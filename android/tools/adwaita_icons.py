@@ -20,7 +20,7 @@ input-keyboard changes-prevent changes-allow web-browser edit-clear phone networ
 view-more object-select document-edit edit-undo edit-redo media-playback-start media-playback-stop user-trash alarm
 system-users utilities-terminal dialog-question folder media-playlist-shuffle insert-link process-stop dialog-error
 dialog-warning content-loading x-office-spreadsheet x-office-calendar x-office-document x-office-presentation
-image-x-generic audio-x-generic applications-games mail-unread edit-copy text-x-generic""".split()
+image-x-generic audio-x-generic applications-games mail-unread edit-copy text-x-generic folder-open""".split()
 BAUDE = ["baude-return", "baude-claude", "baude-meta", "baude-map"]
 
 

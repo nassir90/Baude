@@ -1,5 +1,5 @@
 {
-  "description": "What Baude's and Record's windows show alike: the ☰ menu, the Settings dialog, the title's tooltip, the Feedback tab, and asking to restart for an update.",
+  "description": "What Baude's and Record's windows show alike: the ☰ menu (with its Read-only session item), the Settings dialog, the title's tooltip, the Feedback tab, and asking to restart for an update.",
   "messages": {
     "settings_title": "Settings",
     "settings": "Settings…",
@@ -16,6 +16,7 @@
     "restart_now_heading": "Restart now?",
     "restart_now": "Restart Now",
     "blocker_dialog": "a dialog open",
-    "blocker_using": "you, using this window"
+    "blocker_using": "you, using this window",
+    "read_only": "Read-only session"
   }
 }

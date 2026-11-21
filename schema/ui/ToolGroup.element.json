@@ -11,14 +11,17 @@
     "baude.py:BaudeWindow.add_activity",
     "widgets.py:Disclosure"
   ],
+  "copy": [
+    "tool_calls"
+  ],
   "parts": [
     {
       "name": "line",
       "shows": "A 16px disclosure arrow (› pointing right when folded, ⌄ down when open, at 75% opacity) then the label at 80% opacity: \"N tool calls\", with \", F failed\" when any failed and \", I interrupted\" when any were interrupted (e.g. \"6 tool calls, 1 failed\"). 2px above and below. Then, while any call in it runs (or runs in the background), a 16px spinner; nothing when all are done (a tick wouldn't say anything).",
-      "text": [
-        "tool calls",
-        "failed",
-        "interrupted"
+      "copy": [
+        "tool_calls.count",
+        "tool_calls.failed",
+        "tool_calls.interrupted"
       ],
       "actions": [
         {

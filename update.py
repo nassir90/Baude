@@ -188,7 +188,8 @@ def changelog_group(commit, root=HERE, limit=None, made=None):
     group, made = Adw.PreferencesGroup(), changelog(commit, root) if made is None else made
 
     def add(short, stamp, subject):
-        row = Adw.ActionRow(title=subject, subtitle=f"{made_when(stamp)} · {short}", use_markup=False)
+        row = Adw.ActionRow(title=subject, subtitle=wording.say("changelog.row", made=made_when(stamp), commit=short),
+                             use_markup=False)
         row.commit = short
         group.add(row)
     shown = made if limit is None else made[:limit]

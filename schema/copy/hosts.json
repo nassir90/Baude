@@ -12,6 +12,9 @@
     "command_body": "The command ssh runs on {$host}, with connect after it",
     "command_placeholder": "{$command}, on its PATH",
     "restart_waiting": ".input {$n :number} .match $n one {{Restarting the daemon once {$n} session finishes running a command}} * {{Restarting the daemon once {$n} sessions finish running a command}}",
-    "daemon_restarted": "Daemon restarted"
+    "daemon_restarted": "Daemon restarted",
+    "now_deactivated": "{$host} deactivated",
+    "now_activated": "{$host} activated",
+    "looking_for_baude": "Looking for Baude on {$dest}"
   }
 }

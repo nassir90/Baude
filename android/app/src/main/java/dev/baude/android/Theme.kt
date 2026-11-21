@@ -88,7 +88,7 @@ object Type {
     val caption = TextStyle(fontSize = Tokens.Font.caption, lineHeight = Tokens.Font.captionLine)
     val folder = TextStyle(fontSize = Tokens.Font.caption, fontWeight = Tokens.Font.bold)  // (.sidebar-folder, at 0.6)
     val title = TextStyle(fontSize = Tokens.Font.body, fontWeight = Tokens.Font.bold)
-    val mono = TextStyle(fontSize = Tokens.Font.mono, fontFamily = FontFamily.Monospace)  // (.mono)
+    val mono = TextStyle(fontSize = Tokens.Font.mono, fontFamily = CodeFont.family)  // (.mono: Settings → Code Font's, from the next start)
 }
 
 /** The app's look as Settings has it: light or dark (Appearance: the system's, or one of them), the accent (Accent

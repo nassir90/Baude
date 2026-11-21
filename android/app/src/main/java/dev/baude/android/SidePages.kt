@@ -25,6 +25,7 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import kotlinx.coroutines.launch
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -200,14 +201,28 @@ fun FilesPage(hostId: String, sid: String) {
     var at by remember(root) { mutableStateOf(root) }
     var entries by remember(at) { mutableStateOf<List<Msg.DirEntry>?>(null) }
     var file by remember(root) { mutableStateOf<String?>(null) }
+    var fileLine by remember(root) { mutableStateOf<Int?>(null) }
     var again by remember { mutableStateOf(0) }
+    LaunchedEffect(FileLinks.wanted.value) { // (a link in the chat to a file or folder of this host's: shown here)
+        val w = FileLinks.wanted.value ?: return@LaunchedEffect
+        if (w.hostId != hostId) return@LaunchedEffect
+        if (w.dir) {
+            at = w.path
+            file = null
+        } else {
+            at = w.path.substringBeforeLast('/')
+            file = w.path
+            fileLine = w.line
+        }
+        FileLinks.wanted.value = null
+    }
     LaunchedEffect(at, again) {
         Mesh.ask(hostId, Msg.ListDir(path = at).json()) { r ->
             val d = Msg.Dir.from(r)
             if (r.optString("op") == Op.DIR && d.error.isNullOrBlank()) entries = d.entries.orEmpty()
         }
     }
-    file?.let { f -> return FileView(hostId, f) { file = null } }
+    file?.let { f -> return FileView(hostId, f, fileLine) { file = null; fileLine = null } }
     if (at != root) BackHandler { at = at.substringBeforeLast('/') }
     Column(Modifier.fillMaxSize()) {
         Row(Modifier.fillMaxWidth().padding(start = 12.dp, end = 6.dp, top = 6.dp, bottom = 2.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -227,9 +242,9 @@ fun FilesPage(hostId: String, sid: String) {
                     val dir = e.dir == true
                     Box(Modifier.alpha(if (e.ignored == true) 0.55f else 1f)) {
                         ActionRow(e.name.orEmpty(), null,
-                            onClick = { if (dir) at = path else file = path },
+                            onClick = { if (dir) at = path else { file = path; fileLine = null } },
                             prefix = { androidx.compose.material3.Icon(if (dir) Adwaita.Folder
-                                else Adwaita.TextXGeneric, null, tint = c.dim, modifier = Modifier.size(18.dp)) })
+                                else Adwaita.TextXGeneric, null, tint = c.dim, modifier = Modifier.size(18.dp.icon)) })
                     }
                 }
             }
@@ -241,7 +256,7 @@ private val PICTURES = setOf("png", "jpg", "jpeg", "gif", "webp", "bmp")
 
 /** A file of the host's, read (read_file): its text in the code's type, a picture shown, or why it can't be. */
 @Composable
-private fun FileView(hostId: String, path: String, back: () -> Unit) {
+private fun FileView(hostId: String, path: String, line: Int? = null, back: () -> Unit) {
     val c = LocalBaude.current
     BackHandler(onBack = back)
     var data by remember(path) { mutableStateOf<ByteArray?>(null) }
@@ -274,8 +289,17 @@ private fun FileView(hostId: String, path: String, back: () -> Unit) {
                 } ?: Empty("Not a picture this phone can read")
                 d.take(8192).contains(0.toByte()) -> Empty(Wording.FileView.unreadable(path = path, host = Mesh.label(hostId),
                     why = Wording.FileView.notText))
-                else -> Text(String(d, Charsets.UTF_8), style = Type.mono, color = c.fg, modifier = Modifier.fillMaxSize()
-                    .verticalScroll(rememberScrollState()).horizontalScroll(rememberScrollState()).padding(12.dp))
+                else -> {
+                    val scroll = rememberScrollState()
+                    val scope = androidx.compose.runtime.rememberCoroutineScope()
+                    Text(String(d, Charsets.UTF_8), style = Type.mono, color = c.fg, modifier = Modifier.fillMaxSize()
+                        .verticalScroll(scroll).horizontalScroll(rememberScrollState()).padding(12.dp),
+                        onTextLayout = { layout -> // (a link's line: scrolled to, a line from the top)
+                            if (line != null && line > 1 && line <= layout.lineCount && scroll.value == 0) scope.launch {
+                                scroll.scrollTo(maxOf(0f, layout.getLineTop(line - 2)).toInt())
+                            }
+                        })
+                }
             }
         }
     }
@@ -506,7 +530,7 @@ fun SignalPage(hostId: String, sid: String) {
                                     "resolved" -> c.success
                                     "ambiguous", "pending" -> c.dim
                                     else -> c.warning
-                                }, modifier = Modifier.size(16.dp))
+                                }, modifier = Modifier.size(16.dp.icon))
                             })
                         }
                     }

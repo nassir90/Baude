@@ -2,6 +2,8 @@
   "description": "Words many features say alike, in every app: buttons, menu items and states.",
   "messages": {
     "open": "Open",
+    "command": "Command",
+    "prompt": "Prompt",
     "copy": "Copy",
     "expand": "Expand",
     "collapse": "Collapse",

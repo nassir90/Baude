@@ -43,11 +43,16 @@ fun alwaysOffered(m: String?, hostId: String? = null): Boolean = m == null ||
         m.startsWith("agent/") || m.startsWith("mlx-")) ||
     hostId != null && lists(hostId, "always_allow")
 
-/** One line of a chat as it's shown: yours, the Bot's, what it did (a tool it used), or a note (a background task
- * ended, a turn stopped, the conversation compacted, an API error). Two that aren't shown: "record", the end of a
- * transcript record (uuid: its uuid, shown or not), and "rewind", a revert's mark (uuid: the record it keeps last;
- * none, none kept). */
-data class Line(val kind: String, val text: String, val uuid: String? = null)
+/** One line of a chat as it's shown: yours, the Bot's, what it did (a tool it used: "call", by its id in the chat's
+ * Calls), or a note (a background task ended, "tasknote": its call's not drawn; the conversation compacted, an API
+ * error). Some aren't shown: "record", the end of a transcript record (uuid: its uuid, shown or not), "rewind", a
+ * revert's mark (uuid: the record it keeps last; none, none kept), and "stopped", a turn stopped (a note, unless a call
+ * of it says so). */
+data class Line(val kind: String, val text: String, val uuid: String? = null, val files: List<Sent> = emptyList())
+
+/** A file or picture sent with a message of yours, as its record has it (kind: "image" or "file"; data: a picture's
+ * base64). */
+class Sent(val kind: String, val name: String, val mime: String, val data: String?)
 
 /** A permission its Bot asks, not answered yet: claude's control_request (can_use_tool) for request_id. seen: its
  * host has listed it (so a listing without it means it's been answered, or its claude's gone). */
@@ -80,8 +85,13 @@ class Chat(hostId: String, sid: String) {
     val busy = mutableStateOf(false)
     val thinking = mutableStateOf(false)     // (at a turn, where its host doesn't list it: Meta's)
     val said = mutableStateOf<String?>(null)
+    var reverting by mutableStateOf<Reverting?>(null) // (a revert asked, not made: the page for it may be left and come back to)
+    val clearBox = mutableStateOf(false) // (a revert made: the box is emptied when next composed)
+    val streamingThought = mutableStateOf("") // (and what it's thinking, as it comes)
     val streaming = mutableStateOf("") // (what its agent's writing now, as it comes: till its message is whole)
     val asks = mutableStateListOf<Ask>()      // (what its Bot asks, answered here: Allow, Deny)
+    val calls = ChatCalls()                     // (its tool calls, as their cards have them)
+    val showAgent = mutableStateOf<String?>(null) // (a call whose subagent's page is asked for: View)
     val fetched = HashSet<String>()           // (asks its host listed that weren't here: fetched again, once)
     val senders = mutableStateMapOf<String, Msg.StoredSender>() // (a message's uuid: who it's from, if not you, as its
     // host's sender store has it: wire's Senders)
@@ -124,6 +134,7 @@ object Mesh {
     val key = mutableStateOf<Key?>(null)
     val keyError = mutableStateOf<String?>(null) // (why the Keystore's key couldn't be read, or made: none made then)
     val making = mutableStateOf(false) // (a key being made, off the main thread)
+    val deactivated = mutableStateListOf<String>() // (connection ids switched off: a host's id, or "mesh:<id>")
     val infos = mutableStateMapOf<String, Msg.Info>() // (a host of yours: what its host process last said it is,
     // its mesh too: Mesh Versions)
     val members = mutableStateMapOf<String, Pair<Msg.Member, String?>>() // (a member of a host's mesh, by its id: its
@@ -147,6 +158,7 @@ object Mesh {
         WireStrict.look(app)
         readKey()
         hosts.addAll(HostStore.load(app))
+        deactivated.addAll(HostStore.deactivated(app))
         Queue.loadDrafts(app.filesDir)
         Queue.migrateUnsent(app.filesDir) { machine, host -> // (its chat's host: the one of yours that's its machine, or the machine as a member)
             hosts.firstOrNull { machine != null && HostStore.machine(app, it) == machine }?.id
@@ -175,7 +187,7 @@ object Mesh {
             key.value = Keys.load()
             keyError.value = null
         } catch (e: Exception) {
-            keyError.value = "This phone's key couldn't be read: ${e.message ?: e.javaClass.simpleName}"
+            keyError.value = Wording.PhoneKeys.unreadable(why = e.message ?: e.javaClass.simpleName)
         }
     }
 
@@ -191,7 +203,7 @@ object Mesh {
                     key.value = it
                     keyError.value = null
                     hosts.forEach { h -> connect(h) }
-                }.onFailure { keyError.value = "A key couldn't be made: ${it.message ?: it.javaClass.simpleName}" }
+                }.onFailure { keyError.value = Wording.PhoneKeys.notMade(why = it.message ?: it.javaClass.simpleName) }
             }
         }
     }
@@ -222,6 +234,29 @@ object Mesh {
         Shares.look()
     }
 
+    /** A host (or a member, "mesh:<id>") switched off, or on again: not reached while off, its chats listed as last seen
+     * (Baude's Network.deactivate). */
+    fun deactivate(id: String, off: Boolean) {
+        if (off) { if (id !in deactivated) deactivated.add(id) } else deactivated.remove(id)
+        HostStore.setDeactivated(app, deactivated)
+        if (off) {
+            conns.remove(id)?.stop()
+            states.remove(id)
+        } else if (id.startsWith("mesh:")) meshed()
+        else hosts.firstOrNull { it.id == id }?.let { declined.removeAll { d -> d.startsWith("${it.id} ") }; connect(it) }
+        tick.value++
+    }
+
+    /** A host's command changed (empty: baude_headless.py, on its PATH), and the host reached again. */
+    fun setCommand(h: Host, command: String) {
+        val now = h.copy(command = command.ifBlank { "baude_headless.py" })
+        val i = hosts.indexOfFirst { it.id == h.id }
+        if (i >= 0) hosts[i] = now
+        declined.removeAll { it.startsWith("${h.id} ") }
+        HostStore.save(app, hosts)
+        connect(now)
+    }
+
     /** A host's or a member's name here (Mesh's Rename): a host's, as it was added; a member's, kept by its id. Empty:
      * its own again. */
     fun rename(id: String, name: String) {
@@ -248,7 +283,7 @@ object Mesh {
 
     fun connect(host: Host) {
         conns.remove(host.id)?.stop()
-        if (key.value == null) return
+        if (key.value == null || host.id in deactivated) return
         start(Connection(app, Place.Direct(host), ::identify, { routes[it] }, ::heard) { conn -> main.post { changed(conn) } })
     }
 
@@ -261,7 +296,10 @@ object Mesh {
     /** Where a connection's id is, as you'd say it: a host's name, or a member's (the one it's given here, if it's
      * been renamed). */
     fun label(id: String): String {
-        (hosts.firstOrNull { it.id == id } ?: conns[id]?.host)?.let { return it.label }
+        (hosts.firstOrNull { it.id == id } ?: conns[id]?.host)?.let { h ->
+            return h.name.ifBlank { null } ?: infos[id]?.name?.ifBlank { null }
+                ?: conns[id]?.info?.name?.ifBlank { null } ?: h.address
+        }
         HostStore.alias(app, id.removePrefix("mesh:"))?.let { return it }
         val m = members[id.removePrefix("mesh:")]?.first
         return m?.name?.ifBlank { null } ?: conns[id]?.info?.name?.ifBlank { null } ?: "a host"
@@ -302,6 +340,7 @@ object Mesh {
         routes = best.mapValues { it.value.second }
         for ((id, pair) in best) {
             members[id] = pair.first to pair.second.host?.label
+            if ("mesh:$id" in deactivated) continue
             val c = conns["mesh:$id"]
             if (c == null) {
                 moved.remove("mesh:$id") // (reached through the mesh again: its chats here, not a host's)
@@ -485,15 +524,24 @@ object Mesh {
     private fun streamed(chat: Chat, m: JSONObject?) {
         m ?: return
         if (m.optString("type") != "stream_event") {
-            if (m.optString("type") in setOf("assistant", "result")) chat.streaming.value = ""
+            if (m.optString("type") in setOf("assistant", "result")) {
+                chat.streaming.value = ""
+                chat.streamingThought.value = ""
+            }
             return
         }
         if (!m.isNull("parent_tool_use_id")) return
         val e = m.optJSONObject("event") ?: return
         when (e.optString("type")) {
-            "message_start" -> chat.streaming.value = ""
-            "content_block_delta" -> e.optJSONObject("delta")?.takeIf { it.optString("type") == "text_delta" }?.let {
-                chat.streaming.value += it.optString("text")
+            "message_start" -> {
+                chat.streaming.value = ""
+                chat.streamingThought.value = ""
+            }
+            "content_block_delta" -> e.optJSONObject("delta")?.let {
+                when (it.optString("type")) {
+                    "text_delta" -> chat.streaming.value += it.optString("text")
+                    "thinking_delta" -> chat.streamingThought.value += it.optString("thinking")
+                }
             }
         }
     }
@@ -546,6 +594,15 @@ object Mesh {
     fun answer(chat: Chat, ask: Ask, allow: Boolean, always: Boolean = false, answers: JSONObject? = null) {
         val c = conns[chat.hostId] ?: return
         chat.asks.remove(ask)
+        if (!allow && answers == null) {
+            val call = ask.toolUseId?.let { chat.calls.byId[it] }
+            val questions = ask.tool == "AskUserQuestion" && ask.input.optJSONArray("questions") != null
+            if (call != null) {
+                if (!questions) call.decision = "denied"
+            } else chat.lines.add(Line("note", if (questions) Wording.ToolCalls.notAnsweredTool(tool = ask.tool)
+                else Wording.ToolCalls.deniedTool(tool = ask.tool)))
+        }
+        if (answers != null) ask.toolUseId?.let { chat.calls.byId[it] }?.input = JSONObject(ask.input.toString()).put("answers", answers)
         val response = when {
             answers != null -> JSONObject().put("behavior", "allow")
                 .put("updatedInput", JSONObject(ask.input.toString()).put("answers", answers))
@@ -700,7 +757,12 @@ object Mesh {
                     for (line in lines) {
                         when (line.kind) {
                             "cost" -> line.text.toDoubleOrNull()?.let { chat.chrome.cost.value = it; chat.chrome.costSeen = it }
-                            "use", "result", "task", "link" -> noted(chat, line)
+                            "call", "stopped" -> took(chat.calls, chat.lines, line)
+                            "result", "task" -> {
+                                noted(chat, line)
+                                took(chat.calls, chat.lines, line)
+                            }
+                            "use", "link" -> noted(chat, line)
                             "record" -> line.uuid?.let { chat.ends[it] = chat.lines.size }
                             "rewind" -> { // (what's after the record it keeps last dropped: all of what's read, if
                                 val keep = line.uuid?.let { chat.ends[it] } ?: 0 // that's before it)
@@ -718,7 +780,7 @@ object Mesh {
                 if (more || chat.again) {
                     chat.again = false
                     read(chat)
-                }
+                } else settle(chat.calls, session(chat.hostId, chat.sid)?.state)
             }
         }
     }
@@ -767,6 +829,12 @@ object Mesh {
     private fun task(chat: Chat, m: JSONObject) {
         if (!m.optString("subtype").startsWith("task_")) return
         val tool = m.optString("tool_use_id")
+        chat.calls.byId[tool]?.let { call ->
+            when (m.optString("subtype")) {
+                "task_started" -> call.bind(m.optString("task_id"), m.optString("task_type"))
+                "task_notification" -> call.finish(m.optString("status"), m.optString("summary"), null)
+            }
+        }
         var a = chat.agents.firstOrNull { it.toolUseId == tool || it.agentId.value == m.optString("task_id") }
         if (a == null) {
             if (m.optString("subtype") != "task_started" || m.optString("task_type") != "local_agent") return
@@ -1069,21 +1137,23 @@ private fun record(o: JSONObject, type: String, uuid: String?, out: MutableList<
             is String -> listOf(JSONObject().put("type", "text").put("text", content))
             else -> emptyList()
         }
+        val typed = ArrayList<String>() // (what you wrote in this record, and the files with it: one message)
+        val sent = ArrayList<Sent>()
         for (b in blocks) {
             when (b.optString("type")) {
+                "thinking" -> if (type == "assistant") b.optString("thinking").trim().takeIf { it.isNotEmpty() }?.let {
+                    out.add(Line("thinking", it, uuid))
+                }
                 "text" -> {
                     var t = b.optString("text")
                     if (type == "user") {
                         t = LEADING_REMINDERS.replace(t, "").trim()
                         when {
-                            t.startsWith("<task-notification") -> {
-                                out.add(Line("note", taskLine(t), uuid))
-                                out.add(Line("task", taskNote(t).toString(), uuid))
-                            }
-                            t.startsWith(STOPPED) -> out.add(Line("note", Wording.Meta.interrupted, uuid))
-                            t.contains("<command-name>") -> out.add(Line("you", command(t), uuid))
+                            t.startsWith("<task-notification") -> out.add(Line("task", taskNote(t).toString(), uuid))
+                            t.startsWith(STOPPED) -> out.add(Line("stopped", "", uuid))
+                            t.contains("<command-name>") -> typed.add(command(t))
                             t.isEmpty() || NOT_TYPED.any { t.startsWith(it) } -> {}
-                            else -> out.add(Line("you", t, uuid))
+                            else -> typed.add(t)
                         }
                     } else if (t.isNotBlank()) {
                         out.add(Line(if (o.optBoolean("isApiErrorMessage")) "error" else "bot", t.trim(), uuid))
@@ -1091,20 +1161,36 @@ private fun record(o: JSONObject, type: String, uuid: String?, out: MutableList<
                         if (urls.isNotEmpty()) out.add(Line("link", JSONObject().put("urls", JSONArray(urls)).toString(), uuid))
                     }
                 }
-                "image" -> if (type == "user") out.add(Line("you", "🖼 A picture", uuid))
-                "document" -> if (type == "user") out.add(Line("you", "📄 " + b.optString("title", "A document"), uuid))
-                "tool_use" -> if (type == "assistant") {
-                    out.add(Line("tool", toolLine(b), uuid))
+                "image" -> if (type == "user") b.optJSONObject("source")?.takeIf { it.optString("type") == "base64" }?.let {
+                    sent.add(Sent("image", "image", it.optString("media_type"), it.optString("data")))
+                }
+                "document" -> if (type == "user") sent.add(Sent("file", b.optString("title").ifBlank { "document.pdf" },
+                    "application/pdf", null))
+                "tool_use", "server_tool_use" -> if (type == "assistant") {
                     val name = b.optString("name")
+                    out.add(Line("call", JSONObject().put("id", b.optString("id")).put("name", name)
+                        .put("input", b.optJSONObject("input") ?: JSONObject()).toString(), uuid))
                     if (isAgent(name) || name.substringAfterLast("__") == "Artifact") out.add(Line("use",
                         JSONObject().put("id", b.optString("id")).put("name", name)
                             .put("input", b.optJSONObject("input") ?: JSONObject()).toString(), uuid))
                 }
-                "tool_result" -> if (type == "user") out.add(Line("result", JSONObject()
-                    .put("id", b.optString("tool_use_id")).put("is_error", b.optBoolean("is_error"))
-                    .put("text", resultText(b.opt("content"))).toString(), uuid))
+                "tool_result" -> {
+                    if (type == "user") out.add(Line("result", JSONObject()
+                        .put("id", b.optString("tool_use_id")).put("is_error", b.optBoolean("is_error"))
+                        .put("text", resultText(b.opt("content")))
+                        .put("images", JSONArray((b.opt("content") as? JSONArray).objects().filter { it.optString("type") == "image" }
+                            .mapNotNull { it.optJSONObject("source")?.optString("data")?.ifEmpty { null } }
+                            .map { JSONObject().put("data", it) })).toString(), uuid))
+                }
+                else -> {
+                    if (type == "assistant" && b.optString("type").endsWith("_tool_result")) out.add(Line("result", JSONObject()
+                        .put("id", b.optString("tool_use_id")).put("server", true)
+                        .put("is_error", b.optJSONObject("content")?.optString("type").orEmpty().endsWith("_error"))
+                        .put("text", "").toString(), uuid))
+                }
             }
         }
+        if (type == "user" && (typed.isNotEmpty() || sent.isNotEmpty())) out.add(Line("you", typed.joinToString("\n\n"), uuid, sent))
     }
 }
 
@@ -1134,7 +1220,7 @@ fun toolDisplay(name: String): Pair<String, String?> {
     if (!name.startsWith("mcp__") || name.split("__").size < 3) return name to null
     val (_, rawServer, rawTool) = name.split("__", limit = 3)
     val server = rawServer.replace(Regex("^(claude_ai_|plugin_[^_]+_)"), "")
-    val source = if (Regex("[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}").matches(server)) "MCP"
+    val source = if (Regex("[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}").matches(server)) Wording.ToolCalls.mcp
     else MCP_NAMES[server.lowercase()] ?: humanize(server).split(" ").joinToString(" ") { it.replaceFirstChar(Char::uppercase) }
     val tool = if (rawTool.lowercase().startsWith(server.lowercase() + "_")) rawTool.substring(server.length + 1) else rawTool
     val title = humanize(tool)
@@ -1144,7 +1230,7 @@ fun toolDisplay(name: String): Pair<String, String?> {
 /** "Source: Title", or the title alone. */
 fun toolTitle(name: String): String = toolDisplay(name).let { (title, source) -> if (source != null) "$source: $title" else title }
 
-private fun humanize(id: String) =
+fun humanize(id: String) =
     id.replace(Regex("([a-z0-9])([A-Z])"), "$1 $2").replace("_", " ").replace("-", " ").trim().split(Regex("\\s+"))
         .joinToString(" ").lowercase()
 
@@ -1152,3 +1238,6 @@ private val MCP_NAMES = mapOf("github" to "GitHub", "gitlab" to "GitLab", "gmail
     "google_drive" to "Google Drive", "gcal" to "Google Calendar", "slack" to "Slack", "notion" to "Notion",
     "linear" to "Linear", "jira" to "Jira", "figma" to "Figma", "postgres" to "Postgres", "sqlite" to "SQLite",
     "playwright" to "Playwright", "sentry" to "Sentry")
+
+private fun JSONArray?.objects(): List<JSONObject> =
+    if (this == null) emptyList() else (0 until length()).mapNotNull { optJSONObject(it) }

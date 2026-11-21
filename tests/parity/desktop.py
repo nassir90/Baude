@@ -66,15 +66,15 @@ def transcript_lines(name, cwd, lines=None):
     return (body if lines is None else body[:lines]) + title
 
 
-def write_sessions(lines=None):
-    """fixtures/sessions.json's sessions as this machine's Claude Code keeps them, each its age; their paths, in the
-    fixture's order."""
+def write_sessions(lines=None, transcript=None):
+    """fixtures/sessions.json's sessions as this machine's Claude Code keeps them, each its age (the first's from the
+    fixture named by transcript, if given); their paths, in the fixture's order."""
     paths = []
     now = time.time()
     for s in fixture("sessions.json")["sessions"]:
         cwd = folder(s["folder"])
         if s["transcript"]:
-            recs = transcript_lines(s["transcript"], cwd, lines)
+            recs = transcript_lines(transcript if not paths and transcript else s["transcript"], cwd, lines)
         else:
             recs = [json.dumps(r) for r in (
                 {"type": "user", "cwd": cwd, "sessionId": s["id"], "message": {"role": "user", "content": s["title"]}},
@@ -117,7 +117,9 @@ def pick_header(win, s):
 
 def open_chat(app, sc):
     shown = fixture("sessions.json")["sessions"][sc.get("session", 0)]
-    path = write_sessions(sc.get("lines"))[sc.get("session", 0)]
+    if sc.get("files"):  # (the scene's files join the chat's folder)
+        shutil.copytree(os.path.join(FIX, sc["files"]), folder("garden"), dirs_exist_ok=True)
+    path = write_sessions(sc.get("lines"), sc.get("transcript"))[sc.get("session", 0)]
     win = app.window(S.opts(cwd=folder("garden")))
     info = baude.read_session_info(path)
     win.resume_session(info)
@@ -134,6 +136,12 @@ def open_chat(app, sc):
             for t in ("input_toggle", "output_toggle"):
                 if getattr(card, t, None) is not None:
                     getattr(card, t).set_expanded(True)
+        T.pump(0.4)
+    if sc.get("ask"):
+        card = win.tool_cards[sc["ask"]]
+        if card.state == "interrupted":  # (a finished chat's call with no result: asking now)
+            card.set_state("running")
+        win.permission_card(f"perm-{sc['ask']}", card.name, card.input, sc["ask"])
         T.pump(0.4)
     if sc.get("page"):
         win.show_panel(True, {"signal": "refs"}.get(sc["page"], sc["page"]))
@@ -159,9 +167,21 @@ def open_chat(app, sc):
 
 def build(app, sc):
     name = sc["name"]
-    if name == "home":
+    if name.startswith("home"):
         write_sessions()
-        return app.window(S.opts(cwd=folder("garden")))
+        win = app.window(S.opts(cwd=folder("garden")))
+        if name == "home":
+            return win
+        title = fixture("sessions.json")["sessions"][0]["title"]
+        T.wait_for(lambda: S.sidebar_row(win, title) is not None, "rows")
+        T.pump(1)  # (the list settled: the row kept)
+        if name == "home-row-menu":
+            win.sidebar.show_menu(S.sidebar_row(win, title), 120, 14)
+        elif name == "home-host-menu":
+            S.host_right_click(win)
+        elif name == "home-add-host":
+            win.ask_add_host()
+        return win
     if name.startswith("chat") or name.startswith("panel"):
         return open_chat(app, sc)
     if name == "menu":

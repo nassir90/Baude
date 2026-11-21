@@ -209,9 +209,9 @@ private val nextControl = AtomicInteger(1)
 /** A control request to a session's claude, sent as its input (as Baude's RemoteProc sends one): its answer (an
  * error's text, or null) once claude's said. */
 fun control(hostId: String, sid: String, request: JSONObject, then: (String?) -> Unit) =
-    controlAnswer(hostId, sid, request) { _, e -> then(e) }
+    controlAnswer(hostId, sid, request) { _, why -> then(why) }
 
-/** The same, its answer's response (an empty one if it gave none) with null, or null with the error's text. */
+/** The same, with claude's whole answer (its response's body) too, when it gave one. */
 fun controlAnswer(hostId: String, sid: String, request: JSONObject, then: (JSONObject?, String?) -> Unit) {
     val rid = "android_${nextControl.getAndIncrement()}"
     var heard: ((String, JSONObject) -> Unit)? = null
@@ -223,8 +223,8 @@ fun controlAnswer(hostId: String, sid: String, request: JSONObject, then: (JSONO
             said.msg?.optString("type") == "control_response" && r?.optString("request_id") == rid) {
             Mesh.listeners.remove(heard!!)
             done = true
-            if (r.optString("subtype") == "error") then(null, r.optString("error").ifBlank { Wording.ChatHeader.claudeSaidNo })
-            else then(r.optJSONObject("response") ?: JSONObject(), null)
+            then(r.optJSONObject("response"), if (r.optString("subtype") == "error") r.optString("error")
+                .ifBlank { Wording.ChatHeader.claudeSaidNo } else null)
         }
     }
     Mesh.listeners.add(heard)
@@ -357,7 +357,7 @@ fun Picker(face: String, tip: String, choices: List<Pair<String, String>>, picke
             verticalAlignment = Alignment.CenterVertically) {
             Text(face, style = Type.body, color = c.fg, maxLines = 1, overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.widthIn(max = 180.dp))
-            Icon(Adwaita.PanDown, tip, tint = c.fg, modifier = Modifier.size(18.dp))
+            Icon(Adwaita.PanDown, tip, tint = c.fg, modifier = Modifier.size(18.dp.icon))
         }
         Popover(open, { open = false }) {
             for ((label, value) in choices) MenuChoice(label, value == picked, enabled = value !in dimmed) { open = false; pick(value) }
@@ -379,7 +379,7 @@ fun ModelPicker(face: String, choices: List<ModelChoice>, picked: String?, logo:
             if (logo != null) Icon(logo, null, tint = c.fg, modifier = Modifier.padding(end = 6.dp).size(16.dp))
             Text(face, style = Type.body, color = c.fg, maxLines = 1, overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.widthIn(max = 180.dp))
-            Icon(Adwaita.PanDown, Wording.Common.model, tint = c.fg, modifier = Modifier.size(18.dp))
+            Icon(Adwaita.PanDown, Wording.Common.model, tint = c.fg, modifier = Modifier.size(18.dp.icon))
         }
         Popover(open, { open = false }) {
             SearchField(query, { query = it }, Wording.ModelPicker.search, Modifier.width(260.dp).padding(horizontal = 8.dp, vertical = 4.dp))

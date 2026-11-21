@@ -955,7 +955,7 @@ object PhoneHost {
         if (!inside) return arrayOf("path" to path, "error" to Wording.HostErrors.notInSessionFolder)
         if (!f.isFile) return arrayOf("path" to path, "error" to "No such file")
         val limit = (r.limit?.toInt() ?: FILE_LIMIT).coerceIn(1, FILE_LIMIT)
-        val data = f.inputStream().use { it.readNBytes(limit + 1) }
+        val data = f.inputStream().use { it.readUpTo(limit + 1) }
         return arrayOf("path" to path, "size" to f.length(), "data" to Base64.getEncoder().encodeToString(data))
     }
 

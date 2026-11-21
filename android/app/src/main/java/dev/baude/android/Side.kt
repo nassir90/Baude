@@ -94,9 +94,9 @@ fun AgentStatus(status: String) {
     val c = LocalBaude.current
     when (status) {
         "running" -> CircularProgressIndicator(Modifier.size(16.dp), color = c.fg.copy(alpha = 0.55f), strokeWidth = 2.dp)
-        "completed" -> Icon(Adwaita.ObjectSelect, Wording.Common.done, tint = c.success, modifier = Modifier.size(16.dp))
-        "interrupted" -> Icon(Adwaita.ProcessStop, "Interrupted", tint = c.dim, modifier = Modifier.size(16.dp))
-        else -> Icon(Adwaita.DialogError, "Failed", tint = c.destructive, modifier = Modifier.size(16.dp))
+        "completed" -> Icon(Adwaita.ObjectSelect, Wording.Common.done, tint = c.success, modifier = Modifier.size(16.dp.icon))
+        "interrupted" -> Icon(Adwaita.ProcessStop, "Interrupted", tint = c.dim, modifier = Modifier.size(16.dp.icon))
+        else -> Icon(Adwaita.DialogError, "Failed", tint = c.destructive, modifier = Modifier.size(16.dp.icon))
     }
 }
 
@@ -125,6 +125,10 @@ fun describe(a: Subagent): String {
 @Composable
 fun SubagentsPage(chat: Chat) {
     var shown by remember(chat) { mutableStateOf<Subagent?>(null) }
+    LaunchedEffect(chat.showAgent.value) { // (View on a call's card: its subagent opened here)
+        val id = chat.showAgent.value ?: return@LaunchedEffect
+        chat.agents.firstOrNull { it.toolUseId == id }?.let { shown = it }
+    }
     val a = shown
     if (a == null) {
         Scrolled {
@@ -143,6 +147,7 @@ private fun AgentDetail(chat: Chat, a: Subagent, back: () -> Unit) {
     val c = LocalBaude.current
     androidx.activity.compose.BackHandler(onBack = back)
     val lines = remember(a) { mutableStateListOf<Line>() }
+    val calls = remember(a) { ChatCalls() }
     val held = remember(a) { HashMap<String, Pair<Long, Long>>() } // (a file's: its size and mtime, as held here)
     val text = remember(a) { StringBuilder() }
     LaunchedEffect(a, a.agentId.value) {
@@ -162,9 +167,15 @@ private fun AgentDetail(chat: Chat, a: Subagent, back: () -> Unit) {
                     if (offset == 0L) text.setLength(0)
                     if (offset == 0L || offset == (held[n]?.first ?: 0L)) {
                         text.append(String(Base64.getDecoder().decode(data), Charsets.UTF_8))
+                        val open = calls.byId.mapValues { it.value.inputOpen to it.value.outputOpen }
                         lines.clear()
-                        lines.addAll(parse(text.toString(), cutFirst = false, sidechain = true)
-                            .filter { it.kind in setOf("you", "bot", "tool", "note", "error") })
+                        calls.byId.clear()
+                        for (l in parse(text.toString(), cutFirst = false, sidechain = true)) when (l.kind) {
+                            "call", "result", "task", "stopped" -> took(calls, lines, l)
+                            "you", "bot", "note", "error" -> lines.add(l)
+                        }
+                        for ((id, o) in open) calls.byId[id]?.let { it.inputOpen = o.first; it.outputOpen = o.second }
+                        if (a.status.value != "running") settle(calls, "idle")
                     }
                 }
                 held[n] = ((f.next ?: f.size)?.toLong() ?: 0L) to (f.mtime?.toLong() ?: 0L)
@@ -190,7 +201,7 @@ private fun AgentDetail(chat: Chat, a: Subagent, back: () -> Unit) {
             val shown = if (lines.isEmpty() && a.prompt.isNotBlank()) listOf(Line("you", a.prompt)) else lines.toList()
             LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(12.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                items(shown) { Said(it) }
+                drawn(shown, calls) { Said(it) }
             }
         }
     }
@@ -261,7 +272,7 @@ fun ArtifactsPage(chat: Chat) {
         BoxedList(chat.artifacts.toList(), Wording.SidePanel.noArtifacts) { a ->
             ActionRow(a.title, a.url.removePrefix("https://").let { link ->
                 a.version?.let { Wording.Artifacts.linkVersion(link = link, version = it) } ?: link }, onClick = { open(a.url) },
-                prefix = { Icon(artifactIcon(a.icon), null, tint = c.accent, modifier = Modifier.size(18.dp)) },
+                prefix = { Icon(artifactIcon(a.icon), null, tint = c.accent, modifier = Modifier.size(18.dp.icon)) },
                 suffix = {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Button(Wording.Common.open) { open(a.url) }

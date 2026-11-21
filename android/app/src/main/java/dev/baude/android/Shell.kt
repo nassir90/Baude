@@ -69,7 +69,7 @@ fun pages(bot: Boolean, hostId: String): List<Page> {
 @OptIn(ExperimentalFoundationApi::class, ExperimentalLayoutApi::class)
 @Composable
 fun ChatShell(hostId: String, sid: String, back: () -> Unit, open: (String, String) -> Unit, feedback: () -> Unit,
-              first: String = "chat") {
+              first: String = "chat", screen: (String) -> Unit = {}) {
     val c = LocalBaude.current
     val chat = remember(hostId, sid) { Mesh.openChat(hostId, sid) }
     Meta.opener = open
@@ -85,6 +85,8 @@ fun ChatShell(hostId: String, sid: String, back: () -> Unit, open: (String, Stri
     val pager = rememberPagerState(initialPage = all.indexOfFirst { it.key == shown }.coerceAtLeast(0)) { all.size }
     val scope = rememberCoroutineScope()
     Meta.pages = { all }
+    FileLinks.showFiles = { all.indexOfFirst { it.key == "files" }.takeIf { it >= 0 }?.let { scope.launch { pager.animateScrollToPage(it) } } }
+    val place = ChatPlace(at, s?.cwd, Mesh.conn(at)?.info?.home, chat.artifacts.toList())
     Meta.pageOpener = { t -> all.indexOfFirst { it.title.equals(t, true) }.takeIf { it >= 0 }?.let { scope.launch { pager.animateScrollToPage(it) } } }
     androidx.compose.runtime.DisposableEffect(chat) { // (its side questions' answers heard whichever page is shown)
         val l = sideQuestions(chat)
@@ -98,11 +100,18 @@ fun ChatShell(hostId: String, sid: String, back: () -> Unit, open: (String, Stri
             Mesh.listeners.remove(status)
             Meta.pages = { emptyList() } // (no chat open: no pages for Meta to show)
             Meta.pageOpener = {}
+            FileLinks.showFiles = {}
         }
     }
     val openPage = { key: String ->
         all.indexOfFirst { it.key == key }.takeIf { it >= 0 }?.let { scope.launch { pager.animateScrollToPage(it) } }
         Unit
+    }
+    LaunchedEffect(chat.showAgent.value) { // (View on a call's card: the Subagents page)
+        if (chat.showAgent.value == null) return@LaunchedEffect
+        all.indexOfFirst { it.key == "agents" }.takeIf { it >= 0 }?.let { pager.animateScrollToPage(it) }
+        kotlinx.coroutines.delay(100) // (the page has read it by now)
+        chat.showAgent.value = null
     }
     LaunchedEffect(pager.currentPage, all.size) { all.getOrNull(pager.currentPage)?.let { shown = it.key } }
     LaunchedEffect(all.size) { // (a Bot no more: its pages gone, Meta shown if one of them was, as Baude does)
@@ -114,8 +123,9 @@ fun ChatShell(hostId: String, sid: String, back: () -> Unit, open: (String, Stri
             lead = if (bot != null) ({ Avatar(name, contact?.let { Mesh.pictures[it.pictureKey] }) }) else null,
             end = {
                 if (bot != null) PhoneBrowserButton(at, sid, name) // (Phone Use: a Bot's browser on this phone)
-                Menu(listOf(Wording.Fixes.sendFeedback to feedback))
+                ChatMenu(at, sid, feedback, screen)
             })
+        androidx.compose.runtime.CompositionLocalProvider(LocalChatPlace provides place) {
         HorizontalPager(pager, Modifier.weight(1f).fillMaxWidth(), key = { all[it].key },
             userScrollEnabled = all.getOrNull(pager.currentPage)?.key != "browser") { i ->
             val here = pager.currentPage == i && !pager.isScrollInProgress
@@ -144,6 +154,7 @@ fun ChatShell(hostId: String, sid: String, back: () -> Unit, open: (String, Stri
                 "signal" -> SignalPage(at, sid)
             }
         }
+        }
         if (!WindowInsets.isImeVisible) BottomBar(all, pager.currentPage) { scope.launch { pager.animateScrollToPage(it) } }
     }
 }
@@ -161,7 +172,7 @@ fun BottomBar(pages: List<Page>, current: Int, pick: (Int) -> Unit) {
                 Column(Modifier.widthIn(min = 64.dp).clip(RoundedCornerShape(8.dp))
                     .background(if (on) c.fg.copy(alpha = 0.10f) else c.frame).clickable { pick(i) }
                     .padding(horizontal = 8.dp, vertical = 5.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                    Icon(p.icon, null, tint = c.fg, modifier = Modifier.size(18.dp))
+                    Icon(p.icon, null, tint = c.fg, modifier = Modifier.size(18.dp.icon))
                     Text(p.title, style = Type.caption.copy(fontWeight = if (on) androidx.compose.ui.text.font.FontWeight.Bold
                         else androidx.compose.ui.text.font.FontWeight.Normal), color = c.fg, maxLines = 1,
                         overflow = TextOverflow.Ellipsis)
@@ -185,7 +196,7 @@ fun StatusPage(icon: ImageVector, title: String, description: String? = null) {
     val c = LocalBaude.current
     Column(Modifier.fillMaxSize().padding(32.dp), verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally) {
-        Icon(icon, null, tint = c.dim, modifier = Modifier.size(64.dp))
+        Icon(icon, null, tint = c.dim, modifier = Modifier.size(64.dp.icon))
         Text(title, style = Type.title.copy(fontSize = Type.title.fontSize * 1.4f), color = c.fg,
             textAlign = androidx.compose.ui.text.style.TextAlign.Center, modifier = Modifier.padding(top = 18.dp))
         if (description != null) Text(description, style = Type.body, color = c.dim,

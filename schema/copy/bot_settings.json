@@ -1,0 +1,13 @@
+{
+  "description": "Make Bot / Bot Settings: the dialog that makes a chat on a host a Bot, or changes a Bot's name and picture.",
+  "messages": {
+    "make_bot": "Make Bot",
+    "settings": "Bot Settings",
+    "body": "A Bot is a chat with a name, a picture and a memory it reads each time it starts.",
+    "choose_picture": "Choose Picture…",
+    "remove_picture": "Remove Picture",
+    "choose_a_picture": "Choose a Picture",
+    "unreadable": "Couldn't read that picture: {$why}",
+    "failed": "Couldn't update the Bot: {$why}"
+  }
+}

@@ -14,6 +14,7 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Column
@@ -36,6 +37,12 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.graphics.compositeOver
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onKeyEvent
+import androidx.compose.ui.input.key.type
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Text
@@ -79,6 +86,7 @@ fun ChatPage(chat: Chat, name: String, attach: Boolean = true, stop: (() -> Unit
     val at = chat.hostId // (where it's reached now: a member's chat moves to a host of yours that's its machine)
     val session = Mesh.session(at, sid)
     val working = isWorking(chat)
+    val readOnly = Settings.isReadOnly(sid)
     var text by androidx.compose.runtime.saveable.rememberSaveable(at, sid) { mutableStateOf("") }
     val files = chat.files
     val pick = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
@@ -100,6 +108,27 @@ fun ChatPage(chat: Chat, name: String, attach: Boolean = true, stop: (() -> Unit
         chat.draft.value = null
     }
     val list = rememberLazyListState()
+    var revealed by remember(chat) { mutableStateOf<String?>(null) } // (the message whose revert button's shown)
+    var reverting by chat::reverting
+    val canRevert = takes(at, "control") && chat.sender == null
+    val focus = remember { androidx.compose.ui.focus.FocusRequester() }
+    var field by remember { mutableStateOf(androidx.compose.ui.text.input.TextFieldValue(text)) }
+    if (field.text != text) field = androidx.compose.ui.text.input.TextFieldValue(text, androidx.compose.ui.text.TextRange(text.length))
+    fun cancelRevert() {
+        val r = reverting ?: return
+        if (r.asked) return // (asked of claude: its answer's waited for)
+        text = r.draft
+        reverting = null
+    }
+    androidx.activity.compose.BackHandler(enabled = reverting != null) { cancelRevert() } // (consumed while asked too: Back does nothing then)
+    LaunchedEffect(chat.clearBox.value) {
+        if (chat.clearBox.value) {
+            text = ""
+            chat.clearBox.value = false
+        }
+    }
+    LaunchedEffect(reverting?.uuid) { if (reverting != null) focus.requestFocus() }
+    LaunchedEffect(list.isScrollInProgress) { if (list.isScrollInProgress) revealed = null }
     // (kept at the end while it's there: what it said last, or what it asks, a tall one's foot too, what it's writing
     // as it grows; scrolled up to read, left where it is)
     var follow by remember(chat) { mutableStateOf(true) }
@@ -109,29 +138,56 @@ fun ChatPage(chat: Chat, name: String, attach: Boolean = true, stop: (() -> Unit
         if (n > 0 && follow) {
             list.animateScrollToItem(n - 1)
             list.scrollBy(1e6f)
+            // (an ask opens its group and card, which grow after this: the end kept in view while they do)
+            if (chat.asks.isNotEmpty()) repeat(10) {
+                kotlinx.coroutines.delay(60)
+                if (follow) list.scrollBy(1e6f)
+            }
         }
     }
     Mesh.tick.value
+    val density = androidx.compose.ui.platform.LocalDensity.current
     Column(Modifier.fillMaxSize().inside(c)) {
-        LazyColumn(Modifier.weight(1f).fillMaxWidth(), state = list,
-            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = Gap.chatH, vertical = Gap.chatV),
+        BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
+        val side = if (Settings.fullWidth.value) 0.dp else (maxWidth - chatColumn(maxWidth)) / 2
+        LazyColumn(Modifier.fillMaxSize().onSizeChanged {
+            CodeBlocks.maxHeight = CodeBlocks.forChat(with(density) { it.height.toDp() })
+        }, state = list,
+            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = Gap.chatH + side, vertical = Gap.chatV),
             verticalArrangement = Arrangement.spacedBy(Gap.messageGap)) {
-            items(chat.lines) { line -> Said(line, line.uuid?.let { chat.senders[it] }.takeIf { line.kind == "you" }) }
-            items(chat.sent.flatMap { it.lines }) { line -> Said(line) }
-            if (chat.streaming.value.isNotEmpty()) item { SelectionContainer { Prose(chat.streaming.value) } }
-            items(chat.asks, key = { it.rid }) { ask -> // (this phone's own agents: as claude's)
-                Asked(chat, ask, alwaysOffered(session?.let { it.model.orEmpty() }, at),
-                    if (session?.bot != null) name else "Claude") // (a Bot's question: its name's)
+            val taken = reverting?.let { r -> chat.lines.indexOfFirst { it.kind == "you" && it.uuid == r.uuid }.takeIf { it >= 0 } }
+            val shown = if (taken != null) chat.lines.take(taken) else chat.lines
+            val offered = alwaysOffered(session?.let { it.model.orEmpty() }, at)
+            val askName = if (session?.bot != null) name else "Claude" // (a Bot's question: its name's)
+            drawn(shown, chat.calls, asking = { call -> chat.asks.firstOrNull { it.toolUseId == call.id } },
+                answer = { AskButtons(chat, it, offered, askName) }, view = { chat.showAgent.value = it.id }) { line ->
+                val uuid = line.uuid
+                Said(line, uuid?.let { chat.senders[it] }.takeIf { line.kind == "you" },
+                    if (canRevert && line.kind == "you" && uuid != null) RevertOffer(revealed == uuid, { revealed = uuid }) {
+                        revealed = null
+                        if (reverting?.asked == true) return@RevertOffer
+                        reverting = Reverting(uuid, reverting?.draft ?: text)
+                        text = line.text
+                    } else null)
+            }
+            if (taken == null) items(chat.sent.flatMap { it.lines }) { line -> Said(line) }
+            if (taken == null && chat.streamingThought.value.isNotBlank()) item {
+                SelectionContainer { Thinking(chat.streamingThought.value) }
+            }
+            if (taken == null && chat.streaming.value.isNotEmpty()) item { SelectionContainer { Prose(chat.streaming.value) } }
+            items(chat.asks.filter { a -> a.toolUseId == null || chat.calls.byId[a.toolUseId] == null }, key = { it.rid }) { ask ->
+                Asked(chat, ask, offered, askName) // (one with no card of its own: this phone's own agents', as claude's)
             }
             val held = session?.held.orEmpty().filter { it.id.orEmpty() !in chat.holding }
             items(held, key = { "held:" + it.id.orEmpty() }) { h -> Held(chat, h, working) }
             items(chat.queued.toList(), key = { "queued:" + System.identityHashCode(it) }) { QueuedRow(chat, it, isWorking(chat)) }
         }
+        }
         chat.said.value?.let { Text(it, style = Type.caption, color = c.dim, modifier = Modifier.padding(horizontal = Gap.chatH)) }
         if (chat.sender == null && exhausted(chat)) Text(Wording.ContextUsage.exhausted, style = Type.caption, color = c.dim,
             modifier = Modifier.padding(horizontal = Gap.chatH))
         // the composer: rounded 12, a ring of the rule, its files over what's written, + and send/stop beside it
-        Column(
+        if (!readOnly) Column(
             Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 8.dp)
                 .clip(RoundedCornerShape(Gap.composerRadius)).background(c.inside)
                 .border(1.dp, c.rule, RoundedCornerShape(Gap.composerRadius)).padding(6.dp),
@@ -148,19 +204,33 @@ fun ChatPage(chat: Chat, name: String, attach: Boolean = true, stop: (() -> Unit
                 }
             }
             val line = with(LocalDensity.current) { Tokens.Font.bodyLine.toDp() }
-            val send = { Queue.submit(chat, isWorking(chat), text, files.toList()); text = ""; files.clear() }
+            val send = {
+                val r = reverting
+                if (r != null) commitRevert(chat, r, text, files.toList()) { ok -> if (ok) text = "" }
+                else {
+                    Queue.submit(chat, isWorking(chat), text, files.toList())
+                    text = ""
+                    files.clear()
+                }
+            }
             val busy = isWorking(chat)
             val conn = Mesh.conn(chat.hostId)
             val gone = chat.sender == null && (conn?.state != "up" || Stopping.line(chat.hostId) != null)
             Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 Box(Modifier.weight(1f).heightIn(min = line * 2 + 14.dp, max = line * 9 + 14.dp)
                     .padding(horizontal = 6.dp, vertical = 7.dp)) {
-                    BasicTextField(text, { text = it }, textStyle = Type.body.copy(color = c.fg),
+                    BasicTextField(field, { field = it; text = it.text }, textStyle = Type.body.copy(color = c.fg),
                         cursorBrush = SolidColor(c.accentBg), modifier = Modifier.fillMaxWidth()
+                            .focusRequester(focus)
                             .onPreviewKeyEvent { e -> // (Ctrl+Enter sends; while a turn runs it queues)
                                 val go = e.type == KeyEventType.KeyDown && e.key == Key.Enter && (e.isCtrlPressed || e.isMetaPressed)
                                 if (go && (text.isNotBlank() || files.isNotEmpty()) && !chat.busy.value && chat.preparing.value == 0 && !gone) send()
                                 go
+                            }.onKeyEvent {
+                                if (it.key == androidx.compose.ui.input.key.Key.Escape && reverting != null) {
+                                    if (it.type == androidx.compose.ui.input.key.KeyEventType.KeyUp) cancelRevert()
+                                    true
+                                } else false
                             })
                 }
                 if (attach) IconButton(Adwaita.ListAdd, Wording.Attachments.attachTip) { pick.launch(arrayOf("*/*")) }
@@ -169,7 +239,7 @@ fun ChatPage(chat: Chat, name: String, attach: Boolean = true, stop: (() -> Unit
                         background = c.destructive.copy(alpha = 0.2f), onClick = stop)
                 else {
                     val ready = !chat.busy.value && chat.preparing.value == 0 && !gone && !chat.chrome.missing.value &&
-                        !(chat.sender == null && exhausted(chat))
+                        !(chat.sender == null && exhausted(chat)) && reverting?.asked != true
                     IconButton(Adwaita.Return, Wording.Common.send, enabled = ready, tint = c.fg,
                         background = c.fg.copy(alpha = 0.10f)) { if (text.isNotBlank() || files.isNotEmpty()) send() }
                 }
@@ -200,25 +270,50 @@ fun take(ctx: Context, chat: Chat, uris: List<Uri>) {
     }
 }
 
-/** What a Bot asks to do, as Baude's permission card has it: Allow, Always allow (for Claude Code's models), Deny;
- * claude's own questions (AskUserQuestion) as a form, answered or skipped. */
-@OptIn(ExperimentalLayoutApi::class)
+/** What a Bot asks to do where its call has no card (Baude's own permission box): amber-edged, what it would run as a
+ * call's input is shown, and Allow, Always allow (for Claude Code's models), Deny; claude's own questions
+ * (AskUserQuestion) as a form. */
 @Composable
 fun Asked(chat: Chat, ask: Ask, alwaysOffered: Boolean, name: String = "Claude") {
     val c = LocalBaude.current
     val questions = ask.input.optJSONArray("questions")
-    Column(Modifier.fillMaxWidth().card(c), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    Column(Modifier.fillMaxWidth().border(1.dp, c.warning, RoundedCornerShape(Gap.cardRadius))
+        .padding(horizontal = 12.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         if (ask.tool == "AskUserQuestion" && questions != null) {
             Text(Wording.Asks.hasQuestion(name = name), style = Type.bold, color = c.fg)
+        } else {
+            val said = summary(ask.tool, ask.input)
+            SelectionContainer {
+                Text(androidx.compose.ui.text.buildAnnotatedString {
+                    withStyle(androidx.compose.ui.text.SpanStyle(fontWeight = androidx.compose.ui.text.font.FontWeight.Bold)) {
+                        append(Wording.Asks.allowTool(tool = toolTitle(ask.tool)))
+                    }
+                    if (said.isNotEmpty()) withStyle(androidx.compose.ui.text.SpanStyle(color = c.fg.copy(alpha = c.fg.alpha * 0.6f))) {
+                        append("  $said")
+                    }
+                }, style = Type.body, color = c.fg)
+            }
+            SelectionContainer { InputView(ask.tool, ask.input) }
+        }
+        AskButtons(chat, ask, alwaysOffered, name)
+    }
+}
+
+/** The buttons of a permission (Baude's, under a call's card or in its box): Allow, Always allow (for Claude Code's
+ * models), Deny; claude's questions (AskUserQuestion) as a form, answered or skipped. */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+fun AskButtons(chat: Chat, ask: Ask, alwaysOffered: Boolean, name: String = "Claude") {
+    val c = LocalBaude.current
+    val questions = ask.input.optJSONArray("questions")
+    if (ask.tool == "AskUserQuestion" && questions != null) {
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Questions(questions, answer = { Mesh.answer(chat, ask, allow = true, answers = it) },
                 skip = { Mesh.answer(chat, ask, allow = false) })
-            return@Column
         }
-        Text(Wording.Asks.allowTool(tool = toolTitle(ask.tool)), style = Type.bold, color = c.fg)
-        val shown = shownInput(ask.input)
-        if (shown.isNotBlank()) Text(shown, style = Type.mono, color = c.fg, maxLines = 14, overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(Gap.codeRadius)).background(c.raised)
-                .padding(horizontal = 8.dp, vertical = 6.dp))
+        return
+    }
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Button(Wording.Common.allow, suggested = true) { Mesh.answer(chat, ask, allow = true) }
             // (a plan's agreed to each time)
@@ -230,19 +325,10 @@ fun Asked(chat: Chat, ask: Ask, alwaysOffered: Boolean, name: String = "Claude")
     }
 }
 
-/** A call's input as the card shows it: its command, or its fields one a line. */
-private fun shownInput(input: org.json.JSONObject): String {
-    input.optString("command").ifBlank { null }?.let { return it }
-    return input.keys().asSequence().joinToString("\n") { k ->
-        val v = input.opt(k)
-        "$k: " + (if (v is String) v else v.toString()).lines().take(6).joinToString("\n  ").take(400)
-    }
-}
-
 /** claude's questions (AskUserQuestion), as Baude's QuestionForm: each its options (one picked, or several if it
  * says so) and Other, to write your own. Answer sends {question: what's picked, comma-joined}; Skip, none. */
 @Composable
-private fun Questions(questions: org.json.JSONArray, answer: (org.json.JSONObject) -> Unit, skip: () -> Unit) {
+fun Questions(questions: org.json.JSONArray, answer: (org.json.JSONObject) -> Unit, skip: () -> Unit) {
     val c = LocalBaude.current
     val qs = (0 until questions.length()).mapNotNull { questions.optJSONObject(it) }.filter { it.optString("question").isNotBlank() }
     val picked = remember { mutableStateListOf<Set<String>>().apply { repeat(qs.size) { add(emptySet()) } } }
@@ -295,7 +381,7 @@ private fun Choice(on: Boolean, multi: Boolean, label: String, about: String, to
                 else androidx.compose.foundation.shape.CircleShape),
             contentAlignment = Alignment.Center) {
             if (on && multi) androidx.compose.material3.Icon(Adwaita.ObjectSelect, null, tint = c.accentFg,
-                modifier = Modifier.size(14.dp))
+                modifier = Modifier.size(14.dp.icon))
             else if (on) Box(Modifier.size(6.dp).clip(androidx.compose.foundation.shape.CircleShape).background(c.accentFg))
         }
         Spacer(Modifier.width(8.dp))
@@ -333,7 +419,7 @@ val SAID_BY = Regex("""\A<baude-sender(?: [a-z_]+="[^"<>]*")*>[^<]*</baude-sende
  * another's: where yours are, grey, as Baude draws it, with "from <who>" small at its top, and what the store says is
  * shown of it in place of its text if it says (shown: a held answer sent, drawn as the held one was). */
 @Composable
-fun Said(line: Line, from: Msg.StoredSender? = null) {
+fun Said(line: Line, from: Msg.StoredSender? = null, revert: RevertOffer? = null) {
     val c = LocalBaude.current
     when {
         from != null -> Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
@@ -342,93 +428,29 @@ fun Said(line: Line, from: Msg.StoredSender? = null) {
                 Text(Wording.Common.fromWho(author = senderName(from)), style = Type.caption, color = c.dim)
                 SelectionContainer {
                     val shown = from.shown
-                    if (shown != null) Prose(SAID_BY.replace(shown, "").trim(), codeBg = c.inside)
-                    else Text(SAID_BY.replace(line.text, "").trim(), style = Type.body, color = c.fg)
+                    Prose(SAID_BY.replace(shown ?: line.text, "").trim(), under = c.raised.compositeOver(c.inside))
                 }
             }
         }
-        else -> SaidLine(line)
+        else -> SaidLine(line, revert)
     }
 }
 
 @Composable
-private fun SaidLine(line: Line) {
+private fun SaidLine(line: Line, revert: RevertOffer? = null) {
     val c = LocalBaude.current
     when (line.kind) {
-        "you" -> Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-            SelectionContainer {
-                Text(line.text, style = Type.body, color = c.fg, modifier = Modifier.padding(start = 48.dp)
-                    .clip(RoundedCornerShape(Gap.bubbleRadius)).background(c.bubble)
-                    .padding(horizontal = Gap.bubbleH, vertical = Gap.bubbleV))
-            }
-        }
+        "you" -> UserTurn(line, revert)
+        "thinking" -> SelectionContainer { Thinking(line.text) }
         "tool" -> Text(line.text, style = Type.caption, color = c.dim, maxLines = 2, overflow = TextOverflow.Ellipsis,
             modifier = Modifier.fillMaxWidth().card(c))
+        "tasknote" -> TaskNoteLine(line.text)
         "rows" -> MetaRows(line.text)
         "action" -> MetaAction(line.text)
         "note", "error" -> Text(line.text, style = Type.caption, color = c.dim, textAlign = TextAlign.Center,
             modifier = Modifier.fillMaxWidth())  // (.sysnote: 0.85em, faded)
         else -> SelectionContainer { Prose(line.text) }
     }
-}
-
-/** What a Bot said: its text, and its code (``` fenced) in Baude's code blocks (codeBg: theirs and inline code's fill,
- * the view's on a raised bubble, where the raised fill wouldn't show). */
-@Composable
-fun Prose(text: String, color: Color = LocalBaude.current.fg, codeBg: Color = LocalBaude.current.raised) {
-    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        text.split("```").forEachIndexed { i, part ->
-            if (i % 2 == 1) {
-                val code = part.substringAfter("\n", part).trimEnd()
-                Text(code, style = Type.mono, color = color, modifier = Modifier.fillMaxWidth()
-                    .clip(RoundedCornerShape(Gap.codeRadius)).background(codeBg).padding(horizontal = 8.dp, vertical = 6.dp))
-            } else if (part.isNotBlank()) {
-                for (block in part.trim().split(Regex("\n\\s*\n"))) Markdown(block, color, codeBg)
-            }
-        }
-    }
-}
-
-/** A paragraph of Markdown as Baude's chat draws it: headings (.md-h1 1.44em, .md-h2 1.2em), bullets, **bold**,
- * *italic* and `code` (monospace, on the raised fill). */
-@Composable
-private fun Markdown(block: String, color: Color, codeBg: Color) {
-    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-        for (raw in block.lines()) {
-            val h = Regex("^(#{1,6})\\s+(.*)$").find(raw)
-            val bullet = Regex("^\\s*([-*+]|\\d+\\.)\\s+(.*)$").find(raw)
-            val (text, style) = when {
-                h != null -> h.groupValues[2] to Type.body.copy(
-                    fontSize = Type.body.fontSize * (if (h.groupValues[1].length == 1) 1.44f else if (h.groupValues[1].length == 2) 1.2f else 1f),
-                    fontWeight = Tokens.Font.bold)
-                bullet != null -> ((if (bullet.groupValues[1].first().isDigit()) bullet.groupValues[1] + " " else "•  ") +
-                    bullet.groupValues[2]) to Type.body
-                else -> raw to Type.body
-            }
-            Text(inline(text, codeBg), style = style, color = color)
-        }
-    }
-}
-
-private fun inline(text: String, codeBg: Color) = androidx.compose.ui.text.buildAnnotatedString {
-    val token = Regex("""`([^`]+)`|\*\*([^*]+)\*\*|__([^_]+)__|\*([^*\s][^*]*)\*|_([^_\s][^_]*)_""")
-    var at = 0
-    for (m in token.findAll(text)) {
-        append(text.substring(at, m.range.first))
-        val (v, style) = when {
-            m.groups[1] != null -> m.groupValues[1] to androidx.compose.ui.text.SpanStyle(
-                fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace, background = codeBg)
-            m.groups[2] != null -> m.groupValues[2] to androidx.compose.ui.text.SpanStyle(
-                fontWeight = androidx.compose.ui.text.font.FontWeight.Bold)
-            m.groups[3] != null -> m.groupValues[3] to androidx.compose.ui.text.SpanStyle(
-                fontWeight = androidx.compose.ui.text.font.FontWeight.Bold)
-            else -> (m.groups[4] ?: m.groups[5])!!.value to androidx.compose.ui.text.SpanStyle(
-                fontStyle = androidx.compose.ui.text.font.FontStyle.Italic)
-        }
-        withStyle(style) { append(v) }
-        at = m.range.last + 1
-    }
-    append(text.substring(at))
 }
 
 /** A file picked, as it's sent (a picture as Baude makes one: prepare), or why it can't be. */
@@ -508,217 +530,6 @@ private fun prepare(bytes: ByteArray, mime: String): Pair<String, ByteArray>? {
 private const val MAX_EDGE = WireConstants.IMAGE_EDGE_MAX
 private const val MAX_BYTES = WireConstants.IMAGE_BYTES_MAX
 private const val MAX_FILE = 20L * 1024 * 1024
-
-// ----------------------------------------------------------------------------------------------------- hosts --
-
-/** This phone's key, your hosts (added as user@host: a host's Tailscale name works, as ssh's), each one's key trusted
- * once you've compared it, and the members of their mesh, reached through them. */
-@Composable
-fun HostsScreen(back: () -> Unit) {
-    val c = LocalBaude.current
-    val ctx = LocalContext.current
-    Mesh.tick.value
-    var adding by remember { mutableStateOf(false) }
-    var removing by remember { mutableStateOf<Host?>(null) }
-    var renewing by remember { mutableStateOf(false) }
-    Column(Modifier.fillMaxSize().background(c.frame)) {
-        Bar("Hosts", start = { IconButton(Adwaita.GoPrevious, Wording.Browser.back, onClick = back) },
-            end = {
-                IconButton(Adwaita.ListAdd, Wording.Sidebar.addHost) { adding = true }
-                if (Mesh.key.value != null) Menu(listOf("New Key…" to { renewing = true }))
-            })
-        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).navigationBarsPadding().padding(12.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            val key = Mesh.key.value
-            Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(c.inside).padding(12.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("This phone's key", style = Type.title, color = c.fg)
-                val error = Mesh.keyError.value
-                if (key == null && error != null) {
-                    Text(error, style = Type.body, color = c.destructive)
-                    Button(Wording.Common.tryAgain, suggested = true) { Mesh.readKey() }
-                } else if (key == null) {
-                    Text("Make a key for this phone, then put it in each host's ~/.ssh/authorized_keys.",
-                        style = Type.body, color = c.dim)
-                    if (Mesh.making.value) Text("Making the key…", style = Type.caption, color = c.dim)
-                    else Button("Make Key", suggested = true) { Mesh.makeKey() }
-                } else {
-                    Text("Put this line in each host's ~/.ssh/authorized_keys.", style = Type.body, color = c.dim)
-                    SelectionContainer {
-                        Text(key.line, style = Type.mono, color = c.fg, modifier = Modifier.fillMaxWidth()
-                            .clip(RoundedCornerShape(Gap.codeRadius)).background(c.raised).padding(8.dp))
-                    }
-                    Button(Wording.Common.copy, suggested = true) {
-                        ctx.getSystemService(ClipboardManager::class.java)
-                            .setPrimaryClip(ClipData.newPlainText("Baude's key", key.line))
-                        Toast.makeText(ctx, "Copied", Toast.LENGTH_SHORT).show()
-                    }
-                    if (Mesh.making.value) Text("Making the key…", style = Type.caption, color = c.dim)
-                    error?.let { Text(it, style = Type.caption, color = c.destructive) }
-                }
-            }
-            if (Mesh.hosts.isEmpty()) Text("No hosts yet. Add one as user@host.",
-                style = Type.body, color = c.dim, modifier = Modifier.padding(horizontal = 4.dp))
-            for (h in Mesh.hosts.toList()) {
-                val conn = Mesh.conn(h.id)
-                val (state, colour) = when (conn?.state) {
-                    "up" -> "Connected" to c.success
-                    "connecting" -> Wording.Hosts.looking(host = h.label) to c.dim
-                    "key" -> (if (conn.shown?.changed == true) "Its key changed, so it isn't connected: tap to see it"
-                              else "Its key isn't trusted yet: tap to check it") to
-                        (if (conn.shown?.changed == true) c.destructive else c.warning)
-                    "down" -> (conn.why?.let { Wording.Hosts.downBecause(host = h.label, why = it) } ?: Wording.Hosts.down(host = h.label)) to
-                        c.destructive
-                    else -> (if (key == null) "Make this phone's key first" else "Not connected") to c.dim
-                }
-                Row(
-                    Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(c.inside)
-                        .clickable {
-                            if (conn?.state == "key") Mesh.declined.removeAll { it.startsWith(h.id + " ") } // (asked again)
-                            else Mesh.connect(h)
-                        }.padding(12.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Column(Modifier.weight(1f)) {
-                        Text(h.label, style = Type.bold, color = c.fg)
-                        Text(h.dest, style = Type.caption, color = c.dim)
-                        Text(state, style = Type.caption, color = colour)
-                    }
-                    IconButton(Adwaita.UserTrash, Wording.Common.remove) { removing = h }
-                }
-            }
-            Members()
-        }
-    }
-    if (adding) AddHost(done = { adding = false })
-    removing?.let { h ->
-        AlertDialog(onDismissRequest = { removing = null }, title = { Text(Wording.MeshVersions.removeHeading(host = h.label)) },
-            text = { Text(Wording.MeshVersions.removeBody) },
-            confirmButton = { Button(Wording.Common.remove, destructive = true) { Mesh.removeHost(h); removing = null } },
-            dismissButton = { Button(Wording.Common.cancel) { removing = null } }, containerColor = c.dialog)
-    }
-    if (renewing) AlertDialog(onDismissRequest = { renewing = false }, title = { Text("Make a new key?") },
-        text = { Text("Hosts that have the current key need the new one in their authorized_keys.") },
-        confirmButton = { Button("Make Key", destructive = true) { Mesh.makeKey(); renewing = false } },
-        dismissButton = { Button(Wording.Common.cancel) { renewing = false } }, containerColor = c.dialog)
-}
-
-/** The members of your hosts' mesh: each reached through a host of yours that's up (the one that reaches it in fewest
- * hops), without this phone's key on it. */
-@Composable
-private fun Members() {
-    val c = LocalBaude.current
-    Mesh.tick.value // (a connection's state changed: drawn again)
-    val members = Mesh.members.values.sortedWith(compareBy({ it.first.hops?.toInt() ?: 99 }, { it.first.name.orEmpty().lowercase() }))
-    if (members.isEmpty()) return
-    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-        Text("Mesh", style = Type.folder, color = c.dim, modifier = Modifier.padding(start = 4.dp, top = 4.dp, bottom = 4.dp))
-        Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(c.inside)) {
-            members.forEachIndexed { i, (m, via) ->
-                val id = m.id.orEmpty()
-                val route = via?.ifBlank { null }
-                val conn = Mesh.conn("mesh:$id")
-                val through = m.through?.ifBlank { null }
-                val path = listOfNotNull(route, through).joinToString(" and ")
-                val named = m.name.orEmpty().ifBlank { m.host.orEmpty() }
-                val (state, colour) = when {
-                    conn?.state == "up" -> "Connected" to c.success
-                    conn?.listed == false -> "Not in reach now" to c.dim
-                    conn?.state == "down" -> (conn.why?.let { Wording.Hosts.downBecause(host = named, why = it) }
-                        ?: Wording.Hosts.down(host = named)) to c.destructive
-                    else -> Wording.Hosts.looking(host = named) to c.dim
-                }
-                if (i > 0) Box(Modifier.fillMaxWidth().padding(start = 12.dp).heightIn(min = 1.dp).background(c.rule))
-                Row(Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
-                        Text(m.name.orEmpty().ifBlank { m.host.orEmpty() }, style = Type.bold, color = c.fg)
-                        val where = m.host?.ifBlank { null }
-                        Text(listOfNotNull(where, if (path.isNotEmpty()) Wording.Sidebar.through(via = path) else null).joinToString(" · "),
-                            style = Type.caption, color = c.dim)
-                        Text(state, style = Type.caption, color = colour)
-                    }
-                }
-            }
-        }
-    }
-}
-
-/** A host's key, when it isn't one you've trusted, asked about wherever you are, as ssh asks: the first time, its
- * fingerprint, to trust or not; changed, the key trusted before and the one shown now, refused unless you trust the
- * new one on purpose. Not trusting leaves the host unconnected (tap it in Hosts to be asked again). */
-@Composable
-fun HostKeyAsk() {
-    val c = LocalBaude.current
-    Mesh.tick.value
-    val conn = Mesh.hosts.firstNotNullOfOrNull { h ->
-        Mesh.conn(h.id)?.takeIf { it.state == "key" && it.shown != null && "${h.id} ${it.shown!!.fingerprint}" !in Mesh.declined }
-    } ?: return
-    val host = conn.host ?: return
-    val shown = conn.shown ?: return
-    val decline = { Mesh.declined.add("${host.id} ${shown.fingerprint}"); Unit }
-    AlertDialog(
-        onDismissRequest = decline,
-        title = { Text(if (shown.changed) "${host.label}'s key changed" else "Trust ${host.label}?") },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                if (shown.changed) {
-                    Text("${host.dest} showed a key that isn't the one you trusted. Someone may be pretending to be it, " +
-                        "or its host key was replaced. This phone won't connect to it unless you trust the new key.")
-                    KeyLines("Trusted before", shown.wasType ?: "?", shown.wasFingerprint ?: "?")
-                    KeyLines("Shown now", shown.type, shown.fingerprint)
-                } else {
-                    Text("This phone hasn't connected to ${host.dest} before. Compare its key's fingerprint with the " +
-                        "host's own (ssh-keygen -lf on its host key) before you trust it.")
-                    KeyLines(null, shown.type, shown.fingerprint)
-                }
-            }
-        },
-        confirmButton = {
-            if (shown.changed) Button("Don't Connect", suggested = true, onClick = decline)
-            else Button("Trust", suggested = true) { Mesh.trust(host, shown) }
-        },
-        dismissButton = {
-            if (shown.changed) Button("Trust the New Key", destructive = true) { Mesh.trust(host, shown) }
-            else Button("Don't Trust", onClick = decline)
-        },
-        containerColor = c.dialog,
-    )
-}
-
-@Composable
-private fun KeyLines(label: String?, type: String, fingerprint: String) {
-    val c = LocalBaude.current
-    Column {
-        Text(listOfNotNull(label, type).joinToString(" · "), style = Type.caption, color = c.dim)
-        SelectionContainer { Text(fingerprint, style = Type.mono, color = c.fg) }
-    }
-}
-
-@Composable
-fun AddHost(done: () -> Unit, given: org.json.JSONObject? = null, edited: ((org.json.JSONObject) -> Unit)? = null,
-            added: () -> Unit = {}) { // (given, edited: Meta's add_host form's values, filled by it and by you)
-    val c = LocalBaude.current
-    var dest by remember { mutableStateOf(given?.str("destination").orEmpty()) }
-    var name by remember { mutableStateOf("") }
-    var command by remember { mutableStateOf(given?.str("command") ?: "baude_headless.py") }
-    LaunchedEffect(dest, command) { edited?.invoke(org.json.JSONObject().put("destination", dest).put("command", command)) }
-    val host = Host.parse(dest, name, command)
-    AlertDialog(
-        onDismissRequest = done,
-        title = { Text(Wording.NewSession.addHost) },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Field(dest, { dest = it }, "user@host (or user@host:port)")
-                Field(name, { name = it }, "Name (optional)")
-                Field(command, { command = it }, Wording.Hosts.commandPlaceholder(command = "baude_headless.py"))
-                Text("Over Tailscale, use the host's Tailscale name or address.", style = Type.caption, color = c.dim)
-            }
-        },
-        confirmButton = { Button(Wording.Common.add, suggested = true) { if (host != null) { Mesh.addHost(host); added(); done() } } },
-        dismissButton = { Button(Wording.Common.cancel, onClick = done) },
-        containerColor = c.dialog,
-    )
-}
 
 @Composable
 fun Field(value: String, set: (String) -> Unit, hint: String) {

@@ -29,7 +29,7 @@
   "parts": [
     {
       "name": "card while running",
-      "shows": "The call's card (ToolCall) keeps its spinner after its first result (which only says it started; that result isn't shown), with \"  · running in background\" dimmed after the summary. The status bar and side panel's Processes / Subagents also list it (other areas)."
+      "shows": "The call's card (ToolCall) keeps its spinner after its first result (which only says it started; that text is its first Output, \"Command running in background with ID: …\"), with \"  · running in background\" dimmed after the summary. The status bar and side panel's Processes / Subagents also list it (other areas)."
     },
     {
       "name": "card when finished",

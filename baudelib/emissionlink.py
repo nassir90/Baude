@@ -295,6 +295,34 @@ def call(pid, msg, timeout=60):
     return got
 
 
+def running_commits(timeout=2):
+    """The commit each Emission running here says its code is, one for each profile it has open (None for one that
+    doesn't say: on older code). Baude's own socket (home: it makes Bots' browsers) is Baude's, not an Emission's."""
+    folder, home = os.path.dirname(profile_socket("home")), os.path.basename(profile_socket("home"))
+    try:
+        names = sorted(n for n in os.listdir(folder) if n.endswith(".sock") and n != home)
+    except OSError:
+        return []
+    out = []
+    for name in names:
+        try:
+            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
+                s.settimeout(timeout)
+                s.connect(os.path.join(folder, name))
+                s.sendall(b'{"op": "info"}\n')
+                raw = b""
+                while not raw.endswith(b"\n") and len(raw) < 1 << 16:
+                    if not (part := s.recv(1 << 12)):
+                        break
+                    raw += part
+            got = json.loads(raw)
+        except (OSError, ValueError):
+            continue  # (one gone, its socket left behind)
+        if isinstance(got, dict) and not got.get("error"):
+            out.append(got["commit"] if isinstance(got.get("commit"), str) else None)
+    return out
+
+
 def hand_over(pid, urls):
     """urls opened in the Emission that has pid's profile: True if it took them."""
     try:

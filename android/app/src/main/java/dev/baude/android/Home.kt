@@ -235,7 +235,7 @@ private fun limit(key: String): Int = when {
  * groups. */
 @Composable
 fun Home(open: (String, String) -> Unit, hosts: () -> Unit, feedback: () -> Unit, phone: () -> Unit = {},
-         settings: () -> Unit = {}, note: @Composable () -> Unit = {}) {
+         settings: () -> Unit = {}, mesh: () -> Unit = {}, note: @Composable () -> Unit = {}) {
     val c = LocalBaude.current
     val ctx = androidx.compose.ui.platform.LocalContext.current
     LaunchedEffect(Unit) { HomePrefs.load(ctx) }
@@ -247,7 +247,8 @@ fun Home(open: (String, String) -> Unit, hosts: () -> Unit, feedback: () -> Unit
         Bar("Baude", left = true, end = {
             IconButton(Adwaita.Phone, "This phone", onClick = phone) // (its own agents: PhoneScreen)
             IconButton(Adwaita.NetworkServer, "Hosts", onClick = hosts)
-            Menu(listOf(Wording.Window.settings to settings, Wording.Fixes.sendFeedback to feedback))
+            Menu(listOf(Wording.Window.settings to settings, Wording.MeshVersions.title to mesh,
+                Wording.Fixes.sendFeedback to feedback))
         })
         note()
         val down = Mesh.hosts.mapNotNull { h -> Mesh.conn(h.id)?.takeIf { it.state == "down" || it.state == "key" } }

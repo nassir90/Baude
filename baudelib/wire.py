@@ -187,6 +187,7 @@ def _ref(schema):
 
 VERSION = CONSTANTS["VERSION"]  # (said in hello, for a person to read)
 HEAD_COMMIT = None  # (the commit a head's code is, as it started: said in its hello, set by Baude and Record)
+HEAD_CLIENT = "tool"  # (what a head is, said in its hello: Baude, Record say what they are; a script is a tool)
 STATES = tuple(DEFS["Session"]["properties"]["state"]["enum"])
 PING_S = CONSTANTS["PING_S"]      # a subscriber hears from the server at least this often
 SILENT_S = CONSTANTS["SILENT_S"]  # and takes it for gone after this long without a word
@@ -830,7 +831,7 @@ def own_dir(path):
 def _hello(ch, timeout, what):
     """(channel, the server's info) past hello, or OSError: what didn't answer."""
     ch.sock.settimeout(timeout)
-    ch.send({"op": "hello", "client": "baude", "version": VERSION, **({"commit": HEAD_COMMIT} if HEAD_COMMIT else {})})
+    ch.send({"op": "hello", "client": HEAD_CLIENT, "version": VERSION, **({"commit": HEAD_COMMIT} if HEAD_COMMIT else {})})
     reply = ch.reply()
     if not reply or reply.get("op") != "hello":
         ch.close()

@@ -52,9 +52,10 @@ class MainActivity : ComponentActivity() {
                     "new-agent" -> NewAgentScreen({ go(listOf("phone")) }) { go(listOf("chat", "phone", it)) }
                     "feedback" -> FeedbackScreen(feedbackContext(now), ::back)
                     "settings" -> SettingsScreen(::back, feedback = { go(listOf("feedback")) })
+                    "mesh" -> MeshScreen(::back)
                     else -> Home(open = { h, s -> go(listOf("chat", h, s)) }, hosts = { go(listOf("hosts")) },
                         feedback = { go(listOf("feedback")) }, phone = { go(listOf("phone")) },
-                        settings = { go(listOf("settings")) },
+                        settings = { go(listOf("settings")) }, mesh = { go(listOf("mesh")) },
                         note = { if (Shares.pending.value != null) ShareBanner(::back) })
                 }
                 HostKeyAsk()

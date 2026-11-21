@@ -89,6 +89,7 @@ import viewers  # noqa: E402  (Baude's viewers, in Record's window: beside this 
 from codeview import FindInText, find_in_focus  # noqa: E402  (⌘F on a page of notes: the Code page's find bar)
 import update  # noqa: E402  (a new version from git, restarted onto once idle, as Baude's: beside this file)
 baudelib.wire.HEAD_COMMIT = update.STARTED  # (said to the host processes it reaches: logged by one on other code)
+baudelib.wire.HEAD_CLIENT = "record"  # (listed as Record among the apps connected to a host)
 import meta  # noqa: E402  (Meta, the helper in the right bar: Baude's too, beside this file)
 import spelling  # noqa: E402  (the pages' spelling and grammar, as they're written: beside this file)
 
@@ -7506,6 +7507,7 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost, w
         item.set_attribute_value("accel", GLib.Variant.new_string(widgets.SETTINGS_KEY))
         app_menu.append_item(item)
         app_menu.append(wording.say("changelog.title"), "win.changelog")
+        app_menu.append(wording.say("mesh_versions.title"), "win.mesh")  # (Baude's too)
         item = Gio.MenuItem.new(wording.say("fixes.send_feedback"), "win.feedback")
         item.set_attribute_value("accel", GLib.Variant.new_string(widgets.FEEDBACK_KEY))
         app_menu.append_item(item)
@@ -7521,7 +7523,8 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost, w
                          ("new", lambda *_: self.new_notebook()), ("restart", lambda: self.restart()),
                          ("settings", lambda: Settings(self).present(self)), ("feedback", lambda: self.open_feedback()),
                          ("fixes", lambda: self.open_fixes()),
-                         ("changelog", lambda: update.changelog_dialog().present(self))):
+                         ("changelog", lambda: update.changelog_dialog().present(self)),
+                         ("mesh", lambda: widgets.mesh_dialog(network()).present(self))):
             a = Gio.SimpleAction(name=name)
             a.connect("activate", lambda _a, _p, fn=fn: fn())
             self.add_action(a)

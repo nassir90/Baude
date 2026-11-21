@@ -16,6 +16,7 @@ import dev.baude.android.Home
 import dev.baude.android.Host
 import dev.baude.android.Key
 import dev.baude.android.Mesh
+import dev.baude.android.MeshScreen
 import dev.baude.android.Msg
 import dev.baude.android.Settings
 import dev.baude.android.SettingsScreen
@@ -65,6 +66,8 @@ abstract class Screens(private val theme: String) {
         FixtureConnection.down()
         Mesh.hosts.clear()
         Mesh.sessions.clear()
+        Mesh.infos.clear()
+        Mesh.states.clear()
         Mesh.key.value = null
     }
 
@@ -88,6 +91,32 @@ abstract class Screens(private val theme: String) {
     }
 
     @Test fun settings() = render("05-settings") { SettingsScreen({}, {}) }
+
+    @Test fun mesh() {
+        versionsFixture()
+        render("06-mesh") { MeshScreen {} }
+    }
+
+    /** The mesh as workshop says it is: it, and two members on older code (one 45 commits behind, one whose count
+     * it can't make), with the apps connected to each. */
+    private fun versionsFixture() {
+        val newest = "6be704e2dc23f0730cc73e2586db5561b1f4cd77"
+        val older = "795a6cfd98c7e2517c183787ae4631ae75d39ff5"
+        val oldest = "98a4827dd47ec7d67f3e36bb7b2064b91a652bc3"
+        val day = 86_400L
+        val made = 1_795_247_995L
+        fun head(client: String, commit: String?, at: Long?, behind: Long?) =
+            Msg.Head(client = client, commit = commit, made = at, behind = behind)
+        Mesh.states["h1"] = Mesh.conn("h1")!!
+        Mesh.infos["h1"] = Msg.Info(id = "h1", name = "workshop", host = "workshop.local", commit = newest, made = made,
+            behind = 0, heads = listOf(head("baude", newest, made, 0), head("baude-android", newest, made, 0)),
+            mesh = Msg.MeshView(newest = newest, members = listOf(
+                Msg.Member(id = "m1", name = "studio", host = "studio.local", commit = older, made = made - day, behind = 45,
+                    heads = listOf(head("record", older, made - day, 45), head("emission", newest, made, 0))),
+                Msg.Member(id = "m2", name = "attic", host = "attic.local", commit = oldest, made = made - 3 * day,
+                    behind = null, heads = listOf(head("baude", null, null, null))),
+            )))
+    }
 
     @Test fun settingsPicked() {
         Settings.accent.value = "green"

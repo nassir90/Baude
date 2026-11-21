@@ -48,6 +48,10 @@
         "$ref": "Gone.json"
       },
       "description": "Members reached lately, not now (not one deactivated here)."
+    },
+    "newest": {
+      "type": ["string", "null"],
+      "description": "The commit of the newest code in the mesh (the latest made of every member's and app's), what each is counted behind (null: none's known)."
     }
   },
   "additionalProperties": false

@@ -45,6 +45,25 @@
     "through": {
       "type": ["string", "null"],
       "description": "The member it's reached through, by name; null for one linked to here."
+    },
+    "commit": {
+      "type": ["string", "null"],
+      "description": "The commit its code is (null: not a checkout, or it didn't say)."
+    },
+    "made": {
+      "type": ["integer", "null"],
+      "description": "When that commit was made, in seconds (null: not known)."
+    },
+    "heads": {
+      "type": "array",
+      "items": {
+        "$ref": "Head.json"
+      },
+      "description": "The apps connected to it, by the code they run."
+    },
+    "behind": {
+      "type": ["integer", "null"],
+      "description": "How many commits it lacks of the mesh's newest code (MeshView's newest), as this host's git counts them (null: it can't)."
     }
   },
   "required": ["id"],

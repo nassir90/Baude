@@ -35,6 +35,9 @@ FRAME_KEYS = frozenset(wire.DEFS["EmissionFrame"]["properties"]) - {"op", "req"}
 EPHEMERAL_S = wire.CONSTANTS["EPHEMERAL_S"]  # (a side question whose head's gone: gone this soon)
 GRACE_MOST = wire.CONSTANTS["GRACE_MAX_S"]  # (start's grace: an ephemeral session waits at most this long for its head
 # to come back)
+APPS = frozenset({"baude", "record", "baude-android"})  # (heads listed as apps connected: a script that says
+# anything else, or a host's mesh, is no app)
+EMISSIONS_S = 30  # (this machine's Emissions, and the code each runs, asked this often: heads_look)
 CHECK_SOCKET_S = 600  # (nobody attached: its socket looked at this often, in case its folder's been taken away)
 TRANSCRIPT_CHUNK = 1 << 20
 TAKEN = 64  # (a session's messages from heads, by uuid: the last this many kept, a repeat of one taken once)
@@ -534,6 +537,10 @@ class Server:
         self.commit = selfupdate.git(selfupdate.HERE, "rev-parse", "HEAD", timeout=5) or None
         self.update, self.restarting = None, None
         self.heads_apart = set()  # (the commits of heads on other code that have said hello: logged once each)
+        # the apps connected here, by the code they run (heads that have subscribed, and this machine's Emissions:
+        # info's heads, and this host's record's for the mesh); when each commit was made, as git here has it
+        self.made_at, self.heads, self.emissions = {}, [], []
+        self.made = self.made_of(self.commit)
         self.feedback_filed = _read_json(os.path.join(self.state_dir, "feedback-filed.json")) or {}  # (feedback's
         # notes filed, by id, kept: found before GitHub's search finds them, and after a restart)
         self.feedback_claims, self.feedback_lock = {}, threading.Lock()  # (notes being filed now: .filing's, here)
@@ -655,9 +662,45 @@ class Server:
                 "checkout": selfupdate.HERE,  # (where its code is: a head here run from elsewhere is told, code_apart)
                 "groups": sorted({s.meta.get("group") or self.me["group"] for s in self.sessions.values()}
                                  | {self.me["group"]}),
-                "init": self.me.get("init") or None, "commit": self.commit, "update": self.update,
+                "init": self.me.get("init") or None, "commit": self.commit, "made": self.made,
+                **self.mesh.here_behind(), "update": self.update,
                 "providers": self.mesh.providers_here(), "mesh": self.mesh.view(),
                 "notes": self.notes_seen}  # (Record's notebooks here, as written last: notes.stamp)
+
+    def made_of(self, commit):
+        """When commit was made, in seconds, as git here has it (None: it hasn't it), kept once asked."""
+        if not commit:
+            return None
+        if commit not in self.made_at:
+            stamp = selfupdate.git(selfupdate.HERE, "show", "-s", "--format=%ct", commit, timeout=5)
+            self.made_at[commit] = int(stamp) if stamp and stamp.isdigit() else None
+        return self.made_at[commit]
+
+    def versions(self):
+        """The code it runs and the apps connected to it by theirs, for its record (mesh.Mesh.mine)."""
+        return {"commit": self.commit, "made": self.made, "heads": self.heads}
+
+    def heads_look(self):
+        """The apps connected here looked at again (a head's subscribed, or gone; an Emission's come or gone): the
+        mesh told of a change, and heads here. (Not with the lock held.)"""
+        with self.lock:
+            seen = {(c.head["client"], c.head["commit"]) for c in self.conns
+                    if c.subscribed and getattr(c, "head", None) and c.origin is None}  # (a tunnel's: its own host's)
+        seen |= {(e["client"], e["commit"]) for e in self.emissions}
+        heads = [{"client": client, "commit": commit, "made": self.made_of(commit)}
+                 for client, commit in sorted(seen, key=lambda h: (h[0], h[1] or ""))]
+        if heads != self.heads:
+            self.heads = heads
+            self.mesh.republish()
+
+    def _emissions(self):
+        """This machine's Emissions, and the code each runs, asked every EMISSIONS_S (they're no heads: the host
+        process reaches them, emissionlink)."""
+        while not self.stopped.wait(EMISSIONS_S):
+            found = [{"client": "emission", "commit": c} for c in emissionlink.running_commits()]
+            if found != self.emissions:
+                self.emissions = found
+                self.heads_look()
 
     def mesh_changed(self):
         """The mesh changed (a member came or went, a link's state, a provider): heads hear, with its info. (Never with
@@ -783,6 +826,7 @@ class Server:
     def serve_forever(self):
         """Take connections till it's shut down."""
         threading.Thread(target=self._watch, daemon=True, name="watch").start()
+        threading.Thread(target=self._emissions, daemon=True, name="emissions").start()
         self.mesh.start()
         with self.lock:  # (waits its agents were at as it last stopped, which stopped them: answered for them)
             waits = [(s, w) for s in self.sessions.values() for w in s.meta.get("waits_on") or []]
@@ -1008,6 +1052,8 @@ class Server:
                     self.drop_ephemeral(s)
             conn.close()
             ch.close()
+            if conn.subscribed:
+                self.heads_look()
 
     def emission_watch(self, conn, req, bot, msg):
         """A Bot's Emission here (started if it isn't) watched for conn: its frames (as JPEG) and state, a message
@@ -1131,11 +1177,15 @@ class Server:
             if isinstance(head, str) and self.commit and head != self.commit and head not in self.heads_apart:
                 self.heads_apart.add(head)
                 self.log(f"a head on {head[:12]} connected; this is on {self.commit[:12]}")
+            if msg.get("client") in APPS:  # (listed as connected here once it subscribes)
+                conn.head = {"client": msg["client"][:32], "commit": mesh.versions_of({"commit": head})["commit"]}
             return reply("hello", server=self.info())
         if op == "subscribe":
             if not conn.subscribed:  # (a head's come: this machine's model providers looked at again, for it)
                 threading.Thread(target=self.mesh.refresh, daemon=True, name="providers").start()
-            conn.subscribed, conn.archived = True, bool(msg.get("archived"))
+            was, conn.subscribed, conn.archived = conn.subscribed, True, bool(msg.get("archived"))
+            if not was:
+                self.heads_look()
             with self.lock:  # (as they are now: nothing's been read while nobody was attached)
                 for s in self.sessions.values():
                     self.rescan(s)

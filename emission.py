@@ -43,6 +43,7 @@ AGENT_IDLE_S = 30 * 60  # (an Emission started for a Bot: gone after this long w
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from baudelib import applist  # noqa: E402  (Emission in the list of apps, as Record is)
+from baudelib import selfupdate  # noqa: E402
 from baudelib import tokens  # noqa: E402  (its pointer's sizes and times: schema/tokens, the Android app's too)
 from baudelib import wire  # noqa: E402  (its screenshots' sizes and qualities, as the phone's: the wire's schema)
 from baudelib import wording  # noqa: E402  (its words, Baude's browser's: schema/copy)
@@ -153,6 +154,8 @@ def address(text):
     return SEARCH.format(urllib.parse.quote_plus(text))
 
 
+STARTED = selfupdate.git(selfupdate.HERE, "rev-parse", "HEAD", timeout=5) or None  # (the commit its code is, as it
+# started: said when it's asked what it is, info, as this machine's host process does to list it among its apps)
 AGENT = {"on": False}  # (this process an agent's Emission: emission.py --agent)
 
 
@@ -2538,15 +2541,16 @@ class Window(Adw.ApplicationWindow):
         op = msg.get("op")
         busy = bool(self.control.queue or self.waiting or any(t.last.get("loading") for t in self.tabs.values()))
         idle_s = 0.0 if busy else (GLib.get_monotonic_time() - self.asked_at) / 1e6  # (work still going: not idle)
-        self.used = GLib.get_monotonic_time()
+        if op != "info":  # (asked what it is, as the host process does every few seconds: not use)
+            self.used = GLib.get_monotonic_time()
         if op not in ("info", "watch", "phone_note") and not msg.get("from_pane"):
-            self.asked_at = self.used
+            self.asked_at = GLib.get_monotonic_time()
         if op == "open":
             self.take(pid, [u for u in msg.get("urls") or [] if isinstance(u, str)])
             return answer({"ok": True})
         if op == "info":  # (hosted: not an agent's to be asked to go; its pages opened there instead: open)
             return answer({"agent": self.agent, "hosted": self.hosted, "profile": self.profile,
-                           "tabs": len(self.tabs), "idle_s": idle_s})
+                           "tabs": len(self.tabs), "idle_s": idle_s, "commit": STARTED})
         if op == "memory":  # (tests/bench_emission.py's: what this process holds now, counted after a collection)
             return answer(self.memory())
         if op == "phone_note":  # (its browser was on a phone till now: what the Bot's next request is told, in place

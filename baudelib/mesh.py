@@ -11,7 +11,8 @@ chats, starts and steers them, reads their transcripts, and runs its models.
 
 What goes over a link, after hello and join {host} -> joined {host} (wire.py's lines, each with an "op"):
     mesh {records}          members' records, {id, seq, info, links}: who it is (info: id, name, group, host, version,
-                            providers) and the members it's linked to. A host sends its own when it changes (seq
+                            providers; commit, made, heads: the code it runs, and the apps connected to it by theirs)
+                            and the members it's linked to. A host sends its own when it changes (seq
                             higher than any it sent before) and passes each one newer than it had on to its other links;
                             all it has as a link's made. Members are reached through links both ends list (a direct
                             link of its own counts at once), so one that's gone, its links dropped, is gone for all.
@@ -69,7 +70,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-from baudelib import models, wire, wording
+from baudelib import models, selfupdate, wire, wording
 
 RETRY_S = (2, 10, 30, 120, 300)  # a link that's dropped, or couldn't be made, is tried again after these
 OFF_S = 30  # (one the other end's deactivated this host on: tried again this often)
@@ -89,6 +90,7 @@ BACKLOG = wire.CONSTANTS["BACKLOG"]  # (messages a model's files may have waitin
 # than this)
 LINKS = "links.json"
 ENDPOINTS = "mesh-endpoints.json"  # (in the runtime folder, the user's own: endpoints(), for what runs here)
+_COMMIT = re.compile(r"[0-9a-f]{7,64}")
 _PROVIDER = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}(/[A-Za-z0-9][A-Za-z0-9_.:-]{0,63})?")
 
 
@@ -228,6 +230,20 @@ def _hello_of(host):
     return out
 
 
+def versions_of(info):
+    """The code a member's record says it runs, cut to size: {commit, made (when that commit was made, in seconds),
+    heads: [{client, commit, made}]: the apps connected to it}, None for what it doesn't say (one on older code)."""
+    def commit(v):
+        return v if isinstance(v, str) and _COMMIT.fullmatch(v) else None
+
+    def made(v):
+        return v if isinstance(v, int) and not isinstance(v, bool) and v > 0 else None
+    heads = [{"client": h["client"][:32], "commit": commit(h.get("commit")), "made": made(h.get("made"))}
+             for h in (info.get("heads") if isinstance(info.get("heads"), list) else [])[:32]
+             if isinstance(h, dict) and isinstance(h.get("client"), str) and h["client"]]
+    return {"commit": commit(info.get("commit")), "made": made(info.get("made")), "heads": heads}
+
+
 def _record(r):
     """A member's record as it came, if it's one, cut to size: {id, seq, info, links}."""
     if not isinstance(r, dict) or not wire.is_id(r.get("id")) or not isinstance(r.get("seq"), int):
@@ -239,6 +255,7 @@ def _record(r):
     info["providers"] = [published(p, p.get("http") is True) for p in raw[:32]
                          if isinstance(p, dict) and is_provider_id(p.get("id"))] \
         if isinstance(raw, list) else []
+    info.update(versions_of(r["info"]))
     links = r.get("links") if isinstance(r.get("links"), list) else []
     return {"id": r["id"], "seq": r["seq"], "info": info, "links": sorted({x for x in links[:256] if wire.is_id(x)})}
 
@@ -595,6 +612,10 @@ class Mesh:
         self.bonjour = bonjour_name()
         self.stopped, self.linked = threading.Event(), threading.Event()  # (linked: set while there's a link)
         self.told = None  # (the endpoints what runs here was last told of: endpoints())
+        # (how many commits each commit in the mesh lacks of the newest, by (commit, newest), as git here counts them:
+        # None, it can't; counted off the lock, on a thread of its own, as they're first asked for: behind)
+        self.counted, self.counting = {}, queue.Queue()
+        threading.Thread(target=self._count, daemon=True, name="mesh-versions").start()
         self.records[self.id] = {"rec": self.mine(), "got": time.time()}
         try:
             with open(os.path.join(server.state_dir, LINKS), encoding="utf-8") as f:
@@ -677,7 +698,7 @@ class Mesh:
     def mine(self):
         """(lock held) This host's record."""
         return {"id": self.id, "seq": self.seq,
-                "info": {**self.hello(), "providers": [published(p) for p in self.local]},
+                "info": {**self.hello(), "providers": [published(p) for p in self.local], **self.server.versions()},
                 "links": sorted(self.links)}
 
     def publish(self):
@@ -689,6 +710,12 @@ class Mesh:
             for x in ls:
                 x.send({"op": "mesh", "records": [rec]})
         self.reroute()
+
+    def republish(self):
+        """This host's record, anew, as what it is has changed (the apps connected to it), and heads here told."""
+        with self.lock:
+            self.publish()
+        self.changed()
 
     def _providers(self):
         """This machine's providers looked at again every PROVIDERS_S while it's linked (refresh), and not at all while
@@ -1167,11 +1194,13 @@ class Mesh:
         deactivated here], gone: [{id, name}] (members reached lately, not now: restarting, say; FORGET_S; not one
         deactivated here)}."""
         with self.lock:
+            newest = self.newest()
             members = []
             for k, n in sorted(self.hops.items(), key=lambda kv: (kv[1], self.name_of(kv[0]).lower())):
                 rec = (self.records.get(k) or {}).get("rec")
                 info = rec["info"] if rec else {**(self.links.get(k) or [None])[0].peer, "providers": []}
-                members.append({**info, "hops": n, "through": None if n == 1 else self.name_of(self.routes.get(k))})
+                members.append({**info, "hops": n, "through": None if n == 1 else self.name_of(self.routes.get(k)),
+                                **self.counted_behind(info, newest)})
             links = [{"where": o.where, "id": o.id, "name": o.name, "state": o.state, "error": o.error,
                       "active": o.active} for o in self.outs]
             inactive = sorted(self.inactive)
@@ -1186,7 +1215,52 @@ class Mesh:
                     self.proxy = False
             proxy = {"url": self.proxy.url, "key": self.proxy.key} if self.proxy else None
         return {"members": members, "links": links, "proxy": proxy, "inactive": inactive, "found": found,
-                "gone": gone}
+                "gone": gone, "newest": newest}
+
+    # ---- the code each member runs, and the apps connected to it
+    def newest(self):
+        """(lock held) The commit of the newest code in the mesh: the latest made of every reached member's, and of
+        the apps connected to each (this host's own among them), or None if none's known."""
+        best = None
+        for k in (self.id, *self.hops):
+            info = ((self.records.get(k) or {}).get("rec") or {}).get("info") or {}
+            for c, made in [(info.get("commit"), info.get("made"))] + [(h.get("commit"), h.get("made"))
+                                                                      for h in info.get("heads") or ()]:
+                if c and made and (best is None or made > best[1]):
+                    best = (c, made)
+        return best[0] if best else None
+
+    def behind(self, commit, newest):
+        """(lock held) How many commits commit lacks of newest, if git here has counted them; None if it can't (or
+        hasn't yet: asked for, and heads told once it has)."""
+        if not commit or not newest:
+            return None
+        if commit == newest:
+            return 0
+        if (commit, newest) not in self.counted:
+            self.counted[(commit, newest)] = None
+            self.counting.put((commit, newest))
+        return self.counted[(commit, newest)]
+
+    def counted_behind(self, info, newest):
+        """(lock held) A member's (or this host's) info's behind, and its heads with theirs."""
+        return {"behind": self.behind(info.get("commit"), newest),
+                "heads": [{**h, "behind": self.behind(h.get("commit"), newest)} for h in info.get("heads") or ()]}
+
+    def here_behind(self):
+        """This host's info's behind, and its heads with theirs (Server._info)."""
+        with self.lock:
+            return self.counted_behind(self.records[self.id]["rec"]["info"], self.newest())
+
+    def _count(self):
+        """What behind asks for, counted by git here, one at a time: heads told of each it can count."""
+        while not self.stopped.is_set():
+            commit, newest = self.counting.get()
+            n = selfupdate.git(selfupdate.HERE, "rev-list", "--count", f"{commit}..{newest}", timeout=10)
+            if n is not None and n.isdigit():
+                with self.lock:
+                    self.counted[(commit, newest)] = int(n)
+                self.changed()
 
     def providers_here(self):
         """This machine's providers, for its info: as local_providers has them, with no key."""

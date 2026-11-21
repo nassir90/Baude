@@ -1,0 +1,14 @@
+{
+  "description": "☰ → Mesh, in Baude and Record, and ⋮ → Mesh in the Android app: the code each host's daemon in the mesh runs, and each app connected to it (Baude, Record, Emission, the Android app), against the newest in the mesh.",
+  "messages": {
+    "title": "Mesh",
+    "none": "Not connected to a host process",
+    "baude": "Baude",
+    "record": "Record",
+    "emission": "Emission",
+    "android": "Android",
+    "newest": "Newest",
+    "behind": ".input {$n :number} .match $n one {{{$n} commit behind}} * {{{$n} commits behind}}",
+    "older": "Older code"
+  }
+}

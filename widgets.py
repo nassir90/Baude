@@ -10658,3 +10658,112 @@ class HostApart:
             restart_host()
         elif apart == "both":
             restart_host(then=restart_app)
+
+
+# ---- ☰ → Mesh: the code each host's daemon in the mesh runs, and each app connected to it
+
+VERSION_CLIENTS = {"baude": "baude", "record": "record", "emission": "emission", "baude-android": "android"}
+
+
+def mesh_versions(net):
+    """The mesh's hosts as the host process here has them (or, with none here, the first host reached that has a
+    mesh): (newest: (commit, made) or None, [{id, name, commit, made, behind, heads: [{client, commit, made,
+    behind}]}], each host once), or None with no host reached."""
+    with net.lock:
+        reached = [r for r in net.servers.values() if r.state == "alive" and isinstance(r.info.get("mesh"), dict)]
+    source = next((r for r in reached if r.mine), None) or next(iter(reached), None)
+    if source is None:
+        return None
+    info, mesh = source.info, source.info["mesh"]
+    hosts = {}
+    for h in [info, *(mesh.get("members") or [])]:
+        hosts.setdefault(h.get("id"), h)
+    hosts = list(hosts.values())
+    newest = mesh.get("newest")
+    made = next((x.get("made") for h in hosts for x in [h, *(h.get("heads") or [])] if x.get("commit") == newest
+                 and x.get("made")), None) if newest else None
+    return ((newest, made) if newest else None), hosts
+
+
+def version_standing(entry, newest):
+    """What a daemon's or an app's code is against the newest: ("newest" | "behind" | "older" | "unknown" | None,
+    what's said of it)."""
+    if not entry.get("commit"):
+        return "unknown", ""
+    if newest is None:
+        return None, ""
+    if entry["commit"] == newest[0]:
+        return "newest", wording.say("mesh_versions.newest")
+    if isinstance(entry.get("behind"), int) and entry["behind"] > 0:
+        return "behind", wording.say("mesh_versions.behind", n=entry["behind"])
+    if entry.get("made") and newest[1] and entry["made"] < newest[1]:
+        return "older", wording.say("mesh_versions.older")
+    return None, ""
+
+
+def mesh_dialog(net):
+    """☰ → Mesh (Baude's and Record's): a group for each host in the mesh, its daemon and each app connected to it a
+    line each (version_row). Looked at again every MESH_VERSIONS_S while it's shown (what the hosts say comes as it
+    changes: a host's record, a head come or gone)."""
+    view = Adw.ToolbarView()
+    view.add_top_bar(Adw.HeaderBar())
+    dialog = Adw.Dialog(title=wording.say("mesh_versions.title"), content_width=640, content_height=720, child=view)
+    shown = {"got": object(), "open": True}
+
+    def fill():
+        got = mesh_versions(net)
+        if got == shown["got"]:
+            return
+        shown["got"] = got
+        prefs = settings_page()
+        if got is None:
+            prefs.add(Adw.PreferencesGroup(description=wording.say("mesh_versions.none")))
+        else:
+            newest, hosts = got
+            for h in hosts:
+                group = Adw.PreferencesGroup(title=GLib.markup_escape_text(h.get("name") or h.get("id", "")[:8]))
+                group.add(version_row(wording.say("host_menu.daemon"), h, newest))
+                for x in h.get("heads") or ():
+                    client = VERSION_CLIENTS.get(x.get("client"))
+                    group.add(version_row(wording.say(f"mesh_versions.{client}") if client else x.get("client", ""),
+                                          x, newest))
+                prefs.add(group)
+        view.set_content(prefs)
+
+    def look():
+        if shown["open"]:
+            fill()
+        return shown["open"]
+    dialog.connect("closed", lambda _d: shown.update(open=False))
+    fill()
+    GLib.timeout_add_seconds(MESH_VERSIONS_S, look)
+    return dialog
+
+
+MESH_VERSIONS_S = 2
+
+
+def changelog_of(commit, widget):
+    """The commits commit has, in ☰ → Changelog's dialog, over widget."""
+    import update
+    update.changelog_dialog(commit).present(widget)
+
+
+def version_row(title, entry, newest):
+    """A daemon's or an app's line on ☰ → Mesh: what it is, its commit (a link to that commit's changelog, ☰ →
+    Changelog's), and where that stands (Newest, dimmed; N commits behind or Older code, in the warning colour)."""
+    row = Adw.ActionRow(title=GLib.markup_escape_text(title))
+    kind, said = version_standing(entry, newest)
+    box = Gtk.Box(spacing=12, valign=Gtk.Align.CENTER)
+    commit = entry.get("commit")
+    if commit:
+        link = Gtk.Button(label=commit[:7], css_classes=["flat", "monospace", "accent"], valign=Gtk.Align.CENTER)
+        link.connect("clicked", lambda b: changelog_of(commit, b))
+        box.append(link)
+    else:
+        box.append(Gtk.Label(label=wording.say("updates.version_unknown"), css_classes=["dim-label"]))
+    behind = Gtk.Label(label=said, xalign=1, width_chars=16)
+    behind.add_css_class("dim-label" if kind == "newest" else "warning")
+    box.append(behind)
+    row.add_suffix(box)
+    return row

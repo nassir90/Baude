@@ -37,6 +37,21 @@
         "$ref": "Provider.json"
       },
       "description": "Its model providers."
+    },
+    "commit": {
+      "type": ["string", "null"],
+      "description": "The commit its code is (null: not a checkout, or it didn't say)."
+    },
+    "made": {
+      "type": ["integer", "null"],
+      "description": "When that commit was made, in seconds (null: not known)."
+    },
+    "heads": {
+      "type": "array",
+      "items": {
+        "$ref": "Head.json"
+      },
+      "description": "The apps connected to it, by the code they run."
     }
   },
   "required": ["id"],

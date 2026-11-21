@@ -404,7 +404,9 @@ fun MetaPage(chatHost: String, here: Boolean) {
             if (Meta.chat.lines.isNotEmpty()) Button(Wording.Common.clear) { Meta.clear() }
         }
         Column(Modifier.weight(1f)) {
-            ChatPage(Meta.chat, "Meta", hint = "Ask Meta", attach = false)
+            ChatPage(Meta.chat, "Meta", attach = false, foot = {
+                Row(Modifier.padding(horizontal = 10.dp, vertical = 4.dp)) { WorkingDots(Meta.chat.thinking.value) }
+            })
         }
     }
     MetaTools.form.value?.takeIf { it.optString("state", "open") == "open" }?.let { f -> // (a form Meta brought up, as

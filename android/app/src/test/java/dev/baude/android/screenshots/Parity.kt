@@ -64,8 +64,10 @@ abstract class Parity(private val theme: String, private val scene: String) {
     @Before fun up() {
         val sc = scenes().first { it.getString("name") == scene }
         files = sc.optString("files").ifBlank { null }
-        shown = transcript(sc.optString("transcript").ifBlank { sessions.getJSONArray("sessions").getJSONObject(0).getString("transcript") },
-            sc.optInt("lines", -1)).toByteArray()
+        val opened = sessions.getJSONArray("sessions").getJSONObject(sc.optInt("session", 0))
+        shown = (if (sc.has("transcript")) transcript(sc.getString("transcript"), sc.optInt("lines", -1))
+            else if (opened.isNull("transcript")) standIn(opened)
+            else transcript(opened.getString("transcript"), sc.optInt("lines", -1))).toByteArray()
         freshCompose()
         ShadowChoreographer.setPaused(true)
         ShadowChoreographer.setFrameDelay(Duration.ofMillis(16))
@@ -108,7 +110,7 @@ abstract class Parity(private val theme: String, private val scene: String) {
                 created = now - s.getDouble("ago") - 600,
                 state = (if (i == 0) sc.optString("state").ifBlank { null } else null) ?: s.getString("state"), model = s.getString("model"),
                 effort = s.getString("effort"), mode = s.getString("mode"),
-                size = if (s.isNull("transcript")) 0 else shown.size)
+                size = if (s.getString("id") == opened.getString("id")) shown.size else 0)
         }
     }
 
@@ -198,7 +200,7 @@ abstract class Parity(private val theme: String, private val scene: String) {
     /** The scene drawn: true, or false when the phone has no screen for it. */
     private fun draw(sc: JSONObject): Boolean {
         val name = sc.getString("name")
-        val first = sessions.getJSONArray("sessions").getJSONObject(0)
+        val first = sessions.getJSONArray("sessions").getJSONObject(sc.optInt("session", 0))
         when {
             name.startsWith("home") -> {
                 show { Home(open = { _, _ -> }, feedback = {}) }
@@ -219,6 +221,21 @@ abstract class Parity(private val theme: String, private val scene: String) {
             else -> return false
         }
         return true
+    }
+
+    /** What the desktop rig writes for a session with no transcript of its own: its prompt, a reply, its title. */
+    private fun standIn(s: JSONObject): String {
+        fun rec(type: String, vararg more: Pair<String, Any>) = JSONObject().put("type", type).also { o ->
+            more.forEach { (k, v) -> o.put(k, v) }
+        }
+        val cwd = "$home/${s.getString("folder")}"
+        val id = s.getString("id")
+        return listOf(
+            rec("user", "cwd" to cwd, "sessionId" to id, "message" to JSONObject().put("role", "user").put("content", s.getString("title"))),
+            rec("assistant", "cwd" to cwd, "sessionId" to id, "message" to JSONObject().put("role", "assistant")
+                .put("content", JSONArray().put(JSONObject().put("type", "text").put("text", "On it.")))),
+            rec("custom-title", "customTitle" to s.getString("title"), "sessionId" to id),
+        ).joinToString("\n") { it.toString() } + "\n"
     }
 
     /** The permission its call asks, as claude's control_request for it (the call is the transcript's, with no result). */

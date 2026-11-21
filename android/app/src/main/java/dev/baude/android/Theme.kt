@@ -26,6 +26,7 @@ data class BaudeColors(
     val accentFg: Color,   // (accent_fg_color)
     val accent: Color,     // (accent_color: accent as text)
     val destructive: Color,
+    val error: Color,      // (error_color: the context bar past 85%)
     val warning: Color,
     val success: Color,
     val dialog: Color,     // (dialog_bg_color)
@@ -41,7 +42,7 @@ private fun baudeColors(t: ThemeTokens) = with(t.libadwaita) {
     BaudeColors(
         frame = t.baude.frame, inside = t.baude.inside, window = windowBgColor, fg = windowFgColor, rule = t.baude.rule,
         raised = t.baude.raised, card = cardBgColor, accentBg = accentBgColor, accentFg = accentFgColor,
-        accent = accentColor, destructive = destructiveColor, warning = warningColor, success = successColor,
+        accent = accentColor, destructive = destructiveColor, error = errorColor, warning = warningColor, success = successColor,
         dialog = dialogBgColor, removed = t.diff.removed, added = t.diff.added,
     )
 }

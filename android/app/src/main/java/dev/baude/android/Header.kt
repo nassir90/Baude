@@ -29,11 +29,13 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.graphics.vector.ImageVector
 import org.json.JSONObject
 import java.util.concurrent.atomic.AtomicInteger
 
 /** A model a host offers: its value, its name, the efforts it takes (none: it has no effort setting). */
-data class ModelChoice(val value: String, val name: String, val efforts: List<String>, val resolved: String? = null)
+data class ModelChoice(val value: String, val name: String, val efforts: List<String>, val resolved: String? = null,
+                       val defaultEffort: String? = null)
 
 /** Thinking effort's levels as Baude says them (claude.EFFORT_LABELS). */
 val EFFORT_LABELS = mapOf("off" to Wording.ModeEffort.effortOff, "low" to Wording.ModeEffort.effortLow,
@@ -66,7 +68,8 @@ fun models(hostId: String): List<ModelChoice> {
         val v = m.optString("value")
         if (v.isBlank() || v == "default") continue
         val efforts = if (m.optBoolean("supportsEffort")) m.optJSONArray("supportedEffortLevels").strings() else emptyList()
-        out[v] = ModelChoice(v, m.optString("displayName").ifBlank { v }, efforts, m.optString("resolvedModel").ifBlank { null })
+        out[v] = ModelChoice(v, m.optString("displayName").ifBlank { v }, efforts, m.optString("resolvedModel").ifBlank { null },
+            m.str("defaultEffort"))
     }
     for (m in info.models.orEmpty()) {
         val v = m.optString("value")
@@ -242,7 +245,8 @@ fun controlAnswer(hostId: String, sid: String, request: JSONObject, then: (JSONO
  * where its model runs (another's only), its model, its effort, its permission mode. A model another program runs
  * starts a new chat with it, as Baude does (another kind of model can't carry the conversation on). */
 @Composable
-fun ChatControls(hostId: String, sid: String, said: (String) -> Unit, open: (String, String) -> Unit) {
+fun ChatControls(hostId: String, sid: String, said: (String) -> Unit, open: (String, String) -> Unit,
+                 modelSet: (String) -> Unit = {}) {
     val c = LocalBaude.current
     Mesh.tick.value
     val s = Mesh.session(hostId, sid) ?: return
@@ -262,7 +266,8 @@ fun ChatControls(hostId: String, sid: String, said: (String) -> Unit, open: (Str
         verticalAlignment = Alignment.CenterVertically) {
         val copies = copiesOf(hostId, model)
         if (copies.isNotEmpty()) { // (where the chat's model runs: each copy of it in the mesh, by host and provider)
-            val face = copies.firstOrNull { it.value == model }?.let { "${it.host} / ${it.provider}" } ?: Wording.MetaSettings.provider
+            val face = copies.firstOrNull { it.value == model }?.let { "${it.host} / ${it.provider}" }?.let(::middleCut)
+                ?: Wording.MetaSettings.provider
             Picker(face, if (copies.size > 1) Wording.ChatHeader.providerTip else Wording.ChatHeader.providerTipOnly,
                 copies.map { "${it.host} / ${it.provider}" to it.value }, model, enabled = copies.size > 1) { v ->
                 Moves.cancel(hostId, sid)
@@ -270,22 +275,25 @@ fun ChatControls(hostId: String, sid: String, said: (String) -> Unit, open: (Str
                 if (s.state.orEmpty() in setOf("working", "waiting")) { // (at a turn: moved once it's over)
                     asked["model"] = v
                     Moves.later(hostId, sid, v) { value ->
-                        Mesh.session(hostId, sid)?.let { pickModel(hostId, sid, it, value, models(hostId), HashMap(), said, open) }
+                        Mesh.session(hostId, sid)?.let { pickModel(hostId, sid, it, value, models(hostId), HashMap(), said, open, modelSet) }
                     }
-                } else pickModel(hostId, sid, s, v, choices, asked, said, open)
+                } else pickModel(hostId, sid, s, v, choices, asked, said, open, modelSet)
             }
         }
-        ModelPicker(now?.name ?: model ?: Wording.Common.model, choices, now?.value) { v ->
-            pickModel(hostId, sid, s, v, choices, asked, said, open)
+        ModelPicker((now?.name ?: model ?: Wording.Common.model).let { if (it.length > 30) it.take(29) + "…" else it },
+            choices, now?.value, logo = if (now != null && family(now) == "Claude") Adwaita.Claude else null) { v ->
+            pickModel(hostId, sid, s, v, choices, asked, said, open, modelSet)
         }
         val efforts = now?.efforts.orEmpty()
         val effort = asked["effort"] ?: listed("effort")
-        if (efforts.isEmpty()) Picker(Wording.MetaSettings.effort,
+        if (efforts.isEmpty()) { if (prog == "claude") Picker(Wording.MetaSettings.effort,
             Wording.MetaSettings.noEffort(model = now?.name ?: Wording.ChatHeader.thisModel), emptyList(), null,
             enabled = false) {}
-        else Picker(EFFORT_LABELS[effort] ?: Wording.MetaSettings.effort, Wording.ChatHeader.effortTip, efforts.map { (EFFORT_LABELS[it] ?: it) to it },
+        } else Picker(EFFORT_LABELS[effort?.takeIf { it in efforts } ?: now?.defaultEffort?.takeIf { it in efforts }]
+            ?: Wording.MetaSettings.effort, Wording.ChatHeader.effortTip, efforts.map { (EFFORT_LABELS[it] ?: it) to it },
             effort) { v ->
             asked["effort"] = v
+            said(Wording.ChatHeader.effortNote(label = EFFORT_LABELS[v] ?: v))
             control(hostId, sid, JSONObject().put("subtype", "apply_flag_settings")
                 .put("settings", JSONObject().put("effortLevel", v))) { e ->
                 if (e != null) { asked.remove("effort"); said("Couldn't change the effort: $e") }
@@ -303,7 +311,7 @@ fun ChatControls(hostId: String, sid: String, said: (String) -> Unit, open: (Str
                     if (e != null) {
                         asked.remove("mode")
                         said(Wording.ChatHeader.modeRefusedStill(mode = modes.firstOrNull { it.first == v }?.second ?: v, why = e, was = was))
-                    }
+                    } else said(Wording.ChatHeader.modeNote(mode = modes.firstOrNull { it.first == v }?.second ?: v))
                 }
             }
         }
@@ -313,7 +321,8 @@ fun ChatControls(hostId: String, sid: String, said: (String) -> Unit, open: (Str
 }
 
 private fun pickModel(hostId: String, sid: String, s: Msg.Session, v: String, choices: List<ModelChoice>,
-                      asked: MutableMap<String, String>, said: (String) -> Unit, open: (String, String) -> Unit) {
+                      asked: MutableMap<String, String>, said: (String) -> Unit, open: (String, String) -> Unit,
+                      modelSet: (String) -> Unit) {
     val was = s.model?.ifBlank { null } ?: defaultModel(hostId)
     if (program(v) != program(chosen(choices, was)?.value ?: was)) { // (another program: a new chat with it)
         val msg = Msg.Start(prompt = "", cwd = s.cwd.orEmpty().ifBlank { "~" }, model = v,
@@ -326,10 +335,14 @@ private fun pickModel(hostId: String, sid: String, s: Msg.Session, v: String, ch
         return
     }
     asked["model"] = v
+    said(Wording.ChatHeader.modelNote(name = chosen(choices, v)?.name ?: v))
     control(hostId, sid, JSONObject().put("subtype", "set_model").put("model", v)) { e ->
-        if (e != null) { asked.remove("model"); said("Couldn't change the model: $e") }
+        if (e != null) { asked.remove("model"); said("Couldn't change the model: $e") } else modelSet(v)
     }
 }
+
+/** A label cut in the middle with … past 24 characters (the provider picker's). */
+fun middleCut(s: String) = if (s.length > 24) s.take(11) + "…" + s.takeLast(12) else s
 
 /** A dropdown as the header bar's (a flat button, its choice and ▾): its choices (label, value), the one picked
  * checked, those dimmed greyed and not to be picked. */
@@ -355,13 +368,15 @@ fun Picker(face: String, tip: String, choices: List<Pair<String, String>>, picke
 /** The model picker (widgets.ModelPicker): its face the model's name; a search over them, under their families'
  * heads. */
 @Composable
-fun ModelPicker(face: String, choices: List<ModelChoice>, picked: String?, pick: (String) -> Unit) {
+fun ModelPicker(face: String, choices: List<ModelChoice>, picked: String?, logo: ImageVector? = null,
+                pick: (String) -> Unit) {
     val c = LocalBaude.current
     var open by remember { mutableStateOf(false) }
     var query by remember { mutableStateOf("") }
     Box {
         Row(Modifier.clip(RoundedCornerShape(6.dp)).clickable(enabled = choices.isNotEmpty()) { open = true; query = "" }
             .padding(start = 8.dp, end = 4.dp, top = 6.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+            if (logo != null) Icon(logo, null, tint = c.fg, modifier = Modifier.padding(end = 6.dp).size(16.dp))
             Text(face, style = Type.body, color = c.fg, maxLines = 1, overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.widthIn(max = 180.dp))
             Icon(Adwaita.PanDown, Wording.Common.model, tint = c.fg, modifier = Modifier.size(18.dp.icon))

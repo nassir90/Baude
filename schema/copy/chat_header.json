@@ -9,6 +9,10 @@
     "claude_said_no": "claude said no",
     "mode_refused": "couldn't switch to {$mode}: {$why}",
     "mode_refused_still": "couldn't switch to {$mode}: {$why} (still {$was})",
-    "menu": "Menu"
+    "menu": "Menu",
+    "model_note": "model → {$name}",
+    "model_note_new": "model → {$name}: a new conversation",
+    "effort_note": "thinking effort → {$label}",
+    "mode_note": "permission mode → {$mode}"
   }
 }

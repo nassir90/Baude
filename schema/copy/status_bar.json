@@ -1,0 +1,16 @@
+{
+  "description": "The thin bar under a chat's box: its host, folder and last turn, background tasks and what it has spent.",
+  "messages": {
+    "host_tip": "The host this chat lives on: its files, and its agent's tools",
+    "host_tip_at": "The host this chat lives on: its files, and its agent's tools ({$address})",
+    "last_turn": "{$turns} turns · {$seconds}s · in {$used} / out {$written} tok",
+    "tasks": "Background tasks",
+    "processes": ".input {$n :number} .match $n one {{{$n} background process}} * {{{$n} background processes}}",
+    "subagents": ".input {$n :number} .match $n one {{{$n} subagent}} * {{{$n} subagents}}",
+    "running": "⚙ {$tasks} running",
+    "open_panel": "Click to open the side panel",
+    "cost_tip": "What this chat has spent",
+    "cost": "${$cost}",
+    "cost_local": "$0.00 (local)"
+  }
+}

@@ -131,6 +131,8 @@
     "chat-h": {"$description": "The chat, in from the inside's sides.", "$value": {"value": 16, "unit": "px"}},
     "chat-v": {"$description": "And from its top and bottom.", "$value": {"value": 12, "unit": "px"}},
     "message": {"$description": "Between a chat's parts on the phone.", "$value": {"value": 8, "unit": "px"}},
+    "context-meter": {"$description": "The context bar, beside the word context: its width.", "$value": {"value": 110, "unit": "px"}},
+    "context-meter-h": {"$description": "And its height.", "$value": {"value": 16, "unit": "px"}},
     "bubble-v": {
       "$description": "A message of yours: its bubble's padding, top and bottom (.user-bubble; Record's reader's, .reader-user).",
       "$value": {"value": 8, "unit": "px"}
@@ -169,7 +171,8 @@
     "code": {
       "$description": "A code block (.codeblock), and a command to copy (.kube-error-fix).",
       "$value": {"value": 6, "unit": "px"}
-    }
+    },
+    "context-meter": {"$description": "The context bar (.context-meter).", "$value": {"value": 4, "unit": "px"}}
   },
   "font": {
     "$description": "Text: the phone's sizes (sp: libadwaita's 11pt body is about 15), and the CSS's, of the text round it (em).",
@@ -205,6 +208,10 @@
     "pulse": {
       "$description": "A working chat's dot: from bright to faint, or back.",
       "$value": {"value": 900, "unit": "ms"}
+    },
+    "working-dots": {
+      "$description": "A turn running: the working dots' step, and a banner's waiting dots.",
+      "$value": {"value": 350, "unit": "ms"}
     }
   },
   "pointer": {

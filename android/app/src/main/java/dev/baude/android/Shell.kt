@@ -78,7 +78,8 @@ fun ChatShell(hostId: String, sid: String, back: () -> Unit, open: (String, Stri
     val s = Mesh.session(at, sid)
     val bot = s?.bot
     val contact = s?.let { Contact(at, it) }
-    val name = if (bot != null) contact!!.name else s?.title?.ifBlank { null } ?: Wording.Common.untitled
+    val name = if (bot != null) contact!!.name else s?.title?.ifBlank { null }?.let { if (it.length > 48) it.take(47) + "…" else it }
+        ?: Wording.Sidebar.newSession
     val all = pages(bot != null, at)
     var shown by rememberSaveable(hostId, sid) { mutableStateOf(first) }
     val pager = rememberPagerState(initialPage = all.indexOfFirst { it.key == shown }.coerceAtLeast(0)) { all.size }
@@ -89,13 +90,22 @@ fun ChatShell(hostId: String, sid: String, back: () -> Unit, open: (String, Stri
     Meta.pageOpener = { t -> all.indexOfFirst { it.title.equals(t, true) }.takeIf { it >= 0 }?.let { scope.launch { pager.animateScrollToPage(it) } } }
     androidx.compose.runtime.DisposableEffect(chat) { // (its side questions' answers heard whichever page is shown)
         val l = sideQuestions(chat)
+        val status = chrome(chat)
         Mesh.listeners.add(l)
+        Mesh.listeners.add(status)
+        Stopping.listen()
+        refreshContext(chat)
         onDispose {
             Mesh.listeners.remove(l)
+            Mesh.listeners.remove(status)
             Meta.pages = { emptyList() } // (no chat open: no pages for Meta to show)
             Meta.pageOpener = {}
             FileLinks.showFiles = {}
         }
+    }
+    val openPage = { key: String ->
+        all.indexOfFirst { it.key == key }.takeIf { it >= 0 }?.let { scope.launch { pager.animateScrollToPage(it) } }
+        Unit
     }
     LaunchedEffect(chat.showAgent.value) { // (View on a call's card: the Subagents page)
         if (chat.showAgent.value == null) return@LaunchedEffect
@@ -109,15 +119,12 @@ fun ChatShell(hostId: String, sid: String, back: () -> Unit, open: (String, Stri
         if (i < 0) pager.scrollToPage(1) else if (i != pager.currentPage) pager.scrollToPage(i)
     }
     Column(Modifier.fillMaxSize().background(c.frame).imePadding()) {
-        Bar(name, subtitle = Mesh.label(at), start = { IconButton(Adwaita.GoPrevious, Wording.Browser.back, onClick = back) },
+        Bar(name, start = { IconButton(Adwaita.GoPrevious, Wording.Browser.back, onClick = back) },
             lead = if (bot != null) ({ Avatar(name, contact?.let { Mesh.pictures[it.pictureKey] }) }) else null,
             end = {
                 if (bot != null) PhoneBrowserButton(at, sid, name) // (Phone Use: a Bot's browser on this phone)
                 ChatMenu(at, sid, feedback, screen)
             })
-        val conn = Mesh.conn(at)
-        if (conn == null || conn.state != "up") GreyBanner(if (conn?.state == "connecting") Wording.Hosts.looking(host = Mesh.label(at))
-            else conn?.why?.let { Wording.Hosts.downBecause(host = Mesh.label(at), why = it) } ?: Wording.Hosts.down(host = Mesh.label(at)))
         androidx.compose.runtime.CompositionLocalProvider(LocalChatPlace provides place) {
         HorizontalPager(pager, Modifier.weight(1f).fillMaxWidth(), key = { all[it].key },
             userScrollEnabled = all.getOrNull(pager.currentPage)?.key != "browser") { i ->
@@ -125,8 +132,14 @@ fun ChatShell(hostId: String, sid: String, back: () -> Unit, open: (String, Stri
             when (all[i].key) {
                 "chat" -> Column(Modifier.fillMaxSize()) { // (its model, effort and mode: the chat's own, as Baude's
                     if (takes(at, "control"))              // header has them, not its side panel's pages)
-                        ChatControls(at, sid, said = { chat.said.value = it }, open = open)
-                    Box(Modifier.weight(1f)) { ChatPage(chat, name, hint = if (bot != null) "Message $name" else "") }
+                        ChatControls(at, sid, said = { chat.said.value = it }, open = open, modelSet = { v ->
+                            chat.chrome.outgrown.value = false // (another model's window: as its usage says)
+                            refreshContext(chat, v)
+                        })
+                    ChatBanner(chat, open)
+                    Box(Modifier.weight(1f)) {
+                        ChatPage(chat, name, stop = { interrupt(chat) }, foot = { StatusBar(chat, openPage) })
+                    }
                 }
                 "meta" -> MetaPage(at, here)
                 "memory" -> MemoryPage(at, sid, here)

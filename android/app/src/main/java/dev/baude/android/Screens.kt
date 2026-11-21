@@ -62,14 +62,17 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 
 // ------------------------------------------------------------------------------------------------------ a chat --
 
 /** A chat's page: what it and you have said, what it did, and a box to write in (files too: pictures and PDFs as
- * Baude sends them, text files in the message). name: what the box asks you to message. */
+ * Baude sends them, text files in the message). stop: the button that ends a turn while it runs and nothing's
+ * written; foot: what's under the box. */
 @Composable
-fun ChatPage(chat: Chat, name: String, hint: String = "Message $name", attach: Boolean = true) {
+fun ChatPage(chat: Chat, name: String, attach: Boolean = true, stop: (() -> Unit)? = null,
+             foot: (@Composable () -> Unit)? = null) {
     val c = LocalBaude.current
     val ctx = LocalContext.current
     val sid = chat.sid
@@ -160,13 +163,12 @@ fun ChatPage(chat: Chat, name: String, hint: String = "Message $name", attach: B
             val held = session?.held.orEmpty().filter { it.id.orEmpty() !in chat.holding }
             items(held, key = { "held:" + it.id.orEmpty() }) { h -> Held(chat, h, working) }
             items(Pending.of(sid), key = { "unsent:" + it.id }) { Waiting(it, Mesh.conn(Mesh.reach(it))?.state == "up") }
-            if (working && chat.asks.isEmpty()) item {
-                Text("Working…", style = Type.caption, color = c.dim)
-            }
         }
         }
         chat.said.value?.let { Text(it, style = Type.caption, color = c.dim, modifier = Modifier.padding(horizontal = Gap.chatH)) }
-        // the composer: rounded 12, a ring of the rule, its files over what's written, + and send beside it
+        if (chat.sender == null && exhausted(chat)) Text(Wording.ContextUsage.exhausted, style = Type.caption, color = c.dim,
+            modifier = Modifier.padding(horizontal = Gap.chatH))
+        // the composer: rounded 12, a ring of the rule, its files over what's written, + and send/stop beside it
         if (!readOnly) Column(
             Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 8.dp)
                 .clip(RoundedCornerShape(Gap.composerRadius)).background(c.inside)
@@ -183,12 +185,24 @@ fun ChatPage(chat: Chat, name: String, hint: String = "Message $name", attach: B
                     IconButton(Adwaita.WindowClose, Wording.Common.remove) { files.remove(f) }
                 }
             }
-            Row(verticalAlignment = Alignment.Bottom) {
-                if (attach) IconButton(Adwaita.ListAdd, "Attach images, PDFs or files") { pick.launch(arrayOf("*/*")) }
-                Box(Modifier.weight(1f).padding(horizontal = 6.dp, vertical = 7.dp)) {
-                    if (text.isEmpty()) Text(hint, style = Type.body, color = c.dim)
+            val line = with(LocalDensity.current) { Tokens.Font.bodyLine.toDp() }
+            val send = {
+                val r = reverting
+                if (r != null) commitRevert(chat, r, text, files.toList()) { ok -> if (ok) text = "" }
+                else {
+                    chat.send(text, files.toList())
+                    text = ""
+                    files.clear()
+                }
+            }
+            val busy = isWorking(chat)
+            val conn = Mesh.conn(chat.hostId)
+            val gone = chat.sender == null && (conn?.state != "up" || Stopping.line(chat.hostId) != null)
+            Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                Box(Modifier.weight(1f).heightIn(min = line * 2 + 14.dp, max = line * 9 + 14.dp)
+                    .padding(horizontal = 6.dp, vertical = 7.dp)) {
                     BasicTextField(field, { field = it; text = it.text }, textStyle = Type.body.copy(color = c.fg),
-                        cursorBrush = SolidColor(c.accentBg), modifier = Modifier.fillMaxWidth().heightIn(max = 160.dp)
+                        cursorBrush = SolidColor(c.accentBg), modifier = Modifier.fillMaxWidth()
                             .focusRequester(focus).onKeyEvent {
                                 if (it.key == androidx.compose.ui.input.key.Key.Escape && reverting != null) {
                                     if (it.type == androidx.compose.ui.input.key.KeyEventType.KeyUp) cancelRevert()
@@ -196,21 +210,19 @@ fun ChatPage(chat: Chat, name: String, hint: String = "Message $name", attach: B
                                 } else false
                             })
                 }
-                val ready = (text.isNotBlank() || files.isNotEmpty()) && !chat.busy.value && chat.preparing.value == 0 &&
-                    reverting?.asked != true
-                IconButton(Adwaita.Return, Wording.Common.send, enabled = ready, tint = if (ready) c.accentFg else c.fg,
-                    background = if (ready) c.accentBg else null) {
-                    val r = reverting
-                    if (r != null) commitRevert(chat, r, text, files.toList()) { ok ->
-                        if (ok) text = ""
-                    } else {
-                        chat.send(text, files.toList())
-                        text = ""
-                        files.clear()
-                    }
+                if (attach) IconButton(Adwaita.ListAdd, Wording.Attachments.attachTip) { pick.launch(arrayOf("*/*")) }
+                if (busy && stop != null && text.isBlank() && files.isEmpty())
+                    IconButton(Adwaita.MediaPlaybackStop, Wording.Composer.stop, tint = c.destructive,
+                        background = c.destructive.copy(alpha = 0.2f), onClick = stop)
+                else {
+                    val ready = !chat.busy.value && chat.preparing.value == 0 && !gone && !chat.chrome.missing.value &&
+                        !(chat.sender == null && exhausted(chat)) && reverting?.asked != true
+                    IconButton(Adwaita.Return, Wording.Common.send, enabled = ready, tint = c.fg,
+                        background = c.fg.copy(alpha = 0.10f)) { if (text.isNotBlank() || files.isNotEmpty()) send() }
                 }
             }
         }
+        foot?.invoke()
     }
 }
 

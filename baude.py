@@ -9130,7 +9130,7 @@ class SessionSidebar(Gtk.Box):
         named = bot.get("name") or " ".join((info.get("title") or "").split())[:80]  # (a new one: the chat's title)
         entry = Gtk.Entry(text=named, placeholder_text=wording.say("common.name"), activates_default=True)
         pick = {"data": None}  # (bytes: a picture chosen; "": its picture removed; None: as it is)
-        avatar = Adw.Avatar(size=64, text=named or "Bot", show_initials=True, halign=Gtk.Align.CENTER)
+        avatar = Adw.Avatar(size=64, text=named or wording.say("sidebar.bot"), show_initials=True, halign=Gtk.Align.CENTER)
         choose = Gtk.Button(label=wording.say("bot_settings.choose_picture"))
         remove = Gtk.Button(label=wording.say("bot_settings.remove_picture"), visible=False)
 
@@ -9183,7 +9183,7 @@ class SessionSidebar(Gtk.Box):
 
         def typed(e):
             name = " ".join(e.get_text().split())
-            avatar.set_text(name or "Bot")
+            avatar.set_text(name or wording.say("sidebar.bot"))
             dlg.set_response_enabled("save", bool(name))
         entry.connect("changed", typed)
         typed(entry)
@@ -10835,7 +10835,7 @@ class ProcessRow(Gtk.ListBoxRow):
         self.toggle.add_css_class("flat")
         self.toggle.connect("clicked", lambda *_: self.set_expanded(not self.expanded()))
         self.full = Gtk.Button(icon_name="window-maximize-symbolic", valign=Gtk.Align.CENTER,
-                               tooltip_text="Open this process in the whole panel")
+                               tooltip_text=wording.say("side_panel.open_process"))
         self.full.add_css_class("flat")
         self.full.add_css_class("side-question-full")  # (the size of a side question's)
         self.full.connect("clicked", lambda *_: panel.open_process(self))
@@ -10853,7 +10853,7 @@ class ProcessRow(Gtk.ListBoxRow):
                             margin_top=12, margin_bottom=12)
         self.body.add_css_class("zoomable")
         self.command = None
-        self.output = CodeBlock("(no output yet)", "output")
+        self.output = CodeBlock(wording.say("side_panel.no_output_yet"), "output")
         self.body.append(self.output)
         self.scroll = natural_height(Gtk.ScrolledWindow(child=self.body, hscrollbar_policy=Gtk.PolicyType.NEVER))
         self.inside.append(self.scroll)
@@ -10889,7 +10889,7 @@ class ProcessRow(Gtk.ListBoxRow):
     def set_expanded(self, on):
         self.reveal.set_reveal_child(on)
         self.toggle.set_icon_name("list-remove-symbolic" if on else "pan-down-symbolic")
-        self.toggle.set_tooltip_text("Hide this process's output" if on else "Show this process's output")
+        self.toggle.set_tooltip_text(wording.say("side_panel.hide_output" if on else "side_panel.show_output"))
 
     def put_inside_row(self):
         """Its command and output back under its line (from the whole page), as tall as they are."""
@@ -11054,7 +11054,7 @@ class SidePanel(Gtk.Box):
                                     valign=Gtk.Align.CENTER)
         self.proc_stop.add_css_class("flat")
         self.proc_stop.connect("clicked", lambda *_: self.proc_shown and self.win.stop_task(self.proc_shown.task_id))
-        self.proc_back = Gtk.Button(icon_name="go-previous-symbolic", tooltip_text="All processes",
+        self.proc_back = Gtk.Button(icon_name="go-previous-symbolic", tooltip_text=wording.say("side_panel.all_processes"),
                                     valign=Gtk.Align.CENTER)
         self.proc_back.add_css_class("flat")
         self.proc_back.add_css_class("side-question-full")  # (the size of the button it's in place of)
@@ -16667,7 +16667,7 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
 
     def stop_task(self, task_id):
         self.request({"subtype": "stop_task", "task_id": task_id}, lambda _r: None)
-        self.note(f"stop requested for {self.tasks.get(task_id, {}).get('description') or task_id}")
+        self.note(wording.say("side_panel.stop_requested", task=self.tasks.get(task_id, {}).get("description") or task_id))
 
     def place_split(self):
         """Give the panel the width it was dragged to when it opens, else about a third of the window."""

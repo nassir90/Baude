@@ -23,7 +23,13 @@ import dev.baude.android.KubeScreen
 import dev.baude.android.Home
 import dev.baude.android.Host
 import dev.baude.android.Key
+import dev.baude.android.BotSettings
 import dev.baude.android.FeedbackScreen
+import dev.baude.android.FileLinks
+import dev.baude.android.FilesPrefs
+import dev.baude.android.Fixes
+import dev.baude.android.FixesScreen
+import dev.baude.android.Item
 import dev.baude.android.Mesh
 import dev.baude.android.Queued
 import dev.baude.android.Meta
@@ -31,7 +37,9 @@ import dev.baude.android.Msg
 import dev.baude.android.Settings
 import dev.baude.android.SettingsScreen
 import dev.baude.android.Update
+import dev.baude.android.Wanted
 import dev.baude.android.Wording
+import dev.baude.android.processesState
 import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.After
@@ -70,6 +78,8 @@ abstract class Parity(private val theme: String, private val scene: String) {
     @Before fun up() {
         val sc = scenes().first { it.getString("name") == scene }
         files = sc.optString("files").ifBlank { null }
+        subagents = sc.optString("subagents").ifBlank { null }
+        FilesPrefs.gallery.value = false
         val opened = sessions.getJSONArray("sessions").getJSONObject(sc.optInt("session", 0))
         shown = (if (sc.has("transcript")) transcript(sc.getString("transcript"), sc.optInt("lines", -1))
             else if (opened.isNull("transcript")) standIn(opened)
@@ -127,6 +137,9 @@ abstract class Parity(private val theme: String, private val scene: String) {
     /** The scene's `files`: a folder of fixtures whose contents join the chat's folder (as the desktop rig copies them in). */
     private var files: String? = null
 
+    /** The scene's `subagents`: a folder of fixtures with the first session's subagents' transcripts. */
+    private var subagents: String? = null
+
     /** What the fixture host answers, as the desktop's host (baudelib/server.py, hostfiles.py) would: the open chat's
      * transcript, and the folder's files (fixtures/garden, not a git repository, with no Signal glossary). */
     private fun answer(msg: JSONObject): JSONObject? {
@@ -170,8 +183,37 @@ abstract class Parity(private val theme: String, private val scene: String) {
                 return reply("op" to "file", "path" to path, "size" to f.length(), "truncated" to false,
                     "data" to java.util.Base64.getEncoder().encodeToString(f.readBytes()))
             }
+            "subagents" -> {
+                val have = msg.optJSONObject("have")
+                val arr = JSONArray()
+                for (f in File(root, "fixtures/${subagents ?: return reply("session" to msg.optString("session"),
+                    "files" to arr, "more" to false)}").listFiles().orEmpty().sortedBy { it.name }) {
+                    val bytes = f.readText().replace("@CWD@", "$home/garden").toByteArray()
+                    if (have?.optJSONArray(f.name)?.optLong(0) == bytes.size.toLong()) continue
+                    arr.put(JSONObject().put("name", f.name).put("size", bytes.size).put("mtime", 0).put("offset", 0)
+                        .put("next", bytes.size).put("data", java.util.Base64.getEncoder().encodeToString(bytes)))
+                }
+                return reply("session" to msg.optString("session"), "files" to arr, "more" to false)
+            }
+            "task_output" -> {
+                val path = msg.optString("path")
+                val f = File(root, "fixtures/tasks/" + path.substringAfterLast('/')).takeIf { path.startsWith("/tmp/parity/tasks/") && it.isFile }
+                    ?: return reply("op" to "file", "path" to path, "error" to "No such file or directory")
+                val limit = msg.optInt("limit", 4000)
+                val all = f.readBytes()
+                return reply("op" to "file", "path" to path, "size" to all.size, "truncated" to (all.size > limit),
+                    "data" to java.util.Base64.getEncoder().encodeToString(all.takeLast(limit).toByteArray()))
+            }
             "git" -> return reply("what" to msg.optString("what"), "error" to Wording.HostErrors.notARepo)
             "signal_names" -> return reply("glossary" to "$home/garden/.baude", "refs" to JSONArray())
+            // (what Baude answers with its own functions: tests/parity/host.py, a throwaway process for each request)
+            "fixes" -> {
+                val p = ProcessBuilder("python3", "-I", File(root, "host.py").path).start()
+                p.outputStream.use { it.write(msg.toString().toByteArray()) }
+                val out = p.inputStream.readBytes().toString(Charsets.UTF_8)
+                p.waitFor()
+                return JSONObject(out)
+            }
         }
         return null
     }
@@ -187,6 +229,13 @@ abstract class Parity(private val theme: String, private val scene: String) {
     }
 
     @After fun down() {
+        Fixes.items = emptyList()
+        Fixes.repo = null
+        Fixes.error = null
+        Fixes.readAt = 0
+        Fixes.lastRead = 0
+        Fixes.firstRead = true
+        Fixes.loading = false
         Meta.load(JSONObject())
         Meta.host.value = null
         FixtureConnection.down()
@@ -241,8 +290,38 @@ abstract class Parity(private val theme: String, private val scene: String) {
                     Mesh.tick.value++
                 }
                 if (sc.has("draft")) Mesh.openChat(host.getString("id"), first.getString("id")).draft.value = sc.getString("draft")
+                if (sc.has("reveal")) FileLinks.wanted.value = Wanted(host.getString("id"), "$home/garden/${sc.getString("reveal")}", null, true)
+                // (the page asks its host for the folder's entries as a link to it is followed: the same here, for the chat's own)
+                if (sc.has("gallery") || sc.has("hold")) FileLinks.wanted.value = Wanted(host.getString("id"), "$home/garden", null, true)
                 show { ChatShell(host.getString("id"), first.getString("id"), back = {}, open = { _, _ -> }, feedback = {},
                     first = sc.optString("page").ifBlank { "chat" }) }
+                if (sc.has("process") || sc.has("view") || sc.has("gallery") || sc.has("hold")) flush()
+                if (sc.has("running")) {
+                    val tasks = sc.getJSONArray("running")
+                    for (i in 0 until tasks.length()) {
+                        val t = tasks.getJSONObject(i)
+                        val said = JSONObject().put("op", "claude").put("session", first.getString("id"))
+                            .put("msg", JSONObject(t.toString()).put("type", "system").put("subtype", "task_started"))
+                        for (l in Mesh.listeners.toList()) l(host.getString("id"), said)
+                    }
+                    androidx.compose.runtime.snapshots.Snapshot.sendApplyNotifications()
+                    settle()
+                }
+                if (sc.has("process")) {
+                    val st = processesState(Mesh.open!!)
+                    if (sc.optBoolean("full")) st.shown.value = sc.getString("process") else st.open[sc.getString("process")] = true
+                    flush()
+                }
+                if (sc.has("view")) {
+                    Mesh.open!!.showAgent.value = sc.getString("view")
+                    flush()
+                }
+                if (sc.has("gallery")) {
+                    tap(sc.getString("gallery"))
+                    tap(Wording.CodeView.showGallery)
+                    repeat(3) { flush(true) } // (the pictures are read and drawn)
+                }
+                if (sc.has("hold")) hold(sc.getString("hold"))
                 if (name == "menu") tap(Wording.ChatHeader.menu)
                 if (sc.optBoolean("open") && !sc.has("meta")) toEnd()
                 if (sc.has("ask")) ask(sc.getString("ask"))
@@ -253,6 +332,11 @@ abstract class Parity(private val theme: String, private val scene: String) {
                     hold(sc.getString("queued"))
                 }
             }
+            name == "bot-settings" -> show {
+                BotSettings(Item(host.getString("id"), Mesh.sessions.getValue(host.getString("id")).first(), 0)) {}
+            }
+            name == "feedback-ongoing" -> show { FixesScreen({}, {}, show = "12") }
+            name == "feedback-ongoing-list" -> show { FixesScreen({}, {}) }
             name == "feedback" -> show { FeedbackScreen(listOf("Chat: Fix the flaky upload"), back = {}) }
             name == "settings" -> show { SettingsScreen({}, {}) }
             name == "changelog" -> show { ChangelogScreen(null, {}) }
@@ -392,6 +476,7 @@ abstract class Parity(private val theme: String, private val scene: String) {
 
     /** A click on what's labelled label (its text or its description), as a finger's would. */
     private fun tap(label: String) {
+        repeat(5) { if (find(label) == null) flush(true) }
         val node = roots().flatMap { all(it.semanticsOwner.rootSemanticsNode) }.firstOrNull { n ->
             n.config.contains(SemanticsActions.OnClick) && (label in said(n) || label == described(n))
         } ?: error("nothing labelled $label")
@@ -406,11 +491,30 @@ abstract class Parity(private val theme: String, private val scene: String) {
         fun found() = roots().flatMap { all(it.semanticsOwner.rootSemanticsNode) }.firstOrNull { n ->
             n.config.contains(SemanticsActions.OnLongClick) && (label in said(n) || label == described(n))
         }
-        repeat(20) { if (found() == null) settle() }
-        val node = found() ?: error("nothing to hold labelled $label")
+        repeat(5) { if (found() == null) flush(true) }
+        val node = found() ?: error("nothing to hold labelled $label; have " + roots().flatMap { all(it.semanticsOwner.rootSemanticsNode) }.map { said(it) + "|" + it.config.contains(SemanticsActions.OnLongClick) }.filter { it.length > 1 }.take(30))
         node.config[SemanticsActions.OnLongClick].action?.invoke()
         androidx.compose.runtime.snapshots.Snapshot.sendApplyNotifications()
         settle()
+    }
+
+    private fun find(label: String) = roots().flatMap { all(it.semanticsOwner.rootSemanticsNode) }.firstOrNull { n ->
+        n.config.contains(SemanticsActions.OnClick) && (label in said(n) || label == described(n))
+    }
+
+    /** What the host answered is told to the composition, and drawn. */
+    private fun flush(frame: Boolean = false) {
+        if (frame) { // (a picture taken draws a frame, which is what lays out a list's rows)
+            val scratch = File(out, "scratch.png")
+            out.mkdirs()
+            captureScreenRoboImage(scratch.path)
+            scratch.delete()
+        }
+        repeat(3) {
+            Thread.sleep(100) // (the fixture host answers on a thread of its own)
+            androidx.compose.runtime.snapshots.Snapshot.sendApplyNotifications()
+            settle()
+        }
     }
 
     private fun all(n: SemanticsNode): List<SemanticsNode> = listOf(n) + n.children.flatMap { all(it) }

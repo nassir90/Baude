@@ -8728,13 +8728,14 @@ listview.file-tree > row { min-height: 24px; padding-top: 1px; padding-bottom: 1
 .feedback-thumb { padding: 0; border-radius: 8px; border: 1px solid @baude_rule; }
 .feedback-tag { font-size: 0.8em; padding: 1px 6px; border-radius: 6px; }
 /* (as .git-ref, Git's bubbles, a shade or two of its colours; its weight, not a head's bold) */
-.fix-status { font-size: 0.78em; padding: 0 5px; border-radius: 4px; background: alpha(@window_fg_color, 0.08);
+.fix-status { font-size: {fixes.status-size}em; padding: 0 {fixes.status-pad}; border-radius: {radius.status};
+              background: alpha(@window_fg_color, 0.08);
               color: alpha(@window_fg_color, 0.7); }
 .fix-status.working { background: alpha(@accent_bg_color, 0.14); color: @accent_color; }
 .fix-status.ready { background: alpha(#c88800, 0.16); color: #c88800; }
 .fix-status.merged, .fix-status.resolved { background: alpha(@success_color, 0.14); color: @success_color; }
 .fix-status.rejected { background: alpha(@error_color, 0.14); color: @error_color; }
-.fix-round { border: 1px solid @baude_rule; border-radius: 8px; padding: 10px 12px; }
+.fix-round { border: 1px solid @baude_rule; border-radius: 8px; padding: {fixes.round-pad-v} {fixes.round-pad-h}; }
 .fix-round.failed { border-color: @error_color; }
 .fix-shot { border: 1px solid @baude_rule; }
 .capture-bar { padding: 4px 6px; }

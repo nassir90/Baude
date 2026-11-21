@@ -20,8 +20,8 @@ input-keyboard changes-prevent changes-allow web-browser edit-clear phone networ
 view-more object-select document-edit edit-undo edit-redo media-playback-start media-playback-stop user-trash alarm
 system-users utilities-terminal dialog-question folder media-playlist-shuffle insert-link process-stop dialog-error
 dialog-warning content-loading x-office-spreadsheet x-office-calendar x-office-document x-office-presentation
-image-x-generic audio-x-generic applications-games mail-unread edit-copy text-x-generic folder-open go-bottom
-zoom-in zoom-out zoom-fit-best format-justify-fill""".split()
+image-x-generic audio-x-generic applications-games mail-unread edit-copy text-x-generic folder-open mail-send
+view-grid view-list window-maximize go-bottom zoom-in zoom-out zoom-fit-best format-justify-fill""".split()
 BAUDE = ["baude-return", "baude-claude", "baude-meta", "baude-map", "baude-logs", "baude-kube-nodes",
          "baude-kube-workloads", "baude-kube-helm", "baude-kube-config", "baude-kube-network", "baude-kube-storage",
          "baude-kube-namespaces", "baude-kube-events", "baude-kube-users", "baude-kube-crds", "baude-kube-scaling",

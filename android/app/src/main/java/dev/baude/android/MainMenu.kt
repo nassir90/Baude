@@ -51,8 +51,8 @@ private fun fullWidth(): MenuItem {
 }
 
 /** A chat's ☰ (baude.BaudeWindow's menu): Settings…, Changelog, Mesh, Full-width text, Read-only session, Database
- * Schemas…, Kubernetes… (a host that takes them), Send Feedback…, Copy Transcript for an Issue. screen opens one of
- * "settings", "changelog", "mesh", "databases" and "kubernetes" over the chat. */
+ * Schemas…, Kubernetes… (a host that takes them), Send Feedback…, Ongoing Feedback, Copy Transcript for an Issue.
+ * screen opens one of "settings", "changelog", "mesh", "fixes", "databases" and "kubernetes" over the chat. */
 @Composable
 fun ChatMenu(hostId: String, sid: String, feedback: () -> Unit, screen: (String) -> Unit) {
     val ctx = LocalContext.current
@@ -68,18 +68,20 @@ fun ChatMenu(hostId: String, sid: String, feedback: () -> Unit, screen: (String)
         if (takes(hostId, "databases")) MenuItem(Wording.Window.databaseSchemas) { screen("databases") } else null,
         if (takes(hostId, "kube")) MenuItem(Wording.Window.kubernetesMenu) { screen("kubernetes") } else null,
         MenuItem(Wording.Fixes.sendFeedback) { feedback() },
+        MenuItem(Wording.Window.ongoingFeedback) { screen("fixes") },
         MenuItem(Wording.Window.copyTranscript) { copyReport(ctx, hostId, sid) },
     ))
 }
 
 /** The home screen's ☰: the items that don't need a chat open. */
 @Composable
-fun HomeMenu(settings: () -> Unit, changelog: () -> Unit, mesh: () -> Unit, feedback: () -> Unit) {
+fun HomeMenu(settings: () -> Unit, changelog: () -> Unit, mesh: () -> Unit, feedback: () -> Unit, fixes: () -> Unit) {
     MainMenu(listOf(
         MenuItem(Wording.Window.settings) { settings() },
         MenuItem(Wording.Changelog.title) { changelog() },
         MenuItem(Wording.MeshVersions.title) { mesh() },
         fullWidth(),
         MenuItem(Wording.Fixes.sendFeedback) { feedback() },
+        MenuItem(Wording.Window.ongoingFeedback) { fixes() },
     ))
 }

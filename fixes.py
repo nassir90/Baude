@@ -31,8 +31,6 @@ HERE = os.path.dirname(os.path.realpath(__file__))
 ROOT = os.environ.get("BAUDE_FIX_ROOT") or HERE  # (the checkout fixes are made from; a test's clone)
 OPEN, WORKING, READY, MERGED, REJECTED, CLOSED = "open", "working", "ready", "merged", "rejected", "closed"
 SAVED, FILED, RESOLVED = "saved", "filed", "resolved"  # (a note on this machine, with no issue read for it: fixview)
-LABELS = {OPEN: "Open", WORKING: "In Progress", READY: "Ready for review", MERGED: "Merged", REJECTED: "Rejected",
-          CLOSED: "Closed", SAVED: "Waiting to upload", FILED: "Filed", RESOLVED: "Resolved"}
 ONGOING = (READY, WORKING, OPEN, FILED, SAVED)  # (the order they're listed in: what's waiting for you first)
 SHOTS_BRANCH = "fix-shots"
 SHOTS_FILE = "fix-shots.json"  # (what the fix's claude says to show, in its worktree; never committed)

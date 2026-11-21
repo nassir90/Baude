@@ -172,7 +172,8 @@
       "$description": "A code block (.codeblock), and a command to copy (.kube-error-fix).",
       "$value": {"value": 6, "unit": "px"}
     },
-    "context-meter": {"$description": "The context bar (.context-meter).", "$value": {"value": 4, "unit": "px"}}
+    "context-meter": {"$description": "The context bar (.context-meter).", "$value": {"value": 4, "unit": "px"}},
+    "status": {"$description": "A feedback's status pill (.fix-status).", "$value": {"value": 4, "unit": "px"}}
   },
   "font": {
     "$description": "Text: the phone's sizes (sp: libadwaita's 11pt body is about 15), and the CSS's, of the text round it (em).",
@@ -198,6 +199,44 @@
     },
     "semibold": {"$description": "A Bot's name (.bot-name).", "$type": "fontWeight", "$value": 600},
     "bold": {"$description": "A folder's name, a title.", "$type": "fontWeight", "$value": "bold"}
+  },
+  "fixes": {
+    "$description": "Ongoing Feedback (fixview).",
+    "status-size": {
+      "$description": "A status pill's text (.fix-status), in em.",
+      "$type": "number",
+      "$value": 0.78
+    },
+    "status-pad": {
+      "$description": "A status pill's padding, left and right.",
+      "$type": "dimension",
+      "$value": {"value": 5, "unit": "px"}
+    },
+    "round-pad-v": {
+      "$description": "A round of the fix: its padding, top and bottom (.fix-round).",
+      "$type": "dimension",
+      "$value": {"value": 10, "unit": "px"}
+    },
+    "round-pad-h": {
+      "$description": "And left and right.",
+      "$type": "dimension",
+      "$value": {"value": 12, "unit": "px"}
+    },
+    "image-slot": {
+      "$description": "The room an image has while it is read, and the least height of one drawn.",
+      "$type": "dimension",
+      "$value": {"value": 120, "unit": "px"}
+    },
+    "detail-max": {
+      "$description": "The widest an issue's page is drawn.",
+      "$type": "dimension",
+      "$value": {"value": 980, "unit": "px"}
+    },
+    "list-width": {
+      "$description": "The list of issues, beside the page.",
+      "$type": "dimension",
+      "$value": {"value": 300, "unit": "px"}
+    }
   },
   "motion": {
     "$type": "duration",

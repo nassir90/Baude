@@ -274,7 +274,7 @@ fun ArtifactsPage(chat: Chat) {
         BoxedList(chat.artifacts.toList(), Wording.SidePanel.noArtifacts) { a ->
             ActionRow(a.title, a.url.removePrefix("https://").let { link ->
                 a.version?.let { Wording.Artifacts.linkVersion(link = link, version = it) } ?: link }, onClick = { open(a.url) },
-                prefix = { Icon(artifactIcon(a.icon), null, tint = c.accent, modifier = Modifier.size(18.dp.icon)) },
+                prefix = { Icon(artifactIcon(a.icon), null, tint = c.accent, modifier = Modifier.size(16.dp.icon)) },
                 suffix = {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Button(Wording.Common.open) { open(a.url) }

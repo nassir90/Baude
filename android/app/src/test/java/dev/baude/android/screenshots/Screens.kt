@@ -129,20 +129,19 @@ abstract class Screens(private val theme: String) {
     }
 
     // (a chat open on workshop, which is up: each of its pages, as its bottom bar switches to them)
-    @Test fun chat() = chatAt("13-chat", "chat")
-    @Test fun chatMeta() = chatAt("14-chat-meta", "meta")
-    @Test fun chatSubagents() = chatAt("15-chat-subagents", "agents")
-    @Test fun chatProcesses() = chatAt("16-chat-processes", "processes")
-    @Test fun chatSideQuestions() = chatAt("17-chat-side-questions", "btw")
-    @Test fun chatArtifacts() = chatAt("18-chat-artifacts", "artifacts")
-    @Test fun chatFiles() = chatAt("19-chat-files", "files")
-    @Test fun chatGit() = chatAt("20-chat-git", "git")
-    @Test fun chatSignal() = chatAt("21-chat-signal", "signal")
+    @Test fun chat() = chatAt("10-chat", "chat")
+    @Test fun chatMeta() = chatAt("11-chat-meta", "meta")
+    @Test fun chatSubagents() = chatAt("12-chat-subagents", "agents")
+    @Test fun chatProcesses() = chatAt("13-chat-processes", "processes")
+    @Test fun chatSideQuestions() = chatAt("14-chat-side-questions", "btw")
+    @Test fun chatArtifacts() = chatAt("15-chat-artifacts", "artifacts")
+    @Test fun chatFiles() = chatAt("16-chat-files", "files")
+    @Test fun chatGit() = chatAt("17-chat-git", "git")
+    @Test fun chatSignal() = chatAt("18-chat-signal", "signal")
 
     /** The fixture chat ("Tidy the release notes") open at page, its host up: what was said in it, its subagents,
      * side questions and artifacts. */
     private fun chatAt(name: String, page: String) {
-        FixtureConnection.up(activity, Mesh.hosts.first())
         val chat = Mesh.openChat("h1", "a")
         fill(chat)
         render(name) { ChatShell("h1", "a", back = {}, open = { _, _ -> }, feedback = {}, first = page) }
@@ -220,10 +219,11 @@ abstract class Screens(private val theme: String) {
         Mesh.key.value = Key(pair.private, pair.public as ECPublicKey)
         val workshop = Host(id = "h1", name = "workshop", user = "dev", address = "workshop.example")
         Mesh.hosts.add(workshop)
+        FixtureConnection.up(activity, workshop) // (up, never reached)
         val now = System.currentTimeMillis() / 1000.0
         fun s(id: String, title: String, cwd: String, ago: Double, state: String = "idle") =
             Msg.Session(id = id, title = title, cwd = cwd, updated = now - ago, said = now - ago, created = now - ago - 600,
-                state = state)
+                state = state, model = "opus", effort = "high", mode = "default")
         Mesh.sessions["h1"] = listOf(
             s("a", "Tidy the release notes", "/home/dev/garden", 60.0, "working"),
             s("b", "Why the build is slow", "/home/dev/garden", 3_600.0),

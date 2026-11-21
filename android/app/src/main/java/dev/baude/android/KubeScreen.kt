@@ -622,14 +622,14 @@ private fun Body(st: KubeState) {
         val full = maxHeight
         var logsHeight by remember(st.logs?.pod) { mutableStateOf(maxOf(full / 2, k.logsMin)) }
         Column(Modifier.fillMaxSize()) {
-            Column(Modifier.weight(1f)) {
+            Column(Modifier.weight(1f).fillMaxWidth()) {
                 val y = st.yaml
                 if (y != null) YamlLevel(st, y)
                 else {
                     val shown = remember(st.rows, st.nsShown, st.filter, st.sortCol, st.sortDesc, st.tablePage, st.columns) {
                         kubeRows(st)
                     }
-                    Box(Modifier.weight(1f).alpha(if (st.fade) 0.4f else 1f)) {
+                    Box(Modifier.weight(1f).fillMaxWidth().alpha(if (st.fade) 0.4f else 1f)) {
                         if (st.fault != null) ErrorState(st, st.fault!!) else if (st.tablePage != null) KubeTable(st, shown)
                     }
                     val status = st.status(shown.size)

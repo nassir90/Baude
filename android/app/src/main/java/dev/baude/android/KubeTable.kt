@@ -8,10 +8,11 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -35,6 +36,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
@@ -103,8 +105,14 @@ fun kubeRows(st: KubeState): List<Msg.KubeRow> {
         (!spaced || r.namespace.orEmpty() in st.nsShown) && (q.isEmpty() || r.cells.orEmpty().any { q in it.lowercase() })
     }
     val i = st.sortCol
-    val sorted = kept.sortedWith { a, b -> kubeOrder(a.keys?.opt(i), b.keys?.opt(i)) }
-    return if (st.sortDesc) sorted.reversed() else sorted
+    val sign = if (st.sortDesc) -1 else 1
+    return kept.sortedWith { a, b -> // (nothing stays last, whichever way it's sorted)
+        val x = a.keys?.opt(i)
+        val y = b.keys?.opt(i)
+        val nx = x == null || x == JSONObject.NULL || x == ""
+        val ny = y == null || y == JSONObject.NULL || y == ""
+        if (nx || ny) (if (nx) 1 else 0) - (if (ny) 1 else 0) else sign * kubeOrder(x, y)
+    }
 }
 
 /** A cell's text with what's filtered for found in it, black on yellow (find_label). */
@@ -218,8 +226,8 @@ fun KubeTable(st: KubeState, rows: List<Msg.KubeRow>) {
         }
     }
     val buttons = 16.dp.icon * 2 + 20.dp
-    BoxWithConstraints(Modifier.padding(0.dp)) {
-        val view = maxWidth
+    var view by remember { mutableStateOf(0.dp) }
+    Box(Modifier.fillMaxSize().onSizeChanged { view = with(density) { it.width.toDp() } }) {
         val grows = here.filter { cols[it].kind == "name" || cols[it].title in GROWS }
         val base = here.associateWith { resized[it] ?: natural.getValue(it) }
         val room = view - base.values.fold(0.dp) { a, b -> a + b } - (if (pods) buttons else 0.dp)
@@ -231,7 +239,7 @@ fun KubeTable(st: KubeState, rows: List<Msg.KubeRow>) {
             Row(Modifier.horizontalScroll(scroll).width(total).background(c.raised)) {
                 for (i in here) {
                     val title = cols[i].title.orEmpty()
-                    Box(Modifier.width(wide(i)).clickable { if (st.sortCol == i) st.sortDesc = !st.sortDesc else { st.sortCol = i; st.sortDesc = false } }) {
+                    Box(Modifier.width(wide(i)).height(IntrinsicSize.Min).clickable { if (st.sortCol == i) st.sortDesc = !st.sortDesc else { st.sortCol = i; st.sortDesc = false } }) {
                         Row(Modifier.padding(horizontal = 6.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
                             Text(title, style = Type.bold, color = c.fg, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
                             if (st.sortCol == i) Icon(if (st.sortDesc) Adwaita.PanDown else Adwaita.GoUp, null, tint = c.fg,

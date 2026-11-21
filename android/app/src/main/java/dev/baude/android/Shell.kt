@@ -77,8 +77,8 @@ fun pages(bot: Boolean, hostId: String): List<Page> {
     )
 }
 
-/** A chat open: its bar (its Bot's picture and name, or its title; where it is), Baude's header controls under it,
- * its pages to swipe between, and the bottom bar that's Baude's side panel's switcher (a row that scrolls). */
+/** A chat open: its bar (its Bot's picture and name, or its title; where it is), its pages to swipe between (the
+ * chat's own with Baude's header controls over it), and the bottom bar that's Baude's side panel's switcher (a row that scrolls). */
 @OptIn(ExperimentalFoundationApi::class, ExperimentalLayoutApi::class)
 @Composable
 fun ChatShell(hostId: String, sid: String, back: () -> Unit, open: (String, String) -> Unit, feedback: () -> Unit) {
@@ -118,7 +118,6 @@ fun ChatShell(hostId: String, sid: String, back: () -> Unit, open: (String, Stri
                 if (bot != null) PhoneBrowserButton(at, sid, name) // (Phone Use: a Bot's browser on this phone)
                 Menu(listOf(Wording.Fixes.sendFeedback to feedback))
             })
-        if (takes(at, "control")) ChatControls(at, sid, said = { chat.said.value = it }, open = open)
         val conn = Mesh.conn(at)
         if (conn == null || conn.state != "up") GreyBanner(if (conn?.state == "connecting") Wording.Hosts.looking(host = Mesh.label(at))
             else conn?.why?.let { Wording.Hosts.downBecause(host = Mesh.label(at), why = it) } ?: Wording.Hosts.down(host = Mesh.label(at)))
@@ -126,7 +125,11 @@ fun ChatShell(hostId: String, sid: String, back: () -> Unit, open: (String, Stri
             userScrollEnabled = all.getOrNull(pager.currentPage)?.key != "browser") { i ->
             val here = pager.currentPage == i && !pager.isScrollInProgress
             when (all[i].key) {
-                "chat" -> ChatPage(chat, name, hint = if (bot != null) "Message $name" else "")
+                "chat" -> Column(Modifier.fillMaxSize()) { // (its model, effort and mode: the chat's own, as Baude's
+                    if (takes(at, "control"))              // header has them, not its side panel's pages)
+                        ChatControls(at, sid, said = { chat.said.value = it }, open = open)
+                    Box(Modifier.weight(1f)) { ChatPage(chat, name, hint = if (bot != null) "Message $name" else "") }
+                }
                 "meta" -> MetaPage(at, here)
                 "memory" -> MemoryPage(at, sid, here)
                 "browser" -> BrowserPage(at, sid, bot?.name.orEmpty(), here)

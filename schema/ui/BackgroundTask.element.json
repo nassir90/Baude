@@ -1,0 +1,86 @@
+{
+  "description": "How the chat shows a command or subagent the CLI runs in the background: its card keeps spinning, marked \"running in background\", and finishes in place when the task ends. A task whose card isn't in the chat (it started before what's drawn) gets one quiet line instead when it ends.",
+  "apps": [
+    "baude",
+    "record"
+  ],
+  "opens": [
+    "A Bash call with run_in_background, or a subagent run asynchronously",
+    "A task-notification in a transcript"
+  ],
+  "code": [
+    "baude.py:ToolCard.bind_task",
+    "baude.py:ToolCard.finish_task",
+    "baude.py:task_note_widget",
+    "baude.py:BaudeWindow.on_task_event",
+    "baude.py:BaudeWindow.task_note",
+    "baude.py:BaudeWindow.card_task",
+    "baude.py:BaudeWindow.task_from_result",
+    "baude.py:BaudeWindow.task_from_note",
+    "baude.py:BaudeWindow.settle_tasks",
+    "widgets.py:task_note_line",
+    "record.py:Reader._add"
+  ],
+  "copy": [
+    "task_notes",
+    "common",
+    "transcript_notes"
+  ],
+  "parts": [
+    {
+      "name": "card while running",
+      "shows": "The call's card (ToolCall) keeps its spinner after its first result (which only says it started; that result isn't shown), with \"  · running in background\" dimmed after the summary. The status bar and side panel's Processes / Subagents also list it (other areas)."
+    },
+    {
+      "name": "card when finished",
+      "shows": "The spinner stops; the \"running in background\" mark goes. A command's Output becomes the last 6,000 bytes of what it wrote (\"… \" before it when cut), in a code block tagged \"output\"; with no output file, the task's summary, tagged with its status. A subagent's final report is added to its output as markdown. Completed: normal border; failed or killed: red border and Error."
+    },
+    {
+      "name": "ending line (no card)",
+      "shows": "One wrapping, selectable, left-aligned line, no icon: \"<b>What</b> · <description> — <ending>\". What: the card's tool name (\"Bash\") when the card is known, else \"Agent\" for a subagent or \"Background command\". Description: the task's description, else its command's first line, else what its summary quotes, cut at 80 characters with …, else \"a background task\". Ending: \"finished\", \"failed\", \"stopped\" (killed), with \" (exit N)\" when the summary gives an exit code. Dimmed when it finished; all in the error red when it failed or was killed. Never the raw command or the XML it arrives in. Tooltip: the task's full summary.",
+      "copy": [
+        "task_notes.background_command",
+        "task_notes.unnamed",
+        "task_notes.finished",
+        "task_notes.failed",
+        "task_notes.stopped",
+        "task_notes.ending_exit",
+        "common.agent"
+      ],
+      "actions": [
+        {
+          "by": "click the description (when its card is drawn later, higher up)",
+          "does": "Scrolls back to the card, opening its group, and flashes it."
+        }
+      ]
+    }
+  ],
+  "states": [
+    {
+      "name": "running",
+      "shows": "Spinner + \"· running in background\"."
+    },
+    {
+      "name": "finished with card in chat",
+      "shows": "No separate line: the card says it ended. The CLI then often starts a turn by itself to report it, drawn as a normal reply."
+    },
+    {
+      "name": "finished, card not drawn",
+      "shows": "The ending line, in order in the chat."
+    },
+    {
+      "name": "never heard the end (finished session)",
+      "shows": "Opening a chat whose transcript never says the task ended: its card shows interrupted, not spinning for ever."
+    },
+    {
+      "name": "Record",
+      "shows": "Record's reader draws the same ending line (no link) for each task notification in a chat."
+    }
+  ],
+  "scenes": [
+    "70-background-running",
+    "71-background-finished",
+    "54-task-notifications",
+    "76-tail-background-tasks"
+  ]
+}

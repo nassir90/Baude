@@ -1,0 +1,71 @@
+{
+  "description": "A Bot's routines, a page of the right-hand side panel: work the Bot is given on a schedule. They are kept with the Bot on its host, which gives the Bot a turn with the routine's task as each comes due (as if you had said it), whether or not Baude is open; each run shows in the Bot's chat as a turn of its own. A routine missed while the host was off runs once when it is back. Only exists while the open chat is a Bot; otherwise the tab is hidden, and if it was shown the panel falls back to Meta.",
+  "apps": ["baude"],
+  "opens": [
+    "the 'Routines' tab (alarm-clock icon) in the side panel's switcher, visible only while the open chat is a Bot"
+  ],
+  "code": [
+    "routinespage.py:RoutinesPage",
+    "routinespage.py:RoutinesPage.draw",
+    "routinespage.py:RoutinesPage.edit",
+    "routinespage.py:when",
+    "routinespage.py:stamp",
+    "baudelib/routines.py",
+    "baude.py:SidePanel.bot_changed"
+  ],
+  "copy": ["routines", "common"],
+  "parts": [
+    {
+      "name": "tab",
+      "shows": "Switcher tab with an alarm-clock icon and the label 'Routines'; present only for a Bot chat.",
+      "copy": ["routines.title"]
+    },
+    {
+      "name": "header row",
+      "shows": "A row at the top with empty space at the left (the page's name is the tab's) and a flat plus button at the right, tooltip 'New routine'.",
+      "copy": ["routines.new_routine"],
+      "actions": [
+        {"by": "click +", "does": "opens the New Routine dialog (see 'routine dialog')"}
+      ]
+    },
+    {
+      "name": "list",
+      "shows": "A boxed list of the Bot's routines in the order its host keeps them, scrolling, no selection. Empty: the centred dim text 'No routines yet'. The list is read when the chat is opened, when a turn of the Bot ends, every 30 seconds while the page is shown, and after each change here.",
+      "copy": ["routines.no_routines"],
+      "parts": [
+        {
+          "name": "routine row",
+          "shows": "Title: the routine's name ('Routine' if it has none). Subtitle on one line, parts joined with ' · ': the schedule, then either 'paused' or 'next <time>', then 'last <time>' if it has run, then the error text if its last run could not be made. Schedule wording: 'every hour', 'every 2 hours' (whole hours from 2 up), 'every <n> minutes' (otherwise, including 90), or '<days> at <HH:MM>' where days is 'weekdays', 'weekends', 'every day' or the day names joined with ', ' (Mon, Tue, Wed, Thu, Fri, Sat, Sun). A time is HH:MM on the host's clock if it is today, else 'Mon 03 Nov 14:00'; a time that is not known is 'never'. At the end of the row, in order: a switch, a Run now button (play icon), a Change button (pencil icon), a Delete button (trash icon). Row text is escaped, never markup.",
+          "copy": ["routines.routine", "routines.paused", "routines.next", "routines.last", "routines.never", "routines.every_hour", "routines.every_hours", "routines.every_minutes", "routines.weekdays", "routines.weekends", "routines.every_day", "routines.days_at", "routines.mon", "routines.tue", "routines.wed", "routines.thu", "routines.fri", "routines.sat", "routines.sun", "routines.turn_off", "routines.run_now", "routines.change", "common.delete"],
+          "actions": [
+            {"by": "toggle the switch", "does": "on = running, off = paused (tooltip 'Turn off to pause'); saved to the host at once; turning it back on works out the next run afresh"},
+            {"by": "click Run now", "does": "the host gives the Bot a turn with the routine's task now"},
+            {"by": "click Change", "does": "opens the Change Routine dialog filled with it"},
+            {"by": "click Delete", "does": "deletes the routine on the host at once (no confirmation)"}
+          ]
+        }
+      ]
+    },
+    {
+      "name": "message line",
+      "shows": "A dim wrapping line under the list (10 px margins), hidden unless something failed: \"Couldn't load the routines.\", \"Couldn't run the routine.\", \"Couldn't save the routine.\", \"Couldn't delete the routine.\"; the host's reason is in its tooltip. It goes away after the next successful answer.",
+      "copy": ["routines.couldnt"]
+    },
+    {
+      "name": "routine dialog",
+      "shows": "An Adw alert dialog headed 'New Routine' (or 'Change Routine'), default response Save, with Cancel and Save (suggested) buttons. Content (scrolls if the window is short, 440 px at most): a text field with the placeholder 'Name'; the label 'Task' over a card-style multi-line text box (at least 110 px tall, wrapping) for what the Bot is to do; a drop-down with 'Every' or 'At a time of day' (a new routine starts on 'Every'; one that has a time starts on 'At a time of day'). With 'Every': a number box and a unit drop-down 'minutes' / 'hours'; minutes 5 to 999, hours 1 to 744 (a month); a routine runs no more often than every 5 minutes and no less often than monthly; a new routine defaults to 1 hour; an existing one whose period is whole hours shows hours. With 'At a time of day': the label 'Times in <zone>' (the host's time zone, e.g. 'Times in GMT') or 'Times on the host's clock' when the zone is not known, a time field (placeholder 'HH:MM', default 09:00), and a row of seven toggle buttons Mon to Sun (a new routine has Mon to Fri on). The host checks the routine when it is saved: a task is required (the name defaults to the first line of the task, 40 characters), the time must be HH:MM, at least one day must be on.",
+      "copy": ["routines.new_heading", "routines.change_heading", "common.name", "routines.task", "routines.every", "routines.at_a_time", "routines.minutes", "routines.hours", "routines.times_in", "routines.host_clock", "common.cancel", "common.save"],
+      "text": ["HH:MM", "09:00"],
+      "actions": [
+        {"by": "click Save", "does": "saves the routine on the host (a new one is made; a changed one keeps its id and last-run time, its next run is kept unless its schedule changed); if the host rejects it, the message line says 'Couldn't save the routine.' with the reason as its tooltip"},
+        {"by": "click Cancel / key Esc", "does": "closes without saving"}
+      ]
+    }
+  ],
+  "states": [
+    {"name": "empty", "shows": "'No routines yet'"},
+    {"name": "paused routine", "shows": "Switch off, subtitle '<schedule> · paused' (no next time)"},
+    {"name": "failed last run", "shows": "The error text is the last part of the subtitle; the next run is still worked out"},
+    {"name": "error", "shows": "Message line under the list"}
+  ]
+}

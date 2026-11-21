@@ -1,0 +1,34 @@
+{
+  "description": "A confirmation alert over the main window before a session's transcript is moved to the trash.",
+  "apps": ["baude"],
+  "opens": ["session row right-click → Move to Trash…"],
+  "code": ["baude.py:SessionSidebar.ask_trash", "baude.py:SessionSidebar.trash", "baude.py:SessionSidebar.ask_remote"],
+  "copy": ["trash"],
+  "parts": [
+    {
+      "name": "heading",
+      "shows": "Move “<title>” to the trash? (the title, or \"this session\" if it has none).",
+      "copy": ["trash.heading", "trash.this_session"]
+    },
+    {
+      "name": "body",
+      "shows": "\"Its transcript will be moved to <where>, where you can restore it.\" where is \"your trash\" for this machine's sessions, or \"the trash on <host>\" for a session on a host. When earlier copies of the conversation were folded into this session: \"Its transcript and its N earlier copy/copies will be moved to <where>, where you can restore it.\" For a session on Codex's model, a line is added: \"Codex keeps its own copy of this session.\"",
+      "copy": ["trash.body", "trash.body_copies", "trash.yours", "trash.on_host"],
+      "text": ["Codex keeps its own copy of this session."]
+    },
+    {
+      "name": "Cancel",
+      "shows": "\"Cancel\" button; the default response and Escape.",
+      "copy": ["common.cancel"]
+    },
+    {
+      "name": "Move to Trash",
+      "shows": "\"Move to Trash\" button in the destructive (red) style.",
+      "copy": ["trash.move"],
+      "actions": [
+        {"by": "click", "does": "This machine's: the transcript and its copies go to the system trash (if the filesystem has none, they are moved to Baude's own trash folder and a note says where). If it's the open chat, a new session opens; the list refreshes. On a host: the host's process moves it to its trash; the session leaves the list, and the open chat if it was this one is left for a new one. A host that refuses says \"<host> didn't delete it: <why>\" in a toast."}
+      ]
+    }
+  ],
+  "scenes": ["53b-sidebar-menu", "55g-network-session-menu"]
+}

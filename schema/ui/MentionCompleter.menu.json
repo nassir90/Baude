@@ -1,0 +1,29 @@
+{
+  "description": "The @-list that rises over the composer while an @ is typed at a word's start: the chats and the names of the chat's folder (files, code, commits, pull requests, routes, Kubernetes objects …) the Signal glossary knows.",
+  "apps": ["baude", "record"],
+  "opens": ["type @ at a word's start (start of line, or after a space or an opening bracket or quote)"],
+  "code": ["baude.py:ChatRefCompleter", "meta.py:RefCompleter", "widgets.py:PickList"],
+  "copy": ["meta"],
+  "parts": [
+    {
+      "name": "list",
+      "shows": "A popover above the box like the slash list, its left edge on the @. Each row: the kind's icon, the name, and a dim line \"<what it is> · <summary>\" with a time tip where it has a date. With nothing typed after the @, the chats come first. More rows arrive while the catalogue is still being read (the list shows it is waiting). A footer note says \"{n} found\" or \"Nothing found\".",
+      "copy": ["meta.found", "meta.nothing_found"]
+    },
+    {
+      "name": "search",
+      "shows": "What is typed after the @, spaces and all, is the search; the typed @search is coloured like a known @name. A new line, the caret moving back before the @, or words that name nothing end it.",
+      "actions": [
+        {"by": "key Up / Down / Page Up / Page Down", "does": "Moves the lit row"},
+        {"by": "key Tab, or Enter once an arrow has moved or while a single word is typed, or click a row", "does": "Puts @name (or @{a name} for names with spaces) plus a space in place of the @search"},
+        {"by": "key Enter (several words typed, no arrow moved)", "does": "A new line"},
+        {"by": "key Ctrl+Enter / Shift+Enter", "does": "Closes the list and sends / makes a new line"},
+        {"by": "key Esc", "does": "Closes the list; over \"Nothing found\" Esc does what it would have done (stop a turn)"}
+      ]
+    },
+    {
+      "name": "where it opens",
+      "shows": "Not inside code (a decorator's @, an address's @), and not while the slash list is up."
+    }
+  ]
+}

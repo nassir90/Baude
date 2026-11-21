@@ -1,0 +1,80 @@
+{
+  "description": "An image a reply or message embeds with ![alt](src) on its own line: a link line saying where it's from, with the picture under it. Local files and web images both work.",
+  "apps": [
+    "baude",
+    "record"
+  ],
+  "code": [
+    "widgets.py:MarkdownView.render_image",
+    "widgets.py:image_widget",
+    "widgets.py:with_image_link",
+    "widgets.py:image_link_markup",
+    "widgets.py:make_image_interactive",
+    "widgets.py:fetch_web_image"
+  ],
+  "copy": [
+    "images"
+  ],
+  "parts": [
+    {
+      "name": "source line",
+      "shows": "Above the picture, left-aligned: the path as the reply wrote it (or the web address), as a link, middle-ellipsized when long. Tooltip: \"Open with default app\" for a file, \"Open in browser\" for a web image.",
+      "copy": [
+        "images.open_with_default_app",
+        "images.open_in_browser"
+      ],
+      "actions": [
+        {
+          "by": "click",
+          "does": "Opens the file in its default app, or the web image in the browser."
+        }
+      ]
+    },
+    {
+      "name": "picture",
+      "shows": "Under the line, 4px below, left-aligned, at most 480px on its longest side (smaller images at their own size), 6px rounded corners. Sized from its header at once, decoded as it comes near the view. Pointer: a magnifier. Tooltip: \"<path or alt>\\nClick to view · right-click for more\".",
+      "copy": [
+        "images.click_tip"
+      ],
+      "actions": [
+        {
+          "by": "click",
+          "does": "Opens the image viewer (ImageViewer) on it."
+        },
+        {
+          "by": "right-click",
+          "does": "Menu: View, Open in browser (web images only), Copy image, Open with default app, Open in folder."
+        }
+      ]
+    }
+  ],
+  "states": [
+    {
+      "name": "local file",
+      "shows": "The src as a path (absolute, ~/, relative to the chat's folder, or file://): drawn at once."
+    },
+    {
+      "name": "web image loading",
+      "shows": "Until it arrives, just a link \"Image: <alt or URL>\" (opens in the browser); then the source line and picture replace it.",
+      "copy": [
+        "images.link"
+      ]
+    },
+    {
+      "name": "can't be loaded / shown",
+      "shows": "The \"Image: …\" link stays; its tooltip says \"Couldn't load the image: <why>\" or \"Couldn't show the image: <why>\".",
+      "copy": [
+        "images.couldnt_load",
+        "images.couldnt_show"
+      ]
+    },
+    {
+      "name": "local file missing",
+      "shows": "Only the \"Image: <alt>\" link."
+    }
+  ],
+  "scenes": [
+    "31-markdown-image",
+    "26-image-viewer"
+  ]
+}

@@ -1,0 +1,53 @@
+{
+  "description": "Right-click menu on the host dropdown of Record's Notebooks header, as Baude's New session has for its hosts. Only for another machine's host. (Right-click here is a long-press on a touch screen.)",
+  "apps": [
+    "record"
+  ],
+  "opens": [
+    "right-click the host dropdown"
+  ],
+  "code": [
+    "record.py:Window.host_menu",
+    "record.py:Window.ask_host_command",
+    "record.py:Window.deactivate_host"
+  ],
+  "copy": [
+    "hosts"
+  ],
+  "parts": [
+    {
+      "name": "Host Command…",
+      "shows": "\"Host Command…\", only for a host reached over ssh.",
+      "copy": [
+        "hosts.command"
+      ],
+      "actions": [
+        {
+          "by": "click",
+          "does": "Dialog headed \"Baude on {host}\", body \"The command ssh runs on {host}, with connect after it\", a text box (placeholder \"{command}, on its PATH\") holding the command or empty for the default, buttons Cancel and Save."
+        }
+      ]
+    },
+    {
+      "name": "Deactivate / Activate",
+      "shows": "\"Deactivate\", or \"Activate\" when the host is already deactivated.",
+      "copy": [
+        "hosts.deactivate",
+        "hosts.activate"
+      ],
+      "actions": [
+        {
+          "by": "click",
+          "does": "Turns the host off or on for the mesh (kept). Toast \"{host} deactivated\" or \"{host} activated\". While it is off the banner over the notebooks says \"{host} is deactivated\"."
+        }
+      ]
+    }
+  ],
+  "states": [
+    {
+      "name": "this machine",
+      "shows": "No menu."
+    }
+  ],
+  "scenes": []
+}

@@ -1,0 +1,35 @@
+{
+  "description": "The command list that rises over the composer while a /word is being typed: Baude's own commands, then Claude Code's commands and skills, each with its arguments and what it does.",
+  "apps": ["baude"],
+  "opens": ["type / at the start of the prompt, or at a word's start after a space or new line"],
+  "code": ["baude.py:SlashCompleter", "baude.py:LOCAL_COMMANDS", "widgets.py:PickList"],
+  "copy": ["meta"],
+  "parts": [
+    {
+      "name": "list",
+      "shows": "A popover above the box (a clear gap), its left edge on the /, as wide as the box up to a maximum. Each row: an icon (Claude's logo for Claude Code's built-in commands, a command-line icon for others), the command as \"/name\" and a dim line \"also /alias · <argument hint> · <first line of its description>\" (cut with …, the full description as a tooltip). Local commands first: /new (aliases /clear; \"Start a fresh session\"), /cd <path> (\"Move the conversation to another folder\"), /btw <question> (\"Ask a side question: answered from this conversation, without adding to it\"), /login [--console | --sso | --email <address>] (\"Sign in to your Anthropic account (claude auth login)\"), /logout (\"Sign out of your Anthropic account (claude auth logout)\"); then Claude's commands by name.",
+      "text": ["Start a fresh session", "Move the conversation to another folder", "Ask a side question: answered from this conversation, without adding to it", "Sign in to your Anthropic account (claude auth login)", "Sign out of your Anthropic account (claude auth logout)"]
+    },
+    {
+      "name": "matching",
+      "shows": "Ranked: names starting with what is typed, then aliases starting with it, then either containing it, then descriptions containing it. A footer note says \"{n} found\", or \"Nothing found\" when none match.",
+      "copy": ["meta.found", "meta.nothing_found"]
+    },
+    {
+      "name": "keys",
+      "shows": "While open:",
+      "actions": [
+        {"by": "key Up / Down / Page Up / Page Down", "does": "Moves the lit row"},
+        {"by": "key Enter or Tab, or click a row", "does": "Puts \"/command \" in place of the /word with the caret after it; Enter does so only while a row is lit"},
+        {"by": "key Ctrl+Enter", "does": "Closes the list and sends what is typed"},
+        {"by": "key Shift+arrow", "does": "Closes the list and selects text"},
+        {"by": "key Esc", "does": "Closes the list; over \"Nothing found\" Esc does what it would have done (stop a turn)"}
+      ]
+    },
+    {
+      "name": "where it opens",
+      "shows": "Not for a / in a path (src/app) or a link (https://…), nor inside code (a fence or `span`), nor when the caret is not at the end of the word. Only the prompt's first word is a command to Claude Code; a later /word is words to Claude."
+    }
+  ],
+  "scenes": ["43-slash-completer", "44-completer-filter", "45-completer-picked"]
+}

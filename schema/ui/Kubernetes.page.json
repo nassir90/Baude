@@ -1,0 +1,490 @@
+{
+  "description": "A full-window view over the chat that lays a kubeconfig cluster out as Freelens does: a top bar to pick the cluster context, namespaces and a filter, a sidebar of resource categories, a table of the chosen kind's objects with Freelens' columns, the selected object's YAML beside it, and a pod's followed logs under both. Read-only except for pod deletes, each asked first.",
+  "apps": [
+    "baude",
+    "record"
+  ],
+  "opens": [
+    "☰ → Kubernetes…",
+    "A running workload in a Signal link's popover (Running section): opens its context, on its kind's page, filtered to its name, in its namespace",
+    "A Kubernetes cluster's icon button in a Signal link's popover (Open this cluster in the Kubernetes view): opens that context",
+    "⌘K / Ctrl+K glossary: a running workload or a cluster context"
+  ],
+  "code": [
+    "kubeview.py:KubeView",
+    "kubeview.py:KUBE_SECTIONS",
+    "kubeview.py:KubeSquares",
+    "kubeview.py:kube_diagnose",
+    "baude.py:BaudeWindow.__init__",
+    "record.py:RecordWindow.open_viewer"
+  ],
+  "copy": [
+    "kube"
+  ],
+  "parts": [
+    {
+      "name": "top bar",
+      "shows": "A bar as tall as a header bar (on macOS with room at the left for the window's traffic lights). From left: the title, a context picker, a namespaces button, a filter box, a gap, a refresh button, a close button. Dragging it moves the window; double-clicking it maximizes.",
+      "parts": [
+        {
+          "name": "title",
+          "shows": "Heading \"Kubernetes\"",
+          "copy": [
+            "window.kubernetes"
+          ]
+        },
+        {
+          "name": "context picker",
+          "shows": "A drop-down of every kubeconfig context (clusters no context names are not listed). Shows the picked context's name, truncated in the middle past about 32 characters. The one used last is picked on open, else the kubeconfig's current one, else the first. No \"(current)\" suffix.",
+          "copy": [
+            "kube.context_tip"
+          ],
+          "actions": [
+            {
+              "by": "pick another context",
+              "does": "Switches to that cluster: the table fades, the logs close and their kubectl stops, the YAML closes, any watch stops, then the cluster's resources, namespaces and node count are read and the page is read again. Each context remembers the namespaces shown in it; the context is remembered across sessions."
+            }
+          ]
+        },
+        {
+          "name": "namespaces button",
+          "shows": "A button with a down arrow showing which namespaces are shown: \"All namespaces\", the one name, two names joined by a comma, or \"3 namespaces\" (n namespaces) from three up. Its tooltip is \"Namespaces shown (any of them at once)\", or, with more than two chosen, the full comma-joined list of names.",
+          "copy": [
+            "kube.all_namespaces",
+            "kube.n_namespaces",
+            "kube.namespaces_tip"
+          ],
+          "actions": [
+            {
+              "by": "click",
+              "does": "Opens a popover: an \"All namespaces\" check, a separator, then a scrolling list (up to about 420 px tall) of a check per namespace of the cluster, sorted by name (plus any shown namespace the cluster didn't list, such as one opened from a link)."
+            },
+            {
+              "by": "tick \"All namespaces\"",
+              "does": "Shows every namespace's objects (clears the chosen set)."
+            },
+            {
+              "by": "tick or untick a namespace",
+              "does": "Adds it to or removes it from the set shown, in the order picked; the table fades and is filtered (nothing is read again). Any number can be on at once. With none ticked it is the same as All namespaces."
+            }
+          ]
+        },
+        {
+          "name": "filter",
+          "shows": "A search box, placeholder \"Filter\", about 22 characters wide, tooltip \"Filter (Ctrl+F)\". Rows are kept if any cell's text contains the typed text (any case); the matching text is highlighted in the cells.",
+          "copy": [
+            "kube.filter",
+            "kube.filter_tip"
+          ],
+          "actions": [
+            {
+              "by": "type",
+              "does": "Filters the table live (no reading again), and the status line's count updates."
+            },
+            {
+              "by": "key Esc in the box",
+              "does": "Clears the text if there is some; otherwise closes the view (see Esc below)."
+            },
+            {
+              "by": "key Ctrl+F (⌘F on macOS) while the view is open",
+              "does": "Focuses the filter with its text selected to type over. In the YAML or logs, their own Ctrl+F finds in them instead."
+            }
+          ]
+        },
+        {
+          "name": "refresh",
+          "shows": "A refresh icon button, tooltip \"Read it again\"; it spins while a read is going on.",
+          "copy": [
+            "common.read_again"
+          ],
+          "actions": [
+            {
+              "by": "click",
+              "does": "Reads the page again (the table fades while it does)."
+            }
+          ]
+        },
+        {
+          "name": "close",
+          "shows": "A round × button, tooltip \"Close (Esc)\"",
+          "copy": [
+            "images.close"
+          ],
+          "actions": [
+            {
+              "by": "click",
+              "does": "Closes the view: the logs' kubectl is stopped, any watch and the refresh timer stop, and the chat's input box gets the focus back."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "sidebar of categories",
+      "shows": "A left column about 230 px wide (scrolls vertically) listing Freelens' categories. A category with several kinds is a heading row (the category's icon, its name, and a down arrow, or a right arrow when folded) with its kinds nested under it, indented to line up with the heading's name. A category of one kind is just that kind's row carrying the category's icon (Nodes, Namespaces, Events). One row is selected: the page shown. Pods is the page on first open. A kind this cluster doesn't serve is dimmed and can't be picked; its tooltip is \"<context> doesn't serve <kind>\". Categories and kinds, in order: Nodes (shown only when the cluster has more than one node, or when it's the page shown); Workloads: Pods, Deployments, DaemonSets, StatefulSets, ReplicaSets, Replication Controllers, Jobs, CronJobs, Rollouts (Argo, only where installed); Config: ConfigMaps, Secrets, Resource Quotas, Limit Ranges, Horizontal Pod Autoscalers, Vertical Pod Autoscalers, Pod Disruption Budgets, Priority Classes, Runtime Classes, Leases, Mutating Webhook Configurations, Validating Webhook Configurations, Validating Admission Policies, Validating Admission Policy Bindings; KEDA (only on a cluster with KEDA): Scaled Objects, Scaled Jobs, Trigger Authentications, Cluster Trigger Authentications; Network: Services, Endpoints, Endpoint Slices, Ingresses, Ingress Classes, Network Policies, HTTP Routes (Gateway API), Ingress Routes (Traefik), Virtual Services (Istio); Storage: Persistent Volume Claims, Persistent Volumes, Storage Classes; Namespaces; Events; Helm: Releases; User Management: Service Accounts, Cluster Roles, Roles, Cluster Role Bindings, Role Bindings; Certificates (cert-manager, only where installed): Certificates, Issuers, Cluster Issuers; Monitoring (Prometheus Operator, only where installed): Service Monitors, Pod Monitors, Prometheus Rules; Custom Resources: Definitions. The optional custom-resource kinds' rows, and a category's heading when none of its kinds is served, are not listed at all on a cluster that lacks them (rather than dimmed).",
+      "actions": [
+        {
+          "by": "click a kind",
+          "does": "Shows that kind's page: the YAML closes and the table is read again (the logs stay)."
+        },
+        {
+          "by": "click a category heading",
+          "does": "Folds its kinds away, or shows them again; which categories are folded is remembered across sessions."
+        }
+      ]
+    },
+    {
+      "name": "table",
+      "shows": "A scrolling table of the page's objects, one row per object, with Freelens' columns for the kind, no row or column separators. Columns can be resized; Name is about 220 px and Namespace about 120 px wide by default, Name expands to fill, and the table scrolls sideways when it's wider than the room. A cell's text is cut with … and carries a tooltip of the full text when it is long (over about 30 characters for a Name, 40 otherwise). Age cells show how old (45s, 3m05s under ten minutes, 42m, 5h07m under a day, then 3d), and their tooltip is the full creation time. Status cells are coloured by tone: green (Running, Succeeded, Active, Bound, Available, Complete, Ready, Deployed, True, Normal), orange (Pending, Terminating, Finalizing, Waiting, ContainerCreating, Released, Suspended and similar), red (Failed, Evicted, Error, NotReady, Lost, Warning, Unknown, and anything with BackOff, err or OOM in it, such as CrashLoopBackOff), plain otherwise; for a multi-part status the first part sets the colour. Sorting: click a column heading to sort by it, again to reverse; numbers, ages and sizes sort by value, text as text. Rows start sorted by Name (Events: by Last Seen). The selected row is highlighted. Columns per kind: Pods: Name, Namespace, Containers, CPU, Memory, Restarts, Controlled By, Node (only on a cluster of more than one node), Age, Status, then a last unlabelled column with the row buttons. Nodes: Name, CPU, Memory, Roles, Version, Internal IP, Age, Conditions. Deployments: Name, Namespace, Ready (ready/desired), Desired, Updated, Available, Age, Conditions. DaemonSets: Name, Namespace, Desired, Current, Ready, Updated, Available, Node Selector, Age. StatefulSets: Name, Namespace, Ready, Desired, Age. ReplicaSets and Replication Controllers: Name, Namespace, Desired, Current, Ready, Age. Jobs: Name, Namespace, Status, Succeeded, Completions, Parallelism, Duration, Age. CronJobs: Name, Namespace, Schedule, Timezone, Suspended (Yes/No), Active, Last schedule, Age. ConfigMaps: Name, Namespace, Keys, Age. Secrets: Name, Namespace, Keys, Type, Age. Services: Name, Namespace, Type, Cluster IP, External IP, Ports, Age, Status. Ingresses: Name, Namespace, LoadBalancers, Rules, Age. Persistent Volume Claims: Name, Namespace, Storage class, Size, Age, Status. Persistent Volumes: Name, Storage Class, Capacity, Claim, Age, Status. Namespaces: Name, Labels, Age, Status. Events: Type, Message, Namespace, Involved Object, Source, Count, Age, Last Seen. Helm Releases: Name, Namespace, Chart, Revision, App Version, Status, Updated. Custom Resource Definitions: Resource, Group, Version, Scope, Age. Other kinds (Config's, Network's, Storage's, User Management's, KEDA, cert-manager, monitoring) have the same shape: Name, Namespace (if namespaced), their own few columns, Age. A custom resource opened from a definition shows the printer columns its definition declares.",
+      "parts": [
+        {
+          "name": "namespace cell (a link)",
+          "shows": "In a Namespace column, the namespace's name as a flat link-looking button; tooltip \"Only <namespace>'s\"",
+          "copy": [
+            "kube.only_namespace"
+          ],
+          "actions": [
+            {
+              "by": "click",
+              "does": "Shows only that namespace's objects (the namespaces shown become just it)."
+            }
+          ]
+        },
+        {
+          "name": "controlled-by cell (a link)",
+          "shows": "In a pod's Controlled By column, the owner as \"Kind/name\" as a link-looking button",
+          "actions": [
+            {
+              "by": "click",
+              "does": "Status line says \"Finding <kind>/<name>…\"; climbs ReplicaSet to its Deployment and Job to its CronJob (up to three steps), then goes to that kind's page with that object selected and scrolled into view (its YAML opens beside the table). The filter is cleared, and the owner's namespace is added to the namespaces shown if it wasn't one of them. If the owner isn't in the list the status line says \"<owner> isn't in <kinds> on <context>\"; if the kind has no page here, \"<kind>/<name>: no page here for <kind>\"."
+            }
+          ]
+        },
+        {
+          "name": "containers cell (squares)",
+          "shows": "In the Pods table's Containers column, a small rounded square (10 px, 3 px apart) per container, init containers first: solid green (running and ready), solid orange (waiting, starting or running but not ready yet), green with an orange ring (ready, but its last run ended less than an hour ago: restarted lately), solid red (crashed, failed, an image that won't pull, exited with an error), faint grey (completed, exit 0: an init container's, a job's). Tooltip: one line per container, \"name: state\" (init ones \"name (init)\"), the state being words such as \"running, ready\", \"running, not ready yet\", \"running, ready, restarted 12m ago, at <time>\", \"completed\", \"terminated: Error (exit code 1)\", \"terminated: <reason>\", \"waiting: CrashLoopBackOff\", \"waiting\", \"not started yet\", each with \" (1 restart)\" or \" (n restarts)\" appended when it has restarted. The column sorts and filters by its ready/total count (\"1/2\").",
+          "copy": [
+            "kube.init_container",
+            "kube.not_started",
+            "kube.running_not_ready",
+            "kube.running_restarted",
+            "kube.running_ready",
+            "kube.completed",
+            "kube.terminated",
+            "kube.terminated_code",
+            "kube.waiting",
+            "kube.waiting_for",
+            "kube.with_restarts"
+          ],
+          "phone": {
+            "does": "A long-press on a square shows its tooltip's words",
+            "why": "No hover on touch",
+            "decided": "2026-11-21"
+          }
+        },
+        {
+          "name": "CPU and Memory cells",
+          "shows": "Pods and Nodes: CPU in cores to three decimals (0.012), Memory in B, KiB, MiB, GiB or TiB with one decimal (12.4MiB); \"N/A\" when the cluster has no metrics API."
+        },
+        {
+          "name": "pod row buttons",
+          "shows": "At the end of each Pods row, two flat icon buttons: a logs button (tooltip \"Logs\") and a ⋮ menu button (tooltip \"Delete…\"). The column's heading is blank and not clickable.",
+          "copy": [
+            "kube.logs",
+            "common.delete_ellipsis"
+          ],
+          "actions": [
+            {
+              "by": "click Logs",
+              "does": "Opens the pod's logs pane under the table (see logs)."
+            },
+            {
+              "by": "click ⋮",
+              "does": "Opens a menu of two items, Delete and Force delete (see pod menu)."
+            }
+          ]
+        },
+        {
+          "name": "row selection",
+          "shows": "Nothing is selected to start with.",
+          "actions": [
+            {
+              "by": "click a row",
+              "does": "Selects it and opens its YAML beside the table (see YAML)."
+            },
+            {
+              "by": "double-click or press Enter on a Namespaces row",
+              "does": "Shows only that namespace's pods: the page goes to Pods with the namespaces shown set to that one."
+            },
+            {
+              "by": "double-click or press Enter on a Custom Resource Definitions row",
+              "does": "Adds a row for that definition's kind to the sidebar (under Definitions), selects it, and shows that kind's objects with the columns the definition declares."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "YAML pane",
+      "shows": "Appears to the right of the table (at least 360 px wide, the table keeping about two thirds, with a draggable divider) once a row is selected. A header line: the object's title, \"<Kind> <name>\" plus \" · <namespace>\" when it has one (the kind is the page's title with a trailing s dropped; truncated in the middle), and a flat × button (tooltip \"Hide\"). Below it the object's YAML as read-only code: highlighted, with line numbers, the code zoom's size, Ctrl+F finding in it. Names of other objects inside it (an owner, a service, a secret, a node…) are underlined links; the text stays selectable. While the YAML is read again it goes grey until the new text is in, and if it is the same object read again it stays where it was scrolled to. A Secret shows only a comment header, \"# Secret <ns>/<name> (<type>)\", \"# Its values aren't shown.\" and \"keys:\" with each key's name (its values are never read). A Helm release shows its listed fields as JSON. A read that fails shows one comment line \"# <title>: <why>\".",
+      "copy": [
+        "kube.hide",
+        "kube.secret_values_hidden"
+      ],
+      "actions": [
+        {
+          "by": "click ×",
+          "does": "Hides the pane and deselects the row."
+        },
+        {
+          "by": "click a link in the YAML",
+          "does": "Goes to that object: its kind's page, it selected and scrolled to (same as the Controlled By click); a Namespace link shows only that namespace's objects."
+        },
+        {
+          "by": "key Esc",
+          "does": "Closes the logs first if open, else the YAML, else the whole view."
+        }
+      ]
+    },
+    {
+      "name": "pod menu",
+      "shows": "The ⋮ button's menu on a pod row: two items, \"Delete\" and \"Force delete\".",
+      "copy": [
+        "common.delete",
+        "kube.force_delete"
+      ],
+      "actions": [
+        {
+          "by": "choose Delete",
+          "does": "Asks first in a dialog (see delete dialog); only the dialog's Delete button deletes."
+        },
+        {
+          "by": "choose Force delete",
+          "does": "Asks first in a stronger dialog (see delete dialog)."
+        }
+      ]
+    },
+    {
+      "name": "delete dialog",
+      "shows": "A modal alert over the window. Heading \"Delete pod <name>?\" (or \"Force delete pod <name>?\"). Body paragraphs, in this order: \"In namespace <ns>, on <context>.\"; for a cluster whose API server isn't on this machine, \"This is a remote cluster: <context>'s API server isn't on this machine.\"; for a normal delete \"Its containers are stopped, given their grace period to finish.\", for a force delete \"Force delete doesn't wait for the pod to stop: the cluster forgets it at once, while its containers may go on running on their node for a while.\"; then \"It's controlled by <Kind> <name>, which may start another in its place.\" or \"No controller owns it: nothing will start it again.\" Buttons: Cancel (default; also what Esc or closing does) and a destructive-styled \"Delete\" (force: \"Force Delete\").",
+      "copy": [
+        "kube.delete_heading",
+        "kube.force_delete_heading",
+        "kube.in_namespace",
+        "kube.remote_cluster",
+        "kube.delete_body",
+        "kube.force_delete_body",
+        "kube.controlled_by",
+        "kube.no_controller",
+        "kube.force_delete_response",
+        "common.cancel",
+        "common.delete"
+      ],
+      "actions": [
+        {
+          "by": "Delete",
+          "does": "Status line says \"Deleting pod <name>…\" (force: \"Force deleting pod <name>…\"); kubectl runs off the main thread; then the status line says what kubectl said, else \"pod \"<name>\" deleted\", or \"couldn't delete pod <name>: <why>\"; the list is read again. The message stays first in the status line for 30 seconds through refreshes."
+        },
+        {
+          "by": "Cancel",
+          "does": "Nothing runs."
+        }
+      ]
+    },
+    {
+      "name": "logs pane",
+      "shows": "Docks under the table and the YAML, the width of both, with a draggable divider (opens at about half the height, at least 140 px tall; the table keeps the rest). A header line: a logs icon, the title \"<pod> · <namespace>\" (heading, truncated in the middle), a small dim state text filling the space (\"following\", \"its previous run\", \"ended (its container stopped)\", \"kubectl exited with <code>\", or \"kubectl: <error>\"), a container picker, then flat buttons: Previous (toggle), Follow (toggle, a down-to-bottom icon, on by default), Wrap (toggle, a wrap icon; remembered across sessions), Find (a find icon), Close (×). Below, the log as read-only code with line numbers (the same code view: highlighted by its language guess, Ctrl+F finds in it, code zoom applies). A log starts at the pod's last 500 lines and keeps the newest 20,000 as it follows (the oldest are dropped a tenth at a time). Opening another pod's logs replaces the first's (and stops its kubectl).",
+      "copy": [
+        "kube.container",
+        "kube.previous",
+        "kube.previous_tip",
+        "kube.follow_tip",
+        "code_view.wrap",
+        "code_view.find_tip",
+        "kube.close_logs",
+        "kube.following",
+        "kube.previous_run",
+        "kube.ended",
+        "kube.kubectl_exited",
+        "kube.kubectl_error"
+      ],
+      "parts": [
+        {
+          "name": "container picker",
+          "shows": "A drop-down (tooltip \"Container\") of the pod's containers, init containers first and marked \"<name> (init)\". Opens on the container named by the pod's kubectl.kubernetes.io/default-container annotation, else its first non-init container.",
+          "actions": [
+            {
+              "by": "pick one",
+              "does": "Stops the current kubectl and follows that container's log from the start (last 500 lines)."
+            }
+          ]
+        },
+        {
+          "name": "Previous",
+          "shows": "A toggle button labelled \"Previous\", tooltip \"Its previous run's log (one that crashed, say), instead of this one's\". Off whenever a pod is opened.",
+          "actions": [
+            {
+              "by": "toggle",
+              "does": "On: shows the container's previous run's log (not followed; the state text says \"its previous run\"). Off: this run's log, followed."
+            }
+          ]
+        },
+        {
+          "name": "Follow",
+          "shows": "A toggle button, tooltip \"Follow: keep to the newest line (scrolling up stops it, scrolling to the end again goes on)\". On while the log keeps to its newest line.",
+          "actions": [
+            {
+              "by": "toggle",
+              "does": "On: jumps to the end and keeps to the newest line. Off: stays where scrolled."
+            },
+            {
+              "by": "scroll up (wheel, scrollbar drag, or keys Up, Page Up, Home)",
+              "does": "Turns Follow off by itself."
+            },
+            {
+              "by": "scroll back to the end",
+              "does": "Turns Follow on again by itself."
+            }
+          ]
+        },
+        {
+          "name": "Wrap",
+          "shows": "A toggle button, tooltip \"Wrap long lines\", remembered across sessions",
+          "actions": [
+            {
+              "by": "toggle",
+              "does": "Wraps long lines at the pane's width, or scrolls sideways."
+            }
+          ]
+        },
+        {
+          "name": "Find",
+          "shows": "A flat find button, tooltip \"Find (Ctrl+F)\"",
+          "actions": [
+            {
+              "by": "click",
+              "does": "Opens the find bar over the log (see CodeView: find bar)."
+            }
+          ]
+        },
+        {
+          "name": "Close",
+          "shows": "A flat × button, tooltip \"Close the logs (stops following them)\"",
+          "actions": [
+            {
+              "by": "click",
+              "does": "Closes the pane and stops kubectl (it is never left running). Switching context, closing the view or Esc do the same."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "status line",
+      "shows": "A single dim line under the table, truncated at the end, of parts joined with \" · \": a note first while it's fresh (a delete's result, an owner not found; 30 seconds), the count (\"7 pods\", or \"3 pods of 7\" when the filter or namespaces hide some), \"In <namespaces>\" folded into the count when namespaces are chosen (\"3 pods of 7 in shop, jobs\"), the context's name, \"live\" while the list is watched, the metrics note (\"CPU and memory from the metrics API, every 10 s\", or \"no metrics API on this cluster (CPU and memory N/A)\"; Pods and Nodes only) and finally \"read-only but for the deletes you confirm\". The same line says progress: \"Connecting to <context>…\", \"Reading <kinds> on <context>…\", \"Finding <kind>/<name>…\", and, when a watch can't be kept, \"can't watch <kinds> (<why>): read every <n> s instead\".",
+      "copy": [
+        "kube.count",
+        "kube.count_of",
+        "kube.in_namespaces",
+        "kube.live",
+        "kube.metrics",
+        "kube.no_metrics",
+        "kube.read_only",
+        "kube.connecting",
+        "kube.reading",
+        "kube.finding",
+        "kube.cant_watch",
+        "kube.owner_missing",
+        "kube.no_page"
+      ]
+    },
+    {
+      "name": "live updating",
+      "shows": "While the view is open the list is watched (kubectl get --watch) so rows appear, change and go as the cluster changes; where a watch isn't possible the list is read again every 10 s. Pods' and Nodes' CPU and memory are read again every 10 s. A row selected stays selected through a refresh (and its YAML stays unless the object's version changed)."
+    },
+    {
+      "name": "keys",
+      "shows": "Esc closes in layers: the logs, then the YAML, then the view (a filter with text in it clears first). Ctrl+F focuses the filter. Ctrl +/−/0 and Ctrl+scroll over the YAML or logs change the code text size for every code view, not the chat's.",
+      "phone": {
+        "does": "nothing",
+        "why": "Hardware-keyboard shortcuts; every action has a button too",
+        "decided": "2026-11-21"
+      },
+      "actions": [
+        {
+          "by": "key Esc",
+          "does": "Closes the logs, else the YAML, else the view."
+        },
+        {
+          "by": "key Ctrl+F",
+          "does": "Focuses the filter."
+        }
+      ]
+    }
+  ],
+  "states": [
+    {
+      "name": "no kubeconfig context",
+      "shows": "The table area is empty and the status line says \"No kubeconfig context to show: <where>.\" where <where> is the kubeconfig path(s) (shortened with ~), or \"~/.kube/config (there is none)\" when no file is set up. Nothing is read."
+    },
+    {
+      "name": "connecting / reading",
+      "shows": "The table fades (greys) while a context's resources are read and while a kind, a namespace-switching page or another read is loading; the refresh button spins. Background refreshes every 10 s do not fade it."
+    },
+    {
+      "name": "cluster can't be read",
+      "shows": "The table is replaced by a centred message: a warning icon, a title, the reason (dim, selectable, centred), a copyable fix command in monospace with a copy button (tooltip \"Copy\"; copying toasts \"Copied: run it in a terminal, then Try again\"), a \"Try again\" pill button, and a folded \"kubectl's output\" expander holding all kubectl wrote (monospace, selectable; shown only when it differs from the reason). The status line says \"<context>: <title>\". The kinds: \"AWS profile <p> isn't set up\", \"AWS sign-in expired\", \"No valid AWS credentials\", \"Google Cloud sign-in expired\", \"Azure sign-in expired\", \"<program> isn't installed\" with a reason that kubectl signs in with it and it isn't on Baude's PATH, \"Signing in needs a terminal\", \"The cluster didn't accept your credentials\", \"Not allowed\", \"The cluster's certificate isn't trusted\", \"The cluster isn't running\" (a local cluster) or \"Can't reach the cluster\", \"Signing in with <program> failed\", else \"kubectl failed\" with the last line kubectl wrote. The shown table's rows are cleared. Try again reconnects from the start if the cluster never connected, else reads the page again.",
+      "copy": [
+        "kube.aws_profile_missing",
+        "kube.aws_expired",
+        "kube.aws_no_credentials",
+        "kube.gcloud_expired",
+        "kube.azure_expired",
+        "kube.not_installed",
+        "kube.not_on_path",
+        "kube.needs_terminal",
+        "kube.credentials_refused",
+        "kube.not_allowed",
+        "kube.untrusted_certificate",
+        "kube.not_running",
+        "kube.unreachable",
+        "kube.signin_failed",
+        "kube.kubectl_failed",
+        "kube.copied_try_again",
+        "kube.kubectl_output",
+        "common.copy",
+        "common.try_again"
+      ]
+    },
+    {
+      "name": "kind not served",
+      "shows": "A sidebar row is dimmed, not clickable, with the tooltip \"<context> doesn't serve <kind>\". If the page shown becomes unserved after a context switch, Pods is shown instead.",
+      "copy": [
+        "kube.not_served"
+      ]
+    },
+    {
+      "name": "no containers to show logs of",
+      "shows": "Clicking Logs on a pod with no containers shows no pane; the status line says \"<pod> has no containers to show logs of\".",
+      "copy": [
+        "kube.no_containers"
+      ]
+    },
+    {
+      "name": "logs ended",
+      "shows": "The logs' state text reads \"ended (its container stopped)\" when kubectl ends cleanly, or \"kubectl exited with <code>\" when it fails. The log stays on screen."
+    },
+    {
+      "name": "single-node cluster",
+      "shows": "No Nodes row in the sidebar and no Node column in Pods (every pod would say the same)."
+    },
+    {
+      "name": "empty table",
+      "shows": "The column headings with no rows; the status line counts \"0 <kinds>\"."
+    }
+  ],
+  "scenes": [
+    "38e-kubernetes",
+    "38e-kubernetes-logs"
+  ]
+}

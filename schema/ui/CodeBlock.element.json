@@ -1,0 +1,72 @@
+{
+  "description": "Monospace code on a raised, rounded panel, with a language tag and a copy button floating in its top-right corner. Used for fenced code in replies and messages, and everywhere a tool card shows a command, a pattern, a file's contents or a tool's output.",
+  "apps": [
+    "baude",
+    "record"
+  ],
+  "code": [
+    "widgets.py:CodeBlock",
+    "widgets.py:diff_block",
+    "widgets.py:code_spans",
+    "widgets.py:numbered_spans",
+    "widgets.py:markdown_scroller",
+    "widgets.py:CodeBlock.set_max_height"
+  ],
+  "copy": [
+    "common"
+  ],
+  "parts": [
+    {
+      "name": "panel",
+      "shows": "Filled with the raised colour (baude.raised), 6px corners (radius.code), the code at the code size (font.mono, 13.5px; 0.9 of the body) with 6px top/bottom and 8px left/right padding. Only as tall as its lines; a one-line block is one line tall. Long lines are not wrapped: the block scrolls sideways. Selectable."
+    },
+    {
+      "name": "corner",
+      "shows": "Floats over the first line at the top right: the language tag (if any; 0.8em at 50% opacity, e.g. \"python\", \"bash\", \"regex\", \"glob\", \"output\") then a small flat copy button (22px, copy icon at 75% opacity). Its background is the panel's own colour, feathered in from the left over 14px, so a long first line runs under it rather than through it.",
+      "copy": [
+        "common.copy"
+      ],
+      "actions": [
+        {
+          "by": "click copy",
+          "does": "Puts the block's whole text on the clipboard (a diff: the new text). Tooltip \"Copy\"."
+        }
+      ]
+    },
+    {
+      "name": "highlighting",
+      "shows": "Coloured as its language (a fence's tag, a tool's shell, a regex, or a file's extension when it's a file's contents), in the light or dark theme's colours, following the theme live. Only the first 20,000 characters (about 500 lines) are coloured; the rest is plain. A Read's output has each line's number dimmed and the line coloured as the file's code."
+    },
+    {
+      "name": "sub-pane height limit",
+      "shows": "A block taller than two thirds of the chat's visible height (at least 160px) stops there and scrolls inside itself (vertical scrollbar), so long output doesn't become pages of chat. The limit follows the window as it's resized."
+    },
+    {
+      "name": "diff",
+      "shows": "An edit's change: the replaced lines first, each on a red background (token diff.removed-line), then the new lines on green (diff.added-line), each line padded 8px, highlighted as the file's code; no + / − signs and no line numbers. Empty old and new shows one blank line."
+    }
+  ],
+  "states": [
+    {
+      "name": "streaming",
+      "shows": "A code block still being written grows in place; colouring catches up a few times a second."
+    },
+    {
+      "name": "wrapped",
+      "shows": "Where prose is shown as code (a page's text in Meta/Record), lines wrap at the block's width instead of scrolling sideways, and the corner is hidden until the pointer is over the block.",
+      "phone": {
+        "does": "The copy corner is always shown",
+        "why": "No hover on touch",
+        "decided": "2026-11-21"
+      }
+    }
+  ],
+  "scenes": [
+    "30-markdown-gallery",
+    "21-output-text",
+    "21b-output-long",
+    "21c-write-long",
+    "21d-command-no-description",
+    "11-permission-edit"
+  ]
+}

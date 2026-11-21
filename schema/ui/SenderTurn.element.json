@@ -1,0 +1,70 @@
+{
+  "description": "A message to the chat from someone other than you (a Bot, another chat, a subagent's answer, a host), as the chat's host records the sender: placed where your messages are, at the right, but grey, with who it's from in a small line at the top of the bubble.",
+  "apps": [
+    "baude"
+  ],
+  "opens": [
+    "A Bot, another chat or a subagent messages this chat over the mesh",
+    "A held message sent with its ↑ (HeldTurn)",
+    "Opening a chat whose host's sender store says a message is someone else's"
+  ],
+  "code": [
+    "widgets.py:SenderTurn",
+    "baude.py:BaudeWindow.sender_turn",
+    "baude.py:BaudeWindow.sender_bubble",
+    "baude.py:BaudeWindow.senders_came",
+    "baudelib/wire.py:sender_name"
+  ],
+  "copy": [
+    "senders",
+    "common",
+    "chat_turns"
+  ],
+  "parts": [
+    {
+      "name": "bubble",
+      "shows": "A sent-message bubble (right-aligned, 12px corners, attachments then markdown text), filled with the text colour at 7% (grey) instead of the accent; its text in the normal colour (not dimmed like a queued one). The hidden line the host puts at the head of the text for the agent (\"A message from …, not from your user\") is never shown; if the host says what to show of it (a held answer), that is shown instead of the full text."
+    },
+    {
+      "name": "from line",
+      "shows": "At the top of the bubble, right-aligned, wrapping: \"from <who>\" at 0.85em and 60% opacity. <who> is: \"<name>, a Bot\" (or \"a Bot, a Bot\" without a name); \"“<chat title>”\" (or \"a chat\"); \"subagent “<name>”\" (or \"a subagent\"); a host's name (or \"a host\"); another kind by its name (or \"another\"). For anything but a host, \" on <host>\" follows when the sender's host is known, e.g. \"from Ada, a Bot on lab-mac\".",
+      "copy": [
+        "common.from_who",
+        "senders.bot",
+        "senders.bot_unnamed",
+        "senders.chat",
+        "senders.chat_unnamed",
+        "senders.subagent",
+        "senders.subagent_unnamed",
+        "senders.host_unnamed",
+        "senders.another",
+        "senders.on"
+      ]
+    },
+    {
+      "name": "revert button",
+      "shows": "As a sent message's (UserTurn): fades in left of the bubble on hover.",
+      "copy": [
+        "chat_turns.revert"
+      ],
+      "phone": {
+        "does": "A long-press reveals the same controls",
+        "why": "No hover on touch; a long-press is Android's equivalent of the desktop's right-click",
+        "decided": "2026-11-21"
+      },
+      "actions": [
+        {
+          "by": "click",
+          "does": "Tentative revert of it and everything after it, but its words are NOT put in your composer; sending (even with nothing in the composer) makes the revert."
+        }
+      ]
+    }
+  ],
+  "states": [
+    {
+      "name": "sender learned late",
+      "shows": "A message first drawn as yours turns into this look in place once the host's sender store arrives and says it's someone else's."
+    }
+  ],
+  "scenes": []
+}

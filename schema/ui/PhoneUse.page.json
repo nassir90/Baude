@@ -1,0 +1,172 @@
+{
+  "description": "Phone Use: a Bot's browser opened on the phone itself. A globe button in a Bot chat's header opens a browser here (its own screen, in a process of its own) that the Bot's browser tools drive instead of the host's Emission, while you can use it too. The Browser page in the chat's pages shows that the browser is on a phone.",
+  "apps": [
+    "phone"
+  ],
+  "opens": [
+    "the globe button in a Bot chat's header bar, tooltip \"<Bot>'s browser on this phone\"; shown only while the Bot's host can carry the Bot's browser requests to a phone"
+  ],
+  "code": [
+    "PhoneBrowser.kt:PhoneBrowserButton",
+    "PhoneBrowser.kt:PhoneBrowser",
+    "BrowserActivity.kt:BrowserActivity",
+    "BrowserBars.kt:EmissionBar",
+    "BrowserBars.kt:TabStrip",
+    "BrowserBars.kt:PromptCards",
+    "BrowserPage.kt:BrowserPage",
+    "BrowserPage.kt:TypeRow"
+  ],
+  "copy": [
+    "browser",
+    "bot_browser",
+    "common",
+    "hosts"
+  ],
+  "parts": [
+    {
+      "name": "Globe button",
+      "shows": "A web-browser icon button in the chat header, for a Bot only. Tooltip \"<name>'s browser on this phone\".",
+      "text": [
+        "<name>'s browser on this phone"
+      ],
+      "actions": [
+        {
+          "by": "tap",
+          "does": "opens the Bot's browser here (shown again if open already); if another Bot's browser is open, that one closes first. The Bot's host is told its browser tools' requests come here until it is closed"
+        }
+      ]
+    },
+    {
+      "name": "Bar",
+      "shows": "At the top: back, forward, reload (a stop while a page loads), the address entry, new tab, and the Bot's name with a down arrow (the profile, shown, not changed).",
+      "copy": [
+        "browser.back",
+        "browser.forward",
+        "browser.reload",
+        "browser.address",
+        "browser.new_tab",
+        "common.stop"
+      ],
+      "actions": [
+        {
+          "by": "type an address and Go",
+          "does": "opens it, or searches for it, in the front tab"
+        },
+        {
+          "by": "tap back, forward, reload, stop, new tab",
+          "does": "does that in the page"
+        }
+      ]
+    },
+    {
+      "name": "Tab strip",
+      "shows": "Every tab as wide as the others (at least 120dp, the strip scrolls sideways beyond that), the front one raised with a close button, a progress bar along the strip's foot while a page loads.",
+      "text": [
+        "Close Tab"
+      ],
+      "actions": [
+        {
+          "by": "tap a tab",
+          "does": "brings it to the front"
+        },
+        {
+          "by": "tap close",
+          "does": "closes it; the last one closed leaves a blank tab"
+        }
+      ]
+    },
+    {
+      "name": "Page box",
+      "shows": "The page (Android's WebView, laid out at the phone's size) in a framed box; the Bot's pointer is drawn over it and the box glows in the accent colour while the Bot acts. What a page asks (alert, confirm, prompt, sign-in, files to upload) shows as cards at the top of the box with Cancel and OK; the Bot can answer them too.",
+      "copy": [
+        "bot_browser.asks_for_files",
+        "browser.sign_in",
+        "browser.sign_in_realm",
+        "browser.a_site",
+        "browser.user_name",
+        "browser.password",
+        "common.cancel",
+        "common.ok"
+      ]
+    },
+    {
+      "name": "Status line",
+      "shows": "Under the page while its host is not carrying the Bot's requests here: \"Connecting to <host>…\" at first, then the host's reason or \"Can't reach <host>\". Nothing once it is.",
+      "text": [
+        "Connecting to <host>…",
+        "Can't reach <host>"
+      ]
+    },
+    {
+      "name": "Use by hand",
+      "shows": "You can use the browser as well as the Bot; what you do (addresses, back/forward/reload, tabs, touching the page, answering a page's prompt) is told to the Bot with its next request. The Bot is also told its browser is on a phone, and after a restart by Android which pages were closed."
+    },
+    {
+      "name": "Closing",
+      "shows": "The phone's back or the notification's Close ends it; the Bot's host is told, and the Bot's browser requests go to the host's own Emission again. It keeps serving out of sight (with a notification) while the app is elsewhere. Its cookies and sign-ins are kept per Bot."
+    },
+    {
+      "name": "Browser page, on a phone",
+      "shows": "While the Bot's browser is on a phone, the Browser page of that chat (the Bot's browser page in the chat's pages) shows a status page \"On a phone\" saying the Bot's browser is on a phone now and shown there, and back here once the phone closes it; its toolbar is greyed.",
+      "copy": [
+        "bot_browser.on_phone_title",
+        "bot_browser.on_phone",
+        "bot_browser.the_bot"
+      ]
+    },
+    {
+      "name": "Browser page toolbar",
+      "shows": "The Browser page of a Bot's chat (watching the host's Emission) has a toolbar: back, forward, reload, address, new tab, \"Type into the page\" (a keyboard button, shown pressed while the row is open) and Read-only. A tab strip shows when there are several tabs.",
+      "copy": [
+        "browser.back",
+        "browser.forward",
+        "browser.reload",
+        "browser.address",
+        "browser.new_tab",
+        "bot_browser.read_only",
+        "bot_browser.close_tab"
+      ],
+      "text": [
+        "Type into the page"
+      ]
+    },
+    {
+      "name": "Type into the page row",
+      "shows": "Under the toolbar once the keyboard button is tapped: a text entry with the hint \"Type into the page\" (focused at once, the phone's keyboard up), a Backspace button and an Enter button. Greyed while Read-only.",
+      "text": [
+        "Type into the page",
+        "Backspace",
+        "Enter"
+      ],
+      "actions": [
+        {
+          "by": "type",
+          "does": "what is typed goes into the page's focused field as it is typed; a correction is sent as Backspaces then the new text; a space is sent as the Space key"
+        },
+        {
+          "by": "tap Send on the keyboard or the Enter button",
+          "does": "presses Enter in the page and clears the box"
+        },
+        {
+          "by": "tap the Backspace button",
+          "does": "presses Backspace in the page"
+        },
+        {
+          "by": "tap the keyboard button again",
+          "does": "closes the row"
+        }
+      ]
+    }
+  ],
+  "states": [
+    {
+      "name": "host not carrying requests",
+      "shows": "Status line with the host's reason"
+    },
+    {
+      "name": "another phone",
+      "shows": "The status line says another phone shows this Bot's browser now"
+    }
+  ],
+  "scenes": []
+}

@@ -1,0 +1,58 @@
+{
+  "description": "Two or more tool calls in a row folded into one quiet line, \"› 5 tool calls\", with a spinner after it while one runs. Opened, the calls are listed under it, a ToolCall card each, their boxes starting where the chat's text starts (no indent).",
+  "apps": [
+    "baude"
+  ],
+  "opens": [
+    "A second tool call arriving right after another (nothing but tool calls between them)"
+  ],
+  "code": [
+    "baude.py:ToolGroup",
+    "baude.py:BaudeWindow.add_activity",
+    "widgets.py:Disclosure"
+  ],
+  "parts": [
+    {
+      "name": "line",
+      "shows": "A 16px disclosure arrow (› pointing right when folded, ⌄ down when open, at 75% opacity) then the label at 80% opacity: \"N tool calls\", with \", F failed\" when any failed and \", I interrupted\" when any were interrupted (e.g. \"6 tool calls, 1 failed\"). 2px above and below. Then, while any call in it runs (or runs in the background), a 16px spinner; nothing when all are done (a tick wouldn't say anything).",
+      "text": [
+        "tool calls",
+        "failed",
+        "interrupted"
+      ],
+      "actions": [
+        {
+          "by": "click the arrow or label",
+          "does": "Slides the list of calls open (120ms) or closed. The line stays put on screen; what's under it moves. Pointer: a hand."
+        }
+      ]
+    },
+    {
+      "name": "calls",
+      "shows": "Opened: each call's card (ToolCall), one under another 4px apart, 4px under the line, full width, left edge where the chat's text starts. Each card is a single line until its own toggles are opened."
+    }
+  ],
+  "states": [
+    {
+      "name": "folded",
+      "shows": "Just the line. This is how a finished run of calls normally sits in the chat."
+    },
+    {
+      "name": "running",
+      "shows": "Spinner after the label. A call waiting for your permission doesn't count as running."
+    },
+    {
+      "name": "opens by itself",
+      "shows": "When any call in it has images to show, or is asking for permission, the group opens so you see it."
+    },
+    {
+      "name": "how runs form",
+      "shows": "Only consecutive tool calls group; Claude's text or thinking between calls ends the run (the next calls start a new group, or stay a lone card). A lone call is a bare card, not a group. Mesh calls (MeshCard) never join a group and split a run."
+    }
+  ],
+  "scenes": [
+    "28-tool-group",
+    "29-tool-group-open",
+    "24-output-collapsed"
+  ]
+}

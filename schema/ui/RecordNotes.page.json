@@ -1,0 +1,221 @@
+{
+  "description": "A page of a notebook's notes, in a tab of its own: a title and, under it, the page's Markdown text drawn as it reads, edited in place. Pages link to each other, name things with @, and take changes Meta proposes. Every notebook has a page called Home that cannot be renamed or deleted.",
+  "apps": [
+    "record"
+  ],
+  "opens": [
+    "click a page in the Pages list",
+    "[[link]] followed in a page",
+    "New page (+ in the list, New Page… in its menu)",
+    "an @page from the palette, @ or ⌘K",
+    "back/forward history",
+    "Meta's action card for a page"
+  ],
+  "code": [
+    "record.py:DiaryEditor",
+    "record.py:NotesView",
+    "record.py:PageHistory",
+    "record.py:EditControls",
+    "codeview.py:FindInText"
+  ],
+  "copy": [
+    "find",
+    "edit_review",
+    "code_view",
+    "meta"
+  ],
+  "parts": [
+    {
+      "name": "find bar",
+      "shows": "Hidden normally; when open it sits over the top of the page, above the title: a search box (placeholder \"Find\"), a count \"3 of 12\" (dimmed, small) at its right, an up and a down arrow button (tooltips \"Previous match (Shift+Enter)\" and \"Next match (Enter)\"), and a close button. Every match is shaded, the current one more. The title is searched too. Finds what is seen as it reads (not the hidden Markdown marks).",
+      "copy": [
+        "code_view.find",
+        "find.previous",
+        "find.next"
+      ],
+      "actions": [
+        {
+          "by": "key Ctrl+F (Cmd+F on macOS)",
+          "does": "Opens the bar with the selected text (one line) in it, and focuses it."
+        },
+        {
+          "by": "key Enter / Ctrl+G",
+          "does": "Next match."
+        },
+        {
+          "by": "key Shift+Enter / Ctrl+Shift+G",
+          "does": "Previous match."
+        },
+        {
+          "by": "key Esc",
+          "does": "Closes the bar; the caret stays where it is."
+        },
+        {
+          "by": "click in the text",
+          "does": "Closes the bar and the caret goes where clicked."
+        }
+      ]
+    },
+    {
+      "name": "title",
+      "shows": "A frameless text entry at the top, large, bold, in the page's own short name (Plans for Work:Plans; the full name is its tooltip when it has a parent). Home's is not editable. As you type, the Pages list and the tab show the typed name at once; it is kept when you leave the box or press Enter.",
+      "actions": [
+        {
+          "by": "key Enter",
+          "does": "Renames the page (with its sub-pages and every [[link]] to any of them, their tabs following) and moves into the text, caret at the start. A name another page has already stays in the box and a toast says \"There's a page called {name} already\"."
+        },
+        {
+          "by": "key Esc",
+          "does": "Lets go of what was typed (own name back) and moves to the text, caret where it was."
+        },
+        {
+          "by": "key Up on the text's first line",
+          "does": "Up into the title, the caret about straight above where it was."
+        },
+        {
+          "by": "leave the box",
+          "does": "Renames the page."
+        }
+      ]
+    },
+    {
+      "name": "text",
+      "shows": "The page's Markdown, drawn as it reads in a column 820 wide (or the whole pane with Full-width text), centred. The Markdown marks are hidden except on the lines the caret or selection is on (Settings → Markup visibility: that, never, or always but a link's). Left margin 22. Drawn: # to ###### headings (largest first, bold and heavier; the fourth the text's size, the fifth and sixth smaller; the third and deeper in grey), **bold** or __bold__, *italic* or _italic_, ~~struck~~, ==marked== (yellow background), `code` (monospace, grey background), > quotes (grey italic, indented), --- rules (a line is drawn), lists with - * + drawn as • (solid, hollow ◦ a level in, then solid) and numbers 1. in a grey bold, a task's [ ] and [x] drawn as boxes ☐ and ☑, a ``` block as a card as in Baude's chat, [text](url) and bare web addresses as underlined links in the accent colour, [[Page]] and [[Page|label]] as links showing the name or label (grey italic when that page has nothing written yet), @name as a green bold chip with the logo of what it is, -- typed with space around it becoming an em dash (not in code). A passage Meta changed is tinted green until kept. Misspellings get a red squiggle and grammar errors a blue one (Settings → Check Spelling).",
+      "actions": [
+        {
+          "by": "click a [[link]]",
+          "does": "Opens that page in a tab, made if there is none yet; the caret and selection stay where they were. With Alt or Shift held, or a double click, it is the text's own (caret, selection)."
+        },
+        {
+          "by": "click an @name",
+          "does": "Opens it where it is: a notebook or page opens in Record; a chat on a Read tab; a file on a Code tab; a branch on Git; a Kubernetes object or table in their views; a pull request or issue on its web page; a name that has nowhere to open shows its card (what it is) in a toast. Not found: toast \"@{name}: not found in {folders}\" or \"@{name}: open a chat to look it up in its folder\"."
+        },
+        {
+          "by": "click a web link",
+          "does": "Opens it in the system's browser. A citation link to a passage of a chat (made by Copy citation link on a Read tab) opens that chat on a Read tab at the passage, shaded; toast \"That chat isn't on this computer\" if its transcript is not there."
+        },
+        {
+          "by": "hover a link or an @name",
+          "does": "Pointer becomes a hand. Over an @name, after a short rest, a card (RecordNameCard)."
+        },
+        {
+          "by": "select text",
+          "does": "After a short pause the selected passage (more than 2 characters, what is proposed in it left out) is quoted to Meta with where it is (RecordMeta)."
+        },
+        {
+          "by": "key Enter in a list",
+          "does": "Next item (a number one more, a box not ticked); Enter on an empty item ends the list. Shift+Enter a line of the item's text under it."
+        },
+        {
+          "by": "key Tab / Shift+Tab in a list item",
+          "does": "Indent or outdent the item (a level is two spaces)."
+        },
+        {
+          "by": "key Backspace right after a bullet",
+          "does": "Outdent one level, or at the left remove the bullet and make the line text."
+        },
+        {
+          "by": "key Alt+Up / Alt+Down on a heading or list item",
+          "does": "Moves it up or down past its sibling, all under it going with it (Org-mode style)."
+        },
+        {
+          "by": "key Alt+Left / Alt+Right on a heading",
+          "does": "Alt+Left moves that heading one level toward #, Alt+Right one deeper (one mark added), with the lines selected every heading in them; Shift too: its children's levels go with it. Nothing happens past levels 1 to 6."
+        },
+        {
+          "by": "select text, type * ` or /",
+          "does": "Wraps the selection in bold, code or italic marks."
+        },
+        {
+          "by": "key Ctrl+Z, Ctrl+Shift+Z / Ctrl+Y (Cmd on macOS)",
+          "does": "Undo and redo, kept per page (up to 1000 steps; a run of letters is one step to a word; what Meta proposes is in none of it)."
+        },
+        {
+          "by": "paste a web address over a selection",
+          "does": "The selection becomes a link [selection](address)."
+        },
+        {
+          "by": "key Backspace or Delete at a link's edge",
+          "does": "A link's hidden marks are never broken into: Backspace after it takes its name's last letter, Delete before it its first; with none left the link goes. A pull request's or issue's #12 goes whole."
+        },
+        {
+          "by": "key Ctrl+Plus / Ctrl+Minus / Ctrl+0 (Cmd on macOS)",
+          "does": "Zooms the notes' text (and the chat read and Meta's conversation with it); 0 goes back to Settings' Global Scale."
+        }
+      ]
+    },
+    {
+      "name": "@ list",
+      "shows": "Typing @ (after a space or at a line start) opens a list under the caret, searched as you type (what is typed after the @, spaces and all, each word found in any order, best match first; @{ allows spaces and closing } ). Each row: the logo of its kind, the name, and under it \"{kind} · {summary}\" (hovering that shows when/how long ago). It lists the notebooks, their pages, every chat by its title, and what the folder of the chat being read has (files, branches, Kubernetes objects, database tables, pull requests and issues). The list's foot says \"{n} found\", \"Nothing found\", or \"Nothing found · open a chat for its folder's names\". The typed @word is coloured as an @name; the folder's names come in a part at a time while it is catalogued.",
+      "copy": [
+        "meta.found",
+        "meta.nothing_found"
+      ],
+      "actions": [
+        {
+          "by": "key Up / Down",
+          "does": "Moves in the list."
+        },
+        {
+          "by": "key Enter / Tab",
+          "does": "Takes the picked row: the @name is written in (a name with spaces as @{name})."
+        },
+        {
+          "by": "click a row",
+          "does": "Same."
+        },
+        {
+          "by": "key Esc",
+          "does": "Leaves it, what was typed stays."
+        },
+        {
+          "by": "key Shift+arrow",
+          "does": "Closes it and selects text."
+        }
+      ]
+    },
+    {
+      "name": "# list",
+      "shows": "Typing # after a space, bracket or at a line start (not a line's first # with nothing after it, a heading's; not in code) lists GitHub's pull requests and issues of the chat read's folder, as long as what is typed still asks for them (a number, or words). Same layout as the @ list. Enter when nothing was picked is a new line.",
+      "actions": [
+        {
+          "by": "key Enter / Tab",
+          "does": "Writes the picked one in as an @ reference."
+        }
+      ]
+    },
+    {
+      "name": "+ list",
+      "shows": "Typing + (after a space or line start) lists this page's sub-pages first, then the notebook's other pages, each row \"Sub-page\" or \"Page\" with the first non-empty line of the page as its summary (or \"nothing in it yet\"), last a row \"New sub-page\" with \"of {page}\" when no page has that name yet. The foot says \"{n} page(s)\" or \"No page named that yet\". Enter with nothing picked is a new line. Typing +Ideas then a space or Enter turns it into a link [[+Ideas]] to this page's sub-page Ideas (made empty, grey in the Pages list until written in).",
+      "actions": [
+        {
+          "by": "key Enter / Tab / click a row",
+          "does": "Writes the link, as [[page]] (or [[+Name]] for a sub-page)."
+        }
+      ]
+    },
+    {
+      "name": "proposed change",
+      "shows": "See RecordProposal."
+    }
+  ],
+  "states": [
+    {
+      "name": "Home",
+      "shows": "Title cannot be edited. A notebook made by Meta or by hand starts with it. The heading \"To learn\" on it holds words added from Meta's \"Not in your notes\" chips."
+    },
+    {
+      "name": "new page",
+      "shows": "Empty text and the title ready to type; the page is made but listed grey in Pages and not kept as a file while empty (an empty page that nothing links to goes when its tab closes)."
+    },
+    {
+      "name": "page changed elsewhere",
+      "shows": "Another Record or Meta changed it: shown again with the caret kept and nothing to undo."
+    },
+    {
+      "name": "page deleted by Meta",
+      "shows": "Listed struck through in the Pages list; clicking it opens a read-only tab titled \"{page} (deleted)\" (trash icon, tooltip \"{page}: deleted by Meta; undo brings it back\") with its text as it was, struck through on red, until the change is kept or undone."
+    }
+  ],
+  "scenes": []
+}

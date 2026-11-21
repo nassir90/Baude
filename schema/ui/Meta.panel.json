@@ -1,0 +1,256 @@
+{
+  "description": "Meta, the helper: a conversation with an assistant that operates the app (reads its state, changes settings, organises chats or pages), in the first page of the right-hand side panel. One conversation per app (kept on disk, 400 messages and 400 actions), shared by every window; each window has its own Claude session behind it. Every change it makes is recorded as an action that can be undone and redone from its card.",
+  "apps": ["baude", "record"],
+  "opens": [
+    "Ctrl+M (Control on macOS too) from anywhere in the window: shows the side panel (Record: right bar) on Meta with the focus in Meta's box; pressed again while Meta is shown it closes the panel and puts the focus back where it was",
+    "the Meta tab (icon, name) in the side panel's switcher",
+    "a desktop notification for a reply or question while Meta is out of sight: clicking it brings the window up with Meta shown",
+    "Baude: Meta is the first page of the side panel; it stays when a Bot chat adds Memory, Browser and Routines pages, and the panel falls back to Meta when a chat that is not a Bot is opened while one of those is shown"
+  ],
+  "code": [
+    "meta.py:MetaChat",
+    "meta.py:MetaChat.__init__",
+    "meta.py:MetaChat._bubble",
+    "meta.py:MetaChat.call_widget",
+    "meta.py:MetaChat.tool_card",
+    "meta.py:MetaChat.change_box",
+    "meta.py:MetaChat.setting_box",
+    "meta.py:MetaChat.shown_widget",
+    "meta.py:MetaChat.form_card",
+    "meta.py:MetaChat._ask_card",
+    "meta.py:MetaChat._changes_bar",
+    "meta.py:MetaChat.submit",
+    "meta.py:MetaChat.model_changed",
+    "meta.py:Agent",
+    "meta.py:Form",
+    "meta.py:RefCompleter",
+    "meta.py:rows_group",
+    "baude.py:BaudeMeta",
+    "baude.py:SidePanel.__init__",
+    "baude.py:BaudeWindow.show_meta",
+    "baude.py:BaudeWindow.toggle_meta",
+    "record.py:RecordChat",
+    "record.py:Window.show_meta",
+    "widgets.py:Composer",
+    "widgets.py:ContextUsage",
+    "widgets.py:Exhausted",
+    "widgets.py:UserTurn",
+    "widgets.py:WorkingDots"
+  ],
+  "copy": ["meta", "meta_actions", "meta_asks", "meta_app", "meta_chats", "meta_settings", "context_usage", "composer", "compaction", "common", "model_providers", "agent_proxy"],
+  "parts": [
+    {
+      "name": "conversation",
+      "shows": "A scrolling column (12 px margins, 10 px between items) that opens at the bottom and scrolls to the newest item after every render. Text is selectable across messages (one selection spanning yours and Meta's replies). Messages are listed oldest first; yours are right-aligned bubbles, Meta's replies are not in a bubble and are drawn in order of what happened (text parts and tool calls interleaved). While a turn runs, its reply is drawn live and grows as text streams in; the working dots in the foot say it is busy. Empty conversation: nothing is drawn (no placeholder).",
+      "actions": [
+        {"by": "key Ctrl+F (Cmd+F)", "does": "opens a find bar over the conversation; matches are marked under any pinned form"},
+        {"by": "drag", "does": "selects text across messages"},
+        {"by": "scroll", "does": "scrolls; the scroll position is held while a reply is read back"}
+      ],
+      "parts": [
+        {
+          "name": "your message",
+          "shows": "A bubble at the right (28 px left margin so it never reaches the left edge). If the message quoted something, the quote sits at the top of the bubble in the quote style (collapsed to one line of at most 400 characters, ellipsis). Your text is selectable; an @reference in it is drawn as the item's icon (or an @ sign) followed by its name, bold, in green (#2f8f72) on a faint green patch; a pull request or issue is drawn by its number alone.",
+          "actions": [
+            {"by": "click an @reference", "does": "opens it as it is opened on a page (Record: follows the link; Baude: opens the chat or file)"},
+            {"by": "hover the row", "does": "a small round revert button (circular arrows) fades in just outside the bubble, level with its last line, and fades out when the pointer leaves; hover-only on desktop, so the phone needs another way to reach it (long-press or a message menu)"},
+            {"by": "click revert", "does": "tentative revert: this message and everything after it disappear from the conversation, its text goes back into the box (and in Record the quote and selection come back); Esc puts everything back as it was (with the draft that was in the box); sending the box commits the revert (those messages are removed for good, the Claude sessions are stopped and the next message starts a new one told only what is left). The actions the removed replies took stay (kept or undone as any are). Not available while any Meta in the app is answering"}
+          ],
+          "copy": ["chat_turns.revert"]
+        },
+        {
+          "name": "reply text",
+          "shows": "Meta's words as Markdown without a bubble (Baude: plain Markdown view; Record: Markdown with page and notebook names linked, and Record's trailing 'Unknown:' line removed from the text). Before the text, any notes about what it was told it cannot do are shown as small dim lines.",
+          "actions": [
+            {"by": "click a link", "does": "Baude: as in the chat; Record: follows the page/notebook name as in the notes"}
+          ]
+        },
+        {
+          "name": "tool card",
+          "shows": "A card with the tool-card outline for each call that is not shown in a more specific way. Top line: the tool name in bold (Claude Code's own tools as they are: Read, Grep, Glob, Bash, Edit, Write, WebFetch, WebSearch; Meta's tools in words, first letter capital, underscores as spaces: 'Move chats', 'Set setting'; a call with no name: 'Changes'), a summary on the same line (file name for Read/Edit/Write, the pattern for Grep/Glob, the command's first line for Bash, the URL, the query, the first line of Python for run_python, 'setting → value' for a setting change, the 'what' and items for show, otherwise the call's argument values joined with ' · ', 200 characters at most), then toggles, then a status. Toggles open under the line: 'Input' (the call's arguments as JSON; for run_python it is labelled 'Code' and shows the Python) and 'Output' (the result; labelled 'Error' when it failed), each in a code block built when first opened. Status: spinner while it runs, a check or cross when it has ended. A failed call's card is red. A call stopped part way is red and says 'interrupted' (or '<summary> · interrupted'). An edit's before/after hunks (Record) are drawn under the line instead of Input.",
+          "copy": ["meta.tool_changes", "meta.input", "meta.output", "meta.error", "meta.code", "meta.interrupted", "meta.call_interrupted"],
+          "actions": [
+            {"by": "click Input / Output toggle", "does": "expands or collapses the arguments or result"},
+            {"by": "hover (card of a call that changed things)", "does": "lights what the call changed in the left bar (sidebar rows or pages) brighter while the pointer is over the card (hover-only; the phone could light them while the card is pressed)"}
+          ],
+          "parts": [
+            {
+              "name": "batch controls",
+              "shows": "At the end of the card's line for a call that changed things: a Keep button (tick icon, tooltip 'Keep'), shown while any of the batch is not yet kept, and an Undo button (undo arrow, tooltip 'Undo') while the batch is done; once undone it shows a Redo button (redo arrow, tooltip 'Redo') instead. The card's tooltip lists the action labels. All actions of one call are one batch, undone and redone together, never singly. Once undone the card's summary is dimmed and reads '<action> · undone'.",
+              "copy": ["meta.keep", "common.undo", "common.redo", "meta_actions.undone"],
+              "actions": [
+                {"by": "click Keep", "does": "accepts the change: its highlights in the left bar go away (undo stays available)"},
+                {"by": "click Undo", "does": "takes back every action of the call, last first; Meta is told with its next message ('The user undid your action ...'); what cannot be undone any more is left as it is and a toast says so: 'Couldn't undo <what>: <why>'"},
+                {"by": "click Redo", "does": "does the batch again in its original order; a failure toasts 'Couldn't redo <action>: <why>'"}
+              ]
+            }
+          ]
+        },
+        {
+          "name": "change box",
+          "shows": "Replaces the tool card for a call that changed chats or pages. An outlined box with one line: what was done (the action labels joined with '; ', e.g. 'Moved 3 chats to group Work', 'Archived “x”', 'Renamed “a” to “b”', 'Made group X', 'Deleted 2 chats') and the batch controls at its end; dimmed and '<action> · undone' once undone. Under it each chat or page it changed as a flat button: its name (a chat's title; a page's name) highlighted as the left bar highlights it (green added, red removed and struck through, blue moved, yellow archived, purple edited, accent colour 'highlighted'), followed by an optional small note ('deleted', 'renamed', '→ Work', 'archived', 'back'). Highlights are only drawn while the action is done and not kept. Record: a page's edit hunks are drawn under the page's line (what it replaces on red, what it puts in on green).",
+          "copy": ["meta_actions.setting_changed", "meta_actions.renamed", "meta_actions.renamed_note", "meta_chats.moved", "meta_chats.made_group", "meta_chats.renamed_group", "meta_chats.deleted_group", "meta_chats.listed", "meta_chats.listed_every", "meta_chats.archived", "meta_chats.unarchived", "meta_app.deleted", "meta_actions.highlighted", "meta_actions.by_meta", "meta_actions.by_meta_note"],
+          "actions": [
+            {"by": "click an item", "does": "opens it (Baude: the chat, as the sidebar opens one; a deleted chat says by toast 'It's in Baude's trash: undo brings it back'; Record: the page or its notebook). Tooltip 'Open <name>'"},
+            {"by": "hover the box", "does": "lights its items in the left bar"}
+          ]
+        },
+        {
+          "name": "setting box",
+          "shows": "For a setting Meta changed (set_setting) and for 'show setting:<name>': the setting's own row from Settings, drawn in Meta's look (outlined, transparent) so it can be adjusted right there. When Meta changed it, the row has a tooltip 'Meta: <Setting>: <before> → <after>', a subtitle 'Was <value>' (or 'Set to <value>, undone' once undone) if the row has no subtitle of its own, and the batch controls (Keep/Undo/Redo) as a suffix. If you adjust the row yourself, Meta is told with your next message ('The user set <name> to <value> with the row under your reply').",
+          "copy": ["meta_actions.was", "meta_actions.set_undone", "meta_actions.by_meta"]
+        },
+        {
+          "name": "shown rows (show chats / pages)",
+          "shows": "A list group of rows to click, one per chat or page: icon prefix (Baude chat: Claude icon; Record page: document icon, Record chat: Claude icon), title, a subtitle (Baude chat: folder · time ago · 'group <name>'; Record chat: folder (or 'no folder') · time ago; Record page: notebook, plus the full page path for a sub-page), a › at the end. Twelve rows at most; beyond that a 'Show N more' row that appends the rest when pressed. An unavailable item shows '(<error>)' in a dim caption.",
+          "copy": ["meta.show_more"],
+          "actions": [
+            {"by": "click a row", "does": "opens that chat or page"}
+          ]
+        },
+        {
+          "name": "shown changelog",
+          "shows": "The changelog group (last 5 entries, as in the Changelog dialog) in Meta's look.",
+          "copy": ["changelog"]
+        },
+        {
+          "name": "shown button",
+          "shows": "A single left-aligned button for something Meta will not do itself because it cannot be undone. Baude: 'Open <host name>' (suggested style) which picks that host in the sidebar's New session host picker; or 'Move “<chat title>” to Trash…' (destructive style) which starts the chat's trash flow with its confirmation. Record: Delete notebook (asks first) and open-host buttons.",
+          "copy": ["meta.open_item", "trash.move_title"],
+          "actions": [
+            {"by": "click", "does": "does it (the trash flow asks first, a host button opens the host: its chats are listed and New session is on it)"}
+          ]
+        },
+        {
+          "name": "form card",
+          "shows": "A form Meta brings up (open_form), filled by it with what it knows (fill_form), submitted only by you. A card with: the form's heading (bold), an optional dim caption body, the form's fields (the same fields as the app's dialog: Baude has 'add_host' (Add Host), 'new_group' (new group of chats) and 'spawn_agent' (start an agent on a host: host, what it offers to run, folder, group and prompt); Record has 'new_page' (name, 'Under' a drop-down of the notebook's pages with '(the top)', and text), only while a notebook is open), a red caption with what is wrong with the fields (shown once something is filled), a dim caption after it is done ('Done: <what was done>' or 'Cancelled'), and at the end right-aligned buttons Cancel and the form's own verb (Add, Create, Start …; suggested style; disabled while something is wrong). Once submitted or cancelled the fields and buttons are disabled/hidden and the card stays in place. A form that cannot be made says '(The <form> form can't be had now: <why>)' in a dim caption. Filling by Meta fills the fields live; a value that does not match a drop-down choice is kept as it was.",
+          "copy": ["meta.form_done", "meta.cancelled", "meta.submit", "meta.form_unavailable", "common.cancel", "common.add", "meta_app.its_name"],
+          "actions": [
+            {"by": "click Cancel", "does": "marks the form cancelled; Meta is told 'The user cancelled the form'"},
+            {"by": "click the verb button", "does": "checks and submits; on a problem the red caption says it; on success the card says 'Done: ...' and Meta is told what was done"},
+            {"by": "scroll past the form", "does": "an unsubmitted form whose place scrolls above the top of the conversation is pinned: it hovers 8 px under the top of the pane until its place is back in view; a gap its height stays where it was"},
+            {"by": "right-click the form", "does": "a one-item popover: 'Unpin' while pinned (tooltip 'Right-click: Unpin'), 'Pin' to pin it again (tooltip 'Right-click: Pin'); desktop-only as a right-click, the phone needs a long-press or a menu"}
+          ]
+        },
+        {
+          "name": "permission card",
+          "shows": "At the end of the conversation, an asking-style card (the same look as a tool card waiting for you in Baude's chat) with the question text, optionally a monospace code block (the command, or the file's new content / the - and + lines of an edit, up to 600 characters), and right-aligned buttons Deny and the answer (Allow, Remove, Add, Copy, Build; suggested style). Asked for: running a command ('Meta would like to run this (<why>):' / 'Meta would like to run this:'), 'edit <path>:', 'write <path>:', 'fetch <url>', 'search the web for “<query>”', 'read / search in / look for files in <path>' (a read outside its folders), any other tool, removing Ollama models, adding a model server (with the key variable if any), copying a model from another host over the mesh (size, host, whether it replaces one), building apple-claude. If the model was not started in Auto mode the question is prefixed with the reason ('<note>, so each command is asked. ...'). The question also goes out as a desktop notification if Meta is out of sight. Stopping the turn (or a 600 s wait with no answer) counts as Deny.",
+          "copy": ["meta_asks.run", "meta_asks.run_why", "meta_asks.edit", "meta_asks.write", "meta_asks.fetch", "meta_asks.search_web", "meta_asks.read", "meta_asks.grep", "meta_asks.glob", "meta_asks.other", "meta_asks.each_asked", "meta_asks.remove_models", "meta_asks.add_server", "meta_asks.add_server_key", "meta_asks.copy_ollama", "meta_asks.copy_ollama_replacing", "meta_asks.copy_mlx", "meta_asks.build_apple", "meta_asks.build", "common.allow", "common.deny", "common.remove", "common.add", "common.copy", "meta_settings.asks_each"],
+          "actions": [
+            {"by": "click Deny / Allow", "does": "answers the question; the card goes away and the turn continues"}
+          ]
+        },
+        {
+          "name": "compaction mark",
+          "shows": "Where Claude Code compacted the conversation inside a reply: the same marker as in a Baude chat ('Compacting the conversation' while it runs, then 'Conversation compacted automatically · N tokens of context → M · Ns'; 'Compaction failed: <error>' or 'Compaction didn't finish'), with a summary of the earlier conversation that can be opened.",
+          "copy": ["compaction.running", "compaction.compacted_auto", "compaction.failed", "compaction.unfinished", "compaction.summary"]
+        },
+        {
+          "name": "error reply",
+          "shows": "A reply that ended in an error: the tools it had run before the error are drawn as above (their actions can still be undone) and the error text is drawn in red under them. Errors seen: 'Couldn't run <model> (<why>).' when the model's program cannot start, 'claude reported an error', 'Run `claude` in a terminal and /login, then ask again.', '<program> exited with <code>', 'apple-claude isn't built yet: swift build -c release, in apple-claude/', '<program>-claude isn't here', and the host/pi/provider notes of model_providers and agent_proxy (for example 'couldn't reach the host that runs this model (<host>): <why>').",
+          "copy": ["meta.couldnt_run", "meta.claude_error", "meta.login_hint", "meta.exited", "meta.apple_not_built", "meta.runner_missing", "meta.ended_error", "model_providers", "agent_proxy"]
+        }
+      ]
+    },
+    {
+      "name": "over the box: app bars",
+      "shows": "Stacked above the box, only when they have something to say. 1) The changes bar: a faint bar reading '<n> change(s) in the left bar' (singular 'change') with flat buttons Keep and Undo at its end; shown while any action that marked rows in the left bar is not yet kept. 2) Record only, above that: the pending-edits bar: '<n> edit(s) pending' with round flat Previous edit (up arrow) and Next edit (down arrow) buttons.",
+      "copy": ["meta.changes", "meta.keep", "common.undo"],
+      "text": ["edit pending", "edits pending", "Previous edit", "Next edit"],
+      "actions": [
+        {"by": "click Keep", "does": "keeps every unkept change at once (marks in the left bar go)"},
+        {"by": "click Undo", "does": "undoes every unkept change at once (told to Meta with its next message)"},
+        {"by": "click Previous / Next edit (Record)", "does": "goes to the edit before/after the one last gone to (wrapping), opens its page, scrolls to it and puts the caret in it"}
+      ]
+    },
+    {
+      "name": "box",
+      "shows": "The composer, the same widget as Baude's and Record's own: a card with a Markdown text area (at least two lines tall, scrolls past nine) and a round send button in the bottom right; no attach button. Markdown is shown as you type; a list continues on Enter. Record only: above the text, inside the card, a quote chip (up to 3 lines, ellipsis) with an x button (tooltip 'Drop the passage') when a passage of a chat read, or a selection on a page, is quoted; for a selection the chip starts with '<page> · '. With a quote and no text, sending asks 'What does this mean?'.",
+      "copy": ["composer.send", "composer.stop", "meta.send_tip"],
+      "text": ["Drop the passage", "What does this mean?"],
+      "actions": [
+        {"by": "key Ctrl+Enter (Cmd+Enter)", "does": "sends"},
+        {"by": "key Enter", "does": "a new line (the next list item in a list); Shift+Enter a plain line break"},
+        {"by": "key Tab / Alt+Up / Alt+Down", "does": "indent a list item, move it up or down"},
+        {"by": "typing * ` or / with a selection", "does": "wraps the selection in bold, code or italic"},
+        {"by": "key Esc", "does": "stops the reply while one is coming; with a revert pending, cancels the revert"},
+        {"by": "type @", "does": "opens the @ list (see 'reference list')"},
+        {"by": "type 'clear' or '/clear' and send", "does": "starts a new conversation (clears messages and stops the session) instead of sending; works even when the context is exhausted"},
+        {"by": "click send", "does": "sends; while a reply is coming the button is a red stop button (tooltip 'Stop (Esc)') and stops the turn"}
+      ],
+      "states": [
+        {"name": "send tooltip", "shows": "'Ask Meta (<model>[, <effort>][, runs commands][, code mode]) (Ctrl+Enter)', then 'New line: Enter', '@: a chat, a file…', 'clear or /clear: a new conversation'. It names the model that the next message will use."},
+        {"name": "context exhausted / unavailable", "shows": "A dim label over the box ('Context Exhausted', or 'This model is unavailable' when Meta's model has left the mesh, or 'Window too small for Meta: pick a larger model'), the send button is off (the text box stays editable; typing clear still works). Unavailable is re-checked every 5 seconds and clears when the model is back."},
+        {"name": "busy", "shows": "Send button red, Stop; working dots in the foot."}
+      ]
+    },
+    {
+      "name": "reference list (@)",
+      "shows": "Typing @ at the start of a word (or after ( [ { quote) opens a pop-up list above the box listing what the app can reference, filtering as you type (spaces allowed in the search): each row has an icon, a name and 'kind · summary' (Baude: every host's chats by title, then the names in the open chat's folder, current host first; Record: notebooks and pages, the read chat's folder names, chats, with notes first). Header note '<n> found' or 'Nothing found'; a busy catalogue says it is still coming in. Picking inserts @name (or @{a name with spaces}) plus a space; names the app knows are drawn green in the box as they are typed.",
+      "copy": ["meta.found", "meta.nothing_found"],
+      "actions": [
+        {"by": "key Up / Down", "does": "moves in the list"},
+        {"by": "key Enter / Tab", "does": "takes the picked name"},
+        {"by": "key Esc", "does": "leaves the list"},
+        {"by": "key Ctrl+Enter", "does": "closes the list and sends"}
+      ]
+    },
+    {
+      "name": "foot",
+      "shows": "A row under the box: at the left a flat 'Clear' button, a flat 'Copy' button, and the working dots (•, ••, ••• cycling, only while a turn runs, tooltip 'Working'); at the right a context meter: the word 'context' and a small bar with text like '24k / 200k' inside, amber past 60%, red past 85%. Before a session has said what it has used the bar says '— / <window>'; its tooltip then gives the model's window; afterwards 'Context window usage: <n>%' plus a line per category with its tokens.",
+      "copy": ["common.clear", "common.copy", "meta.clear_tip", "meta.copy_tip", "meta.copied", "context_usage.tooltip", "context_usage.label", "context_usage.usage_percent", "context_usage.window_known", "common.working"],
+      "actions": [
+        {"by": "click Clear", "does": "clears the whole conversation (and stops the Claude session; any pending revert is cancelled first); tooltip 'Clear the conversation (or ask clear, /clear)'"},
+        {"by": "click Copy", "does": "puts the conversation on the clipboard as text for pasting into an issue, with a header block (App, Model with its value, Next message's model if another was picked since, Runs on, Effort, Code mode, Runs commands, mode, Context, Tools, copied-at time) and each message and tool call; toast 'Conversation copied'. Tooltip: 'Copy the conversation, with its model, tools and context, to paste into an issue'"}
+      ],
+      "states": [
+        {"name": "context unknown for the model", "shows": "'context: <used>' with no bar when the model reports usage without a limit; 'context —' when not even that is known"}
+      ]
+    },
+    {
+      "name": "what Meta can open and do",
+      "shows": "Not drawn on its own; this is what its replies can bring up. Tools shared by both apps: app_index (opens a part of the app's index: settings, runtime, changelog, buttons, forms, plus the app's own parts), set_setting, show (a setting's row, chats, pages, the changelog, or a button), read_chat, rename_chat, undo, redo, open_form, fill_form; model setup tools: local_models, check_models (loads Ollama models one at a time), prune_models (asks first), add_mlx_model, add_endpoint (asks first), model_files, fetch_model (asks first), build_apple_adapter (asks first). Claude Code's own: Read, Grep, Glob always; Bash, Edit, Write, WebFetch, WebSearch only on Claude's models with Run commands on (in Claude Code's Auto mode; anything it holds back is asked as a permission card). Code mode replaces the app's tools with one run_python tool (up to 10 lines of Python calling the app's tools; the model-setup tools stay separate). Baude's own tools: highlight_chats, move_chats, make_group, rename_group, delete_group, show_groups (which groups the left bar lists), archive_chats, unarchive_chats, delete_chats (this machine's chats only, to Baude's trash, not the open chat nor ones used in the last 10 minutes; a host's session or a Claude Desktop chat gets a Move to Trash button instead). Record's own: propose_edit, list_edits, revise_edit, withdraw_edit, add_page, delete_page, move_pages, add_notebook, edit_page, highlight_pages. Baude settings it can change: group_by (folder or date) plus the shared ones; Record's: markup visibility and backup_all plus the shared ones. The shared settings Meta can read and change: accent colour, code font (takes effect from the next start), text scale, icon scale, global scale, full-width text, auto update, Meta's model (Intelligence), Effort. Run commands and Code mode are only shown, never changed by Meta (the user's to turn on or off).",
+      "copy": ["meta_settings"]
+    },
+    {
+      "name": "left bar marks",
+      "shows": "While changes are not kept, the sidebar's chat rows (Baude) or the pages' and notebooks' lists and open pages (Record) show a highlight behind each changed name: green added, red removed and struck through (a deleted chat stays listed, struck through, until kept or undone), blue moved (with a small note like '→ Work'), yellow archived, purple edited, accent colour for 'highlighted' (what Meta merely points at; cleared at your next message). A tooltip on such a row says 'Meta: <action>' (with the note in brackets). Lit brighter while the pointer is over the card that did it.",
+      "copy": ["meta_actions.by_meta", "meta_actions.by_meta_note", "meta_actions.highlighted"]
+    },
+    {
+      "name": "Record differences",
+      "shows": "Record's Meta lives in the right bar (icon and 'Meta', tooltip 'Meta, Files and Git (Ctrl+Alt+B)') and has one conversation for the window whichever notebook is open. It knows the open notebook (told when another is opened), offers its pages for @ references, a quote box over the text (a passage picked in a chat read or selected on a page), the pending-edits bar, edit cards, 'Unknown' chips and the notebook/page tools. It writes to pages only by proposing: propose_edit puts a diff on the page (red text it replaces struck through, green text it puts in, a tick and cross at the end of the green; Tab accepts, Esc rejects) and nothing is written until accepted.",
+      "parts": [
+        {
+          "name": "edit card",
+          "shows": "A tool card for propose_edit / revise_edit / edit_page: the page's short name as summary, the hunk under the line (old text on red line by line, new text on green wrapped as prose), and at the end of the line, while the edit waits: round tick (tooltip 'Accept') and cross (tooltip 'Reject') buttons. Otherwise a dim caption: 'accepted', 'rejected', 'taken back', 'revised' (a later call changed it; the later card has it), 'its page is gone' (with a Reject only, tooltip 'Reject (its page is gone)'), or 'waiting in <notebook>' with an 'Open' button (tooltip 'Open <notebook>') when the edit is in a notebook that is not open ('waiting in a notebook that's gone' if it was deleted). The hunk is dimmed unless the edit is accepted.",
+          "copy": ["edit_review.accept_tip", "edit_review.reject_tip", "common.open", "meta.open_item"],
+          "actions": [
+            {"by": "click tick / cross", "does": "accepts or rejects the edit, applying it on its page (the page opened and scrolled to it); Meta is told with the next message"},
+            {"by": "click Open", "does": "selects that notebook, opens the page, scrolls to the edit and puts the caret in it"}
+          ]
+        },
+        {
+          "name": "unknown chips",
+          "shows": "Under a reply that ended with an 'Unknown:' list: a wrapped row starting with the dim caption 'Not in your notes:' followed by a chip for each term, '+ <term>' (tooltip 'Add to <to-learn page>') or '✓ <term>' disabled if the notebook already has it.",
+          "actions": [
+            {"by": "click a chip", "does": "adds the term to the notebook's to-learn page; the chip becomes '✓ <term>'"}
+          ]
+        },
+        {
+          "name": "earlier edits-only reply",
+          "shows": "A reply from before tool cards that only edited is drawn as one dim caption: 'Edited <pages>' and/or 'Took back an edit to <pages>'."
+        }
+      ]
+    }
+  ],
+  "states": [
+    {"name": "empty", "shows": "No messages: an empty scroll area above the box."},
+    {"name": "answering", "shows": "The live reply (nothing yet: only the working dots in the foot; then parts and tool cards as they happen); the box's send button is Stop; revert buttons are unavailable in every window."},
+    {"name": "model gone", "shows": "'This model is unavailable' over the box, send off, until the model is back in the mesh or another is picked in Settings."},
+    {"name": "context exhausted", "shows": "'Context Exhausted' over the box, send off, until a model with a bigger window is picked or the conversation is cleared. A message that was too big for the new session's window is not sent: it goes back into the box and what Meta was to be told is kept."},
+    {"name": "reverting", "shows": "The reverted message and everything after it are hidden; its text is in the box; Esc brings them back."},
+    {"name": "form pinned", "shows": "An open form hovering over the top of the conversation."}
+  ],
+  "scenes": ["55u-network-meta-host-button"]
+}

@@ -1,0 +1,194 @@
+{
+  "description": "Send Feedback: a small dialog (560 px wide, title \"Feedback\") for writing a note, an issue or a suggestion, optionally with screen captures of the app window; with the Capture bar at the bottom of the window while a capture is pending, and the Mark regions dialog over a capture. Baude's and Record's. Saved notes are listed in Ongoing Feedback and, when GitHub is signed in, filed as an issue.",
+  "apps": [
+    "baude",
+    "record"
+  ],
+  "opens": [
+    "☰ → Send Feedback…",
+    "key Cmd+. (macOS) / Ctrl+. (elsewhere), over whatever is open",
+    "Settings → Send Feedback…",
+    "the + button in Ongoing Feedback's list header"
+  ],
+  "code": [
+    "feedback.py:FeedbackDialog",
+    "feedback.py:FeedbackHost",
+    "feedback.py:RegionEditor",
+    "feedback.py:save_feedback",
+    "feedback.py:file_soon",
+    "feedback.py:capture_window"
+  ],
+  "copy": [
+    "feedback",
+    "feedback_regions",
+    "report",
+    "common"
+  ],
+  "parts": [
+    {
+      "name": "Header bar",
+      "shows": "Title \"Feedback\". Cancel at the left, Save (the suggested, accent-coloured button) at the right; no window close buttons.",
+      "copy": [
+        "feedback.title",
+        "common.cancel",
+        "common.save"
+      ],
+      "actions": [
+        {
+          "by": "click Cancel",
+          "does": "throws the draft away (note and captures) and closes"
+        },
+        {
+          "by": "click Save",
+          "does": "saves the note (see Saving)"
+        },
+        {
+          "by": "key Cmd+Enter / Ctrl+Enter",
+          "does": "saves, as Save, when Save is enabled; does not insert a new line"
+        }
+      ]
+    },
+    {
+      "name": "Capture strip",
+      "shows": "Above the note, only when there are captures: a horizontally scrolling row of thumbnails, each 160 px on its longer side, the marked regions outlined over it in the accent colour. Each thumbnail has a tag at its bottom left (\"click to mark regions\" when none, else \"1 region\" / \"N regions\") and a round close button at its top right.",
+      "copy": [
+        "feedback.click_to_mark",
+        "feedback.regions",
+        "feedback.mark_capture",
+        "feedback.remove_capture"
+      ],
+      "actions": [
+        {
+          "by": "click a thumbnail (tooltip \"Mark regions on this capture\", magnifier pointer)",
+          "does": "opens the Mark regions dialog over it; when that closes the note has the focus again"
+        },
+        {
+          "by": "click the thumbnail's ✕ (tooltip \"Remove this capture\")",
+          "does": "drops that capture; focus back to the note"
+        }
+      ]
+    },
+    {
+      "name": "Note box",
+      "shows": "A rounded card like the chat's composer, a multi-line text box, 140 px tall growing to 280 then scrolling, words wrapping, text kept clear of the + at its bottom right corner. Has the focus when the dialog opens, cursor after any text already written. Text selection is not drag-dropped away.",
+      "text": [
+        "(no placeholder text)"
+      ]
+    },
+    {
+      "name": "+ button (add capture)",
+      "shows": "A flat + button at the box's bottom right. Tooltip \"Add a screen capture: go to it, then press Capture\"; when something sits over the window (a dialog, the large image viewer, Kubernetes or Database Schemas), \"Capture what's open now\".",
+      "copy": [
+        "feedback.add_capture",
+        "feedback.capture_open"
+      ],
+      "actions": [
+        {
+          "by": "click",
+          "does": "puts the dialog away and shows the Capture bar; or, with something over the window, closes the dialog and captures that at once (a double click is ignored)"
+        }
+      ]
+    },
+    {
+      "name": "Capture bar",
+      "shows": "While a capture is pending, a bar slides up at the bottom of the window (the dialog is gone, so you can go to what you want to show): a camera icon, the line \"Feedback: go to what you want to show, then capture it\" (ellipsized), then Cancel and Capture (suggested style) at the right. Always a capture of the window itself: its picture and the text on screen, each line with where it was and which part (sidebar, chat, side panel, input box, status bar, header, banner, Kubernetes, databases, image).",
+      "copy": [
+        "feedback.capture_bar",
+        "feedback.capture",
+        "common.cancel"
+      ],
+      "actions": [
+        {
+          "by": "click Capture",
+          "does": "hides the bar at once (it is not part of the picture), waits 120 ms, captures the window, then opens Mark regions over the capture"
+        },
+        {
+          "by": "click Cancel",
+          "does": "hides the bar and reopens the Feedback dialog with the draft"
+        },
+        {
+          "by": "key Cmd+. / Ctrl+.",
+          "does": "with the bar showing, same as Capture"
+        }
+      ]
+    },
+    {
+      "name": "Mark regions dialog",
+      "shows": "A large dialog (1100 x 760) titled \"Mark regions\": Clear at the left of its header, Done (suggested) at the right; under the header a dimmed centred hint that depends on where the note will go: \"Drag over what you mean · those words go in the note's GitHub issue on <repo> · right-click a region to remove it\" (repo known), \"... go in the note's GitHub issue · ...\" (repository known but not signed in), or \"... those words stay with the note · ...\" (nowhere to file). Below, the capture fitted whole (not cropped) and centred, crosshair pointer; each marked region is outlined in the accent colour (rounded, 2 px) with its number in a small accent-coloured tab on its top-right corner, just above it (inside only at the very top of the image).",
+      "copy": [
+        "feedback_regions.title",
+        "feedback_regions.hint_repo",
+        "feedback_regions.hint_issue",
+        "feedback_regions.hint_note",
+        "common.clear",
+        "common.done"
+      ],
+      "actions": [
+        {
+          "by": "drag over the image",
+          "does": "outlines a region live; on release it is added (ignored if 4 px or less in either direction); the text on screen inside the region is what goes in the note and the issue"
+        },
+        {
+          "by": "right-click inside a region",
+          "does": "removes the topmost (newest) region there"
+        },
+        {
+          "by": "click Clear",
+          "does": "removes every region"
+        },
+        {
+          "by": "click Done or key Esc",
+          "does": "closes; when it was a fresh capture, the Feedback dialog reopens with it added"
+        }
+      ]
+    }
+  ],
+  "states": [
+    {
+      "name": "empty",
+      "shows": "Save disabled until there is text or at least one capture"
+    },
+    {
+      "name": "draft kept",
+      "shows": "The text and captures stay in the window's draft while the dialog is closed for a capture, and across a Baude restart; Cancel clears it"
+    },
+    {
+      "name": "Saving",
+      "shows": "Save writes feedback/<time>/ under the app's data folder (feedback.md with the note, where it came from, and the text in each marked region quoted; capture-N.png, capture-N-marked.png, capture-N.txt, captures.json); the dialog closes; a toast \"Feedback saved\" (\"Feedback saved, filing it…\" when GitHub filing is available) with an Open folder button, 6 seconds",
+      "copy": [
+        "feedback.saved",
+        "feedback.saved_filing",
+        "feedback.open_folder"
+      ]
+    },
+    {
+      "name": "filing result",
+      "shows": "A while after, another toast: \"Filed as an issue on <repo>\" with an Open issue button (8 s); or \"Saved, and it'll be filed on <repo> when it can be\" (with \": <first line of why>\" up to 100 characters) for 10 s. Filing is retried every minute for unfiled notes, by either app; \"Another window is filing this\" if two race.",
+      "copy": [
+        "feedback.filed",
+        "feedback.open_issue",
+        "feedback.not_filed",
+        "feedback.not_filed_why",
+        "feedback.filing_elsewhere"
+      ]
+    },
+    {
+      "name": "context in the note",
+      "shows": "The note carries, under Context: the session id and title, the folder, the app's path, and the open chat's and Meta's transcripts in code fences (as Copy Transcript copies them, shared out of a budget so the issue body stays under GitHub's limit)",
+      "copy": [
+        "report.folder_line",
+        "report.the_chat"
+      ]
+    },
+    {
+      "name": "over a dialog or full view",
+      "shows": "With something over the window, + captures it straight away without showing the bar (the bar couldn't be pressed). Opening the dialog from the menu with a capture pending hides the bar. The key does nothing while Feedback or Mark regions is open."
+    }
+  ],
+  "scenes": [
+    "90-feedback-dialog",
+    "91-feedback-capture-bar",
+    "92-feedback-with-capture",
+    "93-feedback-regions"
+  ]
+}

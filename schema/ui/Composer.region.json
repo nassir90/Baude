@@ -1,0 +1,291 @@
+{
+  "description": "The message box at the bottom of the Baude main window's chat column: an attachments strip (only while something is attached), then a rounded card holding the text, with the attach and send buttons in its bottom-right corner. Messages queued or held while the agent works are drawn in the chat column just above it (see parts).",
+  "apps": [
+    "baude"
+  ],
+  "code": [
+    "widgets.py:Composer",
+    "widgets.py:ComposerView",
+    "widgets.py:ComposerMarkdown",
+    "widgets.py:sends",
+    "widgets.py:newline_key",
+    "widgets.py:tab_key",
+    "widgets.py:wrap_selection",
+    "widgets.py:Exhausted",
+    "baude.py:BaudeWindow.on_key",
+    "baude.py:BaudeWindow.on_send",
+    "baude.py:BaudeWindow.queue_message",
+    "baude.py:BaudeWindow.show_held",
+    "baude.py:BaudeWindow.show_composer",
+    "baude.py:BaudeWindow.paste_attachment",
+    "baude.py:BaudeWindow.on_drop",
+    "baude.py:BaudeWindow.refresh_attach_strip",
+    "baude.py:Attachment",
+    "baude.py:attachment_widget",
+    "widgets.py:QueuedTurn",
+    "widgets.py:HeldTurn"
+  ],
+  "copy": [
+    "composer",
+    "attachments",
+    "context_usage",
+    "chat_turns",
+    "held",
+    "held_send",
+    "meta"
+  ],
+  "parts": [
+    {
+      "name": "text box",
+      "shows": "A card with the text in the chat's font (scales with chat zoom), word-wrapped, at least two lines tall, growing with the text and scrolling past about nine lines (220 px). The right margin keeps text from running under the buttons. No placeholder text. Spell check is not on in Baude's box (it is a Record page feature). The box takes the focus when a window opens; a click anywhere in the card puts the caret in the text.",
+      "actions": [
+        {
+          "by": "key Enter",
+          "does": "A new line; on a list item the next item (bullet or number continued); on an empty list item it leaves the list; in a code block a plain new line, and an unclosed block gets its closing fence at once"
+        },
+        {
+          "by": "key Shift+Enter",
+          "does": "A plain line break (no list continuation)"
+        },
+        {
+          "by": "key Ctrl+Enter (⌘Enter on a Mac)",
+          "does": "Sends. While the agent is working the text is queued instead (see queued messages)"
+        },
+        {
+          "by": "key Esc",
+          "does": "While a turn is running: stops it (interrupt). With a revert pending: cancels the revert. With a completer list open: closes the list first"
+        },
+        {
+          "by": "key Tab / Shift+Tab",
+          "does": "On list items or a selection of them: in or out one level (a bullet 2 spaces); in a code block: four spaces in or out; elsewhere moves the focus"
+        },
+        {
+          "by": "key Alt+Up / Alt+Down",
+          "does": "Moves the list item the caret is in past its neighbour"
+        },
+        {
+          "by": "key Left / Right",
+          "does": "Leaves a just-formatted run (after wrap-selection) to outside its marks"
+        },
+        {
+          "by": "key Ctrl+V / ⌘V / Shift+Insert / paste",
+          "does": "Pastes text as text; copied files or a copied image are attached instead (see attachments). Ctrl+V pastes on a Mac too"
+        },
+        {
+          "by": "type * ` or / with text selected",
+          "does": "Wraps the selection: * makes it bold (**…**), ` makes it code (`…`), / makes it italic (*…*); each line of a multi-line selection wrapped on its own, list markers, headings and quotes left out; stays selected so another mark can go round it (* then /: bold italic); typing the same mark again unwraps it"
+        }
+      ],
+      "parts": [
+        {
+          "name": "markdown shown as typed",
+          "shows": "The text is styled live like chat messages while still plain text: # headings at the chat's heading sizes, **bold**, *italic*, `inline code` (monospace, shaded), ``` fenced code blocks (one rounded shaded background behind all lines, fence lines dim, monospace), bullet lists with real bullets (- * + typed become • at the top level, ◦ one level in; sent back as -) with hanging indent, numbered lists, > quotes. Markdown symbols (#, **, `) are hidden except on the line the caret is on, where they show dim. @names the catalogue knows are coloured (green, bold, tinted background), and the @ search being typed too."
+        }
+      ]
+    },
+    {
+      "name": "attach button",
+      "shows": "A flat button with a + (list-add) icon, left of the send button, bottom right of the card.",
+      "copy": [
+        "attachments.attach_tip"
+      ],
+      "actions": [
+        {
+          "by": "hover",
+          "does": "Tooltip \"Attach images, PDFs or files (or paste / drop them)\""
+        },
+        {
+          "by": "click",
+          "does": "Opens a file chooser titled \"Attach files\", multi-select, filters \"All files\" and \"Images & PDFs\"; each chosen file is attached"
+        }
+      ]
+    },
+    {
+      "name": "send / stop button",
+      "shows": "A round icon button, last in the corner. Idle: grey, a return-arrow icon. While the agent works: red (destructive), a stop square icon.",
+      "copy": [
+        "composer.send",
+        "composer.stop"
+      ],
+      "text": [
+        "Send ({key})\nNew line: Enter\n@: a chat, a file, a pull request…"
+      ],
+      "actions": [
+        {
+          "by": "hover (idle)",
+          "does": "Tooltip \"Send (Ctrl+Enter)\" then \"New line: Enter\" then \"@: a chat, a file, a pull request…\" (⌘Enter on a Mac)"
+        },
+        {
+          "by": "hover (working)",
+          "does": "Tooltip \"Stop (Esc)\""
+        },
+        {
+          "by": "click (idle)",
+          "does": "Sends the text and attachments (markdown, bullets turned back to -). Nothing is sent when both are empty. A first message after viewing a past session resumes that session. The box and strip empty and the chat scrolls to the end"
+        },
+        {
+          "by": "click (working)",
+          "does": "Stops the turn (also with a revert pending). Enter/Ctrl+Enter with text meanwhile queues instead of stopping"
+        }
+      ]
+    },
+    {
+      "name": "slash commands in the box",
+      "shows": "Typing / at the start of the prompt (or at a word's start after a space or new line) opens a command list over the box; see SlashCompleter. These commands are handled by Baude itself and never sent: /new and /clear (a fresh session), /cd <path> (move the conversation to another folder), /btw <question> (side question, answered without adding to the chat; works mid-turn), /login [options] and /logout (Anthropic account sign-in; /login on another host's chat says it signs in there: run claude auth login on it).",
+      "text": [
+        "/new",
+        "/clear",
+        "/cd",
+        "/btw",
+        "/login",
+        "/logout"
+      ]
+    },
+    {
+      "name": "@ references in the box",
+      "shows": "Typing @ at a word's start opens a list of chats and the names of the chat's folder; see MentionCompleter."
+    },
+    {
+      "name": "attachments strip",
+      "shows": "A row above the card, hidden until something is attached, scrolling sideways. Each attachment is a chip: an image as a 48 px square centre-cropped thumbnail; a PDF or other file as its type icon (or the system thumbnail where one exists) and its file name (… in the middle past 22 characters); a small round × button at the end of each. Images are shrunk/recompressed for the model; a pasted image is named \"pasted image.png\".",
+      "copy": [
+        "common.remove"
+      ],
+      "actions": [
+        {
+          "by": "hover chip",
+          "does": "Tooltip: the file's full path, or its name for a pasted image"
+        },
+        {
+          "by": "click image thumbnail",
+          "does": "Opens the image viewer over the window"
+        },
+        {
+          "by": "click ×",
+          "does": "Removes that attachment (tooltip \"Remove\")"
+        },
+        {
+          "by": "paste",
+          "does": "Copied files are attached. A copied image is attached; an image copied together with text is attached when the text is only its file name or web address, otherwise the text is pasted. Copied web addresses that aren't local files fall back to the image beside them, else the text"
+        },
+        {
+          "by": "drag and drop onto the window",
+          "does": "Files or an image dropped anywhere on the window are attached and the focus goes to the box; ignored while the chat is read-only"
+        },
+        {
+          "by": "failure",
+          "does": "A quiet note in the chat: \"can't attach <path>: not a file\", \"can't attach image: <error>\", or \"paste failed: <error>\""
+        }
+      ]
+    },
+    {
+      "name": "queued messages",
+      "shows": "A message sent while the agent is mid-turn is drawn as a grey user bubble under the conversation (above the box) instead of being sent. It carries its attachments.",
+      "copy": [
+        "chat_turns.queued_delete",
+        "chat_turns.queued_send_now",
+        "chat_turns.queued_edit"
+      ],
+      "actions": [
+        {
+          "by": "hover row",
+          "does": "Three small round buttons fade in left of the bubble, level with its last line"
+        },
+        {
+          "by": "click ✕",
+          "does": "Drops the message (tooltip \"Delete this queued message\")"
+        },
+        {
+          "by": "click ↑",
+          "does": "Stops the turn, then sends this message and every one queued before it together as one message (tooltip \"Send now: interrupt the agent, then send this and the queued messages before it\")"
+        },
+        {
+          "by": "click revert (circular arrow)",
+          "does": "Takes it out of the queue and puts its text before what is in the box, with its attachments, and focuses the box (tooltip \"Edit: put this message back in the box\")"
+        },
+        {
+          "by": "turn ends on its own",
+          "does": "All queued messages are sent together as one message, in order. A turn stopped with Esc or the stop button leaves them queued"
+        }
+      ]
+    },
+    {
+      "name": "held messages",
+      "shows": "A message the chat's host held rather than sent (a subagent's answer that arrived after the host restarted) is drawn grey in the same place as queued ones, above them, from whom it came shown at its top (its sender), in the order held.",
+      "copy": [
+        "held.delete",
+        "held.send",
+        "held_send.after_turn",
+        "held_send.while_exhausted",
+        "held_send.while_down",
+        "held_send.while_no_host",
+        "held_send.while_other",
+        "held_send.not_sent",
+        "held_send.not_deleted"
+      ],
+      "actions": [
+        {
+          "by": "hover row",
+          "does": "Two small round buttons fade in: ✕ and ↑"
+        },
+        {
+          "by": "click ✕",
+          "does": "Drops it on its host (tooltip \"Delete this held message\"); a refusal toasts \"Not deleted: <why>\""
+        },
+        {
+          "by": "click ↑",
+          "does": "Sends it to the agent (tooltip \"Send it to the agent: it was held, not sent, as this chat's host restarted while it waited for it\"). Toasts when it can't: \"It can be sent once this turn's over\", \"It can't be sent while this chat's context is exhausted: pick a model with a bigger window, or clear it\", \"It can't be sent while the connection to this chat's host is down\", \"It can't be sent while this chat's host isn't there\", or \"It can't be sent while nothing can be sent in this chat\"; \"Not sent: <why>\" if the host refuses"
+        }
+      ]
+    }
+  ],
+  "states": [
+    {
+      "name": "idle",
+      "shows": "Grey send button; Ctrl+Enter sends"
+    },
+    {
+      "name": "working",
+      "shows": "Red stop button; text sent meanwhile is queued, grey, under the conversation"
+    },
+    {
+      "name": "context exhausted",
+      "shows": "A plain grey line \"Context Exhausted\" just above the card; the send button is off (Enter and Ctrl+Enter too, except /clear /new /cd /login /logout); the box stays editable. Cleared by picking a model with a bigger window or clearing the chat; hidden again while a turn runs",
+      "copy": [
+        "context_usage.exhausted"
+      ]
+    },
+    {
+      "name": "host gone or connection dropped",
+      "shows": "The send button is off (nothing to send to) while a banner above the chat says why (see Banners); the box stays editable"
+    },
+    {
+      "name": "read-only by choice",
+      "shows": "☰ → Read-only session: the whole box is gone (not greyed). If the box had the focus, the focus moves to the chat. Remembered per chat"
+    },
+    {
+      "name": "active elsewhere",
+      "shows": "A Claude Desktop chat being written right now by Claude Desktop: the box is gone and the banner \"This session is currently active elsewhere\" is shown, until it has been quiet for a while. Only Claude Desktop's chats are guarded this way; any other chat (a host's, another window's, a terminal's) can be written to"
+    },
+    {
+      "name": "draft kept",
+      "shows": "Each chat keeps its own draft (text, caret, attachments) while another chat is open, and over a restart; a new chat keeps one shared draft"
+    },
+    {
+      "name": "revert pending",
+      "shows": "After Revert on a sent message the text is in the box for editing; Enter-send commits the revert then sends; Esc cancels it"
+    }
+  ],
+  "scenes": [
+    "40-composer-markdown",
+    "41-composer-code-fence",
+    "42-composer-attachments",
+    "43-slash-completer",
+    "44-completer-filter",
+    "45-completer-picked",
+    "03-working",
+    "53d-live-tail",
+    "63-zoomed",
+    "01-empty"
+  ]
+}

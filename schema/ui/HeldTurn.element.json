@@ -1,0 +1,81 @@
+{
+  "description": "A message the chat's host held for the chat instead of sending it to the agent (for example a subagent's answer that arrived after the host restarted): shown under the conversation with the queue, above any queued messages, as a grey bubble from its sender, with delete and send buttons on hover.",
+  "apps": [
+    "baude"
+  ],
+  "opens": [
+    "The open chat's host lists held messages for it"
+  ],
+  "code": [
+    "widgets.py:HeldTurn",
+    "baude.py:BaudeWindow.show_held",
+    "baude.py:BaudeWindow.held_send",
+    "baude.py:BaudeWindow.held_drop"
+  ],
+  "copy": [
+    "held",
+    "held_send",
+    "senders",
+    "common"
+  ],
+  "parts": [
+    {
+      "name": "bubble",
+      "shows": "A sender's bubble (see SenderTurn: \"from <who>\" line on top, grey 7% fill) but with its words at 55% opacity like a queued message. Text: what the host says to show of it, else its text, without the sender tag. Several are shown in the order held, 10px apart, above queued messages."
+    },
+    {
+      "name": "buttons",
+      "shows": "Two small round flat buttons (24px) left of the bubble, level with its last line, fading in on hover: ✕ and a bold ↑.",
+      "copy": [
+        "held.delete",
+        "held.send"
+      ],
+      "phone": {
+        "does": "A long-press reveals the same controls",
+        "why": "No hover on touch; a long-press is Android's equivalent of the desktop's right-click",
+        "decided": "2026-11-21"
+      },
+      "actions": [
+        {
+          "by": "click ✕",
+          "does": "Asks the host to drop it; it disappears. Refused: toast \"Not deleted: <why>\". Tooltip \"Delete this held message\"."
+        },
+        {
+          "by": "click ↑",
+          "does": "Sends it to the agent now: it disappears from the held list and appears in the chat as a SenderTurn while the turn starts. Tooltip \"Send it to the agent: it was held, not sent, as this chat's host restarted while it waited for it\"."
+        }
+      ]
+    }
+  ],
+  "states": [
+    {
+      "name": "send refused while busy",
+      "shows": "Toast \"It can be sent once this turn's over\"; it stays.",
+      "copy": [
+        "held_send.after_turn"
+      ]
+    },
+    {
+      "name": "send refused (chat can't send)",
+      "shows": "Toast, one of: \"It can't be sent while this chat's context is exhausted: pick a model with a bigger window, or clear it\", \"It can't be sent while the connection to this chat's host is down\", \"It can't be sent while this chat's host isn't there\", \"It can't be sent while nothing can be sent in this chat\"; or \"It can't be sent: this chat's agent couldn't be started\".",
+      "copy": [
+        "held_send.while_exhausted",
+        "held_send.while_down",
+        "held_send.while_no_host",
+        "held_send.while_other"
+      ]
+    },
+    {
+      "name": "send failed at the host",
+      "shows": "The sent bubble is taken out of the chat again, the held message comes back, and a toast says \"Not sent: <why>\".",
+      "copy": [
+        "held_send.not_sent"
+      ]
+    },
+    {
+      "name": "revert pending",
+      "shows": "↑ first makes the pending revert, then sends this after it."
+    }
+  ],
+  "scenes": []
+}

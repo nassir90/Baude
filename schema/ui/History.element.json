@@ -1,0 +1,92 @@
+{
+  "description": "How an opened past or remote session's transcript is drawn, where it differs from a live chat: drawn from the transcript file in chunks, newest first, with a Show earlier messages button at the top; things only a transcript has (CI events, artifact records, summaries) get their own looks.",
+  "apps": [
+    "baude"
+  ],
+  "opens": [
+    "Clicking a session in the sidebar",
+    "A session active elsewhere (tailed live)",
+    "A network session opened"
+  ],
+  "code": [
+    "baude.py:BaudeWindow.load_history",
+    "baude.py:BaudeWindow.render_history",
+    "baude.py:BaudeWindow.update_earlier_btn",
+    "baude.py:BaudeWindow.show_earlier",
+    "baude.py:BaudeWindow.settle_tasks",
+    "baudelib/transcripts.py:history_item",
+    "baudelib/transcripts.py:history_items"
+  ],
+  "copy": [
+    "compaction",
+    "transcript_notes",
+    "meta",
+    "references"
+  ],
+  "parts": [
+    {
+      "name": "Show earlier messages",
+      "shows": "A button centred at the top of the chat while earlier parts aren't drawn: \"Show earlier messages (N more)\" (or without the count). Earlier chunks (60 items each) also draw by themselves as you scroll near them; the chat is about its full height from the start so the scrollbar doesn't jump.",
+      "text": [
+        "Show earlier messages",
+        "Show earlier messages (N more)"
+      ],
+      "actions": [
+        {
+          "by": "click",
+          "does": "Draws the topmost chunk not drawn yet, keeping the view where it is."
+        }
+      ]
+    },
+    {
+      "name": "your messages",
+      "shows": "As live (UserTurn), images and PDFs attached shown as attachments; injected text (system reminders, local-command output, caveats, task notifications) is never shown as a message. A message the host's sender store says is someone else's is a SenderTurn. The session's first prompt, if it came from outside, is a StartPrompt."
+    },
+    {
+      "name": "replies and calls",
+      "shows": "As live. Calls whose result never came are shown interrupted (no spinner for ever); background tasks never heard to end are settled as interrupted too. A turn that was stopped gets one \"interrupted\" note."
+    },
+    {
+      "name": "CI event",
+      "shows": "A pull-request event the desktop app reported: a small dimmed disclosure titled with what happened (first words of its message, or \"A CI event\"), folded; opened, its text as markdown.",
+      "copy": [
+        "transcript_notes.ci_event"
+      ]
+    },
+    {
+      "name": "artifact record",
+      "shows": "Claude Desktop's record of an artifact it published: a small dimmed \"Published <title> ↗\" line (see Artifact)."
+    },
+    {
+      "name": "task notification",
+      "shows": "Its card (if drawn) ends; otherwise the quiet ending line (see BackgroundTask)."
+    },
+    {
+      "name": "compaction",
+      "shows": "A CompactMark with its summary folded under it."
+    }
+  ],
+  "states": [
+    {
+      "name": "opened, not yet written to",
+      "shows": "No banner and no resumed mark; \"— resumed —\" appears above your message once you write."
+    },
+    {
+      "name": "active elsewhere (tail)",
+      "shows": "New messages appear as they're written, with spinners on running calls; the composer is replaced (see Composer/Banners)."
+    },
+    {
+      "name": "cut short by a restart",
+      "shows": "The CutShort line at the end."
+    }
+  ],
+  "scenes": [
+    "51-resumed-session",
+    "51b-resumed-after-writing",
+    "52-resumed-image-read",
+    "53d-live-tail",
+    "54-task-notifications",
+    "76-tail-background-tasks",
+    "83-artifact-history"
+  ]
+}

@@ -1,0 +1,47 @@
+{
+  "description": "The dialog to make a chat on a host a Bot (a name, a picture and a memory it reads each time it starts), or change an existing Bot's name and picture.",
+  "apps": ["baude"],
+  "opens": ["session row right-click → Make Bot…", "session row right-click → Bot Settings…"],
+  "code": ["baude.py:SessionSidebar.ask_bot", "baude.py:SessionSidebar.bot_set"],
+  "copy": ["common"],
+  "parts": [
+    {
+      "name": "heading",
+      "shows": "\"Make Bot\", or \"Bot Settings\" for an existing Bot.",
+      "text": ["Make Bot", "Bot Settings"]
+    },
+    {
+      "name": "body",
+      "shows": "Only when making: \"A Bot is a chat with a name, a picture and a memory it reads each time it starts.\"",
+      "text": ["A Bot is a chat with a name, a picture and a memory it reads each time it starts."]
+    },
+    {
+      "name": "picture",
+      "shows": "A round avatar 64px across, centred: the Bot's picture, else its initials from the name typed. Under it two buttons: \"Choose Picture…\" and (only while there is a picture) \"Remove Picture\".",
+      "text": ["Choose Picture…", "Remove Picture", "Choose a Picture"],
+      "actions": [
+        {"by": "click Choose Picture…", "does": "A file chooser (Pictures) opens; the picture is scaled to fit 256 by 256 and shown. An unreadable one says \"Couldn't read that picture: <why>\"."},
+        {"by": "click Remove Picture", "does": "Clears the picture."}
+      ]
+    },
+    {
+      "name": "name field",
+      "shows": "A text entry with placeholder \"Name\", pre-filled with the Bot's name, or for a new one the chat's title (80 characters at most); focused. The avatar's initials follow it.",
+      "copy": ["common.name"]
+    },
+    {
+      "name": "Cancel",
+      "shows": "\"Cancel\" button; Escape.",
+      "copy": ["common.cancel"]
+    },
+    {
+      "name": "Save / Make Bot",
+      "shows": "The default, suggested-style button: \"Make Bot\" when making, \"Save\" for settings; disabled while the name is blank.",
+      "copy": ["common.save"],
+      "text": ["Make Bot"],
+      "actions": [
+        {"by": "click", "does": "Sends the name (and picture if changed) to the chat's host, which lists the chat as a Bot. A failure says \"Couldn't update the Bot: <why>\"."}
+      ]
+    }
+  ]
+}

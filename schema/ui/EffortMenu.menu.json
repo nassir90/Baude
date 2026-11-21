@@ -1,0 +1,22 @@
+{
+  "description": "The header's thinking-effort drop-down: the effort levels the current model supports, a tick on the current one, opened centred under its button.",
+  "apps": ["baude"],
+  "opens": ["header effort picker"],
+  "code": ["widgets.py:ChoiceDropDown", "baude.py:BaudeWindow.sync_effort_choices", "baude.py:BaudeWindow.on_effort_changed", "baudelib/claude.py:EFFORT_LABELS"],
+  "copy": ["mode_effort", "chat_header", "meta_settings"],
+  "parts": [
+    {
+      "name": "levels",
+      "shows": "Only the levels the model says it supports, in the model's order, from: No thinking (off), Low effort, Medium effort, High effort, Extra-high effort, Max effort. The model's default level is shown until one is chosen. Models that think on this Mac keep their own level, separate from Claude's.",
+      "copy": ["mode_effort.effort_off", "mode_effort.effort_low", "mode_effort.effort_medium", "mode_effort.effort_high", "mode_effort.effort_xhigh", "mode_effort.effort_max"],
+      "actions": [
+        {"by": "click", "does": "Sets the thinking effort (effortLevel applied to the running chat) and notes quietly \"thinking effort → <label>\". Changing the model re-reads the level (the CLI may change or drop it)"}
+      ]
+    }
+  ],
+  "states": [
+    {"name": "unavailable", "shows": "A model with no effort setting: the box shows \"Effort\", is greyed out and can't be opened; tooltip \"<model> has no effort setting\""},
+    {"name": "hidden", "shows": "Hidden for a program that has no effort levels at all"}
+  ],
+  "scenes": ["60-effort-unavailable", "01-empty"]
+}

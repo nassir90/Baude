@@ -1,0 +1,22 @@
+{
+  "description": "A notebook's right-click menu in Record's left column; a popover menu with no arrow at the pointer. The notebook right-clicked is selected first.",
+  "apps": ["record"],
+  "opens": ["right-click a notebook row"],
+  "code": ["record.py:Window.book_menu"],
+  "copy": ["common"],
+  "parts": [
+    {
+      "name": "Rename…",
+      "shows": "\"Rename…\"",
+      "copy": ["common.rename_ellipsis"],
+      "actions": [{"by": "click", "does": "Rename dialog (RecordAlerts) for the notebook. Also key F2 with the list focused."}]
+    },
+    {
+      "name": "Delete…",
+      "shows": "\"Delete…\"",
+      "copy": ["common.delete_ellipsis"],
+      "actions": [{"by": "click", "does": "Delete dialog (RecordAlerts)."}]
+    }
+  ],
+  "scenes": []
+}

@@ -1,0 +1,39 @@
+{
+  "description": "A small alert dialog over the main window asking for a session's (or a Bot's) new name.",
+  "apps": ["baude"],
+  "opens": ["session row right-click → Rename…", "key F2 on a session row"],
+  "code": ["baude.py:SessionSidebar.ask_rename", "baude.py:SessionSidebar.rename", "baude.py:SessionSidebar.renamed_remote"],
+  "copy": ["common"],
+  "parts": [
+    {
+      "name": "heading",
+      "shows": "\"Rename session\"; for a Bot on a host, \"Rename Bot\".",
+      "text": ["Rename session", "Rename Bot"]
+    },
+    {
+      "name": "name field",
+      "shows": "A single text field, pre-filled with the session's current title (a Bot's: its name), focused. Enter confirms.",
+      "actions": [
+        {"by": "type", "does": "Edits the name. Spaces are tidied (runs collapsed, trimmed) and it's cut to 80 characters."}
+      ]
+    },
+    {
+      "name": "Cancel",
+      "shows": "\"Cancel\" button; also the Escape response.",
+      "copy": ["common.cancel"],
+      "actions": [{"by": "click", "does": "Closes without change."}]
+    },
+    {
+      "name": "Rename",
+      "shows": "\"Rename\" button, the default, in the suggested (accent) style.",
+      "copy": ["common.rename"],
+      "actions": [
+        {"by": "click", "does": "Renames, unless the name is blank or unchanged. Here: the title is written to the session (to the live one through the running claude), and a rename of the open chat updates its header title. On a host: the host renames it, and it's listed by the new title straight away; a host that refuses says \"<host> didn't rename it: <why>\" in a toast. A Bot's name is changed (its picture kept)."}
+      ]
+    }
+  ],
+  "states": [
+    {"name": "blank name", "shows": "Pressing Rename does nothing."}
+  ],
+  "scenes": ["53-rename-session", "55j-network-renamed"]
+}

@@ -1,0 +1,246 @@
+#!/usr/bin/env python3
+"""Baude's side of the parity rig: each scene of tests/parity/scenes.json drawn from tests/parity/fixtures, offscreen,
+as <out>/desktop/<theme>/<scene>.png, and what's on screen in it as <out>/desktop/<scene>.json (dump.py's items: the
+text, buttons, inputs, switches and images a user sees, top to bottom). A render rig, not a test: nothing's checked.
+
+    python3 tests/parity/desktop.py [--out DIR] [-k NAME] [--theme light|dark]
+
+Runs against tests/fake_claude.py in a throwaway HOME and config dirs (tests/test_baude.py's), never the real claude,
+never the real data; on macOS its windows never reach the screen (macos.stay_offscreen)."""
+import json
+import os
+import shutil
+import sys
+import tempfile
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+ROOT = os.path.dirname(os.path.dirname(HERE))
+tempfile.tempdir = "/tmp"  # (every throwaway path lands under /tmp: none of it names a user's own temp folder)
+with open(os.path.join(HERE, "fixtures", "sessions.json")) as f:
+    HOME = json.load(f)["host"]["home"]  # (the phone's fixture host has the same one)
+shutil.rmtree(HOME, ignore_errors=True)
+os.makedirs(HOME)
+os.environ["HOME"] = HOME  # (before anything reads it: ~ is this run's)
+os.environ.setdefault("GSK_RENDERER", "cairo")
+sys.path.insert(0, ROOT)
+if sys.platform == "darwin":
+    import macos
+    macos.stay_offscreen()
+sys.path.insert(0, os.path.join(ROOT, "tests"))
+sys.path.insert(0, HERE)
+
+import argparse  # noqa: E402
+import re  # noqa: E402
+import time  # noqa: E402
+
+import screenshots as S  # noqa: E402  (tests/test_baude's throwaway env, the window machinery, capture)
+from screenshots import T, Adw, Gtk, baude  # noqa: E402
+import update  # noqa: E402
+import dump  # noqa: E402
+
+FIX = os.path.join(HERE, "fixtures")
+SIZE = (S.W, S.H)
+
+
+def fixture(name):
+    with open(os.path.join(FIX, name)) as f:
+        return json.load(f)
+
+
+def folder(name):
+    """A folder of the fixture host's home: fixtures/<name>/'s files in it, if the fixtures have any."""
+    path = os.path.join(HOME, name)
+    src = os.path.join(FIX, name)
+    if os.path.isdir(src):
+        shutil.copytree(src, path, dirs_exist_ok=True)
+    os.makedirs(path, exist_ok=True)
+    return path
+
+
+def transcript_lines(name, cwd, lines=None):
+    with open(os.path.join(FIX, name)) as f:
+        recs = [r.replace("@CWD@", cwd) for r in f.read().splitlines() if r.strip()]
+    title = [r for r in recs if '"custom-title"' in r]
+    body = [r for r in recs if r not in title]
+    return (body if lines is None else body[:lines]) + title
+
+
+def write_sessions(lines=None):
+    """fixtures/sessions.json's sessions as this machine's Claude Code keeps them, each its age; the first's path."""
+    first = None
+    now = time.time()
+    for s in fixture("sessions.json")["sessions"]:
+        cwd = folder(s["folder"])
+        if s["transcript"]:
+            recs = transcript_lines(s["transcript"], cwd, lines)
+        else:
+            recs = [json.dumps(r) for r in (
+                {"type": "user", "cwd": cwd, "sessionId": s["id"], "message": {"role": "user", "content": s["title"]}},
+                {"type": "assistant", "cwd": cwd, "sessionId": s["id"],
+                 "message": {"role": "assistant", "content": [{"type": "text", "text": "On it."}]}},
+                {"type": "custom-title", "customTitle": s["title"], "sessionId": s["id"]})]
+        d = os.path.join(os.environ["CLAUDE_CONFIG_DIR"], "projects", re.sub(r"[^A-Za-z0-9]", "-", cwd))
+        os.makedirs(d, exist_ok=True)
+        path = os.path.join(d, f"{s['id']}.jsonl")
+        with open(path, "w") as f:
+            f.write("\n".join(recs) + "\n")
+        os.utime(path, (now - s["ago"], now - s["ago"]))
+        first = first or path
+    return first
+
+
+def apply_settings():
+    keep = {k: v for k, v in fixture("settings.json").items() if k != "description"}
+    baude.save_settings(**keep)
+
+
+def fixture_changelog():
+    log = fixture("changelog.json")
+    update.changelog = lambda commit, root=None: [tuple(c) for c in log["commits"]]
+    update.version = lambda commit, root=None: (log["commit"], log["made"])
+    update.STARTED = log["commit"]
+
+
+def pick_header(win, s):
+    """The chat's model, effort and mode as the session has them, picked in the window's pickers as a user would."""
+    T.wait_for(lambda: s["model"] in win.model_dd.values, "its models")
+    row = next(r for r in win.model_dd._rows() if r.value == s["model"])
+    win.model_dd._activate(row)
+    T.pump(0.5)
+    for dd, value in ((win.effort_dd, s["effort"]), (win.mode_dd, s["mode"])):
+        T.wait_for(lambda dd=dd, value=value: value in dd.values, f"the {value} pick")
+        dd.set_selected(dd.values.index(value))
+    T.pump(0.5)
+
+
+def open_chat(app, sc):
+    path = write_sessions(sc.get("lines"))
+    win = app.window(S.opts(cwd=folder("garden")))
+    info = baude.read_session_info(path)
+    win.resume_session(info)
+    T.wait_for(lambda: win.session_id == info["id"] and win.transcript.get_first_child() is not None, "its history")
+    T.pump(0.8)
+    pick_header(win, fixture("sessions.json")["sessions"][0])
+    if sc.get("open"):
+        for g in T.find(win, baude.ToolGroup):
+            g.toggle.set_expanded(True)
+        for card in list(win.tool_cards.values()):
+            for t in ("input_toggle", "output_toggle"):
+                if getattr(card, t, None) is not None:
+                    getattr(card, t).set_expanded(True)
+        T.pump(0.4)
+    if sc.get("page"):
+        win.show_panel(True, {"signal": "refs"}.get(sc["page"], sc["page"]))
+        T.pump(0.4)
+    vadj = win.scroller.get_vadjustment()
+    vadj.set_value(vadj.get_upper())  # (at its end, as a chat opens)
+    T.pump(0.4)
+    return win
+
+
+def build(app, sc):
+    name = sc["name"]
+    if name == "home":
+        write_sessions()
+        return app.window(S.opts(cwd=folder("garden")))
+    if name.startswith("chat") or name.startswith("panel"):
+        return open_chat(app, sc)
+    if name == "menu":
+        win = open_chat(app, sc)
+        button = next(b for b in T.find(win, Gtk.MenuButton) if b.get_icon_name() == "open-menu-symbolic")
+        button.popup()
+        return win
+    if name == "settings":
+        win = open_chat(app, sc)
+        win.open_settings()
+        return win
+    if name == "changelog":
+        win = open_chat(app, sc)
+        update.changelog_dialog().present(win)
+        return win
+    return None
+
+
+def capture(win, path):
+    """The window as GTK draws it, with its open popovers where they are: the picture grown to hold one that reaches
+    past the window's edge (☰'s does), not cut at it."""
+    T.wait_for(lambda: (win.get_width(), win.get_height()) == SIZE, f"window at {SIZE}", 5)
+    T.pump(0.6)  # (layout, the reveal animations and popovers settled)
+    img = S.render_widget(win, path)
+    pops = []
+    for pop in dump._popovers(win):
+        if pop.get_width() and pop.get_height():
+            pops.append((S.render_widget(pop, path + ".popover.png"), dump._origin(pop)))
+            os.remove(path + ".popover.png")
+    w = max([img.width] + [x + shot.width for shot, (x, _) in pops])
+    h = max([img.height] + [y + shot.height for shot, (_, y) in pops])
+    canvas = S.Image.new("RGBA", (w, h), (0, 0, 0, 0))
+    canvas.paste(img, (0, 0))
+    for shot, at in pops:
+        canvas.paste(shot, at, shot)
+    canvas.save(path)
+
+
+def areas(win):
+    """The window's parts, outermost first, as the dump names them."""
+    header = next(iter(T.find(win, Adw.HeaderBar)), None)
+    return [(header, "header"), (win.sidebar, "sidebar"), (win.panel, "panel"), (win.scroller, "chat"),
+            (win.composer, "composer"), (win.status.get_parent(), "status")]
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--out", default=os.path.join(HERE, "out"))
+    ap.add_argument("-k", default="")
+    ap.add_argument("--theme", choices=("light", "dark"))
+    args = ap.parse_args()
+    out = os.path.join(os.path.abspath(args.out), "desktop")
+    os.makedirs(out, exist_ok=True)
+    fixture_changelog()
+    app = T.App()
+    style = Adw.StyleManager.get_default()
+    failed = 0
+    for sc in fixture_scenes():
+        if args.k not in sc["name"]:
+            continue
+        for theme, scheme in (("light", Adw.ColorScheme.FORCE_LIGHT), ("dark", Adw.ColorScheme.FORCE_DARK)):
+            if args.theme not in (None, theme):
+                continue
+            style.set_color_scheme(scheme)
+            S.reset_state()
+            apply_settings()
+            app.next_size = SIZE
+            win = None
+            try:
+                win = build(app, sc)
+                if win is None:
+                    with open(os.path.join(out, f"{sc['name']}.json"), "w") as f:
+                        json.dump({"scene": sc["name"], "app": "desktop", "missing": "no desktop scene"}, f, indent=1)
+                    break
+                os.makedirs(os.path.join(out, theme), exist_ok=True)
+                capture(win, os.path.join(out, theme, f"{sc['name']}.png"))
+                if theme == "light" or args.theme == "dark":
+                    with open(os.path.join(out, f"{sc['name']}.json"), "w") as f:
+                        json.dump({"scene": sc["name"], "app": "desktop", "size": list(SIZE),
+                                   "items": dump.items(win, areas(win))}, f, indent=1, ensure_ascii=False)
+                print(f"ok    {sc['name']} ({theme})")
+            except Exception as e:  # noqa: BLE001 — keep going, report at the end
+                failed += 1
+                print(f"FAIL  {sc['name']} ({theme}): {e!r}")
+            finally:
+                for w in Gtk.Window.list_toplevels():
+                    if isinstance(w, baude.BaudeWindow):
+                        T.close(w)
+                S.reset_state()
+                shutil.rmtree(os.path.join(os.environ["CLAUDE_CONFIG_DIR"], "projects"), ignore_errors=True)
+    print(f"{failed} failures -> {out}")
+    return 1 if failed else 0
+
+
+def fixture_scenes():
+    with open(os.path.join(HERE, "scenes.json")) as f:
+        return json.load(f)["scenes"]
+
+
+if __name__ == "__main__":
+    sys.exit(main())

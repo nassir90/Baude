@@ -1,0 +1,228 @@
+{
+  "description": "Record's Settings dialog (a libadwaita preferences dialog, one scrolling page of groups). Each row takes effect at once and is kept; Code Font takes from the next start. Most rows are Baude's too, the same settings (settings.json); the ones only Record has are marked.",
+  "apps": [
+    "record"
+  ],
+  "opens": [
+    "☰ → Settings…",
+    "key Ctrl+, (Cmd+, on macOS)",
+    "Meta asked about a setting shows that setting's row"
+  ],
+  "code": [
+    "record.py:Settings",
+    "record.py:markup_row",
+    "meta.py:settings_group",
+    "widgets.py:settings_code_font",
+    "widgets.py:settings_accent",
+    "widgets.py:settings_size",
+    "update.py:settings_row",
+    "update.py:version_row"
+  ],
+  "copy": [
+    "window",
+    "meta_settings",
+    "shared_settings",
+    "updates",
+    "fixes"
+  ],
+  "parts": [
+    {
+      "name": "title",
+      "shows": "\"Settings\"",
+      "copy": [
+        "window.settings_title"
+      ]
+    },
+    {
+      "name": "group: Meta",
+      "shows": "A group titled \"Meta\", the same rows as Baude's.",
+      "parts": [
+        {
+          "name": "Intelligence",
+          "shows": "Row \"Intelligence\", subtitle \"The model Meta thinks with\", a flat model picker at the right (a search box and a list with each family's icon: Claude's models first, then every other in the mesh). Taken from Meta's next message.",
+          "copy": [
+            "meta_settings.intelligence",
+            "meta_settings.intelligence_detail"
+          ],
+          "actions": [
+            {
+              "by": "pick a model",
+              "does": "Meta thinks with it from its next message; the Provider and Effort rows follow."
+            }
+          ]
+        },
+        {
+          "name": "Provider",
+          "shows": "Row \"Provider\", subtitle \"Where the model runs\", a host picker at the right (this machine first). Greyed and off on Claude's models (claude runs where it is).",
+          "copy": [
+            "meta_settings.provider",
+            "meta_settings.provider_detail",
+            "meta_settings.provider_picker"
+          ],
+          "actions": [
+            {
+              "by": "pick a host",
+              "does": "Moves Meta's model to that provider, from its next message."
+            }
+          ]
+        },
+        {
+          "name": "Effort",
+          "shows": "A choice row \"Effort\", subtitle \"How hard Meta thinks\"; choices \"Default\" then the levels its model takes. Greyed with \"{model} has no effort setting\" when the model has none.",
+          "copy": [
+            "meta_settings.effort",
+            "meta_settings.effort_default",
+            "meta_settings.effort_detail",
+            "meta_settings.no_effort"
+          ]
+        },
+        {
+          "name": "Run commands",
+          "shows": "A switch \"Run commands\", subtitle \"Meta runs shell commands and edits files, in Auto mode\"; or \"{note}: Meta asks before each command\"; greyed and off with \"{model} only reads: Claude's models run commands\" on a model that only reads.",
+          "copy": [
+            "meta_settings.run_commands",
+            "meta_settings.run_commands_detail",
+            "meta_settings.asks_each",
+            "meta_settings.only_reads"
+          ]
+        },
+        {
+          "name": "Code mode",
+          "shows": "A switch \"Code mode\", subtitle \"Meta acts by writing up to {n} lines of Python\".",
+          "copy": [
+            "meta_settings.code_mode",
+            "meta_settings.code_mode_detail"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "group: general",
+      "shows": "An untitled group, rows in this order:",
+      "parts": [
+        {
+          "name": "Full-width text",
+          "shows": "A switch \"Full-width text\": the same as ☰ → Full-width text.",
+          "copy": [
+            "meta_settings.full_width"
+          ]
+        },
+        {
+          "name": "Markup visibility (Record only)",
+          "shows": "A choice row \"Markup visibility\" with three choices: \"Show formatting on current line\" (default: the Markdown marks of a heading, bold, code, quote, list on the line the caret is on), \"Don't show formatting\", \"Show all formatting (Except Links)\". Every open page is redrawn at once.",
+          "text": [
+            "Markup visibility",
+            "Show formatting on current line",
+            "Don't show formatting",
+            "Show all formatting (Except Links)"
+          ]
+        },
+        {
+          "name": "Code Font",
+          "shows": "A choice row \"Code Font\" listing the available code fonts. Picked other than the font in use, the subtitle says \"{font} from Record's next start\" and a \"Restart\" button appears in the row (closes the dialog, restarts Record).",
+          "copy": [
+            "shared_settings.code_font",
+            "shared_settings.restart",
+            "shared_settings.code_font_next_start"
+          ]
+        },
+        {
+          "name": "Accent Colour",
+          "shows": "A choice row \"Accent Colour\": \"System\" or one of libadwaita's colours, each with a dot of its colour. Taken in every window as picked.",
+          "copy": [
+            "shared_settings.accent_colour"
+          ]
+        },
+        {
+          "name": "Auto restart on update",
+          "shows": "A switch \"Auto restart on update\", subtitle \"From {upstream} every {seconds}s, restarting once idle\"; greyed with \"Not a git checkout following a branch: nothing to update from\" when there is no upstream. Off until turned on.",
+          "copy": [
+            "updates.auto_restart",
+            "updates.auto_restart_from",
+            "updates.no_upstream"
+          ]
+        },
+        {
+          "name": "Notifications",
+          "shows": "A switch \"Notifications\", subtitle \"When a reply finishes, or asks you something, while you're elsewhere\". On unless turned off.",
+          "copy": [
+            "shared_settings.notifications",
+            "shared_settings.notifications_subtitle"
+          ]
+        },
+        {
+          "name": "Version",
+          "shows": "A plain row (no action): title \"Version {commit}\" (the commit this running Record's code is), subtitle the date and time it was made (\"21 November 2026, 14:03\"). Without a git checkout: \"Version unknown\" with subtitle \"Not a git checkout\". There is no Changelog row here: Changelog is in ☰.",
+          "copy": [
+            "updates.version",
+            "updates.version_unknown",
+            "updates.not_checkout"
+          ]
+        },
+        {
+          "name": "Check Spelling (Record only)",
+          "shows": "A switch \"Check Spelling\". Subtitle says what checks: \"Starting…\" first, then \"Spelling with Enchant, grammar with Harper\", or on macOS \"Spelling and grammar, as macOS checks them\", or what is missing (\"Needs Enchant 2 and a dictionary (libenchant-2, hunspell-en-us) for spelling, harper-ls for grammar\" and variants). On: a red squiggle under a misspelled word in notes and a blue one under a grammar error.",
+          "text": [
+            "Check Spelling"
+          ]
+        },
+        {
+          "name": "Include glossary and chats in backup (Record only)",
+          "shows": "A switch \"Include glossary and chats in backup\", subtitle the backup file's path (~/.local/share/record/notebooks-backup.zip, with ~ for the home folder). Record rolls all its local notebooks into that one zip every 10 minutes when they changed (the zip is replaced each time); on, the glossary and chats go in it too.",
+          "text": [
+            "Include glossary and chats in backup"
+          ]
+        },
+        {
+          "name": "Show in Applications",
+          "shows": "A switch \"Show in Applications\" (macOS) or \"Show in application menu\" (Linux), subtitle the launcher's path. On: Record is added to the platform's list of apps (per user) with its logo; off: removed.",
+          "copy": [
+            "window.show_in",
+            "install.applications",
+            "install.application_menu"
+          ],
+          "phone": {
+            "does": "nothing",
+            "why": "Show in Applications installs a macOS app bundle or freedesktop launcher; a phone's launcher is the OS's own.",
+            "decided": "2026-11-21"
+          }
+        }
+      ]
+    },
+    {
+      "name": "group: Size",
+      "shows": "A group titled \"Size\": three number rows with steppers, 1.0 the usual, steps of 0.1: \"Text Scale\", \"Icon Scale\", \"Global Scale\" (what Ctrl+0 / Cmd+0 goes back to, and the zoom right now). Applied as they change; the same settings as Baude's.",
+      "copy": [
+        "window.size",
+        "meta_settings.text_scale",
+        "meta_settings.icon_scale",
+        "meta_settings.global_scale"
+      ]
+    },
+    {
+      "name": "group: export",
+      "shows": "An untitled group of arrow rows: \"Export Notebook…\" (only with a notebook open; the open one) then \"Export All Notebooks…\". Each subtitle starts \"Working out size…\" and then reads \"{size}, or {size} with glossary and chats\" (sizes as \"412 bytes\", \"3.4 KB\", \"12 MB\"), or \"{size}; with glossary and chats, not known\", or \"Size not known\". Closing Settings stops working the sizes out.",
+      "text": [
+        "Export Notebook…",
+        "Export All Notebooks…",
+        "Working out size…",
+        "Size not known"
+      ],
+      "actions": [
+        {
+          "by": "click a row",
+          "does": "Opens the Export dialog (RecordExport)."
+        }
+      ]
+    },
+    {
+      "name": "group: feedback",
+      "shows": "Two arrow button rows: \"Send Feedback…\" and \"Ongoing Feedback\". Each closes Settings first and then does what the ☰ item does.",
+      "copy": [
+        "fixes.send_feedback",
+        "window.ongoing_feedback"
+      ]
+    }
+  ],
+  "scenes": []
+}

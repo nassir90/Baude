@@ -1,0 +1,27 @@
+{
+  "description": "A tab's right-click menu in Record.",
+  "apps": ["record"],
+  "opens": ["right-click a tab"],
+  "code": ["widgets.py:MainTabs.__init__", "record.py:Window.ask_rename_chat"],
+  "copy": ["tabs", "common"],
+  "parts": [
+    {
+      "name": "Copy Link",
+      "shows": "Item \"Copy Link\".",
+      "copy": ["tabs.copy_link"],
+      "actions": [
+        {"by": "click", "does": "Puts the tab's absolute link on the clipboard, for pasting into an agent: a page of notes' file path, a chat's transcript path, a file's code path. Toast \"Link copied\", or \"This page has no link to copy\"."},
+        {"by": "key Ctrl+Shift+L (Cmd+Shift+L on macOS)", "does": "Same, for the tab shown; its menu name there is \"Copy Link to This Page\" (in ☰)."}
+      ]
+    },
+    {
+      "name": "Rename…",
+      "shows": "Item \"Rename…\", enabled only on a chat's tab.",
+      "copy": ["common.rename_ellipsis"],
+      "actions": [
+        {"by": "click", "does": "Opens the Rename chat dialog (RecordAlerts)."}
+      ]
+    }
+  ],
+  "scenes": []
+}

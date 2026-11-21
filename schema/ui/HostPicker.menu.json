@@ -1,0 +1,32 @@
+{
+  "description": "The menu under the header's provider button, which lists where the chat's model can run: each host that has it as a section, the host's name as the section heading and its providers under it. Called the provider picker in the header.",
+  "apps": ["baude"],
+  "opens": ["header provider button"],
+  "code": ["widgets.py:HostPicker", "baude.py:BaudeWindow.sync_providers", "baude.py:BaudeWindow.on_provider_changed", "baude.py:BaudeWindow.move_to"],
+  "copy": ["chat_header"],
+  "parts": [
+    {
+      "name": "button face",
+      "shows": "The pick written \"<host name> / <provider>\" (for example \"local / MLX\", \"lab-mac / Ollama\"), cut with … in the middle past 24 characters, then the drop-down arrow. This machine's host is named \"local\".",
+      "copy": ["chat_header.provider_tip", "chat_header.provider_tip_only"]
+    },
+    {
+      "name": "host section",
+      "shows": "A heading with the host's name over its rows, a rule between hosts; the chat's host's section first.",
+      "text": ["local"]
+    },
+    {
+      "name": "provider row",
+      "shows": "The provider's name (Ollama, MLX, Apple, an endpoint's name …) as a menu row; the picked one carries the menu's selection mark.",
+      "actions": [
+        {"by": "click", "does": "The chat's model becomes its copy on that provider and host (the chat itself stays on its host with its files; another host's model runs through the mesh's proxy, or as an agent there whose tools are the chat's host's). Mid-turn, the move waits for the turn's end. Picking the one already picked changes nothing and drops a waiting move"}
+      ]
+    }
+  ],
+  "states": [
+    {"name": "hidden", "shows": "The chat is on one of Claude's own models: the picker isn't shown"},
+    {"name": "only one", "shows": "Only one provider has the model: the button is greyed (can't be pressed); tooltip \"Where the chat's model runs (the only one that has it)\""},
+    {"name": "several", "shows": "Tooltip \"Where the chat's model runs\"; enabled"}
+  ],
+  "scenes": ["55h-network-models", "55l2-network-host-picker"]
+}

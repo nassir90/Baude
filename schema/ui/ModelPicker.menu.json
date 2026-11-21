@@ -1,0 +1,42 @@
+{
+  "description": "The popover under the header's model button: a command palette over every model the chat can run, with a search box on top and the models listed under their family's name.",
+  "apps": ["baude"],
+  "opens": ["header model button"],
+  "code": ["widgets.py:ModelPicker", "widgets.py:model_family", "widgets.py:model_icon", "baude.py:BaudeWindow.sync_models", "baude.py:BaudeWindow.sync_providers", "baude.py:BaudeWindow.on_model_changed"],
+  "copy": ["model_picker", "common"],
+  "parts": [
+    {
+      "name": "search box",
+      "shows": "A search field at the top of the popover, empty each time it opens, focused at once.",
+      "copy": ["model_picker.search"],
+      "actions": [
+        {"by": "type", "does": "Narrows the list live: a row stays if every word typed is found in its name, its value or its family's name (case ignored); the first match is lit"},
+        {"by": "key Down / Up", "does": "Moves the lit row one step among those shown (kept in view)"},
+        {"by": "key Enter", "does": "Picks the lit row and closes"},
+        {"by": "key Esc", "does": "Closes the popover"}
+      ]
+    },
+    {
+      "name": "family heading",
+      "shows": "A small dim caption over the first model of each family (Claude, Qwen, Gemma, Gemini, GPT, Llama, Mistral, DeepSeek, Phi, Granite, Kimi, GLM, Nemotron, Command, MiniMax, SmolLM, OLMo, InternLM, Yi, Step, Baichuan, Apple; \"Other\" for one that matches none). Families are listed in the order their first model was given (Claude's models first, then the chat's host's, then others); models keep their given order inside a family. While searching, a heading shows over the first match of each family.",
+      "copy": ["common.other"]
+    },
+    {
+      "name": "model row",
+      "shows": "One line: the family's monochrome logo (16 px; blank space of the same width when the family has none), the model's name (one line, … past 40 characters; the full name as a tooltip when cut), and at the right a tick on the picked model only. Claude's rows are named as claude lists them (\"Opus 5.5\"); a provider's model is named alike across hosts and shows once however many hosts have it, told apart by provider/host name only where two models share a name.",
+      "actions": [
+        {"by": "click", "does": "Picks the model and closes the popover. Same model: nothing happens. Different: the chat switches (set_model on the running claude with a quiet note \"model → <name>\"); across programs (Claude to Apple/Codex, or another host) the chat restarts or becomes a new conversation (\"model → <name>: a new conversation\"); picked mid-turn for a program change, it waits until the turn is over"}
+      ]
+    },
+    {
+      "name": "empty list",
+      "shows": "While the search matches nothing, the centred dim text \"No models match\".",
+      "copy": ["model_picker.none"]
+    }
+  ],
+  "states": [
+    {"name": "opens on picked model", "shows": "The picked model's row is lit (Enter would re-pick it); typing starts from the first match"},
+    {"name": "scrolling", "shows": "List grows to 420 px tall then scrolls, 280 px minimum wide, no horizontal scrollbar"}
+  ],
+  "scenes": ["60m-models-any-case", "55h-network-models", "60-effort-unavailable"]
+}

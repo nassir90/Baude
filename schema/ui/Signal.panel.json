@@ -1,0 +1,118 @@
+{
+  "description": "The side panel's Signal page: the names (files, code symbols, commits, branches, pull requests, env vars, constants, routes, services, Kubernetes objects, tools and more) Claude's replies mention, grouped by kind, with how far each lookup got. Click a name for its card (what it is, how it was found, where it lives, GitHub facts); a Reader row opens the model session that reads the chat on a page of its own. Signal turns the names into links in replies.",
+  "apps": ["baude"],
+  "opens": [
+    "Side panel page button \"Signal\"",
+    "A name's popover Open button (an icon in the popover) opens this page at that name's card",
+    "Header link button (icon with a dropdown, for this chat's two Signal switches) is the header's, not this page's"
+  ],
+  "code": ["baude.py:SignalPage", "baude.py:SignalPage.show_ref", "baude.py:SignalPage.facts", "baude.py:SignalPage.tool_card", "baude.py:SignalPage.show_reader", "baude.py:BaudeWindow.show_ref", "lookup.py:REF_KINDS"],
+  "copy": ["signal", "lookup", "references", "databases", "meta"],
+  "parts": [
+    {
+      "name": "filter bar",
+      "shows": "A search field \"Filter names\" (grows) and a refresh icon button (tooltip \"Search again for the names not found\", greyed unless some names are not found).",
+      "copy": ["signal.filter", "signal.search_again"],
+      "actions": [
+        {"by": "type in the field", "does": "filters the list as you type: names containing the text (or whose canonical name does), case-insensitive"},
+        {"by": "click refresh", "does": "looks again for every listed name that was not found, ignoring earlier give-ups"}
+      ]
+    },
+    {
+      "name": "options row",
+      "shows": "Three toggle buttons (pressed = on) and, at the right end, a switch. Buttons: the reader's model name (\"Sonnet\" by default, capitalised; on by default); \"LSP\" (on by default if language servers are already installed); \"Tools\". Switch: Signal for this chat on/off (tooltip \"Signal, for this chat\"; the same as the header's Activate Signal).",
+      "copy": ["lookup.tools"],
+      "text": ["Sonnet", "LSP", "Signal, for this chat"],
+      "parts": [
+        {"name": "reader toggle", "shows": "Tooltip: the reader is a model session that reads the chat in order like a person following along (your messages, what Claude ran and saw, its replies), decides what each name points at in each reply, with Signal's lookups as its tools; its spending is capped and shown in the status line.",
+         "actions": [{"by": "click", "does": "turns the reader on or off (remembered)"}]},
+        {"name": "LSP toggle", "shows": "Tooltip: language servers (pyright, typescript-language-server) say which definition a code name means. Baude fetches them once with npm, at pinned versions, and runs them read-only.",
+         "actions": [{"by": "click", "does": "turns language-server lookups on or off (remembered; the first time on, fetches the servers)"}]},
+        {"name": "Tools toggle", "shows": "Tooltip: tool schemas: when a reply talks about a tool (the Agent tool, Read), show what it takes, from Anthropic's Agent SDK types and the Claude Code docs (fetched once per Claude Code version).",
+         "actions": [{"by": "click", "does": "turns tool-schema lookup on or off (remembered)"}]},
+        {"name": "Signal switch", "shows": "A switch aligned right. Off: the reader, language servers and waiting lookups stop at once; links already made stay.",
+         "actions": [{"by": "toggle", "does": "activates or stops Signal for this chat"}]}
+      ]
+    },
+    {
+      "name": "summary",
+      "shows": "A small dim caption: counts joined by \" · \" for the kinds that have any: \"N linked\", \"N with several matches\", \"N looking up\", \"N not found\", \"N stale\"; then a second line \"Glossary: <folder of the glossary files, with ~>\". Hidden when Signal is off.",
+      "copy": ["signal.linked", "signal.several", "signal.looking_up", "signal.not_found", "signal.stale", "signal.glossary"]
+    },
+    {
+      "name": "now line",
+      "shows": "Shown while Signal is on: a spinner (only while a lookup is running for this chat) and what Signal is doing now (wrapped text, e.g. which lookups are running, what it is waiting for). Empty text when idle."
+    },
+    {
+      "name": "reader row",
+      "shows": "Shown only once the reader has read something. A boxed row: a status mark (spinner while reading, tick when done, red cross if its last call was refused, grey stop mark when stopped partway by the switch or its spending cap with replies left to read), the model's name as the title (\"Sonnet\", or \"Reader\"), a subtitle of up to two lines (while reading: \"Reading replies A to B\"; else its last part line, \"done\"/\"refused\" line, or its last words), and a chevron ›.",
+      "text": ["Reader", "Reading replies {a} to {b}"],
+      "actions": [{"by": "click", "does": "opens the reader's page: the row grows into a header, the reader's chat below, scrolled to its end"}]
+    },
+    {
+      "name": "names list",
+      "shows": "Groups, each a dim heading (the kind's plural: \"Looking up\" first for names still pending, then Files, Commits, Branches, Pull requests, Env vars, Constants, Code symbols, Database tables and columns, Config keys, Services, Kubernetes objects, Packages, Commands, External tools, Tools, Subagent types, Skills, HTTP routes; a group with no names isn't shown) over a boxed list of rows. Row: a status icon (green tick resolved; \"…\" icon for several matches; spinner-like icon pending; question mark not found; amber warning stale), the name in monospace (middle-ellipsised), under it a dim one-line summary of what was found (its tooltip is the same text). Names that are plain English guesses, cloud providers' product names, or never-found names the reader didn't link are not listed.",
+      "copy": ["lookup.file", "lookup.files", "lookup.commits", "lookup.branches", "lookup.pull_requests", "lookup.env_vars", "lookup.constants", "lookup.code_symbols", "signal.database_tables", "lookup.config_keys", "lookup.services", "lookup.kubernetes_objects", "lookup.packages", "lookup.commands", "lookup.external_tools", "lookup.tools", "lookup.subagent_types", "lookup.skills", "lookup.http_routes"],
+      "text": ["Looking up"],
+      "actions": [
+        {"by": "click a row", "does": "opens that name's card (slides in from the right)"},
+        {"by": "hover a row", "does": "tooltip with its summary"}
+      ]
+    },
+    {
+      "name": "name card (detail)",
+      "shows": "Header: back button ‹ (tooltip \"All names\") and the name as a heading. Body, scrolling, top to bottom: (1) the kind (dim) and the name in monospace; (2) a status line (dim; amber for stale), hidden for commits, branches, pull requests, tools, subagent types, skills and kubeconfig contexts whose facts say it all: \"Looking it up…\", \"Not found: <reason>.\", \"Stale: the code changed and this couldn't be found again. It can still be opened as it was.\", \"N matches (<why>).\" or a resolved summary, with a note \"Looked up <time> after the message was written, so the line is the one there now.\" if it was looked up late (tooltip: when the message was written); (3) facts (see below); (4) \"Known as: <kind> (<where>) · <kind> …\" in dim when the glossary has the name from more than one kind of source; (5) for a resolved tool: its Inputs, output type, calls; (6) a \"Locations\" heading and a flat button per location; (7) a dim caption \"Read from <state> content at <sha9> on <branch>\"; (8) for names that can run (services, workloads, folders) a \"Running\" heading and rows for where they run in local clusters; (9) buttons Refresh and, for a resolved commit or branch, Show in Git.",
+      "copy": ["lookup.looking_it_up", "lookup.stale"],
+      "text": ["All names", "Locations", "Refresh", "Show in Git", "Running"],
+      "parts": [
+        {
+          "name": "facts by kind",
+          "shows": "Commit: the subject in bold; for a range \"N commit(s), <sha9>..<sha9>\"; \"In <repo folder>\"; author · date; \"+A −R in N files\"; a link \"Open on GitHub ↗\" or \"Local only: no remote branch contains it\"; \"On no branch: a rebase or squash replaced it.\" (with \"Probably replaced by <sha9> (same subject).\") or \"On <branches...>\" (first 8 and \"and N more\"); then \"Pull requests\" with each #12 link, title and (merged <date> or <state>, opened <date>), or \"No pull requests\", or (pushed, gh missing) \"Install the GitHub CLI (gh) to see pull requests\". Branch: subject in bold; \"Last commit <date> · <sha9>\"; \"N ahead, M behind <base>\"; \"Tracks <upstream>\"; \"Open on GitHub ↗\" or \"Not pushed\"; plus the same Pull requests block. Pull request: title in bold; \"<State>: opened <date>, merged/closed <date>\"; \"+A −R in N files · <head> → <base>\"; \"Open on GitHub ↗\". Tool: its description; \"Asks your permission: yes/no\"; its source (\"Claude Code <version> · Anthropic's Agent SDK <version> types · Docs ↗\", or \"From the MCP server <name> (its tools/list)\", or a Claude Desktop MCP tool with no public schema, or \"No schema here yet: turn on Tools at the top of this page ...\"). Subagent type and skill: description, Model and Tools, \"Built into Claude Code\". Kubeconfig context or cluster: name (and \"(the current one)\"), Cluster, Server, Namespace, User, \"In <kubeconfig>, line N; its credentials aren't read\". Kubernetes object: kind in bold, name in monospace, namespace; Helm chart and release; Kustomize overlay; how it was found."
+        },
+        {
+          "name": "tool card extras",
+          "shows": "Inputs: a boxed list, one row per field: name in bold monospace, its type in monospace, \"required\" dim, and its description dimmer on a second line; or \"No inputs\". An expandable \"Output\" (the meta copy's) with the output type as TypeScript code. \"Called N time(s) in this chat\" in bold, then (when more than one) \"the last ones:\" and the last two calls' inputs as JSON code blocks. For the Agent/Task tool a dim line \"Subagent types: <name> (built in|defined here), ...\"; for Skill \"Skills: <names>\".",
+          "copy": ["meta.output"]
+        },
+        {
+          "name": "location row",
+          "shows": "A flat full-width button: \"<role> · <path>:<line>\" plus \"  (<note>)\" if any, middle-ellipsised; tooltip the full path. A stale location with a saved version has a second flat button \"As it was\" (tooltip \"Open the version that was read when it was looked up\").",
+          "text": ["As it was", "Open the version that was read when it was looked up"],
+          "actions": [
+            {"by": "click the location", "does": "opens the file at the line in a code tab, following the code if it moved (a lost one is marked stale, toast \"The code there changed and this couldn't be found again\"); a place on another branch opens that branch's version, note \"On <rev>: not in this checkout\" (toast \"<rev> hasn't <path> any more\" if it's gone)"},
+            {"by": "click As it was", "does": "opens the version read at lookup time"}
+          ]
+        },
+        {
+          "name": "running rows",
+          "shows": "Under a dim \"Running\" heading, a flat button per matching workload in the user's local Kubernetes clusters: a dot (green ok, amber not), \"<kind> <name> · <context> · <namespace> · <state>\" middle-ellipsised, tooltip \"Open it in the Kubernetes view: <context>, namespace <ns>\". Nothing is shown if it runs nowhere or kubectl is absent.",
+          "actions": [{"by": "click", "does": "opens the Kubernetes view filtered to it"}]
+        },
+        {
+          "name": "buttons",
+          "shows": "Refresh (tooltip \"Search again, ignoring what was found or given up on\") and, for a resolved commit or branch, Show in Git (tooltip \"Its place in the history, on the Git page\").",
+          "actions": [
+            {"by": "click Refresh", "does": "searches that name again"},
+            {"by": "click Show in Git", "does": "switches to the Git page showing it"}
+          ]
+        }
+      ]
+    },
+    {
+      "name": "reader page (detail)",
+      "shows": "Header: status mark, the model's name as a heading, up to two lines of what it's doing, and a back button ‹ (tooltip \"All names\") at the right end. Under it the reader's chat, set into the panel like a subagent's: Baude's own lines in a quiet style (each part given to it; what the checks kept: \"Linked <names> (kind), ... and N more\", \"Not in the code: ...\", \"Plain words: ...\", \"N rejected by the checks\"; a part done; a refused line in an error style; hover shows the time HH:MM:SS), the reader's words as markdown replies, and its tool calls (searches and lookups) as tool cards with their results. Keeps at its end while new lines come in; at most 400 entries kept.",
+      "text": ["All names"],
+      "actions": [{"by": "click back", "does": "closes into the reader row"}]
+    }
+  ],
+  "states": [
+    {"name": "Signal off", "shows": "The list is replaced by centred dim text: \"Signal is off. Turned on (here, or with the link button in the header), the files, code, commits, env vars, routes, Kubernetes objects and tools Claude names become links, listed here.\" No summary, now line or reader row.", "text": ["Signal is off. Turned on (here, or with the link button in the header), the files, code, commits, env vars, routes, Kubernetes objects and tools Claude names become links, listed here."]},
+    {"name": "no names yet", "shows": "\"No names yet: the files, commits, env vars and routes in Claude's replies show up here.\"", "copy": ["signal.empty"]},
+    {"name": "looking up", "shows": "Names in the \"Looking up\" group, spinner in the now line"},
+    {"name": "resolved / several matches / not found / stale", "shows": "Status icons and summary counts as above"},
+    {"name": "reader working", "shows": "Reader row spinner and \"Reading replies A to B\""},
+    {"name": "reader stopped", "shows": "Grey stop mark on the reader row"},
+    {"name": "page not shown", "shows": "The list is rebuilt when next shown, not on every change"}
+  ],
+  "scenes": ["37-signal", "37b-signal-link-kinds", "38-signal-popover", "38d-tool-card"]
+}

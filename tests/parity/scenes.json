@@ -1,0 +1,29 @@
+{
+  "description": "The scenes both rigs draw from the fixtures, by the same names: tests/parity/desktop.py for Baude, android/.../screenshots/Parity.kt for the phone. chat scenes open fixtures/sessions.json's first session with only the first `lines` lines of its transcript (all of them when absent); `open` opens every tool call's input and output where the app can. `inventory` names the schema/ui entries the scene shows.",
+  "scenes": [
+    {"name": "home", "what": "The sessions list, no chat open", "inventory": ["Sidebar.region", "GroupByMenu.menu"]},
+    {"name": "chat-bash", "what": "A failed command with its output, after thinking", "lines": 3, "inventory": ["ToolCall.element", "Thinking.element", "UserTurn.element"]},
+    {"name": "chat-bash-open", "what": "The same, its input and output opened", "lines": 3, "open": true, "inventory": ["ToolCall.element"]},
+    {"name": "chat-read-search", "what": "Read, Grep and Glob in a row", "lines": 9, "inventory": ["ToolCall.element", "ToolGroup.element"]},
+    {"name": "chat-read-search-open", "what": "The same, opened", "lines": 9, "open": true, "inventory": ["ToolCall.element", "ToolGroup.element"]},
+    {"name": "chat-markdown", "what": "A reply with bold, a table and a code block", "lines": 10, "inventory": ["Reply.element"]},
+    {"name": "chat-edit-write", "what": "An Edit (a diff) and a Write (a file)", "lines": 14, "inventory": ["ToolCall.element"]},
+    {"name": "chat-edit-write-open", "what": "The same, opened", "lines": 14, "open": true, "inventory": ["ToolCall.element"]},
+    {"name": "chat-todo-agent", "what": "TodoWrite and a subagent (Task)", "lines": 18, "inventory": ["ToolCall.element"]},
+    {"name": "chat-todo-agent-open", "what": "The same, opened", "lines": 18, "open": true, "inventory": ["ToolCall.element"]},
+    {"name": "chat-web-mcp", "what": "WebFetch and an MCP tool", "lines": 22, "inventory": ["ToolCall.element"]},
+    {"name": "chat-web-mcp-open", "what": "The same, opened", "lines": 22, "open": true, "inventory": ["ToolCall.element"]},
+    {"name": "chat-end", "what": "The whole chat, at its end", "inventory": ["UserTurn.element", "Reply.element", "Composer.region", "StatusBar.region", "HeaderBar.region"]},
+    {"name": "menu", "what": "The chat's main menu open (☰ on the desktop)", "inventory": ["MainMenu.menu"]},
+    {"name": "settings", "what": "Settings", "inventory": ["Settings.dialog", "MetaSettings.dialog"]},
+    {"name": "changelog", "what": "The changelog of the running version", "inventory": ["Changelog.dialog"]},
+    {"name": "panel-meta", "what": "The fixture chat with the side panel's Meta page", "page": "meta", "inventory": ["Meta.panel", "SidePanel.region"]},
+    {"name": "panel-subagents", "what": "… its Subagents page", "page": "agents", "inventory": ["Subagents.panel"]},
+    {"name": "panel-processes", "what": "… its Processes page", "page": "processes", "inventory": ["Processes.panel"]},
+    {"name": "panel-side-questions", "what": "… its Side questions page", "page": "btw", "inventory": ["SideQuestions.panel"]},
+    {"name": "panel-artifacts", "what": "… its Artifacts page", "page": "artifacts", "inventory": ["Artifacts.panel"]},
+    {"name": "panel-files", "what": "… its Files page", "page": "files", "inventory": ["Files.panel"]},
+    {"name": "panel-git", "what": "… its Git page", "page": "git", "inventory": ["Git.panel"]},
+    {"name": "panel-signal", "what": "… its Signal page", "page": "signal", "inventory": ["Signal.panel"]}
+  ]
+}

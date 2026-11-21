@@ -1,0 +1,110 @@
+{
+  "description": "The main area's tab bar and the pages open in its tabs: in Baude the chat (pinned, first, never closed) plus code files and the Ongoing Feedback page; in Record its chats, notes, code files, deleted pages and Ongoing Feedback. This is how code and Feedback pages open beside the chat. The Kubernetes and Database Schemas views are not tabs: they are full-window views over everything (see Kubernetes, DatabaseSchemas).",
+  "apps": [
+    "baude",
+    "record"
+  ],
+  "opens": [
+    "Always present; the bar is shown according to the rules below"
+  ],
+  "code": [
+    "widgets.py:MainTabs",
+    "widgets.py:TabBody",
+    "baude.py:BaudeWindow.show_code",
+    "baude.py:BaudeWindow.open_fixes",
+    "baude.py:BaudeWindow.reopen_tab",
+    "record.py:RecordWindow.__init__"
+  ],
+  "copy": [
+    "tabs"
+  ],
+  "parts": [
+    {
+      "name": "tab bar",
+      "shows": "A bar of tabs along the top of the main area, above the page shown: each tab has an icon, a title and a × (the pinned chat tab has an icon only, titled \"Chat\", and no ×). The tab shown is selected; a tab's tooltip is its title, or for a file the file's full path. Many tabs scroll sideways (a touchpad's scrolling moves it smoothly). In Baude the bar is hidden while the chat is the only tab and appears once something else is open; in Record it is always shown.",
+      "copy": [
+        "chats.chat"
+      ],
+      "text": [
+        "Chat"
+      ],
+      "actions": [
+        {
+          "by": "click a tab",
+          "does": "Shows that page. Only the page shown has a size: a wide page open behind another doesn't hold the window wider."
+        },
+        {
+          "by": "click a tab's ×",
+          "does": "Closes it (the Feedback page's images and what it holds are freed)."
+        },
+        {
+          "by": "key Ctrl+W (⌘W)",
+          "does": "Closes the tab shown, unless it is pinned (the chat in Baude stays)."
+        },
+        {
+          "by": "right-click a tab",
+          "does": "Record only: the tab menu (see MainTabsMenu)."
+        }
+      ]
+    },
+    {
+      "name": "what opens in a tab",
+      "shows": "Each page is opened under a key so that asking for it again shows the existing tab instead of making a second: the chat (\"chat\", pinned); a file's code, keyed by its real path and note (so a version or a diff is a tab of its own, the file itself another); the Ongoing Feedback page (☰ → Ongoing Feedback; tab titled \"Feedback\" with a mail-send icon and a tooltip); in Record also each open chat, each page of notes, and a deleted page (\"<page> (deleted)\" with a trash icon). The code tab's title is its file's name (plus \" (<note>)\"), with a script icon.",
+      "copy": [
+        "feedback.title",
+        "window.feedback_tab_tip"
+      ]
+    },
+    {
+      "name": "history",
+      "shows": "What's shown is kept as a browser keeps history (up to 100 entries): each tab shown, and a file's code at each line it was shown at (the shown line is recorded again when a link sends the file to another line). Going back from the middle and then opening something else forgets what was forward.",
+      "phone": {
+        "does": "The system back gesture",
+        "why": "Android's own back",
+        "decided": "2026-11-21"
+      },
+      "actions": [
+        {
+          "by": "key Alt+Left (⌥⌘← on macOS)",
+          "does": "Back: shows what was shown before. A file whose tab was closed is opened again at its line if it still exists; an entry that is gone is skipped. Nothing happens when there is nothing before."
+        },
+        {
+          "by": "key Alt+Right (⌥⌘→ on macOS)",
+          "does": "Forward."
+        },
+        {
+          "by": "key Alt+Up (⌥⌘↑ on macOS)",
+          "does": "Up: from a file's code, its folder on the Files page with the file selected (nothing from the chat)."
+        }
+      ]
+    },
+    {
+      "name": "copy link",
+      "shows": "Record only: a tab's absolute link on the clipboard, to paste to an agent: a code tab gives the file's path with \":<line>\" when it has a line; a page of notes its file; a chat its transcript. A toast says \"Link copied\", or \"This page has no link to copy\" (a version or diff of a file, or a file no longer on disk). The window's menu has \"Copy Link to This Page\" with a key (Ctrl+Shift+L; ⌘⇧L on macOS).",
+      "copy": [
+        "tabs.copy_link_to_page",
+        "tabs.link_copied",
+        "tabs.no_link"
+      ],
+      "actions": [
+        {
+          "by": "key Ctrl+Shift+L",
+          "does": "Copies the link of the tab shown."
+        }
+      ]
+    }
+  ],
+  "states": [
+    {
+      "name": "only the chat (Baude)",
+      "shows": "No tab bar; the chat fills the area."
+    },
+    {
+      "name": "code open beside the chat",
+      "shows": "The bar with the Chat tab (icon only) and one tab per file; the selected one's page below it."
+    }
+  ],
+  "scenes": [
+    "38b-code-view"
+  ]
+}

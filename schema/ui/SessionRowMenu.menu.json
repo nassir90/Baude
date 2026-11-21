@@ -1,0 +1,81 @@
+{
+  "description": "The menu on a session row in the sessions sidebar, opened by right-click (press and hold on touch) at the pointer. Its items depend on whether the session is on this machine or on a host, its state, and whether it can be a Bot. A Bot row has the same menu.",
+  "apps": ["baude"],
+  "opens": ["right-click a session row (not the open unsaved chat, not a ghost)", "key F2 (Rename… only)"],
+  "code": ["baude.py:SessionSidebar.show_menu", "baude.py:SessionSidebar.group_submenu", "baude.py:SessionSidebar.on_key"],
+  "copy": ["common", "trash", "new_session", "sidebar"],
+  "parts": [
+    {
+      "name": "Rename…",
+      "shows": "\"Rename…\". Shown for every session except a gone host's. Opens the Rename dialog (RenameSession.dialog.json).",
+      "copy": ["common.rename_ellipsis"],
+      "actions": [
+        {"by": "click", "does": "Opens Rename session / Rename Bot."},
+        {"by": "key F2", "does": "Same, on the focused or selected row."}
+      ]
+    },
+    {
+      "name": "Bot items",
+      "shows": "Only for a top-level session on a host that is alive, supports Bots, and runs a model of Claude's or pi's program (not a fork): either \"Make Bot…\" (a plain chat) or both \"Bot Settings…\" and \"Turn Back into a Chat\" (a Bot). They sit right after Rename…, before Move to Group.",
+      "text": ["Make Bot…", "Bot Settings…", "Turn Back into a Chat"],
+      "actions": [
+        {"by": "click Make Bot… / Bot Settings…", "does": "Opens the Make Bot / Bot Settings dialog (BotSettings.dialog.json)."},
+        {"by": "click Turn Back into a Chat", "does": "The host lists it as a plain chat again; its memory and picture stay on the host for if it is made a Bot again."}
+      ]
+    },
+    {
+      "name": "Mesh tools item",
+      "shows": "For a non-Bot chat on a host that takes mesh tools (the same chats that can be Bots): \"Give Mesh Tools\", or \"Remove Mesh Tools\" if it has them. Sits third (after Rename… and any Bot item, before Move to Group; for a fork, after Move to Group). With mesh tools its agent can see the mesh's hosts and models, start a subagent on any of them and message other chats, from its next start.",
+      "text": ["Give Mesh Tools", "Remove Mesh Tools"]
+    },
+    {
+      "name": "Move to Group",
+      "shows": "A submenu, for any chat (this machine's or a host's), after Rename… and any Bot and mesh items (first if there is no Rename…). Lists each group by name (those made, those chats are put in, and those hosts' sessions were started in), alphabetical, the chat's own ticked; then \"No Group\"; then, in a separate section, \"New Group…\".",
+      "text": ["Move to Group", "No Group", "New Group…"],
+      "actions": [
+        {"by": "click a group or No Group", "does": "Puts the chat in that group (or none); the list and the ⋮ → Groups list refresh. Undo is not offered."},
+        {"by": "click New Group…", "does": "Asks for a name (GroupName.dialog.json); the group is made and this chat moved into it."}
+      ]
+    },
+    {
+      "name": "Archive / Unarchive",
+      "shows": "\"Archive\" for a normal session, \"Unarchive\" for one that is already archived (here, in Claude Desktop, or on its host). For a session on a host that is at a turn (working or waiting), Archive is left out (Stop is offered instead). For a session of this machine's own: archived only in Baude's settings, listed under Archived. On a host: archived there, for every app.",
+      "text": ["Archive", "Unarchive"],
+      "actions": [
+        {"by": "click", "does": "Moves it to the Archived group (or back). A host that refuses says \"<host> didn't archive it: <why>\" / \"…didn't unarchive it: <why>\" in a toast."}
+      ]
+    },
+    {
+      "name": "Stop",
+      "shows": "Only for a session on a host that is working or waiting (and not gone): \"Stop\".",
+      "copy": ["common.stop"],
+      "actions": [
+        {"by": "click", "does": "Stops its claude (its host keeps the session to carry on with)."}
+      ]
+    },
+    {
+      "name": "Move to Trash…",
+      "shows": "\"Move to Trash…\" Opens the confirmation (MoveToTrash.dialog.json). Not shown for a session on a gone host (see Delete).",
+      "copy": ["trash.move_dots"],
+      "actions": [
+        {"by": "click", "does": "Opens Move “<title>” to the trash?"}
+      ]
+    },
+    {
+      "name": "Delete",
+      "shows": "Only for a session whose host is gone (dead) or not alive: the sole item: \"Delete\". Its transcript is the host's, so it's only hidden from the list until it shows up again (used since, at a turn, or its host back); Archive keeps a session out for good.",
+      "copy": ["common.delete"],
+      "actions": [
+        {"by": "click", "does": "The session is hidden from the list; if it's the open chat, a new session opens in its place."}
+      ]
+    }
+  ],
+  "states": [
+    {"name": "this machine's session (plain)", "shows": "Rename…, Move to Group ▸, Archive (or Unarchive), Move to Trash…. Order: Rename…, Move to Group, Archive, Move to Trash…."},
+    {"name": "host session, idle", "shows": "Rename…, [Make Bot… | Bot Settings… and Turn Back into a Chat], [Give/Remove Mesh Tools], Move to Group ▸, Archive, Move to Trash…."},
+    {"name": "host session, working or waiting", "shows": "Rename…, Move to Group ▸, Stop, Move to Trash… (no Archive; an archived one at a turn shows Unarchive)."},
+    {"name": "host session, host gone", "shows": "Move to Group ▸, Delete. (Rename… is absent.)"},
+    {"name": "host session, deactivated", "shows": "As gone: Move to Group ▸, Delete."}
+  ],
+  "scenes": ["53b-sidebar-menu", "55g-network-session-menu"]
+}

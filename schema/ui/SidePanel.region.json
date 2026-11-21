@@ -1,0 +1,220 @@
+{
+  "description": "The right-hand side panel of the Baude window: a column beside the chat with a row of page buttons (icon + title) over one page at a time. Hidden by default; it holds Meta, Subagents, Processes, Side questions, Artifacts, Files, Git and Signal, plus Memory, Browser and Routines while the open chat is a Bot.",
+  "apps": [
+    "baude"
+  ],
+  "opens": [
+    "Header bar toggle button (sidebar-right icon, tooltip \"Side panel: subagents, processes, code, files (Ctrl+Alt+B)\"), pressed while the panel is open",
+    "key Ctrl+Alt+B (anywhere in the window): opens it, or closes it if open",
+    "Status bar \"⚙ N background processes · M subagents running\" button (shown only while something runs; tooltip lists each running task's description, then \"Click to open the side panel\")",
+    "key Ctrl+M / ⌘M: Meta page (closes the panel if Meta is already showing)",
+    "A subagent tool card's View button: Subagents page, that subagent open",
+    "/btw <question> in the composer: Side questions page, the new question open",
+    "A Signal link or a name's Open: Signal page at that name; a branch or commit link: Git page; a folder link: Files page"
+  ],
+  "code": [
+    "baude.py:SidePanel",
+    "baude.py:BaudeWindow.show_panel",
+    "baude.py:BaudeWindow.place_split",
+    "baude.py:BaudeWindow.split_dragged",
+    "widgets.py:PaneSlide",
+    "widgets.py:ExpandStack"
+  ],
+  "copy": [
+    "side_panel",
+    "side_questions",
+    "artifacts",
+    "git",
+    "signal",
+    "lookup",
+    "bot_memory"
+  ],
+  "phone": {
+    "does": "The side panel's pages are a chat's pages, switched by a bar along its bottom (icon over title), the chat itself the first",
+    "why": "One column at a time on a phone",
+    "decided": "2026-11-21"
+  },
+  "parts": [
+    {
+      "name": "panel container",
+      "shows": "A column on the right of the window, same background as the chat, a 1px rule between it and the chat. It slides in and out. At least 320px wide; first opened it takes about 36% of the window (between 320 and 460px); after the user drags the rule, that width is remembered (settings panel_width) and used each time it opens, and for code. It can't squeeze the chat below the chat's own least width.",
+      "actions": [
+        {
+          "by": "drag the rule between chat and panel",
+          "does": "resizes the panel; stops at the panel's least (320px) and the chat's least width. Dragged on past the least until under 24px wide, the panel slides shut and stays shut (it reopens at the width it had). The width is saved shortly after the drag stops."
+        },
+        {
+          "by": "key Ctrl+Alt+B",
+          "does": "toggles the panel (slides)"
+        },
+        {
+          "by": "header toggle button",
+          "does": "toggles the panel; the button shows pressed while it is open"
+        }
+      ]
+    },
+    {
+      "name": "page switcher",
+      "shows": "A centred row of buttons at the top of the panel (6px above and below, no rule under it), one per page, each an icon with its title (narrow policy: when the panel is too narrow for titles it shows icons only). The current page's button is selected. Pages in order, left to right: Meta (Baude's helper icon), Memory (pencil/document-edit icon), Browser (web-browser icon), Routines (alarm icon), Subagents (people icon), Processes (terminal icon), Side questions (question-bubble icon), Artifacts (globe icon), Files (folder icon), Git (branch icon), Signal (link icon).",
+      "copy": [
+        "side_panel.subagents",
+        "side_panel.processes",
+        "side_panel.side_questions",
+        "side_panel.artifacts",
+        "lookup.files",
+        "git.title",
+        "side_panel.signal",
+        "bot_memory.title"
+      ],
+      "text": [
+        "Meta",
+        "Browser",
+        "Routines"
+      ],
+      "parts": [
+        {
+          "name": "Meta",
+          "shows": "Always there; first. (Page content is described in the Meta panel file.)"
+        },
+        {
+          "name": "Memory",
+          "shows": "Only while the open chat is a Bot; hidden for ordinary chats. Title from bot_memory.title.",
+          "copy": [
+            "bot_memory.title"
+          ]
+        },
+        {
+          "name": "Browser",
+          "shows": "Only while the open chat is a Bot (the Bot's own browser, watched and driven)."
+        },
+        {
+          "name": "Routines",
+          "shows": "Only while the open chat is a Bot (work scheduled for it)."
+        },
+        {
+          "name": "Subagents",
+          "shows": "Title \"Subagents\"; always there.",
+          "copy": [
+            "side_panel.subagents"
+          ]
+        },
+        {
+          "name": "Processes",
+          "shows": "Title \"Processes\"; always there.",
+          "copy": [
+            "side_panel.processes"
+          ]
+        },
+        {
+          "name": "Side questions",
+          "shows": "Title \"Side questions\"; always there.",
+          "copy": [
+            "side_panel.side_questions"
+          ]
+        },
+        {
+          "name": "Artifacts",
+          "shows": "Title \"Artifacts\"; always there.",
+          "copy": [
+            "side_panel.artifacts"
+          ]
+        },
+        {
+          "name": "Files",
+          "shows": "Title \"Files\"; always there.",
+          "copy": [
+            "lookup.files"
+          ]
+        },
+        {
+          "name": "Git",
+          "shows": "Title \"Git\"; always there.",
+          "copy": [
+            "git.title"
+          ]
+        },
+        {
+          "name": "Signal",
+          "shows": "Title \"Signal\"; always there.",
+          "copy": [
+            "side_panel.signal"
+          ]
+        }
+      ],
+      "actions": [
+        {
+          "by": "click a page button",
+          "does": "shows that page. Opening Files for the first time loads the chat's folder tree; opening Git loads the history if anything changed since it last showed."
+        },
+        {
+          "by": "switching to another chat that isn't a Bot while Memory, Browser or Routines is showing",
+          "does": "falls back to Meta and hides those three buttons"
+        }
+      ]
+    },
+    {
+      "name": "which page opens by default",
+      "shows": "When something opens the panel without naming a page (the status bar ⚙ button): Subagents if any subagent is running, otherwise Processes. Everything else that opens the panel names its page (see opens).",
+      "actions": []
+    },
+    {
+      "name": "list to detail navigation",
+      "shows": "Subagents, Processes and Side questions are lists of rows; each row can open as a detail page that fills the panel. The row animates into the page's header: its title, status and subtitle move to the header, and a back button (‹, go-previous) sits at the right end where the row's chevron or square was. Closing animates back into the row. Git (a commit's card) and Signal (a name's card, the reader) also have list to detail pages: Git and Signal's name cards slide in from the right with a back button at the left of the header. Back-button tooltips: \"All subagents\", \"All processes\", \"All side questions\", \"The log\" (Git), \"All names\" (Signal).",
+      "copy": [
+        "side_panel.all_subagents",
+        "side_questions.all",
+        "git.the_log"
+      ],
+      "text": [
+        "All processes",
+        "All names"
+      ],
+      "actions": [
+        {
+          "by": "click the back button",
+          "does": "returns to the page's list"
+        },
+        {
+          "by": "open a different row's detail while one is open",
+          "does": "the first is put back in its row; only one detail at a time per page"
+        }
+      ]
+    },
+    {
+      "name": "state kept per page",
+      "shows": "Each page keeps what it showed while another is shown: a subagent's detail stays open, scroll positions stay, Git keeps its branch choice and open commit per chat and brings them back when that chat returns. A new session (clearing or switching chat) empties Subagents, Processes and Artifacts (rows removed, subagent transcripts dropped).",
+      "actions": []
+    },
+    {
+      "name": "dark/light",
+      "shows": "Commands drawn as code in Processes are re-coloured when the app's light or dark theme changes.",
+      "actions": []
+    }
+  ],
+  "states": [
+    {
+      "name": "closed",
+      "shows": "No panel; the chat uses the whole width. Header toggle button not pressed."
+    },
+    {
+      "name": "open",
+      "shows": "Panel at its remembered width, switcher on top, current page below."
+    },
+    {
+      "name": "Bot chat",
+      "shows": "Memory, Browser and Routines buttons present in the switcher, between Meta and Subagents."
+    },
+    {
+      "name": "tasks running",
+      "shows": "Status bar button \"⚙ N background processes · M subagents running\" (singular \"1 background process\", \"1 subagent\"), so the panel is one click away even when closed."
+    }
+  ],
+  "scenes": [
+    "72-panel-processes",
+    "73-panel-subagents",
+    "75-side-questions",
+    "82-panel-artifacts",
+    "38f-git",
+    "37-signal"
+  ]
+}

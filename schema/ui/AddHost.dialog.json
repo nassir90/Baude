@@ -1,0 +1,41 @@
+{
+  "description": "A dialog over the main window to add another machine's Baude host process to the mesh, by where ssh goes. The host is kept from then on, reached or not.",
+  "apps": ["baude"],
+  "opens": ["host picker's right-click → Add Host…"],
+  "code": ["baude.py:BaudeWindow.ask_add_host", "baude.py:BaudeWindow.host_form"],
+  "copy": ["new_session", "hosts", "common"],
+  "parts": [
+    {
+      "name": "heading",
+      "shows": "\"Add a host\".",
+      "copy": ["new_session.add_host"]
+    },
+    {
+      "name": "destination field",
+      "shows": "A text entry about 30 characters wide, focused, with the placeholder \"user@host, or an ssh alias\". Takes an alias in ~/.ssh/config, a host name or address, or user@host; it must not start with \"-\".",
+      "copy": ["new_session.host_placeholder"],
+      "actions": [
+        {"by": "type", "does": "Add is enabled only while the text can be given to ssh as where to go. Enter confirms."}
+      ]
+    },
+    {
+      "name": "command field",
+      "shows": "A second text entry with placeholder \"baude_headless.py, on its PATH\": the host process's command there, run as `<command> connect`. Empty if baude_headless.py is on its PATH, else its path (in a checkout of Baude, <checkout>/baude_headless.py; not the baude launcher, which runs the app).",
+      "copy": ["hosts.command_placeholder"]
+    },
+    {
+      "name": "Cancel",
+      "shows": "\"Cancel\" button; Escape.",
+      "copy": ["common.cancel"]
+    },
+    {
+      "name": "Add",
+      "shows": "\"Add\" button, the default, suggested style, disabled until the destination is valid.",
+      "copy": ["common.add"],
+      "actions": [
+        {"by": "click", "does": "The host is added (by ssh with the destination and the command) and a toast says \"Looking for Baude on <destination>\"; it then appears in the host picker."}
+      ]
+    }
+  ],
+  "scenes": ["55k-network-add-server"]
+}

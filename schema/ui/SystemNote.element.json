@@ -1,0 +1,74 @@
+{
+  "description": "A quiet one-line note Baude adds to the chat about what happened around the conversation (resumed, interrupted, a turn's error, the model or folder changed, a denied call…): small, dimmed, left-aligned, selectable, in order with the messages.",
+  "apps": [
+    "baude"
+  ],
+  "code": [
+    "baude.py:BaudeWindow.note",
+    "baude.py:BaudeWindow.h_result",
+    "baude.py:BaudeWindow.begin_resume",
+    "baude.py:BaudeWindow.stop_stuck",
+    "baude.py:BaudeWindow.render_history"
+  ],
+  "copy": [
+    "meta",
+    "asks"
+  ],
+  "parts": [
+    {
+      "name": "note",
+      "shows": "Plain text (not markdown) at 0.85em (font.small), 60% opacity, wrapping, selectable, full column width."
+    }
+  ],
+  "states": [
+    {
+      "name": "resumed",
+      "shows": "\"— resumed —\" where you first wrote to a past session you opened (not on opening it), above your message; \"— resumed from network error —\" / \"— resumed from claude binary error —\" when the chat's claude had gone and was started again.",
+      "text": [
+        "— resumed —",
+        "— resumed from network error —",
+        "— resumed from claude binary error —"
+      ]
+    },
+    {
+      "name": "interrupted",
+      "shows": "\"interrupted\" once, after a turn you stopped (Esc / stop button), unless a tool card it cut short already says interrupted. Also from history for a stopped turn.",
+      "copy": [
+        "meta.interrupted"
+      ]
+    },
+    {
+      "name": "stop didn't take",
+      "shows": "\"claude hadn't stopped after 5s: ended it\" or \"claude wasn't running: turn ended\" (\"pi\", \"Apple's model\", \"Codex\" in place of claude for those).",
+      "text": [
+        "hadn't stopped after 5s: ended it",
+        "wasn't running: turn ended"
+      ]
+    },
+    {
+      "name": "turn error",
+      "shows": "\"turn ended with error: <what claude said>\" (unless the reply already showed that error as an API error line). For a chat whose folder is gone on another host: \"<why>: start a new chat in <folder> on <host> to carry on\".",
+      "text": [
+        "turn ended with error: "
+      ]
+    },
+    {
+      "name": "denied without a card",
+      "shows": "\"denied <tool>\" / \"not answered AskUserQuestion\"; \"<tool> isn't always allowed: <why>\".",
+      "copy": [
+        "asks.not_always_allowed"
+      ]
+    },
+    {
+      "name": "settings changed",
+      "shows": "\"model → <model>\" (\": a new conversation\" when it had to start afresh), \"thinking effort → <level>\", \"permission mode → <mode>\", \"folder → <path>\" (\" (conversation continues)\"), \"claude is running in <path>\"."
+    },
+    {
+      "name": "other",
+      "shows": "Host and process notes (\"Starting <machine>'s host process…\", \"failed to start claude: …\", \"couldn't reach <host>: …\"), attach/paste failures (\"can't attach <path>: not a file\", \"paste failed: …\"), \"stop requested for <task>\", \"control error: …\", \"stderr: <line>\", and unknown system events as \"[system:<subtype>]\"."
+    }
+  ],
+  "scenes": [
+    "51b-resumed-after-writing"
+  ]
+}

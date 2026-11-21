@@ -24,7 +24,9 @@ import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -38,14 +40,19 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalViewConfiguration
 import androidx.compose.ui.unit.dp
 import java.util.Base64
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import org.json.JSONObject
+
+private val thumbnails = android.util.LruCache<String, androidx.compose.ui.graphics.ImageBitmap>(64)
 
 /** What a message's revert needs of the chat's page: whether its button's shown, how it's shown, and what it does. */
 class RevertOffer(val revealed: Boolean, val reveal: () -> Unit, val onRevert: () -> Unit)
 
 /** A revert asked for and not made: the message it takes back, and what was in the box before. */
-class Reverting(val uuid: String, val draft: String)
+class Reverting(val uuid: String, val draft: String) {
+    var asked by androidx.compose.runtime.mutableStateOf(false) // (sent, claude's answer not in yet)
+}
 
 /** A message of yours as Baude draws it (.user-bubble): a bubble at the right, its files in a row over its text, which
  * is markdown, and the revert button beside it, shown by a long press on the message. */
@@ -100,8 +107,10 @@ private fun Attachments(files: List<Sent>) {
     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
         for (f in files) {
             if (f.kind == "image") {
-                val bitmap = remember(f.data) {
-                    try {
+                val bitmap = androidx.compose.runtime.produceState<androidx.compose.ui.graphics.ImageBitmap?>(
+                    thumbnails.get(f.data.orEmpty()), f.data) {
+                    if (value != null) return@produceState
+                    value = withContext(kotlinx.coroutines.Dispatchers.Default) { try {
                         val bytes = Base64.getDecoder().decode(f.data.orEmpty())
                         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
                         BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
@@ -110,10 +119,11 @@ private fun Attachments(files: List<Sent>) {
                         while (minOf(bounds.outWidth, bounds.outHeight) / (sample * 2) >= want) sample *= 2
                         BitmapFactory.decodeByteArray(bytes, 0, bytes.size,
                             BitmapFactory.Options().apply { inSampleSize = sample })?.asImageBitmap()
+                            ?.also { thumbnails.put(f.data.orEmpty(), it) }
                     } catch (_: Exception) {
                         null
-                    }
-                }
+                    } }
+                }.value
                 if (bitmap != null) Image(bitmap, f.name, contentScale = ContentScale.Crop,
                     modifier = Modifier.size(Tokens.Markdown.thumb).clip(RoundedCornerShape(6.dp)))
             } else Row(Modifier.clip(RoundedCornerShape(Gap.cardRadius)).background(c.raised)
@@ -131,10 +141,14 @@ private fun Attachments(files: List<Sent>) {
 /** A revert made (the box's text and files go once claude has rewound to before the message): rewind_conversation to
  * its host's claude, interrupting a turn that's running; once it says it has, the message and all after it are
  * gone from the chat and what's written is sent. Why not, if it won't (done(false); the revert stays asked). */
-fun commitRevert(chat: Chat, uuid: String, text: String, files: List<Picked>, done: (Boolean) -> Unit) {
+fun commitRevert(chat: Chat, r: Reverting, text: String, files: List<Picked>, done: (Boolean) -> Unit) {
+    val uuid = r.uuid
+    r.asked = true
     val request = JSONObject().put("subtype", "rewind_conversation").put("target_message_uuid", uuid)
         .put("interrupt_if_running", true)
     controlAnswer(chat.hostId, chat.sid, request) { response, why ->
+        if (chat.reverting !== r) return@controlAnswer // (no longer pending: its answer does nothing)
+        r.asked = false
         if (why != null || response?.optBoolean("rewound") != true) {
             val other = response?.keys()?.asSequence()?.filter { it != "rewound" }?.mapNotNull { response.opt(it) as? String }?.firstOrNull()
             chat.said.value = Wording.ChatTurns.couldntRevert(why = why ?: other ?: Wording.ChatHeader.claudeSaidNo)
@@ -146,6 +160,8 @@ fun commitRevert(chat: Chat, uuid: String, text: String, files: List<Picked>, do
             while (chat.lines.size > i) chat.lines.removeAt(chat.lines.size - 1)
             chat.ends.values.removeAll { it > i }
         }
+        chat.reverting = null
+        chat.files.clear()
         done(true)
         var waited = 0
         fun whenIdle() {

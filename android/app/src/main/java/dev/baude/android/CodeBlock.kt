@@ -61,6 +61,8 @@ private fun splitLines(s: String) = if (s.isEmpty()) emptyList() else s.removeSu
 
 private typealias Spans = List<Triple<Int, Int, Tok>>
 
+private val spansCache = android.util.LruCache<List<Any?>, List<Spans>>(128)
+
 /** The spans to colour a block by: for plain code one list; for a diff one for each of its lines. */
 private fun colour(code: String, syntax: String?, path: String, numbered: Boolean, diff: List<Pair<String, String>>?): List<Spans> {
     if (diff == null) return listOf(if (numbered) numberedSpans(code, path) else codeSpans(code, path, syntax.orEmpty()))
@@ -87,12 +89,14 @@ fun CodeBlock(code: String, lang: String = "", syntax: String? = lang.ifBlank { 
     val dark = c.inside.luminance() < 0.5f
     val panel = c.raised.compositeOver(under)
     val key = listOf(code, syntax, path, numbered, diff)
-    var spans by remember { mutableStateOf(if (code.length <= 4000) colour(code, syntax, path, numbered, diff) else emptyList()) }
-    var doneFor by remember { mutableStateOf<Any?>(if (code.length <= 4000) key else null) }
+    var spans by remember { mutableStateOf(spansCache.get(key) ?: if (code.length <= 4000)
+        colour(code, syntax, path, numbered, diff).also { spansCache.put(key, it) } else emptyList()) }
+    var doneFor by remember { mutableStateOf<Any?>(if (spansCache.get(key) != null) key else null) }
     LaunchedEffect(key) { // (a block that grows keeps its colours till new ones are made, a moment after it's still)
         if (doneFor == key) return@LaunchedEffect
         if (spans.isNotEmpty()) delay(150L + minOf(code.length, 20_000) / 40)
         spans = withContext(Dispatchers.Default) { colour(code, syntax, path, numbered, diff) }
+        spansCache.put(key, spans)
         doneFor = key
     }
     val ctx = LocalContext.current
@@ -111,13 +115,15 @@ fun CodeBlock(code: String, lang: String = "", syntax: String? = lang.ifBlank { 
                                 "add" -> if (dark) Tokens.dark.diff.addedLine else Tokens.light.diff.addedLine
                                 else -> Color.Transparent
                             }
-                            Text(highlighted(line, spans.getOrElse(i) { emptyList() }, c, dark), style = Type.mono, color = c.fg,
+                            val lineSpans = spans.getOrElse(i) { emptyList() }
+                            Text(remember(line, lineSpans, dark, c.fg) { highlighted(line, lineSpans, c, dark) }, style = Type.mono, color = c.fg,
                                 softWrap = wrap, modifier = Modifier.fillMaxWidth().background(back).padding(horizontal = 8.dp))
                         }
                     }
                 }
             } else {
-                val text: AnnotatedString = highlighted(code, spans.firstOrNull().orEmpty(), c, dark)
+                val main = spans.firstOrNull().orEmpty()
+                val text: AnnotatedString = remember(code, main, dark, c.fg) { highlighted(code, main, c, dark) }
                 Text(text, style = Type.mono, color = c.fg, softWrap = wrap,
                     modifier = Modifier.then(if (wrap) Modifier.fillMaxWidth() else Modifier.horizontalScroll(rememberScrollState()))
                         .padding(horizontal = 8.dp, vertical = 6.dp))

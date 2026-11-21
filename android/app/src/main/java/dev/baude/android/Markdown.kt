@@ -12,6 +12,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import android.util.LruCache
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
@@ -56,6 +58,11 @@ private val RULE = Regex("""\s*([-*_])(\s*\1){2,}\s*""")
 private val ITEM = Regex("""^(\s*)([-*+•◦]|\d+[.)])\s+(.*)$""")
 private val QUOTE_MARK = Regex("""^>\s?""")
 private val IMAGE = Regex("""^\s*!\[([^\]]*)]\(([^)\s]+)\)\s*$""")
+
+private val blocksCache = LruCache<String, List<Block>>(256)
+
+/** markdownBlocks, kept by text (a long chat's items that scroll back in aren't parsed again). */
+fun cachedBlocks(text: String): List<Block> = blocksCache.get(text) ?: markdownBlocks(text).also { blocksCache.put(text, it) }
 
 /** widgets.markdown_parse: line by line, the same checks in the same order. An unclosed fence runs to the end. */
 fun markdownBlocks(md: String): List<Block> {
@@ -284,6 +291,8 @@ internal fun annotate(markup: String, accent: Color, open: (String) -> Unit, fil
         }
     }
 
+private val inlineCache = LruCache<List<Any?>, AnnotatedString>(1024)
+
 /** A text's inline markdown (each line of it its own), as styled text; drawn again when the paths it names are
  * learned of. */
 @Composable
@@ -293,9 +302,10 @@ internal fun rememberInline(text: String): AnnotatedString {
     val uri = LocalUriHandler.current
     val known = if (place != null) PathCheck.version.intValue else 0
     return remember(text, place, known, c.accent) {
-        annotate(text.split("\n").joinToString("\n") { inlineMarkup(it, place) }, c.accent,
+        val key = listOf(text, place, known, c.accent)
+        inlineCache.get(key) ?: annotate(text.split("\n").joinToString("\n") { inlineMarkup(it, place) }, c.accent,
             { url -> try { uri.openUri(url) } catch (_: Exception) {} },
-            { path, line, dir -> place?.let { FileLinks.open(Wanted(it.hostId, path, line, dir)) } })
+            { path, line, dir -> place?.let { FileLinks.open(Wanted(it.hostId, path, line, dir)) } }).also { inlineCache.put(key, it) }
     }
 }
 
@@ -306,7 +316,7 @@ internal fun rememberInline(text: String): AnnotatedString {
 @Composable
 fun MarkdownView(text: String, color: Color = LocalBaude.current.fg, under: Color = LocalBaude.current.inside) {
     val c = LocalBaude.current
-    val blocks = remember(text) { markdownBlocks(text) }
+    val blocks = remember(text) { cachedBlocks(text) }
     val measure = rememberTextMeasurer()
     val density = LocalDensity.current
     val markerWidth = remember(density) { with(density) { measure.measure("00", Type.body.copy(fontWeight = FontWeight.Bold)).size.width.toDp() } }
@@ -319,7 +329,7 @@ fun MarkdownView(text: String, color: Color = LocalBaude.current.fg, under: Colo
             is Block.Item -> Row(Modifier.padding(start = Tokens.Markdown.itemStart + Tokens.Markdown.indentStep * b.depth),
                 horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text(b.marker, style = Type.body.copy(fontWeight = FontWeight.Bold), color = color,
-                    textAlign = TextAlign.End, modifier = Modifier.width(markerWidth).alpha(Tokens.Markdown.markerOpacity.toFloat()))
+                    textAlign = TextAlign.End, modifier = Modifier.widthIn(min = markerWidth).alpha(Tokens.Markdown.markerOpacity.toFloat()))
                 Text(rememberInline(b.text), style = Type.body, color = color, modifier = Modifier.weight(1f))
             }
             is Block.Quote -> Row(Modifier.height(IntrinsicSize.Min)) {

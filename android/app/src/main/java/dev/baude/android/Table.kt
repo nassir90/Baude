@@ -26,6 +26,8 @@ import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 
+private val widthCache = android.util.LruCache<List<Any?>, Dp>(2048)
+
 /** A markdown table as Baude draws one (md-table): a frame with a ruled grid, its first row the head (bold, raised).
  * Short columns are as wide as their text; the long ones (a cell over 40 characters) share what's left of the
  * column, never under 40 characters, and wrap; wider than the column even so, it scrolls sideways. */
@@ -39,8 +41,12 @@ fun MarkdownTable(rows: List<List<String>>, color: Color, under: Color) {
     val cells = rows.mapIndexed { r, row -> List(columns) { col -> rememberInline(row.getOrElse(col) { "" }) } }
     BoxWithConstraints(Modifier.padding(vertical = 2.dp)) {
         val available = maxWidth
-        fun natural(text: AnnotatedString, head: Boolean): Dp =
-            with(density) { measure.measure(text, if (head) bold else Type.body, softWrap = false).size.width.toDp() }
+        fun natural(text: AnnotatedString, head: Boolean): Dp {
+            val key = listOf(text, head, density.density, density.fontScale)
+            return widthCache.get(key) ?: with(density) {
+                measure.measure(text, if (head) bold else Type.body, softWrap = false).size.width.toDp()
+            }.also { widthCache.put(key, it) }
+        }
         val long = (0 until columns).filter { col -> rows.any { it.getOrElse(col) { "" }.length > Tokens.Markdown.tableWrapChars } }
         val widths = (0 until columns).map { col -> cells.indices.maxOf { r -> natural(cells[r][col], r == 0) } }
         val char = with(density) { measure.measure("0".repeat(Tokens.Markdown.tableWrapChars), Type.body).size.width.toDp() }

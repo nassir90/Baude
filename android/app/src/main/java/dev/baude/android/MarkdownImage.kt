@@ -49,6 +49,18 @@ private object Pictures {
 
 private const val MAX_PICTURE_BYTES = 20_000_000
 
+/** Up to n bytes of a stream (InputStream.readNBytes is for Android 13 and later). */
+fun java.io.InputStream.readUpTo(n: Int): ByteArray {
+    val out = java.io.ByteArrayOutputStream()
+    val buf = ByteArray(8192)
+    while (out.size() < n) {
+        val got = read(buf, 0, minOf(buf.size, n - out.size()))
+        if (got < 0) break
+        out.write(buf, 0, got)
+    }
+    return out.toByteArray()
+}
+
 /** A picture's bytes: a web one fetched, a file of the chat's host read from it; null if it can't be had. */
 private suspend fun bytesOf(place: ChatPlace?, src: String): ByteArray? {
     if (src.startsWith("http://") || src.startsWith("https://")) return withContext(Dispatchers.IO) {
@@ -56,7 +68,7 @@ private suspend fun bytesOf(place: ChatPlace?, src: String): ByteArray? {
             val conn = java.net.URL(src).openConnection() as java.net.HttpURLConnection
             conn.connectTimeout = 15_000
             conn.readTimeout = 15_000
-            conn.inputStream.use { it.readNBytes(MAX_PICTURE_BYTES) }
+            conn.inputStream.use { it.readUpTo(MAX_PICTURE_BYTES) }
         } catch (_: Exception) {
             null
         }

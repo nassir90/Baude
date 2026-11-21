@@ -87,16 +87,18 @@ fun ChatPage(chat: Chat, name: String, hint: String = "Message $name", attach: B
     }
     val list = rememberLazyListState()
     var revealed by remember(chat) { mutableStateOf<String?>(null) } // (the message whose revert button's shown)
-    var reverting by remember(chat) { mutableStateOf<Reverting?>(null) }
+    var reverting by chat::reverting
     val canRevert = takes(at, "control") && chat.sender == null
     val focus = remember { androidx.compose.ui.focus.FocusRequester() }
     var field by remember { mutableStateOf(androidx.compose.ui.text.input.TextFieldValue(text)) }
     if (field.text != text) field = androidx.compose.ui.text.input.TextFieldValue(text, androidx.compose.ui.text.TextRange(text.length))
     fun cancelRevert() {
-        reverting?.let { text = it.draft }
+        val r = reverting ?: return
+        if (r.asked) return // (asked of claude: its answer's waited for)
+        text = r.draft
         reverting = null
     }
-    androidx.activity.compose.BackHandler(enabled = reverting != null) { cancelRevert() }
+    androidx.activity.compose.BackHandler(enabled = reverting != null) { cancelRevert() } // (consumed while asked too: Back does nothing then)
     LaunchedEffect(reverting?.uuid) { if (reverting != null) focus.requestFocus() }
     LaunchedEffect(list.isScrollInProgress) { if (list.isScrollInProgress) revealed = null }
     // (kept at the end while it's there: what it said last, or what it asks, a tall one's foot too, what it's writing
@@ -125,6 +127,7 @@ fun ChatPage(chat: Chat, name: String, hint: String = "Message $name", attach: B
                 Said(line, uuid?.let { chat.senders[it] }.takeIf { line.kind == "you" },
                     if (canRevert && line.kind == "you" && uuid != null) RevertOffer(revealed == uuid, { revealed = uuid }) {
                         revealed = null
+                        if (reverting?.asked == true) return@RevertOffer
                         reverting = Reverting(uuid, reverting?.draft ?: text)
                         text = line.text
                     } else null)
@@ -175,16 +178,13 @@ fun ChatPage(chat: Chat, name: String, hint: String = "Message $name", attach: B
                                 } else false
                             })
                 }
-                val ready = (text.isNotBlank() || files.isNotEmpty()) && !chat.busy.value && chat.preparing.value == 0
+                val ready = (text.isNotBlank() || files.isNotEmpty()) && !chat.busy.value && chat.preparing.value == 0 &&
+                    reverting?.asked != true
                 IconButton(Adwaita.Return, Wording.Common.send, enabled = ready, tint = if (ready) c.accentFg else c.fg,
                     background = if (ready) c.accentBg else null) {
                     val r = reverting
-                    if (r != null) commitRevert(chat, r.uuid, text, files.toList()) { ok ->
-                        if (ok) {
-                            reverting = null
-                            text = ""
-                            files.clear()
-                        }
+                    if (r != null) commitRevert(chat, r, text, files.toList()) { ok ->
+                        if (ok) text = ""
                     } else {
                         chat.send(text, files.toList())
                         text = ""

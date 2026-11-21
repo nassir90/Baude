@@ -83,6 +83,7 @@ class Chat(hostId: String, sid: String) {
     val busy = mutableStateOf(false)
     val thinking = mutableStateOf(false)     // (at a turn, where its host doesn't list it: Meta's)
     val said = mutableStateOf<String?>(null)
+    var reverting by mutableStateOf<Reverting?>(null) // (a revert asked, not made: the page for it may be left and come back to)
     val streamingThought = mutableStateOf("") // (and what it's thinking, as it comes)
     val streaming = mutableStateOf("") // (what its agent's writing now, as it comes: till its message is whole)
     val asks = mutableStateListOf<Ask>()      // (what its Bot asks, answered here: Allow, Deny)

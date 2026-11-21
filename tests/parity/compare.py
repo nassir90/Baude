@@ -37,7 +37,8 @@ def dump(out, side, name):
 
 def norm(text):
     """Copy as it's compared: case, spacing, ellipses and quotes aside."""
-    t = unicodedata.normalize("NFKC", text or "").replace("…", "...").replace("’", "'").replace("‘", "'")
+    t = (text or "").replace("/private/tmp/", "/tmp/")  # (macOS resolves /tmp)
+    t = unicodedata.normalize("NFKC", t).replace("…", "...").replace("’", "'").replace("‘", "'")
     return re.sub(r"\s+", " ", t).strip().casefold()
 
 
@@ -164,7 +165,8 @@ def pair_path(out, theme, name):
 
 
 def font(size):
-    for f in ("/System/Library/Fonts/Supplemental/Arial.ttf", "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"):
+    for f in ("/System/Library/Fonts/Supplemental/Arial Unicode.ttf", "/System/Library/Fonts/Supplemental/Arial.ttf",
+              "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"):
         if os.path.exists(f):
             return ImageFont.truetype(f, size)
     return ImageFont.load_default()
@@ -180,7 +182,9 @@ def make_pair(out, theme, name, what):
     for side in SIDES:
         path = os.path.join(out, side, theme, f"{name}.png")
         if os.path.exists(path):
-            im = Image.open(path).convert("RGB")
+            shot = Image.open(path).convert("RGBA")
+            im = Image.new("RGB", shot.size, bg)  # (the margin a popover grew the picture by is transparent)
+            im.paste(shot, mask=shot.getchannel("A"))
             im = im.resize((round(im.width * h / im.height), h), Image.LANCZOS)
         else:
             im = Image.new("RGB", (round(h * 411 / 891), h), (60, 60, 60) if dark else (220, 220, 220))

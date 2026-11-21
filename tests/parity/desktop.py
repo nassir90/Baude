@@ -7,13 +7,19 @@ text, buttons, inputs, switches and images a user sees, top to bottom). A render
 
 Runs against tests/fake_claude.py in a throwaway HOME and config dirs (tests/test_baude.py's), never the real claude,
 never the real data; on macOS its windows never reach the screen (macos.stay_offscreen)."""
+import json
 import os
+import shutil
 import sys
 import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(os.path.dirname(HERE))
-HOME = os.path.realpath(tempfile.mkdtemp(prefix="parity-home-"))
+tempfile.tempdir = "/tmp"  # (every throwaway path lands under /tmp: none of it names a user's own temp folder)
+with open(os.path.join(HERE, "fixtures", "sessions.json")) as f:
+    HOME = json.load(f)["host"]["home"]  # (the phone's fixture host has the same one)
+shutil.rmtree(HOME, ignore_errors=True)
+os.makedirs(HOME)
 os.environ["HOME"] = HOME  # (before anything reads it: ~ is this run's)
 os.environ.setdefault("GSK_RENDERER", "cairo")
 sys.path.insert(0, ROOT)
@@ -24,9 +30,7 @@ sys.path.insert(0, os.path.join(ROOT, "tests"))
 sys.path.insert(0, HERE)
 
 import argparse  # noqa: E402
-import json  # noqa: E402
 import re  # noqa: E402
-import shutil  # noqa: E402
 import time  # noqa: E402
 
 import screenshots as S  # noqa: E402  (tests/test_baude's throwaway env, the window machinery, capture)
@@ -44,7 +48,11 @@ def fixture(name):
 
 
 def folder(name):
+    """A folder of the fixture host's home: fixtures/<name>/'s files in it, if the fixtures have any."""
     path = os.path.join(HOME, name)
+    src = os.path.join(FIX, name)
+    if os.path.isdir(src):
+        shutil.copytree(src, path, dirs_exist_ok=True)
     os.makedirs(path, exist_ok=True)
     return path
 
@@ -93,6 +101,18 @@ def fixture_changelog():
     update.STARTED = log["commit"]
 
 
+def pick_header(win, s):
+    """The chat's model, effort and mode as the session has them, picked in the window's pickers as a user would."""
+    T.wait_for(lambda: s["model"] in win.model_dd.values, "its models")
+    row = next(r for r in win.model_dd._rows() if r.value == s["model"])
+    win.model_dd._activate(row)
+    T.pump(0.5)
+    for dd, value in ((win.effort_dd, s["effort"]), (win.mode_dd, s["mode"])):
+        T.wait_for(lambda dd=dd, value=value: value in dd.values, f"the {value} pick")
+        dd.set_selected(dd.values.index(value))
+    T.pump(0.5)
+
+
 def open_chat(app, sc):
     path = write_sessions(sc.get("lines"))
     win = app.window(S.opts(cwd=folder("garden")))
@@ -100,6 +120,7 @@ def open_chat(app, sc):
     win.resume_session(info)
     T.wait_for(lambda: win.session_id == info["id"] and win.transcript.get_first_child() is not None, "its history")
     T.pump(0.8)
+    pick_header(win, fixture("sessions.json")["sessions"][0])
     if sc.get("open"):
         for g in T.find(win, baude.ToolGroup):
             g.toggle.set_expanded(True)

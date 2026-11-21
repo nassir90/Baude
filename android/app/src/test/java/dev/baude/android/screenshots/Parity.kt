@@ -65,6 +65,9 @@ abstract class Parity(private val theme: String, private val scene: String) {
         ShadowChoreographer.setFrameDelay(Duration.ofMillis(16))
         activity = Robolectric.buildActivity(ComponentActivity::class.java).setup().get()
         Mesh.app = activity.applicationContext
+        // (Settings' Version: the fixture changelog's commit, not this build's; its date is the build's resource: left)
+        org.robolectric.Shadows.shadowOf(activity.packageManager).getInternalMutablePackageInfo(activity.packageName)
+            .versionName = JSONObject(File(root, "fixtures/changelog.json").readText()).getString("commit")
         Settings.load(activity)
         val set = JSONObject(File(root, "fixtures/settings.json").readText())
         Settings.accent.value = if (set.isNull("accent")) null else set.getString("accent")
@@ -78,7 +81,7 @@ abstract class Parity(private val theme: String, private val scene: String) {
         Mesh.key.value = Key(pair.private, pair.public as ECPublicKey)
         val h = Host(id = host.getString("id"), name = host.getString("name"), user = "dev", address = "workshop.example")
         Mesh.hosts.add(h)
-        FixtureConnection.up(activity, h) { msg -> answer(msg) }
+        FixtureConnection.up(activity, h, home) { msg -> answer(msg) }
         val now = System.currentTimeMillis() / 1000.0
         val list = sessions.getJSONArray("sessions")
         Mesh.sessions[h.id] = (0 until list.length()).map { list.getJSONObject(it) }.map { s ->
@@ -93,14 +96,45 @@ abstract class Parity(private val theme: String, private val scene: String) {
     /** The scene's transcript, as the host has it: the first `lines` lines of the fixture's (all, without). */
     private var shown = ByteArray(0)
 
-    /** What the fixture host answers: the open chat's transcript, as it's asked for (Mesh.read). */
+    /** What the fixture host answers, as the desktop's host (baudelib/server.py, hostfiles.py) would: the open chat's
+     * transcript, and the folder's files (fixtures/garden, not a git repository, with no Signal glossary). */
     private fun answer(msg: JSONObject): JSONObject? {
-        if (msg.optString("op") != "transcript") return null
-        val from = msg.optLong("offset", 0).coerceIn(0, shown.size.toLong()).toInt()
-        val part = shown.copyOfRange(from, shown.size)
-        return JSONObject().put("op", "transcript").put("req", msg.opt("req")).put("session", msg.optString("session"))
-            .put("offset", from).put("next", shown.size).put("size", shown.size)
-            .put("data", java.util.Base64.getEncoder().encodeToString(part))
+        val op = msg.optString("op")
+        fun reply(vararg more: Pair<String, Any?>) = JSONObject().put("op", op).put("req", msg.opt("req")).also { r ->
+            more.forEach { (k, v) -> r.put(k, v) }
+        }
+        fun local(path: String) = File(root, "fixtures/garden").let { g ->
+            val rel = path.removePrefix("$home/garden").trimStart('/')
+            if (path != "$home/garden" && !path.startsWith("$home/garden/")) null else if (rel.isEmpty()) g else File(g, rel)
+        }
+        when (op) {
+            "transcript" -> {
+                val from = msg.optLong("offset", 0).coerceIn(0, shown.size.toLong()).toInt()
+                val part = shown.copyOfRange(from, shown.size)
+                return reply("session" to msg.optString("session"), "offset" to from, "next" to shown.size, "size" to shown.size,
+                    "data" to java.util.Base64.getEncoder().encodeToString(part))
+            }
+            "list_dir" -> {
+                val path = msg.optString("path")
+                val dir = local(path)?.takeIf { it.isDirectory } ?: return JSONObject().put("op", "error").put("req", msg.opt("req"))
+                    .put("error", "Not in a session folder")
+                val entries = dir.listFiles().orEmpty().filter { it.name != ".git" }
+                    .sortedWith(compareBy({ !it.isDirectory }, { it.name.lowercase() }))
+                return reply("op" to "dir", "path" to path, "more" to false, "entries" to JSONArray(entries.map { e ->
+                    JSONObject().put("name", e.name).put("dir", e.isDirectory).put("ignored", false)
+                        .apply { if (!e.isDirectory) put("size", e.length()) }
+                }))
+            }
+            "read_file" -> {
+                val path = msg.optString("path")
+                val f = local(path)?.takeIf { it.isFile } ?: return reply("op" to "file", "path" to path, "error" to "No such file or directory")
+                return reply("op" to "file", "path" to path, "size" to f.length(), "truncated" to false,
+                    "data" to java.util.Base64.getEncoder().encodeToString(f.readBytes()))
+            }
+            "git" -> return reply("what" to msg.optString("what"), "error" to Wording.HostErrors.notARepo)
+            "signal_names" -> return reply("glossary" to JSONObject.NULL, "refs" to JSONArray())
+        }
+        return null
     }
 
     @After fun down() {
@@ -166,6 +200,8 @@ abstract class Parity(private val theme: String, private val scene: String) {
             n.config.contains(SemanticsActions.OnClick) && (label in said(n) || label == described(n))
         } ?: error("nothing labelled $label")
         node.config[SemanticsActions.OnClick].action?.invoke()
+        // (what the tap wrote is told to the composition now: in a run's later scenes the write observer's notice doesn't arrive)
+        androidx.compose.runtime.snapshots.Snapshot.sendApplyNotifications()
         settle()
     }
 
@@ -178,8 +214,10 @@ abstract class Parity(private val theme: String, private val scene: String) {
     private fun windows(): List<View> {
         val global = Class.forName("android.view.WindowManagerGlobal")
         val wm = global.getMethod("getInstance").invoke(null)
+        // (the activity's own window first)
         @Suppress("UNCHECKED_CAST")
-        return (global.getDeclaredField("mViews").apply { isAccessible = true }.get(wm) as List<View>).filter { it.isShown }
+        val all = global.getDeclaredField("mViews").apply { isAccessible = true }.get(wm) as List<View>
+        return all.filter { it.isShown }.sortedBy { if (it === activity.window.decorView) 0 else 1 }
     }
 
     /** Every window's Compose root. */
@@ -194,7 +232,7 @@ abstract class Parity(private val theme: String, private val scene: String) {
         val density = activity.resources.displayMetrics.density
         val out = mutableListOf<JSONObject>()
         roots().forEachIndexed { i, r ->
-            val area = if (i == 0) "screen" else "popover"
+            val area = if (r.view.rootView === activity.window.decorView) "screen" else "popover"
             val top = r.semanticsOwner.rootSemanticsNode
             val view = r.view
             val at = IntArray(2).also { view.getLocationOnScreen(it) }

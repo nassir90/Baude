@@ -156,11 +156,6 @@
     {
       "name": "code",
       "shows": "The file's text, read-only (not editable, no cursor), monospace, at the shared code text size, with the text selectable. Highlighted by language: the part around the marked line (about 150 lines each way) is coloured first and the rest follows in the background, so the code is readable at once and colours arrive within a moment; light and dark themes have their own colours (strings, comments, keywords, numbers, names, and so on; bold and italic where the style has them); the colours change with the theme. A gutter at the left of right-aligned line numbers in dim text, the marked line's in full strength and bold; the gutter widens with the digits. The marked line has a warm yellow background across its whole width; for Python the class it belongs to is shaded in a faint blue background over its whole range of lines (not shaded for a class only named in a signature). Opening scrolls so the marked line is about a third of the way down and puts the caret there. Line endings are normalized (CRLF, CR to newline). Large files: anything over 4 MiB, a folder, or a binary (a NUL in the first 8 KiB) is not shown here but opened in the user's editor instead; also, if the setting code_viewer is off everything opens in the editor.",
-      "phone": {
-        "does": "nothing",
-        "why": "Ctrl+scroll is a mouse and keyboard gesture; the size steps are Settings' text size",
-        "decided": "2026-11-21"
-      },
       "actions": [
         {
           "by": "select text",
@@ -168,7 +163,12 @@
         },
         {
           "by": "key Ctrl+plus / Ctrl+minus / Ctrl+0 with the code focused, or Ctrl+scroll over it",
-          "does": "Sizes the code text for every code view (a step each; 0 returns to 100%); remembered across sessions (setting code_zoom). The chat's own size is separate."
+          "does": "Sizes the code text for every code view (a step each; 0 returns to 100%); remembered across sessions (setting code_zoom). The chat's own size is separate.",
+          "phone": {
+            "does": "nothing",
+            "why": "Ctrl+scroll is a mouse and keyboard gesture; the size steps are Settings' text size",
+            "decided": "2026-11-21"
+          }
         }
       ]
     },
@@ -210,8 +210,8 @@
       "name": "links in code",
       "shows": "A code view can have spans that are links (blue, underlined; the hand cursor over them). Only the Kubernetes YAML uses them (the names of other objects); a file's code has none.",
       "phone": {
-        "does": "nothing",
-        "why": "No pointer, so no hand cursor; the links work by tap",
+        "does": "The links work by tap, with no hand cursor",
+        "why": "No pointer on touch",
         "decided": "2026-11-21"
       },
       "actions": [

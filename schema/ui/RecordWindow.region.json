@@ -75,11 +75,6 @@
     {
       "name": "middle: tabs",
       "shows": "A tab bar at the top of an inner panel, the open tab's content under it. The tabs and the page under them are one rounded island set into the window frame. See RecordTabs. Empty states are below.",
-      "phone": {
-        "does": "nothing",
-        "why": "Alt+arrow history keys are keyboard shortcuts; the tab history itself (back/forward) can exist on any platform.",
-        "decided": "2026-11-21"
-      },
       "actions": [
         {
           "by": "key Ctrl+W",
@@ -87,11 +82,21 @@
         },
         {
           "by": "key Alt+Left / Alt+Right (Option+Cmd on macOS)",
-          "does": "Back and forward through the tabs shown, as a browser's history; a closed tab is opened again if it can be."
+          "does": "Back and forward through the tabs shown, as a browser's history; a closed tab is opened again if it can be.",
+          "phone": {
+            "does": "The system back gesture",
+            "why": "Android's own back",
+            "decided": "2026-11-21"
+          }
         },
         {
           "by": "key Alt+Up (Option+Cmd on macOS)",
-          "does": "Up: from a sub-page, the page it is under; from a file's code, its folder in Files with the file selected."
+          "does": "Up: from a sub-page, the page it is under; from a file's code, its folder in Files with the file selected.",
+          "phone": {
+            "does": "The system back gesture",
+            "why": "Android's own back",
+            "decided": "2026-11-21"
+          }
         }
       ]
     },

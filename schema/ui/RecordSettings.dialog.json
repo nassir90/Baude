@@ -99,11 +99,6 @@
     {
       "name": "group: general",
       "shows": "An untitled group, rows in this order:",
-      "phone": {
-        "does": "nothing",
-        "why": "Show in Applications installs a macOS app bundle or freedesktop launcher; a phone's launcher is the OS's own.",
-        "decided": "2026-11-21"
-      },
       "parts": [
         {
           "name": "Full-width text",
@@ -185,7 +180,12 @@
             "window.show_in",
             "install.applications",
             "install.application_menu"
-          ]
+          ],
+          "phone": {
+            "does": "nothing",
+            "why": "Show in Applications installs a macOS app bundle or freedesktop launcher; a phone's launcher is the OS's own.",
+            "decided": "2026-11-21"
+          }
         }
       ]
     },

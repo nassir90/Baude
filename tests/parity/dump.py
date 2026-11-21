@@ -31,10 +31,20 @@ def _cut(a, b):
     return [x, y, w, h] if w > 0.5 and h > 0.5 else None
 
 
+def _inside(widget):
+    """widget and what it holds, not a popover's (a menu button's menu isn't the button's text)."""
+    yield widget
+    child = widget.get_first_child()
+    while child is not None:
+        if not isinstance(child, Gtk.Popover):
+            yield from _inside(child)
+        child = child.get_next_sibling()
+
+
 def _texts(widget):
     """The labels' text inside a widget, in order."""
     out = []
-    for w in _walk(widget):
+    for w in _inside(widget):
         if isinstance(w, (Gtk.Label, Gtk.Inscription)) and w.get_mapped():
             t = (w.get_text() or "").strip()
             if t:
@@ -44,7 +54,7 @@ def _texts(widget):
 
 def _icons(widget):
     out = []
-    for w in _walk(widget):
+    for w in _inside(widget):
         if isinstance(w, Gtk.Image) and w.get_mapped() and w.get_icon_name():
             out.append(w.get_icon_name())
     return out
@@ -83,7 +93,8 @@ def items(window, areas=()):
     full = [0, 0, window.get_width(), window.get_height()]
     _visit(window, window, full, out, "window", names=names)
     for pop in _popovers(window):
-        _visit(pop, pop, [0, 0, pop.get_width(), pop.get_height()], out, "popover", origin=_origin(pop), names=names)
+        ox, oy = _origin(pop)
+        _visit(pop, pop, [ox, oy, pop.get_width(), pop.get_height()], out, "popover", origin=(ox, oy), names=names)
     rank = {n: i for i, n in enumerate(["window"] + order)}
     out.sort(key=lambda i: (rank.get(i["area"], 0), round(i["at"][1] / 6), i["at"][0]))
     return out

@@ -17,11 +17,6 @@
   "copy": [
     "common"
   ],
-  "phone": {
-    "does": "nothing",
-    "why": "The save-file dialog is the desktop's; the zip itself (and the question) is not.",
-    "decided": "2026-11-21"
-  },
   "parts": [
     {
       "name": "question dialog",

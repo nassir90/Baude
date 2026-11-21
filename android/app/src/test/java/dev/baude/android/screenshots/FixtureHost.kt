@@ -6,15 +6,22 @@ import dev.baude.android.Host
 import dev.baude.android.Mesh
 import dev.baude.android.Msg
 import dev.baude.android.Place
+import org.json.JSONArray
 import org.json.JSONObject
 
 /** A host's connection as the rig has it: up, its info given (every op taken), nothing ever sent, and nothing answered
  * (what a page asks for stays coming) but what answer gives an answer for. */
-class FixtureConnection(ctx: Context, host: Host, private val answer: (JSONObject) -> JSONObject? = { null }) : Connection(ctx, Place.Direct(host), identify = { _, _ -> },
+class FixtureConnection(ctx: Context, host: Host, home: String = "/home/dev", private val answer: (JSONObject) -> JSONObject? = { null }) : Connection(ctx, Place.Direct(host), identify = { _, _ -> },
     route = { null }, heard = { _, _ -> }, changed = {}) {
     init {
         state = "up"
-        info = Msg.Info(id = host.id, name = host.name, home = "/home/dev")
+        // (the models as the desktop rig's fake claude lists them, with their efforts: what the header's pickers need)
+        val levels = JSONArray(listOf("low", "medium", "high", "xhigh", "max"))
+        fun model(value: String, name: String, efforts: JSONArray?) = JSONObject().put("value", value).put("displayName", name)
+            .put("resolvedModel", "claude-$value").apply { if (efforts != null) put("supportsEffort", true).put("supportedEffortLevels", efforts) }
+        val init = JSONObject().put("models", JSONArray(listOf(model("opus", "Opus 5.5", levels),
+            model("sonnet", "Sonnet 5.5", JSONArray(listOf("low", "medium", "high", "xhigh"))), model("claude-haiku-4-5", "Haiku 4.5", null))))
+        info = Msg.Info(id = host.id, name = host.name, home = home, init = init)
     }
 
     override fun start() {}
@@ -26,8 +33,8 @@ class FixtureConnection(ctx: Context, host: Host, private val answer: (JSONObjec
 
     companion object {
         /** host's connection, as Mesh keeps one it's made (its own map's private: set through reflection). */
-        fun up(ctx: Context, host: Host, answer: (JSONObject) -> JSONObject? = { null }): FixtureConnection {
-            val c = FixtureConnection(ctx, host, answer)
+        fun up(ctx: Context, host: Host, home: String = "/home/dev", answer: (JSONObject) -> JSONObject? = { null }): FixtureConnection {
+            val c = FixtureConnection(ctx, host, home, answer)
             @Suppress("UNCHECKED_CAST")
             val conns = Mesh::class.java.getDeclaredField("conns").apply { isAccessible = true }.get(Mesh) as HashMap<String, Connection>
             conns[host.id] = c

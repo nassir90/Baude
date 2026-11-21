@@ -225,7 +225,8 @@ private fun Revealed(shown: Boolean, buttons: @Composable () -> Unit) {
 fun QueuedRow(chat: Chat, q: Queued, working: Boolean) {
     val c = LocalBaude.current
     var shown by remember { mutableStateOf(false) }
-    Row(Modifier.fillMaxWidth().combinedClickable(onClick = { shown = false }, onLongClick = { shown = true }),
+    Row(Modifier.fillMaxWidth().semantics(mergeDescendants = true) {}
+        .combinedClickable(onClick = { shown = false }, onLongClick = { shown = true }),
         horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.Bottom) {
         Revealed(shown) {
             TurnButton(Wording.ChatTurns.queuedDelete, { chat.queued.remove(q) }) {
@@ -260,7 +261,8 @@ fun Held(chat: Chat, h: Msg.HeldMessage, working: Boolean) {
     val c = LocalBaude.current
     val ctx = LocalContext.current
     var shown by remember { mutableStateOf(false) }
-    Row(Modifier.fillMaxWidth().combinedClickable(onClick = { shown = false }, onLongClick = { shown = true }),
+    Row(Modifier.fillMaxWidth().semantics(mergeDescendants = true) {}
+        .combinedClickable(onClick = { shown = false }, onLongClick = { shown = true }),
         horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.Bottom) {
         Revealed(shown) {
             TurnButton(Wording.Held.delete, { Mesh.held(chat, h.id.orEmpty(), false) }) {

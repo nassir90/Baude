@@ -70,7 +70,7 @@
       "items": {
         "$ref": "Head.json"
       },
-      "description": "The apps connected to it, by the code they run (each counted behind as its own commit is)."
+      "description": "The apps on its machine connected to it, by the code they run (each counted behind as its own commit is)."
     },
     "update": {
       "anyOf": [

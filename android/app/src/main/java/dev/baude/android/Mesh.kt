@@ -85,6 +85,7 @@ class Chat(hostId: String, sid: String) {
     val busy = mutableStateOf(false)
     val thinking = mutableStateOf(false)     // (at a turn, where its host doesn't list it: Meta's)
     val said = mutableStateOf<String?>(null)
+    val jump = mutableStateOf<String?>(null) // (a call to scroll to: Made by this chat, on the Git page)
     var reverting by mutableStateOf<Reverting?>(null) // (a revert asked, not made: the page for it may be left and come back to)
     val clearBox = mutableStateOf(false) // (a revert made: the box is emptied when next composed)
     val streamingThought = mutableStateOf("") // (and what it's thinking, as it comes)

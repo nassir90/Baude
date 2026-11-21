@@ -502,3 +502,34 @@ fun LazyListScope.drawn(lines: List<Line>, calls: ChatCalls, asking: (Call) -> A
         if (run.size >= 2) item { ToolGroup(run, calls, asking, answer, view) } else item { ToolCard(run[0], asking(run[0]), answer, view) }
     }
 }
+
+/** Where call id is drawn, as drawn counts items: its item's index, and the group's key (as ToolGroup keys
+ * calls.opened) when that item is a group. */
+fun itemOf(lines: List<Line>, calls: ChatCalls, id: String): Pair<Int, String?>? {
+    var item = 0
+    var i = 0
+    while (i < lines.size) {
+        val call = if (lines[i].kind == "call") calls.byId[lines[i].text] else null
+        if (call == null) {
+            item++
+            i++
+            continue
+        }
+        if (call.name in MESH_CHAT_TOOLS) {
+            if (call.id == id) return item to null
+            item++
+            i++
+            continue
+        }
+        val run = ArrayList<Call>()
+        while (i < lines.size && lines[i].kind == "call") {
+            val next = calls.byId[lines[i].text] ?: break
+            if (next.name in MESH_CHAT_TOOLS) break
+            run.add(next)
+            i++
+        }
+        if (run.any { it.id == id }) return item to (if (run.size >= 2) run.first().id else null)
+        item++
+    }
+    return null
+}

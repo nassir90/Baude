@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "Where a commit a link points at is in the log.",
+  "properties": {
+    "sha": {
+      "type": "string",
+      "description": "The commit."
+    },
+    "merge": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "The merge on the branch's own line it came in by, if it's not on that line."
+    }
+  },
+  "additionalProperties": false
+}

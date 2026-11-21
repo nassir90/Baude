@@ -133,6 +133,15 @@ fun ChatPage(chat: Chat, name: String, attach: Boolean = true, stop: (() -> Unit
     // as it grows; scrolled up to read, left where it is)
     var follow by remember(chat) { mutableStateOf(true) }
     LaunchedEffect(list.isScrollInProgress) { if (!list.isScrollInProgress) follow = !list.canScrollForward }
+    LaunchedEffect(chat.jump.value) { // (Made by this chat: the call it names, its group opened)
+        val id = chat.jump.value ?: return@LaunchedEffect
+        val found = itemOf(chat.lines, chat.calls, id)
+        chat.jump.value = null
+        if (found == null) return@LaunchedEffect
+        found.second?.let { chat.calls.opened[it] = true }
+        follow = false
+        list.animateScrollToItem(found.first)
+    }
     LaunchedEffect(chat.lines.size, chat.asks.size, chat.queued.size, chat.sent.size, chat.streaming.value.length / 120) {
         val n = list.layoutInfo.totalItemsCount
         if (n > 0 && follow) {

@@ -38,6 +38,7 @@ from screenshots import T, Adw, Gtk, baude  # noqa: E402
 import update  # noqa: E402
 import baudelib.wording as wording  # noqa: E402
 import dump  # noqa: E402
+import gitfixture  # noqa: E402
 
 FIX = os.path.join(HERE, "fixtures")
 SIZE = (S.W, S.H)
@@ -115,10 +116,36 @@ def pick_header(win, s):
     T.pump(0.5)
 
 
+def git_scene(win, sc):
+    """The Git page read and set as the scene says: the branches picked, every branch, GitHub's part, the branch list
+    open, a commit's card."""
+    git, page = sc["git"], win.panel.git_page
+    T.wait_for(lambda: page.top and page.commits, "the log", 20)
+    if git.get("pick"):
+        page.pick(git["pick"])
+        T.wait_for(lambda: page.state.get("picked") == git["pick"], "the branches picked", 20)
+    if git.get("every"):
+        page.all_btn.set_active(True)
+        T.wait_for(lambda: page.state.get("every"), "every branch", 20)
+    if sc.get("github"):
+        T.wait_for(lambda: page.pulls_scroll.get_visible(), "the pull requests", 20)
+        if len(git.get("pick") or ()) == 1:
+            T.wait_for(lambda: "Pull request #128" in page.info.get_text(), "the branch's pull request", 20)
+    if git.get("branches"):
+        page.picker.popup()
+    if git.get("commit"):
+        page.show_commit(next(c["sha"] for c in page.commits if c["subject"] == git["commit"]))
+        T.wait_for(lambda: any("garden/upload.py" in label.get_text() for label in T.find(page, Gtk.Label)),
+                   "the commit's files", 20)
+    T.pump(0.4)
+
+
 def open_chat(app, sc):
     shown = fixture("sessions.json")["sessions"][sc.get("session", 0)]
     if sc.get("files"):  # (the scene's files join the chat's folder)
         shutil.copytree(os.path.join(FIX, sc["files"]), folder("garden"), dirs_exist_ok=True)
+    if sc.get("git") is not None:  # (the chat's folder is the fixture repository)
+        gitfixture.make(folder("garden"))
     path = write_sessions(sc.get("lines"), sc.get("transcript"))[sc.get("session", 0)]
     win = app.window(S.opts(cwd=folder("garden")))
     info = baude.read_session_info(path)
@@ -146,6 +173,8 @@ def open_chat(app, sc):
     if sc.get("page"):
         win.show_panel(True, {"signal": "refs"}.get(sc["page"], sc["page"]))
         T.pump(0.4)
+        if sc.get("git") is not None:
+            git_scene(win, sc)
     if sc.get("state") == "working":
         win.set_busy(True)
     if sc.get("queued"):
@@ -167,6 +196,8 @@ def open_chat(app, sc):
 
 def build(app, sc):
     name = sc["name"]
+    if sc.get("github"):  # (gh signed in, with the fixture's pull requests)
+        gitfixture.stub_github(True, os.path.join(HOME, "garden"))
     if name.startswith("home"):
         write_sessions()
         win = app.window(S.opts(cwd=folder("garden")))
@@ -276,6 +307,9 @@ def main():
                         T.close(w)
                 S.reset_state()
                 shutil.rmtree(os.path.join(os.environ["CLAUDE_CONFIG_DIR"], "projects"), ignore_errors=True)
+                gitfixture.stub_github(False)
+                gitfixture.unmake(os.path.join(HOME, "garden"))
+                baude.GIT_CARDS.clear()
     print(f"{failed} failures -> {out}")
     return 1 if failed else 0
 

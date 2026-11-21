@@ -44,6 +44,7 @@
     "chat_further_up": "That command is further up the chat than what's shown: scroll up to load it",
     "ahead": ".input {$n :number} .match $n one {{{$n} commit ahead}} * {{{$n :number} commits ahead}}",
     "behind": ".input {$n :number} .match $n one {{{$n} commit behind}} * {{{$n :number} commits behind}}",
+    "github_link": "GitHub ↗",
     "in_files": ".input {$n :number} .match $n one {{in {$n} file}} * {{in {$n} files}}"
   }
 }

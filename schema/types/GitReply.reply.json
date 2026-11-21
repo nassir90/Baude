@@ -1,14 +1,17 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
-  "description": "git's answer: log {top, branch, commits, skip, more}; card {sha, parents, author, email, at, committer, message, files, more_files, branches}; diff {sha, path, text, truncated}.",
+  "description": "git's answer: log {top, branch, commits, skip, more}; card {sha, parents, author, email, at, ct, committer, message, files, more_files, on, remotes, url, login}, or with github {sha, login, prs}; diff {sha, path, text, truncated}; page {top, folder, branches, picked, rev, mine, branch, parent, commits, own, theirs, revs, repo, every, fetched, found, more, made, heads, opened, links, prs}; pulls {repo, prs, gh, signed_in, pr, avatars}.",
   "properties": {
     "op": {
       "const": "git",
       "description": "What it is."
     },
     "req": {
-      "type": ["integer", "null"],
+      "type": [
+        "integer",
+        "null"
+      ],
       "description": "The request's number, the client's pick: its answers carry it back."
     },
     "what": {
@@ -21,18 +24,18 @@
     },
     "top": {
       "type": "string",
-      "description": "log: the checkout's top folder."
+      "description": "log, page: the checkout's top folder."
     },
     "branch": {
       "$ref": "Branch.json",
-      "description": "log: its branch."
+      "description": "log, page: its branch."
     },
     "commits": {
       "type": "array",
       "items": {
         "$ref": "Commit.json"
       },
-      "description": "log: the commits."
+      "description": "log, page: the commits."
     },
     "skip": {
       "type": "integer",
@@ -40,7 +43,7 @@
     },
     "more": {
       "type": "boolean",
-      "description": "log: there are more."
+      "description": "log, page: there are more."
     },
     "sha": {
       "type": "string",
@@ -85,15 +88,25 @@
       "type": "boolean",
       "description": "card: more files than listed."
     },
-    "branches": {
+    "on": {
       "type": "array",
       "items": {
         "type": "string"
       },
-      "description": "card: the branches it's on."
+      "description": "card: the local branches it's on."
+    },
+    "branches": {
+      "type": "array",
+      "items": {
+        "$ref": "Branch.json"
+      },
+      "description": "page: the branches to choose from."
     },
     "path": {
-      "type": ["string", "null"],
+      "type": [
+        "string",
+        "null"
+      ],
       "description": "diff: the file."
     },
     "text": {
@@ -103,8 +116,186 @@
     "truncated": {
       "type": "boolean",
       "description": "diff: cut short."
+    },
+    "folder": {
+      "type": "string",
+      "description": "page: the folder asked about."
+    },
+    "picked": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "page: the branches shown."
+    },
+    "rev": {
+      "type": "string",
+      "description": "page: the first branch shown."
+    },
+    "mine": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "page: the branch the chat's checkout has."
+    },
+    "parent": {
+      "anyOf": [
+        {
+          "$ref": "GitParent.json"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "page: the branch the one shown came from."
+    },
+    "own": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "page: the shown branch's own commits."
+    },
+    "theirs": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "page: the commits its parent has that it hasn't."
+    },
+    "revs": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "page: what the log was read from."
+    },
+    "repo": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "page, pulls: the GitHub repository, owner/name."
+    },
+    "every": {
+      "type": "boolean",
+      "description": "page: every branch is shown."
+    },
+    "made": {
+      "type": "array",
+      "items": {
+        "$ref": "GitMade.json"
+      },
+      "description": "page: the commits this chat made."
+    },
+    "heads": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "page: the branches this chat touched."
+    },
+    "opened": {
+      "type": "array",
+      "items": {
+        "type": "integer"
+      },
+      "description": "page: the pull requests this chat opened."
+    },
+    "links": {
+      "type": "array",
+      "items": {
+        "$ref": "PullLink.json"
+      },
+      "description": "page: the pull requests its replies name."
+    },
+    "prs": {
+      "anyOf": [
+        {
+          "type": "array",
+          "items": {
+            "$ref": "PullInfo.json"
+          }
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "page, pulls: the repository's pull requests (null: not known). card: the commit's."
+    },
+    "fetched": {
+      "type": [
+        "boolean",
+        "null"
+      ],
+      "description": "page: whether the fetch went (null: none asked)."
+    },
+    "found": {
+      "anyOf": [
+        {
+          "$ref": "GitFound.json"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "page: where the commit asked for is."
+    },
+    "gh": {
+      "type": "boolean",
+      "description": "pulls: gh is there and not signed out."
+    },
+    "signed_in": {
+      "type": "boolean",
+      "description": "pulls: gh is signed in."
+    },
+    "pr": {
+      "anyOf": [
+        {
+          "$ref": "PullInfo.json"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "pulls: the pull request of the branch asked."
+    },
+    "avatars": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      },
+      "description": "pulls: {email: picture URL}."
+    },
+    "remotes": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "card: the remote branches it's on."
+    },
+    "url": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "card: its page on GitHub."
+    },
+    "login": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "card: its author's GitHub login."
+    },
+    "ct": {
+      "type": "integer",
+      "description": "card: when committed, epoch seconds."
     }
   },
-  "required": ["op"],
+  "required": [
+    "op"
+  ],
   "additionalProperties": false
 }

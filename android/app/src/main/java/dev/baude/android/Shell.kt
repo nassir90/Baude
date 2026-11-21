@@ -88,7 +88,12 @@ fun ChatShell(hostId: String, sid: String, back: () -> Unit, open: (String, Stri
     FileLinks.showFiles = { all.indexOfFirst { it.key == "files" }.takeIf { it >= 0 }?.let { scope.launch { pager.animateScrollToPage(it) } } }
     val place = ChatPlace(at, s?.cwd, Mesh.conn(at)?.info?.home, chat.artifacts.toList())
     Meta.pageOpener = { t -> all.indexOfFirst { it.title.equals(t, true) }.takeIf { it >= 0 }?.let { scope.launch { pager.animateScrollToPage(it) } } }
+    val openPage = { key: String ->
+        all.indexOfFirst { it.key == key }.takeIf { it >= 0 }?.let { scope.launch { pager.animateScrollToPage(it) } }
+        Unit
+    }
     androidx.compose.runtime.DisposableEffect(chat) { // (its side questions' answers heard whichever page is shown)
+        GitPages.showPage = { openPage("git") }
         val l = sideQuestions(chat)
         val status = chrome(chat)
         Mesh.listeners.add(l)
@@ -101,11 +106,8 @@ fun ChatShell(hostId: String, sid: String, back: () -> Unit, open: (String, Stri
             Meta.pages = { emptyList() } // (no chat open: no pages for Meta to show)
             Meta.pageOpener = {}
             FileLinks.showFiles = {}
+            GitPages.showPage = {}
         }
-    }
-    val openPage = { key: String ->
-        all.indexOfFirst { it.key == key }.takeIf { it >= 0 }?.let { scope.launch { pager.animateScrollToPage(it) } }
-        Unit
     }
     LaunchedEffect(chat.showAgent.value) { // (View on a call's card: the Subagents page)
         if (chat.showAgent.value == null) return@LaunchedEffect
@@ -150,7 +152,7 @@ fun ChatShell(hostId: String, sid: String, back: () -> Unit, open: (String, Stri
                 "artifacts" -> ArtifactsPage(chat)
                 "btw" -> SideQuestionsPage(chat)
                 "files" -> FilesPage(at, sid)
-                "git" -> GitPage(at, sid)
+                "git" -> GitPage(at, sid, here, openPage)
                 "signal" -> SignalPage(at, sid)
             }
         }

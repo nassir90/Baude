@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "The branch a branch most likely came from.",
+  "properties": {
+    "name": {
+      "type": "string",
+      "description": "Its name."
+    },
+    "base": {
+      "type": "string",
+      "description": "The commit they share."
+    },
+    "ahead": {
+      "type": "integer",
+      "description": "Commits the branch has on it."
+    },
+    "behind": {
+      "type": "integer",
+      "description": "Commits it has on the branch."
+    }
+  },
+  "additionalProperties": false
+}

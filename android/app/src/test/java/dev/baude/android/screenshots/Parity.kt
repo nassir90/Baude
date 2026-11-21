@@ -22,6 +22,8 @@ import dev.baude.android.Home
 import dev.baude.android.Host
 import dev.baude.android.Key
 import dev.baude.android.FeedbackScreen
+import dev.baude.android.GitAvatars
+import dev.baude.android.GitPages
 import dev.baude.android.Mesh
 import dev.baude.android.Queued
 import dev.baude.android.Meta
@@ -68,6 +70,9 @@ abstract class Parity(private val theme: String, private val scene: String) {
     @Before fun up() {
         val sc = scenes().first { it.getString("name") == scene }
         files = sc.optString("files").ifBlank { null }
+        gitScene = sc.optJSONObject("git")
+        github = sc.optBoolean("github")
+        GitAvatars.off = true
         val opened = sessions.getJSONArray("sessions").getJSONObject(sc.optInt("session", 0))
         shown = (if (sc.has("transcript")) transcript(sc.getString("transcript"), sc.optInt("lines", -1))
             else if (opened.isNull("transcript")) standIn(opened)
@@ -125,6 +130,59 @@ abstract class Parity(private val theme: String, private val scene: String) {
     /** The scene's `files`: a folder of fixtures whose contents join the chat's folder (as the desktop rig copies them in). */
     private var files: String? = null
 
+    /** The scene's `git` (the garden is a repository: pick, every, branches, commit) and `github` (gh signed in). */
+    private var gitScene: JSONObject? = null
+    private var github = false
+    private val gitAnswers by lazy { JSONObject(File(root, "fixtures/git-answers.json").readText()).getJSONObject("answers") }
+    private val githubFixture by lazy { JSONObject(File(root, "fixtures/github.json").readText()) }
+
+    /** git's answers (the garden's repository, recorded by tests/parity/gitfixture.py), with GitHub's part when gh is signed in. */
+    private fun gitAnswer(msg: JSONObject, reply: (Array<out Pair<String, Any?>>) -> JSONObject): JSONObject {
+        val what = msg.optString("what")
+        val failed = reply(arrayOf("what" to what, "error" to Wording.HostErrors.gitFailed))
+        val gh = githubFixture
+        if (gitScene == null) return if (what == "pulls") reply(arrayOf("what" to what, "repo" to null, "prs" to null, "gh" to false))
+            else reply(arrayOf("what" to what, "error" to Wording.HostErrors.notARepo))
+        when (what) {
+            "pulls" -> {
+                if (!github) return reply(arrayOf("what" to what, "repo" to msg.optString("repo").ifBlank { gh.getString("repo") }, "prs" to null, "gh" to false))
+                val out = reply(arrayOf("what" to what, "repo" to gh.getString("repo"), "prs" to gh.getJSONArray("prs"), "gh" to true))
+                if (msg.has("head") || msg.optBoolean("people")) {
+                    out.put("signed_in", true).put("avatars", JSONObject())
+                    val prs = gh.getJSONArray("prs")
+                    (0 until prs.length()).map { prs.getJSONObject(it) }.firstOrNull { it.optString("head") == msg.optString("head") }?.let {
+                        out.put("pr", JSONObject(it.toString()).put("head", JSONObject.NULL))
+                    }
+                }
+                return out
+            }
+            "page" -> {
+                val key = "page" + (if (msg.optBoolean("every")) "|every" else "") +
+                    (if (!msg.optBoolean("follow", true)) "|" + (0 until (msg.optJSONArray("revs")?.length() ?: 0)).joinToString(",") { msg.getJSONArray("revs").getString(it) } else "")
+                val a = gitAnswers.optJSONObject(key) ?: return failed
+                val out = JSONObject(a.toString().replace("@HOME@", home)).put("op", "git").put("req", msg.opt("req"))
+                if (github) out.put("prs", gh.getJSONArray("prs"))
+                return out
+            }
+            "card" -> {
+                val sha = msg.optString("sha")
+                val full = gitAnswers.keys().asSequence().firstOrNull { it.startsWith("card|") && it.removePrefix("card|").startsWith(sha) }
+                val a = full?.let { gitAnswers.getJSONObject(it) } ?: return failed
+                if (msg.optBoolean("github")) {
+                    if (!github) return reply(arrayOf("what" to what, "sha" to sha))
+                    val pulls = gh.getJSONArray("commit_pulls")
+                    val prs = gh.getJSONArray("prs")
+                    val mine = (0 until pulls.length()).map { pulls.getInt(it) }
+                    return reply(arrayOf("what" to what, "sha" to sha, "login" to gh.getJSONObject("logins").optString(a.optString("email")).ifBlank { null },
+                        "prs" to JSONArray((0 until prs.length()).map { prs.getJSONObject(it) }.filter { it.getInt("number") in mine })))
+                }
+                return JSONObject(a.toString().replace("@HOME@", home)).put("op", "git").put("req", msg.opt("req"))
+            }
+            "log" -> return reply(arrayOf("what" to what, "commits" to JSONArray(), "skip" to 0, "more" to false))
+        }
+        return failed
+    }
+
     /** What the fixture host answers, as the desktop's host (baudelib/server.py, hostfiles.py) would: the open chat's
      * transcript, and the folder's files (fixtures/garden, not a git repository, with no Signal glossary). */
     private fun answer(msg: JSONObject): JSONObject? {
@@ -167,7 +225,7 @@ abstract class Parity(private val theme: String, private val scene: String) {
                 return reply("op" to "file", "path" to path, "size" to f.length(), "truncated" to false,
                     "data" to java.util.Base64.getEncoder().encodeToString(f.readBytes()))
             }
-            "git" -> return reply("what" to msg.optString("what"), "error" to Wording.HostErrors.notARepo)
+            "git" -> return gitAnswer(msg) { more -> reply(*more) }
             "signal_names" -> return reply("glossary" to "$home/garden/.baude", "refs" to JSONArray())
         }
         return null
@@ -220,8 +278,20 @@ abstract class Parity(private val theme: String, private val scene: String) {
                     Mesh.tick.value++
                 }
                 if (sc.has("draft")) Mesh.openChat(host.getString("id"), first.getString("id")).draft.value = sc.getString("draft")
+                gitScene?.let { g -> GitPages.prepare(host.getString("id"), first.getString("id"),
+                    g.optJSONArray("pick")?.let { a -> (0 until a.length()).map { a.getString(it) } }, g.optBoolean("every")) }
                 show { ChatShell(host.getString("id"), first.getString("id"), back = {}, open = { _, _ -> }, feedback = {},
                     first = sc.optString("page").ifBlank { "chat" }) }
+                gitScene?.let { g ->
+                    settle()
+                    val st = GitPages.of(host.getString("id"), first.getString("id"))
+                    if (g.optBoolean("branches")) st.listOpen = true
+                    g.optString("commit").ifBlank { null }?.let { subject ->
+                        st.card = st.commits.first { it.subject == subject }.sha
+                    }
+                    androidx.compose.runtime.snapshots.Snapshot.sendApplyNotifications()
+                    settle()
+                }
                 if (name == "menu") tap(Wording.ChatHeader.menu)
                 if (sc.optBoolean("open")) toEnd()
                 if (sc.has("ask")) ask(sc.getString("ask"))

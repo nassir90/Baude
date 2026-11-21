@@ -652,6 +652,7 @@ object Mesh {
                     chat.offset = next
                     for (line in lines) {
                         when (line.kind) {
+                            "cost" -> line.text.toDoubleOrNull()?.let { chat.chrome.cost.value = it; chat.chrome.costSeen = it }
                             "use", "result", "task", "link" -> noted(chat, line)
                             "record" -> line.uuid?.let { chat.ends[it] = chat.lines.size }
                             "rewind" -> { // (what's after the record it keeps last dropped: all of what's read, if
@@ -1036,6 +1037,10 @@ fun parse(text: String, cutFirst: Boolean, sidechain: Boolean = false): List<Lin
         val type = o.optString("type")
         if (type == "last-prompt" && o.optBoolean("rewound")) {
             out.add(Line("rewind", "", if (o.isNull("leafUuid")) null else o.optString("leafUuid")))
+            continue
+        }
+        if (type == "cost-state") { // (what claude had spent on it when it last exited: a resume counts on from it)
+            out.add(Line("cost", o.optDouble("totalCostUSD", 0.0).toString()))
             continue
         }
         val uuid = if (o.isNull("uuid")) null else o.optString("uuid").ifBlank { null }

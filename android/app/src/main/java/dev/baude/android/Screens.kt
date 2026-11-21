@@ -142,8 +142,8 @@ fun ChatPage(chat: Chat, name: String, attach: Boolean = true, stop: (() -> Unit
                 }
                 if (attach) IconButton(Adwaita.ListAdd, Wording.Attachments.attachTip) { pick.launch(arrayOf("*/*")) }
                 if (busy && stop != null && text.isBlank() && files.isEmpty())
-                    IconButton(Adwaita.MediaPlaybackStop, Wording.Composer.stop, tint = c.destructiveFg,
-                        background = c.destructiveBg, onClick = stop)
+                    IconButton(Adwaita.MediaPlaybackStop, Wording.Composer.stop, tint = c.destructive,
+                        background = c.destructive.copy(alpha = 0.2f), onClick = stop)
                 else {
                     val ready = !chat.busy.value && chat.preparing.value == 0 && !gone && !chat.chrome.missing.value &&
                         !(chat.sender == null && exhausted(chat))

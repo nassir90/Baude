@@ -125,6 +125,7 @@ from livefeed import (  # noqa: E402
     LIVE_SECONDS, TURN_OPEN_SECONDS, external_state, read_appended, transcript_turn_open)
 import update  # noqa: E402  (a new version from git, restarted onto once idle: Record's too)
 baudelib.wire.HEAD_COMMIT = update.STARTED  # (said to the host processes it reaches: logged by one on other code)
+baudelib.wire.HEAD_CLIENT = "baude"  # (listed as Baude among the apps connected to a host)
 import meta  # noqa: E402  (Meta, the helper in the side panel: Record's too; see meta.py)
 from feedback import (  # noqa: E402,F401
     Capture, FEEDBACK_SAVE_KEYS, FeedbackDialog, FeedbackDraft, FeedbackHost, RegionEditor, RegionLayer, _visible_rect, capture_window, feedback_dir, feedback_items, save_feedback,
@@ -12938,7 +12939,6 @@ class SettingsDialog(Adw.PreferencesDialog):
         group.add(widgets.notifications_row())  # (Record's too)
         self.version_row = update.version_row()
         group.add(self.version_row)
-        group.add(widgets.mesh_versions_row(network()))  # (Record's too)
         page.add(group)
         sizes = Adw.PreferencesGroup(title=wording.say("window.size"))
         self.text_row = self.size_row(wording.say("meta_settings.text_scale"), None, scale_setting("text_scale"),
@@ -13092,6 +13092,7 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
         item.set_attribute_value("accel", GLib.Variant.new_string(SETTINGS_KEY))  # (its key, shown beside it)
         menu.append_item(item)
         menu.append(wording.say("changelog.title"), "win.changelog")
+        menu.append(wording.say("mesh_versions.title"), "win.mesh")  # (Record's too)
         menu.append(wording.say("meta_settings.full_width"), "win.fullwidth")
         menu.append("Read-only session", "win.readonly")
         menu.append(wording.say("window.database_schemas"), "win.dbschema")
@@ -13150,6 +13151,9 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
         changelog = Gio.SimpleAction.new("changelog", None)  # (☰ → Changelog, Record's too)
         changelog.connect("activate", lambda *_: update.changelog_dialog().present(self))
         self.add_action(changelog)
+        mesh = Gio.SimpleAction.new("mesh", None)  # (☰ → Mesh, Record's too)
+        mesh.connect("activate", lambda *_: widgets.mesh_dialog(network()).present(self))
+        self.add_action(mesh)
         self.feedback_draft = None
         restart = Gio.SimpleAction.new("restart", None)
         restart.connect("activate", lambda *_: self.restart_app())

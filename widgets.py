@@ -10660,22 +10660,25 @@ class HostApart:
             restart_host(then=restart_app)
 
 
-# ---- Settings → Mesh Versions: the code each host's daemon in the mesh runs, and each app connected to it
+# ---- ☰ → Mesh: the code each host's daemon in the mesh runs, and each app connected to it
 
 VERSION_CLIENTS = {"baude": "baude", "record": "record", "emission": "emission", "baude-android": "android"}
 
 
 def mesh_versions(net):
     """The mesh's hosts as the host process here has them (or, with none here, the first host reached that has a
-    mesh): (newest: (commit, made) or None, [{name, host, here (this machine's), commit, made, behind, heads:
-    [{client, commit, made, behind}]}], the one that says so first), or None with no host reached."""
+    mesh): (newest: (commit, made) or None, [{id, name, commit, made, behind, heads: [{client, commit, made,
+    behind}]}], each host once), or None with no host reached."""
     with net.lock:
         reached = [r for r in net.servers.values() if r.state == "alive" and isinstance(r.info.get("mesh"), dict)]
     source = next((r for r in reached if r.mine), None) or next(iter(reached), None)
     if source is None:
         return None
     info, mesh = source.info, source.info["mesh"]
-    hosts = [{**info, "here": source.mine}] + [{**m, "here": False} for m in mesh.get("members") or []]
+    hosts = {}
+    for h in [info, *(mesh.get("members") or [])]:
+        hosts.setdefault(h.get("id"), h)
+    hosts = list(hosts.values())
     newest = mesh.get("newest")
     made = next((x.get("made") for h in hosts for x in [h, *(h.get("heads") or [])] if x.get("commit") == newest
                  and x.get("made")), None) if newest else None
@@ -10686,7 +10689,7 @@ def version_standing(entry, newest):
     """What a daemon's or an app's code is against the newest: ("newest" | "behind" | "older" | "unknown" | None,
     what's said of it)."""
     if not entry.get("commit"):
-        return "unknown", wording.say("updates.version_unknown")
+        return "unknown", ""
     if newest is None:
         return None, ""
     if entry["commit"] == newest[0]:
@@ -10698,44 +10701,14 @@ def version_standing(entry, newest):
     return None, ""
 
 
-def version_said(entry):
-    """A daemon's or an app's commit, short, and when it was made."""
-    if not entry.get("commit"):
-        return ""
-    if not entry.get("made"):
-        return entry["commit"][:7]
-    return wording.say("mesh_versions.commit_made", commit=entry["commit"][:7],
-                       made=time.strftime("%-d %B %Y, %H:%M", time.localtime(entry["made"])))
-
-
-def mesh_versions_summary(net):
-    """Settings → Mesh Versions's subtitle: how many daemons and apps are behind the newest code."""
-    got = mesh_versions(net)
-    if got is None:
-        return wording.say("mesh_versions.none")
-    newest, hosts = got
-    n = sum(version_standing(x, newest)[0] in ("behind", "older", "unknown")
-            for h in hosts for x in [h, *(h.get("heads") or [])])
-    return wording.say("mesh_versions.some_behind", n=n) if n else wording.say("mesh_versions.all_newest")
-
-
-def mesh_versions_row(net):
-    """Settings → Mesh Versions (Baude's and Record's): its page pushed onto the Settings dialog."""
-    row = Adw.ActionRow(title=wording.say("mesh_versions.title"), subtitle=mesh_versions_summary(net),
-                        activatable=True)
-    row.add_suffix(Gtk.Image(icon_name="go-next-symbolic"))
-    row.connect("activated", lambda r: r.get_ancestor(Adw.PreferencesDialog).push_subpage(mesh_versions_page(net)))
-    return row
-
-
-def mesh_versions_page(net):
-    """Settings → Mesh Versions's page: a group for each host in the mesh (this machine's first), its daemon's code
-    and each app connected to it, each said against the newest code in the mesh. Looked at again every
-    MESH_VERSIONS_S while it's shown (what the hosts say comes as it changes: a host's record, a head come or gone)."""
+def mesh_dialog(net):
+    """☰ → Mesh (Baude's and Record's): a group for each host in the mesh, its daemon and each app connected to it a
+    line each (version_row). Looked at again every MESH_VERSIONS_S while it's shown (what the hosts say comes as it
+    changes: a host's record, a head come or gone)."""
     view = Adw.ToolbarView()
     view.add_top_bar(Adw.HeaderBar())
-    page = Adw.NavigationPage(title=wording.say("mesh_versions.title"), child=view)
-    shown = {"got": object(), "prefs": None}
+    dialog = Adw.Dialog(title=wording.say("mesh_versions.title"), content_width=640, content_height=720, child=view)
+    shown = {"got": object(), "open": True}
 
     def fill():
         got = mesh_versions(net)
@@ -10747,47 +10720,50 @@ def mesh_versions_page(net):
             prefs.add(Adw.PreferencesGroup(description=wording.say("mesh_versions.none")))
         else:
             newest, hosts = got
-            if newest is not None and newest[1]:
-                prefs.add(Adw.PreferencesGroup(description=wording.say(
-                    "mesh_versions.against", commit=newest[0][:7],
-                    made=time.strftime("%-d %B %Y, %H:%M", time.localtime(newest[1])))))
             for h in hosts:
-                where = h.get("host") or ""
-                group = Adw.PreferencesGroup(title=GLib.markup_escape_text(h.get("name") or h.get("id", "")[:8]),
-                                             description=GLib.markup_escape_text(
-                                                 wording.say("mesh_versions.this_machine", host=where) if h["here"]
-                                                 else where))
+                group = Adw.PreferencesGroup(title=GLib.markup_escape_text(h.get("name") or h.get("id", "")[:8]))
                 group.add(version_row(wording.say("host_menu.daemon"), h, newest))
                 for x in h.get("heads") or ():
                     client = VERSION_CLIENTS.get(x.get("client"))
                     group.add(version_row(wording.say(f"mesh_versions.{client}") if client else x.get("client", ""),
                                           x, newest))
                 prefs.add(group)
-        if shown["prefs"] is not None:
-            view.set_content(None)
-        shown["prefs"] = prefs
         view.set_content(prefs)
 
     def look():
-        if page.get_parent() is None and shown["prefs"] is not None and not page.get_mapped():
-            return False  # (popped: let go of)
-        fill()
-        return True
+        if shown["open"]:
+            fill()
+        return shown["open"]
+    dialog.connect("closed", lambda _d: shown.update(open=False))
     fill()
     GLib.timeout_add_seconds(MESH_VERSIONS_S, look)
-    return page
+    return dialog
 
 
 MESH_VERSIONS_S = 2
 
 
+def changelog_of(commit, widget):
+    """The commits commit has, in ☰ → Changelog's dialog, over widget."""
+    import update
+    update.changelog_dialog(commit).present(widget)
+
+
 def version_row(title, entry, newest):
-    """A daemon's or an app's row on Mesh Versions: its commit and when it was made, and where that stands (Newest,
-    dimmed; N commits behind or Older code, in the warning colour; Version unknown)."""
-    row = Adw.ActionRow(title=GLib.markup_escape_text(title), subtitle=version_said(entry))
+    """A daemon's or an app's line on ☰ → Mesh: what it is, its commit (a link to that commit's changelog, ☰ →
+    Changelog's), and where that stands (Newest, dimmed; N commits behind or Older code, in the warning colour)."""
+    row = Adw.ActionRow(title=GLib.markup_escape_text(title))
     kind, said = version_standing(entry, newest)
-    if said:
-        label = Gtk.Label(label=said, valign=Gtk.Align.CENTER)
-        label.add_css_class("dim-label" if kind in ("newest", "unknown") else "warning")
-        row.add_suffix(label)
+    box = Gtk.Box(spacing=12, valign=Gtk.Align.CENTER)
+    commit = entry.get("commit")
+    if commit:
+        link = Gtk.Button(label=commit[:7], css_classes=["flat", "monospace", "accent"], valign=Gtk.Align.CENTER)
+        link.connect("clicked", lambda b: changelog_of(commit, b))
+        box.append(link)
+    else:
+        box.append(Gtk.Label(label=wording.say("updates.version_unknown"), css_classes=["dim-label"]))
+    behind = Gtk.Label(label=said, xalign=1, width_chars=16)
+    behind.add_css_class("dim-label" if kind == "newest" else "warning")
+    box.append(behind)
+    row.add_suffix(box)
     return row

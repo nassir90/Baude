@@ -2541,9 +2541,10 @@ class Window(Adw.ApplicationWindow):
         op = msg.get("op")
         busy = bool(self.control.queue or self.waiting or any(t.last.get("loading") for t in self.tabs.values()))
         idle_s = 0.0 if busy else (GLib.get_monotonic_time() - self.asked_at) / 1e6  # (work still going: not idle)
-        self.used = GLib.get_monotonic_time()
+        if op != "info":  # (asked what it is, as the host process does every few seconds: not use)
+            self.used = GLib.get_monotonic_time()
         if op not in ("info", "watch", "phone_note") and not msg.get("from_pane"):
-            self.asked_at = self.used
+            self.asked_at = GLib.get_monotonic_time()
         if op == "open":
             self.take(pid, [u for u in msg.get("urls") or [] if isinstance(u, str)])
             return answer({"ok": True})

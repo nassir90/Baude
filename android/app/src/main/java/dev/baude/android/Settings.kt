@@ -117,9 +117,9 @@ object Settings {
 }
 
 /** ⋮ → Settings…, as Baude's Settings: the accent and whether it's light or dark, how updates download, notifications
- * and the version; Mesh Versions; the sizes; Send Feedback…. */
+ * and the version; the sizes; Send Feedback…. */
 @Composable
-fun SettingsScreen(back: () -> Unit, feedback: () -> Unit, versions: () -> Unit = {}) {
+fun SettingsScreen(back: () -> Unit, feedback: () -> Unit) {
     val c = LocalBaude.current
     val ctx = LocalContext.current
     Settings.load(ctx)
@@ -160,11 +160,6 @@ fun SettingsScreen(back: () -> Unit, feedback: () -> Unit, versions: () -> Unit 
                     }
                 },
                 { VersionRow() },
-                {
-                    ActionRow(Wording.MeshVersions.title, meshVersionsSummary(), onClick = versions, suffix = {
-                        Icon(Adwaita.GoNext, null, tint = c.dim, modifier = Modifier.size(18.dp))
-                    })
-                },
             ), "") { it() }
             Heading(Wording.Window.size)
             BoxedList(listOf<@Composable () -> Unit>(

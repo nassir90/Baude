@@ -16,7 +16,7 @@ import dev.baude.android.Home
 import dev.baude.android.Host
 import dev.baude.android.Key
 import dev.baude.android.Mesh
-import dev.baude.android.MeshVersionsScreen
+import dev.baude.android.MeshScreen
 import dev.baude.android.Msg
 import dev.baude.android.Settings
 import dev.baude.android.SettingsScreen
@@ -92,14 +92,9 @@ abstract class Screens(private val theme: String) {
 
     @Test fun settings() = render("05-settings") { SettingsScreen({}, {}) }
 
-    @Test fun meshVersions() {
+    @Test fun mesh() {
         versionsFixture()
-        render("06-mesh-versions") { MeshVersionsScreen {} }
-    }
-
-    @Test fun settingsMesh() {
-        versionsFixture()
-        render("05-settings-mesh") { SettingsScreen({}, {}) }
+        render("06-mesh") { MeshScreen {} }
     }
 
     /** The mesh as workshop says it is: it, and two members on older code (one 45 commits behind, one whose count

@@ -35,6 +35,8 @@ FRAME_KEYS = frozenset(wire.DEFS["EmissionFrame"]["properties"]) - {"op", "req"}
 EPHEMERAL_S = wire.CONSTANTS["EPHEMERAL_S"]  # (a side question whose head's gone: gone this soon)
 GRACE_MOST = wire.CONSTANTS["GRACE_MAX_S"]  # (start's grace: an ephemeral session waits at most this long for its head
 # to come back)
+APPS = frozenset({"baude", "record", "baude-android"})  # (heads listed as apps connected: a script that says
+# anything else, or a host's mesh, is no app)
 EMISSIONS_S = 30  # (this machine's Emissions, and the code each runs, asked this often: heads_look)
 CHECK_SOCKET_S = 600  # (nobody attached: its socket looked at this often, in case its folder's been taken away)
 TRANSCRIPT_CHUNK = 1 << 20
@@ -1175,7 +1177,7 @@ class Server:
             if isinstance(head, str) and self.commit and head != self.commit and head not in self.heads_apart:
                 self.heads_apart.add(head)
                 self.log(f"a head on {head[:12]} connected; this is on {self.commit[:12]}")
-            if isinstance(msg.get("client"), str) and msg["client"]:  # (listed as connected here once it subscribes)
+            if msg.get("client") in APPS:  # (listed as connected here once it subscribes)
                 conn.head = {"client": msg["client"][:32], "commit": mesh.versions_of({"commit": head})["commit"]}
             return reply("hello", server=self.info())
         if op == "subscribe":

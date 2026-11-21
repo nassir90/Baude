@@ -7315,7 +7315,6 @@ class Settings(Adw.PreferencesDialog):
         group.add(widgets.notifications_row())  # (Baude's too)
         self.version_row = update.version_row()
         group.add(self.version_row)
-        group.add(widgets.mesh_versions_row(network()))  # (Baude's too)
         spell = widgets.settings_switch("Check Spelling", spelling.about(), "win.spellcheck")
         spelling.when_made(lambda: spell.set_subtitle(spelling.about()))  # (said once it's known)
         group.add(spell)
@@ -7508,6 +7507,7 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost, w
         item.set_attribute_value("accel", GLib.Variant.new_string(widgets.SETTINGS_KEY))
         app_menu.append_item(item)
         app_menu.append(wording.say("changelog.title"), "win.changelog")
+        app_menu.append(wording.say("mesh_versions.title"), "win.mesh")  # (Baude's too)
         item = Gio.MenuItem.new(wording.say("fixes.send_feedback"), "win.feedback")
         item.set_attribute_value("accel", GLib.Variant.new_string(widgets.FEEDBACK_KEY))
         app_menu.append_item(item)
@@ -7523,7 +7523,8 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost, w
                          ("new", lambda *_: self.new_notebook()), ("restart", lambda: self.restart()),
                          ("settings", lambda: Settings(self).present(self)), ("feedback", lambda: self.open_feedback()),
                          ("fixes", lambda: self.open_fixes()),
-                         ("changelog", lambda: update.changelog_dialog().present(self))):
+                         ("changelog", lambda: update.changelog_dialog().present(self)),
+                         ("mesh", lambda: widgets.mesh_dialog(network()).present(self))):
             a = Gio.SimpleAction(name=name)
             a.connect("activate", lambda _a, _p, fn=fn: fn())
             self.add_action(a)

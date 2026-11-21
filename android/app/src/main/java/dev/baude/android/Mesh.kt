@@ -338,9 +338,12 @@ object Mesh {
 
     /** The mesh as one of your hosts that's up says it is (the first in your list), for Mesh Versions: what its host
      * process is, and its mesh's members, each with the apps connected to it; null with none up. */
-    fun versions(): Msg.Info? = hosts.firstNotNullOfOrNull { h ->
-        infos[h.id]?.takeIf { states[h.id]?.state == "up" && it.mesh != null }
-    }
+    fun versions(): Msg.Info? = versionsHost()?.let { infos[it] }
+
+    /** The host versions() is from: your first that's up and has said its mesh. */
+    fun versionsHost(): String? = hosts.firstOrNull { h ->
+        infos[h.id]?.mesh != null && states[h.id]?.state == "up"
+    }?.id
 
     /** A request to a host, its reply on the main thread (an error one if it isn't connected). */
     fun ask(hostId: String, msg: JSONObject, then: (JSONObject) -> Unit) {

@@ -1057,8 +1057,7 @@ class Signal(Names):
     def status_text(self):
         """One line on what it's doing: the Signal page's, and the header button's tooltip."""
         if self.halted:
-            return f"Not running: the links are what needs no model (the glossary's, the catalogue's and git's: " \
-                   f"{len(self.refs)} names)"
+            return wording.say("signal.not_running", n=len(self.refs))
         part = self.agent.part if self.agent is not None else None
         now = self.activity or ("Waiting to start" if self.waiting else
                                 f"{self.agent.model.capitalize()}: reading replies {part['a']} to {part['b']}" if part
@@ -11838,11 +11837,11 @@ def ref_status_text(ref):
     if ref.status == "pending":
         return wording.say("lookup.looking_it_up")
     if ref.status == "not_found":
-        return f"Not found: {ref.reason}."
+        return wording.say("signal.status_not_found", reason=ref.reason)
     if ref.status == "stale":
-        return "Stale: the code changed and this couldn't be found again. It can still be opened as it was."
+        return wording.say("signal.status_stale")
     if ref.status == "ambiguous":
-        return f"{len(ref.locations)} matches ({ref.reason})."
+        return wording.say("signal.status_matches", n=len(ref.locations), why=ref.reason)
     note = ""
     if late := ref_late(ref):
         note = f" Looked up {late} after the message was written, so the line is the one there now."
@@ -11891,7 +11890,7 @@ def kube_running_rows(win, names, box, on_open=None):
     def show(found):
         if not found or holder.get_root() is None:
             return False
-        heading = Gtk.Label(label="Running", xalign=0)
+        heading = Gtk.Label(label=wording.say("signal.running"), xalign=0)
         heading.add_css_class("ref-kind")
         holder.append(heading)
         for r in found:
@@ -11944,7 +11943,8 @@ def ref_kind_label(ref):
         return "Database collection" if live.get("engine") == "ArangoDB" else wording.say("databases.database_table")
     roles = [l["role"] for l in ref.locations if l["role"] != "used"]
     if ref.kind == "symbol" and roles and all(r in ("table", "column") for r in roles):
-        return "Database column" if all(r == "column" for r in roles) else wording.say("databases.database_table")
+        return wording.say("signal.database_column") if all(r == "column" for r in roles) \
+            else wording.say("databases.database_table")
     if ref.data.get("context"):
         return wording.say("lookup.kubeconfig_cluster") if ref.data.get("cluster_only") else \
             wording.say("lookup.kubeconfig_context")
@@ -12170,7 +12170,8 @@ class RefPopover(AnchoredPopover):
             icon_button(RefIcon("db"), "Show it in its database's schema diagram",
                         lambda: (win.show_schema_for(ref, self.get_parent()), self.popdown()))
         icon_button(Gtk.Image.new_from_icon_name("view-refresh-symbolic"),
-                    wording.say("common.try_again") if ref.status in ("not_found", "stale") else "Search again",
+                    wording.say("common.try_again") if ref.status in ("not_found", "stale")
+                    else wording.say("signal.search_again_one"),
                     lambda: (win.signal.refresh([ref.surface], win.touched_paths()), self.popdown()))
         icon_button(Gtk.Image.new_from_icon_name("baude-open-symbolic"), wording.say("common.open"),
                     lambda: (self.popdown(), win.show_ref(ref.surface)))
@@ -12240,17 +12241,12 @@ class SignalPage(widgets.ExpandStack):
         for attr, label, active, tip, fn in (
                 ("sonnet", (load_settings().get("signal_model") or "sonnet").capitalize(),
                  bool(load_settings().get("signal_reader", True)),
-                 "The reader: a model session reads the chat in order, like a person following along (your "
-                 "messages, what Claude ran and saw, its replies), and decides what each name points at in each "
-                 "reply, with Signal's lookups as its tools; its spending is capped and shown in the status line",
+                 wording.say("signal.reader_tip"),
                  self.set_sonnet),
-                ("lsp", "LSP", lsp is True or (lsp is None and bool(lsp_commands())),
-                 "Language servers: pyright and typescript-language-server say which definition a code name means "
-                 "(whose field previous.job_id is). Baude fetches them once with npm, at pinned versions, and runs "
-                 "them read-only", self.set_lsp),
+                ("lsp", wording.say("signal.lsp"), lsp is True or (lsp is None and bool(lsp_commands())),
+                 wording.say("signal.lsp_tip"), self.set_lsp),
                 ("tools", wording.say("lookup.tools"), bool(load_settings().get("signal_tool_schemas")),
-                 "Tool schemas: when a reply talks about a tool (the Agent tool, Read), show what it takes, from "
-                 "Anthropic's Agent SDK types and the Claude Code docs (fetched once per Claude Code version)",
+                 wording.say("signal.tools_tip"),
                  self.set_tool_schemas)):
             btn = Gtk.ToggleButton(label=label, active=active, tooltip_text=tip)
             btn.add_css_class("ref-option")
@@ -12260,7 +12256,7 @@ class SignalPage(widgets.ExpandStack):
         # Signal for this chat, on or off: the header's Activate Signal switch (off, the reader, the language servers and
         # the lookups waiting stop at once; its links stay)
         self.master = Gtk.Switch(hexpand=True, halign=Gtk.Align.END, valign=Gtk.Align.CENTER,
-                                 tooltip_text="Signal, for this chat")
+                                 tooltip_text=wording.say("signal.this_chat"))
         if getattr(win, "signal_run", None) is not None:
             win.signal_run.bind_property("active", self.master, "active",
                                          GObject.BindingFlags.BIDIRECTIONAL | GObject.BindingFlags.SYNC_CREATE)
@@ -12308,7 +12304,7 @@ class SignalPage(widgets.ExpandStack):
         self.add_named(page, "list")
         detail = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         head = Gtk.Box(spacing=6, margin_start=8, margin_end=8, margin_top=6, margin_bottom=6)
-        back = Gtk.Button(icon_name="go-previous-symbolic", tooltip_text="All names")
+        back = Gtk.Button(icon_name="go-previous-symbolic", tooltip_text=wording.say("signal.all_names"))
         back.add_css_class("flat")
         back.connect("clicked", lambda *_: self.show_list())
         self.detail_title = Gtk.Label(xalign=0, ellipsize=Pango.EllipsizeMode.END, hexpand=True)
@@ -12334,7 +12330,7 @@ class SignalPage(widgets.ExpandStack):
         self.reader_info.add_css_class("caption")
         titles.append(self.reader_title)
         titles.append(self.reader_info)
-        back = self.reader_back = Gtk.Button(icon_name="go-previous-symbolic", tooltip_text="All names",
+        back = self.reader_back = Gtk.Button(icon_name="go-previous-symbolic", tooltip_text=wording.say("signal.all_names"),
                                              valign=Gtk.Align.CENTER)
         back.add_css_class("flat")
         back.connect("clicked", lambda *_: self.close_reader_page())
@@ -12563,9 +12559,7 @@ class SignalPage(widgets.ExpandStack):
             discard(c)
         self.status_changed()
         if self.win.signal is None:
-            self.empty.set_label("Signal is off. Turned on (here, or with the link button in the header), the "
-                                 "files, code, commits, env vars, routes, Kubernetes objects and tools Claude names "
-                                 "become links, listed here.")
+            self.empty.set_label(wording.say("signal.off"))
             self.empty.set_visible(True)
             self.summary.set_visible(False)
             return
@@ -12589,9 +12583,10 @@ class SignalPage(widgets.ExpandStack):
             if r.status == "pending":
                 return "pending"
             label = ref_kind_label(r)
-            return "db" if label in (wording.say("databases.database_table"), "Database column", "Database collection",
+            return "db" if label in (wording.say("databases.database_table"), wording.say("signal.database_column"),
+                                     "Database collection",
                                      wording.say("databases.database")) else r.kind
-        groups = [("pending", "Looking up")] + [(k, many) for k, (_one, many) in REF_KINDS.items()]
+        groups = [("pending", wording.say("signal.looking_up_group"))] + [(k, many) for k, (_one, many) in REF_KINDS.items()]
         groups.insert(groups.index(("symbol", REF_KINDS["symbol"][1])) + 1,
                       ("db", wording.say("signal.database_tables")))
         for kind, many in groups:
@@ -12661,7 +12656,7 @@ class SignalPage(widgets.ExpandStack):
         if r.kind == "tool" and r.status == "resolved":
             self.tool_card(r, body)
         if r.locations:
-            heading = Gtk.Label(label="Locations", xalign=0)
+            heading = Gtk.Label(label=wording.say("signal.locations"), xalign=0)
             heading.add_css_class("ref-kind")
             body.append(heading)
             locs = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
@@ -12669,19 +12664,20 @@ class SignalPage(widgets.ExpandStack):
             body.append(locs)
             first = r.locations[0]
             if first.get("state"):
-                body.append(sel_label(f'<span alpha="60%">Read from {html.escape(first["state"])} content'
-                                      + (f' at {html.escape((first.get("commit_sha") or "")[:9])}'
-                                         if first.get("commit_sha") else "")
-                                      + (f' on {html.escape(first["branch"])}' if first.get("branch") else "")
+                body.append(sel_label('<span alpha="60%">' + html.escape(
+                    wording.say("signal_card.read_from", state=first["state"])
+                    + (wording.say("signal_card.read_from_at", sha=(first.get("commit_sha") or "")[:9])
+                       if first.get("commit_sha") else "")
+                    + (wording.say("signal_card.read_from_on", branch=first["branch"]) if first.get("branch") else ""))
                                       + "</span>", css="caption"))
         if names := ref_run_names(r):
             kube_running_rows(self.win, names, body)
-        refresh = Gtk.Button(label="Refresh", tooltip_text="Search again, ignoring what was found or given up on")
+        refresh = Gtk.Button(label=wording.say("signal.refresh"), tooltip_text=wording.say("signal.refresh_tip"))
         refresh.connect("clicked", lambda *_: self.win.signal.refresh([surface], self.win.touched_paths()))
         actions = Gtk.Box(spacing=6)
         actions.append(refresh)
         if r.kind in ("commit", "branch") and r.status == "resolved":
-            git = Gtk.Button(label="Show in Git", tooltip_text="Its place in the history, on the Git page")
+            git = Gtk.Button(label=wording.say("signal.show_in_git"), tooltip_text=wording.say("signal.show_in_git_tip"))
             git.connect("clicked", lambda *_: self.win.show_git_ref(r))
             actions.append(git)
         body.append(actions)
@@ -12692,14 +12688,14 @@ class SignalPage(widgets.ExpandStack):
         d, name = r.data, r.data.get("tool") or r.canonical
         fields, e = d.get("input"), html.escape
         if fields:  # (a list, not a table: the panel is narrow and the descriptions matter most)
-            heading = Gtk.Label(label="Inputs", xalign=0)
+            heading = Gtk.Label(label=wording.say("signal_card.inputs"), xalign=0)
             heading.add_css_class("ref-kind")
             body.append(heading)
             box = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE)
             box.add_css_class("boxed-list")
             for f in fields:
                 line = f"<tt><b>{e(f['name'])}</b></tt>" + (f"  <tt>{e(f['type'][:200])}</tt>" if f.get("type") else "") \
-                    + ('  <span alpha="60%">required</span>' if f.get("required") else "") \
+                    + (f'  <span alpha="60%">{wording.say("signal_card.required")}</span>' if f.get("required") else "") \
                     + (f'\n<span alpha="75%">{e(f["doc"])}</span>' if f.get("doc") else "")
                 lbl = sel_label(line)
                 for side in ("top", "bottom"):
@@ -12709,15 +12705,15 @@ class SignalPage(widgets.ExpandStack):
                 box.append(lbl)
             body.append(box)
         elif fields is not None:
-            body.append(sel_label('<span alpha="60%">No inputs</span>'))
+            body.append(sel_label(f'<span alpha="60%">{wording.say("signal_card.no_inputs")}</span>'))
         if d.get("output_text"):
             out = Gtk.Expander(label=wording.say("meta.output"))
             out.set_child(CodeBlock(d["output_text"], "ts"))
             body.append(out)
         calls = [c for c in self.win.tool_cards.values() if c.name == name and c.input]
         if calls:
-            body.append(sel_label(f"<b>Called {len(calls)} time{'s' * (len(calls) != 1)} in this chat</b>"
-                                  + (", the last ones:" if len(calls) > 1 else ":")))
+            body.append(sel_label(f"<b>{wording.say('signal_card.called', n=len(calls))}</b>"
+                                  + (wording.say("signal_card.last_ones") if len(calls) > 1 else ":")))
             for c in calls[-2:]:
                 body.append(CodeBlock(json.dumps(c.input, indent=2, ensure_ascii=False)[:1500], "json"))
         if name in ("Agent", "Task") and SUBAGENTS:
@@ -12739,38 +12735,45 @@ class SignalPage(widgets.ExpandStack):
             if d.get("description"):
                 out.append(e(d["description"]))
             if "permission" in d:
-                out.append("Asks your permission: " + ("yes" if d["permission"] else "no"))
+                out.append(wording.say("signal_card.asks_yes" if d["permission"] else "signal_card.asks_no"))
             if src == "anthropic":
-                where = f"Claude Code {d.get('cli') or ''}".strip() + (f" · Anthropic's Agent SDK {d['sdk']} types"
-                                                                       if d.get("sdk") and d.get("input") is not None else "")
+                where = wording.say("signal_card.claude_code", version=d.get("cli") or "").strip() + (
+                    wording.say("signal_card.sdk_types", version=d["sdk"]) if d.get("sdk") and d.get("input") is not None
+                    else "")
                 docs = TOOL_DOCS_PAGE + (f"#{d['anchor']}" if d.get("anchor") else "")
-                out.append(f'<span alpha="70%">{e(where)} · </span>{link(docs, "Docs ↗")}')
+                out.append(f'<span alpha="70%">{e(where)} · </span>{link(docs, wording.say("signal_card.docs"))}')
             elif src == "mcp":
-                out.append(f'<span alpha="70%">From the MCP server {e(d.get("server", ""))} (its tools/list)</span>')
+                out.append(f'<span alpha="70%">{e(wording.say("signal_card.from_mcp", server=d.get("server", "")))}</span>')
             elif d.get("server"):
-                out.append(f'<span alpha="70%">A tool of the MCP server {e(d["server"])}, which Claude Desktop provides: '
-                           "no public schema, so only its calls show what it takes</span>")
+                out.append(f'<span alpha="70%">{e(wording.say("signal_card.desktop_mcp", server=d["server"]))}</span>')
             else:
-                out.append('<span alpha="70%">No schema here yet: turn on Tools at the top of this page to fetch '
-                           "Claude Code's from Anthropic</span>")
+                out.append(f'<span alpha="70%">{e(wording.say("signal_card.no_schema"))}</span>')
             return out
         if d.get("context"):  # (a kubeconfig context: what kubectl would use, never its credentials)
-            out.append(f"Kubeconfig {'cluster' if d.get('cluster_only') else 'context'} <b>{e(d['context'])}</b>" +
-                       (" (the current one)" if d.get("current") else ""))
-            for key, label in (("cluster", "Cluster"), ("server", "Server"), ("namespace", "Namespace"), ("user", "User")):
+            out.append(f"{wording.say('lookup.kubeconfig_cluster' if d.get('cluster_only') else 'lookup.kubeconfig_context')}"
+                       f" <b>{e(d['context'])}</b>" +
+                       (e(wording.say("signal_card.current_one")) if d.get("current") else ""))
+            for key, label in (("cluster", wording.say("signal_card.cluster")), ("server", wording.say("signal_card.server")),
+                               ("namespace", wording.say("signal_card.namespace")), ("user", wording.say("report.user"))):
                 if d.get(key):
                     out.append(f"{label}: <tt>{e(str(d[key]))}</tt>")
-            out.append(f'<span alpha="70%">In {e(pretty_path(d.get("kubeconfig") or ""))}' +
-                       (f", line {d['line']}" if d.get("line") else "") + "; its credentials aren't read</span>")
+            kubeconfig = pretty_path(d.get("kubeconfig") or "")
+            out.append('<span alpha="70%">' + e(wording.say("signal_card.in_kubeconfig_line", path=kubeconfig, line=d["line"])
+                                                 if d.get("line") else wording.say("signal_card.in_kubeconfig", path=kubeconfig))
+                       + "</span>")
             return out
         if r.kind == "k8s" and d.get("kind"):
             out.append(f"<b>{e(d['kind'])}</b> <tt>{e(d.get('name') or '')}</tt>" +
-                       (f" in namespace <tt>{e(d['namespace'])}</tt>" if d.get("namespace") else ""))
+                       (e(wording.say("signal_card.in_namespace", namespace="\0")).replace(
+                           "\0", f"<tt>{e(d['namespace'])}</tt>") if d.get("namespace") else ""))
             if d.get("chart") is not None:
-                out.append(f"Helm chart <tt>{e(d['chart'] or '.')}</tt>" +
-                           (f", release <tt>{e(d['release'])}</tt>" if d.get("release") else ""))
+                out.append(e(wording.say("signal_card.helm_chart", chart="\0")).replace(
+                    "\0", f"<tt>{e(d['chart'] or '.')}</tt>") +
+                           (e(wording.say("signal_card.helm_release", release="\0")).replace(
+                               "\0", f"<tt>{e(d['release'])}</tt>") if d.get("release") else ""))
             if d.get("overlay"):
-                out.append(f"Kustomize overlay <tt>{e(d['overlay'])}</tt>")
+                out.append(e(wording.say("signal_card.kustomize", overlay="\0")).replace(
+                    "\0", f"<tt>{e(d['overlay'])}</tt>"))
             if d.get("how"):
                 out.append(f'<span alpha="70%">{e(d["how"])}</span>')
             return out
@@ -12781,57 +12784,66 @@ class SignalPage(widgets.ExpandStack):
                 if d.get(key):
                     out.append(f"{label}: <tt>{e(str(d[key]))}</tt>")
             if d.get("built_in"):
-                out.append('<span alpha="70%">Built into Claude Code</span>')
+                out.append(f'<span alpha="70%">{e(wording.say("signal_card.built_in"))}</span>')
             return out
         if r.kind == "commit":
             out.append(f"<b>{e(d.get('subject', ''))}</b>")
             if d.get("range"):
-                out.append(f"{d.get('count', 0)} commit{'s' * (d.get('count') != 1)}, "
-                           f"<tt>{e(d['range'][:9])}..{e(d.get('sha', '')[:9])}</tt>")
+                out.append(e(wording.say("signal_card.commits_range", n=d.get("count", 0), **{
+                    "from": "\0", "to": "\1"})).replace("\0", f"<tt>{e(d['range'][:9])}").replace(
+                        "\1", f"{e(d.get('sha', '')[:9])}</tt>"))
             if d.get("repo"):
-                out.append(f"In <tt>{e(d['repo'].replace(os.path.expanduser('~'), '~', 1))}</tt>")
+                out.append(e(wording.say("signal_card.in_repo", repo="\0")).replace(
+                    "\0", f"<tt>{e(d['repo'].replace(os.path.expanduser('~'), '~', 1))}</tt>"))
             out.append(f"{e(d.get('author', ''))} · {e(ref_date(d.get('date')))}")
-            out.append(f"+{d.get('added', 0)} −{d.get('removed', 0)} in {d.get('files', 0)} files")
-            out.append(link(d["url"], "Open on GitHub ↗") if d.get("url") else
-                       "Local only: no remote branch contains it")
+            out.append(wording.say("signal_card.changed", added=d.get("added", 0), removed=d.get("removed", 0),
+                                   n=d.get("files", 0)))
+            out.append(link(d["url"], wording.say("signal_card.open_github")) if d.get("url") else
+                       wording.say("signal_card.local_only"))
             if d.get("rewritten"):
-                rep = f" Probably replaced by <tt>{e(d['successor'][:9])}</tt> (same subject)." if d.get("successor") else ""
-                out.append(f"On no branch: a rebase or squash replaced it.{rep}")
+                rep = e(wording.say("signal_card.replaced_by", sha="\0")).replace(
+                    "\0", f"<tt>{e(d['successor'][:9])}</tt>") if d.get("successor") else ""
+                out.append(e(wording.say("signal_card.rewritten")) + rep)
             elif d.get("branches") or d.get("remotes"):
                 on = (d.get("branches") or []) + (d.get("remotes") or [])
-                out.append("On " + e(", ".join(on[:8])) + (f" and {len(on) - 8} more" if len(on) > 8 else ""))
+                out.append(e(wording.say("git.on_branches_more", branches=", ".join(on[:8]), n=len(on) - 8)
+                             if len(on) > 8 else wording.say("git.on_branches", branches=", ".join(on[:8]))))
         elif r.kind == "branch":
             out.append(f"<b>{e(d.get('subject', ''))}</b>")
-            out.append(f"Last commit {e(ref_date(d.get('date')))} · <tt>{e(d.get('sha', '')[:9])}</tt>")
+            out.append(e(wording.say("signal_card.last_commit", date=ref_date(d.get("date")), sha="\0")).replace(
+                "\0", f"<tt>{e(d.get('sha', '')[:9])}</tt>"))
             if "ahead" in d:
-                out.append(f"{d['ahead']} ahead, {d['behind']} behind {e(d.get('base', ''))}")
+                out.append(e(wording.say("signal_card.ahead_behind", ahead=d["ahead"], behind=d["behind"],
+                                         base=d.get("base", ""))))
             if d.get("upstream"):
-                out.append(f"Tracks {e(d['upstream'])}")
-            out.append(link(d["url"], "Open on GitHub ↗") if d.get("url") else "Not pushed")
+                out.append(e(wording.say("signal_card.tracks", upstream=d["upstream"])))
+            out.append(link(d["url"], wording.say("signal_card.open_github")) if d.get("url") else
+                       wording.say("signal_card.not_pushed"))
         elif r.kind == "pr":
             out.append(f"<b>{e(d.get('title') or '#' + str(d.get('number')))}</b>")
             if d.get("state"):
-                dates = [f"opened {ref_date(d.get('created'))}"]
+                dates = [wording.say("signal_card.opened", date=ref_date(d.get("created")))]
                 if d.get("merged"):
-                    dates.append(f"merged {ref_date(d['merged'])}")
+                    dates.append(wording.say("signal_card.merged", date=ref_date(d["merged"])))
                 elif d.get("closed"):
-                    dates.append(f"closed {ref_date(d['closed'])}")
+                    dates.append(wording.say("signal_card.closed", date=ref_date(d["closed"])))
                 out.append(f"{e(d['state'].capitalize())}: " + e(", ".join(dates)))
             if d.get("additions") is not None:
-                out.append(f"+{d['additions']} −{d['deletions']} in {d.get('changed_files', 0)} files"
+                out.append(wording.say("signal_card.changed", added=d["additions"], removed=d["deletions"],
+                                       n=d.get("changed_files", 0))
                            + (f" · {e(d.get('head') or '')} → {e(d.get('base') or '')}" if d.get("head") else ""))
-            out.append(link(d["url"], "Open on GitHub ↗"))
+            out.append(link(d["url"], wording.say("signal_card.open_github")))
         if r.kind in ("commit", "branch"):
             if d.get("prs"):
-                out.append("<b>Pull requests</b>")
+                out.append(f"<b>{wording.say('lookup.pull_requests')}</b>")
                 for p in d["prs"]:
-                    when = f"merged {ref_date(p['merged'])}" if p.get("merged") else \
-                        f"{p.get('state', '')}, opened {ref_date(p.get('created'))}"
+                    when = wording.say("signal_card.merged", date=ref_date(p["merged"])) if p.get("merged") else \
+                        f"{p.get('state', '')}, " + wording.say("signal_card.opened", date=ref_date(p.get("created")))
                     out.append(f"{link(p['url'], '#' + str(p['number']))} {e(p.get('title', ''))} ({e(when)})")
             elif d.get("pushed") and "prs" in d:
-                out.append("No pull requests")
+                out.append(wording.say("signal_card.no_prs"))
             elif d.get("pushed") and not shutil.which("gh"):
-                out.append('<span alpha="60%">Install the GitHub CLI (gh) to see pull requests</span>')
+                out.append(f'<span alpha="60%">{wording.say("signal_card.install_gh")}</span>')
         return out
 
     def set_sonnet(self, on):
@@ -16870,10 +16882,8 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
             line.append(sw)
             box.append(line)
             return sw
-        self.signal_show = row("Show links", "Draw the names Signal knows as links: files, code, commits, routes, "
-                                             "Kubernetes objects, tools")
-        self.signal_run = row("Activate Signal", "Look up the names in this chat's replies as they come, and let the "
-                                                 "reader (a model session) read the chat")
+        self.signal_show = row(wording.say("signal_menu.show_links"), wording.say("signal_menu.show_links_detail"))
+        self.signal_run = row(wording.say("signal_menu.activate"), wording.say("signal_menu.activate_detail"))
         pop.set_child(box)
         return pop
 
@@ -17262,10 +17272,9 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
             (Ticker.pulse if busy else Ticker.still)(icon)
         hidden = "" if shown else "\nIts links are hidden (Show links)"
         if ref is None:
-            tip = ("Signal is off. Click for its switches: Show links draws the files, code, commits, env vars, routes, "
-                   "Kubernetes objects and tools Claude names as links; Activate Signal looks them up")
+            tip = wording.say("signal_menu.tip_off")
         elif not running:
-            tip = f"Signal shows its links but isn't running: {ref.status_text()}.\nClick for its switches"
+            tip = wording.say("signal_menu.tip_links", status=ref.status_text())
         elif busy:
             tip = f"Signal is working: {ref.status_text()}.{hidden}\nClick to stop it (Activate Signal)"
         else:
@@ -17772,10 +17781,11 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
             elif ref.status == "not_found":
                 pop.set_title(ref_kind_label(ref))
                 again = lambda: (sig.refresh([surface]), show(sig.refs.get(surface)))  # noqa: E731
-                pop.state(f"Not found: {ref.reason}.", actions=[(wording.say("common.try_again"), again)])
+                pop.state(wording.say("signal.status_not_found", reason=ref.reason),
+                          actions=[(wording.say("common.try_again"), again)])
             else:
                 pop.set_title(ref_kind_label(ref))
-                pop.state(f"Found. {ref_status_text(ref)}",
+                pop.state(wording.say("signal.found", status=ref_status_text(ref)),
                           actions=[(wording.say("common.open"),
                                     lambda: (pop.popdown(), self.open_ref(surface, anchor, message)))])
                 ref_status_tip(pop.status, ref)

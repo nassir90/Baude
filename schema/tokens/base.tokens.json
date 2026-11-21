@@ -330,5 +330,15 @@
     "code-height": {"$type": "number", "$description": "A code block's tallest, of the chat's visible height (CodeBlock.set_max_height).", "$value": 0.6667},
     "table-wrap-chars": {"$type": "number", "$description": "A table's long column's least width, in characters (TableScroll.MIN_CHARS).", "$value": 40},
     "code-span": {"$type": "color", "$description": "An inline code span's background (_inline_markup's bgcolor).", "$value": {"colorSpace": "srgb", "components": [0.498, 0.498, 0.498], "alpha": 0.22, "hex": "#7f7f7f"}}
+  },
+  "signal": {
+    "$description": "A Signal link in a reply, by how far its lookup got, and a pull request's logo by where it stands.",
+    "not-found": {"$type": "color", "$description": "A name not found: its text (the ref_markup span's foreground).", "$value": {"colorSpace": "srgb", "components": [0.5412, 0.5412, 0.5412], "hex": "#8a8a8a"}},
+    "not-found-underline": {"$type": "color", "$description": "A name not found: its underline.", "$value": {"colorSpace": "srgb", "components": [0.7529, 0.7529, 0.7529], "hex": "#c0c0c0"}},
+    "stale": {"$type": "color", "$description": "A stale name: its text and its wavy underline.", "$value": {"colorSpace": "srgb", "components": [0.7608, 0.4824, 0], "hex": "#c27b00"}},
+    "pr-open": {"$type": "color", "$description": "An open pull request's logo (REF_ICON_TINTS).", "$value": {"colorSpace": "srgb", "components": [0.1765, 0.6431, 0.3059], "hex": "#2da44e"}},
+    "pr-merged": {"$type": "color", "$description": "A merged pull request's logo.", "$value": {"colorSpace": "srgb", "components": [0.5373, 0.3412, 0.898], "hex": "#8957e5"}},
+    "pr-closed": {"$type": "color", "$description": "A pull request closed unmerged, or a closed issue: the logo.", "$value": {"colorSpace": "srgb", "components": [0.5412, 0.5608, 0.5961], "hex": "#8a8f98"}},
+    "pending-opacity": {"$type": "number", "$description": "A name still being looked up: its link's opacity (alpha=\"55%\").", "$value": 0.55}
   }
 }

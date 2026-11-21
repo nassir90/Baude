@@ -86,10 +86,17 @@ fun ChatShell(hostId: String, sid: String, back: () -> Unit, open: (String, Stri
     val scope = rememberCoroutineScope()
     Meta.pages = { all }
     FileLinks.showFiles = { all.indexOfFirst { it.key == "files" }.takeIf { it >= 0 }?.let { scope.launch { pager.animateScrollToPage(it) } } }
-    val place = ChatPlace(at, s?.cwd, Mesh.conn(at)?.info?.home, chat.artifacts.toList())
+    val place = ChatPlace(at, s?.cwd, Mesh.conn(at)?.info?.home, chat.artifacts.toList(), sid)
     Meta.pageOpener = { t -> all.indexOfFirst { it.title.equals(t, true) }.takeIf { it >= 0 }?.let { scope.launch { pager.animateScrollToPage(it) } } }
+    val openPage = { key: String ->
+        all.indexOfFirst { it.key == key }.takeIf { it >= 0 }?.let { scope.launch { pager.animateScrollToPage(it) } }
+        Unit
+    }
     androidx.compose.runtime.DisposableEffect(chat) { // (its side questions' answers heard whichever page is shown)
         val l = sideQuestions(chat)
+        SignalLinks.hostId = at
+        SignalLinks.sid = sid
+        val unsignal = SignalNames.listen(chat)
         val status = chrome(chat)
         Mesh.listeners.add(l)
         Mesh.listeners.add(status)
@@ -98,15 +105,14 @@ fun ChatShell(hostId: String, sid: String, back: () -> Unit, open: (String, Stri
         onDispose {
             Mesh.listeners.remove(l)
             Mesh.listeners.remove(status)
+            unsignal()
+            SignalLinks.open.value = null
             Meta.pages = { emptyList() } // (no chat open: no pages for Meta to show)
             Meta.pageOpener = {}
             FileLinks.showFiles = {}
         }
     }
-    val openPage = { key: String ->
-        all.indexOfFirst { it.key == key }.takeIf { it >= 0 }?.let { scope.launch { pager.animateScrollToPage(it) } }
-        Unit
-    }
+    SignalLinks.openPage = openPage
     LaunchedEffect(chat.showAgent.value) { // (View on a call's card: the Subagents page)
         if (chat.showAgent.value == null) return@LaunchedEffect
         all.indexOfFirst { it.key == "agents" }.takeIf { it >= 0 }?.let { pager.animateScrollToPage(it) }
@@ -130,7 +136,7 @@ fun ChatShell(hostId: String, sid: String, back: () -> Unit, open: (String, Stri
             userScrollEnabled = all.getOrNull(pager.currentPage)?.key != "browser") { i ->
             val here = pager.currentPage == i && !pager.isScrollInProgress
             when (all[i].key) {
-                "chat" -> Column(Modifier.fillMaxSize()) { // (its model, effort and mode: the chat's own, as Baude's
+                "chat" -> Column(Modifier.fillMaxSize().watchTouches()) { // (its model, effort and mode: the chat's own, as Baude's
                     if (takes(at, "control"))              // header has them, not its side panel's pages)
                         ChatControls(at, sid, said = { chat.said.value = it }, open = open, modelSet = { v ->
                             chat.chrome.outgrown.value = false // (another model's window: as its usage says)
@@ -139,6 +145,7 @@ fun ChatShell(hostId: String, sid: String, back: () -> Unit, open: (String, Stri
                     ChatBanner(chat, open)
                     Box(Modifier.weight(1f)) {
                         ChatPage(chat, name, stop = { interrupt(chat) }, foot = { StatusBar(chat, openPage) })
+                        SignalPopovers(chat)
                     }
                 }
                 "meta" -> MetaPage(at, here)
@@ -151,7 +158,7 @@ fun ChatShell(hostId: String, sid: String, back: () -> Unit, open: (String, Stri
                 "btw" -> SideQuestionsPage(chat)
                 "files" -> FilesPage(at, sid)
                 "git" -> GitPage(at, sid)
-                "signal" -> SignalPage(at, sid)
+                "signal" -> SignalPage(at, sid, here)
             }
         }
         }

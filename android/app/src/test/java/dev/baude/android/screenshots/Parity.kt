@@ -27,6 +27,7 @@ import dev.baude.android.Queued
 import dev.baude.android.Meta
 import dev.baude.android.Msg
 import dev.baude.android.Settings
+import dev.baude.android.SignalLinks
 import dev.baude.android.SettingsScreen
 import dev.baude.android.Update
 import dev.baude.android.Wording
@@ -68,6 +69,7 @@ abstract class Parity(private val theme: String, private val scene: String) {
     @Before fun up() {
         val sc = scenes().first { it.getString("name") == scene }
         files = sc.optString("files").ifBlank { null }
+        signal = sc.optString("signal").ifBlank { null }?.let { JSONObject(File(root, "fixtures/$it").readText()).getJSONArray("refs") }
         val opened = sessions.getJSONArray("sessions").getJSONObject(sc.optInt("session", 0))
         shown = (if (sc.has("transcript")) transcript(sc.getString("transcript"), sc.optInt("lines", -1))
             else if (opened.isNull("transcript")) standIn(opened)
@@ -125,6 +127,9 @@ abstract class Parity(private val theme: String, private val scene: String) {
     /** The scene's `files`: a folder of fixtures whose contents join the chat's folder (as the desktop rig copies them in). */
     private var files: String? = null
 
+    /** The scene's `signal`: the names the folder's Signal glossary has (signal_names answers them), none without. */
+    private var signal: JSONArray? = null
+
     /** What the fixture host answers, as the desktop's host (baudelib/server.py, hostfiles.py) would: the open chat's
      * transcript, and the folder's files (fixtures/garden, not a git repository, with no Signal glossary). */
     private fun answer(msg: JSONObject): JSONObject? {
@@ -168,7 +173,8 @@ abstract class Parity(private val theme: String, private val scene: String) {
                     "data" to java.util.Base64.getEncoder().encodeToString(f.readBytes()))
             }
             "git" -> return reply("what" to msg.optString("what"), "error" to Wording.HostErrors.notARepo)
-            "signal_names" -> return reply("glossary" to "$home/garden/.baude", "refs" to JSONArray())
+            "signal_names" -> return reply("glossary" to "$home/garden/.baude", "root" to "$home/garden",
+                "refs" to (signal ?: JSONArray()))
         }
         return null
     }
@@ -223,6 +229,13 @@ abstract class Parity(private val theme: String, private val scene: String) {
                 show { ChatShell(host.getString("id"), first.getString("id"), back = {}, open = { _, _ -> }, feedback = {},
                     first = sc.optString("page").ifBlank { "chat" }) }
                 if (name == "menu") tap(Wording.ChatHeader.menu)
+                if (sc.has("card")) tap(sc.getString("card"))
+                if (sc.optBoolean("signal_menu")) tapDescribed(Wording.SignalMenu.tipLinks(status = "").substringBefore(":"))
+                if (sc.has("ref")) {
+                    SignalLinks.tap(sc.getString("ref"))
+                    androidx.compose.runtime.snapshots.Snapshot.sendApplyNotifications()
+                    settle()
+                }
                 if (sc.optBoolean("open")) toEnd()
                 if (sc.has("ask")) ask(sc.getString("ask"))
                 if (sc.has("queued")) {
@@ -308,6 +321,16 @@ abstract class Parity(private val theme: String, private val scene: String) {
         } ?: error("nothing labelled $label")
         node.config[SemanticsActions.OnClick].action?.invoke()
         // (what the tap wrote is told to the composition now: in a run's later scenes the write observer's notice doesn't arrive)
+        androidx.compose.runtime.snapshots.Snapshot.sendApplyNotifications()
+        settle()
+    }
+
+    /** A click on what's described as starting with prefix. */
+    private fun tapDescribed(prefix: String) {
+        val node = roots().flatMap { all(it.semanticsOwner.rootSemanticsNode) }.firstOrNull { n ->
+            n.config.contains(SemanticsActions.OnClick) && described(n)?.startsWith(prefix) == true
+        } ?: error("nothing described as $prefix")
+        node.config[SemanticsActions.OnClick].action?.invoke()
         androidx.compose.runtime.snapshots.Snapshot.sendApplyNotifications()
         settle()
     }

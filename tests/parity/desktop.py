@@ -65,14 +65,14 @@ def transcript_lines(name, cwd, lines=None):
     return (body if lines is None else body[:lines]) + title
 
 
-def write_sessions(lines=None):
+def write_sessions(lines=None, transcript=None):
     """fixtures/sessions.json's sessions as this machine's Claude Code keeps them, each its age; the first's path."""
     first = None
     now = time.time()
     for s in fixture("sessions.json")["sessions"]:
         cwd = folder(s["folder"])
         if s["transcript"]:
-            recs = transcript_lines(s["transcript"], cwd, lines)
+            recs = transcript_lines(transcript if first is None and transcript else s["transcript"], cwd, lines)
         else:
             recs = [json.dumps(r) for r in (
                 {"type": "user", "cwd": cwd, "sessionId": s["id"], "message": {"role": "user", "content": s["title"]}},
@@ -114,7 +114,9 @@ def pick_header(win, s):
 
 
 def open_chat(app, sc):
-    path = write_sessions(sc.get("lines"))
+    if sc.get("files"):  # (the scene's files join the chat's folder)
+        shutil.copytree(os.path.join(FIX, sc["files"]), folder("garden"), dirs_exist_ok=True)
+    path = write_sessions(sc.get("lines"), sc.get("transcript"))
     win = app.window(S.opts(cwd=folder("garden")))
     info = baude.read_session_info(path)
     win.resume_session(info)

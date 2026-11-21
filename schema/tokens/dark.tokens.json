@@ -53,5 +53,37 @@
       "$value": {"colorSpace": "srgb", "components": [0.4706, 0.9137, 0.6706], "alpha": 0.18, "hex": "#78e9ab"},
       "$extensions": {"dev.baude.gtk": "alpha({libadwaita.success_color}, 0.18)"}
     }
+  },
+  "syntax": {
+    "$type": "color",
+    "$description": "Code's colours as the desktop's Pygments styles give them (CODE_STYLES: default in the light theme, github-dark in the dark one), by token class. Which are bold or italic is the phone's Highlight.kt's.",
+    "keyword": {"$description": "Pygments' Keyword.", "$value": {"colorSpace": "srgb", "components": [1, 0.4824, 0.4471], "hex": "#ff7b72"}},
+    "keyword-constant": {"$description": "Pygments' Keyword.Constant.", "$value": {"colorSpace": "srgb", "components": [0.4745, 0.7529, 1], "hex": "#79c0ff"}},
+    "keyword-type": {"$description": "Pygments' Keyword.Type.", "$value": {"colorSpace": "srgb", "components": [1, 0.4824, 0.4471], "hex": "#ff7b72"}},
+    "builtin": {"$description": "Pygments' Name.Builtin.", "$value": {"colorSpace": "srgb", "components": [0.902, 0.9294, 0.9529], "hex": "#e6edf3"}},
+    "function": {"$description": "Pygments' Name.Function.", "$value": {"colorSpace": "srgb", "components": [0.8235, 0.6588, 1], "hex": "#d2a8ff"}},
+    "class-name": {"$description": "Pygments' Name.Class.", "$value": {"colorSpace": "srgb", "components": [0.9412, 0.5333, 0.2431], "hex": "#f0883e"}},
+    "decorator": {"$description": "Pygments' Name.Decorator.", "$value": {"colorSpace": "srgb", "components": [0.8235, 0.6588, 1], "hex": "#d2a8ff"}},
+    "namespace": {"$description": "Pygments' Name.Namespace.", "$value": {"colorSpace": "srgb", "components": [1, 0.4824, 0.4471], "hex": "#ff7b72"}},
+    "variable": {"$description": "Pygments' Name.Variable.", "$value": {"colorSpace": "srgb", "components": [0.4745, 0.7529, 1], "hex": "#79c0ff"}},
+    "constant": {"$description": "Pygments' Name.Constant.", "$value": {"colorSpace": "srgb", "components": [0.4745, 0.7529, 1], "hex": "#79c0ff"}},
+    "tag": {"$description": "Pygments' Name.Tag.", "$value": {"colorSpace": "srgb", "components": [0.4941, 0.9059, 0.5294], "hex": "#7ee787"}},
+    "attribute": {"$description": "Pygments' Name.Attribute.", "$value": {"colorSpace": "srgb", "components": [0.902, 0.9294, 0.9529], "hex": "#e6edf3"}},
+    "exception": {"$description": "Pygments' Name.Exception.", "$value": {"colorSpace": "srgb", "components": [0.9412, 0.5333, 0.2431], "hex": "#f0883e"}},
+    "entity": {"$description": "Pygments' Name.Entity.", "$value": {"colorSpace": "srgb", "components": [1, 0.651, 0.3412], "hex": "#ffa657"}},
+    "string": {"$description": "Pygments' String.", "$value": {"colorSpace": "srgb", "components": [0.6471, 0.8392, 1], "hex": "#a5d6ff"}},
+    "escape": {"$description": "Pygments' String.Escape.", "$value": {"colorSpace": "srgb", "components": [0.4745, 0.7529, 1], "hex": "#79c0ff"}},
+    "interpol": {"$description": "Pygments' String.Interpol.", "$value": {"colorSpace": "srgb", "components": [0.6471, 0.8392, 1], "hex": "#a5d6ff"}},
+    "doc": {"$description": "Pygments' String.Doc.", "$value": {"colorSpace": "srgb", "components": [0.6471, 0.8392, 1], "hex": "#a5d6ff"}},
+    "regex": {"$description": "Pygments' String.Regex.", "$value": {"colorSpace": "srgb", "components": [0.4745, 0.7529, 1], "hex": "#79c0ff"}},
+    "number": {"$description": "Pygments' Number.", "$value": {"colorSpace": "srgb", "components": [0.6471, 0.8392, 1], "hex": "#a5d6ff"}},
+    "comment": {"$description": "Pygments' Comment.", "$value": {"colorSpace": "srgb", "components": [0.5451, 0.5804, 0.6196], "hex": "#8b949e"}},
+    "preproc": {"$description": "Pygments' Comment.Preproc.", "$value": {"colorSpace": "srgb", "components": [0.5451, 0.5804, 0.6196], "hex": "#8b949e"}},
+    "operator": {"$description": "Pygments' Operator.", "$value": {"colorSpace": "srgb", "components": [1, 0.4824, 0.4471], "hex": "#ff7b72"}},
+    "operator-word": {"$description": "Pygments' Operator.Word.", "$value": {"colorSpace": "srgb", "components": [1, 0.4824, 0.4471], "hex": "#ff7b72"}},
+    "inserted": {"$description": "Pygments' Generic.Inserted.", "$value": {"colorSpace": "srgb", "components": [0.3373, 0.8275, 0.3922], "hex": "#56d364"}},
+    "deleted": {"$description": "Pygments' Generic.Deleted.", "$value": {"colorSpace": "srgb", "components": [1, 0.6314, 0.5961], "hex": "#ffa198"}},
+    "heading": {"$description": "Pygments' Generic.Heading.", "$value": {"colorSpace": "srgb", "components": [0.4745, 0.7529, 1], "hex": "#79c0ff"}},
+    "name": {"$description": "Pygments' Name.", "$value": {"colorSpace": "srgb", "components": [0.902, 0.9294, 0.9529], "hex": "#e6edf3"}}
   }
 }

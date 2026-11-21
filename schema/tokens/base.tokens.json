@@ -285,5 +285,35 @@
       "$type": "dimension",
       "$value": {"value": 5, "unit": "px"}
     }
+  },
+  "markdown": {
+    "$description": "A reply's markdown, its code blocks, tables and pictures.",
+    "$extensions": {"dev.baude.android": "dp"},
+    "block": {"$type": "dimension", "$description": "Between a reply's blocks (MarkdownView's spacing).", "$value": {"value": 6, "unit": "px"}},
+    "item-start": {"$type": "dimension", "$description": "A list item's start margin, before its depth's steps (MarkdownView's item row).", "$value": {"value": 6, "unit": "px"}},
+    "indent-step": {"$type": "dimension", "$description": "A list item's step in for each level of depth (widgets.INDENT_STEP).", "$value": {"value": 18, "unit": "px"}},
+    "quote-rule": {"$type": "dimension", "$description": "A quote's bar's width (.md-quote).", "$value": {"value": 3, "unit": "px"}},
+    "quote-pad": {"$type": "dimension", "$description": "A quote's text, in from its bar.", "$value": {"value": 10, "unit": "px"}},
+    "rule-gap": {"$type": "dimension", "$description": "A rule's margin, above and below (.md-hr).", "$value": {"value": 4, "unit": "px"}},
+    "table-radius": {"$type": "dimension", "$description": "A table's corners (.md-table).", "$value": {"value": 8, "unit": "px"}},
+    "image-edge": {"$type": "dimension", "$description": "A reply's picture's longest side, at most (MarkdownImage).", "$value": {"value": 480, "unit": "px"}},
+    "image-radius": {"$type": "dimension", "$description": "A reply's picture's corners.", "$value": {"value": 6, "unit": "px"}},
+    "image-gap": {"$type": "dimension", "$description": "Between a picture's source line and the picture.", "$value": {"value": 4, "unit": "px"}},
+    "thumb": {"$type": "dimension", "$description": "A sent picture's thumbnail's side (.attach-thumb).", "$value": {"value": 96, "unit": "px"}},
+    "code-copy": {"$type": "dimension", "$description": "A code block's copy button's side.", "$value": {"value": 22, "unit": "px"}},
+    "code-min": {"$type": "dimension", "$description": "A code block's height limit's floor (CodeBlock.set_max_height).", "$value": {"value": 160, "unit": "px"}},
+    "corner-feather": {"$type": "dimension", "$description": "A code block's corner's fade in from its left.", "$value": {"value": 14, "unit": "px"}},
+    "marker-opacity": {"$type": "number", "$description": "A list item's marker (.md-marker).", "$value": 0.7},
+    "quote-opacity": {"$type": "number", "$description": "A quote's text.", "$value": 0.85},
+    "quote-rule-opacity": {"$type": "number", "$description": "A quote's bar.", "$value": 0.25},
+    "thinking-opacity": {"$type": "number", "$description": "A thinking block (.thinking).", "$value": 0.62},
+    "h1": {"$type": "number", "$description": "A # heading's size, in em (.md-h1).", "$value": 1.44},
+    "h2": {"$type": "number", "$description": "A ## heading's size, in em (.md-h2).", "$value": 1.2},
+    "code-tag": {"$type": "number", "$description": "A code block's language tag's size, in em.", "$value": 0.8},
+    "code-tag-opacity": {"$type": "number", "$description": "And its opacity.", "$value": 0.5},
+    "code-copy-opacity": {"$type": "number", "$description": "A code block's copy icon's opacity.", "$value": 0.75},
+    "code-height": {"$type": "number", "$description": "A code block's tallest, of the chat's visible height (CodeBlock.set_max_height).", "$value": 0.6667},
+    "table-wrap-chars": {"$type": "number", "$description": "A table's long column's least width, in characters (TableScroll.MIN_CHARS).", "$value": 40},
+    "code-span": {"$type": "color", "$description": "An inline code span's background (_inline_markup's bgcolor).", "$value": {"colorSpace": "srgb", "components": [0.498, 0.498, 0.498], "alpha": 0.22, "hex": "#7f7f7f"}}
   }
 }

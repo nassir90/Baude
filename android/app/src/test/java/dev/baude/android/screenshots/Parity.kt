@@ -58,7 +58,8 @@ abstract class Parity(private val theme: String, private val scene: String) {
 
     @Before fun up() {
         val sc = scenes().first { it.getString("name") == scene }
-        shown = transcript(sessions.getJSONArray("sessions").getJSONObject(0).getString("transcript"),
+        files = sc.optString("files").ifBlank { null }
+        shown = transcript(sc.optString("transcript").ifBlank { sessions.getJSONArray("sessions").getJSONObject(0).getString("transcript") },
             sc.optInt("lines", -1)).toByteArray()
         freshCompose()
         ShadowChoreographer.setPaused(true)
@@ -96,6 +97,9 @@ abstract class Parity(private val theme: String, private val scene: String) {
     /** The scene's transcript, as the host has it: the first `lines` lines of the fixture's (all, without). */
     private var shown = ByteArray(0)
 
+    /** The scene's `files`: a folder of fixtures whose contents join the chat's folder (as the desktop rig copies them in). */
+    private var files: String? = null
+
     /** What the fixture host answers, as the desktop's host (baudelib/server.py, hostfiles.py) would: the open chat's
      * transcript, and the folder's files (fixtures/garden, not a git repository, with no Signal glossary). */
     private fun answer(msg: JSONObject): JSONObject? {
@@ -103,9 +107,13 @@ abstract class Parity(private val theme: String, private val scene: String) {
         fun reply(vararg more: Pair<String, Any?>) = JSONObject().put("op", op).put("req", msg.opt("req")).also { r ->
             more.forEach { (k, v) -> r.put(k, v) }
         }
-        fun local(path: String) = File(root, "fixtures/garden").let { g ->
+        // (the scene's files first, then fixtures/garden: the desktop rig's folder holds both)
+        fun local(path: String): File? {
             val rel = path.removePrefix("$home/garden").trimStart('/')
-            if (path != "$home/garden" && !path.startsWith("$home/garden/")) null else if (rel.isEmpty()) g else File(g, rel)
+            if (path != "$home/garden" && !path.startsWith("$home/garden/")) return null
+            val roots = listOfNotNull(files, "garden").map { File(root, "fixtures/$it") }
+            val at = roots.map { if (rel.isEmpty()) it else File(it, rel) }
+            return at.firstOrNull { it.exists() } ?: at.last()
         }
         when (op) {
             "transcript" -> {
@@ -116,9 +124,12 @@ abstract class Parity(private val theme: String, private val scene: String) {
             }
             "list_dir" -> {
                 val path = msg.optString("path")
-                val dir = local(path)?.takeIf { it.isDirectory } ?: return JSONObject().put("op", "error").put("req", msg.opt("req"))
-                    .put("error", "Not in a session folder")
-                val entries = dir.listFiles().orEmpty().filter { it.name != ".git" }
+                val rel = path.removePrefix("$home/garden").trimStart('/')
+                val dirs = listOfNotNull(files, "garden").map { File(root, "fixtures/$it").let { g -> if (rel.isEmpty()) g else File(g, rel) } }
+                    .filter { it.isDirectory }
+                if (local(path) == null || dirs.isEmpty()) return reply("op" to "dir", "path" to path, "entries" to JSONArray(),
+                    "error" to "No such file or directory")
+                val entries = dirs.flatMap { it.listFiles().orEmpty().toList() }.filter { it.name != ".git" }.distinctBy { it.name }
                     .sortedWith(compareBy({ !it.isDirectory }, { it.name.lowercase() }))
                 return reply("op" to "dir", "path" to path, "more" to false, "entries" to JSONArray(entries.map { e ->
                     JSONObject().put("name", e.name).put("dir", e.isDirectory).put("ignored", false)

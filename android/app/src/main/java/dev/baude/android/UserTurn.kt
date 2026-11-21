@@ -162,6 +162,7 @@ fun commitRevert(chat: Chat, r: Reverting, text: String, files: List<Picked>, do
         }
         chat.reverting = null
         chat.files.clear()
+        chat.clearBox.value = true
         done(true)
         var waited = 0
         fun whenIdle() {

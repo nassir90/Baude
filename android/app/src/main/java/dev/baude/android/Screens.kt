@@ -99,6 +99,12 @@ fun ChatPage(chat: Chat, name: String, hint: String = "Message $name", attach: B
         reverting = null
     }
     androidx.activity.compose.BackHandler(enabled = reverting != null) { cancelRevert() } // (consumed while asked too: Back does nothing then)
+    LaunchedEffect(chat.clearBox.value) {
+        if (chat.clearBox.value) {
+            text = ""
+            chat.clearBox.value = false
+        }
+    }
     LaunchedEffect(reverting?.uuid) { if (reverting != null) focus.requestFocus() }
     LaunchedEffect(list.isScrollInProgress) { if (list.isScrollInProgress) revealed = null }
     // (kept at the end while it's there: what it said last, or what it asks, a tall one's foot too, what it's writing

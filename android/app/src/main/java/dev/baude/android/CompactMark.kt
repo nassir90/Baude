@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -114,16 +115,19 @@ fun CompactMark(line: Line) {
         else -> compactText(o.optJSONObject("meta"))
     }
     Column(Modifier.fillMaxWidth().padding(vertical = Tokens.Compact.margin), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-        Row(Modifier.fillMaxWidth().semantics { contentDescription = Wording.Compaction.tooltip },
-            horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
-            HorizontalDivider(Modifier.weight(1f), color = c.rule)
-            Row(Modifier.weight(1f, fill = false), verticalAlignment = Alignment.CenterVertically) {
-                SelectionContainer(Modifier.weight(1f, fill = false)) {
-                    Text(text, style = Type.caption, color = if (bad) c.destructive else c.dim, textAlign = TextAlign.Center)
+        androidx.compose.foundation.layout.BoxWithConstraints(Modifier.fillMaxWidth()) {
+            val most = maxWidth * 0.75f
+            Row(Modifier.fillMaxWidth().semantics { contentDescription = Wording.Compaction.tooltip },
+                horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                HorizontalDivider(Modifier.weight(1f), color = c.rule)
+                Row(Modifier.widthIn(max = most), verticalAlignment = Alignment.CenterVertically) {
+                    SelectionContainer(Modifier.weight(1f, fill = false)) {
+                        Text(text, style = Type.caption, color = if (bad) c.destructive else c.dim, textAlign = TextAlign.Center)
+                    }
+                    if (state == "running") Row(Modifier.padding(start = 2.dp)) { WorkingDots(true) }
                 }
-                if (state == "running") Row(Modifier.padding(start = 2.dp)) { WorkingDots(true) }
+                HorizontalDivider(Modifier.weight(1f), color = c.rule)
             }
-            HorizontalDivider(Modifier.weight(1f), color = c.rule)
         }
         o.optString("summary").ifBlank { null }?.let { SummaryFold(it, line.uuid ?: "") }
     }

@@ -176,6 +176,7 @@ abstract class Parity(private val theme: String, private val scene: String) {
     }
 
     @After fun down() {
+        dev.baude.android.CompactFolds.open.clear()
         Meta.host.value = null
         FixtureConnection.down()
         Mesh.hosts.clear()
@@ -216,7 +217,7 @@ abstract class Parity(private val theme: String, private val scene: String) {
                 if (name == "home-add-host") tap(Wording.Sidebar.addHost)
             }
             name.startsWith("chat") || name.startsWith("panel") || name == "menu" -> {
-                if (sc.optBoolean("open")) openAll(first.getString("id"))
+                if (sc.optBoolean("open") || sc.optBoolean("view")) openAll(first.getString("id"))
                 if (sc.optBoolean("down")) {
                     conn.state = "down"
                     Mesh.tick.value++
@@ -227,6 +228,7 @@ abstract class Parity(private val theme: String, private val scene: String) {
                 if (name == "menu") tap(Wording.ChatHeader.menu)
                 if (sc.has("typed")) type(sc.getString("typed"))
                 if (sc.optBoolean("view")) {
+                    toEnd()
                     dev.baude.android.Viewer.flyMs = 0
                     val shot = roots().flatMap { all(it.semanticsOwner.rootSemanticsNode) }.firstOrNull { n ->
                         n.config.getOrNull(SemanticsProperties.Role) == Role.Image && n.config.contains(SemanticsActions.OnClick)
@@ -236,7 +238,10 @@ abstract class Parity(private val theme: String, private val scene: String) {
                     settle()
                 }
                 if (sc.optBoolean("open")) toEnd()
-                if (sc.has("ask")) ask(sc.getString("ask"))
+                if (sc.has("ask")) {
+                    ask(sc.getString("ask"))
+                    toEnd()
+                }
                 if (sc.has("queued")) {
                     Mesh.open!!.queued.add(Queued(sc.getString("queued"), emptyList()))
                     androidx.compose.runtime.snapshots.Snapshot.sendApplyNotifications()

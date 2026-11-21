@@ -40,12 +40,12 @@
     {"name": "chat-host-down", "what": "The chat's host can't be reached: the banner, something written in the box, send off", "down": true, "draft": "Does the bench need it too?", "inventory": ["Banners.region", "Composer.region"]},
     {"name": "chat-slash", "what": "/ typed in the box: Baude's commands, then Claude Code's", "lines": 3, "typed": "/", "inventory": ["SlashCompleter.menu", "Composer.region"]},
     {"name": "chat-mention", "what": "@Tidy typed: the chat it names", "lines": 3, "typed": "@Tidy", "inventory": ["MentionCompleter.menu", "Composer.region"]},
-    {"name": "chat-composer-markdown", "what": "Markdown being written: a heading, bullets, bold, code and a fenced block", "lines": 3, "draft": "# Plan\n- **retry** the upload\n- keep `seed` fixed\n```\npytest -k upload\n```", "inventory": ["Composer.region"]},
     {"name": "chat-compact", "what": "A compaction's mark, its summary folded", "transcript": "chat-extras.jsonl", "lines": 4, "inventory": ["CompactMark.element"]},
     {"name": "chat-compact-open", "what": "The same, its summary opened", "transcript": "chat-extras.jsonl", "lines": 4, "open": true, "inventory": ["CompactMark.element"]},
     {"name": "chat-question", "what": "AskUserQuestion asking: two questions, one multi-select", "transcript": "chat-extras.jsonl", "state": "waiting", "ask": "q1", "inventory": ["QuestionForm.element", "ToolCall.element"]},
     {"name": "chat-cut", "what": "A chat whose last turn a restart cut short", "lines": 3, "cut": true, "inventory": ["CutShort.element"]},
     {"name": "chat-image-viewer", "what": "The image a Read returned, opened in the large view", "transcript": "tool-states.jsonl", "view": true, "inventory": ["ImageViewer.page"]},
-    {"name": "feedback", "what": "Send Feedback, empty", "inventory": ["SendFeedback.dialog"]}
+    {"name": "feedback", "what": "Send Feedback, empty", "inventory": ["SendFeedback.dialog"]},
+    {"name": "chat-composer-markdown", "what": "Markdown being written: a heading, bullets, bold, code and a fenced block", "lines": 3, "draft": "# Plan\n- **retry** the upload\n- keep `seed` fixed\n```\npytest -k upload\n```", "inventory": ["Composer.region"]}
   ]
 }

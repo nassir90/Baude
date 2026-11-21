@@ -118,7 +118,10 @@ fun ChatPage(chat: Chat, name: String, attach: Boolean = true, stop: (() -> Unit
     val canRevert = takes(at, "control") && chat.sender == null
     val focus = remember { androidx.compose.ui.focus.FocusRequester() }
     var field by remember { mutableStateOf(androidx.compose.ui.text.input.TextFieldValue(text)) }
-    if (field.text != text) field = androidx.compose.ui.text.input.TextFieldValue(text, androidx.compose.ui.text.TextRange(text.length))
+    if (field.text != text) { // (put in from outside: its bullets made as typed ones are)
+        field = makeBullets(androidx.compose.ui.text.input.TextFieldValue(text, androidx.compose.ui.text.TextRange(text.length)))
+        if (field.text != text) text = field.text
+    }
     val host = chat.sender == null // (Baude's own commands, the / and @ lists: a host's chat's)
     val marks = remember(chat) { Marks() }
     val composer = remember(chat) { ComposerState() }

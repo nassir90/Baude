@@ -109,6 +109,14 @@
       "$value": {"value": 6, "unit": "px"}
     },
     "sidebar-row-h": {"$description": "And its sides.", "$value": {"value": 4, "unit": "px"}},
+    "chat-max": {
+      "$description": "The chat's column at most this wide while Full-width text is off: Adw.Clamp's maximum.",
+      "$value": {"value": 860, "unit": "px"}
+    },
+    "chat-tighten": {
+      "$description": "And where it starts narrowing short of the window: the clamp's tightening threshold.",
+      "$value": {"value": 600, "unit": "px"}
+    },
     "bot-row": {
       "$description": "A Bot's row: twice a chat's (row.bot-row's least height).",
       "$value": {"value": 52, "unit": "px"}

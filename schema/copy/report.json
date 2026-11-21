@@ -1,5 +1,5 @@
 {
-  "description": "The copied transcript's header (Copy Transcript for an Issue) and the context a Feedback note carries: text pasted into an issue.",
+  "description": "The copied transcript's header and headings (Copy Transcript for an Issue: who said what, each tool call and result, what was left out) and the context a Feedback note carries: text pasted into an issue.",
   "messages": {
     "app": "App",
     "copied": "Copied",
@@ -7,6 +7,24 @@
     "folder_line": "- folder: {$folder}",
     "mode": "Mode",
     "context": "Context",
-    "nothing_said": "(nothing said yet)"
+    "nothing_said": "(nothing said yet)",
+    "session": "Session",
+    "picked": "Picked",
+    "claude_code": "Claude Code",
+    "not_said_yet": "not said yet",
+    "user": "User",
+    "claude": "Claude",
+    "claude_model": "Claude ({$model})",
+    "api_error": "(API error)",
+    "tool_results": "Tool results",
+    "tool_call": "[tool {$name}]",
+    "tool_result": "[{$name} result]",
+    "tool_error": "[{$name} error]",
+    "unknown_tool": "tool",
+    "summary": "Summary of the earlier conversation:",
+    "more_characters": "[… {$n} more characters]",
+    "more_characters_read": "[… {$n} more characters: Read {$where}]",
+    "left_out": ".input {$n :number} .match $n one {{[… the first {$n} message left out: too long to paste]}} * {{[… the first {$n} messages left out: too long to paste]}}",
+    "not_read": "(transcript not read: {$why})"
   }
 }

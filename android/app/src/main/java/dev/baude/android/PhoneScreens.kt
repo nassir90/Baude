@@ -166,17 +166,19 @@ fun PhoneScreen(back: () -> Unit, open: (String) -> Unit, make: () -> Unit) {
     }
 }
 
-/** A picture picked, as a Bot's is sent: a PNG, 256 across at most (null if it can't be read). */
-fun picture(ctx: android.content.Context, uri: android.net.Uri): ByteArray? = try {
+/** A picture picked, as a Bot's is sent: a PNG, 256 across at most; or null and why not ("" if it isn't an image). */
+fun pictureOr(ctx: android.content.Context, uri: android.net.Uri): Pair<ByteArray?, String> = try {
     val bmp = ctx.contentResolver.openInputStream(uri)?.use { android.graphics.BitmapFactory.decodeStream(it) }
-    bmp?.let {
-        val k = minOf(1f, 256f / maxOf(it.width, it.height))
-        val small = android.graphics.Bitmap.createScaledBitmap(it, maxOf(1, (it.width * k).toInt()), maxOf(1, (it.height * k).toInt()), true)
-        java.io.ByteArrayOutputStream().also { o -> small.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, o) }.toByteArray()
+    if (bmp == null) null to "" else {
+        val k = minOf(1f, 256f / maxOf(bmp.width, bmp.height))
+        val small = android.graphics.Bitmap.createScaledBitmap(bmp, maxOf(1, (bmp.width * k).toInt()), maxOf(1, (bmp.height * k).toInt()), true)
+        java.io.ByteArrayOutputStream().also { o -> small.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, o) }.toByteArray() to ""
     }
-} catch (_: Exception) {
-    null
+} catch (e: Exception) {
+    null to (e.message ?: e.javaClass.simpleName)
 }
+
+fun picture(ctx: android.content.Context, uri: android.net.Uri): ByteArray? = pictureOr(ctx, uri).first
 
 /** A Bot's picture set, as Baude's Bot Settings sets one (bot, its picture with it). */
 private fun setPicture(s: Msg.Session, png: ByteArray) {

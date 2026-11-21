@@ -56,7 +56,14 @@ object Outbox {
     fun keep(id: String, text: String, context: List<String>, host: String) {
         val o = JSONObject().put("id", id).put("text", text).put("context", JSONArray(context)).put("host", host)
             .put("tried", System.currentTimeMillis())
-        java.io.File(dir(), "$id.json").writeText(o.toString())
+        val f = java.io.File(dir(), "$id.json")
+        o.put("kept", try { JSONObject(f.readText()).optLong("kept", System.currentTimeMillis()) } catch (_: Exception) { System.currentTimeMillis() })
+        f.writeText(o.toString())
+    }
+
+    /** Each note kept and not filed yet: its id, its text, and when it was kept (ms). */
+    fun listed(): List<JSONObject> = notes().filter { !it.has("filed") }.map { o ->
+        JSONObject().put("id", o.optString("id")).put("text", o.optString("text")).put("kept", o.optLong("kept", o.optLong("tried")))
     }
 
     private fun notes(): List<JSONObject> = (dir().listFiles() ?: emptyArray()).filter { it.name.endsWith(".json") }

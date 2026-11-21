@@ -31,6 +31,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -124,12 +128,12 @@ fun Bar(title: String, start: (@Composable RowScope.() -> Unit)? = null, end: (@
 /** A flat button as libadwaita's in a bar: an icon, 34 square, rounded. */
 @Composable
 fun IconButton(icon: ImageVector, label: String, enabled: Boolean = true, tint: androidx.compose.ui.graphics.Color? = null,
-               background: androidx.compose.ui.graphics.Color? = null, onClick: () -> Unit) {
+               background: androidx.compose.ui.graphics.Color? = null, tip: String? = null, onClick: () -> Unit) {
     val c = LocalBaude.current
     Box(
         Modifier.size(Gap.composerButton).clip(RoundedCornerShape(8.dp))
             .then(if (background != null) Modifier.background(background) else Modifier)
-            .clickable(enabled = enabled, onClick = onClick),
+            .then(if (tip != null) Modifier.tip(tip) { if (enabled) onClick() } else Modifier.clickable(enabled = enabled, onClick = onClick)),
         contentAlignment = Alignment.Center,
     ) {
         Icon(icon, label, tint = (tint ?: c.fg).copy(alpha = if (enabled) 1f else 0.4f), modifier = Modifier.size(18.dp.icon))
@@ -174,3 +178,34 @@ fun Modifier.inside(c: BaudeColors): Modifier = this.padding(start = Gap.inside,
 /** A box with Baude's one edge (.tool-card's: a 1px rule, rounded 8). */
 fun Modifier.card(c: BaudeColors): Modifier =
     this.border(1.dp, c.rule, RoundedCornerShape(Gap.cardRadius)).padding(horizontal = Gap.cardH, vertical = Gap.cardV)
+
+/** Each row's levels whose parent has a child further down (its line runs on past the row, top to bottom): a level
+ * is open from a row at depth level + 1 up to the first row above that's at that depth or less. */
+fun through(depths: List<Int>): List<Set<Int>> {
+    val open = HashSet<Int>()
+    val out = ArrayList<Set<Int>>(depths.size)
+    for (depth in depths.asReversed()) {
+        out.add(open.filter { it < depth }.toSet())
+        open.removeAll { it >= depth }
+        if (depth > 0) open.add(depth - 1)
+    }
+    return out.asReversed()
+}
+
+/** A nested row's part of its parents' lines, as Baude's TreeList draws them, one joined line per parent: down from
+ * under the parent's title to its last child's middle, then a corner across to just short of that child's title;
+ * through: the levels whose line runs on past this row. start: where the row's titles start in; lineX: how far into
+ * a parent's title its line runs. */
+fun Modifier.treeLines(depth: Int, through: Set<Int>, color: Color, start: Dp = 6.dp, lineX: Dp = 5.dp): Modifier =
+    if (depth == 0) this else drawBehind {
+        val w = 1.dp.toPx()
+        val mid = (1.dp.toPx() + size.height) / 2 // (the title's middle: under the 1dp gap above the row)
+        for (k in 0 until depth) {
+            val x = (start + lineX + 18.dp * k).toPx()
+            if (k in through) drawRect(color, Offset(x, 0f), Size(w, size.height))
+            else if (k == depth - 1) {
+                drawRect(color, Offset(x, 0f), Size(w, mid + w))
+                drawRect(color, Offset(x + w, mid), Size((start + 18.dp * depth - 4.dp).toPx() - x - w, w))
+            }
+        }
+    }

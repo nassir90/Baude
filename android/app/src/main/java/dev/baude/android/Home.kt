@@ -269,9 +269,9 @@ fun sections(query: String): List<Section> {
         for ((ch, c) in children[key(h, s)].orEmpty().sortedByDescending { said(it.second) }) flat(ch, c, depth + 1, into, seen)
     }
     val seen = HashSet<String>()
-    for ((h, s) in top.sortedByDescending { said(it.second) }) flat(h, s, 0, if (s.archived == true) archived else live, seen)
+    for ((h, s) in top.sortedByDescending { said(it.second) }) flat(h, s, 0, if (s.archived == true && metaMark(h, s.id.orEmpty()) == null) archived else live, seen)
     for ((h, s) in found) if (key(h, s) in kept && key(h, s) !in seen) // (in a loop of parents: in its own place)
-        flat(h, s, 0, if (s.archived == true) archived else live, seen)
+        flat(h, s, 0, if (s.archived == true && metaMark(h, s.id.orEmpty()) == null) archived else live, seen)
     val out = ArrayList<Section>()
     fun runs(items: List<Item>): List<List<Item>> { // (each top-level row with its subtree)
         val r = ArrayList<MutableList<Item>>()
@@ -324,7 +324,7 @@ private fun limit(key: String): Int = when {
  * groups. */
 @Composable
 fun Home(open: (String, String) -> Unit, feedback: () -> Unit, phone: () -> Unit = {},
-         settings: () -> Unit = {}, mesh: () -> Unit = {}, changelog: () -> Unit = {}, note: @Composable () -> Unit = {}) {
+         settings: () -> Unit = {}, mesh: () -> Unit = {}, changelog: () -> Unit = {}, fixes: () -> Unit = {}, note: @Composable () -> Unit = {}) {
     val c = LocalBaude.current
     val ctx = androidx.compose.ui.platform.LocalContext.current
     LaunchedEffect(Unit) { HomePrefs.load(ctx) }
@@ -353,7 +353,7 @@ fun Home(open: (String, String) -> Unit, feedback: () -> Unit, phone: () -> Unit
     Column(Modifier.fillMaxSize()) {
         Bar("Baude", left = true, end = {
             IconButton(Adwaita.Phone, "This phone", onClick = phone) // (its own agents: PhoneScreen)
-            HomeMenu(settings, changelog, mesh, feedback)
+            HomeMenu(settings, changelog, mesh, feedback, fixes)
         })
         note()
         if (Mesh.hosts.isEmpty()) GreyBanner("Add a host to see its sessions.", onClick = { adding = true })
@@ -396,7 +396,7 @@ fun Home(open: (String, String) -> Unit, feedback: () -> Unit, phone: () -> Unit
                 val cap = if (query.isNotBlank() || sec.key in more) Int.MAX_VALUE else limit(sec.key)
                 var seen = 0
                 val rows = sec.rows.filter { if (it.depth == 0) seen++; seen <= cap }
-                val through = through(rows)
+                val through = through(rows.map { it.depth })
                 itemsIndexed(rows, key = { _, it -> sec.key + "/" + it.hostId + "/" + it.id }) { i, item ->
                     if (item.bot != null && item.depth == 0 && !dead(item.hostId)) BotRow(item) { open(item.hostId, item.id) }
                     else SessionRow(item, through[i]) { open(item.hostId, item.id) }
@@ -474,35 +474,6 @@ private fun Header(sec: Section, folded: Boolean, plus: (() -> Unit)?, toggle: (
     }
 }
 
-/** Each row's levels whose parent has a child further down (its line runs on past the row, top to bottom): a level
- * is open from a row at depth level + 1 up to the first row above that's at that depth or less. */
-private fun through(rows: List<Item>): List<Set<Int>> {
-    val open = HashSet<Int>()
-    val out = ArrayList<Set<Int>>(rows.size)
-    for (item in rows.asReversed()) {
-        out.add(open.filter { it < item.depth }.toSet())
-        open.removeAll { it >= item.depth }
-        if (item.depth > 0) open.add(item.depth - 1)
-    }
-    return out.asReversed()
-}
-
-/** A nested row's part of its parents' lines, as Baude's TreeList draws them, one joined line per parent: down from
- * under the parent's title to its last child's middle, then a corner across to just short of that child's title;
- * through: the levels whose line runs on past this row. */
-private fun Modifier.treeLines(depth: Int, through: Set<Int>, color: Color): Modifier = if (depth == 0) this else drawBehind {
-    val w = 1.dp.toPx()
-    val mid = (1.dp.toPx() + size.height) / 2 // (the title's middle: under the 1dp gap above the row)
-    for (k in 0 until depth) {
-        val x = (11 + 18 * k).dp.toPx() // (5 into the parent's title, as line_x)
-        if (k in through) drawRect(color, Offset(x, 0f), Size(w, size.height))
-        else if (k == depth - 1) {
-            drawRect(color, Offset(x, 0f), Size(w, mid + w))
-            drawRect(color, Offset(x + w, mid), Size((6 + 18 * depth - 4).dp.toPx() - x - w, w))
-        }
-    }
-}
-
 /** A row's long-press, where it was pressed: its menu opens at the finger (Baude's right-click, at the pointer). */
 @OptIn(ExperimentalFoundationApi::class)
 private fun Modifier.pressed(at: (Offset) -> Unit, onClick: () -> Unit, onLong: () -> Unit): Modifier =
@@ -522,16 +493,17 @@ private fun SessionRow(item: Item, through: Set<Int>, onClick: () -> Unit) {
     var height by remember { mutableStateOf(0) }
     Box(Modifier.onSizeChanged { height = it.height }) {
         Row(Modifier.fillMaxWidth().treeLines(item.depth, through, c.fg.copy(alpha = 0.3f)).padding(top = 1.dp).heightIn(min = 26.dp).clip(RoundedCornerShape(6.dp))
-            .then(if ("${item.hostId}/${item.id}" in MetaTools.highlight) Modifier.background(c.accentBg.copy(alpha = 0.2f)) else Modifier)
             .pressed({ pressed = it }, onClick) { menu = true }
             .padding(start = 6.dp + 18.dp * item.depth, end = 4.dp, top = 1.dp, bottom = 1.dp),
             verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             val title = s.title?.ifBlank { null } ?: Wording.Common.untitled
             val bot = item.bot?.name?.ifBlank { null }
-            Text(bot ?: title, style = Type.body, color = if (dead || off) c.dim else c.fg, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f))
+            val mark = metaMark(item.hostId, item.id)
+            Text(markedName(bot ?: title, mark?.how, mark != null), style = Type.body, color = if (dead || off) c.dim else c.fg,
+                maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
             if (dead) RowTag(Wording.Sidebar.dead) else HeldTag(s)
             StatusDot(if (dead || off) "" else s.state.orEmpty(), !dead && !off && (!s.asks.isNullOrEmpty() || s.state == "waiting"))
+            MarkNote(mark)
         }
         RowMenu(item, menu, pressed, height) { menu = false }
     }
@@ -548,18 +520,20 @@ private fun BotRow(item: Item, onClick: () -> Unit) {
     LaunchedEffect(contact.pictureKey) { Mesh.picture(contact) }
     Box(Modifier.onSizeChanged { height = it.height }) {
         Row(Modifier.fillMaxWidth().heightIn(min = Gap.botRow).clip(RoundedCornerShape(6.dp))
-            .then(if ("${item.hostId}/${item.id}" in MetaTools.highlight) Modifier.background(c.accentBg.copy(alpha = 0.2f)) else Modifier)
             .pressed({ pressed = it }, onClick) { menu = true }
             .padding(horizontal = 4.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
             Avatar(contact.name, Mesh.pictures[contact.pictureKey])
             Spacer(Modifier.width(Gap.avatarGap))
             Column(Modifier.weight(1f)) {
-                Text(contact.name, style = Type.bold, color = c.fg, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                val mark = metaMark(item.hostId, item.id)
+                Text(markedName(contact.name, mark?.how, mark != null), style = Type.bold, color = c.fg, maxLines = 1,
+                    overflow = TextOverflow.Ellipsis)
                 val what = item.s.title?.ifBlank { null }
                 if (what != null) Text(what, style = Type.caption, color = c.dim, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
             HeldTag(item.s)
             StatusDot(contact.state, contact.asking)
+            MarkNote(metaMark(item.hostId, item.id))
         }
         RowMenu(item, menu, pressed, height) { menu = false }
     }

@@ -167,6 +167,11 @@ class GitState(val hostId: String, val sid: String) {
     }
 }
 
+/** A commit asked for from elsewhere (a link in the chat): the page opens its card. */
+object GitLinks {
+    val want = mutableStateOf<String?>(null)
+}
+
 /** Each chat's page, kept (the least recently used dropped past GIT_KEPT_CHATS). */
 object GitPages {
     private val kept = object : LinkedHashMap<String, GitState>(16, 0.75f, true) {
@@ -290,6 +295,11 @@ fun GitPage(hostId: String, sid: String, here: Boolean, openPage: (String) -> Un
             delay(STALE_DELAY_MS)
             state.load(cwd, lines)
         }
+    }
+    LaunchedEffect(GitLinks.want.value) { // (a commit named in the chat: its card)
+        val sha = GitLinks.want.value ?: return@LaunchedEffect
+        state.card = sha
+        GitLinks.want.value = null
     }
     var minute by remember { mutableIntStateOf(0) }
     LaunchedEffect(here) { // (the captions' times, as the minutes pass)

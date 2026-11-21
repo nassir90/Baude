@@ -11,6 +11,9 @@
     "listed": "Listed {$names}",
     "listed_every": "Listed every {$what}",
     "archived": "Archived {$chats}",
-    "unarchived": "Unarchived {$chats}"
+    "unarchived": "Unarchived {$chats}",
+    "moved_note": "→ {$group}",
+    "archived_note": "archived",
+    "back_note": "back"
   }
 }

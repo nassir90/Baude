@@ -269,9 +269,9 @@ fun sections(query: String): List<Section> {
         for ((ch, c) in children[key(h, s)].orEmpty().sortedByDescending { said(it.second) }) flat(ch, c, depth + 1, into, seen)
     }
     val seen = HashSet<String>()
-    for ((h, s) in top.sortedByDescending { said(it.second) }) flat(h, s, 0, if (s.archived == true) archived else live, seen)
+    for ((h, s) in top.sortedByDescending { said(it.second) }) flat(h, s, 0, if (s.archived == true && metaMark(h, s.id.orEmpty()) == null) archived else live, seen)
     for ((h, s) in found) if (key(h, s) in kept && key(h, s) !in seen) // (in a loop of parents: in its own place)
-        flat(h, s, 0, if (s.archived == true) archived else live, seen)
+        flat(h, s, 0, if (s.archived == true && metaMark(h, s.id.orEmpty()) == null) archived else live, seen)
     val out = ArrayList<Section>()
     fun runs(items: List<Item>): List<List<Item>> { // (each top-level row with its subtree)
         val r = ArrayList<MutableList<Item>>()
@@ -522,16 +522,17 @@ private fun SessionRow(item: Item, through: Set<Int>, onClick: () -> Unit) {
     var height by remember { mutableStateOf(0) }
     Box(Modifier.onSizeChanged { height = it.height }) {
         Row(Modifier.fillMaxWidth().treeLines(item.depth, through, c.fg.copy(alpha = 0.3f)).padding(top = 1.dp).heightIn(min = 26.dp).clip(RoundedCornerShape(6.dp))
-            .then(if ("${item.hostId}/${item.id}" in MetaTools.highlight) Modifier.background(c.accentBg.copy(alpha = 0.2f)) else Modifier)
             .pressed({ pressed = it }, onClick) { menu = true }
             .padding(start = 6.dp + 18.dp * item.depth, end = 4.dp, top = 1.dp, bottom = 1.dp),
             verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             val title = s.title?.ifBlank { null } ?: Wording.Common.untitled
             val bot = item.bot?.name?.ifBlank { null }
-            Text(bot ?: title, style = Type.body, color = if (dead || off) c.dim else c.fg, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f))
+            val mark = metaMark(item.hostId, item.id)
+            Text(markedName(bot ?: title, mark?.how, mark != null), style = Type.body, color = if (dead || off) c.dim else c.fg,
+                maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
             if (dead) RowTag(Wording.Sidebar.dead) else HeldTag(s)
             StatusDot(if (dead || off) "" else s.state.orEmpty(), !dead && !off && (!s.asks.isNullOrEmpty() || s.state == "waiting"))
+            MarkNote(mark)
         }
         RowMenu(item, menu, pressed, height) { menu = false }
     }
@@ -548,18 +549,20 @@ private fun BotRow(item: Item, onClick: () -> Unit) {
     LaunchedEffect(contact.pictureKey) { Mesh.picture(contact) }
     Box(Modifier.onSizeChanged { height = it.height }) {
         Row(Modifier.fillMaxWidth().heightIn(min = Gap.botRow).clip(RoundedCornerShape(6.dp))
-            .then(if ("${item.hostId}/${item.id}" in MetaTools.highlight) Modifier.background(c.accentBg.copy(alpha = 0.2f)) else Modifier)
             .pressed({ pressed = it }, onClick) { menu = true }
             .padding(horizontal = 4.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
             Avatar(contact.name, Mesh.pictures[contact.pictureKey])
             Spacer(Modifier.width(Gap.avatarGap))
             Column(Modifier.weight(1f)) {
-                Text(contact.name, style = Type.bold, color = c.fg, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                val mark = metaMark(item.hostId, item.id)
+                Text(markedName(contact.name, mark?.how, mark != null), style = Type.bold, color = c.fg, maxLines = 1,
+                    overflow = TextOverflow.Ellipsis)
                 val what = item.s.title?.ifBlank { null }
                 if (what != null) Text(what, style = Type.caption, color = c.dim, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
             HeldTag(item.s)
             StatusDot(contact.state, contact.asking)
+            MarkNote(metaMark(item.hostId, item.id))
         }
         RowMenu(item, menu, pressed, height) { menu = false }
     }

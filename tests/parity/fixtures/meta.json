@@ -1,0 +1,25 @@
+{
+  "description": "Meta's conversation as the desktop keeps it (meta.json): one message of yours and one reply, whose calls read a file, moved a chat, changed a setting and showed the changelog, and the two actions they took. t is epoch seconds.",
+  "messages": [
+    {"role": "user", "text": "Put the upload chat in a Release group, and show me what's new", "t": 1795600900},
+    {"role": "meta", "model": "claude-haiku-4-5", "t": 1795600930, "actions": ["a1b2c3", "d4e5f6"], "text": "Done: it's in Release, and grouped by folder. Here's what's new.",
+     "items": [
+       {"kind": "tool", "name": "Read", "state": "done", "input": {"file_path": "/tmp/parity-home/dev/garden/README.md"},
+        "result": "# Garden\n\nA small sample project.\nNothing here is real."},
+       {"kind": "tool", "name": "mcp__meta__move_chats", "state": "done", "input": {"chats": ["6f1c2a90"], "group": "Release"},
+        "result": "Moved to group Release (action a1b2c3).", "actions": ["a1b2c3"]},
+       {"kind": "tool", "name": "mcp__meta__set_setting", "state": "done", "input": {"name": "group_by", "value": "folder"},
+        "result": "group_by is folder now (action d4e5f6).", "actions": ["d4e5f6"], "shown": [{"kind": "setting", "name": "group_by", "set": "folder"}]},
+       {"kind": "tool", "name": "mcp__meta__show", "state": "done", "input": {"what": "changelog"},
+        "result": "Shown under your reply.", "shown": [{"kind": "changelog"}]},
+       {"kind": "text", "text": "Done: it's in Release, and grouped by folder. Here's what's new."}
+     ]}
+  ],
+  "actions": [
+    {"id": "a1b2c3", "label": "Moved “Fix the flaky upload” to group Release", "kind": "move_chats", "state": "done", "kept": false,
+     "undo": {}, "redo": {}, "t": 1795600920,
+     "marks": [["chat", "6f1c2a90-1111-4c4e-9a11-000000000001", "moved", "→ Release"]]},
+    {"id": "d4e5f6", "label": "Group by: date → folder", "kind": "setting", "state": "done", "kept": true,
+     "undo": {"name": "group_by", "value": "date"}, "redo": {"name": "group_by", "value": "folder"}, "t": 1795600925, "marks": []}
+  ]
+}

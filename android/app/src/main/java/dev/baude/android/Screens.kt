@@ -79,7 +79,8 @@ import androidx.compose.ui.unit.dp
  * written; foot: what's under the box. */
 @Composable
 fun ChatPage(chat: Chat, name: String, attach: Boolean = true, stop: (() -> Unit)? = null,
-             foot: (@Composable () -> Unit)? = null) {
+             foot: (@Composable () -> Unit)? = null, overBox: (@Composable () -> Unit)? = null, own: OwnRevert? = null,
+             sendTip: String? = null) {
     val c = LocalBaude.current
     val ctx = LocalContext.current
     val sid = chat.sid
@@ -110,7 +111,7 @@ fun ChatPage(chat: Chat, name: String, attach: Boolean = true, stop: (() -> Unit
     val list = rememberLazyListState()
     var revealed by remember(chat) { mutableStateOf<String?>(null) } // (the message whose revert button's shown)
     var reverting by chat::reverting
-    val canRevert = takes(at, "control") && chat.sender == null
+    val canRevert = own?.can?.invoke() ?: (takes(at, "control") && chat.sender == null)
     val focus = remember { androidx.compose.ui.focus.FocusRequester() }
     var field by remember { mutableStateOf(androidx.compose.ui.text.input.TextFieldValue(text)) }
     if (field.text != text) field = androidx.compose.ui.text.input.TextFieldValue(text, androidx.compose.ui.text.TextRange(text.length))
@@ -186,6 +187,7 @@ fun ChatPage(chat: Chat, name: String, attach: Boolean = true, stop: (() -> Unit
         chat.said.value?.let { Text(it, style = Type.caption, color = c.dim, modifier = Modifier.padding(horizontal = Gap.chatH)) }
         if (chat.sender == null && exhausted(chat)) Text(Wording.ContextUsage.exhausted, style = Type.caption, color = c.dim,
             modifier = Modifier.padding(horizontal = Gap.chatH))
+        overBox?.invoke()
         // the composer: rounded 12, a ring of the rule, its files over what's written, + and send/stop beside it
         if (!readOnly) Column(
             Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 8.dp)
@@ -206,7 +208,10 @@ fun ChatPage(chat: Chat, name: String, attach: Boolean = true, stop: (() -> Unit
             val line = with(LocalDensity.current) { Tokens.Font.bodyLine.toDp() }
             val send = {
                 val r = reverting
-                if (r != null) commitRevert(chat, r, text, files.toList()) { ok -> if (ok) text = "" }
+                if (r != null && own != null) {
+                    own.commit(r, text)
+                    text = ""
+                } else if (r != null) commitRevert(chat, r, text, files.toList()) { ok -> if (ok) text = "" }
                 else {
                     Queue.submit(chat, isWorking(chat), text, files.toList())
                     text = ""
@@ -241,7 +246,7 @@ fun ChatPage(chat: Chat, name: String, attach: Boolean = true, stop: (() -> Unit
                     val ready = !chat.busy.value && chat.preparing.value == 0 && !gone && !chat.chrome.missing.value &&
                         !(chat.sender == null && exhausted(chat)) && reverting?.asked != true
                     IconButton(Adwaita.Return, Wording.Common.send, enabled = ready, tint = c.fg,
-                        background = c.fg.copy(alpha = 0.10f)) { if (text.isNotBlank() || files.isNotEmpty()) send() }
+                        background = c.fg.copy(alpha = 0.10f), tip = sendTip) { if (text.isNotBlank() || files.isNotEmpty()) send() }
                 }
             }
         }
@@ -446,6 +451,7 @@ private fun SaidLine(line: Line, revert: RevertOffer? = null) {
             modifier = Modifier.fillMaxWidth().card(c))
         "tasknote" -> TaskNoteLine(line.text)
         "rows" -> MetaRows(line.text)
+        "metacall" -> MetaCallLine(line.text)
         "action" -> MetaAction(line.text)
         "note", "error" -> Text(line.text, style = Type.caption, color = c.dim, textAlign = TextAlign.Center,
             modifier = Modifier.fillMaxWidth())  // (.sysnote: 0.85em, faded)

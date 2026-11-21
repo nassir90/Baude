@@ -180,32 +180,9 @@ fun SettingsScreen(back: () -> Unit, feedback: () -> Unit, chat: List<String> = 
         Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).navigationBarsPadding()) {
             MetaSettingsGroup()
             BoxedList(listOf<@Composable () -> Unit>(
-                {
-                    SwitchRow(Wording.MetaSettings.fullWidth, null, Settings.fullWidth.value) {
-                        Settings.fullWidth.value = it
-                        save()
-                    }
-                },
-                {
-                    val shown = Settings.codeFont.value?.takeIf { it in CodeFont.FONTS } ?: CodeFont.DEFAULT
-                    Choice(Wording.SharedSettings.codeFont, CodeFont.FONTS.keys.toList(), shown, { it },
-                        subtitle = if (shown == CodeFont.running) null
-                            else Wording.SharedSettings.codeFontNextStart(font = shown, app = Wording.MeshVersions.baude),
-                        before = if (shown == CodeFont.running) null else ({
-                            Button(Wording.SharedSettings.restart) { CodeFont.restart(ctx, chat) }
-                        })) {
-                        Settings.codeFont.value = it
-                        save()
-                    }
-                },
-                {
-                    val names = listOf("system") + Settings.ACCENTS.keys
-                    Choice(Wording.SharedSettings.accentColour, names, Settings.accent.value ?: "system", { it.replaceFirstChar(Char::uppercase) },
-                        dot = { if (it == "system") Settings.accentBg(ctx) else Settings.ACCENTS.getValue(it) }) {
-                        Settings.accent.value = it.takeIf { n -> n in Settings.ACCENTS }
-                        save()
-                    }
-                },
+                { FullWidthRow() },
+                { CodeFontRow(chat) },
+                { AccentRow() },
                 {
                     val looks = linkedMapOf("system" to Wording.PhoneSettings.followSystem, "light" to Wording.PhoneSettings.light,
                         "dark" to Wording.PhoneSettings.dark)
@@ -214,14 +191,7 @@ fun SettingsScreen(back: () -> Unit, feedback: () -> Unit, chat: List<String> = 
                         save()
                     }
                 },
-                {
-                    SwitchRow(Wording.Updates.metered, Wording.Updates.meteredSubtitle,
-                        Settings.meteredUpdates.value) {
-                        Settings.meteredUpdates.value = it
-                        save()
-                        if (it) Update.check(ctx, force = true)
-                    }
-                },
+                { MeteredRow() },
                 {
                     SwitchRow(Wording.SharedSettings.notifications, Wording.SharedSettings.notificationsSubtitle,
                         Settings.notify.value) {
@@ -233,21 +203,76 @@ fun SettingsScreen(back: () -> Unit, feedback: () -> Unit, chat: List<String> = 
             ), "") { it() }
             Heading(Wording.Window.size)
             BoxedList(listOf<@Composable () -> Unit>(
-                { SizeRow(Wording.MetaSettings.textScale, Settings.textScale.value, Settings.SCALE_MIN, Settings.SCALE_MAX) {
-                    Settings.textScale.value = it
-                    save()
-                } },
-                { SizeRow(Wording.MetaSettings.iconScale, Settings.iconScale.value, Settings.SCALE_MIN, Settings.SCALE_MAX) {
-                    Settings.iconScale.value = it
-                    save()
-                } },
-                { SizeRow(Wording.MetaSettings.globalScale, Settings.globalScale.value, Settings.ZOOM_MIN, Settings.ZOOM_MAX) {
-                    Settings.globalScale.value = it
-                    save()
-                } },
+                { ScaleRow("text_scale") },
+                { ScaleRow("icon_scale") },
+                { ScaleRow("global_scale") },
             ), "") { it() }
             BoxedList(listOf<@Composable () -> Unit>({ ButtonRow(Wording.Fixes.sendFeedback, Adwaita.GoNext, onClick = feedback) }), "") { it() }
         }
+    }
+}
+
+/** Settings' Full-width text row; fallback: its subtitle, where one's wanted; extra: after its switch. */
+@Composable
+fun FullWidthRow(fallback: String? = null, extra: (@Composable () -> Unit)? = null) {
+    val ctx = LocalContext.current
+    SwitchRow(Wording.MetaSettings.fullWidth, fallback, Settings.fullWidth.value, extra = extra) {
+        Settings.fullWidth.value = it
+        Settings.save(ctx)
+    }
+}
+
+/** Settings' Code Font row (chat: the chats Restart keeps open). */
+@Composable
+fun CodeFontRow(chat: List<String> = emptyList(), fallback: String? = null, extra: (@Composable () -> Unit)? = null) {
+    val ctx = LocalContext.current
+    val shown = Settings.codeFont.value?.takeIf { it in CodeFont.FONTS } ?: CodeFont.DEFAULT
+    Choice(Wording.SharedSettings.codeFont, CodeFont.FONTS.keys.toList(), shown, { it },
+        subtitle = if (shown == CodeFont.running) fallback
+            else Wording.SharedSettings.codeFontNextStart(font = shown, app = Wording.MeshVersions.baude),
+        before = if (shown == CodeFont.running) null else ({
+            Button(Wording.SharedSettings.restart) { CodeFont.restart(ctx, chat) }
+        }), extra = extra) {
+        Settings.codeFont.value = it
+        Settings.save(ctx)
+    }
+}
+
+/** Settings' Accent Colour row. */
+@Composable
+fun AccentRow(fallback: String? = null, extra: (@Composable () -> Unit)? = null) {
+    val ctx = LocalContext.current
+    val names = listOf("system") + Settings.ACCENTS.keys
+    Choice(Wording.SharedSettings.accentColour, names, Settings.accent.value ?: "system", { it.replaceFirstChar(Char::uppercase) },
+        dot = { if (it == "system") Settings.accentBg(ctx) else Settings.ACCENTS.getValue(it) }, subtitle = fallback, extra = extra) {
+        Settings.accent.value = it.takeIf { n -> n in Settings.ACCENTS }
+        Settings.save(ctx)
+    }
+}
+
+/** Settings' Update on metered connections row. */
+@Composable
+fun MeteredRow(fallback: String? = null, extra: (@Composable () -> Unit)? = null) {
+    val ctx = LocalContext.current
+    SwitchRow(Wording.Updates.metered, Wording.Updates.meteredSubtitle, Settings.meteredUpdates.value, extra = extra) {
+        Settings.meteredUpdates.value = it
+        Settings.save(ctx)
+        if (it) Update.check(ctx, force = true)
+    }
+}
+
+/** One of Settings' sizes' rows: text_scale, icon_scale or global_scale. */
+@Composable
+fun ScaleRow(key: String, fallback: String? = null, extra: (@Composable () -> Unit)? = null) {
+    val ctx = LocalContext.current
+    val (title, field, range) = when (key) {
+        "text_scale" -> Triple(Wording.MetaSettings.textScale, Settings.textScale, Settings.SCALE_MIN to Settings.SCALE_MAX)
+        "icon_scale" -> Triple(Wording.MetaSettings.iconScale, Settings.iconScale, Settings.SCALE_MIN to Settings.SCALE_MAX)
+        else -> Triple(Wording.MetaSettings.globalScale, Settings.globalScale, Settings.ZOOM_MIN to Settings.ZOOM_MAX)
+    }
+    SizeRow(title, field.value, range.first, range.second, fallback, extra) {
+        field.value = it
+        Settings.save(ctx)
     }
 }
 
@@ -272,12 +297,14 @@ private fun VersionRow() {
 
 /** A row with a switch (Adw.SwitchRow). */
 @Composable
-fun SwitchRow(title: String, subtitle: String?, on: Boolean, enabled: Boolean = true, set: (Boolean) -> Unit) {
+fun SwitchRow(title: String, subtitle: String?, on: Boolean, enabled: Boolean = true,
+              extra: (@Composable () -> Unit)? = null, set: (Boolean) -> Unit) {
     val c = LocalBaude.current
     Box(Modifier.alpha(if (enabled) 1f else 0.5f)) {
         ActionRow(title, subtitle, onClick = if (enabled) ({ set(!on) }) else null, suffix = {
             Switch(on, set, enabled = enabled,
                 colors = SwitchDefaults.colors(checkedTrackColor = c.accentBg, checkedThumbColor = c.accentFg))
+            extra?.invoke()
         })
     }
 }
@@ -287,7 +314,7 @@ fun SwitchRow(title: String, subtitle: String?, on: Boolean, enabled: Boolean = 
 @Composable
 fun Choice(title: String, values: List<String>, picked: String, label: (String) -> String,
            dot: ((String) -> Color)? = null, subtitle: String? = null, enabled: Boolean = true,
-           before: (@Composable () -> Unit)? = null, pick: (String) -> Unit) {
+           before: (@Composable () -> Unit)? = null, extra: (@Composable () -> Unit)? = null, pick: (String) -> Unit) {
     val c = LocalBaude.current
     var open by remember { mutableStateOf(false) }
     Box(Modifier.alpha(if (enabled) 1f else 0.5f)) {
@@ -311,6 +338,7 @@ fun Choice(title: String, values: List<String>, picked: String, label: (String) 
                 })
             }
         }
+        extra?.invoke()
     })
     }
 }
@@ -320,16 +348,18 @@ private fun Dot(color: Color) = Box(Modifier.size(14.dp).clip(CircleShape).backg
 
 /** A size, 1.0 the usual, in steps of 0.1 between low and high (Adw.SpinRow): − and + either side of it. */
 @Composable
-private fun SizeRow(title: String, size: Float, low: Float, high: Float, set: (Float) -> Unit) {
+private fun SizeRow(title: String, size: Float, low: Float, high: Float, subtitle: String? = null,
+                    extra: (@Composable () -> Unit)? = null, set: (Float) -> Unit) {
     val c = LocalBaude.current
     fun step(by: Int) = set(((size / Settings.STEP).roundToInt() + by).times(Settings.STEP).coerceIn(low, high)
         .let { (it * 100).roundToInt() / 100f })
-    ActionRow(title, null, suffix = {
+    ActionRow(title, subtitle, suffix = {
         Row(verticalAlignment = Alignment.CenterVertically) {
             IconButton(Adwaita.ListRemove, Wording.PhoneSettings.smaller, enabled = size > low + 0.001f) { step(-1) }
             Text("%.1f".format(size), style = Type.body, color = c.fg, textAlign = TextAlign.Center,
                 modifier = Modifier.widthIn(min = 36.dp))
             IconButton(Adwaita.ListAdd, Wording.PhoneSettings.larger, enabled = size < high - 0.001f) { step(1) }
+            extra?.invoke()
         }
     })
 }

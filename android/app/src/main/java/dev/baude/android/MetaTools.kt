@@ -1,22 +1,46 @@
 package dev.baude.android
 
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import org.json.JSONArray
 import org.json.JSONObject
+import android.widget.Toast
 import java.util.Base64
 
+/** A part of an action: what it did, its kind and its data (an action that bundles a turn's changes to the chats has
+ * several; a setting's has one). */
+class Part(val said: String, val kind: String, val data: JSONObject)
+
 /** One of Meta's changes, as desktop Meta's journal keeps them: its id, what it did, the turn it was made in, and its
- * kind and data, from which it's undone and done again (kept with Meta's conversation, so it outlives a restart). */
-class Action(val id: String, val said: String, val kind: String, val data: JSONObject, val turn: Int) {
+ * kind and data, from which it's undone and done again (kept with Meta's conversation, so it outlives a restart). A
+ * change to what the left bar lists is marked there until it's kept: a mark is [kind, key, how, note]. */
+class Action(val id: String, said: String, var kind: String, var data: JSONObject, val turn: Int) {
+    var said by mutableStateOf(said)
     val undone = mutableStateOf(false)
+    val kept = mutableStateOf(true)
+    val marks = mutableStateListOf<JSONArray>()
+    val parts = ArrayList<Part>()
+
+    fun parts(): List<Part> = parts.ifEmpty { listOf(Part(said, kind, data)) }
 
     fun json(): JSONObject = JSONObject().put("id", id).put("said", said).put("kind", kind).put("data", data)
-        .put("turn", turn).put("undone", undone.value)
+        .put("turn", turn).put("undone", undone.value).put("kept", kept.value).put("marks", JSONArray(marks.toList()))
+        .put("parts", JSONArray(parts.map { JSONObject().put("said", it.said).put("kind", it.kind).put("data", it.data) }))
 
     companion object {
         fun of(o: JSONObject) = Action(o.optString("id"), o.optString("said"), o.optString("kind"),
-            o.optJSONObject("data") ?: JSONObject(), o.optInt("turn")).also { it.undone.value = o.optBoolean("undone") }
+            o.optJSONObject("data") ?: JSONObject(), o.optInt("turn")).also { a ->
+            a.undone.value = o.optBoolean("undone")
+            a.kept.value = o.optBoolean("kept", true)
+            val m = o.optJSONArray("marks")
+            for (i in 0 until (m?.length() ?: 0)) m!!.optJSONArray(i)?.let { a.marks.add(it) }
+            val p = o.optJSONArray("parts")
+            for (i in 0 until (p?.length() ?: 0)) p!!.optJSONObject(i)?.let {
+                a.parts.add(Part(it.optString("said"), it.optString("kind"), it.optJSONObject("data") ?: JSONObject()))
+            }
+        }
     }
 }
 
@@ -82,7 +106,7 @@ object MetaTools {
     ))
 
     /** A JSON-RPC line from Meta's claude: its answer, to then (null for a notification). */
-    fun line(raw: String, then: (String?) -> Unit) {
+    fun line(raw: String, item: ((String, JSONObject) -> MetaCall?)? = null, then: (String?) -> Unit) {
         val msg = try {
             JSONObject(raw)
         } catch (_: Exception) {
@@ -99,7 +123,13 @@ object MetaTools {
             "tools/list" -> answer(JSONObject().put("tools", TOOLS))
             "tools/call" -> {
                 val p = msg.optJSONObject("params") ?: JSONObject()
-                call(p.optString("name"), p.optJSONObject("arguments") ?: JSONObject()) { text, error ->
+                val args = p.optJSONObject("arguments") ?: JSONObject()
+                val at = item?.invoke(p.optString("name"), args)
+                call(p.optString("name"), args, at) { text, error ->
+                    if (at != null && at.id == null) { // (no card of claude's for it: its own say how it stands)
+                        at.state = if (error) "error" else "done"
+                        at.result = text
+                    }
                     answer(JSONObject().put("content", JSONArray(listOf(JSONObject().put("type", "text").put("text", text))))
                         .put("isError", error))
                     Meta.save()
@@ -145,11 +175,73 @@ object MetaTools {
 
     // ---- the journal
 
-    private fun act(said: String, kind: String, data: JSONObject): Action {
-        val a = Action("a${next++}", said, kind, data, turn)
-        actions.add(a)
-        Meta.under(Line("action", a.id))
+    val told = ArrayList<String>() // (what the user did to Meta's actions: said with the next message)
+    var bundle: String? = null     // (the action this turn's changes to the chats join)
+
+    private val MARK_STRENGTH = mapOf("archived" to 4, "added" to 3, "moved" to 2, "edited" to 1)
+    private val MARK_AFTER = mapOf<Pair<String, String>, String?>("added" to "removed" to null, "added" to "archived" to null,
+        "archived" to "added" to null, "removed" to "added" to "edited", "moved" to "removed" to "removed",
+        "edited" to "removed" to "removed")
+
+    /** An action Meta's taken (done already): kept in the journal, under the call's card. A change to what the left bar
+     * lists joins the turn's change, if it's made one (bundle): a turn's changes to it are one action. */
+    fun act(said: String, kind: String, data: JSONObject, marks: List<JSONArray> = emptyList(), at: MetaCall? = null): Action {
+        val joined = if (marks.isEmpty()) null else actions.firstOrNull { it.id == bundle && !it.undone.value && !it.kept.value }
+        val a = if (joined != null) {
+            join(joined, said, kind, data, marks)
+            actions.remove(joined)
+            actions.add(joined)
+            joined
+        } else Action("a${next++}", said, kind, data, turn).also {
+            it.kept.value = marks.isEmpty()
+            it.marks.addAll(marks)
+            actions.add(it)
+            if (marks.isNotEmpty()) bundle = it.id
+            if (at == null) Meta.under(Line("action", it.id))
+        }
+        if (at != null && a.id !in at.actions) at.actions.add(a.id)
         return a
+    }
+
+    /** Action a with another part (desktop's bundle): its marks gathered, a row marked twice as MARK_AFTER says for the
+     * two, else the stronger, with both their notes. */
+    private fun join(a: Action, said: String, kind: String, data: JSONObject, marks: List<JSONArray>) {
+        val parts = ArrayList(a.parts()) + Part(said, kind, data)
+        val gathered = LinkedHashMap<String, JSONArray>()
+        for (m in a.marks) gathered[m.optString(0) + "|" + m.optString(1)] = m
+        for (m in marks) {
+            val k = m.optString(0) + "|" + m.optString(1)
+            var mark = m
+            val old = gathered[k]
+            if (old != null) {
+                val pair = old.optString(2) to m.optString(2)
+                val how = if (pair in MARK_AFTER) MARK_AFTER[pair]
+                    else if ((MARK_STRENGTH[pair.first] ?: 0) > (MARK_STRENGTH[pair.second] ?: 0)) pair.first else pair.second
+                if (how == null) {
+                    gathered.remove(k)
+                    continue
+                }
+                val note = listOf(old.optString(3), m.optString(3)).filter { it.isNotEmpty() }.distinct().joinToString(", ")
+                mark = JSONArray(listOf(m.optString(0), m.optString(1), how, note))
+            }
+            gathered[k] = mark
+        }
+        a.kind = "bundle"
+        a.data = JSONObject()
+        a.parts.clear()
+        a.parts.addAll(parts)
+        a.kept.value = false
+        a.marks.clear()
+        a.marks.addAll(gathered.values)
+        a.said = parts.map { it.said }.distinct().joinToString("; ")
+    }
+
+    /** The actions done, not undone and not kept: the left bar marks what they changed. */
+    fun unkept(): List<Action> = actions.filter { !it.undone.value && !it.kept.value }
+
+    /** What a call showed, under its card (or, with no card, after its reply). */
+    private fun shown(at: MetaCall?, spec: JSONObject) {
+        if (at != null) at.shown.add(spec) else Meta.under(Line("rows", spec.toString()))
     }
 
     private fun overrides(keys: JSONObject, to: (String) -> String?) {
@@ -163,11 +255,50 @@ object MetaTools {
 
     /** An action undone (or done again): what went wrong, if anything, to done. */
     fun apply(a: Action, undo: Boolean, done: (String?) -> Unit) {
-        val d = a.data
-        val finish = { e: String? -> if (e == null) a.undone.value = undo; HomePrefs.save(); Meta.save(); done(e) }
-        when (a.kind) {
+        val parts = if (undo) a.parts().reversed() else a.parts()
+        val ran = ArrayList<Part>()
+        fun finish(e: String?) {
+            if (e == null) a.undone.value = undo
+            HomePrefs.save()
+            Meta.save()
+            done(e)
+        }
+        fun back(i: Int, why: String?) { // (a part that failed: the ones done put back)
+            if (i < 0) return finish(why)
+            applyPart(ran[i], !undo) { back(i - 1, why) }
+        }
+        fun step(i: Int) {
+            if (i >= parts.size) return finish(null)
+            applyPart(parts[i], undo) { e ->
+                if (e == null) {
+                    ran.add(parts[i])
+                    step(i + 1)
+                } else back(ran.size - 1, e)
+            }
+        }
+        step(0)
+    }
+
+    /** The part an action's just been given, done (the others were, when they were made). */
+    private fun applyNew(a: Action, done: (String?) -> Unit) = applyPart(a.parts().last(), false) { e ->
+        HomePrefs.save()
+        Meta.save()
+        done(e)
+    }
+
+    private fun applyPart(p: Part, undo: Boolean, finish: (String?) -> Unit) {
+        val d = p.data
+        when (p.kind) {
             "rename" -> rename(d.optString("host"), d.optString("sid"), d.optString(if (undo) "from" else "to"), finish)
-            "setting" -> finish(setting(d.optString("name"), d.optString(if (undo) "from" else "to")))
+            "setting" -> {
+                val s = MetaSet.ALL[d.optString("name")] ?: return finish("No setting '${d.optString("name")}'.")
+                try {
+                    s.put(s.coerce(d.opt(if (undo) "from" else "to")))
+                    finish(null)
+                } catch (e: IllegalArgumentException) {
+                    finish(e.message)
+                }
+            }
             "move" -> {
                 val keys = d.optJSONObject("keys") ?: JSONObject()
                 val to = d.optString("to")
@@ -209,14 +340,14 @@ object MetaTools {
                 val op = d.optString("op").let { if (undo) (if (it == "archive") "unarchive" else "archive") else it }
                 archive(d.optJSONArray("chats").list2(), op) { failed -> finish(failed.ifEmpty { null }?.joinToString("; ")) }
             }
-            else -> done("not an action of the phone's")
+            else -> finish("not an action of the phone's")
         }
     }
 
     private fun JSONArray?.list2(): List<Pair<String, String>> = if (this == null) emptyList()
     else (0 until length()).mapNotNull { optJSONArray(it)?.let { p -> p.optString(0) to p.optString(1) } }
 
-    private fun undoMany(acts: List<Action>, undo: Boolean, done: (List<String>) -> Unit) {
+    private fun runMany(acts: List<Action>, undo: Boolean, done: (List<String>) -> Unit) {
         val failed = ArrayList<String>()
         fun step(i: Int) {
             if (i < 0 || i >= acts.size) return done(failed)
@@ -225,10 +356,50 @@ object MetaTools {
         step(if (undo) acts.size - 1 else 0) // (undone newest first)
     }
 
-    /** An action of Meta's undone or done again from its row (Undo, Redo). */
-    fun button(a: Action, undo: Boolean) = apply(a, undo) { e ->
-        if (e != null) Meta.chat.said.value = if (undo) Wording.MetaActions.couldntUndo(failed = "${a.said}: $e")
-        else Wording.MetaActions.couldntRedo(action = a.said, why = e) }
+    private fun toast(text: String) = Toast.makeText(Mesh.app, text, Toast.LENGTH_SHORT).show()
+
+    /** Actions kept: what they marked in the left bar goes; they can still be undone. */
+    fun keep(acts: List<Action>) {
+        for (a in acts) a.kept.value = true
+        Meta.save()
+    }
+
+    /** Actions undone, newest first (byUser: Meta's told, with its next message, and what failed is toasted). */
+    fun undoMany(acts: List<Action>, byUser: Boolean, done: (List<String>) -> Unit = {}) {
+        val todo = acts.filter { !it.undone.value }
+        runMany(todo, true) { failed ->
+            if (byUser) {
+                for (a in todo) if (a.undone.value) told.add("(The user undid your action ${a.id}: ${a.said}.)")
+                if (failed.isNotEmpty()) toast(Wording.MetaActions.couldntUndo(failed = failed.joinToString("; ")))
+                Meta.save()
+            }
+            done(failed)
+        }
+    }
+
+    /** Actions done again, in order; what they marked is marked again. */
+    fun redoMany(acts: List<Action>, byUser: Boolean, done: (List<String>) -> Unit = {}) {
+        val todo = acts.filter { it.undone.value }
+        val failed = ArrayList<String>()
+        fun step(i: Int) {
+            if (i >= todo.size) {
+                if (byUser) Meta.save()
+                return done(failed)
+            }
+            val a = todo[i]
+            apply(a, false) { e ->
+                if (e == null) {
+                    a.kept.value = a.marks.isEmpty()
+                    if (byUser) told.add("(The user redid your action ${a.id}: ${a.said}.)")
+                } else {
+                    failed.add("${a.said}: $e")
+                    if (byUser) toast(Wording.MetaActions.couldntRedo(action = a.said, why = e))
+                }
+                step(i + 1)
+            }
+        }
+        step(0)
+    }
 
     // ---- the app's own changes, each checked with its host where it's the host's
 
@@ -252,23 +423,6 @@ object MetaTools {
                 Msg.Error.from(r).said.orEmpty().ifBlank { "it said no" })
             if (--left == 0) then(failed)
         }
-    }
-
-    private fun setting(name: String, v: String): String? = when (name) {
-        "sidebar_group" -> if (v !in setOf("folder", "date")) "sidebar_group is folder or date"
-            else { HomePrefs.by.value = v; HomePrefs.save(); null }
-        "sidebar_host" -> {
-            val to = hostByName(v) ?: Mesh.conn(v)?.id
-            if (to == null) "no host $v: ${Mesh.reached("subscribe").joinToString(", ") { it.second }}"
-            else { HomePrefs.pick(to); null }
-        }
-        else -> "No setting '$name': they're sidebar_group, sidebar_host."
-    }
-
-    private fun settingValue(name: String) = when (name) {
-        "sidebar_group" -> HomePrefs.by.value
-        "sidebar_host" -> picked()?.let { Mesh.label(it) }.orEmpty()
-        else -> ""
     }
 
     // ---- the forms (desktop Meta's: Baude's forms(), as the phone has them)
@@ -338,7 +492,7 @@ object MetaTools {
     // ---- the tools
 
     /** A tool called: what it says back (and whether it went wrong), to done, on the main thread. */
-    fun call(name: String, args: JSONObject, done: (String, Boolean) -> Unit) {
+    fun call(name: String, args: JSONObject, at: MetaCall?, done: (String, Boolean) -> Unit) {
         val ok = { t: String -> done(t, false) }
         val no = { t: String -> done(t, true) }
         when (name) {
@@ -349,17 +503,22 @@ object MetaTools {
                 ok(rows.filter { f.isEmpty() || it.lowercase().contains(f) }.joinToString("\n").ifEmpty { "(none)" })
             }
             "set_setting" -> {
-                val n = args.optString("name")
-                val v = args.opt("value")?.toString().orEmpty()
-                val from = settingValue(n)
-                setting(n, v)?.let { return no(it) }
-                Meta.under(Line("rows", JSONObject().put("setting", n).toString()))
-                if (from == settingValue(n)) return ok("It's $v already.")
-                val a = act(Wording.MetaActions.settingChanged(setting = if (n == "sidebar_group") Wording.Sidebar.groupBy else "Hosts shown",
-                    before = from, after = v), "setting", JSONObject().put("name", n).put("from", from).put("to", v))
-                ok("$n is $v now (action ${a.id}).")
+                val n = args.optString("name").trim()
+                val st = MetaSet.ALL[n] ?: return no("No setting '$n': they're ${MetaSet.ALL.keys.joinToString(", ")}.")
+                if (!st.metaSets) return no("$n is the user's to change: show setting:$n for them to.")
+                val before = st.get()
+                val now = try {
+                    st.coerce(args.opt("value")).also { st.put(it) }
+                } catch (e: IllegalArgumentException) {
+                    return no(e.message.orEmpty())
+                }
+                shown(at, JSONObject().put("setting", n).put("set", now))
+                if (now == before) return ok("$n is ${saidValue(now)} already. Its row is under your reply.")
+                val a = act(Wording.MetaActions.settingChanged(setting = st.title(), before = saidValue(before), after = saidValue(now)),
+                    "setting", JSONObject().put("name", n).put("from", before).put("to", now), at = at)
+                ok("$n is ${saidValue(now)} now (action ${a.id})" + (st.note?.let { "; $it" } ?: "") + ". Its row is under your reply.")
             }
-            "show" -> show(args, ok, no)
+            "show" -> show(args, at, ok, no)
             "read_chat" -> {
                 val (h, s) = find(args.optString("chat")) ?: return no(notFound(listOf(args.optString("chat"))))
                 val size = s.size?.toLong() ?: 0
@@ -389,7 +548,7 @@ object MetaTools {
                 rename(h, s.id.orEmpty(), to) { e ->
                     if (e != null) return@rename no("Couldn't rename it: $e")
                     val a = act(Wording.MetaActions.renamed(before = before, after = to), "rename", JSONObject().put("host", h).put("sid", s.id.orEmpty())
-                        .put("from", before).put("to", to))
+                        .put("from", before).put("to", to), listOf(JSONArray(listOf("chat", key(h, s), "moved", Wording.MetaActions.renamedNote))), at)
                     ok("Renamed (action ${a.id}).")
                 }
             }
@@ -399,7 +558,7 @@ object MetaTools {
                 a ?: return no("No such action of yours: its id is in your replies.")
                 val acts = if (args.optBoolean("turn")) actions.filter { it.turn == a.turn } else listOf(a)
                 if (acts.all { it.undone.value }) return ok("That's undone already.")
-                undoMany(acts.filter { !it.undone.value }, true) { failed ->
+                undoMany(acts.filter { !it.undone.value }, false) { failed ->
                     ok("Undone: ${acts.filter { it.undone.value }.joinToString(", ") { it.said }}." +
                         if (failed.isNotEmpty()) " Not undone: ${failed.joinToString("; ")}." else "")
                 }
@@ -407,7 +566,7 @@ object MetaTools {
             "redo" -> {
                 val a = actions.firstOrNull { it.id == args.optString("action") && it.undone.value }
                     ?: return no("No action of yours with that id is undone.")
-                apply(a, false) { e -> if (e != null) no(e) else ok("Done again: ${a.said}.") }
+                redoMany(listOf(a), false) { failed -> if (failed.isNotEmpty()) no(failed.first()) else ok("Done again: ${a.said}.") }
             }
             "open_form" -> {
                 val f = args.optString("form").trim()
@@ -451,14 +610,16 @@ object MetaTools {
                 val a = act(Wording.MetaChats.moved(chats = found.filter { (h, s) -> groupOf(h, s) != to }.let { m ->
                     if (m.size == 1) Wording.Senders.chat(name = title(m[0].second)) else Wording.MetaChats.chats(n = m.size) },
                     where = if (to.isEmpty()) Wording.MetaChats.noGroup else Wording.MetaChats.groupNamed(name = to)),
-                    "move", JSONObject().put("keys", keys).put("to", to).put("made", made))
-                apply(a, false) { ok("Moved (action ${a.id}).") }
+                    "move", JSONObject().put("keys", keys).put("to", to).put("made", made),
+                    keys.keys().asSequence().map { k -> JSONArray(listOf("chat", k, "moved",
+                        Wording.MetaChats.movedNote(group = to.ifEmpty { Wording.MetaChats.noGroup }))) }.toList(), at)
+                applyNew(a) { ok("Moved (action ${a.id}).") }
             }
             "make_group" -> {
                 val g = args.optString("name").trim().ifEmpty { return no("A name is needed.") }
                 if (g in groupNames()) return no("There's a group '$g' already.")
-                val a = act(Wording.MetaChats.madeGroup(name = g), "make_group", JSONObject().put("name", g))
-                apply(a, false) { ok("Made (action ${a.id}).") }
+                val a = act(Wording.MetaChats.madeGroup(name = g), "make_group", JSONObject().put("name", g), at = at)
+                applyNew(a) { ok("Made (action ${a.id}).") }
             }
             "rename_group", "delete_group" -> {
                 val g = args.optString("group")
@@ -469,8 +630,8 @@ object MetaTools {
                 for ((h, s) in all()) if (groupOf(h, s) == g) keys.put(key(h, s), HomePrefs.chatGroups[key(h, s)] ?: JSONObject.NULL)
                 val a = act(if (to.isEmpty()) Wording.MetaChats.deletedGroup(name = g) else Wording.MetaChats.renamedGroup(old = g, new = to), "group", JSONObject()
                     .put("keys", keys).put("from", g).put("to", to).put("from_made", g in HomePrefs.made)
-                    .put("to_made", to.isNotEmpty() && to in HomePrefs.made))
-                apply(a, false) { ok("${if (to.isEmpty()) "Deleted" else "Renamed"} (action ${a.id}).") }
+                    .put("to_made", to.isNotEmpty() && to in HomePrefs.made), at = at)
+                applyNew(a) { ok("${if (to.isEmpty()) "Deleted" else "Renamed"} (action ${a.id}).") }
             }
             "show_groups" -> {
                 val given = args.optJSONArray("groups").strings().map { if (it == "No group") "" else it }
@@ -478,8 +639,8 @@ object MetaTools {
                 if (unknown.isNotEmpty()) return no("No group ${unknown.joinToString(", ") { "'$it'" }}: app_index groups lists them.")
                 val a = act(if (given.isEmpty()) Wording.MetaChats.listedEvery(what = "group")
                     else Wording.MetaChats.listed(names = given.joinToString(", ") { it.ifEmpty { "No group" } }),
-                    "show_groups", JSONObject().put("from", JSONArray(HomePrefs.groups.toList())).put("to", JSONArray(given)))
-                apply(a, false) { ok("Shown (action ${a.id}).") }
+                    "show_groups", JSONObject().put("from", JSONArray(HomePrefs.groups.toList())).put("to", JSONArray(given)), at = at)
+                applyNew(a) { ok("Shown (action ${a.id}).") }
             }
             "archive_chats", "unarchive_chats" -> {
                 val (found, missing) = chats(args.optJSONArray("chats").strings())
@@ -496,7 +657,9 @@ object MetaTools {
                         else Wording.MetaChats.chats(n = went.size)
                     val a = act(if (op == "archive") Wording.MetaChats.archived(chats = chats)
                         else Wording.MetaChats.unarchived(chats = chats), "archive",
-                        JSONObject().put("op", op).put("chats", JSONArray(went.map { JSONArray(listOf(it.first, it.second)) })))
+                        JSONObject().put("op", op).put("chats", JSONArray(went.map { JSONArray(listOf(it.first, it.second)) })),
+                        went.map { (h, sid) -> JSONArray(listOf("chat", "$h/$sid", if (op == "archive") "archived" else "added",
+                            if (op == "archive") Wording.MetaChats.archivedNote else Wording.MetaChats.backNote)) }, at)
                     ok("${op.replaceFirstChar(Char::uppercase)}d (action ${a.id})." +
                         if (failed.isNotEmpty()) " Not ${op}d: ${failed.joinToString("; ")}." else "")
                 }
@@ -507,49 +670,45 @@ object MetaTools {
         }
     }
 
-    private fun show(args: JSONObject, ok: (String) -> Unit, no: (String) -> Unit) {
+    private fun show(args: JSONObject, at: MetaCall?, ok: (String) -> Unit, no: (String) -> Unit) {
         val what = args.optString("what").trim()
         val items = args.optJSONArray("items").strings()
         val kind = what.substringBefore(":")
         val rest = what.substringAfter(":", "")
         when (kind) {
             "setting" -> {
-                if (rest !in setOf("sidebar_group", "sidebar_host")) return no("No setting '$rest': they're sidebar_group, sidebar_host.")
-                Meta.under(Line("rows", JSONObject().put("setting", rest).toString()))
+                if (rest !in MetaSet.ALL) return no("No setting '$rest': they're ${MetaSet.ALL.keys.joinToString(", ")}.")
+                shown(at, JSONObject().put("setting", rest))
             }
             "chats" -> {
                 val (found, missing) = chats(items)
                 if (missing.isNotEmpty()) return no(notFound(missing))
-                Meta.under(Line("rows", JSONObject().put("chats", JSONArray(found.map { (h, s) ->
-                    JSONArray(listOf(h, s.id.orEmpty())) })).toString()))
+                shown(at, JSONObject().put("chats", JSONArray(found.map { (h, s) -> JSONArray(listOf(h, s.id.orEmpty())) })))
             }
             "pages" -> {
                 val have = Meta.pages().map { it.title }
                 val missing = items.filter { i -> have.none { it.equals(i, true) } }
                 if (missing.isNotEmpty()) return no("No page ${missing.joinToString(", ") { "'$it'" }}: the chat open has " +
                     have.joinToString(", ") + " (app_index pages).")
-                Meta.under(Line("rows", JSONObject().put("pages", JSONArray(items.map { i -> have.first { it.equals(i, true) } })).toString()))
+                shown(at, JSONObject().put("pages", JSONArray(items.map { i -> have.first { it.equals(i, true) } })))
             }
-            "changelog" -> {
-                val h = Meta.host.value ?: return no("Meta's host isn't connected.")
-                Meta.under(Line("rows", JSONObject().put("changelog", h).toString()))
-            }
+            "changelog" -> shown(at, JSONObject().put("changelog", true))
             "button" -> {
                 if (rest !in BUTTONS) return no("No button '$rest': they're ${BUTTONS.keys.joinToString(", ")} (app_index buttons).")
                 val item = items.firstOrNull()
                 when (rest) {
                     "trash" -> {
                         val (h, s) = item?.let(::find) ?: return no("There's no button trash without items: app_index buttons.")
-                        Meta.under(Line("rows", JSONObject().put("button", "trash").put("host", h).put("sid", s.id.orEmpty())
-                            .put("label", Wording.Trash.moveTitle(title = title(s))).toString()))
+                        shown(at, JSONObject().put("button", "trash").put("host", h).put("sid", s.id.orEmpty())
+                            .put("label", Wording.Trash.moveTitle(title = title(s))))
                     }
                     "host" -> {
                         val h = item?.let { hostByName(it) } ?: return no("No host '${item.orEmpty()}': they're " +
                             Mesh.reached("start").joinToString(", ") { it.second } + ".")
-                        Meta.under(Line("rows", JSONObject().put("button", "host").put("host", h)
-                            .put("label", Wording.Meta.openItem(name = Mesh.label(h))).toString()))
+                        shown(at, JSONObject().put("button", "host").put("host", h)
+                            .put("label", Wording.Meta.openItem(name = Mesh.label(h))))
                     }
-                    else -> Meta.under(Line("rows", JSONObject().put("button", rest).put("label", BUTTONS[rest]!!.substringBefore(":")).toString()))
+                    else -> shown(at, JSONObject().put("button", rest).put("label", BUTTONS[rest]!!.substringBefore(":")))
                 }
             }
             else -> return no("show takes setting:<name>, chats, pages, changelog or button:<action>.")
@@ -557,7 +716,7 @@ object MetaTools {
         ok("Shown under your reply.")
     }
 
-    const val PARTS = "chats, hosts, groups, settings, forms, buttons, pages"
+    const val PARTS = "chats, hosts, groups, settings, forms, buttons, pages, changelog"
 
     /** A part of the index, a row a line. */
     fun section(name: String): List<String>? = when (name) {
@@ -571,8 +730,10 @@ object MetaTools {
                 s.model?.ifBlank { null }).joinToString(" · ")
         }
         "groups" -> listOf("No group") + groupNames()
-        "settings" -> listOf("sidebar_group=${settingValue("sidebar_group")} (folder or date: how the left bar, the home " +
-            "screen, groups chats)", "sidebar_host=${settingValue("sidebar_host")} (a host's name: whose chats it lists)")
+        "settings" -> MetaSet.ALL.values.map { st ->
+            "${st.name} = ${saidValue(st.get())} (${st.takes()}) · ${st.title()}" + (st.note?.let { " · $it" } ?: "")
+        }
+        "changelog" -> AppVersion.changes(Mesh.app).take(60).map { "${it.short} ${madeWhen(it.made)} · ${it.subject}" }
         "forms" -> FORMS.map { (k, f) -> "$k: ${f.about}" }
         "buttons" -> BUTTONS.map { (k, v) -> "$k: $v" }
         "pages" -> Meta.pages().map { it.title }.ifEmpty { listOf("(no chat open)") }

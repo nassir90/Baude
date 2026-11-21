@@ -194,9 +194,6 @@ fun Asked(chat: Chat, ask: Ask, alwaysOffered: Boolean, name: String = "Claude")
             }
             Button(Wording.Common.deny, destructive = true) { Mesh.answer(chat, ask, allow = false) }
         }
-        val always = Mesh.alwaysAllowed(chat)
-        if (always.isNotEmpty()) Text("Always allowed in this chat: " + always.sorted().joinToString(", ") {
-            toolDisplay(it).first }, style = Type.caption, color = c.dim)
     }
 }
 

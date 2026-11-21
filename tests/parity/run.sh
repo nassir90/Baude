@@ -4,6 +4,9 @@
 # Output: tests/parity/out/{desktop,phone,pairs,diffs}. Args pass to desktop.py (-k NAME, --theme).
 set -euo pipefail
 cd "$(dirname "$0")/../.."
+# (one run at a time on a machine: every checkout's run uses the fixtures' one home folder)
+until mkdir /tmp/parity-run.lock 2>/dev/null; do echo "waiting for another parity run…" >&2; sleep 10; done
+trap 'rmdir /tmp/parity-run.lock' EXIT
 rm -rf tests/parity/out/desktop tests/parity/out/phone
 if [ "$(uname)" = Linux ] && command -v xvfb-run >/dev/null; then  # (a virtual display, as tests/screenshots.sh)
     env -u WAYLAND_DISPLAY GDK_BACKEND=x11 GSK_RENDERER=cairo \

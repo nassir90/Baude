@@ -2,6 +2,8 @@
   "description": "The box a message is written in: its send button's tooltips.",
   "messages": {
     "send": "Send ({$key})\nNew line: Enter",
-    "stop": "Stop (Esc)"
+    "stop": "Stop (Esc)",
+    "send_key": "Ctrl+Enter",
+    "send_key_mac": "⌘Enter"
   }
 }

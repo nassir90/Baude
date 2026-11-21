@@ -29,6 +29,8 @@
     {"name": "settings", "what": "Settings", "inventory": ["Settings.dialog", "MetaSettings.dialog"]},
     {"name": "changelog", "what": "The changelog of the running version", "inventory": ["Changelog.dialog"]},
     {"name": "panel-meta", "what": "The fixture chat with the side panel's Meta page", "page": "meta", "inventory": ["Meta.panel", "SidePanel.region"]},
+    {"name": "panel-meta-reply", "what": "Meta's page with a reply: a Read card, a chat moved (its change box), a setting it changed, the changelog it showed, the changes bar", "page": "meta", "meta": "meta.json", "inventory": ["Meta.panel", "MetaSettings.dialog"]},
+    {"name": "panel-meta-reply-open", "what": "The same, the cards' Input and Output opened", "page": "meta", "meta": "meta.json", "open": true, "inventory": ["Meta.panel"]},
     {"name": "panel-subagents", "what": "… its Subagents page", "page": "agents", "inventory": ["Subagents.panel"]},
     {"name": "panel-processes", "what": "… its Processes page", "page": "processes", "inventory": ["Processes.panel"]},
     {"name": "panel-side-questions", "what": "… its Side questions page", "page": "btw", "inventory": ["SideQuestions.panel"]},

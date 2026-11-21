@@ -109,7 +109,7 @@ fun ChangelogScreen(commit: String?, back: () -> Unit) {
 
 /** A commit's row (Adw.ActionRow): its subject, wrapped, and under it when it was made and its hash. */
 @Composable
-private fun ChangeRow(title: String, subtitle: String) {
+fun ChangeRow(title: String, subtitle: String) {
     val c = LocalBaude.current
     Row(Modifier.fillMaxWidth().heightIn(min = 50.dp).padding(horizontal = 12.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically) {

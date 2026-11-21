@@ -1,5 +1,5 @@
 {
-  "description": "☰ → Mesh, in Baude and Record, and ⋮ → Mesh in the Android app: the code each host's daemon in the mesh runs, and each app connected to it (Baude, Record, Emission, the Android app), against the newest in the mesh.",
+  "description": "☰ → Mesh, in Baude and Record, and ⋮ → Mesh in the Android app: each machine in the mesh, and each host the app knows (greyed while it isn't reached), with the code its daemon and the apps on it (Baude, Record, Emission; a phone's, the Android app) run against the newest in the mesh; and each one's ⋮, to rename it or remove it on this device.",
   "messages": {
     "title": "Mesh",
     "none": "Not connected to a host process",
@@ -9,6 +9,10 @@
     "android": "Android",
     "newest": "Newest",
     "behind": ".input {$n :number} .match $n one {{{$n} commit behind}} * {{{$n} commits behind}}",
-    "older": "Older code"
+    "older": "Older code",
+    "rename_heading": "Rename {$host}",
+    "rename_body": "The name it has on this device only. Left empty, it has its own: {$name}.",
+    "remove_heading": "Remove {$host}?",
+    "remove_body": "It isn't listed on this device any more, nor are its chats, and this device's link to it is let go of, till it's added again. Nothing on the host changes."
   }
 }

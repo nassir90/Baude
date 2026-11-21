@@ -617,8 +617,8 @@ fun HostsScreen(back: () -> Unit) {
     }
     if (adding) AddHost(done = { adding = false })
     removing?.let { h ->
-        AlertDialog(onDismissRequest = { removing = null }, title = { Text("Remove ${h.label}?") },
-            text = { Text("Its sessions aren't listed here any more. Nothing on the host changes.") },
+        AlertDialog(onDismissRequest = { removing = null }, title = { Text(Wording.MeshVersions.removeHeading(host = h.label)) },
+            text = { Text(Wording.MeshVersions.removeBody) },
             confirmButton = { Button(Wording.Common.remove, destructive = true) { Mesh.removeHost(h); removing = null } },
             dismissButton = { Button(Wording.Common.cancel) { removing = null } }, containerColor = c.dialog)
     }

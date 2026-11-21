@@ -16,8 +16,6 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.mutableStateOf
@@ -275,6 +273,6 @@ fun ShareBanner(cancel: () -> Unit) {
         verticalAlignment = Alignment.CenterVertically) {
         Text("Choose a Bot or session to send this to", style = Type.caption, color = c.fg.copy(alpha = c.fg.alpha * 0.75f),
             modifier = Modifier.weight(1f).padding(vertical = 8.dp))
-        IconButton(Icons.Filled.Close, Wording.Common.cancel, onClick = cancel)
+        IconButton(Adwaita.WindowClose, Wording.Common.cancel, onClick = cancel)
     }
 }

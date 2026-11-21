@@ -11,7 +11,7 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 
 /** Kept running in the browser's process while a Bot's browser is open on this phone, so it goes on serving the Bot
- * with the app out of sight, as MeshService keeps the app's connections: a quiet notification of its own says so, to
+ * with the app out of sight: a quiet notification of its own says so, to
  * show the browser again or close it. */
 class BrowserService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null

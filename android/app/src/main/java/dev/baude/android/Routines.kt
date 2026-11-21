@@ -18,11 +18,6 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.background
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Edit
-import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
@@ -123,7 +118,7 @@ fun RoutinesPage(hostId: String, sid: String, here: Boolean) {
         Row(Modifier.fillMaxWidth().padding(start = 10.dp, end = 10.dp, top = 8.dp, bottom = 4.dp),
             horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             Spacer(Modifier.weight(1f))
-            IconButton(Icons.Filled.Add, Wording.Routines.newRoutine) { editing = Msg.Routine() }
+            IconButton(Adwaita.ListAdd, Wording.Routines.newRoutine) { editing = Msg.Routine() }
         }
         BoxedList(list.toList(), if (loaded || error == null) Wording.Routines.noRoutines else "") { r ->
             val offset = clock.offset?.toInt() ?: 0
@@ -135,13 +130,13 @@ fun RoutinesPage(hostId: String, sid: String, here: Boolean) {
                     Switch(r.paused != true, { on -> set(r.json().put("paused", !on)) },
                         colors = SwitchDefaults.colors(checkedTrackColor = c.accentBg, checkedThumbColor = c.accentFg),
                         modifier = Modifier.padding(end = 4.dp))
-                    IconButton(Icons.Filled.PlayArrow, Wording.Routines.runNow) {
+                    IconButton(Adwaita.MediaPlaybackStart, Wording.Routines.runNow) {
                         Mesh.ask(hostId, Msg.RunRoutine(session = sid, id = r.id.orEmpty()).json()) {
                             took(it, Wording.Routines.couldnt(doing = "run"))
                         }
                     }
-                    IconButton(Icons.Filled.Edit, Wording.Routines.change) { editing = r }
-                    IconButton(Icons.Filled.Delete, Wording.Common.delete) {
+                    IconButton(Adwaita.DocumentEdit, Wording.Routines.change) { editing = r }
+                    IconButton(Adwaita.UserTrash, Wording.Common.delete) {
                         Mesh.ask(hostId, Msg.Routines(session = sid, delete = r.id.orEmpty()).json()) {
                             took(it, Wording.Routines.couldnt(doing = "delete"))
                         }

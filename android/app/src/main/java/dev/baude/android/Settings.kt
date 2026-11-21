@@ -16,13 +16,6 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.ArrowDropDown
-import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Switch
@@ -70,6 +63,7 @@ object Settings {
     const val ZOOM_MIN = 0.6f // (widgets.ZOOM_MIN, ZOOM_MAX: Global Scale's)
     const val ZOOM_MAX = 2.5f
     const val STEP = 0.1f // (widgets.ZOOM_STEP)
+    const val BASE_SCALE = 1.2f // (everything's size at Global Scale 1.0: a phone's held further off than a screen)
 
     private var loaded = false
 
@@ -131,7 +125,7 @@ fun SettingsScreen(back: () -> Unit, feedback: () -> Unit, versions: () -> Unit 
     Settings.load(ctx)
     val save = { Settings.save(ctx) }
     Column(Modifier.fillMaxSize().background(c.frame)) {
-        Bar(Wording.Window.settingsTitle, start = { IconButton(Icons.AutoMirrored.Filled.ArrowBack, Wording.Browser.back, onClick = back) })
+        Bar(Wording.Window.settingsTitle, start = { IconButton(Adwaita.GoPrevious, Wording.Browser.back, onClick = back) })
         Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).navigationBarsPadding()) {
             BoxedList(listOf<@Composable () -> Unit>(
                 {
@@ -159,7 +153,7 @@ fun SettingsScreen(back: () -> Unit, feedback: () -> Unit, versions: () -> Unit 
                     }
                 },
                 {
-                    SwitchRow(Wording.SharedSettings.notifications, Wording.SharedSettings.notificationsSubtitle,
+                    SwitchRow(Wording.SharedSettings.notifications, null,
                         Settings.notify.value) {
                         Settings.notify.value = it
                         save()
@@ -185,7 +179,7 @@ fun SettingsScreen(back: () -> Unit, feedback: () -> Unit, versions: () -> Unit 
             ), "") { it() }
             BoxedList(listOf<@Composable () -> Unit>({
                 ActionRow(Wording.Fixes.sendFeedback, null, onClick = feedback, suffix = {
-                    Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null, tint = c.dim, modifier = Modifier.size(18.dp))
+                    Icon(Adwaita.GoNext, null, tint = c.dim, modifier = Modifier.size(18.dp))
                 })
             }), "") { it() }
         }
@@ -224,7 +218,7 @@ private fun Choice(title: String, values: List<String>, picked: String, label: (
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 dot?.let { Dot(it(picked)) }
                 Text(label(picked), style = Type.body, color = c.fg)
-                Icon(Icons.Filled.ArrowDropDown, null, tint = c.fg, modifier = Modifier.size(18.dp))
+                Icon(Adwaita.PanDown, null, tint = c.fg, modifier = Modifier.size(18.dp))
             }
             Popover(open, { open = false }) {
                 for (v in values) DropdownMenuItem({
@@ -233,7 +227,7 @@ private fun Choice(title: String, values: List<String>, picked: String, label: (
                         Text(label(v), style = Type.body, color = c.fg)
                     }
                 }, { open = false; pick(v) }, trailingIcon = {
-                    if (v == picked) Icon(Icons.Filled.Check, null, tint = c.accent,
+                    if (v == picked) Icon(Adwaita.ObjectSelect, null, tint = c.accent,
                         modifier = Modifier.size(16.dp))
                 })
             }
@@ -252,10 +246,10 @@ private fun SizeRow(title: String, size: Float, low: Float, high: Float, set: (F
         .let { (it * 100).roundToInt() / 100f })
     ActionRow(title, null, suffix = {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            IconButton(Icons.Filled.Remove, Wording.PhoneSettings.smaller, enabled = size > low + 0.001f) { step(-1) }
+            IconButton(Adwaita.ListRemove, Wording.PhoneSettings.smaller, enabled = size > low + 0.001f) { step(-1) }
             Text("%.1f".format(size), style = Type.body, color = c.fg, textAlign = TextAlign.Center,
                 modifier = Modifier.widthIn(min = 36.dp))
-            IconButton(Icons.Filled.Add, Wording.PhoneSettings.larger, enabled = size < high - 0.001f) { step(1) }
+            IconButton(Adwaita.ListAdd, Wording.PhoneSettings.larger, enabled = size < high - 0.001f) { step(1) }
         }
     })
 }

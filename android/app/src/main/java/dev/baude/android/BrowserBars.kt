@@ -22,13 +22,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
-import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.KeyboardArrowDown
-import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.outlined.AddBox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -65,17 +58,17 @@ fun EmissionBar(b: Browser, profile: String, go: (String) -> Unit, nav: (String)
         Modifier.fillMaxWidth().background(c.frame).statusBarsPadding().height(Gap.bar).padding(horizontal = 6.dp),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        IconButton(Icons.AutoMirrored.Filled.KeyboardArrowLeft, Wording.Browser.back, enabled = b.canBack.value) { nav("back") }
-        IconButton(Icons.AutoMirrored.Filled.KeyboardArrowRight, Wording.Browser.forward, enabled = b.canForward.value) { nav("forward") }
-        if (b.loading.value) IconButton(Icons.Filled.Close, Wording.Common.stop) { nav("stop") }
-        else IconButton(Icons.Filled.Refresh, Wording.Browser.reload) { nav("reload") }
+        IconButton(Adwaita.GoPrevious, Wording.Browser.back, enabled = b.canBack.value) { nav("back") }
+        IconButton(Adwaita.GoNext, Wording.Browser.forward, enabled = b.canForward.value) { nav("forward") }
+        if (b.loading.value) IconButton(Adwaita.WindowClose, Wording.Common.stop) { nav("stop") }
+        else IconButton(Adwaita.ViewRefresh, Wording.Browser.reload) { nav("reload") }
         Address(b.shownUrl.value, go, Modifier.weight(1f))
-        IconButton(Icons.Outlined.AddBox, Wording.Browser.newTab, onClick = newTab)
+        IconButton(Adwaita.TabNew, Wording.Browser.newTab, onClick = newTab)
         Row(Modifier.heightIn(min = Gap.composerButton).padding(horizontal = 8.dp), // (who: the profile's, the Bot's
             verticalAlignment = Alignment.CenterVertically) {                        // own, shown not changed here)
             Text(profile, style = Type.bold, color = c.fg.copy(alpha = c.fg.alpha * 0.5f), maxLines = 1,
                 overflow = TextOverflow.Ellipsis, modifier = Modifier.widthIn(max = 96.dp))
-            Icon(Icons.Filled.KeyboardArrowDown, null, tint = c.fg.copy(alpha = c.fg.alpha * 0.5f),
+            Icon(Adwaita.PanDown, null, tint = c.fg.copy(alpha = c.fg.alpha * 0.5f),
                 modifier = Modifier.size(16.dp))
         }
     }
@@ -135,7 +128,7 @@ fun TabStrip(b: Browser, pick: (String) -> Unit, close: (String) -> Unit) {
                         modifier = Modifier.weight(1f).padding(horizontal = 4.dp))
                     if (front) Box(Modifier.size(26.dp).clip(RoundedCornerShape(13.dp)).clickable { close(t.id) },
                         contentAlignment = Alignment.Center) {
-                        Icon(Icons.Filled.Close, "Close Tab", tint = c.fg, modifier = Modifier.size(16.dp))
+                        Icon(Adwaita.WindowClose, "Close Tab", tint = c.fg, modifier = Modifier.size(16.dp))
                     } else Spacer(Modifier.size(26.dp))
                 }
             }

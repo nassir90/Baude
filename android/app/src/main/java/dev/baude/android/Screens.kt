@@ -37,14 +37,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.ArrowUpward
-import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Dns
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -132,18 +124,18 @@ fun ChatPage(chat: Chat, name: String, hint: String = "Message $name", attach: B
                 ) {
                     Text(f.name, style = Type.caption, color = c.fg, maxLines = 1, overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.widthIn(max = 140.dp))
-                    IconButton(Icons.Filled.Close, Wording.Common.remove) { files.remove(f) }
+                    IconButton(Adwaita.WindowClose, Wording.Common.remove) { files.remove(f) }
                 }
             }
             Row(verticalAlignment = Alignment.Bottom) {
-                if (attach) IconButton(Icons.Filled.Add, "Attach images, PDFs or files") { pick.launch(arrayOf("*/*")) }
+                if (attach) IconButton(Adwaita.ListAdd, "Attach images, PDFs or files") { pick.launch(arrayOf("*/*")) }
                 Box(Modifier.weight(1f).padding(horizontal = 6.dp, vertical = 7.dp)) {
                     if (text.isEmpty()) Text(hint, style = Type.body, color = c.dim)
                     BasicTextField(text, { text = it }, textStyle = Type.body.copy(color = c.fg),
                         cursorBrush = SolidColor(c.accentBg), modifier = Modifier.fillMaxWidth().heightIn(max = 160.dp))
                 }
                 val ready = (text.isNotBlank() || files.isNotEmpty()) && !chat.busy.value && chat.preparing.value == 0
-                IconButton(Icons.Filled.ArrowUpward, Wording.Common.send, enabled = ready, tint = if (ready) c.accentFg else c.fg,
+                IconButton(Adwaita.Return, Wording.Common.send, enabled = ready, tint = if (ready) c.accentFg else c.fg,
                     background = if (ready) c.accentBg else null) {
                     chat.send(text, files.toList())
                     text = ""
@@ -272,7 +264,7 @@ private fun Choice(on: Boolean, multi: Boolean, label: String, about: String, to
             .border(1.5.dp, if (on) c.accentBg else c.dim, if (multi) RoundedCornerShape(4.dp)
                 else androidx.compose.foundation.shape.CircleShape),
             contentAlignment = Alignment.Center) {
-            if (on && multi) androidx.compose.material3.Icon(Icons.Filled.Check, null, tint = c.accentFg,
+            if (on && multi) androidx.compose.material3.Icon(Adwaita.ObjectSelect, null, tint = c.accentFg,
                 modifier = Modifier.size(14.dp))
             else if (on) Box(Modifier.size(6.dp).clip(androidx.compose.foundation.shape.CircleShape).background(c.accentFg))
         }
@@ -336,8 +328,8 @@ fun Said(line: Line, from: Msg.StoredSender? = null) {
 private fun Held(chat: Chat, h: Msg.HeldMessage, working: Boolean) {
     val c = LocalBaude.current
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.Bottom) {
-        IconButton(Icons.Filled.Close, Wording.Held.delete) { Mesh.held(chat, h.id.orEmpty(), false) }
-        IconButton(Icons.Filled.ArrowUpward, if (working) Wording.HeldSend.afterTurn else Wording.Held.send,
+        IconButton(Adwaita.WindowClose, Wording.Held.delete) { Mesh.held(chat, h.id.orEmpty(), false) }
+        IconButton(Adwaita.Return, if (working) Wording.HeldSend.afterTurn else Wording.Held.send,
             enabled = !working) { Mesh.held(chat, h.id.orEmpty(), true) }
         Column(Modifier.weight(1f, fill = false).clip(RoundedCornerShape(Gap.bubbleRadius)).background(c.raised)
             .padding(horizontal = Gap.bubbleH, vertical = Gap.bubbleV), horizontalAlignment = Alignment.End) {
@@ -355,8 +347,8 @@ private fun Waiting(u: Unsent, up: Boolean) {
     val failed = u.state.value == "failed"
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.Bottom) {
         if (failed) {
-            IconButton(Icons.Filled.Close, "Delete this message") { Mesh.dropUnsent(u) }
-            IconButton(Icons.Filled.ArrowUpward, "Send it again") { Mesh.again(u) }
+            IconButton(Adwaita.WindowClose, "Delete this message") { Mesh.dropUnsent(u) }
+            IconButton(Adwaita.Return, "Send it again") { Mesh.again(u) }
         }
         Column(Modifier.weight(1f, fill = false).padding(start = if (failed) 0.dp else 48.dp), horizontalAlignment = Alignment.End) {
             Column(Modifier.clip(RoundedCornerShape(Gap.bubbleRadius)).background(c.bubble.copy(alpha = c.bubble.alpha * 0.55f))
@@ -545,9 +537,9 @@ fun HostsScreen(back: () -> Unit) {
     var removing by remember { mutableStateOf<Host?>(null) }
     var renewing by remember { mutableStateOf(false) }
     Column(Modifier.fillMaxSize().background(c.frame)) {
-        Bar("Hosts", start = { IconButton(Icons.AutoMirrored.Filled.ArrowBack, Wording.Browser.back, onClick = back) },
+        Bar("Hosts", start = { IconButton(Adwaita.GoPrevious, Wording.Browser.back, onClick = back) },
             end = {
-                IconButton(Icons.Filled.Add, Wording.Sidebar.addHost) { adding = true }
+                IconButton(Adwaita.ListAdd, Wording.Sidebar.addHost) { adding = true }
                 if (Mesh.key.value != null) Menu(listOf("New Key…" to { renewing = true }))
             })
         Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).navigationBarsPadding().padding(12.dp),
@@ -607,7 +599,7 @@ fun HostsScreen(back: () -> Unit) {
                         Text(h.dest, style = Type.caption, color = c.dim)
                         Text(state, style = Type.caption, color = colour)
                     }
-                    IconButton(Icons.Filled.Delete, Wording.Common.remove) { removing = h }
+                    IconButton(Adwaita.UserTrash, Wording.Common.remove) { removing = h }
                 }
             }
             Members()

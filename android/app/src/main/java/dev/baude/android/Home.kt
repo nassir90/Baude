@@ -18,19 +18,9 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.NoteAdd
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.ArrowDropDown
-import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.Dns
-import androidx.compose.material.icons.filled.PhoneAndroid
-import androidx.compose.material.icons.filled.KeyboardArrowDown
-import androidx.compose.material.icons.filled.KeyboardArrowRight
-import androidx.compose.material.icons.filled.MoreVert
-import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
@@ -48,10 +38,15 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import org.json.JSONArray
 import org.json.JSONObject
 import java.time.Instant
@@ -250,8 +245,8 @@ fun Home(open: (String, String) -> Unit, hosts: () -> Unit, feedback: () -> Unit
     val more = remember { mutableStateListOf<String>() } // (sections shown whole this run: Show N more)
     Column(Modifier.fillMaxSize().background(c.frame)) {
         Bar("Baude", left = true, end = {
-            IconButton(Icons.Filled.PhoneAndroid, "This phone", onClick = phone) // (its own agents: PhoneScreen)
-            IconButton(Icons.Filled.Dns, "Hosts", onClick = hosts)
+            IconButton(Adwaita.Phone, "This phone", onClick = phone) // (its own agents: PhoneScreen)
+            IconButton(Adwaita.NetworkServer, "Hosts", onClick = hosts)
             Menu(listOf(Wording.Window.settings to settings, Wording.Fixes.sendFeedback to feedback))
         })
         note()
@@ -262,7 +257,7 @@ fun Home(open: (String, String) -> Unit, hosts: () -> Unit, feedback: () -> Unit
         // the top: New session and the host it's on, then the search and ⋮ (Baude's sidebar's top box)
         Column(Modifier.padding(start = 8.dp, end = 8.dp, top = 8.dp, bottom = 4.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-                SidebarAction(Icons.AutoMirrored.Filled.NoteAdd, Wording.Sidebar.newSession, Modifier.weight(1f)) {
+                SidebarAction(Adwaita.DocumentNew, Wording.Sidebar.newSession, Modifier.weight(1f)) {
                     starting = (HomePrefs.host.value.takeIf { it != "all" }) to null
                 }
                 HostPick()
@@ -295,9 +290,10 @@ fun Home(open: (String, String) -> Unit, hosts: () -> Unit, feedback: () -> Unit
                 val cap = if (query.isNotBlank() || sec.key in more) Int.MAX_VALUE else limit(sec.key)
                 var seen = 0
                 val rows = sec.rows.filter { if (it.depth == 0) seen++; seen <= cap }
-                items(rows, key = { sec.key + "/" + it.hostId + "/" + it.id }) { item ->
+                val through = through(rows)
+                itemsIndexed(rows, key = { _, it -> sec.key + "/" + it.hostId + "/" + it.id }) { i, item ->
                     if (item.bot != null && item.depth == 0) BotRow(item) { open(item.hostId, item.id) }
-                    else SessionRow(item) { open(item.hostId, item.id) }
+                    else SessionRow(item, through[i]) { open(item.hostId, item.id) }
                 }
                 if (tops > cap) item(key = "m:" + sec.key) { // (every row it hides counted, nested ones too)
                     Text(Wording.Meta.showMore(n = sec.rows.size - rows.size), style = Type.body, color = c.dim,
@@ -339,28 +335,58 @@ private fun Header(sec: Section, folded: Boolean, plus: (() -> Unit)?, toggle: (
     Row(Modifier.fillMaxWidth().padding(top = 6.dp, start = 4.dp).clip(RoundedCornerShape(6.dp)).clickable(onClick = toggle),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(2.dp)) {
         Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
-            Text(sec.label, style = Type.folder, color = c.fg, maxLines = 1, overflow = TextOverflow.Ellipsis,
+            Text(sec.label, style = Type.folder.copy(fontSize = 14.sp), color = c.fg, maxLines = 1, overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.alpha(0.6f).weight(1f, fill = false))
             Box(Modifier.size(20.dp).alpha(if (folded) 0.75f else 0.4f), contentAlignment = Alignment.Center) {
-                Icon(if (folded) Icons.Filled.KeyboardArrowRight else Icons.Filled.KeyboardArrowDown,
+                Icon(if (folded) Adwaita.PanEnd else Adwaita.PanDown,
                     if (folded) Wording.Common.expand else Wording.Common.collapse, tint = c.fg, modifier = Modifier.size(16.dp))
             }
         }
         if (plus != null) Box(Modifier.size(24.dp).alpha(0.75f).clip(RoundedCornerShape(6.dp)).clickable(onClick = plus),
             contentAlignment = Alignment.Center) {
-            Icon(Icons.Filled.Add, sec.hostId?.let {
+            Icon(Adwaita.ListAdd, sec.hostId?.let {
                 Wording.Sidebar.newSessionInOn(folder = shortPath(it, sec.folder.orEmpty()), host = Mesh.label(it))
             } ?: Wording.Sidebar.newSessionIn(folder = sec.full), tint = c.fg, modifier = Modifier.size(16.dp))
         }
     }
 }
 
-/** A chat's row (Baude's session_row): its title on one line, nested under its parent, its status dot. */
+/** Each row's levels whose parent has a child further down (its line runs on past the row, top to bottom): a level
+ * is open from a row at depth level + 1 up to the first row above that's at that depth or less. */
+private fun through(rows: List<Item>): List<Set<Int>> {
+    val open = HashSet<Int>()
+    val out = ArrayList<Set<Int>>(rows.size)
+    for (item in rows.asReversed()) {
+        out.add(open.filter { it < item.depth }.toSet())
+        open.removeAll { it >= item.depth }
+        if (item.depth > 0) open.add(item.depth - 1)
+    }
+    return out.asReversed()
+}
+
+/** A nested row's part of its parents' lines, as Baude's TreeList draws them, one joined line per parent: down from
+ * under the parent's title to its last child's middle, then a corner across to just short of that child's title;
+ * through: the levels whose line runs on past this row. */
+private fun Modifier.treeLines(depth: Int, through: Set<Int>, color: Color): Modifier = if (depth == 0) this else drawBehind {
+    val w = 1.dp.toPx()
+    val mid = (1.dp.toPx() + size.height) / 2 // (the title's middle: under the 1dp gap above the row)
+    for (k in 0 until depth) {
+        val x = (11 + 18 * k).dp.toPx() // (5 into the parent's title, as line_x)
+        if (k in through) drawRect(color, Offset(x, 0f), Size(w, size.height))
+        else if (k == depth - 1) {
+            drawRect(color, Offset(x, 0f), Size(w, mid + w))
+            drawRect(color, Offset(x + w, mid), Size((6 + 18 * depth - 4).dp.toPx() - x - w, w))
+        }
+    }
+}
+
+/** A chat's row (Baude's session_row): its title on one line, nested under its parent with its parents' lines, its
+ * status dot. */
 @Composable
-private fun SessionRow(item: Item, onClick: () -> Unit) {
+private fun SessionRow(item: Item, through: Set<Int>, onClick: () -> Unit) {
     val c = LocalBaude.current
     val s = item.s
-    Row(Modifier.fillMaxWidth().padding(top = 1.dp).heightIn(min = 26.dp).clip(RoundedCornerShape(6.dp))
+    Row(Modifier.fillMaxWidth().treeLines(item.depth, through, c.fg.copy(alpha = 0.3f)).padding(top = 1.dp).heightIn(min = 26.dp).clip(RoundedCornerShape(6.dp))
         .then(if ("${item.hostId}/${item.id}" in MetaTools.highlight) Modifier.background(c.accentBg.copy(alpha = 0.2f)) else Modifier)
         .clickable(onClick = onClick).padding(start = 6.dp + 18.dp * item.depth, end = 4.dp, top = 1.dp, bottom = 1.dp),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -422,7 +448,7 @@ fun SearchField(value: String, set: (String) -> Unit, hint: String, modifier: Mo
     val c = LocalBaude.current
     Row(modifier.clip(RoundedCornerShape(8.dp)).background(c.fg.copy(alpha = 0.08f)).padding(horizontal = 8.dp, vertical = 7.dp),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-        Icon(Icons.Filled.Search, null, tint = c.dim, modifier = Modifier.size(16.dp))
+        Icon(Adwaita.SystemSearch, null, tint = c.dim, modifier = Modifier.size(16.dp))
         Box(Modifier.weight(1f)) {
             if (value.isEmpty()) Text(hint, style = Type.body, color = c.dim, maxLines = 1)
             BasicTextField(value, set, singleLine = true, textStyle = Type.body.copy(color = c.fg),
@@ -444,7 +470,7 @@ private fun HostPick() {
             verticalAlignment = Alignment.CenterVertically) {
             Text(if (pick == "all" || pick !in ids) "All hosts" else Mesh.label(pick), style = Type.body, color = c.fg,
                 maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.widthIn(max = 120.dp))
-            Icon(Icons.Filled.ArrowDropDown, null, tint = c.fg, modifier = Modifier.size(18.dp))
+            Icon(Adwaita.PanDown, null, tint = c.fg, modifier = Modifier.size(18.dp))
         }
         Popover(open, { open = false }) {
             MenuChoice("All hosts", pick == "all") { HomePrefs.host.value = "all"; HomePrefs.save(); open = false }
@@ -461,7 +487,7 @@ private fun ViewMenu() {
     val c = LocalBaude.current
     var open by remember { mutableStateOf(false) }
     Box {
-        IconButton(Icons.Filled.MoreVert, Wording.Sidebar.groupByTip) { open = true }
+        IconButton(Adwaita.ViewMore, Wording.Sidebar.groupByTip) { open = true }
         Popover(open, { open = false }) {
             Heading(Wording.Sidebar.groupBy)
             MenuChoice(Wording.Common.folder, HomePrefs.by.value == "folder") { HomePrefs.by.value = "folder"; HomePrefs.save() }
@@ -499,7 +525,7 @@ fun Heading(text: String) {
 fun MenuChoice(label: String, on: Boolean, enabled: Boolean = true, onClick: () -> Unit) {
     val c = LocalBaude.current
     DropdownMenuItem({ Text(label, style = Type.body, color = if (enabled) c.fg else c.dim) }, onClick, enabled = enabled,
-        trailingIcon = { if (on) Icon(Icons.Filled.Check, null, tint = c.accent, modifier = Modifier.size(16.dp)) },
+        trailingIcon = { if (on) Icon(Adwaita.ObjectSelect, null, tint = c.accent, modifier = Modifier.size(16.dp)) },
         modifier = Modifier.heightIn(min = 38.dp))
 }
 
@@ -508,7 +534,7 @@ fun MenuChoice(label: String, on: Boolean, enabled: Boolean = true, onClick: () 
 fun Menu(items: List<Pair<String, () -> Unit>>) {
     var open by remember { mutableStateOf(false) }
     Box {
-        IconButton(Icons.Filled.MoreVert, Wording.ChatHeader.menu) { open = true }
+        IconButton(Adwaita.ViewMore, Wording.ChatHeader.menu) { open = true }
         Popover(open, { open = false }) {
             for ((label, go) in items) MenuChoice(label, false) { open = false; go() }
         }

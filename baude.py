@@ -13251,14 +13251,14 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
         self.host_label = Gtk.Label(label=THIS_MACHINE, css_classes=["chat-host", "mono"])
         statusbar.append(self.host_label)
         statusbar.append(self.status)
-        self.tasks_btn = Gtk.Button(visible=False, tooltip_text="Background tasks")
+        self.tasks_btn = Gtk.Button(visible=False, tooltip_text=wording.say("status_bar.tasks"))
         self.tasks_btn.add_css_class("flat")
         self.tasks_btn.add_css_class("tasks-indicator")
         self.tasks_btn.connect("clicked", lambda *_: self.show_panel(True))
         statusbar.append(self.tasks_btn)
         # (what the chat's spent, a label of its own, never cut short: the folder and the turn's figures give way,
         # however narrow the chat or long another host's path; beside the context count, the other running total)
-        self.cost_label = Gtk.Label(xalign=1, tooltip_text="What this chat has spent")
+        self.cost_label = Gtk.Label(xalign=1, tooltip_text=wording.say("status_bar.cost_tip"))
         statusbar.append(self.cost_label)
         statusbar.append(ctx)
 
@@ -14592,16 +14592,16 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
         self.cost_label.set_text(self.cost_said())
         self.status.set_tooltip_text(there or ("" if not here else self.run_cwd))
         self.host_label.set_text(THIS_MACHINE if here else remote_name(self.remote))
-        self.host_label.set_tooltip_text("The host this chat lives on: its files, and its agent's tools" +
-                                         ("" if here else f" ({self.remote.host})"))
+        self.host_label.set_tooltip_text(wording.say("status_bar.host_tip") if here else
+                                         wording.say("status_bar.host_tip_at", address=self.remote.host))
 
     def cost_said(self):
         """What the chat's spent, as the status bar says it: claude's figure ($0.0125); on a model run on your own
         machines (providers.runs_free), which a turn adds nothing to, $0.00 (local) while it's spent nothing, so it
         reads as a price and not as one missing."""
         if not self.total_cost and providerslib.runs_free(self.model):
-            return "$0.00 (local)"
-        return f"${self.total_cost:.4f}"
+            return wording.say("status_bar.cost_local")
+        return wording.say("status_bar.cost", cost=f"{self.total_cost:.4f}")
 
     def remote_folder(self):
         """A chat on another host's folder there, as its host says it: in the sessions it lists, else as it said it
@@ -15772,7 +15772,8 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
 
     def program_name(self):
         """What runs the chat's model, as a note names it: claude, pi, or Apple's model."""
-        return {"pi": "pi", "apple": "Apple's model", "codex": "Codex"}.get(model_program(self.model), "claude")
+        program = model_program(self.model)
+        return wording.say(f"programs.{program if program in ('pi', 'apple', 'codex') else 'claude'}")
 
     def revert_to(self, turn):
         """A message of yours reverted (UserTurn's button), tentatively, as a model or a folder picked for a chat is till
@@ -15999,8 +16000,9 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
         if proc is not self.proc or not self.busy:
             return False
         proc.stop_asked = "said"  # (its end said here: not again if its result comes after all, h_result)
-        self.note(f"{self.program_name()} hadn't stopped after {self.INTERRUPT_WAIT // 1000}s: ended it" if ran else
-                  f"{self.program_name()} wasn't running: turn ended")
+        self.note(wording.say("interrupt.not_stopped", program=self.program_name(),
+                              seconds=self.INTERRUPT_WAIT // 1000) if ran else
+                  wording.say("interrupt.not_running", program=self.program_name()))
         self.cut_short()
         if self.remote is not None:
             if ran:
@@ -16046,19 +16048,19 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
         self.sync_effort_choices()
         self.sync_local()
         if self.remote is None and model_program(value) != model_program(was):  # (Claude's to Apple's: another program)
-            self.note(f"model → {self.model_said(value)}: a new conversation")
+            self.note(wording.say("chat_header.model_note_new", name=self.model_said(value)))
             self.restart_proc(resume=False)
             return
         if self.remote is None and value != was and \
                 (model_program(value) == "pi" or modelslib.runs_on(value) != modelslib.runs_on(was)):
             # (pi-claude serves one model, and one on another host runs there: pi's session goes on, kept on the chat's
             # host; a network session's server starts it again on the new one itself)
-            self.note(f"model → {self.model_said(value)}")
+            self.note(wording.say("chat_header.model_note", name=self.model_said(value)))
             self.restart_proc(resume=True)
             return
         if self.proc:
             self.proc.control({"subtype": "set_model", "model": value})
-            self.note(f"model → {self.model_said(value)}")
+            self.note(wording.say("chat_header.model_note", name=self.model_said(value)))
             self.refresh_effort()  # the CLI may change or drop the effort with the model
             self.refresh_context()  # different models have different windows
         else:
@@ -16071,7 +16073,7 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
             self.effort = value
         if self.proc:
             self.proc.control({"subtype": "apply_flag_settings", "settings": {"effortLevel": value}})
-            self.note(f"thinking effort → {self.effort_dd.label()}")
+            self.note(wording.say("chat_header.effort_note", label=self.effort_dd.label()))
 
     def sync_effort_choices(self):
         """Offer the current model's effort levels; grey the picker out if it has none."""
@@ -16108,7 +16110,7 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
 
     def mode_taken(self, value):
         self.proc.mode = value  # (what it's in: where a mode it refuses next goes back to)
-        self.note(f"permission mode → {dict(MODES).get(value, value)}")
+        self.note(wording.say("chat_header.mode_note", mode=dict(MODES).get(value, value)))
 
     def mode_refused(self, value, error):
         """claude said no to a mode picked (Bypass permissions, when it wasn't started able to bypass them): the
@@ -16651,12 +16653,12 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
         running = self.running_tasks()
         agents = sum(t.get("task_type") == "local_agent" for t in running)
         procs = len(running) - agents
-        parts = ([f"{procs} background process{'es' if procs != 1 else ''}"] if procs else []) + \
-                ([f"{agents} subagent{'s' if agents != 1 else ''}"] if agents else [])
+        parts = ([wording.say("status_bar.processes", n=procs)] if procs else []) + \
+                ([wording.say("status_bar.subagents", n=agents)] if agents else [])
         self.tasks_btn.set_visible(bool(running))
-        self.tasks_btn.set_label("⚙ " + " · ".join(parts) + " running" if running else "")
+        self.tasks_btn.set_label(wording.say("status_bar.running", tasks=" · ".join(parts)) if running else "")
         self.tasks_btn.set_tooltip_text("\n".join(t.get("description") or t["task_id"] for t in running)
-                                        + "\nClick to open the side panel")
+                                        + "\n" + wording.say("status_bar.open_panel"))
 
     def stop_task(self, task_id):
         self.request({"subtype": "stop_task", "task_id": task_id}, lambda _r: None)
@@ -19271,15 +19273,16 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
             text = "This session is currently active elsewhere"
         elif kind == "missing":  # (its host there, but with no such session: session_missing)
             name = "Daemon" if self.remote.mine else remote_name(self.remote)
-            text = f"{name} couldn't take this chat up again: {self.missing_reason}" if self.missing_reason else \
-                f"{name} no longer has this chat"
+            text = wording.say("chat_banner.missing_because", name=name, reason=self.missing_reason) \
+                if self.missing_reason else wording.say("chat_banner.missing", name=name)
         elif kind == "drop":
             text = f"Connection to {'daemon' if self.remote.mine else remote_name(self.remote)} dropped"
         else:
             m = self.retrying or {}
-            what = f"The API returned {m['error_status']}" if m.get("error_status") else "The API didn't answer"
-            tries = f", attempt {m['attempt']} of {m['max_retries']}" if m.get("attempt") and m.get("max_retries") else ""
-            text = f"{what}: retrying{tries}"
+            what = wording.say("chat_banner.api_status", status=m["error_status"]) if m.get("error_status") else \
+                wording.say("chat_banner.api_silent")
+            text = wording.say("chat_banner.retrying_attempt", what=what, attempt=m["attempt"], max=m["max_retries"]) \
+                if m.get("attempt") and m.get("max_retries") else wording.say("chat_banner.retrying", what=what)
         if kind not in ("drop", "retry"):
             return GLib.markup_escape_text(text)
         n = self.banner_dots or 1
@@ -19312,7 +19315,7 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
             self.banner.set_title(self.banner_text(kind))
         if kind in ("drop", "retry") and self.banner_timer is None:
             self.banner_timer = GLib.timeout_add(widgets.WorkingDots.STEP_MS, self.tick_banner)
-        self.banner.set_button_label("New chat" if kind == "missing" else apart[2] if kind == "apart" else None)
+        self.banner.set_button_label(wording.say("chat_banner.new_chat") if kind == "missing" else apart[2] if kind == "apart" else None)
         self.banner.set_revealed(kind is not None)
         self.locked = live
         if hasattr(self, "composer_box"):
@@ -19413,8 +19416,9 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
                 self.login_prompt(msg["result"])
         self.end_turn()
         self.tell_desktop(self.session_id, turn_said(msg))
-        self.update_status(f"{msg.get('num_turns', 0)} turns · {msg.get('duration_ms', 0) / 1000:.1f}s"
-                           f" · in {fmt_tokens(tok)} / out {fmt_tokens(u.get('output_tokens', 0))} tok")
+        self.update_status(wording.say("status_bar.last_turn", turns=msg.get("num_turns", 0),
+                                       seconds=f"{msg.get('duration_ms', 0) / 1000:.1f}", used=fmt_tokens(tok),
+                                       written=fmt_tokens(u.get("output_tokens", 0))))
 
     def end_turn(self, proc=None):
         """A turn's over (its result; or stopped here, stop_stuck: proc, the claude it ran in): the chat not busy, and

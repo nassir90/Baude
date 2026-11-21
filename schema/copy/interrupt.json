@@ -1,0 +1,7 @@
+{
+  "description": "What a chat says when a turn it stopped didn't end by itself.",
+  "messages": {
+    "not_stopped": "{$program} hadn't stopped after {$seconds}s: ended it",
+    "not_running": "{$program} wasn't running: turn ended"
+  }
+}

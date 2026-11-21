@@ -196,17 +196,15 @@ private fun AskBox(hint: String, enabled: Boolean = true, send: (String) -> Unit
 fun FilesPage(hostId: String, sid: String) {
     val c = LocalBaude.current
     val root = Mesh.session(hostId, sid)?.cwd?.ifBlank { null }
-    if (root == null) return StatusPage(Adwaita.Folder, Wording.Lookup.files, "No folder yet")
+    if (root == null) return
     var at by remember(root) { mutableStateOf(root) }
     var entries by remember(at) { mutableStateOf<List<Msg.DirEntry>?>(null) }
-    var error by remember(at) { mutableStateOf<String?>(null) }
     var file by remember(root) { mutableStateOf<String?>(null) }
     var again by remember { mutableStateOf(0) }
     LaunchedEffect(at, again) {
         Mesh.ask(hostId, Msg.ListDir(path = at).json()) { r ->
             val d = Msg.Dir.from(r)
             if (r.optString("op") == Op.DIR && d.error.isNullOrBlank()) entries = d.entries.orEmpty()
-            else error = said(r, d.error).ifBlank { "Couldn't read it" }
         }
     }
     file?.let { f -> return FileView(hostId, f) { file = null } }
@@ -219,17 +217,16 @@ fun FilesPage(hostId: String, sid: String) {
                     overflow = TextOverflow.Ellipsis)
             }
             if (at != root) IconButton(Adwaita.GoUp, Wording.CodeView.upFolder) { at = at.substringBeforeLast('/') }
-            IconButton(Adwaita.ViewRefresh, Wording.CodeView.readFoldersAgain) { entries = null; error = null; again++ }
+            IconButton(Adwaita.ViewRefresh, Wording.CodeView.readFoldersAgain) { entries = null; again++ }
         }
         Scrolled {
             when {
-                error != null -> Empty(error!!)
-                entries == null -> Empty("Reading it…")
+                entries == null -> {}
                 else -> BoxedList(entries!!, Wording.CodeView.emptyFolder) { e ->
                     val path = "$at/${e.name.orEmpty()}"
                     val dir = e.dir == true
                     Box(Modifier.alpha(if (e.ignored == true) 0.55f else 1f)) {
-                        ActionRow(e.name.orEmpty(), if (dir) null else size(e.size?.toLong() ?: 0L),
+                        ActionRow(e.name.orEmpty(), null,
                             onClick = { if (dir) at = path else file = path },
                             prefix = { androidx.compose.material3.Icon(if (dir) Adwaita.Folder
                                 else Adwaita.TextXGeneric, null, tint = c.dim, modifier = Modifier.size(18.dp)) })
@@ -238,12 +235,6 @@ fun FilesPage(hostId: String, sid: String) {
             }
         }
     }
-}
-
-private fun size(n: Long) = when {
-    n < 1024 -> "$n bytes"
-    n < 1024 * 1024 -> "%.1f KB".format(n / 1024.0)
-    else -> "%.1f MB".format(n / 1024.0 / 1024.0)
 }
 
 private val PICTURES = setOf("png", "jpg", "jpeg", "gif", "webp", "bmp")
@@ -277,7 +268,7 @@ private fun FileView(hostId: String, path: String, back: () -> Unit) {
             val d = data
             when {
                 why != null -> Empty(Wording.FileView.unreadable(path = path, host = Mesh.label(hostId), why = why!!))
-                d == null -> Empty("Reading it…")
+                d == null -> {}
                 path.substringAfterLast('.').lowercase() in PICTURES -> BitmapFactory.decodeByteArray(d, 0, d.size)?.let {
                     Image(it.asImageBitmap(), path, contentScale = ContentScale.Fit, modifier = Modifier.fillMaxSize().padding(8.dp))
                 } ?: Empty("Not a picture this phone can read")
@@ -469,7 +460,7 @@ fun SignalPage(hostId: String, sid: String) {
     val c = LocalBaude.current
     val s = Mesh.session(hostId, sid)
     val cwd = s?.cwd?.ifBlank { null }
-    if (cwd == null) return StatusPage(Adwaita.InsertLink, Wording.SidePanel.signal, "No folder yet")
+    if (cwd == null) return
     var got by remember(cwd, sid) { mutableStateOf<Msg.SignalNamesReply?>(null) }
     var filter by remember { mutableStateOf("") }
     var again by remember { mutableStateOf(0) }
@@ -487,12 +478,9 @@ fun SignalPage(hostId: String, sid: String) {
             IconButton(Adwaita.ViewRefresh, "Read them again") { got = null; again++ }
         }
         when {
-            g == null -> Empty("Reading them…")
-            !g.error.isNullOrBlank() -> Empty(g.error)
+            g == null || !g.error.isNullOrBlank() -> {}
             else -> {
                 val refs = g.refs.orEmpty()
-                if (refs.isEmpty()) return@Column StatusPage(Adwaita.InsertLink, Wording.SidePanel.signal,
-                    Wording.Signal.empty)
                 fun n(st: String) = refs.count { it.status == st }
                 Scrolled {
                     Text(listOf<Pair<String, (Int) -> String>>("resolved" to { Wording.Signal.linked(n = it) },
@@ -501,6 +489,7 @@ fun SignalPage(hostId: String, sid: String) {
                         .filter { n(it.first) > 0 }.joinToString(" · ") { it.second(n(it.first)) } +
                         (g.glossary?.ifBlank { null }?.let { "\n" + Wording.Signal.glossary(path = it) } ?: ""), style = Type.caption, color = c.dim,
                         modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp))
+                    if (refs.isEmpty()) Empty(Wording.Signal.empty)
                     val f = filter.trim().lowercase()
                     for ((kind, rows) in refs.filter { f.isEmpty() || it.surface.orEmpty().lowercase().contains(f) }
                         .groupBy { it.kind.orEmpty() }) {

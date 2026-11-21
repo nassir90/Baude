@@ -95,7 +95,7 @@ fun NewSession(host: String?, folder: String?, done: () -> Unit, opened: (String
                 }
                 FormRow(Wording.Common.folder) { NameField(cwd, { cwd = it }, "~", {}, focus = focus == "folder") }
                 FormRow(Wording.NewSession.group) { Field(group, { group = it }, Wording.Sidebar.noGroup) }
-                FormRow(Wording.NewSession.prompt) {
+                FormRow(Wording.Common.prompt) {
                     Box(Modifier.fillMaxWidth().heightIn(min = 96.dp).border(1.dp, c.rule, RoundedCornerShape(Gap.cardRadius))
                         .padding(horizontal = 8.dp, vertical = 6.dp)) {
                         val focusing = remember { FocusRequester() }

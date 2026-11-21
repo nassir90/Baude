@@ -57,9 +57,16 @@ object CodeBlocks {
 fun diffBlock(old: String, new: String): List<Pair<String, String>> =
     (splitLines(old).map { "del" to it } + splitLines(new).map { "add" to it }).ifEmpty { listOf("ctx" to "") }
 
-private fun splitLines(s: String) = if (s.isEmpty()) emptyList() else s.removeSuffix("\n").lines()
 
 private typealias Spans = List<Triple<Int, Int, Tok>>
+
+private val styledCache = android.util.LruCache<List<Any?>, AnnotatedString>(1024)
+
+/** A text's coloured string, made once for the text, its spans and the colours (a block scrolled back in isn't made again). */
+private fun styled(text: String, spans: List<Triple<Int, Int, Tok>>, c: BaudeColors, dark: Boolean): AnnotatedString {
+    val key = listOf(text, spans.size, spans.firstOrNull(), spans.lastOrNull(), dark, c.fg)
+    return styledCache.get(key) ?: highlighted(text, spans, c, dark).also { styledCache.put(key, it) }
+}
 
 private val spansCache = android.util.LruCache<List<Any?>, List<Spans>>(128)
 
@@ -116,14 +123,14 @@ fun CodeBlock(code: String, lang: String = "", syntax: String? = lang.ifBlank { 
                                 else -> Color.Transparent
                             }
                             val lineSpans = spans.getOrElse(i) { emptyList() }
-                            Text(remember(line, lineSpans, dark, c.fg) { highlighted(line, lineSpans, c, dark) }, style = Type.mono, color = c.fg,
+                            Text(styled(line, lineSpans, c, dark), style = Type.mono, color = c.fg,
                                 softWrap = wrap, modifier = Modifier.fillMaxWidth().background(back).padding(horizontal = 8.dp))
                         }
                     }
                 }
             } else {
                 val main = spans.firstOrNull().orEmpty()
-                val text: AnnotatedString = remember(code, main, dark, c.fg) { highlighted(code, main, c, dark) }
+                val text: AnnotatedString = styled(code, main, c, dark)
                 Text(text, style = Type.mono, color = c.fg, softWrap = wrap,
                     modifier = Modifier.then(if (wrap) Modifier.fillMaxWidth() else Modifier.horizontalScroll(rememberScrollState()))
                         .padding(horizontal = 8.dp, vertical = 6.dp))

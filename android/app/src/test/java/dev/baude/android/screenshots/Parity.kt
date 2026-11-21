@@ -12,6 +12,7 @@ import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.state.ToggleableState
 import com.github.takahirom.roborazzi.captureScreenRoboImage
+import dev.baude.android.Ask
 import dev.baude.android.AppVersion
 import dev.baude.android.BaudeTheme
 import dev.baude.android.Change
@@ -101,10 +102,11 @@ abstract class Parity(private val theme: String, private val scene: String) {
         FixtureConnection.up(activity, h, home) { msg -> answer(msg) }
         val now = System.currentTimeMillis() / 1000.0
         val list = sessions.getJSONArray("sessions")
-        Mesh.sessions[h.id] = (0 until list.length()).map { list.getJSONObject(it) }.map { s ->
+        Mesh.sessions[h.id] = (0 until list.length()).map { list.getJSONObject(it) }.mapIndexed { i, s ->
             Msg.Session(id = s.getString("id"), title = s.getString("title"), cwd = "$home/${s.getString("folder")}",
                 updated = now - s.getDouble("ago"), said = now - s.getDouble("ago"),
-                created = now - s.getDouble("ago") - 600, state = s.getString("state"), model = s.getString("model"),
+                created = now - s.getDouble("ago") - 600,
+                state = (if (i == 0) sc.optString("state").ifBlank { null } else null) ?: s.getString("state"), model = s.getString("model"),
                 effort = s.getString("effort"), mode = s.getString("mode"),
                 size = if (s.isNull("transcript")) 0 else shown.size)
         }
@@ -205,15 +207,52 @@ abstract class Parity(private val theme: String, private val scene: String) {
                 if (name == "home-add-host") tap(Wording.Sidebar.addHost)
             }
             name.startsWith("chat") || name.startsWith("panel") || name == "menu" -> {
+                if (sc.optBoolean("open")) openAll(first.getString("id"))
                 show { ChatShell(host.getString("id"), first.getString("id"), back = {}, open = { _, _ -> }, feedback = {},
                     first = sc.optString("page").ifBlank { "chat" }) }
                 if (name == "menu") tap(Wording.ChatHeader.menu)
+                if (sc.optBoolean("open")) toEnd()
+                if (sc.has("ask")) ask(sc.getString("ask"))
             }
             name == "settings" -> show { SettingsScreen({}, {}) }
             name == "changelog" -> show { ChangelogScreen(null, {}) }
             else -> return false
         }
         return true
+    }
+
+    /** The permission its call asks, as claude's control_request for it (the call is the transcript's, with no result). */
+    private fun ask(id: String) {
+        val chat = Mesh.open!!
+        if (chat.calls.byId[id] == null) settle()
+        val call = chat.calls.byId.getValue(id)
+        chat.asks.add(Ask("perm-$id", call.name, JSONObject(call.input.toString()), id))
+        settle()
+    }
+
+    /** The chat read and every group and every call's input and output opened, before it's drawn (as desktop.py opens
+     * them: all open, the chat at its end). */
+    private fun openAll(first: String) {
+        val chat = Mesh.openChat(host.getString("id"), first)
+        settle()
+        for (call in chat.calls.byId.values) {
+            call.inputOpen = true
+            call.outputOpen = true
+            chat.calls.opened[call.id] = true
+        }
+    }
+
+    /** The chat's list (the one that scrolls up and down, with items) scrolled to its end. */
+    private fun toEnd() {
+        val list = roots().flatMap { all(it.semanticsOwner.rootSemanticsNode) }.firstOrNull { n ->
+            val c = n.config
+            c.contains(SemanticsProperties.CollectionInfo) && c.contains(SemanticsProperties.VerticalScrollAxisRange) &&
+                c.contains(SemanticsActions.ScrollBy)
+        } ?: return
+        repeat(8) {
+            list.config[SemanticsActions.ScrollBy].action?.invoke(0f, 2500f)
+            settle()
+        }
     }
 
     private fun transcript(file: String, lines: Int): String {

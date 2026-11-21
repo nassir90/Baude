@@ -97,6 +97,12 @@ fun ChatShell(hostId: String, sid: String, back: () -> Unit, open: (String, Stri
             FileLinks.showFiles = {}
         }
     }
+    LaunchedEffect(chat.showAgent.value) { // (View on a call's card: the Subagents page)
+        if (chat.showAgent.value == null) return@LaunchedEffect
+        all.indexOfFirst { it.key == "agents" }.takeIf { it >= 0 }?.let { pager.animateScrollToPage(it) }
+        kotlinx.coroutines.delay(100) // (the page has read it by now)
+        chat.showAgent.value = null
+    }
     LaunchedEffect(pager.currentPage, all.size) { all.getOrNull(pager.currentPage)?.let { shown = it.key } }
     LaunchedEffect(all.size) { // (a Bot no more: its pages gone, Meta shown if one of them was, as Baude does)
         val i = all.indexOfFirst { it.key == shown }

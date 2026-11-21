@@ -36,7 +36,9 @@
       "copy": [
         "common.allow",
         "asks.always_allow",
-        "common.deny"
+        "common.deny",
+        "tool_calls.denied_tool",
+        "tool_calls.not_answered_tool"
       ],
       "actions": [
         {

@@ -1,0 +1,24 @@
+{
+  "description": "A tool call's card in a chat (its header, toggles and what they open) and the fold of several in a row, in Baude and the Android app.",
+  "messages": {
+    "diff": "Diff",
+    "running_in_background": "running in background",
+    "denied": "denied",
+    "mcp": "MCP",
+    "image_not_decoded": "[image could not be decoded]",
+    "cut_chars": "… ({$n} chars)",
+    "all_occurrences": "all occurrences",
+    "from_line": "from line {$start}",
+    "edits": "{$n} edits",
+    "line_count": "{$n} lines",
+    "more_lines": "… {$n} more lines",
+    "yes": "yes",
+    "no": "no",
+    "count": "{$n} tool calls",
+    "failed": ", {$n} failed",
+    "interrupted": ", {$n} interrupted",
+    "view_tip": "Open this subagent in the side panel",
+    "denied_tool": "denied {$tool}",
+    "not_answered_tool": "not answered {$tool}"
+  }
+}

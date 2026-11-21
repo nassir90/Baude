@@ -7,7 +7,6 @@
     "host_named": "{$name} ({$host})",
     "host": "Host",
     "group": "Group",
-    "prompt": "Prompt",
     "spawn_agent": "Spawn an agent",
     "on_host": "New session on {$host}",
     "on_network": "New session on the network",

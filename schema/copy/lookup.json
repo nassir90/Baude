@@ -23,7 +23,6 @@
     "kubernetes_objects": "Kubernetes objects",
     "package": "Package",
     "packages": "Packages",
-    "command": "Command",
     "commands": "Commands",
     "external_tool": "External tool",
     "external_tools": "External tools",

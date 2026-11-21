@@ -42,10 +42,11 @@ fun alwaysOffered(m: String?, hostId: String? = null): Boolean = m == null ||
         m.startsWith("agent/") || m.startsWith("mlx-")) ||
     hostId != null && lists(hostId, "always_allow")
 
-/** One line of a chat as it's shown: yours, the Bot's, what it did (a tool it used), or a note (a background task
- * ended, a turn stopped, the conversation compacted, an API error). Two that aren't shown: "record", the end of a
- * transcript record (uuid: its uuid, shown or not), and "rewind", a revert's mark (uuid: the record it keeps last;
- * none, none kept). */
+/** One line of a chat as it's shown: yours, the Bot's, what it did (a tool it used: "call", by its id in the chat's
+ * Calls), or a note (a background task ended, "tasknote": its call's not drawn; the conversation compacted, an API
+ * error). Some aren't shown: "record", the end of a transcript record (uuid: its uuid, shown or not), "rewind", a
+ * revert's mark (uuid: the record it keeps last; none, none kept), and "stopped", a turn stopped (a note, unless a call
+ * of it says so). */
 data class Line(val kind: String, val text: String, val uuid: String? = null, val files: List<Sent> = emptyList())
 
 /** A file or picture sent with a message of yours, as its record has it (kind: "image" or "file"; data: a picture's
@@ -88,6 +89,8 @@ class Chat(hostId: String, sid: String) {
     val streamingThought = mutableStateOf("") // (and what it's thinking, as it comes)
     val streaming = mutableStateOf("") // (what its agent's writing now, as it comes: till its message is whole)
     val asks = mutableStateListOf<Ask>()      // (what its Bot asks, answered here: Allow, Deny)
+    val calls = ChatCalls()                     // (its tool calls, as their cards have them)
+    val showAgent = mutableStateOf<String?>(null) // (a call whose subagent's page is asked for: View)
     val fetched = HashSet<String>()           // (asks its host listed that weren't here: fetched again, once)
     val senders = mutableStateMapOf<String, Msg.StoredSender>() // (a message's uuid: who it's from, if not you, as its
     // host's sender store has it: wire's Senders)
@@ -589,6 +592,15 @@ object Mesh {
     fun answer(chat: Chat, ask: Ask, allow: Boolean, always: Boolean = false, answers: JSONObject? = null) {
         val c = conns[chat.hostId] ?: return
         chat.asks.remove(ask)
+        if (!allow && answers == null) {
+            val call = ask.toolUseId?.let { chat.calls.byId[it] }
+            val questions = ask.tool == "AskUserQuestion" && ask.input.optJSONArray("questions") != null
+            if (call != null) {
+                if (!questions) call.decision = "denied"
+            } else chat.lines.add(Line("note", if (questions) Wording.ToolCalls.notAnsweredTool(tool = ask.tool)
+                else Wording.ToolCalls.deniedTool(tool = ask.tool)))
+        }
+        if (answers != null) ask.toolUseId?.let { chat.calls.byId[it] }?.input = JSONObject(ask.input.toString()).put("answers", answers)
         val response = when {
             answers != null -> JSONObject().put("behavior", "allow")
                 .put("updatedInput", JSONObject(ask.input.toString()).put("answers", answers))
@@ -736,7 +748,12 @@ object Mesh {
                     chat.offset = next
                     for (line in lines) {
                         when (line.kind) {
-                            "use", "result", "task", "link" -> noted(chat, line)
+                            "call", "stopped" -> took(chat.calls, chat.lines, line)
+                            "result", "task" -> {
+                                noted(chat, line)
+                                took(chat.calls, chat.lines, line)
+                            }
+                            "use", "link" -> noted(chat, line)
                             "record" -> line.uuid?.let { chat.ends[it] = chat.lines.size }
                             "rewind" -> { // (what's after the record it keeps last dropped: all of what's read, if
                                 val keep = line.uuid?.let { chat.ends[it] } ?: 0 // that's before it)
@@ -751,7 +768,7 @@ object Mesh {
                 if (more || chat.again) {
                     chat.again = false
                     read(chat)
-                }
+                } else settle(chat.calls, session(chat.hostId, chat.sid)?.state)
             }
         }
     }
@@ -800,6 +817,12 @@ object Mesh {
     private fun task(chat: Chat, m: JSONObject) {
         if (!m.optString("subtype").startsWith("task_")) return
         val tool = m.optString("tool_use_id")
+        chat.calls.byId[tool]?.let { call ->
+            when (m.optString("subtype")) {
+                "task_started" -> call.bind(m.optString("task_id"), m.optString("task_type"))
+                "task_notification" -> call.finish(m.optString("status"), m.optString("summary"), null)
+            }
+        }
         var a = chat.agents.firstOrNull { it.toolUseId == tool || it.agentId.value == m.optString("task_id") }
         if (a == null) {
             if (m.optString("subtype") != "task_started" || m.optString("task_type") != "local_agent") return
@@ -1174,11 +1197,8 @@ private fun record(o: JSONObject, type: String, uuid: String?, out: MutableList<
                     if (type == "user") {
                         t = LEADING_REMINDERS.replace(t, "").trim()
                         when {
-                            t.startsWith("<task-notification") -> {
-                                out.add(Line("note", taskLine(t), uuid))
-                                out.add(Line("task", taskNote(t).toString(), uuid))
-                            }
-                            t.startsWith(STOPPED) -> out.add(Line("note", Wording.Meta.interrupted, uuid))
+                            t.startsWith("<task-notification") -> out.add(Line("task", taskNote(t).toString(), uuid))
+                            t.startsWith(STOPPED) -> out.add(Line("stopped", "", uuid))
                             t.contains("<command-name>") -> typed.add(command(t))
                             t.isEmpty() || NOT_TYPED.any { t.startsWith(it) } -> {}
                             else -> typed.add(t)
@@ -1194,16 +1214,28 @@ private fun record(o: JSONObject, type: String, uuid: String?, out: MutableList<
                 }
                 "document" -> if (type == "user") sent.add(Sent("file", b.optString("title").ifBlank { "document.pdf" },
                     "application/pdf", null))
-                "tool_use" -> if (type == "assistant") {
-                    out.add(Line("tool", toolLine(b), uuid))
+                "tool_use", "server_tool_use" -> if (type == "assistant") {
                     val name = b.optString("name")
+                    out.add(Line("call", JSONObject().put("id", b.optString("id")).put("name", name)
+                        .put("input", b.optJSONObject("input") ?: JSONObject()).toString(), uuid))
                     if (isAgent(name) || name.substringAfterLast("__") == "Artifact") out.add(Line("use",
                         JSONObject().put("id", b.optString("id")).put("name", name)
                             .put("input", b.optJSONObject("input") ?: JSONObject()).toString(), uuid))
                 }
-                "tool_result" -> if (type == "user") out.add(Line("result", JSONObject()
-                    .put("id", b.optString("tool_use_id")).put("is_error", b.optBoolean("is_error"))
-                    .put("text", resultText(b.opt("content"))).toString(), uuid))
+                "tool_result" -> {
+                    if (type == "user") out.add(Line("result", JSONObject()
+                        .put("id", b.optString("tool_use_id")).put("is_error", b.optBoolean("is_error"))
+                        .put("text", resultText(b.opt("content")))
+                        .put("images", JSONArray((b.opt("content") as? JSONArray).objects().filter { it.optString("type") == "image" }
+                            .mapNotNull { it.optJSONObject("source")?.optString("data")?.ifEmpty { null } }
+                            .map { JSONObject().put("data", it) })).toString(), uuid))
+                }
+                else -> {
+                    if (type == "assistant" && b.optString("type").endsWith("_tool_result")) out.add(Line("result", JSONObject()
+                        .put("id", b.optString("tool_use_id")).put("server", true)
+                        .put("is_error", b.optJSONObject("content")?.optString("type").orEmpty().endsWith("_error"))
+                        .put("text", "").toString(), uuid))
+                }
             }
         }
         if (type == "user" && (typed.isNotEmpty() || sent.isNotEmpty())) out.add(Line("you", typed.joinToString("\n\n"), uuid, sent))
@@ -1236,7 +1268,7 @@ fun toolDisplay(name: String): Pair<String, String?> {
     if (!name.startsWith("mcp__") || name.split("__").size < 3) return name to null
     val (_, rawServer, rawTool) = name.split("__", limit = 3)
     val server = rawServer.replace(Regex("^(claude_ai_|plugin_[^_]+_)"), "")
-    val source = if (Regex("[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}").matches(server)) "MCP"
+    val source = if (Regex("[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}").matches(server)) Wording.ToolCalls.mcp
     else MCP_NAMES[server.lowercase()] ?: humanize(server).split(" ").joinToString(" ") { it.replaceFirstChar(Char::uppercase) }
     val tool = if (rawTool.lowercase().startsWith(server.lowercase() + "_")) rawTool.substring(server.length + 1) else rawTool
     val title = humanize(tool)
@@ -1246,7 +1278,7 @@ fun toolDisplay(name: String): Pair<String, String?> {
 /** "Source: Title", or the title alone. */
 fun toolTitle(name: String): String = toolDisplay(name).let { (title, source) -> if (source != null) "$source: $title" else title }
 
-private fun humanize(id: String) =
+fun humanize(id: String) =
     id.replace(Regex("([a-z0-9])([A-Z])"), "$1 $2").replace("_", " ").replace("-", " ").trim().split(Regex("\\s+"))
         .joinToString(" ").lowercase()
 
@@ -1254,3 +1286,6 @@ private val MCP_NAMES = mapOf("github" to "GitHub", "gitlab" to "GitLab", "gmail
     "google_drive" to "Google Drive", "gcal" to "Google Calendar", "slack" to "Slack", "notion" to "Notion",
     "linear" to "Linear", "jira" to "Jira", "figma" to "Figma", "postgres" to "Postgres", "sqlite" to "SQLite",
     "playwright" to "Playwright", "sentry" to "Sentry")
+
+private fun JSONArray?.objects(): List<JSONObject> =
+    if (this == null) emptyList() else (0 until length()).mapNotNull { optJSONObject(it) }

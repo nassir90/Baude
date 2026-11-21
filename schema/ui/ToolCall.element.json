@@ -31,7 +31,9 @@
   "copy": [
     "meta",
     "common",
-    "images"
+    "images",
+    "tool_calls",
+    "code_view"
   ],
   "parts": [
     {
@@ -53,12 +55,11 @@
             "meta.input",
             "meta.output",
             "meta.error",
-            "common.view"
-          ],
-          "text": [
-            "Command",
-            "Prompt",
-            "Diff"
+            "common.view",
+            "common.command",
+            "common.prompt",
+            "tool_calls.diff",
+            "tool_calls.view_tip"
           ],
           "actions": [
             {
@@ -78,11 +79,11 @@
         {
           "name": "summary",
           "shows": "Plain weight, first line only, at most 120 characters, then cut with … to fit. What it is: Claude's description if the input has one; else the first of command, file_path, notebook_path, pattern, url, query, prompt, path, skill that's set. A command (Bash) without a description shows nothing here: a description on this line is always Claude's, never Baude's words. Grep/Glob's pattern is in monospace. An MCP tool's server name comes first, dimmed (55%), then two spaces (\"GitHub  …\"; an unnamed connector with only an id shows \"MCP\"). Then, dimmed at 55% after \"  · \": \"running in background\", \"interrupted\", and/or \"denied\". AskUserQuestion: its first question (+\" (+N more)\"), and once answered \"<header>: <answer> · <header>: <answer>\". The summary is selectable (to copy) and updates live as the input streams in.",
-          "text": [
-            "running in background",
-            "interrupted",
-            "denied",
-            "MCP"
+          "copy": [
+            "tool_calls.running_in_background",
+            "meta.interrupted",
+            "tool_calls.denied",
+            "tool_calls.mcp"
           ]
         },
         {
@@ -94,8 +95,8 @@
     {
       "name": "media",
       "shows": "Right under the header line (6px gap), always visible, not behind a toggle: any images the tool returned, each at most 480px on its longest side with 6px corners, clickable to the image viewer, right-click for its menu (see ImageViewer). An image that can't be decoded shows \"[image could not be decoded]\". An Artifact publish shows its \"Published …\" line here (see Artifact).",
-      "text": [
-        "[image could not be decoded]"
+      "copy": [
+        "tool_calls.image_not_decoded"
       ]
     },
     {
@@ -108,19 +109,33 @@
         },
         {
           "name": "Read",
-          "shows": "The path in monospace (85% opacity), then dimmed after two spaces \"lines 120–159\" (offset and limit) or \"from line 120\" (offset only); labelled rows for other fields (pages …). A plain Read has no input view at all (the header shows the path)."
+          "shows": "The path in monospace (85% opacity), then dimmed after two spaces \"lines 120–159\" (offset and limit) or \"from line 120\" (offset only); labelled rows for other fields (pages …). A plain Read has no input view at all (the header shows the path).",
+          "copy": [
+            "code_view.lines",
+            "tool_calls.from_line"
+          ]
         },
         {
           "name": "Edit",
-          "shows": "The path in monospace, \"all occurrences\" dimmed after it when replace_all; then the change as a diff: the old lines on red, then the new lines on green, highlighted as the file's code (see CodeBlock diff)."
+          "shows": "The path in monospace, \"all occurrences\" dimmed after it when replace_all; then the change as a diff: the old lines on red, then the new lines on green, highlighted as the file's code (see CodeBlock diff).",
+          "copy": [
+            "tool_calls.all_occurrences"
+          ]
         },
         {
           "name": "MultiEdit",
-          "shows": "The path, then dimmed \"N edits\"; then one red/green diff block per edit, one under another."
+          "shows": "The path, then dimmed \"N edits\"; then one red/green diff block per edit, one under another.",
+          "copy": [
+            "tool_calls.edits"
+          ]
         },
         {
           "name": "Write",
-          "shows": "The path, then dimmed \"N lines\"; then the whole file in a code block highlighted by its extension (tag \"python\", \"bash\", …), scrolling inside itself past two thirds of the chat's height. Past 2,000 lines it ends with \"… N more lines\"."
+          "shows": "The path, then dimmed \"N lines\"; then the whole file in a code block highlighted by its extension (tag \"python\", \"bash\", …), scrolling inside itself past two thirds of the chat's height. Past 2,000 lines it ends with \"… N more lines\".",
+          "copy": [
+            "tool_calls.line_count",
+            "tool_calls.more_lines"
+          ]
         },
         {
           "name": "Grep",
@@ -156,15 +171,19 @@
         },
         {
           "name": "MCP tools, NotebookEdit, ExitPlanMode, Skill, unknown tools",
-          "shows": "Labelled rows (\"key: value\" grid, 12px between columns, 4px between rows): each key humanized (snake_case, camelCase and kebab-case become lower-case words: file_path → \"file path\", -n → \"n\") right-aligned and dimmed, its value beside it filling the width. Values: text as is; true/false as \"yes\"/\"no\"; a list of plain values comma-joined (\"bug, ui\"); a list of one-key objects as their values comma-joined ([{\"login\":\"dev\"}] → \"dev\"); an object as nested labelled rows (up to 3 deep); a list of objects one under another; text with line breaks as a code block; anything else as compact JSON in monospace. Empty values (null, \"\", [], {}) are left out. Never raw JSON for the whole input. E.g. NotebookEdit: notebook path, cell id, new source (a code block), cell type, edit mode; ExitPlanMode: plan (a code block); Skill: skill, args."
+          "shows": "Labelled rows (\"key: value\" grid, 12px between columns, 4px between rows): each key humanized (snake_case, camelCase and kebab-case become lower-case words: file_path → \"file path\", -n → \"n\") right-aligned and dimmed, its value beside it filling the width. Values: text as is; true/false as \"yes\"/\"no\"; a list of plain values comma-joined (\"bug, ui\"); a list of one-key objects as their values comma-joined ([{\"login\":\"dev\"}] → \"dev\"); an object as nested labelled rows (up to 3 deep); a list of objects one under another; text with line breaks as a code block; anything else as compact JSON in monospace. Empty values (null, \"\", [], {}) are left out. Never raw JSON for the whole input. E.g. NotebookEdit: notebook path, cell id, new source (a code block), cell type, edit mode; ExitPlanMode: plan (a code block); Skill: skill, args.",
+          "copy": [
+            "tool_calls.yes",
+            "tool_calls.no"
+          ]
         }
       ]
     },
     {
       "name": "output view",
       "shows": "Opened by Output/Error, under the input view (6px gap), built when first opened. Each piece of text the tool returned is a code block (no tag), monospace, long lines scrolling sideways, at most two thirds of the chat's height then scrolling inside itself. Text over 200,000 characters is cut, ending \"… (N chars)\". A Read's output (the file's lines) has its line numbers dimmed and the lines highlighted as that file's code. A Task/Agent's final answer is drawn as markdown instead, not code. A background command's output (see BackgroundTask) is the last 6,000 bytes of its output file, \"… \" before it when cut, tagged \"output\".",
-      "text": [
-        "… (N chars)"
+      "copy": [
+        "tool_calls.cut_chars"
       ]
     },
     {
@@ -187,11 +206,11 @@
     },
     {
       "name": "error",
-      "shows": "Border in the theme's error red; the output button reads \"Error\" and holds what the tool said."
+      "shows": "Border in the theme's error red, and everything in the card (name, toggles, summary, code) drawn in that red too; the output button reads \"Error\" and holds what the tool said."
     },
     {
       "name": "interrupted",
-      "shows": "The turn ended (Esc / stop, or a saved chat whose call never got a result) before the call did: red border, no spinner, \"· interrupted\" dimmed after the summary. If its input never finished arriving, it has no Input button. A result that arrives later turns it back into done/error."
+      "shows": "The turn ended (Esc / stop, or a saved chat whose call never got a result) before the call did: red border and red content as for an error, no spinner, \"· interrupted\" dimmed after the summary. If its input never finished arriving, it has no Input button. A result that arrives later turns it back into done/error."
     },
     {
       "name": "background",

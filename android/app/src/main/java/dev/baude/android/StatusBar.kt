@@ -246,7 +246,7 @@ fun StatusBar(chat: Chat, openPage: (String) -> Unit) {
 
 /** The status bar's row: parts 12 apart, never wider than the bar, the cost and the context meter at its right.
  * What doesn't fit gives way: the folder and the turn's figures first (they have what room is left, and none when
- * it's short), then the tasks button, the working dots, the host; the cost and the meter never do. */
+ * it's short), then the tasks button, the host, the working dots; the cost and the meter never do. */
 @Composable
 private fun StatusRow(modifier: Modifier, content: @Composable () -> Unit) {
     androidx.compose.ui.layout.Layout(content, modifier) { measurables, k ->
@@ -255,7 +255,7 @@ private fun StatusRow(modifier: Modifier, content: @Composable () -> Unit) {
         val by = measurables.associateBy { it.layoutId as String }
         val kept = by.filterKeys { it != "folder" }.mapValues { it.value.measure(loose) }.toMutableMap()
         fun width() = kept.values.sumOf { it.width } + gap * (kept.size - 1)
-        for (id in listOf("tasks", "dots", "host")) if (width() > k.maxWidth) kept.remove(id)
+        for (id in listOf("tasks", "host", "dots")) if (width() > k.maxWidth) kept.remove(id)
         val room = k.maxWidth - width() - gap * 2
         val folder = by["folder"]?.takeIf { room >= 40.dp.roundToPx() }
             ?.measure(androidx.compose.ui.unit.Constraints(maxWidth = room))

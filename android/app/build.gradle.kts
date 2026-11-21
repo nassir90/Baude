@@ -678,8 +678,10 @@ androidComponents {
  * (GNOME's Adwaita icons) and baude (Baude's own), as dev.baude.android.Adwaita, an ImageVector each by its name
  * (go-previous-symbolic.svg: Adwaita.GoPrevious; baude-return-symbolic.svg: Adwaita.Return), its 16-square drawing in
  * the middle of a 19.2 square (so drawn at the sizes Material's 24-square ones were, it's as big as they looked); and
- * apps/baude-notification.svg as the notification's icon (drawable ic_baude). The SVG they use: path, rect and circle,
- * filled, in groups that scale, translate or rotate, with opacity. */
+ * links (a link's logo, drawn in the text's colour) as dev.baude.android.LinkLogos, each logo's shapes, filled or
+ * stroked, and what its mask cuts from them; and apps/baude-notification.svg as the notification's icon (drawable
+ * ic_baude). The SVG they use: path, rect and circle, filled or stroked, in groups that scale, translate or rotate,
+ * with opacity, and a mask (white shows, black cuts) for a cut-out. */
 abstract class BaudeIcons : DefaultTask() {
     @get:InputDirectory abstract val icons: DirectoryProperty
     @get:OutputDirectory abstract val outputDir: DirectoryProperty
@@ -790,6 +792,59 @@ abstract class BaudeIcons : DefaultTask() {
         return out.append("</vector>\n").toString()
     }
 
+    /** A shape of a logo as LinkLogos has it: P (a path), C (a circle) or Rr (a rectangle), stroked if it has a
+     * stroke, else filled. */
+    private fun shape(e: org.w3c.dom.Element, where: String): String {
+        fun n(k: String) = "${num(e.attr(k))}f"
+        val stroke = e.attr("stroke")?.takeIf { it != "none" } != null
+        val how = if (stroke) "width = ${num(e.attr("stroke-width") ?: "1")}f" else "fill = true"
+        return when (e.tagName) {
+            "path" -> "P(\"${e.getAttribute("d")}\", $how)"
+            "circle" -> "C(${n("cx")}, ${n("cy")}, ${n("r")}, $how)"
+            "rect" -> "Rr(${n("x")}, ${n("y")}, ${n("width")}, ${n("height")}, ${n("rx")}, $how)"
+            else -> throw GradleException("schema/icons/$where: <${e.tagName}> isn't drawn here")
+        }
+    }
+
+    /** LinkLogos: schema/icons/links' logos, by their files' names. */
+    private fun linkLogos(dir: File): String {
+        val out = StringBuilder()
+        out.append("// Made from schema/icons/links as the app's built (build.gradle.kts's baudeIcons): never edited, never kept.\n")
+        out.append("package dev.baude.android\n\n")
+        out.append("/** A link's logos (schema/icons/links, as the desktop draws them), in a 16 by 16 square. */\n")
+        out.append("object LinkLogos {\n")
+        out.append("    /** A logo's shape: a path, circle or rectangle, filled or stroked in the text's colour. */\n")
+        out.append("    sealed interface Shape\n")
+        out.append("    class P(val d: String, val fill: Boolean = false, val width: Float = 1.35f) : Shape\n")
+        out.append("    class C(val x: Float, val y: Float, val r: Float, val fill: Boolean = false, val width: Float = 1.35f) : Shape\n")
+        out.append("    class Rr(val x: Float, val y: Float, val w: Float, val h: Float, val rx: Float, val fill: Boolean = false,\n")
+        out.append("             val width: Float = 1.35f) : Shape\n\n")
+        out.append("    /** A logo: its shapes, and for a cut-out one (git, Kubernetes, a database) what's cut from them. */\n")
+        out.append("    class Logo(val shapes: List<Shape>, val cut: List<Shape> = emptyList())\n\n")
+        out.append("    /** Each logo, by its file's name. */\n")
+        out.append("    val all: Map<String, Logo> = mapOf(\n")
+        for (f in dir.listFiles { f -> f.name.endsWith(".svg") }!!.sortedBy { it.name }) {
+            val where = "links/${f.name}"
+            val svg = read(f)
+            val masks = svg.getElementsByTagName("mask").let { m -> (0 until m.length).map { m.item(it) as org.w3c.dom.Element } }
+            val shapes = ArrayList<String>()
+            val cut = ArrayList<String>()
+            for (e in svg.kids()) {
+                if (e.tagName == "defs") continue
+                shapes.add(shape(e, where))
+                val ref = e.attr("mask") ?: continue
+                val mask = masks.firstOrNull { "url(#${it.getAttribute("id")})" == ref }
+                    ?: throw GradleException("schema/icons/$where: no mask $ref")
+                for (c in mask.kids()) if (c.attr("fill")?.lowercase() !in setOf("#fff", "#ffffff", "white")) cut.add(shape(c, where))
+            }
+            val name = f.name.removeSuffix(".svg")
+            out.append("        \"$name\" to Logo(listOf(${shapes.joinToString(", ")})")
+            if (cut.isNotEmpty()) out.append(", listOf(${cut.joinToString(", ")})")
+            out.append("),\n")
+        }
+        return out.append("    )\n}\n").toString()
+    }
+
     @TaskAction
     fun write() {
         val root = icons.get().asFile
@@ -848,6 +903,7 @@ abstract class BaudeIcons : DefaultTask() {
             |        return b.build()
             |    }
             |""".trimMargin() + blocks + "}\n")
+        dir.resolve("LinkLogos.kt").writeText(linkLogos(root.resolve("links")))
         val res = resDir.get().asFile.resolve("drawable")
         res.mkdirs()
         res.resolve("ic_baude.xml").writeText(drawable(root.resolve("apps/baude-notification.svg")))

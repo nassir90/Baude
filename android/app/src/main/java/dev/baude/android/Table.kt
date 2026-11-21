@@ -44,7 +44,7 @@ fun MarkdownTable(rows: List<List<String>>, color: Color, under: Color) {
         fun natural(text: AnnotatedString, head: Boolean): Dp {
             val key = listOf(text, head, density.density, density.fontScale)
             return widthCache.get(key) ?: with(density) {
-                measure.measure(text, if (head) bold else Type.body, softWrap = false).size.width.toDp()
+                measure.measure(text, if (head) bold else Type.body, softWrap = false, placeholders = RefIcons.placeholders(text)).size.width.toDp()
             }.also { widthCache.put(key, it) }
         }
         val long = (0 until columns).filter { col -> rows.any { it.getOrElse(col) { "" }.length > Tokens.Markdown.tableWrapChars } }
@@ -64,7 +64,7 @@ fun MarkdownTable(rows: List<List<String>>, color: Color, under: Color) {
                         Row(Modifier.background(if (head) c.raised.compositeOver(under) else Color.Transparent)) {
                             row.forEachIndexed { col, text ->
                                 val w = if (col in long) maxOf(char, minOf(share, widths[col])) else widths[col]
-                                Text(text, style = if (head) bold else Type.body, color = color,
+                                Text(text, style = if (head) bold else Type.body, color = color, inlineContent = RefIcons.inline,
                                     modifier = Modifier.width(w + 24.dp).padding(horizontal = 12.dp, vertical = if (head) 5.dp else 4.dp))
                             }
                         }

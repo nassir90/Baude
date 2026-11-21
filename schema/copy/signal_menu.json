@@ -1,0 +1,11 @@
+{
+  "description": "The header's Signal button and its popover: this chat's two switches",
+  "messages": {
+    "show_links": "Show links",
+    "show_links_detail": "Draw the names Signal knows as links: files, code, commits, routes, Kubernetes objects, tools",
+    "activate": "Activate Signal",
+    "activate_detail": "Look up the names in this chat's replies as they come, and let the reader (a model session) read the chat",
+    "tip_off": "Signal is off. Click for its switches: Show links draws the files, code, commits, env vars, routes, Kubernetes objects and tools Claude names as links; Activate Signal looks them up",
+    "tip_links": "Signal shows its links but isn't running: {$status}.\nClick for its switches"
+  }
+}

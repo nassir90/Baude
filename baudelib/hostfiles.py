@@ -167,18 +167,18 @@ def git(server, msg):
 
 def signal_names(server, msg):
     """signal_names {cwd, session?}: the names Signal's glossary has for the folder (the chat's own mentions only,
-    session given: its id there), read as they are: [{surface, kind, canonical, status, summary, locations}], and the
-    glossary's path. Nothing's looked up or written: that's Signal's, where Baude runs it."""
+    session given: its id there), read as they are: [{surface, kind, canonical, status, summary, reason, data, locations}],
+    the glossary's path and the checkout's top (root, what the locations' paths are from). Nothing's looked up or written: that's Signal's, where Baude runs it."""
     import lookup  # (no GTK in it)
     cwd = _inside(server, msg.get("cwd"))
     place = lookup.signal_place(cwd)
     db = os.path.join(place.store, "signal.db")
     if not os.path.exists(db):
-        return {"glossary": None, "refs": []}
+        return {"glossary": None, "root": place.top or cwd, "refs": []}
     try:
         con = sqlite3.connect(f"file:{db}?mode=ro", uri=True, timeout=5)
     except sqlite3.Error as e:
-        return {"glossary": db, "refs": [], "error": str(e)}
+        return {"glossary": db, "root": place.top or cwd, "refs": [], "error": str(e)}
     try:
         q = ("SELECT e.id, a.surface, e.kind, e.canonical, e.status, e.reason, e.data FROM alias a JOIN entity e "
              "ON e.id = a.entity_id WHERE a.checkout = ? AND a.scope = ?")
@@ -190,14 +190,15 @@ def signal_names(server, msg):
         rows = con.execute(q + " ORDER BY e.kind, a.surface LIMIT 2000", args).fetchall()
         refs = []
         for eid, surface, kind, canonical, status, reason, data in rows:
-            locs = [dict(zip(("role", "path", "line", "note", "rev"), r)) for r in con.execute(
-                "SELECT role, path, line, note, rev FROM location WHERE entity_id = ? LIMIT 20", (eid,))]
+            locs = [dict(zip(("role", "path", "line", "note", "rev", "state", "commit_sha", "branch"), r))
+                    for r in con.execute("SELECT role, path, line, note, rev, state, commit_sha, branch FROM location "
+                                         "WHERE entity_id = ? LIMIT 20", (eid,))]
             ref = lookup.Ref(surface, kind, status or "pending", canonical, reason or "",
                              json.loads(data) if data else {}, locs)
             refs.append({"surface": surface, "kind": kind, "canonical": ref.canonical, "status": ref.status,
-                         "summary": ref.summary(), "locations": locs})
+                         "summary": ref.summary(), "reason": ref.reason, "data": ref.data, "locations": locs})
     except (sqlite3.Error, ValueError) as e:
-        return {"glossary": db, "refs": [], "error": str(e)}
+        return {"glossary": db, "root": place.top or cwd, "refs": [], "error": str(e)}
     finally:
         con.close()
-    return {"glossary": db, "refs": refs}
+    return {"glossary": db, "root": place.top or cwd, "refs": refs}

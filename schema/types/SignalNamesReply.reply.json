@@ -15,6 +15,10 @@
       "type": ["string", "null"],
       "description": "The glossary's path; null for none."
     },
+    "root": {
+      "type": ["string", "null"],
+      "description": "The checkout's top folder the locations' paths are relative to."
+    },
     "refs": {
       "type": "array",
       "items": {

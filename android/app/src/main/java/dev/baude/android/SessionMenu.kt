@@ -127,7 +127,7 @@ fun SessionMenu(item: Item, open: Boolean, at: DpOffset, dismiss: () -> Unit) {
     Popover(open, dismiss, offset = at) {
         if (page == "groups") {
             Row(Modifier.heightIn(min = 38.dp).clickable { page = "items" }.padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-                Icon(Adwaita.GoPrevious, null, tint = c.fg, modifier = Modifier.size(16.dp))
+                Icon(Adwaita.GoPrevious, null, tint = c.fg, modifier = Modifier.size(16.dp.icon))
                 Text(Wording.Sidebar.moveToGroup, style = Type.bold, color = c.fg, modifier = Modifier.padding(start = 8.dp))
             }
             HorizontalDivider(color = c.rule)
@@ -187,6 +187,6 @@ fun MenuRow(label: String, onClick: () -> Unit) {
     val c = LocalBaude.current
     Row(Modifier.heightIn(min = 38.dp).clickable(onClick = onClick).padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
         Text(label, style = Type.body, color = c.fg, modifier = Modifier.weight(1f))
-        Icon(Adwaita.GoNext, null, tint = c.fg, modifier = Modifier.size(16.dp))
+        Icon(Adwaita.GoNext, null, tint = c.fg, modifier = Modifier.size(16.dp.icon))
     }
 }

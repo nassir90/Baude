@@ -152,7 +152,7 @@ fun CodeBlock(code: String, lang: String = "", syntax: String? = lang.ifBlank { 
                     ctx.getSystemService(Context.CLIPBOARD_SERVICE).let { it as ClipboardManager }
                         .setPrimaryClip(ClipData.newPlainText("code", code))
                 }, contentAlignment = Alignment.Center) {
-                    Icon(Adwaita.EditCopy, Wording.Common.copy, modifier = Modifier.size(16.dp),
+                    Icon(Adwaita.EditCopy, Wording.Common.copy, modifier = Modifier.size(16.dp.icon),
                         tint = c.fg.copy(alpha = c.fg.alpha * Tokens.Markdown.codeCopyOpacity.toFloat()))
                 }
             }

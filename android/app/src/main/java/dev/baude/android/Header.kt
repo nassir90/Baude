@@ -315,6 +315,7 @@ fun ChatControls(hostId: String, sid: String, said: (String) -> Unit, open: (Str
                 }
             }
         }
+        if (takes(hostId, "signal_names")) SignalButton(hostId, sid)
     }
     // (what's listed now is what was picked: no longer held here)
     androidx.compose.runtime.SideEffect { for (k in asked.keys.toList()) if (listed(k) == asked[k]) asked.remove(k) }

@@ -1,0 +1,51 @@
+{
+ "description": "A Signal glossary for the garden fixture: what signal_names answers (the phone), written into <garden>/.baude/signal.db (the desktop).",
+ "refs": [
+  {
+   "surface": "RETRY_S",
+   "kind": "constant",
+   "canonical": "RETRY_S",
+   "status": "resolved",
+   "reason": "",
+   "summary": "Definition in garden/upload.py:4",
+   "data": {},
+   "locations": [
+    {
+     "role": "definition",
+     "path": "garden/upload.py",
+     "line": 4,
+     "note": null,
+     "rev": null
+    }
+   ]
+  },
+  {
+   "surface": "tests/server.py:20",
+   "kind": "file",
+   "canonical": "tests/server.py:20",
+   "status": "stale",
+   "reason": "",
+   "summary": "Stale: the code changed and this couldn't be found again",
+   "data": {},
+   "locations": [
+    {
+     "role": "file",
+     "path": "tests/server.py",
+     "line": 20,
+     "note": null,
+     "rev": null
+    }
+   ]
+  },
+  {
+   "surface": "bench_drop",
+   "kind": "symbol",
+   "canonical": "bench_drop",
+   "status": "not_found",
+   "reason": "no definition of it in the repository",
+   "summary": "Not found: no definition of it in the repository",
+   "data": {},
+   "locations": []
+  }
+ ]
+}

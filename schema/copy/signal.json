@@ -10,6 +10,27 @@
     "stale": "{$n} stale",
     "glossary": "Glossary: {$path}",
     "empty": "No names yet: the files, commits, env vars and routes in Claude's replies show up here.",
-    "database_tables": "Database tables and columns"
+    "database_tables": "Database tables and columns",
+    "this_chat": "Signal, for this chat",
+    "lsp": "LSP",
+    "reader_tip": "The reader: a model session reads the chat in order, like a person following along (your messages, what Claude ran and saw, its replies), and decides what each name points at in each reply, with Signal's lookups as its tools; its spending is capped and shown in the status line",
+    "lsp_tip": "Language servers: pyright and typescript-language-server say which definition a code name means (whose field previous.job_id is). Baude fetches them once with npm, at pinned versions, and runs them read-only",
+    "tools_tip": "Tool schemas: when a reply talks about a tool (the Agent tool, Read), show what it takes, from Anthropic's Agent SDK types and the Claude Code docs (fetched once per Claude Code version)",
+    "off": "Signal is off. Turned on (here, or with the link button in the header), the files, code, commits, env vars, routes, Kubernetes objects and tools Claude names become links, listed here.",
+    "not_running": "Not running: the links are what needs no model (the glossary's, the catalogue's and git's: {$n} names)",
+    "looking_up_group": "Looking up",
+    "all_names": "All names",
+    "locations": "Locations",
+    "running": "Running",
+    "refresh": "Refresh",
+    "refresh_tip": "Search again, ignoring what was found or given up on",
+    "show_in_git": "Show in Git",
+    "show_in_git_tip": "Its place in the history, on the Git page",
+    "search_again_one": "Search again",
+    "status_not_found": "Not found: {$reason}.",
+    "status_stale": "Stale: the code changed and this couldn't be found again. It can still be opened as it was.",
+    "status_matches": "{$n} matches ({$why}).",
+    "database_column": "Database column",
+    "found": "Found. {$status}"
   }
 }

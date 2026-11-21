@@ -37,6 +37,12 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.graphics.compositeOver
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onKeyEvent
+import androidx.compose.ui.input.key.type
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Text
@@ -82,6 +88,27 @@ fun ChatPage(chat: Chat, name: String, hint: String = "Message $name", attach: B
         chat.draft.value = null
     }
     val list = rememberLazyListState()
+    var revealed by remember(chat) { mutableStateOf<String?>(null) } // (the message whose revert button's shown)
+    var reverting by chat::reverting
+    val canRevert = takes(at, "control") && chat.sender == null
+    val focus = remember { androidx.compose.ui.focus.FocusRequester() }
+    var field by remember { mutableStateOf(androidx.compose.ui.text.input.TextFieldValue(text)) }
+    if (field.text != text) field = androidx.compose.ui.text.input.TextFieldValue(text, androidx.compose.ui.text.TextRange(text.length))
+    fun cancelRevert() {
+        val r = reverting ?: return
+        if (r.asked) return // (asked of claude: its answer's waited for)
+        text = r.draft
+        reverting = null
+    }
+    androidx.activity.compose.BackHandler(enabled = reverting != null) { cancelRevert() } // (consumed while asked too: Back does nothing then)
+    LaunchedEffect(chat.clearBox.value) {
+        if (chat.clearBox.value) {
+            text = ""
+            chat.clearBox.value = false
+        }
+    }
+    LaunchedEffect(reverting?.uuid) { if (reverting != null) focus.requestFocus() }
+    LaunchedEffect(list.isScrollInProgress) { if (list.isScrollInProgress) revealed = null }
     // (kept at the end while it's there: what it said last, or what it asks, a tall one's foot too, what it's writing
     // as it grows; scrolled up to read, left where it is)
     var follow by remember(chat) { mutableStateOf(true) }
@@ -94,14 +121,31 @@ fun ChatPage(chat: Chat, name: String, hint: String = "Message $name", attach: B
         }
     }
     Mesh.tick.value
+    val density = androidx.compose.ui.platform.LocalDensity.current
     Column(Modifier.fillMaxSize().inside(c)) {
         BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
         val side = if (Settings.fullWidth.value) 0.dp else (maxWidth - chatColumn(maxWidth)) / 2
-        LazyColumn(Modifier.fillMaxSize(), state = list,
+        LazyColumn(Modifier.fillMaxSize().onSizeChanged {
+            CodeBlocks.maxHeight = CodeBlocks.forChat(with(density) { it.height.toDp() })
+        }, state = list,
             contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = Gap.chatH + side, vertical = Gap.chatV),
             verticalArrangement = Arrangement.spacedBy(Gap.messageGap)) {
-            items(chat.lines) { line -> Said(line, line.uuid?.let { chat.senders[it] }.takeIf { line.kind == "you" }) }
-            if (chat.streaming.value.isNotEmpty()) item { SelectionContainer { Prose(chat.streaming.value) } }
+            val taken = reverting?.let { r -> chat.lines.indexOfFirst { it.kind == "you" && it.uuid == r.uuid }.takeIf { it >= 0 } }
+            val shown = if (taken != null) chat.lines.take(taken) else chat.lines
+            items(shown) { line ->
+                val uuid = line.uuid
+                Said(line, uuid?.let { chat.senders[it] }.takeIf { line.kind == "you" },
+                    if (canRevert && line.kind == "you" && uuid != null) RevertOffer(revealed == uuid, { revealed = uuid }) {
+                        revealed = null
+                        if (reverting?.asked == true) return@RevertOffer
+                        reverting = Reverting(uuid, reverting?.draft ?: text)
+                        text = line.text
+                    } else null)
+            }
+            if (taken == null && chat.streamingThought.value.isNotBlank()) item {
+                SelectionContainer { Thinking(chat.streamingThought.value) }
+            }
+            if (taken == null && chat.streaming.value.isNotEmpty()) item { SelectionContainer { Prose(chat.streaming.value) } }
             items(chat.asks, key = { it.rid }) { ask -> // (this phone's own agents: as claude's)
                 Asked(chat, ask, alwaysOffered(session?.let { it.model.orEmpty() }, at),
                     if (session?.bot != null) name else "Claude") // (a Bot's question: its name's)
@@ -136,15 +180,27 @@ fun ChatPage(chat: Chat, name: String, hint: String = "Message $name", attach: B
                 if (attach) IconButton(Adwaita.ListAdd, "Attach images, PDFs or files") { pick.launch(arrayOf("*/*")) }
                 Box(Modifier.weight(1f).padding(horizontal = 6.dp, vertical = 7.dp)) {
                     if (text.isEmpty()) Text(hint, style = Type.body, color = c.dim)
-                    BasicTextField(text, { text = it }, textStyle = Type.body.copy(color = c.fg),
-                        cursorBrush = SolidColor(c.accentBg), modifier = Modifier.fillMaxWidth().heightIn(max = 160.dp))
+                    BasicTextField(field, { field = it; text = it.text }, textStyle = Type.body.copy(color = c.fg),
+                        cursorBrush = SolidColor(c.accentBg), modifier = Modifier.fillMaxWidth().heightIn(max = 160.dp)
+                            .focusRequester(focus).onKeyEvent {
+                                if (it.key == androidx.compose.ui.input.key.Key.Escape && reverting != null) {
+                                    if (it.type == androidx.compose.ui.input.key.KeyEventType.KeyUp) cancelRevert()
+                                    true
+                                } else false
+                            })
                 }
-                val ready = (text.isNotBlank() || files.isNotEmpty()) && !chat.busy.value && chat.preparing.value == 0
+                val ready = (text.isNotBlank() || files.isNotEmpty()) && !chat.busy.value && chat.preparing.value == 0 &&
+                    reverting?.asked != true
                 IconButton(Adwaita.Return, Wording.Common.send, enabled = ready, tint = if (ready) c.accentFg else c.fg,
                     background = if (ready) c.accentBg else null) {
-                    chat.send(text, files.toList())
-                    text = ""
-                    files.clear()
+                    val r = reverting
+                    if (r != null) commitRevert(chat, r, text, files.toList()) { ok ->
+                        if (ok) text = ""
+                    } else {
+                        chat.send(text, files.toList())
+                        text = ""
+                        files.clear()
+                    }
                 }
             }
         }
@@ -308,7 +364,7 @@ private val SAID_BY = Regex("""\A<baude-sender(?: [a-z_]+="[^"<>]*")*>[^<]*</bau
  * another's: where yours are, grey, as Baude draws it, with "from <who>" small at its top, and what the store says is
  * shown of it in place of its text if it says (shown: a held answer sent, drawn as the held one was). */
 @Composable
-fun Said(line: Line, from: Msg.StoredSender? = null) {
+fun Said(line: Line, from: Msg.StoredSender? = null, revert: RevertOffer? = null) {
     val c = LocalBaude.current
     when {
         from != null -> Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
@@ -317,12 +373,11 @@ fun Said(line: Line, from: Msg.StoredSender? = null) {
                 Text(Wording.Common.fromWho(author = senderName(from)), style = Type.caption, color = c.dim)
                 SelectionContainer {
                     val shown = from.shown
-                    if (shown != null) Prose(SAID_BY.replace(shown, "").trim(), codeBg = c.inside)
-                    else Text(SAID_BY.replace(line.text, "").trim(), style = Type.body, color = c.fg)
+                    Prose(SAID_BY.replace(shown ?: line.text, "").trim(), under = c.raised.compositeOver(c.inside))
                 }
             }
         }
-        else -> SaidLine(line)
+        else -> SaidLine(line, revert)
     }
 }
 
@@ -339,7 +394,7 @@ private fun Held(chat: Chat, h: Msg.HeldMessage, working: Boolean) {
         Column(Modifier.weight(1f, fill = false).clip(RoundedCornerShape(Gap.bubbleRadius)).background(c.raised)
             .padding(horizontal = Gap.bubbleH, vertical = Gap.bubbleV), horizontalAlignment = Alignment.End) {
             Text(Wording.Common.fromWho(author = h.sender?.let(::senderName) ?: Wording.Senders.hostUnnamed), style = Type.caption, color = c.dim)
-            Prose(SAID_BY.replace(h.shown ?: h.text.orEmpty(), "").trim(), c.dim, c.inside)
+            Prose(SAID_BY.replace(h.shown ?: h.text.orEmpty(), "").trim(), c.dim, c.raised.compositeOver(c.inside))
         }
     }
 }
@@ -372,16 +427,11 @@ private fun Waiting(u: Unsent, up: Boolean) {
 }
 
 @Composable
-private fun SaidLine(line: Line) {
+private fun SaidLine(line: Line, revert: RevertOffer? = null) {
     val c = LocalBaude.current
     when (line.kind) {
-        "you" -> Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-            SelectionContainer {
-                Text(line.text, style = Type.body, color = c.fg, modifier = Modifier.padding(start = 48.dp)
-                    .clip(RoundedCornerShape(Gap.bubbleRadius)).background(c.bubble)
-                    .padding(horizontal = Gap.bubbleH, vertical = Gap.bubbleV))
-            }
-        }
+        "you" -> UserTurn(line, revert)
+        "thinking" -> SelectionContainer { Thinking(line.text) }
         "tool" -> Text(line.text, style = Type.caption, color = c.dim, maxLines = 2, overflow = TextOverflow.Ellipsis,
             modifier = Modifier.fillMaxWidth().card(c))
         "rows" -> MetaRows(line.text)
@@ -390,65 +440,6 @@ private fun SaidLine(line: Line) {
             modifier = Modifier.fillMaxWidth())  // (.sysnote: 0.85em, faded)
         else -> SelectionContainer { Prose(line.text) }
     }
-}
-
-/** What a Bot said: its text, and its code (``` fenced) in Baude's code blocks (codeBg: theirs and inline code's fill,
- * the view's on a raised bubble, where the raised fill wouldn't show). */
-@Composable
-fun Prose(text: String, color: Color = LocalBaude.current.fg, codeBg: Color = LocalBaude.current.raised) {
-    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        text.split("```").forEachIndexed { i, part ->
-            if (i % 2 == 1) {
-                val code = part.substringAfter("\n", part).trimEnd()
-                Text(code, style = Type.mono, color = color, modifier = Modifier.fillMaxWidth()
-                    .clip(RoundedCornerShape(Gap.codeRadius)).background(codeBg).padding(horizontal = 8.dp, vertical = 6.dp))
-            } else if (part.isNotBlank()) {
-                for (block in part.trim().split(Regex("\n\\s*\n"))) Markdown(block, color, codeBg)
-            }
-        }
-    }
-}
-
-/** A paragraph of Markdown as Baude's chat draws it: headings (.md-h1 1.44em, .md-h2 1.2em), bullets, **bold**,
- * *italic* and `code` (monospace, on the raised fill). */
-@Composable
-private fun Markdown(block: String, color: Color, codeBg: Color) {
-    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-        for (raw in block.lines()) {
-            val h = Regex("^(#{1,6})\\s+(.*)$").find(raw)
-            val bullet = Regex("^\\s*([-*+]|\\d+\\.)\\s+(.*)$").find(raw)
-            val (text, style) = when {
-                h != null -> h.groupValues[2] to Type.body.copy(
-                    fontSize = Type.body.fontSize * (if (h.groupValues[1].length == 1) 1.44f else if (h.groupValues[1].length == 2) 1.2f else 1f),
-                    fontWeight = Tokens.Font.bold)
-                bullet != null -> ((if (bullet.groupValues[1].first().isDigit()) bullet.groupValues[1] + " " else "•  ") +
-                    bullet.groupValues[2]) to Type.body
-                else -> raw to Type.body
-            }
-            Text(inline(text, codeBg), style = style, color = color)
-        }
-    }
-}
-
-private fun inline(text: String, codeBg: Color) = androidx.compose.ui.text.buildAnnotatedString {
-    val token = Regex("""`([^`]+)`|\*\*([^*]+)\*\*|__([^_]+)__|\*([^*\s][^*]*)\*|_([^_\s][^_]*)_""")
-    var at = 0
-    for (m in token.findAll(text)) {
-        append(text.substring(at, m.range.first))
-        val (v, style) = when {
-            m.groups[1] != null -> m.groupValues[1] to androidx.compose.ui.text.SpanStyle(
-                fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace, background = codeBg)
-            m.groups[2] != null -> m.groupValues[2] to androidx.compose.ui.text.SpanStyle(
-                fontWeight = androidx.compose.ui.text.font.FontWeight.Bold)
-            m.groups[3] != null -> m.groupValues[3] to androidx.compose.ui.text.SpanStyle(
-                fontWeight = androidx.compose.ui.text.font.FontWeight.Bold)
-            else -> (m.groups[4] ?: m.groups[5])!!.value to androidx.compose.ui.text.SpanStyle(
-                fontStyle = androidx.compose.ui.text.font.FontStyle.Italic)
-        }
-        withStyle(style) { append(v) }
-        at = m.range.last + 1
-    }
-    append(text.substring(at))
 }
 
 /** A file picked, as it's sent (a picture as Baude makes one: prepare), or why it can't be. */

@@ -84,6 +84,8 @@ fun ChatShell(hostId: String, sid: String, back: () -> Unit, open: (String, Stri
     val pager = rememberPagerState(initialPage = all.indexOfFirst { it.key == shown }.coerceAtLeast(0)) { all.size }
     val scope = rememberCoroutineScope()
     Meta.pages = { all }
+    FileLinks.showFiles = { all.indexOfFirst { it.key == "files" }.takeIf { it >= 0 }?.let { scope.launch { pager.animateScrollToPage(it) } } }
+    val place = ChatPlace(at, s?.cwd, Mesh.conn(at)?.info?.home, chat.artifacts.toList())
     Meta.pageOpener = { t -> all.indexOfFirst { it.title.equals(t, true) }.takeIf { it >= 0 }?.let { scope.launch { pager.animateScrollToPage(it) } } }
     androidx.compose.runtime.DisposableEffect(chat) { // (its side questions' answers heard whichever page is shown)
         val l = sideQuestions(chat)
@@ -92,6 +94,7 @@ fun ChatShell(hostId: String, sid: String, back: () -> Unit, open: (String, Stri
             Mesh.listeners.remove(l)
             Meta.pages = { emptyList() } // (no chat open: no pages for Meta to show)
             Meta.pageOpener = {}
+            FileLinks.showFiles = {}
         }
     }
     LaunchedEffect(pager.currentPage, all.size) { all.getOrNull(pager.currentPage)?.let { shown = it.key } }
@@ -109,6 +112,7 @@ fun ChatShell(hostId: String, sid: String, back: () -> Unit, open: (String, Stri
         val conn = Mesh.conn(at)
         if (conn == null || conn.state != "up") GreyBanner(if (conn?.state == "connecting") Wording.Hosts.looking(host = Mesh.label(at))
             else conn?.why?.let { Wording.Hosts.downBecause(host = Mesh.label(at), why = it) } ?: Wording.Hosts.down(host = Mesh.label(at)))
+        androidx.compose.runtime.CompositionLocalProvider(LocalChatPlace provides place) {
         HorizontalPager(pager, Modifier.weight(1f).fillMaxWidth(), key = { all[it].key },
             userScrollEnabled = all.getOrNull(pager.currentPage)?.key != "browser") { i ->
             val here = pager.currentPage == i && !pager.isScrollInProgress
@@ -130,6 +134,7 @@ fun ChatShell(hostId: String, sid: String, back: () -> Unit, open: (String, Stri
                 "git" -> GitPage(at, sid)
                 "signal" -> SignalPage(at, sid)
             }
+        }
         }
         if (!WindowInsets.isImeVisible) BottomBar(all, pager.currentPage) { scope.launch { pager.animateScrollToPage(it) } }
     }

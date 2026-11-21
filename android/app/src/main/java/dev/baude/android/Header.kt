@@ -205,7 +205,11 @@ private val nextControl = AtomicInteger(1)
 
 /** A control request to a session's claude, sent as its input (as Baude's RemoteProc sends one): its answer (an
  * error's text, or null) once claude's said. */
-fun control(hostId: String, sid: String, request: JSONObject, then: (String?) -> Unit) {
+fun control(hostId: String, sid: String, request: JSONObject, then: (String?) -> Unit) =
+    controlAnswer(hostId, sid, request) { _, why -> then(why) }
+
+/** The same, with claude's whole answer (its response's body) too, when it gave one. */
+fun controlAnswer(hostId: String, sid: String, request: JSONObject, then: (JSONObject?, String?) -> Unit) {
     val rid = "android_${nextControl.getAndIncrement()}"
     var heard: ((String, JSONObject) -> Unit)? = null
     var done = false
@@ -216,19 +220,20 @@ fun control(hostId: String, sid: String, request: JSONObject, then: (String?) ->
             said.msg?.optString("type") == "control_response" && r?.optString("request_id") == rid) {
             Mesh.listeners.remove(heard!!)
             done = true
-            then(if (r.optString("subtype") == "error") r.optString("error").ifBlank { Wording.ChatHeader.claudeSaidNo } else null)
+            then(r.optJSONObject("response"), if (r.optString("subtype") == "error") r.optString("error")
+                .ifBlank { Wording.ChatHeader.claudeSaidNo } else null)
         }
     }
     Mesh.listeners.add(heard)
     Mesh.later(30_000) { // (no answer: not waited for any longer)
         if (done || !Mesh.listeners.remove(heard)) return@later
-        then(Wording.HostStatus.noAnswer)
+        then(null, Wording.HostStatus.noAnswer)
     }
     val msg = JSONObject().put("type", "control_request").put("request_id", rid).put("request", request)
     Mesh.ask(hostId, Msg.Input(session = sid, msg = msg).json()) { r ->
         if (r.optString("op") == Op.ERROR && Mesh.listeners.remove(heard)) {
             done = true
-            then(Msg.Error.from(r).said.orEmpty())
+            then(null, Msg.Error.from(r).said.orEmpty())
         }
     }
 }

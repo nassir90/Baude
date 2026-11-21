@@ -15879,7 +15879,8 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
                 self.start_proc()
             if self.proc is None:
                 self.held_after_revert = None
-                self.note(f"Couldn't revert: {self.program_name()} isn't running")
+                self.note(wording.say("chat_turns.couldnt_revert", why=wording.say(
+                    "chat_turns.not_running", program=self.program_name())))
                 return
         finally:
             if rev["turn"].is_ancestor(self.transcript):
@@ -15899,7 +15900,7 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
             rev["asked"][0].stop_asked = False  # (its turn not stopped by it: an error that ends it is said, h_result)
         rev["asked"] = None
         if self.reverting is rev:
-            self.say_now(f"Couldn't revert: {why}")
+            self.say_now(wording.say("chat_turns.couldnt_revert", why=why))
 
     def reverted(self, rev, response):
         """claude's answer to commit_revert: rewound, the message and all after it gone from the chat, and what's in the

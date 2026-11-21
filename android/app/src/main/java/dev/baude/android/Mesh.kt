@@ -46,7 +46,11 @@ fun alwaysOffered(m: String?, hostId: String? = null): Boolean = m == null ||
  * ended, a turn stopped, the conversation compacted, an API error). Two that aren't shown: "record", the end of a
  * transcript record (uuid: its uuid, shown or not), and "rewind", a revert's mark (uuid: the record it keeps last;
  * none, none kept). */
-data class Line(val kind: String, val text: String, val uuid: String? = null)
+data class Line(val kind: String, val text: String, val uuid: String? = null, val files: List<Sent> = emptyList())
+
+/** A file or picture sent with a message of yours, as its record has it (kind: "image" or "file"; data: a picture's
+ * base64). */
+class Sent(val kind: String, val name: String, val mime: String, val data: String?)
 
 /** A permission its Bot asks, not answered yet: claude's control_request (can_use_tool) for request_id. seen: its
  * host has listed it (so a listing without it means it's been answered, or its claude's gone). */
@@ -79,6 +83,9 @@ class Chat(hostId: String, sid: String) {
     val busy = mutableStateOf(false)
     val thinking = mutableStateOf(false)     // (at a turn, where its host doesn't list it: Meta's)
     val said = mutableStateOf<String?>(null)
+    var reverting by mutableStateOf<Reverting?>(null) // (a revert asked, not made: the page for it may be left and come back to)
+    val clearBox = mutableStateOf(false) // (a revert made: the box is emptied when next composed)
+    val streamingThought = mutableStateOf("") // (and what it's thinking, as it comes)
     val streaming = mutableStateOf("") // (what its agent's writing now, as it comes: till its message is whole)
     val asks = mutableStateListOf<Ask>()      // (what its Bot asks, answered here: Allow, Deny)
     val fetched = HashSet<String>()           // (asks its host listed that weren't here: fetched again, once)
@@ -505,15 +512,24 @@ object Mesh {
     private fun streamed(chat: Chat, m: JSONObject?) {
         m ?: return
         if (m.optString("type") != "stream_event") {
-            if (m.optString("type") in setOf("assistant", "result")) chat.streaming.value = ""
+            if (m.optString("type") in setOf("assistant", "result")) {
+                chat.streaming.value = ""
+                chat.streamingThought.value = ""
+            }
             return
         }
         if (!m.isNull("parent_tool_use_id")) return
         val e = m.optJSONObject("event") ?: return
         when (e.optString("type")) {
-            "message_start" -> chat.streaming.value = ""
-            "content_block_delta" -> e.optJSONObject("delta")?.takeIf { it.optString("type") == "text_delta" }?.let {
-                chat.streaming.value += it.optString("text")
+            "message_start" -> {
+                chat.streaming.value = ""
+                chat.streamingThought.value = ""
+            }
+            "content_block_delta" -> e.optJSONObject("delta")?.let {
+                when (it.optString("type")) {
+                    "text_delta" -> chat.streaming.value += it.optString("text")
+                    "thinking_delta" -> chat.streamingThought.value += it.optString("thinking")
+                }
             }
         }
     }
@@ -1146,8 +1162,13 @@ private fun record(o: JSONObject, type: String, uuid: String?, out: MutableList<
             is String -> listOf(JSONObject().put("type", "text").put("text", content))
             else -> emptyList()
         }
+        val typed = ArrayList<String>() // (what you wrote in this record, and the files with it: one message)
+        val sent = ArrayList<Sent>()
         for (b in blocks) {
             when (b.optString("type")) {
+                "thinking" -> if (type == "assistant") b.optString("thinking").trim().takeIf { it.isNotEmpty() }?.let {
+                    out.add(Line("thinking", it, uuid))
+                }
                 "text" -> {
                     var t = b.optString("text")
                     if (type == "user") {
@@ -1158,9 +1179,9 @@ private fun record(o: JSONObject, type: String, uuid: String?, out: MutableList<
                                 out.add(Line("task", taskNote(t).toString(), uuid))
                             }
                             t.startsWith(STOPPED) -> out.add(Line("note", Wording.Meta.interrupted, uuid))
-                            t.contains("<command-name>") -> out.add(Line("you", command(t), uuid))
+                            t.contains("<command-name>") -> typed.add(command(t))
                             t.isEmpty() || NOT_TYPED.any { t.startsWith(it) } -> {}
-                            else -> out.add(Line("you", t, uuid))
+                            else -> typed.add(t)
                         }
                     } else if (t.isNotBlank()) {
                         out.add(Line(if (o.optBoolean("isApiErrorMessage")) "error" else "bot", t.trim(), uuid))
@@ -1168,8 +1189,11 @@ private fun record(o: JSONObject, type: String, uuid: String?, out: MutableList<
                         if (urls.isNotEmpty()) out.add(Line("link", JSONObject().put("urls", JSONArray(urls)).toString(), uuid))
                     }
                 }
-                "image" -> if (type == "user") out.add(Line("you", "🖼 A picture", uuid))
-                "document" -> if (type == "user") out.add(Line("you", "📄 " + b.optString("title", "A document"), uuid))
+                "image" -> if (type == "user") b.optJSONObject("source")?.takeIf { it.optString("type") == "base64" }?.let {
+                    sent.add(Sent("image", "image", it.optString("media_type"), it.optString("data")))
+                }
+                "document" -> if (type == "user") sent.add(Sent("file", b.optString("title").ifBlank { "document.pdf" },
+                    "application/pdf", null))
                 "tool_use" -> if (type == "assistant") {
                     out.add(Line("tool", toolLine(b), uuid))
                     val name = b.optString("name")
@@ -1182,6 +1206,7 @@ private fun record(o: JSONObject, type: String, uuid: String?, out: MutableList<
                     .put("text", resultText(b.opt("content"))).toString(), uuid))
             }
         }
+        if (type == "user" && (typed.isNotEmpty() || sent.isNotEmpty())) out.add(Line("you", typed.joinToString("\n\n"), uuid, sent))
     }
 }
 

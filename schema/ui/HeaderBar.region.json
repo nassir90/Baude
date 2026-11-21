@@ -1,0 +1,203 @@
+{
+  "description": "The Baude main window's title bar: on the left the sessions-sidebar toggle, in the middle the open chat's name, on the right (right to left as built: ☰, side-panel toggle, Signal, mode, effort, model, provider) the chat's pickers and buttons. The window's own title is \"Baude\" or \"Baude — <chat name>\".",
+  "apps": [
+    "baude"
+  ],
+  "code": [
+    "baude.py:BaudeWindow.__init__",
+    "baude.py:BaudeWindow.show_title",
+    "baude.py:BaudeWindow.sync_models",
+    "baude.py:BaudeWindow.sync_providers",
+    "baude.py:BaudeWindow.sync_effort_choices",
+    "baude.py:BaudeWindow.sync_local",
+    "baude.py:BaudeWindow.sync_mode"
+  ],
+  "copy": [
+    "chat_header",
+    "mode_effort",
+    "model_picker",
+    "window",
+    "sidebar"
+  ],
+  "parts": [
+    {
+      "name": "sessions sidebar toggle",
+      "shows": "A toggle button at the far left with the left-sidebar icon; pressed while the sessions sidebar is shown. The sidebar's shown state is remembered between runs.",
+      "text": [
+        "Sessions sidebar (Ctrl+B)"
+      ],
+      "actions": [
+        {
+          "by": "click",
+          "does": "Slides the sessions sidebar in or out"
+        },
+        {
+          "by": "key Ctrl+B or F9",
+          "does": "Same toggle, from anywhere in the window"
+        },
+        {
+          "by": "key Ctrl+O",
+          "does": "Shows the sidebar and puts the focus in its search box"
+        }
+      ]
+    },
+    {
+      "name": "title",
+      "shows": "The open chat's name, centred in the bar, one line, cut with … past 48 characters. A chat with no name yet reads \"New session\". The window title follows it (\"Baude — <name>\").",
+      "copy": [
+        "sidebar.new_session",
+        "window.rename_tip"
+      ],
+      "text": [
+        "Baude — {title}"
+      ],
+      "actions": [
+        {
+          "by": "hover",
+          "does": "Tooltip: \"Rename: right-click the session in the sidebar, or F2\". Clicking the title itself does not rename (renaming is done on the chat's row in the sidebar: right-click → Rename…, or F2 with the row focused)"
+        }
+      ]
+    },
+    {
+      "name": "provider picker",
+      "shows": "Left of the model picker, a drop-down button with an arrow showing where the chat's model runs, written \"<host> / <provider>\" (for example \"local / MLX\"), cut with … in the middle past 24 characters. Only shown while the chat's model is one that runs on a provider (Ollama, MLX, Apple, an OpenAI-compatible server), never for Claude's own models.",
+      "copy": [
+        "chat_header.provider_tip",
+        "chat_header.provider_tip_only"
+      ],
+      "actions": [
+        {
+          "by": "click",
+          "does": "Opens the host/provider menu (see HostPicker); picking another moves the chat's model to its copy there, mid-turn once the turn is over"
+        }
+      ]
+    },
+    {
+      "name": "model picker",
+      "shows": "A button with the family's logo and the picked model's name (for example \"Opus 5.5\"), cut with … past 30 characters, and a drop-down arrow. Before claude has said which model, it shows the model the default resolves to.",
+      "copy": [
+        "common.model"
+      ],
+      "actions": [
+        {
+          "by": "click",
+          "does": "Opens the model palette (see ModelPicker): search box over models grouped by family"
+        }
+      ]
+    },
+    {
+      "name": "effort picker",
+      "shows": "A drop-down of the thinking-effort levels the current model supports, the current one shown. For a model without an effort setting the box reads \"Effort\" and is greyed out; for models of a program without effort it is hidden.",
+      "copy": [
+        "chat_header.effort_tip",
+        "meta_settings.effort",
+        "meta_settings.no_effort",
+        "chat_header.this_model"
+      ],
+      "actions": [
+        {
+          "by": "hover",
+          "does": "Tooltip \"Thinking effort\"; when unavailable \"{model} has no effort setting\" (\"This model has no effort setting\" if no model name is known)"
+        },
+        {
+          "by": "click",
+          "does": "Opens the effort menu (see EffortMenu); the pick applies to the running chat and a quiet note says \"thinking effort → <label>\""
+        }
+      ]
+    },
+    {
+      "name": "mode picker",
+      "shows": "A drop-down of permission modes, the chat's mode shown (a new chat starts on Auto; a Codex-model chat starts on Manual). Hidden for models whose program has no permission modes unless the chat's host offers them.",
+      "copy": [
+        "chat_header.mode_tip"
+      ],
+      "actions": [
+        {
+          "by": "hover",
+          "does": "Tooltip \"Permission mode\""
+        },
+        {
+          "by": "click",
+          "does": "Opens the mode menu (see ModeMenu); the pick is sent to claude, which can refuse it"
+        }
+      ]
+    },
+    {
+      "name": "Signal button",
+      "shows": "An icon-only menu button with a chain-link icon (no label, no tooltip). It sits between the mode picker and the side-panel toggle.",
+      "actions": [
+        {
+          "by": "click",
+          "does": "Opens the Signal popover (see SignalMenu): two switches, Show links and Activate Signal, per chat"
+        }
+      ]
+    },
+    {
+      "name": "side panel toggle",
+      "shows": "A toggle button with the right-sidebar icon; pressed while the side panel (subagents, processes, code, files, …) is shown.",
+      "text": [
+        "Side panel: subagents, processes, code, files (Ctrl+Alt+B)"
+      ],
+      "actions": [
+        {
+          "by": "click",
+          "does": "Slides the side panel in or out"
+        },
+        {
+          "by": "key Ctrl+Alt+B",
+          "does": "Same toggle from anywhere"
+        },
+        {
+          "by": "key Ctrl+M",
+          "does": "Shows and focuses Meta in the side panel, or closes it if already shown there"
+        }
+      ]
+    },
+    {
+      "name": "menu button",
+      "shows": "The rightmost button: the three-bar ☰ icon (open-menu).",
+      "copy": [
+        "chat_header.menu"
+      ],
+      "actions": [
+        {
+          "by": "hover",
+          "does": "Tooltip \"Menu\""
+        },
+        {
+          "by": "click",
+          "does": "Opens the ☰ main menu (see MainMenu)"
+        }
+      ]
+    }
+  ],
+  "states": [
+    {
+      "name": "Claude's own model",
+      "shows": "No provider picker; effort picker live for models that support it; mode picker shown"
+    },
+    {
+      "name": "provider model",
+      "shows": "Provider picker shown, greyed when only one provider has the model (tooltip: \"Where the chat's model runs (the only one that has it)\")"
+    },
+    {
+      "name": "model without effort",
+      "shows": "Effort picker reads \"Effort\", greyed, with the no-effort tooltip"
+    },
+    {
+      "name": "mode refused",
+      "shows": "The mode picker goes back to the mode claude is still in and a note in the chat says \"couldn't switch to <mode>: <why> (still <was>)\""
+    },
+    {
+      "name": "new chat",
+      "shows": "Title reads \"New session\""
+    }
+  ],
+  "scenes": [
+    "01-empty",
+    "60-effort-unavailable",
+    "60m-models-any-case",
+    "55h-network-models",
+    "63-zoomed"
+  ]
+}

@@ -1,0 +1,148 @@
+{
+  "description": "Meta in Record: the same helper and conversation panel as in Baude (Meta.panel.json describes the shared part: box, replies, tool cards, settings changes, undo, Changelog). This file lists only where Record's differs: it works on notebooks and pages, takes quoted passages, proposes edits to pages, and has no sessions or tabs of its own. One conversation for the whole window, whichever notebook is open (kept in the notebooks' file).",
+  "apps": [
+    "record"
+  ],
+  "opens": [
+    "Ctrl+M",
+    "the right column's Meta page"
+  ],
+  "code": [
+    "record.py:RecordChat",
+    "record.py:RECORD_TOOLS",
+    "meta.py:MetaChat"
+  ],
+  "copy": [
+    "meta_app",
+    "meta",
+    "edit_review"
+  ],
+  "parts": [
+    {
+      "name": "page switcher",
+      "shows": "At the top of the right column: Meta, Files, Git. (Baude's right column has more.) Files and Git are of the folder of the chat being read; with no chat read they have no folder."
+    },
+    {
+      "name": "what Meta works on",
+      "shows": "Meta reads the open notebook's pages and folders, and what is @-referenced in what you ask (a page, a notebook, a file, a chat: its text goes with the message). Its first message of a session says which notebook is open, or which notebooks there are with none open; it is told again when another notebook is opened. It knows where you are as \"host / notebook / page\". Each of your messages remembers the notebook it was asked in (a restarted session's earlier conversation says \"[in {notebook}] \" or \"[no notebook open] \")."
+    },
+    {
+      "name": "quote chip",
+      "shows": "Over the box you type in, while a passage is quoted: a quote-styled box of up to 3 lines (ends in …) and at its right a flat × button, tooltip \"Drop the passage\". A passage selected on a page shows \"{page} · {text}\"; picked in a chat read shows the text, several as \"[1] … [2] …\". At most 6000 characters. The quote goes with what you ask; a change proposed to a selected passage replaces it. Leaving for another notebook lets go of a quote of the notebook left. What was typed (the quote too) is kept with a restart.",
+      "text": [
+        "Drop the passage"
+      ],
+      "actions": [
+        {
+          "by": "click ×",
+          "does": "Drops the quote and puts the focus back in the box."
+        },
+        {
+          "by": "send with nothing typed",
+          "does": "A quote alone can be sent (an empty question asks about the passage)."
+        }
+      ]
+    },
+    {
+      "name": "sent bubble's quote",
+      "shows": "Your sent message shows its quote as a chip above the text; for a page's passage it begins \"{page} · \"."
+    },
+    {
+      "name": "pending edits bar",
+      "shows": "Over the box, only while the open notebook has proposed edits waiting: \"{n} edit pending\" / \"{n} edits pending\" at the left and two flat round buttons, up (tooltip \"Previous edit\") and down (\"Next edit\").",
+      "text": [
+        "{n} edit pending",
+        "{n} edits pending",
+        "Previous edit",
+        "Next edit"
+      ],
+      "actions": [
+        {
+          "by": "click Previous edit / Next edit",
+          "does": "Goes to the edit before or after the one last gone to (wrapping round): opens its page, shows the edit there, scrolled to, the caret in it (Tab takes it, Esc leaves it)."
+        }
+      ]
+    },
+    {
+      "name": "edit card",
+      "shows": "A tool card in a reply for propose_edit, revise_edit and edit_page: the short page name as its summary, the passage it replaces (old) and what it puts in (new) as the hunks, and a slot at the end of its line: for an edit waiting here, a tick button (tooltip \"Accept\") and a cross (tooltip \"Reject\"); otherwise dim text saying what became of it: \"accepted\", \"rejected\", \"taken back\", \"revised\" (a later call changed it; that call's card has it as it is), \"waiting in {notebook}\" with an \"Open\" button (tooltip \"Open {notebook}\"), \"waiting in a notebook that's gone\", or \"its page is gone\" with a cross only (tooltip \"Reject (its page is gone)\"). A hunk is dimmed unless the edit is in the page.",
+      "copy": [
+        "common.open",
+        "meta.open_item"
+      ],
+      "actions": [
+        {
+          "by": "click tick",
+          "does": "Opens the page, shows the edit and accepts it, as the page's own Accept does."
+        },
+        {
+          "by": "click cross",
+          "does": "Rejects it."
+        },
+        {
+          "by": "click Open",
+          "does": "Opens that notebook and shows the edit on its page, the caret in it."
+        }
+      ]
+    },
+    {
+      "name": "edit-only reply",
+      "shows": "A reply that did nothing but edit and has no text (from before tool cards) says \"Edited {pages}\" and/or \"Took back an edit to {pages}\" in a dimmed small line."
+    },
+    {
+      "name": "tool card summaries",
+      "shows": "add_page, delete_page, edit_page: the page's short name. move_pages: \"{pages} → {parent or 'the top'}\" with \" (from {notebook})\" and \" (into {notebook})\" when across notebooks. add_notebook: its name. Deleting says \"Deleted {what}\". A card for edit_page has a link to its page (marked in the Pages list)."
+    },
+    {
+      "name": "Not in your notes chips",
+      "shows": "Under a reply that explained a chat's passage and ended with an \"Unknown: …\" line (that line is not shown): a flow of \"Not in your notes:\" then a chip per name, \"+ {term}\" (tooltip \"Add to To learn\") or \"✓ {term}\" and disabled when the notebook's notes already mention it. Only while the notebook it was asked in is open.",
+      "text": [
+        "Not in your notes:",
+        "Add to To learn"
+      ],
+      "actions": [
+        {
+          "by": "click a chip",
+          "does": "Adds the term to the To learn list on Home (a toast \"“{term}” added to To learn\" with an \"Open\" button that opens Home) and the chip becomes ✓."
+        }
+      ]
+    },
+    {
+      "name": "names in replies",
+      "shows": "Names of the notebooks, pages, chats and of the chat read's folder in a reply are links with logos, and resting on one shows its card with a \"To notes\" button; a click opens it where it is (as in a chat read)."
+    },
+    {
+      "name": "marks in lists",
+      "shows": "Things Meta added, deleted, moved or highlighted show in the notebooks' list, the Pages list and open pages as Meta's marks (green for added or edited, struck through for deleted) until you keep or undo them; clicking a change's page opens it (a deleted one: read-only tab \"{page} (deleted)\")."
+    },
+    {
+      "name": "forms and buttons",
+      "shows": "Meta can show a \"New page\" form in a reply: a text box (placeholder \"Its name\"), an \"Under\" choice (\"(the top)\" or a page of the notebook, Home first), and a multi-line box for its Markdown text; its button \"Add\" makes the page and says \"made {page}\"; with no name or a name taken it says why instead: \"A page needs a name\" or \"There's a page {name} already\". Meta can also show a red \"Delete {notebook}…\" button (opens the delete dialog, RecordAlerts) and a blue \"Open {host}\" button (switches the notebooks' host).",
+      "text": [
+        "New page",
+        "Its name",
+        "Under",
+        "(the top)",
+        "A page needs a name",
+        "Add",
+        "Open {host}"
+      ],
+      "copy": [
+        "meta_app.its_name",
+        "common.add",
+        "meta.open_item"
+      ]
+    },
+    {
+      "name": "settings Meta can change",
+      "shows": "Those Baude's has in common (Accent Colour, Code Font, Text/Icon/Global Scale, Full-width text, Auto restart on update, Notifications) and Record's own: Markup visibility and Include glossary and chats in backup. Asked about a setting, it shows that setting's row, the same row as Settings has."
+    }
+  ],
+  "states": [
+    {
+      "name": "no notebook open",
+      "shows": "Meta works, but a tool that works on the open notebook says \"No notebook is open: add_page takes notebook, move_pages from_notebook and to_notebook, and add_notebook makes one.\""
+    }
+  ],
+  "scenes": []
+}

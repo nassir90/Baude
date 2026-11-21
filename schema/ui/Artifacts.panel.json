@@ -1,0 +1,29 @@
+{
+  "description": "The side panel's Artifacts page: every Claude artifact published or linked in this session, as rows of the same size as Subagents rows, newest first.",
+  "apps": ["baude"],
+  "opens": ["Side panel page button \"Artifacts\""],
+  "code": ["baude.py:ArtifactChip", "baude.py:SidePanel.update_artifact", "baude.py:BaudeWindow.register_artifact"],
+  "copy": ["artifacts", "side_panel"],
+  "parts": [
+    {
+      "name": "list",
+      "shows": "A boxed list, newest at the top; an artifact seen again (a new version) replaces its row in the same place with the newer info. Rows are removed when the session is cleared.",
+      "parts": [
+        {
+          "name": "row",
+          "shows": "Left to right: the artifact's icon (the icon its publisher named, e.g. chart, calendar; a globe if none or unknown); title (one line; \"Artifact\" if it has none) over a one-line subtitle: the link without https:// (claude.ai/artifact/...) cut in the middle with … if long, followed by \" · v2\" style version number when known (\"{link} · v{version}\"); then an Open button and a flat Copy-link icon button.",
+          "copy": ["artifacts.untitled", "artifacts.link_version", "artifacts.copy_link", "common.open", "tabs.link_copied"],
+          "actions": [
+            {"by": "click anywhere on the row, or the Open button (tooltip: the full URL)", "does": "opens the artifact's URL in the browser"},
+            {"by": "click the copy icon (tooltip \"Copy link\")", "does": "copies the URL and toasts \"Link copied\""},
+            {"by": "hover the row (tooltip)", "does": "shows the artifact's description, or its URL if it has none"}
+          ]
+        }
+      ]
+    }
+  ],
+  "states": [
+    {"name": "empty", "shows": "\"No artifacts yet\"", "copy": ["side_panel.no_artifacts"]}
+  ],
+  "scenes": ["82-panel-artifacts"]
+}

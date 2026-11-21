@@ -1,0 +1,13 @@
+{
+  "description": "The running version and the commits it has, newest first (update.changelog's shape: short hash, when made in epoch seconds, subject).",
+  "commit": "5e1d2c4",
+  "made": 1795600800,
+  "commits": [
+    ["5e1d2c4", 1795600800, "Mesh: a menu item instead of a Settings page"],
+    ["a93f0b1", 1795586400, "Tool cards: the output opens under the command"],
+    ["77c2e19", 1795500000, "Sidebar: forks sit under the session they came from"],
+    ["0d4a8f3", 1795413600, "Changelog in the main menu"],
+    ["c61be70", 1795327200, "Settings: the text and icon sizes apart"],
+    ["19af4d2", 1795240800, "Side questions as rows titled with their questions"]
+  ]
+}

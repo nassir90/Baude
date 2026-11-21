@@ -1,0 +1,76 @@
+{
+  "description": "The side panel's Side questions page: /btw questions asked about the conversation without adding to it. A box on top asks a new one; below, one row per question, newest first, each opening its thread under its line or filling the page. Each question is its own throwaway claude that sees the whole conversation so far but writes nothing, can't edit anything and can't use tools that need permission.",
+  "apps": ["baude"],
+  "opens": [
+    "Side panel page button \"Side questions\"",
+    "/btw <question> typed in the chat's composer and sent (works even mid-turn; doesn't interrupt; the composer is emptied; the panel opens on this page with the new question open under its line). /btw with nothing after it does nothing."
+  ],
+  "code": ["baude.py:SideQuestion", "baude.py:SidePanel.ask_typed", "baude.py:SidePanel.add_side_question", "baude.py:SidePanel.open_side_question", "baude.py:SidePanel.close_side_question", "baude.py:BaudeWindow.ask_side_question"],
+  "copy": ["side_questions", "side_panel"],
+  "parts": [
+    {
+      "name": "new question box",
+      "shows": "At the top of the list page, a rounded text box (a pill) at least as tall as an empty list placeholder, growing taller as more is typed, with a send button by the text's last line. Edge to edge with the list under it, 10px above it. The send button and Ctrl+Enter do nothing while the box is empty (the button is greyed).",
+      "copy": ["side_questions.ask_tip"],
+      "actions": [
+        {"by": "key Ctrl+Enter / ⌘Enter, or click send (tooltip \"Ask (Ctrl+Enter)\" with \"New line: Enter\" on a second line)", "does": "asks it: a new row at the top of the list, open under its line; the box is emptied. If the question couldn't be asked, the row is dropped, the text stays in the box and the window's note says \"the side question couldn't be asked: <why>\""},
+        {"by": "key Enter", "does": "a new line (a list's next item inside a list; Shift+Enter a plain line break)"},
+        {"by": "key Tab / Shift+Tab", "does": "indent or outdent a list item"}
+      ]
+    },
+    {
+      "name": "list",
+      "shows": "A boxed list of questions, newest first. Hidden entirely (no outline) while none has been asked, so only the box shows.",
+      "parts": [
+        {
+          "name": "row line",
+          "shows": "Left to right: a status mark, the question as the title (wraps over lines, not bold), a ⌄ toggle and a maximise button. The status mark is shown only while it's answering (spinner), or for a failed question (red cross) or a stopped one (grey stop mark); otherwise nothing.",
+          "parts": [
+            {"name": "status", "shows": "Spinner while it answers; red cross if the answer failed; grey stop mark if stopped or the process ended mid-answer; hidden otherwise."},
+            {"name": "title", "shows": "The first question's text (what was asked), wrapping."},
+            {"name": "toggle", "shows": "⌄ (down chevron) when closed, − when open; tooltip \"Show this side question\" / \"Hide this side question\".", "text": ["Show this side question", "Hide this side question"],
+             "actions": [{"by": "click", "does": "slides the thread open or closed under the line"}]},
+            {"name": "maximise", "shows": "Window-maximise icon, tooltip \"Open this side question in the whole panel\".", "text": ["Open this side question in the whole panel"],
+             "actions": [{"by": "click", "does": "the row grows into a page filling the panel"}]}
+          ]
+        },
+        {
+          "name": "opened thread (under the line)",
+          "shows": "On a darker inside inset from the row: the thread (the answer as a markdown reply, then each follow-up as a user bubble followed by its answer), nothing at all above the box until something has been asked; then under it a one-line-tall box for a follow-up with a small send button (a stop button while answering). Scrolls past nine lines of typing. No dots or context meter here.",
+          "actions": [
+            {"by": "key Ctrl+Enter / ⌘Enter, or send", "does": "asks the follow-up in the same claude; the box is emptied (kept if it couldn't be sent)"},
+            {"by": "key Enter", "does": "new line"},
+            {"by": "key Esc while answering, or the box's stop button", "does": "stops the answer; shown as stopped (grey stop mark), not failed"},
+            {"by": "key Ctrl+F / ⌘F", "does": "find bar in this thread"},
+            {"by": "revert button on a follow-up's user bubble (not on the first question; not on Codex models; not while answering)", "does": "that follow-up and everything after it is hidden and its text put in the box to change; Esc puts it back with the earlier draft; sending it rewinds the conversation, then asks. If refused: note \"Couldn't revert the side question's follow-up: <why>\""}
+          ]
+        }
+      ]
+    },
+    {
+      "name": "full page (detail)",
+      "shows": "Header over the thread. Header: status mark (as in the row), the question as one ellipsised line, a back button ‹ (tooltip \"All side questions\") at the end. Under it the thread fills the page and scrolls; at its foot a Meta-style box (at least two lines tall, scrolls vertically if long), and under the box working dots on the left while it answers and a context meter (how much of the model's window the question's context uses, e.g. \"24k / 200k\") at the right, refreshed about once a second while answering and after each answer.",
+      "copy": ["side_questions.all"],
+      "actions": [
+        {"by": "click back", "does": "closes into its row (into its thread under the line, if it was open there)"},
+        {"by": "same keys as the opened thread", "does": "Ctrl+Enter asks, Esc stops, Ctrl+F finds"}
+      ]
+    },
+    {
+      "name": "answer content",
+      "shows": "Answers are rendered as markdown replies, streaming in. A side question is told to answer briefly from what it already knows. An answer that fails shows the error text in italics (or \"The side question failed.\"). A request to use a tool that needs permission is refused automatically (\"Side questions can't run tools that need permission.\") and not shown as a prompt.",
+      "copy": ["side_questions.failed"],
+      "actions": []
+    }
+  ],
+  "states": [
+    {"name": "empty", "shows": "Only the new-question box; no list, no placeholder text."},
+    {"name": "answering", "shows": "Spinner in the row/header, the box's send button turns to stop, dots under the box on the full page"},
+    {"name": "answered", "shows": "No status mark"},
+    {"name": "failed", "shows": "Red cross, the error in italics as the answer"},
+    {"name": "stopped / ended", "shows": "Grey stop mark"},
+    {"name": "couldn't start", "shows": "The row keeps its question in its own box to send again; its claude starts then. The window's note says why (e.g. claude missing or the chat's folder gone)."},
+    {"name": "several at once", "shows": "Any number can run at the same time; each has its own row and spinner"}
+  ],
+  "scenes": ["75-side-questions", "75b-side-question-new", "75c-side-questions-rows", "75d-side-question-full", "75e-side-questions-empty"]
+}

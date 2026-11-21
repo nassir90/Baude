@@ -1,0 +1,267 @@
+{
+  "description": "Baude's Settings dialog: one scrolling page of groups of rows, each applied as it is changed and kept in settings.json (shared with Record, which has its own Settings dialog with the same rows). Title \"Settings\".",
+  "apps": [
+    "baude"
+  ],
+  "opens": [
+    "☰ → Settings…",
+    "key Cmd+, (macOS) / Ctrl+, (elsewhere); the key again while it is open leaves it"
+  ],
+  "code": [
+    "baude.py:SettingsDialog",
+    "baude.py:BaudeWindow.open_settings",
+    "widgets.py:settings_code_font",
+    "widgets.py:settings_accent",
+    "widgets.py:settings_switch",
+    "widgets.py:settings_size",
+    "widgets.py:notifications_row",
+    "update.py:settings_row",
+    "update.py:version_row"
+  ],
+  "copy": [
+    "window",
+    "meta_settings",
+    "shared_settings",
+    "updates",
+    "fixes"
+  ],
+  "parts": [
+    {
+      "name": "Meta group",
+      "shows": "The first group, Meta's settings (Intelligence, Provider, Effort, Run commands, Code mode), the same rows Meta's own page has. Described in MetaSettings.dialog.json.",
+      "text": [
+        "see MetaSettings.dialog.json"
+      ]
+    },
+    {
+      "name": "General group (no title)",
+      "shows": "One group of six rows, in this order.",
+      "parts": [
+        {
+          "name": "Full-width text",
+          "shows": "A row titled \"Full-width text\" with a switch at the right, no subtitle. The switch is the same setting as the ☰ menu's \"Full-width text\" item, so the two always agree. On: the chat's text column runs the full width of the window; off: held to a readable column.",
+          "copy": [
+            "meta_settings.full_width"
+          ],
+          "actions": [
+            {
+              "by": "click anywhere on the row or the switch",
+              "does": "toggles full-width text at once in the open chat and keeps it"
+            }
+          ]
+        },
+        {
+          "name": "Code Font",
+          "shows": "A row titled \"Code Font\" with a drop-down of the code fonts this machine has, the current one selected. When the picked font is not the one running now, the row's subtitle reads \"<font> from Baude's next start\" and a Restart button shows at the right of the row; when the pick is the running font there is no subtitle and no button.",
+          "copy": [
+            "shared_settings.code_font",
+            "shared_settings.code_font_next_start",
+            "shared_settings.restart"
+          ],
+          "actions": [
+            {
+              "by": "pick a font",
+              "does": "keeps it in settings.json; it takes effect at the next start (fonts are set up before the app starts); the subtitle and Restart button appear"
+            },
+            {
+              "by": "click Restart",
+              "does": "closes Settings, then restarts Baude as ☰ → Restart Baude does"
+            }
+          ]
+        },
+        {
+          "name": "Accent Colour",
+          "shows": "A row titled \"Accent Colour\" with a drop-down. Its first entry is \"System\" (the platform's own accent), then libadwaita's accents: Blue, Teal, Green, Yellow, Orange, Red, Pink, Purple, Slate. Each entry, in the list and in the closed drop-down, is a 12 px round dot of that colour then the name (System's dot is the colour the system accent is now).",
+          "copy": [
+            "shared_settings.accent_colour"
+          ],
+          "actions": [
+            {
+              "by": "pick an accent",
+              "does": "applies it in every open Baude and Record window at once and keeps it; System clears the choice"
+            }
+          ]
+        },
+        {
+          "name": "Appearance",
+          "apps": [
+            "phone"
+          ],
+          "shows": "A row titled \"Appearance\" with a drop-down at its end showing the current choice: Follow System (the default), Light or Dark. The phone's own: the desktop follows the platform.",
+          "copy": [
+            "phone_settings.appearance",
+            "phone_settings.follow_system",
+            "phone_settings.light",
+            "phone_settings.dark"
+          ],
+          "actions": [
+            {
+              "by": "pick a choice",
+              "does": "applies it to the whole app at once and keeps it"
+            }
+          ]
+        },
+        {
+          "name": "Show in launcher",
+          "shows": "A row titled \"Show in application menu\" on Linux or \"Show in Applications\" on macOS, with a switch; the subtitle is the path of the launcher file it writes (the home folder written as ~). On when Baude is already in the platform's list of apps.",
+          "copy": [
+            "window.show_in",
+            "install.application_menu",
+            "install.applications"
+          ],
+          "phone": {
+            "does": "nothing",
+            "why": "Adding the app to the freedesktop application menu or the macOS Applications list has no phone equivalent (the phone's app is installed and updated as its own build)",
+            "decided": "2026-11-21"
+          },
+          "actions": [
+            {
+              "by": "toggle the switch",
+              "does": "adds Baude to (writes the .desktop file and icon, or the macOS app bundle) or removes it from the platform's list of apps; a note in the chat says what was done (\"added to <where>: <path>\", \"removed from <where>\"), or the error; the switch ends up showing the real state"
+            }
+          ]
+        },
+        {
+          "name": "Auto restart on update",
+          "shows": "A switch row titled \"Auto restart on update\". Subtitle \"From <upstream> every <N>s, restarting once idle\" (upstream is the branch the checkout follows, N the check interval in seconds). With no upstream (not a git checkout following a branch) the subtitle is \"Not a git checkout following a branch: nothing to update from\" and the switch is greyed and off. Off by default: an update runs code from the upstream. One setting shared by Baude and Record; follows a change made in the other app.",
+          "copy": [
+            "updates.auto_restart",
+            "updates.auto_restart_from",
+            "updates.no_upstream"
+          ],
+          "phone": {
+            "does": "Update on metered connections (the phone's own updater)",
+            "why": "The phone installs builds, not a git checkout",
+            "decided": "2026-11-21"
+          },
+          "actions": [
+            {
+              "by": "toggle",
+              "does": "turns the automatic fetch, fast-forward and restart-once-idle on or off, and keeps it"
+            }
+          ]
+        },
+        {
+          "name": "Update on metered connections",
+          "apps": [
+            "phone"
+          ],
+          "shows": "A switch row titled \"Update on metered connections\", subtitle \"Whether to download when only 5G/4G is available\". Off by default: a newer build then waits for Update on a metered network.",
+          "copy": [
+            "updates.metered",
+            "updates.metered_subtitle"
+          ],
+          "actions": [
+            {
+              "by": "toggle",
+              "does": "keeps it; turning it on looks for a newer build at once"
+            }
+          ]
+        },
+        {
+          "name": "Notifications",
+          "shows": "A switch row titled \"Notifications\", subtitle \"When a reply finishes, or asks you something, while you're elsewhere\". On unless turned off. Shared by Baude and Record.",
+          "copy": [
+            "shared_settings.notifications",
+            "shared_settings.notifications_subtitle"
+          ],
+          "actions": [
+            {
+              "by": "toggle",
+              "does": "turns desktop notifications on or off and keeps it"
+            }
+          ]
+        },
+        {
+          "name": "Version",
+          "shows": "An information row (no switch, no link, nothing to click). Title \"Version <short hash>\" (the commit this running process's code is); subtitle the date and time that commit was made, like \"21 November 2026, 09:14\". If the code is not in a git checkout: title \"Version unknown\", subtitle \"Not a git checkout\". It does NOT lead to the changelog: the changelog is only reached from ☰ → Changelog (and from the commit links in ☰ → Mesh, and under Meta's reply).",
+          "copy": [
+            "updates.version",
+            "updates.version_unknown",
+            "updates.not_checkout"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Size group",
+      "shows": "A group titled \"Size\" with three numeric stepper rows (a number with - and + buttons, one decimal digit, steps of 0.1), 1.0 the usual.",
+      "copy": [
+        "window.size"
+      ],
+      "parts": [
+        {
+          "name": "Text Scale",
+          "shows": "Row \"Text Scale\", range 0.7 to 2.0, the saved value (default 1.0). Scales all text in every open window of Baude and Record.",
+          "copy": [
+            "meta_settings.text_scale"
+          ],
+          "actions": [
+            {
+              "by": "change the number",
+              "does": "applies the text size at once in every window and keeps it; follows the other app changing it"
+            }
+          ]
+        },
+        {
+          "name": "Icon Scale",
+          "shows": "Row \"Icon Scale\", range 0.7 to 2.0 (default 1.0). Scales icons (16 px at 1.0) in every window.",
+          "copy": [
+            "meta_settings.icon_scale"
+          ],
+          "actions": [
+            {
+              "by": "change the number",
+              "does": "applies the icon size at once in every window and keeps it"
+            }
+          ]
+        },
+        {
+          "name": "Global Scale",
+          "shows": "Row \"Global Scale\", range 0.6 to 2.5, this window's current chat zoom default (what Cmd+0 / Ctrl+0 goes back to).",
+          "copy": [
+            "meta_settings.global_scale"
+          ],
+          "actions": [
+            {
+              "by": "change the number",
+              "does": "sets the zoom the chat returns to on the reset-zoom key, and keeps it as zoom_default"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Send Feedback row",
+      "shows": "A last group of one row, a button row titled \"Send Feedback…\" with a go-next chevron at its end.",
+      "copy": [
+        "fixes.send_feedback"
+      ],
+      "actions": [
+        {
+          "by": "click",
+          "does": "closes Settings first (the captures are of the window, not of the dialog over it), then opens the Send Feedback dialog (SendFeedback.dialog.json)"
+        }
+      ]
+    }
+  ],
+  "states": [
+    {
+      "name": "no upstream",
+      "shows": "Auto restart row greyed, off, with the \"Not a git checkout…\" subtitle"
+    },
+    {
+      "name": "code font changed, not yet running",
+      "shows": "Code Font row has the \"from Baude's next start\" subtitle and a Restart button"
+    },
+    {
+      "name": "not a git checkout",
+      "shows": "Version row says \"Version unknown\" / \"Not a git checkout\""
+    },
+    {
+      "name": "setting changed by the other app",
+      "shows": "The row for any shared setting (accent, code font, notifications, auto restart, scales) updates to the new value without running its own handler"
+    }
+  ],
+  "scenes": []
+}

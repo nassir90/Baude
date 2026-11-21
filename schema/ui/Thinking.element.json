@@ -1,0 +1,38 @@
+{
+  "description": "Claude's narration between steps (summarized thinking): a sentence or two shown in the conversation as ordinary markdown, dimmed. It is not folded away.",
+  "apps": [
+    "baude"
+  ],
+  "opens": [
+    "A thinking block with words in it, live or from history"
+  ],
+  "code": [
+    "baude.py:ThinkingView",
+    "baude.py:BaudeWindow.h_stream_event",
+    "baude.py:BaudeWindow.render_assistant"
+  ],
+  "parts": [
+    {
+      "name": "text",
+      "shows": "Full column width, drawn as markdown (see Reply), the whole thing at 62% opacity. Links in it work as a reply's do."
+    }
+  ],
+  "states": [
+    {
+      "name": "streaming",
+      "shows": "Appears only once its first words arrive, then grows like a reply."
+    },
+    {
+      "name": "empty / signed-only",
+      "shows": "Thinking blocks with no words (the model's raw reasoning arrives as empty signed blocks) are never drawn."
+    },
+    {
+      "name": "between tool calls",
+      "shows": "It stands on its own line in the chat and splits a run of tool calls: calls before and after it are grouped separately (ToolGroup)."
+    }
+  ],
+  "scenes": [
+    "02-turn-complete",
+    "28-tool-group"
+  ]
+}

@@ -1,0 +1,89 @@
+{
+  "description": "In manual permission mode, Claude asking whether a tool call may run: shown in the call's own card (border amber, its input opened, buttons at the bottom), or, when the call has no card in this chat (a subagent's call, or one not drawn), as an amber-bordered box of its own saying what it would run.",
+  "apps": [
+    "baude"
+  ],
+  "opens": [
+    "claude's can_use_tool request for a tool not always-allowed in this chat"
+  ],
+  "code": [
+    "baude.py:BaudeWindow.h_control_request",
+    "baude.py:BaudeWindow.permission_card",
+    "baude.py:ToolCard.ask",
+    "baude.py:ToolCard.answered",
+    "baude.py:ToolCard.set_decision",
+    "baude.py:BaudeWindow.allowed_in"
+  ],
+  "copy": [
+    "asks",
+    "common"
+  ],
+  "parts": [
+    {
+      "name": "in the call's card",
+      "shows": "The card's border turns amber (warning colour), its spinner goes, and its input view (Command / Diff / Input) opens by itself so you see exactly what would run: a Bash command in its code block, an Edit's red/green diff, a Write's path, line count and contents, a WebFetch's link and prompt, an MCP tool's labelled rows. The buttons sit at the bottom of the card, 8px below. Its group (if in one) opens by itself."
+    },
+    {
+      "name": "own box (no card)",
+      "shows": "A box with a 1px amber border, 8px corners, 8px/12px padding, items 6px apart: first \"Allow <tool>?\" in bold, then dimmed (60%) after two spaces the call's one-line summary; MCP tools are named \"<Server>: <Tool title>\" (\"Allow GitHub: Create issue?\"). Under it the same input view a card would show, then the buttons.",
+      "copy": [
+        "asks.allow_tool"
+      ]
+    },
+    {
+      "name": "buttons",
+      "shows": "One row, 6px apart: \"Allow\" (accent, suggested), \"Always allow <Tool title>\" (plain; e.g. \"Always allow Bash\", \"Always allow Create issue\"), \"Deny\" (red, destructive). Always allow is left out for models that ask every call (Apple's model, a model run on this Mac) unless the chat's host keeps an always-allowed list.",
+      "copy": [
+        "common.allow",
+        "asks.always_allow",
+        "common.deny"
+      ],
+      "actions": [
+        {
+          "by": "click Allow",
+          "does": "The call runs as asked; the buttons go, the input folds again, the border returns to normal (then the card runs and ends as usual)."
+        },
+        {
+          "by": "click Always allow <tool>",
+          "does": "As Allow, and that tool is never asked again in this chat (its host told too, for a host's chat). If the host refuses: a note \"<tool> isn't always allowed: <why>\"."
+        },
+        {
+          "by": "click Deny",
+          "does": "Claude is told \"The user denied this tool use.\"; the buttons go and the card's summary gains \"· denied\". With no card, a quiet note \"denied <tool name>\" is added."
+        }
+      ]
+    }
+  ],
+  "states": [
+    {
+      "name": "waiting",
+      "shows": "The chat's sidebar dot turns waiting (yellow) and a desktop notification says \"Waiting for your answer: <tool>\" (\"Claude has a question for you\" for AskUserQuestion). The chat scrolls to the end to show it.",
+      "copy": [
+        "asks.waiting_for_tool",
+        "asks.has_question_for_you"
+      ]
+    },
+    {
+      "name": "turn ends unanswered",
+      "shows": "Stopped (Esc) or ended otherwise: the buttons go and the card shows interrupted."
+    },
+    {
+      "name": "AskUserQuestion",
+      "shows": "Never auto-allowed: its buttons are replaced by the question form (QuestionForm)."
+    },
+    {
+      "name": "always-allowed tool",
+      "shows": "Not asked at all; the call just runs (for claude models)."
+    }
+  ],
+  "scenes": [
+    "10-permission-bash",
+    "11-permission-edit",
+    "12-permission-write",
+    "13-permission-web",
+    "14-permission-mcp",
+    "02-turn-complete",
+    "50d-dot-waiting",
+    "55c-network-session-asking"
+  ]
+}

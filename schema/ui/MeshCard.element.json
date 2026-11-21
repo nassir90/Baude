@@ -1,0 +1,112 @@
+{
+  "description": "A call of the mesh's own tools that starts a subagent on a host of the mesh, or messages a chat there: drawn like a subagent's row (a state mark, its title over its host and model, a › at the right), the whole line opening that chat; once the chat answers, its answer sits under the card in a bubble of its own. Never folded into a ToolGroup.",
+  "apps": [
+    "baude"
+  ],
+  "opens": [
+    "A call of mcp__mesh__start_subagent or mcp__mesh__message_chat"
+  ],
+  "code": [
+    "baude.py:MeshCard",
+    "baude.py:BaudeWindow.open_mesh_chat",
+    "baude.py:BaudeWindow.add_activity",
+    "baudelib/meshtools.py"
+  ],
+  "copy": [
+    "meta",
+    "common"
+  ],
+  "parts": [
+    {
+      "name": "frame",
+      "shows": "The tool-card border (1px rule colour, 8px corners) round the head line and anything opened under it, with no padding of its own. Border red on error, amber while asking permission."
+    },
+    {
+      "name": "head line",
+      "shows": "Padding 7px/10px, items 10px apart: the mark, then two stacked lines filling the width, then the toggles, then a › chevron (75% opacity) when there's a chat to open. Under the pointer, when openable, the line lights up (text colour at 5%) and the pointer is a hand.",
+      "parts": [
+        {
+          "name": "mark",
+          "shows": "16px: a spinner while the call runs or the chat it started is working or waiting on a question; ✓ (success green) when done; ✕ (error red) on error, or when the chat ended badly (its claude exited, its host went, the wait ran out, it was interrupted); a grey stop icon when interrupted. Invisible (its space kept) while the call asks permission."
+        },
+        {
+          "name": "title",
+          "shows": "Bold, ellipsized: for start_subagent the started chat's title as its host lists it, else the title given, else the first 60 characters of the prompt, else \"Subagent\"; for message_chat the chat's Bot's name, else its title, else \"Chat <first 8 of its id>\"."
+        },
+        {
+          "name": "subtitle",
+          "shows": "Caption size, dimmed, ellipsized, parts joined by \" · \": \"Subagent on <host>\" (or \"Subagent\") then the model's display name if known; or \"Messaged on <host>\" (or \"Messaged\"). Then at most one of: \"interrupted\", \"the wait ran out\", \"denied\", \"waiting for an answer\", \"still working\" / \"stopped waiting for it\", \"not waited for\", \"its claude exited (<code>)\", \"its host went before it answered\".",
+          "text": [
+            "Subagent on",
+            "Messaged on",
+            "interrupted",
+            "the wait ran out",
+            "denied",
+            "waiting for an answer",
+            "still working",
+            "stopped waiting for it",
+            "not waited for",
+            "its claude exited",
+            "its host went before it answered"
+          ]
+        },
+        {
+          "name": "toggles",
+          "shows": "Small toggle buttons as on a tool card: \"Prompt\" (start_subagent) or \"Message\" (message_chat) opens what it was given; \"Output\"/\"Error\" only when the result wasn't the mesh's normal reply.",
+          "text": [
+            "Prompt",
+            "Message"
+          ]
+        }
+      ],
+      "actions": [
+        {
+          "by": "click the head line",
+          "does": "Opens that chat in the main area, as the sidebar opens a mesh chat. If it isn't listed here yet: a toast \"<title>: its chat isn't listed here yet\" plus \" (is <host> reachable from here?)\" once the call is over."
+        },
+        {
+          "by": "hover",
+          "does": "Tooltip \"Open this chat on <host>\", or \"This chat on <host> isn't listed here yet\"."
+        }
+      ]
+    },
+    {
+      "name": "opened sections",
+      "shows": "The prompt/message and any output open under the head line inside the frame, 10px in from each side, as wide as the card, 8px below."
+    },
+    {
+      "name": "answer",
+      "shows": "Outside and under the frame (6px gap): a bubble on the raised fill (12px corners, 8px/12px padding) with the chat's answer as markdown. If the chat hadn't finished, a dimmed (60%) line \"What it had said so far\" heads it.",
+      "text": [
+        "What it had said so far"
+      ]
+    }
+  ],
+  "states": [
+    {
+      "name": "starting / running",
+      "shows": "Spinner; the chat it is starting is found among the host's chats by its title, so the line opens it even before the reply."
+    },
+    {
+      "name": "chat working or waiting",
+      "shows": "After the call returns, the mark follows the chat's own state as its host lists it: spinner while it works, \"waiting for an answer\" when it waits on a question."
+    },
+    {
+      "name": "done",
+      "shows": "✓ and the answer bubble."
+    },
+    {
+      "name": "failed / refused",
+      "shows": "A result that isn't the mesh's reply is shown as a normal card's Error; ✕ and red border."
+    },
+    {
+      "name": "asking permission",
+      "shows": "Amber border, mark hidden, buttons inside the frame at the bottom (see PermissionPrompt)."
+    },
+    {
+      "name": "jumped to",
+      "shows": "Accent tint flash over the frame."
+    }
+  ],
+  "scenes": []
+}

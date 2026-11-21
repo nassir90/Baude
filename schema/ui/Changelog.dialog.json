@@ -1,0 +1,31 @@
+{
+  "description": "A dialog listing the commits (newest first, merges left out) the running version has, 640 x 720 px, with a header naming that version. The same dialog, for another commit, is what the commit links in Mesh open. Baude's and Record's.",
+  "apps": ["baude", "record"],
+  "opens": ["☰ → Changelog", "a commit link (short hash) on a row of ☰ → Mesh (opens it for that commit)"],
+  "code": ["update.py:changelog_dialog", "update.py:changelog", "update.py:changelog_group", "update.py:version", "update.py:made_when", "widgets.py:changelog_of"],
+  "copy": ["changelog", "meta"],
+  "parts": [
+    {
+      "name": "Header bar",
+      "shows": "A title \"Changelog\" with a subtitle under it \"Version <short hash> · <date>\", e.g. \"Version 586e286 · 21 November 2026, 09:14\" (date like \"21 November 2026, 09:14\", day without a leading zero, 24-hour time, local time). With no version known (not a git checkout) the subtitle is empty. A close control as any dialog has.",
+      "copy": ["changelog.title", "changelog.version_made"]
+    },
+    {
+      "name": "Commit rows",
+      "shows": "One group of rows, one per commit reachable from that version, newest first, merge commits left out. Each row: title the commit's subject line (plain text, not markup, may be long); subtitle \"<date> · <short hash>\" (date as above, the hash 7 or so characters). At most the 50 newest are listed at first.",
+      "text": ["<date> · <short hash>"]
+    },
+    {
+      "name": "Show more",
+      "shows": "When there are more than 50 commits, the last row is a button row \"Show N more\", N the number not yet listed.",
+      "copy": ["meta.show_more"],
+      "actions": [{"by": "click", "does": "removes the button and appends all the remaining rows"}]
+    }
+  ],
+  "states": [
+    {"name": "empty", "shows": "A single row \"No changelog\" with subtitle \"No commits to list\" (no git history readable)", "copy": ["changelog.empty", "changelog.empty_detail"]},
+    {"name": "for another commit", "shows": "Opened from a Mesh commit link: the header and list are for that commit (its history), not the running one"},
+    {"name": "also under Meta's reply", "shows": "The same rows (limited to the newest 5, then \"Show N more\") are drawn inside Meta's changelog reply; not this dialog"}
+  ],
+  "scenes": []
+}

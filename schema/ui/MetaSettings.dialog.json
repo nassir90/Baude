@@ -1,0 +1,83 @@
+{
+  "description": "The Meta group of Settings: the first group in the Settings dialog, titled 'Meta', five rows that choose what Meta thinks with, where that runs, how hard it thinks, and whether it may run commands or act through code. Part of the Settings dialog (Settings.dialog.json); Baude and Record show the same group and the same settings. A change applies from Meta's next message, updates the send button's tooltip in Meta's box, and shows at once in every row and every window (also when another app on the machine changes it: Baude and Record share the settings file).",
+  "apps": ["baude", "record"],
+  "opens": ["☰ → Settings… → first group (Meta)", "Meta can show one of these rows under its reply ('show setting:<name>') and change Intelligence and Effort itself (set_setting); Run commands and Code mode it can only show"],
+  "code": [
+    "meta.py:settings_group",
+    "meta.py:model_row",
+    "meta.py:provider_row",
+    "meta.py:effort_row",
+    "meta.py:commands_row",
+    "meta.py:code_mode_row",
+    "meta.py:shared_settings",
+    "meta.py:model_picked",
+    "meta.py:listed_models",
+    "meta.py:takes_commands",
+    "widgets.py:ModelPicker",
+    "widgets.py:HostPicker",
+    "baude.py:SettingsDialog",
+    "record.py:SettingsDialog"
+  ],
+  "copy": ["meta_settings", "model_picker", "mode_effort", "model_providers"],
+  "parts": [
+    {
+      "name": "group title",
+      "shows": "'Meta' (Meta's name), above the five rows.",
+      "text": ["Meta"]
+    },
+    {
+      "name": "Intelligence",
+      "shows": "A row with the title 'Intelligence', the subtitle 'The model Meta thinks with', and at the end a picker button showing the picked model's family icon and name (ellipsised past 30 characters) with a drop-down arrow. The list holds Claude's models first, then every other model in the mesh (this machine's first, then the other hosts'), one entry per kind: the same model on two hosts, or served two ways, is one entry; two different models that share a name are told apart. Meta's own model stays listed even if its host is gone and no other has it. Pressing the row opens the picker.",
+      "copy": ["meta_settings.intelligence", "meta_settings.intelligence_detail"],
+      "parts": [
+        {
+          "name": "model picker popover",
+          "shows": "A command-palette popover: a search field at the top (placeholder 'Search models'), under it a scrolling list (at most 420 px tall, at least 280 px wide) of the models grouped under their family's name in the order the families first appear, each row with the family icon (or a blank slot), the model name (ellipsised at 40 characters, tooltip with the whole name if longer) and a tick at the end on the picked one. When nothing matches the list says 'No models match'.",
+          "copy": ["model_picker.search", "model_picker.none"],
+          "actions": [
+            {"by": "type", "does": "narrows the list: every word must be found in the name, the value or the family name"},
+            {"by": "key Up / Down", "does": "moves the highlight"},
+            {"by": "key Enter / click a row", "does": "picks that model: Meta's next message uses it; the Provider and Effort rows update (Effort offers the new model's levels; Provider shows where it runs); the send button's tooltip changes"},
+            {"by": "key Esc", "does": "closes the popover"}
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Provider",
+      "shows": "A row with the title 'Provider', the subtitle 'Where the model runs', and a picker button at the end showing '<host> / <provider>' (shortened in the middle past 30 characters). The menu lists, for the model picked, every provider that has it (the same model on another host, or served another way), in sections headed by the host's name with this machine ('local') first and a rule between hosts; the picked one has the selection mark. Picking another moves Meta's model to that provider's copy of it from the next message (Intelligence follows). The row is greyed when only one provider has the model, and is hidden when Meta's model is one of Claude's (Claude runs where it is: no provider of its own).",
+      "copy": ["meta_settings.provider", "meta_settings.provider_detail", "meta_settings.provider_picker"],
+      "states": [
+        {"name": "one provider", "shows": "Greyed out, not changeable"},
+        {"name": "Claude model", "shows": "Row not shown"}
+      ]
+    },
+    {
+      "name": "Effort",
+      "shows": "A drop-down row titled 'Effort'. Choices: 'Default' then the levels the picked model takes, named as the mode/effort pickers name them ('No thinking', 'Low effort', 'Medium effort', 'High effort', 'Extra-high effort', 'Max effort'). Subtitle 'How hard Meta thinks'. A model that takes no effort levels: the row is greyed and the subtitle reads '<model> has no effort setting'. Changing the model reloads the choices; an effort the new model does not take falls back to Default. The send button's tooltip names the effort ('<model>, <effort>').",
+      "copy": ["meta_settings.effort", "meta_settings.effort_default", "meta_settings.effort_detail", "meta_settings.no_effort", "mode_effort.effort_off", "mode_effort.effort_low", "mode_effort.effort_medium", "mode_effort.effort_high", "mode_effort.effort_xhigh", "mode_effort.effort_max"],
+      "states": [
+        {"name": "model without effort levels", "shows": "Greyed, subtitle '<model> has no effort setting', value Default"}
+      ]
+    },
+    {
+      "name": "Run commands",
+      "shows": "A switch row titled 'Run commands'. Subtitle 'Meta runs shell commands and edits files, in Auto mode' (on Claude's models). On: Meta may run shell commands, edit and write files, and fetch or search the web, in Claude Code's Auto mode; anything it holds back is put to you in a permission card. Default on. Only Claude's models run commands, started by claude on this machine: for a smaller model (run by pi, Apple's adapter, or another host) the row is greyed, off, and the subtitle reads '<model> only reads: Claude's models run commands'. If claude did not start the model in Auto mode here, the subtitle reads 'Claude Code didn't start <model> in Auto mode here: Meta asks before each command'; the switch still works but every command is asked. The setting's value is kept while the row is greyed.",
+      "copy": ["meta_settings.run_commands", "meta_settings.run_commands_detail", "meta_settings.only_reads", "meta_settings.no_auto", "meta_settings.asks_each"],
+      "states": [
+        {"name": "model only reads", "shows": "Greyed, off, subtitle '<model> only reads: Claude's models run commands'"},
+        {"name": "not started in Auto mode", "shows": "Subtitle 'Claude Code didn't start <model> in Auto mode here: Meta asks before each command'"}
+      ]
+    },
+    {
+      "name": "Code mode",
+      "shows": "A switch row titled 'Code mode', subtitle 'Meta acts by writing up to 10 lines of Python'. On: Meta's tools for the app are replaced by one run_python tool that calls them from a few lines of Python (the slow model-setup tools stay separate). Default off. Only the user turns it on or off; Meta cannot.",
+      "copy": ["meta_settings.code_mode", "meta_settings.code_mode_detail"]
+    },
+    {
+      "name": "other settings Meta can show or change",
+      "shows": "Not rows of this group but settings Meta can name with 'show setting:<name>' and change with set_setting, drawn as the row Settings has for them: Accent Colour, Code Font, Text Scale, Icon Scale, Global Scale, Full-width text, automatic update (the 'auto restart' row), and in Baude 'group_by' (the sidebar's group-by: Folder or Date), in Record 'markup' (Markup visibility) and 'backup_all' (Include glossary and chats in backup). Their rows and wording are described with Settings.",
+      "copy": ["shared_settings.accent_colour", "shared_settings.code_font", "meta_settings.text_scale", "meta_settings.icon_scale", "meta_settings.global_scale", "meta_settings.full_width"]
+    }
+  ]
+}

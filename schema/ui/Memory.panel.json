@@ -1,0 +1,112 @@
+{
+  "description": "A Bot's memory, a page of the right-hand side panel: the notes (memory.md) the Bot keeps on its host, shown and edited in Record's Markdown page editor. Changes the Bot wrote since you last decided are drawn as tracked changes with Accept and Reject on each. Only exists while the open chat is a Bot (a chat with an identity and a host); otherwise the tab is hidden, and if it was shown the panel falls back to Meta.",
+  "apps": [
+    "baude"
+  ],
+  "opens": [
+    "the 'Memory' tab (document-edit icon) in the side panel's switcher, visible only while the open chat is a Bot",
+    "it is read again whenever a turn of the Bot ends (the Bot may have written in it)"
+  ],
+  "code": [
+    "botmemory.py:BotMemory",
+    "botmemory.py:changes",
+    "botmemory.py:merge",
+    "baude.py:SidePanel.bot_changed",
+    "record.py:DiaryEditor",
+    "record.py:EditControls"
+  ],
+  "copy": [
+    "bot_memory",
+    "edit_review"
+  ],
+  "parts": [
+    {
+      "name": "tab",
+      "shows": "Switcher tab with a document-edit icon and the label 'Memory'; present only for a Bot chat.",
+      "copy": [
+        "bot_memory.title"
+      ]
+    },
+    {
+      "name": "offline line",
+      "shows": "A faint grey band at the very top (8% tint, text a little dimmed, 8 px / 12 px padding) shown only when the memory was read before but the last read failed: 'Can't connect to the host. Showing the last saved copy.' (host gone) or \"Couldn't load the memory. Showing the last saved copy.\" (any other failure; the host's reason is in its tooltip). While it is shown the editor below is greyed and cannot be written in.",
+      "copy": [
+        "bot_memory.cant_connect",
+        "bot_memory.couldnt_load",
+        "bot_memory.last_saved"
+      ]
+    },
+    {
+      "name": "status page",
+      "shows": "A centred placeholder (document-edit icon, title, description) in place of the editor. Before the memory is first read: title 'No memory yet', description 'Notes the Bot keeps. You can edit them.'. If the first read fails: the title is 'Can't connect to the host' (without the full stop) with the description 'It's shown once the host is back.' when the host is gone, or the title 'Couldn't load the memory' with the host's reason (or 'no reason given') as the description.",
+      "copy": [
+        "bot_memory.no_memory",
+        "bot_memory.empty_text",
+        "bot_memory.shown_when_back",
+        "bot_memory.no_reason",
+        "bot_memory.cant_connect",
+        "bot_memory.couldnt_load"
+      ]
+    },
+    {
+      "name": "editor",
+      "shows": "Record's page editor with its title row hidden (the tab is the name): one page of Markdown drawn as it reads (headings in decreasing sizes and weights, **bold**, *italic*, ==highlight==, `code`, ``` blocks, - lists and numbered lists, > quotes, [links](url)), the markup shown only on the caret's line, a [[Page]] link saying it is the only page. The column is as wide as the Full-width text setting (full width on, otherwise 820 px centred). It is greyed and not editable until the memory has been read. Spell checking is on.",
+      "actions": [
+        {
+          "by": "typing",
+          "does": "edits the memory; saved to the Bot's host 600 ms after the last key (and when the chat is left, and when the window closes)"
+        },
+        {
+          "by": "type @",
+          "does": "lists what Baude's search finds (chats by title, the chat's folder's names) as in Meta's box"
+        },
+        {
+          "by": "key Ctrl+F (Cmd+F)",
+          "does": "finds in the page"
+        },
+        {
+          "by": "key Ctrl+Z",
+          "does": "undoes your own edit (the Bot's proposed changes are not part of undo)"
+        }
+      ],
+      "parts": [
+        {
+          "name": "Bot's change",
+          "shows": "Text the Bot wrote since you last decided, drawn like tracked changes: what it took away struck through on red where it was, what it put in just after, in green in the page's own font and wrapping, and at the end of the green a square tick (accept) button on green and a cross (reject) button on red, as tall as the text. The green text cannot be edited. Lines put in go with the line before them; lines changed one for one are one change each, with its own buttons.",
+          "copy": [
+            "edit_review.accept_tip",
+            "edit_review.reject_tip"
+          ],
+          "actions": [
+            {
+              "by": "click tick / key Tab with the caret in the green",
+              "does": "accepts: the text goes into the page in the red's place as one undoable edit; saved to the host"
+            },
+            {
+              "by": "click cross / key Esc",
+              "does": "rejects: the red text is as it was; saved to the host"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "states": [
+    {
+      "name": "loading",
+      "shows": "Empty editor, greyed, until the host answers."
+    },
+    {
+      "name": "saving conflict",
+      "shows": "If the Bot wrote while you were editing, what you did is merged into what it wrote and saved again (up to 3 tries). If both changed the same lines, the Bot's text is kept and what you wrote shows as its changes to accept or reject, with a toast: 'The Bot changed the same lines. Its version is shown as changes to accept or reject.'"
+    },
+    {
+      "name": "save failed",
+      "shows": "Toast 'Couldn't save: <why>' (or 'no reason given'); it stays unsaved and is retried with your next change or read. Host not connected: toast 'Not saved yet: can't connect to the host'."
+    },
+    {
+      "name": "no longer a Bot",
+      "shows": "Opening a chat that is not a Bot hides the Memory tab; a chat that stops being a Bot keeps its memory on the host as last saved."
+    }
+  ]
+}

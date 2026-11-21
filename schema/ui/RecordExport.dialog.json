@@ -1,0 +1,62 @@
+{
+  "description": "Exporting notebooks to a zip: a question about what goes in, then a save dialog. Reached only from Settings' export rows.",
+  "apps": [
+    "record"
+  ],
+  "opens": [
+    "Settings → Export Notebook…",
+    "Settings → Export All Notebooks…"
+  ],
+  "code": [
+    "record.py:Window.ask_export",
+    "record.py:Window.choose_zip",
+    "record.py:Window.export",
+    "record.py:export_zip",
+    "record.py:zip_entries"
+  ],
+  "copy": [
+    "common"
+  ],
+  "phone": {
+    "does": "nothing",
+    "why": "The save-file dialog is the desktop's; the zip itself (and the question) is not.",
+    "decided": "2026-11-21"
+  },
+  "parts": [
+    {
+      "name": "question dialog",
+      "shows": "Alert titled \"Export {name}\" (the notebook's name, or \"Notebooks\" for all). One checkbox \"Include glossary and chats\", tooltip \"What's shown of the chats named in its notes, and what's been looked up in their folders\". Buttons: Cancel, \"Export…\" (suggested, default).",
+      "copy": [
+        "common.cancel"
+      ],
+      "text": [
+        "Export {name}",
+        "Include glossary and chats",
+        "Export…"
+      ],
+      "actions": [
+        {
+          "by": "click Export…",
+          "does": "A save-file dialog titled \"Export\" with the file name \"{name}.zip\"."
+        },
+        {
+          "by": "click Cancel",
+          "does": "Closes; Settings stays."
+        }
+      ]
+    },
+    {
+      "name": "result",
+      "shows": "Settings closes and the zip is written off the main loop, whole or not at all. A toast says \"Exported to {path}\" or \"Couldn't export: {error}\".",
+      "text": [
+        "Exported to {path}",
+        "Couldn't export: {error}"
+      ]
+    },
+    {
+      "name": "zip contents",
+      "shows": "notes/{notebook}/{page}.md for every page (empty ones left out), conversations/{notebook}.md (the conversation with Meta as Markdown: \"**You:**\" and \"**Record:**\" turns, passages quoted with >). With the checkbox: glossary/{notebook}.md and chats/{notebook}/{chat title} ({8-char id}).md for every chat the notebook's notes name."
+    }
+  ],
+  "scenes": []
+}

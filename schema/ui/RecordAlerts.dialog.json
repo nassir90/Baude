@@ -1,0 +1,84 @@
+{
+  "description": "Record's small question dialogs (libadwaita alerts: a heading, optional body or text box, buttons; Enter takes the default button, Esc cancels): rename or create a notebook, delete a notebook, new page, delete a page, rename a chat.",
+  "apps": [
+    "record"
+  ],
+  "code": [
+    "record.py:Window.rename",
+    "record.py:Window.delete",
+    "record.py:PagesList.new_page",
+    "record.py:Window.delete_page",
+    "record.py:Window.ask_rename_chat"
+  ],
+  "copy": [
+    "common"
+  ],
+  "parts": [
+    {
+      "name": "Rename (notebook)",
+      "shows": "Heading \"Rename\"; a text box holding the notebook's name (focused); buttons Cancel and \"Rename\" (suggested, default). A blank name changes nothing. Kept and the row and header bar's name change at once. Reached by: right-click a notebook → Rename…; key F2 in the notebooks list; the header bar's notebook name's tooltip says F2 too.",
+      "copy": [
+        "common.rename",
+        "common.cancel"
+      ]
+    },
+    {
+      "name": "New Notebook (naming)",
+      "shows": "As Rename but the heading is \"New Notebook\" and the suggested button is \"Create\". Shown right after + makes the notebook. Cancelling leaves the new notebook blank under its suggested name (it is dropped when left).",
+      "copy": [
+        "common.create",
+        "common.cancel"
+      ],
+      "text": [
+        "New Notebook"
+      ]
+    },
+    {
+      "name": "Delete notebook",
+      "shows": "Heading \"Delete {name}?\", body \"Its notes ({n} pages) go with it.\"; buttons Cancel and \"Delete\" (red). Then the first notebook is opened, or none. Reached by: right-click a notebook → Delete…; Meta's Delete {name}… button.",
+      "copy": [
+        "common.delete",
+        "common.cancel"
+      ],
+      "text": [
+        "Delete {name}?",
+        "Its notes ({n} pages) go with it."
+      ]
+    },
+    {
+      "name": "New page",
+      "shows": "Heading \"New page\", body \"Under {page}\" when made from a page's menu (none when from the list's +); a text box (focused); buttons Cancel and \"Add\" (suggested, default). A name typed opens a tab of that page, made (as Parent:Name under a parent). Empty name does nothing.",
+      "copy": [
+        "common.add",
+        "common.cancel"
+      ],
+      "text": [
+        "New page",
+        "Under {page}"
+      ]
+    },
+    {
+      "name": "Delete page",
+      "shows": "Heading \"Delete {page}?\" (short name); buttons Cancel and \"Delete\" (red). Its tab closes; links to it stay and make the page again when followed; Meta's edits waiting on it are rejected.",
+      "copy": [
+        "common.delete",
+        "common.cancel"
+      ],
+      "text": [
+        "Delete {page}?"
+      ]
+    },
+    {
+      "name": "Rename chat",
+      "shows": "Heading \"Rename chat\"; a text box holding the chat's title; buttons Cancel and \"Rename\". Done the way Claude Code renames a chat (a custom-title line is added to its transcript), so Claude Code shows it too. The tab's title and tooltip, the Open a chat list and the saved list of open chats take it at once. Reached by: right-click a chat's tab → Rename….",
+      "copy": [
+        "common.rename",
+        "common.cancel"
+      ],
+      "text": [
+        "Rename chat"
+      ]
+    }
+  ],
+  "scenes": []
+}

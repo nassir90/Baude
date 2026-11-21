@@ -1,0 +1,37 @@
+{
+  "description": "A small alert asking for a group's name: making a new group, or renaming one. Also reached from a session's Move to Group → New Group…, where the chat is moved into the new group.",
+  "apps": ["baude"],
+  "opens": ["⋮ → Groups → New Group…", "⋮ → a group's right-click → Rename Group…", "session row right-click → Move to Group → New Group…"],
+  "code": ["baude.py:SessionSidebar.ask_group_name", "baude.py:SessionSidebar.ask_new_group", "baude.py:SessionSidebar.ask_rename_group"],
+  "copy": ["new_session", "common"],
+  "parts": [
+    {
+      "name": "heading",
+      "shows": "\"New group\", or \"Rename group\".",
+      "copy": ["new_session.new_group"],
+      "text": ["Rename group"]
+    },
+    {
+      "name": "name field",
+      "shows": "A single text field, empty for a new group, else holding the group's current name; focused. Enter confirms. Spaces are tidied; a blank name does nothing.",
+      "actions": [{"by": "type", "does": "Edits the name."}]
+    },
+    {
+      "name": "Cancel",
+      "shows": "\"Cancel\" button; Escape.",
+      "copy": ["common.cancel"]
+    },
+    {
+      "name": "Create / Rename",
+      "shows": "The default, suggested-style button: \"Create\" for a new group, \"Rename\" for a rename.",
+      "copy": ["common.create", "common.rename"],
+      "actions": [
+        {"by": "click Create", "does": "The group is made and listed in ⋮ → Groups even while empty; if the dialog came from Move to Group, that chat is moved into it. A name already in use joins that group."},
+        {"by": "click Rename", "does": "The group's chats move to the new name (and it stays listed if it was); to a group already there, they join it. No change if the name is unchanged."}
+      ]
+    }
+  ],
+  "states": [
+    {"name": "group explanation", "shows": "A new group is explained as: \"A list of chats of its own, picked in ⋮ → Groups; a chat's right-click → Move to Group puts it there\" (copy new_session.group_body, shown where the same form is used for a host's new session, not in this dialog)."}
+  ]
+}

@@ -1,0 +1,45 @@
+{
+  "description": "☰ → Mesh: a dialog (640 x 720 px, title \"Mesh\") that shows what code every host's daemon in the mesh runs, and every app connected to each host, against the newest in the mesh. Baude's and Record's; the phone has the same under ⋮ → Mesh.",
+  "apps": ["baude", "record"],
+  "opens": ["☰ → Mesh"],
+  "code": ["widgets.py:mesh_dialog", "widgets.py:mesh_versions", "widgets.py:version_standing", "widgets.py:version_row", "widgets.py:changelog_of"],
+  "copy": ["mesh_versions", "host_menu", "updates"],
+  "parts": [
+    {
+      "name": "Header bar",
+      "shows": "Title \"Mesh\", nothing else."
+    },
+    {
+      "name": "Host group",
+      "shows": "One group per host in the mesh (this machine's host process, or the first reached host that has a mesh, plus its members; each host once). The group's title is the host's name, or the first 8 characters of its id when it has no name. Rows in a group: first the host's daemon, then each app connected to it, one line each.",
+      "parts": [
+        {
+          "name": "Daemon row",
+          "shows": "Row titled \"Daemon\" (host_menu.daemon), the host process's code version at the right (see Version cell and Standing cell).",
+          "copy": ["host_menu.daemon"]
+        },
+        {
+          "name": "App row",
+          "shows": "One row per app connected to that host (a head), titled by the app: \"Baude\", \"Record\", \"Emission\", \"Android\" (for the Android app). An app whose kind isn't known is titled by its own client name as sent.",
+          "copy": ["mesh_versions.baude", "mesh_versions.record", "mesh_versions.emission", "mesh_versions.android"]
+        },
+        {
+          "name": "Version cell",
+          "shows": "At the right of every row: the commit as its first 7 characters, as a flat monospace link in the accent colour. With no commit known: \"Version unknown\", dimmed.",
+          "copy": ["updates.version_unknown"],
+          "actions": [{"by": "click the commit", "does": "opens ☰ → Changelog's dialog (Changelog.dialog.json) for that commit, over this one"}]
+        },
+        {
+          "name": "Standing cell",
+          "shows": "Right of the commit, a 16-character-wide right-aligned label: \"Newest\" (dimmed) when it is the newest commit in the mesh; \"N commit behind\" / \"N commits behind\" (warning colour) when N > 0 commits behind the newest; \"Older code\" (warning colour) when it isn't known how many behind but it was made before the newest; empty otherwise (no newest known, or unknown commit).",
+          "copy": ["mesh_versions.newest", "mesh_versions.behind", "mesh_versions.older"]
+        }
+      ]
+    }
+  ],
+  "states": [
+    {"name": "no host reached", "shows": "One line, \"Not connected to a host process\", no groups", "copy": ["mesh_versions.none"]},
+    {"name": "live", "shows": "Looked at again every 2 seconds while the dialog is open; rows come and go and standings change as hosts report (a host's record, an app connecting or leaving), without closing it. Left alone if nothing changed."}
+  ],
+  "scenes": []
+}

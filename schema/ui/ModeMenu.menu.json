@@ -1,0 +1,26 @@
+{
+  "description": "The header's permission-mode drop-down: a plain list of the modes the chat's program offers, a tick on the current one, opened centred under its button.",
+  "apps": ["baude"],
+  "opens": ["header mode picker"],
+  "code": ["widgets.py:ChoiceDropDown", "baude.py:BaudeWindow.on_mode_changed", "baude.py:BaudeWindow.mode_refused", "baude.py:BaudeWindow.sync_mode", "baudelib/claude.py:MODES", "baudelib/models.py:CODEX_MODES"],
+  "copy": ["mode_effort", "chat_header"],
+  "parts": [
+    {
+      "name": "Claude's modes, in order",
+      "shows": "Six rows for Claude's models: Manual (value default), Accept edits, Plan, Auto, Don't ask, Bypass permissions. A new chat starts on Auto.",
+      "copy": ["mode_effort.manual", "mode_effort.accept_edits", "mode_effort.plan", "mode_effort.auto", "mode_effort.dont_ask", "mode_effort.bypass"],
+      "actions": [
+        {"by": "click", "does": "Switches the chat's permission mode (asked of claude; on success the quiet note \"permission mode → <label>\"). If claude refuses (for example Bypass when the chat wasn't started able to bypass), the picker returns to the mode it is still in and the chat notes \"couldn't switch to <mode>: <why> (still <was>)\" (or without the \"still\" part with no known earlier mode)"}
+      ]
+    },
+    {
+      "name": "Codex modes",
+      "shows": "Three rows for a Codex model: Manual, Auto, Bypass Permissions. A Codex chat starts on Manual.",
+      "copy": ["mode_effort.manual", "mode_effort.auto", "mode_effort.codex_bypass"]
+    }
+  ],
+  "states": [
+    {"name": "hidden", "shows": "Not shown for models whose program has no permission modes, unless the chat's host offers set_permission_mode"}
+  ],
+  "scenes": ["01-empty", "10-permission-bash"]
+}

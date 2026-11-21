@@ -1,0 +1,74 @@
+{
+  "description": "Sharing to Baude from other apps on the phone: Bots as targets in the system share sheet, what a share puts in the chat, and the banner on the home screen that asks where to send a share sent to Baude itself.",
+  "apps": [
+    "phone"
+  ],
+  "opens": [
+    "another app's Share, then a Bot (its picture or initials as the icon, most recently active first)",
+    "another app's Share, then Baude (plain): the home screen with the banner",
+    "a Bot's shortcut in the launcher's long-press menu opens its chat"
+  ],
+  "code": [
+    "Share.kt:Shares",
+    "Share.kt:ShareBanner",
+    "MainActivity.kt:MainActivity",
+    "Home.kt:Home"
+  ],
+  "copy": [
+    "common"
+  ],
+  "parts": [
+    {
+      "name": "Bots as share targets",
+      "shows": "Each Bot (as many as the launcher takes, most recently active first) is a sharing shortcut: its name, its picture or its initials on its avatar's gradient as the icon. Sending a message to a Bot ranks it higher. A Bot that is gone (deleted, archived, made a chat again, or its host removed) has its shortcut taken away or disabled (\"This Bot isn't there any more\"); one whose host has not listed yet is kept.",
+      "text": [
+        "This Bot isn't there any more"
+      ],
+      "actions": [
+        {
+          "by": "pick a Bot in the share sheet",
+          "does": "opens that Bot's chat with the shared text put in the box (after what is already there) and the shared files attached, ready to send; back then returns to the app it was shared from"
+        }
+      ]
+    },
+    {
+      "name": "What a share puts in the chat",
+      "shows": "The text (a link's too, else the subject if no file) goes in the message box, after what is there; each file is read and attached as the chat's own attachments. Nothing is sent: you send it."
+    },
+    {
+      "name": "Share banner",
+      "shows": "A bar over the home screen while a share waits: \"Choose a Bot or session to send this to\" with a close button.",
+      "copy": [
+        "common.cancel"
+      ],
+      "text": [
+        "Choose a Bot or session to send this to"
+      ],
+      "actions": [
+        {
+          "by": "open any chat",
+          "does": "the share is put in that chat and cleared"
+        },
+        {
+          "by": "tap close, or back",
+          "does": "drops the share and returns to the app it was shared from"
+        }
+      ]
+    },
+    {
+      "name": "Kept across a restart",
+      "shows": "A share not yet sent, the open chat's box text and attached files are kept if Android ends the app, and put back when it is made again."
+    }
+  ],
+  "states": [
+    {
+      "name": "share waiting",
+      "shows": "The home screen has the banner"
+    },
+    {
+      "name": "opened from Recents",
+      "shows": "Not treated as a share again"
+    }
+  ],
+  "scenes": []
+}

@@ -1,0 +1,78 @@
+{
+  "description": "The side panel's Processes page: the session's background commands (and other non-subagent tasks), newest first, each with its status, a live tail of its output and a stop button; a row opens under its line or fills the page.",
+  "apps": ["baude"],
+  "opens": [
+    "Side panel page button \"Processes\"",
+    "Status bar \"⚙ ... running\" button (when no subagent is running)"
+  ],
+  "code": ["baude.py:ProcessRow", "baude.py:SidePanel.update_process", "baude.py:SidePanel.open_process", "baude.py:SidePanel.close_process", "baude.py:SidePanel.poll_output", "baude.py:BaudeWindow.stop_task"],
+  "copy": ["side_panel"],
+  "parts": [
+    {
+      "name": "list",
+      "shows": "A boxed list of process rows, as tall and wide as the Subagents rows, newest at the top; empty shows centred dim text.",
+      "copy": ["side_panel.no_processes"],
+      "parts": [
+        {
+          "name": "row line",
+          "shows": "Left to right: status mark (spinner while running, green tick completed, grey stop mark interrupted, red cross failed/killed); title and one-line subtitle; then three flat buttons at the end: stop (square icon, only while running), a ⌄ toggle, and a maximise icon.",
+          "parts": [
+            {
+              "name": "title",
+              "shows": "If Claude gave the command a description: that text in normal type. If not, the command's first line (up to 300 characters) shown as code in monospace with shell syntax colours (light or dark by theme), never a summary of ours. A multi-line command shows only its first line here. One line, ellipsised; no tooltip (the full command is in the opened row)."
+            },
+            {
+              "name": "subtitle",
+              "shows": "Same format as a subagent's: status word only for failed/killed, then \"N tool use(s)\", \"N tokens\", seconds, and the running activity if the task reports any (usually little for commands)."
+            },
+            {
+              "name": "stop button",
+              "shows": "Stop icon, tooltip \"Stop this process\"; visible only while running.",
+              "copy": ["side_panel.stop_process"],
+              "actions": [{"by": "click", "does": "asks Baude's claude to stop that task and notes \"stop requested for <description or id>\" in the window's note line"}]
+            },
+            {
+              "name": "toggle",
+              "shows": "A ⌄ icon (down chevron) when closed, a − when open. Tooltip \"Show this process's output\" / \"Hide this process's output\".",
+              "text": ["Show this process's output", "Hide this process's output"],
+              "actions": [{"by": "click, or a click on the row's line (not on a button)", "does": "slides the command and output open under the line, or closes them"}]
+            },
+            {
+              "name": "maximise button",
+              "shows": "Window-maximise icon, tooltip \"Open this process in the whole panel\".",
+              "text": ["Open this process in the whole panel"],
+              "actions": [{"by": "click", "does": "the row grows into a detail page filling the panel"}]
+            }
+          ]
+        },
+        {
+          "name": "opened body (under the line)",
+          "shows": "On the row's own fill: first the command in a code block with bash highlighting (the whole command, every line), then the output in a code block labelled output: the last 4000 characters of the task's output file. Before any output it says \"(no output yet)\". The output refreshes every second while the row is running and the panel is visible, and on every task update. Long lines scroll/wrap inside the block.",
+          "text": ["(no output yet)"],
+          "actions": [{"by": "select text", "does": "copy as in any code block"}]
+        }
+      ]
+    },
+    {
+      "name": "detail page",
+      "shows": "Header then the same command and output, scrolling in the panel's own background.",
+      "parts": [
+        {"name": "header", "shows": "Status mark, title (as in the row: description or highlighted command line), subtitle line (hidden if empty), stop button (while running), and a back button ‹ at the end, tooltip \"All processes\". Everything stays live: title, status and output update as the process goes on.", "text": ["All processes"],
+         "actions": [
+           {"by": "click stop", "does": "stops it, as in the row"},
+           {"by": "click back", "does": "closes into its row (and into its opened body, if it was open there)"}
+         ]},
+        {"name": "body", "shows": "The command code block, then the output code block, filling the page height and scrolling."}
+      ]
+    }
+  ],
+  "states": [
+    {"name": "empty", "shows": "\"No background processes\""},
+    {"name": "running", "shows": "Spinner, stop button visible, output tail updating each second"},
+    {"name": "completed", "shows": "Tick, no stop button, final output"},
+    {"name": "interrupted / failed / killed", "shows": "Grey stop mark or red cross; the word \"failed\" or \"killed\" in the subtitle"},
+    {"name": "no description, long command", "shows": "Title is one line of highlighted code (first line only), ellipsised"},
+    {"name": "viewing a session running elsewhere", "shows": "That machine's background tasks listed the same way"}
+  ],
+  "scenes": ["72-panel-processes", "72b-panel-processes-long", "76-tail-background-tasks"]
+}

@@ -1,0 +1,11 @@
+{
+  "description": "One host and the sessions it lists, newest first. folder is under the host's home; ago is seconds since something was said; transcript is a file here, or null for a short stand-in (a prompt and a reply).",
+  "host": {"id": "h1", "name": "workshop", "home": "/home/dev"},
+  "sessions": [
+    {"id": "6f1c2a90-1111-4c4e-9a11-000000000001", "title": "Fix the flaky upload", "folder": "garden", "ago": 60, "state": "idle", "transcript": "tools.jsonl", "model": "opus", "effort": "high", "mode": "default"},
+    {"id": "6f1c2a90-1111-4c4e-9a11-000000000002", "title": "Tidy the release notes", "folder": "garden", "ago": 1800, "state": "working", "transcript": null, "model": "opus", "effort": "high", "mode": "default"},
+    {"id": "6f1c2a90-1111-4c4e-9a11-000000000003", "title": "Why the build is slow", "folder": "garden", "ago": 7200, "state": "idle", "transcript": null, "model": "sonnet", "effort": "medium", "mode": "default"},
+    {"id": "6f1c2a90-1111-4c4e-9a11-000000000004", "title": "Draft the README", "folder": "lantern", "ago": 90000, "state": "idle", "transcript": null, "model": "opus", "effort": "high", "mode": "default"},
+    {"id": "6f1c2a90-1111-4c4e-9a11-000000000005", "title": "Sketch the settings page", "folder": "lantern", "ago": 200000, "state": "idle", "transcript": null, "model": "opus", "effort": "high", "mode": "default"}
+  ]
+}

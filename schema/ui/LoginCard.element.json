@@ -1,0 +1,102 @@
+{
+  "description": "Signing in to Claude from the chat: /login (or Sign in on a turn that failed for want of it) runs claude auth login and shows its progress in an amber-bordered card in the chat; a turn that fails because Claude Code isn't signed in shows a card with Sign in.",
+  "apps": [
+    "baude"
+  ],
+  "opens": [
+    "/login (optionally with claude auth login's arguments) sent in the composer",
+    "Sign in on the not-signed-in card"
+  ],
+  "code": [
+    "baude.py:LoginCard",
+    "baude.py:BaudeWindow.sign_in",
+    "baude.py:BaudeWindow.login_prompt",
+    "baude.py:BaudeWindow.sign_out"
+  ],
+  "copy": [
+    "common"
+  ],
+  "parts": [
+    {
+      "name": "not-signed-in card",
+      "shows": "Amber-bordered box (1px warning colour, 8px corners, 8px/12px padding): \"Claude Code isn't signed in\" in bold, then dimmed (60%) the first 200 characters of why; under it a \"Sign in\" button (accent).",
+      "text": [
+        "Claude Code isn't signed in",
+        "Sign in"
+      ],
+      "actions": [
+        {
+          "by": "click Sign in",
+          "does": "Removes this card and adds the sign-in card."
+        }
+      ]
+    },
+    {
+      "name": "sign-in card",
+      "shows": "Same amber box. A bold title line, a body line under it, then a row: a text field filling the width (placeholder \"If the page shows a code, paste it here\"), \"Send\", \"Cancel\".",
+      "copy": [
+        "common.send",
+        "common.cancel",
+        "common.try_again"
+      ],
+      "text": [
+        "Signing in to Claude…",
+        "Starting the sign-in…",
+        "If the page shows a code, paste it here"
+      ],
+      "actions": [
+        {
+          "by": "Enter in the field / click Send",
+          "does": "Passes the pasted code to the sign-in; the body says \"Checking the code…\"."
+        },
+        {
+          "by": "click Cancel",
+          "does": "Stops the sign-in."
+        },
+        {
+          "by": "click the sign-in page link",
+          "does": "Opens the sign-in page in the browser."
+        },
+        {
+          "by": "click Try again",
+          "does": "Starts the sign-in again."
+        }
+      ]
+    }
+  ],
+  "states": [
+    {
+      "name": "starting",
+      "shows": "\"Signing in to Claude…\" / dimmed \"Starting the sign-in…\"."
+    },
+    {
+      "name": "browser opened",
+      "shows": "Body: \"A browser window should have opened to sign in. If it didn't, open the sign-in page.\" (the last words a link)."
+    },
+    {
+      "name": "checking",
+      "shows": "Body: \"Checking the code…\" after a code is sent; \"Signed in; checking who as…\" once it succeeds. The field row goes."
+    },
+    {
+      "name": "signed in",
+      "shows": "\"Signed in to Claude\" / \"as <account>\" (or dimmed \"claude auth status didn't say who as\"); the chat's claude restarts on the new sign-in (after the turn if one runs)."
+    },
+    {
+      "name": "failed",
+      "shows": "\"Sign-in didn't finish\" / dimmed reason, and a \"Try again\" button (accent)."
+    },
+    {
+      "name": "cancelled",
+      "shows": "\"Sign-in cancelled\" and \"Try again\"."
+    },
+    {
+      "name": "another machine's chat",
+      "shows": "No card: a quiet note \"<host>'s claude signs in there: run claude auth login on it\" (or, for a failed turn, \"<host>'s claude isn't signed in: run claude auth login on it\")."
+    },
+    {
+      "name": "/logout",
+      "shows": "Quiet notes: \"signing out…\" then \"signed out of Claude\" or \"sign-out failed: <why>\"."
+    }
+  ],
+  "scenes": []
+}

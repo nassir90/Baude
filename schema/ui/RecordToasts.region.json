@@ -1,0 +1,34 @@
+{
+  "description": "Record's toasts: short messages over the bottom of the window (libadwaita toasts, 4 seconds; 6 for a name's card), sometimes with a button. A list of those Record shows, with their wording.",
+  "apps": ["record"],
+  "code": ["record.py:Window.toast", "record.py:Window._toast"],
+  "copy": ["hosts", "window", "tabs"],
+  "parts": [
+    {
+      "name": "notes and pages",
+      "shows": "\"There's a page called {name} already\" (a rename that would clash). \"“{term}” added to To learn\" with a button \"Open\" (Home). \"Link copied\" / \"This page has no link to copy\". \"Transcript copied\" / \"No chat open\".",
+      "text": ["There's a page called {name} already", "“{term}” added to To learn", "No chat open"],
+      "copy": ["tabs.link_copied", "tabs.no_link", "window.transcript_copied"]
+    },
+    {
+      "name": "names and chats",
+      "shows": "\"@{name}: not found in {folders}\" or \"@{name}: open a chat to look it up in its folder\"; a name's card as a toast (\"{name}: {kind} · {summary}\", with \"To notes\" for a chat's name); \"That chat isn't on this computer\"; \"That passage isn't in the chat any more\"; \"Citation link copied\", \"{n} citation links copied\"; \"Open a chat first: the viewers show its folder\".",
+      "text": ["That chat isn't on this computer", "Open a chat first: the viewers show its folder"]
+    },
+    {
+      "name": "export",
+      "shows": "\"Exported to {path}\" or \"Couldn't export: {error}\"."
+    },
+    {
+      "name": "hosts",
+      "shows": "\"{host} deactivated\" / \"{host} activated\"; \"{host}'s notebooks weren't listed: {why}\"; \"{host} didn't save the change: {why}\"; \"Restarting the daemon once {n} session(s) finish running a command\"; \"Daemon restarted\"; \"The daemon didn't start again: {log path} may say why\".",
+      "copy": ["hosts.restart_waiting", "hosts.daemon_restarted", "agent_proxy.no_answer"]
+    },
+    {
+      "name": "update",
+      "shows": "\"Record updated\" (with the number of new commits) after a restart onto a new version.",
+      "copy": ["updates.updated", "updates.updated_commits"]
+    }
+  ],
+  "scenes": []
+}

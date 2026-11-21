@@ -1,0 +1,227 @@
+{
+  "description": "The large image view: opens over the whole window (what's behind dimmed almost to black), flying out of the image clicked and back into it when closed. A bar at the top names the image and offers Copy, Show in folder, Open (and Open in browser); ← / → step through every image in the chat; it zooms and pans smoothly. Also the right-click menu every image in the chat has.",
+  "apps": [
+    "baude",
+    "record"
+  ],
+  "opens": [
+    "Click any image in the chat (a tool card's, a markdown image, an attachment thumbnail)",
+    "Right-click an image → View",
+    "A picture on the side panel's Files page"
+  ],
+  "code": [
+    "widgets.py:Lightbox",
+    "widgets.py:ZoomPicture",
+    "widgets.py:ImageActions",
+    "widgets.py:FileImageActions",
+    "widgets.py:make_image_interactive",
+    "widgets.py:image_description"
+  ],
+  "copy": [
+    "images",
+    "common"
+  ],
+  "parts": [
+    {
+      "name": "image menu",
+      "shows": "Right-click on any image in the chat: a menu at the pointer, no arrow: \"View\", \"Open in browser\" (web images only), \"Copy image\", \"Open with default app\", \"Open in folder\". Every image's tooltip: \"<path or name>\\nClick to view · right-click for more\"; the pointer over it is a magnifier.",
+      "copy": [
+        "common.view",
+        "images.open_in_browser",
+        "images.copy_image",
+        "images.open_with_default_app",
+        "images.open_in_folder",
+        "images.click_tip",
+        "images.unnamed"
+      ],
+      "actions": [
+        {
+          "by": "View",
+          "does": "Opens this viewer on it."
+        },
+        {
+          "by": "Copy image",
+          "does": "Copies the image (the original file's, if it's a better copy than what the chat has) to the clipboard; toast \"Image copied\"."
+        },
+        {
+          "by": "Open with default app",
+          "does": "Opens the file (or a cached copy of the image) in the system's default app."
+        },
+        {
+          "by": "Open in folder",
+          "does": "Shows the file in the file manager."
+        },
+        {
+          "by": "Open in browser",
+          "does": "Opens a web image's address."
+        }
+      ]
+    },
+    {
+      "name": "backdrop",
+      "shows": "The window under it dimmed to 94% dark; all text in the viewer is white (secondary text white at 70%)."
+    },
+    {
+      "name": "top bar",
+      "shows": "As tall as a header bar (16px in at left, 12px at right): the title (bold heading, middle-ellipsized, filling the width), then the info line dimmed, then text buttons \"Copy\", \"Show in folder\", \"Open\", \"Open in browser\" (only for a web image), then a round ✕ button.",
+      "parts": [
+        {
+          "name": "title",
+          "shows": "The file's name, else the image's alt text or URL, else \"Image\".",
+          "copy": [
+            "images.untitled"
+          ]
+        },
+        {
+          "name": "info",
+          "shows": "Parts joined by \"  ·  \": \"<width>×<height> · <size>\" (\"1280×720 · 34 kB\", \"2.1 MB\"), then \"<n> / <count>\" when there's more than one image, then the zoom \"<percent>%\" while zoomed in.",
+          "copy": [
+            "images.size_mb",
+            "images.size_kb"
+          ]
+        },
+        {
+          "name": "buttons",
+          "shows": "Copy (tooltip \"Copy image\"), Show in folder (\"Open its folder\"), Open (\"Open with the default app\"), Open in browser (\"Open the original in the browser\"), ✕ (\"Close (Esc)\").",
+          "copy": [
+            "common.copy",
+            "images.copy_image",
+            "images.show_in_folder",
+            "images.open_its_folder",
+            "common.open",
+            "images.open_with_the_default_app",
+            "images.open_in_browser",
+            "images.open_original_in_browser",
+            "images.close"
+          ]
+        }
+      ],
+      "actions": [
+        {
+          "by": "drag the bar",
+          "does": "Moves the window; double-click maximizes.",
+          "phone": {
+            "does": "nothing",
+            "why": "Window management",
+            "decided": "2026-11-21"
+          }
+        }
+      ]
+    },
+    {
+      "name": "stage",
+      "shows": "The image centred in the rest of the window (56px margin each side, 8px top, 40px bottom), fitted to it: an image 400px or larger fills the space; a smaller one is shown at its own size, not blown up. Shown at once, then swapped for the original file's sharper copy if there is one, without moving.",
+      "actions": [
+        {
+          "by": "click outside the image",
+          "does": "Closes the viewer (flies back into the image in the chat)."
+        },
+        {
+          "by": "double-click the image",
+          "does": "Zooms to 2× around that point, or back to fitted."
+        },
+        {
+          "by": "scroll wheel",
+          "does": "Zooms in/out (×1.25 a notch) around the pointer."
+        },
+        {
+          "by": "trackpad scroll",
+          "does": "Pans while zoomed in; zooms when not zoomed, or with Ctrl/⌘ held."
+        },
+        {
+          "by": "pinch",
+          "does": "Zooms around the fingers."
+        },
+        {
+          "by": "drag",
+          "does": "Pans while zoomed in (pointer: grab)."
+        }
+      ]
+    },
+    {
+      "name": "arrows",
+      "shows": "Round on-screen-display buttons (44px) at the left and right edges, vertically centred, 10px in: previous / next. Only when there's more than one image and it isn't zoomed in.",
+      "actions": [
+        {
+          "by": "click",
+          "does": "Steps to the previous / next image, wrapping round; each shows fitted."
+        }
+      ]
+    },
+    {
+      "name": "keys",
+      "shows": "Keyboard while the viewer is open.",
+      "actions": [
+        {
+          "by": "key Esc",
+          "does": "Closes."
+        },
+        {
+          "by": "key ← / →",
+          "does": "Previous / next image (when not zoomed); pans a fifth of the view when zoomed."
+        },
+        {
+          "by": "key ↑ / ↓",
+          "does": "Pans when zoomed."
+        },
+        {
+          "by": "key + / =",
+          "does": "Zooms in ×1.5."
+        },
+        {
+          "by": "key − / _",
+          "does": "Zooms out ÷1.5."
+        },
+        {
+          "by": "key 0",
+          "does": "Back to fitted."
+        }
+      ]
+    },
+    {
+      "name": "strip",
+      "shows": "Only when opened from a folder (the Files page's pictures): a row of 56px thumbnails centred along the bottom, the one shown highlighted (white at 85%), others lit on hover; scrolls sideways.",
+      "actions": [
+        {
+          "by": "click a thumbnail",
+          "does": "Shows that picture."
+        }
+      ]
+    }
+  ],
+  "states": [
+    {
+      "name": "opening / closing",
+      "shows": "The image flies (240ms) from where it sits in the chat to its place in the viewer, and back on close, while the backdrop dims or clears and the bar and arrows fade."
+    },
+    {
+      "name": "sequence",
+      "shows": "The images stepped through are every image in the conversation (tool results, markdown images, attachments), in chat order."
+    },
+    {
+      "name": "zoomed",
+      "shows": "Smooth zoom (160ms) up to 8 screen pixels per image pixel (sharp pixels when far in); the arrows hide; the info shows the percentage; the pointer is a grab hand."
+    },
+    {
+      "name": "can't be shown",
+      "shows": "A folder's picture with no decoder here: info says \"Can't be shown here: Open opens it in its app\".",
+      "copy": [
+        "images.cannot_show"
+      ]
+    },
+    {
+      "name": "copy failed",
+      "shows": "Toast \"This image can't be copied\".",
+      "copy": [
+        "images.cannot_copy",
+        "images.copied"
+      ]
+    }
+  ],
+  "scenes": [
+    "26-image-viewer",
+    "27-image-menu",
+    "25-image-read",
+    "31-markdown-image"
+  ]
+}

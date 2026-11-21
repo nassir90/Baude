@@ -1,0 +1,71 @@
+{
+  "description": "The side panel's Subagents page: one row per subagent (a Task/Agent call) of this session, newest first, each opening its own transcript on a detail page.",
+  "apps": ["baude"],
+  "opens": [
+    "Side panel page button \"Subagents\"",
+    "Status bar \"⚙ ... running\" button when a subagent is running",
+    "View button on a subagent's tool card in the chat (opens this page with that subagent's detail; opens from its row with the animation only if the list was already on screen)"
+  ],
+  "code": ["baude.py:SidePanel.update_agent", "baude.py:SidePanel.open_agent", "baude.py:SidePanel.close_agent", "baude.py:SidePanel.describe", "baude.py:SidePanel.link_card", "widgets.py:ExpandStack"],
+  "copy": ["side_panel"],
+  "parts": [
+    {
+      "name": "list",
+      "shows": "A boxed list of rows, newest at the top, scrolling. Empty: centred dim text.",
+      "copy": ["side_panel.no_subagents"],
+      "parts": [
+        {
+          "name": "row",
+          "shows": "Left to right: a status mark (spinner while running, green tick when completed, grey stop mark when interrupted, red cross for failed or killed); a title and a one-line subtitle; a chevron › at the right. Title: the subagent's description (what Claude gave the call), or \"Subagent\" if none. Subtitle (one line) joined with \" · \": subagent type (e.g. general-purpose) first if known; the status word only for endings the mark can't say (failed, killed); \"N tool use(s)\"; \"N tokens\" (12.3k style: 1.2k, 3.4M); duration in seconds with one decimal (\"8.2s\"); and while running, its current activity text last.",
+          "copy": ["side_panel.subagent", "side_panel.tool_uses", "side_panel.tokens", "time.seconds"],
+          "actions": [
+            {"by": "click the row", "does": "opens its detail page (its row grows into the header)"}
+          ]
+        },
+        {
+          "name": "nested row",
+          "shows": "A subagent started by another subagent sits directly under its parent, indented one step per level, with a thin tree line drawn from the parent's status mark down to it (like a file in a folder). Its row is otherwise the same.",
+          "actions": [{"by": "click", "does": "opens its own transcript"}]
+        }
+      ]
+    },
+    {
+      "name": "detail page",
+      "shows": "A header, then the subagent's transcript set into the panel like the main chat (darker inside, its own scrolling, code blocks at natural height).",
+      "parts": [
+        {
+          "name": "header",
+          "shows": "Status mark (same as the row, updates live), the title as a heading (one line, ellipsised), under it the same one-line info as the row's subtitle (hidden if empty, wraps), and a back button ‹ at the right end.",
+          "actions": [
+            {"by": "click back (tooltip \"All subagents\")", "does": "closes into the list row", "copy": ["side_panel.all_subagents"]}
+          ]
+        },
+        {
+          "name": "transcript",
+          "shows": "First the subagent's prompt as a user bubble (if known), then everything it does as in the main chat: replies, thinking, tool cards (including its own subagent calls, whose View button opens that nested subagent), results. It fills in live while the subagent runs. Right-click and zoom behave as in the main chat; the zoom size is the chat's.",
+          "actions": [
+            {"by": "key Ctrl+F / ⌘F", "does": "opens a find bar inside this transcript"},
+            {"by": "a nested subagent card's View", "does": "opens that nested subagent's detail (replaces this one; the first goes back to its box)"}
+          ]
+        }
+      ]
+    },
+    {
+      "name": "chat card link",
+      "shows": "In the main chat, a subagent's tool card has a View toggle button beside Prompt, where Output was; its Output is shown only for an error. Pressing View doesn't stay pressed; it opens this page.",
+      "copy": ["common.view"],
+      "text": ["Open this subagent in the side panel"],
+      "actions": [{"by": "click View (tooltip \"Open this subagent in the side panel\")", "does": "opens the panel on Subagents with this one open"}]
+    }
+  ],
+  "states": [
+    {"name": "empty", "shows": "\"No subagents yet\""},
+    {"name": "running", "shows": "Spinner in row and header, activity text at the end of the subtitle, counts rising"},
+    {"name": "completed", "shows": "Green tick; subtitle without a status word"},
+    {"name": "interrupted", "shows": "Grey stop mark (a saved subagent that never finished)"},
+    {"name": "failed or killed", "shows": "Red cross, and the word \"failed\" or \"killed\" first in the subtitle (after the type)"},
+    {"name": "nested", "shows": "Indented under its parent with a tree line"},
+    {"name": "viewing a session running elsewhere", "shows": "Another machine's subagents are fetched from it and listed the same way, transcripts included"}
+  ],
+  "scenes": ["73-panel-subagents", "74-panel-subagent-detail", "74b-panel-nested-subagents", "74c-panel-nested-detail", "55i-network-subagent", "76-tail-background-tasks"]
+}

@@ -1,0 +1,49 @@
+{
+  "description": "A line at the very end of the chat saying a restart (of the chat's host, or of Baude for a Desktop chat) cut its last turn short, with Continue to carry on.",
+  "apps": [
+    "baude"
+  ],
+  "opens": [
+    "Opening (or being in) a chat whose last turn a restart cut short"
+  ],
+  "code": [
+    "baude.py:BaudeWindow.show_cut",
+    "baude.py:BaudeWindow.continue_cut",
+    "baude.py:BaudeWindow.continue_failed",
+    "baude.py:BaudeWindow.cut_state"
+  ],
+  "parts": [
+    {
+      "name": "line",
+      "shows": "Left-aligned row, 8px gaps, 2px above: dimmed \"Cut short by a restart\" then a small \"Continue\" button (0.9em, 1px/8px padding). Always the last thing in the chat (moved down again if more is drawn after it).",
+      "text": [
+        "Cut short by a restart",
+        "Continue"
+      ],
+      "actions": [
+        {
+          "by": "click Continue",
+          "does": "Sends \"Continue where you left off: a restart cut your last turn short.\" as your message (what's typed and attached stays in the composer). Tooltip: \"Send “Continue where you left off: a restart cut your last turn short.”\"."
+        }
+      ]
+    }
+  ],
+  "states": [
+    {
+      "name": "continuing",
+      "shows": "After Continue, until the turn starts: a spinner and dimmed \"Continuing…\".",
+      "text": [
+        "Continuing…"
+      ]
+    },
+    {
+      "name": "couldn't continue",
+      "shows": "If the message couldn't be sent, the line comes back with Continue."
+    },
+    {
+      "name": "gone",
+      "shows": "Removed once anything is sent to the chat."
+    }
+  ],
+  "scenes": []
+}

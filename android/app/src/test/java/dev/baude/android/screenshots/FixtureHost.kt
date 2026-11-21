@@ -8,9 +8,9 @@ import dev.baude.android.Msg
 import dev.baude.android.Place
 import org.json.JSONObject
 
-/** A host's connection as the rig has it: up, its info given (every op taken), nothing ever sent or answered (what a
- * page asks for stays coming). */
-class FixtureConnection(ctx: Context, host: Host) : Connection(ctx, Place.Direct(host), identify = { _, _ -> },
+/** A host's connection as the rig has it: up, its info given (every op taken), nothing ever sent, and nothing answered
+ * (what a page asks for stays coming) but what answer gives an answer for. */
+class FixtureConnection(ctx: Context, host: Host, private val answer: (JSONObject) -> JSONObject? = { null }) : Connection(ctx, Place.Direct(host), identify = { _, _ -> },
     route = { null }, heard = { _, _ -> }, changed = {}) {
     init {
         state = "up"
@@ -20,12 +20,14 @@ class FixtureConnection(ctx: Context, host: Host) : Connection(ctx, Place.Direct
     override fun start() {}
     override fun stop() {}
     override fun send(msg: JSONObject) = true
-    override fun request(msg: JSONObject, then: (JSONObject) -> Unit) {}
+    override fun request(msg: JSONObject, then: (JSONObject) -> Unit) {
+        answer(msg)?.let(then)
+    }
 
     companion object {
         /** host's connection, as Mesh keeps one it's made (its own map's private: set through reflection). */
-        fun up(ctx: Context, host: Host): FixtureConnection {
-            val c = FixtureConnection(ctx, host)
+        fun up(ctx: Context, host: Host, answer: (JSONObject) -> JSONObject? = { null }): FixtureConnection {
+            val c = FixtureConnection(ctx, host, answer)
             @Suppress("UNCHECKED_CAST")
             val conns = Mesh::class.java.getDeclaredField("conns").apply { isAccessible = true }.get(Mesh) as HashMap<String, Connection>
             conns[host.id] = c

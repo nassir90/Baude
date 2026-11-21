@@ -1,0 +1,82 @@
+{
+  "description": "A tab of the main area (title \"Feedback\", or \"Feedback (N)\" with N the fixes waiting for your review; tooltip \"The feedback on Baude, and where each stands\"): left, a list of all the feedback (GitHub issues plus notes saved on this machine); right, the one selected, its note, what's been said on it, each round of its fix with before and after images, and a bar for what can be done. Baude's and Record's.",
+  "apps": ["baude", "record"],
+  "opens": ["☰ → Ongoing Feedback", "a feedback issue or PR chosen in the @ list or the glossary search (Cmd+K / Ctrl+K): shown here, selected; any other issue opens on GitHub in the browser", "back / forward in the tab history"],
+  "code": ["fixview.py:FixesPage", "fixview.py:with_notes", "fixview.py:note_item", "fixes.py", "baude.py:BaudeWindow.open_fixes"],
+  "copy": ["fixes", "feedback", "window", "common"],
+  "parts": [
+    {
+      "name": "List header",
+      "shows": "A row at the top of the left column (240 px at least, 300 by default, a draggable divider between it and the detail): a linked pair of toggle buttons \"Ongoing\" (on at first) and \"All\"; a flat + button; a read-again button.",
+      "copy": ["fixes.ongoing", "fixes.all", "fixes.send_feedback", "common.read_again"],
+      "actions": [
+        {"by": "click Ongoing / All", "does": "Ongoing lists what is Ready for review, In Progress, Open, Filed or Waiting to upload (in that order, newest first within each); All adds Merged, Rejected, Closed and Resolved. Switching to Ongoing drops a selected finished item from the list; while finished the selected one otherwise stays listed so keys never land on another."},
+        {"by": "click + (tooltip \"Send Feedback…\")", "does": "opens the Send Feedback dialog; the new note appears in the list as it is saved, and again a moment later when filed"},
+        {"by": "click refresh (tooltip \"Read it again\")", "does": "reads GitHub again; the icon turns while reading"}
+      ]
+    },
+    {
+      "name": "List rows",
+      "shows": "Each row: the title (up to two lines, wrapped, ellipsized); beneath, a coloured status pill and a dimmed line \"<Repo>#<number> · <how long ago it was last updated>\" plus \" · N capture(s)\" when notes have captures. The location prefix (Baude#12, BaudeInternal#3) is blank for a note never filed. Status pill labels: Open, In Progress, Ready for review, Merged, Rejected, Closed, Waiting to upload (a note saved only here), Filed (filed but unreadable now), Resolved (a note with a resolution). The row's age text moves on without redrawing the list.",
+      "copy": ["fixes.captures"],
+      "text": ["Open", "In Progress", "Ready for review", "Merged", "Rejected", "Closed", "Waiting to upload", "Filed", "Resolved"],
+      "actions": [{"by": "click a row", "does": "selects it and shows it in the detail; the reply field is cleared. With nothing selected the first row is selected."}]
+    },
+    {
+      "name": "List foot",
+      "shows": "A dimmed, ellipsized line under the list saying what was read and when: \"<repo name(s)> · read HH:MM\" (the repositories read from, e.g. Baude, BaudeInternal); \"GitHub isn't connected: only what's saved here\" when not connected; \"Couldn't read it just now: <why>\" (full error in the tooltip) when GitHub failed. Opened again, the last read's time is shown at once (as a relative time, with a clock tooltip) while it reads afresh.",
+      "copy": ["fixes.read_from", "fixes.read_from_at", "fixes.only_saved_here", "fixes.read_failed"]
+    },
+    {
+      "name": "Detail: issue",
+      "shows": "Scrolling column, 980 px at most: the title large and selectable; a line with the status pill, a dimmed \"<Repo>#N · from <author> · <time>\" (created), an \"Issue\" link button (tooltip the URL) and, when it has a pull request, a \"PR #N\" link button; then the issue's text as markdown (images shown as links, never fetched).",
+      "copy": ["lookup.issue", "fixes.pr", "common.from_who"],
+      "actions": [{"by": "click Issue / PR #N", "does": "opens that page on GitHub in the browser"}]
+    },
+    {
+      "name": "Detail: thread rounds",
+      "shows": "Below the issue, what has been said and each round of the fix, in order: a card per round headed \"In progress\", \"Ready for review\", \"Failed\", \"Stopped\", \"No change\" or \"Fix discarded\" with a dimmed time and, if known, \" · <machine>\"; its text as markdown; and each picture it shows. A round still running is not drawn here (the bar says it). Other people's comments are headed by their author name.",
+      "text": ["In progress", "Ready for review", "Failed", "Stopped", "No change", "Fix discarded"]
+    },
+    {
+      "name": "Before / after pictures",
+      "shows": "Each thing a fix shows: an optional label line, then two equal columns \"Before\" and \"After\" (dimmed captions) with the image under each, fitted to the column; while read, a spinner in a 120 px box. A missing before says \"Not there before this fix\"; a missing after says \"None\"; an unreadable file says \"This image can't be read\".",
+      "copy": ["fixes.before", "fixes.after", "fixes.not_there_before", "fixes.none", "fixes.image_unreadable"],
+      "actions": [{"by": "click an image", "does": "opens the large image view (← and → step through this tab's images; right-click for the image menu as in the chat)"}]
+    },
+    {
+      "name": "Detail: saved note card",
+      "shows": "For a note kept on this machine: when it was resolved a heading \"Resolved <date time>\" and its resolution as markdown (\"(no note)\" if empty), then its screen captures two to a line, marked version when there is one. A note with no resolution and no captures has no card. A note filed as an issue shows under that issue (its captures exist only here, GitHub can't hold them); a note not filed is an item of its own.",
+      "copy": ["fixes.resolved_at", "fixes.no_note", "fixes.captures"]
+    },
+    {
+      "name": "Action bar",
+      "shows": "A bar under the detail (hidden entirely when there is nothing to say or do, as on a merged item). A dimmed hint line, and a row of controls whose visibility depends on the item's status (below). While something is running a spinner shows and all buttons are greyed.",
+      "parts": [
+        {"name": "Ask for changes", "shows": "Only for a Ready-for-review item whose PR is this repository's own fix branch, when you can write: a text field with placeholder \"Ask for changes…\" and a Send button (tooltip \"Say it on the issue, and fix it again\"), enabled once something is typed.", "copy": ["fixes.ask_for_changes", "fixes.send_tip", "common.send"], "actions": [{"by": "click Send or key Enter", "does": "comments the text on the issue and starts another fix round; the field is cleared"}]},
+        {"name": "Fix here", "shows": "Suggested-style button on an Open item (can write). Tooltip \"Fix it on this machine, on branch fix/<key>\".", "copy": ["fixes.fix_here", "fixes.fix_tip"], "actions": [{"by": "click", "does": "starts a fix round on this machine (a Claude run in a worktree, on a fix/<key> branch, opening a draft PR); the item becomes In Progress"}]},
+        {"name": "Merge", "shows": "Suggested-style button on a Ready-for-review item (can write). Tooltip \"Merge PR #N: every running Baude and Record updates to it\".", "copy": ["fixes.merge", "fixes.merge_tip", "fixes.merge_heading", "fixes.merge_body"], "actions": [{"by": "click", "does": "asks \"Merge the fix for <Repo>#N?\" / \"PR #N goes into main, and every running Baude and Record updates itself from main.\" with Cancel and Merge; Merge merges the PR as a merge commit, only if it is still the commit that was read"}]},
+        {"name": "Discard", "shows": "Destructive-style button on a Ready-for-review item (can write). Tooltip \"Discard the fix: its PR closed, its branch deleted, the feedback still open\".", "copy": ["common.discard", "fixes.discard_tip", "fixes.discard_heading", "fixes.discard_body"], "actions": [{"by": "click", "does": "asks \"Discard the fix for <Repo>#N?\" / \"PR #N is closed and its branch deleted. The feedback stays open.\" with Cancel and Discard (red); Discard closes the PR, deletes the branch and leaves the feedback open"}]},
+        {"name": "Reopen", "shows": "Button on a Rejected item (can write). Tooltip \"Open the issue again\".", "copy": ["fixes.reopen", "fixes.reopen_tip"], "actions": [{"by": "click", "does": "reopens the issue on GitHub"}]},
+        {"name": "Stop", "shows": "Button on an In Progress item whose round is running on this machine (can write). Tooltip \"Stop the fix running on this machine\".", "copy": ["common.stop", "fixes.stop_tip"], "actions": [{"by": "click", "does": "stops the running fix"}]}
+      ]
+    }
+  ],
+  "states": [
+    {"name": "first open, reading", "shows": "The list placeholder says \"Loading issues…\" with nothing on the right until the first read (any saved notes appear at once)", "copy": ["fixes.loading"]},
+    {"name": "opened again", "shows": "What was read last time and the notes saved here at once, while GitHub is read afresh in the background (every 60 s while shown, every 15 s while a round is running)"},
+    {"name": "nothing ongoing", "shows": "Empty list placeholder \"Nothing ongoing\" after a read", "copy": ["fixes.nothing_ongoing"]},
+    {"name": "GitHub not connected, nothing saved", "shows": "Right pane: a status page, title \"GitHub isn't connected\", text \"Feedback lives on GitHub. Sign the gh CLI in (gh auth login) on a checkout of Baude from GitHub, and it shows here.\" Foot: \"GitHub isn't connected: only what's saved here\". Saved notes, if any, still list.", "copy": ["fixes.not_connected", "fixes.not_connected_body"]},
+    {"name": "couldn't read, nothing known", "shows": "Status page titled \"Couldn't read the feedback\" with the error as its text", "copy": ["fixes.unreadable"]},
+    {"name": "read-only (no write access)", "shows": "No Fix here, Merge, Discard, Reopen, Stop or reply field; for an Open or Ready item the hint is \"Only people with write access to <repo> can fix or merge.\"", "copy": ["fixes.write_access"]},
+    {"name": "working here", "shows": "In Progress item: hint \"<Repo>#N is running on <machine>\" (or \"... on another machine\"); Stop shown when it runs on this machine", "copy": ["fixes.running_on", "fixes.running_elsewhere"]},
+    {"name": "draft PR", "shows": "In Progress with no running round: hint \"PR #N is a draft: in progress.\"", "copy": ["fixes.draft"]},
+    {"name": "last fix failed", "shows": "Open or Ready item whose last round failed: hint \"The last fix here didn't go ahead: <why>\"", "copy": ["fixes.fix_failed"]},
+    {"name": "filed, unreadable", "shows": "A note filed as an issue that GitHub can't give now: pill Filed, hint \"Filed as an issue, but it can't be read from GitHub here just now, so this is only the note saved here.\"", "copy": ["fixes.filed_unreadable"]},
+    {"name": "private repository", "shows": "Feedback kept on a private repository beside Baude's (BaudeInternal for Baude) is listed together with Baude's, each saying which repository it is in the \"<Repo>#N\" label; its fix is a PR on the public repository, titled from the reply's own \"Title:\" line"},
+    {"name": "action running", "shows": "A spinner in the bar and every button greyed; afterwards the list is read again, and again 6 s later (a round's first comment takes a few seconds). An error from the action appears as a toast of its first line (160 characters, 10 s)."},
+    {"name": "refreshing", "shows": "The refresh icon turns, in full colour, while reading"},
+    {"name": "restart", "shows": "The selection, the Ongoing/All choice and the typed reply are kept across a restart"}
+  ],
+  "scenes": ["96-feedback-ready", "96b-feedback-open", "96c-feedback-working", "96d-feedback-all", "96e-feedback-merge", "96f-feedback-read-only", "96g-feedback-offline-note", "96h-feedback-note-on-issue", "96i-feedback-private", "96j-feedback-loading", "96k-feedback-first-open", "96l-feedback-opened-again"]
+}

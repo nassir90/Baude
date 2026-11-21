@@ -1,0 +1,50 @@
+{
+  "description": "The glossary search (⌘K on macOS, Ctrl+K elsewhere): a modal dialog listing every name Baude knows for the open chat's folder and every chat, searched as you type. It's the same list the @ picker uses in the composer and Meta.",
+  "apps": ["baude"],
+  "opens": ["key ⌘K / Ctrl+K, from anywhere in the window"],
+  "code": ["baude.py:RefPalette", "widgets.py:RefPalette", "baude.py:MetaNames", "baude.py:SearchSpace", "baude.py:ref_palette_items", "baude.py:ref_palette_open", "baude.py:palette_open", "lookup.py:SearchSpace"],
+  "copy": ["glossary", "common.search", "lookup"],
+  "parts": [
+    {
+      "name": "dialog",
+      "shows": "An Adw dialog titled \"Glossary\", about 760 wide by 520 tall.",
+      "copy": ["glossary.title"]
+    },
+    {
+      "name": "search field",
+      "shows": "A search entry at the top with placeholder \"Search\", focused when the dialog shows.",
+      "copy": ["common.search"],
+      "actions": [
+        {"by": "type", "does": "filters as you type: each word you type must match, in any order, best match first; matched text is highlighted in the rows"},
+        {"by": "key Down / Up (Page Down / Page Up: ten rows)", "does": "moves the picked row while you type"},
+        {"by": "key Enter", "does": "opens the picked row"},
+        {"by": "key Esc", "does": "closes the dialog"}
+      ]
+    },
+    {
+      "name": "table",
+      "shows": "No header. Three columns, the first and last stretching, the middle fixed: Name (the logo its links have, then the name, middle-ellipsised, highlighted where it matched), Kind (dim: e.g. File, Commit, Branch, Pull request, Issue, Env var, Constant, Code symbol, Config key, Service, Kubernetes object, Package, Command, External tool, Tool, Subagent type, Skill, HTTP route, Kubeconfig cluster/context, Database, Database table, Chat), Where (dim: the file or place, or for a pull request or issue its state and number). At most 400 rows are shown. Fainter rows are older or less certain. Tooltips carry the full text for long cells, and a \"time ago\" for rows that have one. Columns can be resized.",
+      "copy": ["lookup.file", "lookup.commit", "lookup.branch", "lookup.pull_request", "lookup.env_var", "lookup.constant", "lookup.code_symbol", "lookup.config_key", "lookup.service", "lookup.kubernetes_object", "lookup.package", "lookup.command", "lookup.external_tool", "lookup.tool", "lookup.subagent_type", "lookup.skill", "lookup.http_route"],
+      "actions": [
+        {"by": "click a row (single click)", "does": "closes the dialog and opens that name"}
+      ]
+    },
+    {
+      "name": "what opening does",
+      "shows": "A name a reply looked up opens as its link does (see Signal links). A catalogued name no reply has looked up: a running workload or a Kubernetes context opens in the Kubernetes view filtered to it; a manifest's object or a file opens at its file in a code tab (several files of that name: a toast \"<n> files are called <name>\"); a branch opens on the Git page; a database table opens in its database's diagram; a database opens the schema view; a pull request or issue opens on GitHub (one of Baude's own feedback issues on the Feedback tab). A chat opens as the sidebar opens it (the open chat: its tab is shown; another host's chat is fetched). A file or manifest object on another host is read from that host and shown in a tab; anything else on another host gets a toast \"<name>: <kind> on <host>\".",
+      "actions": []
+    },
+    {
+      "name": "footer",
+      "shows": "At the left, working dots while more names are still coming in (the catalogue is made afresh if it's old, and the table fills in as parts arrive); at the right, a dim caption \"<matched> out of <total>\".",
+      "copy": ["glossary.count"]
+    }
+  ],
+  "states": [
+    {"name": "building", "shows": "Dots at bottom left; rows appear and the count grows as the catalogue comes in; the picked row stays picked if still there"},
+    {"name": "Signal off", "shows": "Still works: the catalogue (files, branches, Kubernetes objects and contexts, running workloads, database tables) is listed with Signal off too"},
+    {"name": "chat on another host", "shows": "That host's folder names are made on it and listed as they come; other hosts' chats are listed after this host's"},
+    {"name": "no matches", "shows": "Empty table, count \"0 out of <total>\""}
+  ],
+  "scenes": []
+}

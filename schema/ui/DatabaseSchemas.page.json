@@ -1,0 +1,155 @@
+{
+  "description": "A full-window view over the chat that draws the tables of the running databases (Postgres, and ArangoDB, in Docker containers or a local Kubernetes cluster's pods) as a diagram like Supabase's schema visualizer: a card per table, a curve per foreign key, a minimap, and a table's first rows in a pane below. Read-only.",
+  "apps": ["baude", "record"],
+  "opens": [
+    "☰ → Database Schemas…",
+    "A table or column name in a reply (a Signal link): finds the running database that has it and opens the diagram there with that table selected (a popover says \"Finding it in the running databases…\" if it takes a moment, asks \"<n> running databases have it. Which one?\" when several do, and says so with its definition and Try again when none does)",
+    "A Signal link's popover: a database icon button (Show it in its database's schema diagram), on a name that is a table or column",
+    "⌘K / Ctrl+K glossary: a table in its database's diagram"
+  ],
+  "code": ["schemaview.py:SchemaView", "schemaview.py:SchemaCanvas", "schemaview.py:schema_layout", "schemaview.py:pg_normalize", "schemaview.py:arango_normalize", "schemaview.py:db_find", "baude.py:BaudeWindow.open_db_name", "baude.py:BaudeWindow.show_schema_for", "record.py:RecordWindow.open_viewer"],
+  "copy": ["databases"],
+  "parts": [
+    {
+      "name": "top bar",
+      "shows": "A bar as tall as a header bar (on macOS with room at the left for the traffic lights). From left: the title, three drop-downs (server, database, schema), a find box, a gap, the Definition button (only sometimes), Rows, three zoom buttons, a close button. Dragging it moves the window; double-clicking it maximizes.",
+      "parts": [
+        {
+          "name": "title",
+          "shows": "Heading \"Database schema\"",
+          "copy": ["databases.title"]
+        },
+        {
+          "name": "server picker",
+          "shows": "A drop-down, tooltip \"Server (container)\", of every database server found: \"<container> (Postgres <version>)\" or \"<container> (ArangoDB <version>)\" (just the container name when the version is unknown), truncated past about 34 characters.",
+          "copy": ["databases.server_tip"],
+          "actions": [
+            {"by": "pick another", "does": "Reads that server's first database (not \"postgres\" if there is another) and draws it."}
+          ]
+        },
+        {
+          "name": "database picker",
+          "shows": "A drop-down, tooltip \"Database\", of the picked server's databases.",
+          "copy": ["databases.database"],
+          "actions": [
+            {"by": "pick another", "does": "Reads that database's schema and draws it; the diagram fades meanwhile."}
+          ]
+        },
+        {
+          "name": "schema picker",
+          "shows": "A drop-down, tooltip \"Schema\", of the database's schemas (\"public\" first, then the rest by name; an ArangoDB database has one, \"collections\"). Tables in system schemas (pg_catalog, information_schema, pg_toast) are never listed.",
+          "copy": ["databases.schema_tip"],
+          "actions": [
+            {"by": "pick another", "does": "The diagram fades and shows that schema's tables, laid out and fitted."}
+          ]
+        },
+        {
+          "name": "find",
+          "shows": "A search box, placeholder \"Search\", about 22 characters wide. Finds tables and columns by name, any case, substring: every match is highlighted in place (a table's name gets a tint on its header, a column's on its row, in the card and in the minimap), and the first is shown at once (a table named exactly as typed first). The status line says \"<n> out of <total>\" for the match shown, or \"0 out of 0\".",
+          "copy": ["common.search", "glossary.count"],
+          "actions": [
+            {"by": "type", "does": "Highlights matches and centres the first one's card (selected, zoomed to at least readable); the column it matched is marked."},
+            {"by": "key Enter, or Ctrl+G", "does": "The next match, round the end."},
+            {"by": "key Shift+Enter, or Ctrl+Shift+G", "does": "The match before."},
+            {"by": "key Esc in the box", "does": "Clears the text if there is some; otherwise closes the view."},
+            {"by": "key Ctrl+F (⌘F) while the view is on top", "does": "Focuses it with its text selected to type over."}
+          ]
+        },
+        {
+          "name": "Definition button",
+          "shows": "A button \"Definition\", tooltip \"Show where the code defines it\". Only shown when the view was opened from a name whose definition in the code is known.",
+          "copy": ["databases.definition", "databases.definition_tip"],
+          "actions": [
+            {"by": "click", "does": "Closes the view and opens that file at that line in a code tab (see CodeView)."}
+          ]
+        },
+        {
+          "name": "Rows button",
+          "shows": "A button \"Rows\", tooltip \"The selected table's first rows\". Greyed until a table card is selected.",
+          "copy": ["databases.rows_button", "databases.rows_tip"],
+          "actions": [
+            {"by": "click", "does": "Reads and shows the selected table's first rows in the rows pane (same as double-clicking the card)."}
+          ]
+        },
+        {
+          "name": "zoom buttons",
+          "shows": "Three flat icon buttons: zoom out (tooltip \"Zoom out (Ctrl+−, or Ctrl+scroll)\"), zoom in (\"Zoom in (Ctrl++)\"), fit (\"Fit everything (Ctrl+0)\").",
+          "copy": ["databases.zoom_out_tip", "databases.zoom_in_tip", "databases.fit_tip"],
+          "actions": [
+            {"by": "click zoom out / zoom in", "does": "Zooms the diagram by a factor of 1.2 about the middle of the view."},
+            {"by": "click fit", "does": "Zooms and pans so every table fills the view (never closer than 1.2x for a few small tables)."},
+            {"by": "key Ctrl +/−/0 while the view is on top", "does": "The same as the buttons (they size the diagram, not the chat under it)."}
+          ]
+        },
+        {
+          "name": "close",
+          "shows": "A round × button, tooltip \"Close (Esc)\"",
+          "copy": ["images.close"],
+          "actions": [
+            {"by": "click, or key Esc", "does": "Closes the view; the chat's input box gets the focus back."}
+          ]
+        }
+      ]
+    },
+    {
+      "name": "diagram",
+      "shows": "The main area: a dotted canvas (a faint dot grid at the zoom's spacing, shown while the spacing is at least 8 px) with a card per table of the picked schema and a curve per foreign key. Cards are laid out in columns: tables with foreign keys sit one column to the right of the tables they reference, ordered to keep links short; tables without links make a grid beside them. Opens fitted to everything, or, when opened from a name, centred on that table with it selected. The diagram fades while a schema is being read.",
+      "parts": [
+        {
+          "name": "table card",
+          "shows": "A white (dark grey in dark mode) rounded card with a 1 px border. Header strip: the table's name in bold on the left, and on the right in dim text the row count (\"<n> rows\", the number formatted as a number) for tables and partitioned tables, or \"view\", \"materialized view\" or \"foreign table\" for those kinds (an ArangoDB collection shows its document count). Under a divider, one row per column in table order: left, small coloured squares for key badges (yellow-orange for primary key, green for foreign key, side by side when both), then the column's name (full strength when it is not nullable or is a primary key, dim when nullable), and right-aligned in dim text its type (data type; a user-defined type or array shows its type name; a trailing ? marks a nullable column). Rows are separated by faint lines. The card's width follows its widest row, up to 380 px at the base size; the head, row heights and text follow the app's text size. For ArangoDB each collection is a card with _key first (primary key), then the attributes sampled from its first 50 documents (types joined with | when mixed, nullable when a sampled document lacks it); edge collections and relation collections link to the collections they join.",
+          "copy": ["databases.rows", "databases.view", "databases.materialized_view", "databases.foreign_table"],
+          "actions": [
+            {"by": "click", "does": "Selects the card: its border turns accent coloured and 2 px thick; the cards it links to and from get a green border; its links turn accent coloured and thicker; the Rows button wakes. Clicking empty canvas deselects."},
+            {"by": "double-click", "does": "Opens the table's first rows in the rows pane."},
+            {"by": "drag", "does": "Moves the card (its links follow)."}
+          ]
+        },
+        {
+          "name": "foreign-key curve",
+          "shows": "A smooth curve from the referencing column's row to the referenced column's row, leaving the card's near side (right, or left when the referenced table is to the left), ending in a small square dot at the referenced row; a table referencing itself loops out and back. Faint grey; accent coloured, thicker, when either end's card is selected. When opened from a column name, that column's row is tinted in the selected card."
+        },
+        {
+          "name": "minimap",
+          "shows": "Bottom right, 180 x 120 px at most, 12 px from the edges: every card as a small block, the part in view as a clear cutout in a greyed map, matches from Find marked. Not drawn when the view is under 360 px wide or 260 px tall.",
+          "actions": [
+            {"by": "click or drag in it", "does": "Centres the view on that point; it follows the pointer while dragging."}
+          ]
+        },
+        {
+          "name": "view gestures",
+          "shows": "Zoom runs from about 0.5 (or less, when the diagram is too big to fit at 0.5: down to a little smaller than fitting it) up to 2x, as React Flow / d3-zoom behaves; the view can't be panned off the diagram (the view's middle stays over the cards' box).",
+          "actions": [
+            {"by": "drag the background", "does": "Pans."},
+            {"by": "scroll wheel or two-finger swipe", "does": "Pans (a wheel notch is 50 px; a touchpad's pixels one to one); Shift+wheel pans sideways."},
+            {"by": "Ctrl+scroll", "does": "Zooms in proportion to the scroll, about the pointer; the point under the pointer stays under it through one scroll gesture."},
+            {"by": "pinch", "does": "Zooms about the point between the fingers, which pans as they move."}
+          ]
+        },
+        {
+          "name": "status line",
+          "shows": "Overlaid bottom left of the diagram, one line: the summary \"<database> · <schema> · <n> tables · <n> foreign key(s) · read-only · read in <s> s\" (the last only after a fresh read; singular \"1 foreign key\"); or progress and results: \"Looking for Postgres servers…\", \"Looking for <table> in <n> databases on <m> servers…\", \"Looking for a column <column> in <n> databases on <m> servers…\", \"Reading <database>…\", \"No database here has a table <table>.\", \"No database here has a table with a column <column>.\", \"No table like <text> in <schema>\", \"<database>: <error>\", and find's \"<n> out of <total>\". With no table found the first database is drawn anyway.",
+          "copy": ["databases.tables", "databases.foreign_keys", "databases.read_only", "databases.read_in", "databases.looking_for_servers", "databases.looking_for_table", "databases.looking_for_column", "databases.reading", "databases.no_table_here", "databases.no_column_here", "databases.no_table_like", "glossary.count"]
+        }
+      ]
+    },
+    {
+      "name": "rows pane",
+      "shows": "Opens below the diagram (about 40% of the height, with a draggable divider) when rows are asked for. Header: \"<schema>.<table>: reading…\" while reading, then \"<schema>.<table>: first <n> rows (read-only; secret-looking columns hidden)\", or \"<schema>.<table>: <error>\" if it failed; and a flat × button, tooltip \"Hide the rows\". Below, a scrolling grid: a bold header cell per column, then up to 50 rows; each cell's text is selectable, cut at 120 characters with …, JSON values (objects, lists) written as JSON, a NULL shown dim as \"NULL\". Values of secret-looking columns (name contains pass, secret, token, api key, private, hash, salt, otp, credential or session key) are shown as \"•••\" when not null. The grid fades while another table's rows are read.",
+      "copy": ["databases.reading_rows", "databases.first_rows", "databases.hide_rows"],
+      "actions": [
+        {"by": "click ×", "does": "Hides the pane."}
+      ]
+    }
+  ],
+  "states": [
+    {"name": "looking", "shows": "Status line \"Looking for Postgres servers…\" and the diagram faded, while servers and databases are discovered."},
+    {"name": "no server", "shows": "No diagram; the status line says \"No Postgres server is running (in Docker, or in a local Kubernetes cluster).\" (or Docker's error, \"Docker isn't reachable: <why>\")."},
+    {"name": "name not found", "shows": "The first database is drawn fitted, with the status line \"No database here has a table <table>.\" (or the column wording)."},
+    {"name": "read failed", "shows": "The previous diagram stays; the status line says \"<database>: <error>\"."},
+    {"name": "table selected", "shows": "That card's border is the accent colour and thicker; the cards it links to or from have a green border; its links are accent coloured; Rows is enabled."},
+    {"name": "find active", "shows": "Matching table names tint their header strip and matching columns tint their row; matches are marked in the minimap; the status line counts them."},
+    {"name": "rows shown", "shows": "The rows pane below the diagram (see rows pane)."}
+  ],
+  "scenes": ["38c-schema-diagram"]
+}

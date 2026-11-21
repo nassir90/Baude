@@ -1,0 +1,101 @@
+{
+  "description": "The side panel's Git page: the history of the branch(es) the chat works in, as a graph of commits with authors' pictures, what the branch tracks and came from, the pull requests the chat touches, and a card for each commit with its files, branches and pull requests. Each chat keeps its own state of the page.",
+  "apps": ["baude"],
+  "opens": [
+    "Side panel page button \"Git\"",
+    "A commit or branch link in a reply (Signal link: shows the branch's history, or the commit highlighted in the history of a branch that has it, the merge it came in by opened)",
+    "Signal page: a resolved commit or branch name's \"Show in Git\" button",
+    "⌘K / Ctrl+K: a branch from the glossary"
+  ],
+  "code": ["gitview.py:GitPage", "gitview.py:git_checkouts", "gitview.py:git_branch_list", "gitview.py:git_lanes", "gitview.py:git_commit_card", "gitview.py:gh_state", "gitview.py:GitAvatars", "baude.py:BaudeWindow.show_git"],
+  "copy": ["git", "host_errors.not_a_repo"],
+  "parts": [
+    {
+      "name": "top bar",
+      "shows": "One line: the repository's folder (dim, start-ellipsised, with ~; while reading: \"Reading the history…\"), then a toggle button (list icon) and a refresh button.",
+      "copy": ["git.reading_history", "git.show_every_branch", "git.fetch_tip"],
+      "actions": [
+        {"by": "click the list toggle (tooltip \"Show every branch\")", "does": "when on, shows every branch, remote branch and tag in one log (merge commits shown as ordinary rows)"},
+        {"by": "click refresh (tooltip \"Fetch, and read the history again (and ask GitHub)\")", "does": "git fetch, then re-reads the history, branch list and pull request states from GitHub; the icon turns while reading. If the fetch failed: toast \"Couldn't fetch: the remotes' branches are as last fetched\""}
+      ]
+    },
+    {
+      "name": "branch picker",
+      "shows": "A full-width button with the name of the branch shown (middle-ellipsised so a long name never widens the panel), and when several are picked, \" + N more\" dimmed after it; a dropdown arrow. Tooltip: \"The branches shown: this chat's first, then the rest. Shift or Ctrl (⌘) and a click picks more\", or, with several picked, the list of their names.",
+      "copy": ["git.branches_tip", "git.more_branches"],
+      "parts": [
+        {
+          "name": "branch list (popover)",
+          "shows": "A scrolling list (up to 420px tall) of branches, each row its label and a tick on the right if shown. Order: the branches this chat touched first (its checkout's branch, then those its commands committed on or pushed to, latest first; each with the branch it came from before the branches made from it, and a branch's own remote copy right after it), then a thin rule, then every other worktree checkout, local branch (most recently changed first) and remote branch (up to 300). Label: the branch name; a worktree's \"name — folder\"; a detached worktree \"detached at <sha7> — <folder>\"; the chat's own branch \"<branch>  (this chat)\".",
+          "copy": ["git.detached_at", "git.this_chat_branch"],
+          "actions": [
+            {"by": "click a row", "does": "picks that branch alone"},
+            {"by": "Shift+click or Ctrl/⌘+click a row", "does": "adds it to, or takes it out of, the shown set; several branches' histories show together"},
+            {"by": "arrow keys, Shift+arrows, Ctrl+Space", "does": "move and pick like a file manager"},
+            {"by": "Enter, double-click, Esc, click outside", "does": "close the list; the branches chosen are shown (none chosen: unchanged)"}
+          ]
+        }
+      ]
+    },
+    {
+      "name": "branch info",
+      "shows": "Up to four lines of text under the picker (hidden when none): (1) \"Every branch, remote branch and tag\" when the toggle is on; (2) \"Tracks <upstream>: <track>\" where track is \"up to date\", \"N commit(s) ahead\", \"N commit(s) behind\" (joined by comma) or \"gone from the remote\"; (3) \"From <parent branch> at <sha7>: <track>\" (the branch it came from, by a guess or what -b said); (4) with gh signed in only: \"Pull request #12 <title up to 60 chars> (<state>)\" where #12 is a link. With gh signed out or missing, the pull request line isn't shown and nothing says to sign in. Branch names in bold, shas in monospace.",
+      "copy": ["git.every_branch", "git.tracks", "git.from_branch", "git.pull_request", "git.up_to_date", "git.gone_from_remote", "git.ahead", "git.behind"],
+      "actions": [{"by": "click the #12 link", "does": "opens the pull request in the browser"}]
+    },
+    {
+      "name": "pull requests list",
+      "shows": "Only when there are any, no gap otherwise: a boxed list of the pull requests this chat touches (those from its branches, those it opened with gh pr create, and those its replies name by link or by bare #12), at most 8 rows tall then scrolling. Each row: a pill (git merge logo and the number, coloured by state: green open, grey draft or closed, red changes requested, purple merged), aligned with the log's text column, then the title (two lines, ellipsised). Needs GitHub data (gh); shows nothing when gh is absent or signed out unless the information has been read already.",
+      "actions": [
+        {"by": "click a row", "does": "opens the pull request in the browser"},
+        {"by": "hover a row (tooltip)", "does": "the pull request's title with its repository and number, and its URL"}
+      ]
+    },
+    {
+      "name": "log",
+      "shows": "The commits, newest first, 50 at a time. Each row: a graph slice (coloured lanes with a dot; up to 10 lanes; a violet dot for a commit this chat made; dimmed lanes for commits not on the branch itself), the author's round picture (GitHub avatar, else initials on a colour), and two lines of text: first the subject (up to two lines, ellipsised) preceded by chips for the refs at that commit (HEAD, local branch, remote branch, tag, each a small coloured chip, names over 24 characters cut in the middle with …), a pull request pill before its branch's chip, and a \"this chat\" chip for commits the chat made; second a caption: relative time, \" · author\", then \" · +12 −3 in 2 files\" (additions green, deletions red; left out for a commit that changed nothing). When one branch is shown and it has a parent branch, the commits only on this branch have slightly heavier text and the commits it inherited from the parent are dimmed (about 55%, graph lanes lighter too). A merge commit in a branch's own history (first parent only) has a ▸ button at the end of its row.",
+      "copy": ["git.this_chat", "git.added", "git.removed", "git.in_files", "git.hide_merged", "git.show_merged", "git.made_by_chat"],
+      "actions": [
+        {"by": "click a row", "does": "opens that commit's card"},
+        {"by": "click the ▸ on a merge row (tooltip \"Show the commits it merged\")", "does": "shows the merge's own commits under it (up to 200, indented in the graph); the arrow turns ▾ with tooltip \"Hide the commits it merged\""},
+        {"by": "hover a row (tooltip)", "does": "<sha9> · <subject>; for a pull request's merge, its name then its own subject; and \"Made by this chat: <subject>\" for the chat's commits"},
+        {"by": "click a pull request pill in a row", "does": "opens it in the browser"},
+        {"by": "hover a commit or branch link in the chat", "does": "lights its row here (if in view); nothing scrolls"}
+      ]
+    },
+    {
+      "name": "Show more",
+      "shows": "A flat centred button \"Show more\" under the log, visible while the log is full (50 or more commits read).",
+      "copy": ["git.show_more"],
+      "actions": [{"by": "click", "does": "reads and appends the next 50 commits"}]
+    },
+    {
+      "name": "commit card (detail)",
+      "shows": "Header: back button ‹ (tooltip \"The log\") and the commit's 9-character sha as a heading. Body, scrolling: (1) the title as a heading (selectable; a pull request's name for its merge, with the full message below); (2) a caption line \"<author> · <full date> · <sha9>\" where the author links to their GitHub profile once known and the sha links to the commit on GitHub if pushed; a second dim line \"Committed by <committer> · <when>\" when the committer differs; (3) for a commit this chat made, a button \"Made by this chat: show the command\"; (4) a summary \"N files\" in bold then +added −removed, and for a merge \"against first parent <sha7>\"; (5) a boxed list of changed files, each row: path in monospace (start-ellipsised), +a −r (or \"binary\"), a small bar scaled to the biggest file (green share, red share); (6) the rest of the message in a small selectable caption; (7) refs: \"On <branches and remote branches>\" (first 8, then \"and N more\"; \"On …\" while read; \"On no branch (rewritten, or only in the reflog)\") and, with gh signed in, a link line per pull request \"#12 <title> (<state>)\"; (8) buttons \"Open diff\" and, if pushed, \"GitHub ↗\".",
+      "copy": ["git.the_log", "git.made_by_chat_show", "git.files", "git.against_parent", "git.binary", "git.file_diff_tip", "git.committed_by", "git.on_reading", "git.on_branches", "git.on_branches_more", "git.on_no_branch", "git.open_diff", "git.open_diff_tip"],
+      "text": ["GitHub ↗"],
+      "actions": [
+        {"by": "click back", "does": "back to the log, scrolled where it was"},
+        {"by": "click a file row (tooltip \"<path>: the diff in this commit\")", "does": "opens that file's diff of the commit in a code tab named <sha9>-<file>.diff, note \"<path> in <sha9>\""},
+        {"by": "click Open diff (tooltip \"The whole commit on the Code page\")", "does": "opens the whole commit (git show) as a diff in a code tab, note \"Commit <sha9>\""},
+        {"by": "click \"Made by this chat: show the command\"", "does": "the chat scrolls to the tool call that made the commit; if that's above what's loaded, toast \"That command is further up the chat than what's shown: scroll up to load it\"", "copy": ["git.chat_further_up"]},
+        {"by": "click GitHub ↗ (tooltip: the URL)", "does": "opens the commit on GitHub"},
+        {"by": "click an author or #12 link", "does": "opens it in the browser"}
+      ]
+    }
+  ],
+  "states": [
+    {"name": "reading", "shows": "Top line \"Reading the history…\"; refresh icon turning if asked for"},
+    {"name": "empty log", "shows": "\"No commits\" in the list", "copy": ["git.no_commits"]},
+    {"name": "not a repository", "shows": "Top line is the folder; the info line says \"Not in a git repository.\"; no picker, no log, no pull requests, no Show more", "copy": ["host_errors.not_a_repo"]},
+    {"name": "commit being read", "shows": "Card header with the sha, body \"Reading the commit…\"", "copy": ["git.reading_commit"]},
+    {"name": "commit not found", "shows": "\"No commit <sha> here\"", "copy": ["git.no_commit"]},
+    {"name": "gh signed in", "shows": "The branch's pull request line in the info, pull requests listed with their states, commit cards add the author's GitHub profile link and the pull requests that contain the commit, authors' pictures are looked up"},
+    {"name": "gh signed out or missing", "shows": "No pull request line, no pull requests on commit cards, no profile links; commits' remote links still work for pushed commits; nothing offers sign-in"},
+    {"name": "several branches picked", "shows": "Picker says first name + \" + N more\"; their histories merged into one log"},
+    {"name": "every branch", "shows": "All refs in one log; merge commits not folded"},
+    {"name": "another chat", "shows": "Switching chats brings back that chat's branches, merges opened, commit card and log scroll; a new chat starts on the branches it touched at the top of the log"},
+    {"name": "stale", "shows": "Reads again about 0.8 s after the chat goes on (new commits, pushes) while the page is shown; on show if it changed while hidden"}
+  ],
+  "scenes": ["38f-git", "38g-git-commit", "38h-git-signed-in", "38i-git-signed-out"]
+}

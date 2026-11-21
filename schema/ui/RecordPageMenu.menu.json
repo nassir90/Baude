@@ -1,0 +1,31 @@
+{
+  "description": "A page's right-click menu in Record's Pages list; a popover menu with no arrow at the pointer, in sections.",
+  "apps": ["record"],
+  "opens": ["right-click a page row (not a page Meta deleted)"],
+  "code": ["record.py:PagesList.page_menu", "record.py:PagesList.new_page", "record.py:PagesList.rename_from_menu"],
+  "copy": ["common"],
+  "parts": [
+    {
+      "name": "New Page…",
+      "shows": "First section: \"New Page…\"",
+      "text": ["New Page…"],
+      "actions": [{"by": "click", "does": "New page dialog with \"Under {page}\", the new one made as a sub-page of this one."}]
+    },
+    {
+      "name": "Rename…",
+      "shows": "Second section, not on Home: \"Rename…\"",
+      "copy": ["common.rename_ellipsis"],
+      "actions": [{"by": "click", "does": "Opens the page and puts the focus in its title with the whole title selected, to type the new name."}]
+    },
+    {
+      "name": "Delete…",
+      "shows": "Second section, not on Home: \"Delete…\"",
+      "copy": ["common.delete_ellipsis"],
+      "actions": [{"by": "click", "does": "Delete page dialog (RecordAlerts)."}]
+    }
+  ],
+  "states": [
+    {"name": "Home", "shows": "Only New Page…; Home is never renamed or deleted."}
+  ],
+  "scenes": []
+}

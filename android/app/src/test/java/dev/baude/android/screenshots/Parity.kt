@@ -1,0 +1,271 @@
+package dev.baude.android.screenshots
+
+import android.view.View
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.setContent
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.platform.ViewRootForTest
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.semantics.SemanticsNode
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.semantics.getOrNull
+import androidx.compose.ui.state.ToggleableState
+import com.github.takahirom.roborazzi.captureScreenRoboImage
+import dev.baude.android.BaudeTheme
+import dev.baude.android.ChatShell
+import dev.baude.android.Home
+import dev.baude.android.Host
+import dev.baude.android.Key
+import dev.baude.android.Mesh
+import dev.baude.android.Msg
+import dev.baude.android.Settings
+import dev.baude.android.SettingsScreen
+import dev.baude.android.Update
+import dev.baude.android.Wording
+import org.json.JSONArray
+import org.json.JSONObject
+import org.junit.After
+import org.junit.Before
+import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.Robolectric
+import org.robolectric.ParameterizedRobolectricTestRunner
+import org.robolectric.annotation.Config
+import org.robolectric.annotation.GraphicsMode
+import org.robolectric.shadows.ShadowChoreographer
+import java.io.File
+import java.security.KeyPairGenerator
+import java.security.interfaces.ECPublicKey
+import java.time.Duration
+
+/** The phone's side of the parity rig (tests/parity/): each scene of tests/parity/scenes.json drawn from
+ * tests/parity/fixtures, as tests/parity/out/phone/<theme>/<scene>.png, and what's on screen in it as
+ * tests/parity/out/phone/<scene>.json, in the shape tests/parity/dump.py writes for Baude (the text, buttons, inputs,
+ * switches and images a user sees, top to bottom; read from Compose's semantics). A scene the phone has no screen for
+ * is written {"missing": …}. A menu or dialog in a window of its own is in the dump but not in the picture (Roborazzi's
+ * screen capture leaves those windows out here, and drawing one by hand comes out empty). A render rig, not a test: nothing's checked. In android/:
+ *     ./gradlew --offline testDebugUnitTest --tests '*Parity*' */
+@GraphicsMode(GraphicsMode.Mode.NATIVE)
+@Config(sdk = [35])
+abstract class Parity(private val theme: String, private val scene: String) {
+    private lateinit var activity: ComponentActivity
+    private val root = File("../../tests/parity")
+    private val out = File(root, "out/phone")
+    private val sessions = JSONObject(File(root, "fixtures/sessions.json").readText())
+    private val host = sessions.getJSONObject("host")
+    private val home = host.getString("home")
+
+    @Before fun up() {
+        val sc = scenes().first { it.getString("name") == scene }
+        shown = transcript(sessions.getJSONArray("sessions").getJSONObject(0).getString("transcript"),
+            sc.optInt("lines", -1)).toByteArray()
+        freshCompose()
+        ShadowChoreographer.setPaused(true)
+        ShadowChoreographer.setFrameDelay(Duration.ofMillis(16))
+        activity = Robolectric.buildActivity(ComponentActivity::class.java).setup().get()
+        Mesh.app = activity.applicationContext
+        Settings.load(activity)
+        val set = JSONObject(File(root, "fixtures/settings.json").readText())
+        Settings.accent.value = if (set.isNull("accent")) null else set.getString("accent")
+        Settings.appearance.value = "system"
+        Settings.textScale.value = set.optDouble("text_scale", 1.0).toFloat()
+        Settings.globalScale.value = set.optDouble("zoom_default", 1.0).toFloat()
+        Settings.notify.value = set.optBoolean("notifications", true)
+        Settings.meteredUpdates.value = false
+        Update.state.value = ""
+        val pair = KeyPairGenerator.getInstance("EC").apply { initialize(256) }.generateKeyPair()
+        Mesh.key.value = Key(pair.private, pair.public as ECPublicKey)
+        val h = Host(id = host.getString("id"), name = host.getString("name"), user = "dev", address = "workshop.example")
+        Mesh.hosts.add(h)
+        FixtureConnection.up(activity, h) { msg -> answer(msg) }
+        val now = System.currentTimeMillis() / 1000.0
+        val list = sessions.getJSONArray("sessions")
+        Mesh.sessions[h.id] = (0 until list.length()).map { list.getJSONObject(it) }.map { s ->
+            Msg.Session(id = s.getString("id"), title = s.getString("title"), cwd = "$home/${s.getString("folder")}",
+                updated = now - s.getDouble("ago"), said = now - s.getDouble("ago"),
+                created = now - s.getDouble("ago") - 600, state = s.getString("state"), model = s.getString("model"),
+                effort = s.getString("effort"), mode = s.getString("mode"),
+                size = if (s.isNull("transcript")) 0 else shown.size)
+        }
+    }
+
+    /** The scene's transcript, as the host has it: the first `lines` lines of the fixture's (all, without). */
+    private var shown = ByteArray(0)
+
+    /** What the fixture host answers: the open chat's transcript, as it's asked for (Mesh.read). */
+    private fun answer(msg: JSONObject): JSONObject? {
+        if (msg.optString("op") != "transcript") return null
+        val from = msg.optLong("offset", 0).coerceIn(0, shown.size.toLong()).toInt()
+        val part = shown.copyOfRange(from, shown.size)
+        return JSONObject().put("op", "transcript").put("req", msg.opt("req")).put("session", msg.optString("session"))
+            .put("offset", from).put("next", shown.size).put("size", shown.size)
+            .put("data", java.util.Base64.getEncoder().encodeToString(part))
+    }
+
+    @After fun down() {
+        FixtureConnection.down()
+        Mesh.hosts.clear()
+        Mesh.sessions.clear()
+        Mesh.infos.clear()
+        Mesh.states.clear()
+        Mesh.key.value = null
+    }
+
+    @Test fun draw() {
+        val sc = scenes().first { it.getString("name") == scene }
+        val made = runCatching { draw(sc) }
+        if (made.isFailure) {
+            if (theme == "light") write(scene, JSONObject().put("scene", scene).put("app", "phone")
+                .put("missing", "failed: ${made.exceptionOrNull()}"))
+            return
+        }
+        if (made.getOrNull() == false) {
+            if (theme == "light") write(scene, JSONObject().put("scene", scene).put("app", "phone")
+                .put("missing", "no phone screen"))
+            return
+        }
+        File(out, theme).mkdirs()
+        captureScreenRoboImage(File(out, "$theme/$scene.png").path)
+        if (theme == "light") write(scene, JSONObject().put("scene", scene).put("app", "phone")
+            .put("size", JSONArray(listOf(411, 891))).put("items", items()))
+    }
+
+    /** The scene drawn: true, or false when the phone has no screen for it. */
+    private fun draw(sc: JSONObject): Boolean {
+        val name = sc.getString("name")
+        val first = sessions.getJSONArray("sessions").getJSONObject(0)
+        when {
+            name == "home" -> show { Home(open = { _, _ -> }, hosts = {}, feedback = {}) }
+            name.startsWith("chat") || name.startsWith("panel") || name == "menu" -> {
+                show { ChatShell(host.getString("id"), first.getString("id"), back = {}, open = { _, _ -> }, feedback = {},
+                    first = sc.optString("page").ifBlank { "chat" }) }
+                if (name == "menu") tap(Wording.ChatHeader.menu)
+            }
+            name == "settings" -> show { SettingsScreen({}, {}) }
+            else -> return false
+        }
+        return true
+    }
+
+    private fun transcript(file: String, lines: Int): String {
+        val all = File(root, "fixtures/$file").readLines().filter { it.isNotBlank() }
+            .map { it.replace("@CWD@", "$home/garden") }
+        val (title, body) = all.partition { it.contains("\"custom-title\"") }
+        return ((if (lines < 0) body else body.take(lines)) + title).joinToString("\n") + "\n"
+    }
+
+    private fun show(screen: @Composable () -> Unit) {
+        activity.setContent { BaudeTheme { screen() } }
+        settle()
+    }
+
+    /** A click on what's labelled label (its text or its description), as a finger's would. */
+    private fun tap(label: String) {
+        val node = roots().flatMap { all(it.semanticsOwner.rootSemanticsNode) }.firstOrNull { n ->
+            n.config.contains(SemanticsActions.OnClick) && (label in said(n) || label == described(n))
+        } ?: error("nothing labelled $label")
+        node.config[SemanticsActions.OnClick].action?.invoke()
+        settle()
+    }
+
+    private fun all(n: SemanticsNode): List<SemanticsNode> = listOf(n) + n.children.flatMap { all(it) }
+
+    private fun said(n: SemanticsNode) = n.config.getOrNull(SemanticsProperties.Text)?.joinToString(" ") { it.text } ?: ""
+    private fun described(n: SemanticsNode) = n.config.getOrNull(SemanticsProperties.ContentDescription)?.joinToString(" ")
+
+    /** Every window's root view, shown: the activity's, then a menu's or a dialog's (each a window of its own). */
+    private fun windows(): List<View> {
+        val global = Class.forName("android.view.WindowManagerGlobal")
+        val wm = global.getMethod("getInstance").invoke(null)
+        @Suppress("UNCHECKED_CAST")
+        return (global.getDeclaredField("mViews").apply { isAccessible = true }.get(wm) as List<View>).filter { it.isShown }
+    }
+
+    /** Every window's Compose root. */
+    private fun roots(): List<ViewRootForTest> {
+        val views = windows()
+        fun find(v: View): ViewRootForTest? = v as? ViewRootForTest
+            ?: (v as? android.view.ViewGroup)?.let { g -> (0 until g.childCount).firstNotNullOfOrNull { find(g.getChildAt(it)) } }
+        return views.mapNotNull { find(it) }
+    }
+
+    private fun items(): JSONArray {
+        val density = activity.resources.displayMetrics.density
+        val out = mutableListOf<JSONObject>()
+        roots().forEachIndexed { i, r ->
+            val area = if (i == 0) "screen" else "popover"
+            val top = r.semanticsOwner.rootSemanticsNode
+            val view = r.view
+            val at = IntArray(2).also { view.getLocationOnScreen(it) }
+            fun walk(n: SemanticsNode) {
+                val c = n.config
+                val b = n.boundsInRoot
+                val text = said(n).ifBlank { null }
+                val edit = c.getOrNull(SemanticsProperties.EditableText)?.text
+                val desc = described(n)
+                val role = c.getOrNull(SemanticsProperties.Role)
+                val click = c.contains(SemanticsActions.OnClick)
+                val toggle = c.getOrNull(SemanticsProperties.ToggleableState)
+                val kind = when {
+                    edit != null || c.contains(SemanticsActions.SetText) -> "input"
+                    role == Role.Checkbox -> "check"
+                    role == Role.Switch || toggle != null -> "switch"
+                    role == Role.Image -> "image"
+                    role == Role.Tab -> "tab"
+                    click || role == Role.Button || role == Role.DropdownList -> "button"
+                    text != null -> "text"
+                    desc != null -> "image"
+                    else -> null
+                }
+                if (kind != null && b.width > 1 && b.height > 1) {
+                    val o = JSONObject().put("kind", kind)
+                    (text ?: edit)?.let { o.put("text", it) }
+                    c.getOrNull(SemanticsProperties.EditableText)?.let { _ -> text?.let { o.put("sub", it) } }
+                    desc?.let { o.put("tip", it) }
+                    if (toggle != null) o.put("on", toggle == ToggleableState.On)
+                    if (c.contains(SemanticsProperties.Selected) && c[SemanticsProperties.Selected]) o.put("selected", true)
+                    if (c.contains(SemanticsProperties.Disabled)) o.put("dim", true)
+                    o.put("area", area)
+                    o.put("at", JSONArray(listOf((b.left + at[0]) / density, (b.top + at[1]) / density, b.width / density,
+                        b.height / density).map { Math.round(it) }))
+                    out.add(o)
+                }
+                n.children.forEach { walk(it) }
+            }
+            walk(top)
+        }
+        out.sortWith(compareBy({ if (it.getString("area") == "screen") 0 else 1 },
+            { it.getJSONArray("at").getInt(1) / 6 }, { it.getJSONArray("at").getInt(0) }))
+        return JSONArray(out)
+    }
+
+    private fun write(name: String, o: JSONObject) {
+        out.mkdirs()
+        File(out, "$name.json").writeText(o.toString(1))
+    }
+}
+
+/** tests/parity/scenes.json's scenes. */
+fun scenes(): List<JSONObject> = JSONObject(File("../../tests/parity/scenes.json").readText()).getJSONArray("scenes")
+    .let { a -> (0 until a.length()).map { a.getJSONObject(it) } }
+
+/** Their names, read without org.json (the runner lists them outside Robolectric, where Android's is a stub). */
+fun sceneNames(): List<Array<Any>> = Regex(""""name":\s*"([^"]+)"""")
+    .findAll(File("../../tests/parity/scenes.json").readText()).map { arrayOf<Any>(it.groupValues[1]) }.toList()
+
+@RunWith(ParameterizedRobolectricTestRunner::class)
+@Config(qualifiers = "w411dp-h891dp-notnight-xxhdpi")
+class LightParity(scene: String) : Parity("light", scene) {
+    companion object {
+        @JvmStatic @ParameterizedRobolectricTestRunner.Parameters(name = "{0}") fun names() = sceneNames()
+    }
+}
+
+@RunWith(ParameterizedRobolectricTestRunner::class)
+@Config(qualifiers = "w411dp-h891dp-night-xxhdpi")
+class DarkParity(scene: String) : Parity("dark", scene) {
+    companion object {
+        @JvmStatic @ParameterizedRobolectricTestRunner.Parameters(name = "{0}") fun names() = sceneNames()
+    }
+}

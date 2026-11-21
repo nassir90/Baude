@@ -1,0 +1,31 @@
+{
+  "description": "The Pages section at the top of Record's left column: the open notebook's pages as an indented tree (a sub-page on its own line under its parent), above the notebooks.",
+  "apps": ["record"],
+  "code": ["record.py:PagesList", "record.py:Window.open_note", "record.py:Window.delete_page"],
+  "copy": ["common"],
+  "parts": [
+    {
+      "name": "Pages header",
+      "shows": "A group header: an arrow, \"Pages\", and a + button on the right with the tooltip \"New page (+Name in a page makes one under it)\". The arrow folds the list away (kept); the notebooks section then takes the spare height.",
+      "text": ["Pages", "New page (+Name in a page makes one under it)"],
+      "actions": [
+        {"by": "click the arrow or the header", "does": "Folds or unfolds the pages list."},
+        {"by": "click +", "does": "New page dialog (RecordAlerts), the page made at the top level."}
+      ]
+    },
+    {
+      "name": "page row",
+      "shows": "One line per page, indented by depth (a page called Work:Plans shows as Plans under Work, with a tree line from its parent's name; hovering a sub-page shows its full name). Home is first, then the rest sorted by name, case-insensitively, each parent before its children. The page in the tab shown is selected. What is listed: pages with something written in them, every page a [[link]] anywhere goes to, Home, the pages open, and their parents. A page with nothing written yet is grey and italic. A page whose title is being typed in shows the typed name at once. Names too long fade out. Pages Meta added are marked green; deleted ones stay listed, struck through, until kept or undone (nothing opens from them); moved and highlighted ones are marked too.",
+      "actions": [
+        {"by": "click", "does": "Opens the page in a tab (shown if already open)."},
+        {"by": "right-click", "does": "Page menu (RecordPageMenu)."}
+      ]
+    }
+  ],
+  "states": [
+    {"name": "folded", "shows": "The Pages header alone."},
+    {"name": "no notebook", "shows": "Header only, no rows."},
+    {"name": "empty page left", "shows": "A page with nothing written that nothing links to and that is not open and not Home goes from the list (and from the notebook) when its tab closes."}
+  ],
+  "scenes": []
+}

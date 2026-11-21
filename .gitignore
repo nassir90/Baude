@@ -4,3 +4,5 @@ __pycache__/
 /site/node_modules/
 /site/public/
 /site/.cloudflare/
+/tests/parity/out/
+/tests/parity/out-gradle.log

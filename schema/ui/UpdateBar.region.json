@@ -1,0 +1,86 @@
+{
+  "description": "The phone's Update bar at the foot of the home screen, under a rule from the chats, as Baude's sidebar has it, and the notifications that go with it. The phone is kept up to date from the Baude site's feed rather than git: looked at as the app starts, each time it is back in front (once a minute at most) and every hour in the background.",
+  "apps": [
+    "phone"
+  ],
+  "opens": [
+    "shown at the home screen's foot whenever a newer build is found, ready, downloading or cannot be installed"
+  ],
+  "code": [
+    "Home.kt:UpdateBar",
+    "Update.kt:Update",
+    "Update.kt:UpdateJob",
+    "Update.kt:UpdateReceiver"
+  ],
+  "copy": [
+    "update_bar",
+    "updates"
+  ],
+  "parts": [
+    {
+      "name": "Update button",
+      "shows": "A text button \"Update\" at the foot. Shown while a newer build is ready, or found and waiting to be downloaded.",
+      "copy": [
+        "update_bar.update"
+      ],
+      "actions": [
+        {
+          "by": "tap",
+          "does": "installs the build over this one through Android's installer if it is ready; downloads it first if it is not, then installs. The first time, opens Android's page to allow installs from this app, and carries on as you come back. Android closes the app to replace it"
+        }
+      ]
+    },
+    {
+      "name": "Progress",
+      "shows": "A progress line over the button while the build downloads."
+    },
+    {
+      "name": "Why line",
+      "shows": "For a newer build that cannot be installed over this one, the reason replaces the button, in dim text; that build is not downloaded again.",
+      "copy": [
+        "updates.cant_read",
+        "updates.not_this_app",
+        "updates.other_key"
+      ]
+    },
+    {
+      "name": "Notifications",
+      "shows": "\"A new version is ready\" (silent, with an Update action; once per build, only if the app was not in front when it came); after an update, \"<App> updated: N new commits\" (from the difference in version codes), opened again from the notification; a toast \"Baude closes to update: open it again once it has\" when notifications are off; a toast \"Couldn't update: <why>\" when the installer fails. The notification channel is named Update.",
+      "copy": [
+        "update_bar.ready",
+        "update_bar.update",
+        "updates.updated",
+        "updates.updated_commits",
+        "updates.closes_to_update",
+        "updates.couldnt_update"
+      ]
+    },
+    {
+      "name": "When it downloads",
+      "shows": "A newer build is downloaded by itself on a network that is not metered, checked (size, sha256, this app's package at the feed's version, signed as this one is) and only then offered. On a metered network it waits for Update, unless Settings → Update on metered connections is on."
+    }
+  ],
+  "states": [
+    {
+      "name": "none",
+      "shows": "No bar"
+    },
+    {
+      "name": "found",
+      "shows": "Update button; a metered network held the download"
+    },
+    {
+      "name": "downloading",
+      "shows": "Update button with progress along its top"
+    },
+    {
+      "name": "ready",
+      "shows": "Update button; the build is checked"
+    },
+    {
+      "name": "wrong key",
+      "shows": "The reason (\"Can't update: the new version is signed with another key\", or not this app, or cannot be read) instead of the button"
+    }
+  ],
+  "scenes": []
+}

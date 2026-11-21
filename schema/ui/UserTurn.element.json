@@ -1,0 +1,101 @@
+{
+  "description": "A message you sent, in the chat: a bubble at the right of the chat column holding what was attached and what you wrote, drawn as markdown. Hovering its row reveals a revert button beside it.",
+  "apps": [
+    "baude",
+    "record"
+  ],
+  "opens": [
+    "Enter (or the send button) in the composer while no turn runs",
+    "Opening a chat: each message of yours in its history"
+  ],
+  "code": [
+    "baude.py:BaudeWindow.user_bubble",
+    "baude.py:BaudeWindow.send_text",
+    "widgets.py:UserTurn",
+    "baude.py:attachment_widget",
+    "baude.py:BaudeWindow.revert_to",
+    "baude.py:BaudeWindow.commit_revert",
+    "baude.py:BaudeWindow.cancel_revert",
+    "baudelib/transcripts.py:_command_text",
+    "record.py:Reader._add"
+  ],
+  "copy": [
+    "chat_turns",
+    "images"
+  ],
+  "parts": [
+    {
+      "name": "row",
+      "shows": "The message takes the whole width of the chat column as its row; the bubble is right-aligned in it, only as wide as its content (it wraps at the column's width). Messages and replies are 10px apart."
+    },
+    {
+      "name": "bubble",
+      "shows": "Rounded box (12px corners, token radius.bubble), 8px top/bottom and 12px left/right padding (gap.bubble-v / gap.bubble-h), filled with the accent colour at 15% opacity. Its children are stacked 6px apart: the attachments row first, then the text.",
+      "parts": [
+        {
+          "name": "attachments",
+          "shows": "One right-aligned row, 6px gaps, in the order attached. An image: a 96×96 thumbnail with 6px rounded corners. Anything else (a PDF, a file): its file-type icon and its name (middle-ellipsized past 22 characters); a PDF or video shows the system thumbnail of it in place of the icon (two thirds of 96px) when one exists. Hover tooltip: the file's path, else its name.",
+          "actions": [
+            {
+              "by": "click an image thumbnail",
+              "does": "Opens it in the image viewer (ImageViewer), stepping through every image in the chat."
+            },
+            {
+              "by": "right-click an image thumbnail",
+              "does": "The image menu: View, Copy image, Open with default app, Open in folder (see ImageViewer)."
+            }
+          ]
+        },
+        {
+          "name": "text",
+          "shows": "What you wrote, drawn with the same markdown as a reply (headings, bold/italic, lists with • and ◦, quotes, code blocks with copy button, tables, links to files that exist and to URLs; see Reply). A slash command is shown as typed, e.g. \"/compact keep the API notes\"; from history, Claude Code's <command-name>/<command-args> record is shown the same way, \"/name args\". Pasted-content wrappers and system reminders a client added are never shown. A message with attachments and no text has no text part."
+        }
+      ]
+    },
+    {
+      "name": "revert button",
+      "shows": "A small round flat button (24px, a 12px circular-arrows icon, the grey of the chat's notes) just left of the bubble, level with the bubble's last line. Invisible until the pointer is anywhere on the message's row (the whole chat width), then fades in over 150ms; fades out as the pointer leaves. Only offered when the message has an id and the chat can be reverted here (not a session only being read because it's active elsewhere).",
+      "copy": [
+        "chat_turns.revert"
+      ],
+      "phone": {
+        "does": "A long-press reveals the same controls",
+        "why": "No hover on touch; a long-press is Android's equivalent of the desktop's right-click",
+        "decided": "2026-11-21"
+      },
+      "actions": [
+        {
+          "by": "click",
+          "does": "Tentative revert: this message and everything after it are hidden, and the message's text is put in the composer (the draft that was there is kept to put back), caret at its end, focus in the composer. Tooltip: \"Revert: take back this message and everything after it, and put it back in the box\"."
+        },
+        {
+          "by": "key Esc (while a revert is pending)",
+          "does": "Cancels it: everything hidden is shown again and the composer gets back the draft it had."
+        },
+        {
+          "by": "send (Enter) while a revert is pending",
+          "does": "Makes the revert: the agent rewinds the conversation to before that message (stopping a running turn), the message and all after it leave the chat, then what's in the composer is sent as a new message."
+        }
+      ]
+    }
+  ],
+  "states": [
+    {
+      "name": "revert pending",
+      "shows": "The message and everything after it are hidden; the composer holds its text. A permission asked meanwhile is shown again so it can be answered."
+    },
+    {
+      "name": "revert refused",
+      "shows": "A quiet note under what's still shown: \"Couldn't revert: <why>\" (or \"Couldn't revert: claude isn't running\"); the revert stays pending."
+    },
+    {
+      "name": "Record's reader",
+      "shows": "Record draws your messages as markdown in a right-aligned box filled with the raised colour (baude.raised), not the accent; no attachments row and no revert; text past 1200 characters is cut with \"…\"."
+    }
+  ],
+  "scenes": [
+    "32-user-bubble",
+    "02-turn-complete",
+    "51b-resumed-after-writing"
+  ]
+}

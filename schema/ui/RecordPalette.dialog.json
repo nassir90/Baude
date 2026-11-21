@@ -1,0 +1,42 @@
+{
+  "description": "⌘K / Ctrl+K, as Baude's: a search of every name, opened where it is. Record's lists the open notebooks, their pages, the chats (each by its title) and every name the folder of the chat being read has (files, branches, Kubernetes objects and contexts, running workloads, database tables, pull requests and issues). The dialog itself is the shared one (Baude's); only what it lists differs.",
+  "apps": [
+    "record"
+  ],
+  "opens": [
+    "key Ctrl+K (Cmd+K on macOS), from anywhere in the window"
+  ],
+  "code": [
+    "widgets.py:RefPalette",
+    "record.py:Window.open_palette",
+    "record.py:Window.open_item",
+    "record.py:Spaces",
+    "record.py:NotesNames",
+    "record.py:ChatNames"
+  ],
+  "parts": [
+    {
+      "name": "search box and table",
+      "shows": "A search box; under it a table with the columns Name (with the logo its links have), Kind and Where, best match first, up to 400 rows, as you type (each word, in any order). A notebook and a page name show Kind notebook or page and the notebook it is in; a chat its folder (\"no folder\" with none). The catalogue is made afresh if it is old; the table follows, a part at a time, with dots at the bottom left until it is all in."
+    },
+    {
+      "name": "picking",
+      "shows": "The picked row is highlighted; the table has no buttons.",
+      "actions": [
+        {
+          "by": "key Up / Down / Page Up / Page Down",
+          "does": "Picks."
+        },
+        {
+          "by": "key Enter or click a row",
+          "does": "Opens it where it is: a page opens in a tab (its notebook opened first), a notebook is shown, a chat on a Read tab, a file on a Code tab, a branch on Git, a Kubernetes object or table in its view, a pull request or issue on its web page; other files in the system's app."
+        },
+        {
+          "by": "key Esc",
+          "does": "Closes."
+        }
+      ]
+    }
+  ],
+  "scenes": []
+}

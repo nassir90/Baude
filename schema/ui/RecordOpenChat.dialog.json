@@ -1,0 +1,32 @@
+{
+  "description": "Open a Chat…: a list of the Claude Code chats on this computer; the one picked is read in a tab of its own. Dialog 560 wide, 620 tall, with its own header bar.",
+  "apps": ["record"],
+  "opens": ["☰ → Open a Chat…", "the Open a chat… button of an empty chat tab"],
+  "code": ["record.py:ChatDialog", "record.py:recent_sessions", "record.py:Window.open_chat"],
+  "copy": ["chats"],
+  "parts": [
+    {
+      "name": "title",
+      "shows": "\"Open a chat\" in the dialog's header bar."
+    },
+    {
+      "name": "search box",
+      "shows": "A search entry, placeholder \"Search chats\", filtering as you type: a chat stays if the text is in its title or its folder (case-insensitive).",
+      "text": ["Search chats"]
+    },
+    {
+      "name": "chat row",
+      "shows": "A boxed list of rows, newest used first (the last 80 transcripts Claude Code keeps, by when they were last typed in; those the Claude desktop app replaced with a continuation are left out; a transcript with no title is left out). Each row: the chat's title; under it a dimmed subtitle \"{folder} · {time ago}\" (the folder with ~ for home; \"No folder (Claude Desktop)\" for a desktop app's scratch workspace); hovering the time shows the full date and time. A chat written to within the last 3 minutes has a green bold \"live\" tag at the right.",
+      "copy": ["chats.no_folder_desktop"],
+      "text": ["live"],
+      "actions": [
+        {"by": "click", "does": "Closes the dialog and opens the chat on a Read tab (RecordRead); one open already is shown."}
+      ]
+    }
+  ],
+  "states": [
+    {"name": "loading", "shows": "A spinner while the chats are listed."},
+    {"name": "nothing matches", "shows": "The list is hidden (blank under the search box)."}
+  ],
+  "scenes": []
+}

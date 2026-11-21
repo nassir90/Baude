@@ -1,0 +1,42 @@
+{
+  "description": "The prompt a session was started with from outside (another session, the desktop app, a script), at the very top of its chat instead of a message bubble.",
+  "apps": [
+    "baude",
+    "record"
+  ],
+  "opens": [
+    "Opening a chat whose first message came from outside (its transcript's turnOrigin isn't human)"
+  ],
+  "code": [
+    "widgets.py:start_prompt_view",
+    "baude.py:BaudeWindow.render_history",
+    "record.py:Reader._add"
+  ],
+  "copy": [
+    "chat_turns"
+  ],
+  "parts": [
+    {
+      "name": "heading",
+      "shows": "\"Started with this prompt\", small bold caption style, dimmed, left-aligned.",
+      "copy": [
+        "chat_turns.started_with_prompt"
+      ]
+    },
+    {
+      "name": "prompt",
+      "shows": "Full column width (not a bubble): the prompt's images first if it had any (96px thumbnails in a row, clickable to view), then the prompt as markdown. Past 260px tall it scrolls inside its own box; scrolling past its end scrolls the chat."
+    },
+    {
+      "name": "rule",
+      "shows": "A horizontal separator under it, 6px above and below."
+    }
+  ],
+  "states": [
+    {
+      "name": "chat started by a Bot on the mesh",
+      "shows": "Not used: the task it was given is drawn as an ordinary message instead."
+    }
+  ],
+  "scenes": []
+}

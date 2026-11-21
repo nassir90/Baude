@@ -1,0 +1,73 @@
+{
+  "description": "A message written while the agent is busy with a turn: not sent yet, it waits in the queue just under the conversation (above the composer), drawn as your bubble but grey. Hovering its row shows delete, send-now and edit buttons beside it.",
+  "apps": [
+    "baude"
+  ],
+  "opens": [
+    "Enter in the composer (with text or attachments) while a turn runs"
+  ],
+  "code": [
+    "widgets.py:QueuedTurn",
+    "baude.py:BaudeWindow.queue_message",
+    "baude.py:BaudeWindow.queue_send",
+    "baude.py:BaudeWindow.queue_edit",
+    "baude.py:BaudeWindow.queue_drop",
+    "baude.py:BaudeWindow.flush_queue"
+  ],
+  "copy": [
+    "chat_turns"
+  ],
+  "parts": [
+    {
+      "name": "bubble",
+      "shows": "Same shape and content as a sent message's bubble (attachments row, then markdown text), right-aligned, but filled with the text colour at 7% and its text at 55% opacity (grey), not the accent. Queued messages stack 10px apart, oldest first, below the last message of the chat and above the composer; the queue takes no room when empty."
+    },
+    {
+      "name": "buttons",
+      "shows": "Three small round flat buttons (24px) in a row just left of the bubble, level with its last line, invisible until the pointer is on the row, fading in over 150ms: ✕ (close icon), ↑ (a bold arrow character), and the circular-arrows revert icon.",
+      "copy": [
+        "chat_turns.queued_delete",
+        "chat_turns.queued_send_now",
+        "chat_turns.queued_edit"
+      ],
+      "phone": {
+        "does": "A long-press reveals the same controls",
+        "why": "No hover on touch; a long-press is Android's equivalent of the desktop's right-click",
+        "decided": "2026-11-21"
+      },
+      "actions": [
+        {
+          "by": "click ✕",
+          "does": "Drops it from the queue. Tooltip \"Delete this queued message\"."
+        },
+        {
+          "by": "click ↑",
+          "does": "Interrupts the running turn, then sends this message and every queued message before it, together as one message (their texts joined by a blank line, their attachments together). Tooltip \"Send now: interrupt the agent, then send this and the queued messages before it\"."
+        },
+        {
+          "by": "click the revert icon",
+          "does": "Takes it out of the queue and puts its text in the composer before what's already written there (separated by a blank line), caret after its text, its attachments back in the composer's strip. Tooltip \"Edit: put this message back in the box\"."
+        }
+      ]
+    }
+  ],
+  "states": [
+    {
+      "name": "turn ends by itself",
+      "shows": "Every queued message is sent at once, together as one message (texts joined by blank lines); they leave the queue and the sent message appears in the chat as a normal sent bubble."
+    },
+    {
+      "name": "turn stopped (Esc / stop button)",
+      "shows": "The queue stays as it is; nothing is sent."
+    },
+    {
+      "name": "another chat opened",
+      "shows": "The queue goes into the left chat's draft."
+    },
+    {
+      "name": "in history",
+      "shows": "A message Claude Code recorded as sent mid-turn (queued_command) is drawn in a reopened chat as an ordinary sent message (UserTurn)."
+    }
+  ],
+  "scenes": []
+}

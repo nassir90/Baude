@@ -9130,7 +9130,7 @@ class SessionSidebar(Gtk.Box):
         named = bot.get("name") or " ".join((info.get("title") or "").split())[:80]  # (a new one: the chat's title)
         entry = Gtk.Entry(text=named, placeholder_text=wording.say("common.name"), activates_default=True)
         pick = {"data": None}  # (bytes: a picture chosen; "": its picture removed; None: as it is)
-        avatar = Adw.Avatar(size=64, text=named or "Bot", show_initials=True, halign=Gtk.Align.CENTER)
+        avatar = Adw.Avatar(size=64, text=named or wording.say("sidebar.bot"), show_initials=True, halign=Gtk.Align.CENTER)
         choose = Gtk.Button(label=wording.say("bot_settings.choose_picture"))
         remove = Gtk.Button(label=wording.say("bot_settings.remove_picture"), visible=False)
 
@@ -9183,7 +9183,7 @@ class SessionSidebar(Gtk.Box):
 
         def typed(e):
             name = " ".join(e.get_text().split())
-            avatar.set_text(name or "Bot")
+            avatar.set_text(name or wording.say("sidebar.bot"))
             dlg.set_response_enabled("save", bool(name))
         entry.connect("changed", typed)
         typed(entry)

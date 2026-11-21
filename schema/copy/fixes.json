@@ -42,6 +42,18 @@
     "read_failed": "Couldn't read it just now: {$why}",
     "read_from": "{$where} · read ",
     "read_from_at": "{$where} · read {$time}",
-    "tab_waiting": "Feedback ({$n})"
+    "tab_waiting": "Feedback ({$n})",
+    "status_working": "In Progress",
+    "status_ready": "Ready for review",
+    "status_rejected": "Rejected",
+    "status_closed": "Closed",
+    "status_saved": "Waiting to upload",
+    "status_filed": "Filed",
+    "status_resolved": "Resolved",
+    "round_working": "In progress",
+    "round_failed": "Failed",
+    "round_stopped": "Stopped",
+    "round_nochange": "No change",
+    "round_discarded": "Fix discarded"
   }
 }

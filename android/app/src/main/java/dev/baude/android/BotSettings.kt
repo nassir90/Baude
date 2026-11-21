@@ -36,21 +36,25 @@ fun BotSettings(item: Item, done: () -> Unit) {
     val contact = Contact(h, s)
     LaunchedEffect(contact.pictureKey) { Mesh.picture(contact) }
     var name by remember { mutableStateOf(s.bot?.name?.ifBlank { null } ?: tidy(s.title.orEmpty()).take(80)) }
-    var pick by remember { mutableStateOf<ByteArray?>(null) } // (bytes: a picture chosen; empty: removed; null: as it is)
-    val chosen = pick?.takeIf { it.isNotEmpty() }?.let { b -> android.graphics.BitmapFactory.decodeByteArray(b, 0, b.size)?.asImageBitmap() }
-    val shown = if (pick == null) Mesh.pictures[contact.pictureKey] else chosen
+    var pick by remember { mutableStateOf<ByteArray?>(null) } // (a picture chosen)
+    var cleared by remember { mutableStateOf(false) } // (its picture removed)
+    val chosen = pick?.let { b -> android.graphics.BitmapFactory.decodeByteArray(b, 0, b.size)?.asImageBitmap() }
+    val shown = if (cleared) null else if (pick != null) chosen else Mesh.pictures[contact.pictureKey]
     val launcher = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
         if (uri != null) {
-            val png = picture(ctx, uri)
-            if (png == null) toast(Wording.BotSettings.unreadable(why = ""))
-            else pick = png
+            val (png, why) = pictureOr(ctx, uri)
+            if (png == null) toast(Wording.BotSettings.unreadable(why = why))
+            else {
+                pick = png
+                cleared = false
+            }
         }
     }
     fun go() {
         val n = tidy(name)
         if (n.isBlank()) return
         done()
-        val picture = pick?.let { if (it.isEmpty()) "" else Base64.getEncoder().encodeToString(it) }
+        val picture = pick?.let { Base64.getEncoder().encodeToString(it) } ?: if (cleared && s.bot?.picture != null) "" else null
         Mesh.ask(h, Msg.Bot(session = s.id.orEmpty(), bot = Msg.BotFields(name = n, picture = picture)).json()) { r ->
             if (r.optString("op") == Op.ERROR) toast(Wording.BotSettings.failed(why = Msg.Error.from(r).said.orEmpty()))
         }
@@ -60,7 +64,7 @@ fun BotSettings(item: Item, done: () -> Unit) {
         title = { Text(if (making) Wording.BotSettings.makeBot else Wording.BotSettings.settings) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                if (making) Text(Wording.BotSettings.body, style = Type.body, color = c.dim)
+                if (making) Text(Wording.BotSettings.body, style = Type.body, color = c.fg)
                 Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
                     Avatar(name.ifBlank { Wording.Sidebar.bot }, shown, size = 64.dp)
                 }
@@ -68,13 +72,16 @@ fun BotSettings(item: Item, done: () -> Unit) {
                     Button(Wording.BotSettings.choosePicture) {
                         launcher.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
                     }
-                    if (shown != null) Button(Wording.BotSettings.removePicture) { pick = ByteArray(0) }
+                    if (shown != null) Button(Wording.BotSettings.removePicture) {
+                        pick = null
+                        cleared = true
+                    }
                 }
-                NameField(name, { name = it }, Wording.Common.name, ::go, focus = false)
+                NameField(name, { name = it }, Wording.Common.name, ::go)
             }
         },
         confirmButton = {
-            Button(if (making) Wording.BotSettings.makeBot else Wording.Common.save, suggested = name.isNotBlank(), onClick = ::go)
+            Button(if (making) Wording.BotSettings.makeBot else Wording.Common.save, suggested = true, enabled = tidy(name).isNotBlank(), onClick = ::go)
         },
         dismissButton = { Button(Wording.Common.cancel, onClick = done) },
         containerColor = c.dialog,

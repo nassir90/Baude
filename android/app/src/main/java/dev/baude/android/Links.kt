@@ -7,7 +7,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 
 /** Where a chat is, for the links in what's said: its host, its folder, the host's home and what it published. */
-data class ChatPlace(val hostId: String, val cwd: String?, val home: String?, val artifacts: List<Artifact>)
+data class ChatPlace(val hostId: String, val cwd: String?, val home: String?, val artifacts: List<Artifact>, val sid: String? = null)
 
 val LocalChatPlace = compositionLocalOf<ChatPlace?> { null }
 

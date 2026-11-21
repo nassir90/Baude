@@ -28,7 +28,15 @@
       "items": {
         "type": "object"
       },
-      "description": "Where it's mentioned: {role, path, line, note, rev}."
+      "description": "Where it's mentioned: {role, path, line, note, rev, state, commit_sha, branch}."
+    },
+    "reason": {
+      "type": "string",
+      "description": "Why it wasn't found, or how its matches were told apart."
+    },
+    "data": {
+      "type": "object",
+      "description": "What was found (lookup.Ref.data): a commit's subject and branches, a pull request's state, a tool's inputs…"
     }
   },
   "additionalProperties": false

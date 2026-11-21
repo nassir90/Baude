@@ -5,6 +5,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -589,7 +590,8 @@ fun MetaRowsOf(o: JSONObject) {
     Mesh.tick.value
     @Composable
     fun boxed(rows: List<@Composable () -> Unit>) = MetaBoxed(rows) { it() }
-    val chevron: @Composable () -> Unit = { androidx.compose.material3.Icon(Adwaita.GoNext, null, tint = c.dim) }
+    val chevron: @Composable () -> Unit = { androidx.compose.material3.Icon(Adwaita.GoNext, null, tint = c.dim,
+        modifier = Modifier.size(16.dp.icon)) }
     o.optJSONArray("chats")?.let { rows ->
         boxed((0 until rows.length()).mapNotNull { rows.optJSONArray(it) }.map { r ->
             {

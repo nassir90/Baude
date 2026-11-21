@@ -282,7 +282,7 @@ fun BottomBar(pages: List<Page>, current: Int, pick: (Int) -> Unit) {
                 Column(Modifier.widthIn(min = 64.dp).clip(RoundedCornerShape(8.dp))
                     .background(if (on) c.fg.copy(alpha = 0.10f) else c.frame).clickable { pick(i) }
                     .padding(horizontal = 8.dp, vertical = 5.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                    Icon(p.icon, null, tint = c.fg, modifier = Modifier.size(18.dp.icon))
+                    Icon(p.icon, null, tint = c.fg, modifier = Modifier.size(16.dp.icon))
                     Text(p.title, style = Type.caption.copy(fontWeight = if (on) androidx.compose.ui.text.font.FontWeight.Bold
                         else androidx.compose.ui.text.font.FontWeight.Normal), color = c.fg, maxLines = 1,
                         overflow = TextOverflow.Ellipsis)

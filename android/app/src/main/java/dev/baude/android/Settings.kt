@@ -171,8 +171,12 @@ fun chatColumn(w: Dp): Dp {
     }
 }
 
-/** An icon's size at Icon Scale (widgets.set_scale's icon_scale: 16 px at 1.0). */
-val Dp.icon: Dp get() = this * Settings.iconScale.value
+/** An icon's size, given in Baude's px, at Icon Scale (widgets.set_scale's icon_scale: 16 px at 1.0). Baude draws its icons
+ * beside its 12 px system text (GTK on macOS: 12 pt at 72 dpi); the phone's text is Tokens.Font.body, so its icons
+ * grow by the same ratio and keep their size against the words beside them. */
+val Dp.icon: Dp get() = this * (Tokens.Font.body.value / BAUDE_TEXT_PX) * Settings.iconScale.value
+
+private const val BAUDE_TEXT_PX = 12f
 
 /** ⋮ → Settings…, as Baude's Settings, its groups in its order: Meta's, Full-width text, Code Font, the accent and
  * whether it's light or dark, how updates download, notifications and the version; the sizes; Send Feedback…. */
@@ -289,7 +293,7 @@ fun ButtonRow(title: String, end: ImageVector? = null, onClick: () -> Unit) {
     Row(Modifier.fillMaxWidth().heightIn(min = 50.dp).clickable(onClick = onClick).padding(horizontal = 12.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center) {
         Text(title, style = Type.body, color = c.fg, textAlign = TextAlign.Center)
-        if (end != null) Icon(end, null, tint = c.dim, modifier = Modifier.size(18.dp.icon))
+        if (end != null) Icon(end, null, tint = c.dim, modifier = Modifier.size(16.dp.icon))
     }
 }
 
@@ -330,7 +334,7 @@ fun Choice(title: String, values: List<String>, picked: String, label: (String) 
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 dot?.let { Dot(it(picked)) }
                 Text(label(picked), style = Type.body, color = c.fg)
-                Icon(Adwaita.PanDown, null, tint = c.fg, modifier = Modifier.size(18.dp.icon))
+                Icon(Adwaita.PanDown, null, tint = c.fg, modifier = Modifier.size(16.dp.icon))
             }
             Popover(open, { open = false }) {
                 for (v in values) DropdownMenuItem({

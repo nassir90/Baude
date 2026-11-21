@@ -493,7 +493,8 @@ class Network:
         self.saved_at, self.pending, self.looked = 0.0, False, float("-inf")
         self.stopped, self.forgotten = threading.Event(), set()  # (forgotten: gone FORGET_S, dropped from the file)
         self.linked_pid = None  # (the host process here that's been asked to link to the hosts given by hand)
-        self.removed = self.removed_saved()  # (removed here, by its id or key: not known again till it's added by hand)
+        self.removed_known = self.removed_saved()  # (what servers.json listed as removed when last read)
+        self.removed = set(self.removed_known)  # (removed here, by its id or key: not known again till it's added by hand)
         self.unremoved = set()  # (no longer removed: added again by hand, this run)
         for key, c in self.saved().items():
             if self.is_removed(key, c):
@@ -568,10 +569,18 @@ class Network:
             self.removed.discard(key)
             self.unremoved.add(key)
 
+    def sync_removed(self, on_disk):
+        """(lock held) What servers.json lists as removed is the truth: a host it no longer lists (added again by hand
+        in the other app) is no longer removed here; one removed here and not written yet stays."""
+        self.removed -= self.removed_known - on_disk
+        self.removed_known = set(on_disk)
+
     def take_removed(self):
         """servers.json's hosts removed as it's edited (by Baude or Record): let go of here too."""
-        on_disk = self.removed_saved() - self.unremoved
+        on_disk = self.removed_saved()
         with self.lock:
+            self.sync_removed(on_disk)
+            on_disk = on_disk - self.unremoved
             new = on_disk - self.removed
             self.removed |= on_disk
             gone = [r for r in self.servers.values() if not r.mine and {r.key, r.info.get("id")} & new]
@@ -842,8 +851,10 @@ class Network:
             return
         if self.readonly:
             return self._save_one(only)
-        on_disk, removed = self.saved(), self.removed_saved() - self.unremoved
+        on_disk, removed = self.saved(), self.removed_saved()
         with self.lock:
+            self.sync_removed(removed)
+            removed = removed - self.unremoved
             self.removed |= removed  # (Record's, meanwhile, kept too)
             servers = {k: r.cached() for k, r in self.servers.items() if r.info.get("id") or r.sessions or r.by_hand}
             for key, c in on_disk.items():
@@ -864,10 +875,12 @@ class Network:
     def _save_one(self, key):
         """servers.json with one host's entry as it is here (key; None: those removed here only), every other as it is
         there (a read-only Network's: what it knows of the rest may be older than Baude's)."""
+        on_file = self.removed_saved()
         with self.lock:
+            self.sync_removed(on_file)
             r = self.servers.get(key) if key else None
             mine = r.cached() if r is not None else None
-            removed = self.removed | (self.removed_saved() - self.unremoved)
+            removed = self.removed | (on_file - self.unremoved)
         if mine is None and key:
             return
         on_disk = {k: c for k, c in self.saved().items() if not (k in removed or (c.get("info") or {}).get("id") in removed)}

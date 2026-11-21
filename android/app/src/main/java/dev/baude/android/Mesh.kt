@@ -199,6 +199,8 @@ object Mesh {
     fun removeHost(host: Host) {
         // (what's waiting for it let go of: you're done with that host)
         for (u in Pending.all.toList()) if (u.hostId == host.id || reach(u) == host.id) Pending.drop(u)
+        val machine = conns[host.id]?.info?.id?.takeIf(::isId) ?: HostStore.machine(app, host)
+        if (machine != null) HostStore.setRemoved(app, machine, true) // (nor reached again as a member another host lists)
         hosts.removeAll { it.id == host.id }
         HostStore.save(app, hosts)
         if (hosts.none { it.address == host.address && it.port == host.port }) HostStore.forget(app, host)

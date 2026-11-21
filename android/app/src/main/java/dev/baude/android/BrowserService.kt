@@ -17,15 +17,15 @@ class BrowserService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        val name = intent?.getStringExtra("name") ?: "A Bot"
+        val name = intent?.getStringExtra("name") ?: Wording.BotBrowser.theBot
         val show = Intent(this, BrowserActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
         val close = Intent(this, BrowserActivity::class.java).putExtra("close", true)
         val n = NotificationCompat.Builder(this, Mesh.LINKED)
             .setSmallIcon(R.drawable.ic_baude)
-            .setContentTitle("$name's browser is open")
-            .setContentText("On this phone, for its tools.")
+            .setContentTitle(Wording.BotBrowser.openOnPhone(bot = name))
+            .setContentText(Wording.BotBrowser.openOnPhoneBody)
             .setContentIntent(PendingIntent.getActivity(this, 2, show, PendingIntent.FLAG_IMMUTABLE))
-            .addAction(0, "Close", PendingIntent.getActivity(this, 3, close, PendingIntent.FLAG_IMMUTABLE or
+            .addAction(0, Wording.Common.close, PendingIntent.getActivity(this, 3, close, PendingIntent.FLAG_IMMUTABLE or
                 PendingIntent.FLAG_UPDATE_CURRENT))
             .setOngoing(true)
             .setPriority(NotificationCompat.PRIORITY_MIN)

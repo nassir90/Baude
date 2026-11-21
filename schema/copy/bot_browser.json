@@ -1,5 +1,5 @@
 {
-  "description": "A Bot's browser on the side panel's Browser page (Baude's) and the Android app's: its bars, tabs, what a page asks, and why it isn't shown.",
+  "description": "A Bot's browser on the side panel's Browser page (Baude's) and the Android app's (and the phone's notification while it's open): its bars, tabs, what a page asks, and why it isn't shown.",
   "messages": {
     "title": "Browser",
     "host_said_no": "its host said no",
@@ -9,6 +9,8 @@
     "on_phone_title": "On a phone",
     "on_phone": "{$bot}'s browser is on a phone now, and shown there. It's back here once the phone closes it.",
     "the_bot": "The Bot",
+    "open_on_phone": "{$bot}'s browser is open",
+    "open_on_phone_body": "On this phone, for its tools.",
     "restarts_soon": "It restarts in a moment, or when you come back to this window.",
     "restarts_on_open": "It restarts when you open this page again.",
     "couldnt_open": "Couldn't open the browser",

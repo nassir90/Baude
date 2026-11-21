@@ -49,6 +49,13 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.isCtrlPressed
+import androidx.compose.ui.input.key.isMetaPressed
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalContext
@@ -62,7 +69,7 @@ import androidx.compose.ui.unit.dp
 /** A chat's page: what it and you have said, what it did, and a box to write in (files too: pictures and PDFs as
  * Baude sends them, text files in the message). name: what the box asks you to message. */
 @Composable
-fun ChatPage(chat: Chat, name: String, hint: String = "Message $name", attach: Boolean = true) {
+fun ChatPage(chat: Chat, name: String, reachable: Boolean, hint: String = "Message $name", attach: Boolean = true) {
     val c = LocalBaude.current
     val ctx = LocalContext.current
     val sid = chat.sid
@@ -74,6 +81,17 @@ fun ChatPage(chat: Chat, name: String, hint: String = "Message $name", attach: B
     val pick = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
         take(ctx, chat, uris)
     }
+    LaunchedEffect(chat.edit.value) { // (a queued message taken back: before what's written)
+        val back = chat.edit.value ?: return@LaunchedEffect
+        text = back + (if (text.isBlank()) "" else "\n\n" + text)
+        chat.edit.value = null
+    }
+    LaunchedEffect(text) { chat.typed = text }
+    var wasWorking by remember(chat) { mutableStateOf(working) }
+    LaunchedEffect(working) { // (a turn ended by itself: what was queued sent)
+        if (wasWorking && !working) Queue.flush(chat)
+        wasWorking = working
+    }
     LaunchedEffect(chat, chat.draft.value) { // (shared from another app: after what's written)
         val shared = chat.draft.value ?: return@LaunchedEffect
         text = if (text.isBlank()) shared else text.trimEnd() + "\n" + shared
@@ -84,7 +102,7 @@ fun ChatPage(chat: Chat, name: String, hint: String = "Message $name", attach: B
     // as it grows; scrolled up to read, left where it is)
     var follow by remember(chat) { mutableStateOf(true) }
     LaunchedEffect(list.isScrollInProgress) { if (!list.isScrollInProgress) follow = !list.canScrollForward }
-    LaunchedEffect(chat.lines.size, chat.asks.size, chat.streaming.value.length / 120) {
+    LaunchedEffect(chat.lines.size, chat.asks.size, chat.queued.size, chat.sent.size, chat.streaming.value.length / 120) {
         val n = list.layoutInfo.totalItemsCount
         if (n > 0 && follow) {
             list.animateScrollToItem(n - 1)
@@ -97,6 +115,7 @@ fun ChatPage(chat: Chat, name: String, hint: String = "Message $name", attach: B
             contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = Gap.chatH, vertical = Gap.chatV),
             verticalArrangement = Arrangement.spacedBy(Gap.messageGap)) {
             items(chat.lines) { line -> Said(line, line.uuid?.let { chat.senders[it] }.takeIf { line.kind == "you" }) }
+            items(chat.sent.flatMap { it.lines }) { line -> Said(line) }
             if (chat.streaming.value.isNotEmpty()) item { SelectionContainer { Prose(chat.streaming.value) } }
             items(chat.asks, key = { it.rid }) { ask -> // (this phone's own agents: as claude's)
                 Asked(chat, ask, alwaysOffered(session?.let { it.model.orEmpty() }, at),
@@ -104,7 +123,7 @@ fun ChatPage(chat: Chat, name: String, hint: String = "Message $name", attach: B
             }
             val held = session?.held.orEmpty().filter { it.id.orEmpty() !in chat.holding }
             items(held, key = { "held:" + it.id.orEmpty() }) { h -> Held(chat, h, working) }
-            items(Pending.of(sid), key = { "unsent:" + it.id }) { Waiting(it, Mesh.conn(Mesh.reach(it))?.state == "up") }
+            items(chat.queued.toList(), key = { "queued:" + System.identityHashCode(it) }) { QueuedRow(chat, it, working) }
             if (working && chat.asks.isEmpty()) item {
                 Text("Working…", style = Type.caption, color = c.dim)
             }
@@ -127,19 +146,27 @@ fun ChatPage(chat: Chat, name: String, hint: String = "Message $name", attach: B
                     IconButton(Adwaita.WindowClose, Wording.Common.remove) { files.remove(f) }
                 }
             }
+            val ready = (text.isNotBlank() || files.isNotEmpty()) && !chat.busy.value && chat.preparing.value == 0 && reachable
+            fun send() {
+                Queue.submit(chat, working, text, files.toList())
+                text = ""
+                files.clear()
+            }
             Row(verticalAlignment = Alignment.Bottom) {
                 if (attach) IconButton(Adwaita.ListAdd, "Attach images, PDFs or files") { pick.launch(arrayOf("*/*")) }
                 Box(Modifier.weight(1f).padding(horizontal = 6.dp, vertical = 7.dp)) {
                     if (text.isEmpty()) Text(hint, style = Type.body, color = c.dim)
                     BasicTextField(text, { text = it }, textStyle = Type.body.copy(color = c.fg),
-                        cursorBrush = SolidColor(c.accentBg), modifier = Modifier.fillMaxWidth().heightIn(max = 160.dp))
+                        cursorBrush = SolidColor(c.accentBg), modifier = Modifier.fillMaxWidth().heightIn(max = 160.dp)
+                        .onPreviewKeyEvent { e -> // (Ctrl+Enter sends; while a turn runs it queues)
+                            val go = e.type == KeyEventType.KeyDown && e.key == Key.Enter && (e.isCtrlPressed || e.isMetaPressed)
+                            if (go && ready) send()
+                            go
+                        })
                 }
-                val ready = (text.isNotBlank() || files.isNotEmpty()) && !chat.busy.value && chat.preparing.value == 0
                 IconButton(Adwaita.Return, Wording.Common.send, enabled = ready, tint = if (ready) c.accentFg else c.fg,
                     background = if (ready) c.accentBg else null) {
-                    chat.send(text, files.toList())
-                    text = ""
-                    files.clear()
+                    send()
                 }
             }
         }
@@ -194,9 +221,6 @@ fun Asked(chat: Chat, ask: Ask, alwaysOffered: Boolean, name: String = "Claude")
             }
             Button(Wording.Common.deny, destructive = true) { Mesh.answer(chat, ask, allow = false) }
         }
-        val always = Mesh.alwaysAllowed(chat)
-        if (always.isNotEmpty()) Text("Always allowed in this chat: " + always.sorted().joinToString(", ") {
-            toolDisplay(it).first }, style = Type.caption, color = c.dim)
     }
 }
 
@@ -297,7 +321,7 @@ private fun senderName(kind: String?, name0: String?, hostName: String?): String
 
 /** A message's text without the line its host put at its head for its agent (wire.said_by), for one its sender
  * store says is another's. */
-private val SAID_BY = Regex("""\A<baude-sender(?: [a-z_]+="[^"<>]*")*>[^<]*</baude-sender>(?:\n\n|\n|\z)""")
+val SAID_BY = Regex("""\A<baude-sender(?: [a-z_]+="[^"<>]*")*>[^<]*</baude-sender>(?:\n\n|\n|\z)""")
 
 /** A line of the chat: from (a message of yours) who it's from instead, if its host's sender store says it's
  * another's: where yours are, grey, as Baude draws it, with "from <who>" small at its top, and what the store says is
@@ -318,51 +342,6 @@ fun Said(line: Line, from: Msg.StoredSender? = null) {
             }
         }
         else -> SaidLine(line)
-    }
-}
-
-/** A message its host holds for the chat (a subagent's answer after its host restarted), as Baude's queue box shows
- * one: grey, from whom at its top, what a person's shown of it (shown: its answer, as an answer's drawn, or what
- * became of it; else what it says), ✕ to drop it and ↑ to send it to the agent (once no turn's going). */
-@Composable
-private fun Held(chat: Chat, h: Msg.HeldMessage, working: Boolean) {
-    val c = LocalBaude.current
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.Bottom) {
-        IconButton(Adwaita.WindowClose, Wording.Held.delete) { Mesh.held(chat, h.id.orEmpty(), false) }
-        IconButton(Adwaita.Return, if (working) Wording.HeldSend.afterTurn else Wording.Held.send,
-            enabled = !working) { Mesh.held(chat, h.id.orEmpty(), true) }
-        Column(Modifier.weight(1f, fill = false).clip(RoundedCornerShape(Gap.bubbleRadius)).background(c.raised)
-            .padding(horizontal = Gap.bubbleH, vertical = Gap.bubbleV), horizontalAlignment = Alignment.End) {
-            Text(Wording.Common.fromWho(author = h.sender?.let(::senderName) ?: Wording.Senders.hostUnnamed), style = Type.caption, color = c.dim)
-            Prose(SAID_BY.replace(h.shown ?: h.text.orEmpty(), "").trim(), c.dim, c.inside)
-        }
-    }
-}
-
-/** A message you sent that its host doesn't have yet (Pending), as yours is drawn but faint, how it stands under it:
- * being sent, waiting for its host, or not sent (why), with ✕ to drop it and ↑ to put it in line again. */
-@Composable
-private fun Waiting(u: Unsent, up: Boolean) {
-    val c = LocalBaude.current
-    val failed = u.state.value == "failed"
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.Bottom) {
-        if (failed) {
-            IconButton(Adwaita.WindowClose, "Delete this message") { Mesh.dropUnsent(u) }
-            IconButton(Adwaita.Return, "Send it again") { Mesh.again(u) }
-        }
-        Column(Modifier.weight(1f, fill = false).padding(start = if (failed) 0.dp else 48.dp), horizontalAlignment = Alignment.End) {
-            Column(Modifier.clip(RoundedCornerShape(Gap.bubbleRadius)).background(c.bubble.copy(alpha = c.bubble.alpha * 0.55f))
-                .padding(horizontal = Gap.bubbleH, vertical = Gap.bubbleV), horizontalAlignment = Alignment.End) {
-                for (f in u.files) Text((if (f.mime.startsWith("image/")) "🖼 " else "📄 ") + f.name, style = Type.body,
-                    color = c.dim, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                if (u.text.isNotBlank()) Text(u.text, style = Type.body, color = c.dim)
-            }
-            Text(when {
-                failed -> Wording.HeldSend.notSent(why = u.why.value ?: Wording.BotBrowser.hostSaidNo)
-                u.state.value == "sending" || up -> "Sending…"
-                else -> "It's sent once this chat's host is there"
-            }, style = Type.caption, color = if (failed) c.destructive else c.dim, modifier = Modifier.padding(top = 2.dp, end = 4.dp))
-        }
     }
 }
 

@@ -116,7 +116,7 @@ fun ChatShell(hostId: String, sid: String, back: () -> Unit, open: (String, Stri
                 "chat" -> Column(Modifier.fillMaxSize()) { // (its model, effort and mode: the chat's own, as Baude's
                     if (takes(at, "control"))              // header has them, not its side panel's pages)
                         ChatControls(at, sid, said = { chat.said.value = it }, open = open)
-                    Box(Modifier.weight(1f)) { ChatPage(chat, name, hint = if (bot != null) "Message $name" else "") }
+                    Box(Modifier.weight(1f)) { ChatPage(chat, name, reachable = conn?.state == "up", hint = if (bot != null) "Message $name" else "") }
                 }
                 "meta" -> MetaPage(at, here)
                 "memory" -> MemoryPage(at, sid, here)

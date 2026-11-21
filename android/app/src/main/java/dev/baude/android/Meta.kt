@@ -357,7 +357,8 @@ fun MetaPage(chatHost: String, here: Boolean) {
     }
     Column(Modifier.fillMaxSize()) {
         Column(Modifier.weight(1f)) {
-            ChatPage(Meta.chat, "Meta", hint = "Ask Meta", attach = false)
+            ChatPage(Meta.chat, "Meta", reachable = Meta.host.value?.let { Mesh.conn(it)?.state == "up" } == true,
+                hint = "Ask Meta", attach = false)
         }
         Row(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 2.dp)) {
             Button(Wording.Common.clear) { Meta.clear() }

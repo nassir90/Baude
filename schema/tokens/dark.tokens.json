@@ -85,5 +85,17 @@
     "deleted": {"$description": "Pygments' Generic.Deleted.", "$value": {"colorSpace": "srgb", "components": [1, 0.6314, 0.5961], "hex": "#ffa198"}},
     "heading": {"$description": "Pygments' Generic.Heading.", "$value": {"colorSpace": "srgb", "components": [0.4745, 0.7529, 1], "hex": "#79c0ff"}},
     "name": {"$description": "Pygments' Name.", "$value": {"colorSpace": "srgb", "components": [0.902, 0.9294, 0.9529], "hex": "#e6edf3"}}
+  },
+  "kube": {
+    "ok": {"$type": "color", "$description": "A container running and ready.", "$value": {"colorSpace": "srgb", "components": [0.2, 0.8196, 0.4784], "hex": "#33d17a"}},
+    "starting": {"$type": "color", "$description": "Getting ready, and the ring of one that restarted lately.", "$value": {"colorSpace": "srgb", "components": [1, 0.549, 0.149], "hex": "#ff8c26"}},
+    "bad": {"$type": "color", "$description": "Crashed or failed.", "$value": {"colorSpace": "srgb", "components": [0.9412, 0.2627, 0.2902], "hex": "#f0434a"}}
+  },
+  "schema": {
+    "card": {"$type": "color", "$description": "A card's fill.", "$value": {"colorSpace": "srgb", "components": [0.16, 0.16, 0.17], "hex": "#29292b"}},
+    "head": {"$type": "color", "$description": "A card's head.", "$value": {"colorSpace": "srgb", "components": [1, 1, 1], "alpha": 0.05, "hex": "#ffffff"}},
+    "border": {"$type": "color", "$description": "A card's edge, and the minimap's.", "$value": {"colorSpace": "srgb", "components": [1, 1, 1], "alpha": 0.14, "hex": "#ffffff"}},
+    "pk": {"$type": "color", "$description": "A primary key's badge.", "$value": {"colorSpace": "srgb", "components": [0.9, 0.65, 0.04], "hex": "#e6a60a"}},
+    "fk": {"$type": "color", "$description": "A foreign key's badge, and the edge of a table linked to the selected one.", "$value": {"colorSpace": "srgb", "components": [0.2, 0.65, 0.4], "hex": "#33a666"}}
   }
 }

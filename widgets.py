@@ -8863,7 +8863,7 @@ list.filter-list > row:focus-visible { outline-offset: -2px; }
 columnview.kube-table { background: none; }
 columnview.kube-table > header { background: @baude_raised;
                                  box-shadow: inset 0 -1px @baude_rule; }
-columnview.kube-table > listview > row > cell { padding-top: 5px; padding-bottom: 5px; }
+columnview.kube-table > listview > row > cell { padding-top: {kube.row-pad}; padding-bottom: {kube.row-pad}; }
 .kube-row-btn, .kube-row-btn > button { padding: 0 4px; min-height: 0; min-width: 0; }
 .kube-side-head { font-weight: bold; font-size: 0.85em; opacity: 0.7; }
 /* the side panel's page names (Subagents, Processes, Side questions, Artifacts…): libadwaita draws them bold */

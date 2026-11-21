@@ -45,7 +45,7 @@ from widgets import (  # noqa: E402,F401
 from codeview import (  # noqa: E402,F401
     CodeView,
 )
-from baudelib import wording  # noqa: E402
+from baudelib import tokens, wording  # noqa: E402
 
 
 # ---------------------------------------------------------- kubernetes --
@@ -241,10 +241,10 @@ class KubeSquares(Gtk.Widget):
     """A pod's containers in the Pods table, a small square each, as Freelens draws them: solid green, running and
     ready; solid orange, getting ready; green ringed with orange, ready but restarted lately; solid red, crashed or failed;
     grey, done (kube_container_look). Its tooltip names each container and its state."""
-    SIZE, GAP = 10, 3
+    SIZE, GAP = tokens.px("kube.square"), tokens.px("kube.square-gap")
     # GNOME's palette (light, dark): fills, so the brighter shades, not the theme's text colours
-    COLORS = {"ok": ("#2ec27e", "#33d17a"), "starting": ("#ff7800", "#ff8c26"), "restarted": ("#ff7800", "#ff8c26"),
-              "bad": ("#e01b24", "#f0434a")}
+    COLORS = {look: tuple(tokens.color_hex(f"kube.{name}", theme) for theme in ("light", "dark"))
+              for look, name in (("ok", "ok"), ("starting", "starting"), ("restarted", "starting"), ("bad", "bad"))}
 
     def __init__(self):
         super().__init__(halign=Gtk.Align.START, valign=Gtk.Align.CENTER)
@@ -379,7 +379,8 @@ class KubeView(Gtk.Box):
         self.side.connect("row-selected", self.on_side)
         self.side.connect("row-activated", lambda _b, row: hasattr(row, "section") and not hasattr(row, "page")
                           and self.fold(row.section, row.section not in self.folded))
-        side_scroll = Gtk.ScrolledWindow(child=self.side, hscrollbar_policy=Gtk.PolicyType.NEVER, width_request=230)
+        side_scroll = Gtk.ScrolledWindow(child=self.side, hscrollbar_policy=Gtk.PolicyType.NEVER,
+                                       width_request=tokens.px("kube.sidebar-width"))
         # the table, its status line; the selected object's YAML beside it
         self.table_scroll = Gtk.ScrolledWindow(vexpand=True, hexpand=True)
         self.fade = Fade(self.table_scroll)  # (another context, kind or namespace: the table fades until it's in)
@@ -542,7 +543,7 @@ class KubeView(Gtk.Box):
         up = {Gdk.KEY_Up, Gdk.KEY_Page_Up, Gdk.KEY_Home, Gdk.KEY_KP_Up, Gdk.KEY_KP_Page_Up, Gdk.KEY_KP_Home}
         keys.connect("key-pressed", lambda _c, kv, _k, _s: (kv in up and self.follow_logs(False), False)[1])
         self.logs.view.add_controller(keys)
-        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, visible=False, height_request=140)  # (the pane's rule over it)
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, visible=False, height_request=tokens.px("kube.logs-min"))  # (the pane's rule over it)
         box.append(head)
         box.append(self.logs)
         return box
@@ -1089,7 +1090,7 @@ class KubeView(Gtk.Box):
                                  expand=col["kind"] == "name" or col["title"] in ("Message", "Rules"))
         # (fixed: the cells that matter most aren't squeezed, and the table scrolls sideways. A name and a namespace
         # no wider than this: the Pods table's Restarts is still in sight beside the YAML in a laptop's window)
-        if width := {"name": 220, "namespace": 120}.get(col["kind"]) or {"Message": 420, "Rules": 320,
+        if width := {"name": tokens.px("kube.name-width"), "namespace": tokens.px("kube.namespace-width")}.get(col["kind"]) or {"Message": 420, "Rules": 320,
                                                                         "Involved Object": 260}.get(col["title"]):
             c.set_fixed_width(width)
         c.set_sorter(Gtk.CustomSorter.new(lambda a, b, _d: _KUBE_ORDER[kube_order(a.keys[i], b.keys[i])], None))

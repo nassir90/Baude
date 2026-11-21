@@ -40,7 +40,7 @@ from widgets import (  # noqa: E402,F401
     FIND_RGB, Fade, WorkerPool, ZOOM_STEP, ellipsize_dropdown, find_attrs, inside,
     paned_grip, view_bar, _scales,
 )
-from baudelib import wording  # noqa: E402
+from baudelib import tokens, wording  # noqa: E402
 
 
 # --------------------------------------------------------- database schemas --
@@ -71,8 +71,8 @@ class SchemaCanvas(Gtk.Widget):
     fitting the whole diagram in; and the view is kept over the diagram, as a translateExtent keeps it, so it can't
     be panned off the screen."""
 
-    HEAD, ROW, PAD, MAX_W = 34, 24, 12, 380
-    MINI_W, MINI_H, MINI_PAD = 180, 120, 12  # the minimap, bottom right
+    HEAD, ROW, PAD, MAX_W = (tokens.px(f"schema.{k}") for k in ("head-h", "row-h", "pad", "max-w"))
+    MINI_W, MINI_H, MINI_PAD = (tokens.px(f"schema.{k}") for k in ("mini-w", "mini-h", "mini-pad"))  # the minimap, bottom right
     MAX_SCALE = 2.0  # (React Flow's maxZoom; Supabase's is 1.8): closer is only bigger, no more legible
     # d3-zoom's wheelDelta: 0.05 a line, 0.002 a pixel, so a browser's 100-pixel notch is 0.2 (×1.15). A notch here is
     # one wheel unit; a touchpad's pixels are d3's pixels, so a swipe the length of a notch zooms as far as one
@@ -441,12 +441,13 @@ class SchemaCanvas(Gtk.Widget):
             return c
         accent = Adw.StyleManager.get_default().get_accent_color_rgba() if hasattr(
             Adw.StyleManager.get_default(), "get_accent_color_rgba") else rgba(0.21, 0.52, 0.89, 1)
+        def themed(name):
+            c = tokens.value(f"schema.{name}", "color", "dark" if dark else "light")
+            return rgba(*c["components"], c.get("alpha", 1))
         return {"fg": fg, "dim": rgba(fg.red, fg.green, fg.blue, 0.55), "faint": rgba(fg.red, fg.green, fg.blue, 0.18),
-                "card": rgba(0.16, 0.16, 0.17, 1) if dark else rgba(1, 1, 1, 1),
-                "head": rgba(1, 1, 1, 0.05) if dark else rgba(0, 0, 0, 0.035),
-                "border": rgba(1, 1, 1, 0.14) if dark else rgba(0, 0, 0, 0.14),
+                "card": themed("card"), "head": themed("head"), "border": themed("border"),
                 "accent": accent, "link": rgba(fg.red, fg.green, fg.blue, 0.32),
-                "pk": rgba(0.90, 0.65, 0.04, 1), "fk": rgba(0.20, 0.65, 0.40, 1),
+                "pk": themed("pk"), "fk": themed("fk"),
                 "find": rgba(*(c / 255 for c in FIND_RGB), 1),  # (Find's matches, as in the cards' text)
                 "grid": rgba(fg.red, fg.green, fg.blue, 0.06)}
 
@@ -788,7 +789,7 @@ class SchemaView(Gtk.Box):
         self.summary = " · ".join([db_label(self.database), ns, wording.say("databases.tables", n=len(tables)),
                                    wording.say("databases.foreign_keys", n=n_links),
                                    wording.say("databases.read_only")] +
-                                  [wording.say("databases.read_in", seconds=f"{took:.2f}")] * bool(took))
+                                  ([wording.say("databases.read_in", seconds=f"{took:.2f}")] if took else []))
         self.show_summary()
         GLib.idle_add(self._frame, table)
 
@@ -934,7 +935,7 @@ class SchemaView(Gtk.Box):
         for r, row in enumerate(rows, 1):
             for c, name in enumerate(cols):
                 v = row.get(name)
-                text = "NULL" if v is None else (json.dumps(v) if isinstance(v, (dict, list)) else str(v))
+                text = wording.say("databases.null") if v is None else (json.dumps(v) if isinstance(v, (dict, list)) else str(v))
                 cell = Gtk.Label(label=text[:120] + ("…" if len(text) > 120 else ""), xalign=0, selectable=True)
                 cell.add_css_class("md-cell")
                 if v is None:

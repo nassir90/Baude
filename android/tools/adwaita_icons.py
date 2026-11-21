@@ -20,17 +20,24 @@ input-keyboard changes-prevent changes-allow web-browser edit-clear phone networ
 view-more object-select document-edit edit-undo edit-redo media-playback-start media-playback-stop user-trash alarm
 system-users utilities-terminal dialog-question folder media-playlist-shuffle insert-link process-stop dialog-error
 dialog-warning content-loading x-office-spreadsheet x-office-calendar x-office-document x-office-presentation
-image-x-generic audio-x-generic applications-games mail-unread edit-copy text-x-generic folder-open""".split()
-BAUDE = ["baude-return", "baude-claude", "baude-meta", "baude-map"]
+image-x-generic audio-x-generic applications-games mail-unread edit-copy text-x-generic folder-open go-bottom
+zoom-in zoom-out zoom-fit-best format-justify-fill""".split()
+BAUDE = ["baude-return", "baude-claude", "baude-meta", "baude-map", "baude-logs", "baude-kube-nodes",
+         "baude-kube-workloads", "baude-kube-helm", "baude-kube-config", "baude-kube-network", "baude-kube-storage",
+         "baude-kube-namespaces", "baude-kube-events", "baude-kube-users", "baude-kube-crds", "baude-kube-scaling",
+         "baude-kube-certificates", "baude-kube-monitoring"]
 
 
 def baude_icons():
-    """widgets.BAUDE_ICONS, read from the source (importing widgets wants GTK)."""
+    """widgets.BAUDE_ICONS and KUBE_ICONS, read from the source (importing widgets wants GTK)."""
     tree = ast.parse((ROOT / "widgets.py").read_text())
+    icons = {}
     for node in tree.body:
-        if isinstance(node, ast.Assign) and any(getattr(t, "id", "") == "BAUDE_ICONS" for t in node.targets):
-            return ast.literal_eval(node.value)
-    sys.exit("widgets.BAUDE_ICONS not found")
+        if isinstance(node, ast.Assign) and any(getattr(t, "id", "") in ("BAUDE_ICONS", "KUBE_ICONS") for t in node.targets):
+            icons.update(ast.literal_eval(node.value))
+    if not icons:
+        sys.exit("widgets.BAUDE_ICONS not found")
+    return icons
 
 
 def num(s):

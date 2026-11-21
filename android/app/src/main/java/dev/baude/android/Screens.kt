@@ -418,7 +418,7 @@ private fun Attached(f: Picked, remove: () -> Unit, view: () -> Unit) {
             } ?: Box(Modifier.size(Tokens.Composer.thumb))
         } else {
             androidx.compose.material3.Icon(if (f.mime == "application/pdf") Adwaita.XOfficeDocument else Adwaita.TextXGeneric, null,
-                tint = c.fg, modifier = Modifier.size(16.dp))
+                tint = c.fg, modifier = Modifier.size(16.dp.icon))
             Text(if (f.name.length > 22) f.name.take(10) + "…" + f.name.takeLast(11) else f.name, style = Type.body, color = c.fg, maxLines = 1)
         }
         IconButton(Adwaita.WindowClose, Wording.Common.remove, onClick = remove)

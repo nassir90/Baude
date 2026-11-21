@@ -343,6 +343,24 @@ object Adwaita {
         }
     }
 
+    val ViewGrid: ImageVector by lazy {
+        icon("view-grid") {
+            p("M2 1c-.554688 0-1 .445312-1 1v4c0 .554688.445312 1 1 1h4c.554688 0 1-.445312 1-1V2c0-.554688-.445312-1-1-1zm8 0c-.554688 0-1 .445312-1 1v4c0 .554688.445312 1 1 1h4c.554688 0 1-.445312 1-1V2c0-.554688-.445312-1-1-1zM2 9c-.554688 0-1 .445312-1 1v4c0 .554688.445312 1 1 1h4c.554688 0 1-.445312 1-1v-4c0-.554688-.445312-1-1-1zm8 0c-.554688 0-1 .445312-1 1v4c0 .554688.445312 1 1 1h4c.554688 0 1-.445312 1-1v-4c0-.554688-.445312-1-1-1zm0 0", 1f, PathFillType.NonZero)
+        }
+    }
+
+    val ViewList: ImageVector by lazy {
+        icon("view-list") {
+            p("M2 1c-.554688 0-1 .445312-1 1v2c0 .554688.445312 1 1 1h2c.554688 0 1-.445312 1-1V2c0-.554688-.445312-1-1-1zm5 1v2h8V2zM2 6.015625c-.554688 0-1 .445313-1 1v1.980469c0 .550781.445312 1 1 1h2c.554688 0 1-.449219 1-1V7.015625c0-.554687-.445312-1-1-1zM7 7v2h8V7zm-5 4c-.554688 0-1 .445312-1 1v1.980469c0 .550781.445312 1 1 1h2c.554688 0 1-.449219 1-1V12c0-.554688-.445312-1-1-1zm5 .984375v2h8v-2zm0 0", 1f, PathFillType.NonZero)
+        }
+    }
+
+    val WindowMaximize: ImageVector by lazy {
+        icon("window-maximize") {
+            p("M3.988281 3.992188v8.011718H12V3.992188zm2 2H10v4.011718H5.988281zm0 0", 1f, PathFillType.NonZero)
+        }
+    }
+
     val Return: ImageVector by lazy {
         icon("baude-return") {
             p("M12 2h2v9H6.5V9H12z", 1f, PathFillType.NonZero)

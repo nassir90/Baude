@@ -94,9 +94,9 @@ fun AgentStatus(status: String) {
     val c = LocalBaude.current
     when (status) {
         "running" -> CircularProgressIndicator(Modifier.size(16.dp), color = c.fg.copy(alpha = 0.55f), strokeWidth = 2.dp)
-        "completed" -> Icon(Adwaita.ObjectSelect, Wording.Common.done, tint = c.success, modifier = Modifier.size(16.dp.icon))
-        "interrupted" -> Icon(Adwaita.ProcessStop, "Interrupted", tint = c.dim, modifier = Modifier.size(16.dp.icon))
-        else -> Icon(Adwaita.DialogError, "Failed", tint = c.destructive, modifier = Modifier.size(16.dp.icon))
+        "completed" -> Icon(Adwaita.ObjectSelect, null, tint = c.success, modifier = Modifier.size(16.dp.icon))
+        "interrupted" -> Icon(Adwaita.ProcessStop, null, tint = c.dim, modifier = Modifier.size(16.dp.icon))
+        else -> Icon(Adwaita.DialogError, null, tint = c.destructive, modifier = Modifier.size(16.dp.icon))
     }
 }
 
@@ -124,7 +124,8 @@ fun describe(a: Subagent): String {
  * the host (the subagents op), as Baude's Subagents page. */
 @Composable
 fun SubagentsPage(chat: Chat) {
-    var shown by remember(chat) { mutableStateOf<Subagent?>(null) }
+    val held = shownAgents.getOrPut(chat) { mutableStateOf(null) } // (kept while other pages show)
+    var shown by held
     LaunchedEffect(chat.showAgent.value) { // (View on a call's card: its subagent opened here)
         val id = chat.showAgent.value ?: return@LaunchedEffect
         chat.agents.firstOrNull { it.toolUseId == id }?.let { shown = it }
@@ -139,17 +140,20 @@ fun SubagentsPage(chat: Chat) {
         }
         return
     }
-    AgentDetail(chat, a) { shown = null }
+    AgentDetail(chat, a, open = { shown = it }) { shown = null }
 }
 
+private val shownAgents = java.util.WeakHashMap<Chat, androidx.compose.runtime.MutableState<Subagent?>>()
+
 @Composable
-private fun AgentDetail(chat: Chat, a: Subagent, back: () -> Unit) {
+private fun AgentDetail(chat: Chat, a: Subagent, open: (Subagent) -> Unit, back: () -> Unit) {
     val c = LocalBaude.current
     androidx.activity.compose.BackHandler(onBack = back)
     val lines = remember(a) { mutableStateListOf<Line>() }
     val calls = remember(a) { ChatCalls() }
     val held = remember(a) { HashMap<String, Pair<Long, Long>>() } // (a file's: its size and mtime, as held here)
     val text = remember(a) { StringBuilder() }
+    val nested = remember(a) { HashMap<String, String>() } // (a subagent call's id: its agent's id)
     LaunchedEffect(a, a.agentId.value) {
         val id = a.agentId.value ?: return@LaunchedEffect
         val name = "agent-$id.jsonl"
@@ -170,8 +174,17 @@ private fun AgentDetail(chat: Chat, a: Subagent, back: () -> Unit) {
                         val open = calls.byId.mapValues { it.value.inputOpen to it.value.outputOpen }
                         lines.clear()
                         calls.byId.clear()
+                        nested.clear()
                         for (l in parse(text.toString(), cutFirst = false, sidechain = true)) when (l.kind) {
-                            "call", "result", "task", "stopped" -> took(calls, lines, l)
+                            "call", "result", "task", "stopped" -> {
+                                took(calls, lines, l)
+                                if (l.kind == "result") try {
+                                    val o = JSONObject(l.text)
+                                    if (calls.byId[o.optString("id")]?.base?.let { isAgent(it) } == true)
+                                        Regex("agentId: ([A-Za-z0-9_-]+)").find(o.optString("text"))?.groupValues?.get(1)
+                                            ?.let { nested[o.optString("id")] = it }
+                                } catch (_: Exception) {}
+                            }
                             "you", "bot", "note", "error" -> lines.add(l)
                         }
                         for ((id, o) in open) calls.byId[id]?.let { it.inputOpen = o.first; it.outputOpen = o.second }
@@ -198,10 +211,27 @@ private fun AgentDetail(chat: Chat, a: Subagent, back: () -> Unit) {
             IconButton(Adwaita.GoPrevious, Wording.SidePanel.allSubagents, onClick = back)
         }
         Box(Modifier.fillMaxSize().padding(top = 6.dp).inside(c)) {
-            val shown = if (lines.isEmpty() && a.prompt.isNotBlank()) listOf(Line("you", a.prompt)) else lines.toList()
+            val parsed = lines.toList()
+            val first = parsed.indexOfFirst { it.kind == "you" } // (the file's first user record: the task's prompt, drawn instead)
+            val shown = if (a.prompt.isBlank()) parsed else listOf(Line("you", a.prompt)) +
+                if (first >= 0 && parsed.take(first).none { it.kind == "bot" || it.kind == "call" })
+                    parsed.filterIndexed { i, _ -> i != first } else parsed
+            val view = { call: Call ->
+                open(chat.agents.firstOrNull { it.toolUseId == call.id } ?: Subagent(call.id,
+                    call.input.optString("description").ifBlank { Wording.SidePanel.subagent },
+                    call.input.optString("subagent_type"), call.input.optString("prompt")).also { s ->
+                    s.agentId.value = nested[call.id]
+                    s.status.value = when (call.state) {
+                        "running", "background" -> "running"
+                        "error" -> "failed"
+                        "interrupted" -> "interrupted"
+                        else -> "completed"
+                    }
+                })
+            }
             LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(12.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                drawn(shown, calls) { Said(it) }
+                drawn(shown, calls, view = view) { Said(it) }
             }
         }
     }
@@ -210,34 +240,6 @@ private fun AgentDetail(chat: Chat, a: Subagent, back: () -> Unit) {
 /** Mesh.ask, waited for. */
 suspend fun asked(hostId: String, msg: JSONObject): JSONObject = kotlinx.coroutines.suspendCancellableCoroutine { k ->
     Mesh.ask(hostId, msg) { r -> if (k.isActive) k.resumeWith(Result.success(r)) }
-}
-
-// -------------------------------------------------------------------------------------------------- processes --
-
-/** The chat's background processes (its commands, as its host lists them), each stopped from here, as Baude's
- * Processes page lists them. */
-@Composable
-fun ProcessesPage(hostId: String, sid: String) {
-    val c = LocalBaude.current
-    Mesh.tick.value
-    val commands = Mesh.session(hostId, sid)?.commands.orEmpty()
-    var said by remember { mutableStateOf<String?>(null) }
-    Scrolled {
-        BoxedList(commands, Wording.SidePanel.noProcesses) { cmd ->
-            val since = cmd.since?.toDouble() ?: 0.0
-            val sub = listOfNotNull(if (cmd.background == true) "In the background" else null,
-                if (since > 0) "since " + java.text.SimpleDateFormat("HH:mm", java.util.Locale.ENGLISH)
-                    .format(java.util.Date((since * 1000).toLong())) else null).joinToString(" · ")
-            ActionRow(cmd.what.orEmpty().lines().first(), sub, prefix = { AgentStatus("running") }, suffix = {
-                if (takes(hostId, "control")) IconButton(Adwaita.MediaPlaybackStop, Wording.SidePanel.stopProcess) {
-                    control(hostId, sid, JSONObject().put("subtype", "stop_task").put("task_id", cmd.id.orEmpty())) { e ->
-                        if (e != null) said = "Couldn't stop it: $e"
-                    }
-                }
-            })
-        }
-        said?.let { Text(it, style = Type.caption, color = c.dim, modifier = Modifier.padding(horizontal = 10.dp)) }
-    }
 }
 
 // -------------------------------------------------------------------------------------------------- artifacts --

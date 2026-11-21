@@ -32,6 +32,7 @@ sys.path.insert(0, HERE)
 import argparse  # noqa: E402
 import re  # noqa: E402
 import time  # noqa: E402
+import types  # noqa: E402
 
 import screenshots as S  # noqa: E402  (tests/test_baude's throwaway env, the window machinery, capture)
 from screenshots import T, Adw, Gtk, baude  # noqa: E402
@@ -149,6 +150,8 @@ def open_chat(app, sc):
     if sc.get("files"):  # (the scene's files join the chat's folder)
         shutil.copytree(os.path.join(FIX, sc["files"]), folder("garden"), dirs_exist_ok=True)
     path = write_sessions(sc.get("lines"), sc.get("transcript"))[sc.get("session", 0)]
+    if sc.get("meta"):  # (Meta's conversation, as its store keeps it)
+        baude._META[:] = [{k: v for k, v in fixture(sc["meta"]).items() if k != "description"}]
     win = app.window(S.opts(cwd=folder("garden")))
     info = baude.read_session_info(path)
     win.resume_session(info)
@@ -175,6 +178,11 @@ def open_chat(app, sc):
     if sc.get("page"):
         win.show_panel(True, {"signal": "refs"}.get(sc["page"], sc["page"]))
         T.pump(0.4)
+        if sc.get("meta") and sc.get("open"):  # (Meta's cards' Input and Output opened)
+            for b in T.find(win.panel.meta, Gtk.ToggleButton):
+                if b.has_css_class("tool-toggle"):
+                    b.set_active(True)
+            T.pump(0.4)
     if sc.get("card"):
         win.panel.signal_page.show_ref(sc["card"])
         T.pump(0.4)
@@ -242,6 +250,17 @@ def build(app, sc):
         win = open_chat(app, sc)
         update.changelog_dialog().present(win)
         return win
+    if name == "bot-settings":
+        win = open_chat(app, sc)
+        title = fixture("sessions.json")["sessions"][0]["title"]
+        T.wait_for(lambda: S.sidebar_row(win, title) is not None, "rows")
+        row = S.sidebar_row(win, title)
+        win.sidebar.ask_bot({**row.info, "remote": types.SimpleNamespace(request=lambda *a, **k: None)})
+        return win
+    if name.startswith("feedback-ongoing"):
+        with open(os.path.join(FIX, "gallery", "docs", "flow.png"), "rb") as f:
+            png = f.read()
+        return S.fixes_tab(app, shots={"12/1/1-before.png": png, "12/1/1-after.png": png})[0]
     return None
 
 
@@ -315,6 +334,7 @@ def main():
                 for w in Gtk.Window.list_toplevels():
                     if isinstance(w, baude.BaudeWindow):
                         T.close(w)
+                baude._META.clear()
                 S.reset_state()
                 shutil.rmtree(os.path.join(os.environ["CLAUDE_CONFIG_DIR"], "projects"), ignore_errors=True)
     print(f"{failed} failures -> {out}")

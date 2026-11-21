@@ -21,7 +21,11 @@ import dev.baude.android.ChatShell
 import dev.baude.android.Home
 import dev.baude.android.Host
 import dev.baude.android.Key
+import dev.baude.android.BotSettings
 import dev.baude.android.FeedbackScreen
+import dev.baude.android.Fixes
+import dev.baude.android.FixesScreen
+import dev.baude.android.Item
 import dev.baude.android.Mesh
 import dev.baude.android.Queued
 import dev.baude.android.Meta
@@ -176,11 +180,27 @@ abstract class Parity(private val theme: String, private val scene: String) {
             "git" -> return reply("what" to msg.optString("what"), "error" to Wording.HostErrors.notARepo)
             "signal_names" -> return reply("glossary" to "$home/garden/.baude", "root" to "$home/garden",
                 "refs" to (signal ?: JSONArray()))
+            // (what Baude answers with its own functions: tests/parity/host.py, a throwaway process for each request)
+            "fixes" -> {
+                val p = ProcessBuilder("python3", "-I", File(root, "host.py").path).start()
+                p.outputStream.use { it.write(msg.toString().toByteArray()) }
+                val out = p.inputStream.readBytes().toString(Charsets.UTF_8)
+                p.waitFor()
+                return JSONObject(out)
+            }
         }
         return null
     }
 
     @After fun down() {
+        Fixes.items = emptyList()
+        Fixes.repo = null
+        Fixes.error = null
+        Fixes.readAt = 0
+        Fixes.lastRead = 0
+        Fixes.firstRead = true
+        Fixes.loading = false
+        Meta.load(JSONObject())
         Meta.host.value = null
         FixtureConnection.down()
         Mesh.hosts.clear()
@@ -221,6 +241,13 @@ abstract class Parity(private val theme: String, private val scene: String) {
                 if (name == "home-add-host") tap(Wording.Sidebar.addHost)
             }
             name.startsWith("chat") || name.startsWith("panel") || name == "menu" -> {
+                if (sc.has("meta")) {
+                    Meta.load(metaState(sc.getString("meta")))
+                    if (sc.optBoolean("open")) for (call in Meta.calls.values) {
+                        call.inputOpen = true
+                        call.outputOpen = true
+                    }
+                }
                 if (sc.optBoolean("open")) openAll(first.getString("id"))
                 if (sc.optBoolean("down")) {
                     conn.state = "down"
@@ -237,7 +264,7 @@ abstract class Parity(private val theme: String, private val scene: String) {
                     androidx.compose.runtime.snapshots.Snapshot.sendApplyNotifications()
                     settle()
                 }
-                if (sc.optBoolean("open")) toEnd()
+                if (sc.optBoolean("open") && !sc.has("meta")) toEnd()
                 if (sc.has("ask")) ask(sc.getString("ask"))
                 if (sc.has("queued")) {
                     Mesh.open!!.queued.add(Queued(sc.getString("queued"), emptyList()))
@@ -246,12 +273,79 @@ abstract class Parity(private val theme: String, private val scene: String) {
                     hold(sc.getString("queued"))
                 }
             }
+            name == "bot-settings" -> show {
+                BotSettings(Item(host.getString("id"), Mesh.sessions.getValue(host.getString("id")).first(), 0)) {}
+            }
+            name == "feedback-ongoing" -> show { FixesScreen({}, {}, show = "12") }
+            name == "feedback-ongoing-list" -> show { FixesScreen({}, {}) }
             name == "feedback" -> show { FeedbackScreen(listOf("Chat: Fix the flaky upload"), back = {}) }
             name == "settings" -> show { SettingsScreen({}, {}) }
             name == "changelog" -> show { ChangelogScreen(null, {}) }
             else -> return false
         }
         return true
+    }
+
+    /** The desktop's meta store fixture (messages and actions) as the phone keeps Meta's conversation (Meta.save's). */
+    private fun metaState(file: String): JSONObject {
+        val src = JSONObject(File(root, "fixtures/$file").readText())
+        val lines = JSONArray()
+        val calls = JSONObject()
+        val turns = JSONObject()
+        val messages = src.getJSONArray("messages")
+        var user = ""
+        for (i in 0 until messages.length()) {
+            val m = messages.getJSONObject(i)
+            if (m.getString("role") == "user") {
+                user = "u$i"
+                lines.put(JSONArray(listOf("you", m.getString("text"), user)))
+                turns.put(user, JSONObject().put("t", m.optDouble("t")))
+                continue
+            }
+            turns.optJSONObject(user)?.put("reply_t", m.optDouble("t"))?.put("model", m.optString("model"))
+            val items = m.getJSONArray("items")
+            for (j in 0 until items.length()) {
+                val it = items.getJSONObject(j)
+                if (it.getString("kind") == "text") {
+                    lines.put(JSONArray(listOf("bot", it.getString("text"), "")))
+                    continue
+                }
+                val key = "c$i-$j"
+                val shown = JSONArray()
+                val specs = it.optJSONArray("shown")
+                for (k in 0 until (specs?.length() ?: 0)) {
+                    val sp = specs!!.getJSONObject(k)
+                    when (sp.getString("kind")) {
+                        "setting" -> shown.put(JSONObject().put("setting", sp.getString("name")).put("set", sp.get("set")))
+                        "changelog" -> shown.put(JSONObject().put("changelog", true))
+                    }
+                }
+                calls.put(key, JSONObject().put("key", key).put("id", key).put("name", it.getString("name"))
+                    .put("input", it.optJSONObject("input") ?: JSONObject()).put("state", it.optString("state", "done"))
+                    .put("result", it.opt("result") ?: JSONObject.NULL).put("actions", it.optJSONArray("actions") ?: JSONArray())
+                    .put("shown", shown).put("ran", true))
+                lines.put(JSONArray(listOf("metacall", key, "")))
+            }
+        }
+        val actions = JSONArray()
+        val list = src.getJSONArray("actions")
+        for (i in 0 until list.length()) {
+            val a = list.getJSONObject(i)
+            val kind = a.getString("kind")
+            val marks = JSONArray()
+            val ms = a.optJSONArray("marks")
+            for (k in 0 until (ms?.length() ?: 0)) {
+                val m = ms!!.getJSONArray(k)
+                marks.put(JSONArray(listOf(m.getString(0), host.getString("id") + "/" + m.getString(1), m.getString(2), m.getString(3))))
+            }
+            actions.put(JSONObject().put("id", a.getString("id")).put("said", a.getString("label"))
+                .put("kind", if (kind == "move_chats") "move" else kind)
+                .put("data", if (kind == "setting") JSONObject().put("name", a.getJSONObject("undo").getString("name"))
+                    .put("from", a.getJSONObject("undo").get("value")).put("to", a.getJSONObject("redo").get("value")) else JSONObject())
+                .put("turn", 1).put("undone", a.getString("state") != "done").put("kept", a.getBoolean("kept")).put("marks", marks))
+        }
+        return JSONObject().put("host", host.getString("id")).put("lines", lines).put("calls", calls).put("turns", turns)
+            .put("actions", actions).put("started", false)
     }
 
     /** What the desktop rig writes for a session with no transcript of its own: its prompt, a reply, its title. */

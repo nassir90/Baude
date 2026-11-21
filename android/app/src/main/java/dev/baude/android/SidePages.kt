@@ -369,7 +369,7 @@ private fun stamped(at: Long): String {
     return SimpleDateFormat("HH:mm EEE ", Locale.ENGLISH).format(d) + Wording.Time.dayOfMonth(day = day) + " " + SimpleDateFormat("MMMM yyyy", Locale.ENGLISH).format(d)
 }
 
-private fun ago(at: Long): String {
+internal fun ago(at: Long): String {
     val secs = maxOf(0L, System.currentTimeMillis() / 1000 - at)
     for ((n, said) in listOf<Pair<Long, (Long) -> String>>(365 * 86400L to { Wording.Time.yearsAgo(n = it) },
         30 * 86400L to { Wording.Time.monthsAgo(n = it) }, 7 * 86400L to { Wording.Time.weeksAgo(n = it) },

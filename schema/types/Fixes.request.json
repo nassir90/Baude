@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "Ongoing Feedback, read and acted on with this host's gh, as Baude's Ongoing Feedback does: list, shot (path), merge, discard, reopen, reply (text), fix, stop; the item is as list gave it.",
+  "properties": {
+    "op": {
+      "const": "fixes",
+      "description": "What it is."
+    },
+    "req": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "what": {
+      "enum": [
+        "list",
+        "shot",
+        "merge",
+        "discard",
+        "reopen",
+        "reply",
+        "fix",
+        "stop"
+      ],
+      "description": "What to do."
+    },
+    "item": {
+      "type": "object",
+      "description": "merge, discard, reopen, reply, fix, stop: the issue, as list gave it."
+    },
+    "text": {
+      "type": "string",
+      "description": "reply: what to ask for."
+    },
+    "path": {
+      "type": "string",
+      "description": "shot: an image's path, as a round's shot names it (<key>/<round>/<n>-<before|after>.png)."
+    }
+  },
+  "required": [
+    "op"
+  ],
+  "additionalProperties": false
+}

@@ -19,7 +19,7 @@ from gi.repository import Adw, Gdk, Gio, GLib, Gtk, Pango  # noqa: E402
 import feedback  # noqa: E402
 import fixes  # noqa: E402
 import pointers  # noqa: E402
-from baudelib import wording  # noqa: E402
+from baudelib import tokens, wording  # noqa: E402
 from widgets import (  # noqa: E402
     MarkdownView, RefreshButton, discard, make_image_interactive, markdown_scroller, paned_grip, retime, say_time,
     time_tip,
@@ -27,12 +27,20 @@ from widgets import (  # noqa: E402
 
 POLL_S = 60  # (read again this often while it's shown)
 POLL_WORKING_S = 15  # (and this often while a round's running)
-LIST_WIDTH = 300
+LIST_WIDTH = int(tokens.px("fixes.list-width"))
 NOTE_FILES = ("feedback.md", "issue.json", "resolution.md")  # (what a note is, of what's in its folder: feedback_items)
 
 
+STATUS_COPY = {fixes.OPEN: "common.open", fixes.WORKING: "fixes.status_working", fixes.READY: "fixes.status_ready",
+               fixes.MERGED: "references.pr_merged", fixes.REJECTED: "fixes.status_rejected",
+               fixes.CLOSED: "fixes.status_closed", fixes.SAVED: "fixes.status_saved", fixes.FILED: "fixes.status_filed",
+               fixes.RESOLVED: "fixes.status_resolved"}
+ROUND_COPY = {"working": "fixes.round_working", "ready": "fixes.status_ready", "failed": "fixes.round_failed",
+              "stopped": "fixes.round_stopped", "nochange": "fixes.round_nochange", "discarded": "fixes.round_discarded"}
+
+
 def status_pill(status):
-    return Gtk.Label(label=fixes.LABELS[status], css_classes=["fix-status", status], valign=Gtk.Align.CENTER)
+    return Gtk.Label(label=wording.say(STATUS_COPY[status]), css_classes=["fix-status", status], valign=Gtk.Align.CENTER)
 
 
 def dim(text, **kw):
@@ -221,7 +229,7 @@ class FixesPage(Gtk.Box):
     # ---- one of them
     def make_detail(self):
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, width_request=420, hexpand=True)
-        self.clamp = Adw.Clamp(maximum_size=980, tightening_threshold=900)
+        self.clamp = Adw.Clamp(maximum_size=int(tokens.px("fixes.detail-max")), tightening_threshold=900)
         self.scroller = markdown_scroller(self.clamp, vexpand=True)
         box.append(self.scroller)
         self.bar = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8, margin_start=14, margin_end=14,
@@ -326,7 +334,7 @@ class FixesPage(Gtk.Box):
 
     def image_slot(self, path, read):
         """A place for an image, shown once read(path, slot) has it off the main loop."""
-        slot = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, height_request=120)
+        slot = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, height_request=int(tokens.px("fixes.image-slot")))
         slot.append(Adw.Spinner(halign=Gtk.Align.CENTER, valign=Gtk.Align.CENTER, vexpand=True))
         threading.Thread(target=read, args=(path, slot), daemon=True).start()
         return slot
@@ -344,7 +352,7 @@ class FixesPage(Gtk.Box):
             box.add_css_class("fix-round")
             box.add_css_class(mark["state"])
         head = Gtk.Box(spacing=8)
-        title = fixes.HEADINGS[mark["state"]].capitalize() if mark else entry["author"]
+        title = wording.say(ROUND_COPY[mark["state"]]) if mark else entry["author"]
         head.append(Gtk.Label(label=title, xalign=0, css_classes=["heading"], ellipsize=Pango.EllipsizeMode.END))
         place = f" · {mark['machine']}" if mark and mark.get("machine") else ""
         head.append(say_time(dim(""), entry["at"], after=place))

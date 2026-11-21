@@ -9129,7 +9129,7 @@ class SessionSidebar(Gtk.Box):
         named = bot.get("name") or " ".join((info.get("title") or "").split())[:80]  # (a new one: the chat's title)
         entry = Gtk.Entry(text=named, placeholder_text=wording.say("common.name"), activates_default=True)
         pick = {"data": None}  # (bytes: a picture chosen; "": its picture removed; None: as it is)
-        avatar = Adw.Avatar(size=64, text=named or "Bot", show_initials=True, halign=Gtk.Align.CENTER)
+        avatar = Adw.Avatar(size=64, text=named or wording.say("sidebar.bot"), show_initials=True, halign=Gtk.Align.CENTER)
         choose = Gtk.Button(label=wording.say("bot_settings.choose_picture"))
         remove = Gtk.Button(label=wording.say("bot_settings.remove_picture"), visible=False)
 
@@ -9182,7 +9182,7 @@ class SessionSidebar(Gtk.Box):
 
         def typed(e):
             name = " ".join(e.get_text().split())
-            avatar.set_text(name or "Bot")
+            avatar.set_text(name or wording.say("sidebar.bot"))
             dlg.set_response_enabled("save", bool(name))
         entry.connect("changed", typed)
         typed(entry)
@@ -10477,7 +10477,8 @@ class BaudeMeta(meta.MetaChat):
         where = wording.say("meta_chats.group_named", name=group) if group else wording.say("meta_chats.no_group")
         a = self.act(turn, wording.say("meta_chats.moved", chats=self.said(infos), where=where), "move_chats",
                      {"before": before, "group": group, "made": made}, {"ids": ids, "group": group, "made": made},
-                     [("chat", i, "moved", f"→ {group or 'no group'}") for i in ids])
+                     [("chat", i, "moved", wording.say("meta_chats.moved_note", group=group or wording.say("meta_chats.no_group")))
+                      for i in ids])
         return {"text": f"Moved to {where} (action {a['id']})."}
 
     def make_group(self, turn, args):
@@ -10560,7 +10561,8 @@ class BaudeMeta(meta.MetaChat):
                      wording.say("meta_chats.unarchived", chats=self.said(infos)), "archive",
                      {"ids": ids, "archived": not archive, "lists": lists, "expect": archive},
                      {"ids": ids, "archived": archive, "expect": not archive},
-                     [("chat", i, "archived" if archive else "added", "archived" if archive else "back") for i in ids])
+                     [("chat", i, "archived" if archive else "added",
+                      wording.say("meta_chats.archived_note" if archive else "meta_chats.back_note")) for i in ids])
         return {"text": f"{'Archived' if archive else 'Unarchived'} (action {a['id']})."}
 
     def delete_chats(self, turn, args):

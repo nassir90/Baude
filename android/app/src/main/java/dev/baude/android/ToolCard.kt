@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -31,9 +32,11 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.platform.LocalContext
@@ -162,23 +165,50 @@ private fun header(call: Call, c: BaudeColors): AnnotatedString {
     }
 }
 
-/** The pictures a call returned, right under its line (6dp below), each as it is up to 480dp on its long side. */
+/** A picture decoded (bmp null: it can't be). */
+private class Pic(val bmp: ImageBitmap?)
+
+private val pics = android.util.LruCache<String, Pic>(24)
+private val sizes = android.util.LruCache<String, IntArray>(256)
+
+/** A picture's size from the head of its base64 (its header), [0, 0] if it isn't one. */
+private fun sizeOf(data: String): IntArray = sizes.get(data) ?: run {
+    val o = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+    try {
+        val head = Base64.getDecoder().decode(data.take(65536))
+        BitmapFactory.decodeByteArray(head, 0, head.size, o)
+    } catch (_: Exception) {}
+    intArrayOf(maxOf(o.outWidth, 0), maxOf(o.outHeight, 0)).also { sizes.put(data, it) }
+}
+
+/** The pictures a call returned, right under its line (6dp below), each as it is up to 480dp on its long side: its
+ * place kept from its header before it's decoded (once, off the main thread, to the size shown). */
 @Composable
 private fun Media(pictures: List<String>) {
+    val density = androidx.compose.ui.platform.LocalDensity.current.density
     Column(Modifier.fillMaxWidth().padding(top = 6.dp, bottom = 2.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         for (data in pictures) {
-            val got by produceState<Pair<androidx.compose.ui.graphics.ImageBitmap?, Boolean>>(null to false, data) {
+            val (w, h) = sizeOf(data)
+            val got by produceState<Pic?>(pics.get(data), data) {
+                if (value != null) return@produceState
                 value = withContext(Dispatchers.Default) {
                     val bytes = try { Base64.getDecoder().decode(data) } catch (_: Exception) { ByteArray(0) }
-                    BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap() to true
+                    val o = BitmapFactory.Options().apply {
+                        var n = 1
+                        while (maxOf(w, h) / (n * 2) >= 480 * density) n *= 2
+                        inSampleSize = n
+                    }
+                    Pic(BitmapFactory.decodeByteArray(bytes, 0, bytes.size, o)?.asImageBitmap()).also { pics.put(data, it) }
                 }
             }
-            val bitmap = got.first
-            if (bitmap != null) {
-                val k = minOf(1f, 480f / maxOf(bitmap.width, bitmap.height))
-                Image(bitmap, null, Modifier.widthIn(max = (bitmap.width * k).dp).aspectRatio(bitmap.width / bitmap.height.toFloat())
-                    .clip(RoundedCornerShape(6.dp)))
-            } else if (got.second) SelectionContainer { Text(Wording.ToolCalls.imageNotDecoded, style = Type.body, color = LocalBaude.current.fg) }
+            val bitmap = got?.bmp
+            if (w > 0 && h > 0) {
+                val k = minOf(1f, 480f / maxOf(w, h))
+                Box(Modifier.widthIn(max = (w * k).dp).aspectRatio(w / h.toFloat()).clip(RoundedCornerShape(6.dp))) {
+                    if (bitmap != null) Image(bitmap, null, Modifier.fillMaxSize())
+                }
+            }
+            if (got != null && bitmap == null) SelectionContainer { Text(Wording.ToolCalls.imageNotDecoded, style = Type.body, color = LocalBaude.current.fg) }
         }
     }
 }
@@ -215,11 +245,13 @@ fun InputView(name: String, input: JSONObject) {
                 for (e in edits) Hunk(e.said("old_string"), e.said("new_string"), input.said("file_path"))
             }
             base == "Write" && input.has("file_path") -> {
-                val lines = splitLines(input.said("content"))
                 val path = input.said("file_path")
-                PathLabel(path, Wording.ToolCalls.lineCount(n = lines.size))
-                val shown = lines.take(2000).joinToString("\n") +
-                    if (lines.size > 2000) "\n" + Wording.ToolCalls.moreLines(n = lines.size - 2000) else ""
+                val (count, shown) = remember(input) {
+                    val lines = splitLines(input.said("content"))
+                    lines.size to lines.take(2000).joinToString("\n") +
+                        if (lines.size > 2000) "\n" + Wording.ToolCalls.moreLines(n = lines.size - 2000) else ""
+                }
+                PathLabel(path, Wording.ToolCalls.lineCount(n = count))
                 CodeBlock(shown, LANG_BY_EXT[path.substringAfterLast('.', "").let { if (it.isEmpty()) "" else ".$it" }].orEmpty(), path = path)
             }
             base == "Read" && input.has("file_path") -> {
@@ -401,8 +433,13 @@ fun ToolGroup(group: List<Call>, calls: ChatCalls, asking: (Call) -> Ask?, answe
     val c = LocalBaude.current
     val key = group.first().id
     val open = calls.opened[key] == true
-    val showNow = group.any { it.images.isNotEmpty() || asking(it) != null }
-    LaunchedEffect(showNow) { if (showNow) calls.opened[key] = true }
+    val why = group.filter { it.images.isNotEmpty() || asking(it) != null }.joinToString { it.id + if (asking(it) != null) "?" else "" }
+    LaunchedEffect(why) { // (opened once for each call that has pictures or asks; folded by you, it stays so)
+        if (why.isNotEmpty() && calls.autoOpened[key] != why) {
+            calls.autoOpened[key] = why
+            calls.opened[key] = true
+        }
+    }
     val failed = group.count { it.state == "error" }
     val cut = group.count { it.state == "interrupted" }
     val running = group.any { asking(it) == null && (it.state == "running" || it.state == "background") }

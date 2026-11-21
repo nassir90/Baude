@@ -83,6 +83,7 @@ class Call(val id: String, val name: String, input: JSONObject = JSONObject()) {
 class ChatCalls {
     val byId = mutableStateMapOf<String, Call>()
     val opened = mutableStateMapOf<String, Boolean>()
+    val autoOpened = HashMap<String, String>() // (a group: what it was last opened by itself for)
 }
 
 private val BACKGROUND_COMMAND = Regex("""Command running in background with ID: (\S+?)\.?\s+Output is being written to: (\S+)""")
@@ -111,7 +112,7 @@ fun summary(name: String, input: JSONObject?): String {
     val qs = input.optJSONArray("questions")
     if (name == "AskUserQuestion" && qs != null && qs.length() > 0 && qs.optJSONObject(0) != null) {
         val answers = input.optJSONObject("answers")
-        if (answers != null && answers.length() > 0) return qs.list().filter { answers.has(it.optString("question")) }
+        if (answers != null && answers.length() > 0) return (0 until qs.length()).mapNotNull { qs.optJSONObject(it) }.filter { answers.has(it.optString("question")) }
             .joinToString(" · ") { q -> "${(q.opt("header") as? String)?.ifEmpty { null } ?: q.optString("question")}: ${answers.opt(q.optString("question"))}" }
         return first(qs.optJSONObject(0)!!.optString("question")) + if (qs.length() > 1) " (+${qs.length() - 1} more)" else ""
     }

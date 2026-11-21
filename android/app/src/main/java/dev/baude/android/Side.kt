@@ -128,7 +128,6 @@ fun SubagentsPage(chat: Chat) {
     LaunchedEffect(chat.showAgent.value) { // (View on a call's card: its subagent opened here)
         val id = chat.showAgent.value ?: return@LaunchedEffect
         chat.agents.firstOrNull { it.toolUseId == id }?.let { shown = it }
-        chat.showAgent.value = null
     }
     val a = shown
     if (a == null) {

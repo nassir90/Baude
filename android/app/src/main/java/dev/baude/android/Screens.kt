@@ -116,6 +116,11 @@ fun ChatPage(chat: Chat, name: String, hint: String = "Message $name", attach: B
         if (n > 0 && follow) {
             list.animateScrollToItem(n - 1)
             list.scrollBy(1e6f)
+            // (an ask opens its group and card, which grow after this: the end kept in view while they do)
+            if (chat.asks.isNotEmpty()) repeat(10) {
+                kotlinx.coroutines.delay(60)
+                if (follow) list.scrollBy(1e6f)
+            }
         }
     }
     Mesh.tick.value

@@ -12,12 +12,16 @@ import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.state.ToggleableState
 import com.github.takahirom.roborazzi.captureScreenRoboImage
+import dev.baude.android.AppVersion
 import dev.baude.android.BaudeTheme
+import dev.baude.android.Change
+import dev.baude.android.ChangelogScreen
 import dev.baude.android.ChatShell
 import dev.baude.android.Home
 import dev.baude.android.Host
 import dev.baude.android.Key
 import dev.baude.android.Mesh
+import dev.baude.android.Meta
 import dev.baude.android.Msg
 import dev.baude.android.Settings
 import dev.baude.android.SettingsScreen
@@ -65,15 +69,26 @@ abstract class Parity(private val theme: String, private val scene: String) {
         ShadowChoreographer.setFrameDelay(Duration.ofMillis(16))
         activity = Robolectric.buildActivity(ComponentActivity::class.java).setup().get()
         Mesh.app = activity.applicationContext
-        // (Settings' Version: the fixture changelog's commit, not this build's; its date is the build's resource: left)
-        org.robolectric.Shadows.shadowOf(activity.packageManager).getInternalMutablePackageInfo(activity.packageName)
-            .versionName = JSONObject(File(root, "fixtures/changelog.json").readText()).getString("commit")
+        // (the running version, as Settings' Version and the Changelog say it: the fixture's, not this build's)
+        val log = JSONObject(File(root, "fixtures/changelog.json").readText())
+        AppVersion.short = log.getString("commit")
+        AppVersion.made = log.getLong("made")
+        AppVersion.read = log.getJSONArray("commits").let { a ->
+            (0 until a.length()).map { a.getJSONArray(it) }.map { Change(it.getString(0), it.getLong(1), it.getString(2)) }
+        }
         Settings.load(activity)
         val set = JSONObject(File(root, "fixtures/settings.json").readText())
         Settings.accent.value = if (set.isNull("accent")) null else set.getString("accent")
         Settings.appearance.value = "system"
         Settings.textScale.value = set.optDouble("text_scale", 1.0).toFloat()
+        Settings.iconScale.value = set.optDouble("icon_scale", 1.0).toFloat()
         Settings.globalScale.value = set.optDouble("zoom_default", 1.0).toFloat()
+        Settings.fullWidth.value = set.optBoolean("full_width", true)
+        Settings.readOnly.clear()
+        Settings.metaModel.value = null
+        Settings.metaEffort.value = null
+        Settings.metaCommands.value = true
+        Settings.codeFont.value = null
         Settings.notify.value = set.optBoolean("notifications", true)
         Settings.meteredUpdates.value = false
         Update.state.value = ""
@@ -81,6 +96,7 @@ abstract class Parity(private val theme: String, private val scene: String) {
         Mesh.key.value = Key(pair.private, pair.public as ECPublicKey)
         val h = Host(id = host.getString("id"), name = host.getString("name"), user = "dev", address = "workshop.example")
         Mesh.hosts.add(h)
+        Meta.host.value = h.id
         FixtureConnection.up(activity, h, home) { msg -> answer(msg) }
         val now = System.currentTimeMillis() / 1000.0
         val list = sessions.getJSONArray("sessions")
@@ -138,6 +154,7 @@ abstract class Parity(private val theme: String, private val scene: String) {
     }
 
     @After fun down() {
+        Meta.host.value = null
         FixtureConnection.down()
         Mesh.hosts.clear()
         Mesh.sessions.clear()
@@ -182,6 +199,7 @@ abstract class Parity(private val theme: String, private val scene: String) {
                 if (name == "menu") tap(Wording.ChatHeader.menu)
             }
             name == "settings" -> show { SettingsScreen({}, {}) }
+            name == "changelog" -> show { ChangelogScreen(null, {}) }
             else -> return false
         }
         return true

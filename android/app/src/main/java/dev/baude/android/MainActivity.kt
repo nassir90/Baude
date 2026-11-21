@@ -15,9 +15,13 @@ import androidx.compose.runtime.mutableStateOf
 class MainActivity : ComponentActivity() {
     private val screen = mutableStateOf<List<String>>(listOf("contacts"))
 
+    /** The screens laid over a chat, opened with its host and session: back goes to the chat. */
+    private val OVER = setOf("feedback", "settings", "changelog", "mesh")
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        Settings.load(this)
         Mesh.start(this)
         HomePrefs.load(this)
         Outbox.start() // (feedback not filed yet: tried again)
@@ -44,16 +48,21 @@ class MainActivity : ComponentActivity() {
                 when (now[0]) {
                     "chat" -> androidx.compose.runtime.key(now[1], now[2]) { // (another chat: its own pages, from Chat)
                         ChatShell(now[1], now[2], ::back, open = { h, s -> go(listOf("chat", h, s)) },
-                            feedback = { go(listOf("feedback", now[1], now[2])) })
+                            feedback = { go(listOf("feedback", now[1], now[2])) },
+                            screen = { go(listOf(it, now[1], now[2])) })
                     }
                     "phone" -> PhoneScreen(::back, open = { go(listOf("chat", "phone", it)) }, make = { go(listOf("new-agent")) })
                     "new-agent" -> NewAgentScreen({ go(listOf("phone")) }) { go(listOf("chat", "phone", it)) }
                     "feedback" -> FeedbackScreen(feedbackContext(now), ::back)
-                    "settings" -> SettingsScreen(::back, feedback = { go(listOf("feedback")) })
+                    "settings" -> SettingsScreen(::back, feedback = {
+                        go(if (now.size == 3) listOf("feedback", now[1], now[2]) else listOf("feedback"))
+                    }, chat = now.drop(1))
+                    "changelog" -> ChangelogScreen(null, ::back)
                     "mesh" -> MeshScreen(::back)
                     else -> Home(open = { h, s -> go(listOf("chat", h, s)) },
                         feedback = { go(listOf("feedback")) }, phone = { go(listOf("phone")) },
                         settings = { go(listOf("settings")) }, mesh = { go(listOf("mesh")) },
+                        changelog = { go(listOf("changelog")) },
                         note = { if (Shares.pending.value != null) ShareBanner(::back) })
                 }
                 HostKeyAsk()
@@ -83,9 +92,10 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun go(to: List<String>) {
-        if (screen.value[0] == "chat" && to[0] != "chat" && to[0] != "feedback") Mesh.close()
+        val now = screen.value
+        if ((now[0] == "chat" || now[0] in OVER && now.size == 3) && to[0] != "chat" && to[0] !in OVER) Mesh.close()
         screen.value = if (to[0] == "contacts") listOf("contacts") else to
-        if (to[0] != "feedback") Shares.returns = false // (Send Feedback from it, and back: still the shared one)
+        if (to[0] !in OVER) Shares.returns = false // (a screen over it, and back: still the shared one)
         val shared = Shares.pending.value
         if (to[0] == "chat" && shared != null) { // (the chat chosen for what's shared)
             Shares.pending.value = null
@@ -104,7 +114,7 @@ class MainActivity : ComponentActivity() {
             moveTaskToBack(true) // (back to the app it was shared from, as a messaging app goes)
             return
         }
-        if (now[0] == "feedback" && now.size == 3) { // (back to the chat it was sent from)
+        if (now[0] in OVER && now.size == 3) { // (back to the chat it was opened from)
             screen.value = listOf("chat", now[1], now[2])
             return
         }

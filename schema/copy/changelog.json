@@ -4,6 +4,7 @@
     "title": "Changelog",
     "version_made": "Version {$commit} · {$made}",
     "empty": "No changelog",
-    "empty_detail": "No commits to list"
+    "empty_detail": "No commits to list",
+    "row": "{$made} · {$commit}"
   }
 }

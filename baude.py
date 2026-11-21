@@ -13094,7 +13094,7 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
         menu.append(wording.say("changelog.title"), "win.changelog")
         menu.append(wording.say("mesh_versions.title"), "win.mesh")  # (Record's too)
         menu.append(wording.say("meta_settings.full_width"), "win.fullwidth")
-        menu.append("Read-only session", "win.readonly")
+        menu.append(wording.say("window.read_only"), "win.readonly")
         menu.append(wording.say("window.database_schemas"), "win.dbschema")
         menu.append(wording.say("window.kubernetes_menu"), "win.kube")
         menu.append(record_item(), "win.record")
@@ -14336,8 +14336,8 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
     # ---- full width
     def apply_full_width(self, on):
         # Adw.Clamp can't be switched off, so "off" is just a limit wider than any screen
-        self.clamp.set_maximum_size(100_000 if on else 860)
-        self.clamp.set_tightening_threshold(100_000 if on else 600)
+        self.clamp.set_maximum_size(100_000 if on else tokens.px("gap.chat-max"))
+        self.clamp.set_tightening_threshold(100_000 if on else tokens.px("gap.chat-tighten"))
 
     def on_fullwidth_toggled(self, action, value):
         action.set_state(value)
@@ -14360,17 +14360,17 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
         init = getattr(self, "init_info", None) or {}
         tip = (ctx.get_tooltip_text() or "").split("\n")[1:]
         tools = [t for t in init.get("tools") or () if isinstance(t, str)]
-        head = [(wording.say("report.app"), "Baude"), ("Session", self.session_id or "new"),
+        head = [(wording.say("report.app"), "Baude"), (wording.say("report.session"), self.session_id or "new"),
                 (wording.say("common.model"), init.get("model") or self.model or "default"),
-                ("Picked", self.model if self.model and self.model != init.get("model") else ""),
+                (wording.say("report.picked"), self.model if self.model and self.model != init.get("model") else ""),
                 (wording.say("meta_settings.effort"), self.effort or "default"),
                 (wording.say("report.mode"), self.mode),
-                ("Host", THIS_MACHINE if here else f"{remote_name(self.remote)} ({self.remote.host})"),
-                (wording.say("common.folder"), self.cwd or ""), ("Claude Code", init.get("claude_code_version") or ""),
+                (wording.say("new_session.host"), THIS_MACHINE if here else f"{remote_name(self.remote)} ({self.remote.host})"),
+                (wording.say("common.folder"), self.cwd or ""), (wording.say("report.claude_code"), init.get("claude_code_version") or ""),
                 (wording.say("report.context"),
                  (shown + (f" ({', '.join(tip)})" if tip else "")) if (shown := ctx.label.get_text()
                                                                        .removeprefix("context").strip(" :—"))
-                 else "not said yet"),
+                 else wording.say("report.not_said_yet")),
                 (wording.say("lookup.tools"), ", ".join(tools)),
                 (wording.say("report.copied"), time.strftime("%Y-%m-%d %H:%M:%S %z"))]
         path = getattr(self, "history_path", None) or \

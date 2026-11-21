@@ -94,9 +94,9 @@ fun AgentStatus(status: String) {
     val c = LocalBaude.current
     when (status) {
         "running" -> CircularProgressIndicator(Modifier.size(16.dp), color = c.fg.copy(alpha = 0.55f), strokeWidth = 2.dp)
-        "completed" -> Icon(Adwaita.ObjectSelect, Wording.Common.done, tint = c.success, modifier = Modifier.size(16.dp))
-        "interrupted" -> Icon(Adwaita.ProcessStop, "Interrupted", tint = c.dim, modifier = Modifier.size(16.dp))
-        else -> Icon(Adwaita.DialogError, "Failed", tint = c.destructive, modifier = Modifier.size(16.dp))
+        "completed" -> Icon(Adwaita.ObjectSelect, Wording.Common.done, tint = c.success, modifier = Modifier.size(16.dp.icon))
+        "interrupted" -> Icon(Adwaita.ProcessStop, "Interrupted", tint = c.dim, modifier = Modifier.size(16.dp.icon))
+        else -> Icon(Adwaita.DialogError, "Failed", tint = c.destructive, modifier = Modifier.size(16.dp.icon))
     }
 }
 
@@ -261,7 +261,7 @@ fun ArtifactsPage(chat: Chat) {
         BoxedList(chat.artifacts.toList(), Wording.SidePanel.noArtifacts) { a ->
             ActionRow(a.title, a.url.removePrefix("https://").let { link ->
                 a.version?.let { Wording.Artifacts.linkVersion(link = link, version = it) } ?: link }, onClick = { open(a.url) },
-                prefix = { Icon(artifactIcon(a.icon), null, tint = c.accent, modifier = Modifier.size(18.dp)) },
+                prefix = { Icon(artifactIcon(a.icon), null, tint = c.accent, modifier = Modifier.size(18.dp.icon)) },
                 suffix = {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Button(Wording.Common.open) { open(a.url) }

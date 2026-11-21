@@ -14,6 +14,7 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Column
@@ -69,6 +70,7 @@ fun ChatPage(chat: Chat, name: String, hint: String = "Message $name", attach: B
     val at = chat.hostId // (where it's reached now: a member's chat moves to a host of yours that's its machine)
     val session = Mesh.session(at, sid)
     val working = session?.state == "working" || chat.thinking.value
+    val readOnly = Settings.isReadOnly(sid)
     var text by androidx.compose.runtime.saveable.rememberSaveable(at, sid) { mutableStateOf("") }
     val files = chat.files
     val pick = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
@@ -93,8 +95,10 @@ fun ChatPage(chat: Chat, name: String, hint: String = "Message $name", attach: B
     }
     Mesh.tick.value
     Column(Modifier.fillMaxSize().inside(c)) {
-        LazyColumn(Modifier.weight(1f).fillMaxWidth(), state = list,
-            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = Gap.chatH, vertical = Gap.chatV),
+        BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
+        val side = if (Settings.fullWidth.value) 0.dp else (maxWidth - chatColumn(maxWidth)) / 2
+        LazyColumn(Modifier.fillMaxSize(), state = list,
+            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = Gap.chatH + side, vertical = Gap.chatV),
             verticalArrangement = Arrangement.spacedBy(Gap.messageGap)) {
             items(chat.lines) { line -> Said(line, line.uuid?.let { chat.senders[it] }.takeIf { line.kind == "you" }) }
             if (chat.streaming.value.isNotEmpty()) item { SelectionContainer { Prose(chat.streaming.value) } }
@@ -109,9 +113,10 @@ fun ChatPage(chat: Chat, name: String, hint: String = "Message $name", attach: B
                 Text("Working…", style = Type.caption, color = c.dim)
             }
         }
+        }
         chat.said.value?.let { Text(it, style = Type.caption, color = c.dim, modifier = Modifier.padding(horizontal = Gap.chatH)) }
         // the composer: rounded 12, a ring of the rule, its files over what's written, + and send beside it
-        Column(
+        if (!readOnly) Column(
             Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 8.dp)
                 .clip(RoundedCornerShape(Gap.composerRadius)).background(c.inside)
                 .border(1.dp, c.rule, RoundedCornerShape(Gap.composerRadius)).padding(6.dp),
@@ -265,7 +270,7 @@ private fun Choice(on: Boolean, multi: Boolean, label: String, about: String, to
                 else androidx.compose.foundation.shape.CircleShape),
             contentAlignment = Alignment.Center) {
             if (on && multi) androidx.compose.material3.Icon(Adwaita.ObjectSelect, null, tint = c.accentFg,
-                modifier = Modifier.size(14.dp))
+                modifier = Modifier.size(14.dp.icon))
             else if (on) Box(Modifier.size(6.dp).clip(androidx.compose.foundation.shape.CircleShape).background(c.accentFg))
         }
         Spacer(Modifier.width(8.dp))

@@ -20,6 +20,7 @@
     "text_scale": "Text Scale",
     "icon_scale": "Icon Scale",
     "global_scale": "Global Scale",
-    "full_width": "Full-width text"
+    "full_width": "Full-width text",
+    "title": "Meta"
   }
 }

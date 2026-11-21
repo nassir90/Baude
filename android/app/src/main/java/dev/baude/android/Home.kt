@@ -324,7 +324,7 @@ private fun limit(key: String): Int = when {
  * groups. */
 @Composable
 fun Home(open: (String, String) -> Unit, feedback: () -> Unit, phone: () -> Unit = {},
-         settings: () -> Unit = {}, mesh: () -> Unit = {}, note: @Composable () -> Unit = {}) {
+         settings: () -> Unit = {}, mesh: () -> Unit = {}, changelog: () -> Unit = {}, note: @Composable () -> Unit = {}) {
     val c = LocalBaude.current
     val ctx = androidx.compose.ui.platform.LocalContext.current
     LaunchedEffect(Unit) { HomePrefs.load(ctx) }
@@ -353,8 +353,7 @@ fun Home(open: (String, String) -> Unit, feedback: () -> Unit, phone: () -> Unit
     Column(Modifier.fillMaxSize()) {
         Bar("Baude", left = true, end = {
             IconButton(Adwaita.Phone, "This phone", onClick = phone) // (its own agents: PhoneScreen)
-            Menu(listOf(Wording.Window.settings to settings, Wording.MeshVersions.title to mesh,
-                Wording.Fixes.sendFeedback to feedback))
+            HomeMenu(settings, changelog, mesh, feedback)
         })
         note()
         if (Mesh.hosts.isEmpty()) GreyBanner("Add a host to see its sessions.", onClick = { adding = true })
@@ -463,14 +462,14 @@ private fun Header(sec: Section, folded: Boolean, plus: (() -> Unit)?, toggle: (
                 modifier = Modifier.alpha(0.6f).weight(1f, fill = false))
             Box(Modifier.size(20.dp).alpha(if (folded) 0.75f else 0.4f), contentAlignment = Alignment.Center) {
                 Icon(if (folded) Adwaita.PanEnd else Adwaita.PanDown,
-                    if (folded) Wording.Common.expand else Wording.Common.collapse, tint = c.fg, modifier = Modifier.size(16.dp))
+                    if (folded) Wording.Common.expand else Wording.Common.collapse, tint = c.fg, modifier = Modifier.size(16.dp.icon))
             }
         }
         if (plus != null) Box(Modifier.size(24.dp).alpha(0.75f).clip(RoundedCornerShape(6.dp)).clickable(onClick = plus),
             contentAlignment = Alignment.Center) {
             Icon(Adwaita.ListAdd, sec.hostId?.let {
                 Wording.Sidebar.newSessionInOn(folder = shortPath(it, sec.folder.orEmpty()), host = Mesh.label(it))
-            } ?: Wording.Sidebar.newSessionIn(folder = sec.full), tint = c.fg, modifier = Modifier.size(16.dp))
+            } ?: Wording.Sidebar.newSessionIn(folder = sec.full), tint = c.fg, modifier = Modifier.size(16.dp.icon))
         }
     }
 }
@@ -595,7 +594,7 @@ fun SidebarAction(icon: androidx.compose.ui.graphics.vector.ImageVector, label: 
     val c = LocalBaude.current
     Row(modifier.clip(RoundedCornerShape(6.dp)).clickable(onClick = onClick).padding(horizontal = 8.dp, vertical = 7.dp),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-        Icon(icon, null, tint = c.fg, modifier = Modifier.size(16.dp))
+        Icon(icon, null, tint = c.fg, modifier = Modifier.size(16.dp.icon))
         Text(label, style = Type.body, color = c.fg, maxLines = 1)
     }
 }
@@ -606,7 +605,7 @@ fun SearchField(value: String, set: (String) -> Unit, hint: String, modifier: Mo
     val c = LocalBaude.current
     Row(modifier.clip(RoundedCornerShape(8.dp)).background(c.fg.copy(alpha = 0.08f)).padding(horizontal = 8.dp, vertical = 7.dp),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-        Icon(Adwaita.SystemSearch, null, tint = c.dim, modifier = Modifier.size(16.dp))
+        Icon(Adwaita.SystemSearch, null, tint = c.dim, modifier = Modifier.size(16.dp.icon))
         Box(Modifier.weight(1f)) {
             if (value.isEmpty()) Text(hint, style = Type.body, color = c.dim, maxLines = 1)
             BasicTextField(value, set, singleLine = true, textStyle = Type.body.copy(color = c.fg),
@@ -634,7 +633,7 @@ private fun HostPick() {
             verticalAlignment = Alignment.CenterVertically) {
             Text(pick?.let(::name).orEmpty(), style = Type.body, color = c.fg, maxLines = 1, overflow = TextOverflow.MiddleEllipsis,
                 modifier = Modifier.widthIn(max = 120.dp))
-            Icon(Adwaita.PanDown, Wording.Sidebar.hostPickerTip, tint = c.fg, modifier = Modifier.size(18.dp))
+            Icon(Adwaita.PanDown, Wording.Sidebar.hostPickerTip, tint = c.fg, modifier = Modifier.size(18.dp.icon))
         }
         Popover(open, { open = false }) {
             for (id in ids.sortedBy { name(it).lowercase() }) MenuChoice(name(id), pick == id, textColor = if (dead(id)) c.dim else null) {
@@ -714,7 +713,7 @@ fun MenuChoice(label: String, on: Boolean, enabled: Boolean = true, leading: Boo
                onLongClick: (() -> Unit)? = null, onClick: () -> Unit) {
     val c = LocalBaude.current
     val tick: @Composable () -> Unit = {
-        if (on) Icon(Adwaita.ObjectSelect, null, tint = c.accent, modifier = Modifier.size(16.dp)) else if (leading) Spacer(Modifier.size(16.dp))
+        if (on) Icon(Adwaita.ObjectSelect, null, tint = c.accent, modifier = Modifier.size(16.dp.icon)) else if (leading) Spacer(Modifier.size(16.dp.icon))
     }
     val text: @Composable () -> Unit = {
         Text(label, style = Type.body, color = textColor ?: if (enabled) c.fg else c.dim, maxLines = if (leading) 1 else Int.MAX_VALUE,

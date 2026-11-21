@@ -201,6 +201,11 @@
           "copy": [
             "meta.show_more"
           ],
+          "phone": {
+            "does": "nothing: every group lists all its sessions",
+            "why": "Early truncation of chats on the phone",
+            "decided": "2026-11-21"
+          },
           "actions": [
             {
               "by": "click",

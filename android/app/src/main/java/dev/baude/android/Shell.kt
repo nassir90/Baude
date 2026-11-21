@@ -118,10 +118,13 @@ fun ChatShell(hostId: String, sid: String, back: () -> Unit, open: (String, Stri
     }
     Meta.pages = { all }
     FileLinks.showFiles = { show("files") }
-    val place = ChatPlace(at, s?.cwd, Mesh.conn(at)?.info?.home, chat.artifacts.toList())
+    val place = ChatPlace(at, s?.cwd, Mesh.conn(at)?.info?.home, chat.artifacts.toList(), sid)
     Meta.pageOpener = { t -> all.firstOrNull { it.title.equals(t, true) }?.let { show(it.key) } }
     androidx.compose.runtime.DisposableEffect(chat) { // (its side questions' answers heard whichever page is shown)
         val l = sideQuestions(chat)
+        SignalLinks.hostId = at
+        SignalLinks.sid = sid
+        val unsignal = SignalNames.listen(chat)
         val status = chrome(chat)
         Mesh.listeners.add(l)
         Mesh.listeners.add(status)
@@ -130,11 +133,14 @@ fun ChatShell(hostId: String, sid: String, back: () -> Unit, open: (String, Stri
         onDispose {
             Mesh.listeners.remove(l)
             Mesh.listeners.remove(status)
+            unsignal()
+            SignalLinks.open.value = null
             Meta.pages = { emptyList() } // (no chat open: no pages for Meta to show)
             Meta.pageOpener = {}
             FileLinks.showFiles = {}
         }
     }
+    SignalLinks.openPage = show
     LaunchedEffect(chat.showAgent.value) { // (View on a call's card: the Subagents page)
         if (chat.showAgent.value == null) return@LaunchedEffect
         if (beside) side = "agents"
@@ -159,11 +165,12 @@ fun ChatShell(hostId: String, sid: String, back: () -> Unit, open: (String, Stri
     @Composable
     fun Page(key: String, here: Boolean, beside: Boolean) {
         when (key) {
-            "chat" -> Column(Modifier.fillMaxSize()) {
+            "chat" -> Column(Modifier.fillMaxSize().watchTouches()) {
                 if (!wide) chatControls(false)
                 ChatBanner(chat, open)
                 Box(Modifier.weight(1f)) {
                     ChatPage(chat, name, stop = { interrupt(chat) }, foot = { StatusBar(chat) { show(it) } })
+                    SignalPopovers(chat)
                 }
             }
             "meta" -> Column(Modifier.fillMaxSize()) { // (Meta's pickers where the chat's are; beside the chat, over it)
@@ -179,7 +186,7 @@ fun ChatShell(hostId: String, sid: String, back: () -> Unit, open: (String, Stri
             "btw" -> SideQuestionsPage(chat)
             "files" -> FilesPage(chat)
             "git" -> GitPage(at, sid)
-            "signal" -> SignalPage(at, sid)
+            "signal" -> SignalPage(at, sid, here)
         }
     }
     Column(Modifier.fillMaxSize().background(c.frame).imePadding()) {

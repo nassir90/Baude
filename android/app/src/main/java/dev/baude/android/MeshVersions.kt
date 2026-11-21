@@ -107,8 +107,8 @@ fun MeshScreen(back: () -> Unit) {
             }
             for ((_, name) in away) {
                 Heading(name)
-                Text(Wording.Hosts.down(host = name), style = Type.caption, color = c.dim,
-                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 4.dp))
+                Text(Wording.Hosts.down(host = name), style = Type.caption, color = c.dim, // (its left the lists' edge)
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp))
             }
         }
     }

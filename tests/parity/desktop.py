@@ -147,6 +147,7 @@ def build(app, sc):
             return win
         title = fixture("sessions.json")["sessions"][0]["title"]
         T.wait_for(lambda: S.sidebar_row(win, title) is not None, "rows")
+        T.pump(1)  # (the list settled: the row kept)
         if name == "home-row-menu":
             win.sidebar.show_menu(S.sidebar_row(win, title), 120, 14)
         elif name == "home-host-menu":

@@ -125,6 +125,11 @@ fun MeshScreen(back: () -> Unit) {
     var log by remember { mutableStateOf<String?>(null) }
     var renaming by remember { mutableStateOf<Machine?>(null) }
     var removing by remember { mutableStateOf<Machine?>(null) }
+    log?.let {
+        androidx.activity.compose.BackHandler { log = null }
+        ChangelogScreen(it) { log = null }
+        return
+    }
     Column(Modifier.fillMaxSize().background(c.frame)) {
         Bar(Wording.MeshVersions.title, start = { IconButton(Adwaita.GoPrevious, Wording.Browser.back, onClick = back) })
         Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).navigationBarsPadding()) {
@@ -156,7 +161,6 @@ fun MeshScreen(back: () -> Unit) {
             }
         }
     }
-    log?.let { Changelog(it) { log = null } }
     renaming?.let { m ->
         val conn = m.conn ?: return@let
         val own = Mesh.conn(conn)?.info?.name?.ifBlank { null } ?: Mesh.members[m.id]?.first?.name?.ifBlank { null }
@@ -181,35 +185,4 @@ fun MeshScreen(back: () -> Unit) {
             confirmButton = { Button(Wording.Common.remove, destructive = true) { Mesh.remove(conn); removing = null } },
             dismissButton = { Button(Wording.Common.cancel) { removing = null } })
     }
-}
-
-/** What a commit has, newest first (as ☰ → Changelog's: its host's own git, read as Meta's changelog reads it). */
-@Composable
-private fun Changelog(commit: String, done: () -> Unit) {
-    val c = LocalBaude.current
-    val host = Mesh.versionsHost()
-    var commits by remember(commit) { mutableStateOf<List<Msg.Commit>?>(null) }
-    var why by remember(commit) { mutableStateOf<String?>(null) }
-    androidx.compose.runtime.LaunchedEffect(commit) {
-        val checkout = host?.let { Mesh.conn(it)?.info?.checkout?.ifBlank { null } }
-        if (host == null || checkout == null) { why = Wording.Changelog.empty; return@LaunchedEffect }
-        Mesh.ask(host, Msg.Git(what = "log", cwd = checkout, rev = commit, limit = 15).json()) { r ->
-            val g = Msg.GitReply.from(r)
-            if (r.optString("op") == Op.GIT && g.error.isNullOrBlank()) commits = g.commits.orEmpty()
-            else why = Wording.Changelog.empty
-        }
-    }
-    AlertDialog(onDismissRequest = done, containerColor = c.dialog,
-        title = { Text(Wording.Changelog.title) },
-        text = {
-            Column(Modifier.verticalScroll(rememberScrollState())) {
-                when {
-                    why != null -> Text(why!!, style = Type.caption, color = c.dim)
-                    commits == null -> Text("…", style = Type.caption, color = c.dim)
-                    else -> for (m in commits!!) ActionRow(m.subject.orEmpty(), java.text.SimpleDateFormat("d MMMM yyyy, HH:mm",
-                        java.util.Locale.ENGLISH).format(java.util.Date((m.at?.toLong() ?: 0L) * 1000)) + " · " + m.sha.orEmpty().take(7))
-                }
-            }
-        },
-        confirmButton = { Button(Wording.Common.done, onClick = done) })
 }

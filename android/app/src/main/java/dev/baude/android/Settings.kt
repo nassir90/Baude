@@ -12,7 +12,9 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
@@ -23,19 +25,21 @@ import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import java.time.Instant
-import java.time.ZoneId
-import java.time.format.DateTimeFormatter
+import org.json.JSONArray
 import kotlin.math.cbrt
 import kotlin.math.max
 import kotlin.math.min
@@ -44,13 +48,21 @@ import kotlin.math.roundToInt
 
 /** The phone's settings (Baude's settings.json's, those that mean something here, and the phone's own), kept in its
  * prefs ("settings") and taken as they're changed: the accent (null: the system's) and whether it's light or dark
- * (BaudeTheme), the text's size and everything's (Global Scale: BaudeTheme's density), notifications (Mesh's), and
- * whether updates download on a metered network by themselves (Update's). */
+ * (BaudeTheme), the text's size, the icons' and everything's (Global Scale: BaudeTheme's density), Full-width text
+ * (the chat's), the chats that are read-only, Meta's model, effort and Run commands, the code font (null: the
+ * default), notifications (Mesh's), and whether updates download on a metered network by themselves (Update's). */
 object Settings {
     val accent = mutableStateOf<String?>(null)
     val appearance = mutableStateOf("system") // ("system", "light", "dark")
     val textScale = mutableStateOf(1f)
+    val iconScale = mutableStateOf(1f)
     val globalScale = mutableStateOf(1f)
+    val fullWidth = mutableStateOf(true)
+    val readOnly = mutableStateListOf<String>() // (the sessions that can't be written to: their ids)
+    val metaModel = mutableStateOf<String?>(null)
+    val metaEffort = mutableStateOf<String?>(null)
+    val metaCommands = mutableStateOf(true)
+    val codeFont = mutableStateOf<String?>(null)
     val notify = mutableStateOf(true)
     val meteredUpdates = mutableStateOf(false)
 
@@ -74,7 +86,22 @@ object Settings {
         accent.value = p.getString("accent", null)?.takeIf { it in ACCENTS }
         appearance.value = p.getString("appearance", "system")!!
         textScale.value = p.getFloat("text_scale", 1f)
+        iconScale.value = p.getFloat("icon_scale", 1f)
         globalScale.value = p.getFloat("global_scale", 1f)
+        fullWidth.value = p.getBoolean("full_width", true)
+        val sessions = try {
+            p.getString("read_only_sessions", null)?.let { j -> JSONArray(j).let { a -> (0 until a.length()).map(a::getString) } }
+        } catch (_: Exception) {
+            null
+        }.orEmpty()
+        if (sessions != readOnly.toList()) {
+            readOnly.clear()
+            readOnly.addAll(sessions)
+        }
+        metaModel.value = p.getString("meta_model", null)
+        metaEffort.value = p.getString("meta_effort", null)
+        metaCommands.value = p.getBoolean("meta_commands", true)
+        codeFont.value = p.getString("code_font", null)
         notify.value = p.getBoolean("notify", true)
         meteredUpdates.value = p.getBoolean("metered_updates", false)
     }
@@ -82,9 +109,16 @@ object Settings {
     fun save(ctx: Context) {
         ctx.applicationContext.getSharedPreferences("settings", Context.MODE_PRIVATE).edit()
             .putString("accent", accent.value).putString("appearance", appearance.value)
-            .putFloat("text_scale", textScale.value).putFloat("global_scale", globalScale.value)
+            .putFloat("text_scale", textScale.value).putFloat("icon_scale", iconScale.value)
+            .putFloat("global_scale", globalScale.value).putBoolean("full_width", fullWidth.value)
+            .putString("read_only_sessions", JSONArray(readOnly.toList()).toString())
+            .putString("meta_model", metaModel.value).putString("meta_effort", metaEffort.value)
+            .putBoolean("meta_commands", metaCommands.value).putString("code_font", codeFont.value)
             .putBoolean("notify", notify.value).putBoolean("metered_updates", meteredUpdates.value).apply()
     }
+
+    /** Whether a chat is read-only (Read-only session). */
+    fun isReadOnly(sid: String) = sid.isNotEmpty() && sid in readOnly
 
     /** The accent's colour, as @accent_bg_color has it: the one picked, or the system's (Android 12's on: its
      * palette's accent; before it, Baude's blue). */
@@ -116,18 +150,54 @@ object Settings {
     }
 }
 
-/** ⋮ → Settings…, as Baude's Settings: the accent and whether it's light or dark, how updates download, notifications
- * and the version; the sizes; Send Feedback…. */
+/** How wide the chat's column is in room w while Full-width text is off, as Adw.Clamp holds it: all of w up to its
+ * tightening threshold, then narrowing less and less to its maximum (adw_clamp's, the same cubic). */
+fun chatColumn(w: Dp): Dp {
+    val max = Tokens.Gap.chatMax.value
+    val lower = Tokens.Gap.chatTighten.value
+    val amp = max - lower
+    val upper = 3 * amp + lower
+    val x = w.value
+    return when {
+        x <= lower -> w
+        x >= upper -> max.dp
+        else -> (lower + amp * (1 - (1 - (x - lower) / (upper - lower)).pow(3))).dp
+    }
+}
+
+/** An icon's size at Icon Scale (widgets.set_scale's icon_scale: 16 px at 1.0). */
+val Dp.icon: Dp get() = this * Settings.iconScale.value
+
+/** ⋮ → Settings…, as Baude's Settings, its groups in its order: Meta's, Full-width text, Code Font, the accent and
+ * whether it's light or dark, how updates download, notifications and the version; the sizes; Send Feedback…. */
 @Composable
-fun SettingsScreen(back: () -> Unit, feedback: () -> Unit) {
+fun SettingsScreen(back: () -> Unit, feedback: () -> Unit, chat: List<String> = emptyList()) {
     val c = LocalBaude.current
     val ctx = LocalContext.current
-    Settings.load(ctx)
     val save = { Settings.save(ctx) }
     Column(Modifier.fillMaxSize().background(c.frame)) {
         Bar(Wording.Window.settingsTitle, start = { IconButton(Adwaita.GoPrevious, Wording.Browser.back, onClick = back) })
         Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).navigationBarsPadding()) {
+            MetaSettingsGroup()
             BoxedList(listOf<@Composable () -> Unit>(
+                {
+                    SwitchRow(Wording.MetaSettings.fullWidth, null, Settings.fullWidth.value) {
+                        Settings.fullWidth.value = it
+                        save()
+                    }
+                },
+                {
+                    val shown = Settings.codeFont.value?.takeIf { it in CodeFont.FONTS } ?: CodeFont.DEFAULT
+                    Choice(Wording.SharedSettings.codeFont, CodeFont.FONTS.keys.toList(), shown, { it },
+                        subtitle = if (shown == CodeFont.running) null
+                            else Wording.SharedSettings.codeFontNextStart(font = shown, app = Wording.MeshVersions.baude),
+                        before = if (shown == CodeFont.running) null else ({
+                            Button(Wording.SharedSettings.restart) { CodeFont.restart(ctx, chat) }
+                        })) {
+                        Settings.codeFont.value = it
+                        save()
+                    }
+                },
                 {
                     val names = listOf("system") + Settings.ACCENTS.keys
                     Choice(Wording.SharedSettings.accentColour, names, Settings.accent.value ?: "system", { it.replaceFirstChar(Char::uppercase) },
@@ -153,7 +223,7 @@ fun SettingsScreen(back: () -> Unit, feedback: () -> Unit) {
                     }
                 },
                 {
-                    SwitchRow(Wording.SharedSettings.notifications, null,
+                    SwitchRow(Wording.SharedSettings.notifications, Wording.SharedSettings.notificationsSubtitle,
                         Settings.notify.value) {
                         Settings.notify.value = it
                         save()
@@ -167,53 +237,67 @@ fun SettingsScreen(back: () -> Unit, feedback: () -> Unit) {
                     Settings.textScale.value = it
                     save()
                 } },
+                { SizeRow(Wording.MetaSettings.iconScale, Settings.iconScale.value, Settings.SCALE_MIN, Settings.SCALE_MAX) {
+                    Settings.iconScale.value = it
+                    save()
+                } },
                 { SizeRow(Wording.MetaSettings.globalScale, Settings.globalScale.value, Settings.ZOOM_MIN, Settings.ZOOM_MAX) {
                     Settings.globalScale.value = it
                     save()
                 } },
             ), "") { it() }
-            BoxedList(listOf<@Composable () -> Unit>({
-                ActionRow(Wording.Fixes.sendFeedback, null, onClick = feedback, suffix = {
-                    Icon(Adwaita.GoNext, null, tint = c.dim, modifier = Modifier.size(18.dp))
-                })
-            }), "") { it() }
+            BoxedList(listOf<@Composable () -> Unit>({ ButtonRow(Wording.Fixes.sendFeedback, Adwaita.GoNext, onClick = feedback) }), "") { it() }
         }
     }
 }
 
-/** Settings → Version (Baude's): the commit the app was built from, and when it was made. */
+/** A button row (Adw.ButtonRow): its title, and an icon after it, together in the middle. */
+@Composable
+fun ButtonRow(title: String, end: ImageVector? = null, onClick: () -> Unit) {
+    val c = LocalBaude.current
+    Row(Modifier.fillMaxWidth().heightIn(min = 50.dp).clickable(onClick = onClick).padding(horizontal = 12.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center) {
+        Text(title, style = Type.body, color = c.fg, textAlign = TextAlign.Center)
+        if (end != null) Icon(end, null, tint = c.dim, modifier = Modifier.size(18.dp.icon))
+    }
+}
+
+/** Settings → Version (Baude's): the commit the app was built from, and when it was made; or that it's not a checkout. */
 @Composable
 private fun VersionRow() {
-    val ctx = LocalContext.current
-    val name = remember { ctx.packageManager.getPackageInfo(ctx.packageName, 0).versionName }
-    val made = remember { ctx.getString(R.string.commit_time).toLongOrNull()?.takeIf { it > 0 } }
-    ActionRow(if (name != null) Wording.Updates.version(commit = name) else Wording.Updates.versionUnknown, made?.let {
-        DateTimeFormatter.ofPattern("d MMMM yyyy, HH:mm").format(Instant.ofEpochSecond(it).atZone(ZoneId.systemDefault()))
-    })
+    val short = AppVersion.short
+    ActionRow(if (short != null) Wording.Updates.version(commit = short) else Wording.Updates.versionUnknown,
+        if (short != null) AppVersion.made?.let(::madeWhen) else Wording.Updates.notCheckout)
 }
 
 /** A row with a switch (Adw.SwitchRow). */
 @Composable
-private fun SwitchRow(title: String, subtitle: String?, on: Boolean, set: (Boolean) -> Unit) {
+fun SwitchRow(title: String, subtitle: String?, on: Boolean, enabled: Boolean = true, set: (Boolean) -> Unit) {
     val c = LocalBaude.current
-    ActionRow(title, subtitle, onClick = { set(!on) }, suffix = {
-        Switch(on, set, colors = SwitchDefaults.colors(checkedTrackColor = c.accentBg, checkedThumbColor = c.accentFg))
-    })
+    Box(Modifier.alpha(if (enabled) 1f else 0.5f)) {
+        ActionRow(title, subtitle, onClick = if (enabled) ({ set(!on) }) else null, suffix = {
+            Switch(on, set, enabled = enabled,
+                colors = SwitchDefaults.colors(checkedTrackColor = c.accentBg, checkedThumbColor = c.accentFg))
+        })
+    }
 }
 
 /** A row whose value is one of a list (Adw.ComboRow): the one picked beside its name, the others in a menu; dot: a
  * colour before each (the accents'). */
 @Composable
-private fun Choice(title: String, values: List<String>, picked: String, label: (String) -> String,
-                   dot: ((String) -> Color)? = null, pick: (String) -> Unit) {
+fun Choice(title: String, values: List<String>, picked: String, label: (String) -> String,
+           dot: ((String) -> Color)? = null, subtitle: String? = null, enabled: Boolean = true,
+           before: (@Composable () -> Unit)? = null, pick: (String) -> Unit) {
     val c = LocalBaude.current
     var open by remember { mutableStateOf(false) }
-    ActionRow(title, null, onClick = { open = true }, suffix = {
+    Box(Modifier.alpha(if (enabled) 1f else 0.5f)) {
+    ActionRow(title, subtitle, onClick = if (enabled) ({ open = true }) else null, suffix = {
+        before?.invoke()
         Box {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 dot?.let { Dot(it(picked)) }
                 Text(label(picked), style = Type.body, color = c.fg)
-                Icon(Adwaita.PanDown, null, tint = c.fg, modifier = Modifier.size(18.dp))
+                Icon(Adwaita.PanDown, null, tint = c.fg, modifier = Modifier.size(18.dp.icon))
             }
             Popover(open, { open = false }) {
                 for (v in values) DropdownMenuItem({
@@ -223,11 +307,12 @@ private fun Choice(title: String, values: List<String>, picked: String, label: (
                     }
                 }, { open = false; pick(v) }, trailingIcon = {
                     if (v == picked) Icon(Adwaita.ObjectSelect, null, tint = c.accent,
-                        modifier = Modifier.size(16.dp))
+                        modifier = Modifier.size(16.dp.icon))
                 })
             }
         }
     })
+    }
 }
 
 @Composable

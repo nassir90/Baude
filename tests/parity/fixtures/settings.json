@@ -1,5 +1,5 @@
 {
-  "description": "Settings as both apps start them in the rig (widgets.save_settings keys; the phone's Settings object maps text_scale, zoom_default, notifications and accent).",
+  "description": "Settings as both apps start them in the rig (widgets.save_settings keys; the phone's Settings object maps full_width, text_scale, icon_scale, zoom_default, notifications and accent).",
   "full_width": true,
   "text_scale": 1.0,
   "icon_scale": 1.0,

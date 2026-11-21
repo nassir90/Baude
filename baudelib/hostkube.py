@@ -167,9 +167,19 @@ def _owner(msg):
     return {"kind": kind, "name": name, "resource": kd.KUBE_CLIMB.get(kind) or kd.kube_resource(kind)}
 
 
+ARGS = ("context", "namespace", "name", "pod", "container", "kind", "page", "crd")
+
+
+def _unsafe(msg):
+    """The first name in a request that kubectl would take for an option (one that starts with -), or None."""
+    return next((k for k in ARGS if isinstance(msg.get(k), str) and msg[k].startswith("-")), None)
+
+
 def answer(server, msg):
     """The reply's fields for a kube request."""
     what, context = msg.get("what"), msg.get("context")
+    if (bad := _unsafe(msg)) is not None:
+        return {"what": what, "error": f"{bad} can't start with -"}
     try:
         if what == "contexts":
             return {"what": what, **_contexts()}
@@ -366,6 +376,9 @@ def follow(server, conn, msg):
     """A kube_follow request, run on a thread of its own: the answers carry msg's req, till kubectl ends or the
     connection goes (stop)."""
     req = msg.get("req")
+    if (bad := _unsafe(msg)) is not None:
+        conn.send({"op": "kube_end", "req": req, "code": 1, "said": f"{bad} can't start with -"})
+        return
     try:
         if msg.get("what") == "logs":
             _logs(conn, req, msg)

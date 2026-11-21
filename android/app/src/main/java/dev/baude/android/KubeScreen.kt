@@ -248,6 +248,7 @@ class KubeState(val hostId: String) {
                     if (!r.note.isNullOrEmpty()) { setNote(r.note); live = false } else live = true
                 }
             },
+            onEnd = { if (watch === w) { live = false; watch = null } },
             onError = { if (watch === w) { live = false; watch = null } },
             onUp = { up -> if (watch === w) live = up })
         watch = w

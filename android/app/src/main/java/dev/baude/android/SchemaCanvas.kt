@@ -356,7 +356,7 @@ fun SchemaCanvas(d: SchemaDiagram, modifier: Modifier = Modifier, onRows: (Msg.D
             val onMini = inMini(down.position, g0)
             val card = if (onMini) null else d.cardAt(down.position.x, down.position.y)
             val cardAt = card?.let { d.cards[it].x to d.cards[it].y }
-            val view0 = d.ox to d.oy
+            var view0 = d.ox to d.oy
             var moved = false
             var pinch: Triple<Float, Offset, Float>? = null // (scale, canvas point under the fingers, span) at its start
             var base = down.position
@@ -378,6 +378,7 @@ fun SchemaCanvas(d: SchemaDiagram, modifier: Modifier = Modifier, onRows: (Msg.D
                 if (pinch != null) { // (one finger left: it pans from here)
                     pinch = null
                     base = p.position
+                    view0 = d.ox to d.oy
                     continue
                 }
                 val delta = p.position - base

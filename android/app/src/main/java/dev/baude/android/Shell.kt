@@ -69,7 +69,7 @@ fun pages(bot: Boolean, hostId: String): List<Page> {
 @OptIn(ExperimentalFoundationApi::class, ExperimentalLayoutApi::class)
 @Composable
 fun ChatShell(hostId: String, sid: String, back: () -> Unit, open: (String, String) -> Unit, feedback: () -> Unit,
-              first: String = "chat") {
+              first: String = "chat", screen: (String) -> Unit = {}) {
     val c = LocalBaude.current
     val chat = remember(hostId, sid) { Mesh.openChat(hostId, sid) }
     Meta.opener = open
@@ -113,7 +113,7 @@ fun ChatShell(hostId: String, sid: String, back: () -> Unit, open: (String, Stri
             lead = if (bot != null) ({ Avatar(name, contact?.let { Mesh.pictures[it.pictureKey] }) }) else null,
             end = {
                 if (bot != null) PhoneBrowserButton(at, sid, name) // (Phone Use: a Bot's browser on this phone)
-                Menu(listOf(Wording.Fixes.sendFeedback to feedback))
+                ChatMenu(at, sid, feedback, screen)
             })
         val conn = Mesh.conn(at)
         if (conn == null || conn.state != "up") GreyBanner(if (conn?.state == "connecting") Wording.Hosts.looking(host = Mesh.label(at))
@@ -159,7 +159,7 @@ fun BottomBar(pages: List<Page>, current: Int, pick: (Int) -> Unit) {
                 Column(Modifier.widthIn(min = 64.dp).clip(RoundedCornerShape(8.dp))
                     .background(if (on) c.fg.copy(alpha = 0.10f) else c.frame).clickable { pick(i) }
                     .padding(horizontal = 8.dp, vertical = 5.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                    Icon(p.icon, null, tint = c.fg, modifier = Modifier.size(18.dp))
+                    Icon(p.icon, null, tint = c.fg, modifier = Modifier.size(18.dp.icon))
                     Text(p.title, style = Type.caption.copy(fontWeight = if (on) androidx.compose.ui.text.font.FontWeight.Bold
                         else androidx.compose.ui.text.font.FontWeight.Normal), color = c.fg, maxLines = 1,
                         overflow = TextOverflow.Ellipsis)
@@ -183,7 +183,7 @@ fun StatusPage(icon: ImageVector, title: String, description: String? = null) {
     val c = LocalBaude.current
     Column(Modifier.fillMaxSize().padding(32.dp), verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally) {
-        Icon(icon, null, tint = c.dim, modifier = Modifier.size(64.dp))
+        Icon(icon, null, tint = c.dim, modifier = Modifier.size(64.dp.icon))
         Text(title, style = Type.title.copy(fontSize = Type.title.fontSize * 1.4f), color = c.fg,
             textAlign = androidx.compose.ui.text.style.TextAlign.Center, modifier = Modifier.padding(top = 18.dp))
         if (description != null) Text(description, style = Type.body, color = c.dim,

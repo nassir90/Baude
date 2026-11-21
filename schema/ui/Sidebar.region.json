@@ -73,9 +73,11 @@
     {
       "name": "Host picker (beside New session)",
       "shows": "A flat dropdown right of New session, naming the host a new session is made on and whose chats the list shows. Its button shows the name cut with … in the middle (about 12 characters); the popup list shows every name whole, each with its name as tooltip. Choices: \"local\" (this machine) first, then every other known host sorted by name, case-insensitively. A host that is gone is dimmed in the list. When only this machine exists the dropdown is dimmed and has nothing else to pick. The choice is remembered across restarts, with its name, even while the host is gone or unknown (then it's still listed, by the name it had). Tooltip \"The host a new session is made on, and whose chats are listed. Right-click (or press and hold) for Add Host…\".",
+      "copy": [
+        "sidebar.host_picker_tip"
+      ],
       "text": [
-        "local",
-        "The host a new session is made on, and whose chats are listed. Right-click (or press and hold) for Add Host…"
+        "local"
       ],
       "actions": [
         {
@@ -95,9 +97,9 @@
     {
       "name": "Open folder button",
       "shows": "A flat button under New session with a folder-open icon and the words \"Open folder…\". Tooltip \"Start a session in another folder\".",
-      "text": [
-        "Open folder…",
-        "Start a session in another folder"
+      "copy": [
+        "sidebar.open_folder",
+        "sidebar.open_folder_tip"
       ],
       "actions": [
         {
@@ -213,8 +215,10 @@
             "common.untitled",
             "sidebar.held"
           ],
+          "copy": [
+            "sidebar.dead"
+          ],
           "text": [
-            "dead",
             "On {host} ({address})",
             ", deactivated",
             ", gone from the network since {time}",

@@ -31,7 +31,7 @@
     {
       "name": "Add",
       "shows": "\"Add\" button, the default, suggested style, disabled until the destination is valid.",
-      "copy": ["common.add"],
+      "copy": ["common.add", "hosts.looking_for_baude"],
       "actions": [
         {"by": "click", "does": "The host is added (by ssh with the destination and the command) and a toast says \"Looking for Baude on <destination>\"; it then appears in the host picker."}
       ]

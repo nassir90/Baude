@@ -247,7 +247,7 @@ fun FilesPage(hostId: String, sid: String) {
                         ActionRow(e.name.orEmpty(), if (dir) null else size(e.size?.toLong() ?: 0L),
                             onClick = { if (dir) at = path else { file = path; fileLine = null } },
                             prefix = { androidx.compose.material3.Icon(if (dir) Adwaita.Folder
-                                else Adwaita.TextXGeneric, null, tint = c.dim, modifier = Modifier.size(18.dp)) })
+                                else Adwaita.TextXGeneric, null, tint = c.dim, modifier = Modifier.size(18.dp.icon)) })
                     }
                 }
             }
@@ -541,7 +541,7 @@ fun SignalPage(hostId: String, sid: String) {
                                     "resolved" -> c.success
                                     "ambiguous", "pending" -> c.dim
                                     else -> c.warning
-                                }, modifier = Modifier.size(16.dp))
+                                }, modifier = Modifier.size(16.dp.icon))
                             })
                         }
                     }

@@ -240,7 +240,7 @@ abstract class Screens(private val theme: String) {
     }
 
     @Composable
-    private fun HomeScreen() = Home(open = { _, _ -> }, hosts = {}, feedback = {})
+    private fun HomeScreen() = Home(open = { _, _ -> }, feedback = {})
 
     private fun render(name: String, screen: @Composable () -> Unit) {
         show(screen)

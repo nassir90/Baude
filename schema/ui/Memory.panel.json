@@ -38,10 +38,9 @@
     },
     {
       "name": "status page",
-      "shows": "A centred placeholder (document-edit icon, title, description) in place of the editor. Before the memory is first read: title 'No memory yet', description 'Notes the Bot keeps. You can edit them.'. If the first read fails: the title is 'Can't connect to the host' (without the full stop) with the description 'It's shown once the host is back.' when the host is gone, or the title 'Couldn't load the memory' with the host's reason (or 'no reason given') as the description.",
+      "shows": "A centred placeholder (document-edit icon and title, with a description when reading failed) in place of the editor. Before the memory is first read: title 'No memory yet', no description. If the first read fails: the title is 'Can't connect to the host' (without the full stop) with the description 'It's shown once the host is back.' when the host is gone, or the title 'Couldn't load the memory' with the host's reason (or 'no reason given') as the description.",
       "copy": [
         "bot_memory.no_memory",
-        "bot_memory.empty_text",
         "bot_memory.shown_when_back",
         "bot_memory.no_reason",
         "bot_memory.cant_connect",

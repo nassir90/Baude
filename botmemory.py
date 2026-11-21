@@ -246,7 +246,7 @@ class BotMemory(Gtk.Box):
         if self.editor is not None:
             self.editor.set_sensitive(ok)
 
-    def _status(self, title=wording.say("bot_memory.no_memory"), text=wording.say("bot_memory.empty_text")):
+    def _status(self, title=wording.say("bot_memory.no_memory"), text=""):
         """The status page in the editor's place: before a Bot's memory is first read, or what went wrong reading it."""
         self.empty.set_title(title)
         self.empty.set_description(text)

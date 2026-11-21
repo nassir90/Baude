@@ -208,9 +208,10 @@ private fun Detail(item: JSONObject, reply: String, setReply: (String) -> Unit) 
                         ?.let { Wording.Common.fromWho(author = it) }.orEmpty(), ago(item.optDouble("created").toLong()))
                     Text(said.filter { it.isNotEmpty() }.joinToString(" · "), style = Type.caption, color = c.dim, maxLines = 1,
                         overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
-                    item.optString("url").takeIf { it.isNotEmpty() }?.let { url ->
-                        Link(Wording.Lookup.issue) { try { uri.openUri(url) } catch (_: Exception) {} }
-                    }
+                }
+                val url = item.optString("url")
+                if (url.isNotEmpty() || pr != null) Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    if (url.isNotEmpty()) Link(Wording.Lookup.issue) { try { uri.openUri(url) } catch (_: Exception) {} }
                     pr?.let { p ->
                         Link(Wording.Fixes.pr(number = p.optInt("number"))) { try { uri.openUri(p.optString("url")) } catch (_: Exception) {} }
                     }
@@ -317,6 +318,7 @@ private fun ShotImage(path: String) {
 private fun ActionBar(item: JSONObject, reply: String, setReply: (String) -> Unit, ask: (String) -> Unit) {
     val c = LocalBaude.current
     val status = item.optString("status")
+    val failure = item.opt("error")?.takeIf { it != JSONObject.NULL }?.toString().orEmpty()
     val working = item.optJSONObject("working")
     val pr = item.optJSONObject("pr")
     val can = Fixes.canWrite
@@ -330,7 +332,7 @@ private fun ActionBar(item: JSONObject, reply: String, setReply: (String) -> Uni
             else Wording.Fixes.runningElsewhere(issue = Fixes.location(item))
         } else Wording.Fixes.draft(number = pr?.optInt("number") ?: 0)
         !can -> if (status == "open" || status == "ready") Wording.Fixes.writeAccess(repo = Fixes.repo.orEmpty()) else ""
-        item.optString("error").isNotEmpty() && (status == "open" || status == "ready") -> Wording.Fixes.fixFailed(why = item.optString("error"))
+        failure.isNotEmpty() && (status == "open" || status == "ready") -> Wording.Fixes.fixFailed(why = failure)
         else -> ""
     }
     val stop = can && status == "working" && item.optBoolean("here")
@@ -343,20 +345,21 @@ private fun ActionBar(item: JSONObject, reply: String, setReply: (String) -> Uni
     Column(Modifier.fillMaxWidth().navigationBarsPadding().padding(start = 14.dp, end = 14.dp, top = 8.dp, bottom = 10.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp)) {
         if (hint.isNotEmpty()) Text(hint, style = Type.caption, color = c.dim)
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-            fun send() {
-                if (writes && reply.isNotBlank()) Fixes.run("reply", item, reply.trim()) { setReply("") }
+        fun send() {
+            if (writes && reply.isNotBlank()) Fixes.run("reply", item, reply.trim()) { setReply("") }
+        }
+        if (replies) Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.weight(1f).clip(RoundedCornerShape(8.dp)).background(c.fg.copy(alpha = 0.08f))
+                .padding(horizontal = 10.dp, vertical = 9.dp)) {
+                if (reply.isEmpty()) Text(Wording.Fixes.askForChanges, style = Type.body, color = c.dim)
+                BasicTextField(reply, setReply, enabled = writes, singleLine = true, textStyle = Type.body.copy(color = c.fg),
+                    cursorBrush = SolidColor(c.accentBg), keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                    keyboardActions = KeyboardActions(onSend = { send() }), modifier = Modifier.fillMaxWidth())
             }
-            if (replies) {
-                Box(Modifier.weight(1f).clip(RoundedCornerShape(8.dp)).background(c.fg.copy(alpha = 0.08f))
-                    .padding(horizontal = 10.dp, vertical = 9.dp)) {
-                    if (reply.isEmpty()) Text(Wording.Fixes.askForChanges, style = Type.body, color = c.dim)
-                    BasicTextField(reply, setReply, enabled = writes, singleLine = true, textStyle = Type.body.copy(color = c.fg),
-                        cursorBrush = SolidColor(c.accentBg), keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-                        keyboardActions = KeyboardActions(onSend = { send() }), modifier = Modifier.fillMaxWidth())
-                }
-                Button(Wording.Common.send, enabled = writes && reply.isNotBlank()) { send() }
-            } else Box(Modifier.weight(1f))
+            Button(Wording.Common.send, enabled = writes && reply.isNotBlank()) { send() }
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End), verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.fillMaxWidth()) {
             if (Fixes.busy) Spinner()
             if (stop) Button(Wording.Common.stop, enabled = writes) { Fixes.run("stop", item) }
             if (reopen) Button(Wording.Fixes.reopen, enabled = writes) { Fixes.run("reopen", item) }

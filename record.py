@@ -428,7 +428,7 @@ def network():
 
 
 def remote_name(r):
-    return r.info.get("name") or r.host
+    return r.label
 
 
 def host_key(r):

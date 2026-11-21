@@ -29,7 +29,7 @@ import androidx.compose.ui.unit.dp
 import org.json.JSONObject
 
 /** Baude's "New session on …" (remote_start_form): the host it starts on (any that's up: one of yours, or a member
- * of their mesh), its folder (as last given there, else the host's home), its group (the host's own), what to ask
+ * of their mesh; those that aren't listed greyed, as Baude's dropdown has them), its folder (as last given there, else the host's home), its group (the host's own), what to ask
  * first, and its model, effort and permission mode. Started empty, it's a draft till it's written in. host: the one
  * it's on (fixed), or null to pick. */
 @Composable
@@ -39,6 +39,7 @@ fun NewSession(host: String?, folder: String?, done: () -> Unit, opened: (String
     val ctx = LocalContext.current
     Mesh.tick.value
     val up = Mesh.reached("start")
+    val known = Mesh.known("start")
     var at by remember { mutableStateOf(host ?: given?.str("host")?.let { MetaTools.hostByName(it) }
         ?: HomePrefs.host.value.takeIf { h -> up.any { it.first == h } } ?: up.firstOrNull()?.first) }
     fun home(h: String?) = h?.let { folder ?: HomePrefs.folder(ctx, it) ?: Mesh.conn(it)?.info?.home?.ifBlank { null } } ?: "~"
@@ -82,8 +83,9 @@ fun NewSession(host: String?, folder: String?, done: () -> Unit, opened: (String
             Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 FormRow(Wording.NewSession.host) {
                     if (host != null) Text(Mesh.label(host), style = Type.body, color = c.fg)
-                    else if (up.isEmpty()) Text("None of your hosts is connected", style = Type.body, color = c.dim)
-                    else Picker(at?.let { a -> hostName(a) } ?: Wording.NewSession.host, Wording.NewSession.host, up.map { hostName(it.first) to it.first }, at) {
+                    else if (known.isEmpty()) Text("None of your hosts is connected", style = Type.body, color = c.dim)
+                    else Picker(at?.let { a -> hostName(a) } ?: Wording.NewSession.host, Wording.NewSession.host,
+                        known.map { hostName(it.first) to it.first }, at, dimmed = known.filter { !it.third }.map { it.first }.toSet()) {
                         at = it
                         cwd = home(it)
                         group = Mesh.conn(it)?.info?.group.orEmpty()

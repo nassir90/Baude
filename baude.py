@@ -7940,7 +7940,7 @@ def chat_group(info, assigned=None):
 
 
 def remote_name(r):
-    return r.info.get("name") or r.host
+    return r.label
 
 
 def stopping_said(r):

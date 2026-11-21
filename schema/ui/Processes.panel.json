@@ -28,19 +28,19 @@
             {
               "name": "stop button",
               "shows": "Stop icon, tooltip \"Stop this process\"; visible only while running.",
-              "copy": ["side_panel.stop_process"],
+              "copy": ["side_panel.stop_process", "side_panel.stop_requested"],
               "actions": [{"by": "click", "does": "asks Baude's claude to stop that task and notes \"stop requested for <description or id>\" in the window's note line"}]
             },
             {
               "name": "toggle",
               "shows": "A ⌄ icon (down chevron) when closed, a − when open. Tooltip \"Show this process's output\" / \"Hide this process's output\".",
-              "text": ["Show this process's output", "Hide this process's output"],
+              "copy": ["side_panel.show_output", "side_panel.hide_output"],
               "actions": [{"by": "click, or a click on the row's line (not on a button)", "does": "slides the command and output open under the line, or closes them"}]
             },
             {
               "name": "maximise button",
               "shows": "Window-maximise icon, tooltip \"Open this process in the whole panel\".",
-              "text": ["Open this process in the whole panel"],
+              "copy": ["side_panel.open_process"],
               "actions": [{"by": "click", "does": "the row grows into a detail page filling the panel"}]
             }
           ]
@@ -48,7 +48,7 @@
         {
           "name": "opened body (under the line)",
           "shows": "On the row's own fill: first the command in a code block with bash highlighting (the whole command, every line), then the output in a code block labelled output: the last 4000 characters of the task's output file. Before any output it says \"(no output yet)\". The output refreshes every second while the row is running and the panel is visible, and on every task update. Long lines scroll/wrap inside the block.",
-          "text": ["(no output yet)"],
+          "copy": ["side_panel.no_output_yet"],
           "actions": [{"by": "select text", "does": "copy as in any code block"}]
         }
       ]
@@ -57,7 +57,7 @@
       "name": "detail page",
       "shows": "Header then the same command and output, scrolling in the panel's own background.",
       "parts": [
-        {"name": "header", "shows": "Status mark, title (as in the row: description or highlighted command line), subtitle line (hidden if empty), stop button (while running), and a back button ‹ at the end, tooltip \"All processes\". Everything stays live: title, status and output update as the process goes on.", "text": ["All processes"],
+        {"name": "header", "shows": "Status mark, title (as in the row: description or highlighted command line), subtitle line (hidden if empty), stop button (while running), and a back button ‹ at the end, tooltip \"All processes\". Everything stays live: title, status and output update as the process goes on.", "copy": ["side_panel.all_processes"],
          "actions": [
            {"by": "click stop", "does": "stops it, as in the row"},
            {"by": "click back", "does": "closes into its row (and into its opened body, if it was open there)"}

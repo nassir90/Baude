@@ -761,6 +761,7 @@ object Mesh {
                             "result", "task" -> {
                                 noted(chat, line)
                                 took(chat.calls, chat.lines, line)
+                                tasksFrom(chat, line)
                             }
                             "use", "link" -> noted(chat, line)
                             "record" -> line.uuid?.let { chat.ends[it] = chat.lines.size }
@@ -780,7 +781,10 @@ object Mesh {
                 if (more || chat.again) {
                     chat.again = false
                     read(chat)
-                } else settle(chat.calls, session(chat.hostId, chat.sid)?.state)
+                } else {
+                    settle(chat.calls, session(chat.hostId, chat.sid)?.state)
+                    settleTasks(chat)
+                }
             }
         }
     }

@@ -396,7 +396,7 @@ fun Home(open: (String, String) -> Unit, feedback: () -> Unit, phone: () -> Unit
                 val cap = if (query.isNotBlank() || sec.key in more) Int.MAX_VALUE else limit(sec.key)
                 var seen = 0
                 val rows = sec.rows.filter { if (it.depth == 0) seen++; seen <= cap }
-                val through = through(rows)
+                val through = through(rows.map { it.depth })
                 itemsIndexed(rows, key = { _, it -> sec.key + "/" + it.hostId + "/" + it.id }) { i, item ->
                     if (item.bot != null && item.depth == 0 && !dead(item.hostId)) BotRow(item) { open(item.hostId, item.id) }
                     else SessionRow(item, through[i]) { open(item.hostId, item.id) }
@@ -470,35 +470,6 @@ private fun Header(sec: Section, folded: Boolean, plus: (() -> Unit)?, toggle: (
             Icon(Adwaita.ListAdd, sec.hostId?.let {
                 Wording.Sidebar.newSessionInOn(folder = shortPath(it, sec.folder.orEmpty()), host = Mesh.label(it))
             } ?: Wording.Sidebar.newSessionIn(folder = sec.full), tint = c.fg, modifier = Modifier.size(16.dp.icon))
-        }
-    }
-}
-
-/** Each row's levels whose parent has a child further down (its line runs on past the row, top to bottom): a level
- * is open from a row at depth level + 1 up to the first row above that's at that depth or less. */
-private fun through(rows: List<Item>): List<Set<Int>> {
-    val open = HashSet<Int>()
-    val out = ArrayList<Set<Int>>(rows.size)
-    for (item in rows.asReversed()) {
-        out.add(open.filter { it < item.depth }.toSet())
-        open.removeAll { it >= item.depth }
-        if (item.depth > 0) open.add(item.depth - 1)
-    }
-    return out.asReversed()
-}
-
-/** A nested row's part of its parents' lines, as Baude's TreeList draws them, one joined line per parent: down from
- * under the parent's title to its last child's middle, then a corner across to just short of that child's title;
- * through: the levels whose line runs on past this row. */
-private fun Modifier.treeLines(depth: Int, through: Set<Int>, color: Color): Modifier = if (depth == 0) this else drawBehind {
-    val w = 1.dp.toPx()
-    val mid = (1.dp.toPx() + size.height) / 2 // (the title's middle: under the 1dp gap above the row)
-    for (k in 0 until depth) {
-        val x = (11 + 18 * k).dp.toPx() // (5 into the parent's title, as line_x)
-        if (k in through) drawRect(color, Offset(x, 0f), Size(w, size.height))
-        else if (k == depth - 1) {
-            drawRect(color, Offset(x, 0f), Size(w, mid + w))
-            drawRect(color, Offset(x + w, mid), Size((6 + 18 * depth - 4).dp.toPx() - x - w, w))
         }
     }
 }

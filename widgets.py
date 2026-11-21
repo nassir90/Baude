@@ -40,7 +40,7 @@ from gi.repository import Adw, Gdk, GdkPixbuf, Gio, GLib, GObject, Graphene, Gsk
 
 import lookup  # noqa: E402,F401
 from lookup import (  # noqa: E402,F401  (⌘K's engine: what a folder has)
-    _CATALOGUE_TOKEN, _KUBE_NAME, _kube_args, catalogue_shaped, find_spans, ref_icon,
+    _CATALOGUE_TOKEN, _KUBE_NAME, _kube_args, catalogue_shaped, find_spans, full_time, ref_icon,
     ref_key,
 )
 from macos import ns_string, objc_send, set_window_frame, window_frame  # noqa: E402,F401
@@ -7508,13 +7508,6 @@ def time_ago(at, now=None):
         if secs >= n:
             return said(secs // n)
     return wording.say("time.just_now")
-
-
-def full_time(at):
-    """A time in full, local: 00:00 Mon 4th May 2020. What every relative time says under the pointer (time_tip)."""
-    t = time.localtime(at)
-    return time.strftime("%H:%M %a ", t) + wording.say("time.day_of_month", day=t.tm_mday) + " " + \
-        time.strftime("%B %Y", t)
 
 
 def say_time(label, at, before="", after="", markup=False):

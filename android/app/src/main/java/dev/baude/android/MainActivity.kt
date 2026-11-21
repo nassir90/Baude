@@ -29,7 +29,6 @@ class MainActivity : ComponentActivity() {
                 "home" -> go(listOf("contacts"))
             }
         }
-        MeshService.keep(this)
         Update.start(this) // (a newer build on the Baude site: downloaded and offered, Update at the home screen's foot)
         val kept = savedInstanceState?.getStringArrayList("screen")
         if (kept != null && kept.isNotEmpty()) screen.value = kept // (turned, or dark mode switched: where it was)

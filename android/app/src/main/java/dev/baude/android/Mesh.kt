@@ -100,7 +100,7 @@ class Chat(hostId: String, sid: String) {
 }
 
 /** The mesh as this app has it: your hosts, a connection to each, their Bots, the chat open, notifications as a Bot
- * says something. One for the app (the activity and MeshService share it); its state's Compose's, changed on the main
+ * says something. One for the app (the activity and the browser's service share it); its state's Compose's, changed on the main
  * thread. */
 object Mesh {
     lateinit var app: Context
@@ -192,7 +192,6 @@ object Mesh {
         hosts.add(host)
         HostStore.save(app, hosts)
         connect(host)
-        MeshService.keep(app)
     }
 
     fun removeHost(host: Host) {
@@ -207,7 +206,6 @@ object Mesh {
         listedBy.remove(host.id)
         moved.values.removeAll { it == host.id }
         meshed()
-        if (hosts.isEmpty()) app.stopService(Intent(app, MeshService::class.java))
         Shares.look()
     }
 

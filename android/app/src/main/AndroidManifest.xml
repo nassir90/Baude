@@ -55,10 +55,6 @@
             android:process=":emission"
             android:foregroundServiceType="remoteMessaging" />
 
-        <service
-            android:name=".MeshService"
-            android:exported="false"
-            android:foregroundServiceType="remoteMessaging" />
 
         <receiver
             android:name=".UpdateReceiver"

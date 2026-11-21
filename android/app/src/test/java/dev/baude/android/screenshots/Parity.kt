@@ -338,8 +338,8 @@ abstract class Parity(private val theme: String, private val scene: String) {
                 if (sc.has("reveal")) FileLinks.wanted.value = Wanted(host.getString("id"), "$home/garden/${sc.getString("reveal")}", null, true)
                 // (the page asks its host for the folder's entries as a link to it is followed: the same here, for the chat's own)
                 if (sc.has("gallery") || sc.has("hold")) FileLinks.wanted.value = Wanted(host.getString("id"), "$home/garden", null, true)
-                gitScene?.let { g -> GitPages.prepare(host.getString("id"), first.getString("id"),
-                    g.optJSONArray("pick")?.let { a -> (0 until a.length()).map { a.getString(it) } }, g.optBoolean("every")) }
+                GitPages.prepare(host.getString("id"), first.getString("id"),
+                    gitScene?.optJSONArray("pick")?.let { a -> (0 until a.length()).map { a.getString(it) } }, gitScene?.optBoolean("every") == true)
                 show { ChatShell(host.getString("id"), first.getString("id"), back = {}, open = { _, _ -> }, feedback = {},
                     first = sc.optString("page").ifBlank { "chat" }) }
                 gitScene?.let { g ->

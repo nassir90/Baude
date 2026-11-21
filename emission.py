@@ -44,6 +44,7 @@ AGENT_IDLE_S = 30 * 60  # (an Emission started for a Bot: gone after this long w
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from baudelib import applist  # noqa: E402  (Emission in the list of apps, as Record is)
 from baudelib import selfupdate  # noqa: E402
+from baudelib import icons  # noqa: E402  (its logo: schema/icons)
 from baudelib import tokens  # noqa: E402  (its pointer's sizes and times: schema/tokens, the Android app's too)
 from baudelib import wire  # noqa: E402  (its screenshots' sizes and qualities, as the phone's: the wire's schema)
 from baudelib import wording  # noqa: E402  (its words, Baude's browser's: schema/copy)
@@ -4269,30 +4270,8 @@ def jpeg(w, h, stride, data, quality=wire.CONSTANTS["FRAME_QUALITY"]):
 # with a cream page on it (their bubble's, without its tail) and a globe cut out of the page through a mask, so every
 # cut is the tile itself: a meridian and two parallels. At 16 px, the same a pixel wide, on whole pixels (ICON_SVG_16).
 
-ICON_SVG = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
-  <mask id="cut">
-    <rect x="22" y="38" width="84" height="52" rx="8" fill="#fff"/>
-    <g fill="none" stroke="#000" stroke-width="4.5">
-      <ellipse cx="64" cy="64" rx="22" ry="34"/>
-      <path d="M22 50h84M22 78h84"/>
-    </g>
-  </mask>
-  <rect x="8" y="8" width="112" height="112" rx="26" fill="#d9b44a"/>
-  <rect x="22" y="38" width="84" height="52" rx="8" fill="#fff8f0" mask="url(#cut)"/>
-</svg>
-"""
-ICON_SVG_16 = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
-  <mask id="cut">
-    <rect x="22" y="38" width="84" height="52" rx="8" fill="#fff"/>
-    <g fill="none" stroke="#000" stroke-width="8">
-      <ellipse cx="64" cy="64" rx="20" ry="36"/>
-      <path d="M22 52h84M22 76h84"/>
-    </g>
-  </mask>
-  <rect x="8" y="8" width="112" height="112" rx="26" fill="#d9b44a"/>
-  <rect x="22" y="38" width="84" height="52" rx="8" fill="#fff8f0" mask="url(#cut)"/>
-</svg>
-"""
+ICON_SVG = icons.svg("apps", "emission")  # (schema/icons/apps)
+ICON_SVG_16 = icons.svg("apps", "emission-16")
 
 
 def icon_png(size=1024, mac=True):

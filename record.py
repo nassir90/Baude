@@ -70,6 +70,7 @@ import lookup  # noqa: E402  (⌘K's engine: what a chat's folder has; beside th
 import pointers  # noqa: E402  (the pointer's shape: beside this file)
 import widgets  # noqa: E402  (what Record draws as Baude does: the links' logos; beside this file)
 from baudelib import tokens  # noqa: E402  (its measures, Baude's: schema/tokens)
+from baudelib import icons  # noqa: E402  (its logo: schema/icons)
 from baudelib import wording  # noqa: E402  (its words, Baude's: schema/copy)
 import fontsetup  # noqa: E402  (its fonts, as Baude's: set up before Pango's first used)
 fontsetup.setup()
@@ -9301,15 +9302,7 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost, w
 # ---------------------------------------------------------------- the logo
 # Baude's speech bubble, in green, holding three lines that fade from the newest: the three messages it remembers.
 
-ICON_SVG = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
-  <rect x="8" y="8" width="112" height="112" rx="26" fill="#4f8a7c"/>
-  <path d="M30 38h68a8 8 0 0 1 8 8v36a8 8 0 0 1-8 8H58l-18 14v-14H30a8 8 0 0 1-8-8V46a8 8 0 0 1 8-8z"
-        fill="#fff8f0"/>
-  <path d="M38 52h52" stroke="#4f8a7c" stroke-width="7" stroke-linecap="round" opacity="0.3"/>
-  <path d="M38 64h42" stroke="#4f8a7c" stroke-width="7" stroke-linecap="round" opacity="0.6"/>
-  <path d="M38 76h28" stroke="#4f8a7c" stroke-width="7" stroke-linecap="round"/>
-</svg>
-"""
+ICON_SVG = icons.svg("apps", "record")  # (schema/icons/apps)
 
 
 def icon_png(size=1024, macos=True):

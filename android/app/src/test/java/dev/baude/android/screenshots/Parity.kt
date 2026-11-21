@@ -189,6 +189,7 @@ abstract class Parity(private val theme: String, private val scene: String) {
                 if (name == "menu") tap(Wording.ChatHeader.menu)
                 if (sc.has("queued")) {
                     Mesh.open!!.queued.add(Queued(sc.getString("queued"), emptyList()))
+                    androidx.compose.runtime.snapshots.Snapshot.sendApplyNotifications()
                     settle()
                     hold(sc.getString("queued"))
                 }
@@ -243,7 +244,7 @@ abstract class Parity(private val theme: String, private val scene: String) {
         fun found() = roots().flatMap { all(it.semanticsOwner.rootSemanticsNode) }.firstOrNull { n ->
             n.config.contains(SemanticsActions.OnLongClick) && (label in said(n) || label == described(n))
         }
-        repeat(5) { if (found() == null) settle() }
+        repeat(20) { if (found() == null) settle() }
         val node = found() ?: error("nothing to hold labelled $label")
         node.config[SemanticsActions.OnLongClick].action?.invoke()
         androidx.compose.runtime.snapshots.Snapshot.sendApplyNotifications()

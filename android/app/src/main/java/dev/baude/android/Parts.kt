@@ -79,10 +79,31 @@ fun StatusDot(state: String, asking: Boolean) {
 fun Bar(title: String, start: (@Composable RowScope.() -> Unit)? = null, end: (@Composable RowScope.() -> Unit)? = null,
         subtitle: String? = null, lead: (@Composable () -> Unit)? = null, left: Boolean = false) {
     val c = LocalBaude.current
-    Row(
-        Modifier.fillMaxWidth().background(c.frame).statusBarsPadding().height(Gap.bar).padding(horizontal = 6.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
+    val bar = Modifier.fillMaxWidth().background(c.frame).statusBarsPadding().height(Gap.bar).padding(horizontal = 6.dp)
+    if (lead == null && !left) { // (in the middle of the bar, as Adw.HeaderBar's: the room either side of it as wide as the wider end's)
+        androidx.compose.ui.layout.Layout({
+            Row(verticalAlignment = Alignment.CenterVertically) { if (start != null) start() }
+            Column(Modifier.padding(horizontal = 6.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                Text(title, style = Type.title, color = c.fg, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                if (subtitle != null) Text(subtitle, style = Type.caption, color = c.dim, maxLines = 1,
+                    overflow = TextOverflow.Ellipsis)
+            }
+            Row(verticalAlignment = Alignment.CenterVertically) { if (end != null) end() }
+        }, bar) { (s, m, e), k ->
+            val loose = k.copy(minWidth = 0, minHeight = 0)
+            val sp = s.measure(loose)
+            val ep = e.measure(loose)
+            val side = maxOf(sp.width, ep.width)
+            val mp = m.measure(loose.copy(maxWidth = (k.maxWidth - 2 * side).coerceAtLeast(0)))
+            layout(k.maxWidth, k.maxHeight) {
+                sp.place(0, (k.maxHeight - sp.height) / 2)
+                mp.place((k.maxWidth - mp.width) / 2, (k.maxHeight - mp.height) / 2)
+                ep.place(k.maxWidth - ep.width, (k.maxHeight - ep.height) / 2)
+            }
+        }
+        return
+    }
+    Row(bar, verticalAlignment = Alignment.CenterVertically) {
         if (start != null) start()
         Row(Modifier.weight(1f).padding(horizontal = 6.dp), verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = if (lead == null && !left) Arrangement.Center else Arrangement.Start) {

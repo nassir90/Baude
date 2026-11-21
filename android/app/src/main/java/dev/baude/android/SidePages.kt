@@ -23,17 +23,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.automirrored.filled.InsertDriveFile
-import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
-import androidx.compose.material.icons.filled.ArrowUpward
-import androidx.compose.material.icons.filled.CheckCircle
-import androidx.compose.material.icons.filled.Folder
-import androidx.compose.material.icons.filled.HelpOutline
-import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.Schedule
-import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -156,7 +145,7 @@ fun SideQuestionsPage(chat: Chat) {
                 if (q.status.value != "done") AgentStatus(if (q.status.value == "error") "failed" else q.status.value)
                 Text(q.question, style = Type.body, color = c.fg, maxLines = 1, overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f))
-                IconButton(Icons.AutoMirrored.Filled.ArrowBack, Wording.SideQuestions.all) { shown = null }
+                IconButton(Adwaita.GoPrevious, Wording.SideQuestions.all) { shown = null }
             }
             Column(Modifier.weight(1f).padding(top = 6.dp).inside(c)) {
                 LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -175,7 +164,7 @@ fun SideQuestionsPage(chat: Chat) {
         if (chat.btw.isNotEmpty()) BoxedList(chat.btw.toList(), "") { sq ->
             ActionRow(sq.question, sq.thread.getOrNull(1)?.text?.lines()?.firstOrNull(), onClick = { shown = sq },
                 prefix = if (sq.status.value != "done") ({ AgentStatus(if (sq.status.value == "error") "failed" else sq.status.value) }) else null,
-                suffix = { androidx.compose.material3.Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null, tint = c.dim) })
+                suffix = { androidx.compose.material3.Icon(Adwaita.GoNext, null, tint = c.dim) })
         }
     }
 }
@@ -193,7 +182,7 @@ private fun AskBox(hint: String, enabled: Boolean = true, send: (String) -> Unit
                 cursorBrush = SolidColor(c.accentBg), modifier = Modifier.fillMaxWidth().heightIn(max = 140.dp))
         }
         val ready = enabled && text.isNotBlank()
-        IconButton(Icons.Filled.ArrowUpward, "Ask", enabled = ready, tint = if (ready) c.accentFg else c.fg,
+        IconButton(Adwaita.Return, "Ask", enabled = ready, tint = if (ready) c.accentFg else c.fg,
             background = if (ready) c.accentBg else null) { send(text.trim()); text = "" }
     }
 }
@@ -207,7 +196,7 @@ private fun AskBox(hint: String, enabled: Boolean = true, send: (String) -> Unit
 fun FilesPage(hostId: String, sid: String) {
     val c = LocalBaude.current
     val root = Mesh.session(hostId, sid)?.cwd?.ifBlank { null }
-    if (root == null) return StatusPage(Icons.Filled.Folder, Wording.Lookup.files, "No folder yet")
+    if (root == null) return StatusPage(Adwaita.Folder, Wording.Lookup.files, "No folder yet")
     var at by remember(root) { mutableStateOf(root) }
     var entries by remember(at) { mutableStateOf<List<Msg.DirEntry>?>(null) }
     var error by remember(at) { mutableStateOf<String?>(null) }
@@ -229,8 +218,8 @@ fun FilesPage(hostId: String, sid: String) {
                 Text(shortPath(hostId, at.substringBeforeLast('/')), style = Type.caption, color = c.dim, maxLines = 1,
                     overflow = TextOverflow.Ellipsis)
             }
-            if (at != root) IconButton(Icons.Filled.ArrowUpward, Wording.CodeView.upFolder) { at = at.substringBeforeLast('/') }
-            IconButton(Icons.Filled.Refresh, Wording.CodeView.readFoldersAgain) { entries = null; error = null; again++ }
+            if (at != root) IconButton(Adwaita.GoUp, Wording.CodeView.upFolder) { at = at.substringBeforeLast('/') }
+            IconButton(Adwaita.ViewRefresh, Wording.CodeView.readFoldersAgain) { entries = null; error = null; again++ }
         }
         Scrolled {
             when {
@@ -242,8 +231,8 @@ fun FilesPage(hostId: String, sid: String) {
                     Box(Modifier.alpha(if (e.ignored == true) 0.55f else 1f)) {
                         ActionRow(e.name.orEmpty(), if (dir) null else size(e.size?.toLong() ?: 0L),
                             onClick = { if (dir) at = path else file = path },
-                            prefix = { androidx.compose.material3.Icon(if (dir) Icons.Filled.Folder
-                                else Icons.AutoMirrored.Filled.InsertDriveFile, null, tint = c.dim, modifier = Modifier.size(18.dp)) })
+                            prefix = { androidx.compose.material3.Icon(if (dir) Adwaita.Folder
+                                else Adwaita.TextXGeneric, null, tint = c.dim, modifier = Modifier.size(18.dp)) })
                     }
                 }
             }
@@ -282,7 +271,7 @@ private fun FileView(hostId: String, path: String, back: () -> Unit) {
                 Text(path.substringAfterLast('/'), style = Type.title, color = c.fg, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text(Wording.FileView.onHost(host = Mesh.label(hostId)) + if (cut) " · its first part" else "", style = Type.caption, color = c.dim)
             }
-            IconButton(Icons.AutoMirrored.Filled.ArrowBack, Wording.Browser.back, onClick = back)
+            IconButton(Adwaita.GoPrevious, Wording.Browser.back, onClick = back)
         }
         Box(Modifier.fillMaxSize().padding(top = 6.dp).inside(c)) {
             val d = data
@@ -310,7 +299,7 @@ private fun FileView(hostId: String, path: String, back: () -> Unit) {
 fun GitPage(hostId: String, sid: String) {
     val c = LocalBaude.current
     val cwd = Mesh.session(hostId, sid)?.cwd?.ifBlank { null }
-    if (cwd == null) return StatusPage(Icons.Filled.Schedule, Wording.Git.title, "No folder yet")
+    if (cwd == null) return StatusPage(Adwaita.MediaPlaylistShuffle, Wording.Git.title, "No folder yet")
     var log by remember(cwd) { mutableStateOf<Msg.GitReply?>(null) }
     val commits = remember(cwd) { mutableStateListOf<Msg.Commit>() }
     var why by remember(cwd) { mutableStateOf<String?>(null) }
@@ -330,10 +319,10 @@ fun GitPage(hostId: String, sid: String) {
         Row(Modifier.fillMaxWidth().padding(start = 12.dp, end = 6.dp, top = 6.dp, bottom = 2.dp), verticalAlignment = Alignment.CenterVertically) {
             Text(shortPath(hostId, log?.top?.ifBlank { null } ?: cwd), style = Type.caption, color = c.dim, maxLines = 1,
                 overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
-            IconButton(Icons.Filled.Refresh, "Read the history again") { why = null; log = null; again++ }
+            IconButton(Adwaita.ViewRefresh, "Read the history again") { why = null; log = null; again++ }
         }
         when {
-            why != null -> StatusPage(Icons.Filled.Schedule, Wording.Git.title, why)
+            why != null -> StatusPage(Adwaita.MediaPlaylistShuffle, Wording.Git.title, why)
             log == null -> Empty(Wording.Git.readingHistory)
             else -> Scrolled {
                 val b = log!!.branch
@@ -400,7 +389,7 @@ private fun CommitCard(hostId: String, cwd: String, sha: String, back: () -> Uni
         Column(Modifier.fillMaxSize()) {
             Row(Modifier.fillMaxWidth().padding(start = 12.dp, end = 6.dp, top = 6.dp, bottom = 2.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text(Wording.Git.pathInCommit(path = p, sha = sha.take(9)), style = Type.bold, color = c.fg, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
-                IconButton(Icons.AutoMirrored.Filled.ArrowBack, "The commit") { diff = null }
+                IconButton(Adwaita.GoPrevious, "The commit") { diff = null }
             }
             Box(Modifier.fillMaxSize().padding(top = 6.dp).inside(c)) {
                 val t = diffText
@@ -425,7 +414,7 @@ private fun CommitCard(hostId: String, cwd: String, sha: String, back: () -> Uni
     Column(Modifier.fillMaxSize()) {
         Row(Modifier.fillMaxWidth().padding(start = 12.dp, end = 6.dp, top = 6.dp, bottom = 2.dp), verticalAlignment = Alignment.CenterVertically) {
             Text(sha.take(9), style = Type.title.copy(fontFamily = Type.mono.fontFamily), color = c.fg, modifier = Modifier.weight(1f))
-            IconButton(Icons.AutoMirrored.Filled.ArrowBack, Wording.Git.theLog, onClick = back)
+            IconButton(Adwaita.GoPrevious, Wording.Git.theLog, onClick = back)
         }
         val k = card
         when {
@@ -480,7 +469,7 @@ fun SignalPage(hostId: String, sid: String) {
     val c = LocalBaude.current
     val s = Mesh.session(hostId, sid)
     val cwd = s?.cwd?.ifBlank { null }
-    if (cwd == null) return StatusPage(Icons.Filled.HelpOutline, Wording.SidePanel.signal, "No folder yet")
+    if (cwd == null) return StatusPage(Adwaita.InsertLink, Wording.SidePanel.signal, "No folder yet")
     var got by remember(cwd, sid) { mutableStateOf<Msg.SignalNamesReply?>(null) }
     var filter by remember { mutableStateOf("") }
     var again by remember { mutableStateOf(0) }
@@ -495,14 +484,14 @@ fun SignalPage(hostId: String, sid: String) {
     Column(Modifier.fillMaxSize()) {
         Row(Modifier.padding(start = 8.dp, end = 6.dp, top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             SearchField(filter, { filter = it }, Wording.Signal.filter, Modifier.weight(1f))
-            IconButton(Icons.Filled.Refresh, "Read them again") { got = null; again++ }
+            IconButton(Adwaita.ViewRefresh, "Read them again") { got = null; again++ }
         }
         when {
             g == null -> Empty("Reading them…")
             !g.error.isNullOrBlank() -> Empty(g.error)
             else -> {
                 val refs = g.refs.orEmpty()
-                if (refs.isEmpty()) return@Column StatusPage(Icons.Filled.HelpOutline, Wording.SidePanel.signal,
+                if (refs.isEmpty()) return@Column StatusPage(Adwaita.InsertLink, Wording.SidePanel.signal,
                     Wording.Signal.empty)
                 fun n(st: String) = refs.count { it.status == st }
                 Scrolled {
@@ -520,10 +509,10 @@ fun SignalPage(hostId: String, sid: String) {
                             val st = r.status.orEmpty()
                             ActionRow(r.surface.orEmpty(), r.summary.orEmpty(), prefix = {
                                 androidx.compose.material3.Icon(when (st) {
-                                    "resolved" -> Icons.Filled.CheckCircle
-                                    "pending" -> Icons.Filled.Schedule
-                                    "ambiguous" -> Icons.Filled.HelpOutline
-                                    else -> Icons.Filled.Warning
+                                    "resolved" -> Adwaita.ObjectSelect
+                                    "pending" -> Adwaita.ContentLoading
+                                    "ambiguous" -> Adwaita.ViewMore
+                                    else -> Adwaita.DialogWarning
                                 }, st, tint = when (st) {
                                     "resolved" -> c.success
                                     "ambiguous", "pending" -> c.dim

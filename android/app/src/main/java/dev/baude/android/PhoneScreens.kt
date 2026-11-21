@@ -25,11 +25,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -62,8 +57,8 @@ fun PhoneScreen(back: () -> Unit, open: (String) -> Unit, make: () -> Unit) {
         if (uri != null) kotlin.concurrent.thread(name = "picture", isDaemon = true) { picture(ctx, uri)?.let { setPicture(s, it) } }
     }
     Column(Modifier.fillMaxSize().background(c.frame)) {
-        Bar("This phone", start = { IconButton(Icons.AutoMirrored.Filled.ArrowBack, Wording.Browser.back, onClick = back) },
-            end = { IconButton(Icons.Filled.Add, "New Agent", onClick = make) })
+        Bar("This phone", start = { IconButton(Adwaita.GoPrevious, Wording.Browser.back, onClick = back) },
+            end = { IconButton(Adwaita.ListAdd, "New Agent", onClick = make) })
         Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).navigationBarsPadding().padding(12.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Panel {
@@ -104,7 +99,7 @@ fun PhoneScreen(back: () -> Unit, open: (String) -> Unit, make: () -> Unit) {
                             Text(what, style = Type.caption, color = c.dim, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         }
                         StatusDot(s.state.orEmpty(), !s.asks.isNullOrEmpty())
-                        IconButton(Icons.Filled.Delete, Wording.Trash.moveDots) { deleting = s }
+                        IconButton(Adwaita.UserTrash, Wording.Trash.moveDots) { deleting = s }
                     }
                 }
             }
@@ -206,7 +201,7 @@ fun NewAgentScreen(back: () -> Unit, made: (String) -> Unit) {
     val models = Inference.found()
     if (model == null || models.none { it.value == model }) model = models.firstOrNull()?.value
     Column(Modifier.fillMaxSize().background(c.frame).imePadding()) {
-        Bar("New Agent", start = { IconButton(Icons.AutoMirrored.Filled.ArrowBack, Wording.Browser.back, onClick = back) })
+        Bar("New Agent", start = { IconButton(Adwaita.GoPrevious, Wording.Browser.back, onClick = back) })
         Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).navigationBarsPadding().padding(12.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Panel {

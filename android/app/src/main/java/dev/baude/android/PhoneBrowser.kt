@@ -7,8 +7,6 @@ import android.net.LocalSocket
 import android.os.Handler
 import android.os.Looper
 import android.os.Process
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Public
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.platform.LocalContext
 import org.json.JSONObject
@@ -237,5 +235,5 @@ fun PhoneBrowserButton(hostId: String, sid: String, name: String) {
     val ctx = LocalContext.current
     Mesh.tick.value
     if (!PhoneBrowser.offered(hostId)) return
-    IconButton(Icons.Filled.Public, "$name's browser on this phone") { PhoneBrowser.open(ctx, hostId, sid, name) }
+    IconButton(Adwaita.WebBrowser, "$name's browser on this phone") { PhoneBrowser.open(ctx, hostId, sid, name) }
 }

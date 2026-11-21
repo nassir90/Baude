@@ -25,25 +25,6 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
-import androidx.compose.material.icons.filled.CalendarMonth
-import androidx.compose.material.icons.filled.Cancel
-import androidx.compose.material.icons.filled.CheckCircle
-import androidx.compose.material.icons.filled.ContentCopy
-import androidx.compose.material.icons.filled.Description
-import androidx.compose.material.icons.filled.Email
-import androidx.compose.material.icons.filled.Image
-import androidx.compose.material.icons.filled.Language
-import androidx.compose.material.icons.filled.Map
-import androidx.compose.material.icons.filled.MusicNote
-import androidx.compose.material.icons.filled.RemoveCircleOutline
-import androidx.compose.material.icons.filled.SportsEsports
-import androidx.compose.material.icons.filled.Stop
-import androidx.compose.material.icons.filled.TableChart
-import androidx.compose.material.icons.filled.Terminal
-import androidx.compose.material.icons.filled.Slideshow
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -113,9 +94,9 @@ fun AgentStatus(status: String) {
     val c = LocalBaude.current
     when (status) {
         "running" -> CircularProgressIndicator(Modifier.size(16.dp), color = c.fg.copy(alpha = 0.55f), strokeWidth = 2.dp)
-        "completed" -> Icon(Icons.Filled.CheckCircle, Wording.Common.done, tint = c.success, modifier = Modifier.size(16.dp))
-        "interrupted" -> Icon(Icons.Filled.RemoveCircleOutline, "Interrupted", tint = c.dim, modifier = Modifier.size(16.dp))
-        else -> Icon(Icons.Filled.Cancel, "Failed", tint = c.destructive, modifier = Modifier.size(16.dp))
+        "completed" -> Icon(Adwaita.ObjectSelect, Wording.Common.done, tint = c.success, modifier = Modifier.size(16.dp))
+        "interrupted" -> Icon(Adwaita.ProcessStop, "Interrupted", tint = c.dim, modifier = Modifier.size(16.dp))
+        else -> Icon(Adwaita.DialogError, "Failed", tint = c.destructive, modifier = Modifier.size(16.dp))
     }
 }
 
@@ -149,7 +130,7 @@ fun SubagentsPage(chat: Chat) {
         Scrolled {
             BoxedList(chat.agents.toList(), Wording.SidePanel.noSubagents) { agent ->
                 ActionRow(agent.description, describe(agent), onClick = { shown = agent }, prefix = { AgentStatus(agent.status.value) },
-                    suffix = { Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null, tint = LocalBaude.current.dim) })
+                    suffix = { Icon(Adwaita.GoNext, null, tint = LocalBaude.current.dim) })
             }
         }
         return
@@ -203,7 +184,7 @@ private fun AgentDetail(chat: Chat, a: Subagent, back: () -> Unit) {
                 val d = describe(a)
                 if (d.isNotBlank()) Text(d, style = Type.caption, color = c.dim)
             }
-            IconButton(Icons.AutoMirrored.Filled.ArrowBack, Wording.SidePanel.allSubagents, onClick = back)
+            IconButton(Adwaita.GoPrevious, Wording.SidePanel.allSubagents, onClick = back)
         }
         Box(Modifier.fillMaxSize().padding(top = 6.dp).inside(c)) {
             val shown = if (lines.isEmpty() && a.prompt.isNotBlank()) listOf(Line("you", a.prompt)) else lines.toList()
@@ -237,7 +218,7 @@ fun ProcessesPage(hostId: String, sid: String) {
                 if (since > 0) "since " + java.text.SimpleDateFormat("HH:mm", java.util.Locale.ENGLISH)
                     .format(java.util.Date((since * 1000).toLong())) else null).joinToString(" · ")
             ActionRow(cmd.what.orEmpty().lines().first(), sub, prefix = { AgentStatus("running") }, suffix = {
-                if (takes(hostId, "control")) IconButton(Icons.Filled.Stop, Wording.SidePanel.stopProcess) {
+                if (takes(hostId, "control")) IconButton(Adwaita.MediaPlaybackStop, Wording.SidePanel.stopProcess) {
                     control(hostId, sid, JSONObject().put("subtype", "stop_task").put("task_id", cmd.id.orEmpty())) { e ->
                         if (e != null) said = "Couldn't stop it: $e"
                     }
@@ -252,17 +233,17 @@ fun ProcessesPage(hostId: String, sid: String) {
 
 /** An artifact's icon, as Baude's ArtifactChip maps the one it's given (a globe for the rest). */
 private fun artifactIcon(name: String?): ImageVector = when (name?.lowercase()) {
-    "chart", "dashboard", "table" -> Icons.Filled.TableChart
-    "calendar" -> Icons.Filled.CalendarMonth
-    "map" -> Icons.Filled.Map
-    "code" -> Icons.Filled.Terminal
-    "doc", "document" -> Icons.Filled.Description
-    "slides", "deck" -> Icons.Filled.Slideshow
-    "image" -> Icons.Filled.Image
-    "music" -> Icons.Filled.MusicNote
-    "game" -> Icons.Filled.SportsEsports
-    "mail" -> Icons.Filled.Email
-    else -> Icons.Filled.Language
+    "chart", "dashboard", "table" -> Adwaita.XOfficeSpreadsheet
+    "calendar" -> Adwaita.XOfficeCalendar
+    "map" -> Adwaita.Map
+    "code" -> Adwaita.UtilitiesTerminal
+    "doc", "document" -> Adwaita.XOfficeDocument
+    "slides", "deck" -> Adwaita.XOfficePresentation
+    "image" -> Adwaita.ImageXGeneric
+    "music" -> Adwaita.AudioXGeneric
+    "game" -> Adwaita.ApplicationsGames
+    "mail" -> Adwaita.MailUnread
+    else -> Adwaita.WebBrowser
 }
 
 /** What the chat published (or linked to), newest first: each opened in the browser, or its link copied, as Baude's
@@ -284,7 +265,7 @@ fun ArtifactsPage(chat: Chat) {
                 suffix = {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Button(Wording.Common.open) { open(a.url) }
-                        IconButton(Icons.Filled.ContentCopy, Wording.Artifacts.copyLink) {
+                        IconButton(Adwaita.EditCopy, Wording.Artifacts.copyLink) {
                             ctx.getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText("Artifact", a.url))
                             Toast.makeText(ctx, Wording.Tabs.linkCopied, Toast.LENGTH_SHORT).show()
                         }

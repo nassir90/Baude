@@ -111,7 +111,7 @@ fun BaudeTheme(content: @Composable () -> Unit) {
     )
     val density = androidx.compose.ui.platform.LocalDensity.current
     CompositionLocalProvider(LocalBaude provides c, androidx.compose.ui.platform.LocalDensity provides
-        androidx.compose.ui.unit.Density(density.density * Settings.globalScale.value,
+        androidx.compose.ui.unit.Density(density.density * Settings.BASE_SCALE * Settings.globalScale.value,
             density.fontScale * Settings.textScale.value)) {
         MaterialTheme(colorScheme = scheme, typography = Typography(bodyLarge = Type.body, bodyMedium = Type.body),
             content = content)

@@ -62,6 +62,9 @@ def _do(what, msg):
         raise ValueError("fixes needs the issue, as list gave it")
     if found is None:
         raise ValueError("GitHub isn't connected")
+    if not isinstance(item["number"], int) or isinstance(item["number"], bool):
+        raise ValueError("fixes needs the issue, as list gave it")
+    item = {**item, "key": fixes.parse_key(fixes.fix_key(item))}  # (a key that isn't one is refused: it names a folder)
     if what == "merge":
         fixes.merge(found, item)
     elif what == "discard":

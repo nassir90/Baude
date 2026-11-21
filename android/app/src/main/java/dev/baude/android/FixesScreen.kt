@@ -204,7 +204,7 @@ private fun Detail(item: JSONObject, reply: String, setReply: (String) -> Unit) 
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
                     StatusPill(status)
-                    val said = listOf(Fixes.location(item), item.optString("author").takeIf { it.isNotEmpty() }
+                    val said = listOf(Fixes.location(item), item.str("author")
                         ?.let { Wording.Common.fromWho(author = it) }.orEmpty(), ago(item.optDouble("created").toLong()))
                     Text(said.filter { it.isNotEmpty() }.joinToString(" · "), style = Type.caption, color = c.dim, maxLines = 1,
                         overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
@@ -258,7 +258,7 @@ private fun Entry(e: JSONObject, mark: JSONObject?) {
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
             Text(if (mark != null) roundLabel(mark.optString("state")) else e.optString("author"), style = Type.bold, color = c.fg,
                 maxLines = 1, overflow = TextOverflow.Ellipsis)
-            val machine = mark?.optString("machine")?.takeIf { it.isNotEmpty() }?.let { " · $it" }.orEmpty()
+            val machine = mark?.str("machine")?.let { " · $it" }.orEmpty()
             Text(ago(e.optDouble("at").toLong()) + machine, style = Type.caption, color = c.dim, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
         e.optString("text").takeIf { it.isNotEmpty() }?.let { Said(it) }
@@ -278,7 +278,7 @@ private fun Shot(shot: JSONObject) {
                 Triple("after", Wording.Fixes.after, Wording.Fixes.none))) {
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Text(name, style = Type.caption, color = c.dim)
-                    val path = shot.optString(side).takeIf { it.isNotEmpty() }
+                    val path = shot.str(side)
                     if (path == null) Text(none, style = Type.caption, color = c.dim) else ShotImage(path)
                 }
             }
@@ -327,7 +327,7 @@ private fun ActionBar(item: JSONObject, reply: String, setReply: (String) -> Uni
     val hint = when {
         status == "filed" -> Wording.Fixes.filedUnreadable
         status == "working" -> if (working != null) {
-            val machine = working.optString("machine")
+            val machine = working.str("machine").orEmpty()
             if (machine.isNotEmpty()) Wording.Fixes.runningOn(issue = Fixes.location(item), machine = machine)
             else Wording.Fixes.runningElsewhere(issue = Fixes.location(item))
         } else Wording.Fixes.draft(number = pr?.optInt("number") ?: 0)

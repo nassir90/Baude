@@ -35,9 +35,9 @@ def state(viewer="ADMIN", private=False):
         issue(12, "The input box is hard to find when the chat is empty",
               "In an empty chat, the input box barely stands out from the window around it.\n\n"
               "Could it have a stronger outline?\n\n_Sent from Baude's Send Feedback…_", 7200, comments=[
-                  fix_comment(age=1500, state="working", round=1, machine="naza-mbp"),
+                  fix_comment(age=1500, state="working", round=1, machine="workshop"),
                   fix_comment("The input box now has a 2px outline in the accent colour (`.composer-box` in "
-                              "`widgets.py`), in both themes.", age=600, state="ready", round=1, machine="naza-mbp",
+                              "`widgets.py`), in both themes.", age=600, state="ready", round=1, machine="workshop",
                               shots=[{"label": "The empty chat", "before": "12/1/1-before.png",
                                       "after": "12/1/1-after.png"}])]),
         issue(11, "Kubernetes view forgets the namespace when it reloads",
@@ -56,7 +56,7 @@ def state(viewer="ADMIN", private=False):
         inside = {**issue(3, "The approval card's border is thicker than the tool rows'",
                           "Approvals have a 2px border, failed and passed tools 1px.", 5400, comments=[
                               fix_comment("Every card's border is now 1px (`.perm-card` in `widgets.py`).", age=300,
-                                          state="ready", round=1, machine="naza-mbp")]),
+                                          state="ready", round=1, machine="workshop")]),
                   "url": "https://github.com/nassir90/BaudeInternal/issues/3"}
         out["issues_on"] = {"nassir90/BaudeInternal": [inside]}
         out["prs"].append({**pr, "number": 44, "title": "One border width for every card",

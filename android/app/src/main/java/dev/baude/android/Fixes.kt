@@ -37,7 +37,7 @@ object Fixes {
         shown = true
         val o = try { JSONObject(file().readText()) } catch (_: Exception) { return }
         val a = o.optJSONArray("items") ?: return
-        repo = o.optString("repo").ifBlank { null }
+        repo = o.str("repo")
         items = (0 until a.length()).mapNotNull { a.optJSONObject(it) }
         canWrite = o.optBoolean("can_write")
         locations = o.optJSONArray("locations")?.strings().orEmpty()
@@ -77,7 +77,7 @@ object Fixes {
 
     /** Where its issue is, as a row names it (Baude#12); "" for a note not filed. */
     fun location(item: JSONObject): String {
-        val where = item.optString("issue_location")
+        val where = item.str("issue_location").orEmpty()
         val n = item.opt("number")
         return if (where.isNotEmpty() && (n is Int || n is Long)) "${where.substringAfterLast('/')}#$n" else ""
     }

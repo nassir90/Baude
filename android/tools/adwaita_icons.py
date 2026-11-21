@@ -21,7 +21,7 @@ view-more object-select document-edit edit-undo edit-redo media-playback-start m
 system-users utilities-terminal dialog-question folder media-playlist-shuffle insert-link process-stop dialog-error
 dialog-warning content-loading x-office-spreadsheet x-office-calendar x-office-document x-office-presentation
 image-x-generic audio-x-generic applications-games mail-unread edit-copy text-x-generic folder-open mail-send
-view-grid view-list window-maximize""".split()
+view-grid view-list window-maximize sidebar-show-right""".split()
 BAUDE = ["baude-return", "baude-claude", "baude-meta", "baude-map"]
 
 

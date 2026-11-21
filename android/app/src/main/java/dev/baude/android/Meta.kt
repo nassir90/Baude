@@ -23,9 +23,10 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.util.UUID
 
-/** Meta, Baude's helper, for this phone: this phone can't run claude, so its agent runs on a host you pick, as a
- * session of its own there that's kept nowhere (ephemeral), waiting for the phone a long while (start's grace) when
- * it's away, and attached again, its tools with it, when it's back. It operates the app as desktop Meta operates
+/** Meta, Baude's helper, for this phone: this phone can't run claude, so its agent runs on a host (the open chat's, else
+ * the first that's up: MetaPage's), any model in the mesh as that host reaches it, as a session of its own there
+ * that's kept nowhere (ephemeral), waiting for the phone a long while (start's grace) when it's away, and attached
+ * again, its tools with it, when it's back. It operates the app as desktop Meta operates
  * Baude: its tools (MetaTools) are the phone's own, an MCP server its claude runs relayed back over the phone's
  * connection (start's app_tools), so they act here; it knows the app by the light index sent with your first message.
  * Its conversation and its journal are kept on this phone (meta.json, as desktop's meta.json keeps them): a session
@@ -548,7 +549,8 @@ fun MetaPage(chatHost: String, here: Boolean) {
     Meta.version.value
     val up = Mesh.reached("app_tools")
     androidx.compose.runtime.LaunchedEffect(up, chatHost) { // (a host it's on kept, even while it's away: its session
-        if (Meta.host.value == null)                          // waits for the phone there)
+        val on = Meta.host.value                                // waits for the phone there; with none there, another
+        if (on == null || !Meta.hasSession && up.none { it.first == on }) // that's up, the chat's first)
             (up.firstOrNull { it.first == chatHost } ?: up.firstOrNull())?.let { Meta.host.value = it.first }
     }
     androidx.compose.runtime.LaunchedEffect(Meta.host.value, Meta.version.value) {

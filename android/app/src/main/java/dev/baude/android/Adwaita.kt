@@ -367,6 +367,13 @@ object Adwaita {
         }
     }
 
+    val SidebarShowRight: ImageVector by lazy {
+        icon("sidebar-show-right") {
+            p("M10 13V3h3c.550781 0 1 .449219 1 1v8c0 .550781-.449219 1-1 1zm0 0", 0.34902f, PathFillType.NonZero)
+            p("M13 1c1.644531 0 3 1.355469 3 3v8c0 1.644531-1.355469 3-3 3H3c-1.644531 0-3-1.355469-3-3V4c0-1.644531 1.355469-3 3-3zm0 2h-3v10h3c.570312 0 1-.429688 1-1V4c0-.570312-.429688-1-1-1M9 3H3c-.570312 0-1 .429688-1 1v8c0 .570312.429688 1 1 1h6zm0 0", 1f, PathFillType.NonZero)
+        }
+    }
+
     val Return: ImageVector by lazy {
         icon("baude-return") {
             p("M12 2h2v9H6.5V9H12z", 1f, PathFillType.NonZero)

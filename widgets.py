@@ -1997,7 +1997,7 @@ class ContextUsage(Gtk.Box):
         self.bar.set_visible(True)
         self.over = used > total
         self.label.set_text(wording.say("context_usage.label"))
-        self.bar.set_text(f"{fmt_tokens(used)} / {fmt_tokens(total)}")
+        self.bar.set_text(wording.say("context_usage.count", used=fmt_tokens(used), total=fmt_tokens(total)))
         self.bar.set_value(min(1.0, used / total))
         lines = [f"{c['name']}: {fmt_tokens(c.get('tokens', 0))}" for c in usage.get("categories") or []
                  if c.get("tokens") and c.get("kind") != "deferred"]
@@ -2017,7 +2017,8 @@ class ContextUsage(Gtk.Box):
         if self.said:
             return
         total = self.window() if self.window else None
-        self.bar.set_text(f"— / {fmt_tokens(total)}" if total else "—")
+        self.bar.set_text(wording.say("context_usage.window_only", total=fmt_tokens(total)) if total else
+                          wording.say("context_usage.nothing"))
         self.set_tooltip_text(wording.say("context_usage.window_known", total=total) if total else
                               wording.say("context_usage.tooltip"))
 

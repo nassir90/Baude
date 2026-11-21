@@ -66,8 +66,9 @@ def transcript_lines(name, cwd, lines=None):
 
 
 def write_sessions(lines=None):
-    """fixtures/sessions.json's sessions as this machine's Claude Code keeps them, each its age; the first's path."""
-    first = None
+    """fixtures/sessions.json's sessions as this machine's Claude Code keeps them, each its age; their paths, in the
+    fixture's order."""
+    paths = []
     now = time.time()
     for s in fixture("sessions.json")["sessions"]:
         cwd = folder(s["folder"])
@@ -85,8 +86,8 @@ def write_sessions(lines=None):
         with open(path, "w") as f:
             f.write("\n".join(recs) + "\n")
         os.utime(path, (now - s["ago"], now - s["ago"]))
-        first = first or path
-    return first
+        paths.append(path)
+    return paths
 
 
 def apply_settings():
@@ -114,13 +115,17 @@ def pick_header(win, s):
 
 
 def open_chat(app, sc):
-    path = write_sessions(sc.get("lines"))
+    shown = fixture("sessions.json")["sessions"][sc.get("session", 0)]
+    path = write_sessions(sc.get("lines"))[sc.get("session", 0)]
     win = app.window(S.opts(cwd=folder("garden")))
     info = baude.read_session_info(path)
     win.resume_session(info)
     T.wait_for(lambda: win.session_id == info["id"] and win.transcript.get_first_child() is not None, "its history")
     T.pump(0.8)
-    pick_header(win, fixture("sessions.json")["sessions"][0])
+    pick_header(win, shown)
+    if shown["state"] == "working":  # (at a turn, as tests/screenshots.py's 03-working)
+        win.set_busy(True)
+        T.pump(0.4)
     if sc.get("open"):
         for g in T.find(win, baude.ToolGroup):
             g.toggle.set_expanded(True)

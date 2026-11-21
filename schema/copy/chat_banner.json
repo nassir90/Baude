@@ -1,0 +1,12 @@
+{
+  "description": "The strip over a chat that says what's in its way from outside it.",
+  "messages": {
+    "missing": "{$name} no longer has this chat",
+    "missing_because": "{$name} couldn't take this chat up again: {$reason}",
+    "new_chat": "New chat",
+    "api_status": "The API returned {$status}",
+    "api_silent": "The API didn't answer",
+    "retrying": "{$what}: retrying",
+    "retrying_attempt": "{$what}: retrying, attempt {$attempt} of {$max}"
+  }
+}

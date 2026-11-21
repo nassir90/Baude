@@ -95,6 +95,7 @@ class Chat(hostId: String, sid: String) {
     var reading = false
     var again = false
     var sender: ((String, List<Picked>) -> Unit)? = null // (one that's sent its own way: Meta's)
+    val chrome = Chrome() // (what its status bar, banner and stop button keep)
 
     fun send(text: String, files: List<Picked>) = sender?.invoke(text, files) ?: Mesh.send(this, text, files)
 }
@@ -594,7 +595,10 @@ object Mesh {
      * shown to answer). */
     private fun attach(chat: Chat) {
         conns[chat.hostId]?.request(Msg.Attach(session = chat.sid, live = true, answers = visible).json()) { r ->
+            if (r.optString("op") == Op.ERROR && Msg.Error.from(r).said.orEmpty().startsWith("no session"))
+                main.post { chat.chrome.missing.value = true } // (its host there, but with no such session)
             if (r.optString("op") != Op.ATTACHED) return@request
+            main.post { chat.chrome.missing.value = false }
             val asks = Msg.Attached.from(r).asks.orEmpty().mapNotNull(Ask::of)
             main.post {
                 if (open !== chat) return@post

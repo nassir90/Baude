@@ -1,5 +1,5 @@
 {
-  "description": "The scenes both rigs draw from the fixtures, by the same names: tests/parity/desktop.py for Baude, android/.../screenshots/Parity.kt for the phone. chat scenes open fixtures/sessions.json's first session with only the first `lines` lines of its transcript (all of them when absent); `open` opens every tool call's input and output where the app can. `inventory` names the schema/ui entries the scene shows.",
+  "description": "The scenes both rigs draw from the fixtures, by the same names: tests/parity/desktop.py for Baude, android/.../screenshots/Parity.kt for the phone. chat scenes open fixtures/sessions.json's first session, or the `session`th (from 0), with only the first `lines` lines of its transcript (all of them when absent); a session whose state is `working` is shown at a turn; `open` opens every tool call's input and output where the app can. `inventory` names the schema/ui entries the scene shows.",
   "scenes": [
     {"name": "home", "what": "The sessions list, no chat open", "inventory": ["Sidebar.region", "GroupByMenu.menu"]},
     {"name": "chat-bash", "what": "A failed command with its output, after thinking", "lines": 3, "inventory": ["ToolCall.element", "Thinking.element", "UserTurn.element"]},
@@ -14,6 +14,7 @@
     {"name": "chat-web-mcp", "what": "WebFetch and an MCP tool", "lines": 22, "inventory": ["ToolCall.element"]},
     {"name": "chat-web-mcp-open", "what": "The same, opened", "lines": 22, "open": true, "inventory": ["ToolCall.element"]},
     {"name": "chat-end", "what": "The whole chat, at its end", "inventory": ["UserTurn.element", "Reply.element", "Composer.region", "StatusBar.region", "HeaderBar.region"]},
+    {"name": "chat-working", "what": "A chat at a turn: fixtures/sessions.json's second session, working", "session": 1, "inventory": ["Composer.region", "StatusBar.region", "HeaderBar.region"]},
     {"name": "menu", "what": "The chat's main menu open (☰ on the desktop)", "inventory": ["MainMenu.menu"]},
     {"name": "settings", "what": "Settings", "inventory": ["Settings.dialog", "MetaSettings.dialog"]},
     {"name": "changelog", "what": "The changelog of the running version", "inventory": ["Changelog.dialog"]},

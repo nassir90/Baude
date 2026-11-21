@@ -165,8 +165,12 @@ fun chatColumn(w: Dp): Dp {
     }
 }
 
-/** An icon's size at Icon Scale (widgets.set_scale's icon_scale: 16 px at 1.0). */
-val Dp.icon: Dp get() = this * Settings.iconScale.value
+/** An icon's size, given in Baude's px, at Icon Scale (widgets.set_scale's icon_scale: 16 px at 1.0). Baude draws its icons
+ * beside its 12 px system text (GTK on macOS: 12 pt at 72 dpi); the phone's text is Tokens.Font.body, so its icons
+ * grow by the same ratio and keep their size against the words beside them. */
+val Dp.icon: Dp get() = this * (Tokens.Font.body.value / BAUDE_TEXT_PX) * Settings.iconScale.value
+
+private const val BAUDE_TEXT_PX = 12f
 
 /** ⋮ → Settings…, as Baude's Settings, its groups in its order: Meta's, Full-width text, Code Font, the accent and
  * whether it's light or dark, how updates download, notifications and the version; the sizes; Send Feedback…. */

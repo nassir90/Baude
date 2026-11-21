@@ -165,7 +165,7 @@ fun SideQuestionsPage(chat: Chat) {
         if (chat.btw.isNotEmpty()) BoxedList(chat.btw.toList(), "") { sq ->
             ActionRow(sq.question, sq.thread.getOrNull(1)?.text?.lines()?.firstOrNull(), onClick = { shown = sq },
                 prefix = if (sq.status.value != "done") ({ AgentStatus(if (sq.status.value == "error") "failed" else sq.status.value) }) else null,
-                suffix = { androidx.compose.material3.Icon(Adwaita.GoNext, null, tint = c.dim) })
+                suffix = { androidx.compose.material3.Icon(Adwaita.GoNext, null, tint = c.dim, modifier = Modifier.size(16.dp.icon)) })
         }
     }
 }

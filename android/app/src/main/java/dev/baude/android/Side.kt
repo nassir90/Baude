@@ -134,7 +134,7 @@ fun SubagentsPage(chat: Chat) {
         Scrolled {
             BoxedList(chat.agents.toList(), Wording.SidePanel.noSubagents) { agent ->
                 ActionRow(agent.description, describe(agent), onClick = { shown = agent }, prefix = { AgentStatus(agent.status.value) },
-                    suffix = { Icon(Adwaita.GoNext, null, tint = LocalBaude.current.dim) })
+                    suffix = { Icon(Adwaita.GoNext, null, tint = LocalBaude.current.dim, modifier = Modifier.size(16.dp.icon)) })
             }
         }
         return

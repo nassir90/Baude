@@ -132,7 +132,7 @@ fun IconButton(icon: ImageVector, label: String, enabled: Boolean = true, tint: 
             .then(if (tip != null) Modifier.tip(tip) { if (enabled) onClick() } else Modifier.clickable(enabled = enabled, onClick = onClick)),
         contentAlignment = Alignment.Center,
     ) {
-        Icon(icon, label, tint = (tint ?: c.fg).copy(alpha = if (enabled) 1f else 0.4f), modifier = Modifier.size(18.dp.icon))
+        Icon(icon, label, tint = (tint ?: c.fg).copy(alpha = if (enabled) 1f else 0.4f), modifier = Modifier.size(16.dp.icon))
     }
 }
 

@@ -52,7 +52,9 @@ class MainActivity : ComponentActivity() {
                     "phone" -> PhoneScreen(::back, open = { go(listOf("chat", "phone", it)) }, make = { go(listOf("new-agent")) })
                     "new-agent" -> NewAgentScreen({ go(listOf("phone")) }) { go(listOf("chat", "phone", it)) }
                     "feedback" -> FeedbackScreen(feedbackContext(now), ::back)
-                    "settings" -> SettingsScreen(::back, feedback = { go(listOf("feedback")) })
+                    "settings" -> SettingsScreen(::back, feedback = { go(listOf("feedback")) },
+                        versions = { go(listOf("mesh-versions")) })
+                    "mesh-versions" -> MeshVersionsScreen(::back)
                     else -> Home(open = { h, s -> go(listOf("chat", h, s)) }, hosts = { go(listOf("hosts")) },
                         feedback = { go(listOf("feedback")) }, phone = { go(listOf("phone")) },
                         settings = { go(listOf("settings")) },
@@ -108,6 +110,10 @@ class MainActivity : ComponentActivity() {
         }
         if (now[0] == "feedback" && now.size == 3) { // (back to the chat it was sent from)
             screen.value = listOf("chat", now[1], now[2])
+            return
+        }
+        if (now[0] == "mesh-versions") { // (back to Settings, which it's opened from)
+            screen.value = listOf("settings")
             return
         }
         if (now[0] == "chat") Mesh.close()

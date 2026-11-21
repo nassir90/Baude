@@ -89,6 +89,7 @@ import viewers  # noqa: E402  (Baude's viewers, in Record's window: beside this 
 from codeview import FindInText, find_in_focus  # noqa: E402  (⌘F on a page of notes: the Code page's find bar)
 import update  # noqa: E402  (a new version from git, restarted onto once idle, as Baude's: beside this file)
 baudelib.wire.HEAD_COMMIT = update.STARTED  # (said to the host processes it reaches: logged by one on other code)
+baudelib.wire.HEAD_CLIENT = "record"  # (listed as Record among the apps connected to a host)
 import meta  # noqa: E402  (Meta, the helper in the right bar: Baude's too, beside this file)
 import spelling  # noqa: E402  (the pages' spelling and grammar, as they're written: beside this file)
 
@@ -7314,6 +7315,7 @@ class Settings(Adw.PreferencesDialog):
         group.add(widgets.notifications_row())  # (Baude's too)
         self.version_row = update.version_row()
         group.add(self.version_row)
+        group.add(widgets.mesh_versions_row(network()))  # (Baude's too)
         spell = widgets.settings_switch("Check Spelling", spelling.about(), "win.spellcheck")
         spelling.when_made(lambda: spell.set_subtitle(spelling.about()))  # (said once it's known)
         group.add(spell)

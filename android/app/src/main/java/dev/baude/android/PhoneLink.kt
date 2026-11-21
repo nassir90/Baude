@@ -324,9 +324,11 @@ object PhoneLink {
     private fun hello() = Msg.HostHello(id = PhoneHost.id, name = PhoneHost.name, group = PhoneHost.name,
         host = PhoneHost.name, dial = false)
 
-    /** Its record, as the mesh has a member's: who it is, its providers (none: it serves no models), its links. */
+    /** Its record, as the mesh has a member's: who it is, its providers (none: it serves no models), the code it
+     * runs (the app's: no apps connect to it), its links. */
     private fun record() = Msg.Record(id = PhoneHost.id, seq = seq, info = Msg.MemberInfo(id = PhoneHost.id,
-        name = PhoneHost.name, group = PhoneHost.name, host = PhoneHost.name, dial = false, providers = emptyList()),
+        name = PhoneHost.name, group = PhoneHost.name, host = PhoneHost.name, dial = false, providers = emptyList(),
+        commit = BuildConfig.COMMIT.ifEmpty { null }, made = BuildConfig.MADE.takeIf { it > 0 }, heads = emptyList()),
         links = links.values.mapNotNull { it.peer }.distinct().sorted())
 
     /** Its record, anew (its links changed), to every link. */
@@ -339,7 +341,8 @@ object PhoneLink {
     private fun Number?.whole(): Long? = (this as? Int)?.toLong() ?: this as? Long
 
     /** A member's record as it came, if it's one, cut to size (mesh._record): {id, seq, info, links}, info a host's
-     * hello (_hello_of) with its providers as the mesh is told of them (published). */
+     * hello (_hello_of) with its providers as the mesh is told of them (published), and the code it runs and the
+     * apps connected to it run (versions_of). */
     private fun cut(o: JSONObject): Msg.Record? {
         val r = Msg.Record.from(o)
         val id = r.id?.takeIf(::isId) ?: return null
@@ -359,9 +362,21 @@ object PhoneLink {
         }.orEmpty()
         val info = Msg.MemberInfo(id = id, name = (text("name", 64)?.ifEmpty { null } ?: id.take(8)),
             group = text("group", 64).orEmpty(), host = text("host", 255).orEmpty(), version = (i.version.whole() ?: 0L),
-            bonjour = text("bonjour", 255), dial = if (raw.opt("dial") == false) false else null, providers = providers)
+            bonjour = text("bonjour", 255), dial = if (raw.opt("dial") == false) false else null, providers = providers,
+            commit = commit(raw.opt("commit")), made = made(raw.opt("made")),
+            heads = raw.optJSONArray("heads")?.let { a ->
+                (0 until minOf(a.length(), 32)).mapNotNull { a.optJSONObject(it) }.mapNotNull { h ->
+                    (h.opt("client") as? String)?.ifEmpty { null }?.let {
+                        Msg.Head(client = it.take(32), commit = commit(h.opt("commit")), made = made(h.opt("made")))
+                    }
+                }
+            }.orEmpty())
         return Msg.Record(id = id, seq = seq, info = info, links = (r.links.orEmpty().take(256).filter(::isId).toSortedSet().toList()))
     }
+
+    private fun commit(v: Any?) = (v as? String)?.takeIf { Regex("[0-9a-f]{7,64}").matches(it) }
+
+    private fun made(v: Any?) = (v as? Number).whole()?.takeIf { it > 0 }
 
     /** A model as the mesh is told of it (mesh._model). */
     private fun model(o: JSONObject): Msg.ProviderModel? {

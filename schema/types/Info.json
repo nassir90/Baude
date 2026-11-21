@@ -57,6 +57,21 @@
       "type": ["string", "null"],
       "description": "The git commit its code was as it started (null: not a checkout)."
     },
+    "made": {
+      "type": ["integer", "null"],
+      "description": "When that commit was made, in seconds (null: not a checkout)."
+    },
+    "behind": {
+      "type": ["integer", "null"],
+      "description": "How many commits it lacks of the mesh's newest code (mesh's newest), as its git counts them (null: it can't)."
+    },
+    "heads": {
+      "type": "array",
+      "items": {
+        "$ref": "Head.json"
+      },
+      "description": "The apps connected to it, by the code they run (each counted behind as its own commit is)."
+    },
     "update": {
       "anyOf": [
         {

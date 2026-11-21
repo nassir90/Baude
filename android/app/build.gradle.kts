@@ -43,6 +43,8 @@ fun version(): Pair<Int, String> {
 }
 val (appVersionCode, appVersionName) = version()
 val appCommitTime = if (findProperty("baudeVersionCode") != null) "0" else git("log", "-1", "--format=%ct") ?: "0"
+/** The commit it's built from, whole ("" outside a checkout): said in its hello, as Baude's is (Mesh Versions). */
+val appCommit = if (findProperty("baudeVersionCode") != null) "" else git("rev-parse", "HEAD") ?: ""
 
 android {
     namespace = "dev.baude.android"
@@ -55,6 +57,8 @@ android {
         versionCode = appVersionCode // (version(): from git)
         versionName = appVersionName
         resValue("string", "commit_time", appCommitTime) // (Settings → Version's when: the commit's, in seconds)
+        buildConfigField("String", "COMMIT", "\"$appCommit\"")
+        buildConfigField("long", "MADE", "${appCommitTime}L")
     }
 
     buildTypes {
@@ -68,6 +72,7 @@ android {
     }
     buildFeatures {
         compose = true
+        buildConfig = true // (BuildConfig.COMMIT, MADE: the commit it's built from)
     }
     testOptions {
         unitTests {

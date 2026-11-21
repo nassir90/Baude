@@ -116,6 +116,8 @@ object Mesh {
     val key = mutableStateOf<Key?>(null)
     val keyError = mutableStateOf<String?>(null) // (why the Keystore's key couldn't be read, or made: none made then)
     val making = mutableStateOf(false) // (a key being made, off the main thread)
+    val infos = mutableStateMapOf<String, Msg.Info>() // (a host of yours: what its host process last said it is,
+    // its mesh too: Mesh Versions)
     val members = mutableStateMapOf<String, Pair<Msg.Member, String?>>() // (a member of a host's mesh, by its id: its
     // record, as the host it's reached through lists it (id, name, host, hops, through), and that host's label)
     @Volatile private var routes = emptyMap<String, Connection>() // (a member: the host that's up and reaches it in
@@ -336,6 +338,12 @@ object Mesh {
 
     fun conn(hostId: String): Connection? = conns[hostId]
 
+    /** The mesh as one of your hosts that's up says it is (the first in your list), for Mesh Versions: what its host
+     * process is, and its mesh's members, each with the apps connected to it; null with none up. */
+    fun versions(): Msg.Info? = hosts.firstNotNullOfOrNull { h ->
+        infos[h.id]?.takeIf { states[h.id]?.state == "up" && it.mesh != null }
+    }
+
     /** A request to a host, its reply on the main thread (an error one if it isn't connected). */
     fun ask(hostId: String, msg: JSONObject, then: (JSONObject) -> Unit) {
         val c = conns[hostId]
@@ -389,7 +397,10 @@ object Mesh {
                     vanished(c, now)
                     listing.server?.let { // (its mesh as it is now)
                         c.info = it
-                        if (c.place is Place.Direct) meshed()
+                        if (c.place is Place.Direct) {
+                            infos[c.id] = it
+                            meshed()
+                        }
                     }
                     if (catchUp.remove(c.id) && before != null) missed(c, before, now)
                     asked(c, before, now)

@@ -12938,6 +12938,7 @@ class SettingsDialog(Adw.PreferencesDialog):
         group.add(widgets.notifications_row())  # (Record's too)
         self.version_row = update.version_row()
         group.add(self.version_row)
+        group.add(widgets.mesh_versions_row(network()))  # (Record's too)
         page.add(group)
         sizes = Adw.PreferencesGroup(title=wording.say("window.size"))
         self.text_row = self.size_row(wording.say("meta_settings.text_scale"), None, scale_setting("text_scale"),

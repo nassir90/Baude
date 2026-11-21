@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "An app connected to a host process (one that's subscribed: Baude, Record, the Android app; or an Emission there), by the code it runs. Those on the same code are one.",
+  "properties": {
+    "client": {
+      "type": "string",
+      "description": "What it is, as its hello says (baude, record, emission, baude-android, ...)."
+    },
+    "commit": {
+      "type": ["string", "null"],
+      "description": "The commit its code is, as its hello says (null: it didn't say)."
+    },
+    "made": {
+      "type": ["integer", "null"],
+      "description": "When that commit was made, in seconds, as the host's git has it (null: it hasn't it)."
+    },
+    "behind": {
+      "type": ["integer", "null"],
+      "description": "In a host's info only: how many commits it lacks of the mesh's newest code (MeshView's newest), as that host's git counts them (null: it can't)."
+    }
+  },
+  "required": ["client"],
+  "additionalProperties": false
+}

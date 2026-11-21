@@ -288,7 +288,7 @@ open class Connection(
         out = stream
         var reached = false
         val hello = {
-            request(Msg.Hello(client = "baude-android").json()) { reply ->
+            request(Msg.Hello(client = "baude-android", commit = BuildConfig.COMMIT.ifEmpty { null }).json()) { reply ->
                 val server = Msg.HelloReply.from(reply).server
                 when {
                     reply.optString("op") != Op.HELLO -> {

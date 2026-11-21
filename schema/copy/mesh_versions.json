@@ -1,0 +1,19 @@
+{
+  "description": "Settings → Mesh Versions, in Baude, Record and the Android app: the code each host's daemon in the mesh runs, and each app connected to it (Baude, Record, Emission, the Android app), against the newest in the mesh.",
+  "messages": {
+    "title": "Mesh Versions",
+    "all_newest": "Every host and app on the newest code",
+    "some_behind": ".input {$n :number} .match $n one {{{$n} host or app behind the newest code}} * {{{$n} hosts or apps behind the newest code}}",
+    "none": "Not connected to a host process",
+    "against": "Measured against the newest code in the mesh: {$commit}, {$made}",
+    "this_machine": "{$host} · this machine",
+    "baude": "Baude",
+    "record": "Record",
+    "emission": "Emission",
+    "android": "Android",
+    "newest": "Newest",
+    "behind": ".input {$n :number} .match $n one {{{$n} commit behind}} * {{{$n} commits behind}}",
+    "older": "Older code",
+    "commit_made": "{$commit} · {$made}"
+  }
+}

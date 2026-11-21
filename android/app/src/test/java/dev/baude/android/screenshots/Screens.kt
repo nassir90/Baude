@@ -5,6 +5,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.runtime.Composable
 import com.github.takahirom.roborazzi.captureRoboImage
+import com.github.takahirom.roborazzi.captureScreenRoboImage
 import dev.baude.android.Artifact
 import dev.baude.android.BaudeTheme
 import dev.baude.android.Chat
@@ -18,6 +19,8 @@ import dev.baude.android.Key
 import dev.baude.android.Mesh
 import dev.baude.android.MeshScreen
 import dev.baude.android.Msg
+import dev.baude.android.NewSession
+import dev.baude.android.PhoneHost
 import dev.baude.android.Settings
 import dev.baude.android.SettingsScreen
 import dev.baude.android.Update
@@ -63,6 +66,7 @@ abstract class Screens(private val theme: String) {
     }
 
     @After fun down() {
+        PhoneHost.id = ""
         FixtureConnection.down()
         Mesh.hosts.clear()
         Mesh.sessions.clear()
@@ -97,8 +101,32 @@ abstract class Screens(private val theme: String) {
         render("06-mesh") { MeshScreen {} }
     }
 
+    @Test fun meshRename() {
+        versionsFixture()
+        show { MeshScreen {} }
+        tap("Menu")
+        tap("Rename…")
+        screen("06-mesh-rename")
+    }
+
+    @Test fun meshRemove() {
+        versionsFixture()
+        show { MeshScreen {} }
+        tap("Menu")
+        tap("Remove…")
+        screen("06-mesh-remove")
+    }
+
+    @Test fun newSessionHosts() {
+        versionsFixture()
+        show { NewSession(null, null, done = {}, opened = { _, _ -> }) }
+        tap("workshop")
+        menu("19-new-session-hosts")
+    }
+
     /** The mesh as workshop says it is: it, and two members on older code (one 45 commits behind, one whose count
-     * it can't make), with the apps connected to each, and one not reached now. */
+     * it can't make), with the apps on each, and this phone; one not reached now; and lantern, a host of yours that
+     * isn't up. */
     private fun versionsFixture() {
         val newest = "6be704e2dc23f0730cc73e2586db5561b1f4cd77"
         val older = "795a6cfd98c7e2517c183787ae4631ae75d39ff5"
@@ -107,15 +135,20 @@ abstract class Screens(private val theme: String) {
         val made = 1_795_247_995L
         fun head(client: String, commit: String?, at: Long?, behind: Long?) =
             Msg.Head(client = client, commit = commit, made = at, behind = behind)
+        PhoneHost.id = "p1"
         Mesh.states["h1"] = Mesh.conn("h1")!!
         Mesh.infos["h1"] = Msg.Info(id = "h1", name = "workshop", host = "workshop.local", commit = newest, made = made,
-            behind = 0, heads = listOf(head("baude", newest, made, 0), head("baude-android", newest, made, 0)),
+            behind = 0, heads = listOf(head("baude", newest, made, 0)),
             mesh = Msg.MeshView(newest = newest, members = listOf(
                 Msg.Member(id = "m1", name = "studio", host = "studio.local", commit = older, made = made - day, behind = 45,
                     heads = listOf(head("record", older, made - day, 45), head("emission", newest, made, 0))),
                 Msg.Member(id = "m2", name = "attic", host = "attic.local", commit = oldest, made = made - 3 * day,
                     behind = null, heads = listOf(head("baude", null, null, null))),
+                Msg.Member(id = "p1", name = "Phone", host = "Phone", dial = false, commit = older, made = made - day, behind = 45),
             ), gone = listOf(Msg.Gone(id = "m3", name = "cellar"))))
+        val lantern = Host(id = "h2", name = "lantern", user = "dev", address = "lantern.example")
+        Mesh.hosts.add(lantern)
+        FixtureConnection.up(activity, lantern).state = "down"
     }
 
     @Test fun settingsPicked() {
@@ -214,6 +247,49 @@ abstract class Screens(private val theme: String) {
     private fun render(name: String, screen: @Composable () -> Unit) {
         show(screen)
         activity.window.decorView.captureRoboImage("build/screenshots/$theme/$name.png")
+    }
+
+    /** What's on the screen, its dialogs too. */
+    private fun screen(name: String) = captureScreenRoboImage("build/screenshots/$theme/$name.png")
+
+    /** The menu that's up (a window of its own), alone. */
+    private fun menu(name: String) {
+        val wm = Class.forName("android.view.WindowManagerGlobal").getMethod("getInstance").invoke(null)
+        @Suppress("UNCHECKED_CAST")
+        val views = wm.javaClass.getDeclaredField("mViews").apply { isAccessible = true }.get(wm) as List<android.view.View>
+        val v = views.last()
+        val bitmap = android.graphics.Bitmap.createBitmap(v.width, v.height, android.graphics.Bitmap.Config.ARGB_8888)
+        v.draw(android.graphics.Canvas(bitmap))
+        java.io.File("build/screenshots/$theme").mkdirs()
+        java.io.File("build/screenshots/$theme/$name.png").outputStream().use {
+            bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it)
+        }
+    }
+
+    /** The nth thing on screen (its dialogs and menus too) whose words or description are label tapped, as Compose's
+     * semantics have it (its click action). */
+    private fun tap(label: String, nth: Int = 0) {
+        val wm = Class.forName("android.view.WindowManagerGlobal").getMethod("getInstance").invoke(null)
+        @Suppress("UNCHECKED_CAST")
+        val views = wm.javaClass.getDeclaredField("mViews").apply { isAccessible = true }.get(wm) as List<android.view.View>
+        fun roots(v: android.view.View): List<androidx.compose.ui.node.RootForTest> = when (v) {
+            is androidx.compose.ui.node.RootForTest -> listOf(v)
+            is android.view.ViewGroup -> (0 until v.childCount).flatMap { roots(v.getChildAt(it)) }
+            else -> emptyList()
+        }
+        fun all(n: androidx.compose.ui.semantics.SemanticsNode): List<androidx.compose.ui.semantics.SemanticsNode> =
+            listOf(n) + n.children.flatMap { all(it) }
+        fun hits() = views.drop(views.indexOf(activity.window.decorView)).flatMap(::roots) // (this test's windows)
+            .flatMap { all(it.semanticsOwner.rootSemanticsNode) }.filter { n ->
+                val c = n.config
+                c.contains(androidx.compose.ui.semantics.SemanticsActions.OnClick) &&
+                    (c.getOrElse(androidx.compose.ui.semantics.SemanticsProperties.Text) { emptyList() }.any { it.text == label } ||
+                        c.getOrElse(androidx.compose.ui.semantics.SemanticsProperties.ContentDescription) { emptyList() }.contains(label))
+            }
+        repeat(20) { if (hits().size <= nth) settle() } // (a menu that's opening: once it's up)
+        hits()[nth].config[androidx.compose.ui.semantics.SemanticsActions.OnClick].action!!.invoke()
+        androidx.compose.runtime.snapshots.Snapshot.sendApplyNotifications() // (what it changed: composed again)
+        settle()
     }
 
     private fun show(screen: @Composable () -> Unit) {

@@ -677,15 +677,16 @@ class Server:
         return self.made_at[commit]
 
     def versions(self):
-        """The code it runs and the apps connected to it by theirs, for its record (mesh.Mesh.mine)."""
+        """The code it runs and the apps on this machine connected to it by theirs, for its record (mesh.Mesh.mine)."""
         return {"commit": self.commit, "made": self.made, "heads": self.heads}
 
     def heads_look(self):
-        """The apps connected here looked at again (a head's subscribed, or gone; an Emission's come or gone): the
-        mesh told of a change, and heads here. (Not with the lock held.)"""
+        """The apps on this machine connected here looked at again (a head's subscribed, or gone; an Emission's come
+        or gone): the mesh told of a change, and heads here. (Not with the lock held.)"""
         with self.lock:
+            # (a tunnel's is its own host's; one over ssh is its own machine's host's, there)
             seen = {(c.head["client"], c.head["commit"]) for c in self.conns
-                    if c.subscribed and getattr(c, "head", None) and c.origin is None}  # (a tunnel's: its own host's)
+                    if c.subscribed and getattr(c, "head", None) and c.head["here"] and c.origin is None}
         seen |= {(e["client"], e["commit"]) for e in self.emissions}
         heads = [{"client": client, "commit": commit, "made": self.made_of(commit)}
                  for client, commit in sorted(seen, key=lambda h: (h[0], h[1] or ""))]
@@ -1177,8 +1178,9 @@ class Server:
             if isinstance(head, str) and self.commit and head != self.commit and head not in self.heads_apart:
                 self.heads_apart.add(head)
                 self.log(f"a head on {head[:12]} connected; this is on {self.commit[:12]}")
-            if msg.get("client") in APPS:  # (listed as connected here once it subscribes)
-                conn.head = {"client": msg["client"][:32], "commit": mesh.versions_of({"commit": head})["commit"]}
+            if msg.get("client") in APPS:  # (listed as connected here once it subscribes, if it's on this machine)
+                conn.head = {"client": msg["client"][:32], "commit": mesh.versions_of({"commit": head})["commit"],
+                             "here": msg.get("here") is True}
             return reply("hello", server=self.info())
         if op == "subscribe":
             if not conn.subscribed:  # (a head's come: this machine's model providers looked at again, for it)

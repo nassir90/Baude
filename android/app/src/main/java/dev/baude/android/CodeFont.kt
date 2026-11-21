@@ -1,7 +1,5 @@
 package dev.baude.android
 
-import android.app.AlarmManager
-import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import androidx.compose.ui.text.font.Font
@@ -62,12 +60,16 @@ object CodeFont {
         }
     }
 
-    /** The app started again: launched anew in a moment, this process ended. */
-    fun restart(ctx: Context) {
+    /** The app started again, where it was (the chat open: its host and session): its launch intent started from the
+     * foreground activity, then this process ended. */
+    fun restart(ctx: Context, chat: List<String> = emptyList()) {
         val launch = ctx.packageManager.getLaunchIntentForPackage(ctx.packageName)
             ?.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK) ?: return
-        val again = PendingIntent.getActivity(ctx, 0, launch, PendingIntent.FLAG_CANCEL_CURRENT or PendingIntent.FLAG_IMMUTABLE)
-        ctx.getSystemService(AlarmManager::class.java).set(AlarmManager.RTC, System.currentTimeMillis() + 300, again)
+        if (chat.size == 2) launch.putExtra("host", chat[0]).putExtra("session", chat[1])
+        ctx.startActivity(launch)
+        var a = ctx
+        while (a is android.content.ContextWrapper && a !is android.app.Activity) a = a.baseContext
+        (a as? android.app.Activity)?.finish()
         Runtime.getRuntime().exit(0)
     }
 }

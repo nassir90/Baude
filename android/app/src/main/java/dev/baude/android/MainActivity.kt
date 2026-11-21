@@ -21,6 +21,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        Settings.load(this)
         Mesh.start(this)
         HomePrefs.load(this)
         Outbox.start() // (feedback not filed yet: tried again)
@@ -57,7 +58,7 @@ class MainActivity : ComponentActivity() {
                     "feedback" -> FeedbackScreen(feedbackContext(now), ::back)
                     "settings" -> SettingsScreen(::back, feedback = {
                         go(if (now.size == 3) listOf("feedback", now[1], now[2]) else listOf("feedback"))
-                    })
+                    }, chat = now.drop(1))
                     "changelog" -> ChangelogScreen(null, ::back)
                     "mesh" -> MeshScreen(::back)
                     else -> Home(open = { h, s -> go(listOf("chat", h, s)) }, hosts = { go(listOf("hosts")) },

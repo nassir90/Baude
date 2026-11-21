@@ -44,7 +44,6 @@ fun MainMenu(items: List<MenuItem>) {
 @Composable
 private fun fullWidth(): MenuItem {
     val ctx = LocalContext.current
-    Settings.load(ctx)
     return MenuItem(Wording.MetaSettings.fullWidth, Settings.fullWidth.value) {
         Settings.fullWidth.value = !Settings.fullWidth.value
         Settings.save(ctx)
@@ -56,13 +55,12 @@ private fun fullWidth(): MenuItem {
 @Composable
 fun ChatMenu(hostId: String, sid: String, feedback: () -> Unit, screen: (String) -> Unit) {
     val ctx = LocalContext.current
-    Settings.load(ctx)
-    MainMenu(listOf(
+    MainMenu(listOfNotNull(
         MenuItem(Wording.Window.settings) { screen("settings") },
         MenuItem(Wording.Changelog.title) { screen("changelog") },
         MenuItem(Wording.MeshVersions.title) { screen("mesh") },
         fullWidth(),
-        MenuItem(Wording.Window.readOnly, Settings.isReadOnly(sid)) {
+        if (sid.isEmpty()) null else MenuItem(Wording.Window.readOnly, Settings.isReadOnly(sid)) {
             if (sid in Settings.readOnly) Settings.readOnly.remove(sid) else Settings.readOnly.add(sid)
             Settings.save(ctx)
         },

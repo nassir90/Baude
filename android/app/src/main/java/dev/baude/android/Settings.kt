@@ -89,13 +89,14 @@ object Settings {
         iconScale.value = p.getFloat("icon_scale", 1f)
         globalScale.value = p.getFloat("global_scale", 1f)
         fullWidth.value = p.getBoolean("full_width", true)
-        readOnly.clear()
-        p.getString("read_only_sessions", null)?.let { j ->
-            try {
-                val a = JSONArray(j)
-                for (i in 0 until a.length()) readOnly.add(a.getString(i))
-            } catch (_: Exception) {
-            }
+        val sessions = try {
+            p.getString("read_only_sessions", null)?.let { j -> JSONArray(j).let { a -> (0 until a.length()).map(a::getString) } }
+        } catch (_: Exception) {
+            null
+        }.orEmpty()
+        if (sessions != readOnly.toList()) {
+            readOnly.clear()
+            readOnly.addAll(sessions)
         }
         metaModel.value = p.getString("meta_model", null)
         metaEffort.value = p.getString("meta_effort", null)
@@ -170,10 +171,9 @@ val Dp.icon: Dp get() = this * Settings.iconScale.value
 /** ⋮ → Settings…, as Baude's Settings, its groups in its order: Meta's, Full-width text, Code Font, the accent and
  * whether it's light or dark, how updates download, notifications and the version; the sizes; Send Feedback…. */
 @Composable
-fun SettingsScreen(back: () -> Unit, feedback: () -> Unit) {
+fun SettingsScreen(back: () -> Unit, feedback: () -> Unit, chat: List<String> = emptyList()) {
     val c = LocalBaude.current
     val ctx = LocalContext.current
-    Settings.load(ctx)
     val save = { Settings.save(ctx) }
     Column(Modifier.fillMaxSize().background(c.frame)) {
         Bar(Wording.Window.settingsTitle, start = { IconButton(Adwaita.GoPrevious, Wording.Browser.back, onClick = back) })
@@ -192,7 +192,7 @@ fun SettingsScreen(back: () -> Unit, feedback: () -> Unit) {
                         subtitle = if (shown == CodeFont.running) null
                             else Wording.SharedSettings.codeFontNextStart(font = shown, app = Wording.MeshVersions.baude),
                         before = if (shown == CodeFont.running) null else ({
-                            Button(Wording.SharedSettings.restart) { CodeFont.restart(ctx) }
+                            Button(Wording.SharedSettings.restart) { CodeFont.restart(ctx, chat) }
                         })) {
                         Settings.codeFont.value = it
                         save()

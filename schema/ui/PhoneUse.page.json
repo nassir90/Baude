@@ -99,11 +99,11 @@
     },
     {
       "name": "Use by hand",
-      "shows": "You can use the browser as well as the Bot; what you do (addresses, back/forward/reload, tabs, touching the page, answering a page's prompt) is told to the Bot with its next request. The Bot is also told its browser is on a phone, and after a restart by Android which pages were closed."
+      "shows": "You can use the browser as well as the Bot; what you do (addresses, back/forward/reload, tabs, touching the page, answering a page's prompt) is told to the Bot with its next request. The Bot is also told its browser is on a phone, and which pages it opened again."
     },
     {
       "name": "Closing",
-      "shows": "The phone's back or the notification's Close ends it; the Bot's host is told, and the Bot's browser requests go to the host's own Emission again. It keeps serving out of sight (with a notification) while the app is elsewhere. Its cookies and sign-ins are kept per Bot."
+      "shows": "The phone's back or the notification's Close ends it; the Bot's host is told, and the Bot's browser requests go to the host's own Emission again. It keeps serving out of sight (with a notification) while the app is elsewhere. Its cookies and sign-ins are kept per Bot. Opened again for the same Bot (or started again by Android), it opens the tabs it had, in their order, with the one in front in front again, as the desktop's Bot browser does; with none, one blank tab."
     },
     {
       "name": "Browser page, on a phone",

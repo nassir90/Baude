@@ -224,6 +224,10 @@
       "shows": "Live page; tab strip if more than one tab; pointer and glow while the Bot acts (its host says it is working and acting)."
     },
     {
+      "name": "started again",
+      "shows": "A Bot's browser that starts again (gone unused for a while, Baude or its host restarted, or moved into Baude) opens the tabs it had, in their order, with the one in front in front again; with none, one blank tab."
+    },
+    {
       "name": "Bot busy in its own Emission",
       "shows": "A Bot's own Emission window on this Mac is not taken into Baude while it is in use (it is taken once it has been idle for 5 seconds); meanwhile the page is streamed and tried again every 10 seconds."
     },

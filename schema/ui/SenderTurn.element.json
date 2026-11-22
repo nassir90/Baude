@@ -6,7 +6,8 @@
   "opens": [
     "A Bot, another chat or a subagent messages this chat over the mesh",
     "A held message sent with its ↑ (HeldTurn)",
-    "Opening a chat whose host's sender store says a message is someone else's"
+    "Opening a chat whose host's sender store says a message is someone else's",
+    "A message from a Bot, another chat or a host sent to the open chat: appears as its agent is given it, as theirs from the start (the host says who it's from with it), placed as a message of yours sent from elsewhere is (UserTurn), mid-turn included. The phone shows it in the same place"
   ],
   "code": [
     "chatparts.py:SenderTurn",

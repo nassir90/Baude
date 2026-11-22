@@ -226,8 +226,8 @@ class Session:
         self.streamed = False     # (its agent's said what it writes as it writes it: stream_event)
         self.routines_out = set()  # (its routines sent at a turn, not yet over: not sent again till it is)
         self.waiting_init = []    # (conn, its request id): initialize asked before claude answered its own
-        self.queued = []          # (message, uuid) sent at a turn, kept once it's over (Server.keep)
-        self.codex_queue = []     # Codex runs each follow-up as a separate turn.
+        self.queued = []          # (message, uuid, conn that sent it) sent at a turn, kept once it's over (Server.keep)
+        self.codex_queue = []     # (msg, conn that sent it): Codex runs each follow-up as a separate turn.
         self.rewinds = {}         # request id sent on -> the record a revert keeps last (kept: its mark, once made)
         self.reverting = {}       # request id sent on -> the message a revert takes back (what it drops of Senders)
         self.senders = None       # (its sender store as it's kept, {uuid: sender}, once it's read: Server.senders)

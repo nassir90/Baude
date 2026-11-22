@@ -50,6 +50,6 @@ An entry or a part may carry:
 ## Rules every entry follows
 
 - **A Bot has only its Name.** Wherever an app lists or shows a Bot (a sidebar or home row, the open chat's header and
-  window title, a notification, This phone, a share target, the @ and ⌘K lists, a sender), it shows the Bot's name and
+  window title, a notification, the macOS menu bar item, This phone, a share target, the @ and ⌘K lists, Meta's lists, captions and trash button, a sender), it shows the Bot's name and
   nothing of the chat under it: no chat title, no second line. The name is set when the chat is made a Bot
   (BotSettings.dialog.json) and changed with Rename… or Bot Settings…. A new entry that shows a Bot says so.

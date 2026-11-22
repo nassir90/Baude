@@ -260,7 +260,7 @@ fun ChangeBox(batch: List<Action>) {
             val h = key.substringBeforeLast('/')
             val sid = key.substringAfterLast('/')
             val s = Mesh.session(h, sid)
-            val name = if (s != null) s.title?.ifBlank { null } ?: Wording.Common.untitled else sid.take(8)
+            val name = if (s != null) chatName(s) ?: Wording.Common.untitled else sid.take(8)
             val note = m.optString(3)
             Row(Modifier.clip(RoundedCornerShape(4.dp)).then(
                 if (s != null) Modifier.clickable { Meta.opener(h, sid) } else Modifier)

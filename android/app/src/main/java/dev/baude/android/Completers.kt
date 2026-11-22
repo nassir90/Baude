@@ -240,7 +240,7 @@ object MentionList {
         return chats + Catalogue.items(at, cwd)
     }
 
-    private fun named(s: Msg.Session): String? = s.bot?.name?.ifBlank { null } ?: s.title
+    private fun named(s: Msg.Session): String? = chatName(s)
 
     private fun item(r: Ref): Double? = r.at
 

@@ -27,6 +27,7 @@ from widgets import (  # noqa: E402,F401
 from pickers import TreeList, sidebar_action, ellipsize_dropdown  # noqa: E402,F401
 
 from startup import trace  # noqa: E402
+from baudelib.client import chat_name  # noqa: E402
 from sessionlist import (  # noqa: E402
     HERE_HOST, THIS_MACHINE, apply_desktop_index, bot_picture, chat_group, chat_groups, collapse_copies, date_group,
     desktop_index, desktop_parents, fork_tree, host_key, last_used, list_sessions, made_groups, main_folder, network,
@@ -1035,7 +1036,7 @@ class SessionSidebar(SidebarMenu, Gtk.Box):
         dot = StatusDot(self.win.session_state() if is_open else self.file_state(info))
         label = info.get("fork_label") if depth else None
         # (a title too long for the row fades out where it's cut: pickers.FadeLabel)
-        title = pickers.FadeLabel(label=label or info.get("title") or wording.say("common.untitled"), xalign=0,
+        title = pickers.FadeLabel(label=label or chat_name(info) or wording.say("common.untitled"), xalign=0,
                                   hexpand=True)
         if depth:
             title.add_css_class("fork-title")
@@ -1051,7 +1052,7 @@ class SessionSidebar(SidebarMenu, Gtk.Box):
         elif info.get("held"):
             box.append(self.held_tag())
         box.append(dot)
-        tip = [info.get("title") or "", info.get("cwd") or "", self.held_tip(info)]
+        tip = [chat_name(info) or "", info.get("cwd") or "", self.held_tip(info)]
         if r is not None:
             gone = ", deactivated" if info.get("off") else \
                 f", gone from the network since {time_ago(r.seen)}" if info.get("dead") and r.seen else ""

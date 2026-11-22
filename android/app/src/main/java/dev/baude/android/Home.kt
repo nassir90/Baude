@@ -478,10 +478,9 @@ private fun SessionRow(item: Item, through: Set<Int>, onClick: () -> Unit) {
             .pressed({ pressed = it }, onClick) { menu = true }
             .padding(start = 6.dp + 18.dp * item.depth, end = 4.dp, top = 1.dp, bottom = 1.dp),
             verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            val title = s.title?.ifBlank { null } ?: Wording.Common.untitled
-            val bot = item.bot?.name?.ifBlank { null }
+            val title = chatName(s) ?: Wording.Common.untitled
             val mark = metaMark(item.hostId, item.id)
-            Text(markedName(bot ?: title, mark?.how, mark != null), style = Type.body, color = if (dead || off) c.dim else c.fg,
+            Text(markedName(title, mark?.how, mark != null), style = Type.body, color = if (dead || off) c.dim else c.fg,
                 maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
             if (dead) Icon(Adwaita.NoConnection, Wording.Sidebar.noConnection, tint = c.dim, modifier = Modifier.size(16.dp.icon))
             else HeldTag(s)

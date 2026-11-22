@@ -24,6 +24,7 @@ from livefeed import TURN_OPEN_SECONDS, external_state, transcript_turn_open  # 
 import imageviews  # noqa: E402
 from widgets import load_settings, save_settings, toast  # noqa: E402,F401
 
+from baudelib.client import chat_name  # noqa: E402
 from sessionlist import (  # noqa: E402
     HERE_HOST, background_proc, bot_picture, can_be_bot, chat_group, host_key, network, remote_info, remote_name,
     stopping_said,
@@ -292,7 +293,7 @@ class SidebarMenu:
         body = wording.say("trash.body_copies", n=n, where=where) if n else wording.say("trash.body", where=where)
         if model_program(info.get("model")) == "codex":
             body += " " + wording.say("trash.codex_copy")
-        dlg = Adw.AlertDialog(heading=wording.say("trash.heading", title=info.get("title") or
+        dlg = Adw.AlertDialog(heading=wording.say("trash.heading", title=chat_name(info) or
                                                   wording.say("trash.this_session")), body=body,
                               default_response="cancel", close_response="cancel")
         dlg.add_response("cancel", wording.say("common.cancel"))

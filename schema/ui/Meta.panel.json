@@ -88,7 +88,7 @@
         },
         {
           "name": "change box",
-          "shows": "Replaces the tool card for a call that changed chats or pages. An outlined box with one line: what was done (the action labels joined with '; ', e.g. 'Moved 3 chats to group Work', 'Archived “x”', 'Renamed “a” to “b”', 'Made group X', 'Deleted 2 chats') and the batch controls at its end; dimmed and '<action> · undone' once undone. Under it each chat or page it changed as a flat button: its name (a chat's title; a page's name) highlighted as the left bar highlights it (green added, red removed and struck through, blue moved, yellow archived, purple edited, accent colour 'highlighted'), followed by an optional small note ('deleted', 'renamed', '→ Work', 'archived', 'back'). Highlights are only drawn while the action is done and not kept. Record: a page's edit hunks are drawn under the page's line (what it replaces on red, what it puts in on green).",
+          "shows": "Replaces the tool card for a call that changed chats or pages. Meta finds a chat by its id or its name (a Bot's name, else its title) and its captions say a chat by that name, on both apps. An outlined box with one line: what was done (the action labels joined with '; ', e.g. 'Moved 3 chats to group Work', 'Archived “x”', 'Renamed “a” to “b”', 'Made group X', 'Deleted 2 chats') and the batch controls at its end; dimmed and '<action> · undone' once undone. Under it each chat or page it changed as a flat button: its name (a chat's: a Bot's name, else its title; a page's name) highlighted as the left bar highlights it (green added, red removed and struck through, blue moved, yellow archived, purple edited, accent colour 'highlighted'), followed by an optional small note ('deleted', 'renamed', '→ Work', 'archived', 'back'). Highlights are only drawn while the action is done and not kept. Record: a page's edit hunks are drawn under the page's line (what it replaces on red, what it puts in on green).",
           "copy": ["meta_actions.setting_changed", "meta_actions.renamed", "meta_actions.renamed_note", "meta_chats.moved", "meta_chats.made_group", "meta_chats.renamed_group", "meta_chats.deleted_group", "meta_chats.listed", "meta_chats.listed_every", "meta_chats.archived", "meta_chats.unarchived", "meta_app.deleted", "meta_actions.highlighted", "meta_actions.by_meta", "meta_actions.by_meta_note"],
           "actions": [
             {"by": "click an item", "does": "opens it (Baude: the chat, as the sidebar opens one; a deleted chat says by toast 'It's in Baude's trash: undo brings it back'; Record: the page or its notebook). Tooltip 'Open <name>'"},
@@ -102,7 +102,7 @@
         },
         {
           "name": "shown rows (show chats / pages)",
-          "shows": "A list group of rows to click, one per chat or page: icon prefix (Baude chat: Claude icon; Record page: document icon, Record chat: Claude icon), title, a subtitle (Baude chat: folder · time ago · 'group <name>'; Record chat: folder (or 'no folder') · time ago; Record page: notebook, plus the full page path for a sub-page), a › at the end. Twelve rows at most; beyond that a 'Show N more' row that appends the rest when pressed. An unavailable item shows '(<error>)' in a dim caption.",
+          "shows": "A list group of rows to click, one per chat or page: icon prefix (Baude chat: Claude icon; Record page: document icon, Record chat: Claude icon), name (a chat's: a Bot's name, else its title, on both apps), a subtitle (Baude chat: folder · time ago · 'group <name>'; Record chat: folder (or 'no folder') · time ago; Record page: notebook, plus the full page path for a sub-page), a › at the end. Twelve rows at most; beyond that a 'Show N more' row that appends the rest when pressed. An unavailable item shows '(<error>)' in a dim caption.",
           "copy": ["meta.show_more"],
           "actions": [
             {"by": "click a row", "does": "opens that chat or page"}
@@ -115,7 +115,7 @@
         },
         {
           "name": "shown button",
-          "shows": "A single left-aligned button for something Meta will not do itself because it cannot be undone. Baude: 'Open <host name>' (suggested style) which picks that host in the sidebar's New session host picker; or 'Move “<chat title>” to Trash…' (destructive style) which starts the chat's trash flow with its confirmation. Record: Delete notebook (asks first) and open-host buttons.",
+          "shows": "A single left-aligned button for something Meta will not do itself because it cannot be undone. Baude: 'Open <host name>' (suggested style) which picks that host in the sidebar's New session host picker; or 'Move “<chat name>” to Trash…' (destructive style) which starts the chat's trash flow with its confirmation. Record: Delete notebook (asks first) and open-host buttons.",
           "copy": ["meta.open_item", "trash.move_title"],
           "actions": [
             {"by": "click", "does": "does it (the trash flow asks first, a host button opens the host: its chats are listed and New session is on it)"}
@@ -186,7 +186,7 @@
     },
     {
       "name": "reference list (@)",
-      "shows": "Typing @ at the start of a word (or after ( [ { quote) opens a pop-up list above the box listing what the app can reference, filtering as you type (spaces allowed in the search): each row has an icon, a name and 'kind · summary' (Baude: every host's chats by title, then the names in the open chat's folder, current host first; Record: notebooks and pages, the read chat's folder names, chats, with notes first). Header note '<n> found' or 'Nothing found'; a busy catalogue says it is still coming in. Picking inserts @name (or @{a name with spaces}) plus a space; names the app knows are drawn green in the box as they are typed.",
+      "shows": "Typing @ at the start of a word (or after ( [ { quote) opens a pop-up list above the box listing what the app can reference, filtering as you type (spaces allowed in the search): each row has an icon, a name and 'kind · summary' (Baude: every host's chats by name (a Bot's name, else its title), then the names in the open chat's folder, current host first; Record: notebooks and pages, the read chat's folder names, chats, with notes first). Header note '<n> found' or 'Nothing found'; a busy catalogue says it is still coming in. Picking inserts @name (or @{a name with spaces}) plus a space; names the app knows are drawn green in the box as they are typed.",
       "copy": ["meta.found", "meta.nothing_found"],
       "actions": [
         {"by": "key Up / Down", "does": "moves in the list"},

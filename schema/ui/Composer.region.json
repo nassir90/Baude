@@ -37,7 +37,7 @@
   "parts": [
     {
       "name": "text box",
-      "shows": "A card with the text in the chat's font (scales with chat zoom), word-wrapped. Empty or one line, it is wrapped close round its buttons: as tall as a button (composer.button, 28 px) with the buttons' inset (composer.inset, 4 px) above and below, the line centred on the buttons, the same height as a side question's box under its question (SideQuestions). It grows with the text and scrolls past about nine lines (220 px), its scrollbar shown only then. The right margin keeps text from running under the buttons. No placeholder text. Spell check is not on in Baude's box (it is a Record page feature). The box takes the focus when a window opens; a click anywhere in the card puts the caret in the text.",
+      "shows": "A card with the text in the chat's font (scales with chat zoom), word-wrapped. Empty or one line, it is wrapped close round its buttons: as tall as a button (composer.button, 28 px) with the buttons' inset (composer.inset, 4 px) above and below, the line centred on the buttons, the same height as a side question's box under its question (SideQuestions). Where the line is taller than the buttons (a large chat zoom, Text size or Global Scale) or the buttons taller than 28 px (a large Icons size), the one-line box is the taller of the two plus the inset above and below, and both are centred in it. As the text grows the buttons stay at the bottom, centred on its last line. The box follows a change of zoom or size at once, smaller as well as larger. It grows with the text and scrolls past about nine lines (220 px), its scrollbar shown only then. The right margin keeps text from running under the buttons. No placeholder text. Spell check is not on in Baude's box (it is a Record page feature). The box takes the focus when a window opens; a click anywhere in the card puts the caret in the text.",
       "actions": [
         {
           "by": "key Enter",
@@ -102,7 +102,7 @@
     },
     {
       "name": "send / stop button",
-      "shows": "A round icon button, last in the corner, 28 px square (composer.button), 4 px in from the card's right and bottom edges (composer.inset). Idle: grey, a return-arrow icon. While the agent works: red (destructive), a stop square icon.",
+      "shows": "A round icon button, last in the corner, 28 px square (composer.button), 4 px in from the card's right and bottom edges (composer.inset), centred on the text's last line at any text or icon size. Idle: grey, a return-arrow icon. While the agent works: red (destructive), a stop square icon.",
       "copy": [
         "composer.send",
         "composer.stop"

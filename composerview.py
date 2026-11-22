@@ -608,13 +608,14 @@ class Composer(Gtk.Overlay):
     """The box a message is written in, Baude's and Record's alike: its text (ComposerView, its markdown shown as it's
     written: ComposerMarkdown) in a card, wrapped close round its buttons while it's a line (schema/tokens' composer:
     a button's height, its inset above and below), growing with the text and scrolling past nine lines, with its
-    buttons in its bottom right corner, the send button last; the text's right margin keeps it from running under
-    them. buttons: any to go before the send button (Baude's attach). head: what's over the text, in the card, the
-    card as tall again as it needs (Record's quote). Its owner connects the send button and the keys."""
+    buttons in its bottom right corner, the send button last, centred on the text's last line; the text's right margin
+    keeps it from running under them. buttons: any to go before the send button (Baude's attach). head: what's over
+    the text, in the card, the card as tall again as it needs (Record's quote). Its owner connects the send button and
+    the keys."""
 
     BUTTON, INSET = tokens.px("composer.button"), tokens.px("composer.inset")
     LEAST = BUTTON + 2 * INSET  # (a line's: the buttons and their inset)
-    PAD = 10  # (the text's margins: a line of the chat's text, 16px, centred on the buttons')
+    PAD = 10  # (the text's left margin, and its right one's beyond the buttons)
 
     def __init__(self, buttons=(), send_tip=wording.say("composer.send", key=SEND_KEY), follow_text=False):
         across = (self.BUTTON + 4) * (len(buttons) + 1) - 4  # (the buttons, 4 apart: actions' spacing)
@@ -649,7 +650,6 @@ class Composer(Gtk.Overlay):
         actions.append(self.send)
         self.add_overlay(actions)
         if follow_text:  # (a box taller than its text: the buttons level with its last line, at most at the bottom)
-            self.actions = actions
             self.connect("get-child-position", self._place_actions)
             self.input.get_buffer().connect("changed", lambda *_: self.queue_allocate())
             adj.connect("value-changed", lambda *_: self.queue_allocate())
@@ -658,6 +658,65 @@ class Composer(Gtk.Overlay):
         self.set_overflow(Gtk.Overflow.HIDDEN)
         self.gates, self.busy = set(), False  # (what keeps what's written from being sent now: gate)
         self.set_busy(False)
+        self.actions, self.fitted, self.text_height, self.laid_out, self.refit = actions, None, None, None, None
+        self.connect("realize", self._watch_layout)
+        self.connect("unrealize", self._unwatch_layout)
+
+    def _watch_layout(self, *_):
+        self._fit(self._drawn())  # (before its first frame, as it's styled by then)
+        clock = self.get_frame_clock()
+        self.laid_out = (clock, clock.connect_after("layout", lambda *_: self._check_fit()))
+
+    def _unwatch_layout(self, *_):
+        if self.laid_out is not None:
+            clock, handler = self.laid_out
+            clock.disconnect(handler)
+            self.laid_out = None
+        if self.refit is not None:
+            GLib.source_remove(self.refit)
+            self.refit = None
+
+    def _drawn(self):
+        """The height of a line of the text as it's drawn now, and the buttons' height and width (the chat's zoom,
+        Text size and Icons size change them)."""
+        layout = self.input.create_pango_layout("")
+        line = (layout.get_extents()[1].height + Pango.SCALE // 2) // Pango.SCALE  # (as GTK rounds a text line's)
+        sizes = self.actions.get_preferred_size()[1]
+        button = max(self.BUTTON, sizes.height - self.actions.get_margin_top() - self.actions.get_margin_bottom())
+        return line, button, sizes.width - self.actions.get_margin_start() - self.actions.get_margin_end()
+
+    def _check_fit(self):
+        """After each layout: the line and the buttons as they're drawn (_drawn), and the text's own height, as GTK
+        has it once it has measured its lines after a change of font; either changed, the box is fitted to them
+        (_fit) just after this frame. (GTK lays the box out again neither for a new height of the text's own nor for
+        one asked for in this layout: a smaller font left the box as tall as the larger one's.)"""
+        fit = self._drawn()
+        height = self.input.measure(Gtk.Orientation.VERTICAL, max(self.input.get_width(), 1))[1]
+        if self.text_height is None:
+            self.text_height = height
+        if (fit, height) != (self.fitted, self.text_height) and self.refit is None:
+            self.refit = GLib.idle_add(self._refit, fit, height, priority=GLib.PRIORITY_HIGH_IDLE)
+
+    def _refit(self, fit, height):
+        self.refit, self.text_height = None, height
+        self._fit(fit)
+        self.input.queue_resize()  # (its margins' setters don't, and its height's change didn't)
+        return GLib.SOURCE_REMOVE
+
+    def _fit(self, fit):
+        """The one-line box a band as tall as the line or the buttons, whichever's taller, with the inset above and
+        below it, the line and the buttons each centred in the band: a line's centred on the buttons as the text
+        grows, its last line's."""
+        if fit == self.fitted:
+            return
+        self.fitted = fit
+        line, button, across = fit
+        band = max(button, line)
+        self.input.set_top_margin(self.INSET + (band - line) // 2)
+        self.input.set_bottom_margin(self.INSET + band - line - (band - line) // 2)
+        self.input.set_right_margin(self.INSET + across + self.PAD)
+        self.actions.set_margin_bottom(self.INSET + (band - button) // 2)
+        self.scroll.set_min_content_height(band + 2 * self.INSET)
 
     def _scrollbar_soon(self):
         """The scrollbar shown once the text's past the box's most, hidden again under it: after this layout (it's
@@ -675,7 +734,7 @@ class Composer(Gtk.Overlay):
 
     def _place_actions(self, _overlay, child, rect):
         """follow_text's buttons: in the bottom right, but no lower than centred on the text's last line."""
-        if child is not getattr(self, "actions", None):
+        if child is not self.actions:
             return False
         nat = child.get_preferred_size()[1]  # (its margins in it: the buttons are its top part)
         rect.width, rect.height = nat.width, nat.height

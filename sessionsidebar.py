@@ -32,7 +32,7 @@ from sessionlist import (  # noqa: E402
     HERE_HOST, THIS_MACHINE, apply_desktop_index, bot_picture, chat_group, chat_groups, collapse_copies, date_group,
     desktop_index, desktop_parents, fork_tree, host_key, last_used, list_sessions, made_groups, main_folder, network,
     next_midnight, place_sessions, remote_info, remote_name, remote_path, save_info_cache, session_group,
-    short_group_label,
+    short_group_label, started_elsewhere,
 )
 from sidebarmenu import SidebarMenu  # noqa: E402
 
@@ -751,7 +751,9 @@ class SessionSidebar(SidebarMenu, Gtk.Box):
         self.remote_keys = {}
         everywhere = [s for s in network().sessions() if not s.get("draft")]  # (a draft, the open one's: not a new
         # chat not written in yet)
-        shown = {s["id"] for s in everywhere if self.shows(s, hosts, picked, assigned) or s["id"] in marks}
+        far = started_elsewhere(network().sessions())  # (only ever under the agent on another host that started it)
+        shown = {s["id"] for s in everywhere
+                 if self.shows(s, hosts, picked, assigned) and s["id"] not in far or s["id"] in marks}
         # a chat an agent started, on another host or in another group: listed under the agent, if that's listed
         # (pulled: dropped below where the agent isn't, archived, say, or not found by a search)
         pulled = set()
@@ -791,17 +793,20 @@ class SessionSidebar(SidebarMenu, Gtk.Box):
         # sessions and this machine's chats in it has them in one order: the open, unsaved one first, then the newest)
         # (a chat a Bot started, in whatever folder or on whatever host: in the Bot's group, to go under it)
         home = {i["id"]: k for k, (_label, _folder, items) in groups.items() for i in items}
+        archived_ids = {i["id"] for i in gone}  # (archived: its threads are under it there, wherever they were)
         while lost := [(k, i) for k, (_label, _folder, items) in groups.items() for i in items
-                       if i["id"] in pulled and i.get("spawned_by") not in home]:  # (its agent not listed: nor is it)
-            for key, info in lost:
-                groups[key][2].remove(info)
+                       if i["id"] in pulled and i.get("spawned_by") not in home.keys() | archived_ids] + \
+                      [(None, i) for i in gone if i["id"] in pulled and i.get("spawned_by") not in home.keys() | archived_ids]:
+            for key, info in lost:  # (its agent not listed: nor is it)
+                (gone if key is None else groups[key][2]).remove(info)
                 home.pop(info["id"], None)
-        archived_ids = {i["id"] for i in gone}  # (archived: under its agent there, if that's there too)
-        while lost := [i for i in gone if i["id"] in pulled and i.get("spawned_by") not in home and
-                       i.get("spawned_by") not in archived_ids]:
-            for info in lost:
-                gone.remove(info)
                 archived_ids.discard(info["id"])
+        while moved := [(k, i) for k, (_label, _folder, items) in groups.items() for i in items
+                        if i.get("spawned_by") in archived_ids]:
+            for key, info in moved:
+                groups[key][2].remove(info)
+                gone.append(info)
+                archived_ids.add(info["id"])
         for key, (_label, _folder, items) in list(groups.items()):
             for info in list(items):
                 if (up := home.get(info.get("spawned_by"))) is not None and up != key:

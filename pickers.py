@@ -149,31 +149,8 @@ class ChoiceDropDown(Gtk.DropDown):
 
 
 # Each model's family, by what its value or name says (the first that matches): the monotone icon its row in a model
-# picker shows (schema/icons/models) and the heading it's listed under. Claude's by its own names too.
-MODEL_FAMILIES = [
-    ("claude", "Claude", r"claude|opus|sonnet|haiku|fable|^default$"),
-    ("qwen", "Qwen", r"qwen|qwq"),
-    ("gemma", "Gemma", r"gemma"),
-    ("gemini", "Gemini", r"gemini"),
-    ("openai", "GPT", r"gpt|openai|(^|[/:])o[134]\b"),
-    ("meta", "Llama", r"llama"),
-    ("mistral", "Mistral", r"mistral|mixtral|stral\b|ministral"),
-    ("deepseek", "DeepSeek", r"deepseek"),
-    ("microsoft", "Phi", r"(^|[/:\-])phi"),
-    ("ibm", "Granite", r"granite"),
-    ("kimi", "Kimi", r"kimi|moonshot"),
-    ("zhipu", "GLM", r"glm"),
-    ("nvidia", "Nemotron", r"nemotron|nvidia"),
-    ("cohere", "Command", r"command-r|cohere|\baya\b"),
-    ("minimax", "MiniMax", r"minimax"),
-    ("huggingface", "SmolLM", r"smol"),
-    ("ai2", "OLMo", r"olmo|tulu"),
-    ("internlm", "InternLM", r"internlm"),
-    ("yi", "Yi", r"(^|[/:\-])yi[\-:]"),
-    ("stepfun", "Step", r"stepfun|(^|[/:\-])step-"),
-    ("baichuan", "Baichuan", r"baichuan"),
-    ("apple", "Apple", r"^apple$|apple/|apple-foundation"),
-]
+# picker shows (schema/icons/models) and the heading it's listed under. The phone reads the same file.
+MODEL_FAMILIES = icons.model_families()
 MODEL_ICONS = icons.folder("models")
 
 

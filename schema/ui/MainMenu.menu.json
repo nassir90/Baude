@@ -1,5 +1,5 @@
 {
-  "description": "The ☰ menu at the right end of the Baude main window's header bar: a plain list of 12 items, each one line, no icons. Items beside a check mark are toggles.",
+  "description": "The ☰ menu at the right end of the Baude main window's header bar: a plain list of 13 items, each one line, no icons. Items beside a check mark are toggles.",
   "apps": [
     "baude"
   ],
@@ -12,6 +12,7 @@
     "baudewindow.py:BaudeWindow.open_record",
     "windowproc.py:WindowProc.copy_report",
     "baudewindow.py:BaudeWindow.restart_app",
+    "windowremote.py:WindowRemote.restart_host",
     "windowproc.py:WindowProc.set_read_only",
     "windowview.py:WindowView.on_fullwidth_toggled"
   ],
@@ -21,7 +22,8 @@
     "mesh_versions",
     "meta_settings",
     "fixes",
-    "code_apart"
+    "code_apart",
+    "hosts"
   ],
   "phone": {
     "does": "⋮ in the chat's header bar, with the same items where they apply (the items with does: nothing aside)",
@@ -188,7 +190,7 @@
     },
     {
       "name": "Restart Baude",
-      "shows": "Last row, \"Restart Baude\".",
+      "shows": "Row \"Restart Baude\".",
       "copy": [
         "code_apart.restart_app"
       ],
@@ -201,6 +203,26 @@
         {
           "by": "click",
           "does": "Restarts the whole app, every window, putting back each as it was (chat, scroll place, draft, attachments, size)"
+        }
+      ]
+    },
+    {
+      "name": "Restart Daemon",
+      "shows": "Last row, \"Restart Daemon\", right under Restart Baude. The same restart as the banner's Restart Daemon button.",
+      "copy": [
+        "code_apart.restart_daemon",
+        "hosts.restart_waiting",
+        "hosts.daemon_restarted"
+      ],
+      "phone": {
+        "does": "nothing",
+        "why": "The phone's host runs inside the app, on the app's own code, so there is no separate daemon to restart.",
+        "decided": "2026-11-22"
+      },
+      "actions": [
+        {
+          "by": "click",
+          "does": "Restarts this machine's host process (daemon) once no command is running on it (a model turn going on is cut short and offered Continue); toast \"Restarting the daemon once N sessions finish running a command\" while it waits, \"Daemon restarted\" once it's back. With none running, starts one. No confirmation"
         }
       ]
     }

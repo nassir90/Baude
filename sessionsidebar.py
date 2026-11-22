@@ -27,6 +27,7 @@ from widgets import (  # noqa: E402,F401
 from pickers import TreeList, sidebar_action, ellipsize_dropdown  # noqa: E402,F401
 
 from startup import trace  # noqa: E402
+from baudelib.client import chat_name  # noqa: E402
 from sessionlist import (  # noqa: E402
     HERE_HOST, THIS_MACHINE, apply_desktop_index, bot_picture, chat_group, chat_groups, collapse_copies, date_group,
     desktop_index, desktop_parents, fork_tree, host_key, last_used, list_sessions, made_groups, main_folder, network,
@@ -512,8 +513,20 @@ class SessionSidebar(SidebarMenu, Gtk.Box):
         pop.connect("closed", lambda p: GLib.idle_add(p.unparent))
         # (on an idle, after the one its sections' separators are shown in: popped up before it, it's sized without
         # them, and macOS never sizes it again, so its last item was cut off)
-        GLib.idle_add(pop.popup)
+        GLib.idle_add(self.popup_on_screen, pop)
         return pop
+
+    @staticmethod
+    def popup_on_screen(pop):
+        """menu_at's idle: pop shown while its parent's still on screen. The list rebuilt before it (a chat archived,
+        trashed or refreshed) takes the row out of the window, and a popover over a widget with no window has no
+        surface to open from: GTK crashes. Then it's dropped instead."""
+        parent = pop.get_parent()
+        if parent is not None and parent.get_mapped():
+            pop.popup()
+        elif parent is not None:
+            pop.unparent()
+        return False
 
     # ---- groups: chats moved to one, and groups made, renamed and deleted (settings' chat_groups and group_names).
     # Each saves, keeps what's picked in ⋮ → Groups (a group renamed: picked by its new name; deleted: not), lists it
@@ -976,30 +989,24 @@ class SessionSidebar(SidebarMenu, Gtk.Box):
         return panel.meta.ghosts() if panel is not None else []
 
     def bot_row(self, info):
-        """A Bot: twice a chat's height, its picture (its initials till it has one), its name and, under it, what it's
-        on; a dot as a chat's. What's under it (its threads) is nested as forks are."""
+        """A Bot: twice a chat's height, its picture (its initials till it has one) and its name, nothing else of its
+        chat's; a dot as a chat's. What's under it (its threads) is nested as forks are."""
         box = Gtk.Box(spacing=tokens.px("gap.avatar-gap"), margin_start=4, margin_end=4)
         bot = info.get("bot") or {}
         name = bot.get("name") or wording.say("sidebar.bot")
         avatar = Adw.Avatar(size=tokens.px("gap.avatar"), text=name, show_initials=True, valign=Gtk.Align.CENTER)
         bot_picture(info, lambda tex: tex is not None and avatar.set_custom_image(tex))
         box.append(imageviews.shaded_picture(avatar))
-        words = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, valign=Gtk.Align.CENTER, hexpand=True)
-        title = pickers.FadeLabel(label=name, xalign=0, hexpand=True)
+        title = pickers.FadeLabel(label=name, xalign=0, hexpand=True, valign=Gtk.Align.CENTER)
         title.add_css_class("bot-name")
-        words.append(title)
-        what = pickers.FadeLabel(label=info.get("title") or "", xalign=0, hexpand=True)
-        what.add_css_class("dim-label")
-        what.add_css_class("caption")
-        words.append(what)
-        box.append(words)
+        box.append(title)
         is_open = info["id"] == self.win.session_id
         dot = StatusDot(self.win.session_state() if is_open else self.file_state(info))
         if info.get("held"):
             box.append(self.held_tag())
         box.append(dot)
         r = info.get("remote")
-        tip = [name, info.get("title") or "", info.get("cwd") or "",
+        tip = [name, info.get("cwd") or "",
                f"On {remote_name(r)} ({r.host})" if r is not None else "", self.held_tip(info)]
         if group := chat_group(info, self.assigned):
             tip.append(f"Group {group}")
@@ -1039,7 +1046,7 @@ class SessionSidebar(SidebarMenu, Gtk.Box):
         dot = StatusDot(self.win.session_state() if is_open else self.file_state(info))
         label = info.get("fork_label") if depth else None
         # (a title too long for the row fades out where it's cut: pickers.FadeLabel)
-        title = pickers.FadeLabel(label=label or info.get("title") or wording.say("common.untitled"), xalign=0,
+        title = pickers.FadeLabel(label=label or chat_name(info) or wording.say("common.untitled"), xalign=0,
                                   hexpand=True)
         if depth:
             title.add_css_class("fork-title")
@@ -1055,7 +1062,7 @@ class SessionSidebar(SidebarMenu, Gtk.Box):
         elif info.get("held"):
             box.append(self.held_tag())
         box.append(dot)
-        tip = [info.get("title") or "", info.get("cwd") or "", self.held_tip(info)]
+        tip = [chat_name(info) or "", info.get("cwd") or "", self.held_tip(info)]
         if r is not None:
             gone = ", deactivated" if info.get("off") else \
                 f", gone from the network since {time_ago(r.seen)}" if info.get("dead") and r.seen else ""

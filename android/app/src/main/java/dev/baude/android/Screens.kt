@@ -195,12 +195,14 @@ fun ChatPage(chat: Chat, name: String, attach: Boolean = true, stop: (() -> Unit
     // (kept at the end while it's there: what it said last, or what it asks, a tall one's foot too, what it's writing
     // as it grows, and as what's drawn takes its size (pictures, code, an ask's card) or the keyboard takes room;
     // scrolled up to read, left where it is. Only the reader's own scrolling decides which: never the page's.)
-    LaunchedEffect(list.isScrollInProgress) {
-        if (list.isScrollInProgress || !touched) return@LaunchedEffect
-        touched = false
-        placed = true
-        restored = true
-        follow = !list.canScrollForward
+    LaunchedEffect(chat) { // (the reader let go and it came to rest: where it rests decides)
+        androidx.compose.runtime.snapshotFlow { touched && !list.isScrollInProgress }.collect { rested ->
+            if (!rested) return@collect
+            touched = false
+            placed = true
+            restored = true
+            follow = !list.canScrollForward
+        }
     }
     LaunchedEffect(chat, chat.loaded.value) {
         if (!chat.loaded.value && chat.sender == null) return@LaunchedEffect

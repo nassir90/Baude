@@ -478,10 +478,9 @@ private fun SessionRow(item: Item, through: Set<Int>, onClick: () -> Unit) {
             .pressed({ pressed = it }, onClick) { menu = true }
             .padding(start = 6.dp + 18.dp * item.depth, end = 4.dp, top = 1.dp, bottom = 1.dp),
             verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            val title = s.title?.ifBlank { null } ?: Wording.Common.untitled
-            val bot = item.bot?.name?.ifBlank { null }
+            val title = chatName(s) ?: Wording.Common.untitled
             val mark = metaMark(item.hostId, item.id)
-            Text(markedName(bot ?: title, mark?.how, mark != null), style = Type.body, color = if (dead || off) c.dim else c.fg,
+            Text(markedName(title, mark?.how, mark != null), style = Type.body, color = if (dead || off) c.dim else c.fg,
                 maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
             if (dead) Icon(Adwaita.NoConnection, Wording.Sidebar.noConnection, tint = c.dim, modifier = Modifier.size(16.dp.icon))
             else HeldTag(s)
@@ -492,7 +491,8 @@ private fun SessionRow(item: Item, through: Set<Int>, onClick: () -> Unit) {
     }
 }
 
-/** A Bot's row (Baude's bot_row): its picture, its name, what it's on, its status dot; a long-press: its menu. */
+/** A Bot's row (Baude's bot_row): its picture, its name (nothing else of its chat's), its status dot; a long-press: its
+ * menu. */
 @Composable
 private fun BotRow(item: Item, onClick: () -> Unit) {
     val c = LocalBaude.current
@@ -507,16 +507,12 @@ private fun BotRow(item: Item, onClick: () -> Unit) {
             .padding(horizontal = 4.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
             Avatar(contact.name, Mesh.pictures[contact.pictureKey])
             Spacer(Modifier.width(Gap.avatarGap))
-            Column(Modifier.weight(1f)) {
-                val mark = metaMark(item.hostId, item.id)
-                Text(markedName(contact.name, mark?.how, mark != null), style = Type.bold, color = c.fg, maxLines = 1,
-                    overflow = TextOverflow.Ellipsis)
-                val what = item.s.title?.ifBlank { null }
-                if (what != null) Text(what, style = Type.caption, color = c.dim, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            }
+            val mark = metaMark(item.hostId, item.id)
+            Text(markedName(contact.name, mark?.how, mark != null), style = Type.bold, color = c.fg, maxLines = 1,
+                overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
             HeldTag(item.s)
             StatusDot(contact.state, contact.asking)
-            MarkNote(metaMark(item.hostId, item.id))
+            MarkNote(mark)
         }
         RowMenu(item, menu, pressed, height) { menu = false }
     }

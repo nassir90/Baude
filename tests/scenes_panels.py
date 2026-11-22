@@ -346,6 +346,45 @@ def _(app):
     return win
 
 
+BOTS = {"Write the release notes for 2.4": "Juniper", "Plan the Q1 roadmap": "Fern"}
+
+
+def lab_bots(win):
+    """Two of lab-mac's chats made Bots (Juniper and Fern), as Make Bot… makes them, and the sidebar showing them; made
+    chats again as the window goes, for the next scene."""
+    server = NET["lab"][0]
+
+    def made(on):
+        with server.lock:
+            for prompt, name in BOTS.items():
+                server.set_bot(server.sessions[NET["ids"][prompt]], {"name": name} if on else None)
+    win.connect("unrealize", lambda *_: made(False))
+    made(True)
+    T.wait_for(lambda: sum(win.sidebar.list.get_row_at_index(i).has_css_class("bot-row") for i in range(40)
+                           if win.sidebar.list.get_row_at_index(i) is not None) == len(BOTS), "the Bots' rows")
+
+
+@scene("55v-network-bots", "Two of lab-mac's chats made Bots: listed first, each by its picture (its initials) and its "
+                           "name; Juniper open, its name in the header")
+def _(app):
+    win = network_window(app, None)
+    lab_bots(win)
+    win.sidebar.on_activate(win.sidebar.list, session_row(win, NET["ids"]["Write the release notes for 2.4"]))
+    T.wait_for(lambda: win.session_id == NET["ids"]["Write the release notes for 2.4"], "Juniper open")
+    T.pump(0.5)
+    return win
+
+
+@scene("55w-network-make-bot", "Right-click a chat on lab-mac → Make Bot…: its picture, Choose Picture…, and the "
+                               "Bot's name, the chat's title to keep or type over")
+def _(app):
+    win = network_window(app, None)
+    lab_bots(win)
+    win.sidebar.ask_bot(sidebar_row(win, "Speed up the tokenizer's hot loop").info)
+    T.pump(0.3)
+    return win
+
+
 @scene("55u-network-meta-host-button", "Meta's button:host for lab-mac, pressed, with this machine picked: lab-mac's "
                                        "chats listed, and New session on it")
 def _(app):
@@ -826,6 +865,29 @@ def _(app):
     T.wait_for(lambda: win.model_dd.values, "models")
     win.provider_choices = lambda: [("local|ollama", "This Mac", "Ollama", [here]),
                                     ("other|ollama", "other-host", "Ollama", [there])]
+    win.sync_providers()
+    popup_choices(win.model_dd)
+    return win
+
+
+@scene("60n-models-mesh", "The model picker open on a chat whose host has eight Ollama models and whose mesh has another "
+                         "host with three more (one of them also here), an MLX model and Apple's: each listed once, under its "
+                         "family, with its family's logo")
+def _(app):
+    def m(value, name, pid, **more):
+        return {"value": value, "displayName": name, "provider": pid, **more}
+    here = [m(f"ollama/{n}", n, "ollama", id=n, window=w) for n, w in (
+        ("qwen3:8b", 40960), ("qwen3:30b", 40960), ("gemma3:4b", 32768), ("gemma3:12b", 32768),
+        ("llama3.1:8b", 131072), ("deepseek-r1:8b", 131072), ("mistral:7b", 32768), ("phi4:14b", 16384))]
+    there = "openai/mesh-studio-ollama"
+    studio = [m(f"{there}/{n}", n, there, id=n, window=w) for n, w in (
+        ("llama3.2:3b", 131072), ("gpt-oss:20b", 131072), ("qwen3:8b", 40960))]
+    mlx = [m("agent/studio/mlx-community/Mistral-7B-Instruct-v0.3-4bit", "Mistral-7B-Instruct-v0.3-4bit", "agent/studio/mlx")]
+    apple = [m("agent/studio/apple", "Apple Foundation Model", "agent/studio/apple")]
+    win = app.window(opts())
+    T.wait_for(lambda: win.model_dd.values, "models")
+    win.provider_choices = lambda: [("local|ollama", "This Mac", "Ollama", here), ("studio|ollama", "studio", "Ollama", studio),
+                                    ("studio|mlx", "studio", "MLX", mlx), ("studio|apple", "studio", "Apple", apple)]
     win.sync_providers()
     popup_choices(win.model_dd)
     return win

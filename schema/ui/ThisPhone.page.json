@@ -56,7 +56,7 @@
     },
     {
       "name": "Agents",
-      "shows": "Shown only while this phone has an agent that is not archived. Heading \"Agents\", then a rounded list of them. Each row: the agent's picture (or initials), its name (\"Agent\" if it has none), its title or else its model's name, its status dot (with the asking mark when it asks something), and a trash button.",
+      "shows": "Shown only while this phone has an agent that is not archived. Heading \"Agents\", then a rounded list of them. Each row, one line: the agent's picture (or initials), then for a Bot its name alone (never its chat's title), else its title, else its model's name (\"Agent\" if none); its status dot (with the asking mark when it asks something), and a trash button. No second line.",
       "copy": [
         "this_phone.agents",
         "common.agent",
@@ -88,7 +88,7 @@
     },
     {
       "name": "Trash",
-      "shows": "Shown only while the phone's trash holds an agent. Heading \"Trash\", then a row per trashed agent, newest first: its name (\"Agent\" if it has none) and title (or model), and a Put Back button.",
+      "shows": "Shown only while the phone's trash holds an agent. Heading \"Trash\", then a row per trashed agent, newest first, one line: for a Bot its name alone, else its title, else its model's name (\"Agent\" if none); and a Put Back button.",
       "copy": [
         "this_phone.trash",
         "this_phone.put_back",

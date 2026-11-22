@@ -4,6 +4,11 @@
   "opens": ["header model button"],
   "code": ["pickers.py:ModelPicker", "pickers.py:model_family", "pickers.py:model_icon", "windowdrafts.py:WindowDrafts.sync_models", "windowdrafts.py:WindowDrafts.sync_providers", "windowdrafts.py:WindowDrafts.on_model_changed"],
   "copy": ["model_picker", "common"],
+  "phone": {
+    "does": "A pane over the page under the model button (a chat's, or Meta's), 280 wide, from just under the button down to the top of the bottom bar at most (the keyboard's top while it's up), scrolling past that; a tap outside it or Back closes it. Its search field and each model row are one height (34), the field's icon over the rows' logos",
+    "why": "The owner: the list shouldn't fill the whole screen on a phone, only the room between the model's name and the bottom bar, with the search row and the model rows aligned",
+    "decided": "2026-11-22"
+  },
   "parts": [
     {
       "name": "search box",
@@ -18,12 +23,12 @@
     },
     {
       "name": "family heading",
-      "shows": "A small dim caption over the first model of each family (Claude, Qwen, Gemma, Gemini, GPT, Llama, Mistral, DeepSeek, Phi, Granite, Kimi, GLM, Nemotron, Command, MiniMax, SmolLM, OLMo, InternLM, Yi, Step, Baichuan, Apple; \"Other\" for one that matches none). Families are listed in the order their first model was given (Claude's models first, then the chat's host's, then others); models keep their given order inside a family. While searching, a heading shows over the first match of each family.",
+      "shows": "A small dim caption over the first model of each family (schema/icons/models/families.json's names, in its order of matching: Claude, Qwen, Gemma, Gemini, GPT, Llama, Mistral, DeepSeek, Phi, Granite, Kimi, GLM, Nemotron, Command, MiniMax, SmolLM, OLMo, InternLM, Yi, Step, Baichuan, Apple; \"Other\" for one that matches none). Families are listed in the order their first model was given (Claude's models first, then the chat's host's, then others); models keep their given order inside a family. While searching, a heading shows over the first match of each family.",
       "copy": ["common.other"]
     },
     {
       "name": "model row",
-      "shows": "One line: the family's monochrome logo (16 px; blank space of the same width when the family has none), the model's name (one line, … past 40 characters; the full name as a tooltip when cut), and at the right a tick on the picked model only. Claude's rows are named as claude lists them (\"Opus 5.5\"); a provider's model is named alike across hosts and shows once however many hosts have it, told apart by provider/host name only where two models share a name.",
+      "shows": "One line: the family's monochrome logo (16 px, schema/icons/models, the family by schema/icons/models/families.json; blank space of the same width when the family has none), the model's name (one line, … past 40 characters; the full name as a tooltip when cut), and at the right a tick on the picked model only. Claude's rows are named as claude lists them (\"Opus 5.5\"); a provider's model is named alike across hosts and shows once however many hosts have it, told apart by provider/host name only where two models share a name.",
       "actions": [
         {"by": "click", "does": "Picks the model and closes the popover. Same model: nothing happens. Different: the chat switches (set_model on the running claude with a quiet note \"model → <name>\"); across programs (Claude to Apple/Codex, or another host) the chat restarts or becomes a new conversation (\"model → <name>: a new conversation\"); picked mid-turn for a program change, it waits until the turn is over"}
       ]
@@ -38,5 +43,5 @@
     {"name": "opens on picked model", "shows": "The picked model's row is lit (Enter would re-pick it); typing starts from the first match"},
     {"name": "scrolling", "shows": "List grows to 420 px tall then scrolls, 280 px minimum wide, no horizontal scrollbar"}
   ],
-  "scenes": ["60m-models-any-case", "55h-network-models", "60-effort-unavailable"]
+  "scenes": ["60n-models-mesh", "60m-models-any-case", "55h-network-models", "60-effort-unavailable"]
 }

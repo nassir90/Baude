@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.only
+import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
@@ -45,6 +46,8 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.positionInWindow
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
@@ -198,6 +201,11 @@ fun ChatShell(hostId: String, sid: String, back: () -> Unit, open: (String, Stri
     // bar; going down, the box comes down with it till it rests on the bar, which the keyboard uncovers as it goes)
     var barHeight by remember { mutableIntStateOf(0) } // (px: the bottom bar, the phone's own bar under it too)
     val overBar = WindowInsets.ime.exclude(WindowInsets(bottom = barHeight))
+    val pane = remember { MenuPane() } // (the model pickers' lists, over the page, down to the bottom bar's top)
+    val keyboard = WindowInsets.isImeVisible
+    val bar = Modifier.onSizeChanged { barHeight = it.height }
+        .onGloballyPositioned { pane.floor = if (keyboard) null else it.positionInWindow().y }
+    androidx.compose.runtime.CompositionLocalProvider(LocalMenuPane provides pane) {
     Box(Modifier.fillMaxSize()) {
     Column(Modifier.fillMaxSize().background(c.frame)) {
         Bar(name, start = { IconButton(Adwaita.GoPrevious, Wording.Browser.back, onClick = back) },
@@ -215,21 +223,19 @@ fun ChatShell(hostId: String, sid: String, back: () -> Unit, open: (String, Stri
         androidx.compose.runtime.CompositionLocalProvider(LocalChatPlace provides place) {
         if (split) SideBySide(Modifier.weight(1f).fillMaxWidth(), close = toggle, chat = { Page("chat", true, false) }) {
             Box(Modifier.weight(1f).windowInsetsPadding(overBar)) { Page(side, true, true) }
-            BottomBar(sideAll, sideAll.indexOfFirst { it.key == side }, Modifier.onSizeChanged { barHeight = it.height }) {
-                side = sideAll[it].key
-            }
+            BottomBar(sideAll, sideAll.indexOfFirst { it.key == side }, bar) { side = sideAll[it].key }
         } else {
             HorizontalPager(pager, Modifier.weight(1f).fillMaxWidth().windowInsetsPadding(overBar), key = { all[it].key },
                 userScrollEnabled = all.getOrNull(pager.currentPage)?.key != "browser") { i ->
                 Page(all[i].key, pager.currentPage == i && !pager.isScrollInProgress, false)
             }
-            BottomBar(all, pager.currentPage, Modifier.onSizeChanged { barHeight = it.height }) {
-                scope.launch { pager.animateScrollToPage(it) }
-            }
+            BottomBar(all, pager.currentPage, bar) { scope.launch { pager.animateScrollToPage(it) } }
         }
         }
     }
+    MenuPaneLayer(pane)
     ViewerOverlay()
+    }
     }
 }
 

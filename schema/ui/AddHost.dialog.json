@@ -1,8 +1,8 @@
 {
   "description": "A dialog over the main window to add another machine's Baude host process to the mesh, by where ssh goes. The host is kept from then on, reached or not.",
-  "apps": ["baude"],
+  "apps": ["baude", "phone"],
   "opens": ["host picker's right-click → Add Host…"],
-  "code": ["windowremote.py:WindowRemote.ask_add_host", "windowremote.py:WindowRemote.host_form"],
+  "code": ["windowremote.py:WindowRemote.ask_add_host", "windowremote.py:WindowRemote.host_form", "android/app/src/main/java/dev/baude/android/HostMenu.kt:AddHost"],
   "copy": ["new_session", "hosts", "common"],
   "parts": [
     {
@@ -36,6 +36,9 @@
         {"by": "click", "does": "The host is added (by ssh with the destination and the command) and a toast says \"Looking for Baude on <destination>\"; it then appears in the host picker."}
       ]
     }
+  ],
+  "removed": [
+    {"name": "This phone's key (and New Key…) in Add Host", "apps": ["phone"], "why": "The phone's key lives on This phone, under Key Material; Add Host is just the endpoint", "decided": "2026-11-22"}
   ],
   "scenes": ["55k-network-add-server"]
 }

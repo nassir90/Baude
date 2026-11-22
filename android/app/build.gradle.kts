@@ -850,12 +850,12 @@ abstract class BaudeIcons : DefaultTask() {
         val root = icons.get().asFile
         val blocks = StringBuilder()
         val seen = HashMap<String, String>()
-        for (set in listOf("adwaita", "baude")) {
+        for (set in listOf("adwaita", "baude", "kube")) {
             val files = root.resolve(set).listFiles { f -> f.name.endsWith("-symbolic.svg") }!!.sortedBy { it.name }
             for (f in files) {
                 val name = f.name.removeSuffix("-symbolic.svg")
                 val where = "$set/${f.name}"
-                val member = pascal(if (set == "baude") name.removePrefix("baude-") else name)
+                val member = pascal(if (set == "adwaita") name else name.removePrefix("baude-"))
                 seen.put(member, where)?.let { throw GradleException("schema/icons/$where: Adwaita.$member, as $it is") }
                 val lines = ArrayList<String>()
                 walk(read(f), lines, 0, 1.0, where)
@@ -869,7 +869,8 @@ abstract class BaudeIcons : DefaultTask() {
         dir.mkdirs()
         dir.resolve("Adwaita.kt").writeText("""
             |// Made from schema/icons as the app's built (build.gradle.kts's baudeIcons): never edited, never kept. GNOME's
-            |// Adwaita icons (schema/icons/adwaita: CC-BY-SA-3.0 or LGPL-3.0, its LICENSE) and Baude's own (schema/icons/baude).
+            |// Adwaita icons (schema/icons/adwaita: CC-BY-SA-3.0 or LGPL-3.0, its LICENSE), Baude's own (schema/icons/baude) and the
+            |// Kubernetes view's categories (schema/icons/kube: each file says its licence).
             |package dev.baude.android
             |
             |import androidx.compose.ui.graphics.Color

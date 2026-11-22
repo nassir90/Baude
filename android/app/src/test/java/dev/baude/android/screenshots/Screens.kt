@@ -24,7 +24,7 @@ import dev.baude.android.Key
 import dev.baude.android.Mesh
 import dev.baude.android.MeshScreen
 import dev.baude.android.Msg
-import dev.baude.android.NewSession
+import dev.baude.android.SpawnAgent
 import dev.baude.android.PhoneHost
 import dev.baude.android.PhoneScreen
 import dev.baude.android.Settings
@@ -126,11 +126,82 @@ abstract class Screens(private val theme: String) {
         screen("06-mesh-remove")
     }
 
-    @Test fun newSessionHosts() {
+    @Test fun spawnAgentHosts() {
         versionsFixture()
-        show { NewSession(null, null, done = {}, opened = { _, _ -> }) }
+        show { SpawnAgent(done = {}, opened = { _, _ -> }, given = null, edited = {}) }
         tap("workshop")
-        menu("19-new-session-hosts")
+        menu("19-spawn-agent-hosts")
+    }
+
+    @Test fun newSessionOpens() = newChat("92-new-session") { tap("New session") }
+
+    @Test fun folderPlusOpens() = newChat("93-folder-plus") { tap("New session in ~/garden, on workshop") }
+
+    /** Open folder…: the step from the host's home, its folders listed; a path typed, the folders it begins; a folder
+     * tapped, browsed into; Open: the chat in it. */
+    @Test fun openFolderOpens() = newChat("95-open-folder-opened") {
+        tap("Open folder…")
+        screen("94-open-folder")
+        typeIn("/home/dev/ga")
+        screen("94b-open-folder-typed")
+        tap("garden")
+        screen("94c-open-folder-browsed")
+        tap("Open")
+    }
+
+    /** A new chat's first message sent: it's the host's from then on (no longer a draft), and listed at home. */
+    @Test fun newChatFirstMessage() {
+        newChat("96-new-chat-written") { tap("New session in ~/garden, on workshop") }
+        val chat = Mesh.openChat("h1", "n")
+        chat.draft.value = "Tidy the changelog for 2.4"
+        settle()
+        tap("Send")
+        val s = Mesh.sessions["h1"].orEmpty()
+        Mesh.sessions["h1"] = s.map { if (it.id == "n") Msg.Session.from(it.json().put("draft", false)
+            .put("title", "Tidy the changelog for 2.4").put("said", System.currentTimeMillis() / 1000.0)) else it }
+        settle()
+        activity.window.decorView.captureRoboImage("build/screenshots/$theme/97-new-chat-sent.png")
+        chat.draft.value = "/new" // (a new chat on workshop, in this one's folder)
+        settle()
+        tap("Send")
+        laidOut()
+        activity.window.decorView.captureRoboImage("build/screenshots/$theme/99-slash-new.png")
+        Mesh.close()
+        render("98-new-chat-listed") { HomeScreen() }
+    }
+
+    /** Home, its new chat asked for (how: a tap), the host starting it as a draft ("n", in the folder asked for), and
+     * the chat that's opened at once. */
+    private fun newChat(name: String, how: () -> Unit) {
+        val now = System.currentTimeMillis() / 1000.0
+        val folders = mapOf("/home/dev" to listOf("garden", "notes", ".config"), "/home/dev/garden" to listOf("docs", "src", "tests"))
+        var made = 0
+        FixtureConnection.up(activity, Mesh.hosts[0]) { m ->
+            if (m.optString("op") == "list_dir") return@up folders[m.optString("path").trimEnd('/')]?.let { names ->
+                org.json.JSONObject().put("op", "dir").put("path", m.optString("path")).put("entries",
+                    org.json.JSONArray(names.map { org.json.JSONObject().put("name", it).put("dir", true) } +
+                        org.json.JSONObject().put("name", "README.md").put("dir", false)))
+            } ?: org.json.JSONObject().put("op", "dir").put("path", m.optString("path")).put("error", "No such folder")
+            if (m.optString("op") != "start") return@up null
+            val id = if (made++ == 0) "n" else "n$made"
+            println("start ${m.optString("cwd")}: $id") // (where it was asked to start: the run's output says)
+            val s = Msg.Session(id = id, cwd = m.optString("cwd"), created = now, updated = now, state = "idle",
+                mode = "auto", draft = true, group = m.optString("group"))
+            Mesh.sessions["h1"] = Mesh.sessions["h1"].orEmpty() + s
+            org.json.JSONObject().put("op", "started").put("session", org.json.JSONObject().put("id", id)
+                .put("cwd", m.optString("cwd")).put("draft", true))
+        }
+        val opened = androidx.compose.runtime.mutableStateOf<Pair<String, String>?>(null)
+        show {
+            val at = opened.value
+            if (at == null) Home(open = { h, s -> opened.value = h to s }, feedback = {})
+            else androidx.compose.runtime.key(at) {
+                ChatShell(at.first, at.second, back = {}, open = { h, s -> opened.value = h to s }, feedback = {}) }
+        }
+        how()
+        settle()
+        laidOut()
+        activity.window.decorView.captureRoboImage("build/screenshots/$theme/$name.png")
     }
 
     @Test fun phone() {
@@ -425,12 +496,12 @@ abstract class Screens(private val theme: String) {
         withMenus("22-settings-meta-intelligence")
     }
 
-    @Test fun newSessionModelPicker() {
+    @Test fun spawnAgentModelPicker() {
         meshModels()
-        show { NewSession("h1", null, done = {}, opened = { _, _ -> }) }
+        show { SpawnAgent(done = {}, opened = { _, _ -> }, given = null, edited = {}) }
         tap("Its default model")
         laidOut()
-        withMenus("23-new-session-model-picker")
+        withMenus("23-spawn-agent-model-picker")
     }
 
     @Test fun metaCardModelPicker() {
@@ -966,6 +1037,26 @@ abstract class Screens(private val theme: String) {
         repeat(20) { if (hits().size <= nth) settle() } // (a menu that's opening: once it's up)
         hits()[nth].config[act].action!!.invoke()
         androidx.compose.runtime.snapshots.Snapshot.sendApplyNotifications() // (what it changed: composed again)
+        settle()
+    }
+
+    /** typed put in the box on screen (its dialog's, if one's up), as typing it would. */
+    private fun typeIn(typed: String) {
+        val wm = Class.forName("android.view.WindowManagerGlobal").getMethod("getInstance").invoke(null)
+        @Suppress("UNCHECKED_CAST")
+        val views = wm.javaClass.getDeclaredField("mViews").apply { isAccessible = true }.get(wm) as List<android.view.View>
+        fun roots(v: android.view.View): List<androidx.compose.ui.node.RootForTest> = when (v) {
+            is androidx.compose.ui.node.RootForTest -> listOf(v)
+            is android.view.ViewGroup -> (0 until v.childCount).flatMap { roots(v.getChildAt(it)) }
+            else -> emptyList()
+        }
+        fun all(n: androidx.compose.ui.semantics.SemanticsNode): List<androidx.compose.ui.semantics.SemanticsNode> =
+            listOf(n) + n.children.flatMap { all(it) }
+        val box = views.drop(views.indexOf(activity.window.decorView)).flatMap(::roots)
+            .flatMap { all(it.semanticsOwner.rootSemanticsNode) }
+            .last { it.config.contains(androidx.compose.ui.semantics.SemanticsActions.SetText) }
+        box.config[androidx.compose.ui.semantics.SemanticsActions.SetText].action!!.invoke(androidx.compose.ui.text.AnnotatedString(typed))
+        androidx.compose.runtime.snapshots.Snapshot.sendApplyNotifications()
         settle()
     }
 

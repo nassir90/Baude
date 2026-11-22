@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
-  "description": "A folder in a session's folder.",
+  "description": "A folder on the host: any on a computer's (a mesh member may start a session in any of them); on a phone's, one in its agents' folders.",
   "properties": {
     "op": {
       "const": "list_dir",

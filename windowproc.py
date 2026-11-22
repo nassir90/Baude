@@ -986,7 +986,10 @@ class WindowProc:
         buf.set_text("")
         self.completer.hide()
         if text in ("/clear", "/new"):
-            self.switch_to(self.new_session)
+            if self.chat_host() != HERE_HOST:  # (another host's chat: a new one on it, in this chat's folder)
+                self.new_session_on(self.remote, (self.remote.sessions.get(self.session_id) or {}).get("cwd"), keep=False)
+            else:
+                self.switch_to(self.new_session)
             return
         if text == "/cd" or text.startswith("/cd "):
             self.change_cwd(text[3:].strip() or "~")

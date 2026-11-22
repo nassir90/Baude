@@ -28,7 +28,11 @@
     "pickers.py:FadeLabel",
     "chatparts.py:HostState",
     "chatparts.py:UpdateBar",
-    "pickers.py:sidebar_action"
+    "pickers.py:sidebar_action",
+    "sidebarmenu.py:SidebarMenu.open_folder",
+    "windowremote.py:WindowRemote.ask_host_folder",
+    "baudelib/hostfiles.py:list_dir",
+    "Home.kt:OpenFolder"
   ],
   "copy": [
     "sidebar",
@@ -60,7 +64,7 @@
       "actions": [
         {
           "by": "click",
-          "does": "Starts a new, blank chat on the host picked beside it. This machine: a draft chat here, in the group chosen by the rule below (switching away from the open chat first). Another host: that host's new-session form (prompt, folder, group, model, effort, mode) opens there. If that host is gone, deactivated or not known, nothing starts and a toast says why (its banner text)."
+          "does": "Opens a new, blank chat at once on the host picked beside it, in the group chosen by the rule below (switching away from the open chat first), with the header's model, effort and mode pickers to set before it's written in (see EmptyChat). This machine: in the window's folder. Another host: in the folder last used there, else that host's home. The chat is a draft on its host: it isn't listed or kept till something is sent in it, and one left empty leaves nothing behind. If that host is gone, deactivated or not known, nothing starts and a toast says why (its banner text)."
         },
         {
           "by": "key Ctrl+N",
@@ -101,14 +105,22 @@
       "shows": "A flat button under New session with a folder-open icon and the words \"Open folder…\". Tooltip \"Start a session in another folder\".",
       "copy": [
         "sidebar.open_folder",
-        "sidebar.open_folder_tip"
+        "sidebar.open_folder_tip",
+        "sidebar.open_folder_on",
+        "common.open",
+        "common.cancel"
       ],
       "actions": [
         {
           "by": "click",
-          "does": "A folder chooser opens; the folder picked gets a new session."
+          "does": "With this machine picked beside New session: a folder chooser opens; the folder picked gets a new, blank chat here. With another host picked: a dialog \"Open a folder on <host>\" over the window, with a path field (starting as the folder last used on that host, else its home; ~ means its home) and under it a list, 240 tall, of the host's folders as the field is typed (read from the host with list_dir): .. (the folder above) first, then the folders in the folder typed, else those of its parent whose names begin with the path's last part (hidden ones only once that part begins with a dot), by name; clicking one puts its path in the field and lists its folders. Cancel and Open (suggested; Enter too): Open opens a new, blank chat on that host in that folder at once, as New session does, and keeps the folder as the host's last. If that host is gone, deactivated or not known, nothing opens and a toast says why (its banner text)."
         }
-      ]
+      ],
+      "phone": {
+        "does": "Always the \"Open a folder on <host>\" step, for whichever host is picked; tapping a folder in its list is clicking it",
+        "why": "The phone's chats are all on hosts; it has no folder chooser of its own",
+        "decided": "2026-11-22"
+      }
     },
     {
       "name": "Search field",
@@ -184,7 +196,7 @@
             },
             {
               "by": "click +",
-              "does": "New session in that folder (tooltip \"New session in <folder>\"). Only if the folder exists here. If a chat made here would not be listed (this machine's host not picked, or No group ticked out), it starts through this machine's host instead (tooltip \"New session in <folder>, through local's server\"). For a folder on another host: starts a session on that host in that folder (tooltip \"New session in <folder>, on <host>\"), shown only while that host is alive."
+              "does": "Opens a new, blank chat in that folder at once, as New session does (tooltip \"New session in <folder>\"). Only if the folder exists here. For a folder on another host: the blank chat is on that host, in that folder, which becomes the folder last used there (tooltip \"New session in <folder>, on <host>\"), shown only while that host is alive."
             }
           ]
         },
@@ -393,6 +405,17 @@
       "shows": "Only the sessions of the groups ticked in ⋮ → Groups (see GroupByMenu.menu.json); ⋮ → Show All is then offered."
     }
   ],
+  "removed": [
+    {
+      "name": "New session form (a dialog of host, folder, group, prompt, model, effort and mode: the desktop's from a folder's + on another host, or on this machine while a new chat here wouldn't be listed; the phone's from a folder's + and Open folder…)",
+      "apps": [
+        "baude",
+        "phone"
+      ],
+      "why": "A new chat is only made on its host once something's sent in it, so New session, a folder's + and Open folder… (after its folder step) open a blank chat at once; its model, effort and mode are the header's pickers",
+      "decided": "2026-11-22"
+    }
+  ],
   "scenes": [
     "50-sessions-sidebar",
     "50b-sidebar-search",
@@ -407,6 +430,12 @@
     "55m-network-all",
     "55r-network-host-gone",
     "55r2-network-host-unknown",
-    "55t-network-host-deactivated"
+    "55t-network-host-deactivated",
+    "55f-network-folder-new-session",
+    "55f2-network-folder-new-session-sent",
+    "55f3-network-open-folder",
+    "55f4-network-open-folder-typed",
+    "55f5-network-open-folder-browsed",
+    "55f6-network-open-folder-opened"
   ]
 }

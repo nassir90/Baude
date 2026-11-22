@@ -100,6 +100,9 @@ GIT_PULLS_SHOWN = 8      # the pull requests this chat touches shown at once (th
 GIT_ROW_GAP = 6          # px between a log row's lane, its author's picture and its text (the list at the top's too)
 
 
+GIT_ROW_PAD = 4          # px over and under a log row's text
+
+
 git_full_when = full_time  # (a commit's card says when in full)
 
 
@@ -462,14 +465,23 @@ class GitPullsScroll(Gtk.ScrolledWindow):
         return least, natural, -1, -1
 
 
+def first_line_middle(label):
+    """How far down label its first line's middle is, px."""
+    it = label.get_layout().get_iter()
+    top, bottom = it.get_line_yrange()
+    return label.get_layout_offsets()[1] + (top + bottom) / 2 / Pango.SCALE
+
+
 class GitGutter(Gtk.Widget):
     """The start of a row of the list at the top: as wide as a log row's lane and its author's picture are (width),
     its child (a pull request's pill) at its end, so what follows starts where a log row's text does. A child wider
-    than that goes out past its start, rather than move the text on."""
+    than that goes out past its start, rather than move the text on. A log row's author's picture is in one as wide
+    as itself. A child that's valign START is centred on the first line of the label beside it (beside, whose top is
+    top px down)."""
 
-    def __init__(self, child, width):
+    def __init__(self, child, width, top=0):
         super().__init__()
-        self.child, self.width = child, width
+        self.child, self.width, self.top = child, width, top
         child.set_parent(self)
 
     def set_width(self, width):
@@ -488,11 +500,10 @@ class GitGutter(Gtk.Widget):
         h = min(height, self.child.measure(Gtk.Orientation.VERTICAL, w)[1])
         y = (height - h) / 2
         if self.child.get_valign() == Gtk.Align.START:  # (centred on the first line of the name beside it: beside)
-            line = height
+            middle = height / 2
             if (beside := getattr(self, "beside", None)) is not None:
-                m = beside.get_pango_context().get_metrics(None, None)
-                line = (m.get_ascent() + m.get_descent()) / Pango.SCALE
-            y = max(0.0, (min(line, height) - h) / 2)
+                middle = self.top + first_line_middle(beside)
+            y = max(0.0, min(middle - h / 2, height - h))
         self.child.allocate(w, h, -1, Gsk.Transform().translate(Graphene.Point().init(width - w, y)))
 
     def do_dispose(self):
@@ -504,7 +515,11 @@ class GitGutter(Gtk.Widget):
 
 class GitLane(Gtk.Widget):
     """A row's slice of the commit graph (git_lanes): the lanes passing it, those ending at its dot and those its
-    parents go on in; every commit a plain dot, a violet one if this chat made it."""
+    parents go on in; every commit a plain dot, a violet one if this chat made it. Its dot is level with the first
+    line of the row's subject (beside, whose top is top px down), so a row's dot is as far from the next's as the
+    rows' first lines are."""
+
+    beside, top = None, 0
 
     STEP, PAD = 12, 9
 
@@ -529,7 +544,8 @@ class GitLane(Gtk.Widget):
 
     def do_snapshot(self, snap):
         h, row = self.get_height(), self.row
-        mid, xc = h / 2, self.x(row["col"])
+        mid = h / 2 if self.beside is None else min(h, self.top + first_line_middle(self.beside))
+        xc = self.x(row["col"])
         stroke = Gsk.Stroke.new(1.6)
 
         def line(x1, y1, x2, y2, lane):
@@ -1210,12 +1226,15 @@ class GitPage(Gtk.Stack):
         row.commit = c
         made = git_chat_commit(self.chat, c["sha"])
         box = Gtk.Box(spacing=GIT_ROW_GAP)
-        box.append(GitLane(lane, cols, chat=bool(made), dim=dim))
+        graph = GitLane(lane, cols, chat=bool(made), dim=dim)
+        box.append(graph)
         # (their initials on a colour; their picture, already if it's known, so a redrawn row doesn't flicker)
-        row.avatar = Adw.Avatar(size=AVATAR_SIZE, text=c["author"], show_initials=True, valign=Gtk.Align.CENTER,
+        row.avatar = Adw.Avatar(size=AVATAR_SIZE, text=c["author"], show_initials=True, valign=Gtk.Align.START,
                                 custom_image=AVATARS.pictures.get(c["email"].lower()))
-        box.append(shaded_picture(row.avatar))
-        text = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, hexpand=True, margin_top=4, margin_bottom=4)
+        picture = GitGutter(shaded_picture(row.avatar), AVATAR_SIZE, top=GIT_ROW_PAD)
+        box.append(picture)
+        text = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, hexpand=True, margin_top=GIT_ROW_PAD,
+                       margin_bottom=GIT_ROW_PAD)
         # (one line of text, as a paragraph's: the branches' chips first, a pull request's pill before its branch's,
         # then the subject, its second line under the chips. Two lines, then …: a pull request's name is often what a
         # commit's called, and seldom fits on one. Its natural width a character's, so a long one never widens the
@@ -1226,6 +1245,9 @@ class GitPage(Gtk.Stack):
         row.line.pill_scale = LinkLabel.CHIP_SCALE  # (a pull request's pill, a chip's size)
         row.line.connect("activate-link", on_label_link)
         row.line.set_markup(self.line_markup(c, made))
+        # (the picture and the graph's dot level with the subject's first line, however many lines the row has)
+        picture.beside = graph.beside = row.line
+        graph.top = GIT_ROW_PAD
         if own:
             row.line.add_css_class("git-own")
         text.append(row.line)

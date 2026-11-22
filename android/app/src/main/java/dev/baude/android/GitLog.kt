@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -23,6 +24,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -46,6 +48,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -53,6 +56,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import java.net.HttpURLConnection
 import java.net.URL
+import kotlin.math.roundToInt
 
 const val GIT_LOG_LIMIT = 50
 const val GIT_MERGE_LIMIT = 200
@@ -125,12 +129,13 @@ fun laneWidth(cols: Int): Dp = Tokens.Git.lanePad * 2 + Tokens.Git.laneStep * (m
 private val LANE_COLOURS get() = listOf(Tokens.Git.lane1, Tokens.Git.lane2, Tokens.Git.lane3, Tokens.Git.lane4, Tokens.Git.lane5,
     Tokens.Git.lane6, Tokens.Git.lane7, Tokens.Git.lane8)
 
-/** A row's graph, drawn into the row's own height from x (its lanes' lines, and its commit's dot). */
-private fun DrawScope.lanes(row: LaneRow, x0: Float, dim: Boolean, made: Boolean) {
+/** A row's graph, drawn into the row's own height from x (its lanes' lines, and its commit's dot at dotY: level with
+ * the first line of the row's title, so rows of different heights have their dots as far apart as their first lines). */
+private fun DrawScope.lanes(row: LaneRow, x0: Float, dim: Boolean, made: Boolean, dotY: Float) {
     val step = Tokens.Git.laneStep.toPx()
     val pad = Tokens.Git.lanePad.toPx()
     fun x(col: Int) = x0 + pad + minOf(col, Tokens.Git.laneMax) * step
-    val mid = size.height / 2
+    val mid = dotY.coerceAtMost(size.height)
     val alpha = if (dim) Tokens.Git.laneDim.toFloat() else 1f
     val stroke = Stroke(Tokens.Git.laneStroke.toPx())
     fun colour(id: Int) = LANE_COLOURS[id % 8].copy(alpha = alpha)
@@ -225,26 +230,35 @@ fun LogRow(c: Msg.Commit, lane: LaneRow, cols: Int, dim: Boolean, own: Boolean, 
     val colors = LocalBaude.current
     GitAvatars.version.intValue
     val density = LocalDensity.current
+    var lineMiddle by remember { mutableStateOf<Float?>(null) } // (px down the title, its first line's middle)
+    val pad = Tokens.Git.rowPad
     Row(Modifier.fillMaxWidth().drawBehind {
         if (found) {
             drawRect(colors.accentBg.copy(alpha = 0.2f))
             drawRect(colors.accent, size = androidx.compose.ui.geometry.Size(3.dp.toPx(), size.height))
         }
-        lanes(lane, 2.dp.toPx(), dim, made)
+        lanes(lane, 2.dp.toPx(), dim, made, lineMiddle?.let { pad.toPx() + it } ?: (size.height / 2))
     }.clickable(onClick = open).padding(start = 2.dp, end = 8.dp), horizontalArrangement = Arrangement.spacedBy(Tokens.Git.rowGap),
-        verticalAlignment = Alignment.CenterVertically) {
+        verticalAlignment = Alignment.Top) {
         Spacer(Modifier.width(laneWidth(cols)))
-        Box(Modifier.alpha(if (dim) Tokens.Git.rowDim.toFloat() else 1f)) {
+        // (the picture and the graph's dot level with the title's first line, however many lines the row has)
+        Box(Modifier.offset {
+            val y = lineMiddle?.let { pad.toPx() + it - Tokens.Git.avatar.icon.toPx() / 2 } ?: pad.toPx()
+            IntOffset(0, y.roundToInt().coerceAtLeast(0))
+        }.alpha(if (dim) Tokens.Git.rowDim.toFloat() else 1f)) {
             Avatar(c.author.orEmpty(), GitAvatars.picture(c.email.orEmpty()), Tokens.Git.avatar.icon)
         }
-        Column(Modifier.weight(1f).padding(vertical = 4.dp).alpha(if (dim) Tokens.Git.rowDim.toFloat() else 1f)) {
+        Column(Modifier.weight(1f).padding(vertical = pad).alpha(if (dim) Tokens.Git.rowDim.toFloat() else 1f)) {
             PillText(lineText(c, made, heads), style = Type.body.copy(fontWeight = if (own) Tokens.Git.ownWeight else null),
-                color = colors.fg, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                color = colors.fg, maxLines = 2, overflow = TextOverflow.Ellipsis,
+                onTextLayout = { lineMiddle = (it.getLineTop(0) + it.getLineBottom(0)) / 2 })
             Text(caption(c), style = Type.caption, color = colors.fg.copy(alpha = colors.fg.alpha * Tokens.Git.captionOpacity.toFloat()),
                 maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
-        if (merge == true) IconButton(if (opened) Adwaita.PanDown else Adwaita.PanEnd,
-            if (opened) Wording.Git.hideMerged else Wording.Git.showMerged, onClick = toggle)
+        if (merge == true) Box(Modifier.align(Alignment.CenterVertically)) {
+            IconButton(if (opened) Adwaita.PanDown else Adwaita.PanEnd,
+                if (opened) Wording.Git.hideMerged else Wording.Git.showMerged, onClick = toggle)
+        }
     }
 }
 

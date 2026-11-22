@@ -1152,7 +1152,7 @@ class WindowProc:
         if self.proc is None:
             self.start_proc()
         if self.proc is None or not hasattr(self.proc, "held"):
-            toast(self, "It can't be sent: this chat's agent couldn't be started")
+            toast(self, "It can't be sent: this chat couldn't be started")
             return
         h, sid = turn.held, self.session_id
         sender = baudelib.wire.clean_sender(h.get("sender")) or {"kind": "host"}

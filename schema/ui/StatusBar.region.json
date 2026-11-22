@@ -13,8 +13,8 @@
     {
       "name": "host",
       "shows": "The host the chat lives on, by name, in monospace: \"local\" for this machine, else the other host's name.",
-      "text": ["local", "The host this chat lives on: its files, and its agent's tools"],
-      "actions": [{"by": "hover", "does": "Tooltip \"The host this chat lives on: its files, and its agent's tools\", with the host's address in brackets for another host"}]
+      "text": ["local", "The host this chat lives on: its files, and its tools"],
+      "actions": [{"by": "hover", "does": "Tooltip \"The host this chat lives on: its files, and its tools\", with the host's address in brackets for another host"}]
     },
     {
       "name": "folder and last turn",

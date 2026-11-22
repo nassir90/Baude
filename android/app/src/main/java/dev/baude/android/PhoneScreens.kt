@@ -70,15 +70,17 @@ fun PhoneScreen(back: () -> Unit, open: (String) -> Unit) {
             PanelHeading(Wording.PhoneKeys.heading)
             KeyMaterial()
 
-            val far = startedElsewhere() // (an agent on another host started it: under that one in Home's list only)
-            val agents = Mesh.sessions["phone"].orEmpty().filter { it.archived != true && "phone/${it.id.orEmpty()}" !in far }
-            if (agents.isNotEmpty()) {
-                PanelHeading(Wording.ThisPhone.agents)
+            val far = startedElsewhere() // (a chat on another host started it: under that one in Home's list only)
+            val hosted = Mesh.sessions["phone"].orEmpty().filter { it.archived != true && "phone/${it.id.orEmpty()}" !in far }
+            val (bots, plain) = hosted.partition { it.bot != null }
+            for ((heading, rows) in listOf(Wording.Common.bots to bots, Wording.ThisPhone.chats to plain)) {
+                if (rows.isEmpty()) continue
+                PanelHeading(heading)
                 Panel(rows = true) {
-                    agents.forEachIndexed { i, s ->
+                    rows.forEachIndexed { i, s ->
                         if (i > 0) Rule()
                         val name = s.bot?.name?.ifBlank { null } ?: s.title?.ifBlank { null } // (a Bot: its name alone)
-                            ?: modelSaid(s.model.orEmpty()).ifBlank { Wording.Common.agent }
+                            ?: Wording.Common.untitled
                         Row(Modifier.fillMaxWidth().clickable { open(s.id.orEmpty()) }.padding(start = 12.dp, top = 8.dp, bottom = 8.dp, end = 4.dp),
                             verticalAlignment = Alignment.CenterVertically) {
                             val contact = Mesh.contact("phone", s.id.orEmpty())
@@ -106,8 +108,7 @@ fun PhoneScreen(back: () -> Unit, open: (String) -> Unit) {
                         Row(Modifier.fillMaxWidth().padding(start = 12.dp, top = 6.dp, bottom = 6.dp, end = 8.dp),
                             verticalAlignment = Alignment.CenterVertically) {
                             Text(m.optJSONObject("bot")?.optString("name")?.ifBlank { null } // (a Bot: its name alone)
-                                ?: (if (m.isNull("title")) "" else m.optString("title")).ifBlank { modelSaid(m.optString("model")) }
-                                    .ifBlank { Wording.Common.agent },
+                                ?: (if (m.isNull("title")) "" else m.optString("title")).ifBlank { Wording.Common.untitled },
                                 style = Type.bold, color = c.fg, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
                             Button(Wording.ThisPhone.restore) { PhoneHost.putBack(m.optString("id")) }
                         }
@@ -206,9 +207,6 @@ private fun setPicture(s: Msg.Session, png: ByteArray) {
     Mesh.conn("phone")?.request(Msg.Bot(session = s.id.orEmpty(), bot = Msg.BotFields(
         name = bot.name.orEmpty(), picture = java.util.Base64.getEncoder().encodeToString(png))).json()) {}
 }
-
-/** A model's value as the agents list says it, by its name in its provider's API. */
-private fun modelSaid(value: String) = value.substringAfterLast("/")
 
 @Composable
 private fun PanelHeading(text: String) {

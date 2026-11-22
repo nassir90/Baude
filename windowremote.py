@@ -568,7 +568,7 @@ class WindowRemote:
         field(wording.say("new_session.host"), servers_dd)
         server = lambda: servers[servers_dd.get_selected()]  # noqa: E731
         agent_dd = Gtk.DropDown.new_from_strings([label for _value, label in offered(servers[0])])
-        field(wording.say("common.agent"), agent_dd)
+        field(wording.say("common.model"), agent_dd)
         last = load_settings().get("remote_folders") or {}
         place = lambda r: HERE_HOST if r is None or host_key(r) == HERE_HOST else r.key  # noqa: E731
         home = lambda r: self.cwd if place(r) == HERE_HOST else r.info.get("home")  # noqa: E731
@@ -593,7 +593,7 @@ class WindowRemote:
 
         def check():
             if agent_dd.get_selected_item() is None:
-                return f"{named(server())} offers no agent"
+                return f"{named(server())} offers nothing to run"
             return None
 
         def submit():
@@ -616,7 +616,7 @@ class WindowRemote:
         fields = [("host", "the host it runs on", servers_dd), ("agent", "what runs it: one of the host's", agent_dd),
                   ("folder", "the folder it starts in, on that host", where), ("group", "its group (or empty)", group_entry),
                   ("prompt", "what it's asked first", prompt)]
-        return metalook.Form(wording.say("new_session.spawn_agent"), grid, fields, check, submit,
+        return metalook.Form(wording.say("new_session.start_chat"), grid, fields, check, submit,
                              verb=wording.say("new_session.start"), body=f"With the top bar's {runs}" if runs else "")
 
     def group_form(self):

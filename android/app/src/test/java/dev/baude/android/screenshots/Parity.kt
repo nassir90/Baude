@@ -316,6 +316,7 @@ abstract class Parity(private val theme: String, private val scene: String) {
     @After fun down() {
         dev.baude.android.CompactFolds.open.clear()
         dev.baude.android.Viewer.state.value = null
+        dev.baude.android.MetaTools.form.value = null
         Fixes.items = emptyList()
         Fixes.repo = null
         Fixes.error = null
@@ -527,6 +528,8 @@ abstract class Parity(private val theme: String, private val scene: String) {
                     when (sp.getString("kind")) {
                         "setting" -> shown.put(JSONObject().put("setting", sp.getString("name")).put("set", sp.get("set")))
                         "changelog" -> shown.put(JSONObject().put("changelog", true))
+                        "form" -> dev.baude.android.MetaTools.form.value = JSONObject().put("id", sp.getString("id"))
+                            .put("form", sp.getString("form")).put("values", sp.optJSONObject("values") ?: JSONObject()).put("state", "open")
                     }
                 }
                 calls.put(key, JSONObject().put("key", key).put("id", key).put("name", it.getString("name"))

@@ -76,7 +76,7 @@ fun SpawnAgent(done: () -> Unit, opened: (String, String) -> Unit, given: JSONOb
     }
     AlertDialog(
         onDismissRequest = done,
-        title = { Text(Wording.NewSession.spawnAgent) },
+        title = { Text(Wording.NewSession.startChat) },
         text = {
             Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 FormRow(Wording.NewSession.host) {

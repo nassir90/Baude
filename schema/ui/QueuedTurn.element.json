@@ -52,7 +52,7 @@
         },
         {
           "by": "click ↑",
-          "does": "Interrupts the running turn, then sends this message and every queued message before it, together as one message (their texts joined by a blank line, their attachments together). Tooltip \"Send now: interrupt the agent, then send this and the queued messages before it\"."
+          "does": "Interrupts the running turn, then sends this message and every queued message before it, together as one message (their texts joined by a blank line, their attachments together). Tooltip \"Send now: interrupt the chat, then send this and the queued messages before it\"."
         },
         {
           "by": "click the revert icon",

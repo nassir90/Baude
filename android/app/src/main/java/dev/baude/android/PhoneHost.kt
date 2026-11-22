@@ -358,7 +358,7 @@ object PhoneHost {
                     val bot = Msg.Bot.from(msg).bot
                     if (bot == null) s.meta.put("bot", JSONObject.NULL)
                     else {
-                        s.meta.put("bot", JSONObject().put("name", bot.name.orEmpty().trim().take(64).ifBlank { "Agent" })
+                        s.meta.put("bot", JSONObject().put("name", bot.name.orEmpty().trim().take(64).ifBlank { "Bot" })
                             .put("since", s.meta.optJSONObject("bot")?.optDouble("since") ?: now()))
                         if (msg.optJSONObject("bot")?.has("picture") == true) { // (a PNG, base64; "" or null to drop it;
                             val pic = picture(s)                                 // left out, kept)
@@ -389,7 +389,7 @@ object PhoneHost {
     private fun start(head: Head, msg: JSONObject, reply: (String, Array<out Pair<String, Any?>>) -> Unit) {
         val r = Msg.Start.from(msg)
         if (r.adopt != null)
-            return reply(Op.ERROR, arrayOf("error" to "an agent on $name can't take up a conversation it doesn't have", "plain" to true))
+            return reply(Op.ERROR, arrayOf("error" to "a chat on $name can't take up a conversation it doesn't have", "plain" to true))
         if (r.askDefault != null && r.askDefault !in setOf("deny", "allow"))
             return reply(Op.ERROR, arrayOf("error" to "ask_default is deny or allow"))
         // (a fork: a copy of one of its agents' conversations, under an id of its own; ephemeral, a side question's,
@@ -401,7 +401,7 @@ object PhoneHost {
         }
         val served = (if (model.isNotBlank()) Inference.of(model)
             else src?.meta?.optJSONObject("infer")?.let { Served.of(it) } ?: Inference.found().firstOrNull())
-            ?: return reply(Op.ERROR, arrayOf("error" to "$name can't run ${model.ifBlank { "a model" }}: its agents " +
+            ?: return reply(Op.ERROR, arrayOf("error" to "$name can't run ${model.ifBlank { "a model" }}: its chats " +
                 "run the models the mesh's machines serve over an API, and none does now", "plain" to true))
         val sid = UUID.randomUUID().toString()
         val botName = r.bot?.let { it.name.orEmpty() }?.trim()?.take(64)?.ifBlank { null }?.takeIf { !ephemeral }
@@ -536,7 +536,7 @@ object PhoneHost {
                         setMode(s, request.optString("mode"))
                         answer(JSONObject())
                     } else answer(null, "no such permission mode: ${request.optString("mode")}")
-                    "rewind_conversation" -> answer(null, "an agent on this phone can't be taken back to an earlier message yet")
+                    "rewind_conversation" -> answer(null, "a chat on this phone can't be taken back to an earlier message yet")
                     else -> answer(JSONObject())
                 }
             }

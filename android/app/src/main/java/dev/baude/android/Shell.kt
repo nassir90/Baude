@@ -19,8 +19,9 @@ import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.imePadding
-import androidx.compose.foundation.layout.isImeVisible
+import androidx.compose.foundation.layout.exclude
+import androidx.compose.foundation.layout.ime
+import androidx.compose.foundation.layout.union
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
@@ -36,6 +37,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -46,6 +48,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
@@ -191,8 +194,12 @@ fun ChatShell(hostId: String, sid: String, back: () -> Unit, open: (String, Stri
             "signal" -> SignalPage(at, sid, here)
         }
     }
+    // (the keyboard rises over the bottom bar, and the pages' foot, the box you write in, with it once it's past the
+    // bar; going down, the box comes down with it till it rests on the bar, which the keyboard uncovers as it goes)
+    var barHeight by remember { mutableIntStateOf(0) } // (px: the bottom bar, the phone's own bar under it too)
+    val overBar = WindowInsets.ime.exclude(WindowInsets(bottom = barHeight))
     Box(Modifier.fillMaxSize()) {
-    Column(Modifier.fillMaxSize().background(c.frame).imePadding()) {
+    Column(Modifier.fillMaxSize().background(c.frame)) {
         Bar(name, start = { IconButton(Adwaita.GoPrevious, Wording.Browser.back, onClick = back) },
             lead = if (bot != null) ({ Avatar(name, contact?.let { Mesh.pictures[it.pictureKey] }) }) else null,
             end = {
@@ -207,14 +214,18 @@ fun ChatShell(hostId: String, sid: String, back: () -> Unit, open: (String, Stri
             })
         androidx.compose.runtime.CompositionLocalProvider(LocalChatPlace provides place) {
         if (split) SideBySide(Modifier.weight(1f).fillMaxWidth(), close = toggle, chat = { Page("chat", true, false) }) {
-            Box(Modifier.weight(1f)) { Page(side, true, true) }
-            if (!WindowInsets.isImeVisible) BottomBar(sideAll, sideAll.indexOfFirst { it.key == side }) { side = sideAll[it].key }
+            Box(Modifier.weight(1f).windowInsetsPadding(overBar)) { Page(side, true, true) }
+            BottomBar(sideAll, sideAll.indexOfFirst { it.key == side }, Modifier.onSizeChanged { barHeight = it.height }) {
+                side = sideAll[it].key
+            }
         } else {
-            HorizontalPager(pager, Modifier.weight(1f).fillMaxWidth(), key = { all[it].key },
+            HorizontalPager(pager, Modifier.weight(1f).fillMaxWidth().windowInsetsPadding(overBar), key = { all[it].key },
                 userScrollEnabled = all.getOrNull(pager.currentPage)?.key != "browser") { i ->
                 Page(all[i].key, pager.currentPage == i && !pager.isScrollInProgress, false)
             }
-            if (!WindowInsets.isImeVisible) BottomBar(all, pager.currentPage) { scope.launch { pager.animateScrollToPage(it) } }
+            BottomBar(all, pager.currentPage, Modifier.onSizeChanged { barHeight = it.height }) {
+                scope.launch { pager.animateScrollToPage(it) }
+            }
         }
         }
     }
@@ -242,8 +253,9 @@ fun SideBySide(modifier: Modifier, close: () -> Unit, chat: @Composable () -> Un
         val from by androidx.compose.runtime.rememberUpdatedState(kept.coerceIn(PANEL_LEAST, most)) // (for the drag: as
         val widest by androidx.compose.runtime.rememberUpdatedState(most)                            // they are then)
         Row(Modifier.fillMaxSize()) {
-            Box(Modifier.weight(1f).fillMaxHeight() // (clear of the phone's own bar at the foot, as the switcher is)
-                .windowInsetsPadding(WindowInsets.navigationBars.only(WindowInsetsSides.Bottom))) { chat() }
+            Box(Modifier.weight(1f).fillMaxHeight() // (clear of the phone's own bar at the foot, as the switcher is, and
+                .windowInsetsPadding(WindowInsets.navigationBars.union(WindowInsets.ime) // of the keyboard)
+                    .only(WindowInsetsSides.Bottom))) { chat() }
             Box(Modifier.width(1.dp).fillMaxHeight().background(c.rule))
             if (width > 0f) Column(Modifier.width(width.dp).fillMaxHeight()) { pages() }
         }
@@ -277,9 +289,9 @@ private const val GRIP = 16f          // (the rule's width to a finger)
 /** Baude's side panel's switcher as a bottom bar (Adw.ViewSwitcher, narrow: each page's icon over its title, the one
  * shown raised), a row that scrolls when it's wider than the phone. */
 @Composable
-fun BottomBar(pages: List<Page>, current: Int, pick: (Int) -> Unit) {
+fun BottomBar(pages: List<Page>, current: Int, modifier: Modifier = Modifier, pick: (Int) -> Unit) {
     val c = LocalBaude.current
-    Box(Modifier.fillMaxWidth().background(c.frame).navigationBarsPadding(), contentAlignment = Alignment.Center) {
+    Box(modifier.fillMaxWidth().background(c.frame).navigationBarsPadding(), contentAlignment = Alignment.Center) {
         Row(Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 6.dp, vertical = 6.dp),
             horizontalArrangement = Arrangement.spacedBy(2.dp)) {
             pages.forEachIndexed { i, p ->

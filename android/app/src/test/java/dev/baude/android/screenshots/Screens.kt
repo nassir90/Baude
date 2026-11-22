@@ -296,6 +296,179 @@ abstract class Screens(private val theme: String) {
         ))
     }
 
+    /** A message of yours tapped: its revert button beside its last line. Then a queued one tapped: its ✕, ↑ and
+     * revert beside its last line. */
+    @Test fun chatMessageTapped() = messageTapped("")
+
+    /** The same with the phone's text at its larger size. */
+    @Test fun chatMessageTappedLarger() {
+        Settings.textScale.value = 1.3f
+        messageTapped("-larger")
+    }
+
+    private fun messageTapped(suffix: String) {
+        val chat = Mesh.openChat("h1", "a")
+        chat.lines.addAll(listOf(
+            Line("you", "Tidy the release notes for 0.9.", uuid = "u1"),
+            Line("bot", "Here's a tidier draft, grouped by area. Want me to write it to `CHANGELOG.md`?"),
+            Line("you", "Yes, and link each item to its PR. Keep the sync items first, then settings, and leave the " +
+                "internal refactors out.", uuid = "u2"),
+            Line("tool", "Edit CHANGELOG.md"),
+        ))
+        chat.loaded.value = true
+        chat.queued.add(dev.baude.android.Queued("Then tag the release as v0.9.0 and push the tag.", emptyList()))
+        show { ChatShell("h1", "a", back = {}, open = { _, _ -> }, feedback = {}) }
+        press("Keep the sync items first")
+        settle()
+        activity.window.decorView.captureRoboImage("build/screenshots/$theme/40-chat-message-tapped$suffix.png")
+        press("Then tag the release")
+        activity.window.decorView.captureRoboImage("build/screenshots/$theme/41-chat-queued-tapped$suffix.png")
+    }
+
+    /** A long chat opened for the first time, its transcript read in parts as a host sends it, a picture you sent
+     * near its end read a moment after it's drawn, taking its size then: open at its end. */
+    @Test fun chatOpened() {
+        val chat = Mesh.openChat("h1", "b")
+        show { ChatShell("h1", "b", back = {}, open = { _, _ -> }, feedback = {}) }
+        for (part in longChat().chunked(12)) {
+            chat.lines.addAll(part)
+            androidx.compose.runtime.snapshots.Snapshot.sendApplyNotifications()
+            repeat(3) { frame() }
+        }
+        chat.loaded.value = true
+        androidx.compose.runtime.snapshots.Snapshot.sendApplyNotifications()
+        repeat(60) { frame() }
+        Thread.sleep(1500) // (the picture read meanwhile, off the main thread)
+        repeat(30) { frame() }
+        activity.window.decorView.captureRoboImage("build/screenshots/$theme/42-chat-opened.png")
+    }
+
+    /** The long chat scrolled up by a drag, left for the home screen, and opened again: where it was left. */
+    @Test fun chatReopened() {
+        val chat = Mesh.openChat("h1", "b")
+        chat.lines.addAll(longChat())
+        chat.loaded.value = true
+        show { ChatShell("h1", "b", back = {}, open = { _, _ -> }, feedback = {}) }
+        repeat(30) { frame() }
+        drag(from = 0.3f, to = 0.75f)
+        drag(from = 0.3f, to = 0.75f)
+        activity.window.decorView.captureRoboImage("build/screenshots/$theme/43-chat-left.png")
+        show { HomeScreen() }
+        Mesh.close()
+        val again = Mesh.openChat("h1", "b")
+        again.lines.addAll(longChat())
+        again.loaded.value = true
+        show { ChatShell("h1", "b", back = {}, open = { _, _ -> }, feedback = {}) }
+        repeat(30) { frame() }
+        activity.window.decorView.captureRoboImage("build/screenshots/$theme/43-chat-reopened.png")
+    }
+
+    /** The keyboard up, then partway down past the bottom bar (as it is mid-way through going down): the keyboard
+     * drawn as a grey block where it is, which the rig doesn't draw. */
+    @Test fun chatKeyboard() {
+        val chat = Mesh.openChat("h1", "a")
+        fill(chat)
+        show { ChatShell("h1", "a", back = {}, open = { _, _ -> }, feedback = {}) }
+        for ((name, dp) in listOf("44-chat-keyboard-up" to 300, "45-chat-keyboard-going-down" to 40)) {
+            val px = (dp * activity.resources.displayMetrics.density).toInt()
+            val w = androidx.core.view.WindowInsetsCompat.Builder()
+                .setInsets(androidx.core.view.WindowInsetsCompat.Type.ime(), androidx.core.graphics.Insets.of(0, 0, 0, px))
+                .setVisible(androidx.core.view.WindowInsetsCompat.Type.ime(), true).build()
+            fun give(v: android.view.View) {
+                androidx.core.view.ViewCompat.dispatchApplyWindowInsets(v, w)
+                if (v is android.view.ViewGroup) for (k in 0 until v.childCount) give(v.getChildAt(k))
+            }
+            give(activity.window.decorView)
+            repeat(20) { frame() }
+            val v = activity.window.decorView
+            val bitmap = android.graphics.Bitmap.createBitmap(v.width, v.height, android.graphics.Bitmap.Config.ARGB_8888)
+            val canvas = android.graphics.Canvas(bitmap)
+            v.draw(canvas)
+            canvas.drawRect(0f, (v.height - px).toFloat(), v.width.toFloat(), v.height.toFloat(),
+                android.graphics.Paint().apply { color = android.graphics.Color.rgb(120, 120, 128) })
+            java.io.File("build/screenshots/$theme").mkdirs()
+            java.io.File("build/screenshots/$theme/$name.png").outputStream().use {
+                bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it)
+            }
+        }
+    }
+
+    private fun longChat(): List<Line> = (1..18).flatMap { i -> listOf(
+        Line("you", "Step $i: check the build on the release branch and say what's slow.", uuid = "s$i"),
+        Line("tool", "Bash ./gradlew assemble --profile"),
+        Line("bot", "Step $i done. Configuration took most of the time: the plugins resolve their dependencies on " +
+            "every run. Caching the configuration would save about a third of it."),
+    ) } + Line("you", "Here's the profile from my machine.", uuid = "pic",
+        files = listOf(dev.baude.android.Sent("image", "profile.png", "image/png", picture()))) +
+        Line("bot", "Thanks: the same three plugins stand out there too.")
+
+    /** A frame as a phone draws one: its time passed, then what changed laid out and drawn (the rig lays out only
+     * when it's drawn). */
+    private fun frame() {
+        org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idleFor(java.time.Duration.ofMillis(16))
+        val v = activity.window.decorView
+        v.draw(android.graphics.Canvas(android.graphics.Bitmap.createBitmap(v.width, v.height, android.graphics.Bitmap.Config.ARGB_8888)))
+    }
+
+    /** A small picture, as a message's attachment has one (base64 PNG). */
+    private fun picture(): String {
+        val b = android.graphics.Bitmap.createBitmap(3000, 3000, android.graphics.Bitmap.Config.ARGB_8888)
+        android.graphics.Canvas(b).apply { // (a phone camera's size: read a moment after its message is drawn)
+            drawColor(android.graphics.Color.rgb(80, 120, 200))
+            drawCircle(1500f, 1500f, 940f, android.graphics.Paint().apply { color = android.graphics.Color.rgb(240, 200, 80) })
+        }
+        val out = java.io.ByteArrayOutputStream()
+        b.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, out)
+        return java.util.Base64.getEncoder().encodeToString(out.toByteArray())
+    }
+
+    /** Where the words text are on screen (the first that has them), as Compose's semantics have them. */
+    private fun where(text: String): android.graphics.RectF {
+        fun roots(v: android.view.View): List<androidx.compose.ui.node.RootForTest> = when (v) {
+            is androidx.compose.ui.node.RootForTest -> listOf(v)
+            is android.view.ViewGroup -> (0 until v.childCount).flatMap { roots(v.getChildAt(it)) }
+            else -> emptyList()
+        }
+        fun all(n: androidx.compose.ui.semantics.SemanticsNode): List<androidx.compose.ui.semantics.SemanticsNode> =
+            listOf(n) + n.children.flatMap { all(it) }
+        val node = roots(activity.window.decorView).flatMap { all(it.semanticsOwner.unmergedRootSemanticsNode) }.first { n ->
+            n.config.getOrElse(androidx.compose.ui.semantics.SemanticsProperties.Text) { emptyList() }.any { text in it.text }
+        }
+        val b = node.boundsInWindow
+        return android.graphics.RectF(b.left, b.top, b.right, b.bottom)
+    }
+
+    /** A finger put down on the words text and lifted (held: for a long press). */
+    private fun press(text: String, held: Boolean = false) {
+        val r = where(text)
+        val root = activity.window.decorView
+        val t = android.os.SystemClock.uptimeMillis()
+        root.dispatchTouchEvent(android.view.MotionEvent.obtain(t, t, android.view.MotionEvent.ACTION_DOWN, r.centerX(), r.centerY(), 0))
+        org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idleFor(java.time.Duration.ofMillis(if (held) 700 else 60))
+        val u = android.os.SystemClock.uptimeMillis()
+        root.dispatchTouchEvent(android.view.MotionEvent.obtain(t, u, android.view.MotionEvent.ACTION_UP, r.centerX(), r.centerY(), 0))
+        settle()
+    }
+
+    /** A finger dragged down the middle of the screen, from and to fractions of its height, then let go still. */
+    private fun drag(from: Float, to: Float) {
+        val root = activity.window.decorView
+        val x = root.width / 2f
+        val t = android.os.SystemClock.uptimeMillis()
+        val looper = org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper())
+        root.dispatchTouchEvent(android.view.MotionEvent.obtain(t, t, android.view.MotionEvent.ACTION_DOWN, x, root.height * from, 0))
+        for (k in 1..20) {
+            looper.idleFor(java.time.Duration.ofMillis(16))
+            val y = root.height * (from + (to - from) * k / 20f)
+            root.dispatchTouchEvent(android.view.MotionEvent.obtain(t, android.os.SystemClock.uptimeMillis(),
+                android.view.MotionEvent.ACTION_MOVE, x, y, 0))
+        }
+        looper.idleFor(java.time.Duration.ofMillis(300))
+        root.dispatchTouchEvent(android.view.MotionEvent.obtain(t, android.os.SystemClock.uptimeMillis(),
+            android.view.MotionEvent.ACTION_UP, x, root.height * to, 0))
+        settle()
+    }
+
     @Composable
     private fun HomeScreen() = Home(open = { _, _ -> }, feedback = {})
 

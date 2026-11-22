@@ -24,16 +24,16 @@
     },
     {
       "name": "buttons",
-      "shows": "Three small round flat buttons (24px) in a row just left of the bubble, level with its last line, invisible until the pointer is on the row, fading in over 150ms: ✕ (close icon), ↑ (a bold arrow character), and the circular-arrows revert icon.",
+      "shows": "Three small round flat buttons (24px) in a row just left of the bubble, their middle level with the middle of its last line of text, invisible until the pointer is on the row, fading in over 150ms: ✕ (close icon), ↑ (a bold arrow character), and the circular-arrows revert icon.",
       "copy": [
         "chat_turns.queued_delete",
         "chat_turns.queued_send_now",
         "chat_turns.queued_edit"
       ],
       "phone": {
-        "does": "A long-press reveals the same controls",
-        "why": "No hover on touch; a long-press is Android's equivalent of the desktop's right-click",
-        "decided": "2026-11-21"
+        "does": "A tap on the message shows the same buttons, centred on its last line of text as here; another tap hides them. A long press shows them too",
+        "why": "No hover on touch; the owner asked for a single tap",
+        "decided": "2026-11-22"
       },
       "actions": [
         {

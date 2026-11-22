@@ -30,9 +30,9 @@
     "bot_memory"
   ],
   "phone": {
-    "does": "The side panel's pages are a chat's pages, switched by a bar along its bottom (icon over title), the chat itself the first",
-    "why": "One column at a time on a phone",
-    "decided": "2026-11-21"
+    "does": "The side panel's pages are a chat's pages, switched by a bar along its bottom (icon over title), the chat itself the first. The bar stays under the on-screen keyboard: the keyboard rises over it, the pages' foot (the composer) rising with the keyboard once it's past the bar; going down, the composer comes down with the keyboard till it rests on the bar, which the keyboard uncovers as it goes",
+    "why": "One column at a time on a phone; the owner asked for the keyboard to go down past the bar rather than the bar coming up after it",
+    "decided": "2026-11-22"
   },
   "parts": [
     {

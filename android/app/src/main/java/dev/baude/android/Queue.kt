@@ -208,27 +208,29 @@ private fun UpArrow() {
     Text("↑", style = Type.bold.copy(fontSize = 13.sp), color = LocalBaude.current.dim)
 }
 
-/** A turn's buttons, hidden till a long-press on the turn reveals them. */
+/** A turn's buttons, hidden till a tap on the turn reveals them; modifier: where they sit in its row (LastLine). */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun Revealed(shown: Boolean, buttons: @Composable () -> Unit) {
-    AnimatedVisibility(shown, enter = fadeIn(tween(150)), exit = fadeOut(tween(150))) {
+private fun Revealed(shown: Boolean, modifier: Modifier, buttons: @Composable () -> Unit) {
+    AnimatedVisibility(shown, modifier, enter = fadeIn(tween(150)), exit = fadeOut(tween(150))) {
         Row(horizontalArrangement = Arrangement.spacedBy(2.dp), verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier.padding(end = 4.dp)) { buttons() }
     }
 }
 
 /** A message queued under the chat while a turn ran, as Baude's queued turn is: grey, right-aligned, its buttons
- * (✕ drops it, ↑ sends it now, revert puts it in the box) shown on a long-press. */
+ * (✕ drops it, ↑ sends it now, revert puts it in the box) level with its last line, shown by a tap (or a long press)
+ * and hidden by another tap. */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun QueuedRow(chat: Chat, q: Queued, working: Boolean) {
     val c = LocalBaude.current
     var shown by remember { mutableStateOf(false) }
+    val level = rememberLastLine()
     Row(Modifier.fillMaxWidth().semantics(mergeDescendants = true) {}
-        .combinedClickable(onClick = { shown = false }, onLongClick = { shown = true }),
-        horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.Bottom) {
-        Revealed(shown) {
+        .combinedClickable(onClick = { shown = !shown }, onLongClick = { shown = true }),
+        horizontalArrangement = Arrangement.End) {
+        Revealed(shown, Modifier.alignBy(level.buttons)) {
             TurnButton(Wording.ChatTurns.queuedDelete, { chat.queued.remove(q) }) {
                 Icon(Adwaita.WindowClose, null, tint = c.dim, modifier = Modifier.size(12.dp.icon))
             }
@@ -239,7 +241,7 @@ fun QueuedRow(chat: Chat, q: Queued, working: Boolean) {
                 chat.files.addAll(0, q.files)
             }) { Icon(Adwaita.ViewRefresh, null, tint = c.dim, modifier = Modifier.size(12.dp.icon)) }
         }
-        Column(Modifier.weight(1f, fill = false).padding(start = if (shown) 0.dp else 48.dp)
+        Column(Modifier.alignBy(level.bubble).weight(1f, fill = false).padding(start = if (shown) 0.dp else 48.dp)
             .clip(RoundedCornerShape(Gap.bubbleRadius)).background(c.quiet)
             .padding(horizontal = Gap.bubbleH, vertical = Gap.bubbleV), horizontalAlignment = Alignment.End) {
             for (f in q.files) Text(when {
@@ -254,23 +256,25 @@ fun QueuedRow(chat: Chat, q: Queued, working: Boolean) {
 
 /** A message its host holds for the chat (a subagent's answer that came after its host restarted), as Baude's held
  * turn shows one: grey, from whom at its top, what a person's shown of it, ✕ to drop it and ↑ to send it to the agent
- * (once no turn's going), their buttons shown on a long-press. */
+ * (once no turn's going), their buttons level with its last line, shown by a tap (or a long press) and hidden by
+ * another tap. */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun Held(chat: Chat, h: Msg.HeldMessage, working: Boolean) {
     val c = LocalBaude.current
     val ctx = LocalContext.current
     var shown by remember { mutableStateOf(false) }
+    val level = rememberLastLine()
     Row(Modifier.fillMaxWidth().semantics(mergeDescendants = true) {}
-        .combinedClickable(onClick = { shown = false }, onLongClick = { shown = true }),
-        horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.Bottom) {
-        Revealed(shown) {
+        .combinedClickable(onClick = { shown = !shown }, onLongClick = { shown = true }),
+        horizontalArrangement = Arrangement.End) {
+        Revealed(shown, Modifier.alignBy(level.buttons)) {
             TurnButton(Wording.Held.delete, { Mesh.held(chat, h.id.orEmpty(), false) }) {
                 Icon(Adwaita.WindowClose, null, tint = c.dim, modifier = Modifier.size(12.dp.icon))
             }
             TurnButton(Wording.Held.send, { heldSend(ctx, chat, h, working) }) { UpArrow() }
         }
-        Column(Modifier.weight(1f, fill = false).clip(RoundedCornerShape(Gap.bubbleRadius)).background(c.quiet)
+        Column(Modifier.alignBy(level.bubble).weight(1f, fill = false).clip(RoundedCornerShape(Gap.bubbleRadius)).background(c.quiet)
             .padding(horizontal = Gap.bubbleH, vertical = Gap.bubbleV), horizontalAlignment = Alignment.End) {
             Text(Wording.Common.fromWho(author = h.sender?.let(::senderName) ?: Wording.Senders.hostUnnamed), style = Type.caption,
                 color = c.quietFg)

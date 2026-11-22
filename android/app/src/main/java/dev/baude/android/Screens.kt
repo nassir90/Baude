@@ -32,7 +32,7 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.gestures.scrollBy
-import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
@@ -75,6 +75,9 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import kotlinx.coroutines.flow.first
 
 // ------------------------------------------------------------------------------------------------------ a chat --
 
@@ -112,8 +115,22 @@ fun ChatPage(chat: Chat, name: String, attach: Boolean = true, stop: (() -> Unit
         text = if (text.isBlank()) shared else text.trimEnd() + "\n" + shared
         chat.draft.value = null
     }
-    val list = rememberLazyListState()
+    val list = remember(chat) { androidx.compose.foundation.lazy.LazyListState() }
     var revealed by remember(chat) { mutableStateOf<String?>(null) } // (the message whose revert button's shown)
+    val placeKey = if (chat.sender == null) "${chat.hostId}/${chat.sid}" else null // (a host's chat's place is kept)
+    val left = remember(chat) { placeKey?.let { ChatPlaces.left(it) } } // (where it was left; none: at its end)
+    var follow by remember(chat) { mutableStateOf(left == null) }
+    var placed by remember(chat) { mutableStateOf(left == null) } // (put back where it was left, or never left)
+    var settled by remember(chat) { mutableStateOf(false) } // (read to its end a moment ago: new things glide in)
+    var touched by remember(chat) { mutableStateOf(false) } // (moved by the reader: a drag, or its fling)
+    val reader = remember(chat) { object : androidx.compose.ui.input.nestedscroll.NestedScrollConnection {
+        override fun onPreScroll(available: androidx.compose.ui.geometry.Offset,
+                                 source: androidx.compose.ui.input.nestedscroll.NestedScrollSource): androidx.compose.ui.geometry.Offset {
+            touched = true
+            revealed = null
+            return androidx.compose.ui.geometry.Offset.Zero
+        }
+    } }
     var reverting by chat::reverting
     val canRevert = own?.can?.invoke() ?: (takes(at, "control") && chat.sender == null)
     val focus = remember { androidx.compose.ui.focus.FocusRequester() }
@@ -171,11 +188,47 @@ fun ChatPage(chat: Chat, name: String, attach: Boolean = true, stop: (() -> Unit
         }
     }
     LaunchedEffect(reverting?.uuid) { if (reverting != null) focus.requestFocus() }
-    LaunchedEffect(list.isScrollInProgress) { if (list.isScrollInProgress) revealed = null }
     // (kept at the end while it's there: what it said last, or what it asks, a tall one's foot too, what it's writing
-    // as it grows; scrolled up to read, left where it is)
-    var follow by remember(chat) { mutableStateOf(true) }
-    LaunchedEffect(list.isScrollInProgress) { if (!list.isScrollInProgress) follow = !list.canScrollForward }
+    // as it grows, and as what's drawn takes its size (pictures, code, an ask's card) or the keyboard takes room;
+    // scrolled up to read, left where it is. Only the reader's own scrolling decides which: never the page's.)
+    LaunchedEffect(list.isScrollInProgress) {
+        if (list.isScrollInProgress || !touched) return@LaunchedEffect
+        touched = false
+        placed = true
+        follow = !list.canScrollForward
+    }
+    LaunchedEffect(chat, chat.loaded.value) {
+        if (!chat.loaded.value && chat.sender == null) return@LaunchedEffect
+        kotlinx.coroutines.delay(1000)
+        settled = true
+    }
+    LaunchedEffect(chat) { // (opened where it was left, once it's read to its end and laid out: measured from its end)
+        val at = left ?: return@LaunchedEffect
+        kotlinx.coroutines.withTimeoutOrNull(2000) {
+            androidx.compose.runtime.snapshotFlow { chat.loaded.value }.first { it }
+            repeat(2) { androidx.compose.runtime.withFrameNanos { } } // (its last lines in the list)
+            val n = list.layoutInfo.totalItemsCount
+            if (!placed && n > 0) list.scrollToItem((n - at.fromEnd).coerceIn(0, n - 1), at.offset)
+        }
+        placed = true
+    }
+    LaunchedEffect(chat) {
+        androidx.compose.runtime.snapshotFlow { follow && placed && !touched && list.canScrollForward && !list.isScrollInProgress }
+            .collect { if (it) toEnd(list, glide = settled) }
+    }
+    LaunchedEffect(chat) { // (what you send brought into view, as Baude's send does, wherever the chat was)
+        var was = chat.sent.size
+        androidx.compose.runtime.snapshotFlow { chat.sent.size }.collect { n ->
+            if (n > was) {
+                placed = true
+                follow = true
+            }
+            was = n
+        }
+    }
+    androidx.compose.runtime.DisposableEffect(chat) {
+        onDispose { if (placed && placeKey != null) ChatPlaces.keep(placeKey, list, follow) }
+    }
     LaunchedEffect(chat.jump.value) { // (Made by this chat: the call it names, its group opened)
         val id = chat.jump.value ?: return@LaunchedEffect
         val found = itemOf(chat.lines, chat.calls, id)
@@ -184,18 +237,6 @@ fun ChatPage(chat: Chat, name: String, attach: Boolean = true, stop: (() -> Unit
         found.second?.let { chat.calls.opened[it] = true }
         follow = false
         list.animateScrollToItem(found.first)
-    }
-    LaunchedEffect(chat.lines.size, chat.asks.size, chat.queued.size, chat.sent.size, chat.streaming.value.length / 120) {
-        val n = list.layoutInfo.totalItemsCount
-        if (n > 0 && follow) {
-            list.animateScrollToItem(n - 1)
-            list.scrollBy(1e6f)
-            // (an ask opens its group and card, which grow after this: the end kept in view while they do)
-            if (chat.asks.isNotEmpty()) repeat(10) {
-                kotlinx.coroutines.delay(60)
-                if (follow) list.scrollBy(1e6f)
-            }
-        }
     }
     Mesh.tick.value
     val density = androidx.compose.ui.platform.LocalDensity.current
@@ -207,7 +248,7 @@ fun ChatPage(chat: Chat, name: String, attach: Boolean = true, stop: (() -> Unit
     val matches = remember(findQuery, chat.lines.size) { findMatches(chat, findQuery) }
     val findAt = (Find.at[findKey] ?: 0).coerceIn(0, maxOf(0, matches.size - 1))
     LaunchedEffect(findQuery, findAt, matches.size) { // (stepped to: scrolled into view)
-        matches.getOrNull(findAt)?.let { list.animateScrollToItem(itemIndex(chat, it.lineIndex), -with(density) { findBarHeight.toPx().toInt() }) }
+        matches.getOrNull(findAt)?.let { follow = false; list.animateScrollToItem(itemIndex(chat, it.lineIndex), -with(density) { findBarHeight.toPx().toInt() }) }
     }
     androidx.compose.runtime.CompositionLocalProvider(LocalImageOpener provides openImage,
         LocalImageItem provides { key: String -> Viewer.item(chat, key) }, LocalFind provides findQuery,
@@ -215,7 +256,7 @@ fun ChatPage(chat: Chat, name: String, attach: Boolean = true, stop: (() -> Unit
     Column(Modifier.fillMaxSize().inside(c)) {
         BoxWithConstraints(Modifier.weight(1f).fillMaxWidth().onGloballyPositioned { boxX = it.positionInRoot().x }) {
         val side = if (Settings.fullWidth.value) 0.dp else (maxWidth - chatColumn(maxWidth)) / 2
-        LazyColumn(Modifier.fillMaxSize().onSizeChanged {
+        LazyColumn(Modifier.fillMaxSize().alpha(if (placed) 1f else 0f).nestedScroll(reader).onSizeChanged {
             CodeBlocks.maxHeight = CodeBlocks.forChat(with(density) { it.height.toDp() })
         }, state = list,
             contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = Gap.chatH + side, vertical = Gap.chatV),
@@ -229,7 +270,7 @@ fun ChatPage(chat: Chat, name: String, attach: Boolean = true, stop: (() -> Unit
                 val uuid = line.uuid
                 androidx.compose.runtime.CompositionLocalProvider(LocalFindLine provides line) {
                 Said(line, uuid?.let { chat.senders[it] }.takeIf { line.kind == "you" },
-                    if (canRevert && line.kind == "you" && uuid != null) RevertOffer(revealed == uuid, { revealed = uuid }) {
+                    if (canRevert && line.kind == "you" && uuid != null) RevertOffer(revealed == uuid, { on -> revealed = if (on) uuid else null }) {
                         revealed = null
                         if (reverting?.asked == true) return@RevertOffer
                         reverting = Reverting(uuid, reverting?.draft ?: text)
@@ -606,6 +647,41 @@ private fun senderName(kind: String?, name0: String?, hostName: String?): String
     }
     val where = hostName.orEmpty()
     return if (where.isNotBlank() && kind.orEmpty() != "host") Wording.Senders.on(who = who, where = where) else who
+}
+
+/** Where each host's chat was left, as Baude keeps it (WindowView.PLACES): by its host and session, measured from its
+ * end (items after the one at the top, and how far into that one), for opening it there again; one left at its end
+ * isn't kept (opened at its end, as one never opened is). The 500 last left. */
+object ChatPlaces {
+    class Left(val fromEnd: Int, val offset: Int)
+
+    private val places = LinkedHashMap<String, Left>()
+
+    fun left(key: String): Left? = places[key]
+
+    fun keep(key: String, list: androidx.compose.foundation.lazy.LazyListState, atEnd: Boolean) {
+        places.remove(key)
+        val n = list.layoutInfo.totalItemsCount
+        if (atEnd || !list.canScrollForward || n == 0) return
+        places[key] = Left(n - list.firstVisibleItemIndex, list.firstVisibleItemScrollOffset)
+        while (places.size > 500) places.remove(places.keys.first())
+    }
+}
+
+/** A chat's list taken to its end (livefeed.FollowEnd's): a line or two, or a whole chat, there at once; between, a
+ * glide over 200 ms, easing out (not glide: there at once, as a chat opening is). */
+suspend fun toEnd(list: androidx.compose.foundation.lazy.LazyListState, glide: Boolean) {
+    val info = list.layoutInfo
+    val last = info.visibleItemsInfo.lastOrNull()
+    val page = info.viewportEndOffset - info.viewportStartOffset
+    val gap = if (last != null && last.index == info.totalItemsCount - 1)
+        (last.offset + last.size + info.afterContentPadding - info.viewportEndOffset).toFloat() else Float.MAX_VALUE
+    if (gap <= 0.5f) return
+    if (!glide || gap <= page / 3f || gap > page * 4f) {
+        if (gap == Float.MAX_VALUE) list.scrollToItem(info.totalItemsCount - 1)
+        list.scrollBy(1e6f)
+    } else list.animateScrollBy(gap, androidx.compose.animation.core.tween(200,
+        easing = androidx.compose.animation.core.CubicBezierEasing(0.33f, 1f, 0.68f, 1f)))
 }
 
 /** A message's text without the line its host put at its head for its agent (wire.said_by), for one its sender

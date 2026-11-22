@@ -105,6 +105,7 @@ class Chat(hostId: String, sid: String) {
     val uses = HashMap<String, JSONObject>()       // (an Artifact or Agent call's id: the call, till its result's read)
     var offset = -1L
     var reading = false
+    val loaded = mutableStateOf(false) // (its transcript read to its end once: where it was left can be found)
     var again = false
     val sent = mutableStateListOf<Outgoing>()     // (what you sent that its transcript doesn't show yet: drawn as sent)
     val queued = mutableStateListOf<Queued>() // (written while a turn ran: sent when it ends)
@@ -791,6 +792,7 @@ object Mesh {
                 } else {
                     settle(chat.calls, session(chat.hostId, chat.sid)?.state)
                     settleTasks(chat)
+                    chat.loaded.value = true
                 }
             }
         }

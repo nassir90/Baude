@@ -46,7 +46,7 @@ from pickers import ellipsize_dropdown  # noqa: E402,F401
 from codeview import (  # noqa: E402,F401
     CodeView,
 )
-from baudelib import tokens, wording  # noqa: E402
+from baudelib import tokens, wire, wording  # noqa: E402
 
 
 # ---------------------------------------------------------- kubernetes --
@@ -414,8 +414,12 @@ class KubeView(Gtk.Box):
         self.right = right
         # a pod's logs under the table and the YAML, the width of both, as Freelens docks them: a log's lines are long
         self.logs_box = self.build_logs()
+        self.shell_box = self.build_shell()  # (or a pod's shell there instead: one or the other docked)
+        self.dock = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, visible=False)
+        self.dock.append(self.logs_box)
+        self.dock.append(self.shell_box)
         self.lower = inside(paned_grip(Gtk.Paned(orientation=Gtk.Orientation.VERTICAL, start_child=right,
-                                                 end_child=self.logs_box, resize_start_child=True,
+                                                 end_child=self.dock, resize_start_child=True,
                                                  resize_end_child=False, shrink_end_child=False)))
         body = paned_grip(Gtk.Paned(orientation=Gtk.Orientation.HORIZONTAL, start_child=side_scroll,
                                     end_child=self.lower, resize_start_child=False, shrink_start_child=False,
@@ -427,7 +431,7 @@ class KubeView(Gtk.Box):
         self.add_controller(keys)
         # a pod's row: its logs, deleting it (targets: "namespace/name"; a row's buttons hold no pod of their own)
         actions = Gio.SimpleActionGroup()
-        for name, fn in (("logs", self.show_logs), ("delete", lambda key: self.ask_delete(key, False)),
+        for name, fn in (("logs", self.show_logs), ("shell", self.show_shell), ("delete", lambda key: self.ask_delete(key, False)),
                          ("force-delete", lambda key: self.ask_delete(key, True))):
             act = Gio.SimpleAction.new(name, GLib.VariantType.new("s"))
             act.connect("activate", lambda _a, target, fn=fn: fn(target.get_string()))
@@ -545,7 +549,7 @@ class KubeView(Gtk.Box):
         up = {Gdk.KEY_Up, Gdk.KEY_Page_Up, Gdk.KEY_Home, Gdk.KEY_KP_Up, Gdk.KEY_KP_Page_Up, Gdk.KEY_KP_Home}
         keys.connect("key-pressed", lambda _c, kv, _k, _s: (kv in up and self.follow_logs(False), False)[1])
         self.logs.view.add_controller(keys)
-        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, visible=False, height_request=tokens.px("kube.logs-min"))  # (the pane's rule over it)
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, visible=False, vexpand=True, height_request=tokens.px("kube.logs-min"))  # (the pane's rule over it)
         box.append(head)
         box.append(self.logs)
         return box
@@ -615,6 +619,7 @@ class KubeView(Gtk.Box):
     def close(self):
         self.set_visible(False)
         self.hide_logs()
+        self.hide_shell()
         self.stop_watch()
         if self.timer is not None:
             GLib.source_remove(self.timer)
@@ -622,7 +627,9 @@ class KubeView(Gtk.Box):
         self.win.input.grab_focus()
 
     def escape(self):
-        if self.logs_box.get_visible():
+        if self.shell_box.get_visible():
+            self.hide_shell()
+        elif self.logs_box.get_visible():
             self.hide_logs()
         elif self.details_box.get_visible():
             self.hide_details()
@@ -671,6 +678,7 @@ class KubeView(Gtk.Box):
         self.say(wording.say("kube.connecting", context=name))
         self.hide_details()
         self.hide_logs()  # (another cluster's: not its pod's)
+        self.hide_shell()
         self.stop_watch()  # (the other cluster's)
         self.fade.hold()
         self.loading = True  # (no refresh meanwhile: it would be read before the context's resources)
@@ -1099,16 +1107,18 @@ class KubeView(Gtk.Box):
         return c
 
     def make_pod_buttons(self):
-        """The Pods table's last column, as Freelens ends a pod's row: its logs (four lines of text), and ⋮, a menu to
-        delete it or force-delete it. Each is the view's action with the pod as its target ("namespace/name")."""
+        """The Pods table's last column, as Freelens ends a pod's row: its logs (four lines of text), a shell in it, and
+        ⋮, a menu to delete it or force-delete it. Each is the view's action with the pod as its target ("namespace/name")."""
         f = Gtk.SignalListItemFactory()
 
         def setup(_f, item):
             box = Gtk.Box(spacing=2, halign=Gtk.Align.END)
             logs = Gtk.Button(icon_name="baude-logs-symbolic", tooltip_text=wording.say("kube.logs"),
                               action_name="kube.logs")
+            shell = Gtk.Button(icon_name="utilities-terminal-symbolic", tooltip_text=wording.say("kube.shell"),
+                               action_name="kube.shell")
             more = Gtk.MenuButton(icon_name="view-more-symbolic", tooltip_text=wording.say("common.delete_ellipsis"))
-            for b in (logs, more):
+            for b in (logs, shell, more):
                 b.add_css_class("flat")
                 b.add_css_class("kube-row-btn")
                 box.append(b)
@@ -1119,6 +1129,7 @@ class KubeView(Gtk.Box):
             key = GLib.Variant("s", f"{obj['namespace']}/{obj['name']}")
             logs, more = box.get_first_child(), box.get_last_child()
             logs.set_action_target_value(key)
+            logs.get_next_sibling().set_action_target_value(key)
             menu = Gio.Menu()
             for label, action in ((wording.say("common.delete"), "kube.delete"),
                                   (wording.say("kube.force_delete"), "kube.force-delete")):
@@ -1296,9 +1307,9 @@ class KubeView(Gtk.Box):
         self.logs_container.set_selected(pick)
         self.logs_previous.set_active(False)
         self.syncing = False
-        if not self.logs_box.get_visible():
-            self.logs_box.set_visible(True)
-            self.lower.set_position(max(160, self.lower.get_height() // 2))
+        self.hide_shell()
+        self.logs_box.set_visible(True)
+        self.show_dock()
         self.tail_logs()
 
     def tail_logs(self):
@@ -1331,6 +1342,107 @@ class KubeView(Gtk.Box):
         self.stop_logs()
         self.log_pod = None
         self.logs_box.set_visible(False)
+        self.dock.set_visible(self.shell_box.get_visible())
+
+    def show_dock(self):
+        """The logs' or the shell's place under the table, half the view's height as it opens."""
+        if not self.dock.get_visible():
+            self.dock.set_visible(True)
+            self.lower.set_position(max(160, self.lower.get_height() // 2))
+
+    # ---- a shell in a pod (Multiplex's terminal: a Bot can find it, read it and type in it, as Multiplex's own)
+    def build_shell(self):
+        """The shell pane: the pod, its containers to pick from (running ones: an init container's has ended), close;
+        the terminal (kubectl exec -it), or why there can't be one."""
+        head = Gtk.Box(spacing=6, margin_start=10, margin_end=6, margin_top=4, margin_bottom=2)
+        head.append(Gtk.Image.new_from_icon_name("utilities-terminal-symbolic"))
+        self.shell_title = Gtk.Label(xalign=0, ellipsize=Pango.EllipsizeMode.MIDDLE)
+        self.shell_title.add_css_class("heading")
+        head.append(self.shell_title)
+        self.shell_state = Gtk.Label(xalign=0, hexpand=True, ellipsize=Pango.EllipsizeMode.END)
+        self.shell_state.add_css_class("dim-label")
+        self.shell_state.add_css_class("caption")
+        head.append(self.shell_state)
+        self.shell_container = ellipsize_dropdown(Gtk.DropDown.new_from_strings([]), 28)
+        self.shell_container.set_tooltip_text(wording.say("kube.container"))
+        self.shell_container.connect("notify::selected", lambda *_: self.syncing or self.start_shell())
+        head.append(self.shell_container)
+        hide = Gtk.Button(icon_name="window-close-symbolic", tooltip_text=wording.say("kube.close_shell"))
+        hide.add_css_class("flat")
+        hide.connect("clicked", lambda *_: self.hide_shell())
+        head.append(hide)
+        self.shell_slot = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, vexpand=True)
+        self.shell_term, self.shell_pod, self.shell_containers = None, None, []
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, visible=False, vexpand=True,
+                      height_request=tokens.px("kube.logs-min"))
+        box.append(head)
+        box.append(self.shell_slot)
+        return box
+
+    def show_shell(self, key):
+        """A shell in a pod under the table, in its default container (as its logs pick one); the logs, or another
+        pod's shell, closed first."""
+        obj = self.pod_obj(key)
+        if obj is None:
+            return
+        pod = obj["raw"]
+        names = [name for name, _l, _w, init in kube_containers(pod, time.time()) if not init]
+        if not names:
+            self.set_note(wording.say("kube.no_containers", pod=obj['name']))
+            return
+        default = (_km(pod).get("annotations") or {}).get("kubectl.kubernetes.io/default-container")
+        self.hide_logs()
+        self.hide_shell()
+        self.shell_containers = names
+        self.shell_pod = (self.context, obj["namespace"], obj["name"])
+        self.shell_title.set_label(f"{obj['name']} · {obj['namespace']}")
+        self.syncing = True
+        self.shell_container.set_model(Gtk.StringList.new(names))
+        self.shell_container.set_selected(names.index(default) if default in names else 0)
+        self.syncing = False
+        self.shell_box.set_visible(True)
+        self.show_dock()
+        self.start_shell()
+
+    def start_shell(self):
+        """kubectl exec -it in the container picked: bash if it has it, else sh. The one before is ended first."""
+        import multiplexterm
+        self.stop_shell()
+        i = self.shell_container.get_selected()
+        if self.shell_pod is None or not 0 <= i < len(self.shell_containers):
+            return
+        if (why := multiplexterm.available()) is not None:
+            self.shell_state.set_label(why)
+            return
+        context, ns, pod = self.shell_pod
+        argv = [kube_tool("kubectl"), "--context", context, "exec", "-it", "-n", ns, pod, "-c",
+                self.shell_containers[i], "--", "sh", "-c", "command -v bash >/dev/null 2>&1 && exec bash || exec sh"]
+        term = multiplexterm.Terminal(argv, title=f"{pod} · {ns} · {context}", on_exit=self._shell_end)
+        multiplexterm.Terminals.get(wire.HEAD_CLIENT).add(term)
+        self.shell_term = term
+        self.shell_slot.append(term)
+        self.shell_state.set_label("")
+        term.vte.grab_focus()
+
+    def _shell_end(self, term, status):
+        if term is self.shell_term:
+            code = os.waitstatus_to_exitcode(status) if status > 0 else status
+            self.shell_state.set_label(wording.say("kube.kubectl_exited", code=code))
+
+    def stop_shell(self):
+        if self.shell_term is not None:
+            import multiplexterm
+            self.shell_term.stop()
+            multiplexterm.Terminals.get().remove(self.shell_term)
+            self.shell_slot.remove(self.shell_term)
+            self.shell_term = None
+
+    def hide_shell(self):
+        """Close the shell: kubectl, and the shell in the pod with it, ended (never left running)."""
+        self.stop_shell()
+        self.shell_pod = None
+        self.shell_box.set_visible(False)
+        self.dock.set_visible(self.logs_box.get_visible())
 
     def _log_text(self, tail, text):
         if tail is not self.log_tail:

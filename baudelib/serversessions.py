@@ -11,7 +11,8 @@ import time
 import uuid
 
 from baudelib import (
-    agentproxy, claude, codex, emissiontools, meshtools, models, notes, transcripts, wire, wording, worktree,
+    agentproxy, claude, codex, emissiontools, meshtools, models, multiplextools, notes, transcripts, wire, wording,
+    worktree,
 )
 from baudelib.serverstate import (
     AGENT_TOOLS, CATALOGUE_LIMIT, CATALOGUE_WAIT_S, CHECK_SOCKET_S, CLAUDE_OPTIONS, COMMAND_TOOLS, FILE_LIMIT,
@@ -239,11 +240,16 @@ class ServerSessions:
                                                "args": [agentproxy.HEADLESS, "emission-tools", "--socket",
                                                         os.path.abspath(self.socket_path)],
                                                "env": {"BAUDE_SESSION": s.id}}
+                servers[multiplextools.NAME] = {"command": sys.executable,  # (and its terminals: Multiplex's)
+                                                "args": [agentproxy.HEADLESS, "multiplex-tools", "--socket",
+                                                         os.path.abspath(self.socket_path)],
+                                                "env": {"BAUDE_SESSION": s.id}}
             extra += ["--mcp-config", json.dumps({"mcpServers": servers})]
             if run["program"] == "claude":  # (never asked about, a Bot's or Meta's)
                 rules = [f"mcp__{meshtools.NAME}__{t}" for t in meshtools.SCHEMAS]
                 if s.meta.get("bot"):
                     rules += [f"mcp__{emissiontools.NAME}__{t}" for t in emissiontools.SCHEMAS]
+                    rules += [f"mcp__{multiplextools.NAME}__{t}" for t in multiplextools.SCHEMAS]
                 if "--allowedTools" in extra:
                     at = extra.index("--allowedTools") + 1
                     extra[at:at] = rules

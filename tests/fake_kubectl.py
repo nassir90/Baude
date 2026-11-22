@@ -8,7 +8,7 @@ cluster down ($FAKE_KUBECTL_HOLD).
 
 `logs` prints a few lines of a pod's container (its previous run's with --previous); with -f it then waits to be
 stopped, printing a line every $FAKE_KUBECTL_FOLLOW seconds if that's set (and never for more than two minutes).
-`delete pod` says what kubectl says; with $FAKE_KUBECTL_STATE (a file) it's remembered: the pod is Terminating
+`exec -it` is a shell (this machine's sh) in the pod. `delete pod` says what kubectl says; with $FAKE_KUBECTL_STATE (a file) it's remembered: the pod is Terminating
 afterwards, or gone if it was forced."""
 import json
 import os
@@ -370,6 +370,12 @@ def main():
     rest = [a for i, a in enumerate(args) if a != "--context" and (i == 0 or args[i - 1] != "--context")]
     if rest[:1] == ["api-resources"]:
         out("\n".join(RESOURCES + PROD_RESOURCES * (context == "prod")) + "\n")
+    if rest[:1] == ["exec"] and "-it" in rest:  # (a shell in a pod: this machine's sh, as the pod's root, in /app)
+        pod = rest[rest.index("-n") + 2] if "-n" in rest else rest[2]
+        home = os.path.join(os.environ.get("TMPDIR") or "/tmp", "fake-kubectl-app")
+        os.makedirs(home, exist_ok=True)
+        os.chdir(home)
+        os.execve("/bin/sh", ["sh"], {"PATH": "/usr/bin:/bin", "PS1": f"root@{pod}:/app# ", "TERM": "xterm-256color"})
     if rest[:1] == ["exec"] and "arangosh" in " ".join(rest):  # (arangosh in an ArangoDB pod)
         script, program = rest[-3], rest[-1]
         if '"$ARANGO_ROOT_PASSWORD"' not in script or "@@" not in program and "@" in program.replace("@@", ""):

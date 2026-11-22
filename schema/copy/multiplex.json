@@ -1,0 +1,7 @@
+{
+  "description": "Multiplex, Baude's terminal: what a terminal says when it can't be.",
+  "messages": {
+    "no_vte": "Terminals need VTE's GTK 4 build (package {$package})",
+    "not_started": "Couldn't start: {$error}"
+  }
+}

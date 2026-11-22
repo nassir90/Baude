@@ -87,7 +87,7 @@
       ],
       "phone": {
         "does": "nothing",
-        "why": "A daemon is started again only by an app on its own machine; the phone's hosts are other machines, and This phone's host runs inside the app.",
+        "why": "The phone's host runs inside the app, on the app's own code, so there is no separate daemon to restart.",
         "decided": "2026-11-22"
       },
       "actions": [

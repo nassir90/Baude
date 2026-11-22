@@ -107,11 +107,16 @@ class RecordHosts:
             self.host_up[key] = up  # it didn't take sent first)
         self.show_host_state()
 
-    def restart_host(self, then=None, waited=0):
+    def restart_host(self, then=None, waited=0, joining=0):
         """This machine's host process stopped and started again, as Baude's Restart Daemon does: once no command's
         running there (quit if_idle; asked again every 5 s till then), said once it's back, or that it isn't. then:
-        what's done once it's back (Record restarted too)."""
+        what's done once it's back (Record restarted too). One that's running but not yet connected to (the app's
+        hosts are looked at when first wanted) is waited for, up to 15 s, before it's asked to quit."""
         r = local_remote()
+        if r is None and joining < 15 and baudelib.serverstate.running_pid() is not None:
+            network().here()
+            GLib.timeout_add(250, lambda: self.restart_host(then, waited, joining + 0.25) and False)
+            return
         if r is None:
             return self.start_host(then)
 

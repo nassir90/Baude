@@ -1,6 +1,7 @@
 """startup — Baude as it starts: its app id, start-up milestones (trace, BAUDE_TRACE), the state a restart leaves
 for the next process (take_restart_state), the app's sizes (apply_scales), and Baude in the platform's list of apps:
-its logo (logo, in the accent), the command that starts it (launch_command) and the launchers (LAUNCHER).
+its logo (logo, in the accent), the command that starts it again (launch_command) and the launchers (LAUNCHER), which
+start ~/.local/bin/baude (baudelib/bins.py).
 """
 import json
 import os
@@ -24,6 +25,7 @@ from widgets import _settings_path  # noqa: E402,F401
 from pickers import _data_home  # noqa: E402,F401
 
 from baudelib import applist  # noqa: E402  (the logo's PNGs and .icns, and its launcher's drawn again: Record's too)
+from baudelib import bins  # noqa: E402  (the commands in ~/.local/bin the launchers start)
 from baudelib.applist import exec_quote as _exec_quote  # noqa: E402  (Record's and Emission's entries quoted so too)
 
 
@@ -195,7 +197,8 @@ def launch_command(*args):
 
 class Launcher:
     """Baude in the platform's list of apps, for this user: LAUNCHER is this platform's. paths() are the files it
-    writes, the first the one install() returns; where names the list."""
+    writes, the first the one install() returns; where names the list. Installing writes the commands in ~/.local/bin
+    too (bins.install), which the launcher starts."""
     where = ""
     folder = None  # (where the list is, where it isn't the user's: tests and rigs')
 
@@ -212,6 +215,7 @@ class Launcher:
         return os.path.exists(self.paths()[0])
 
     def install(self):
+        bins.install()
         self.write()
         self.refresh()
         return self.paths()[0]
@@ -246,7 +250,7 @@ class FreedesktopLauncher(Launcher):
             "Name=Baude",
             "GenericName=Claude Code client",
             "Comment=GTK front-end for the claude CLI",
-            "Exec=" + " ".join(_exec_quote(a) for a in launch_command()),
+            "Exec=" + _exec_quote(bins.path("baude")),
             f"Icon={APP_ID}",
             "Terminal=false",
             "Categories=Development;GTK;",
@@ -274,7 +278,7 @@ MACOS_LSREGISTER = "/System/Library/Frameworks/CoreServices.framework/Frameworks
 
 class MacLauncher(Launcher):
     """macOS: an app bundle, ~/Applications/Baude.app, which Spotlight and the Finder list. Its
-    executable is a script that starts baude (launch_command) through the user's login shell, as an app opened
+    executable is a script that starts ~/.local/bin/baude through the user's login shell, as an app opened
     from the Finder gets launchd's bare PATH, without Homebrew's tools. Its icon is an .icns of PNGs (the
     format's ic07 to ic10 entries, 128 to 1024 px)."""
     where = wording.say("install.applications")
@@ -313,7 +317,7 @@ class MacLauncher(Launcher):
             f.write("#!/bin/sh\n"
                     'cd "$HOME"\n'  # (the Finder starts apps in /; Linux's launchers in your home)
                     'exec "${SHELL:-/bin/zsh}" -lc \'exec "$0" "$@"\' '
-                    + " ".join(shlex.quote(a) for a in launch_command()) + ' "$@"\n')
+                    + shlex.quote(bins.path("baude")) + ' "$@"\n')
         os.chmod(script, 0o755)
 
     def refresh(self):

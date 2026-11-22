@@ -207,7 +207,7 @@ class Window(RecordHosts, Adw.ApplicationWindow, feedback.FeedbackHost, viewers.
             popup.connect("show", lambda *_: (self.start_network(), network().look()))  # (opened: the hosts looked
             # for, one started a moment ago offered)
         self.books_head.insert_child_after(self.host_dd, self.books_head.arrow.get_next_sibling())
-        right = Gtk.GestureClick(button=Gdk.BUTTON_SECONDARY)  # (right-click: Host Command…, Deactivate: host_menu)
+        right = Gtk.GestureClick(button=Gdk.BUTTON_SECONDARY)  # (right-click: Deactivate: host_menu)
         right.connect("pressed", lambda _g, _n, x, y: not (popup and popup.get_visible()) and self.host_menu(x, y))
         self.host_dd.add_controller(right)
         self.books_head.name.set_ellipsize(Pango.EllipsizeMode.NONE)  # (Notebooks whole: the host's name gives way)
@@ -313,10 +313,6 @@ class Window(RecordHosts, Adw.ApplicationWindow, feedback.FeedbackHost, viewers.
         viewer.connect("activate", lambda _a, page, ref: (w := ref()) and w.open_viewer(page.get_string()),
                        weakref.ref(self))
         self.add_action(viewer)
-        command = Gio.SimpleAction.new("host_command", GLib.VariantType.new("s"))
-        command.connect("activate", lambda _a, v, ref: (w := ref()) and w.ask_host_command(v.get_string()),
-                        weakref.ref(self))
-        self.add_action(command)
         off = Gio.SimpleAction.new("deactivate_host", GLib.VariantType.new("(sb)"))
         off.connect("activate", lambda _a, v, ref: (w := ref()) and w.deactivate_host(*v.unpack()), weakref.ref(self))
         self.add_action(off)

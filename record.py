@@ -20,7 +20,7 @@ Claude Code keeps, live ones included), whichever notebook's open: you select a 
 
     python3 record.py
     python3 record.py --chat TRANSCRIPT.jsonl   # reading that chat (Baude's menu → Open in Record does this)
-    python3 record.py --install | --uninstall   # app-menu launcher with the logo (per user)
+    python3 record.py --install | --uninstall   # app-menu launcher with the logo (per user), and ~/.local/bin's commands
 
 Record is part of Baude: it lives beside baude.py and searches the chat read's folder with lookup.py, the engine behind
 Baude's ⌘K, for @ in the diary, for the names linked in the chat, and for what its questions say those names are.
@@ -64,6 +64,7 @@ import baudelib.client  # noqa: E402  (the hosts, as Baude has them: another's n
 import baudelib.hosts  # noqa: E402  (this machine's host process started again: Restart Daemon)
 import baudelib.serverstate  # noqa: E402  (the sessions this machine's host process keeps: bot_started)
 from baudelib import applist  # noqa: E402  (Record in the list of apps, as Emission is)
+from baudelib import bins  # noqa: E402  (the commands in ~/.local/bin, kept up to date as it starts)
 from baudelib import notes  # noqa: E402  (this machine's notebooks, as its host process gives them to another's Record)
 from baudelib.notes import data_dir, socket_path  # noqa: E402,F401
 import update  # noqa: E402  (a new version from git, restarted onto once idle, as Baude's: beside this file)
@@ -326,12 +327,13 @@ def main():
                     help=wording.say("install.uninstall_help", app="Record", where=apps_place()))
     args = ap.parse_args()
     if args.install:
-        print(wording.say("install.installed", path=install()))
+        print("\n".join(wording.say("install.installed", path=p) for p in [*map(bins.path, bins.NAMES), install()]))
         return 0
     if args.uninstall:
         print("\n".join(wording.say("install.removed", path=path) for path in uninstall())
               or wording.say("install.not_installed", app="Record"))
         return 0
+    bins.refreshed(lambda text: print(f"record: {text}", file=sys.stderr))
     chat = os.path.realpath(args.chat) if args.chat else None
     request = {"chat": chat} if chat else {}
     if hand_over(request):

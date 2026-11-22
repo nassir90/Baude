@@ -1,5 +1,5 @@
 {
-  "description": "A dialog over the main window to add another machine's Baude host process to the mesh, by where ssh goes. The host is kept from then on, reached or not.",
+  "description": "A dialog over the main window to add another machine's Baude host process to the mesh, by where ssh goes: the destination alone, as ssh always runs ~/.local/bin/baude-headless there (schema/variables/HOST_COMMAND.json). The host is kept from then on, reached or not.",
   "apps": ["baude", "phone"],
   "opens": ["host picker's right-click → Add Host…"],
   "code": ["windowremote.py:WindowRemote.ask_add_host", "windowremote.py:WindowRemote.host_form", "android/app/src/main/java/dev/baude/android/HostMenu.kt:AddHost"],
@@ -19,11 +19,6 @@
       ]
     },
     {
-      "name": "command field",
-      "shows": "A second text entry with placeholder \"baude_headless.py, on its PATH\": the host process's command there, run as `<command> connect`. Empty if baude_headless.py is on its PATH, else its path (in a checkout of Baude, <checkout>/baude_headless.py; not the baude launcher, which runs the app).",
-      "copy": ["hosts.command_placeholder"]
-    },
-    {
       "name": "Cancel",
       "shows": "\"Cancel\" button; Escape.",
       "copy": ["common.cancel"]
@@ -33,11 +28,12 @@
       "shows": "\"Add\" button, the default, suggested style, disabled until the destination is valid.",
       "copy": ["common.add", "hosts.looking_for_baude"],
       "actions": [
-        {"by": "click", "does": "The host is added (by ssh with the destination and the command) and a toast says \"Looking for Baude on <destination>\"; it then appears in the host picker."}
+        {"by": "click", "does": "The host is added (by ssh with the destination) and a toast says \"Looking for Baude on <destination>\"; it then appears in the host picker."}
       ]
     }
   ],
   "removed": [
+    {"name": "command field in Add Host", "apps": ["baude", "phone"], "why": "Baude has no executable of its own to name: ssh always runs the one command baude-headless on a host (schema/variables/HOST_COMMAND.json)", "decided": "2026-11-22"},
     {"name": "This phone's key (and New Key…) in Add Host", "apps": ["phone"], "why": "The phone's key lives on This phone, under Key Material; Add Host is just the endpoint", "decided": "2026-11-22"}
   ],
   "scenes": ["55k-network-add-server"]

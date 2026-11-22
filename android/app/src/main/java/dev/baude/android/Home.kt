@@ -37,8 +37,6 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -58,7 +56,6 @@ import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -465,7 +462,7 @@ private fun OpenFolder(h: String, done: () -> Unit, picked: (String) -> Unit) {
     }
     fun put(path: String) { field = androidx.compose.ui.text.input.TextFieldValue(path, androidx.compose.ui.text.TextRange(path.length)) }
     fun open() = picked(if (typed.startsWith("/")) java.io.File(typed).normalize().path.ifEmpty { "/" } else typed)
-    androidx.compose.material3.AlertDialog(
+    AlertDialog(
         onDismissRequest = done,
         title = { Text(Wording.Sidebar.openFolderOn(host = Mesh.label(h))) },
         text = {
@@ -677,7 +674,7 @@ fun SearchField(value: String, set: (String) -> Unit, hint: String, modifier: Mo
 }
 
 /** The host the home screen shows and a new session's made on (beside New session, as Baude's): its name cut with …
- * in the middle; listed local (this phone) first, then the rest by name; with one to pick, nothing to open. A long-press: its menu (Host Command…, Deactivate, Add Host…). */
+ * in the middle; listed local (this phone) first, then the rest by name; with one to pick, nothing to open. A long-press: its menu (Deactivate, Add Host…). */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun HostPick() {
@@ -697,7 +694,7 @@ private fun HostPick() {
                 modifier = Modifier.widthIn(max = 120.dp))
             Icon(Adwaita.PanDown, Wording.Sidebar.hostPickerTip, tint = c.fg, modifier = Modifier.size(16.dp.icon))
         }
-        Popover(open, { open = false }) {
+        Popover(open, { open = false }, ticks = Ticks.END) {
             for (id in ids.sortedWith(compareBy<String>({ it != "phone" }, { name(it).lowercase() }))) MenuChoice(name(id), pick == id, textColor = if (dead(id)) c.dim else null) {
                 HomePrefs.pick(id); open = false
             }
@@ -711,22 +708,21 @@ private fun HostPick() {
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun ViewMenu(snack: SnackbarHostState) {
-    val c = LocalBaude.current
     var open by remember { mutableStateOf(false) }
     var held by remember { mutableStateOf<String?>(null) } // (a group long-pressed: its menu)
     var naming by remember { mutableStateOf<Pair<Boolean, String>?>(null) } // (GroupName: new?, the one renamed)
     val scope = androidx.compose.runtime.rememberCoroutineScope()
     Box {
         IconButton(Adwaita.ViewMore, Wording.Sidebar.groupByTip) { open = true }
-        Popover(open, { open = false }) {
-            Heading(Wording.Sidebar.groupBy)
-            MenuChoice(Wording.Common.folder, HomePrefs.by.value == "folder", leading = true) { HomePrefs.by.value = "folder"; HomePrefs.save() }
-            MenuChoice(Wording.Sidebar.date, HomePrefs.by.value == "date", leading = true) { HomePrefs.by.value = "date"; HomePrefs.save() }
-            HorizontalDivider(color = c.rule)
-            Heading(Wording.Sidebar.groups)
+        Popover(open, { open = false }, ticks = Ticks.START) {
+            MenuHeading(Wording.Sidebar.groupBy)
+            MenuChoice(Wording.Common.folder, HomePrefs.by.value == "folder") { HomePrefs.by.value = "folder"; HomePrefs.save() }
+            MenuChoice(Wording.Sidebar.date, HomePrefs.by.value == "date") { HomePrefs.by.value = "date"; HomePrefs.save() }
+            MenuDivider()
+            MenuHeading(Wording.Sidebar.groups)
             val names = Groups.names() + ""
             for (g in names) MenuChoice(g.ifEmpty { Wording.Sidebar.noGroup }, HomePrefs.groups.isEmpty() || g in HomePrefs.groups,
-                leading = true, onLongClick = if (g.isEmpty()) null else { { held = g } }) {
+                onLongClick = if (g.isEmpty()) null else { { held = g } }) {
                 val now = if (HomePrefs.groups.isEmpty()) names else HomePrefs.groups.toList()
                 val next = if (g in now) now - g else now + g
                 HomePrefs.groups.clear()
@@ -753,44 +749,10 @@ private fun ViewMenu(snack: SnackbarHostState) {
     naming?.let { (new, old) -> GroupName(new, old) { naming = null } }
 }
 
-/** A menu as libadwaita's popover is: its own fill, rounded. */
-@Composable
-fun Popover(open: Boolean, dismiss: () -> Unit, offset: DpOffset = DpOffset.Zero,
-            content: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit) {
-    val c = LocalBaude.current
-    DropdownMenu(open, dismiss, offset = offset, containerColor = c.dialog, shape = RoundedCornerShape(12.dp), content = content)
-}
-
 @Composable
 fun Heading(text: String) {
     val c = LocalBaude.current
     Text(text, style = Type.folder, color = c.dim, modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp))
-}
-
-/** A menu's item, checked if it's the one (or one of those) picked: the tick at its end, or at its start (leading, as
- * a menu's check items have it, cut to one line); onLongClick: pressed and held. */
-@OptIn(ExperimentalFoundationApi::class)
-@Composable
-fun MenuChoice(label: String, on: Boolean, enabled: Boolean = true, leading: Boolean = false, textColor: Color? = null,
-               onLongClick: (() -> Unit)? = null, onClick: () -> Unit) {
-    val c = LocalBaude.current
-    val tick: @Composable () -> Unit = {
-        if (on) Icon(Adwaita.ObjectSelect, null, tint = c.accent, modifier = Modifier.size(16.dp.icon)) else if (leading) Spacer(Modifier.size(16.dp.icon))
-    }
-    val text: @Composable () -> Unit = {
-        Text(label, style = Type.body, color = textColor ?: if (enabled) c.fg else c.dim, maxLines = if (leading) 1 else Int.MAX_VALUE,
-            overflow = TextOverflow.Ellipsis, modifier = if (leading) Modifier.widthIn(max = 220.dp) else Modifier)
-    }
-    if (onLongClick != null) {
-        Row(Modifier.heightIn(min = 38.dp).combinedClickable(enabled = enabled, onClick = onClick, onLongClick = onLongClick)
-            .padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            if (leading) tick()
-            text()
-        }
-        return
-    }
-    DropdownMenuItem(text, onClick, enabled = enabled, leadingIcon = if (leading) tick else null,
-        trailingIcon = if (leading) null else tick, modifier = Modifier.heightIn(min = 38.dp))
 }
 
 /** ☰'s menu of a bar: its items. */

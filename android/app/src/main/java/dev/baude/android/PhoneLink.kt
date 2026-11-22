@@ -126,7 +126,7 @@ class WireLine(private val input: InputStream, private val output: OutputStream,
 }
 
 /** This phone in the mesh, as a member: a link made from here to a host of yours that's up, as a host process makes
- * one (mesh.py: hello, then join {host} on another "<command> connect" over that host's ssh), one to each mesh the
+ * one (mesh.py: hello, then join {host} on another CONNECT over that host's ssh), one to each mesh the
  * phone reaches (a host of yours whose machine isn't reached through a link already). Its record (who it is, and the
  * hosts it's linked to) is told the mesh, and the records each link brings are passed on to the others, so meshes the
  * phone links to become one, as a host process that links to two joins them. Each tunnel the mesh opens to it is

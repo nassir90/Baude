@@ -13,7 +13,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
@@ -557,12 +556,12 @@ private fun Namespaces(st: KubeState) {
                 modifier = Modifier.widthIn(max = 140.dp))
             Icon(Adwaita.PanDown, tip, tint = c.fg, modifier = Modifier.size(18.dp.icon))
         }
-        Popover(open, { open = false }) {
-            MenuChoice(Wording.Kube.allNamespaces, st.nsShown.isEmpty(), leading = true) { st.showNamespaces(emptyList()) }
-            Box(Modifier.fillMaxWidth().padding(vertical = 4.dp).height(1.dp).background(c.rule))
+        Popover(open, { open = false }, ticks = Ticks.START) {
+            MenuChoice(Wording.Kube.allNamespaces, st.nsShown.isEmpty()) { st.showNamespaces(emptyList()) }
+            MenuDivider()
             Column(Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState())) {
                 for (ns in (st.namespaces + st.nsShown).distinct().sorted()) {
-                    MenuChoice(ns, ns in st.nsShown, leading = true) {
+                    MenuChoice(ns, ns in st.nsShown) {
                         st.showNamespaces(st.nsShown.filter { it != ns } + if (ns in st.nsShown) emptyList() else listOf(ns))
                     }
                 }
@@ -570,6 +569,11 @@ private fun Namespaces(st: KubeState) {
         }
     }
 }
+
+// (the phone's categories: a category's heading in the body's size, bold, its kinds' rows a little shorter than the
+// desktop's 26; schema/ui's Kubernetes.page)
+private val KUBE_HEAD = 30.dp
+private val KUBE_ROW = 23.dp
 
 /** The categories (Freelens' sidebar) as a page: a category with several kinds is a heading that folds them; each kind a
  * row, the one shown marked, those the cluster doesn't serve dimmed (hold: why). */
@@ -587,11 +591,11 @@ private fun Categories(st: KubeState) {
             val icon = kubeIcon(section.icon)
             if (!single) item(key = "head:$title") {
                 val folded = title in st.folded
-                Row(Modifier.fillMaxWidth().padding(top = 9.dp).heightIn(min = 26.dp).clickable { st.fold(title, !folded) }
+                Row(Modifier.fillMaxWidth().padding(top = 9.dp).heightIn(min = KUBE_HEAD).clickable { st.fold(title, !folded) }
                     .padding(start = 6.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     if (icon != null) Icon(icon, null, tint = c.dim, modifier = Modifier.size(16.dp.icon))
-                    Text(title, style = Type.folder, color = c.dim, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                    Text(title, style = Type.title, color = c.dim, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
                     Icon(if (folded) Adwaita.PanEnd else Adwaita.PanDown, null, tint = c.dim, modifier = Modifier.size(16.dp.icon))
                 }
             }
@@ -601,7 +605,7 @@ private fun Categories(st: KubeState) {
                 val ok = p.served != false
                 val ctx = st.context.orEmpty()
                 val press = if (ok) Modifier.clickable { st.pick(p) } else Modifier.tip(Wording.Kube.notServed(ctx, p.title.orEmpty()))
-                Row(Modifier.fillMaxWidth().padding(top = 1.dp).heightIn(min = 26.dp).background(if (on) c.rowSelected else c.inside)
+                Row(Modifier.fillMaxWidth().padding(top = 1.dp).heightIn(min = KUBE_ROW).background(if (on) c.rowSelected else c.inside)
                     .then(press).alpha(if (ok) 1f else 0.4f)
                     .padding(start = if (single) 6.dp else 6.dp + 16.dp.icon + 8.dp, end = 4.dp),
                     verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {

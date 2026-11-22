@@ -317,9 +317,6 @@ class SessionSidebar(SidebarMenu, Gtk.Box):
         add_server = Gio.SimpleAction.new("add_server", None)
         add_server.connect("activate", lambda *_: self.win.ask_add_host())
         actions.add_action(add_server)
-        command = Gio.SimpleAction.new("host_command", GLib.VariantType.new("s"))
-        command.connect("activate", lambda _a, v: self.win.ask_host_command(v.get_string()))
-        actions.add_action(command)
         off = Gio.SimpleAction.new("deactivate_host", GLib.VariantType.new("(sb)"))
         off.connect("activate", lambda _a, v: self.deactivate_host(*v.unpack()))
         actions.add_action(off)
@@ -467,14 +464,10 @@ class SessionSidebar(SidebarMenu, Gtk.Box):
         # change what's picked)
 
     def host_menu(self, x, y):
-        """Right-click New session's host: Add Host…, always; and for another machine's, Host Command…, for one reached
-        over ssh; Deactivate, or Activate for one that's deactivated."""
+        """Right-click New session's host: Add Host…, always; and for another machine's, Deactivate, or Activate for one
+        that's deactivated."""
         menu, add = Gio.Menu(), Gio.Menu()
         if (r := self.shown_remote()) is not None:
-            if r.where.get("via") == "ssh":  # (its host process's command there, if it isn't on PATH)
-                item = Gio.MenuItem.new(wording.say("hosts.command"), None)
-                item.set_action_and_target_value("sb.host_command", GLib.Variant.new_string(host_key(r)))
-                menu.append_item(item)
             item = Gio.MenuItem.new(wording.say("hosts.activate") if r.deactivated else wording.say("hosts.deactivate"),
                                     None)
             item.set_action_and_target_value("sb.deactivate_host", GLib.Variant("(sb)", (host_key(r), not r.deactivated)))

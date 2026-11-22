@@ -77,7 +77,7 @@ and gives Codex access to Meta's app tools. You can also choose a model from the
 headless entry point:
 
 ```bash
-python3 baude_oneshot.py --model codex/gpt-6.1-sol --cwd . "Describe this repository"
+baude-oneshot --model codex/gpt-6.1-sol --cwd . "Describe this repository"
 ```
 
 Codex chats start in **Manual** (Codex's Ask for Approval). **Auto** routes
@@ -123,10 +123,22 @@ unless its context length is raised), which is too small for pi's instructions a
 You need Python 3.11+, GTK 4 and libadwaita 1.5+ with PyGObject (on Debian/Ubuntu:
 `python3-gi gir1.2-gtk-4.0 gir1.2-adw-1`), and the `claude` CLI, signed in.
 
+Install it once on each machine, from its checkout:
+
 ```bash
-python3 baude.py             # in the current folder
-python3 baude.py --install   # add Baude to your application menu
-python3 record.py            # Record
+python3 baude.py --install            # Baude in your application menu, and Baude's commands in ~/.local/bin
+python3 baude_headless.py install     # only the commands (a host with no GTK)
+```
+
+Either writes `~/.local/bin/baude`, `record`, `emission`, `baude-headless` (the host process) and `baude-oneshot`:
+small scripts that run the checkout's entry points with the Python that installed them. The launchers in your
+application menu start them, and another machine (Baude, the phone, the mesh) runs `~/.local/bin/baude-headless
+connect` over ssh, so every machine you add as a host needs it installed. Baude, Record and the host process write
+them again as they start when the checkout has moved or updated. Add `~/.local/bin` to your `PATH` to type them:
+
+```bash
+baude             # in the current folder
+record            # Record
 ```
 
 Record, the second app, keeps notebooks of wiki pages in your own words, with Meta beside them, and reads a Claude
@@ -149,7 +161,7 @@ Downloads folder. Pages are WebKit's: Apple's WKWebView on macOS 14 or later, an
 virtual one of its own, with `xvfb-run` installed (package `xvfb`).
 
 ```bash
-python3 emission.py [URL] [--profile NAME]
+emission [URL] [--profile NAME]
 ```
 
 | | |
@@ -175,17 +187,16 @@ the browser is Safari (as its engine is); `EMISSION_USER_AGENT` sets another.
 
 ## Sessions on the network
 
-`baude_headless.py` is a machine's host process for Claude Code sessions: one for each user, which owns that user's
+`baude-headless` is a machine's host process for Claude Code sessions: one for each user, which owns that user's
 sessions there and their claude processes, for Baude to start, watch and steer from that machine or another. It needs
 only Python, not GTK, and runs any model Baude can that its machine has: Claude's with `claude`, Apple's with
-`apple-claude` once built, and MLX's, Ollama's and an OpenAI-compatible server's with `pi-claude` (`baude_headless.py
+`apple-claude` once built, and MLX's, Ollama's and an OpenAI-compatible server's with `pi-claude` (`baude-headless
 models` lists them). It listens only on a Unix
 socket in a folder of its user's own, with no port on the network. Baude on the same machine uses the socket, and reads
-its sessions' transcripts where they are; Baude on another reaches it over ssh, as `ssh HOST baude_headless.py
-connect`, which carries the protocol between ssh and the socket and starts the host process if it isn't running. So
-ssh decides who may: Baude never asks for a password (`BatchMode`), and uses your keys or agent as `~/.ssh/config` has
-them, with the host already in `known_hosts`. Put `baude_headless.py` on each host's `PATH`, or give Baude its path
-there (right-click the host → Host Command…).
+its sessions' transcripts where they are; Baude on another reaches it over ssh, as `ssh HOST
+~/.local/bin/baude-headless connect`, which carries the protocol between ssh and the socket and starts the host process
+if it isn't running. So ssh decides who may: Baude never asks for a password (`BatchMode`), and uses your keys or agent
+as `~/.ssh/config` has them, with the host already in `known_hosts`. Install Baude on each host (Running it, above).
 
 Adding a host also links this machine's host process to that host's, and the link works both ways: that host, and every
 host it's linked to, can then start, watch and steer chats here and run this machine's models, as this machine can on
@@ -193,10 +204,10 @@ them. The hosts linked like this form one mesh. A host reached only through anot
 is linked here) is listed under Hosts as "through lab-mac", and everything said to it goes through lab-mac. Each host
 tells the mesh its model providers. One that serves an OpenAI-compatible API, such as Ollama, can be run from any member
 through a proxy on 127.0.0.1 that the member's own host process runs; Apple's model and pi's run where they are, in a
-chat started on that host. From the command line, `baude_headless.py link DEST`, `unlink DEST` and `mesh` do the same,
+chat started on that host. From the command line, `baude-headless link DEST`, `unlink DEST` and `mesh` do the same,
 and `--member ID` reaches a member of the mesh in place of `--host`. Right-click a host → Deactivate, and it's left out:
 it isn't reached from here, nor let reach here, and it's grayed with its chats, till you Activate it (or
-`baude_headless.py deactivate DEST`, `activate DEST`).
+`baude-headless deactivate DEST`, `activate DEST`).
 
 ![A message from another host's Bot](docs/screenshots/mesh-message-from-bot-dark.png)
 
@@ -204,19 +215,19 @@ Heads start the host process when they need it, so there's nothing to run by han
 another host it does nothing: no timers, a session's claude stopped once it's been idle half an hour, and the process
 itself gone after four hours with nothing running and no link to another host (`--idle-minutes`, `--exit-after-hours`).
 On macOS, at the screen, it's an item in the menu bar, with no Dock icon: how many sessions it has and which are
-running, and Quit. Quitting it (or `baude_headless.py quit`, or SIGTERM) stops its claudes, keeping their transcripts,
+running, and Quit. Quitting it (or `baude-headless quit`, or SIGTERM) stops its claudes, keeping their transcripts,
 so their sessions are resumed next time.
 
-`baude_oneshot.py` starts one session in a host process, attaches, and streams what its claude says to stdout as JSON
+`baude-oneshot` starts one session in a host process, attaches, and streams what its claude says to stdout as JSON
 lines, as `claude -p --output-format stream-json` does. The session goes on in the host process, so Baude lists it,
 under its host and group, and can be opened there.
 
 ```bash
-python3 baude_oneshot.py --cwd ~/src/app --model opus --effort high "Run the benchmarks"
-python3 baude_oneshot.py --host lab@lab-mac.local --group Lab "Bisect the flaky login test"
-python3 baude_oneshot.py --resume SESSION "Now fix it"   # its id: the first line's session.id
-python3 baude_headless.py list --host lab@lab-mac.local
-python3 baude_headless.py archive SESSION   # or unarchive, or delete (its transcript to the trash)
+baude-oneshot --cwd ~/src/app --model opus --effort high "Run the benchmarks"
+baude-oneshot --host lab@lab-mac.local --group Lab "Bisect the flaky login test"
+baude-oneshot --resume SESSION "Now fix it"   # its id: the first line's session.id
+baude-headless list --host lab@lab-mac.local
+baude-headless archive SESSION   # or unarchive, or delete (its transcript to the trash)
 ```
 
 Its first line is `{"type": "baude", "event": "started", "session": {...}}`, with the session's `id`; then claude's
@@ -229,33 +240,34 @@ process went mid-turn.
 
 Moving to them, from `baude_server.py`:
 
-- `baude_server.py serve` is `baude_headless.py` (or nothing: a head starts it). It no longer takes `--port` or
+- `baude_server.py serve` is `baude-headless` (or nothing: a head starts it). It no longer takes `--port` or
   `--bind`, and wants no token.
-- `baude_server.py start --prompt TEXT …` is `baude_oneshot.py … TEXT`, with the same options (`--ask-timeout` and
+- `baude_server.py start --prompt TEXT …` is `baude-oneshot … TEXT`, with the same options (`--ask-timeout` and
   `--ask-default` for a new session only). It waits for the turn and prints it, rather than printing the session's id
-  and leaving: `baude_oneshot.py … TEXT | head -1` gives the id, and the turn's still seen to its end.
+  and leaving: `baude-oneshot … TEXT | head -1` gives the id, and the turn's still seen to its end.
 - `baude_server.py servers` has no successor, as nothing's looked for on the network; `list`, `models` and `stop` are
-  `baude_headless.py`'s, with
+  `baude-headless`'s, with
   `--host DEST` (an ssh destination) instead of `--server HOST:PORT`.
 - A client of `baudelib/wire.py` connects with `wire.connect_local()` on the same machine, or `wire.connect_ssh(DEST)`
   from another, instead of `wire.connect(host, port)`: the protocol's the same. `baudelib.hosts.reach(DEST)` starts
-  this machine's host process first if it isn't running. Or it runs `baude_oneshot.py` and reads its stdout.
-- A client that isn't Python asks `baude_headless.py socket` where the socket is, rather than copying its rules
+  this machine's host process first if it isn't running. Or it runs `baude-oneshot` and reads its stdout.
+- A client that isn't Python asks `baude-headless socket` where the socket is, rather than copying its rules
   (`$BAUDE_RUNTIME_DIR`, `$XDG_RUNTIME_DIR`, `$XDG_STATE_HOME` or `~/.local/state`, or `/tmp/baude-<uid>` for a path
   too long for a socket; `XDG_RUNTIME_DIR`, which comes first, can differ between a session at the screen and one over
-  ssh: ask from where the client runs), or talks to `baude_headless.py connect`'s stdin and stdout.
+  ssh: ask from where the client runs), or talks to `baude-headless connect`'s stdin and stdout.
 - A client that attaches to a session but won't answer what it asks says so (`answers: false` on `attach` or
   `start`): the host's `ask_timeout` then runs out and `ask_default` answers, as if nobody were attached.
 - `archive`, `unarchive` and `delete` clean up a client's sessions: archived ones are listed only to a subscriber
   that asks for them (`subscribe {archived: true}`); a deleted one's transcript goes to the trash once its claude has
   ended, as Baude's Move to Trash does with its own, and heads attached to it hear `deleted`.
-- On another machine, put `baude_headless.py` on `PATH` where `baude_server.py` was, for ssh to find.
+- On another machine, run `python3 baude_headless.py install` in its checkout: ssh runs
+  `~/.local/bin/baude-headless connect` there.
 
 The sidebar lists one host's sessions: the host picked beside New session, where a new session is made (`local`: this
 machine's own chats, Claude Code's and Claude Desktop's, and its host process's), kept across restarts. A host that's
 gone or deactivated stays picked, its chats as they were last seen, and says so over them. Right-click the host (or
-press and hold it) for Add Host…, and for another machine's, Host Command… (one reached over ssh) and Deactivate or
-Activate. ⋮ beside its search → Groups picks which groups are listed: a click lists only that one, and Shift or Ctrl
+press and hold it) for Add Host…, and for another machine's, Deactivate or Activate. ⋮ beside its search → Groups
+picks which groups are listed: a click lists only that one, and Shift or Ctrl
 (⌘) and a click adds or takes away one, as the Git page's branch list does. A group is the label a session was started with.
 
 Baude doesn't look for hosts on the network. This machine's host process it finds by its socket. Another machine's

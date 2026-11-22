@@ -27,6 +27,7 @@ import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.Placeholder
 import androidx.compose.ui.text.PlaceholderVerticalAlign
+import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.rememberTextMeasurer
@@ -68,10 +69,10 @@ fun AnnotatedString.Builder.chip(label: String, kind: String) =
 /** Text with pills and chips in it as their own pieces, each sized by its label at the text's size. */
 @Composable
 fun PillText(text: AnnotatedString, style: TextStyle, color: Color, modifier: Modifier = Modifier, maxLines: Int = Int.MAX_VALUE,
-             overflow: TextOverflow = TextOverflow.Clip) {
+             overflow: TextOverflow = TextOverflow.Clip, onTextLayout: (TextLayoutResult) -> Unit = {}) {
     val ids = text.getStringAnnotations(INLINE_TAG, 0, text.length).map { it.item }.filter { it.startsWith("pill$SEP") || it.startsWith("chip$SEP") }.distinct()
     if (ids.isEmpty()) return Text(text, style = style, color = color, modifier = modifier, maxLines = maxLines, overflow = overflow,
-        inlineContent = RefIcons.inline)
+        inlineContent = RefIcons.inline, onTextLayout = onTextLayout)
     val measure = rememberTextMeasurer()
     val density = LocalDensity.current
     val size = if (style.fontSize.isSpecified) style.fontSize else 15.sp
@@ -93,7 +94,8 @@ fun PillText(text: AnnotatedString, style: TextStyle, color: Color, modifier: Mo
             if (pill) Pill(parts[1], parts[3], label, labelSize, logo) else Chip(parts[1], label, labelSize)
         }
     }
-    Text(text, style = style, color = color, modifier = modifier, maxLines = maxLines, overflow = overflow, inlineContent = map)
+    Text(text, style = style, color = color, modifier = modifier, maxLines = maxLines, overflow = overflow, inlineContent = map,
+        onTextLayout = onTextLayout)
 }
 
 private val TextUnit.isSpecified get() = this != TextUnit.Unspecified

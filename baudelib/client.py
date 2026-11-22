@@ -108,9 +108,8 @@ class Remote:
     """One host: where it is (where: wire.reach's), its info (as hello says), its sessions (as it lists them), and
     whether it's there. found_by: "local" (this machine's socket), "hand" (or, kept from before, "network" or
     "tailscale", as it was found then), "mesh" (a member of the mesh this machine's host process is in: reached
-    through it, and tried again when it's there, Network.meshed). command: its host process's command, as given
-    here (what it's said to be otherwise). mesh: what the host process says of a member (hops, through). alias: the
-    name it's given here (Mesh's Rename), if it's been given one: label."""
+    through it, and tried again when it's there, Network.meshed). mesh: what the host process says of a member
+    (hops, through). alias: the name it's given here (Mesh's Rename), if it's been given one: label."""
 
     def __init__(self, network, key, where, cached=None, found_by="hand"):
         cached = cached or {}
@@ -124,7 +123,6 @@ class Remote:
         self.seen = cached.get("seen") or 0.0  # when it last said anything
         self.by_hand = bool(cached.get("by_hand"))  # (given by hand: kept, whether it's been reached or not)
         self.found_by = cached.get("found_by") or found_by
-        self.command = cached.get("command") if isinstance(cached.get("command"), str) else None
         self.alias = cached.get("alias") if isinstance(cached.get("alias"), str) and cached["alias"].strip() else None
         self.tried, self.error = 0.0, None
         self.mesh = None  # (a member of this machine's mesh: {hops, through, providers, ...})
@@ -170,9 +168,6 @@ class Remote:
         this machine's host process itself."""
         return (self.mesh or {}).get("through") if self.where.get("via") == "mesh" else None
 
-    def reach_where(self):
-        return {**self.where, "command": self.command} if self.command and self.where.get("via") == "ssh" else self.where
-
     def start(self):
         threading.Thread(target=self._run, daemon=True, name=f"remote-{self.key}").start()
         return self
@@ -197,7 +192,7 @@ class Remote:
                 continue
             self.tried = time.monotonic()
             try:
-                ch, info = wire.reach(self.reach_where(), timeout=5)
+                ch, info = wire.reach(self.where, timeout=5)
                 self.error = None
             except OSError as e:
                 ch, self.error = None, str(e)
@@ -482,7 +477,7 @@ class Remote:
 
     def cached(self):
         return {"where": self.where, "info": self.info, "seen": self.seen, "by_hand": self.by_hand,
-                "found_by": self.found_by, "command": self.command, "sessions": list(self.sessions.values()),
+                "found_by": self.found_by, "sessions": list(self.sessions.values()),
                 **({"alias": self.alias} if self.alias else {}),
                 **({"deactivated": True} if self.deactivated else {}), **({"untold": True} if self.untold else {})}
 
@@ -605,10 +600,9 @@ class Network:
     def listen(self, fn):
         self.listeners.append(fn)
 
-    def add(self, where, by_hand=False, command=None):
+    def add(self, where, by_hand=False):
         """A host given by where it is (wire.reach's where: an ssh destination, mostly), known by its id once it's said
-        who it is. by_hand: kept in servers.json from now on, reached or not (Baude's Add host…); command: its host
-        process's, there."""
+        who it is. by_hand: kept in servers.json from now on, reached or not (Baude's Add host…)."""
         with self.lock:
             r = next((r for r in self.servers.values() if r.where == dict(where)), None)
             if r is None:
@@ -618,13 +612,9 @@ class Network:
                 if (old := self.servers.get(key)) is not None:  # (the same destination, reached otherwise: this one)
                     old.stop()
                 r = self.servers[key] = Remote(self, key, where, found_by="hand")
-                r.command = command or r.command
                 r.start()
-            elif command is not None:
-                r.command = command or None
-                r.wake.set()
             r.by_hand = r.by_hand or by_hand
-        if by_hand or command is not None:
+        if by_hand:
             self.link(r)
             self.save()
             self.changed()
@@ -647,7 +637,7 @@ class Network:
             linked = r.by_hand and r.where.get("via") in ("ssh", "unix")
             straight = rid if rid and not r.phone else None
             if linked or straight:
-                here.request({"op": "unlink", **({"where": r.reach_where()} if linked else {}),
+                here.request({"op": "unlink", **({"where": r.where} if linked else {}),
                               **({"id": straight} if straight else {})})
         with self.lock:
             self.removed |= {k for k in (r.key, rid, *getattr(r, "was", ())) if k}
@@ -662,13 +652,6 @@ class Network:
             if self.servers.get(r.key) is r:
                 del self.servers[r.key]
             self.forgotten.add(r.key)
-
-    def set_command(self, r, command):
-        """A host's process's command there, as given here (None: what it says, or SSH_COMMAND): tried again with it."""
-        r.command = command or None
-        r.wake.set()
-        self.link(r)
-        self.save(force=True, only=r.key)
 
     # ---- the mesh: this machine's host process linked to each host given by hand, the link used both ways, and
     # every member it reaches known here, reached through it (baudelib/mesh.py)
@@ -696,13 +679,13 @@ class Network:
         r.untold, r.toggled = False, time.monotonic()
         here.request({"op": "deactivate" if r.deactivated else "activate",
                       **({"id": r.info["id"]} if wire.is_id(r.info.get("id")) else {}),
-                      **({"where": r.reach_where()} if r.where.get("via") in ("ssh", "unix") else {})})
+                      **({"where": r.where} if r.where.get("via") in ("ssh", "unix") else {})})
 
     def link(self, r):
         """A host given by hand, linked to from this machine's host process: it, and every member it
         reaches, can reach here too. Kept there; asked again each time it's started."""
         if r.by_hand and r.where.get("via") in ("ssh", "unix") and (here := self.here_alive()) is not None:
-            here.request({"op": "link", "where": r.reach_where()})
+            here.request({"op": "link", "where": r.where})
 
     def meshed(self, here):
         """(this machine's host process said what its info is) Each member of its mesh known here, reached through it
@@ -729,7 +712,7 @@ class Network:
                      if isinstance(x, dict) and x.get("active") is False]
         for r in remotes:
             was = r.deactivated
-            now = (r.info.get("id") or r.key) in off or any(mesh.same_place(w, r.reach_where()) for w in off_where)
+            now = (r.info.get("id") or r.key) in off or any(mesh.same_place(w, r.where) for w in off_where)
             if now != was and time.monotonic() - r.toggled > 5:  # (not one just changed here, not told yet)
                 r.deactivated = now
                 if now:
@@ -830,7 +813,6 @@ class Network:
                 old.stop()
                 remote.sessions = remote.sessions or old.sessions
                 remote.by_hand = remote.by_hand or old.by_hand
-                remote.command = remote.command or old.command
             if remote.key != key:
                 self.forgotten.add(remote.key)  # (where it was known by: not a host of its own in servers.json)
                 remote.was = getattr(remote, "was", set()) | {remote.key}  # (what Baude may still know it by)

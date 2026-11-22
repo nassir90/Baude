@@ -218,7 +218,8 @@
       "$value": {"value": 6, "unit": "px"}
     },
     "context-meter": {"$description": "The context bar (.context-meter).", "$value": {"value": 4, "unit": "px"}},
-    "status": {"$description": "A feedback's status pill (.fix-status).", "$value": {"value": 4, "unit": "px"}}
+    "status": {"$description": "A feedback's status pill (.fix-status).", "$value": {"value": 4, "unit": "px"}},
+    "popover": {"$description": "A popover, a menu, a dialog on the phone.", "$value": {"value": 12, "unit": "px"}}
   },
   "font": {
     "$description": "Text: the phone's sizes (sp: libadwaita's 11pt body is about 15), and the CSS's, of the text round it (em).",
@@ -231,6 +232,11 @@
       "$value": {"value": 12.5, "unit": "px"}
     },
     "caption-line": {"$description": "Its line height.", "$type": "dimension", "$value": {"value": 16, "unit": "px"}},
+    "title": {
+      "$description": "A dialog's heading on the phone (libadwaita's .title-2, 15pt, as body's 11pt is 15).",
+      "$type": "dimension",
+      "$value": {"value": 20, "unit": "px"}
+    },
     "mono": {"$description": "The phone's code.", "$type": "dimension", "$value": {"value": 13.5, "unit": "px"}},
     "small": {
       "$description": "A note's size (.sysnote, Meta's .meta-note), and a folder's name's (.sidebar-folder), in em.",
@@ -437,6 +443,7 @@
     "lane-dot": {"$type": "dimension", "$description": "A commit's dot's radius.", "$value": {"value": 4, "unit": "px"}},
     "avatar": {"$type": "dimension", "$description": "An author's picture in the log (AVATAR_SIZE).", "$value": {"value": 20, "unit": "px"}},
     "row-gap": {"$type": "dimension", "$description": "Between a log row's lane, picture and text (GIT_ROW_GAP).", "$value": {"value": 6, "unit": "px"}},
+    "row-pad": {"$type": "dimension", "$description": "Over and under a log row's text (GIT_ROW_PAD).", "$value": {"value": 4, "unit": "px"}},
     "chip-pad": {"$type": "dimension", "$description": "A ref chip's text, in from its edges (LinkLabel).", "$value": {"value": 5, "unit": "px"}},
     "chip-radius": {"$type": "dimension", "$description": "A chip's or pill's corners (LinkLabel).", "$value": {"value": 4, "unit": "px"}},
     "pill-in": {"$type": "dimension", "$description": "A pull-request pill's start padding (LinkLabel).", "$value": {"value": 4, "unit": "px"}},
@@ -499,6 +506,30 @@
     "width": {"$description": "The / and @ lists over the box: at most this wide (PickList.WIDTH).", "$value": {"value": 520, "unit": "px"}},
     "height": {"$description": "And at most this tall (PickList.HEIGHT).", "$value": {"value": 360, "unit": "px"}},
     "gap": {"$description": "Between the list's foot and the box.", "$value": {"value": 10, "unit": "px"}}
+  },
+  "popup": {
+    "$type": "dimension",
+    "$description": "The phone's menus, pickers' lists and dialogs (Popups.kt: Popover, MenuChoice, AlertDialog), drawn at the page's size (Global Scale's and Text size's). The desktop's are libadwaita's and theming's.",
+    "row": {
+      "$description": "Every menu's and picker's row, and the model list's: its height. The desktop's are 30 (dropdown.choice's and menubutton.choice's rows, the model palette's): the phone's a bar button's side for a finger.",
+      "$value": {"value": 34, "unit": "px"}
+    },
+    "inset": {
+      "$description": "A row's first and last thing (check, icon, text; the trailing tick or ▸), in from the menu's sides; a menu's headings too. libadwaita's menu items' sides (modelbutton's padding).",
+      "$value": {"value": 12, "unit": "px"}
+    },
+    "gap": {"$description": "Between a row's check, dot or logo and its text.", "$value": {"value": 8, "unit": "px"}},
+    "pad": {
+      "$description": "Above a menu's first row and below its last, and either side of a divider (libadwaita's popover contents' padding).",
+      "$value": {"value": 6, "unit": "px"}
+    },
+    "min-width": {"$description": "A menu at least this wide.", "$value": {"value": 112, "unit": "px"}},
+    "margin": {"$description": "A menu kept this far in from the screen's edges.", "$value": "{gap.inside}"},
+    "dialog-gutter": {
+      "$description": "A dialog's sides, this far in from the chat's border (the inside's edge): where the chat's text starts, so a dialog is the chat's column wide.",
+      "$value": "{gap.chat-h}"
+    },
+    "dialog-inset": {"$description": "A dialog's heading, body, fields and buttons, in from its edges.", "$value": {"value": 20, "unit": "px"}}
   },
   "composer": {
     "$type": "dimension",

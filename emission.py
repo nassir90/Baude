@@ -27,6 +27,7 @@ from gi.repository import Adw, Gdk, Gio, GLib, Gtk  # noqa: E402
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from baudelib import applist  # noqa: E402  (Emission in the list of apps, as Record is)
+from baudelib import bins  # noqa: E402  (~/.local/bin/emission, which its launcher starts)
 from baudelib import icons  # noqa: E402  (its logo: schema/icons)
 from baudelib import wording  # noqa: E402  (its words, Baude's browser's: schema/copy)
 from baudelib.emissionlink import (  # noqa
@@ -85,8 +86,9 @@ def themed_icon():
 
 def install():
     """Emission in the platform's list of apps, for this user (applist): macOS's ~/Applications/Emission.app, Linux's
-    .desktop entry and logo. What it wrote."""
-    return applist.install(APP_ID, "Emission", ICON_SVG, [sys.executable, os.path.realpath(__file__), "%u"],
+    .desktop entry and logo, which start ~/.local/bin/emission, written with the other commands (bins.install). What
+    it wrote."""
+    return bins.install() + applist.install(APP_ID, "Emission", ICON_SVG, [bins.path("emission"), "%u"],
                            "public.app-category.productivity",
                            ["GenericName=Web Browser", "Comment=Baude's browser", "Categories=Network;WebBrowser;GTK;"],
                            small=ICON_SVG_16)

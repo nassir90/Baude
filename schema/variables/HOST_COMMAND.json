@@ -1,0 +1,4 @@
+{
+  "description": "What ssh runs on a host to reach its host process, with connect after it: the command Baude installs on every machine (baudelib/bins.py), its ~ the host's home.",
+  "const": "~/.local/bin/baude-headless"
+}

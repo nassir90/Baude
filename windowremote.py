@@ -369,8 +369,9 @@ class WindowRemote:
             return
         self.sync_senders()
         listed = self.remote.sessions.get(self.session_id)
-        if listed and listed.get("title") and listed["title"] != getattr(self, "session_title", None):
-            self.show_title(listed["title"])
+        if listed and (listed.get("title") or getattr(self, "session_title", None)) and \
+                (self.bot_name() or listed.get("title") or self.session_title) != self.title_label.get_text():
+            self.show_title(listed.get("title") or self.session_title)  # (a new title, or made a Bot or renamed one)
         if self.resume_pending and self.remote.local and self.remote.direct(self.session_id) and \
                 self.view_path != self.remote.mirror(self.session_id):  # (on this machine: its transcript's there now)
             self.view_session(self.remote.mirror(self.session_id))
@@ -651,8 +652,10 @@ class WindowRemote:
         its sessions resumes as it's next written to (the windows on them reattach as it's back). then: what's done
         once it's gone, in place of starting it again (Baude restarted too: the new Baude starts it)."""
         r = local_host()
-        if r is None:
-            return then() if then is not None else None
+        if r is None:  # (none running: started, as the restart would)
+            if then is not None:
+                return then()
+            return self.local_server(lambda _r: toast(self.sidebar, wording.say("hosts.daemon_restarted")), quiet=True)
         busy = {c.get("session") for c in (r.info.get("update") or {}).get("waiting") or ()} - {None}  # (its say)
 
         def later(n):

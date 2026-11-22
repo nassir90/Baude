@@ -681,9 +681,12 @@ androidComponents {
  * (go-previous-symbolic.svg: Adwaita.GoPrevious; baude-return-symbolic.svg: Adwaita.Return), its 16-square drawing in
  * the middle of a 19.2 square (so drawn at the sizes Material's 24-square ones were, it's as big as they looked); and
  * links (a link's logo, drawn in the text's colour) as dev.baude.android.LinkLogos, each logo's shapes, filled or
- * stroked, and what its mask cuts from them; and apps/baude-notification.svg as the notification's icon (drawable
- * ic_baude). The SVG they use: path, rect and circle, filled or stroked, in groups that scale, translate or rotate,
- * with opacity, and a mask (white shows, black cuts) for a cut-out. */
+ * stroked, and what its mask cuts from them; models (each model family's logo, Adwaita.Model<Name>) with
+ * models/families.json as dev.baude.android.ModelFamilies, the families the model pickers head and draw models by;
+ * and apps/baude-notification.svg as the notification's icon (drawable ic_baude). The SVG they use: path, rect, circle
+ * and ellipse, filled or stroked, in groups that scale, translate or rotate, with opacity, a fill rule said on them or
+ * on what they're in, a drawing on another square than 16 (models' 24) scaled to 16, and a mask (white shows, black
+ * cuts) for a cut-out. */
 abstract class BaudeIcons : DefaultTask() {
     @get:InputDirectory abstract val icons: DirectoryProperty
     @get:OutputDirectory abstract val outputDir: DirectoryProperty
@@ -720,6 +723,11 @@ abstract class BaudeIcons : DefaultTask() {
         return "M${f(cx - r)},${f(cy)}a${f(r)},${f(r)} 0 1 0 ${f(2 * r)},0a${f(r)},${f(r)} 0 1 0 ${f(-2 * r)},0z"
     }
 
+    private fun ellipseD(e: org.w3c.dom.Element): String {
+        val (cx, cy, rx, ry) = listOf("cx", "cy", "rx", "ry").map { num(e.attr(it)) }
+        return "M${f(cx - rx)},${f(cy)}a${f(rx)},${f(ry)} 0 1 0 ${f(2 * rx)},0a${f(rx)},${f(ry)} 0 1 0 ${f(-2 * rx)},0z"
+    }
+
     /** An SVG transform as the group's arguments (scale, translate and rotate about a point, which is all these use). */
     private fun transform(t: String?, where: String): Map<String, Double> {
         val out = LinkedHashMap<String, Double>()
@@ -746,19 +754,52 @@ abstract class BaudeIcons : DefaultTask() {
         return a
     }
 
+    /** Path data as Compose's parser reads it: an arc's two flags apart from each other and what follows them (SVG
+     * lets "0 01-.1.7" run them together, which it misreads). */
+    private fun spaced(d: String): String {
+        val out = StringBuilder()
+        var i = 0
+        var cmd = ' '
+        var arg = 0
+        val number = Regex("[-+]?(\\d*\\.\\d+|\\d+\\.?)([eE][-+]?\\d+)?")
+        while (i < d.length) {
+            val ch = d[i]
+            when {
+                ch.isLetter() && ch != 'e' && ch != 'E' -> { cmd = ch; arg = 0; out.append(ch); i++ }
+                ch == ',' || ch.isWhitespace() -> i++
+                (cmd == 'a' || cmd == 'A') && (arg % 7 == 3 || arg % 7 == 4) -> { out.append(' ').append(ch); arg++; i++ }
+                else -> {
+                    val m = number.find(d, i)?.takeIf { it.range.first == i } ?: throw GradleException("path data: \"${d.drop(i).take(12)}\"")
+                    out.append(' ').append(m.value)
+                    arg++
+                    i = m.range.last + 1
+                }
+            }
+        }
+        return out.toString().trim()
+    }
+
+    /** An svg drawn on another square than 16 (models' 24) as a group that scales it to 16; none for a 16 one. */
+    private fun viewBox(svg: org.w3c.dom.Element): Map<String, Double> {
+        val side = svg.attr("viewBox")?.trim()?.split(Regex("[ ,]+"))?.getOrNull(2)?.toDoubleOrNull() ?: return emptyMap()
+        return if (Math.abs(side - 16.0) < 0.5) emptyMap() else mapOf("scaleX" to 16.0 / side, "scaleY" to 16.0 / side)
+    }
+
     private fun group(t: Map<String, Double>) = "addGroup(${t.entries.joinToString(", ") { "${it.key} = ${g(it.value)}f" }})"
 
-    /** Kotlin lines drawing e's shapes (groups for transforms), each path's alpha as its own and its groups' times. */
-    private fun walk(e: org.w3c.dom.Element, out: MutableList<String>, depth: Int, inherited: Double, where: String) {
+    /** Kotlin lines drawing e's shapes (groups for transforms), each path's alpha as its own and its groups' times, its
+     * fill rule its own or what it's in says (ruled). */
+    private fun walk(e: org.w3c.dom.Element, out: MutableList<String>, depth: Int, inherited: Double, where: String,
+                     ruled: String? = null) {
         val tag = e.tagName.substringAfter(':')
         val a = inherited * alpha(e)
         if (e.attr("fill") == "none" || tag in setOf("defs", "title", "metadata", "clipPath", "style")) return
         val pad = "            " + "    ".repeat(depth)
-        if (tag in setOf("path", "rect", "circle")) {
-            val d = when (tag) { "path" -> e.attr("d") ?: ""; "rect" -> rectD(e); else -> circleD(e) }
+        val said = e.attr("fill-rule")?.takeIf { it.isNotEmpty() } ?: ruled
+        if (tag in setOf("path", "rect", "circle", "ellipse")) {
+            val d = when (tag) { "path" -> spaced(e.attr("d") ?: ""); "rect" -> rectD(e); "ellipse" -> ellipseD(e); else -> circleD(e) }
             if (d.isEmpty()) return
-            val rule = if ((e.attr("fill-rule")?.takeIf { it.isNotEmpty() } ?: e.attr("clip-rule")) == "evenodd") "EvenOdd"
-                else "NonZero"
+            val rule = if ((said ?: e.attr("clip-rule")) == "evenodd") "EvenOdd" else "NonZero"
             val line = "p(\"$d\", ${g(a)}f, PathFillType.$rule)"
             val t = transform(e.attr("transform"), where)
             if (t.isEmpty()) out.add(pad + line)
@@ -766,9 +807,9 @@ abstract class BaudeIcons : DefaultTask() {
             return
         }
         if (tag != "svg" && tag != "g") throw GradleException("schema/icons/$where: <$tag> isn't drawn here")
-        val t = if (tag == "g") transform(e.attr("transform"), where) else emptyMap()
+        val t = if (tag == "g") transform(e.attr("transform"), where) else viewBox(e)
         if (t.isNotEmpty()) out.add(pad + group(t))
-        for (c in e.kids()) walk(c, out, if (t.isNotEmpty()) depth + 1 else depth, a, where)
+        for (c in e.kids()) walk(c, out, if (t.isNotEmpty()) depth + 1 else depth, a, where, said)
         if (t.isNotEmpty()) out.add("${pad}clearGroup()")
     }
 
@@ -847,12 +888,41 @@ abstract class BaudeIcons : DefaultTask() {
         return out.append("    )\n}\n").toString()
     }
 
+    /** A Kotlin string literal of s. */
+    private fun quoted(s: String) = "\"" + s.replace("\\", "\\\\").replace("\"", "\\\"").replace("$", "\\$") + "\""
+
+    /** ModelFamilies: models/families.json's families, in its order, each with its logo (Adwaita.Model<Name>). */
+    private fun modelFamilies(dir: File, drawn: Map<String, String>): String {
+        val where = "models/families.json"
+        @Suppress("UNCHECKED_CAST")
+        val doc = groovy.json.JsonSlurper().parse(dir.resolve("families.json")) as Map<String, Any?>
+        if (doc.keys != setOf("description", "families")) throw GradleException("schema/icons/$where: a description and families, and nothing else")
+        val out = StringBuilder()
+        out.append("// Made from schema/icons/models as the app's built (build.gradle.kts's baudeIcons): never edited, never kept.\n")
+        out.append("package dev.baude.android\n\n")
+        out.append("import androidx.compose.ui.graphics.vector.ImageVector\n\n")
+        out.append("/** The model families (schema/icons/models/families.json, as the desktop's pickers.MODEL_FAMILIES reads it). */\n")
+        out.append("object ModelFamilies {\n")
+        out.append("    /** A family: its name (what its models are headed by), what finds it in a model's name or value, its logo. */\n")
+        out.append("    class Family(val name: String, val match: Regex, val logo: ImageVector)\n\n")
+        out.append("    /** Each family, the first that matches a model's its own. */\n")
+        out.append("    val all: List<Family> by lazy {\n        listOf(\n")
+        for (x in doc["families"] as List<Map<String, Any?>>) {
+            val icon = x["icon"] as? String ?: throw GradleException("schema/icons/$where: a family with no icon")
+            val member = pascal("model-$icon")
+            if (drawn[member] != "models/baude-model-$icon-symbolic.svg")
+                throw GradleException("schema/icons/$where: no baude-model-$icon-symbolic.svg for $icon")
+            out.append("            Family(${quoted(x["name"] as String)}, Regex(${quoted(x["match"] as String)}), Adwaita.$member),\n")
+        }
+        return out.append("        )\n    }\n}\n").toString()
+    }
+
     @TaskAction
     fun write() {
         val root = icons.get().asFile
         val blocks = StringBuilder()
         val seen = HashMap<String, String>()
-        for (set in listOf("adwaita", "baude", "kube")) {
+        for (set in listOf("adwaita", "baude", "kube", "models")) {
             val files = root.resolve(set).listFiles { f -> f.name.endsWith("-symbolic.svg") }!!.sortedBy { it.name }
             for (f in files) {
                 val name = f.name.removeSuffix("-symbolic.svg")
@@ -871,8 +941,9 @@ abstract class BaudeIcons : DefaultTask() {
         dir.mkdirs()
         dir.resolve("Adwaita.kt").writeText("""
             |// Made from schema/icons as the app's built (build.gradle.kts's baudeIcons): never edited, never kept. GNOME's
-            |// Adwaita icons (schema/icons/adwaita: CC-BY-SA-3.0 or LGPL-3.0, its LICENSE), Baude's own (schema/icons/baude) and the
-            |// Kubernetes view's categories (schema/icons/kube: each file says its licence).
+            |// Adwaita icons (schema/icons/adwaita: CC-BY-SA-3.0 or LGPL-3.0, its LICENSE), Baude's own (schema/icons/baude), the
+            |// Kubernetes view's categories (schema/icons/kube: each file says its licence) and the model families' logos
+            |// (schema/icons/models: MIT, its LICENSE; the logos are their owners' trademarks).
             |package dev.baude.android
             |
             |import androidx.compose.ui.graphics.Color
@@ -907,6 +978,7 @@ abstract class BaudeIcons : DefaultTask() {
             |    }
             |""".trimMargin() + blocks + "}\n")
         dir.resolve("LinkLogos.kt").writeText(linkLogos(root.resolve("links")))
+        dir.resolve("ModelFamilies.kt").writeText(modelFamilies(root.resolve("models"), seen))
         val res = resDir.get().asFile.resolve("drawable")
         res.mkdirs()
         res.resolve("ic_baude.xml").writeText(drawable(root.resolve("apps/baude-notification.svg")))

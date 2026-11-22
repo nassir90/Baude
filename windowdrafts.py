@@ -1086,9 +1086,17 @@ class WindowDrafts:
 
     # ---- session title (click it in the header to rename)
     def show_title(self, title):
+        """The chat's title in the header and the window's title; a Bot's name instead, for a Bot (it has no other)."""
         self.session_title = title
-        self.title_label.set_text(title or wording.say("sidebar.new_session"))
-        self.set_title(f"Baude — {title}" if title else "Baude")
+        shown = self.bot_name() or title
+        self.title_label.set_text(shown or wording.say("sidebar.new_session"))
+        self.set_title(f"Baude — {shown}" if shown else "Baude")
+
+    def bot_name(self):
+        """The open chat's Bot's name, as its host lists it; None if it isn't a Bot."""
+        r = getattr(self, "remote", None)
+        listed = r.sessions.get(self.session_id) if r is not None else None
+        return ((listed or {}).get("bot") or {}).get("name") or None
         # (not the sidebar: a chat being switched to fills it once it's in; a rename re-reads it)
 
     # ---- background tasks (commands and subagents the CLI runs after a turn ends)

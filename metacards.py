@@ -22,6 +22,7 @@ import refkinds  # noqa: E402
 import markdownview  # noqa: E402
 import chatparts  # noqa: E402
 from baudelib import wording  # noqa: E402
+from baudelib.client import chat_name  # noqa: E402
 from meta import (  # noqa: E402
     CODE_LINES, COMMAND_TOOLS, EDIT_TOOLS, NAME, READ_TOOLS, REF_COLOR, REF_RE, api_doc, auto_mode_note, available,
     code_mode, earlier_said, effort, label, model, model_name, runs_commands, said_value, trimmed,
@@ -152,7 +153,7 @@ class MetaCards:
             chat = self.find_chat(key)
             ghost = next((i for p in action_parts(action) for i in (p.get("redo") or {}).get("infos") or ()
                           if i.get("id") == key), None)
-            return chat["title"] if chat else (ghost or {}).get("title") or key[:8]
+            return chat["title"] if chat else chat_name(ghost or {}) or key[:8]
         return str(key).rpartition("\n")[2]
 
     def open_mark(self, kind, key, how, action):

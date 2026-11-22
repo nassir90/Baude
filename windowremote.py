@@ -39,7 +39,6 @@ from toolcards import (  # noqa: E402
     QuestionForm, StatusSlot, ToolCard, ended_by_stop, summarize_tool, tool_display, tool_input_view,
 )
 from chatinput import LoginCard, _AUTH_ESCAPES  # noqa: E402
-from baudelib.hostlogin import login_error  # noqa: E402
 from sessionlist import (  # noqa: E402
     HERE_HOST, THIS_MACHINE, _HOST_APART, _LOCAL_SERVER, cached_session_info, chat_group, chat_groups, host_apart,
     host_key, is_desktop, local_host, made_groups, main_folder, network, on_main, remote_info, remote_name,
@@ -1045,11 +1044,11 @@ class WindowRemote:
             if (gone := msg.get("gone")) and self.remote is not None and not self.remote.mine:  # (no /cd there)
                 shown = f"{gone.get('why')}: start a new chat " + (f"in {gone['folder']} " if gone.get("folder") else "") \
                     + f"on {remote_name(self.remote)} to carry on"
-            if (msg.get("result") or "").strip().removeprefix("⚠").strip() != said and login_error(msg) is None:
+            if (msg.get("result") or "").strip().removeprefix("⚠").strip() != said and self.login_ask(msg) is None:
                 self.note(f"turn ended with error: {shown or msg.get('subtype')}")
             if meta.OVERFLOW_RE.search(msg.get("result") or ""):
                 self.outgrown = True
-            if (why := login_error(msg)) is not None and not getattr(self, "login_asked", False):
+            if (why := self.login_ask(msg)) is not None and not getattr(self, "login_asked", False):
                 self.login_prompt(why)
         self.end_turn()
         self.tell_desktop(self.session_id, turn_said(msg))
@@ -1062,7 +1061,7 @@ class WindowRemote:
         what waited for its end done."""
         proc = self.proc if proc is None else proc
         self.set_busy(False)
-        self.login_asked, self.turn_text = False, None  # (login_prompt's, send_text's: the next turn's own)
+        self.login_asked, self.turn_sent = False, None  # (login_prompt's, send_text's: the next turn's own)
         self.keep_chat_model()
         if getattr(self, "restart_after_turn", False):  # (signed in while it ran: on the new sign-in now)
             self.restart_after_turn = False
@@ -1139,11 +1138,21 @@ class WindowRemote:
         elsewhere = self.remote is not None and not self.remote.local
         self.add(LoginCard(self, args, where=self.remote.reach_where() if elsewhere else None,
                            host=remote_name(self.remote) if elsewhere else None, ask=ask,
-                           retry=getattr(self, "turn_text", None) if ask is not None else None))
+                           retry=getattr(self, "turn_sent", None) if ask is not None else None))
         self.stick_bottom = True
 
-    def signed_in(self):
-        """Signed in afresh: the chat's claude started again on it (after the turn, if one's running)."""
+    def at_chat(self, chat):
+        """Whether chat (a sign-in card's, its host and session) is the one open."""
+        return chat == (self.remote, self.session_id)
+
+    def signed_in(self, chat=None):
+        """Signed in afresh: the chat's claude started again on it (after the turn, if one's running). chat: the one
+        a sign-in card was made in, if another's open now: its host stops its claude, to start again on its next
+        message."""
+        if chat is not None and not self.at_chat(chat):
+            if chat[0] is not None and chat[1]:
+                chat[0].request({"op": "stop", "session": chat[1], "restart": True})
+            return
         if self.busy:
             self.restart_after_turn = True
         else:
@@ -1157,12 +1166,12 @@ class WindowRemote:
             self.remote.request({"op": "stop", "session": self.session_id, "restart": True})
         self.restart_proc(resume=True)
 
-    def send_again(self, text):
-        """A sign-in card's Send again: what a turn that failed for want of signing in sent, sent again, unless a turn's
-        going or the box can't send. Whether it was."""
+    def send_again(self, sent):
+        """A sign-in card's Send again: what a turn that failed for want of signing in sent (its text and its
+        attachments, and no others), sent again, unless a turn's going or the box can't send. Whether it was."""
         if self.busy or self.composer_box.gates or self.live_elsewhere():
             return False
-        self.send_text(text)
+        self.send_text(sent[0], again=sent[1])
         return True
 
     def sign_out(self):

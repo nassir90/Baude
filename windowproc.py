@@ -1203,11 +1203,11 @@ class WindowProc:
         threading.Thread(target=work, daemon=True, name="worktree").start()
         return True
 
-    def send_text(self, text):
+    def send_text(self, text, again=None):
         """(on_send's) What was written, and what's attached, sent: to the host process for a chat of Baude's, taken up
-        by it first (take_up; once it's started, if it isn't yet), or to the chat's claude here (a Desktop chat's)."""
+        by it first (take_up; once it's started, if it isn't yet), or to the chat's claude here (a Desktop chat's).
+        again: the attachments of a turn sent again (a sign-in card's Send again), in place of what's attached now."""
         self.cut_pending = None  # (written to: no longer a turn cut short; its host forgets its own as it's sent)
-        self.turn_text = text  # (sent again, if the turn fails for want of signing in: LoginCard's Send again)
         going = getattr(self, "cut_continuing", False) and text == CUT_CONTINUE  # (Continue's: not the box's to keep)
         if not going:
             self.cut_continuing = False
@@ -1230,7 +1230,7 @@ class WindowProc:
                         self.send_text(text)
                     elif not going and widgets.typed_text(self.input).strip() == text:
                         buf.set_text("")
-                        self.send_text(text)
+                        self.send_text(text, again)
                 self.local_server(ready)
                 return
             if took is None:
@@ -1251,7 +1251,11 @@ class WindowProc:
             return
         self.cut_continuing = False
         # (Continue's message goes alone: what's attached is kept for what's written next)
-        atts, self.attachments = ([], self.attachments) if going else (self.attachments, [])
+        if again is not None:  # (what the turn sent, no more or less: what's attached now is for the next)
+            atts = again
+        else:
+            atts, self.attachments = ([], self.attachments) if going else (self.attachments, [])
+        self.turn_sent = (text, list(atts))  # (sent again, if the turn fails for want of signing in: LoginCard's Send again)
         self.refresh_attach_strip()
         said = str(uuid.uuid4())  # (claude keeps it as the message's: what a revert names, revert_to)
         self.add(UserTurn(self, self.user_bubble(text, atts), text, said))

@@ -2,7 +2,8 @@
 signed in again from that chat, on the phone or another machine's Baude), on a connection of its own (login): each
 line it writes carried back as it's written (login_said), a code pasted there passed to it (login_code), and who's
 signed in once it's done (login_end); the connection's going stops it. Also what's said of a turn's error that signing
-in again would fix (needs_login), the same in every app: Baude's, Record's and the phone's (LocalCommands.kt).
+in again would fix (needs_login, login_error), the same in every app: Baude's chats and Meta, Record's chats and Meta,
+and the phone's (LocalCommands.kt); only a Claude Code session's (Codex's and pi's errors are theirs to say).
 """
 import json
 import re

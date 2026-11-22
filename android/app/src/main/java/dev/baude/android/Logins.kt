@@ -32,7 +32,7 @@ import org.json.JSONObject
  * connection, which stops it there. Once it's signed in: who as, the chat's claude there started again on it, and
  * Send again for what this phone sent for the failed turn (retry). stage: ask, starting, page, checking, signed,
  * failed, cancelled. Compose state, changed on the main thread. */
-class Login(val hostId: String, val sid: String, val why: String?, val retry: String?, private val args: List<String>) {
+class Login(val hostId: String, val sid: String, val why: String?, val retry: Pair<String, List<Picked>>?, private val args: List<String>) {
     val key = java.util.UUID.randomUUID().toString()
     val stage = mutableStateOf(if (why != null) "ask" else "starting")
     val url = mutableStateOf<String?>(null)
@@ -108,20 +108,23 @@ class Login(val hostId: String, val sid: String, val why: String?, val retry: St
             ?: lines.lastOrNull()
     }
 
-    /** Signed in: who as; the chat's claude there stopped, so its next message starts it on the new sign-in. */
+    /** Signed in: who as; the chat's claude there stopped, so its next message starts it on the new sign-in (once the
+     * turn's over, if one's running: stopped, it would be killed). */
     private fun signed(who: String?) {
         stop()
         stage.value = "signed"
         said.value = who
-        Mesh.ask(hostId, Msg.Stop(session = sid, restart = true).json()) {}
+        val chat = Mesh.open?.takeIf { it.hostId == hostId && it.sid == sid }
+        if (chat != null && isWorking(chat)) chat.chrome.restartAfterTurn = true
+        else Mesh.ask(hostId, Msg.Stop(session = sid, restart = true).json()) {}
     }
 
-    /** Send again: what this phone sent for the failed turn, sent again. */
+    /** Send again: what this phone sent for the failed turn, its text and its files, sent again. */
     fun sendAgain(chat: Chat) {
-        val text = retry ?: return
+        val (text, files) = retry ?: return
         if (isWorking(chat)) return
         resent.value = true
-        Mesh.send(chat, text, emptyList(), keep = false, failed = { resent.value = false })
+        Mesh.send(chat, text, files, keep = false, failed = { resent.value = false })
     }
 
     companion object {
@@ -136,7 +139,7 @@ object Logins {
     /** A turn that failed for want of signing in (why: its error): its card, in place of the error (the transcript's
      * line for it, if it's in already; else the line it gives later isn't drawn: loginStandsIn). */
     fun ask(chat: Chat, why: String) {
-        val login = Login(chat.hostId, chat.sid, why, chat.chrome.turnText, emptyList())
+        val login = Login(chat.hostId, chat.sid, why, chat.chrome.turnSent, emptyList())
         all[login.key] = login
         val line = Line("login", login.key)
         val at = chat.lines.indexOfLast { it.kind == "error" && needsLogin(it.text) }

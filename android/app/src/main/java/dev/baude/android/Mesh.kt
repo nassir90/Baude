@@ -893,7 +893,8 @@ object Mesh {
     fun send(chat: Chat, text: String, files: List<Picked>, keep: Boolean = true, failed: (() -> Unit)? = null) {
         val c = conns[chat.hostId]?.takeIf { it.state == "up" } ?: return
         chat.said.value = null
-        chat.chrome.turnText = text.ifBlank { null } // (sent again from a sign-in card, if the turn fails for want of it)
+        // (what it sent, text and files, sent again from a sign-in card, if the turn fails for want of it)
+        chat.chrome.turnSent = if (text.isBlank() && files.isEmpty()) null else text to files
         Shares.used(chat)
         chat.busy.value = true
         val id = java.util.UUID.randomUUID().toString()

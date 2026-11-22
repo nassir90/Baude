@@ -250,6 +250,11 @@ class WindowDrafts:
         only read here (live_elsewhere)."""
         return not self.live_elsewhere()
 
+    def login_ask(self, msg):
+        """A message of claude's saying its sign-in ran out, or None: only a Claude Code chat's (another program's
+        sign-in isn't `claude auth login`'s)."""
+        return login_error(msg) if model_program(self.model) == "claude" else None
+
     def program_name(self):
         """What runs the chat's model, as a note names it: claude, pi, or Apple's model."""
         program = model_program(self.model)
@@ -1265,7 +1270,7 @@ class WindowDrafts:
         for w in self.blocks.values():  # its streamed text is complete: no frame's delay
             if isinstance(w, (MarkdownView, ThinkingView)):
                 w.finish()
-        if (why := login_error(msg)) is not None:  # (its sign-in ran out, say: a card to sign in again, not the error)
+        if (why := self.login_ask(msg)) is not None:  # (its sign-in ran out, say: a card to sign in again, not the error)
             if not getattr(self, "login_asked", False):
                 self.login_prompt(why)
             return

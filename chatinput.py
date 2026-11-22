@@ -308,13 +308,15 @@ class LoginCard(Gtk.Box):
     a turn that failed for want of it (ask) first says so, with why and Sign in. The sign-in page opens in the browser
     here (another machine's, its link to open); if the page shows a code instead of coming back by itself, it's pasted
     in the box; Cancel stops it. Once it's done, who's signed in, and the chat's claude started again on it
-    (win.signed_in); retry: what the failed turn sent from here, Send again to send it again (win.send_again).
+    (win.signed_in); retry: what the failed turn sent from here (its text and attachments), Send again to send it again
+    (win.send_again); the chat it's in is the one started again, whichever's open when it's done.
     args: claude auth login's (--console, --sso, --email …)."""
 
     def __init__(self, win, args=(), where=None, host=None, ask=None, retry=None):
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=6)
         self.add_css_class("perm-card")
         self.win, self.args, self.where, self.host, self.retry = win, list(args), where, host, retry
+        self.chat = (win.remote, win.session_id) if hasattr(win, "at_chat") else None  # (the chat it's in: signed in for)
         self.proc, self.said = None, []
         self.title = sel_label("")
         self.body = sel_label("")
@@ -416,8 +418,8 @@ class LoginCard(Gtk.Box):
     def signed_in(self, who):
         self.say(wording.say("sign_in.signed_in"), wording.say("sign_in.as_who", who=who) if who else
                  wording.say("sign_in.who_unknown"), dim=not who)
-        self.resend.set_visible(bool(self.retry))
-        self.win.signed_in()
+        self.resend.set_visible(bool(self.retry) and (self.chat is None or self.win.at_chat(self.chat)))
+        self.win.signed_in(self.chat) if self.chat is not None else self.win.signed_in()
         return False
 
     def send_again(self):

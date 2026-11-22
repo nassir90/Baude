@@ -1,11 +1,13 @@
 {
-  "description": "Signing in to Claude from the chat, on the machine the chat runs on: a turn that fails for want of it (claude's sign-in ran out, was revoked, or isn't there) shows an amber-bordered card in place of its error, with Sign in; /login (or Sign in) runs claude auth login there and shows its progress in that card, and once it's signed in the failed turn can be sent again. This machine's chats sign in here; another machine's (and every chat on the phone) sign in by that machine's host process, through the mesh if that's how it's reached (the login request).",
+  "description": "Signing in to Claude from the chat, on the machine the chat runs on: a turn of a Claude Code chat (or of Meta, which is a Claude Code session of this machine's) that fails for want of it (claude's sign-in ran out, was revoked, or isn't there) shows an amber-bordered card in place of its error, with Sign in; /login (or Sign in) runs claude auth login there and shows its progress in that card, and once it's signed in the failed turn can be sent again, with the attachments it had (what's attached since stays). This machine's chats sign in here; another machine's (and every chat on the phone) sign in by that machine's host process, through the mesh if that's how it's reached (the login request).",
   "apps": [
-    "baude"
+    "baude",
+    "record",
+    "phone"
   ],
   "opens": [
     "/login (optionally with claude auth login's arguments) sent in the composer",
-    "A turn whose result is an error that signing in again would fix, or whose reply claude wrote in its place saying so (error authentication_failed, or text matching hostlogin.NEEDS_LOGIN: \"Please run /login\", \"claude auth login\", \"Invalid API key\", \"OAuth token has expired\", \"Failed to authenticate\", \"Not logged in\", \"login … time limit / cannot be renewed\", authentication_error, API Error: 401…); once a turn, live only (an old one in history keeps its red line)"
+    "A turn whose result is an error that signing in again would fix, or whose reply claude wrote in its place saying so (error authentication_failed, or text matching hostlogin.NEEDS_LOGIN: \"Please run /login\", \"claude auth login\", \"Invalid API key\", \"OAuth token has expired\", \"Failed to authenticate\", \"Not logged in\", \"login … time limit / cannot be renewed\", authentication_error, API Error: 401…); once a turn, live only (an old one in history keeps its red line); a Codex or pi chat's keeps its own error"
   ],
   "code": [
     "chatinput.py:LoginCard",
@@ -13,6 +15,10 @@
     "chatinput.py:_HostLogin",
     "baudelib/hostlogin.py:login_error",
     "baudelib/hostlogin.py:start",
+    "metachat.py:MetaChat.login_card",
+    "metaagent.py:Agent",
+    "Logins.kt:Login",
+    "Logins.kt:LoginCard",
     "windowremote.py:WindowRemote.sign_in",
     "windowremote.py:WindowRemote.login_prompt",
     "windowremote.py:WindowRemote.send_again",
@@ -44,6 +50,11 @@
             "common.send",
             "common.cancel"
           ],
+          "phone": {
+            "does": "The field fills a row of its own, with Send and Cancel in a row under it",
+            "why": "A phone's width leaves a field beside them too narrow to type a code in",
+            "decided": "2026-11-22"
+          },
           "actions": [
             {
               "by": "Enter in the field / click Send",
@@ -113,7 +124,7 @@
     },
     {
       "name": "signed in",
-      "shows": "\"Signed in to Claude\" / \"as <account>\" (or dimmed \"claude auth status didn't say who as\"), and Send again if there's a turn to send again. The chat's claude restarts on the new sign-in (after the turn if one runs): here, or stopped on its host so its next message starts it.",
+      "shows": "\"Signed in to Claude\" / \"as <account>\" (or dimmed \"claude auth status didn't say who as\"), and Send again if there's a turn to send again. The chat's claude restarts on the new sign-in (after the turn if one runs): here, or stopped on its host so its next message starts it; the chat that failed, whichever's open by then.",
       "copy": [
         "sign_in.signed_in",
         "sign_in.as_who",

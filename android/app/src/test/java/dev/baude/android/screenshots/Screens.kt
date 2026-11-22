@@ -190,6 +190,12 @@ abstract class Screens(private val theme: String) {
         render("09-home-nested") { HomeScreen() }
     }
 
+    /** workshop can't be reached: its chats listed as they were last seen, dimmed and marked. */
+    @Test fun homeHostDown() {
+        Mesh.conn("h1")!!.state = "down"
+        render("09b-home-host-down") { HomeScreen() }
+    }
+
     // (a chat open on workshop, which is up: each of its pages, as its bottom bar switches to them)
     @Test fun chat() = chatAt("10-chat", "chat")
     @Test fun chatMeta() = chatAt("11-chat-meta", "meta")

@@ -463,7 +463,7 @@ private fun Modifier.pressed(at: (Offset) -> Unit, onClick: () -> Unit, onLong: 
         .combinedClickable(onClick = onClick, onLongClick = onLong)
 
 /** A chat's row (Baude's session_row): its title on one line, nested under its parent with its parents' lines, its
- * status dot; a long-press: its menu. A host that's gone or deactivated: its title dim, and "dead" if it's gone. */
+ * status dot; a long-press: its menu. A host that's gone or deactivated: its title dim, and a crossed-out cloud if it's gone. */
 @Composable
 private fun SessionRow(item: Item, through: Set<Int>, onClick: () -> Unit) {
     val c = LocalBaude.current
@@ -483,7 +483,8 @@ private fun SessionRow(item: Item, through: Set<Int>, onClick: () -> Unit) {
             val mark = metaMark(item.hostId, item.id)
             Text(markedName(bot ?: title, mark?.how, mark != null), style = Type.body, color = if (dead || off) c.dim else c.fg,
                 maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
-            if (dead) RowTag(Wording.Sidebar.dead) else HeldTag(s)
+            if (dead) Icon(Adwaita.NoConnection, Wording.Sidebar.noConnection, tint = c.dim, modifier = Modifier.size(16.dp.icon))
+            else HeldTag(s)
             StatusDot(if (dead || off) "" else s.state.orEmpty(), !dead && !off && (!s.asks.isNullOrEmpty() || s.state == "waiting"))
             MarkNote(mark)
         }

@@ -215,13 +215,11 @@
         },
         {
           "name": "Session row",
-          "shows": "One line: the title (a title too long fades out at the cut, no …), then a status dot at the far right. The title is \"(untitled)\" if it has none. A session on another host that is gone shows its title dimmed with a small \"dead\" tag (not for a deactivated host: just dimmed). A chat its host holds messages for shows a small \"held\" tag before the dot. A chat open but not yet written in shows as \"New session\" at the top of its folder (never while blank), and has no right-click menu. Tooltip (several lines, those that apply): title; its folder; \"N message(s) held for it, to send or delete in it\"; \"On <host> (<address>)\" with \", deactivated\" or \", gone from the network since <time ago>\"; \"Group <name>\"; \"Worktree <name> of <folder>\"; the source line (for a session of this machine's Claude Desktop or Claude Code, and \"<host>, on the network\" for a session on a host); \"N earlier copy/copies of this conversation hidden\".",
+          "shows": "One line: the title (a title too long fades out at the cut, no …), then a status dot at the far right. The title is \"(untitled)\" if it has none. A session on another host that is gone shows its title dimmed with a crossed-out cloud icon (schema/icons/baude/baude-no-connection-symbolic.svg) before the dot, tooltip \"No connection\" (not for a deactivated host: just dimmed). A chat its host holds messages for shows a small \"held\" tag before the dot. A chat open but not yet written in shows as \"New session\" at the top of its folder (never while blank), and has no right-click menu. Tooltip (several lines, those that apply): title; its folder; \"N message(s) held for it, to send or delete in it\"; \"On <host> (<address>)\" with \", deactivated\" or \", gone from the network since <time ago>\"; \"Group <name>\"; \"Worktree <name> of <folder>\"; the source line (for a session of this machine's Claude Desktop or Claude Code, and \"<host>, on the network\" for a session on a host); \"N earlier copy/copies of this conversation hidden\".",
           "copy": [
             "common.untitled",
-            "sidebar.held"
-          ],
-          "copy": [
-            "sidebar.dead"
+            "sidebar.held",
+            "sidebar.no_connection"
           ],
           "text": [
             "On {host} ({address})",
@@ -357,11 +355,11 @@
     },
     {
       "name": "host gone",
-      "shows": "Host banner \"Can't connect to <host> at the moment\", or \"…at the moment: <why>\" if the last try said why; the host's chats listed dimmed with a \"dead\" tag; their menu offers only Delete. The host is also dimmed in the host picker."
+      "shows": "Host banner \"Can't connect to <host> at the moment\", or \"…at the moment: <why>\" if the last try said why; the host's chats listed dimmed with the crossed-out cloud icon; their menu offers only Delete. The host is also dimmed in the host picker."
     },
     {
       "name": "host deactivated",
-      "shows": "Host banner \"<host> is deactivated\"; its chats dimmed, no \"dead\" tag; New session toasts that text."
+      "shows": "Host banner \"<host> is deactivated\"; its chats dimmed, no crossed-out cloud; New session toasts that text."
     },
     {
       "name": "host unknown",

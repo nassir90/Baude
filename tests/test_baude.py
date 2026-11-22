@@ -151,7 +151,7 @@ import windowremote  # noqa: E402
 import baudewindow  # noqa: E402
 from baude import Adw, Gdk, Gio, GLib, Gtk  # noqa: E402
 from gi.repository import Pango  # noqa: E402
-from startup import GdkPixbuf  # noqa: E402
+from gi.repository import GdkPixbuf  # noqa: E402
 
 _MOVED = (startup, signalrefs, signalcode, signalresolve, signaltools, signalnames, signalreader, toolcards,
           chatinput, sessionlist, sessionsidebar, sidebarmenu, sidequestion, baudemeta, refpopovers,

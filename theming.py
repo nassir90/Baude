@@ -1,7 +1,7 @@
 """theming — how the apps look: their CSS, the shaders warmed before they're needed, the theme (load_css,
-theme_css), the window's corners and title bar, popovers, the accent (apply_accent, AccentFade, AccentDot),
-Settings' shared rows, and shared settings shown again as another app here changes them (follow_setting,
-watch_settings).
+theme_css), the window's corners and title bar, popovers, the accent (apply_accent, AccentFade, AccentDot) and the
+logo in it (follow_accent, theme_logo), Settings' shared rows, and shared settings shown again as another app here
+changes them (follow_setting, watch_settings).
 """
 import json
 import math
@@ -952,6 +952,7 @@ def apply_accent(display):
     for win in Gtk.Window.list_toplevels() if again else ():
         if isinstance(win, AccentFade):
             win.fade_accent()
+    picked = again and name != _accent["name"]
     _accent["name"], _accent["css"] = name, css
     _accent["provider"].load_from_string(css)
     for win in Gtk.Window.list_toplevels() if again else ():
@@ -961,6 +962,43 @@ def apply_accent(display):
             if (changed := getattr(widget, "accent_changed", None)) is not None:  # (its own colours: Record's links)
                 changed()
             widget.queue_draw()
+    if picked and _logos:  # (after the windows: a logo's drawn at 1024 px, not in the fade's first frames)
+        GLib.idle_add(lambda: [redraw() for redraw in list(_logos)] and False, priority=GLib.PRIORITY_LOW)
+
+
+_logos = []  # (follow_accent's: each app's logo, drawn again in the accent)
+
+
+def follow_accent(redraw):
+    """redraw() as the accent changes here (apply_accent: picked in Settings, set by Meta or in another Baude or
+    Record): the app's logo drawn again in it (widgets.logo), its Dock tile's or its windows' and its launcher's."""
+    if redraw not in _logos:
+        _logos.append(redraw)
+
+
+def theme_logo(root, name, svg):
+    """Linux: an app's logo, svg, as icon name in an icon folder of its own (root), which the display's icon theme
+    looks in: windows take it from there by name. Written again with another svg (the accent changed), the theme looks
+    again, and windows showing it take it anew. Its path (None: not written)."""
+    path = os.path.join(root, "hicolor", "scalable", "apps", f"{name}.svg")
+    try:
+        with open(path) as f:
+            same = f.read() == svg
+    except OSError:
+        same = False
+    if not same:
+        try:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w") as f:
+                f.write(svg)
+        except OSError:
+            return None
+    theme = Gtk.IconTheme.get_for_display(Gdk.Display.get_default())
+    if root not in theme.get_search_path():
+        theme.add_search_path(root)
+    elif not same:
+        theme.set_search_path(theme.get_search_path())
+    return path
 
 
 class AccentFade:

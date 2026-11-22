@@ -69,7 +69,7 @@ from baudelib.notes import data_dir, socket_path  # noqa: E402,F401
 import update  # noqa: E402  (a new version from git, restarted onto once idle, as Baude's: beside this file)
 baudelib.wire.HEAD_COMMIT = update.STARTED  # (said to the host processes it reaches: logged by one on other code)
 baudelib.wire.HEAD_CLIENT = "record"  # (listed as Record among the apps connected to a host)
-from recordstore import APP_ID, ICON_SVG, apps_place, install, noun, restart_path, uninstall  # noqa: E402
+from recordstore import APP_ID, apps_place, install, logo, noun, restart_path, uninstall  # noqa: E402
 from recordui import CSS, UNEXPLAINED  # noqa: E402
 from recordwindow import Window  # noqa: E402
 
@@ -77,8 +77,8 @@ from recordwindow import Window  # noqa: E402
 # ---------------------------------------------------------------- the logo
 
 def icon_png(size=1024, macos=True):
-    """The logo as a PNG; for macOS with the margin its own icons have (the tile 824 of 1024)."""
-    return applist.icon_png(ICON_SVG, size, macos)
+    """The logo (in the accent) as a PNG; for macOS with the margin its own icons have (the tile 824 of 1024)."""
+    return applist.icon_png(logo(), size, macos)
 
 
 def objc_send(obj, sel, *args, types=(), ret=None):
@@ -123,19 +123,31 @@ def macos_dock_icon():
 
 
 def themed_icon():
-    """Elsewhere, windows take the logo from the icon theme: it's put in an icon folder of Record's own."""
-    root = os.path.join(data_dir(), "icons")
-    path = os.path.join(root, "hicolor", "scalable", "apps", f"{APP_ID}.svg")
-    try:
-        if not os.path.exists(path) or open(path).read() != ICON_SVG:
-            os.makedirs(os.path.dirname(path), exist_ok=True)
-            with open(path, "w") as f:
-                f.write(ICON_SVG)
-    except OSError:
-        return None
-    Gtk.IconTheme.get_for_display(Gdk.Display.get_default()).add_search_path(root)
-    Gtk.Window.set_default_icon_name(APP_ID)
+    """Elsewhere, windows take the logo from the icon theme: it's put in an icon folder of Record's own
+    (theming.theme_logo)."""
+    path = theming.theme_logo(os.path.join(data_dir(), "icons"), APP_ID, logo())
+    if path is not None:
+        Gtk.Window.set_default_icon_name(APP_ID)
     return path
+
+
+def redraw_logo():
+    """The logo drawn again in the accent as it's picked (theming.follow_accent): the Dock's or the windows', and the
+    launcher's if Record's in the list of apps."""
+    try:
+        macos_dock_icon() if sys.platform == "darwin" else themed_icon()
+    except Exception as e:  # (an icon isn't worth the accent's change)
+        print("record: logo:", e, file=sys.stderr)
+    launcher_logo()
+
+
+def launcher_logo():
+    """The launcher's logo drawn again in the accent, where it isn't already (applist.redraw_logo)."""
+    try:
+        applist.redraw_logo(APP_ID, "Record", logo())
+    except OSError as e:
+        print("record: launcher logo:", e, file=sys.stderr)
+    return False
 
 
 def hand_over(request, path=None):
@@ -250,6 +262,8 @@ class App(Adw.Application):
                 print("record: no Dock icon:", e, file=sys.stderr)
         else:
             widgets.notify_as(themed_icon())
+        theming.follow_accent(redraw_logo)  # (Settings → Accent Colour: the logo in it)
+        GLib.idle_add(launcher_logo, priority=GLib.PRIORITY_LOW)  # (picked in Baude since Record last ran)
         try:  # (first: a change from another machine's Record waits for the window, not written under it: notes.write)
             self.server = listen(self.request)
         except OSError as e:

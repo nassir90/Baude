@@ -253,6 +253,30 @@ abstract class Screens(private val theme: String) {
         chatAt("34-land-split-dragged", "processes", split = true)
     }
 
+    /** The launcher's icon (mipmap ic_launcher, made of schema/icons/apps), as a launcher draws it: in its colours, then
+     * themed (Android 13's: its monochrome layer on the system palette's colours, as Launcher3 takes them), each at
+     * 192 px on the theme's background. */
+    @Test fun launcherIcon() {
+        val icon = activity.getDrawable(dev.baude.android.R.mipmap.ic_launcher) as android.graphics.drawable.AdaptiveIconDrawable
+        val dark = theme == "dark"
+        val bg = activity.getColor(if (dark) android.R.color.system_neutral1_800 else android.R.color.system_accent1_100)
+        val fg = activity.getColor(if (dark) android.R.color.system_accent1_100 else android.R.color.system_neutral2_700)
+        val themed = android.graphics.drawable.AdaptiveIconDrawable(android.graphics.drawable.ColorDrawable(bg),
+            icon.monochrome!!.mutate().apply { setTint(fg) })
+        val (px, gap) = 192 to 32
+        val bitmap = android.graphics.Bitmap.createBitmap(2 * px + 3 * gap, px + 2 * gap, android.graphics.Bitmap.Config.ARGB_8888)
+        val canvas = android.graphics.Canvas(bitmap)
+        canvas.drawColor(if (dark) 0xFF242424.toInt() else 0xFFFAFAFA.toInt())
+        for ((i, d) in listOf(icon, themed).withIndex()) {
+            d.setBounds(gap + i * (px + gap), gap, gap + i * (px + gap) + px, gap + px)
+            d.draw(canvas)
+        }
+        java.io.File("build/screenshots/$theme").mkdirs()
+        java.io.File("build/screenshots/$theme/42-launcher-icon.png").outputStream().use {
+            bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it)
+        }
+    }
+
     /** The fixture chat ("Tidy the release notes") open at page, its host up: what was said in it, its subagents,
      * side questions and artifacts. */
     private fun chatAt(name: String, page: String, split: Boolean = false) {

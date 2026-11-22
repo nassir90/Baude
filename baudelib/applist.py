@@ -48,6 +48,44 @@ def icon_png(svg, size=1024, mac=True):
     return loader.get_pixbuf().save_to_bufferv("png", [], [])[1]
 
 
+def icns(svg):
+    """A logo as macOS's .icns: PNGs of it (icon_png), its ic07 to ic10 entries, 128 to 1024 px."""
+    entries = b"".join(kind + struct.pack(">I", 8 + len(png)) + png for kind, png in
+                       ((k, icon_png(svg, n)) for k, n in ((b"ic07", 128), (b"ic08", 256), (b"ic09", 512),
+                                                           (b"ic10", 1024))))
+    return b"icns" + struct.pack(">I", 8 + len(entries)) + entries
+
+
+def redraw_logo(app_id, name, svg):
+    """An installed launcher's logo drawn again as svg (the accent picked since: icons.logo), where it isn't already:
+    the .app's .icns (the bundle touched, and LaunchServices told, for the Finder and the Dock) or the hicolor theme's
+    SVG (replaced, and the theme's folder touched, as menus look for a change). Whether it was drawn again."""
+    paths = launchers(app_id, name)
+    if not os.path.exists(paths[0]):
+        return False
+    if sys.platform == "darwin":
+        path, data = os.path.join(paths[0], "Contents", "Resources", f"{name}.icns"), icns(svg)
+    else:
+        path, data = paths[1], svg.encode()
+    try:
+        with open(path, "rb") as f:
+            if f.read() == data:
+                return False
+    except OSError:
+        pass
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path + ".new", "wb") as f:
+        f.write(data)
+    os.replace(path + ".new", path)
+    if sys.platform == "darwin":
+        os.utime(paths[0])
+        if os.path.exists(LSREGISTER):
+            subprocess.Popen([LSREGISTER, "-f", paths[0]], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    else:
+        os.utime(os.path.dirname(os.path.dirname(os.path.dirname(path))))  # (hicolor)
+    return True
+
+
 def install(app_id, name, svg, command, category, entry, small=None):
     """The app in the list. macOS: an .app (an .icns of svg; category its LSApplicationCategoryType) started through
     the login shell, for Homebrew's PATH. Elsewhere: a .desktop entry (entry: its lines besides the ones every app's
@@ -63,11 +101,8 @@ def install(app_id, name, svg, command, category, entry, small=None):
             plistlib.dump({"CFBundleName": name, "CFBundleDisplayName": name, "CFBundleIdentifier": app_id,
                            "CFBundlePackageType": "APPL", "CFBundleExecutable": name, "CFBundleIconFile": name,
                            "LSApplicationCategoryType": category, "NSHighResolutionCapable": True}, f)
-        entries = b"".join(kind + struct.pack(">I", 8 + len(png)) + png for kind, png in
-                           ((k, icon_png(svg, n)) for k, n in ((b"ic07", 128), (b"ic08", 256), (b"ic09", 512),
-                                                               (b"ic10", 1024))))
         with open(os.path.join(contents, "Resources", f"{name}.icns"), "wb") as f:
-            f.write(b"icns" + struct.pack(">I", 8 + len(entries)) + entries)
+            f.write(icns(svg))
         script = os.path.join(contents, "MacOS", name)
         with open(script, "w") as f:
             f.write('#!/bin/sh\ncd "$HOME"\nexec "${SHELL:-/bin/zsh}" -lc \'exec "$0" "$@"\' '

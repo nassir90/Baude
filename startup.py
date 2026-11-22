@@ -1,30 +1,29 @@
 """startup — Baude as it starts: its app id, start-up milestones (trace, BAUDE_TRACE), the state a restart leaves
 for the next process (take_restart_state), the app's sizes (apply_scales), and Baude in the platform's list of apps:
-its logo (ICON_SVG), the command that starts it (launch_command) and the launchers (LAUNCHER).
+its logo (logo, in the accent), the command that starts it (launch_command) and the launchers (LAUNCHER).
 """
 import json
 import os
 import shutil
-import struct
 import subprocess
 import sys
 import time
 
 from macos import objc_send
-from baudelib import icons  # noqa: E402  (its logo: schema/icons)
 from baudelib import wording  # noqa: E402  (the words Baude shows: schema/copy, Record's and the Android app's too)
 
 import gi
 
 gi.require_version("Gtk", "4.0")
-gi.require_version("GdkPixbuf", "2.0")
-from gi.repository import Gdk, GdkPixbuf, Gio, GLib, Gtk  # noqa: E402
+from gi.repository import Gio, GLib  # noqa: E402
 
+import theming  # noqa: E402  (the logo in the accent: follow_accent, theme_logo)
 import widgets  # noqa: E402  (what Record draws as Baude does: the links' logos; see widgets.py)
 from widgets import Ticker  # noqa: E402,F401
 from widgets import _settings_path  # noqa: E402,F401
 from pickers import _data_home  # noqa: E402,F401
 
+from baudelib import applist  # noqa: E402  (the logo's PNGs and .icns, and its launcher's drawn again: Record's too)
 from baudelib.applist import exec_quote as _exec_quote  # noqa: E402  (Record's and Emission's entries quoted so too)
 
 
@@ -112,25 +111,21 @@ def apply_scales(display):
 # ------------------------------------------------------- desktop launcher --
 # Baude in the platform's list of apps, per user: Launcher, below.
 
-ICON_SVG = icons.svg("apps", "baude")  # (schema/icons/apps)
+def logo():
+    """The logo (schema/icons/apps/baude.svg) in the accent picked in Settings: widgets.logo's."""
+    return widgets.logo("baude")
 
 
 def macos_icon_png(size=1024):
-    """The logo (ICON_SVG) as a PNG the way macOS draws app icons: with the margin its own icons have (the tile 824
-    of 1024)."""
-    k = 112 * 1024 / 824  # (the tile is 112 of the SVG's 128)
-    svg = ICON_SVG.replace('viewBox="0 0 128 128"', f'viewBox="{64 - k / 2} {64 - k / 2} {k} {k}"')
-    loader = GdkPixbuf.PixbufLoader.new_with_type("svg")
-    loader.set_size(size, size)
-    loader.write(svg.encode())
-    loader.close()
-    return loader.get_pixbuf().save_to_bufferv("png", [], [])[1]
+    """The logo as a PNG the way macOS draws app icons: with the margin its own icons have (the tile 824 of 1024)."""
+    return applist.icon_png(logo(), size)
 
 
 def macos_dock_icon():
-    """On macOS, the Dock shows the logo (ICON_SVG) instead of Python's rocket: a Python process's Dock tile is
-    Python.app's, and GTK's icon names don't reach it. Drawn at 1024 px (macos_icon_png), and handed to AppKit
-    (-[NSApplication setApplicationIconImage:]) through the Objective-C runtime, as there's no PyObjC."""
+    """On macOS, the Dock shows the logo instead of Python's rocket: a Python process's Dock tile is Python.app's, and
+    GTK's icon names don't reach it. Drawn at 1024 px (macos_icon_png), and handed to AppKit
+    (-[NSApplication setApplicationIconImage:]) through the Objective-C runtime, as there's no PyObjC. Called again
+    as the accent changes (follow_accent)."""
     import ctypes
     png = macos_icon_png()
     data = objc_send(b"NSData", b"dataWithBytes:length:", png, len(png), types=(ctypes.c_char_p, ctypes.c_ulong))
@@ -140,20 +135,36 @@ def macos_dock_icon():
 
 
 def logo_icon():
-    """Elsewhere, windows take the logo (ICON_SVG) from the icon theme by name (APP_ID): it's put in an icon folder of
-    Baude's own, as Record's is. The user's theme has it only once Baude's in the application menu, and without it a
-    title bar that shows the window's icon (KDE's, at the start of the header bar) had the theme's missing-image icon."""
-    root = os.path.join(_data_home(), "baude", "icons")
-    path = os.path.join(root, "hicolor", "scalable", "apps", f"{APP_ID}.svg")
+    """Elsewhere, windows take the logo from the icon theme by name (APP_ID): it's put in an icon folder of Baude's
+    own, as Record's is. The user's theme has it only once Baude's in the application menu, and without it a title bar
+    that shows the window's icon (KDE's, at the start of the header bar) had the theme's missing-image icon. Called
+    again as the accent changes (follow_accent): the theme's looked through again, and the windows take it anew."""
+    return theming.theme_logo(os.path.join(_data_home(), "baude", "icons"), APP_ID, logo())
+
+
+def follow_accent():
+    """The logo in the accent as it's picked (theming.follow_accent: redraw_logo), and the launcher's now (the accent
+    may have changed in Record since Baude last ran)."""
+    theming.follow_accent(redraw_logo)
+    GLib.idle_add(launcher_logo, priority=GLib.PRIORITY_LOW)
+
+
+def redraw_logo():
+    """The logo drawn again in the accent: the Dock's (macOS) or the windows', and the launcher's (launcher_logo)."""
     try:
-        if not os.path.exists(path) or open(path).read() != ICON_SVG:
-            os.makedirs(os.path.dirname(path), exist_ok=True)
-            with open(path, "w") as f:
-                f.write(ICON_SVG)
-    except OSError:
-        return None
-    Gtk.IconTheme.get_for_display(Gdk.Display.get_default()).add_search_path(root)
-    return path
+        macos_dock_icon() if sys.platform == "darwin" else logo_icon()
+    except Exception as e:  # (an icon isn't worth the accent's change)
+        print("baude: logo:", e, file=sys.stderr)
+    launcher_logo()
+
+
+def launcher_logo():
+    """The launcher's logo (LAUNCHER, if it's installed) drawn again in the accent, where it isn't already."""
+    try:
+        applist.redraw_logo(APP_ID, "Baude", logo())
+    except OSError as e:
+        print("baude: launcher logo:", e, file=sys.stderr)
+    return False
 
 
 def launch_command(*args):
@@ -228,7 +239,7 @@ class FreedesktopLauncher(Launcher):
             "",
         ])
         desktop, icon = self.paths()
-        for path, data in ((icon, ICON_SVG), (desktop, entry)):
+        for path, data in ((icon, logo()), (desktop, entry)):
             os.makedirs(os.path.dirname(path), exist_ok=True)
             with open(path, "w") as f:
                 f.write(data)
@@ -259,10 +270,7 @@ class MacLauncher(Launcher):
 
     @staticmethod
     def icns():
-        entries = b"".join(kind + struct.pack(">I", 8 + len(png)) + png
-                           for kind, png in ((k, macos_icon_png(n)) for k, n in
-                                             ((b"ic07", 128), (b"ic08", 256), (b"ic09", 512), (b"ic10", 1024))))
-        return b"icns" + struct.pack(">I", 8 + len(entries)) + entries
+        return applist.icns(logo())
 
     def write(self):
         import plistlib

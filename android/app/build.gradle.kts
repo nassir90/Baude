@@ -794,6 +794,73 @@ abstract class BaudeIcons : DefaultTask() {
         return out.append("</vector>\n").toString()
     }
 
+    /** An SVG colour (#rgb or #rrggbb) as Android's #AARRGGBB, opaque. */
+    private fun argb(c: String, where: String): String {
+        val hex = c.removePrefix("#")
+        if (!c.startsWith("#") || hex.length !in setOf(3, 6)) throw GradleException("schema/icons/$where: colour $c isn't drawn here")
+        return "#FF" + (if (hex.length == 3) hex.map { "$it$it" }.joinToString("") else hex).uppercase()
+    }
+
+    /** A vector drawable of an adaptive icon's layer (108 dp, box of the SVG's units across), its shapes moved by at. */
+    private fun layer(name: String, box: Double, at: Double, shapes: List<String>) =
+        "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<!-- Made from schema/icons/apps/$name as the app's built " +
+            "(build.gradle.kts's baudeIcons). -->\n<vector xmlns:android=\"http://schemas.android.com/apk/res/android\"\n" +
+            "    android:width=\"108dp\" android:height=\"108dp\" android:viewportWidth=\"${g(box)}\" " +
+            "android:viewportHeight=\"${g(box)}\">\n    <group android:translateX=\"${g(at)}\" android:translateY=\"${g(at)}\">\n" +
+            shapes.joinToString("") + "    </group>\n</vector>\n"
+
+    /** A logo's path or rect as a vector drawable's path: filled (SVG's black if it names no fill) and stroked as it is. */
+    private fun vectorPath(e: org.w3c.dom.Element, where: String): String {
+        val d = when (e.tagName) {
+            "path" -> e.getAttribute("d")
+            "rect" -> rectD(e)
+            else -> throw GradleException("schema/icons/$where: <${e.tagName}> isn't drawn here")
+        }
+        val a = alpha(e)
+        val out = StringBuilder("        <path android:pathData=\"$d\"")
+        val fill = e.attr("fill") ?: "#000"
+        if (fill != "none") {
+            out.append("\n            android:fillColor=\"${argb(fill, where)}\"")
+            if (a < 1.0) out.append(" android:fillAlpha=\"${g(a)}\"")
+            if (e.attr("fill-rule") == "evenodd") out.append(" android:fillType=\"evenOdd\"")
+        }
+        e.attr("stroke")?.takeIf { it != "none" }?.let { stroke ->
+            out.append("\n            android:strokeColor=\"${argb(stroke, where)}\" android:strokeWidth=\"${e.attr("stroke-width") ?: "1"}\"")
+            if (a < 1.0) out.append(" android:strokeAlpha=\"${g(a)}\"")
+            e.attr("stroke-linecap")?.let { out.append(" android:strokeLineCap=\"$it\"") }
+            e.attr("stroke-linejoin")?.let { out.append(" android:strokeLineJoin=\"$it\"") }
+        }
+        return out.append(" />\n").toString()
+    }
+
+    /** The launcher's icon, adaptive: apps/baude.svg's tile (its first rect) its background's colour, the rest of it its
+     * foreground, the tile as big as the 72 dp a launcher shows of the 108; and apps/baude-notification.svg its
+     * monochrome layer (Android 13's themed icons draw it in the system's palette), its bubble as wide as the
+     * foreground's. Written into res (mipmap ic_launcher, its drawables and its colour). */
+    private fun launcher(apps: File, res: File) {
+        val logo = read(apps.resolve("baude.svg"))
+        val shapes = logo.kids()
+        val tile = shapes.firstOrNull { it.tagName == "rect" } ?: throw GradleException("schema/icons/apps/baude.svg: no tile")
+        val box = num(tile.attr("width")) * 108 / 72  // (the layer, in the SVG's units: its tile the 72 dp shown)
+        val drawn = res.resolve("drawable")
+        drawn.mkdirs()
+        drawn.resolve("ic_launcher_foreground.xml").writeText(
+            layer("baude.svg", box, (box - 128) / 2, shapes.filter { it !== tile }.map { vectorPath(it, "apps/baude.svg") }))
+        val glyph = read(apps.resolve("baude-notification.svg"))
+        val mono = 108 * 20 / (84 * 72 / num(tile.attr("width")))  // (its bubble's 20 units the foreground's 84, in dp)
+        drawn.resolve("ic_launcher_monochrome.xml").writeText(
+            layer("baude-notification.svg", mono, (mono - 24) / 2, glyph.kids().map { vectorPath(it, "apps/baude-notification.svg") }))
+        res.resolve("values").apply { mkdirs() }.resolve("ic_launcher.xml").writeText(
+            "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<!-- Made from schema/icons/apps/baude.svg's tile as the app's built. -->\n" +
+                "<resources>\n    <color name=\"ic_launcher_background\">${argb(tile.getAttribute("fill"), "apps/baude.svg")}</color>\n</resources>\n")
+        res.resolve("mipmap-anydpi-v26").apply { mkdirs() }.resolve("ic_launcher.xml").writeText(
+            "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<!-- Made from schema/icons/apps as the app's built (build.gradle.kts's baudeIcons). -->\n" +
+                "<adaptive-icon xmlns:android=\"http://schemas.android.com/apk/res/android\">\n" +
+                "    <background android:drawable=\"@color/ic_launcher_background\" />\n" +
+                "    <foreground android:drawable=\"@drawable/ic_launcher_foreground\" />\n" +
+                "    <monochrome android:drawable=\"@drawable/ic_launcher_monochrome\" />\n</adaptive-icon>\n")
+    }
+
     /** A shape of a logo as LinkLogos has it: P (a path), C (a circle) or Rr (a rectangle), stroked if it has a
      * stroke, else filled. */
     private fun shape(e: org.w3c.dom.Element, where: String): String {
@@ -910,6 +977,7 @@ abstract class BaudeIcons : DefaultTask() {
         val res = resDir.get().asFile.resolve("drawable")
         res.mkdirs()
         res.resolve("ic_baude.xml").writeText(drawable(root.resolve("apps/baude-notification.svg")))
+        launcher(root.resolve("apps"), resDir.get().asFile)
     }
 }
 

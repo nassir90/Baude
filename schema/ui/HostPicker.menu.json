@@ -2,7 +2,7 @@
   "description": "The menu under the header's provider button, which lists where the chat's model can run: each host that has it as a section, the host's name as the section heading and its providers under it. Called the provider picker in the header.",
   "apps": ["baude"],
   "opens": ["header provider button"],
-  "code": ["pickers.py:HostPicker", "baude.py:BaudeWindow.sync_providers", "baude.py:BaudeWindow.on_provider_changed", "baude.py:BaudeWindow.move_to"],
+  "code": ["pickers.py:HostPicker", "windowdrafts.py:WindowDrafts.sync_providers", "windowdrafts.py:WindowDrafts.on_provider_changed", "windowdrafts.py:WindowDrafts.move_to"],
   "copy": ["chat_header"],
   "parts": [
     {

@@ -1,7 +1,7 @@
 {
   "description": "What the Baude main window shows for a brand-new chat, before anything has been written: the header and sidebar as usual, an empty chat column, the composer and the status bar. There is no welcome text, logo or example prompt.",
   "apps": ["baude"],
-  "code": ["baude.py:BaudeWindow.__init__", "baude.py:BaudeWindow.draft_changed", "baude.py:BaudeWindow.sync_models"],
+  "code": ["baudewindow.py:BaudeWindow.__init__", "windowproc.py:WindowProc.draft_changed", "windowdrafts.py:WindowDrafts.sync_models"],
   "copy": ["sidebar.new_session"],
   "parts": [
     {

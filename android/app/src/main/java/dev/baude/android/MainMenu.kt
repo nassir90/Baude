@@ -50,9 +50,9 @@ private fun fullWidth(): MenuItem {
     }
 }
 
-/** A chat's ☰ (baude.BaudeWindow's menu): Settings…, Changelog, Mesh, Full-width text, Read-only session, Database
- * Schemas…, Kubernetes… (a host that takes them), Send Feedback…, Ongoing Feedback, Copy Transcript for an Issue.
- * screen opens one of "settings", "changelog", "mesh", "fixes", "databases" and "kubernetes" over the chat. */
+/** A chat's ☰ (baudewindow.BaudeWindow's menu): Settings…, Changelog, Mesh, Full-width text, Read-only session,
+ * Database Schemas…, Kubernetes… (a host that takes them), Send Feedback…, Ongoing Feedback, Copy Transcript for an
+ * Issue. screen opens one of "settings", "changelog", "mesh", "fixes", "databases" and "kubernetes" over the chat. */
 @Composable
 fun ChatMenu(hostId: String, sid: String, feedback: () -> Unit, screen: (String) -> Unit) {
     val ctx = LocalContext.current

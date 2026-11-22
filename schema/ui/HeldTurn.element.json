@@ -8,9 +8,9 @@
   ],
   "code": [
     "chatparts.py:HeldTurn",
-    "baude.py:BaudeWindow.show_held",
-    "baude.py:BaudeWindow.held_send",
-    "baude.py:BaudeWindow.held_drop"
+    "windowproc.py:WindowProc.show_held",
+    "windowproc.py:WindowProc.held_send",
+    "windowproc.py:WindowProc.held_drop"
   ],
   "copy": [
     "held",

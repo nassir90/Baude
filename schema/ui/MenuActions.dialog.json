@@ -8,16 +8,16 @@
     "☰ menu"
   ],
   "code": [
-    "baude.py:BaudeWindow.copy_report",
-    "baude.py:BaudeWindow.report",
+    "windowproc.py:WindowProc.copy_report",
+    "windowproc.py:WindowProc.report",
     "meta.py:transcript_report",
-    "baude.py:BaudeWindow.restart_app",
+    "baudewindow.py:BaudeWindow.restart_app",
     "baude.py:BaudeApp.restart",
     "baude.py:BaudeApp.update_now",
-    "baude.py:BaudeWindow.set_read_only",
-    "baude.py:BaudeWindow.apply_read_only",
-    "baude.py:BaudeWindow.show_composer",
-    "baude.py:BaudeWindow.open_record"
+    "windowproc.py:WindowProc.set_read_only",
+    "windowproc.py:WindowProc.apply_read_only",
+    "windowproc.py:WindowProc.show_composer",
+    "baudewindow.py:BaudeWindow.open_record"
   ],
   "copy": [
     "window",

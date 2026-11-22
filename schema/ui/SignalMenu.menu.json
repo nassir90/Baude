@@ -2,7 +2,7 @@
   "description": "The popover under the header's chain-link button: this chat's two Signal switches, each a title and a small grey explanation with a switch at the right, 310 px wide.",
   "apps": ["baude"],
   "opens": ["header Signal button"],
-  "code": ["baude.py:BaudeWindow.signal_menu", "baude.py:BaudeWindow.set_signal", "baude.py:BaudeWindow.chat_signal", "baude.py:BaudeWindow.apply_chat_signal"],
+  "code": ["windowsignal.py:WindowSignal.signal_menu", "windowsignal.py:WindowSignal.set_signal", "windowsignal.py:WindowSignal.chat_signal", "windowsignal.py:WindowSignal.apply_chat_signal"],
   "parts": [
     {
       "name": "Show links",

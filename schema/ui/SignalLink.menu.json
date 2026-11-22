@@ -7,14 +7,14 @@
     "Click a Signal link in a reply (a name drawn as a link), in Meta's replies or a subagent's transcript too"
   ],
   "code": [
-    "baude.py:BaudeWindow.open_ref",
+    "windowsignal.py:WindowSignal.open_ref",
     "refpopovers.py:RefPopover",
     "refpopovers.py:LookupPopover",
-    "baude.py:BaudeWindow.lookup_pending",
-    "baude.py:BaudeWindow.runs_popover",
+    "windowsignal.py:WindowSignal.lookup_pending",
+    "windowsignal.py:WindowSignal.runs_popover",
     "refpopovers.py:ref_place_items",
     "refpopovers.py:AnchoredPopover",
-    "baude.py:BaudeWindow.hover_link"
+    "windowsignal.py:WindowSignal.hover_link"
   ],
   "copy": [
     "lookup",

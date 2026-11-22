@@ -6,7 +6,7 @@
     "a folder header's + in the sidebar, while a new chat here would not be listed (this machine's host is not picked in New session's host list, or No group is not among the groups picked in ⋮): \"New session in <folder>, through local's server\" (host is this machine, said not picked)",
     "Meta's spawn_agent form card (Meta asks for it, may pre-fill its fields, and the person submits the card): the same fields with an Agent row, every live host listed with this machine's first"
   ],
-  "code": ["baude.py:BaudeWindow.ask_remote_start", "baude.py:BaudeWindow.remote_start_form", "baude.py:BaudeWindow.submit_form", "baude.py:BaudeWindow.remote_started", "baude.py:BaudeWindow.local_server", "metalook.py:Form"],
+  "code": ["windowremote.py:WindowRemote.ask_remote_start", "windowremote.py:WindowRemote.remote_start_form", "windowremote.py:WindowRemote.submit_form", "windowremote.py:WindowRemote.remote_started", "windowremote.py:WindowRemote.local_server", "metalook.py:Form"],
   "copy": ["new_session", "common"],
   "parts": [
     {

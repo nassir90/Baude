@@ -8,8 +8,8 @@
   ],
   "code": [
     "toolcards.py:api_error_label",
-    "baude.py:BaudeWindow.h_assistant",
-    "baude.py:BaudeWindow.render_history",
+    "windowdrafts.py:WindowDrafts.h_assistant",
+    "windowview.py:WindowView.render_history",
     "toolcards.py:ended_by_stop"
   ],
   "parts": [

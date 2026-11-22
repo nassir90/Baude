@@ -21,8 +21,8 @@ many widgets the window has. Phases:
   switch      the next largest sessions opened, one after another
   small       a small session opened after them: what the big ones left behind
   signal      Signal on, for a chat in a copy of this repository
-  pages       the Files, Git and Code pages opened (the Git page on a copy of this repository, baude.py in the
-              Code page)
+  pages       the Files, Git and Code pages opened (the Git page on a copy of this repository, tests/test_baude.py
+              in the Code page)
   closed      the window closed and a new one opened: what a closed window leaves behind
   host        a host process of its own (baude_headless.py serve, as Baude starts this machine's), idle: here the
               window's host is in this process, so this is what the other one costs
@@ -307,7 +307,7 @@ def main():
         win.show_git(folder=repo)
         git = win.panel.git_page
         T.wait_for(lambda: git.top and git.commits, "the git log", 60)
-        win.show_code(os.path.join(ROOT, "baude.py"), 9000)
+        win.show_code(os.path.join(ROOT, "tests", "test_baude.py"), 9000)
         measure("pages (files, git, code)", win)
 
     if "closed" not in skip:

@@ -8,11 +8,11 @@
   ],
   "code": [
     "chatparts.py:QueuedTurn",
-    "baude.py:BaudeWindow.queue_message",
-    "baude.py:BaudeWindow.queue_send",
-    "baude.py:BaudeWindow.queue_edit",
-    "baude.py:BaudeWindow.queue_drop",
-    "baude.py:BaudeWindow.flush_queue"
+    "windowproc.py:WindowProc.queue_message",
+    "windowproc.py:WindowProc.queue_send",
+    "windowproc.py:WindowProc.queue_edit",
+    "windowproc.py:WindowProc.queue_drop",
+    "windowproc.py:WindowProc.flush_queue"
   ],
   "copy": [
     "chat_turns"

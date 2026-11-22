@@ -12,9 +12,9 @@
     "toolcards.py:artifact_from_tool",
     "toolcards.py:html_title",
     "toolcards.py:ToolCard.set_result",
-    "baude.py:BaudeWindow.register_artifact",
-    "baude.py:BaudeWindow.add_artifact_chips",
-    "baude.py:BaudeWindow.render_history",
+    "windowdrafts.py:WindowDrafts.register_artifact",
+    "windowdrafts.py:WindowDrafts.add_artifact_chips",
+    "windowview.py:WindowView.render_history",
     "markdownview.py:link_markup",
     "toolcards.py:ArtifactChip"
   ],

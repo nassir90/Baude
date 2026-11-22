@@ -8,8 +8,8 @@
   ],
   "code": [
     "toolcards.py:ThinkingView",
-    "baude.py:BaudeWindow.h_stream_event",
-    "baude.py:BaudeWindow.render_assistant"
+    "windowdrafts.py:WindowDrafts.h_stream_event",
+    "windowdrafts.py:WindowDrafts.render_assistant"
   ],
   "parts": [
     {

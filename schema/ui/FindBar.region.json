@@ -2,7 +2,7 @@
   "description": "Find in the chat: a bar that slides in at the top of the chat column (under any banner, over the transcript) while searching, which shades every match in the chat's text. The same bar serves Meta's chat, a side question and a subagent's transcript, each over its own text.",
   "apps": ["baude", "record"],
   "opens": ["key Ctrl+F (⌘F on a Mac)"],
-  "code": ["chatfind.py:ChatFind", "chatparts.py:FindBar", "chatfind.py:FindMarks", "baude.py:BaudeWindow.find_in_chat", "baude.py:BaudeWindow.find_beyond"],
+  "code": ["chatfind.py:ChatFind", "chatparts.py:FindBar", "chatfind.py:FindMarks", "windowsignal.py:WindowSignal.find_in_chat", "windowview.py:WindowView.find_beyond"],
   "copy": ["find"],
   "parts": [
     {

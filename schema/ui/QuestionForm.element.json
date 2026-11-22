@@ -8,7 +8,7 @@
   ],
   "code": [
     "toolcards.py:QuestionForm",
-    "baude.py:BaudeWindow.permission_card",
+    "windowremote.py:WindowRemote.permission_card",
     "toolcards.py:summarize_tool",
     "toolcards.py:tool_input_view"
   ],

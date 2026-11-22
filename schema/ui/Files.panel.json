@@ -6,7 +6,7 @@
     "A folder link in a reply (opens here, not in the file manager; the tree is opened down to it)",
     "A code tab's Show in Files button (opens here with that file selected)"
   ],
-  "code": ["codeview.py:FilesPage", "codeview.py:file_children", "codeview.py:FileIgnores", "baude.py:BaudeWindow.show_folder", "markdownview.py:open_code"],
+  "code": ["codeview.py:FilesPage", "codeview.py:file_children", "codeview.py:FileIgnores", "windowsignal.py:WindowSignal.show_folder", "markdownview.py:open_code"],
   "copy": ["code_view", "lookup.files"],
   "parts": [
     {

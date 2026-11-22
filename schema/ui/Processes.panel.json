@@ -5,7 +5,7 @@
     "Side panel page button \"Processes\"",
     "Status bar \"⚙ ... running\" button (when no subagent is running)"
   ],
-  "code": ["toolcards.py:ProcessRow", "sidepanel.py:SidePanel.update_process", "sidepanel.py:SidePanel.open_process", "sidepanel.py:SidePanel.close_process", "sidepanel.py:SidePanel.poll_output", "baude.py:BaudeWindow.stop_task"],
+  "code": ["toolcards.py:ProcessRow", "sidepanel.py:SidePanel.update_process", "sidepanel.py:SidePanel.open_process", "sidepanel.py:SidePanel.close_process", "sidepanel.py:SidePanel.poll_output", "windowdrafts.py:WindowDrafts.stop_task"],
   "copy": ["side_panel"],
   "parts": [
     {

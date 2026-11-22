@@ -57,6 +57,8 @@ os.environ["BAUDE_CLAUDE"] = (args.claude or shutil.which("claude")) if args.son
 os.environ["FAKE_CLAUDE_LOG"] = os.path.join(work, "fake.log")
 sys.path.insert(0, os.path.dirname(HERE))
 import baude  # noqa: E402
+import widgets  # noqa: E402
+import baudewindow  # noqa: E402
 import signalnames  # noqa: E402
 from baude import Gdk, Gio, GLib, Gtk  # noqa: E402
 
@@ -93,11 +95,11 @@ css = Gtk.CssProvider()
 css.load_from_string(baude.CSS)
 Gtk.StyleContext.add_provider_for_display(Gdk.Display.get_default(), css, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
 app.hold()
-baude.save_settings(signal=True, sidebar=False, signal_reader=bool(args.sonnet), signal_lsp=args.lsp,
-                    signal_budget=args.sonnet or 0, signal_model=args.model,
-                    signal_context=args.context, signal_evidence=not args.no_evidence,
-                    signal_effort=args.effort, signal_history=args.history, signal_part_chars=args.part_chars)
-win = baude.BaudeWindow(app, opts)
+widgets.save_settings(signal=True, sidebar=False, signal_reader=bool(args.sonnet), signal_lsp=args.lsp,
+                      signal_budget=args.sonnet or 0, signal_model=args.model,
+                      signal_context=args.context, signal_evidence=not args.no_evidence,
+                      signal_effort=args.effort, signal_history=args.history, signal_part_chars=args.part_chars)
+win = baudewindow.BaudeWindow(app, opts)
 win.set_default_size(1400, 1000)
 win.present()
 pump(lambda: win.proc is not None, 5)

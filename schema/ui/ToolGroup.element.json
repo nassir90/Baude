@@ -8,7 +8,7 @@
   ],
   "code": [
     "toolcards.py:ToolGroup",
-    "baude.py:BaudeWindow.add_activity",
+    "windowview.py:WindowView.add_activity",
     "widgets.py:Disclosure"
   ],
   "copy": [

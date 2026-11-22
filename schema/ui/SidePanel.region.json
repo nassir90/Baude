@@ -14,9 +14,9 @@
   ],
   "code": [
     "sidepanel.py:SidePanel",
-    "baude.py:BaudeWindow.show_panel",
-    "baude.py:BaudeWindow.place_split",
-    "baude.py:BaudeWindow.split_dragged",
+    "windowdrafts.py:WindowDrafts.show_panel",
+    "windowdrafts.py:WindowDrafts.place_split",
+    "windowdrafts.py:WindowDrafts.split_dragged",
     "panels.py:PaneSlide",
     "panels.py:ExpandStack"
   ],

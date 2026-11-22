@@ -632,8 +632,8 @@ class BaudeWindow(WindowView, WindowProc, WindowDrafts, WindowSignal, WindowRemo
 
     def restart_state(self):
         """What a restart brings back: the chat, where it was scrolled to, the window, and whatever's being written: the
-        draft (its caret and attachments too), a side question typed over their list, a Feedback note put aside, the
-        Feedback tab's reply. The other chats' drafts are every window's: BaudeApp.restart's."""
+        draft (its caret and attachments too), its queue, a side question typed over their list, a Feedback note put
+        aside, the Feedback tab's reply. The other chats' drafts are every window's: BaudeApp.restart's."""
         adj = self.scroller.get_vadjustment()
         fixes_page = self.tabs.get(("fixes",))
         return {
@@ -646,6 +646,7 @@ class BaudeWindow(WindowView, WindowProc, WindowDrafts, WindowSignal, WindowRemo
             "draft": widgets.typed_text(self.input), "caret": widgets.caret_of(self.input),
             "btw_draft": widgets.typed_text(self.panel.btw_ask.input),  # (a side question typed, not yet asked)
             "attachments": [a.state() for a in self.attachments],
+            "queue": self.queue_saved(q) if (q := self.queue_state()) else None,  # (the open chat's: put_queue)
             "feedback_draft": self.feedback_draft.state() if self.feedback_draft else None,
             "fixes": fixes_page.state() if fixes_page else None, "fixes_shown": self.tabs.current() is fixes_page,
             "model": self.model, "mode": self.mode, "cost": self.total_cost,
@@ -674,6 +675,8 @@ class BaudeWindow(WindowView, WindowProc, WindowDrafts, WindowSignal, WindowRemo
             self.panel.btw_ask.input.get_buffer().set_text(state["btw_draft"])
         for att in state.get("attachments") or ():
             self.add_attachment(Attachment.from_state(att))
+        if state.get("queue"):
+            self.put_queue(self.queue_loaded(state["queue"]))
         if state.get("feedback_draft"):
             self.feedback_draft = FeedbackDraft.from_state(state["feedback_draft"])
         if state.get("cost"):

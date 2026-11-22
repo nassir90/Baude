@@ -206,6 +206,10 @@
         {
           "by": "turn ends on its own",
           "does": "All queued messages are sent together as one message, in order. A turn stopped with Esc or the stop button leaves them queued"
+        },
+        {
+          "by": "another chat opened",
+          "does": "The queue is kept with its chat, drawn again under it when it's opened, and sent to it when its turn ends meanwhile (see QueuedTurn)"
         }
       ]
     },

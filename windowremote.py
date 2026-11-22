@@ -349,6 +349,7 @@ class WindowRemote:
         if getattr(self, "let_go_done", False):
             return
         self.watch_left_remote()
+        self.send_left_queues()  # (a chat left with a queue, its turn over: what's queued sent to it)
         self.check_host_version()
         if (app := self.get_application()) is not None:
             app.show_update_bars()  # (This Mac's host process waiting on its commands to restart: info's update)

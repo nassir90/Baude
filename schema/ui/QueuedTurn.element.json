@@ -1,7 +1,8 @@
 {
   "description": "A message written while the agent is busy with a turn: not sent yet, it waits in the queue just under the conversation (above the composer), drawn as your bubble but grey. Hovering its row shows delete, send-now and edit buttons beside it.",
   "apps": [
-    "baude"
+    "baude",
+    "phone"
   ],
   "opens": [
     "Enter in the composer (with text or attachments) while a turn runs"
@@ -12,7 +13,16 @@
     "windowproc.py:WindowProc.queue_send",
     "windowproc.py:WindowProc.queue_edit",
     "windowproc.py:WindowProc.queue_drop",
-    "windowproc.py:WindowProc.flush_queue"
+    "windowproc.py:WindowProc.flush_queue",
+    "windowproc.py:WindowProc.queue_state",
+    "windowproc.py:WindowProc.put_queue",
+    "windowdrafts.py:WindowDrafts.keep_draft",
+    "windowdrafts.py:WindowDrafts.take_draft",
+    "windowdrafts.py:WindowDrafts.send_left_queues",
+    "windowdrafts.py:WindowDrafts.left_turn_ended",
+    "Queue.kt:QueuedRow",
+    "Queue.kt:Queue.sendLeft",
+    "Mesh.kt:Mesh.sendQueued"
   ],
   "copy": [
     "chat_turns"
@@ -62,12 +72,19 @@
     },
     {
       "name": "another chat opened",
-      "shows": "The queue goes into the left chat's draft."
+      "shows": "The queue stays with the chat it was written in, kept beside that chat's draft (on disk on the phone, over a restart on the desktop), and is drawn under its conversation again, as it was, when the chat is opened again. A new chat's queue goes into its box instead."
+    },
+    {
+      "name": "turn ends while another chat is open",
+      "shows": "The left chat's queue is sent to it as its turn ends by itself, as if it were open: all of it as one message, or up to the one whose ↑ stopped the turn; a turn stopped otherwise leaves it. The sent message is in that chat's conversation when it is opened. Only a turn's end the app sees sends it; one sent whose host may not have taken it goes back to the front of the queue and is sent again by the same uuid, which its host takes once."
     },
     {
       "name": "in history",
       "shows": "A message Claude Code recorded as sent mid-turn (queued_command) is drawn in a reopened chat as an ordinary sent message (UserTurn)."
     }
   ],
-  "scenes": []
+  "scenes": [
+    "46-queue-kept",
+    "46b-queue-sent-elsewhere"
+  ]
 }

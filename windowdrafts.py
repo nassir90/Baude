@@ -3,6 +3,7 @@ providers, the stream-json protocol, compaction, its title, background tasks and
 """
 import json
 import os
+import uuid
 from baudelib.claude import EFFORT_LABELS, MODELS, MODES
 from baudelib.transcripts import history_item, session_file, transcript_model
 import baudelib.client  # noqa: E402  (servers on the network and their sessions: see baudelib/client.py)
@@ -37,12 +38,14 @@ class WindowDrafts:
     """What each chat keeps: its draft, its model, providers, the protocol, compaction, its title,
     background tasks, artifacts."""
 
-    # ---- each chat's draft: what's written in the box, its caret and what's attached, kept for the chat as it's left
-    # for another (clear_transcript) and put back as it's opened again (take_draft); every window's, kept over a
-    # restart (BaudeApp.restart). A new chat (nothing sent in it, nor anything of it listed or saved) has the one draft,
-    # "": the next new chat opens with it, as its host drops a draft nobody's on and its id goes with it
-    DRAFTS = {}  # draft_key -> {"text", "caret", "attachments"}
+    # ---- each chat's draft: what's written in the box, its caret and what's attached, and its queue (queue_state),
+    # kept for the chat as it's left for another (clear_transcript) and put back as it's opened again (take_draft);
+    # every window's, kept over a restart (BaudeApp.restart). A new chat (nothing sent in it, nor anything of it listed
+    # or saved) has the one draft, "": the next new chat opens with it, as its host drops a draft nobody's on and its id
+    # goes with it. A queue kept for a chat not open is sent as its turn ends, as the open chat's is (send_left_queues)
+    DRAFTS = {}  # draft_key -> {"text", "caret", "attachments", "queue"?: queue_state's}
     MAX_DRAFTS = 200
+    QUEUE_SEEN = {}  # the id of a chat whose queue's kept here -> its state as last listed (send_left_queues)
 
     GONE = set()  # the ids of chats deleted or trashed: forget_draft
 
@@ -52,6 +55,7 @@ class WindowDrafts:
         nothing kept under its id from now on (draft_key)."""
         cls.GONE.add(sid)
         cls.DRAFTS.pop(sid, None)
+        cls.QUEUE_SEEN.pop(sid, None)
 
     LISTED = None  # {host's key: its sessions' ids}, as last listed while it was there: forget_gone
 
@@ -118,15 +122,22 @@ class WindowDrafts:
             text, caret = f"{a}\n\n{b}", [c + len(a) + 2 for c in then.get("caret") or [len(b)] * 2]
         seen = [(x.name, x.path, x.data) for x in first["attachments"]]
         atts = first["attachments"] + [x for x in then["attachments"] if (x.name, x.path, x.data) not in seen]
-        return {"text": text, "caret": caret, "attachments": atts}
+        joined = {"text": text, "caret": caret, "attachments": atts}
+        if first.get("queue") or then.get("queue"):  # (both queues, first's first; its ↑ and stop then's, if it has any)
+            a, b = first.get("queue") or {"turns": []}, then.get("queue") or {"turns": []}
+            joined["queue"] = {"turns": a["turns"] + b["turns"],
+                               "hold": bool(b.get("hold") if b["turns"] else a.get("hold")),
+                               "upto": len(a["turns"]) + b["upto"] if b.get("upto") is not None else a.get("upto")}
+        return joined
 
-    def keep_draft(self, key):
-        """The box's draft kept as key's, with one another window left there (join_drafts), and the box emptied for
-        the next chat's. An empty box keeps nothing and drops nothing: a draft this window took is gone already
-        (take_draft), and one there is another window's."""
+    def keep_draft(self, key, queue=None):
+        """The box's draft kept as key's, its queue with it (queue: queue_state's), with one another window left there
+        (join_drafts), and the box emptied for the next chat's. An empty box and no queue keep nothing and drop
+        nothing: a draft this window took is gone already (take_draft), and one there is another window's."""
         text, atts = widgets.typed_text(self.input), list(self.attachments)
-        if text.strip() or atts:
-            draft = {"text": text, "caret": widgets.caret_of(self.input), "attachments": atts}
+        if text.strip() or atts or queue:
+            draft = {"text": text, "caret": widgets.caret_of(self.input), "attachments": atts,
+                     **({"queue": queue} if queue else {})}
             if (other := self.DRAFTS.pop(key, None)) is not None:
                 draft = self.join_drafts(other, draft)
             self.DRAFTS[key] = draft
@@ -135,20 +146,93 @@ class WindowDrafts:
         self.set_box("", None, [])
 
     def take_draft(self):
-        """The chat just opened: its draft (keep_draft) in the box, if it was left with one."""
+        """The chat just opened: its draft (keep_draft) in the box, and its queue under the conversation, if it was left
+        with them."""
         if draft := self.DRAFTS.pop(self.draft_key(), None):
+            self.QUEUE_SEEN.pop(self.draft_key(), None)  # (its queue this window's again: sent as its turn ends here)
             self.set_box(draft["text"], draft["caret"], draft["attachments"])
+            self.put_queue(draft.get("queue"))
             self.completer.hide()
 
     @classmethod
     def drafts_state(cls):
         """The drafts as a restart keeps them (BaudeApp.restart)."""
-        return {k: {**d, "attachments": [a.state() for a in d["attachments"]]} for k, d in cls.DRAFTS.items()}
+        return {k: {**d, "attachments": [a.state() for a in d["attachments"]],
+                    **({"queue": cls.queue_saved(d["queue"])} if d.get("queue") else {})}
+                for k, d in cls.DRAFTS.items()}
 
     @classmethod
     def restore_drafts(cls, state):
         for key, d in (state or {}).items():
-            cls.DRAFTS.setdefault(key, {**d, "attachments": [Attachment.from_state(a) for a in d["attachments"]]})
+            cls.DRAFTS.setdefault(key, {**d, "attachments": [Attachment.from_state(a) for a in d["attachments"]],
+                                        **({"queue": cls.queue_loaded(d["queue"])} if d.get("queue") else {})})
+
+    @staticmethod
+    def queue_saved(queue):
+        """A queue (queue_state's) as a restart keeps it: its attachments as theirs (Attachment.state)."""
+        return {**queue, "turns": [{**t, "attachments": [a.state() for a in t["attachments"]]} for t in queue["turns"]]}
+
+    @staticmethod
+    def queue_loaded(queue):
+        return {**queue, "turns": [{**t, "attachments": [Attachment.from_state(a) for a in t["attachments"]]}
+                                   for t in queue["turns"]]}
+
+    @classmethod
+    def send_left_queues(cls):
+        """(the network changed) A chat left with a queue, whose turn its host lists over now: what's queued sent to
+        it, as the open chat's is as its turn ends (left_turn_ended), by its host, whatever's open. Only a turn's end
+        seen here sends it: one over by the time it's first listed (a restart's) leaves it for its chat's ↑."""
+        for key in [k for k, d in cls.DRAFTS.items() if d.get("queue")]:
+            r = network().find(key)
+            listed = r.sessions.get(key) if r is not None and r.state == "alive" else None
+            if listed is None:
+                continue
+            state, was = listed.get("state") or "idle", cls.QUEUE_SEEN.get(key)
+            cls.QUEUE_SEEN[key] = state
+            if was in ("working", "waiting") and state not in ("working", "waiting"):
+                cls.left_turn_ended(key, lambda content, said, done, r=r, key=key: r.request(
+                    {"op": "input", "session": key, "msg": {"type": "user", "uuid": said,
+                                                            "message": {"role": "user", "content": content}}}, done))
+
+    @classmethod
+    def left_turn_ended(cls, key, send):
+        """The turn of a chat left with a queue (key's draft's) over: the queue sent as the open chat's would be
+        (flush_queue), with send(content, uuid, done): all of it as one message, or up to the one whose ↑ stopped the
+        turn; a turn stopped otherwise leaves it. Sent by a uuid kept with it, so its host takes it once if it's sent
+        again; put back at the queue's front if it isn't taken (in its window's queue, if it's open in one by then).
+        True if something was sent."""
+        draft = cls.DRAFTS.get(key) or {}
+        queue = draft.get("queue")
+        if not queue:
+            return False
+        upto, hold = queue.get("upto"), queue.get("hold")
+        queue["upto"], queue["hold"] = None, False
+        if upto is None and hold:
+            return False
+        turns = queue["turns"][:upto + 1 if upto is not None else None]
+        del queue["turns"][:len(turns)]
+        if not queue["turns"]:
+            del draft["queue"]
+            if not draft["text"].strip() and not draft["attachments"]:
+                del cls.DRAFTS[key]
+            cls.QUEUE_SEEN.pop(key, None)
+        text = "\n\n".join(t["text"] for t in turns if t["text"])
+        atts = [a for t in turns for a in t["attachments"]]
+        said = turns[0].get("said") if len(turns) == 1 and turns[0].get("said") else str(uuid.uuid4())
+
+        def done(r):
+            if r.get("op") != "error":
+                return
+            back = {"text": text, "attachments": atts, "said": said}
+            app = Gio.Application.get_default()
+            for w in app.windows() if app is not None and hasattr(app, "windows") else ():
+                if w.draft_key() == key:
+                    w.put_queue({"turns": [back], "upto": None, "hold": False})
+                    return
+            d = cls.DRAFTS.setdefault(key, {"text": "", "caret": None, "attachments": []})
+            d.setdefault("queue", {"turns": [], "upto": None, "hold": False})["turns"].insert(0, back)
+        send(cls.user_content(text, atts), said, done)
+        return True
 
     def ask_side_question(self, question):
         sq = SideQuestion(self, question)

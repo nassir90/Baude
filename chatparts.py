@@ -401,11 +401,12 @@ class QueuedTurn(Gtk.Box):
     """A message of yours written while the agent's at a turn, not sent yet (Baude's chat: its queue, under the
     conversation): grey, and with the pointer on its row, ✕ (dropped), ↑ (sent: the turn interrupted, then it and every
     queued message before it sent, together) and the revert button (put back in the box to edit) fade in beside it, as
-    a sent message's revert does. Its bubble's narrower by the buttons. win: its queue_send, queue_edit, queue_drop."""
+    a sent message's revert does. Its bubble's narrower by the buttons. win: its queue_send, queue_edit, queue_drop.
+    said: the uuid it was sent by, if it was and its host may not have taken it (left_turn_ended): sent by it again."""
 
-    def __init__(self, win, bubble, text, atts):
+    def __init__(self, win, bubble, text, atts, said=None):
         super().__init__(spacing=6, hexpand=True)
-        self.win, self.bubble, self.text, self.atts = win, bubble, text, atts
+        self.win, self.bubble, self.text, self.atts, self.said = win, bubble, text, atts, said
         bubble.add_css_class("queued-bubble")
         self.buttons = Gtk.Box(spacing=2, hexpand=True, halign=Gtk.Align.END, valign=Gtk.Align.END, opacity=0,
                                can_target=False)

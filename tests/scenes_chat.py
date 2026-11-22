@@ -976,3 +976,44 @@ def _(app):
     T.wait_for(lambda: sidebar_row(win, "Login bug") is not None, "rows")
     win.sidebar.show_menu(sidebar_row(win, "Login bug"), 120, 14)
     return win
+
+
+def queued_then_left(app):
+    """A chat at a long turn (the fake's LINGER) with two messages queued under it, then another chat opened: the
+    window, and the left chat's id. Its transcript's kept as claude keeps it (FAKE_CLAUDE_TRANSCRIPTS), to be drawn as
+    it's opened again."""
+    os.environ["FAKE_CLAUDE_TRANSCRIPTS"] = "1"
+    win = app.window(opts())
+    T.type_and_send(win, "LINGER: tidy the release notes for 0.9.")
+    T.wait_for(lambda: win.busy and win.session_id, "the turn")
+    T.type_and_send(win, "Then tag the release as v0.9.0.")
+    T.type_and_send(win, "And push the tag to origin.")
+    sid = win.session_id
+    T.wait_for(lambda: win.sidebar.find_info(sid), "listed")
+    win.new_session()
+    T.pump(0.5)
+    return win, sid
+
+
+@scene("46-queue-kept", "A chat left with two messages queued mid-turn and opened again: its queue is under it as it was")
+def _(app):
+    win, sid = queued_then_left(app)
+    win.resume_session(win.sidebar.find_info(sid))
+    T.wait_for(lambda: win.session_id == sid, "the chat")
+    T.pump(1.5)
+    return win
+
+
+@scene("46b-queue-sent-elsewhere", "A chat's turn ends while another chat is open: what was queued in it is sent to "
+                                   "it then, and is there as it's opened")
+def _(app):
+    win, sid = queued_then_left(app)
+    try:  # (sent, in the left chat's transcript at its host)
+        T.wait_for(lambda: any("Then tag the release" in json.dumps(m) for m in T.user_messages()), "the queue sent", 15)
+    except AssertionError:
+        pass
+    T.pump(1.5)
+    win.resume_session(win.sidebar.find_info(sid))
+    T.wait_for(lambda: win.session_id == sid, "the chat")
+    T.pump(1.5)
+    return win

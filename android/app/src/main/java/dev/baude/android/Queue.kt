@@ -42,8 +42,9 @@ import java.io.File
  * files kept to put back in the box if its host says no. */
 class Outgoing(val id: String, val lines: List<Line>, val text: String, val files: List<Picked>)
 
-/** A message written while a turn runs, queued under the chat. */
-class Queued(val text: String, val files: List<Picked>)
+/** A message written while a turn runs, queued under the chat. uuid: the one it was sent by, if it was and its host may
+ * not have taken it (Mesh.sendQueued): sent by it again, so its host takes it once. */
+class Queued(val text: String, val files: List<Picked>, val uuid: String? = null)
 
 object Queue {
     private val ALL = Queued("", emptyList())
@@ -64,7 +65,7 @@ object Queue {
         chat.queued.removeAll(turns.toSet())
         val text = turns.map { it.text }.filter { it.isNotBlank() }.joinToString("\n\n")
         val files = turns.flatMap { it.files }
-        if (Mesh.conn(chat.hostId)?.state == "up") chat.send(text, files)
+        if (Mesh.conn(chat.hostId)?.state == "up") chat.send(text, files, turns.singleOrNull()?.uuid)
         else {
             chat.edit.value = text
             chat.files.addAll(0, files)
@@ -89,14 +90,22 @@ object Queue {
     private fun file(key: String) = File(dir, java.security.MessageDigest.getInstance("SHA-1").digest(key.toByteArray())
         .joinToString("") { "%02x".format(it) } + ".json")
 
+    private fun filesJson(files: List<Picked>) = org.json.JSONArray(files.map {
+        JSONObject().put("name", it.name).put("mime", it.mime).put("data", it.base64()) })
+
+    private fun filesOf(a: org.json.JSONArray?) = (0 until (a?.length() ?: 0)).map { a!!.getJSONObject(it).let { x ->
+        Picked(x.optString("name"), x.optString("mime"), java.util.Base64.getDecoder().decode(x.optString("data"))) } }
+
     private fun write(key: String, d: Mesh.Draft?) {
         val f = file(key)
-        if (d == null || (d.text.isBlank() && d.files.isEmpty())) {
+        if (d == null || d.empty) {
             f.delete()
             return
         }
-        val o = JSONObject().put("key", key).put("text", d.text).put("files", org.json.JSONArray(d.files.map {
-            JSONObject().put("name", it.name).put("mime", it.mime).put("data", it.base64()) }))
+        val o = JSONObject().put("key", key).put("text", d.text).put("files", filesJson(d.files))
+            .put("queued", org.json.JSONArray(d.queue.map { q -> JSONObject().put("text", q.text)
+                .put("files", filesJson(q.files)).apply { q.uuid?.let { put("uuid", it) } } }))
+            .put("hold", d.hold).apply { d.upto?.let { put("upto", it) } }
         File(dir, f.name + ".new").apply { writeText(o.toString()) }.renameTo(f)
     }
 
@@ -107,10 +116,11 @@ object Queue {
             if (!f.name.endsWith(".json")) continue
             try {
                 val o = JSONObject(f.readText())
-                val a = o.optJSONArray("files")
-                val files = (0 until (a?.length() ?: 0)).map { a!!.getJSONObject(it).let { x ->
-                    Picked(x.optString("name"), x.optString("mime"), java.util.Base64.getDecoder().decode(x.optString("data"))) } }
-                Mesh.drafts[o.getString("key")] = Mesh.Draft(o.optString("text"), files)
+                val queued = o.optJSONArray("queued")
+                val queue = (0 until (queued?.length() ?: 0)).map { queued!!.getJSONObject(it).let { q ->
+                    Queued(q.optString("text"), filesOf(q.optJSONArray("files")), q.optString("uuid").ifBlank { null }) } }
+                Mesh.drafts[o.getString("key")] = Mesh.Draft(o.optString("text"), filesOf(o.optJSONArray("files")), queue,
+                    if (o.has("upto")) o.optInt("upto") else null, o.optBoolean("hold"))
             } catch (_: Exception) {
             }
         }
@@ -118,7 +128,7 @@ object Queue {
 
     /** A chat's draft kept: in memory (for when it's opened again) and on disk. */
     fun setDraft(key: String, d: Mesh.Draft?) {
-        if (d == null || (d.text.isBlank() && d.files.isEmpty())) Mesh.drafts.remove(key) else Mesh.drafts[key] = d
+        if (d == null || d.empty) Mesh.drafts.remove(key) else Mesh.drafts[key] = d
         io.execute { try { write(key, d) } catch (_: Exception) { } }
     }
 
@@ -134,14 +144,50 @@ object Queue {
         }
         val key = "$hostId/$sid"
         val was = Mesh.drafts[key]
-        setDraft(key, Mesh.Draft(joined(was?.text.orEmpty(), text), was?.files.orEmpty() + files))
+        setDraft(key, Mesh.Draft(joined(was?.text.orEmpty(), text), was?.files.orEmpty() + files, was?.queue.orEmpty(),
+            was?.upto, was?.hold == true))
     }
 
-    /** A chat's draft as it stands: what's queued, then what's written, and its files. */
+    /** A chat's draft as it stands: what's written and its files, and its queue: the one ↑ was pressed on (its place)
+     * and whether its turn was stopped (hold: its end sends nothing). */
     private fun draftOf(chat: Chat): Mesh.Draft {
-        val text = (chat.queued.map { it.text } + chat.draft.value.orEmpty() + chat.typed).filter { it.isNotBlank() }
-            .joinToString("\n\n")
-        return Mesh.Draft(text, chat.queued.flatMap { it.files } + chat.files)
+        val text = listOf(chat.draft.value.orEmpty(), chat.typed).filter { it.isNotBlank() }.joinToString("\n\n")
+        return Mesh.Draft(text, chat.files.toList(), chat.queued.toList(),
+            chat.queued.indexOf(chat.queueUpto).takeIf { it >= 0 }, chat.stopAsked && chat.queued.isNotEmpty())
+    }
+
+    /** (a host's sessions listed) A chat not open that was left with a queue (its draft's), whose turn that host lists
+     * over now, where it was at one before: what's queued sent to it, as the open chat's is as its turn ends (flush):
+     * all of it, or up to the one ↑ was pressed on; a turn stopped otherwise leaves it. */
+    fun sendLeft(hostId: String, before: List<Msg.Session>?, now: List<Msg.Session>) {
+        if (before == null) return
+        fun working(sid: String, l: List<Msg.Session>) = l.firstOrNull { it.id == sid }?.state.let { it == "working" || it == "waiting" }
+        for ((key, d) in Mesh.drafts.toList()) {
+            val sid = key.substringAfterLast('/')
+            if (d.queue.isEmpty() || key != "$hostId/$sid" || Mesh.open?.let { it.hostId == hostId && it.sid == sid } == true) continue
+            if (!working(sid, before) || working(sid, now)) continue
+            if (d.upto == null && d.hold) {
+                setDraft(key, Mesh.Draft(d.text, d.files, d.queue))
+                continue
+            }
+            val turns = if (d.upto != null) d.queue.take(d.upto + 1) else d.queue
+            setDraft(key, Mesh.Draft(d.text, d.files, d.queue.drop(turns.size)))
+            Mesh.sendQueued(hostId, sid, turns.singleOrNull() ?: Queued(turns.map { it.text }.filter { it.isNotBlank() }
+                .joinToString("\n\n"), turns.flatMap { it.files }))
+        }
+    }
+
+    /** A queued message its host didn't take (Mesh.sendQueued) back at the front of its chat's queue: the open chat's,
+     * or its draft's. */
+    fun putBack(hostId: String, sid: String, q: Queued) {
+        val chat = Mesh.open?.takeIf { it.hostId == hostId && it.sid == sid && it.sender == null }
+        if (chat != null) {
+            chat.queued.add(0, q)
+            return
+        }
+        val key = "$hostId/$sid"
+        val was = Mesh.drafts[key]
+        setDraft(key, Mesh.Draft(was?.text.orEmpty(), was?.files.orEmpty(), listOf(q) + was?.queue.orEmpty()))
     }
 
     /** The open chat's draft kept on disk, as it changes. */
@@ -158,7 +204,8 @@ object Queue {
     fun takeDraft(hostId: String, sid: String, machine: String?): Mesh.Draft? {
         val keys = listOfNotNull("$hostId/$sid", machine?.let { "mesh:$it/$sid" })
         return keys.mapNotNull { Mesh.drafts.remove(it) }.reduceOrNull { a, b ->
-            Mesh.Draft(joined(a.text, b.text), a.files + b.files) }
+            Mesh.Draft(joined(a.text, b.text), a.files + b.files, a.queue + b.queue, b.upto?.let { a.queue.size + it } ?: a.upto,
+                if (b.queue.isEmpty()) a.hold else b.hold) }
     }
 
     /** (the app started, before any chat opens) What the old unsent folder kept put into each message's chat's draft,
@@ -183,7 +230,8 @@ object Queue {
                 }
                 val key = hostOf(o.optString("machine").ifBlank { null }, o.optString("host")) + "/" + o.optString("session")
                 val was = Mesh.drafts[key]
-                val now = Mesh.Draft(joined(was?.text.orEmpty(), o.optString("text")), was?.files.orEmpty() + files)
+                val now = Mesh.Draft(joined(was?.text.orEmpty(), o.optString("text")), was?.files.orEmpty() + files,
+                    was?.queue.orEmpty(), was?.upto, was?.hold == true)
                 write(key, now)
                 Mesh.drafts[key] = now
                 d.deleteRecursively()

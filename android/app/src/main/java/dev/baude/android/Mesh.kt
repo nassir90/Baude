@@ -116,7 +116,8 @@ class Chat(hostId: String, sid: String) {
     var sender: ((String, List<Picked>) -> Unit)? = null // (one that's sent its own way: Meta's)
     val chrome = Chrome() // (what its status bar, banner and stop button keep)
 
-    fun send(text: String, files: List<Picked>) = sender?.invoke(text, files) ?: Mesh.send(this, text, files)
+    fun send(text: String, files: List<Picked>, uuid: String? = null) =
+        sender?.invoke(text, files) ?: Mesh.send(this, text, files, uuid = uuid)
 }
 
 /** The mesh as this app has it: your hosts, a connection to each, their Bots, the chat open, notifications as a Bot
@@ -489,6 +490,7 @@ object Mesh {
                     val was = open?.takeIf { it.hostId == c.id }?.let { isWorking(it) } == true
                     sessions[c.id] = now
                     open?.takeIf { was && it.hostId == c.id && !isWorking(it) }?.let { Queue.flush(it) } // (a turn ended: what's queued sent)
+                    Queue.sendLeft(c.id, before, now) // (and the queues of chats left at a turn that's ended)
                     Shares.look() // (its Bots, in the share sheet)
                     listing.server?.let { // (its mesh as it is now)
                         c.info = it
@@ -672,6 +674,11 @@ object Mesh {
         Queue.takeDraft(hostId, sid, machine(hostId))?.let { d ->
             chat.draft.value = d.text.ifBlank { null }
             chat.files.addAll(d.files)
+            chat.queued.addAll(d.queue) // (its queue under it again; its ↑ and stop for the turn going on, if one is)
+            if (isWorking(chat)) {
+                chat.queueUpto = d.upto?.let { chat.queued.getOrNull(it) }
+                chat.stopAsked = d.hold
+            }
         }
         open = chat
         attach(chat)
@@ -884,22 +891,27 @@ object Mesh {
         else -> conns[connId]?.info?.id?.takeIf(::isId) ?: hosts.firstOrNull { it.id == connId }?.let { HostStore.machine(app, it) }
     }
 
-    class Draft(val text: String, val files: List<Picked>)
-    val drafts = HashMap<String, Draft>() // (a chat left, "host/session": what was written and queued there, as the box has it again)
+    /** A chat's draft: what's written, its files, and its queue (Queue.draftOf). */
+    class Draft(val text: String, val files: List<Picked>, val queue: List<Queued> = emptyList(), val upto: Int? = null,
+                val hold: Boolean = false) {
+        val empty get() = text.isBlank() && files.isEmpty() && queue.isEmpty()
+    }
+    val drafts = HashMap<String, Draft>() // (a chat left, "host/session": what was written and queued there, as it has them again)
 
     private val io = java.util.concurrent.Executors.newSingleThreadExecutor()
 
     /** What you wrote (and the files you chose) sent to the chat at once, as Baude sends it: a user message for its
      * agent, drawn as yours meanwhile (Outgoing). If its host says no, it's taken out and put back in the box, and why
-     * said. */
-    fun send(chat: Chat, text: String, files: List<Picked>, keep: Boolean = true, failed: (() -> Unit)? = null) {
+     * said. uuid: the one it's sent by, if it was sent before (a queued message its host may not have taken). */
+    fun send(chat: Chat, text: String, files: List<Picked>, keep: Boolean = true, uuid: String? = null,
+             failed: (() -> Unit)? = null) {
         val c = conns[chat.hostId]?.takeIf { it.state == "up" } ?: return
         chat.said.value = null
         // (what it sent, text and files, sent again from a sign-in card, if the turn fails for want of it)
         chat.chrome.turnSent = if (text.isBlank() && files.isEmpty()) null else text to files
         Shares.used(chat)
         chat.busy.value = true
-        val id = java.util.UUID.randomUUID().toString()
+        val id = uuid ?: java.util.UUID.randomUUID().toString()
         io.execute {
             val msg = try {
                 build(id, text, files)
@@ -930,6 +942,26 @@ object Mesh {
                         }
                         if (open === chat) read(chat)
                     }
+                }
+            }
+        }
+    }
+
+    /** What a chat not open was left queued, sent to it as its turn ended (Queue.sendLeft): by the uuid it keeps, so its
+     * host takes it once if it's sent again; put back at the front of its queue (Queue.putBack) if it isn't taken. */
+    fun sendQueued(hostId: String, sid: String, q: Queued) {
+        val back = Queued(q.text, q.files, q.uuid ?: java.util.UUID.randomUUID().toString())
+        val c = conns[hostId]?.takeIf { it.state == "up" } ?: return Queue.putBack(hostId, sid, back)
+        io.execute {
+            val msg = try {
+                build(back.uuid!!, q.text, q.files)
+            } catch (e: Exception) {
+                null
+            }
+            main.post {
+                if (msg == null) return@post Queue.putBack(hostId, sid, back)
+                c.request(Msg.Input(session = sid, msg = msg).json()) { r ->
+                    if (r.optString("op") == Op.ERROR) main.post { Queue.putBack(hostId, sid, back) }
                 }
             }
         }

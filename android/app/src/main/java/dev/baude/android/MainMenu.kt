@@ -50,8 +50,9 @@ private fun fullWidth(): MenuItem {
     }
 }
 
-/** A chat's ☰ (baude.BaudeWindow's menu): Settings…, Changelog, Mesh, Full-width text, Read-only session, Send
- * Feedback…, Ongoing Feedback, Copy Transcript for an Issue. screen opens one of "settings", "changelog", "mesh" and "fixes" over the chat. */
+/** A chat's ☰ (baude.BaudeWindow's menu): Settings…, Changelog, Mesh, Full-width text, Read-only session, Database
+ * Schemas…, Kubernetes… (a host that takes them), Send Feedback…, Ongoing Feedback, Copy Transcript for an Issue.
+ * screen opens one of "settings", "changelog", "mesh", "fixes", "databases" and "kubernetes" over the chat. */
 @Composable
 fun ChatMenu(hostId: String, sid: String, feedback: () -> Unit, screen: (String) -> Unit) {
     val ctx = LocalContext.current
@@ -64,6 +65,8 @@ fun ChatMenu(hostId: String, sid: String, feedback: () -> Unit, screen: (String)
             if (sid in Settings.readOnly) Settings.readOnly.remove(sid) else Settings.readOnly.add(sid)
             Settings.save(ctx)
         },
+        if (takes(hostId, "databases")) MenuItem(Wording.Window.databaseSchemas) { screen("databases") } else null,
+        if (takes(hostId, "kube")) MenuItem(Wording.Window.kubernetesMenu) { screen("kubernetes") } else null,
         MenuItem(Wording.Find.placeholder) { Find.open["$hostId/$sid"] = true },
         MenuItem(Wording.Fixes.sendFeedback) { feedback() },
         MenuItem(Wording.Window.ongoingFeedback) { screen("fixes") },

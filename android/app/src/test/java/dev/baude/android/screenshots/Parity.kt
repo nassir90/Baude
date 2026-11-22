@@ -18,6 +18,8 @@ import dev.baude.android.BaudeTheme
 import dev.baude.android.Change
 import dev.baude.android.ChangelogScreen
 import dev.baude.android.ChatShell
+import dev.baude.android.DatabaseScreen
+import dev.baude.android.KubeScreen
 import dev.baude.android.Home
 import dev.baude.android.Host
 import dev.baude.android.Key
@@ -161,6 +163,7 @@ abstract class Parity(private val theme: String, private val scene: String) {
             val at = roots.map { if (rel.isEmpty()) it else File(it, rel) }
             return at.firstOrNull { it.exists() } ?: at.last()
         }
+        if (op == "kube" || op == "databases") return hostAnswer(msg)
         when (op) {
             "transcript" -> {
                 val from = msg.optLong("offset", 0).coerceIn(0, shown.size.toLong()).toInt()
@@ -225,6 +228,16 @@ abstract class Parity(private val theme: String, private val scene: String) {
         return null
     }
 
+    /** What the fixture host answers for kube and databases: tests/parity/host.py's, which reads the fixtures with the
+     * host's own code (hostkube.py, hostdb.py), one process a request. */
+    private fun hostAnswer(msg: JSONObject): JSONObject {
+        val p = ProcessBuilder("python3", "-I", File(root, "host.py").path).start()
+        p.outputStream.use { it.write(msg.toString().toByteArray()) }
+        val out = p.inputStream.bufferedReader().readText()
+        p.waitFor()
+        return JSONObject(out)
+    }
+
     @After fun down() {
         dev.baude.android.CompactFolds.open.clear()
         dev.baude.android.Viewer.state.value = null
@@ -283,7 +296,7 @@ abstract class Parity(private val theme: String, private val scene: String) {
                         call.outputOpen = true
                     }
                 }
-                if (sc.optBoolean("open") || sc.optBoolean("view")) openAll(first.getString("id"))
+                if (sc.optBoolean("open") || sc.optBoolean("lightbox")) openAll(first.getString("id"))
                 if (sc.optBoolean("down")) {
                     conn.state = "down"
                     Mesh.tick.value++
@@ -323,7 +336,7 @@ abstract class Parity(private val theme: String, private val scene: String) {
                 if (sc.has("hold")) hold(sc.getString("hold"))
                 if (name == "menu") tap(Wording.ChatHeader.menu)
                 if (sc.has("typed")) type(sc.getString("typed"))
-                if (sc.optBoolean("view")) {
+                if (sc.optBoolean("lightbox")) {
                     toEnd()
                     dev.baude.android.Viewer.flyMs = 0
                     val shot = roots().flatMap { all(it.semanticsOwner.rootSemanticsNode) }.firstOrNull { n ->
@@ -340,7 +353,7 @@ abstract class Parity(private val theme: String, private val scene: String) {
                     androidx.compose.runtime.snapshots.Snapshot.sendApplyNotifications()
                     settle()
                 }
-                if ((sc.optBoolean("open") || sc.optBoolean("view")) && !sc.has("meta")) toEnd()
+                if ((sc.optBoolean("open") || sc.optBoolean("lightbox")) && !sc.has("meta")) toEnd()
                 if (sc.has("ask")) {
                     ask(sc.getString("ask"))
                     toEnd()
@@ -360,6 +373,12 @@ abstract class Parity(private val theme: String, private val scene: String) {
             name == "feedback" -> show { FeedbackScreen(listOf("Chat: Fix the flaky upload"), back = {}) }
             name == "settings" -> show { SettingsScreen({}, {}) }
             name == "changelog" -> show { ChangelogScreen(null, {}) }
+            name == "databases" -> show { DatabaseScreen(host.getString("id"), {}) }
+            name == "kubernetes" -> {
+                show { KubeScreen(host.getString("id"), {}) }
+                tap("CPU")
+                tap("CPU")
+            }
             else -> return false
         }
         return true

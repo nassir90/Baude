@@ -1,0 +1,502 @@
+{
+ "description": "A small app's database for the parity rig's Database Schemas scene: its server, its database and its schema as PG_SCHEMA_SQL returns it (before pg_normalize), nothing read from a real server.",
+ "server": {
+  "container": "builds-postgres-1",
+  "user": "postgres",
+  "version": "18"
+ },
+ "database": "builds",
+ "raw": {
+  "tables": [
+   {
+    "s": "public",
+    "t": "orgs",
+    "rows": 12,
+    "kind": "r"
+   },
+   {
+    "s": "public",
+    "t": "users",
+    "rows": 340,
+    "kind": "r"
+   },
+   {
+    "s": "public",
+    "t": "projects",
+    "rows": 58,
+    "kind": "r"
+   },
+   {
+    "s": "public",
+    "t": "runners",
+    "rows": 6,
+    "kind": "r"
+   },
+   {
+    "s": "public",
+    "t": "jobs",
+    "rows": 18204,
+    "kind": "r"
+   },
+   {
+    "s": "public",
+    "t": "job_events",
+    "rows": 412877,
+    "kind": "r"
+   },
+   {
+    "s": "public",
+    "t": "artefacts",
+    "rows": 9310,
+    "kind": "r"
+   },
+   {
+    "s": "public",
+    "t": "api_keys",
+    "rows": 77,
+    "kind": "r"
+   },
+   {
+    "s": "public",
+    "t": "settings",
+    "rows": 14,
+    "kind": "r"
+   }
+  ],
+  "columns": [
+   {
+    "s": "public",
+    "t": "orgs",
+    "c": "id",
+    "type": "uuid",
+    "null": false,
+    "def": null
+   },
+   {
+    "s": "public",
+    "t": "orgs",
+    "c": "name",
+    "type": "text",
+    "null": false,
+    "def": null
+   },
+   {
+    "s": "public",
+    "t": "orgs",
+    "c": "plan",
+    "type": "text",
+    "null": false,
+    "def": null
+   },
+   {
+    "s": "public",
+    "t": "orgs",
+    "c": "created_at",
+    "type": "timestamptz",
+    "null": false,
+    "def": null
+   },
+   {
+    "s": "public",
+    "t": "users",
+    "c": "id",
+    "type": "uuid",
+    "null": false,
+    "def": null
+   },
+   {
+    "s": "public",
+    "t": "users",
+    "c": "org_id",
+    "type": "uuid",
+    "null": false,
+    "def": null
+   },
+   {
+    "s": "public",
+    "t": "users",
+    "c": "email",
+    "type": "text",
+    "null": false,
+    "def": null
+   },
+   {
+    "s": "public",
+    "t": "users",
+    "c": "password_hash",
+    "type": "text",
+    "null": true,
+    "def": null
+   },
+   {
+    "s": "public",
+    "t": "users",
+    "c": "last_seen",
+    "type": "timestamptz",
+    "null": true,
+    "def": null
+   },
+   {
+    "s": "public",
+    "t": "projects",
+    "c": "id",
+    "type": "uuid",
+    "null": false,
+    "def": null
+   },
+   {
+    "s": "public",
+    "t": "projects",
+    "c": "org_id",
+    "type": "uuid",
+    "null": false,
+    "def": null
+   },
+   {
+    "s": "public",
+    "t": "projects",
+    "c": "name",
+    "type": "text",
+    "null": false,
+    "def": null
+   },
+   {
+    "s": "public",
+    "t": "projects",
+    "c": "repo_url",
+    "type": "text",
+    "null": true,
+    "def": null
+   },
+   {
+    "s": "public",
+    "t": "runners",
+    "c": "id",
+    "type": "text",
+    "null": false,
+    "def": null
+   },
+   {
+    "s": "public",
+    "t": "runners",
+    "c": "org_id",
+    "type": "uuid",
+    "null": false,
+    "def": null
+   },
+   {
+    "s": "public",
+    "t": "runners",
+    "c": "label",
+    "type": "text",
+    "null": true,
+    "def": null
+   },
+   {
+    "s": "public",
+    "t": "runners",
+    "c": "last_seen",
+    "type": "timestamptz",
+    "null": true,
+    "def": null
+   },
+   {
+    "s": "public",
+    "t": "jobs",
+    "c": "id",
+    "type": "uuid",
+    "null": false,
+    "def": null
+   },
+   {
+    "s": "public",
+    "t": "jobs",
+    "c": "project_id",
+    "type": "uuid",
+    "null": false,
+    "def": null
+   },
+   {
+    "s": "public",
+    "t": "jobs",
+    "c": "requested_by",
+    "type": "uuid",
+    "null": false,
+    "def": null
+   },
+   {
+    "s": "public",
+    "t": "jobs",
+    "c": "runner_id",
+    "type": "text",
+    "null": true,
+    "def": null
+   },
+   {
+    "s": "public",
+    "t": "jobs",
+    "c": "status",
+    "type": "text",
+    "null": false,
+    "def": null
+   },
+   {
+    "s": "public",
+    "t": "jobs",
+    "c": "created_at",
+    "type": "timestamptz",
+    "null": false,
+    "def": null
+   },
+   {
+    "s": "public",
+    "t": "job_events",
+    "c": "id",
+    "type": "bigint",
+    "null": false,
+    "def": null
+   },
+   {
+    "s": "public",
+    "t": "job_events",
+    "c": "job_id",
+    "type": "uuid",
+    "null": false,
+    "def": null
+   },
+   {
+    "s": "public",
+    "t": "job_events",
+    "c": "kind",
+    "type": "text",
+    "null": false,
+    "def": null
+   },
+   {
+    "s": "public",
+    "t": "job_events",
+    "c": "payload",
+    "type": "jsonb",
+    "null": true,
+    "def": null
+   },
+   {
+    "s": "public",
+    "t": "job_events",
+    "c": "at",
+    "type": "timestamptz",
+    "null": false,
+    "def": null
+   },
+   {
+    "s": "public",
+    "t": "artefacts",
+    "c": "id",
+    "type": "uuid",
+    "null": false,
+    "def": null
+   },
+   {
+    "s": "public",
+    "t": "artefacts",
+    "c": "job_id",
+    "type": "uuid",
+    "null": false,
+    "def": null
+   },
+   {
+    "s": "public",
+    "t": "artefacts",
+    "c": "path",
+    "type": "text",
+    "null": false,
+    "def": null
+   },
+   {
+    "s": "public",
+    "t": "artefacts",
+    "c": "bytes",
+    "type": "bigint",
+    "null": false,
+    "def": null
+   },
+   {
+    "s": "public",
+    "t": "api_keys",
+    "c": "id",
+    "type": "uuid",
+    "null": false,
+    "def": null
+   },
+   {
+    "s": "public",
+    "t": "api_keys",
+    "c": "user_id",
+    "type": "uuid",
+    "null": false,
+    "def": null
+   },
+   {
+    "s": "public",
+    "t": "api_keys",
+    "c": "prefix",
+    "type": "text",
+    "null": false,
+    "def": null
+   },
+   {
+    "s": "public",
+    "t": "api_keys",
+    "c": "key_hash",
+    "type": "text",
+    "null": false,
+    "def": null
+   },
+   {
+    "s": "public",
+    "t": "api_keys",
+    "c": "revoked_at",
+    "type": "timestamptz",
+    "null": true,
+    "def": null
+   },
+   {
+    "s": "public",
+    "t": "settings",
+    "c": "key",
+    "type": "text",
+    "null": false,
+    "def": null
+   },
+   {
+    "s": "public",
+    "t": "settings",
+    "c": "value",
+    "type": "jsonb",
+    "null": true,
+    "def": null
+   }
+  ],
+  "pks": [
+   {
+    "s": "public",
+    "t": "orgs",
+    "c": "id"
+   },
+   {
+    "s": "public",
+    "t": "users",
+    "c": "id"
+   },
+   {
+    "s": "public",
+    "t": "projects",
+    "c": "id"
+   },
+   {
+    "s": "public",
+    "t": "runners",
+    "c": "id"
+   },
+   {
+    "s": "public",
+    "t": "jobs",
+    "c": "id"
+   },
+   {
+    "s": "public",
+    "t": "job_events",
+    "c": "id"
+   },
+   {
+    "s": "public",
+    "t": "artefacts",
+    "c": "id"
+   },
+   {
+    "s": "public",
+    "t": "api_keys",
+    "c": "id"
+   },
+   {
+    "s": "public",
+    "t": "settings",
+    "c": "key"
+   }
+  ],
+  "fks": [
+   {
+    "s": "public",
+    "t": "users",
+    "c": "org_id",
+    "rs": "public",
+    "rt": "orgs",
+    "rc": "id"
+   },
+   {
+    "s": "public",
+    "t": "projects",
+    "c": "org_id",
+    "rs": "public",
+    "rt": "orgs",
+    "rc": "id"
+   },
+   {
+    "s": "public",
+    "t": "runners",
+    "c": "org_id",
+    "rs": "public",
+    "rt": "orgs",
+    "rc": "id"
+   },
+   {
+    "s": "public",
+    "t": "jobs",
+    "c": "project_id",
+    "rs": "public",
+    "rt": "projects",
+    "rc": "id"
+   },
+   {
+    "s": "public",
+    "t": "jobs",
+    "c": "requested_by",
+    "rs": "public",
+    "rt": "users",
+    "rc": "id"
+   },
+   {
+    "s": "public",
+    "t": "jobs",
+    "c": "runner_id",
+    "rs": "public",
+    "rt": "runners",
+    "rc": "id"
+   },
+   {
+    "s": "public",
+    "t": "job_events",
+    "c": "job_id",
+    "rs": "public",
+    "rt": "jobs",
+    "rc": "id"
+   },
+   {
+    "s": "public",
+    "t": "artefacts",
+    "c": "job_id",
+    "rs": "public",
+    "rt": "jobs",
+    "rc": "id"
+   },
+   {
+    "s": "public",
+    "t": "api_keys",
+    "c": "user_id",
+    "rs": "public",
+    "rt": "users",
+    "rc": "id"
+   }
+  ]
+ }
+}

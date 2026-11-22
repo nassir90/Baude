@@ -1,6 +1,7 @@
 {
   "description": "The side panel's pages, and its Subagents and Processes pages' rows.",
   "messages": {
+    "toggle_tip": "Side panel: subagents, processes, code, files",
     "subagents": "Subagents",
     "processes": "Processes",
     "side_questions": "Side questions",

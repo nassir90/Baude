@@ -194,10 +194,11 @@ fun ChatPage(chat: Chat, name: String, attach: Boolean = true, stop: (() -> Unit
     val findKey = Find.key(chat)
     val finding = Find.open[findKey] == true && chat.sender == null
     val findQuery = if (finding) Find.query[findKey].orEmpty() else ""
+    var findBarHeight by remember { mutableStateOf(0.dp) } // (what the bar covers at the top: the match scrolled below it)
     val matches = remember(findQuery, chat.lines.size) { findMatches(chat, findQuery) }
     val findAt = (Find.at[findKey] ?: 0).coerceIn(0, maxOf(0, matches.size - 1))
     LaunchedEffect(findQuery, findAt, matches.size) { // (stepped to: scrolled into view)
-        matches.getOrNull(findAt)?.let { list.animateScrollToItem(itemIndex(chat, it.lineIndex)) }
+        matches.getOrNull(findAt)?.let { list.animateScrollToItem(itemIndex(chat, it.lineIndex), -with(density) { findBarHeight.toPx().toInt() }) }
     }
     androidx.compose.runtime.CompositionLocalProvider(LocalImageOpener provides openImage,
         LocalImageItem provides { key: String -> Viewer.item(chat, key) }, LocalFind provides findQuery,
@@ -240,7 +241,7 @@ fun ChatPage(chat: Chat, name: String, attach: Boolean = true, stop: (() -> Unit
             items(chat.queued.toList(), key = { "queued:" + System.identityHashCode(it) }) { QueuedRow(chat, it, isWorking(chat)) }
             if (session?.cut != null && chat.sender == null) item(key = "cut-short") { CutShortLine(chat) }
         }
-        if (finding) FindBar(chat, matches, Modifier.align(Alignment.TopCenter))
+        if (finding) FindBar(chat, matches, Modifier.align(Alignment.TopCenter).onSizeChanged { findBarHeight = with(density) { it.height.toDp() } })
         // the / list or the @ list over the box: its left side on the / or @ that started it, a gap above the box
         val listWidth = if (composerWidth > 0) minOf(Tokens.Picklist.width, with(density) { composerWidth.toDp() } - 10.dp) else Tokens.Picklist.width
         fun left(at: Int): androidx.compose.ui.unit.Dp {
@@ -288,7 +289,7 @@ fun ChatPage(chat: Chat, name: String, attach: Boolean = true, stop: (() -> Unit
             val gone = chat.sender == null && (conn?.state != "up" || Stopping.line(chat.hostId) != null)
             val ready = !chat.busy.value && chat.preparing.value == 0 && !gone && !chat.chrome.missing.value &&
                 !(chat.sender == null && exhausted(chat)) && reverting?.asked != true
-            val sendable = ready || isLocal(text)
+            val sendable = ready || (chat.sender == null && isLocal(text))
             val send = {
                 val typed = text.trim()
                 val local = host && localCommand(chat, typed, busy, { text = ""; marks.at = -1 }, openPage, open)

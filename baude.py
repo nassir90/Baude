@@ -66,6 +66,7 @@ from baudelib import models as modelslib  # noqa: E402  (what runs a model: clau
 from baudelib import providers as providerslib  # noqa: E402  (where the models besides Claude's run: their providers)
 from baudelib import worktree as worktreelib  # noqa: E402  (a chat's worktree that's gone: made again from its branch)
 from baudelib import tokens  # noqa: E402  (Baude's measures: schema/tokens, the Android app's too)
+from baudelib import icons  # noqa: E402  (its logo: schema/icons)
 from baudelib import wording  # noqa: E402  (the words Baude shows: schema/copy, Record's and the Android app's too)
 from baudelib.models import (  # noqa: E402,F401
     APPLE_MODEL, apple_exe, LOCAL_MODELS, local_models, model_program, PI_CLAUDE, pi_exe,
@@ -140,7 +141,7 @@ from widgets import HeldTurn, QueuedTurn, SenderTurn, UserTurn  # noqa: E402  (a
 from widgets import ChoiceDropDown  # noqa: E402  (a dropdown over (value, label): Record's hosts too)
 from widgets import (  # noqa: E402,F401
     _data_home, SCALE_MAX, SCALE_MIN, SETTINGS_KEY, settings_size, settings_switch, ZOOM_MODS, macos_appearance, scale_setting, zoom_keys,
-    CSS, PALETTE_KEY, RefPaletteRow, TreeList, load_css, sidebar_action, ARTIFACT_TITLES, BAUDE_ICONS, BAUDE_SHAPES, BULLET, CODE_STYLES, CodeBlock, diff_block,
+    CSS, PALETTE_KEY, RefPaletteRow, TreeList, load_css, sidebar_action, ARTIFACT_TITLES, BAUDE_ICONS, BULLET, CODE_STYLES, CodeBlock, diff_block,
     EXISTS_FOR, FIND_RGB, Fade, FixedPicture, GUI_EDITORS,
     HOME_NAME, IMAGE_POOL, INDENT_STEP, INLINE_MEMO_BYTES, ImageActions, KUBE_ICONS,
     KUBE_KINDS, LineGutter, LinkLabel, MarkdownView, PictureWatch, natural_height,
@@ -6501,15 +6502,7 @@ class ToolGroup(Gtk.Grid):
 # ------------------------------------------------------- desktop launcher --
 # Baude in the platform's list of apps, per user: Launcher, below.
 
-ICON_SVG = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
-  <rect x="8" y="8" width="112" height="112" rx="26" fill="#d97757"/>
-  <path d="M30 38h68a8 8 0 0 1 8 8v36a8 8 0 0 1-8 8H58l-18 14v-14H30a8 8 0 0 1-8-8V46a8 8 0 0 1 8-8z"
-        fill="#fff8f0"/>
-  <path d="M40 54l12 10-12 10" stroke="#d97757" stroke-width="7" fill="none"
-        stroke-linecap="round" stroke-linejoin="round"/>
-  <path d="M60 76h22" stroke="#d97757" stroke-width="7" stroke-linecap="round"/>
-</svg>
-"""
+ICON_SVG = icons.svg("apps", "baude")  # (schema/icons/apps)
 
 
 def macos_icon_png(size=1024):
@@ -13102,7 +13095,7 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
                                      tooltip_text=wording.say("window.rename_tip", thing="session"))
         header.set_title_widget(self.title_label)
         self.panel_btn = Gtk.ToggleButton(icon_name="sidebar-show-right-symbolic",
-                                          tooltip_text="Side panel: subagents, processes, code, files (Ctrl+Alt+B)")
+                                          tooltip_text=wording.say("side_panel.toggle_tip") + " (Ctrl+Alt+B)")
         menu = Gio.Menu()
         item = Gio.MenuItem.new(wording.say("window.settings"), "win.settings")
         item.set_attribute_value("accel", GLib.Variant.new_string(SETTINGS_KEY))  # (its key, shown beside it)

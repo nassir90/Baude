@@ -685,7 +685,7 @@ def test_icon_strokes(app):
     try:
         baude.ensure_icons()
         reference = stroke_px(win, "list-add-symbolic")  # the theme's line weight
-        for name in baude.BAUDE_ICONS:
+        for name in (n for n in baude.BAUDE_ICONS if n != "baude-dot-symbolic"):  # (the dot's filled, not lines)
             assert abs(stroke_px(win, name) - reference) <= 0.25, \
                 f"{name} is drawn at the theme's stroke width ({stroke_px(win, name):.2f} vs {reference:.2f}px)"
         chip = baude.ArtifactChip({"url": "https://claude.ai/artifact/x", "title": "T", "icon": "map"})

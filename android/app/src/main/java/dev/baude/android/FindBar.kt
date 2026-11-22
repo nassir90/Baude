@@ -117,6 +117,7 @@ fun FindBar(chat: Chat, matches: List<Match>, modifier: Modifier = Modifier) {
     LaunchedEffect(Unit) { focus.requestFocus() }
     fun step(d: Int) { if (matches.isNotEmpty()) Find.at[key] = (at + d + matches.size) % matches.size }
     fun close() { Find.open[key] = false }
+    androidx.activity.compose.BackHandler { close() }
     Row(modifier.fillMaxWidth().background(c.frame).padding(6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp),
         verticalAlignment = Alignment.CenterVertically) {
         Box(Modifier.weight(1f).background(c.fg.copy(alpha = 0.08f), androidx.compose.foundation.shape.RoundedCornerShape(8.dp))

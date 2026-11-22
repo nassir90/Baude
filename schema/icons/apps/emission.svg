@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
+  <mask id="cut">
+    <rect x="22" y="38" width="84" height="52" rx="8" fill="#fff"/>
+    <g fill="none" stroke="#000" stroke-width="4.5">
+      <ellipse cx="64" cy="64" rx="22" ry="34"/>
+      <path d="M22 50h84M22 78h84"/>
+    </g>
+  </mask>
+  <rect x="8" y="8" width="112" height="112" rx="26" fill="#d9b44a"/>
+  <rect x="22" y="38" width="84" height="52" rx="8" fill="#fff8f0" mask="url(#cut)"/>
+</svg>

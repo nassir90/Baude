@@ -84,7 +84,8 @@ fun Bar(title: String, start: (@Composable RowScope.() -> Unit)? = null, end: (@
         subtitle: String? = null, lead: (@Composable () -> Unit)? = null, left: Boolean = false) {
     val c = LocalBaude.current
     val bar = Modifier.fillMaxWidth().background(c.frame).statusBarsPadding().height(Gap.bar).padding(horizontal = 6.dp)
-    if (lead == null && !left) { // (in the middle of the bar, as Adw.HeaderBar's: the room either side of it as wide as the wider end's)
+    if (lead == null && !left) { // (in the middle of the bar, as Adw.HeaderBar's; an end too wide for that: pushed
+                                 // aside, between the two ends)
         androidx.compose.ui.layout.Layout({
             Row(verticalAlignment = Alignment.CenterVertically) { if (start != null) start() }
             Column(Modifier.padding(horizontal = 6.dp), horizontalAlignment = Alignment.CenterHorizontally) {
@@ -97,11 +98,11 @@ fun Bar(title: String, start: (@Composable RowScope.() -> Unit)? = null, end: (@
             val loose = k.copy(minWidth = 0, minHeight = 0)
             val sp = s.measure(loose)
             val ep = e.measure(loose)
-            val side = maxOf(sp.width, ep.width)
-            val mp = m.measure(loose.copy(maxWidth = (k.maxWidth - 2 * side).coerceAtLeast(0)))
+            val mp = m.measure(loose.copy(maxWidth = (k.maxWidth - sp.width - ep.width).coerceAtLeast(0)))
+            val x = ((k.maxWidth - mp.width) / 2).coerceAtMost(k.maxWidth - ep.width - mp.width).coerceAtLeast(sp.width)
             layout(k.maxWidth, k.maxHeight) {
                 sp.place(0, (k.maxHeight - sp.height) / 2)
-                mp.place((k.maxWidth - mp.width) / 2, (k.maxHeight - mp.height) / 2)
+                mp.place(x, (k.maxHeight - mp.height) / 2)
                 ep.place(k.maxWidth - ep.width, (k.maxHeight - ep.height) / 2)
             }
         }

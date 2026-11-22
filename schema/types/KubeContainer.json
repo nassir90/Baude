@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "A pod's container, as its square shows it.",
+  "properties": {
+    "name": {
+      "type": "string",
+      "description": "Its name."
+    },
+    "look": {
+      "type": "string",
+      "description": "ok, starting, restarted, bad or done."
+    },
+    "words": {
+      "type": "string",
+      "description": "What its state is, in words."
+    },
+    "init": {
+      "type": "boolean",
+      "description": "An init container."
+    }
+  },
+  "required": ["name"],
+  "additionalProperties": false
+}

@@ -203,7 +203,7 @@ def open_chat(app, sc):
     if sc.get("process"):
         row = win.panel.proc_rows[sc["process"]]
         win.panel.open_process(row) if sc.get("full") else row.set_expanded(True)
-    if sc.get("view"):
+    if sc.get("lightbox"):
         win.tool_cards[sc["view"]].view_btn.set_active(True)
     if sc.get("reveal"):
         win.show_folder(os.path.join(HOME, "garden", sc["reveal"]))
@@ -214,7 +214,7 @@ def open_chat(app, sc):
         exp = next(e for e in T.find(win.panel.files_page.view, Gtk.TreeExpander)
                    if getattr(e, "node", None) is not None and os.path.basename(e.node.path) == sc["hold"])
         win.panel.files_page.menu(exp, 40, 12)
-    if sc.get("running") or sc.get("process") or sc.get("view") or sc.get("reveal") or sc.get("gallery") or sc.get("hold"):
+    if sc.get("running") or sc.get("process") or sc.get("lightbox") or sc.get("reveal") or sc.get("gallery") or sc.get("hold"):
         T.pump(0.6)
     if sc.get("state") == "working":
         win.set_busy(True)
@@ -253,7 +253,7 @@ def open_chat(app, sc):
         win.pointer = (at.x, at.y)
         win.open_ref(sc["ref"], label)
         T.pump(0.4)
-    if sc.get("view"):  # (the first picture of the chat, opened large)
+    if sc.get("lightbox"):  # (the first picture of the chat, opened large)
         baude.widgets.Lightbox.FLY_MS = 0
         w = next(w for w in baude.widgets.walk(win.transcript)
                  if getattr(w, "image_actions", None) is not None and not isinstance(w, Gtk.Overlay))
@@ -298,6 +298,24 @@ def build(app, sc):
         win = open_chat(app, sc)
         update.changelog_dialog().present(win)
         return win
+    if name == "databases":
+        win = app.window(S.opts())
+        fx = fixture("databases.json")
+        sv = win.schema
+        sv.set_visible(True)
+        sv.schema, sv.database, sv.focus_column = baude.pg_normalize(fx["raw"]), fx["database"], None
+        sv.servers, sv.dbs = [fx["server"]], {fx["server"]["container"]: [fx["database"]]}
+        sv.syncing = True  # (drawn from the fixture, not read from a server)
+        sv.server_dd.set_model(Gtk.StringList.new([f"{fx['server']['container']} (Postgres {fx['server']['version']})"]))
+        sv.db_dd.set_model(Gtk.StringList.new([fx["database"]]))
+        sv.syncing = False
+        sv.show_namespace("public")
+        T.wait_for(lambda: sv.canvas.get_width() > 0 and sv.canvas.cards, "laid out")
+        T.pump(0.3)
+        sv.canvas.fit()
+        return win
+    if name == "kubernetes":
+        return S.kube_window(app)[0]
     if name == "bot-settings":
         win = open_chat(app, sc)
         title = fixture("sessions.json")["sessions"][0]["title"]

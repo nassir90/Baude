@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "kube_follow's last answer: kubectl ended.",
+  "properties": {
+    "op": {
+      "const": "kube_end",
+      "description": "What it is."
+    },
+    "req": {
+      "type": ["integer", "null"],
+      "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "code": {
+      "type": "integer",
+      "description": "Its exit code."
+    },
+    "said": {
+      "type": "string",
+      "description": "What it wrote, for a failure."
+    },
+    "fault": {
+      "$ref": "KubeFault.json",
+      "description": "Why, when the cluster can't be read."
+    }
+  },
+  "required": ["op"],
+  "additionalProperties": false
+}

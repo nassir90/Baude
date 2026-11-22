@@ -1083,6 +1083,12 @@ def accent():
     return ACCENTS[name] if name in ACCENTS else Adw.StyleManager.get_default().get_accent_color()
 
 
+def logo(app):
+    """app's logo (schema/icons/apps: "baude", "record") in the accent settings.json has: icons.logo's, as it's drawn
+    while the system's is."""
+    return icons.logo(app, load_settings().get("accent"))
+
+
 def accent_rgba():
     """The accent's colour as @accent_bg_color has it: a patch's, a selection's."""
     return Adw.AccentColor.to_rgba(accent())

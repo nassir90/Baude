@@ -17,7 +17,7 @@
     },
     {
       "name": "picture",
-      "shows": "A round avatar 64px across, centred: the Bot's picture (set into the page: see README's A picture is set into the page), else its initials from the name typed. Under it two buttons: \"Choose Picture…\" and (only while there is a picture) \"Remove Picture\".",
+      "shows": "A round avatar 64px across, centred: the Bot's picture, else its initials from the name typed, set into the page: see README's A picture is set into the page. Under it two buttons: \"Choose Picture…\" and (only while there is a picture) \"Remove Picture\".",
       "copy": ["bot_settings.choose_picture", "bot_settings.remove_picture", "bot_settings.choose_a_picture", "bot_settings.unreadable"],
       "actions": [
         {"by": "click Choose Picture…", "does": "A file chooser (Pictures) opens; the picture is scaled to fit 256 by 256 and shown. An unreadable one says \"Couldn't read that picture: <why>\"."},

@@ -416,7 +416,7 @@ abstract class Parity(private val theme: String, private val scene: String) {
                     androidx.compose.runtime.snapshots.Snapshot.sendApplyNotifications()
                     settle()
                 }
-                if ((sc.optBoolean("open") || name.startsWith("chat-end")) && !sc.has("meta")) toEnd()
+                if (sc.optBoolean("open") && !sc.has("meta")) toEnd()
                 if (sc.has("ask")) ask(sc.getString("ask"))
                 if (sc.has("queued")) {
                     Mesh.open!!.queued.add(Queued(sc.getString("queued"), emptyList()))

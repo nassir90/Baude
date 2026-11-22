@@ -320,10 +320,80 @@ def bots_scene(app, sc):
     return win
 
 
+THREADS = {}  # (a threads fixture's hosts, made once: name -> (Server, Remote); "ids": fixture id -> the host's)
+
+
+def threads_network(name):
+    """A threads fixture's chats, started on two hosts of their own (each saying it's on a machine of its own, as
+    scenes_panels' are), its Bot made one and the chats it started started by it (spawned_by: its id there)."""
+    if THREADS:
+        return THREADS
+    import threading
+    from baudelib.server import Server
+
+    class Server(Server):
+        def _info(self):
+            return {**super()._info(), "host": f"{self.me['name']}.lan"}
+    fx = fixture(name)
+    net = baude.network()
+    env = {"FAKE_CLAUDE_SESSION_IDS": "1", "FAKE_CLAUDE_TRANSCRIPTS": "1"}
+    for host in (fx["host"]["name"], fx["other"]["name"]):
+        s = Server(state_dir=os.path.join(T.TMP, "servers", host), group="Lab", name=host,
+                   socket_path=os.path.join(os.environ["BAUDE_RUNTIME_DIR"], f"{host}.sock"), log=lambda _text: None,
+                   env=env)
+        threading.Thread(target=s.serve_forever, daemon=True).start()
+        THREADS[host] = (s, net.add({"via": "unix", "path": s.socket_path}))
+    ids = THREADS["ids"] = {}
+    for s in sorted(fx["sessions"], key=lambda s: -s["ago"]):  # (the oldest first: said in the fixture's order)
+        server = THREADS[s["on"]][0]
+        started = server.start({"prompt": s["title"], "title": s["title"], "cwd": folder(s["folder"]), "mode": s["mode"],
+                                "spawned_by": ids.get(s.get("spawned_by"))})
+        ids[s["id"]] = started.id
+        T.wait_for(lambda: started.asks, f"{s['title']}: asking")
+        with server.lock:  # (let do what it asks: idle, as the fixture has it)
+            rid, ask = next(iter(started.asks.items()))
+            server.take_input(None, started, {"type": "control_response", "response": {
+                "subtype": "success", "request_id": rid,
+                "response": {"behavior": "allow", "updatedInput": ask["request"]["input"]}}})
+        T.wait_for(lambda: started.state() == "idle", f"{s['title']}: done")
+        if s.get("bot"):
+            with server.lock:
+                server.set_bot(started, {"name": s["bot"]})
+        time.sleep(0.05)
+    remotes = [THREADS[fx["host"]["name"]][1], THREADS[fx["other"]["name"]][1]]
+    T.wait_for(lambda: sum(x["server"] in remotes for x in net.sessions()) == len(ids), "the hosts' sessions")
+    return THREADS
+
+
+def threads_scene(app, sc):
+    """A threads fixture's chats on their two hosts, the one sc picks listed (the fixture's first, without)."""
+    fx = fixture(sc["threads"])
+    net = threads_network(sc["threads"])
+    host = sc.get("pick") or fx["host"]["name"]
+    server = THREADS[fx["host"]["name"]][0]  # (the Bot, the fixture's first chat: archived, or deleted, on its host as
+    bot = next((x for x in server.sessions.values() if x.meta.get("bot")), None)  # the scene says; scenes.json has
+    if bot and sc.get("bot") == "trashed":  # the trashed one last, as a deleted chat stays so)
+        server.delete(bot, lambda *_a, **_k: None)
+    elif bot and bot.meta.get("archived") != (sc.get("bot") == "archived"):
+        with server.lock:
+            bot.meta["archived"] = sc.get("bot") == "archived"
+            server.save(bot)
+            server.changed()
+    baude.save_settings(new_session_host=baude.host_key(net[host][1]), sidebar_groups=None,
+                       collapsed_folders=[] if sc.get("bot") == "archived" else ["archived"])
+    win = app.window(scenelib.opts(cwd=folder("garden")))
+    T.pump(1.5)
+    win.sidebar.refresh()
+    T.pump(1)
+    return win
+
+
 def build(app, sc):
     name = sc["name"]
     if sc.get("bots"):
         return bots_scene(app, sc)
+    if sc.get("threads"):
+        return threads_scene(app, sc)
     if sc.get("github"):  # (gh signed in, with the fixture's pull requests)
         gitfixture.stub_github(True, os.path.join(HOME, "garden"))
     if name.startswith("home"):
@@ -431,6 +501,10 @@ def main():
     shutil.copytree(os.path.join(FIX, "tasks"), "/tmp/parity/tasks", dirs_exist_ok=True)  # (the fixture transcript's path)
     if any(sc.get("bots") and args.k in sc["name"] for sc in fixture_scenes()):
         scenes_panels.network_fixture()  # (its servers first: before any window's host process is among the sessions)
+    for sc in fixture_scenes():
+        if sc.get("threads") and args.k in sc["name"]:
+            threads_network(sc["threads"])  # (the same)
+            break
     app = T.App()
     style = Adw.StyleManager.get_default()
     failed = 0

@@ -662,6 +662,27 @@ def remote_info(s):
             "held": len(s.get("held") or [])}  # (messages its host holds for it, to send or drop: HeldTurn)
 
 
+def started_elsewhere(sessions):
+    """Of the network's sessions (Network.sessions', archived and those of a gone host too), the ids of those an agent on
+    another host started (spawned_by: a session of another host, none of their own host's), and of those such a chat
+    started in turn there: each is listed only under the agent that started it, never among its own host's chats
+    (schema/ui/Sidebar.region.json, the phone's the same). One whose agent is nowhere (deleted, say) is its host's."""
+    by_host = {(host_key(s["server"]), i): s for s in sessions for i in (s["id"], s.get("cli_id")) if i}
+    hosts_of = {}  # (an id: the hosts that have a session by it)
+    for host, i in by_host:
+        hosts_of.setdefault(i, set()).add(host)
+
+    def far(s, seen):
+        host, by = host_key(s["server"]), s.get("spawned_by")
+        if not by:
+            return False
+        up = by_host.get((host, by))
+        if up is None:
+            return bool(hosts_of.get(by, set()) - {host})
+        return up is not s and up["id"] not in seen and far(up, seen | {s["id"]})  # (a loop of them: its host's own)
+    return {s["id"] for s in sessions if far(s, set())}
+
+
 BOT_PICTURES = {}  # (session id, its picture's mtime) -> Gdk.Texture: a Bot's picture, fetched from its host once
 BOT_FETCHING = {}  # (the same) -> [then]: those waiting for a picture asked of its host, not come yet
 

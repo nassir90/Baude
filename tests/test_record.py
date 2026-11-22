@@ -104,6 +104,12 @@ CHAT = transcript("chat-1", [
 OTHER = transcript("chat-2", ["Nothing to see."])
 
 import record  # noqa: E402
+import recordstore  # noqa: E402
+import recordmeta  # noqa: E402
+import recordui  # noqa: E402
+import diaryeditor  # noqa: E402
+import recordreader  # noqa: E402
+import recordwindow  # noqa: E402
 import widgets  # noqa: E402
 from gi.repository import Adw, Gdk, Gio, GLib, Graphene, Gtk  # noqa: E402
 
@@ -253,7 +259,7 @@ def test_glossary_becomes_diary(app):
     t = by_id(win, "a")
     assert "glossary" not in t and t["pages"]["Home"].startswith("- **function**: a recipe") and \
         "## To learn\n- JSON" in t["pages"]["Home"], t["pages"]
-    assert [record.full_name(x) for x in win.store.notebooks] == ["Systems for me", "Biology reading"]
+    assert [recordstore.full_name(x) for x in win.store.notebooks] == ["Systems for me", "Biology reading"]
 
 
 def test_reader_links_names(app):
@@ -275,7 +281,7 @@ def test_reader_links_names(app):
     assert "relay_jobs.py: File · src/relay_jobs.py" in win.card.get_title() and \
         win.card.get_button_label() == "To notes"
     win.card.emit("button-clicked")
-    assert isinstance(win.tabs.current(), record.DiaryEditor), "To notes: the page of notes shown"
+    assert isinstance(win.tabs.current(), diaryeditor.DiaryEditor), "To notes: the page of notes shown"
     assert win.diary.text().endswith("- [[@relay_jobs.py]]: "), win.diary.text()
     assert by_id(win, "a")["pages"]["Home"].endswith("- [[@relay_jobs.py]]: "), "saved"
 
@@ -346,8 +352,8 @@ def test_read_code_block_height(app):
     r = win.reader
     assert r.scroll.get_child().get_vscroll_policy() == Gtk.ScrollablePolicy.NATURAL
     assert win.chat.scroll.get_child().get_vscroll_policy() == Gtk.ScrollablePolicy.NATURAL
-    assert win.left_slide.fixed.width == record.DiaryEditor.PAGES_WIDTH, "till it's dragged: test_notebooks_column_drags"
-    assert not win.books.get_visible() or win.books.get_width() == record.DiaryEditor.PAGES_WIDTH, \
+    assert win.left_slide.fixed.width == diaryeditor.DiaryEditor.PAGES_WIDTH, "till it's dragged: test_notebooks_column_drags"
+    assert not win.books.get_visible() or win.books.get_width() == diaryeditor.DiaryEditor.PAGES_WIDTH, \
         ("held at it, a long name notwithstanding", win.books.get_width())
     row = win.notebook_list.get_row_at_index(0)
     assert not hasattr(row, "sub") and isinstance(row.name, Gtk.Label) and not row.name.has_css_class("heading")
@@ -374,12 +380,12 @@ def test_heading_swap_stays_among_siblings():
     """A heading swaps with its sibling, all under it going along: never out of its parent, never into a sibling's family,
     and the blank lines between them stay put. A # in a code fence isn't a heading."""
     lines = NOTES_OUTLINE.split("\n")
-    levels = record.heading_levels(lines)
+    levels = recordstore.heading_levels(lines)
     assert levels == [0, 1, 0, 0, 2, 2, 0, 3, 2, 0, 1, 0, 0, 0, 0], levels
     at = {name: lines.index(("#" * n) + " " + name) for name, n in (("A", 1), ("A1", 2), ("A2", 2), ("A2x", 3), ("A3", 2), ("B", 1))}
 
     def swap(name, by):
-        done = record.swap_with_sibling(lines, at[name], by)
+        done = recordstore.swap_with_sibling(lines, at[name], by)
         if done is None:
             return None
         new, one, three, moved = done
@@ -396,7 +402,8 @@ def test_heading_swap_stays_among_siblings():
     assert swap("A", 1) == "intro\n# B\nb text\n```\n# not a heading\n```\n\n# A\na text\n\n## A1\n## A2\na2 text\n### A2x\n## A3".split("\n")
     assert swap("B", -1) == swap("A", 1)
     skipped = ["# P", "### deep", "## mid"]  # (a level skipped: not the same level, so no sibling)
-    assert record.swap_with_sibling(skipped, 1, 1) is None and record.swap_with_sibling(skipped, 2, -1) is None
+    assert recordstore.swap_with_sibling(skipped, 1, 1) is None and \
+        recordstore.swap_with_sibling(skipped, 2, -1) is None
 
 
 def test_enter_in_the_title_goes_to_the_text(app):
@@ -427,7 +434,7 @@ def test_enter_in_the_title_goes_to_the_text(app):
     other.title.emit("activate")
     pump(0.1)
     assert other.title.get_text() == "Taken" and win.get_focus().is_ancestor(other.title), "the name's taken: still in the title"
-    home = win.open_note(record.HOME)
+    home = win.open_note(recordstore.HOME)
     home.title.grab_focus()
     pump(0.1)
     home.title.emit("activate")
@@ -566,7 +573,7 @@ def test_selections_dont_split_links():
     a, name, name_end, b = text.index("[["), text.index("Some"), text.index("]]"), text.index("]]") + 2
 
     def picks(start, end, source=text):
-        s, e = record.whole_links(source, start, end)
+        s, e = recordstore.whole_links(source, start, end)
         return source[s:e]
 
     assert picks(name, name_end) == "[[Some page]]", "its name: its marks too"
@@ -581,7 +588,8 @@ def test_selections_dont_split_links():
     assert picks(0, name + 2) == "see [[Some page]]"
     assert picks(0, 3) == "see" and picks(b, len(text)) == " and more", "beside it"
     items = "- one\n- [[Some page]]\n- three"
-    assert record.whole_links(items, items.index("\n"), items.index("]]")) == (items.index("\n"), items.index("]]") + 2)
+    assert recordstore.whole_links(items, items.index("\n"), items.index("]]")) == \
+        (items.index("\n"), items.index("]]") + 2)
     assert picks(0, 8, "[[+Sub]] tail") == "[[+Sub]]" and picks(2, 8, "[[+Sub]] tail") == "[[+Sub]]"
     label = "x [[@o/r#12|#12]] y"
     assert picks(label.index("#12]"), label.index("]]"), label) == "[[@o/r#12|#12]]", "a label's the name"
@@ -718,7 +726,7 @@ def test_side_bars_drag_from_the_edge_thats_seen(app):
         return
     win = app.win
     select(win, "a")
-    win.open_note(record.HOME)
+    win.open_note(recordstore.HOME)
     pump(0.3)
 
     def box(w):
@@ -772,7 +780,7 @@ def test_notebooks_column_follows_the_pointer_from_past_its_edge(app):
         return
     win = app.win
     select(win, "a")
-    win.open_note(record.HOME)
+    win.open_note(recordstore.HOME)
     pump(0.3)
     column, hand = win.left_slide.fixed, mouse.Mouse(win)
     was = column.width
@@ -812,7 +820,7 @@ def test_nothing_open_is_blank(app):
         page = win.content_stack.get_visible_child()
         assert not [w for w in walk(page) if isinstance(w, (Gtk.Label, Gtk.Button, Gtk.Image, Adw.StatusPage))], list(walk(page))
     finally:
-        win.open_note(record.HOME)
+        win.open_note(recordstore.HOME)
         pump(0.2)
 
 
@@ -941,10 +949,10 @@ def test_sub_page_from_a_pages_menu(app):
         pop.unparent()
         return items, row
 
-    (home_item,), _ = menu_of(record.HOME)
+    (home_item,), _ = menu_of(recordstore.HOME)
     made = []
     try:
-        for parent in ("Plans", record.HOME):
+        for parent in ("Plans", recordstore.HOME):
             items, row = menu_of(parent)
             action = next(a for a, target in items if a == home_item[0] and target == parent)
             assert row.activate_action(action, GLib.Variant.new_string(parent)), "the menu's action is there"
@@ -1053,7 +1061,7 @@ def test_notebooks_column_drags(app):
         return
     win = app.win
     select(win, "a")
-    win.open_note(record.HOME)
+    win.open_note(recordstore.HOME)
     pump(0.3)
     column, slide = win.left_slide.fixed, win.left_slide
     hand, was = mouse.Mouse(win), column.width
@@ -1094,11 +1102,11 @@ def test_notebooks_column_drags(app):
         shot(win, "record-notebooks-column-wide")
         drag(-60)
         assert column.width == was + 60, column.width
-        drag(record.FixedWidth.LEAST - 40 - column.width)
-        assert column.width == record.FixedWidth.LEAST, column.width
+        drag(recordreader.FixedWidth.LEAST - 40 - column.width)
+        assert column.width == recordreader.FixedWidth.LEAST, column.width
         shot(win, "record-notebooks-column-narrow")
         drag(5000)
-        assert column.width == min(record.FixedWidth.MOST, win.get_width() // 2), column.width
+        assert column.width == min(recordreader.FixedWidth.MOST, win.get_width() // 2), column.width
         drag(was - column.width)
         assert column.width == was, column.width
         drag(50, dx=-30)
@@ -1135,8 +1143,9 @@ def test_unmatched_fence_keeps_to_its_lines():
     assert spans(long, typing=(43,)) == [(0, 41, True), (43, 43, False)], "being typed on: it's the new one"
     assert spans("```\nx\n\n```python\ny\n```") == [(0, 1, False), (3, 5, True)], "```python opens, it can't close"
     assert spans("~~~\nx\n~~~") == [(0, 2, True)] and spans("~~~\nx\n~~~", tildes=False) == []
-    assert record.heading_levels("```\ncode\n\n# Heading\n```py\n# comment\n```".split("\n")) == [0, 0, 0, 1, 0, 0, 0]
-    assert record.heading_levels(["```", "# comment", "", "# Heading"]) == [0, 0, 0, 1]
+    assert recordstore.heading_levels("```\ncode\n\n# Heading\n```py\n# comment\n```".split("\n")) == \
+        [0, 0, 0, 1, 0, 0, 0]
+    assert recordstore.heading_levels(["```", "# comment", "", "# Heading"]) == [0, 0, 0, 1]
 
 
 def test_unmatched_fence_in_the_notes(app):
@@ -1272,9 +1281,9 @@ def test_left_column(app):
         assert head.has_css_class("sidebar-header") and head.arrow.has_css_class("folder-arrow")
     try:
         win.pages.head.arrow.emit("clicked")
-        assert win.pages.folded and record.Store().pages_folded and win.books_scroll.get_vexpand()
+        assert win.pages.folded and recordstore.Store().pages_folded and win.books_scroll.get_vexpand()
         win.books_head.arrow.emit("clicked")
-        assert not win.books_reveal.get_reveal_child() and record.Store().books_folded
+        assert not win.books_reveal.get_reveal_child() and recordstore.Store().books_folded
     finally:
         win.pages.set_folded(False)
         win.fold_books(False)
@@ -1283,7 +1292,7 @@ def test_left_column(app):
 def test_ongoing_feedback_tab(app):
     """☰ → Ongoing Feedback is in Record as in Baude: its tab, read from GitHub (a stand-in), what's ready shown with what
     can be done with it; closed, freed, and back through the history; what's selected and typed through a restart."""
-    feedback, fixes = record.feedback, record.fixview.fixes
+    feedback, fixes = recordwindow.feedback, recordwindow.fixview.fixes
     fake = os.path.join(TMP, "fake-github")
     with open(fake, "w") as f:
         f.write(f'#!/bin/sh\nexec {shlex.quote(sys.executable)} {shlex.quote(os.path.join(os.path.dirname(__file__), "fake_gh.py"))} "$@"\n')
@@ -1323,7 +1332,7 @@ def test_ongoing_feedback_tab(app):
         assert win.lookup_action("feedbacklist") is None
         win.activate_action("win.fixes")
         page = win.tabs.get(("fixes",))
-        assert isinstance(page, record.fixview.FixesPage) and win.tabs.current() is page
+        assert isinstance(page, recordwindow.fixview.FixesPage) and win.tabs.current() is page
         assert win.content_stack.get_visible_child_name() != "none"
         wait_for(lambda: page.read_at, "the feedback read")
         assert [i["number"] for i in page.listed()] == [1, 2] and page.selected == 1
@@ -1347,7 +1356,7 @@ def test_ongoing_feedback_tab(app):
         saved = json.loads(json.dumps(win.state()))  # (a restart: the tab, what's selected, what's typed)
         assert saved["tab"] == ["fixes"] and saved["fixes"]["reply"] == "Half a reply"
         win.let_go()
-        app.app.win = new = record.Window(app.app)
+        app.app.win = new = recordwindow.Window(app.app)
         new.restore(saved)
         new.present()
         win.destroy()
@@ -1522,7 +1531,7 @@ def test_typing_keeps_the_caret_in_view(app):
     def caret():
         r = d.view.char_rect(d.buf.get_iter_at_mark(d.buf.get_insert()))
         y = d.view.buffer_to_window_coords(Gtk.TextWindowType.WIDGET, r.x, r.y)[1]
-        return d.view.compute_point(d.scroll, record.Graphene.Point().init(0, y))[1].y, r.height
+        return d.view.compute_point(d.scroll, recordui.Graphene.Point().init(0, y))[1].y, r.height
 
     def seen():
         top, height = caret()
@@ -1576,7 +1585,7 @@ def test_diary_at_lists_the_folder(app):
     win = app.win
     select(win, "a")
     catalogued(win)
-    d = win.open_note(record.HOME)
+    d = win.open_note(recordstore.HOME)
     d.buf.place_cursor(d.buf.get_end_iter())
     d.view.grab_focus()
     for ch in "runs in @relay":  # (typed, a key at a time: @'s search starts only from an @ typed)
@@ -1986,7 +1995,7 @@ def test_diary_hash_lists_issues(app):
                           rest_item(59, "Tried and dropped", pr=True, state="closed", ago=8)],
             "acme/tools": [rest_item(12, "A twelve of its own", ago=40), rest_item(77, "Only here", pr=True, ago=41)]}
     opened = []
-    real_web, record.fixview.web = record.fixview.web, lambda _win, url: opened.append(url)
+    real_web, recordwindow.fixview.web = recordwindow.fixview.web, lambda _win, url: opened.append(url)
     page, chat = "On GitHub", None
     with Github(rest) as hub:
         try:
@@ -2128,7 +2137,7 @@ def test_diary_hash_lists_issues(app):
             # a branch that's spelt as one is a branch
             branch = space.find("feature/login#12")
             assert branch is not None and branch["kind"] == "branch" and not branch.get("label"), branch
-            assert record.ref_text(branch["surface"], branch.get("label")) == "[[@feature/login#12]]"
+            assert recordstore.ref_text(branch["surface"], branch.get("label")) == "[[@feature/login#12]]"
             typed("@login")
             wait_for(lambda: d.pop_shown and d.pop_shown[0]["surface"] == "feature/login#12", "@'s list")
             assert d._key(None, Gdk.KEY_Return, 0, 0) and d.text().endswith("[[@feature/login#12]] ")
@@ -2150,16 +2159,16 @@ def test_diary_hash_lists_issues(app):
             hub.write()
             hub.due()
             lookupgit.GITHUB.round(win.github_folders())
-            record.Window._github_changed(win)
+            recordwindow.Window._github_changed(win)
             assert (at, "pr_merged") in d.view.logos, d.view.logos
             wait_for(lambda: space.find("acme/shop#61")["icon"] == "pr_merged", "the items")
 
             # a name in a reply, as Baude's markdown asks (the backticked #, the full name, PR #)
-            names = record.ReaderNames(space, folder)
+            names = recordui.ReaderNames(space, folder)
             assert names.refs["acme/shop#60"].kind == "pr" and names.refs["PR #60"] is names.refs["acme/shop#60"]
             assert "PR #77" not in names.refs and "acme/tools#77" in names.refs, "the chat's own repository's, not " \
                 "its upstream's"
-            assert "PR #60" not in record.ReaderNames(space).refs, "no chat's: no repository a bare number means"
+            assert "PR #60" not in recordui.ReaderNames(space).refs, "no chat's: no repository a bare number means"
             was, widgets.SIGNAL = widgets.SIGNAL, names
             try:
                 assert "baude-icon-pr_merged" in widgets.ref_link("acme/shop#60", "acme/shop#60", False)
@@ -2174,7 +2183,7 @@ def test_diary_hash_lists_issues(app):
             finally:
                 widgets.SIGNAL = was
             assert "acme/shop#60" in win.names_in("That's acme/shop#60, merged.")
-            assert 'href="ref:acme%2Fshop%2360"' in record.md_markup("That's acme/shop#60.", {"acme/shop#60"})
+            assert 'href="ref:acme%2Fshop%2360"' in recordmeta.md_markup("That's acme/shop#60.", {"acme/shop#60"})
 
             # the questions say what each is, as they do of any @name
             prompt = record.build_prompt(notebook, [], space)
@@ -2194,7 +2203,7 @@ def test_diary_hash_lists_issues(app):
             pump(0.05)
             assert d._key(None, Gdk.KEY_BackSpace, 0, 0) and d.text().endswith("x "), d.text()[-30:]
         finally:
-            record.fixview.web = real_web
+            recordwindow.fixview.web = real_web
             win.tabs.close(("note", page))
             notebook["pages"].pop(page, None)
             read_back(win, chat)
@@ -2565,12 +2574,12 @@ def test_a_name_is_shown_by_where_the_pointer_is(app):
 
         def hover_left(self):
             shown.append(None)
-    wait = record.NAME_CARD_WAIT / 1000 + 0.15
+    wait = recordreader.NAME_CARD_WAIT / 1000 + 0.15
     try:
         window.present()
         pump(0.3)
         its_own = list(label.observe_controllers())
-        record.on_name_hover(label, Host())
+        recordreader.on_name_hover(label, Host())
         moved = next(c for c in list(label.observe_controllers())
                      if c not in its_own and isinstance(c, Gtk.EventControllerMotion))
         y = label.get_height() / 2
@@ -2602,7 +2611,7 @@ def test_pointers(app):
     if not mouse.available():
         return
     assert macos.objc_send(b"gdkCoreCursor", b"gdkZoomInCursor") == macos.make_zoom_cursor.cursor, "the magnifying glass"
-    feedback, fixes = record.feedback, record.fixview.fixes
+    feedback, fixes = recordwindow.feedback, recordwindow.fixview.fixes
     win = app.win
     select(win, "a")
     read = win.open_chat(CHAT)
@@ -2694,7 +2703,7 @@ def test_ci_events_arent_shown(app):
     event = {"type": "user", "uuid": "u9", "message": {"role": "user", "content": "<ci-monitor-event>2 checks failed</ci-monitor-event>"}}
     said = {"type": "user", "uuid": "u8", "message": {"role": "user", "content": "What failed?"}}
     items = []
-    record.parse_records([json.dumps(event), json.dumps(said)], items)
+    recordstore.parse_records([json.dumps(event), json.dumps(said)], items)
     assert [i["text"] for i in items] == ["What failed?"], items
 
 
@@ -2710,12 +2719,13 @@ def test_open_chat(app):
     assert win.reader.path == CHAT, "the chat open, whichever notebook's"
     win.open_chat(OTHER)
     assert len(win.store.notebooks) == count and win.current is b and "chat" not in b and "folders" not in b
-    assert isinstance(win.tabs.current(), record.Reader) and win.reader.path == os.path.realpath(OTHER)
-    assert [c["path"] for c in record.Store().chats] == [os.path.realpath(CHAT), os.path.realpath(OTHER)], "kept open"
-    assert record.Store().reading["path"] == os.path.realpath(OTHER), "kept"
+    assert isinstance(win.tabs.current(), recordreader.Reader) and win.reader.path == os.path.realpath(OTHER)
+    assert [c["path"] for c in recordstore.Store().chats] == [os.path.realpath(CHAT), os.path.realpath(OTHER)], \
+        "kept open"
+    assert recordstore.Store().reading["path"] == os.path.realpath(OTHER), "kept"
     win.open_item({"kind": "chat", "path": CHAT})
     assert len(win.store.notebooks) == count and win.current is b and win.reader.path == os.path.realpath(CHAT)
-    assert len([c for c in win.tabs.children() if isinstance(c, record.Reader)]) == 2, "open already: shown"
+    assert len([c for c in win.tabs.children() if isinstance(c, recordreader.Reader)]) == 2, "open already: shown"
     select(win, "a")
     assert win.reader.path == os.path.realpath(CHAT), "another notebook: the same chats"
     win.tabs.close(("chat", os.path.realpath(OTHER)))
@@ -2729,7 +2739,7 @@ def test_choose_chat(app):
                 {"path": OTHER, "title": "Other", "cwd": REPO, "mtime": time.time() - 999},
                 {"path": "/x/3.jsonl", "title": "Gone", "cwd": "/no/such/folder", "mtime": time.time()}]
     rows = lambda lb: [r.get_title() for i in range(20) if (r := lb.get_row_at_index(i))]  # noqa: E731
-    chats = record.ChatDialog(picked.append)
+    chats = recordui.ChatDialog(picked.append)
     chats._loaded(sessions)
     assert rows(chats.list) == ["Jobs", "Other", "Gone"], rows(chats.list)
     chats.search.set_text("oth")
@@ -2872,7 +2882,7 @@ def test_sub_pages(app):
     rows = lambda: [(r.page, r.tree_anchor.has_css_class("page-placeholder"))  # noqa: E731
                     for i in range(50) if (r := win.pages.index.get_row_at_index(i))]
     try:
-        d = win.open_note(record.HOME)
+        d = win.open_note(recordstore.HOME)
         d.buf.set_text("")
         d.buf.insert_at_cursor("Notes on +Ideas")
         assert d._key(None, record.Gdk.KEY_space, 0, 0) is False, "the space goes in as typed"
@@ -2900,11 +2910,11 @@ def test_sub_pages(app):
             "[[+Goals]]" in notebook["pages"]["Home"]
         assert win.tabs.get(("note", "Home:Goals")) is d, "its tab with it"
     finally:
-        for key in [k for k in list(win.tabs.pages) if k[0] == "note" and k[1] != record.HOME]:
+        for key in [k for k in list(win.tabs.pages) if k[0] == "note" and k[1] != recordstore.HOME]:
             win.tabs.close(key)
         notebook["pages"].clear()
         notebook["pages"].update(saved)
-        win.open_note(record.HOME).reload()
+        win.open_note(recordstore.HOME).reload()
 
 
 def test_saves_links_and_blank_notebooks(app):
@@ -2919,7 +2929,7 @@ def test_saves_links_and_blank_notebooks(app):
     index = win.pages.index
     listed = lambda: [index.get_row_at_index(i).page for i in range(30) if index.get_row_at_index(i)]  # noqa: E731
     try:
-        d = win.open_note(record.HOME)
+        d = win.open_note(recordstore.HOME)
         d.buf.set_text("")
         d.buf.insert_at_cursor("Jobs run nightly. ")
         wait_for(lambda: "nightly" in on_disk()["pages"]["Home"], "saved as typed")
@@ -2930,13 +2940,13 @@ def test_saves_links_and_blank_notebooks(app):
         assert "[[+Plans]] today" in on_disk()["pages"]["Home"], "on the disk as the page was left"
         assert os.listdir(os.path.join(os.path.dirname(store.path), "backups")), "a backup"
         win.tabs.close(("note", "Home:Plans"))  # (left, its tab closed: empty, it's listed for its link only)
-        d = win.open_note(record.HOME)
+        d = win.open_note(recordstore.HOME)
         hidden = d.buf.get_tag_table().lookup("hidden")
         shown = "".join(c for i, c in enumerate(d.text()) if not d.buf.get_iter_at_offset(i).has_tag(hidden))
         assert shown == "Jobs run nightly. Plans today", repr(shown)
         assert "Home:Plans" in listed() and "Home:Plans" not in notebook["pages"], "listed for its link, empty"
-        m = next(record.LINK_RE.finditer(d.text()))
-        d.buf.place_cursor(d.buf.get_iter_at_offset(record.link_name(m)[1]))
+        m = next(recordstore.LINK_RE.finditer(d.text()))
+        d.buf.place_cursor(d.buf.get_iter_at_offset(recordstore.link_name(m)[1]))
         d._key(None, record.Gdk.KEY_x, 0, 0)
         d.buf.insert_at_cursor("!")
         assert "[[+Plans]]! today" in d.text(), "typed at its last letter: beside it"
@@ -2945,8 +2955,8 @@ def test_saves_links_and_blank_notebooks(app):
     finally:
         notebook["pages"].clear()
         notebook["pages"].update(saved)
-        win.open_note(record.HOME).reload()
-    record.Window.rename, rename = (lambda self, *_how: None), record.Window.rename  # (its dialog)
+        win.open_note(recordstore.HOME).reload()
+    recordwindow.Window.rename, rename = (lambda self, *_how: None), recordwindow.Window.rename  # (its dialog)
     try:
         before = len(store.notebooks)
         win.new_notebook()
@@ -2956,7 +2966,7 @@ def test_saves_links_and_blank_notebooks(app):
         select(win, "a")
         wait_for(lambda: blank not in store.notebooks, "the blank one let go")
     finally:
-        record.Window.rename = rename
+        recordwindow.Window.rename = rename
 
 
 def test_baude_niceties(app):
@@ -2983,7 +2993,7 @@ def test_baude_niceties(app):
     dlg = win.open_feedback()
     dlg.text.get_buffer().set_text("Too tall.")
     dlg.save()
-    assert record.feedback.feedback_items()[0]["text"] == "Too tall."
+    assert recordwindow.feedback.feedback_items()[0]["text"] == "Too tall."
     pal = record.widgets.RefPalette(win, space, win.open_item)
     pal.entry.set_text("relay")
     pal.fill()
@@ -2993,7 +3003,7 @@ def test_baude_niceties(app):
     assert isinstance(row.prose, record.widgets.MarkdownView)
     markup = " ".join(w.get_label() for w in walk(row.prose) if isinstance(w, record.Gtk.Label))
     assert "baude-ref:relay_jobs.py" in markup and "baude-icon-file" in markup, markup[:300]
-    d = win.open_note(record.HOME)
+    d = win.open_note(recordstore.HOME)
     saved = d.text()
     try:
         d.buf.insert_at_cursor(" @relay_jobs.py")
@@ -3114,8 +3124,8 @@ def test_zoom_does_only_what_shows(app):
     note.buf.set_text("\n\n".join(f"Line {n} of a page, and @relay_jobs.py" for n in range(200)))
     reader = win.open_chat(transcript("zoom-long", [f"Reply {n}: {reply}" for n in range(240)]), present=False)
     # (a label's width, had without Pango laying it out at no width: the same as a plain label's, its height too)
-    wrapped = widgets.WrapLabel(label=reply, wrap=True, wrap_mode=record.Pango.WrapMode.WORD_CHAR)
-    plain = Gtk.Label(label=reply, wrap=True, wrap_mode=record.Pango.WrapMode.WORD_CHAR)
+    wrapped = widgets.WrapLabel(label=reply, wrap=True, wrap_mode=recordui.Pango.WrapMode.WORD_CHAR)
+    plain = Gtk.Label(label=reply, wrap=True, wrap_mode=recordui.Pango.WrapMode.WORD_CHAR)
     assert wrapped.measure(Gtk.Orientation.HORIZONTAL, -1)[1] == plain.measure(Gtk.Orientation.HORIZONTAL, -1)[1]
     assert wrapped.measure(Gtk.Orientation.HORIZONTAL, -1)[0] <= widgets.WrapLabel.NARROWEST
     assert wrapped.measure(Gtk.Orientation.VERTICAL, 400)[0] == plain.measure(Gtk.Orientation.VERTICAL, 400)[0]
@@ -3196,7 +3206,7 @@ def test_zoom_does_only_what_shows(app):
         assert frames[0][0] < len(reader.rows) / 3, f"the first frame's messages: {frames[0][0]} of {len(reader.rows)}"
         assert frames[-1][0] == len(reader.rows), "all back"
         back = [b[0] - a[0] for a, b in zip(frames, frames[1:])]
-        assert len(frames) > 3 and max(back) <= record.ZoomPlace.BACK + 1, f"a few a frame: {back}"
+        assert len(frames) > 3 and max(back) <= recordui.ZoomPlace.BACK + 1, f"a few a frame: {back}"
         assert not any(getattr(r, "zoom_hidden", False) for r in reader.rows)
         stale = [s for f in frames for s in f[2] if abs(s - 1.3) > 0.03]
         assert not stale, f"{len(stale)} times a message was drawn at another size: {stale[:3]}"
@@ -3208,7 +3218,7 @@ def test_zoom_does_only_what_shows(app):
         # the tabs not shown: nothing of theirs touched
         assert hidden.box.zoomed == hidden_class and font(label_of(hidden_at[0])) == hidden_font, "the chat not shown"
         assert not placed & {lb for lb in walk(hidden.box) if isinstance(lb, widgets.LinkLabel)}, "its logos neither"
-        assert note.zoomed != record.zoom_class(1.3), "nor the page"
+        assert note.zoomed != recordui.zoom_class(1.3), "nor the page"
 
         # shown: at the new size in its first frame, its place kept, the rest coming back as the chat's did
         frames.clear()
@@ -3220,7 +3230,7 @@ def test_zoom_does_only_what_shows(app):
                            font(label_of(hidden_at[0])) / hidden_font))
         stop = each_frame(frame_there)
         win.tabs.show(hidden.tab_key)
-        assert hidden.box.zoomed == record.zoom_class(1.3), "as it's shown, before its first frame"
+        assert hidden.box.zoomed == recordui.zoom_class(1.3), "as it's shown, before its first frame"
         wait_for(lambda: frames and done(hidden), "it's all back", 30)
         pump(0.2)
         stop()
@@ -3232,7 +3242,7 @@ def test_zoom_does_only_what_shows(app):
         # the same for a page of notes: what's at the top of the view stays there
         win.tabs.show(note.tab_key)
         pump(0.5)
-        assert note.zoomed == record.zoom_class(1.3)
+        assert note.zoomed == recordui.zoom_class(1.3)
         value = (note.scroll.get_vadjustment().get_upper() - note.scroll.get_vadjustment().get_page_size()) / 2
         note.scroll.get_vadjustment().set_value(value)
         pump(0.3)
@@ -3246,7 +3256,7 @@ def test_zoom_does_only_what_shows(app):
         wait_for(lambda: drawn and done(note), "the page's zoom done", 30)
         pump(0.2)
         stop()
-        assert note.zoomed == record.zoom_class(1.0)
+        assert note.zoomed == recordui.zoom_class(1.0)
         assert max(abs(y - note_y) for y in drawn) <= 3, f"the page's place moved: {note_y:.0f} -> {drawn[:4]}"
 
         # let go of the keys: written, once
@@ -3410,7 +3420,7 @@ def test_restart_for_update(app):
         assert win.idle()
     finally:
         del win.is_active
-    rows = [w for w in walk(record.Settings(win).get_visible_page()) if isinstance(w, record.Adw.SwitchRow)]
+    rows = [w for w in walk(recordwindow.Settings(win).get_visible_page()) if isinstance(w, record.Adw.SwitchRow)]
     assert len(rows) == 1
     calls, saved = [], (os.execv, record.update.front_app)
     os.execv, record.update.front_app = (lambda exe, argv: calls.append(argv)), (lambda: 4242)
@@ -3418,8 +3428,8 @@ def test_restart_for_update(app):
         win.restart({"from": "a", "to": "b", "commits": 2})
     finally:
         os.execv, record.update.front_app = saved
-    state = json.load(open(record.restart_path()))
-    os.remove(record.restart_path())
+    state = json.load(open(recordstore.restart_path()))
+    os.remove(recordstore.restart_path())
     assert calls and state["front"] == 4242 and state["updated"]["commits"] == 2 and state["record"] == "a"
 
 
@@ -3469,7 +3479,7 @@ def test_restart_keeps_what_is_typed(app):
     caret; on a page of notes, the caret, a new title not yet taken, and where you were typing."""
     win = app.win
     select(win, "a")
-    d = win.open_note(record.HOME)
+    d = win.open_note(recordstore.HOME)
     words = "Is **this** right?"
     win.chat.composer.get_buffer().set_text(words)
     win.chat.composer.get_buffer().place_cursor(win.chat.composer.get_buffer().get_iter_at_offset(7))
@@ -3484,13 +3494,13 @@ def test_restart_keeps_what_is_typed(app):
     assert state["note_caret"] == [5, 9] and state["note_title"] == "A new name" and state["focus"] == "note"
     win.chat.composer.get_buffer().set_text("")
     d.buf.place_cursor(d.buf.get_start_iter())
-    d.title.set_text(record.short_page(record.HOME))
+    d.title.set_text(recordstore.short_page(recordstore.HOME))
     win.restore(state)
     pump(0.1)
     d = win.tabs.current()
     assert widgets_text(win.chat.composer) == words and record.widgets.caret_of(win.chat.composer) == [7, 7]
     assert record.widgets.caret_of(d.view) == [5, 9] and d.title.get_text() == "A new name" and win.get_focus() is d.view
-    d.title.set_text(record.short_page(record.HOME))
+    d.title.set_text(recordstore.short_page(recordstore.HOME))
     win.chat.composer.get_buffer().set_text("")
     d.buf.set_text("")
 
@@ -3507,7 +3517,7 @@ def test_restart_keeps_scroll_positions(app):
     select(win, "a")
     long_note = "\n\n".join(f"Line {n} of a long page" for n in range(300))
     win.open_note("Behind").buf.set_text(long_note)
-    d = win.open_note(record.HOME)
+    d = win.open_note(recordstore.HOME)
     d.buf.set_text(long_note)
     chat = transcript("scrolled", [f"Reply {n}\n\n" + "Words " * 80 for n in range(40)])
     reader = win.open_chat(chat)
@@ -3523,22 +3533,22 @@ def test_restart_keeps_scroll_positions(app):
     win.tabs.show(("note", "Behind"))
     pump(0.3)
     behind = settle(win.tabs.get(("note", "Behind")).scroll, 700)
-    win.tabs.show(("note", record.HOME))
+    win.tabs.show(("note", recordstore.HOME))
     pump(0.3)
     shown = settle(d.scroll, 900)
     state = json.loads(json.dumps(win.state()))
     places = {tuple(k): p for k, p in state["places"]}
-    assert places[("note", record.HOME)]["value"] == shown and not places[("note", record.HOME)]["at_end"]
+    assert places[("note", recordstore.HOME)]["value"] == shown and not places[("note", recordstore.HOME)]["at_end"]
     assert places[("chat", chat)]["value"] == read, (places, read)
     assert places[("note", "Behind")]["value"] == behind, (places, behind)
 
     win.let_go()  # (a window made again from that, as a restart's is)
-    app.app.win = new = record.Window(app.app)
+    app.app.win = new = recordwindow.Window(app.app)
     new.restore(state)
     new.present()
     win.destroy()
     try:
-        page = new.tabs.get(("note", record.HOME))
+        page = new.tabs.get(("note", recordstore.HOME))
         assert new.tabs.current() is page and page.scroll.held
         wait_for(lambda: page.scroll.get_vadjustment().get_value() == shown, "the page back where it was")
         pump(1.2)  # (past what would have taken a chat to its end)
@@ -3694,8 +3704,8 @@ def test_nothing_jumps_as_the_notebooks_slide(app):
     saved, widgets.SLIDE_MS = widgets.SLIDE_MS, 180
     win = app.win
     select(win, "a")
-    win.open_note(record.HOME)
-    for key in [k for k in win.tabs.pages if k != ("note", record.HOME)]:
+    win.open_note(recordstore.HOME)
+    for key in [k for k in win.tabs.pages if k != ("note", recordstore.HOME)]:
         win.tabs.close(key)  # (the tabs to themselves: too many for the bar and the first is scrolled, as it narrows)
     slide, column, right = win.left_slide, win.left_slide.fixed, win.right_slide
 
@@ -3909,35 +3919,38 @@ def test_selection_runs_across_paragraphs(app):
 def test_citation_link_says_where_a_passage_is():
     """A citation link holds the chat, the message and the passage's words; a long passage only its ends. The words before
     it tell it from the same words said elsewhere, and its text survives what a link can't hold. (#48)"""
-    link = record.citation_link("abc-1", "msg_1", "said before it", "a (small) - passage, with [marks]")
-    shown, url = record.MD_LINK_RE.fullmatch(link).groups()
+    link = recordstore.citation_link("abc-1", "msg_1", "said before it", "a (small) - passage, with [marks]")
+    shown, url = recordstore.MD_LINK_RE.fullmatch(link).groups()
     assert shown == "“a (small) - passage, with marks”", shown
-    assert record.parse_citation(url) == {"session": "abc-1", "message": "msg_1", "prefix": "said before it", "length": 33,
+    assert recordstore.parse_citation(url) == {"session": "abc-1", "message": "msg_1", "prefix": "said before it", "length": 33,
                                           "start": "a (small) - passage, with [marks]", "end": ""}, url
-    assert "@" not in record.MD_LINK_RE.fullmatch(record.citation_link("s", "m", "", "ask @orders-api why")).group(1)
+    assert "@" not in recordstore.MD_LINK_RE.fullmatch(
+        recordstore.citation_link("s", "m", "", "ask @orders-api why")).group(1)
     weird = "100% of it, 50-50: “odd” & é ☃ a=b#c?d"
-    assert record.passage_in([weird], record.parse_citation(record.MD_LINK_RE.fullmatch(
-        record.citation_link("s", "m", "", weird)).group(2))) == [(0, 0, len(weird))], "what a link can't hold as it is"
+    assert recordstore.passage_in([weird], recordstore.parse_citation(recordstore.MD_LINK_RE.fullmatch(
+        recordstore.citation_link("s", "m", "", weird)).group(2))) == [(0, 0, len(weird))], \
+        "what a link can't hold as it is"
     long = " ".join(f"w{n}" for n in range(40))
-    url = record.MD_LINK_RE.fullmatch(record.citation_link("s", None, "", long)).group(2)
-    cite = record.parse_citation(url)
+    url = recordstore.MD_LINK_RE.fullmatch(recordstore.citation_link("s", None, "", long)).group(2)
+    cite = recordstore.parse_citation(url)
     assert (cite["start"], cite["end"], cite["prefix"]) == ("w0 w1 w2 w3 w4 w5 w6 w7", " ".join(f"w{n}" for n in range(32, 40)),
                                                             ""), cite
-    assert record.parse_citation("https://example.com") is None
-    assert record.parse_citation("baude-chat:../../etc?message=#:~:text=x") is None, "not a chat's id"
+    assert recordstore.parse_citation("https://example.com") is None
+    assert recordstore.parse_citation("baude-chat:../../etc?message=#:~:text=x") is None, "not a chat's id"
 
     texts = ["the job ran", "and \u2063the  job\nran again", "the job ran at last"]
-    assert record.passage_in(texts, {"start": "the job ran", "end": "", "prefix": ""}) == [(0, 0, 11)]
-    assert record.passage_in(texts, {"start": "the job ran", "end": "", "prefix": "again"}) == [(2, 0, 11)]
-    assert record.passage_in(texts, {"start": "the job ran", "end": "", "prefix": "and"}) == [(1, 5, 17)], "its logo, its spaces"
-    assert record.passage_in(texts, {"start": "job ran again", "end": "at last", "prefix": ""}) == [(1, 10, 23), (2, 0, 19)]
-    assert record.passage_in(texts, {"start": "the job ran", "end": "", "prefix": "gone"}) == [(0, 0, 11)], "its first place"
-    assert record.passage_in(texts, {"start": "never said", "end": "", "prefix": ""}) is None
-    assert record.passage_in(texts, {"start": "the job", "end": "never said", "prefix": ""}) is None
+    assert recordstore.passage_in(texts, {"start": "the job ran", "end": "", "prefix": ""}) == [(0, 0, 11)]
+    assert recordstore.passage_in(texts, {"start": "the job ran", "end": "", "prefix": "again"}) == [(2, 0, 11)]
+    assert recordstore.passage_in(texts, {"start": "the job ran", "end": "", "prefix": "and"}) == [(1, 5, 17)], "its logo, its spaces"
+    assert recordstore.passage_in(texts, {"start": "job ran again", "end": "at last", "prefix": ""}) == [(1, 10, 23), (2, 0, 19)]
+    assert recordstore.passage_in(texts, {"start": "the job ran", "end": "", "prefix": "gone"}) == [(0, 0, 11)], "its first place"
+    assert recordstore.passage_in(texts, {"start": "never said", "end": "", "prefix": ""}) is None
+    assert recordstore.passage_in(texts, {"start": "the job", "end": "never said", "prefix": ""}) is None
     again = ["one two three four, more words, one two three four"]
-    assert record.passage_in(again, {"start": "one", "end": "three four", "prefix": "", "length": 50}) == [(0, 0, 50)], \
+    assert recordstore.passage_in(again, {"start": "one", "end": "three four", "prefix": "", "length": 50}) == [(0, 0, 50)], \
         "its last words said twice: as long as it was"
-    assert record.passage_in(again, {"start": "one", "end": "three four", "prefix": "", "length": 18}) == [(0, 0, 18)]
+    assert recordstore.passage_in(again, {"start": "one", "end": "three four", "prefix": "", "length": 18}) == \
+        [(0, 0, 18)]
 
 
 def find_all(root, kind):
@@ -3954,7 +3967,7 @@ def test_record_pane_has_no_name_over_it(app):
     win = app.win
     select(win, "a")
     pump(0.2)
-    chat, name = win.chat, record.full_name(win.current)
+    chat, name = win.chat, recordstore.full_name(win.current)
     head = chat.get_first_child()
     kids = []
     kid = head.get_first_child()
@@ -4015,7 +4028,7 @@ def test_citation_links(app):
     r.box.activate_action("chat-text.item1", None)
     menus[0].popdown()
     pump(0.6)  # (long enough that the next press isn't a double click)
-    assert len(copied) == 1 and record.CITE_SCHEME in copied[0], copied
+    assert len(copied) == 1 and recordstore.CITE_SCHEME in copied[0], copied
 
     hand.down(*at(near, 6))
     pump(0.05)
@@ -4035,7 +4048,7 @@ def test_citation_links(app):
     other.buf.place_cursor(other.buf.get_end_iter())
     pump(0.2)
     shot(win, "record-citation-in-the-notes")
-    hit = record.MD_LINK_RE.search(other.text())
+    hit = recordstore.MD_LINK_RE.search(other.text())
     rect = other.view.get_iter_location(other.buf.get_iter_at_offset(hit.start() + 3))
     x, y = other.view.buffer_to_window_coords(Gtk.TextWindowType.WIDGET, rect.x + 1, rect.y + rect.height // 2)
     assert other._at(x, y) == ("url", hit.group(2)), other._at(x, y)
@@ -4065,7 +4078,7 @@ def test_citation_links(app):
 
     # a chat a few pages long, just opened: at the passage, not gone on to its end as it opens
     short = transcript("cited-short", [f"Short reply {n} of the chat.\n\nWith a second part {n}." for n in range(24)])
-    win.open_citation(record.MD_LINK_RE.fullmatch(record.citation_link("cited-short", "m2", "", "Short reply 2 of the chat.")).group(2))
+    win.open_citation(recordstore.MD_LINK_RE.fullmatch(recordstore.citation_link("cited-short", "m2", "", "Short reply 2 of the chat.")).group(2))
     s = win.open_chat(short)
     wait_for(lambda: s.cited, "the passage shown", 5)
     pump(0.8)
@@ -4084,7 +4097,7 @@ def test_citation_links(app):
     # in a long code block: the block's own view goes to it too
     code = "\n".join(f"line_{n} = {n}" for n in range(400))
     coded = transcript("cited-code", ["Some code:\n\n```python\n" + code + "\n```\n\nThat's it."])
-    win.open_citation(record.MD_LINK_RE.fullmatch(record.citation_link("cited-code", "m0", "", "line_300 = 300")).group(2))
+    win.open_citation(recordstore.MD_LINK_RE.fullmatch(recordstore.citation_link("cited-code", "m0", "", "line_300 = 300")).group(2))
     c = win.open_chat(coded)
     wait_for(lambda: c.cited, "the passage shown", 5)
     pump(0.3)
@@ -4185,10 +4198,10 @@ def test_markdown_notes(app):
     """The notes in Markdown, drawn as Self's editor draws it: a heading's # and a bold's ** shown only on the
     caret's line; a bullet and a box drawn; Enter goes on with a list and ends it on an empty item. Zim's markup from
     before is made Markdown (zim_to_markdown)."""
-    assert record.zim_to_markdown("====== Jobs ======\n* one\n[*] done\n//slant//") == "# Jobs\n- one\n- [x] done\n*slant*"
+    assert recordstore.zim_to_markdown("====== Jobs ======\n* one\n[*] done\n//slant//") == "# Jobs\n- one\n- [x] done\n*slant*"
     win = app.win
     select(win, "b")
-    d = win.open_note(record.HOME)
+    d = win.open_note(recordstore.HOME)
     saved = d.text()
     try:
         d.buf.set_text("# Title\n- one\n- [ ] two\nsome **bold**")
@@ -4208,7 +4221,7 @@ def test_markdown_notes(app):
         assert x("not a list") == d.MARGIN and abs(x("top") - (d.MARGIN + d.LIST_PAD + col)) <= 1
         assert abs(x("in") - x("top") - d.INDENT) <= 1 and abs(x("deeper") - x("in") - d.INDENT) <= 1
         assert abs(x("first") - x("top")) <= 1, "a number's text where a bullet's is"
-        assert tags.lookup("bullet").get_property("foreground-rgba").alpha == record.NotesView.MARKER_ALPHA
+        assert tags.lookup("bullet").get_property("foreground-rgba").alpha == recordui.NotesView.MARKER_ALPHA
         d.buf.set_text("- " + "wrapping words " * 40 + "\n- \nnot a list")  # (a long item, and a new one)
         d.buf.place_cursor(d.buf.get_iter_at_offset(d.text().index("\n- \n") + 3))
         d._highlight()
@@ -4544,7 +4557,7 @@ def test_notes_find(app):
         pump(0.1)
         rect = d.view.char_rect(d.buf.get_iter_at_offset(d.matches[0][0]))
         y = d.view.buffer_to_window_coords(Gtk.TextWindowType.WIDGET, rect.x, rect.y)[1]
-        ok, there = d.view.compute_point(d.scroll, record.Graphene.Point().init(0, y))
+        ok, there = d.view.compute_point(d.scroll, recordui.Graphene.Point().init(0, y))
         assert ok and 0 <= there.y <= d.scroll.get_height() - rect.height, (there.y, d.scroll.get_height())
         found("line 28")  # (line 28, and line 280 to 289: from what's shown, the far end's far past the first)
         assert seen(*d.matches[d.match_index]) == "line 28" and d.matches[d.match_index][0] > d.matches[0][0], \
@@ -4565,16 +4578,16 @@ def test_notes_find(app):
 def test_full_width(app):
     """☰ → Full-width text, as Baude's: the chat read and the diary across the whole pane, kept for next time."""
     win = app.win
-    win.open_note(record.HOME)
-    assert win.reader.clamp.get_maximum_size() == record.Reader.WIDTH
+    win.open_note(recordstore.HOME)
+    assert win.reader.clamp.get_maximum_size() == recordreader.Reader.WIDTH
     win.activate_action("win.fullwidth", None)
     try:
         assert win.lookup_action("fullwidth").get_state().get_boolean()
         assert win.reader.clamp.get_maximum_size() == win.diary.clamp.get_maximum_size() == 100_000
-        assert record.Store().full_width, "kept in records.json"
+        assert recordstore.Store().full_width, "kept in records.json"
     finally:
         win.activate_action("win.fullwidth", None)
-    assert win.diary.clamp.get_maximum_size() == record.DiaryEditor.WIDTH and not record.Store().full_width
+    assert win.diary.clamp.get_maximum_size() == diaryeditor.DiaryEditor.WIDTH and not recordstore.Store().full_width
 
 
 def test_one_record_running(app):
@@ -4594,7 +4607,7 @@ def test_new_ones_named(app):
         win.new_notebook()
         pump(0.2)
         win.get_visible_dialog().force_close()
-        assert record.full_name(win.current) == want, record.full_name(win.current)
+        assert recordstore.full_name(win.current) == want, recordstore.full_name(win.current)
     assert len(win.store.notebooks) == count + 2
     for t in [t for t in win.store.notebooks if t["name"].startswith("Untitled")]:
         win.store.delete(t)
@@ -4610,7 +4623,7 @@ def test_renamed_then_another_page_clicked(app):
         return
     win = app.win
     select(win, "a")
-    home = win.open_note(record.HOME)
+    home = win.open_note(recordstore.HOME)
     d = win.open_note("Brand new")
     try:
         pump(0.3)
@@ -4627,7 +4640,7 @@ def test_renamed_then_another_page_clicked(app):
         d.title.grab_focus()
         d.title.set_text("Renamed page")
         pump(0.1)
-        row = next(r for r in listed_rows(win.pages.index) if r.page == record.HOME)
+        row = next(r for r in listed_rows(win.pages.index) if r.page == recordstore.HOME)
         ok, p = row.compute_point(win, widgets.Graphene.Point().init(30, 10))
         hand.down(p.x, p.y)
         hand.up(p.x, p.y)
@@ -4636,7 +4649,7 @@ def test_renamed_then_another_page_clicked(app):
         assert win.tabs.get(("note", "Renamed page")) is d and win.tabs.get(("note", "Brand new")) is None
         assert d.page == "Renamed page" and "Renamed page" in win.current["pages"] and "Brand new" not in win.current["pages"]
         assert [r.page for r in listed_rows(win.pages.index)] == list(win.pages.names()[0])
-        assert win.pages.index.get_selected_row().page == record.HOME, "the one clicked, selected"
+        assert win.pages.index.get_selected_row().page == recordstore.HOME, "the one clicked, selected"
     finally:
         win.tabs.close(("note", d.page))
 
@@ -4687,7 +4700,7 @@ def test_rename(app):
     assert entry.get_text() == "Biology reading" and entry.get_next_sibling() is None, "nothing after it"
     entry.set_text("  Monorepo   notes ")
     d.emit("response", "ok")
-    assert win.current["name"] == "Monorepo notes" and record.full_name(win.current) == "Monorepo notes"
+    assert win.current["name"] == "Monorepo notes" and recordstore.full_name(win.current) == "Monorepo notes"
 
 
 def test_copy_link_is_a_file_an_agent_can_read(app):
@@ -4734,7 +4747,7 @@ def test_copy_link_is_a_file_an_agent_can_read(app):
         # two notebooks of one name, whichever comes first: neither's path comes to hold the other's page
         one, two = {"id": "a1", "name": "Notes", "pages": {"Home": "x"}}, {"id": "b2", "name": "notes", "pages": {"Home": "y"}}
         for notebooks in ([one, two], [two, one]):
-            paths = record.page_paths(notebooks)
+            paths = recordstore.page_paths(notebooks)
             assert paths["a1", "Home"] == os.path.join("Notes (a1)", "Home.md"), paths
             assert paths["b2", "Home"] == os.path.join("notes (b2)", "Home.md"), paths
         # what isn't Record's stays; one file that can't be written stops neither the rest nor the notes being saved
@@ -4772,7 +4785,7 @@ def test_copy_link_is_a_file_an_agent_can_read(app):
             win.store.save_now()
         # a tab's own, right-clicked, and another shown
         assert win.tabs.view.get_menu_model() is not None, "Record's tabs have the menu (Baude's don't)"
-        win.open_note(record.HOME)
+        win.open_note(recordstore.HOME)
         page = win.tabs.pages[("note", "Plans:Later")]
         win.tabs.view.emit("setup-menu", page)
         win.tabs.view.emit("setup-menu", None)
@@ -4798,14 +4811,14 @@ def test_copy_link_is_a_file_an_agent_can_read(app):
 def settings_opened(win):
     """Settings, opened as ☰ does: nothing in Python has hold of it till it's asked for here."""
     win.activate_action("win.settings", None)
-    wait_for(lambda: isinstance(win.get_visible_dialog(), record.Settings), "Settings")
+    wait_for(lambda: isinstance(win.get_visible_dialog(), recordwindow.Settings), "Settings")
     return win.get_visible_dialog()
 
 
 def export_chosen(win, i):
     """Settings opened, if it isn't, and its i-th export clicked: what's over the window then."""
     open_now = win.get_visible_dialog()
-    row = (open_now if isinstance(open_now, record.Settings) else settings_opened(win)).export_rows[i]
+    row = (open_now if isinstance(open_now, recordwindow.Settings) else settings_opened(win)).export_rows[i]
     pump(0.2)
     row.get_parent().emit("row-activated", row)
     pump(0.2)
@@ -4817,25 +4830,25 @@ def export_sizes_known(rows):
 
 
 def forget_zip_sizes():
-    with record._ZIP_SIZES:
-        record._ZIPPED.clear()
+    with recordui._ZIP_SIZES:
+        recordui._ZIPPED.clear()
 
 
 def cite(*paths):
     """Chats cited, as a passage's citation has them (Reader.citation): what makes them a notebook's (chats_of)."""
-    return " ".join(record.CITE_SCHEME + os.path.basename(p)[:-len(".jsonl")] for p in paths)
+    return " ".join(recordstore.CITE_SCHEME + os.path.basename(p)[:-len(".jsonl")] for p in paths)
 
 
 def cite_chat(win, path=CHAT):
     """A chat cited on the open notebook's Home, so its export has it: Home as it was, for home_back."""
-    home = win.current["pages"].get(record.HOME, "")
-    win.current["pages"][record.HOME] = f"{home}\n\n{cite(path)}"
+    home = win.current["pages"].get(recordstore.HOME, "")
+    win.current["pages"][recordstore.HOME] = f"{home}\n\n{cite(path)}"
     return home
 
 
 def home_back(win, home):
     """The open notebook's Home as it was (cite_chat), kept."""
-    win.current["pages"][record.HOME] = home
+    win.current["pages"][recordstore.HOME] = home
     win.store.save_now()
 
 
@@ -4847,53 +4860,53 @@ def test_export_sizes_are_the_zips(app):
     named = transcript("chat-sizes", ["Ünï wörds " * 300])
     with open(named, "a") as f:
         f.write(json.dumps({"type": "custom-title", "customTitle": "Ça va, a/b"}) + "\n")
-    book = {"id": "x1", "name": "Shöp notes", "pages": {record.HOME: "Home words " * 500 + cite(CHAT, named), "Plans:Nëxt": "Next", "Empty": " "},
+    book = {"id": "x1", "name": "Shöp notes", "pages": {recordstore.HOME: "Home words " * 500 + cite(CHAT, named), "Plans:Nëxt": "Next", "Empty": " "},
             "messages": [{"role": "user", "text": "What is it?", "quote": "a passage"}, {"role": "record", "text": "A thing."}]}
-    other = {"id": "x2", "name": "Elsewhere", "pages": {record.HOME: "Other words " + cite(CHAT)}, "messages": []}
+    other = {"id": "x2", "name": "Elsewhere", "pages": {recordstore.HOME: "Other words " + cite(CHAT)}, "messages": []}
     nothing = {"id": "x3", "name": "Nothing", "pages": {}, "messages": []}
 
     def made(notebooks, extras):
         path = os.path.join(out, "made.zip")
-        record.export_zip(path, notebooks, extras)
+        recordui.export_zip(path, notebooks, extras)
         return os.path.getsize(path)
     forget_zip_sizes()
-    reads, read = [], record.chat_text
+    reads, read = [], recordui.chat_text
 
     def counted(*a):
         reads.append(a[0])
         return read(*a)
-    record.chat_text = counted
+    recordui.chat_text = counted
     try:
         def data():
             return sorted((os.path.join(d, f), os.stat(os.path.join(d, f)).st_mtime_ns)
                           for d, _, files in os.walk(os.environ["RECORD_DATA"]) for f in files)
-        before, zipping = data(), record.zipfile.ZipFile
-        record.zipfile.ZipFile = None  # (it makes no zip to see how big it is)
+        before, zipping = data(), recordui.zipfile.ZipFile
+        recordui.zipfile.ZipFile = None  # (it makes no zip to see how big it is)
         try:
-            both = record.zip_sizes([book, other])
+            both = recordui.zip_sizes([book, other])
         finally:
-            record.zipfile.ZipFile = zipping
+            recordui.zipfile.ZipFile = zipping
         assert data() == before and not os.listdir(out), "nothing written"
         stopped = threading.Event()
         stopped.set()
-        assert record.zip_sizes([book, other], stopped) is None, "not wanted any more"
+        assert recordui.zip_sizes([book, other], stopped) is None, "not wanted any more"
         assert named in reads and CHAT in reads and len(reads) == len(set(reads)), reads
         first = list(reads)
-        assert record.zip_sizes([book, other]) == both and record.zip_sizes([other]) and reads == first, "none read again"
+        assert recordui.zip_sizes([book, other]) == both and recordui.zip_sizes([other]) and reads == first, "none read again"
         with open(named, "a") as f:
             f.write(json.dumps({"type": "assistant", "cwd": REPO, "uuid": "a9", "message": {
                 "id": "m9", "role": "assistant", "content": [{"type": "text", "text": "More, and more words."}]}}) + "\n")
         del reads[:]
-        changed = record.zip_sizes([book, other])
+        changed = recordui.zip_sizes([book, other])
         assert reads == [named], reads
         assert changed[0] == both[0] and changed[1] > both[1], (both, changed)
-        record.chat_text = read
+        recordui.chat_text = read
         for notebooks in ([book, other], [book], [other], [nothing], []):
-            assert record.zip_sizes(notebooks) == (made(notebooks, False), made(notebooks, True)), notebooks
+            assert recordui.zip_sizes(notebooks) == (made(notebooks, False), made(notebooks, True)), notebooks
     finally:
-        record.chat_text = read
+        recordui.chat_text = read
         os.remove(named)
-    assert [record.size_said(n) for n in (412, 3_400, 12_340, 999_600, 3_400_000, 9_960_000, 177_000_000, 1_500_000_000)] == [
+    assert [recordui.size_said(n) for n in (412, 3_400, 12_340, 999_600, 3_400_000, 9_960_000, 177_000_000, 1_500_000_000)] == [
         "412 bytes", "3.4 KB", "12 KB", "1.0 MB", "3.4 MB", "10 MB", "177 MB", "1.5 GB"]
 
 
@@ -4922,8 +4935,8 @@ def test_export_in_settings(app):
         path = os.path.join(out, "size.zip")
         sizes = []
         for extras in (False, True):
-            record.export_zip(path, notebooks, extras)
-            sizes.append(record.size_said(os.path.getsize(path)))
+            recordui.export_zip(path, notebooks, extras)
+            sizes.append(recordui.size_said(os.path.getsize(path)))
         os.remove(path)
         return f"{sizes[0]}, or {sizes[1]} with glossary and chats"
     was = record.Gtk.FileDialog
@@ -4943,7 +4956,7 @@ def test_export_in_settings(app):
     cancelled, toasts, win.toast = [], [], lambda text: toasts.append(text)
     record.Gtk.FileDialog = Saving
     try:
-        rows = record.Settings(win).export_rows
+        rows = recordwindow.Settings(win).export_rows
         assert all(r.get_activatable() for r in rows)
         settings = settings_opened(win)
         rows = settings.export_rows
@@ -4962,7 +4975,7 @@ def test_export_in_settings(app):
         d.close()
         pump(0.2)
         settings = win.get_visible_dialog()
-        assert isinstance(settings, record.Settings) and not saves, (settings, saves)
+        assert isinstance(settings, recordwindow.Settings) and not saves, (settings, saves)
         d = export_chosen(win, 0)
         d.close()  # (Esc: the same)
         pump(0.2)
@@ -4989,13 +5002,13 @@ def test_export_in_settings(app):
         d = export_chosen(win, 1)
         assert isinstance(d, Adw.AlertDialog), d
         d.close()
-        wait_for(lambda: isinstance(win.get_visible_dialog(), record.Settings), "asked no more")
+        wait_for(lambda: isinstance(win.get_visible_dialog(), recordwindow.Settings), "asked no more")
         win.get_visible_dialog().close()
         wait_for(lambda: win.get_visible_dialog() is None, "Settings closed")
         # no notebook open: no row for it
         current, win.current = win.current, None
         try:
-            assert len(record.Settings(win).export_rows) == 1
+            assert len(recordwindow.Settings(win).export_rows) == 1
         finally:
             win.current = current
     finally:
@@ -5011,7 +5024,7 @@ def test_export_sizes_off_the_main_loop(app):
     win = app.win
     select(win, "a")
     home = cite_chat(win)
-    gate, reading, most, reads, read = threading.Event(), [], [0], [], record.chat_text
+    gate, reading, most, reads, read = threading.Event(), [], [0], [], recordui.chat_text
 
     def held(*a):
         reads.append(a[0])
@@ -5024,7 +5037,7 @@ def test_export_sizes_off_the_main_loop(app):
     def working(settings):
         return [r.get_subtitle() for r in settings.export_rows] == ["Working out size…"] * 2
     forget_zip_sizes()
-    record.chat_text = held
+    recordui.chat_text = held
     try:
         begun = time.monotonic()
         first = settings_opened(win)
@@ -5055,7 +5068,7 @@ def test_export_sizes_off_the_main_loop(app):
         forget_zip_sizes()
         gate.clear()
         del reads[:]
-        record.chat_text = held
+        recordui.chat_text = held
         closing = settings_opened(win)
         wait_for(lambda: reads, "a chat being read")
         closing.close()
@@ -5066,7 +5079,7 @@ def test_export_sizes_off_the_main_loop(app):
         assert len(reads) == 1, reads
         # a chat gone as it's read: what it comes to without them is still known
         forget_zip_sizes()
-        record.chat_text = lambda *_a: (_ for _ in ()).throw(OSError("gone"))
+        recordui.chat_text = lambda *_a: (_ for _ in ()).throw(OSError("gone"))
         failed = settings_opened(win)
         export_sizes_known(failed.export_rows)
         assert all(r.get_subtitle().endswith("; with glossary and chats, not known") for r in failed.export_rows), \
@@ -5074,7 +5087,7 @@ def test_export_sizes_off_the_main_loop(app):
         failed.close()
         wait_for(lambda: win.get_visible_dialog() is None, "closed")
         # nothing can be worked out
-        deflating, record.deflated_size = record.deflated_size, lambda _t: 1 / 0
+        deflating, recordui.deflated_size = recordui.deflated_size, lambda _t: 1 / 0
         try:
             failed = settings_opened(win)
             export_sizes_known(failed.export_rows)
@@ -5082,10 +5095,10 @@ def test_export_sizes_off_the_main_loop(app):
             failed.close()
             wait_for(lambda: win.get_visible_dialog() is None, "closed")
         finally:
-            record.deflated_size = deflating
+            recordui.deflated_size = deflating
     finally:
         gate.set()
-        record.chat_text = read
+        recordui.chat_text = read
         forget_zip_sizes()
         select(app.win, "a")
         home_back(app.win, home)
@@ -5097,7 +5110,7 @@ def test_feedback_over_settings_and_notes_lines(app):
     wrapped as they are, none scrolled away, no markup that's hidden, each with its own place: a small region is the
     lines it runs through, not the page, in feedback.md and the issue's body."""
     import mouse
-    feedback = record.feedback
+    feedback = recordwindow.feedback
     win = app.win
     select(win, "a")
     d = win.open_note("Long notes")
@@ -5192,7 +5205,7 @@ def test_feedback_over_settings_and_notes_lines(app):
     Settings.activate(None)
     pump(0.4)
     settings = win.get_visible_dialog()
-    assert isinstance(settings, record.Settings)
+    assert isinstance(settings, recordwindow.Settings)
     press()
     dlg = win.get_visible_dialog()
     assert isinstance(dlg, feedback.FeedbackDialog) and list(win.get_dialogs()) == [settings, dlg]
@@ -5241,7 +5254,7 @@ def _feedback_note_box(app):
     import io
     import mouse
     from PIL import Image
-    feedback = record.feedback
+    feedback = recordwindow.feedback
     win = app.win
     win.set_zoom(1.0)  # (as a test before may have left it: the chat's box follows it, the note's doesn't)
     widgets.save_settings(text_scale=None, icon_scale=None)
@@ -5394,9 +5407,9 @@ def test_export_to_a_zip(app):
     out = os.path.join(TMP, "exports")
     os.makedirs(out, exist_ok=True)
     home, tools = None, os.path.join(CHATS, "tools-1.jsonl")
-    book = {"id": "x1", "name": "Shop notes", "pages": {record.HOME: "Home words " + cite(CHAT, tools), "Plans:Next": "Next words", "Empty": " "},
+    book = {"id": "x1", "name": "Shop notes", "pages": {recordstore.HOME: "Home words " + cite(CHAT, tools), "Plans:Next": "Next words", "Empty": " "},
             "messages": [{"role": "user", "text": "What is it?", "quote": "a passage"}, {"role": "record", "text": "A thing."}]}
-    other = {"id": "x2", "name": "Elsewhere", "pages": {record.HOME: "Other words"}, "messages": []}
+    other = {"id": "x2", "name": "Elsewhere", "pages": {recordstore.HOME: "Other words"}, "messages": []}
     with open(tools, "w") as f:  # (what's not shown of a chat stays out)
         for d in ({"type": "user", "cwd": REPO, "uuid": "u1", "message": {"role": "user", "content": "Run it"}},
                   {"type": "assistant", "cwd": REPO, "uuid": "a1", "message": {"id": "m1", "role": "assistant", "content": [
@@ -5407,7 +5420,7 @@ def test_export_to_a_zip(app):
     try:
         # the notes alone
         path = os.path.join(out, "plain.zip")
-        record.export_zip(path, [book, other])
+        recordui.export_zip(path, [book, other])
         with zipfile.ZipFile(path) as z:
             names = sorted(z.namelist())
             assert names == ["conversations/Shop notes.md", "notes/Elsewhere/Home.md", "notes/Shop notes/Home.md",
@@ -5416,14 +5429,14 @@ def test_export_to_a_zip(app):
             said = z.read("conversations/Shop notes.md").decode()
             assert "What is it?" in said and "> a passage\n" in said and "A thing." in said
         two = {**book, "messages": [{"role": "user", "text": "So?", "quote": "one\ntwo"}]}
-        assert "> one\n> two\n" in record.conversation_text(two), record.conversation_text(two)
+        assert "> one\n> two\n" in recordui.conversation_text(two), recordui.conversation_text(two)
         # no two notebooks in one folder, even one named as the other's would be
         same = [{"id": "a1", "name": "Foo", "pages": {}}, {"id": "b1", "name": "Foo", "pages": {}}, {"id": "c1", "name": "Foo (a1)", "pages": {}}]
-        folders = record.book_folders(same)
+        folders = recordstore.book_folders(same)
         assert len(set(folders.values())) == 3 and folders["b1"] == "Foo (b1)", folders
         # with the glossary and chats: those its notes cite and their folders' glossary, not the other's
         path = os.path.join(out, "all.zip")
-        record.export_zip(path, [book, other], extras=True)
+        recordui.export_zip(path, [book, other], extras=True)
         with zipfile.ZipFile(path) as z:
             names = z.namelist()
             assert "glossary/Shop notes.md" in names and "glossary/Elsewhere.md" not in names, names
@@ -5435,27 +5448,27 @@ def test_export_to_a_zip(app):
             assert "secret-command" not in text and "secret-output" not in text, "only what's shown"
         # a chat cited or named in the notes comes too, wherever it is
         session = os.path.basename(CHAT)[:-len(".jsonl")]
-        for words in (f"[“a”]({record.CITE_SCHEME}{session}?message=#:~:text=a)", f"[[@{record.session_info(CHAT)[0]}]]"):
-            cited = {**other, "pages": {record.HOME: words}}
-            found = record.chats_of(cited, [(CHAT, *record.session_info(CHAT))])
+        for words in (f"[“a”]({recordstore.CITE_SCHEME}{session}?message=#:~:text=a)", f"[[@{recordstore.session_info(CHAT)[0]}]]"):
+            cited = {**other, "pages": {recordstore.HOME: words}}
+            found = recordui.chats_of(cited, [(CHAT, *recordstore.session_info(CHAT))])
             assert [c[0] for c in found] == [CHAT], words
-        assert not record.chats_of(other, [(CHAT, *record.session_info(CHAT))]), "nothing to do with it"
+        assert not recordui.chats_of(other, [(CHAT, *recordstore.session_info(CHAT))]), "nothing to do with it"
         # one that can't be made leaves what was there, and nothing beside it
         def broken(*_a):
             raise OSError("no")
-        was, record.conversation_text = record.conversation_text, broken
+        was, recordui.conversation_text = recordui.conversation_text, broken
         try:
             with open(path, "rb") as f:
                 before = f.read()
             try:
-                record.export_zip(path, [book])
+                recordui.export_zip(path, [book])
                 assert False, "it should have failed"
             except OSError:
                 pass
             with open(path, "rb") as f:
                 assert f.read() == before and not os.path.exists(path + ".tmp")
         finally:
-            record.conversation_text = was
+            recordui.conversation_text = was
         # Settings: what's asked, then where it goes
         asked_for = []
         win.choose_zip = lambda *a: asked_for.append(a)
@@ -5473,17 +5486,17 @@ def test_export_to_a_zip(app):
             pump(0.2)
         finally:
             del win.choose_zip
-            if isinstance(win.get_visible_dialog(), record.Settings):
+            if isinstance(win.get_visible_dialog(), recordwindow.Settings):
                 win.get_visible_dialog().close()
             wait_for(lambda: win.get_visible_dialog() is None, "Settings closed")
         # one that fails says so, whatever it was: it isn't taken for done
         said = []
-        made, record.export_zip = record.export_zip, lambda *_a: (_ for _ in ()).throw(MemoryError())
+        made, recordwindow.export_zip = recordui.export_zip, lambda *_a: (_ for _ in ()).throw(MemoryError())
         try:
             win.export([win.current], os.path.join(out, "never.zip"), False, said.append)
             wait_for(lambda: said, "said", 5)
         finally:
-            record.export_zip = made
+            recordwindow.export_zip = made
         assert said == ["MemoryError()"], said
         path = os.path.join(out, "window & co.zip")
         toasts, win.toast = [], lambda text: toasts.append(text)
@@ -5496,7 +5509,7 @@ def test_export_to_a_zip(app):
         with zipfile.ZipFile(path) as z:
             assert any(n.startswith(f"notes/{win.current['name']}/") for n in z.namelist()), z.namelist()
         # rolling: in a .local folder (here, this run's), only when something's changed
-        rolling = record.backup_zip()
+        rolling = recordui.backup_zip()
         assert rolling.startswith(os.environ["XDG_DATA_HOME"]) and rolling.endswith(".zip")
         win.store.save_now()
         assert win.roll_backup() is True, "and again in 10 minutes"
@@ -5513,7 +5526,7 @@ def test_export_to_a_zip(app):
         wait_for(lambda: not win.zipping and os.stat(rolling).st_mtime_ns != made, "made again", 5)
         # notes that couldn't be read aren't a reason to replace the last good one with nothing
         kept = os.stat(rolling).st_mtime_ns
-        real, win.store.notebooks = win.store.notebooks, [{"id": "n", "name": "New", "pages": {record.HOME: ""}, "messages": []}]
+        real, win.store.notebooks = win.store.notebooks, [{"id": "n", "name": "New", "pages": {recordstore.HOME: ""}, "messages": []}]
         try:
             win.store.unzipped = True
             win.roll_backup()
@@ -5554,7 +5567,7 @@ def test_no_focus_ring(app):
 def test_chats_arent_searched_by_when(app):
     """How long ago a chat was is shown beside it, not searched: a date filter would be another thing. "ago" doesn't find
     every chat, and its folder and title still find it. (#94)"""
-    chats = record.ChatNames()
+    chats = recordui.ChatNames()
     chats.chats = [{"path": CHAT, "title": "How do the jobs run?", "cwd": REPO, "mtime": time.time() - 3 * 7 * 86400}]
     item = chats.make_items()[0]
     assert "ago" in item["summary"], item["summary"]
@@ -5582,21 +5595,21 @@ def test_times_say_when(app):
         layout = label.get_layout()
         text, (left, top) = layout.get_text(), label.get_layout_offsets()
         spot = layout.index_to_pos(len(text[:text.rfind(words)].encode()))
-        return left + spot.x / record.Pango.SCALE + 1, top + (spot.y + spot.height / 2) / record.Pango.SCALE
+        return left + spot.x / recordui.Pango.SCALE + 1, top + (spot.y + spot.height / 2) / recordui.Pango.SCALE
 
     def says(label):
         assert widgets.time_tip_at(label, *on(label, "2h ago")) == full, label.get_text()
         assert widgets.time_tip_at(label, *on(label, label.get_text()[:2])) is None, label.get_text()
 
-    recent = record.recent_sessions
-    record.recent_sessions = lambda: [{"path": CHAT, "title": "Jobs", "cwd": REPO, "mtime": at}]
+    recent = recordstore.recent_sessions
+    recordui.recent_sessions = lambda: [{"path": CHAT, "title": "Jobs", "cwd": REPO, "mtime": at}]
     try:
-        chats = record.ChatDialog(lambda _s: None)
+        chats = recordui.ChatDialog(lambda _s: None)
         chats.present(win)
         wait_for(lambda: chats.list.get_row_at_index(0) is not None, "the chats")
         pump(0.5)
         row = chats.list.get_row_at_index(0)
-        assert row.get_subtitle() == f"{record.short_dir(REPO)} · 2h ago", row.get_subtitle()
+        assert row.get_subtitle() == f"{recordstore.short_dir(REPO)} · 2h ago", row.get_subtitle()
         label = next(w for w in walk(row) if isinstance(w, Gtk.Label) and w.get_text() == row.get_subtitle())
         says(label)
         if mouse.available():
@@ -5615,18 +5628,18 @@ def test_times_say_when(app):
                 widgets.time_tip_at = ask
         chats.force_close()
     finally:
-        record.recent_sessions = recent
+        recordui.recent_sessions = recent
     pump(0.2)
 
-    names = record.chat_names()
+    names = recordui.chat_names()
     kept = names.chats, names.at
     names.chats, names.at = [{"path": CHAT, "title": "Zebra planning", "cwd": REPO, "mtime": at}], time.time()
-    d = win.open_note(record.HOME)
+    d = win.open_note(recordstore.HOME)
     saved = d.text()
     try:
         item = next(it for it in names.items() if it["surface"] == "Zebra planning")
-        assert item["summary"] == f"{record.short_dir(REPO)} · 2h ago" and item["at"] == at, item
-        assert record.what_it_is(item, None) == f"Chat, {item['summary']}", "what's asked says it as it did"
+        assert item["summary"] == f"{recordstore.short_dir(REPO)} · 2h ago" and item["at"] == at, item
+        assert recordmeta.what_it_is(item, None) == f"Chat, {item['summary']}", "what's asked says it as it did"
         d.buf.place_cursor(d.buf.get_end_iter())
         d.view.grab_focus()
         for ch in " @zebra":
@@ -5667,10 +5680,10 @@ def test_unexplained_nouns():
           "```\nthe code isn't prose\n```\n- an item\n- [ ] a box\n\n| col | the cell |\n|---|---|\n> a quote")
     assert nouns.prose_blocks(md) == ["The platform", "The platform runs the job and build_app.", "an item", "a box",
                                       "col", "the cell", "a quote"], nouns.prose_blocks(md)
-    assert record.nouns_command() is None, "RECORD_NOUNS=off: not run"
+    assert recordui.nouns_command() is None, "RECORD_NOUNS=off: not run"
     page = "- platform: where apps run\n\n## To learn\n- backend\n\n## Later\n- more"
-    assert record.without_to_learn(page) == "- platform: where apps run\n\n## Later\n- more"
-    names = record.ReaderNames(type("NoNames", (), {"items": lambda self: []})())
+    assert recordstore.without_to_learn(page) == "- platform: where apps run\n\n## Later\n- more"
+    names = recordui.ReaderNames(type("NoNames", (), {"items": lambda self: []})())
     reply = "Then the platform's backend restarts `the platform`, as the platform does."
     names.said = {widgets.message_key(reply): re.compile(r"(?<![\w-])(?:the platform's backend|the platform)(?![\w-])")}
     was = widgets.SIGNAL
@@ -5701,22 +5714,22 @@ def test_chats_once():
     os.makedirs(os.path.join(desk, "account", "org"))
     with open(os.path.join(desk, "account", "org", "local_x.json"), "w") as f:
         json.dump({"cliSessionId": ids["new"], "priorCliSessionIds": [ids["old"]], "title": "Pages planning"}, f)
-    real = record.desktop_sessions_dir
-    record.desktop_sessions_dir = lambda: desk
+    real = recordstore.desktop_sessions_dir
+    recordstore.desktop_sessions_dir = lambda: desk
     try:
-        names = [os.path.basename(p) for p in record.chat_transcripts() if os.path.dirname(p) == folder]
+        names = [os.path.basename(p) for p in recordstore.chat_transcripts() if os.path.dirname(p) == folder]
         assert sorted(names) == sorted([ids["new"] + ".jsonl", ids["other"] + ".jsonl"]), names
-        listed = [s["title"] for s in record.recent_sessions() if os.path.dirname(s["path"]) == folder]
+        listed = [s["title"] for s in recordstore.recent_sessions() if os.path.dirname(s["path"]) == folder]
         assert listed == ["Other chat", "Pages planning"], listed  # (newest first)
-        chats = record.ChatNames()
+        chats = recordui.ChatNames()
         chats._read()
         mine = [c for c in chats.chats if os.path.dirname(c["path"]) == folder]
         assert [os.path.basename(c["path"]) for c in mine] == [ids["other"] + ".jsonl", ids["new"] + ".jsonl"], mine
         with open(os.path.join(desk, "account", "org", "local_x.json"), "w") as f:
             f.write("{not json")  # (one the app's halfway through writing: nothing left behind, for now)
-        assert ids["old"] + ".jsonl" in [os.path.basename(p) for p in record.chat_transcripts()]
+        assert ids["old"] + ".jsonl" in [os.path.basename(p) for p in recordstore.chat_transcripts()]
     finally:
-        record.desktop_sessions_dir = real
+        recordstore.desktop_sessions_dir = real
         shutil.rmtree(folder)
 
 

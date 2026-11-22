@@ -90,7 +90,7 @@ def stamp():
 def listing(have=None):
     """{notebooks: [shared(…)], ids: every one's id, in order} (error: why not); have ({id: digest}: those the asker
     has), only those it hasn't as they are. records.json as it is: a Record running here writes its changes there
-    within a moment (record.Store.SAVE_MS)."""
+    within a moment (recordstore.Store.SAVE_MS)."""
     try:
         books = [shared(t) for t in _read().get("records") or [] if isinstance(t, dict) and t.get("id")]
     except (OSError, ValueError) as e:
@@ -242,7 +242,7 @@ def _hand_over(changes):
     return said == b"notes\n"
 
 
-BACKUP_EVERY, BACKUPS = 600, 50  # (as record.Store's: a copy at most every 10 minutes, the last 50 kept)
+BACKUP_EVERY, BACKUPS = 600, 50  # (as recordstore.Store's: a copy at most every 10 minutes, the last 50 kept)
 
 
 def backup(path):

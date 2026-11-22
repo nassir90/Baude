@@ -8,8 +8,8 @@
     "the right column's Meta page"
   ],
   "code": [
-    "record.py:RecordChat",
-    "record.py:RECORD_TOOLS",
+    "recordchat.py:RecordChat",
+    "recordmeta.py:RECORD_TOOLS",
     "metachat.py:MetaChat"
   ],
   "copy": [

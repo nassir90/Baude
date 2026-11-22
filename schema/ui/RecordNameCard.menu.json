@@ -8,9 +8,9 @@
     "rest the pointer on a name linked in a chat read or in Meta's replies"
   ],
   "code": [
-    "record.py:Window.hover_ref",
-    "record.py:Window.ref_card",
-    "record.py:on_name_hover"
+    "recordhosts.py:RecordHosts.hover_ref",
+    "recordhosts.py:RecordHosts.ref_card",
+    "recordreader.py:on_name_hover"
   ],
   "copy": [],
   "phone": {

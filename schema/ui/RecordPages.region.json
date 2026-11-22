@@ -1,7 +1,7 @@
 {
   "description": "The Pages section at the top of Record's left column: the open notebook's pages as an indented tree (a sub-page on its own line under its parent), above the notebooks.",
   "apps": ["record"],
-  "code": ["record.py:PagesList", "record.py:Window.open_note", "record.py:Window.delete_page"],
+  "code": ["recordreader.py:PagesList", "recordwindow.py:Window.open_note", "recordwindow.py:Window.delete_page"],
   "copy": ["common"],
   "parts": [
     {

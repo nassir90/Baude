@@ -1,8 +1,9 @@
 """A Bot's memory, on the side panel's Memory page: its memory.md on its host (the memory op), in Record's page editor
-(record.DiaryEditor). What the Bot wrote there since you last decided is shown as Record shows Meta's edits, each change
-green and red with Accept and Reject on it, against what you've accepted (memory.seen.md, beside it on its host). What
-you write, accept or reject is saved to its host a moment after, as long as the Bot hasn't written in it since it was
-read; if it has, the host says so with what it wrote, and what you did is put in with that (merge) and saved."""
+(diaryeditor.DiaryEditor). What the Bot wrote there since you last decided is shown as Record shows Meta's edits, each
+change green and red with Accept and Reject on it, against what you've accepted (memory.seen.md, beside it on its
+host). What you write, accept or reject is saved to its host a moment after, as long as the Bot hasn't written in it
+since it was read; if it has, the host says so with what it wrote, and what you did is put in with that (merge) and
+saved."""
 import difflib
 import time
 import uuid
@@ -29,10 +30,10 @@ def _lines(text):
 
 
 def changes(seen, now):
-    """The Bot's changes to its memory, seen -> now, as Record's proposals (record.RecordChat's): [{id, old, new, start,
-    ...}], start where old begins in seen, old whole lines of it. Lines put in go with the line before them, as it is
-    (the line after, at the top), so they're shown where they go; lines changed one for one are a change each, each
-    with its own Accept and Reject."""
+    """The Bot's changes to its memory, seen -> now, as Record's proposals (recordchat.RecordChat's): [{id, old, new,
+    start, ...}], start where old begins in seen, old whole lines of it. Lines put in go with the line before them, as
+    it is (the line after, at the top), so they're shown where they go; lines changed one for one are a change each,
+    each with its own Accept and Reject."""
     a, b = _lines(seen), _lines(now)
     starts = [0]
     for line in a:
@@ -85,7 +86,7 @@ def merge(base, ours, theirs):
 
 
 class _Store:
-    """DiaryEditor's window's Store (record.EditorHost.store): a change saved to the Bot's host (BotMemory.save_soon),
+    """DiaryEditor's window's Store (recordui.EditorHost.store): a change saved to the Bot's host (BotMemory.save_soon),
     its page's file there, and Record's settings: the markup on the caret's line, spelling checked."""
     markup = "line"
     spell_check = True
@@ -102,7 +103,7 @@ class _Store:
 
 
 class _Pages:
-    """DiaryEditor's pages' list (record.EditorHost.pages): its one page, Memory, listed; what's typed in it or its
+    """DiaryEditor's pages' list (recordui.EditorHost.pages): its one page, Memory, listed; what's typed in it or its
     title kept as it is."""
     def names(self):
         return [PAGE], []
@@ -118,9 +119,9 @@ class _Pages:
 
 
 class _Chat:
-    """DiaryEditor's Record (record.EditorHost.chat): a change accepted or rejected saved to the Bot's host
+    """DiaryEditor's Record (recordui.EditorHost.chat): a change accepted or rejected saved to the Bot's host
     (BotMemory.decided); a selection, a move, a tint and a card kept as they are."""
-    agent = None  # (what's proposed is the notebook's, record.pending_edits: the Bot's changes)
+    agent = None  # (what's proposed is the notebook's, recordmeta.pending_edits: the Bot's changes)
 
     def __init__(self, owner):
         self.owner = owner
@@ -142,7 +143,7 @@ class _Chat:
 
 
 class _Tabs:
-    """DiaryEditor's window's tabs (record.EditorHost.tabs): the page is the side panel's, so asked for its tab it's
+    """DiaryEditor's window's tabs (recordui.EditorHost.tabs): the page is the side panel's, so asked for its tab it's
     None, and a retitle keeps the panel's name."""
     def get(self, _key):
         return None
@@ -152,8 +153,9 @@ class _Tabs:
 
 
 class _Host:
-    """What record.DiaryEditor takes as its window (a record.EditorHost, its base: BotMemory._ensure_editor): Baude's
-    window's focus, its toasts, and a notebook of one page, Memory, that a [[link]] says it's the only page of."""
+    """What diaryeditor.DiaryEditor takes as its window (a recordui.EditorHost, its base: BotMemory._ensure_editor):
+    Baude's window's focus, its toasts, and a notebook of one page, Memory, that a [[link]] says it's the only page
+    of."""
     pages_made = False
 
     def __init__(self, owner, win):
@@ -204,19 +206,20 @@ class BotMemory(Gtk.Box):
         global _css_loaded, _host_type
         if self.editor is not None:
             return
-        import record  # (Record's page editor: beside this file)
+        import diaryeditor  # (Record's page editor: beside this file)
+        import recordui
         if not _css_loaded:
             css = Gtk.CssProvider()
-            css.load_from_string(record.EDITOR_CSS)
+            css.load_from_string(recordui.EDITOR_CSS)
             Gtk.StyleContext.add_provider_for_display(Gdk.Display.get_default(), css,
                                                       Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
             _css_loaded = True
         if _host_type is None:
-            _host_type = type("BotMemoryHost", (_Host, record.EditorHost), {})
+            _host_type = type("BotMemoryHost", (_Host, recordui.EditorHost), {})
         self.notebook = {"id": PAGE, "pages": {PAGE: ""}, "messages": []}  # (its changes: messages' proposals)
         self.host = _host_type(self, self.win)
         self.host.current = self.notebook
-        self.editor = record.DiaryEditor(self.host, self.notebook, PAGE)
+        self.editor = diaryeditor.DiaryEditor(self.host, self.notebook, PAGE)
         self.editor.title.get_parent().set_visible(False)  # (its name the panel's, on its tab)
         self.editor.set_vexpand(True)
         self.append(self.editor)
@@ -335,13 +338,13 @@ class BotMemory(Gtk.Box):
         decided yet isn't lost."""
         ed = self.editor
         text = ed.kept()
-        import record
+        import recordmeta
         for e in sorted((e for e in ed.proposals if e["p"].get("status") == "pending"),
                         key=lambda e: -ed.kept_offset(ed.buf.get_iter_at_mark(e["a"]).get_offset())):
             p = e["p"]
             at = ed.kept_offset(ed.buf.get_iter_at_mark(e["a"]).get_offset())
             if p["old"] and text[at:at + len(p["old"])] != p["old"]:
-                at, _found = record.place_change(text, p["old"], at)
+                at, _found = recordmeta.place_change(text, p["old"], at)
                 if at is None:
                     continue
             text = text[:at] + p["new"] + text[at + len(p["old"]):]

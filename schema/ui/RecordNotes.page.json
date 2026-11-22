@@ -12,10 +12,10 @@
     "Meta's action card for a page"
   ],
   "code": [
-    "record.py:DiaryEditor",
-    "record.py:NotesView",
-    "record.py:PageHistory",
-    "record.py:EditControls",
+    "diaryeditor.py:DiaryEditor",
+    "recordui.py:NotesView",
+    "recordui.py:PageHistory",
+    "recordui.py:EditControls",
     "codeview.py:FindInText"
   ],
   "copy": [

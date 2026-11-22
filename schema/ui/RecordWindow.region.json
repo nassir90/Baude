@@ -4,10 +4,10 @@
     "record"
   ],
   "code": [
-    "record.py:Window.__init__",
-    "record.py:Window._tab_shown",
-    "record.py:Window.state",
-    "record.py:Window.restore"
+    "recordwindow.py:Window.__init__",
+    "recordwindow.py:Window._tab_shown",
+    "recordwindow.py:Window.state",
+    "recordwindow.py:Window.restore"
   ],
   "copy": [
     "window",

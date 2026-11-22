@@ -2,7 +2,7 @@
   "description": "A notebook's right-click menu in Record's left column; a popover menu with no arrow at the pointer. The notebook right-clicked is selected first.",
   "apps": ["record"],
   "opens": ["right-click a notebook row"],
-  "code": ["record.py:Window.book_menu"],
+  "code": ["recordwindow.py:Window.book_menu"],
   "copy": ["common"],
   "parts": [
     {

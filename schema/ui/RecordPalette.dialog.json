@@ -8,11 +8,11 @@
   ],
   "code": [
     "widgets.py:RefPalette",
-    "record.py:Window.open_palette",
-    "record.py:Window.open_item",
-    "record.py:Spaces",
-    "record.py:NotesNames",
-    "record.py:ChatNames"
+    "recordhosts.py:RecordHosts.open_palette",
+    "recordhosts.py:RecordHosts.open_item",
+    "recordui.py:Spaces",
+    "recordui.py:NotesNames",
+    "recordui.py:ChatNames"
   ],
   "parts": [
     {

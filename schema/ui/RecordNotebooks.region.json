@@ -1,7 +1,7 @@
 {
   "description": "The Notebooks section of Record's left column: the host picker, one row per notebook, New Notebook. Pages of the open notebook are listed above it (RecordPages). Styled as Baude's sessions list.",
   "apps": ["record"],
-  "code": ["record.py:Window.__init__", "record.py:Window._row", "record.py:Window.new_notebook", "record.py:Window.show_host", "record.py:Window.host_state"],
+  "code": ["recordwindow.py:Window.__init__", "recordwindow.py:Window._row", "recordhosts.py:RecordHosts.new_notebook", "recordhosts.py:RecordHosts.show_host", "recordhosts.py:RecordHosts.host_state"],
   "copy": ["hosts", "common"],
   "parts": [
     {

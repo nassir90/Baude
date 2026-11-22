@@ -9,8 +9,8 @@
     "Meta asked about a setting shows that setting's row"
   ],
   "code": [
-    "record.py:Settings",
-    "record.py:markup_row",
+    "recordwindow.py:Settings",
+    "recordreader.py:markup_row",
     "meta.py:settings_group",
     "widgets.py:settings_code_font",
     "widgets.py:settings_accent",

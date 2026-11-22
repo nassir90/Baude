@@ -2,7 +2,7 @@
   "description": "Open a Chat…: a list of the Claude Code chats on this computer; the one picked is read in a tab of its own. Dialog 560 wide, 620 tall, with its own header bar.",
   "apps": ["record"],
   "opens": ["☰ → Open a Chat…", "the Open a chat… button of an empty chat tab"],
-  "code": ["record.py:ChatDialog", "record.py:recent_sessions", "record.py:Window.open_chat"],
+  "code": ["recordui.py:ChatDialog", "recordstore.py:recent_sessions", "recordwindow.py:Window.open_chat"],
   "copy": ["chats"],
   "parts": [
     {

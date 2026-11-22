@@ -2,7 +2,7 @@
   "description": "Record's ☰ main menu, the last button at the right end of the header bar. Sections separated by rules.",
   "apps": ["record"],
   "opens": ["click ☰ in the header bar"],
-  "code": ["record.py:Window.__init__"],
+  "code": ["recordwindow.py:Window.__init__"],
   "copy": ["window", "tabs", "changelog", "mesh_versions", "fixes", "code_apart", "meta_settings"],
   "parts": [
     {

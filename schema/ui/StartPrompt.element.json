@@ -10,7 +10,7 @@
   "code": [
     "widgets.py:start_prompt_view",
     "baude.py:BaudeWindow.render_history",
-    "record.py:Reader._add"
+    "recordreader.py:Reader._add"
   ],
   "copy": [
     "chat_turns"

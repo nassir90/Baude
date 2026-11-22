@@ -166,6 +166,7 @@ object PullStates {
     fun reset() {
         known.clear()
         asked.clear()
+        version.intValue++
     }
 
     fun of(hostId: String, repo: String?): Known? = repo?.let { known[key(hostId, it)] }

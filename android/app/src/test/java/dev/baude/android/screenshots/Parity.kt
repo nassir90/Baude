@@ -361,6 +361,8 @@ abstract class Parity(private val theme: String, private val scene: String) {
                 if (sc.has("gallery") || sc.has("hold")) FileLinks.wanted.value = Wanted(host.getString("id"), "$home/garden", null, true)
                 GitPages.prepare(host.getString("id"), first.getString("id"),
                     gitScene?.optJSONArray("pick")?.let { a -> (0 until a.length()).map { a.getString(it) } }, gitScene?.optBoolean("every") == true)
+                if (github) dev.baude.android.PullStates.put(host.getString("id"), "$home/${first.getString("folder")}", // (gh's answer, as the chat has it by now)
+                    githubFixture.getString("repo"), dev.baude.android.PullStates.parse(githubFixture.getJSONArray("prs")), true)
                 show { ChatShell(host.getString("id"), first.getString("id"), back = {}, open = { _, _ -> }, feedback = {},
                     first = sc.optString("page").ifBlank { "chat" }) }
                 gitScene?.let { g ->
@@ -380,6 +382,10 @@ abstract class Parity(private val theme: String, private val scene: String) {
                         androidx.compose.runtime.snapshots.Snapshot.sendApplyNotifications() // (what the answers wrote is told to the composition)
                         settle()
                     }
+                }
+                if (github) repeat(3) { // (the pull requests' states are read, told to the composition and drawn)
+                    androidx.compose.runtime.snapshots.Snapshot.sendApplyNotifications()
+                    settle()
                 }
                 if (sc.has("process") || sc.has("view") || sc.has("gallery") || sc.has("hold")) flush()
                 if (sc.has("running")) {

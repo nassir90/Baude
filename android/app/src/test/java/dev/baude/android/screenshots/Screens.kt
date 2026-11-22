@@ -270,6 +270,30 @@ abstract class Screens(private val theme: String) {
         chatAt("34-land-split-dragged", "processes", split = true)
     }
 
+    // (a turn on workshop whose sign-in ran out, as claude says it: its card in place of the error, then signing in
+    // again from it: the sign-in page's link, then signed in, with Send again)
+    @Test fun chatLoginExpired() = loginAt("19a-chat-login-expired")
+    @Test fun chatLoginPage() = loginAt("19b-chat-login-page", then = { stage.value = "page"; url.value = "https://claude.ai/oauth/authorize?code=true" })
+    @Test fun chatLoginSigned() = loginAt("19c-chat-login-signed", then = { stage.value = "signed"; said.value = "ada@example.com (Example Org · team)" })
+
+    // (signed in while another turn runs: its claude there started again once that turn's over, not under it)
+    @Test fun chatLoginSignedWorking() = loginAt("19d-chat-login-signed-working", working = true) {
+        stage.value = "signed"; said.value = "ada@example.com (Example Org · team)"
+    }
+
+    private fun loginAt(name: String, working: Boolean = false, then: dev.baude.android.Login.() -> Unit = {}) {
+        val chat = Mesh.openChat("h1", "b")
+        if (working) chat.thinking.value = true
+        val asked = "Why is the release build twice as slow as last week's?"
+        chat.lines.addAll(listOf(Line("you", asked), Line("error", EXPIRED)))
+        chat.chrome.turnSent = asked to emptyList() // (sent from this phone)
+        val said = org.json.JSONObject().put("type", "result").put("subtype", "success").put("is_error", true)
+            .put("result", EXPIRED)
+        dev.baude.android.chrome(chat)("h1", org.json.JSONObject().put("op", "claude").put("session", "b").put("msg", said))
+        chat.lines.mapNotNull { dev.baude.android.Logins.all[it.text].takeIf { _ -> it.kind == "login" } }.forEach { it.then() }
+        render(name) { ChatShell("h1", "b", back = {}, open = { _, _ -> }, feedback = {}, first = "chat") }
+    }
+
     // (the chat's model button pressed: Claude's models, workshop's own Ollama models, and studio's, another member of
     // the mesh: its Ollama models, one of them workshop's too, its MLX model and its Apple model; more than fit)
     @Test fun chatModelPicker() {
@@ -550,6 +574,10 @@ abstract class Screens(private val theme: String) {
         )
     }
 }
+
+/** What claude says when its sign-in has run out and can't be renewed. */
+private const val EXPIRED = "Failed to authenticate: this login reached its time limit and cannot be renewed. Run " +
+    "`claude auth login` to sign in again, or use `claude setup-token` and set CLAUDE_CODE_OAUTH_TOKEN for unattended jobs"
 
 @RunWith(RobolectricTestRunner::class)
 @Config(qualifiers = "w411dp-h891dp-notnight-xxhdpi")

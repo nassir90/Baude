@@ -1,12 +1,23 @@
 {
-  "description": "Signing in to Claude from a chat: the cards and the notes for another machine's chat.",
+  "description": "Signing in to Claude from a chat, on the machine the chat runs on: the not-signed-in card, the sign-in card, and /logout's note for another machine's chat.",
   "messages": {
     "not_signed_in": "Claude Code isn't signed in",
+    "not_signed_in_on": "Claude Code on {$host} isn't signed in",
     "sign_in": "Sign in",
     "signing_in": "Signing in to Claude…",
     "starting": "Starting the sign-in…",
+    "browser_opened": "A browser window should have opened to sign in. If it didn't, {$link}.",
+    "open_page": "open the sign-in page",
+    "page_there": "{$link} to sign in.",
+    "open_page_there": "Open the sign-in page",
     "code_hint": "If the page shows a code, paste it here",
-    "signs_in_there": "{$host}'s claude signs in there: run claude auth login on it",
-    "not_signed_in_there": "{$host}'s claude isn't signed in: run claude auth login on it"
+    "checking_code": "Checking the code…",
+    "signed_in": "Signed in to Claude",
+    "as_who": "as {$who}",
+    "who_unknown": "claude auth status didn't say who as",
+    "failed": "Sign-in didn't finish",
+    "cancelled": "Sign-in cancelled",
+    "send_again": "Send again",
+    "signs_out_there": "{$host}'s claude signs out there: run claude auth logout on it"
   }
 }

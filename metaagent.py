@@ -17,6 +17,7 @@ from baudelib import agentproxy, codex, meshtools, modelfiles, wire, wording  # 
 from baudelib import models as modelslib  # noqa: E402
 from baudelib import providers as providerslib  # noqa: E402
 from baudelib.claude import ClaudeProc  # noqa: E402
+from baudelib.hostlogin import login_error  # noqa: E402
 from meta import (  # noqa: E402
     AGENT_ENV, CHARS_PER_TOKEN, COMMAND_TOOLS, EDIT_TOOLS, MODEL, NAME, NO_AUTO, OVERFLOW_RE, READ_TOOLS,
     codex_catalog, listed, sync_rows, takes_commands, weight, window,
@@ -700,15 +701,17 @@ class Agent:
         elif t == "result":
             self.turn = None
             text = "".join(turn["text"]).strip() or ("" if msg.get("is_error") else (msg.get("result") or "").strip())
-            error, outgrown = None, False
+            error, outgrown, login = None, False, False
             if msg.get("is_error") and not turn.get("stopped"):
                 error = (msg.get("result") or "; ".join(map(str, msg.get("errors") or [])) or
                          wording.say("meta.claude_error"))[-600:]
                 if outgrown := bool(OVERFLOW_RE.search(error)):
                     error = None  # (the conversation's more than the window holds: the chat's exhausted, _done)
+                elif self.program == "claude" and login_error(msg) is not None:
+                    login = True  # (its sign-in ran out: a card to sign in again, in place of the error)
                 elif "log" in error.lower() and "in" in error.lower():
                     error += "\n\n" + wording.say("meta.login_hint")
-            self.chat._done(self, text, error, turn, outgrown)
+            self.chat._done(self, text, error, turn, outgrown, login=login)
         return False
 
     def on_exit(self, code):

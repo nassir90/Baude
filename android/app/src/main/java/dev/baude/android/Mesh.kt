@@ -779,7 +779,9 @@ object Mesh {
                             }
                             else -> {
                                 if (line.kind == "you") chat.sent.removeAll { it.id == line.uuid }
-                                chat.lines.add(line)
+                                if (line.kind == "error" && chat.chrome.loginStandsIn && needsLogin(line.text))
+                                    chat.chrome.loginStandsIn = false // (its sign-in card's in its place already)
+                                else chat.lines.add(line)
                             }
                         }
                     }
@@ -891,6 +893,8 @@ object Mesh {
     fun send(chat: Chat, text: String, files: List<Picked>, keep: Boolean = true, failed: (() -> Unit)? = null) {
         val c = conns[chat.hostId]?.takeIf { it.state == "up" } ?: return
         chat.said.value = null
+        // (what it sent, text and files, sent again from a sign-in card, if the turn fails for want of it)
+        chat.chrome.turnSent = if (text.isBlank() && files.isEmpty()) null else text to files
         Shares.used(chat)
         chat.busy.value = true
         val id = java.util.UUID.randomUUID().toString()

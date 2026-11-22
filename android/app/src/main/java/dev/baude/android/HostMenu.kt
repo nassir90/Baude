@@ -13,7 +13,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -32,7 +31,6 @@ import androidx.compose.ui.unit.dp
  * Deactivate or Activate (never this phone's own), then Add Host…. */
 @Composable
 fun HostMenu(open: Boolean, dismiss: () -> Unit) {
-    val c = LocalBaude.current
     val id = picked()
     val h = Mesh.hosts.firstOrNull { it.id == id }
     var command by remember { mutableStateOf<Host?>(null) }
@@ -48,7 +46,7 @@ fun HostMenu(open: Boolean, dismiss: () -> Unit) {
                 toast(if (now) Wording.Hosts.nowActivated(host = name) else Wording.Hosts.nowDeactivated(host = name))
             }
         }
-        if (h != null || id != null && id != "phone") HorizontalDivider(color = c.rule)
+        if (h != null || id != null && id != "phone") MenuDivider()
         MenuChoice(Wording.Sidebar.addHost, false) { dismiss(); adding = true }
     }
     command?.let { HostCommand(it) { command = null } }

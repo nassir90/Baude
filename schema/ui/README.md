@@ -61,3 +61,22 @@ An entry or a part may carry:
   its edge, black at the tokens' strengths in light and dark alike (imageviews.shaded_picture; the phone's Avatar).
   Initials on their colour get no shade. Launcher shortcut icons (ShareSheet.dialog.json) get none either: the launcher
   cuts them to its own shape.
+- **Popups are one kind of thing.** Every menu, picker's list, popover and dialog is drawn the size of the page it opens
+  from (on the phone: at the page's density, so Global Scale and Text size reach it; android's Popups.kt), with the
+  values in schema/tokens' `popup`:
+  - A menu's or picker's row is `popup.row` high, whatever it holds; its first thing (a check, dot, logo or its text) and
+    its last (a picker's tick, a submenu's ▸) are `popup.inset` in from the menu's sides, `popup.gap` from its text.
+    Headings start at `popup.inset` too; a divider has `popup.pad` either side, and the list `popup.pad` above and below.
+  - Ticks: a picker (one of its rows picked: effort, mode, a host, an accent, a branch) keeps room for its tick at every
+    row's end. A menu of choices (Group by, the namespaces shown) has a check column before every row's text, its
+    actions' rows too, so all its text lines up. A menu of things to do has neither; a toggle in it that's on (Full-width
+    text, Read-only session) shows its tick at its end.
+  - A menu sits under the thing it opens from, at its start (or ending at its end), else over it; on the phone it stays
+    `popup.margin` off the screen's edges, however deep in a dialog it's opened, and is no taller than the room it has.
+  - A dialog on the phone is the chat's column wide: its sides `popup.dialog-gutter` in from the chat's border, where the
+    chat's text starts. Its heading (`font.title`), body (dim) and buttons (at its end) are `popup.dialog-inset` in from
+    its edges.
+  - The desktop's are libadwaita's (Gtk.PopoverMenu, Adw.AlertDialog) and theming's CSS: menu and dropdown rows 30 px
+    (the phone's `popup.row` is 34, a bar button's side, for a finger), modelbutton's 12 px sides (the phone's
+    `popup.inset` too), a toggle's check before its text (the phone puts it at the end, see MainMenu.menu), and
+    Adw.AlertDialog's own width (the phone's follows the chat).

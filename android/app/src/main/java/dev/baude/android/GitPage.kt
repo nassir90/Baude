@@ -6,7 +6,6 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -14,7 +13,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -23,7 +21,6 @@ import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -367,21 +364,16 @@ fun GitPage(hostId: String, sid: String, here: Boolean, openPage: (String) -> Un
                 Icon(Adwaita.PanDown, Wording.Git.branchesTip + if (picked.size > 1) "\n" + names.joinToString("\n") { it.name ?: it.label.orEmpty() } else "",
                     tint = c.fg, modifier = Modifier.size(16.dp.icon))
             }
-            DropdownMenu(state.listOpen, ::pick, containerColor = c.dialog, shape = RoundedCornerShape(12.dp)) {
+            Popover(state.listOpen, ::pick, ticks = Ticks.END) {
                 Column(Modifier.heightIn(max = Tokens.Git.branchesHeight).verticalScroll(rememberScrollState())) {
                     val firstUntouched = branches.indexOfFirst { it.touched != true }
                     branches.forEachIndexed { i, b ->
-                        if (i == firstUntouched && i > 0) Box(Modifier.padding(horizontal = 6.dp, vertical = 4.dp).fillMaxWidth().height(1.dp).background(c.rule))
+                        if (i == firstUntouched && i > 0) MenuDivider()
                         val on = b.rev in chosen
-                        Row(Modifier.clip(RoundedCornerShape(6.dp)).combinedClickable(onClick = {
+                        MenuChoice(if (b.rev == page.mine) Wording.Git.thisChatBranch(branch = b.label.orEmpty()) else b.label.orEmpty(), on,
+                            onLongClick = { if (on) chosen.remove(b.rev) else b.rev?.let { chosen.add(it) } }) {
                             chosen.clear()
                             b.rev?.let { chosen.add(it) }
-                        }, onLongClick = { if (on) chosen.remove(b.rev) else b.rev?.let { chosen.add(it) } })
-                            .padding(vertical = 5.dp, horizontal = 8.dp), horizontalArrangement = Arrangement.spacedBy(10.dp),
-                            verticalAlignment = Alignment.CenterVertically) {
-                            Text(if (b.rev == page.mine) Wording.Git.thisChatBranch(branch = b.label.orEmpty()) else b.label.orEmpty(),
-                                style = Type.body, color = c.fg, modifier = Modifier.weight(1f, fill = false))
-                            Icon(Adwaita.ObjectSelect, null, tint = c.fg, modifier = Modifier.size(16.dp.icon).alpha(if (on) 1f else 0f))
                         }
                     }
                 }

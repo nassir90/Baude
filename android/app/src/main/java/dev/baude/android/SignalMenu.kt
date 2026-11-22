@@ -33,7 +33,7 @@ fun SignalButton(hostId: String, sid: String) {
         IconButton(Adwaita.InsertLink, if (off) Wording.SignalMenu.tipOff else Wording.SignalMenu.tipLinks(status = now),
             tint = if (off) c.fg else c.accent.copy(alpha = 0.5f)) { open = true }
         Popover(open, { open = false }) {
-            Column(Modifier.width(310.dp).padding(top = 8.dp, bottom = 6.dp, start = 10.dp, end = 10.dp),
+            Column(Modifier.width(310.dp).padding(horizontal = Popups.inset, vertical = Popups.pad),
                 verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 SwitchLine(Wording.SignalMenu.showLinks, Wording.SignalMenu.showLinksDetail, links, true) {
                     SignalChats.set(hostId, sid, on, it)

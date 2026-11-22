@@ -622,7 +622,7 @@ fun MetaRowsOf(o: JSONObject) {
             val h = o.optString("host")
             val sid = o.optString("sid")
             val title = Mesh.session(h, sid)?.let { chatName(it) } ?: Wording.Trash.thisSession
-            androidx.compose.material3.AlertDialog(onDismissRequest = { asking = false },
+            AlertDialog(onDismissRequest = { asking = false },
                 title = { Text(Wording.Trash.heading(title = title)) },
                 text = { Text(Wording.Trash.body(where = Wording.Trash.onHost(host = Mesh.label(h)))) },
                 confirmButton = { Button(Wording.Trash.move, destructive = true) {
@@ -656,7 +656,7 @@ fun NewGroup(given: JSONObject?, done: () -> Unit, made: () -> Unit) {
     var name by androidx.compose.runtime.remember { mutableStateOf(given?.str("name").orEmpty()) }
     androidx.compose.runtime.LaunchedEffect(name) { MetaTools.edited(JSONObject().put("name", name)) }
     val wrong = MetaTools.wrong("new_group", JSONObject().put("name", name))
-    androidx.compose.material3.AlertDialog(onDismissRequest = done, title = { Text(Wording.NewSession.newGroup) },
+    AlertDialog(onDismissRequest = done, title = { Text(Wording.NewSession.newGroup) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("A list of chats of its own, picked in ⋮ → Groups.", style = Type.body, color = c.dim)

@@ -4,6 +4,7 @@ import android.view.View
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.runtime.Composable
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.ui.platform.ViewRootForTest
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.SemanticsActions
@@ -314,6 +315,11 @@ abstract class Parity(private val theme: String, private val scene: String) {
     }
 
     @After fun down() {
+        dev.baude.android.PhoneHost.id = ""
+        HomePrefs.made.clear()
+        HomePrefs.chatGroups.clear()
+        HomePrefs.groups.clear()
+        dev.baude.android.Find.open.clear()
         dev.baude.android.CompactFolds.open.clear()
         dev.baude.android.Viewer.state.value = null
         Fixes.items = emptyList()
@@ -347,6 +353,17 @@ abstract class Parity(private val theme: String, private val scene: String) {
                 .put("missing", "no phone screen"))
             return
         }
+        if (scene.startsWith("pop-")) {
+            repeat(2) { laidOut() }
+            val ws = windows().let { w -> w.drop(maxOf(0, w.indexOf(activity.window.decorView))) }
+            val popDir = File(root, "out/popups")
+            val places = Measure.composite(activity.window.decorView, ws, File(popDir, "$theme/$scene.png"))
+            if (theme == "light") File(popDir, "$scene.json").apply { parentFile.mkdirs() }.writeText(JSONObject()
+                .put("scene", scene).put("what", sc.optString("what")).put("measure", sc.opt("measure") ?: JSONObject.NULL)
+                .put("deviceDensity", activity.resources.displayMetrics.density.toDouble())
+                .put("windows", Measure.dump(activity.window.decorView, ws, places)).toString(1))
+            return
+        }
         File(out, theme).mkdirs()
         captureScreenRoboImage(File(out, "$theme/$scene.png").path)
         if (theme == "light") write(scene, JSONObject().put("scene", scene).put("app", "phone")
@@ -355,7 +372,7 @@ abstract class Parity(private val theme: String, private val scene: String) {
 
     /** The scene drawn: true, or false when the phone has no screen for it. */
     private fun draw(sc: JSONObject): Boolean {
-        val name = sc.getString("name")
+        val name = sc.optString("as").ifBlank { sc.getString("name") }
         val first = sessions.getJSONArray("sessions").getJSONObject(sc.optInt("session", 0))
         when {
             name.startsWith("home") -> {
@@ -490,8 +507,18 @@ abstract class Parity(private val theme: String, private val scene: String) {
                 tap("CPU")
                 tap("CPU")
             }
+            name == "mesh" -> {
+                versionsFixture()
+                show { dev.baude.android.MeshScreen {} }
+            }
+            name == "phone" -> {
+                phoneFixture()
+                show { dev.baude.android.PhoneScreen({}, open = {}) }
+            }
+            name == "custom" -> custom(sc.getString("name"), first)
             else -> return false
         }
+        popSteps(sc)
         return true
     }
 
@@ -702,6 +729,210 @@ abstract class Parity(private val theme: String, private val scene: String) {
         }
     }
 
+    // ------------------------------------------------------------------------------------ popup measuring rig --
+
+    /** A popup scene's steps (tests/parity/popups.json "steps": [op, arg]). */
+    private fun popSteps(sc: JSONObject) {
+        val steps = sc.optJSONArray("steps") ?: return
+        for (i in 0 until steps.length()) {
+            val st = steps.getJSONArray(i)
+            val arg = st.optString(1)
+            when (st.getString(0)) {
+                "tap" -> tapx(arg, long = false)
+                "hold" -> tapx(arg, long = true)
+                "desc" -> tapDescribed(arg)
+                "type" -> type(arg)
+                "flush" -> flush()
+                "frame" -> flush(true)
+                "lay" -> laidOut()
+                "holdImage" -> holdImage()
+                "code" -> code(arg)
+                "toEnd" -> toEnd()
+            }
+            laidOut()
+        }
+    }
+
+    /** Exact label (text or description) tapped, a popup window's match first; else a substring match. */
+    private fun tapx(label: String, long: Boolean) {
+        val act = if (long) SemanticsActions.OnLongClick else SemanticsActions.OnClick
+        fun hits(exact: Boolean) = roots().reversed().flatMap { all(it.semanticsOwner.rootSemanticsNode) }.filter { n ->
+            n.config.contains(act) && if (exact) said(n) == label || described(n) == label else label in said(n) || described(n)?.contains(label) == true
+        }
+        repeat(5) { if (hits(false).isEmpty()) flush(true) }
+        val node = hits(true).firstOrNull() ?: hits(false).firstOrNull() ?: error("nothing to ${if (long) "hold" else "tap"} labelled $label; have " +
+            roots().flatMap { all(it.semanticsOwner.rootSemanticsNode) }.filter { it.config.contains(SemanticsActions.OnClick) }
+                .map { said(it) + "|" + described(it) }.take(60))
+        node.config[act].action?.invoke()
+        androidx.compose.runtime.snapshots.Snapshot.sendApplyNotifications()
+        settle()
+    }
+
+    /** A finger held on the first picture (Role.Image) of the screen, then lifted. */
+    private fun holdImage() {
+        val n = roots().first().let { r -> all(r.semanticsOwner.rootSemanticsNode) }.firstOrNull { it.config.getOrNull(SemanticsProperties.Role) == Role.Image }
+            ?: error("no picture")
+        val b = n.boundsInWindow
+        val x = (b.left + b.right) / 2
+        val y = (b.top + b.bottom) / 2
+        val v = activity.window.decorView
+        val down = android.os.SystemClock.uptimeMillis()
+        fun send(action: Int) {
+            val e = android.view.MotionEvent.obtain(down, android.os.SystemClock.uptimeMillis(), action, x, y, 0)
+            e.source = android.view.InputDevice.SOURCE_TOUCHSCREEN
+            v.dispatchTouchEvent(e)
+            e.recycle()
+        }
+        send(android.view.MotionEvent.ACTION_DOWN)
+        repeat(50) { // (the long press's timeout runs on a real clock: waited out)
+            org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idleFor(Duration.ofMillis(16))
+            Thread.sleep(20)
+        }
+        send(android.view.MotionEvent.ACTION_UP)
+        androidx.compose.runtime.snapshots.Snapshot.sendApplyNotifications()
+        settle()
+    }
+
+    /** Each window drawn (what lays it out here), and what that changed composed again. */
+    private fun laidOut() = repeat(3) {
+        val screen = activity.window.decorView
+        for (v in windows()) if (v !== screen) Measure.dialogWidth(v)
+        for (v in windows()) if (v !== screen) Measure.pin(v, screen.width, screen.height) // (where a menu from it is placed)
+        for (v in windows()) if (v.width > 0 && v.height > 0)
+            v.draw(android.graphics.Canvas(android.graphics.Bitmap.createBitmap(v.width, v.height, android.graphics.Bitmap.Config.ARGB_8888)))
+        androidx.compose.runtime.snapshots.Snapshot.sendApplyNotifications()
+        settle()
+    }
+
+    private fun code(what: String) {
+        val h = host.getString("id")
+        val first = sessions.getJSONArray("sessions").getJSONObject(0).getString("id")
+        when (what) {
+            "groups" -> {
+                HomePrefs.load(activity)
+                dev.baude.android.Groups.make("Release")
+                dev.baude.android.Groups.make("Sync work")
+                dev.baude.android.Groups.move("$h/$first", "Release")
+                Mesh.tick.value++
+            }
+            "find" -> dev.baude.android.Find.open["$h/$first"] = true
+            "ref" -> { // (the names known by now: the link tapped again, where it's drawn)
+                flush(true)
+                val n = roots().first().let { r -> all(r.semanticsOwner.rootSemanticsNode) }.lastOrNull { said(it).contains("Not yet: bench") && it.boundsInWindow.height > 0f }
+                SignalLinks.lastDown = n?.boundsInWindow?.let { b -> androidx.compose.ui.geometry.Offset(b.left + b.width * 0.3f, b.top + 40f) }
+                    ?: androidx.compose.ui.geometry.Offset(330f, 1950f) // (where bench_drop is drawn in the dump, if not found)
+                SignalLinks.open.value = null
+                androidx.compose.runtime.snapshots.Snapshot.sendApplyNotifications()
+                settle()
+                SignalLinks.tap("bench_drop")
+            }
+            "lookup" -> {
+                SignalLinks.open.value = SignalLinks.open.value?.let { SignalLinks.Pop(it.surface, "lookup") }
+            }
+            "fixesWrite" -> runCatching {
+                Fixes::class.java.getDeclaredField("canWrite").apply { isAccessible = true }.set(Fixes, true)
+            }.recoverCatching { Fixes::class.java.methods.first { it.name == "setCanWrite" }.invoke(Fixes, true) }
+            "meshModels" -> meshModels()
+            "metaOpus" -> Settings.metaModel.value = "opus"
+        }
+        androidx.compose.runtime.snapshots.Snapshot.sendApplyNotifications()
+        settle()
+    }
+
+    /** A scene drawn by its own code (the dialogs with no route the parity fixtures reach). */
+    private fun custom(name: String, first: JSONObject) {
+        val h = host.getString("id")
+        when (name) {
+            "pop-meta-new-group" -> show { Home(open = { _, _ -> }, feedback = {}); dev.baude.android.NewGroup(null, {}, {}) }
+            "pop-meta-trash-confirm" -> show {
+                androidx.compose.foundation.layout.Box(androidx.compose.ui.Modifier.fillMaxSize()) {
+                    Home(open = { _, _ -> }, feedback = {})
+                    androidx.compose.foundation.layout.Column(androidx.compose.ui.Modifier.align(androidx.compose.ui.Alignment.BottomCenter)) {
+                        dev.baude.android.MetaRowsOf(JSONObject().put("button", "trash").put("label", "Move to Trash…").put("host", h)
+                            .put("sid", first.getString("id")))
+                    }
+                }
+            }
+            "pop-host-key" -> {
+                val c = Mesh.conn(h)!!
+                c.state = "key"
+                c.shown = dev.baude.android.ShownKey("ssh-ed25519", ByteArray(51) { (it * 7 + 3).toByte() })
+                show { Home(open = { _, _ -> }, feedback = {}); dev.baude.android.HostKeyAsk() }
+            }
+            "pop-routine-form", "pop-routine-when" -> show {
+                dev.baude.android.RoutinesPage(h, first.getString("id"), true)
+            }
+            else -> error("no custom scene $name")
+        }
+    }
+
+    /** As Screens.versionsFixture: the mesh as workshop says it is. */
+    private fun versionsFixture() {
+        val newest = "6be704e2dc23f0730cc73e2586db5561b1f4cd77"
+        val older = "795a6cfd98c7e2517c183787ae4631ae75d39ff5"
+        val oldest = "98a4827dd47ec7d67f3e36bb7b2064b91a652bc3"
+        val day = 86_400L
+        val made = 1_795_247_995L
+        fun head(client: String, commit: String?, at: Long?, behind: Long?) = Msg.Head(client = client, commit = commit, made = at, behind = behind)
+        dev.baude.android.PhoneHost.id = "p1"
+        Mesh.states["h1"] = Mesh.conn("h1")!!
+        Mesh.infos["h1"] = Msg.Info(id = "h1", name = "workshop", host = "workshop.local", commit = newest, made = made,
+            behind = 0, heads = listOf(head("baude", newest, made, 0)),
+            mesh = Msg.MeshView(newest = newest, members = listOf(
+                Msg.Member(id = "m1", name = "studio", host = "studio.local", commit = older, made = made - day, behind = 45,
+                    heads = listOf(head("record", older, made - day, 45), head("emission", newest, made, 0))),
+                Msg.Member(id = "m2", name = "attic", host = "attic.local", commit = oldest, made = made - 3 * day,
+                    behind = null, heads = listOf(head("baude", null, null, null))),
+                Msg.Member(id = "p1", name = "Phone", host = "Phone", dial = false, commit = older, made = made - day, behind = 45),
+            ), gone = listOf(Msg.Gone(id = "m3", name = "cellar"))))
+        val lantern = Host(id = "h2", name = "lantern", user = "dev", address = "lantern.example")
+        Mesh.hosts.add(lantern)
+        FixtureConnection.up(activity, lantern).state = "down"
+    }
+
+    /** As Screens.phoneFixture: this phone as a host, two Bots of its own and one in its trash. */
+    private fun phoneFixture() {
+        dev.baude.android.PhoneHost.name = "pocket"
+        val r = File(activity.filesDir, "phone")
+        dev.baude.android.PhoneHost::class.java.getDeclaredField("root").apply { isAccessible = true }.set(dev.baude.android.PhoneHost, r)
+        File(r, "trash/t1").apply { mkdirs() }.resolve("meta.json").writeText(JSONObject()
+            .put("id", "t1").put("title", "Plan the allotment").put("model", "qwen3:8b").put("trashed", 1.0)
+            .put("bot", JSONObject().put("name", "Moss")).toString())
+        FixturePhone.up(activity, "pocket")
+        val now = System.currentTimeMillis() / 1000.0
+        fun s(id: String, name: String, title: String, ago: Double, state: String = "idle") =
+            Msg.Session(id = id, title = title, cwd = "/data/phone/agents/$id", updated = now - ago, said = now - ago,
+                created = now - ago - 600, state = state, model = "qwen3:8b", mode = "default", bot = Msg.BotListing(name = name))
+        Mesh.sessions["phone"] = listOf(s("p-a", "Juniper", "Shopping list for Saturday", 120.0, "working"),
+            s("p-b", "Fern", "Read the bus timetable", 5_400.0))
+    }
+
+    /** As Screens.meshModels: workshop's own Ollama models and studio's in the mesh. */
+    private fun meshModels() {
+        val conn = Mesh.conn("h1")!!
+        fun m(value: String, id: String? = null, name: String = id ?: value, window: Long? = null) =
+            Msg.ProviderModel(value = value, id = id, displayName = name, window = window)
+        val own = listOf("qwen3:8b" to 40960L, "qwen3:30b" to 40960L, "gemma3:4b" to 32768L, "gemma3:12b" to 32768L,
+            "llama3.1:8b" to 131072L, "deepseek-r1:8b" to 131072L, "mistral:7b" to 32768L, "phi4:14b" to 16384L)
+            .map { (id, w) -> m("ollama/$id", id, window = w) }
+        val init = conn.info!!.init!!
+        val listed = JSONArray(init.getJSONArray("models").toString())
+        for (x in own) listed.put(JSONObject().put("value", x.value).put("displayName", x.displayName))
+        val studio = Msg.Member(id = "5c0ffee0-0000-4000-8000-000000000002", name = "studio", providers = listOf(
+            Msg.Provider(id = "ollama", kind = "ollama", name = "Ollama", http = true, models = listOf(
+                m("llama3.2:3b", "llama3.2:3b", window = 131072), m("gpt-oss:20b", "gpt-oss:20b", window = 131072),
+                m("qwen3:8b", "qwen3:8b", window = 40960))),
+            Msg.Provider(id = "mlx", kind = "mlx", name = "MLX", http = false, models = listOf(
+                m("mlx-community/Mistral-7B-Instruct-v0.3-4bit", name = "Mistral-7B-Instruct-v0.3-4bit"))),
+            Msg.Provider(id = "apple", kind = "apple", name = "Apple", http = false, models = listOf(
+                m("apple", name = "Apple Foundation Model")))))
+        conn.info = Msg.Info(id = "h1", name = "workshop", home = home, init = JSONObject(init.toString())
+            .put("models", listed), models = (0 until listed.length()).map { listed.getJSONObject(it) },
+            providers = listOf(Msg.Provider(id = "ollama", kind = "ollama", name = "Ollama", http = true, models = own)),
+            mesh = Msg.MeshView(members = listOf(Msg.Member(id = "h1", name = "workshop"), studio)))
+        Mesh.tick.value++
+    }
+
     private fun all(n: SemanticsNode): List<SemanticsNode> = listOf(n) + n.children.flatMap { all(it) }
 
     private fun said(n: SemanticsNode) = n.config.getOrNull(SemanticsProperties.Text)?.joinToString(" ") { it.text } ?: ""
@@ -781,13 +1012,17 @@ abstract class Parity(private val theme: String, private val scene: String) {
     }
 }
 
-/** tests/parity/scenes.json's scenes. */
-fun scenes(): List<JSONObject> = JSONObject(File("../../tests/parity/scenes.json").readText()).getJSONArray("scenes")
-    .let { a -> (0 until a.length()).map { a.getJSONObject(it) } }
+/** tests/parity/scenes.json's scenes, then popups.json's (every popup, menu and dialog opened: "pop-…"). */
+private val sceneFiles = listOf("scenes.json", "popups.json").map { File("../../tests/parity/$it") }
 
-/** Their names, read without org.json (the runner lists them outside Robolectric, where Android's is a stub). */
-fun sceneNames(): List<Array<Any>> = Regex(""""name":\s*"([^"]+)"""")
-    .findAll(File("../../tests/parity/scenes.json").readText()).map { arrayOf<Any>(it.groupValues[1]) }.toList()
+fun scenes(): List<JSONObject> = sceneFiles.flatMap { f ->
+    JSONObject(f.readText()).getJSONArray("scenes").let { a -> (0 until a.length()).map { a.getJSONObject(it) } } }
+
+/** Their names, read without org.json (the runner lists them outside Robolectric, where Android's is a stub); with
+ * PARITY_ONLY set (a,b), only those whose names have one of its parts in them. */
+fun sceneNames(): List<Array<Any>> = sceneFiles.flatMap { f -> Regex(""""name":\s*"([^"]+)"""").findAll(f.readText()).map { it.groupValues[1] } }
+    .filter { n -> System.getenv("PARITY_ONLY").isNullOrBlank() || System.getenv("PARITY_ONLY")!!.split(",").any { it in n } }
+    .map { arrayOf<Any>(it) }
 
 @RunWith(ParameterizedRobolectricTestRunner::class)
 @Config(qualifiers = "w411dp-h891dp-notnight-xxhdpi")

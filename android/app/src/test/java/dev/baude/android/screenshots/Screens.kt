@@ -13,6 +13,7 @@ import dev.baude.android.Line
 import dev.baude.android.SideQuestion
 import dev.baude.android.Subagent
 import dev.baude.android.Home
+import dev.baude.android.HomePrefs
 import dev.baude.android.Host
 import dev.baude.android.Key
 import dev.baude.android.Mesh
@@ -20,6 +21,7 @@ import dev.baude.android.MeshScreen
 import dev.baude.android.Msg
 import dev.baude.android.NewSession
 import dev.baude.android.PhoneHost
+import dev.baude.android.PhoneScreen
 import dev.baude.android.Settings
 import dev.baude.android.SettingsScreen
 import dev.baude.android.Update
@@ -122,6 +124,35 @@ abstract class Screens(private val theme: String) {
         show { NewSession(null, null, done = {}, opened = { _, _ -> }) }
         tap("workshop")
         menu("19-new-session-hosts")
+    }
+
+    @Test fun phone() {
+        phoneFixture()
+        render("40-phone") { PhoneScreen({}, open = {}) }
+    }
+
+    @Test fun homePhone() {
+        phoneFixture()
+        HomePrefs.pick("phone")
+        render("41-home-phone") { HomeScreen() }
+    }
+
+    /** This phone as a host of its own, named pocket: its connection up, two agents (Bots) of its own, and one in its
+     * trash. */
+    private fun phoneFixture() {
+        PhoneHost.name = "pocket"
+        val root = java.io.File(activity.filesDir, "phone")
+        PhoneHost::class.java.getDeclaredField("root").apply { isAccessible = true }.set(PhoneHost, root)
+        java.io.File(root, "trash/t1").apply { mkdirs() }.resolve("meta.json").writeText(org.json.JSONObject()
+            .put("id", "t1").put("title", "Plan the allotment").put("model", "qwen3:8b").put("trashed", 1.0)
+            .put("bot", org.json.JSONObject().put("name", "Moss")).toString())
+        FixturePhone.up(activity, "pocket")
+        val now = System.currentTimeMillis() / 1000.0
+        fun s(id: String, name: String, title: String, ago: Double, state: String = "idle") =
+            Msg.Session(id = id, title = title, cwd = "/data/phone/agents/$id", updated = now - ago, said = now - ago,
+                created = now - ago - 600, state = state, model = "qwen3:8b", mode = "default", bot = Msg.BotListing(name = name))
+        Mesh.sessions["phone"] = listOf(s("p-a", "Juniper", "Shopping list for Saturday", 120.0, "working"),
+            s("p-b", "Fern", "Read the bus timetable", 5_400.0))
     }
 
     /** The mesh as workshop says it is: it, and two members on older code (one 45 commits behind, one whose count

@@ -18,7 +18,7 @@ Reported, for each phase:
   clipped   frames whose scroll position leaves the end of the content below the fold
   hidden    frames where the end of the transcript, as painted, is under the bottom edge
   behind    frames painted with the newest content still below the fold while following
-Nothing here touches real sessions or settings (see test_baude's throwaway dirs).
+Nothing here touches real sessions or settings (see rig.py's throwaway dirs).
 """
 import argparse
 import json
@@ -32,8 +32,8 @@ from datetime import datetime
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-import test_baude as T  # noqa: E402
-from test_baude import GLib, baude  # noqa: E402
+import rig as T  # noqa: E402
+from rig import GLib, baude  # noqa: E402
 
 
 def stamp(line):

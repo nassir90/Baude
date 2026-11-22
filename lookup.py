@@ -27,7 +27,7 @@ import time
 import urllib.parse
 
 from baudelib import wording
-from fixes import gh_path  # (the gh CLI, or None: BAUDE_GH, for tests)
+from fixes import gh_path  # (the gh CLI, or None: BAUDE_GH, for the render rigs)
 
 
 REF_KINDS = {"file": (wording.say("lookup.file"), wording.say("lookup.files")),

@@ -3,7 +3,7 @@
 written: the sessions are cloned into a throwaway config, chats open in throwaway folders, and
 claude is the fake from tests/).
 
-    python3 tests/bench_memory.py                  # macOS: as is; Linux: under xvfb-run, like run.sh
+    python3 tests/bench_memory.py                  # macOS: as is; Linux: under xvfb-run, like screenshots.sh
     python3 tests/bench_memory.py --trace 15       # + the 15 lines that allocated the most per phase
     python3 tests/bench_memory.py --types 10       # + the 10 kinds of Python object that grew most
     python3 tests/bench_memory.py --sessions 4     # how many of the largest sessions to open
@@ -172,8 +172,8 @@ def main():
         tracemalloc.start(args.frames)
 
     rows, last = [], {"snap": None, "types": None}
-    import test_baude as T  # noqa: E402  (throwaway config dirs and the fake claude from here on)
-    from test_baude import baude  # noqa: E402
+    import rig as T  # noqa: E402  (throwaway config dirs and the fake claude from here on)
+    from rig import baude  # noqa: E402
 
     def settle(seconds=1.5, quiet=0.4):
         """Run the main loop until nothing much happens for `quiet` (layout done, pictures decoded)."""

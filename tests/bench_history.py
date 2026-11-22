@@ -16,8 +16,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
 REAL_PROJECTS = os.path.join(os.environ.get("CLAUDE_CONFIG_DIR") or os.path.expanduser("~/.claude"), "projects")
-import test_baude as T  # noqa: E402  (fake claude + throwaway config dirs from here on)
-from test_baude import Gtk, GLib, baude  # noqa: E402
+import rig as T  # noqa: E402  (fake claude + throwaway config dirs from here on)
+from rig import Gtk, GLib, baude  # noqa: E402
 
 
 def rss_mb():

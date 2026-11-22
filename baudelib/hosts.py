@@ -43,12 +43,12 @@ def log_path():
     return os.path.join(state_home(), "host.log")
 
 
-def reach(dest=None, command=None, member=None):
-    """(channel, info) for a host process: another machine's over ssh (dest: an alias, a host, user@host; command:
-    its host process's, if baude_headless.py isn't on its PATH), a member of the mesh through this machine's (member:
-    its id), else this machine's, started if need be. OSError if it can't be."""
+def reach(dest=None, member=None):
+    """(channel, info) for a host process: another machine's over ssh (dest: an alias, a host, user@host; its
+    ~/.local/bin/baude-headless), a member of the mesh through this machine's (member: its id), else this machine's,
+    started if need be. OSError if it can't be."""
     if dest:
-        return wire.connect_ssh(dest, command)
+        return wire.connect_ssh(dest)
     if not start_here():
         raise OSError(wording.say("host_status.none_started", log=log_path()))
     return wire.connect_mesh(member) if member else wire.connect_local()

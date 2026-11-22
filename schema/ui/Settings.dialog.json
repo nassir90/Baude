@@ -109,7 +109,7 @@
         },
         {
           "name": "Show in launcher",
-          "shows": "A row titled \"Show in application menu\" on Linux or \"Show in Applications\" on macOS, with a switch; the subtitle is the path of the launcher file it writes (the home folder written as ~). On when Baude is already in the platform's list of apps.",
+          "shows": "A row titled \"Show in application menu\" on Linux or \"Show in Applications\" on macOS, with a switch; the subtitle is the path of the launcher file it writes (the home folder written as ~). On when Baude is already in the platform's list of apps. Turning it on also writes Baude's commands in ~/.local/bin (baude, record, emission, baude-headless, baude-oneshot), which the launcher starts; turning it off leaves them, as other machines reach this one's host process through ~/.local/bin/baude-headless.",
           "copy": [
             "window.show_in",
             "install.application_menu",

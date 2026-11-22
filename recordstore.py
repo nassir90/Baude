@@ -30,6 +30,7 @@ import baudelib.client  # noqa: E402  (the hosts, as Baude has them: another's n
 import baudelib.hosts  # noqa: E402  (this machine's host process started again: Restart Daemon)
 import baudelib.serverstate  # noqa: E402  (the sessions this machine's host process keeps: bot_started)
 from baudelib import applist  # noqa: E402  (Record in the list of apps, as Emission is)
+from baudelib import bins  # noqa: E402  (~/.local/bin/record, which its launcher starts)
 from baudelib import notes  # noqa: E402  (this machine's notebooks, as its host process gives them to another's Record)
 from baudelib.notes import data_dir  # noqa: E402,F401
 import meta  # noqa: E402  (Meta, the helper in the right bar: Baude's too, beside this file)
@@ -1046,10 +1047,6 @@ def logo():
 
 # ---------------------------------------------------------------- in the list of apps
 
-def launch_command():
-    return [sys.executable, os.path.join(os.path.dirname(os.path.realpath(__file__)), "record.py")]
-
-
 def apps_place():
     """The list of apps install() puts Record in, as the platform names it."""
     return wording.say("install.applications") if sys.platform == "darwin" else wording.say("install.application_menu")
@@ -1057,8 +1054,9 @@ def apps_place():
 
 def install():
     """macOS: ~/Applications/Record.app (an .icns of the logo). Linux: a .desktop entry and the logo in the user's
-    hicolor theme. Where it is."""
-    return applist.install(APP_ID, "Record", logo(), launch_command(), "public.app-category.productivity",
+    hicolor theme. Either starts ~/.local/bin/record, written with the other commands (bins.install). Where it is."""
+    bins.install()
+    return applist.install(APP_ID, "Record", logo(), [bins.path("record")], "public.app-category.productivity",
                            ["Comment=Read AI prose with a peer who knows what you know", "Categories=Utility;GTK;"])[0]
 
 

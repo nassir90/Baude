@@ -13,11 +13,7 @@
     },
     "dest": {
       "type": "string",
-      "description": "ssh: where (an alias in ~/.ssh/config, a host, user@host)."
-    },
-    "command": {
-      "type": "string",
-      "description": "ssh: the host process there (default baude_headless.py, on its PATH)."
+      "description": "ssh: where (an alias in ~/.ssh/config, a host, user@host); ssh runs HOST_COMMAND there."
     },
     "strict": {
       "type": "boolean",

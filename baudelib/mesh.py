@@ -587,9 +587,8 @@ class Found(Out):
 
 
 def same_place(a, b):
-    """Do two wheres go to the same place (a command given or not)?"""
-    return {k: v for k, v in (a or {}).items() if k != "command"} == {k: v for k, v in (b or {}).items()
-                                                                       if k != "command"}
+    """Do two wheres go to the same place?"""
+    return wire.place(a) == wire.place(b)
 
 
 class Mesh:
@@ -635,7 +634,7 @@ class Mesh:
                                             "names": [n for n in k["names"][:4] if wire.is_dest(n) and "@" not in n]}
         for k in kept:
             if isinstance(k, dict) and wire.is_where(k.get("where")) and k["where"].get("via") != "mesh":
-                self.outs.append(Out(self, k["where"], k.get("id") if wire.is_id(k.get("id")) else None,
+                self.outs.append(Out(self, wire.place(k["where"]), k.get("id") if wire.is_id(k.get("id")) else None,
                                      k.get("name") if isinstance(k.get("name"), str) else None,
                                      k.get("active") is not False))
 
@@ -741,20 +740,16 @@ class Mesh:
 
     # ---- links
     def link(self, where):
-        """A link made from here to where (a head asked), kept in links.json: the one there already, if there's one
-        (a command given anew taken up)."""
+        """A link made from here to where (a head asked), kept in links.json: the one there already, if there's one."""
         if not wire.is_where(where) or where.get("via") in ("local", "mesh"):
             raise ValueError(f"nowhere to link to: {where!r}")
         with self.lock:
             out = next((o for o in self.outs if same_place(o.where, where)), None)
             if out is not None:
-                if out.where != dict(where):
-                    out.where = dict(where)
-                    out.wake.set()
-                elif out.state != "linked":
+                if out.state != "linked":
                     out.wake.set()
             else:
-                out = Out(self, where)
+                out = Out(self, wire.place(where))
                 self.outs.append(out)
                 out.start()
         self.save()

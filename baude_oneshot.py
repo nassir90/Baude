@@ -4,7 +4,7 @@ started (or carried on) with a prompt, attached to, and what its claude says str
 `claude -p --output-format stream-json` writes them. A head, as Baude is: the session goes on in the host process, and
 Baude lists it under its host and group. No GTK needed.
 
-    python3 baude_oneshot.py [--host DEST [--host-command CMD] | --member ID] [--group G] [--cwd DIR] [--model M]
+    python3 baude_oneshot.py [--host DEST | --member ID] [--group G] [--cwd DIR] [--model M]
                              [--effort E] [--mode MODE] [--title T] [--system TEXT] [--add-dir DIR]... [--allow RULE]...
                              [--deny RULE]... [--fork-from SESSION] [--resume SESSION] [--follow] [--input]
                              [--partial] [--ask-timeout S [--ask-default allow]] PROMPT
@@ -55,8 +55,7 @@ def main():
     p.add_argument("prompt", nargs="?", help="what to say first (from stdin's first line with --input, if it's left out)")
     p.add_argument("--host", help="another machine's host process, where ssh reaches it: an alias, a host, user@host "
                                   "(default: this machine's, started if it isn't running)")
-    p.add_argument("--host-command", help="the host process there, if baude_headless.py isn't on its PATH")
-    p.add_argument("--member", help="a member of the mesh (its id, as `baude_headless.py mesh` lists it), reached "
+    p.add_argument("--member", help="a member of the mesh (its id, as `baude-headless mesh` lists it), reached "
                                     "through this machine's host process")
     p.add_argument("--group", help="the session's group (default: the host's)")
     p.add_argument("--cwd", help="the folder it runs in, on the host (default: its home; a relative one is this folder's)")
@@ -84,7 +83,7 @@ def main():
     if args.resume and (args.ask_timeout is not None or args.ask_default):
         p.error("--ask-timeout and --ask-default are a new session's: a resumed one keeps what it was started with")
     try:
-        ch, info = hosts.reach(args.host, args.host_command, args.member)
+        ch, info = hosts.reach(args.host, args.member)
     except OSError as e:
         print(f"baude-oneshot: {e}", file=sys.stderr)
         return 2

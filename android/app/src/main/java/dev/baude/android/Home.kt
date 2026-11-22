@@ -210,17 +210,21 @@ fun shortPath(hostId: String, cwd: String): String {
     return if (home.isNotEmpty() && (cwd == home || cwd.startsWith("$home/"))) "~" + cwd.removePrefix(home) else cwd
 }
 
-/** The chats ("host/id") an agent on another host started (spawned_by: none of their own host's chats), and those
- * such a chat started in turn there: each is listed only under the agent that started it, never among its own host's
- * chats (Baude's started_elsewhere; schema/ui/Sidebar.region.json). */
+/** The chats ("host/id") an agent on another host started (spawned_by: a session of another host, none of their own
+ * host's; archived, hidden here and those of a gone host too), and those such a chat started in turn there: each is
+ * listed only under the agent that started it, never among its own host's chats (Baude's started_elsewhere;
+ * schema/ui/Sidebar.region.json). One whose agent is nowhere (deleted, say) is its host's. */
 fun startedElsewhere(): Set<String> {
     val byKey = HashMap<String, Msg.Session>() // ("host/id" and "host/cli_id": the session)
-    for ((h, list) in Mesh.sessions) for (s in list) for (id in listOfNotNull(s.id?.ifBlank { null }, s.cliId?.ifBlank { null }))
+    val hostsOf = HashMap<String, MutableSet<String>>() // (an id: the hosts that have a session by it)
+    for ((h, list) in Mesh.sessions) for (s in list) for (id in listOfNotNull(s.id?.ifBlank { null }, s.cliId?.ifBlank { null })) {
         byKey["$h/$id"] = s
+        hostsOf.getOrPut(id) { HashSet() }.add(h)
+    }
     fun far(h: String, s: Msg.Session, seen: Set<String>): Boolean {
         val p = s.spawnedBy?.ifBlank { null } ?: return false
-        val up = byKey["$h/$p"]?.takeIf { it !== s } ?: return true
-        return up.id.orEmpty() !in seen && far(h, up, seen + s.id.orEmpty()) // (a loop of them: its host's own)
+        val up = byKey["$h/$p"] ?: return hostsOf[p].orEmpty().any { it != h }
+        return up !== s && up.id.orEmpty() !in seen && far(h, up, seen + s.id.orEmpty()) // (a loop of them: its host's own)
     }
     return Mesh.sessions.flatMap { (h, list) -> list.filter { far(h, it, emptySet()) }.map { "$h/${it.id.orEmpty()}" } }.toSet()
 }

@@ -141,6 +141,7 @@ abstract class Parity(private val theme: String, private val scene: String) {
         val other = sessions.optJSONObject("other")?.let { Host(id = it.getString("id"), name = it.getString("name"), user = "dev", address = "studio.example") }
         other?.let { Mesh.hosts.add(it); FixtureConnection.up(activity, it, home) }
         if (other != null && sc.optString("pick") == other.name) HomePrefs.host.value = other.id
+        if (sc.optString("bot") == "archived") HomePrefs.collapsed.remove("archived") // (Archived open)
         // (one host's chats are listed at a time, as Baude's: home-bots has the gone one picked)
         if (scene == "home-bots" && gone != null) HomePrefs.host.value = gone.id
         val byHost = (0 until list.length()).map { list.getJSONObject(it) }.mapIndexed { i, s ->
@@ -152,9 +153,10 @@ abstract class Parity(private val theme: String, private val scene: String) {
                 cut = if (i == 0 && sc.optBoolean("cut")) now else null,
                 bot = s.optString("bot").ifBlank { null }?.let { Msg.BotListing(name = it) },
                 spawnedBy = s.optString("spawned_by").ifBlank { null },
+                archived = if (i == 0 && sc.optString("bot") == "archived") true else null,
                 size = if (s.getString("id") == opened.getString("id")) shown.size else 0)
         }
-        for ((id, ss) in byHost.groupBy({ it.first }, { it.second })) Mesh.sessions[id] = ss
+        for ((id, ss) in byHost.drop(if (sc.optString("bot") == "trashed") 1 else 0).groupBy({ it.first }, { it.second })) Mesh.sessions[id] = ss
     }
 
     /** The scene's transcript, as the host has it: the first `lines` lines of the fixture's (all, without). */

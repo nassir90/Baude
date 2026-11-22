@@ -254,7 +254,7 @@
           "parts": [
             {
               "name": "Fork nesting",
-              "shows": "A fork sits under the session it came from, indented 18px per level, joined by a thin tree line: down from under the parent's title to its last child, then a corner across to each child. A fork named \"<parent's title> (…)\" shows only the \"…\" part, in a distinct fork style. A Claude Desktop side session or fork sits under the chat Claude Desktop says it came from, in that chat's group whatever its own folder. A chat an agent (Bot) started is under that agent. A chat an agent on another host started (its spawned_by none of its own host's chats), and any chat that one started in turn on its host, is listed only under that agent: under it whichever host's chats are listed, if the agent is listed (not archived, deleted here, or missed by a search), and nowhere otherwise, never among its own host's chats. The phone's home list and This phone's agents follow the same rule. Forks are found within a folder, by date too."
+              "shows": "A fork sits under the session it came from, indented 18px per level, joined by a thin tree line: down from under the parent's title to its last child, then a corner across to each child. A fork named \"<parent's title> (…)\" shows only the \"…\" part, in a distinct fork style. A Claude Desktop side session or fork sits under the chat Claude Desktop says it came from, in that chat's group whatever its own folder. A chat an agent (Bot) started is under that agent. A chat an agent on another host started (its spawned_by a chat of another host, none of its own host's: an archived or gone-host chat counts, one whose agent is deleted doesn't), and any chat that one started in turn on its host, is listed only under that agent, never among its own host's chats: under it whichever host's chats are listed, if the agent is listed (not deleted here, or missed by a search), and nowhere otherwise. An archived agent's chats are under it in Archived, whatever host they're on. The phone's home list and This phone's agents follow the same rule. Forks are found within a folder, by date too."
             },
             {
               "name": "Desktop chats",
@@ -268,11 +268,6 @@
         },
         {
           "name": "Bot row",
-          "phone": {
-            "does": "One and a half times a chat's row (72dp at Global Scale 1.0, Gap.homeBotRow), not twice: the avatar and name as on the desktop",
-            "why": "Twice the phone's 48dp chat row leaves a Bot's row mostly empty round its 32-unit avatar",
-            "decided": "2026-11-22"
-          },
           "shows": "For a session on a host that is a Bot (top level only, its host reachable; a Bot whose host is gone is a session row showing its name, dimmed, with the crossed-out cloud): twice a chat's height: a round avatar with the Bot's picture (set into the page: see README's A picture is set into the page) (its initials until it has one), the Bot's name in bold on one line, a \"held\" tag if any, the status dot. A Bot has only its Name: the row never shows its chat's title or any second line. Bots are listed first in the list with no header, the last used first, each with what is under it (its forks and threads, whatever host). By date, Bots are among the chats by time. Tooltip: name; folder; \"On <host> (<address>)\"; held; \"Group <name>\"; worktree (never the chat's title).",
           "copy": [
             "sidebar.bot",

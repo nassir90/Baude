@@ -370,7 +370,17 @@ def threads_scene(app, sc):
     fx = fixture(sc["threads"])
     net = threads_network(sc["threads"])
     host = sc.get("pick") or fx["host"]["name"]
-    baude.save_settings(new_session_host=baude.host_key(net[host][1]), sidebar_groups=None)
+    server = THREADS[fx["host"]["name"]][0]  # (the Bot, the fixture's first chat: archived, or deleted, on its host as
+    bot = next((x for x in server.sessions.values() if x.meta.get("bot")), None)  # the scene says; scenes.json has
+    if bot and sc.get("bot") == "trashed":  # the trashed one last, as a deleted chat stays so)
+        server.delete(bot, lambda *_a, **_k: None)
+    elif bot and bot.meta.get("archived") != (sc.get("bot") == "archived"):
+        with server.lock:
+            bot.meta["archived"] = sc.get("bot") == "archived"
+            server.save(bot)
+            server.changed()
+    baude.save_settings(new_session_host=baude.host_key(net[host][1]), sidebar_groups=None,
+                       collapsed_folders=[] if sc.get("bot") == "archived" else ["archived"])
     win = app.window(scenelib.opts(cwd=folder("garden")))
     T.pump(1.5)
     win.sidebar.refresh()

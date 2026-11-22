@@ -15,7 +15,7 @@
     "meta.py:takes_commands",
     "pickers.py:ModelPicker",
     "pickers.py:HostPicker",
-    "baude.py:SettingsDialog",
+    "baudewindow.py:SettingsDialog",
     "record.py:SettingsDialog"
   ],
   "copy": ["meta_settings", "model_picker", "mode_effort", "model_providers"],

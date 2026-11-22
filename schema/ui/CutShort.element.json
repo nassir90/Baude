@@ -7,10 +7,10 @@
     "Opening (or being in) a chat whose last turn a restart cut short"
   ],
   "code": [
-    "baude.py:BaudeWindow.show_cut",
-    "baude.py:BaudeWindow.continue_cut",
-    "baude.py:BaudeWindow.continue_failed",
-    "baude.py:BaudeWindow.cut_state"
+    "baudewindow.py:BaudeWindow.show_cut",
+    "baudewindow.py:BaudeWindow.continue_cut",
+    "baudewindow.py:BaudeWindow.continue_failed",
+    "baudewindow.py:BaudeWindow.cut_state"
   ],
   "parts": [
     {

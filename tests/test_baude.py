@@ -145,14 +145,22 @@ import sidequestion  # noqa: E402
 import baudemeta  # noqa: E402
 import refpopovers  # noqa: E402
 import sidepanel  # noqa: E402
-from baude import Adw, Gdk, Gio, GLib, Gtk, Pango  # noqa: E402
+import windowview  # noqa: E402
+import windowproc  # noqa: E402
+import windowdrafts  # noqa: E402
+import windowsignal  # noqa: E402
+import windowremote  # noqa: E402
+import baudewindow  # noqa: E402
+from baude import Adw, Gdk, Gio, GLib, Gtk  # noqa: E402
+from gi.repository import Pango  # noqa: E402
 from startup import GdkPixbuf  # noqa: E402
 
 _MOVED = (widgets, refkinds, codespans, imageviews, markdownview, chatparts, composerview, panels, lightbox, chatfind,
           pickers, theming, meshui,  # (widgets, and what it was split into)
           startup, signalrefs, signalcode, signalresolve, signaltools, signalnames, signalreader, toolcards,
           chatinput, sessionlist, sessionsidebar, sidebarmenu, sidequestion, baudemeta, refpopovers,
-          sidepanel,  # (what baude.py was split into, but its window)
+          sidepanel, windowview, windowproc, windowdrafts, windowsignal, windowremote,
+          baudewindow,  # (what baude.py was split into)
           codeview, kubeview, schemaview, gitview, feedback,  # (what was in baude.py: the viewers, what they
           baudelib.claude, baudelib.transcripts, baudelib.models)  # share, and Claude Code's process and transcripts)
 

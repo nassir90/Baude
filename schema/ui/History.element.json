@@ -9,11 +9,11 @@
     "A network session opened"
   ],
   "code": [
-    "baude.py:BaudeWindow.load_history",
-    "baude.py:BaudeWindow.render_history",
-    "baude.py:BaudeWindow.update_earlier_btn",
-    "baude.py:BaudeWindow.show_earlier",
-    "baude.py:BaudeWindow.settle_tasks",
+    "windowview.py:WindowView.load_history",
+    "windowview.py:WindowView.render_history",
+    "windowview.py:WindowView.update_earlier_btn",
+    "windowview.py:WindowView.show_earlier",
+    "windowview.py:WindowView.settle_tasks",
     "baudelib/transcripts.py:history_item",
     "baudelib/transcripts.py:history_items"
   ],

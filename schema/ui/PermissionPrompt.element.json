@@ -7,12 +7,12 @@
     "claude's can_use_tool request for a tool not always-allowed in this chat"
   ],
   "code": [
-    "baude.py:BaudeWindow.h_control_request",
-    "baude.py:BaudeWindow.permission_card",
+    "windowremote.py:WindowRemote.h_control_request",
+    "windowremote.py:WindowRemote.permission_card",
     "toolcards.py:ToolCard.ask",
     "toolcards.py:ToolCard.answered",
     "toolcards.py:ToolCard.set_decision",
-    "baude.py:BaudeWindow.allowed_in"
+    "windowsignal.py:WindowSignal.allowed_in"
   ],
   "copy": [
     "asks",

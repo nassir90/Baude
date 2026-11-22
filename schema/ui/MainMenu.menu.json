@@ -7,13 +7,13 @@
     "header ☰ button"
   ],
   "code": [
-    "baude.py:BaudeWindow.__init__",
-    "baude.py:BaudeWindow.open_settings",
-    "baude.py:BaudeWindow.open_record",
-    "baude.py:BaudeWindow.copy_report",
-    "baude.py:BaudeWindow.restart_app",
-    "baude.py:BaudeWindow.set_read_only",
-    "baude.py:BaudeWindow.on_fullwidth_toggled"
+    "baudewindow.py:BaudeWindow.__init__",
+    "baudewindow.py:BaudeWindow.open_settings",
+    "baudewindow.py:BaudeWindow.open_record",
+    "windowproc.py:WindowProc.copy_report",
+    "baudewindow.py:BaudeWindow.restart_app",
+    "windowproc.py:WindowProc.set_read_only",
+    "windowview.py:WindowView.on_fullwidth_toggled"
   ],
   "copy": [
     "window",

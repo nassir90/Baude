@@ -9,9 +9,9 @@
   ],
   "code": [
     "chatinput.py:LoginCard",
-    "baude.py:BaudeWindow.sign_in",
-    "baude.py:BaudeWindow.login_prompt",
-    "baude.py:BaudeWindow.sign_out"
+    "windowremote.py:WindowRemote.sign_in",
+    "windowremote.py:WindowRemote.login_prompt",
+    "windowremote.py:WindowRemote.sign_out"
   ],
   "copy": [
     "common"

@@ -9,13 +9,13 @@
     "Opening a chat: each message of yours in its history"
   ],
   "code": [
-    "baude.py:BaudeWindow.user_bubble",
-    "baude.py:BaudeWindow.send_text",
+    "windowdrafts.py:WindowDrafts.user_bubble",
+    "windowproc.py:WindowProc.send_text",
     "chatparts.py:UserTurn",
     "chatinput.py:attachment_widget",
-    "baude.py:BaudeWindow.revert_to",
-    "baude.py:BaudeWindow.commit_revert",
-    "baude.py:BaudeWindow.cancel_revert",
+    "windowdrafts.py:WindowDrafts.revert_to",
+    "windowdrafts.py:WindowDrafts.commit_revert",
+    "windowdrafts.py:WindowDrafts.cancel_revert",
     "baudelib/transcripts.py:_command_text",
     "recordreader.py:Reader._add"
   ],

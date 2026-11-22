@@ -15,7 +15,7 @@
     "kubeview.py:KUBE_SECTIONS",
     "kubeview.py:KubeSquares",
     "kubeview.py:kube_diagnose",
-    "baude.py:BaudeWindow.__init__",
+    "baudewindow.py:BaudeWindow.__init__",
     "record.py:RecordWindow.open_viewer"
   ],
   "copy": [

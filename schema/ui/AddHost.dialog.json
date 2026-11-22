@@ -2,7 +2,7 @@
   "description": "A dialog over the main window to add another machine's Baude host process to the mesh, by where ssh goes. The host is kept from then on, reached or not.",
   "apps": ["baude"],
   "opens": ["host picker's right-click → Add Host…"],
-  "code": ["baude.py:BaudeWindow.ask_add_host", "baude.py:BaudeWindow.host_form"],
+  "code": ["windowremote.py:WindowRemote.ask_add_host", "windowremote.py:WindowRemote.host_form"],
   "copy": ["new_session", "hosts", "common"],
   "parts": [
     {

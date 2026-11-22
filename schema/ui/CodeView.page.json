@@ -24,9 +24,9 @@
     "codespans.py:code_spans",
     "codespans.py:code_style",
     "markdownview.py:open_code",
-    "baude.py:BaudeWindow.show_code",
-    "baude.py:BaudeWindow.open_location",
-    "baude.py:BaudeWindow.go_up",
+    "windowsignal.py:WindowSignal.show_code",
+    "windowsignal.py:WindowSignal.open_location",
+    "windowsignal.py:WindowSignal.go_up",
     "record.py:RecordWindow.show_code"
   ],
   "copy": [

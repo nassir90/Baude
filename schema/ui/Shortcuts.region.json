@@ -4,12 +4,12 @@
     "baude"
   ],
   "code": [
-    "baude.py:BaudeWindow.__init__",
-    "baude.py:BaudeWindow.set_zoom",
-    "baude.py:BaudeWindow.show_zoom_toast",
-    "baude.py:BaudeWindow.apply_zoom",
-    "baude.py:BaudeWindow.on_ctrl_scroll",
-    "baude.py:BaudeWindow.apply_full_width",
+    "baudewindow.py:BaudeWindow.__init__",
+    "windowview.py:WindowView.set_zoom",
+    "windowview.py:WindowView.show_zoom_toast",
+    "windowview.py:WindowView.apply_zoom",
+    "windowproc.py:WindowProc.on_ctrl_scroll",
+    "windowview.py:WindowView.apply_full_width",
     "widgets.py:zoom_keys",
     "widgets.py:first_keys",
     "widgets.py:ZOOM_MIN"

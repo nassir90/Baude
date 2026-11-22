@@ -4,11 +4,11 @@
     "baude"
   ],
   "code": [
-    "baude.py:BaudeWindow.note",
-    "baude.py:BaudeWindow.h_result",
-    "baude.py:BaudeWindow.begin_resume",
-    "baude.py:BaudeWindow.stop_stuck",
-    "baude.py:BaudeWindow.render_history"
+    "windowview.py:WindowView.note",
+    "windowremote.py:WindowRemote.h_result",
+    "windowremote.py:WindowRemote.begin_resume",
+    "windowdrafts.py:WindowDrafts.stop_stuck",
+    "windowview.py:WindowView.render_history"
   ],
   "copy": [
     "meta",

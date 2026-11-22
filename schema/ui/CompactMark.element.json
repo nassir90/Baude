@@ -14,7 +14,7 @@
     "chatparts.py:compact_said",
     "sidequestion.py:CompactMarks.on_compaction",
     "sidequestion.py:CompactMarks.compact_ended",
-    "baude.py:BaudeWindow.adopt_summary",
+    "windowview.py:WindowView.adopt_summary",
     "recordreader.py:Reader._add"
   ],
   "copy": [

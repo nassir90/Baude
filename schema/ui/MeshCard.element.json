@@ -7,9 +7,9 @@
     "A call of mcp__mesh__start_subagent or mcp__mesh__message_chat"
   ],
   "code": [
-    "baude.py:MeshCard",
-    "baude.py:BaudeWindow.open_mesh_chat",
-    "baude.py:BaudeWindow.add_activity",
+    "windowremote.py:MeshCard",
+    "windowview.py:WindowView.open_mesh_chat",
+    "windowview.py:WindowView.add_activity",
     "baudelib/meshtools.py"
   ],
   "copy": [

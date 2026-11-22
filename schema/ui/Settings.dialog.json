@@ -8,8 +8,8 @@
     "key Cmd+, (macOS) / Ctrl+, (elsewhere); the key again while it is open leaves it"
   ],
   "code": [
-    "baude.py:SettingsDialog",
-    "baude.py:BaudeWindow.open_settings",
+    "baudewindow.py:SettingsDialog",
+    "baudewindow.py:BaudeWindow.open_settings",
     "theming.py:settings_code_font",
     "theming.py:settings_accent",
     "theming.py:settings_switch",

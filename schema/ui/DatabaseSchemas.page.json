@@ -7,7 +7,7 @@
     "A Signal link's popover: a database icon button (Show it in its database's schema diagram), on a name that is a table or column",
     "⌘K / Ctrl+K glossary: a table in its database's diagram"
   ],
-  "code": ["schemaview.py:SchemaView", "schemaview.py:SchemaCanvas", "schemaview.py:schema_layout", "schemaview.py:pg_normalize", "schemaview.py:arango_normalize", "schemaview.py:db_find", "baude.py:BaudeWindow.open_db_name", "baude.py:BaudeWindow.show_schema_for", "record.py:RecordWindow.open_viewer"],
+  "code": ["schemaview.py:SchemaView", "schemaview.py:SchemaCanvas", "schemaview.py:schema_layout", "schemaview.py:pg_normalize", "schemaview.py:arango_normalize", "schemaview.py:db_find", "windowsignal.py:WindowSignal.open_db_name", "windowsignal.py:WindowSignal.show_schema_for", "record.py:RecordWindow.open_viewer"],
   "copy": ["databases"],
   "parts": [
     {

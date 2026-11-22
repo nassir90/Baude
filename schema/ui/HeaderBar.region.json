@@ -4,13 +4,13 @@
     "baude"
   ],
   "code": [
-    "baude.py:BaudeWindow.__init__",
-    "baude.py:BaudeWindow.show_title",
-    "baude.py:BaudeWindow.sync_models",
-    "baude.py:BaudeWindow.sync_providers",
-    "baude.py:BaudeWindow.sync_effort_choices",
-    "baude.py:BaudeWindow.sync_local",
-    "baude.py:BaudeWindow.sync_mode"
+    "baudewindow.py:BaudeWindow.__init__",
+    "windowdrafts.py:WindowDrafts.show_title",
+    "windowdrafts.py:WindowDrafts.sync_models",
+    "windowdrafts.py:WindowDrafts.sync_providers",
+    "windowdrafts.py:WindowDrafts.sync_effort_choices",
+    "windowdrafts.py:WindowDrafts.sync_local",
+    "windowdrafts.py:WindowDrafts.sync_mode"
   ],
   "copy": [
     "chat_header",

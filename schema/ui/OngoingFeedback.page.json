@@ -2,7 +2,7 @@
   "description": "A tab of the main area (title \"Feedback\", or \"Feedback (N)\" with N the fixes waiting for your review; tooltip \"The feedback on Baude, and where each stands\"): left, a list of all the feedback (GitHub issues plus notes saved on this machine); right, the one selected, its note, what's been said on it, each round of its fix with before and after images, and a bar for what can be done. Baude's and Record's.",
   "apps": ["baude", "record"],
   "opens": ["☰ → Ongoing Feedback", "a feedback issue or PR chosen in the @ list or the glossary search (Cmd+K / Ctrl+K): shown here, selected; any other issue opens on GitHub in the browser", "back / forward in the tab history"],
-  "code": ["fixview.py:FixesPage", "fixview.py:with_notes", "fixview.py:note_item", "fixes.py", "baude.py:BaudeWindow.open_fixes"],
+  "code": ["fixview.py:FixesPage", "fixview.py:with_notes", "fixview.py:note_item", "fixes.py", "windowsignal.py:WindowSignal.open_fixes"],
   "copy": ["fixes", "feedback", "window", "common"],
   "parts": [
     {

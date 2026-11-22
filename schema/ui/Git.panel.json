@@ -7,7 +7,7 @@
     "Signal page: a resolved commit or branch name's \"Show in Git\" button",
     "⌘K / Ctrl+K: a branch from the glossary"
   ],
-  "code": ["gitview.py:GitPage", "gitview.py:git_checkouts", "gitview.py:git_branch_list", "gitview.py:git_lanes", "gitview.py:git_commit_card", "gitview.py:gh_state", "gitview.py:GitAvatars", "baude.py:BaudeWindow.show_git"],
+  "code": ["gitview.py:GitPage", "gitview.py:git_checkouts", "gitview.py:git_branch_list", "gitview.py:git_lanes", "gitview.py:git_commit_card", "gitview.py:gh_state", "gitview.py:GitAvatars", "windowsignal.py:WindowSignal.show_git"],
   "copy": ["git", "host_errors.not_a_repo"],
   "parts": [
     {

@@ -4,12 +4,12 @@
     "baude"
   ],
   "code": [
-    "baude.py:BaudeWindow.update_banner",
-    "baude.py:BaudeWindow.banner_text",
-    "baude.py:BaudeWindow.host_apart_said",
-    "baude.py:BaudeWindow.show_retry",
-    "baude.py:BaudeWindow.drop",
-    "baude.py:BaudeWindow.live_elsewhere",
+    "windowremote.py:WindowRemote.update_banner",
+    "windowremote.py:WindowRemote.banner_text",
+    "windowremote.py:WindowRemote.host_apart_said",
+    "windowremote.py:WindowRemote.show_retry",
+    "windowremote.py:WindowRemote.drop",
+    "baudewindow.py:BaudeWindow.live_elsewhere",
     "sessionlist.py:stopping_said",
     "baude.py:BaudeApp.show_update_bars",
     "baude.py:BaudeApp.update_now",

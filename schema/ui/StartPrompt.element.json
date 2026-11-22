@@ -9,7 +9,7 @@
   ],
   "code": [
     "composerview.py:start_prompt_view",
-    "baude.py:BaudeWindow.render_history",
+    "windowview.py:WindowView.render_history",
     "recordreader.py:Reader._add"
   ],
   "copy": [

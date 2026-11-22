@@ -20,8 +20,8 @@
     "markdownview.py:open_code",
     "markdownview.py:bullet_for",
     "chatfind.py:ChatSelection",
-    "baude.py:BaudeWindow.render_assistant",
-    "baude.py:BaudeWindow.reply_view",
+    "windowdrafts.py:WindowDrafts.render_assistant",
+    "windowsignal.py:WindowSignal.reply_view",
     "recordreader.py:Reader._add"
   ],
   "copy": [

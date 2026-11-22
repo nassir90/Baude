@@ -24,7 +24,7 @@ import dev.baude.android.Key
 import dev.baude.android.Mesh
 import dev.baude.android.MeshScreen
 import dev.baude.android.Msg
-import dev.baude.android.NewSession
+import dev.baude.android.SpawnAgent
 import dev.baude.android.PhoneHost
 import dev.baude.android.PhoneScreen
 import dev.baude.android.Settings
@@ -126,11 +126,82 @@ abstract class Screens(private val theme: String) {
         screen("06-mesh-remove")
     }
 
-    @Test fun newSessionHosts() {
+    @Test fun spawnAgentHosts() {
         versionsFixture()
-        show { NewSession(null, null, done = {}, opened = { _, _ -> }) }
+        show { SpawnAgent(done = {}, opened = { _, _ -> }, given = null, edited = {}) }
         tap("workshop")
-        menu("19-new-session-hosts")
+        menu("19-spawn-agent-hosts")
+    }
+
+    @Test fun newSessionOpens() = newChat("92-new-session") { tap("New session") }
+
+    @Test fun folderPlusOpens() = newChat("93-folder-plus") { tap("New session in ~/garden, on workshop") }
+
+    /** Open folder…: the step from the host's home, its folders listed; a path typed, the folders it begins; a folder
+     * tapped, browsed into; Open: the chat in it. */
+    @Test fun openFolderOpens() = newChat("95-open-folder-opened") {
+        tap("Open folder…")
+        screen("94-open-folder")
+        typeIn("/home/dev/ga")
+        screen("94b-open-folder-typed")
+        tap("garden")
+        screen("94c-open-folder-browsed")
+        tap("Open")
+    }
+
+    /** A new chat's first message sent: it's the host's from then on (no longer a draft), and listed at home. */
+    @Test fun newChatFirstMessage() {
+        newChat("96-new-chat-written") { tap("New session in ~/garden, on workshop") }
+        val chat = Mesh.openChat("h1", "n")
+        chat.draft.value = "Tidy the changelog for 2.4"
+        settle()
+        tap("Send")
+        val s = Mesh.sessions["h1"].orEmpty()
+        Mesh.sessions["h1"] = s.map { if (it.id == "n") Msg.Session.from(it.json().put("draft", false)
+            .put("title", "Tidy the changelog for 2.4").put("said", System.currentTimeMillis() / 1000.0)) else it }
+        settle()
+        activity.window.decorView.captureRoboImage("build/screenshots/$theme/97-new-chat-sent.png")
+        chat.draft.value = "/new" // (a new chat on workshop, in this one's folder)
+        settle()
+        tap("Send")
+        laidOut()
+        activity.window.decorView.captureRoboImage("build/screenshots/$theme/99-slash-new.png")
+        Mesh.close()
+        render("98-new-chat-listed") { HomeScreen() }
+    }
+
+    /** Home, its new chat asked for (how: a tap), the host starting it as a draft ("n", in the folder asked for), and
+     * the chat that's opened at once. */
+    private fun newChat(name: String, how: () -> Unit) {
+        val now = System.currentTimeMillis() / 1000.0
+        val folders = mapOf("/home/dev" to listOf("garden", "notes", ".config"), "/home/dev/garden" to listOf("docs", "src", "tests"))
+        var made = 0
+        FixtureConnection.up(activity, Mesh.hosts[0]) { m ->
+            if (m.optString("op") == "list_dir") return@up folders[m.optString("path").trimEnd('/')]?.let { names ->
+                org.json.JSONObject().put("op", "dir").put("path", m.optString("path")).put("entries",
+                    org.json.JSONArray(names.map { org.json.JSONObject().put("name", it).put("dir", true) } +
+                        org.json.JSONObject().put("name", "README.md").put("dir", false)))
+            } ?: org.json.JSONObject().put("op", "dir").put("path", m.optString("path")).put("error", "No such folder")
+            if (m.optString("op") != "start") return@up null
+            val id = if (made++ == 0) "n" else "n$made"
+            println("start ${m.optString("cwd")}: $id") // (where it was asked to start: the run's output says)
+            val s = Msg.Session(id = id, cwd = m.optString("cwd"), created = now, updated = now, state = "idle",
+                mode = "auto", draft = true, group = m.optString("group"))
+            Mesh.sessions["h1"] = Mesh.sessions["h1"].orEmpty() + s
+            org.json.JSONObject().put("op", "started").put("session", org.json.JSONObject().put("id", id)
+                .put("cwd", m.optString("cwd")).put("draft", true))
+        }
+        val opened = androidx.compose.runtime.mutableStateOf<Pair<String, String>?>(null)
+        show {
+            val at = opened.value
+            if (at == null) Home(open = { h, s -> opened.value = h to s }, feedback = {})
+            else androidx.compose.runtime.key(at) {
+                ChatShell(at.first, at.second, back = {}, open = { h, s -> opened.value = h to s }, feedback = {}) }
+        }
+        how()
+        settle()
+        laidOut()
+        activity.window.decorView.captureRoboImage("build/screenshots/$theme/$name.png")
     }
 
     @Test fun hostMenu() { // (the host picker's long-press: workshop, reached over ssh)
@@ -211,8 +282,7 @@ abstract class Screens(private val theme: String) {
         screen("46-pictures-bot-settings")
     }
 
-    /** The Git page on the parity rig's repository (its recorded answers), its authors' pictures as GitHub gives them:
-     * ada's identicon, pale grey to its edge; rowan-lee's portrait. */
+    /** The Git page on the parity rig's repository (its recorded answers), rowan-lee's picture a portrait as GitHub gives it, ada's none (initials). */
     @Test fun picturesGit() {
         val fixtures = java.io.File("../../tests/parity/fixtures")
         val home = org.json.JSONObject(java.io.File(fixtures, "sessions.json").readText()).getJSONObject("host").getString("home")
@@ -230,7 +300,7 @@ abstract class Screens(private val theme: String) {
         val now = System.currentTimeMillis() / 1000.0
         Mesh.sessions["h1"] = listOf(Msg.Session(id = "a", title = "Tidy the release notes", cwd = "$home/garden",
             updated = now - 60, said = now - 60, created = now - 660, state = "idle", model = "opus", effort = "high", mode = "default"))
-        Pictures.authors(mapOf("ada@example.com" to Pictures.identicon(7, 0xFF8DB8E8.toInt()),
+        Pictures.authors(mapOf(
             "41000001+rowan-lee@users.noreply.github.com" to Pictures.portrait(0xFF2E3440.toInt(), 0xFFD9A47E.toInt(),
                 0xFF6F8396.toInt(), 0xFF3B2A1E.toInt())))
         dev.baude.android.GitPages.prepare("h1", "a", null, false)
@@ -244,10 +314,9 @@ abstract class Screens(private val theme: String) {
         activity.window.decorView.captureRoboImage("build/screenshots/$theme/47-pictures-git.png")
     }
 
-    /** The phone's two Bots' pictures: Juniper's a portrait on a dark ground, Fern's one on white. */
+    /** The phone's two Bots: Juniper's picture a portrait on a dark ground, Fern with none (initials). */
     private fun botPictures() {
         Mesh.pictures["phone/p-a/null"] = Pictures.portrait(0xFF1D1D20.toInt(), 0xFFE0B48A.toInt(), 0xFF3A3A40.toInt(), 0xFF141414.toInt())
-        Mesh.pictures["phone/p-b/null"] = Pictures.portrait(0xFFFFFFFF.toInt(), 0xFFC68B59.toInt(), 0xFF8DE6B1.toInt(), 0xFF5A3A22.toInt())
     }
 
     /** workshop's first chat a Bot, Juniper, with its picture: a portrait on white. */
@@ -261,7 +330,7 @@ abstract class Screens(private val theme: String) {
         return bot
     }
 
-    /** This phone as a host of its own, named pocket: its connection up, two agents (Bots) of its own, and one in its
+    /** This phone as a host of its own, named pocket: its connection up, two Bots of its own and a chat with no Bot name, and one in its
      * trash. */
     private fun phoneFixture() {
         PhoneHost.name = "pocket"
@@ -276,7 +345,9 @@ abstract class Screens(private val theme: String) {
             Msg.Session(id = id, title = title, cwd = "/data/phone/agents/$id", updated = now - ago, said = now - ago,
                 created = now - ago - 600, state = state, model = "qwen3:8b", mode = "default", bot = Msg.BotListing(name = name))
         Mesh.sessions["phone"] = listOf(s("p-a", "Juniper", "Shopping list for Saturday", 120.0, "working"),
-            s("p-b", "Fern", "Read the bus timetable", 5_400.0))
+            s("p-b", "Fern", "Read the bus timetable", 5_400.0),
+            Msg.Session(id = "p-c", title = "Sort the seed packets", cwd = "/data/phone/agents/p-c", updated = now - 9_000.0,
+                said = now - 9_000.0, created = now - 9_600.0, state = "idle", model = "qwen3:8b", mode = "default"))
     }
 
     /** The mesh as workshop says it is: it, and two members on older code (one 45 commits behind, one whose count
@@ -434,12 +505,12 @@ abstract class Screens(private val theme: String) {
         withMenus("22-settings-meta-intelligence")
     }
 
-    @Test fun newSessionModelPicker() {
+    @Test fun spawnAgentModelPicker() {
         meshModels()
-        show { NewSession("h1", null, done = {}, opened = { _, _ -> }) }
+        show { SpawnAgent(done = {}, opened = { _, _ -> }, given = null, edited = {}) }
         tap("Its default model")
         laidOut()
-        withMenus("23-new-session-model-picker")
+        withMenus("23-spawn-agent-model-picker")
     }
 
     @Test fun metaCardModelPicker() {
@@ -975,6 +1046,26 @@ abstract class Screens(private val theme: String) {
         repeat(20) { if (hits().size <= nth) settle() } // (a menu that's opening: once it's up)
         hits()[nth].config[act].action!!.invoke()
         androidx.compose.runtime.snapshots.Snapshot.sendApplyNotifications() // (what it changed: composed again)
+        settle()
+    }
+
+    /** typed put in the box on screen (its dialog's, if one's up), as typing it would. */
+    private fun typeIn(typed: String) {
+        val wm = Class.forName("android.view.WindowManagerGlobal").getMethod("getInstance").invoke(null)
+        @Suppress("UNCHECKED_CAST")
+        val views = wm.javaClass.getDeclaredField("mViews").apply { isAccessible = true }.get(wm) as List<android.view.View>
+        fun roots(v: android.view.View): List<androidx.compose.ui.node.RootForTest> = when (v) {
+            is androidx.compose.ui.node.RootForTest -> listOf(v)
+            is android.view.ViewGroup -> (0 until v.childCount).flatMap { roots(v.getChildAt(it)) }
+            else -> emptyList()
+        }
+        fun all(n: androidx.compose.ui.semantics.SemanticsNode): List<androidx.compose.ui.semantics.SemanticsNode> =
+            listOf(n) + n.children.flatMap { all(it) }
+        val box = views.drop(views.indexOf(activity.window.decorView)).flatMap(::roots)
+            .flatMap { all(it.semanticsOwner.rootSemanticsNode) }
+            .last { it.config.contains(androidx.compose.ui.semantics.SemanticsActions.SetText) }
+        box.config[androidx.compose.ui.semantics.SemanticsActions.SetText].action!!.invoke(androidx.compose.ui.text.AnnotatedString(typed))
+        androidx.compose.runtime.snapshots.Snapshot.sendApplyNotifications()
         settle()
     }
 

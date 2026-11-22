@@ -4,8 +4,6 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -20,7 +18,6 @@ import androidx.compose.ui.unit.dp
  * own), then Add Host…. */
 @Composable
 fun HostMenu(open: Boolean, dismiss: () -> Unit) {
-    val c = LocalBaude.current
     val id = picked()
     var adding by remember { mutableStateOf(false) }
     Popover(open, dismiss) {
@@ -33,7 +30,7 @@ fun HostMenu(open: Boolean, dismiss: () -> Unit) {
                 toast(if (now) Wording.Hosts.nowActivated(host = name) else Wording.Hosts.nowDeactivated(host = name))
             }
         }
-        if (id != null && id != "phone") HorizontalDivider(color = c.rule)
+        if (id != null && id != "phone") MenuDivider()
         MenuChoice(Wording.Sidebar.addHost, false) { dismiss(); adding = true }
     }
     if (adding) AddHost(done = { adding = false })

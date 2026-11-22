@@ -99,18 +99,18 @@
     }
   },
   "picture-shade": {
-    "$description": "Someone's or a Bot's picture set into the page (imageviews.shaded_picture's .picture-shade; the Android app's Avatar): three inset shadows over it, its rim darker inward and its middle as it is, light and dark alike. Over a picture only, never over initials.",
+    "$description": "Someone's or a Bot's picture or initials set into the page (imageviews.shaded_picture's .picture-shade; the Android app's Avatar): three inset shadows over it, its rim darker inward and its middle as it is, light and dark alike. Over every round avatar: a picture, and initials on their colour.",
     "$extensions": {"dev.baude.android": "dp"},
     "blur": {"$type": "dimension", "$description": "The shadow all round the rim: its blur.", "$value": {"value": 4, "unit": "px"}},
-    "blur-color": {"$type": "color", "$value": {"colorSpace": "srgb", "components": [0, 0, 0], "alpha": 0.3, "hex": "#000000"},
-      "$extensions": {"dev.baude.gtk": "alpha(black, 0.3)"}},
+    "blur-color": {"$type": "color", "$value": {"colorSpace": "srgb", "components": [0, 0, 0], "alpha": 0.2, "hex": "#000000"},
+      "$extensions": {"dev.baude.gtk": "alpha(black, 0.2)"}},
     "top-y": {"$type": "dimension", "$description": "The shadow from the top edge: how far down it's moved.", "$value": {"value": 1, "unit": "px"}},
     "top-blur": {"$type": "dimension", "$description": "The shadow from the top edge: its blur.", "$value": {"value": 2, "unit": "px"}},
-    "top-color": {"$type": "color", "$value": {"colorSpace": "srgb", "components": [0, 0, 0], "alpha": 0.4, "hex": "#000000"},
-      "$extensions": {"dev.baude.gtk": "alpha(black, 0.4)"}},
+    "top-color": {"$type": "color", "$value": {"colorSpace": "srgb", "components": [0, 0, 0], "alpha": 0.28, "hex": "#000000"},
+      "$extensions": {"dev.baude.gtk": "alpha(black, 0.28)"}},
     "ring": {"$type": "dimension", "$description": "The hairline ring just inside the edge: its width.", "$value": {"value": 1, "unit": "px"}},
-    "ring-color": {"$type": "color", "$value": {"colorSpace": "srgb", "components": [0, 0, 0], "alpha": 0.16, "hex": "#000000"},
-      "$extensions": {"dev.baude.gtk": "alpha(black, 0.16)"}}
+    "ring-color": {"$type": "color", "$value": {"colorSpace": "srgb", "components": [0, 0, 0], "alpha": 0.11, "hex": "#000000"},
+      "$extensions": {"dev.baude.gtk": "alpha(black, 0.11)"}}
   },
   "gap": {
     "$type": "dimension",
@@ -218,7 +218,8 @@
       "$value": {"value": 6, "unit": "px"}
     },
     "context-meter": {"$description": "The context bar (.context-meter).", "$value": {"value": 4, "unit": "px"}},
-    "status": {"$description": "A feedback's status pill (.fix-status).", "$value": {"value": 4, "unit": "px"}}
+    "status": {"$description": "A feedback's status pill (.fix-status).", "$value": {"value": 4, "unit": "px"}},
+    "popover": {"$description": "A popover, a menu, a dialog on the phone.", "$value": {"value": 12, "unit": "px"}}
   },
   "font": {
     "$description": "Text: the phone's sizes (sp: libadwaita's 11pt body is about 15), and the CSS's, of the text round it (em).",
@@ -231,6 +232,11 @@
       "$value": {"value": 12.5, "unit": "px"}
     },
     "caption-line": {"$description": "Its line height.", "$type": "dimension", "$value": {"value": 16, "unit": "px"}},
+    "title": {
+      "$description": "A dialog's heading on the phone (libadwaita's .title-2, 15pt, as body's 11pt is 15).",
+      "$type": "dimension",
+      "$value": {"value": 20, "unit": "px"}
+    },
     "mono": {"$description": "The phone's code.", "$type": "dimension", "$value": {"value": 13.5, "unit": "px"}},
     "small": {
       "$description": "A note's size (.sysnote, Meta's .meta-note), and a folder's name's (.sidebar-folder), in em.",
@@ -499,6 +505,30 @@
     "width": {"$description": "The / and @ lists over the box: at most this wide (PickList.WIDTH).", "$value": {"value": 520, "unit": "px"}},
     "height": {"$description": "And at most this tall (PickList.HEIGHT).", "$value": {"value": 360, "unit": "px"}},
     "gap": {"$description": "Between the list's foot and the box.", "$value": {"value": 10, "unit": "px"}}
+  },
+  "popup": {
+    "$type": "dimension",
+    "$description": "The phone's menus, pickers' lists and dialogs (Popups.kt: Popover, MenuChoice, AlertDialog), drawn at the page's size (Global Scale's and Text size's). The desktop's are libadwaita's and theming's.",
+    "row": {
+      "$description": "Every menu's and picker's row, and the model list's: its height. The desktop's are 30 (dropdown.choice's and menubutton.choice's rows, the model palette's): the phone's a bar button's side for a finger.",
+      "$value": {"value": 34, "unit": "px"}
+    },
+    "inset": {
+      "$description": "A row's first and last thing (check, icon, text; the trailing tick or ▸), in from the menu's sides; a menu's headings too. libadwaita's menu items' sides (modelbutton's padding).",
+      "$value": {"value": 12, "unit": "px"}
+    },
+    "gap": {"$description": "Between a row's check, dot or logo and its text.", "$value": {"value": 8, "unit": "px"}},
+    "pad": {
+      "$description": "Above a menu's first row and below its last, and either side of a divider (libadwaita's popover contents' padding).",
+      "$value": {"value": 6, "unit": "px"}
+    },
+    "min-width": {"$description": "A menu at least this wide.", "$value": {"value": 112, "unit": "px"}},
+    "margin": {"$description": "A menu kept this far in from the screen's edges.", "$value": "{gap.inside}"},
+    "dialog-gutter": {
+      "$description": "A dialog's sides, this far in from the chat's border (the inside's edge): where the chat's text starts, so a dialog is the chat's column wide.",
+      "$value": "{gap.chat-h}"
+    },
+    "dialog-inset": {"$description": "A dialog's heading, body, fields and buttons, in from its edges.", "$value": {"value": 20, "unit": "px"}}
   },
   "composer": {
     "$type": "dimension",

@@ -51,11 +51,16 @@ def _git(cwd, *args, timeout=20, limit=OUT_LIMIT):
     return text, None
 
 
-def _inside(server, path, checkout=False):
-    """path (absolute) made real, if it's in one of the server's sessions' folders (or, checkout, its own code's)."""
+def _real(path):
+    """path (absolute, ~ its home's) made real."""
     if not isinstance(path, str) or not os.path.isabs(os.path.expanduser(path)):
         raise ValueError(wording.say("host_errors.not_absolute"))
-    real = os.path.realpath(os.path.expanduser(path))
+    return os.path.realpath(os.path.expanduser(path))
+
+
+def _inside(server, path, checkout=False):
+    """path (absolute) made real, if it's in one of the server's sessions' folders (or, checkout, its own code's)."""
+    real = _real(path)
     if server.in_sessions(real):
         return real
     if checkout:
@@ -66,10 +71,10 @@ def _inside(server, path, checkout=False):
     raise ValueError(wording.say("host_errors.not_in_session_folder"))
 
 
-def list_dir(server, path):
-    """list_dir {path}: a folder's entries, folders first then by name (.git left out), each {name, dir, size?,
-    ignored} (ignored: git ignores it, as Baude dims it)."""
-    real = _inside(server, path)
+def list_dir(_server, path):
+    """list_dir {path}: any folder's entries (Open folder… browses the host with it; a session's Files page), folders
+    first then by name (.git left out), each {name, dir, size?, ignored} (ignored: git ignores it, as Baude dims it)."""
+    real = _real(path)
     try:
         with os.scandir(real) as it:
             entries = [e for e in it if e.name != ".git"]

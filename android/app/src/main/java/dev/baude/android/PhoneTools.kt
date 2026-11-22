@@ -14,7 +14,7 @@ import java.util.concurrent.TimeUnit
  * their chats, a chat read or sent a message. Each runs as the chat's permission mode has it (need). */
 object PhoneTools {
     const val RESULT_MAX = 40_000 // (characters of a tool's result given back to the model)
-    private val GONE = "This agent's been deleted" to true
+    private val GONE = "This chat's been deleted" to true
     private const val READ_LINES = 2000
     private const val READ_MAX = 256 * 1024
     private const val WAIT_S = 300

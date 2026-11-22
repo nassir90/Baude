@@ -748,7 +748,7 @@ def shaded_picture(picture):
     to its rim, as if pressed in (.picture-shade), so a photo isn't a flat cut-out on the grey. In a Gtk.Overlay
     (returned: what goes in the layout, and what's dimmed to dim it all) that clips it and its shade to one shape,
     round, or the theme's corners. Its place in the layout (alignment, margins, expanding) the frame's, so the shade
-    covers the picture and no more. Over an avatar, the shade's there only while it shows a picture, not initials."""
+    covers the picture and no more. Over an avatar, the shade's there whether it shows a picture or initials."""
     frame = Gtk.Overlay(css_classes=["picture-frame"], overflow=Gtk.Overflow.HIDDEN,
                         halign=picture.get_halign(), valign=picture.get_valign(),
                         hexpand=picture.get_hexpand(), vexpand=picture.get_vexpand())
@@ -760,10 +760,6 @@ def shaded_picture(picture):
     frame.set_child(picture)
     shade = Gtk.Box(css_classes=["picture-shade"], can_target=False)
     frame.add_overlay(shade)
-    if isinstance(picture, Adw.Avatar):  # (its picture can come later, or go)
-        shown = lambda *_: shade.set_visible(picture.get_custom_image() is not None)  # noqa: E731
-        picture.connect("notify::custom-image", shown)
-        shown()
     return frame
 
 

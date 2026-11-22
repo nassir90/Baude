@@ -297,7 +297,6 @@ class Here:
             since = time.monotonic() - RELEASED.get(pid, -1e9)  # (just given to someone's Emission: not taken
             if since < RELEASED_S and not (self.force and since > 3):  # back unasked, nor before it's had it)
                 raise OSError("it was just let go of")
-            urls = []
             try:
                 info = emissionlink.call(pid, {"op": "info"}, timeout=3)
                 if not info.get("agent"):  # (someone's Emission window has it: watched there instead)
@@ -305,9 +304,8 @@ class Here:
                 if info.get("idle_s", IDLE_TAKE_S) < IDLE_TAKE_S and not self.force:  # (the Bot's using it: not
                     # taken mid-task)
                     raise OSError("busy")
-                tabs = emissionlink.call(pid, {"op": "tabs", "from_pane": True}, timeout=10).get("tabs") or []
-                urls = [t["url"] for t in tabs if t.get("url") and t["url"] != "about:blank"]  # (Baude's asking,
-                emissionlink.call(pid, {"op": "quit", "from_pane": True}, timeout=3)  # not the Bot: its note kept)
+                emissionlink.call(pid, {"op": "quit", "from_pane": True}, timeout=3)  # (its tabs written down as
+                # it goes, opened again here: Baude's asking, not the Bot, so its note's kept)
             except (FileNotFoundError, ConnectionRefusedError):
                 pass  # (none running)
             end = time.monotonic() + 10
@@ -315,32 +313,26 @@ class Here:
                 if time.monotonic() > end:
                     raise OSError("its Emission didn't let go of its profile")
                 time.sleep(0.1)
-            GLib.idle_add(lambda: self.made(pid, urls) and False)
+            GLib.idle_add(lambda: self.made(pid) and False)
         except (OSError, ValueError) as e:
             why = str(e)  # (e's gone once this block's done: the idle call's after)
             GLib.idle_add(lambda: self.done(why) and False)
 
-    def made(self, pid, urls):
+    def made(self, pid):
         try:
             import emissioncore
             import emissionmac
             import emissionwindow
             profile = next(p["name"] for p in emissionlink.profiles() if p["id"] == pid)
-            win = emissionwindow.Window(self.app, urls[0] if urls else None, profile, agent=True, hosted=True)
+            win = emissionwindow.Window(self.app, None, profile, agent=True, hosted=True)  # (its profile's tabs
+            # opened again, the Bot told where they came from)
             if win.Engine is None or win.status is not None:
                 why = win.status.get_description() if win.status is not None else "no page engine here"
                 self.free(win)
                 emissioncore.ProfileSocket.close(pid)
                 emissionlink.unlock_profile(pid)
                 return self.done(why)
-            for url in urls[1:]:
-                win.open(url)
             win.released = self.release  # (someone's Emission asking for its profile: let go of)
-            if urls:  # (what the Bot's told, its next request: its pages moved, reloaded)
-                win.note = ((win.note + " ") if win.note else "") + (
-                    "This browser moved into Baude: its pages were opened again from their addresses (what was "
-                    "typed in them, and their history, is gone): " + ", ".join(urls[:10]))
-                emissionlink.pending_note(pid, win.note)
             win.get_content().set_content(None)  # (its pages, its downloads' banner: the Browser page's to show)
             if not HOME.get("awake"):
                 HOME["awake"] = True
@@ -380,7 +372,7 @@ class Here:
         if win is None:
             return False
         if not win.body.get_mapped() and (GLib.get_monotonic_time() - win.asked_at) / 1e6 > emissioncore.AGENT_IDLE_S:
-            emissionlink.open_pages(self.pid, win.open_said or [], why="idle")
+            win.leaving = "idle"  # (its tabs written down as it's let go of, for the Bot's next browser)
             self.release()
             return False
         return True

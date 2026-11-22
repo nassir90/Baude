@@ -101,6 +101,7 @@ object Type {
     val caption = TextStyle(fontSize = Tokens.Font.caption, lineHeight = Tokens.Font.captionLine)
     val folder = TextStyle(fontSize = Tokens.Font.caption, fontWeight = Tokens.Font.bold)  // (.sidebar-folder, at 0.6)
     val title = TextStyle(fontSize = Tokens.Font.body, fontWeight = Tokens.Font.bold)
+    val dialogTitle = TextStyle(fontSize = Tokens.Font.title, fontWeight = Tokens.Font.bold)  // (Adw.AlertDialog's heading)
     val mono = TextStyle(fontSize = Tokens.Font.mono, fontFamily = CodeFont.family)  // (.mono: Settings → Code Font's, from the next start)
 }
 

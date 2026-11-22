@@ -33,6 +33,7 @@
     {"name": "panel-meta", "what": "The fixture chat with the side panel's Meta page", "page": "meta", "inventory": ["Meta.panel", "SidePanel.region"]},
     {"name": "panel-meta-reply", "what": "Meta's page with a reply: a Read card, a chat moved (its change box), a setting it changed, the changelog it showed, the changes bar", "page": "meta", "meta": "meta.json", "inventory": ["Meta.panel", "MetaSettings.dialog"]},
     {"name": "panel-meta-mesh", "what": "Meta's page with a reply that used the mesh's tools: the hosts listed, a subagent started on another host", "page": "meta", "meta": "meta-mesh.json", "inventory": ["Meta.panel"]},
+    {"name": "panel-meta-start-chat", "what": "Meta's page with the form for starting a chat brought up, its prompt filled in", "page": "meta", "meta": "meta-form.json", "inventory": ["NewSessionForm.dialog", "Meta.panel"]},
     {"name": "panel-meta-reply-open", "what": "The same, the cards' Input and Output opened", "page": "meta", "meta": "meta.json", "open": true, "inventory": ["Meta.panel"]},
     {"name": "panel-subagents", "what": "… its Subagents page", "page": "agents", "transcript": "agents.jsonl", "subagents": "agents", "inventory": ["Subagents.panel"]},
     {"name": "panel-subagent-detail", "what": "… a subagent's page: its prompt, a Grep card, its reply", "page": "agents", "transcript": "agents.jsonl", "subagents": "agents", "view": "ta1", "inventory": ["Subagents.panel"]},

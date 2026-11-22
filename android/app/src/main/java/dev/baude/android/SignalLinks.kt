@@ -148,7 +148,7 @@ private fun NamesPopover(chat: Chat, surface: String) {
     val r = SignalNames.known(chat.hostId, chat.sid)[surface] ?: return
     val places = r.places
     val width = if (places.isEmpty()) 320.dp else LocalConfiguration.current.screenWidthDp.dp - 48.dp
-    Column(Modifier.width(width).padding(4.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+    Column(Modifier.width(width).padding(horizontal = Popups.inset), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Row(verticalAlignment = Alignment.Top) {
             Text(kindAndName(r, c.fg.copy(alpha = c.fg.alpha * 0.65f)), style = Type.body, color = c.fg, modifier = Modifier.weight(1f).padding(top = 6.dp))
             IconButton(Adwaita.ViewRefresh, if (r.status == NOT_FOUND || r.status == STALE) Wording.Common.tryAgain
@@ -163,8 +163,8 @@ private fun NamesPopover(chat: Chat, surface: String) {
                 val name = (path.substringAfterLast('/').ifEmpty { path }) + (if (role == "folder") "/" else "") +
                     (if (!loc.isNull("line") && loc.optInt("line") > 0) ":${loc.optInt("line")}" else "")
                 val where = path.substringBeforeLast('/', "") + (loc.str("note")?.let { "  ($it)" } ?: "")
-                Row(Modifier.fillMaxWidth().heightIn(min = 28.dp).clickable { SignalLinks.open.value = null; SignalLinks.openLocation(loc) }
-                    .padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically,
+                Row(Modifier.fillMaxWidth().heightIn(min = 28.dp).clickable { SignalLinks.open.value = null; SignalLinks.openLocation(loc) },
+                    verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Row(Modifier.weight(0.4f), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         RefIcons.Draw(refIcon(r.kind, r.found, listOf(role)) ?: "code", c.fg, 16.dp.icon)
@@ -189,7 +189,7 @@ private fun LookupPopover(chat: Chat, surface: String) {
     val version = SignalNames.version.intValue
     var seen by remember(surface) { mutableStateOf(version) }
     if (version != seen) { seen = version; asking = false }
-    Column(Modifier.width(320.dp).padding(4.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+    Column(Modifier.width(320.dp).padding(horizontal = Popups.inset), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Text(if (r != null && r.status != PENDING) kindAndName(r, c.fg.copy(alpha = c.fg.alpha * 0.65f)) else buildAnnotatedString {
             withStyle(SpanStyle(fontFamily = Type.mono.fontFamily ?: FontFamily.Monospace, fontSize = Type.mono.fontSize)) { append(surface) }
         }, style = Type.body, color = c.fg)

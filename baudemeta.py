@@ -431,8 +431,7 @@ class BaudeMeta(metachat.MetaChat):
         win = self.win
 
         def spawn():  # (this machine's host first; none there: it, started as the agent's started)
-            return win.remote_start_form(sorted(network().alive(), key=lambda r: host_key(r) != HERE_HOST) or [None],
-                                         agents=True)
+            return win.spawn_form(sorted(network().alive(), key=lambda r: host_key(r) != HERE_HOST) or [None])
         return {"add_host": ("add a host Baude reaches over ssh", win.host_form),
                 "new_group": ("make a group of chats", win.group_form),
                 "spawn_agent": ("start an agent (a session) on a host: the host, then what it offers to run, the "

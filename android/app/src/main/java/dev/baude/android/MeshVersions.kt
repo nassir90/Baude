@@ -14,7 +14,6 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -181,7 +180,7 @@ fun MeshScreen(back: () -> Unit) {
         val conn = m.conn ?: return@let
         AlertDialog(onDismissRequest = { removing = null }, containerColor = c.dialog,
             title = { Text(Wording.MeshVersions.removeHeading(host = m.name)) },
-            text = { Text(Wording.MeshVersions.removeBody, style = Type.body, color = c.dim) },
+            text = { Text(Wording.MeshVersions.removeBody) },
             confirmButton = { Button(Wording.Common.remove, destructive = true) { Mesh.remove(conn); removing = null } },
             dismissButton = { Button(Wording.Common.cancel) { removing = null } })
     }

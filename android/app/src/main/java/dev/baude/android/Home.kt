@@ -37,8 +37,6 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -55,9 +53,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -342,21 +340,25 @@ fun Home(open: (String, String) -> Unit, feedback: () -> Unit, phone: () -> Unit
     LaunchedEffect(Unit) { HomePrefs.load(ctx) }
     Mesh.tick.value // (a host's state changed: drawn again)
     var query by rememberSaveable { mutableStateOf("") }
-    var starting by remember { mutableStateOf<Starting?>(null) } // (New session's form: where it's from)
+    var choosing by remember { mutableStateOf<String?>(null) } // (Open folder…'s: the host it's a folder of)
     var adding by remember { mutableStateOf(false) }
     val snack = remember { SnackbarHostState() }
-    // New session: a draft on the host picked, in the folder it was last started in, with no form (Baude's new_chat)
-    fun newSession() {
-        val h = picked() ?: return
-        hostState(h)?.let { toast(it); return }
-        val group = newGroup(h)
-        val msg = Msg.Start(prompt = "", cwd = HomePrefs.folder(ctx, h) ?: "~", mode = "auto", group = group).json().put("draft", true)
-        Mesh.ask(h, msg) { r ->
+    // New session, a folder's + and Open folder…: a new chat on host h (none: the one picked), a draft till it's written
+    // in, opened at once (Baude's new_chat, start_in_folder): in folder, kept as the host's last; else in the one last
+    // given there
+    fun newSession(h: String? = picked(), folder: String? = null) {
+        val at = h ?: return
+        hostState(at)?.let { toast(it); return }
+        val group = newGroup(at)
+        val cwd = folder?.trim()?.ifBlank { "~" } ?: HomePrefs.folder(ctx, at) ?: "~"
+        val msg = Msg.Start(prompt = "", cwd = cwd, mode = "auto", group = group).json().put("draft", true)
+        Mesh.ask(at, msg) { r ->
             val id = Msg.Started.from(r).session?.id
             if (r.optString("op") == Op.STARTED && id != null) {
+                if (folder != null) HomePrefs.setFolder(ctx, at, cwd)
                 Groups.putIn(group)
-                open(h, id)
-            } else toast(Wording.NewSession.hostRefused(host = Mesh.label(h),
+                open(at, id)
+            } else toast(Wording.NewSession.hostRefused(host = Mesh.label(at),
                 why = Msg.Error.from(r).said.orEmpty().ifBlank { Wording.BotBrowser.hostSaidNo }))
         }
     }
@@ -371,13 +373,13 @@ fun Home(open: (String, String) -> Unit, feedback: () -> Unit, phone: () -> Unit
         // the top: New session and the host it's on, Open folder…, then the search and ⋮ (Baude's sidebar's top box)
         Column(Modifier.padding(start = 8.dp, end = 8.dp, top = 8.dp, bottom = 4.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-                SidebarAction(Adwaita.DocumentNew, Wording.Sidebar.newSession, Modifier.weight(1f), onClick = ::newSession)
+                SidebarAction(Adwaita.DocumentNew, Wording.Sidebar.newSession, Modifier.weight(1f)) { newSession() }
                 HostPick()
             }
             SidebarAction(Adwaita.FolderOpen, Wording.Sidebar.openFolder, Modifier.fillMaxWidth()) {
                 val h = picked()
                 val said = hostState(h)
-                if (said != null) toast(said) else starting = Starting(h, null, null, "folder")
+                if (said != null) toast(said) else choosing = h
             }
             Row(Modifier.padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(2.dp)) {
@@ -397,7 +399,7 @@ fun Home(open: (String, String) -> Unit, feedback: () -> Unit, phone: () -> Unit
                 val folded = query.isBlank() && sec.key in HomePrefs.collapsed
                 if (sec.key != "bots") item(key = "h:" + sec.key) {
                     Header(sec, folded, plus = sec.hostId?.takeIf { Mesh.conn(it)?.state == "up" }?.let { h ->
-                        { starting = Starting(null, sec.folder, h, null) } }) {
+                        { newSession(h, sec.folder) } }) {
                         if (sec.key in HomePrefs.collapsed) HomePrefs.collapsed.remove(sec.key) else HomePrefs.collapsed.add(sec.key)
                         HomePrefs.save()
                     }
@@ -419,12 +421,84 @@ fun Home(open: (String, String) -> Unit, feedback: () -> Unit, phone: () -> Unit
     }
     SnackbarHost(snack, Modifier.align(Alignment.BottomCenter).navigationBarsPadding())
     }
-    starting?.let { s -> NewSession(s.host, s.folder, done = { starting = null }, opened = open, first = s.first, focus = s.focus) }
+    choosing?.let { h -> OpenFolder(h, done = { choosing = null }) { choosing = null; newSession(h, it) } }
     if (adding) AddHost(done = { adding = false })
 }
 
-/** Where New session's form's from: the host it's on (null: pick), its folder, the host listed first, the field focused. */
-private class Starting(val host: String?, val folder: String?, val first: String?, val focus: String?)
+/** Open folder… (Baude's ask_host_folder): the folder a new chat on host h starts in, a path there typed or browsed,
+ * from the one last given there (else the host's home). Under it, the folders the host lists (list_dir) as it's typed:
+ * those in the folder typed, else those of its parent that its last part begins (.. first, for the one above); one
+ * tapped is put in the path. Open: picked. */
+@Composable
+private fun OpenFolder(h: String, done: () -> Unit, picked: (String) -> Unit) {
+    val c = LocalBaude.current
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    val home = Mesh.conn(h)?.info?.home?.ifBlank { null } ?: "/"
+    val start = HomePrefs.folder(ctx, h) ?: home
+    var field by remember { mutableStateOf(androidx.compose.ui.text.input.TextFieldValue(start,
+        androidx.compose.ui.text.TextRange(start.length))) }
+    var listed by remember { mutableStateOf<Pair<String, List<String>>?>(null) } // (the folder listed, its folders shown)
+    fun full(t: String) = t.trim().ifBlank { "~" }.let { if (it == "~" || it.startsWith("~/")) home.trimEnd('/') + it.drop(1) else it }
+    fun up(p: String) = p.trimEnd('/').substringBeforeLast('/').ifEmpty { "/" }
+    val typed = full(field.text)
+    LaunchedEffect(typed) {
+        if (!typed.startsWith("/")) { listed = null; return@LaunchedEffect }
+        fun shown(folder: String, r: JSONObject, part: String) = folder to Msg.Dir.from(r).entries.orEmpty()
+            .mapNotNull { e -> e.name?.takeIf { e.dir == true } }
+            .filter { it.lowercase().startsWith(part.lowercase()) && (!it.startsWith(".") || part.startsWith(".")) }
+        Mesh.ask(h, Msg.ListDir(path = typed).json()) { r ->
+            if (typed != full(field.text)) return@ask // (typed on since: that one's answer's wanted)
+            if (r.optString("op") == Op.DIR && Msg.Dir.from(r).error.isNullOrBlank()) listed = shown(typed, r, "")
+            else { // (not a folder: its parent's, that its last part begins)
+                val parent = up(typed)
+                val part = typed.trimEnd('/').substringAfterLast('/')
+                Mesh.ask(h, Msg.ListDir(path = parent).json()) { p ->
+                    if (typed != full(field.text)) return@ask
+                    listed = if (p.optString("op") == Op.DIR && Msg.Dir.from(p).error.isNullOrBlank()) shown(parent, p, part)
+                        else parent to emptyList()
+                }
+            }
+        }
+    }
+    fun put(path: String) { field = androidx.compose.ui.text.input.TextFieldValue(path, androidx.compose.ui.text.TextRange(path.length)) }
+    fun open() = picked(if (typed.startsWith("/")) java.io.File(typed).normalize().path.ifEmpty { "/" } else typed)
+    AlertDialog(
+        onDismissRequest = done,
+        title = { Text(Wording.Sidebar.openFolderOn(host = Mesh.label(h))) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                val focusing = remember { androidx.compose.ui.focus.FocusRequester() }
+                LaunchedEffect(Unit) { focusing.requestFocus() }
+                Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(c.fg.copy(alpha = 0.08f))
+                    .padding(horizontal = 10.dp, vertical = 9.dp)) {
+                    if (field.text.isEmpty()) Text("~", style = Type.body, color = c.dim)
+                    BasicTextField(field, { field = it }, singleLine = true, textStyle = Type.body.copy(color = c.fg),
+                        cursorBrush = SolidColor(c.accentBg),
+                        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Done),
+                        keyboardActions = androidx.compose.foundation.text.KeyboardActions(onDone = { open() }),
+                        modifier = Modifier.fillMaxWidth().focusRequester(focusing))
+                }
+                val (folder, names) = listed ?: ("" to emptyList())
+                val rows = (if (folder.trimEnd('/').isNotEmpty()) listOf(".." to up(folder)) else emptyList()) +
+                    names.map { it to folder.trimEnd('/') + "/" + it }
+                LazyColumn(Modifier.fillMaxWidth().heightIn(min = 240.dp, max = 240.dp).clip(RoundedCornerShape(8.dp))
+                    .border(1.dp, c.rule, RoundedCornerShape(8.dp))) {
+                    items(rows, key = { it.second + "\u0000" + it.first }) { (name, path) ->
+                        Row(Modifier.fillMaxWidth().clickable { put(path) }.heightIn(min = 36.dp).padding(horizontal = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Icon(if (name == "..") Adwaita.GoUp else Adwaita.Folder, null, tint = c.fg, modifier = Modifier.size(16.dp.icon))
+                            Text(name, style = Type.body, color = c.fg, maxLines = 1, overflow = TextOverflow.MiddleEllipsis,
+                                modifier = Modifier.weight(1f))
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = { Button(Wording.Common.open, suggested = true) { open() } },
+        dismissButton = { Button(Wording.Common.cancel, onClick = done) },
+        containerColor = LocalBaude.current.dialog,
+    )
+}
 
 /** What's said over the chats of a host that isn't reached (Baude's chatparts.HostState): a placeholder in the rule's
  * outline. */
@@ -620,7 +694,7 @@ private fun HostPick() {
                 modifier = Modifier.widthIn(max = 120.dp))
             Icon(Adwaita.PanDown, Wording.Sidebar.hostPickerTip, tint = c.fg, modifier = Modifier.size(16.dp.icon))
         }
-        Popover(open, { open = false }) {
+        Popover(open, { open = false }, ticks = Ticks.END) {
             for (id in ids.sortedWith(compareBy<String>({ it != "phone" }, { name(it).lowercase() }))) MenuChoice(name(id), pick == id, textColor = if (dead(id)) c.dim else null) {
                 HomePrefs.pick(id); open = false
             }
@@ -634,22 +708,21 @@ private fun HostPick() {
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun ViewMenu(snack: SnackbarHostState) {
-    val c = LocalBaude.current
     var open by remember { mutableStateOf(false) }
     var held by remember { mutableStateOf<String?>(null) } // (a group long-pressed: its menu)
     var naming by remember { mutableStateOf<Pair<Boolean, String>?>(null) } // (GroupName: new?, the one renamed)
     val scope = androidx.compose.runtime.rememberCoroutineScope()
     Box {
         IconButton(Adwaita.ViewMore, Wording.Sidebar.groupByTip) { open = true }
-        Popover(open, { open = false }) {
-            Heading(Wording.Sidebar.groupBy)
-            MenuChoice(Wording.Common.folder, HomePrefs.by.value == "folder", leading = true) { HomePrefs.by.value = "folder"; HomePrefs.save() }
-            MenuChoice(Wording.Sidebar.date, HomePrefs.by.value == "date", leading = true) { HomePrefs.by.value = "date"; HomePrefs.save() }
-            HorizontalDivider(color = c.rule)
-            Heading(Wording.Sidebar.groups)
+        Popover(open, { open = false }, ticks = Ticks.START) {
+            MenuHeading(Wording.Sidebar.groupBy)
+            MenuChoice(Wording.Common.folder, HomePrefs.by.value == "folder") { HomePrefs.by.value = "folder"; HomePrefs.save() }
+            MenuChoice(Wording.Sidebar.date, HomePrefs.by.value == "date") { HomePrefs.by.value = "date"; HomePrefs.save() }
+            MenuDivider()
+            MenuHeading(Wording.Sidebar.groups)
             val names = Groups.names() + ""
             for (g in names) MenuChoice(g.ifEmpty { Wording.Sidebar.noGroup }, HomePrefs.groups.isEmpty() || g in HomePrefs.groups,
-                leading = true, onLongClick = if (g.isEmpty()) null else { { held = g } }) {
+                onLongClick = if (g.isEmpty()) null else { { held = g } }) {
                 val now = if (HomePrefs.groups.isEmpty()) names else HomePrefs.groups.toList()
                 val next = if (g in now) now - g else now + g
                 HomePrefs.groups.clear()
@@ -676,44 +749,10 @@ private fun ViewMenu(snack: SnackbarHostState) {
     naming?.let { (new, old) -> GroupName(new, old) { naming = null } }
 }
 
-/** A menu as libadwaita's popover is: its own fill, rounded. */
-@Composable
-fun Popover(open: Boolean, dismiss: () -> Unit, offset: DpOffset = DpOffset.Zero,
-            content: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit) {
-    val c = LocalBaude.current
-    DropdownMenu(open, dismiss, offset = offset, containerColor = c.dialog, shape = RoundedCornerShape(12.dp), content = content)
-}
-
 @Composable
 fun Heading(text: String) {
     val c = LocalBaude.current
     Text(text, style = Type.folder, color = c.dim, modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp))
-}
-
-/** A menu's item, checked if it's the one (or one of those) picked: the tick at its end, or at its start (leading, as
- * a menu's check items have it, cut to one line); onLongClick: pressed and held. */
-@OptIn(ExperimentalFoundationApi::class)
-@Composable
-fun MenuChoice(label: String, on: Boolean, enabled: Boolean = true, leading: Boolean = false, textColor: Color? = null,
-               onLongClick: (() -> Unit)? = null, onClick: () -> Unit) {
-    val c = LocalBaude.current
-    val tick: @Composable () -> Unit = {
-        if (on) Icon(Adwaita.ObjectSelect, null, tint = c.accent, modifier = Modifier.size(16.dp.icon)) else if (leading) Spacer(Modifier.size(16.dp.icon))
-    }
-    val text: @Composable () -> Unit = {
-        Text(label, style = Type.body, color = textColor ?: if (enabled) c.fg else c.dim, maxLines = if (leading) 1 else Int.MAX_VALUE,
-            overflow = TextOverflow.Ellipsis, modifier = if (leading) Modifier.widthIn(max = 220.dp) else Modifier)
-    }
-    if (onLongClick != null) {
-        Row(Modifier.heightIn(min = 38.dp).combinedClickable(enabled = enabled, onClick = onClick, onLongClick = onLongClick)
-            .padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            if (leading) tick()
-            text()
-        }
-        return
-    }
-    DropdownMenuItem(text, onClick, enabled = enabled, leadingIcon = if (leading) tick else null,
-        trailingIcon = if (leading) null else tick, modifier = Modifier.heightIn(min = 38.dp))
 }
 
 /** ☰'s menu of a bar: its items. */

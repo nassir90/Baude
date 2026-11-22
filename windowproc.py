@@ -986,7 +986,10 @@ class WindowProc:
         buf.set_text("")
         self.completer.hide()
         if text in ("/clear", "/new"):
-            self.switch_to(self.new_session)
+            if self.chat_host() != HERE_HOST:  # (another host's chat: a new one on it, in this chat's folder)
+                self.new_session_on(self.remote, (self.remote.sessions.get(self.session_id) or {}).get("cwd"), keep=False)
+            else:
+                self.switch_to(self.new_session)
             return
         if text == "/cd" or text.startswith("/cd "):
             self.change_cwd(text[3:].strip() or "~")
@@ -1149,7 +1152,7 @@ class WindowProc:
         if self.proc is None:
             self.start_proc()
         if self.proc is None or not hasattr(self.proc, "held"):
-            toast(self, "It can't be sent: this chat's agent couldn't be started")
+            toast(self, "It can't be sent: this chat couldn't be started")
             return
         h, sid = turn.held, self.session_id
         sender = baudelib.wire.clean_sender(h.get("sender")) or {"kind": "host"}

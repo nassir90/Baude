@@ -7,6 +7,7 @@ import com.github.takahirom.roborazzi.captureRoboImage
 import com.github.takahirom.roborazzi.captureScreenRoboImage
 import dev.baude.android.Artifact
 import dev.baude.android.BaudeTheme
+import dev.baude.android.BotSettings
 import dev.baude.android.Chat
 import dev.baude.android.ChatShell
 import dev.baude.android.Line
@@ -15,6 +16,7 @@ import dev.baude.android.Subagent
 import dev.baude.android.Home
 import dev.baude.android.HomePrefs
 import dev.baude.android.Host
+import dev.baude.android.Item
 import dev.baude.android.Key
 import dev.baude.android.Mesh
 import dev.baude.android.MeshScreen
@@ -135,6 +137,11 @@ abstract class Screens(private val theme: String) {
         phoneFixture()
         HomePrefs.pick("phone")
         render("41-home-phone") { HomeScreen() }
+    }
+
+    @Test fun makeBot() { // (a chat on workshop, its row's Make Bot…: the Bot's name, its chat's title to keep or type over)
+        show { BotSettings(Item("h1", Mesh.sessions.getValue("h1")[1], 0)) {} }
+        screen("42-make-bot")
     }
 
     /** This phone as a host of its own, named pocket: its connection up, two agents (Bots) of its own, and one in its

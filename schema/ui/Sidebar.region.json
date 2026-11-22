@@ -261,7 +261,7 @@
         },
         {
           "name": "Bot row",
-          "shows": "For a session on a host that is a Bot (top level only, not dead): twice a chat's height: a round avatar with the Bot's picture (its initials until it has one), the Bot's name in bold, under it in small dim text the chat's title; a \"held\" tag if any; the status dot. Bots are listed first in the list with no header, the last used first, each with what is under it (its forks and threads, whatever host). By date, Bots are among the chats by time. Tooltip: name; title; folder; \"On <host> (<address>)\"; held; \"Group <name>\"; worktree.",
+          "shows": "For a session on a host that is a Bot (top level only, not dead): twice a chat's height: a round avatar with the Bot's picture (its initials until it has one), the Bot's name in bold on one line, a \"held\" tag if any, the status dot. A Bot has only its Name: the row never shows its chat's title or any second line. Bots are listed first in the list with no header, the last used first, each with what is under it (its forks and threads, whatever host). By date, Bots are among the chats by time. Tooltip: name; folder; \"On <host> (<address>)\"; held; \"Group <name>\"; worktree (never the chat's title).",
           "copy": [
             "sidebar.bot",
             "sidebar.held",

@@ -492,7 +492,8 @@ private fun SessionRow(item: Item, through: Set<Int>, onClick: () -> Unit) {
     }
 }
 
-/** A Bot's row (Baude's bot_row): its picture, its name, what it's on, its status dot; a long-press: its menu. */
+/** A Bot's row (Baude's bot_row): its picture, its name (nothing else of its chat's), its status dot; a long-press: its
+ * menu. */
 @Composable
 private fun BotRow(item: Item, onClick: () -> Unit) {
     val c = LocalBaude.current
@@ -507,16 +508,12 @@ private fun BotRow(item: Item, onClick: () -> Unit) {
             .padding(horizontal = 4.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
             Avatar(contact.name, Mesh.pictures[contact.pictureKey])
             Spacer(Modifier.width(Gap.avatarGap))
-            Column(Modifier.weight(1f)) {
-                val mark = metaMark(item.hostId, item.id)
-                Text(markedName(contact.name, mark?.how, mark != null), style = Type.bold, color = c.fg, maxLines = 1,
-                    overflow = TextOverflow.Ellipsis)
-                val what = item.s.title?.ifBlank { null }
-                if (what != null) Text(what, style = Type.caption, color = c.dim, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            }
+            val mark = metaMark(item.hostId, item.id)
+            Text(markedName(contact.name, mark?.how, mark != null), style = Type.bold, color = c.fg, maxLines = 1,
+                overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
             HeldTag(item.s)
             StatusDot(contact.state, contact.asking)
-            MarkNote(metaMark(item.hostId, item.id))
+            MarkNote(mark)
         }
         RowMenu(item, menu, pressed, height) { menu = false }
     }

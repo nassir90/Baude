@@ -200,7 +200,8 @@ class WindowSignal:
         if info is None and session_id and not session_id.startswith("new-") and not here:
             info = find_session(session_id)
         if title is None:
-            title = self.title_label.get_text() if here else (info or {}).get("title")
+            title = self.title_label.get_text() if here else \
+                ((info or {}).get("bot") or {}).get("name") or (info or {}).get("title")  # (a Bot: its name)
         me = weakref.ref(self)
 
         def clicked():

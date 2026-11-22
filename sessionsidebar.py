@@ -978,30 +978,24 @@ class SessionSidebar(SidebarMenu, Gtk.Box):
         return panel.meta.ghosts() if panel is not None else []
 
     def bot_row(self, info):
-        """A Bot: twice a chat's height, its picture (its initials till it has one), its name and, under it, what it's
-        on; a dot as a chat's. What's under it (its threads) is nested as forks are."""
+        """A Bot: twice a chat's height, its picture (its initials till it has one) and its name, nothing else of its
+        chat's; a dot as a chat's. What's under it (its threads) is nested as forks are."""
         box = Gtk.Box(spacing=tokens.px("gap.avatar-gap"), margin_start=4, margin_end=4)
         bot = info.get("bot") or {}
         name = bot.get("name") or wording.say("sidebar.bot")
         avatar = Adw.Avatar(size=tokens.px("gap.avatar"), text=name, show_initials=True, valign=Gtk.Align.CENTER)
         bot_picture(info, lambda tex: tex is not None and avatar.set_custom_image(tex))
         box.append(imageviews.shaded_picture(avatar))
-        words = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, valign=Gtk.Align.CENTER, hexpand=True)
-        title = pickers.FadeLabel(label=name, xalign=0, hexpand=True)
+        title = pickers.FadeLabel(label=name, xalign=0, hexpand=True, valign=Gtk.Align.CENTER)
         title.add_css_class("bot-name")
-        words.append(title)
-        what = pickers.FadeLabel(label=info.get("title") or "", xalign=0, hexpand=True)
-        what.add_css_class("dim-label")
-        what.add_css_class("caption")
-        words.append(what)
-        box.append(words)
+        box.append(title)
         is_open = info["id"] == self.win.session_id
         dot = StatusDot(self.win.session_state() if is_open else self.file_state(info))
         if info.get("held"):
             box.append(self.held_tag())
         box.append(dot)
         r = info.get("remote")
-        tip = [name, info.get("title") or "", info.get("cwd") or "",
+        tip = [name, info.get("cwd") or "",
                f"On {remote_name(r)} ({r.host})" if r is not None else "", self.held_tip(info)]
         if group := chat_group(info, self.assigned):
             tip.append(f"Group {group}")

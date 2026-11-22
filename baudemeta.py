@@ -233,12 +233,13 @@ class MetaNames(lookup.SearchSpace):
     def chat_items(self):
         sidebar = getattr(self.win, "sidebar", None)
         sessions = sidebar.sessions if sidebar is not None else None
-        net = tuple((x["id"], x["server"].key, x.get("title"), x.get("cwd"), x.get("said"), x.get("draft"))
-                    for x in network().sessions())
+        net = tuple((x["id"], x["server"].key, x.get("title"), (x.get("bot") or {}).get("name"), x.get("cwd"),
+                     x.get("said"), x.get("draft")) for x in network().sessions())
         if self._chats[0] is not sessions or self._chats[1] != net:
             items = []
             for info in sorted(all_chats(sidebar), key=last_used, reverse=True):
-                if not info.get("title"):
+                name = (info.get("bot") or {}).get("name") or info.get("title")  # (a Bot: by its name alone)
+                if not name:
                     continue
                 r = info.get("remote")
                 host = host_key(r) if r is not None else HERE_HOST
@@ -248,7 +249,7 @@ class MetaNames(lookup.SearchSpace):
                     wording.say("chats.no_folder")
                 if host != HERE_HOST:  # (another host's: by its name, as the status line says it)
                     where = f"{remote_name(r)} · {where}"
-                items.append({"surface": info["title"], "canonical": "", "icon": "claude",
+                items.append({"surface": name, "canonical": "", "icon": "claude",
                               "what": wording.say("chats.chat"),
                               "kind": "chat", "at": at, "ago": (ago := time_ago(at)), "where": where,
                               "summary": f"{where} · {ago}", "path": info.get("path"), "id": info["id"], "line": None,

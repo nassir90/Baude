@@ -216,6 +216,100 @@ abstract class Screens(private val theme: String) {
         chatAt("34-land-split-dragged", "processes", split = true)
     }
 
+    // (the chat's model button pressed: Claude's models, workshop's own Ollama models, and studio's, another member of
+    // the mesh: its Ollama models, one of them workshop's too, its MLX model and its Apple model; more than fit)
+    @Test fun chatModelPicker() {
+        meshModels()
+        val chat = Mesh.openChat("h1", "a")
+        fill(chat)
+        show { ChatShell("h1", "a", back = {}, open = { _, _ -> }, feedback = {}) }
+        tap("Opus 5.5")
+        laidOut()
+        withMenus("20-chat-model-picker")
+        scrollUnder("Qwen") // (the list's end: the mesh's others)
+        laidOut()
+        withMenus("21-chat-model-picker-end")
+    }
+
+    /** What scrolls around text (a list with it in) scrolled to its end. */
+    private fun scrollUnder(text: String) {
+        fun roots(v: android.view.View): List<androidx.compose.ui.node.RootForTest> = when (v) {
+            is androidx.compose.ui.node.RootForTest -> listOf(v)
+            is android.view.ViewGroup -> (0 until v.childCount).flatMap { roots(v.getChildAt(it)) }
+            else -> emptyList()
+        }
+        fun all(n: androidx.compose.ui.semantics.SemanticsNode): List<androidx.compose.ui.semantics.SemanticsNode> =
+            listOf(n) + n.children.flatMap { all(it) }
+        val list = windows().flatMap(::roots).flatMap { all(it.semanticsOwner.unmergedRootSemanticsNode) }.last { n ->
+            n.config.contains(androidx.compose.ui.semantics.SemanticsActions.ScrollBy) && all(n).any {
+                it.config.getOrElse(androidx.compose.ui.semantics.SemanticsProperties.Text) { emptyList() }.any { t -> t.text == text }
+            }
+        }
+        list.config[androidx.compose.ui.semantics.SemanticsActions.ScrollBy].action!!.invoke(0f, 100_000f)
+        settle()
+    }
+
+    /** The windows up now (the screen's, and a menu's over it), as WindowManager has them, the screen's first. */
+    private fun windows(): List<android.view.View> {
+        val wm = Class.forName("android.view.WindowManagerGlobal").getMethod("getInstance").invoke(null)
+        @Suppress("UNCHECKED_CAST")
+        val views = wm.javaClass.getDeclaredField("mViews").apply { isAccessible = true }.get(wm) as List<android.view.View>
+        return views.drop(views.indexOf(activity.window.decorView))
+    }
+
+    /** Each window laid out and composed again till what its layout says (where a pane or a menu goes) has been read:
+     * the rig lays a window out only as it's drawn. */
+    private fun laidOut() = repeat(3) {
+        for (v in windows()) if (v.width > 0 && v.height > 0)
+            v.draw(android.graphics.Canvas(android.graphics.Bitmap.createBitmap(v.width, v.height, android.graphics.Bitmap.Config.ARGB_8888)))
+        androidx.compose.runtime.snapshots.Snapshot.sendApplyNotifications()
+        settle()
+    }
+
+    /** The screen with the menus that are up drawn over it, each where its window is. */
+    private fun withMenus(name: String) {
+        val root = activity.window.decorView
+        val bitmap = android.graphics.Bitmap.createBitmap(root.width, root.height, android.graphics.Bitmap.Config.ARGB_8888)
+        val canvas = android.graphics.Canvas(bitmap)
+        for (v in windows()) {
+            val lp = v.layoutParams as? android.view.WindowManager.LayoutParams
+            canvas.save()
+            if (v !== root && lp != null) canvas.translate(lp.x.toFloat(), lp.y.toFloat())
+            v.draw(canvas)
+            canvas.restore()
+        }
+        java.io.File("build/screenshots/$theme").mkdirs()
+        java.io.File("build/screenshots/$theme/$name.png").outputStream().use {
+            bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it)
+        }
+    }
+
+    /** workshop's own Ollama (eight models), and studio in its mesh: an Ollama (llama3.2:3b, gpt-oss:20b, and
+     * qwen3:8b, as workshop has it), MLX (a Mistral) and Apple's model. */
+    private fun meshModels() {
+        val conn = Mesh.conn("h1")!!
+        fun m(value: String, id: String? = null, name: String = id ?: value, window: Long? = null) =
+            Msg.ProviderModel(value = value, id = id, displayName = name, window = window)
+        val own = listOf("qwen3:8b" to 40960L, "qwen3:30b" to 40960L, "gemma3:4b" to 32768L, "gemma3:12b" to 32768L,
+            "llama3.1:8b" to 131072L, "deepseek-r1:8b" to 131072L, "mistral:7b" to 32768L, "phi4:14b" to 16384L)
+            .map { (id, w) -> m("ollama/$id", id, window = w) }
+        val init = conn.info!!.init!!
+        val listed = org.json.JSONArray(init.getJSONArray("models").toString())
+        for (x in own) listed.put(org.json.JSONObject().put("value", x.value).put("displayName", x.displayName))
+        val studio = Msg.Member(id = "5c0ffee0-0000-4000-8000-000000000002", name = "studio", providers = listOf(
+            Msg.Provider(id = "ollama", kind = "ollama", name = "Ollama", http = true, models = listOf(
+                m("llama3.2:3b", "llama3.2:3b", window = 131072), m("gpt-oss:20b", "gpt-oss:20b", window = 131072),
+                m("qwen3:8b", "qwen3:8b", window = 40960))),
+            Msg.Provider(id = "mlx", kind = "mlx", name = "MLX", http = false, models = listOf(
+                m("mlx-community/Mistral-7B-Instruct-v0.3-4bit", name = "Mistral-7B-Instruct-v0.3-4bit"))),
+            Msg.Provider(id = "apple", kind = "apple", name = "Apple", http = false, models = listOf(
+                m("apple", name = "Apple Foundation Model")))))
+        conn.info = Msg.Info(id = "h1", name = "workshop", home = "/home/dev", init = org.json.JSONObject(init.toString())
+            .put("models", listed), models = (0 until listed.length()).map { listed.getJSONObject(it) },
+            providers = listOf(Msg.Provider(id = "ollama", kind = "ollama", name = "Ollama", http = true, models = own)),
+            mesh = Msg.MeshView(members = listOf(Msg.Member(id = "h1", name = "workshop"), studio)))
+    }
+
     /** The fixture chat ("Tidy the release notes") open at page, its host up: what was said in it, its subagents,
      * side questions and artifacts. */
     private fun chatAt(name: String, page: String, split: Boolean = false) {

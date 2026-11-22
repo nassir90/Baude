@@ -369,8 +369,9 @@ class WindowRemote:
             return
         self.sync_senders()
         listed = self.remote.sessions.get(self.session_id)
-        if listed and listed.get("title") and listed["title"] != getattr(self, "session_title", None):
-            self.show_title(listed["title"])
+        if listed and (listed.get("title") or getattr(self, "session_title", None)) and \
+                (self.bot_name() or listed.get("title") or self.session_title) != self.title_label.get_text():
+            self.show_title(listed.get("title") or self.session_title)  # (a new title, or made a Bot or renamed one)
         if self.resume_pending and self.remote.local and self.remote.direct(self.session_id) and \
                 self.view_path != self.remote.mirror(self.session_id):  # (on this machine: its transcript's there now)
             self.view_session(self.remote.mirror(self.session_id))

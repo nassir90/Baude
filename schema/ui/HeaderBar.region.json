@@ -43,7 +43,7 @@
     },
     {
       "name": "title",
-      "shows": "The open chat's name, centred in the bar, one line, cut with … past 48 characters. A chat with no name yet reads \"New session\". The window title follows it (\"Baude — <name>\").",
+      "shows": "The open chat's name, centred in the bar, one line, cut with … past 48 characters; for a Bot, the Bot's name (never its chat's title). A chat with no name yet reads \"New session\". The window title follows it (\"Baude — <name>\").",
       "copy": [
         "sidebar.new_session",
         "window.rename_tip"

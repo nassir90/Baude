@@ -294,8 +294,36 @@ def open_chat(app, sc):
     return win
 
 
+def bots_scene(app, sc):
+    """fixtures/bots.json's chats, made Bots on the network's hosts (scenes_panels: lab-mac is up, build-box gone, its
+    chats as last seen). Baude lists one host's chats at a time: home-bots has the gone host picked, chat-bot the one
+    that is up, with its Bot open."""
+    fx = fixture(sc["bots"])
+    gone = sc["name"] == "home-bots"
+    win = scenes_panels.network_window(app, None, host="box" if gone else "lab")
+    ids, server = scenes_panels.NET["ids"], scenes_panels.NET["lab"][0]
+    mine = [s for s in fx["sessions"] if s["gone"] == gone]
+    for s in mine:
+        if gone:
+            scenes_panels.NET["box"][1].sessions[ids[s["title"]]]["bot"] = {"name": s["bot"]}
+        else:
+            with server.lock:
+                server.set_bot(server.sessions[ids[s["title"]]], {"name": s["bot"]})
+    win.connect("unrealize", lambda *_: [server.set_bot(server.sessions[ids[s["title"]]], None) for s in mine
+                                         if not gone])
+    win.sidebar.refresh()
+    T.pump(1.5)
+    if not gone:
+        win.sidebar.on_activate(win.sidebar.list, scenes_panels.session_row(win, ids[mine[0]["title"]]))
+        T.wait_for(lambda: win.session_id == ids[mine[0]["title"]], "the Bot open")
+        T.pump(0.8)
+    return win
+
+
 def build(app, sc):
     name = sc["name"]
+    if sc.get("bots"):
+        return bots_scene(app, sc)
     if sc.get("github"):  # (gh signed in, with the fixture's pull requests)
         gitfixture.stub_github(True, os.path.join(HOME, "garden"))
     if name.startswith("home"):
@@ -401,6 +429,8 @@ def main():
     os.makedirs(out, exist_ok=True)
     fixture_changelog()
     shutil.copytree(os.path.join(FIX, "tasks"), "/tmp/parity/tasks", dirs_exist_ok=True)  # (the fixture transcript's path)
+    if any(sc.get("bots") and args.k in sc["name"] for sc in fixture_scenes()):
+        scenes_panels.network_fixture()  # (its servers first: before any window's host process is among the sessions)
     app = T.App()
     style = Adw.StyleManager.get_default()
     failed = 0

@@ -7,7 +7,7 @@
   "parts": [
     {
       "name": "heading",
-      "shows": "Move “<title>” to the trash? (the title, or \"this session\" if it has none).",
+      "shows": "Move “<title>” to the trash? (the title, or \"this session\" if it has none; a Bot: its name, never its chat's title).",
       "copy": ["trash.heading", "trash.this_session"]
     },
     {

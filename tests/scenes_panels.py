@@ -346,6 +346,45 @@ def _(app):
     return win
 
 
+BOTS = {"Write the release notes for 2.4": "Juniper", "Plan the Q1 roadmap": "Fern"}
+
+
+def lab_bots(win):
+    """Two of lab-mac's chats made Bots (Juniper and Fern), as Make Bot… makes them, and the sidebar showing them; made
+    chats again as the window goes, for the next scene."""
+    server = NET["lab"][0]
+
+    def made(on):
+        with server.lock:
+            for prompt, name in BOTS.items():
+                server.set_bot(server.sessions[NET["ids"][prompt]], {"name": name} if on else None)
+    win.connect("unrealize", lambda *_: made(False))
+    made(True)
+    T.wait_for(lambda: sum(win.sidebar.list.get_row_at_index(i).has_css_class("bot-row") for i in range(40)
+                           if win.sidebar.list.get_row_at_index(i) is not None) == len(BOTS), "the Bots' rows")
+
+
+@scene("55v-network-bots", "Two of lab-mac's chats made Bots: listed first, each by its picture (its initials) and its "
+                           "name; Juniper open, its name in the header")
+def _(app):
+    win = network_window(app, None)
+    lab_bots(win)
+    win.sidebar.on_activate(win.sidebar.list, session_row(win, NET["ids"]["Write the release notes for 2.4"]))
+    T.wait_for(lambda: win.session_id == NET["ids"]["Write the release notes for 2.4"], "Juniper open")
+    T.pump(0.5)
+    return win
+
+
+@scene("55w-network-make-bot", "Right-click a chat on lab-mac → Make Bot…: its picture, Choose Picture…, and the "
+                               "Bot's name, the chat's title to keep or type over")
+def _(app):
+    win = network_window(app, None)
+    lab_bots(win)
+    win.sidebar.ask_bot(sidebar_row(win, "Speed up the tokenizer's hot loop").info)
+    T.pump(0.3)
+    return win
+
+
 @scene("55u-network-meta-host-button", "Meta's button:host for lab-mac, pressed, with this machine picked: lab-mac's "
                                        "chats listed, and New session on it")
 def _(app):

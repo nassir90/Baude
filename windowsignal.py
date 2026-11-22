@@ -9,6 +9,7 @@ import time
 import urllib.parse
 from baudelib.transcripts import find_session, history_items, ref_epoch
 from baudelib import providers as providerslib  # noqa: E402  (where the models besides Claude's run: their providers)
+from baudelib.client import chat_name  # noqa: E402
 from baudelib import wording  # noqa: E402  (the words Baude shows: schema/copy, Record's and the Android app's too)
 from lookup import REF_KINDS, Ref
 from lookupkube import pg_servers_cached
@@ -200,7 +201,7 @@ class WindowSignal:
         if info is None and session_id and not session_id.startswith("new-") and not here:
             info = find_session(session_id)
         if title is None:
-            title = self.title_label.get_text() if here else (info or {}).get("title")
+            title = self.title_label.get_text() if here else chat_name(info or {})
         me = weakref.ref(self)
 
         def clicked():

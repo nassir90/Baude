@@ -89,6 +89,7 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
@@ -352,8 +353,8 @@ private fun ViewerStage(st: ViewerState) {
     val focus = remember { FocusRequester() }
     val keys = remember { arrayOf<(Key) -> Boolean>({ false }) }
     // (what a finger's move and its lifting do, as this composition has the picture: the gesture outlives it)
-    val moves = remember { arrayOf<(Int, Float, Offset, Offset, Int) -> Unit>({ _, _, _, _, _ -> }) }
-    val lifts = remember { arrayOf<(Int, Float) -> Unit>({ _, _ -> }) }
+    val moves = remember { arrayOf<(Int, Float, Offset, Offset, Int, Boolean) -> Unit>({ _, _, _, _, _, _ -> }) }
+    val lifts = remember { arrayOf<(Int, Float, Boolean) -> Unit>({ _, _, _ -> }) }
     LaunchedEffect(Unit) {
         focus.requestFocus()
         progress.animateTo(1f, tween(Viewer.flyMs, easing = FastOutSlowInEasing))
@@ -437,13 +438,16 @@ private fun ViewerStage(st: ViewerState) {
             Size(spot.width + (dest.width - spot.width) * p, spot.height + (dest.height - spot.height) * p)) else dest
         val fling = with(density) { 400.dp.toPx() } // (a finger leaving faster than this a second goes on to the next)
         fun paged(from: Int) = (pager.currentPage - from) + pager.currentPageOffsetFraction // (in pages, + towards the next)
-        moves[0] = { from, zc, dp, centroid, fingers ->
-            if (zc != 1f && fingers > 1 && Math.abs(paged(from)) < 0.001f) {
+        moves[0] = { from, zc, dp, centroid, fingers, settling ->
+            val resting = Math.abs(paged(from)) < 0.001f
+            if (zc != 1f && fingers > 1 && (resting || settling)) { // (a second finger's landing turns paging into zooming)
                 val z2 = (zoom * zc).coerceIn(1f, maxZoom)
                 val c0 = center + pan
                 val moved = centroid - (centroid - c0) * (z2 / zoom) + dp
                 zoom = z2
                 pan = if (z2 <= 1f) Offset.Zero else clamp(z2, moved - center)
+            } else if (!resting && settling) {
+                // (the pages are going back to this picture)
             } else {
                 var dx = dp.x
                 val off = paged(from) * stageW
@@ -458,10 +462,11 @@ private fun ViewerStage(st: ViewerState) {
                 if (rest != 0f) pager.dispatchRawDelta(-rest)
             }
         }
-        lifts[0] = { from, vx ->
+        lifts[0] = { from, vx, settling ->
             val at = paged(from)
             if (Math.abs(at) <= 0.001f) held = false else {
                 val by = when {
+                    settling -> 0
                     vx < -fling && at > 0f -> 1
                     vx > fling && at < 0f -> -1
                     Math.abs(at) > 0.5f -> if (at > 0f) 1 else -1
@@ -481,8 +486,10 @@ private fun ViewerStage(st: ViewerState) {
             awaitEachGesture {
                 awaitFirstDown(requireUnconsumed = false)
                 held = true
-                if (pager.isScrollInProgress) scope.launch { pager.stopScroll(MutatePriority.UserInput) }
+                if (pager.isScrollInProgress) scope.launch(start = CoroutineStart.UNDISPATCHED) { pager.stopScroll(MutatePriority.UserInput) }
+                st.index = pager.currentPage // (the page the pager is on, the one a swipe's lifting settles from, even if the last swipe's spring is still running)
                 val from = st.index
+                var settling = false // (a second finger landed with the pages away from this picture: they go back, and the gesture zooms)
                 val velocity = VelocityTracker()
                 var slop = Offset.Zero
                 var moving = false
@@ -491,6 +498,10 @@ private fun ViewerStage(st: ViewerState) {
                         val e = awaitPointerEvent()
                         val down = e.changes.filter { it.pressed }
                         if (down.isEmpty()) break
+                        if (down.size > 1 && !settling && Math.abs((pager.currentPage - from) + pager.currentPageOffsetFraction) > 0.001f) {
+                            settling = true
+                            scope.launch { pager.animateScrollToPage(from) }
+                        }
                         down.first().let { velocity.addPosition(it.uptimeMillis, it.position) }
                         val zc = e.calculateZoom()
                         val dp = e.calculatePan()
@@ -498,11 +509,11 @@ private fun ViewerStage(st: ViewerState) {
                             slop += dp
                             if (slop.getDistance() > viewConfiguration.touchSlop || (zc != 1f && down.size > 1)) moving = true else continue
                         }
-                        moves[0](from, zc, dp, e.calculateCentroid(useCurrent = false), down.size)
+                        moves[0](from, zc, dp, e.calculateCentroid(useCurrent = false), down.size, settling)
                         e.changes.forEach { if (it.positionChange() != Offset.Zero) it.consume() }
                     }
                 } finally {
-                    lifts[0](from, velocity.calculateVelocity().x)
+                    lifts[0](from, velocity.calculateVelocity().x, settling)
                 }
             }
         }) {

@@ -110,7 +110,7 @@ fun metaToolSummary(name: String, input: JSONObject): String {
     }
 }
 
-/** A mark's colour (meta.MARK_COLORS; highlight: the accent's). */
+/** A mark's colour (metalook.MARK_COLORS; highlight: the accent's). */
 @Composable
 fun markColor(how: String): Color = when (how) {
     "added" -> Tokens.Meta.added

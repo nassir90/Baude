@@ -212,7 +212,7 @@ object SlashList {
 
 private val REF_STEPS = longArrayOf(3600, 86400, 7 * 86400, 30 * 86400)
 
-/** The @ list over a chat's box (baude.ChatRefCompleter, meta.RefCompleter): every host's chats by their titles,
+/** The @ list over a chat's box (baude.ChatRefCompleter, metalook.RefCompleter): every host's chats by their titles,
  * then the names the chat's folder has; ranked as lookup.ref_palette_rank does. */
 object MentionList {
     val REF_RE = Regex("""(?<![\w@])@(?:\{([^}\n]+)\}|([\w][\w./:\-]*[\w/]|\w))""")

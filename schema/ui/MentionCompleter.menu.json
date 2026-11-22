@@ -2,7 +2,7 @@
   "description": "The @-list that rises over the composer while an @ is typed at a word's start: the chats and the names of the chat's folder (files, code, commits, pull requests, routes, Kubernetes objects …) the Signal glossary knows.",
   "apps": ["baude", "record"],
   "opens": ["type @ at a word's start (start of line, or after a space or an opening bracket or quote)"],
-  "code": ["baude.py:ChatRefCompleter", "meta.py:RefCompleter", "widgets.py:PickList"],
+  "code": ["baude.py:ChatRefCompleter", "metalook.py:RefCompleter", "widgets.py:PickList"],
   "copy": ["meta"],
   "parts": [
     {

@@ -10,7 +10,7 @@
   "code": [
     "record.py:RecordChat",
     "record.py:RECORD_TOOLS",
-    "meta.py:MetaChat"
+    "metachat.py:MetaChat"
   ],
   "copy": [
     "meta_app",

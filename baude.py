@@ -132,6 +132,8 @@ import update  # noqa: E402  (a new version from git, restarted onto once idle: 
 baudelib.wire.HEAD_COMMIT = update.STARTED  # (said to the host processes it reaches: logged by one on other code)
 baudelib.wire.HEAD_CLIENT = "baude"  # (listed as Baude among the apps connected to a host)
 import meta  # noqa: E402  (Meta, the helper in the side panel: Record's too; see meta.py)
+import metalook  # noqa: E402
+import metachat  # noqa: E402
 from feedback import (  # noqa: E402,F401
     Capture, FEEDBACK_SAVE_KEYS, FeedbackDialog, FeedbackDraft, FeedbackHost, RegionEditor, RegionLayer, _visible_rect, capture_window, feedback_dir, feedback_items, save_feedback,
 )
@@ -7179,10 +7181,11 @@ class SlashCompleter:
         return True
 
 
-class ChatRefCompleter(meta.RefCompleter):
-    """@'s list over a chat's box, as Meta's box has it (meta.RefCompleter), not in code (an @ there is a decorator's,
-    an address's), nor while /'s list is up. Enter takes what's picked while what's typed after the @ is one word, or
-    once the arrows have moved to it; else it's a new line. Ctrl+Enter (⌘Enter) always sends, past the list. Esc over "Nothing found" is the box's (a turn's stop), as with /'s list."""
+class ChatRefCompleter(metalook.RefCompleter):
+    """@'s list over a chat's box, as Meta's box has it (metalook.RefCompleter), not in code (an @ there is a
+    decorator's, an address's), nor while /'s list is up. Enter takes what's picked while what's typed after the @ is
+    one word, or once the arrows have moved to it; else it's a new line. Ctrl+Enter (⌘Enter) always sends, past the
+    list. Esc over "Nothing found" is the box's (a turn's stop), as with /'s list."""
 
     def __init__(self, space, view, anchor, slash):
         self.slash = slash
@@ -8956,8 +8959,8 @@ class SessionSidebar(Gtk.Box):
         row = Gtk.ListBoxRow(child=box, tooltip_text="\n".join(t for t in tip if t))
         row.add_css_class("bot-row")
         row.info, row.dot, row.depth, row.tree_anchor = info, dot, 0, avatar
-        if (mark := getattr(self, "marks", {}).get(info["id"])) is not None:  # (Meta's change: meta.mark_row)
-            meta.mark_row(row, ("chat", info["id"]), mark, self.win.panel.meta, title)
+        if (mark := getattr(self, "marks", {}).get(info["id"])) is not None:  # (Meta's change: metalook.mark_row)
+            metalook.mark_row(row, ("chat", info["id"]), mark, self.win.panel.meta, title)
         click = Gtk.GestureClick(button=Gdk.BUTTON_SECONDARY)
         click.connect("pressed", lambda g, n, x, y: self.show_menu(row, x, y))
         row.add_controller(click)
@@ -8979,7 +8982,7 @@ class SessionSidebar(Gtk.Box):
     def session_row(self, info, depth=0, last=True):
         """Title ··· [dot] — one line; the dot only when something's happening (working, waiting for an answer,
         finished and waiting for input). Forks sit under their session like files in a tree. One Meta's changed:
-        marked, with Keep and Undo (meta.mark_row). A Bot: bot_row."""
+        marked, with Keep and Undo (metalook.mark_row). A Bot: bot_row."""
         if info.get("bot") and not depth and not info.get("dead"):
             return self.bot_row(info)
         box = Gtk.Box(spacing=6, margin_start=6 + depth * TreeList.INDENT, margin_end=4)
@@ -9017,8 +9020,8 @@ class SessionSidebar(Gtk.Box):
             tip.append(f"{info['copies']} earlier cop{'y' if info['copies'] == 1 else 'ies'} of this conversation hidden")
         row = Gtk.ListBoxRow(child=box, tooltip_text="\n".join(t for t in tip if t))
         row.info, row.dot, row.depth, row.tree_anchor = info, dot, depth, title
-        if (mark := getattr(self, "marks", {}).get(info["id"])) is not None:  # (Meta's change: meta.mark_row)
-            meta.mark_row(row, ("chat", info["id"]), mark, self.win.panel.meta, title)
+        if (mark := getattr(self, "marks", {}).get(info["id"])) is not None:  # (Meta's change: metalook.mark_row)
+            metalook.mark_row(row, ("chat", info["id"]), mark, self.win.panel.meta, title)
         if not info.get("unsaved") and not info.get("ghost"):
             click = Gtk.GestureClick(button=Gdk.BUTTON_SECONDARY)
             click.connect("pressed", lambda g, n, x, y: self.show_menu(row, x, y))
@@ -10250,8 +10253,8 @@ class MetaNames(lookup.SearchSpace):
         return self._items
 
 
-class BaudeMeta(meta.MetaChat):
-    """Meta in Baude (meta.MetaChat), the side panel's first page: one conversation for the app (meta_store), each
+class BaudeMeta(metachat.MetaChat):
+    """Meta in Baude (metachat.MetaChat), the side panel's first page: one conversation for the app (meta_store), each
     window's session its own, started in its chat's folder. Its tools change the sidebar (BAUDE_TOOLS) and the
     settings; what it changes in the list is marked there (SessionSidebar.session_row), a chat it deletes listed still,
     struck through, till that's kept or undone (ghosts)."""
@@ -10269,7 +10272,7 @@ class BaudeMeta(meta.MetaChat):
         BaudeMeta.every.add(self)
         self.render()
 
-    # ---- what meta.MetaChat asks of Baude
+    # ---- what metachat.MetaChat asks of Baude
     def messages(self):
         return meta_store()["messages"]
 
@@ -10345,7 +10348,7 @@ class BaudeMeta(meta.MetaChat):
 
     def ghosts(self):
         """The chats Meta's deleted and that aren't kept so: listed still, struck through, where they were."""
-        return [{**info, "ghost": True} for a in self.unkept() for p in meta.action_parts(a)
+        return [{**info, "ghost": True} for a in self.unkept() for p in metalook.action_parts(a)
                 if p["kind"] == "delete_chats" for info in p["redo"].get("infos") or ()]  # (a bundle's parts too)
 
     # ---- chats
@@ -18788,7 +18791,7 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
             toast(self.sidebar, wording.say("hosts.looking_for_baude", dest=to))
             return f"looking for Baude on {to}"
         heading = wording.say("new_session.add_host")
-        return meta.Form(heading, box, [("destination", "user@host, or an alias in ~/.ssh/config", dest),
+        return metalook.Form(heading, box, [("destination", "user@host, or an alias in ~/.ssh/config", dest),
                                         ("command", "its host process's command there, run as `<command> "
                                                     "connect`: empty if baude_headless.py is on its PATH, else "
                                                     "its path (in a git checkout of Baude, <checkout>/"
@@ -18959,7 +18962,7 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
             ([("agent", "what runs it: one of the host's", agent_dd)] if agent_dd is not None else []) + \
             [("folder", "the folder it starts in, on that host", where), ("group", "its group (or empty)", group_entry),
              ("prompt", "what it's asked first", prompt)]
-        form = meta.Form(heading, grid, fields, check, submit, verb=wording.say("new_session.start"),
+        form = metalook.Form(heading, grid, fields, check, submit, verb=wording.say("new_session.start"),
                          body=f"With the top bar's {runs}" if runs else "")
         form.parts = {"servers": servers_dd, "agent": agent_dd, "folder": where, "group": group_entry, "prompt": prompt}
         return form
@@ -18987,7 +18990,7 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
                 raise ValueError(problem)
             self.sidebar.make_group(name())
             return f"made group {name()}"
-        return meta.Form(wording.say("new_session.new_group"), entry, [("name", "the group's name", entry)], check,
+        return metalook.Form(wording.say("new_session.new_group"), entry, [("name", "the group's name", entry)], check,
                          submit, verb=wording.say("common.create"), body=wording.say("new_session.group_body"))
 
     def check_host_version(self):

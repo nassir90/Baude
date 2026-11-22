@@ -44,7 +44,7 @@ class Action(val id: String, said: String, var kind: String, var data: JSONObjec
     }
 }
 
-/** Meta's tools on the phone: desktop Meta's (meta.SHARED_TOOLS and baude.BAUDE_TOOLS, by their names and what they
+/** Meta's tools on the phone: desktop Meta's (metaagent.SHARED_TOOLS and baude.BAUDE_TOOLS, by their names and what they
  * take) as they act on this app: its index, its settings, what's shown under a reply, reading and renaming chats,
  * the New session form, groups, archiving, undo and redo. Served as the MCP server "meta" that Meta's claude runs on
  * its host, relayed back over the phone's connection (start's app_tools): JSON-RPC lines in, answers out. */

@@ -164,15 +164,15 @@
     },
     {
       "name": "Trash",
-      "shows": "Shown only while the phone's trash holds an agent. Heading \"Trash\", then a row per trashed agent, newest first, one line: for a Bot its name alone, else its title, else its model's name (\"Agent\" if none); and a Put Back button.",
+      "shows": "Shown only while the phone's trash holds an agent. Heading \"Trash\", then a row per trashed agent, newest first, one line: for a Bot its name alone, else its title, else its model's name (\"Agent\" if none); and a Restore button.",
       "copy": [
         "this_phone.trash",
-        "this_phone.put_back",
+        "this_phone.restore",
         "common.agent"
       ],
       "actions": [
         {
-          "by": "tap Put Back",
+          "by": "tap Restore",
           "does": "restores its transcript, folder, picture and senders where they were and lists it again in Agents"
         }
       ]

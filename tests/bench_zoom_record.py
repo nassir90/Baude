@@ -234,7 +234,7 @@ class Bench:
 
 def probe_of(tab):
     """A widget in what's shown whose font says its text's size, near what's in view."""
-    if isinstance(tab, record.Reader):
+    if isinstance(tab, recordreader.Reader):
         top = tab.scroll.get_vadjustment().get_value()
         for row in tab.rows:
             ok, b = row.compute_bounds(tab.box)
@@ -246,7 +246,7 @@ def probe_of(tab):
 
 def extent(tab, what):
     """Where what is (a message, a line of notes) in what's scrolled: (y, height)."""
-    if isinstance(tab, record.Reader):
+    if isinstance(tab, recordreader.Reader):
         ok, b = what.compute_bounds(tab.clamp)
         return (b.get_y(), b.get_height()) if ok else None
     ok, it = tab.buf.get_iter_at_line(what)
@@ -257,7 +257,7 @@ def extent(tab, what):
 def place(tab):
     """What's at the top of the view, and how far through it the top of the view is: for on_screen."""
     value = tab.scroll.get_vadjustment().get_value()
-    if isinstance(tab, record.Reader):
+    if isinstance(tab, recordreader.Reader):
         what = next((r for r in tab.rows if r.get_visible() and sum(extent(tab, r) or (0, 0)) > value), tab.rows[-1])
     else:
         y = tab.view.window_to_buffer_coords(Gtk.TextWindowType.WIDGET, 0, int(value))[1]
@@ -470,7 +470,7 @@ def summarize_sample(text):
 
 def open_sample(tmp, size):
     """The sample built under tmp and open in a Record: (its window, frames, a Bench, seconds till ⌘K had its names)."""
-    global record, widgets, Gdk, Gtk, GLib, Graphene
+    global record, recordreader, widgets, Gdk, Gtk, GLib, Graphene
     os.environ["RECORD_DATA"] = os.path.join(tmp, "record-data")
     os.environ["XDG_CONFIG_HOME"] = os.path.join(tmp, "config")
     os.environ["CLAUDE_CONFIG_DIR"] = os.path.join(tmp, "claude-config")
@@ -483,8 +483,10 @@ def open_sample(tmp, size):
     os.environ["RECORD_CLAUDE"] = "/usr/bin/false"
     build(tmp, size)
     import record
+    import recordreader
     import diaryeditor
     import panels
+    import widgets
     from gi.repository import Gdk, GLib, Graphene, Gtk
     panels.SLIDE_MS = 0
     app = record.App()
@@ -520,7 +522,7 @@ def run_one(name, size, args):
     try:
         win, _frames, bench, took = open_sample(tmp, size)
         space = win.space()
-        chats = [c.chat["path"] for c in win.tabs.children() if isinstance(c, record.Reader)]
+        chats = [c.chat["path"] for c in win.tabs.children() if isinstance(c, recordreader.Reader)]
         result = {"size": name, **size, "catalogue_s": round(took, 1)}
         result["items"] = len(space.items())
         note, chat = win.tabs.get(("note", "Home")), win.tabs.get(("chat", os.path.realpath(chats[0])))

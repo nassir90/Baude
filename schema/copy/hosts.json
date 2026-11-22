@@ -11,6 +11,7 @@
     "daemon_restarted": "Daemon restarted",
     "now_deactivated": "{$host} deactivated",
     "now_activated": "{$host} activated",
-    "looking_for_baude": "Looking for Baude on {$dest}"
+    "looking_for_baude": "Looking for Baude on {$dest}",
+    "no_commands": "{$host} has no Baude commands yet: run `python3 baude_headless.py install` in its Baude checkout there"
   }
 }

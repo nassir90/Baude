@@ -33,6 +33,7 @@
     }
   ],
   "removed": [
+    {"name": "command field in Add Host", "apps": ["baude", "phone"], "why": "Baude has no executable of its own to name: ssh always runs the one command baude-headless on a host (schema/variables/HOST_COMMAND.json)", "decided": "2026-11-22"},
     {"name": "This phone's key (and New Key…) in Add Host", "apps": ["phone"], "why": "The phone's key lives on This phone, under Key Material; Add Host is just the endpoint", "decided": "2026-11-22"}
   ],
   "scenes": ["55k-network-add-server"]

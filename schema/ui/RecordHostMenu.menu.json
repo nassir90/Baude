@@ -35,5 +35,8 @@
       "shows": "No menu."
     }
   ],
+  "removed": [
+    {"name": "Host Command…", "apps": ["record"], "why": "Baude has no executable of its own to name: ssh always runs the one command baude-headless on a host (schema/variables/HOST_COMMAND.json)", "decided": "2026-11-22"}
+  ],
   "scenes": []
 }

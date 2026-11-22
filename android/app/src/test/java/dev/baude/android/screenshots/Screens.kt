@@ -204,13 +204,6 @@ abstract class Screens(private val theme: String) {
         activity.window.decorView.captureRoboImage("build/screenshots/$theme/$name.png")
     }
 
-    @Test fun hostMenu() { // (the host picker's long-press: workshop, reached over ssh)
-        show { HomeScreen() }
-        tap("workshop", long = true)
-        layOut()
-        screen("19b-host-menu")
-    }
-
     @Test fun phone() {
         phoneFixture()
         render("40-phone") { PhoneScreen({}, open = {}) }

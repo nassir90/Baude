@@ -1,6 +1,6 @@
 {
   "description": "The menu on the host picker beside New session (the host whose chats are listed), opened by right-click or press and hold at the pointer. Not opened while the picker's own list is open.",
-  "apps": ["baude"],
+  "apps": ["baude", "phone"],
   "opens": ["right-click or long-press the host picker beside New session"],
   "code": ["sessionsidebar.py:SessionSidebar.host_menu", "sessionsidebar.py:SessionSidebar.deactivate_host"],
   "copy": ["hosts", "sidebar"],
@@ -25,6 +25,9 @@
   "states": [
     {"name": "this machine picked", "shows": "Only Add Host…."},
     {"name": "another host picked", "shows": "Deactivate (or Activate), separator, Add Host…."}
+  ],
+  "removed": [
+    {"name": "Host Command…", "apps": ["baude", "phone"], "why": "Baude has no executable of its own to name: ssh always runs the one command baude-headless on a host (schema/variables/HOST_COMMAND.json)", "decided": "2026-11-22"}
   ],
   "scenes": ["55s-network-host-menu", "55k-network-add-server", "55l2-network-host-picker"]
 }

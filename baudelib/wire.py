@@ -132,7 +132,7 @@ def _refs(schema):
 def _check(types, variables):
     """SchemaError, naming the file, for a type that isn't an object with an object for each of its properties, a kind
     that isn't one of KINDS, a message without an op const, an entity with an op, a $ref to no type, or a variable
-    whose const isn't a number."""
+    whose const isn't a number or a string."""
     for kind, d, path in types.values():
         props = d.get("properties", {}) if isinstance(d, dict) else None
         if not isinstance(props, dict) or not all(isinstance(p, dict) for p in props.values()):
@@ -932,6 +932,8 @@ def connect_ssh(dest, strict=False, timeout=25.0):
             proc.wait(timeout=1)
         except subprocess.TimeoutExpired:
             pass
+        if proc.returncode == 127 or any("No such file or directory" in s or "not found" in s for s in said):
+            raise OSError(wording.say("hosts.no_commands", host=dest)) from None  # (ssh's own words say neither what nor what to do)
         raise OSError("; ".join(s for s in said if s) or str(e)) from None
 
 

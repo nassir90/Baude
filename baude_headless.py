@@ -86,7 +86,7 @@ def serve(args):
     except AlreadyRunning as e:
         sys.exit(f"baude-headless: {e}")
     print(json.dumps({"socket": server.socket_path, "id": server.me["id"], "group": server.me["group"]}), flush=True)
-    bins.refreshed(server.log)  # (the commands in ~/.local/bin following this checkout: ssh runs baude-headless)
+    bins.refreshed(server.log, bins.HOST_NAMES)  # (ssh runs baude-headless: kept following this checkout)
     if server.commit:  # (a git checkout: kept up to date, once that's asked for)
         threading.Thread(target=updater, args=(server, args), daemon=True, name="updater").start()
     item = None

@@ -361,6 +361,8 @@ open class Connection(
             for (i in 0 until 10) if (!ch.isClosed) Thread.sleep(50) // (its exit status comes after its end: a moment)
             stderr.join(500)
             if (said.isBlank() && ch.exitStatus > 0) said = "the host's command ended (status ${ch.exitStatus})"
+            if (place is Place.Direct && (ch.exitStatus == 127 || "No such file or directory" in said || "not found" in said))
+                said = Wording.Hosts.noCommands(host = host?.label ?: id)
         }
         return reached
     }

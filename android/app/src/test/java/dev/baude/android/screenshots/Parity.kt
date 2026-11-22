@@ -325,6 +325,7 @@ abstract class Parity(private val theme: String, private val scene: String) {
         dev.baude.android.Find.open.clear()
         dev.baude.android.CompactFolds.open.clear()
         dev.baude.android.Viewer.state.value = null
+        dev.baude.android.Terms.live.toList().forEach { it.leave(); dev.baude.android.Terms.forget(it) }
         dev.baude.android.MetaTools.forms.clear()
         Fixes.items = emptyList()
         Fixes.repo = null
@@ -511,6 +512,22 @@ abstract class Parity(private val theme: String, private val scene: String) {
                 tap("CPU")
                 tap("CPU")
             }
+            name == "kubernetes-shell" -> {
+                show { KubeScreen(host.getString("id"), {}) }
+                tap("CPU")
+                tap("CPU")
+                tapInRow(Wording.Kube.shell, "api-6f7c-mnopq")
+                // (what tests/fake_kubectl.py's sh in the pod writes, ls typed: the host's terminal op isn't in the rig)
+                dev.baude.android.Terms.live.last().feed("root@api-6f7c-mnopq:/app# ls\r\nroot@api-6f7c-mnopq:/app# ".toByteArray())
+                flush(true)
+            }
+            name == "terminal" -> {
+                show { dev.baude.android.TerminalScreen(host.getString("id"), {}) }
+                flush(true)
+                val files = File(root, "fixtures/garden").list().orEmpty().sorted().joinToString("  ")
+                dev.baude.android.Terms.live.last().feed("dev@garden:~$ ls\r\n$files\r\ndev@garden:~$ ".toByteArray())
+                flush(true)
+            }
             name == "mesh" -> {
                 versionsFixture()
                 show { dev.baude.android.MeshScreen {} }
@@ -674,6 +691,20 @@ abstract class Parity(private val theme: String, private val scene: String) {
         } ?: error("nothing labelled $label")
         node.config[SemanticsActions.OnClick].action?.invoke()
         // (what the tap wrote is told to the composition now: in a run's later scenes the write observer's notice doesn't arrive)
+        androidx.compose.runtime.snapshots.Snapshot.sendApplyNotifications()
+        settle()
+    }
+
+    /** A click on what's labelled label in the row that shows text (a table's: the one at its height). */
+    private fun tapInRow(label: String, text: String) {
+        repeat(5) { if (find(text) == null) flush(true) }
+        val nodes = roots().flatMap { all(it.semanticsOwner.rootSemanticsNode) }
+        fun middle(n: SemanticsNode) = n.positionInWindow.y + n.size.height / 2f // (not clipped: a cell scrolled out of sight too)
+        val row = nodes.first { said(it) == text }.let { it.positionInWindow.y..(it.positionInWindow.y + it.size.height) }
+        val node = nodes.firstOrNull { n ->
+            n.config.contains(SemanticsActions.OnClick) && label == described(n) && middle(n) in row
+        } ?: error("nothing labelled $label beside $text")
+        node.config[SemanticsActions.OnClick].action?.invoke()
         androidx.compose.runtime.snapshots.Snapshot.sendApplyNotifications()
         settle()
     }

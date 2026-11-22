@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -97,6 +98,7 @@ class KubeState(val hostId: String) {
     var selected by mutableStateOf<String?>(null)
     var yaml by mutableStateOf<YamlShown?>(null)
     var logs by mutableStateOf<LogsShown?>(null)
+    var shell by mutableStateOf<ShellShown?>(parked.remove(hostId)) // (one the page had before it was turned)
     var deleting by mutableStateOf<Pair<Msg.KubeRow, Boolean>?>(null)
     var note by mutableStateOf<Pair<String, Long>?>(null)
     var progress by mutableStateOf<String?>(null)
@@ -140,11 +142,19 @@ class KubeState(val hostId: String) {
         }
     }
 
-    /** Let go of everything running: the logs, the watch, and whatever's still to be heard. */
+    /** Let go of everything running: the logs, the shell, the watch, and whatever's still to be heard. */
     fun stop() {
         gen++
         stopLogs()
+        closeShell()
         stopWatch()
+    }
+
+    /** The page made again (the phone turned): everything let go of but the shell, kept for the page that follows. */
+    fun park() {
+        shell?.let { parked[hostId] = it }
+        shell = null
+        stop()
     }
 
     fun switchContext(name: String, spaces: List<String>? = null) {
@@ -158,6 +168,7 @@ class KubeState(val hostId: String) {
         progress = Wording.Kube.connecting(name)
         hideYaml()
         closeLogs()
+        closeShell()
         stopWatch()
         fade = true
         loading = true
@@ -394,6 +405,7 @@ class KubeState(val hostId: String) {
         val names = cs.map { it.first }
         val pick = row.default?.takeIf { it in names } ?: cs.firstOrNull { !it.second }?.first ?: names.first()
         stopLogs()
+        closeShell()
         logs = LogsShown(ctx, row.namespace.orEmpty(), row.name.orEmpty(), cs, pick).also { tail(it) }
     }
 
@@ -425,6 +437,37 @@ class KubeState(val hostId: String) {
     fun closeLogs() {
         stopLogs()
         logs = null
+    }
+
+    // ---- a shell in a pod (Multiplex's terminal: kubectl exec -it, run on the host by the terminal op)
+    /** A shell in a pod under the table, in its default container (as its logs pick one), of its running ones (an init
+     * container's has ended); the logs, or another pod's shell, closed first. */
+    fun showShell(row: Msg.KubeRow) {
+        val ctx = context ?: return
+        val names = row.containers.orEmpty().filter { it.init != true }.mapNotNull { it.name }
+        if (names.isEmpty()) return setNote(Wording.Kube.noContainers(row.name.orEmpty()))
+        closeLogs()
+        closeShell()
+        shell = ShellShown(ctx, row.namespace.orEmpty(), row.name.orEmpty(), names,
+            row.default?.takeIf { it in names } ?: names.first()).also { startShell(it) }
+    }
+
+    /** kubectl exec -it in the container picked: bash if it has it, else sh. The one before is ended first. */
+    fun startShell(s: ShellShown) {
+        s.term?.close()
+        val argv = listOf("kubectl", "--context", s.context, "exec", "-it", "-n", s.namespace, s.pod, "-c", s.container, "--",
+            "sh", "-c", "command -v bash >/dev/null 2>&1 && exec bash || exec sh")
+        s.state = ""
+        s.term = HostTerm(hostId, argv, "${s.pod} · ${s.namespace} · ${s.context}").also { t ->
+            t.onEnd = { code -> if (s.term === t) s.state = Wording.Kube.kubectlExited(code) }
+            Terms.add(t)
+        }
+    }
+
+    /** Close the shell: kubectl, and the shell in the pod with it, ended (never left running). */
+    fun closeShell() {
+        shell?.term?.close()
+        shell = null
     }
 
     // ---- deleting a pod: the view's only writes, each confirmed first
@@ -470,6 +513,8 @@ class KubeState(val hostId: String) {
         private val CLIMB = mapOf("ReplicaSet" to "replicasets", "Job" to "jobs")
 
         private fun prefs() = Mesh.app.getSharedPreferences("settings", Context.MODE_PRIVATE)
+        /** A host's shell, kept while its page is made again. */
+        private val parked = mutableMapOf<String, ShellShown>()
 
         /** The resource kubectl calls a kind by: Ingress, ingresses (kubedata.kube_resource). */
         fun resourceOf(kind: String): String {
@@ -504,11 +549,13 @@ fun KubeScreen(hostId: String, back: () -> Unit, context: String? = null, page: 
             st.tick()
         }
     }
-    DisposableEffect(st) { onDispose { st.stop() } }
+    val activity = androidx.compose.ui.platform.LocalContext.current as? android.app.Activity
+    DisposableEffect(st) { onDispose { if (activity?.isChangingConfigurations == true) st.park() else st.stop() } }
     val leave = { st.stop(); back() }
     val up = {
         when {
             st.logs != null -> st.closeLogs()
+            st.shell != null -> st.closeShell()
             st.yaml != null -> st.hideYaml()
             st.level == "table" -> st.level = "categories"
             else -> leave()
@@ -524,7 +571,7 @@ fun KubeScreen(hostId: String, back: () -> Unit, context: String? = null, page: 
         })
         if (st.level == "categories") Categories(st) else {
             Controls(st)
-            Box(Modifier.weight(1f).navigationBarsPadding().inside(c)) { Body(st) }
+            Box(Modifier.weight(1f).navigationBarsPadding().imePadding().inside(c)) { Body(st) }
         }
     }
 }
@@ -625,7 +672,7 @@ private fun Body(st: KubeState) {
     val k = kubeColours()
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val full = maxHeight
-        var logsHeight by remember(st.logs?.pod) { mutableStateOf(maxOf(full / 2, k.logsMin)) }
+        var logsHeight by remember(st.logs?.pod, st.shell?.pod) { mutableStateOf(maxOf(full / 2, k.logsMin)) }
         Column(Modifier.fillMaxSize()) {
             Column(Modifier.weight(1f).fillMaxWidth()) {
                 val y = st.yaml
@@ -644,6 +691,9 @@ private fun Body(st: KubeState) {
             }
             st.logs?.let { l ->
                 LogsPane(st, l, logsHeight, full) { logsHeight = it }
+            }
+            st.shell?.let { s ->
+                ShellPane(st, s, logsHeight.coerceAtMost(maxOf(k.logsMin, full - 80.dp)), full) { logsHeight = it }
             }
         }
     }

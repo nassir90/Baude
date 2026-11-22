@@ -1,8 +1,18 @@
 {
-  "description": "Multiplex, Baude's terminal: what a terminal says when it can't be.",
+  "description": "Multiplex, Baude's terminal: what a terminal says when it can't be, and the phone's Terminal page and the keys it adds.",
   "messages": {
     "ended": "ended",
     "no_vte": "Terminals need VTE's GTK 4 build (package {$package})",
-    "not_started": "Couldn't start: {$error}"
+    "not_started": "Couldn't start: {$error}",
+    "terminal": "Terminal",
+    "close": "Close the terminal (ends it)",
+    "key_esc": "Esc",
+    "key_tab": "Tab",
+    "key_ctrl": "Ctrl",
+    "key_left": "Left",
+    "key_up": "Up",
+    "key_down": "Down",
+    "key_right": "Right",
+    "keyboard": "Keyboard"
   }
 }

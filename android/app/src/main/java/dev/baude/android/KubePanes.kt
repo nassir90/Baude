@@ -57,6 +57,15 @@ class LogsShown(val context: String, val namespace: String, val pod: String, val
     }
 }
 
+/** A shell in a pod shown: whose, its running containers, the one picked, its terminal, and what it's doing (empty
+ * while it runs, or how kubectl ended). */
+class ShellShown(val context: String, val namespace: String, val pod: String, val containers: List<String>,
+                 container: String) {
+    var container by mutableStateOf(container)
+    var term by mutableStateOf<HostTerm?>(null)
+    var state by mutableStateOf("")
+}
+
 /** An object's YAML in the table's place: its name and a × to hide it, then the YAML with the names in it as links. */
 @Composable
 fun YamlLevel(st: KubeState, y: YamlShown) {
@@ -108,6 +117,35 @@ fun LogsPane(st: KubeState, l: LogsShown, height: Dp, room: Dp, set: (Dp) -> Uni
         }
         CodePane(l.text, "pod.log", Modifier.weight(1f), numbered = true, wrap = st.wrap, follow = l.follow,
             onFollow = { if (it != l.follow) l.follow = it })
+    }
+}
+
+/** The shell in a pod, docked where the logs go (build_shell): a terminal icon, its name, what it's doing, the
+ * container, close; the terminal under that. A bar between it and what's above drags it taller or shorter. */
+@Composable
+fun ShellPane(st: KubeState, s: ShellShown, height: Dp, room: Dp, set: (Dp) -> Unit) {
+    val c = LocalBaude.current
+    val k = kubeColours()
+    val density = LocalDensity.current
+    Box(Modifier.fillMaxWidth().height(6.dp).pointerInput(room) {
+        detectVerticalDragGestures { _, d ->
+            set((height - with(density) { d.toDp() }).coerceIn(k.logsMin, maxOf(k.logsMin, room - 80.dp)))
+        }
+    }, contentAlignment = Alignment.Center) { Box(Modifier.fillMaxWidth().height(1.dp).background(c.rule)) }
+    Column(Modifier.fillMaxWidth().height(height)) {
+        Row(Modifier.fillMaxWidth().heightIn(min = 34.dp).padding(start = 10.dp, end = 6.dp), verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            Icon(Adwaita.UtilitiesTerminal, null, tint = c.fg, modifier = Modifier.size(16.dp.icon))
+            Text(midCut("${s.pod} · ${s.namespace}", 36), style = Type.bold, color = c.fg, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f, fill = false))
+            Text(s.term?.said ?: s.state, style = Type.caption, color = c.dim, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f))
+            Picker(midCut(s.container, 28), Wording.Kube.container, s.containers.map { it to it }, s.container) {
+                if (it != s.container) { s.container = it; st.startShell(s) }
+            }
+            IconButton(Adwaita.WindowClose, Wording.Kube.closeShell) { st.closeShell() }
+        }
+        s.term?.let { t -> key(t) { TerminalPane(t, Modifier.weight(1f).fillMaxWidth()) } }
     }
 }
 

@@ -13,7 +13,7 @@ import uuid
 from gi.repository import GLib  # noqa: E402
 
 import chatparts  # noqa: E402
-from baudelib import agentproxy, codex, meshtools, modelfiles, wording  # noqa: E402
+from baudelib import agentproxy, codex, meshtools, modelfiles, wire, wording  # noqa: E402
 from baudelib import models as modelslib  # noqa: E402
 from baudelib import providers as providerslib  # noqa: E402
 from baudelib.claude import ClaudeProc  # noqa: E402
@@ -490,12 +490,12 @@ class Agent:
         sock = ToolSocket.get()
         sock.add(self.token, lambda tool, args: chat._tool(self, tool, args), tools,
                  python=lambda args: chat._python(self, args))
-        # (its own tools, through the relay; and the mesh's, as this user's host process reaches it, from no chat:
+        # (its own tools, through the relay; and the mesh's, through this user's host process, from Meta, as a phone's is:
         # not on Apple's on-device models, whose small window they'd crowd, and which name a tool as its server does)
         mesh = self.program != "apple"
         relay = {"mcpServers": {"meta": {"command": sys.executable, "args": ["-I", "-c", RELAY, sock.path, self.token]},
-                                **({MESH: {"command": sys.executable, "args": [agentproxy.HEADLESS, "mesh-tools"],
-                                           "env": {"BAUDE_SESSION": ""}}} if mesh else {})}}
+                                **({MESH: {"command": sys.executable, "args": [agentproxy.HEADLESS, "mesh-tools", "--as-meta",
+                                                    "--socket", wire.socket_path()]}} if mesh else {})}}
         args = ["--system-prompt", system, "--tools", ",".join(READ_TOOLS + (COMMAND_TOOLS if commands else ())),
                 "--mcp-config", json.dumps(relay), "--strict-mcp-config",
                 "--allowedTools", ",".join([*(f"mcp__meta__{t['name']}" for t in tools),

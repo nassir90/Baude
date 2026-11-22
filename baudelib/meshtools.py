@@ -14,6 +14,7 @@ import uuid
 from baudelib import wire, wording
 
 NAME = "mesh"  # (its tools are mcp__mesh__hosts, ...)
+META = "Meta"  # (a head's Meta, which is no chat on a host: what its messages are from, as a phone's Meta chat is)
 SUBAGENT_MODES = ("auto", "acceptEdits", "default", "plan")  # (a subagent's: Auto at most; its host holds it to these)
 WAIT_S, WAIT_MAX_S = 600, 3600  # (a subagent's or a chat's reply waited for this long, by default and at most)
 ASK_S = wire.CONSTANTS["ASK_S"]  # (a subagent asking a permission no one's there to give: refused after this long)
@@ -59,17 +60,17 @@ SCHEMAS = {
 }
 
 
-def _channel(where, timeout=10, as_=None):
-    ch, info = wire.reach(where, timeout=timeout, as_=as_)
+def _channel(where, timeout=10, as_=None, meta=False):
+    ch, info = wire.reach(where, timeout=timeout, as_=as_, meta=meta)
     return ch, info or {}
 
 
 class Mesh:
-    """The mesh as this host's process has it (this chat's: me, its session id; socket: that host process's, if it
-    isn't this user's usual one)."""
+    """The mesh as this host's process has it (this chat's: me, its session id, or meta: a head's Meta's, in no chat;
+    socket: that host process's, if it isn't this user's usual one)."""
 
-    def __init__(self, me=None, socket=None):
-        self.me = me
+    def __init__(self, me=None, socket=None, meta=False):
+        self.me, self.meta = me, meta
         self.local = {"via": "unix", "path": socket} if socket else {"via": "local"}
         self.relay = {"path": socket} if socket else {}  # (a member reached through that host process)
 
@@ -177,7 +178,7 @@ class Mesh:
 
     def channel(self, where, timeout=10):
         """(channel, info) for where, as from this chat (relay's as): what's sent on it is from this chat."""
-        return _channel(where, timeout, self.me)
+        return _channel(where, timeout, self.me, self.meta)
 
     def ask(self, where, session, text, wait=True, timeout_s=WAIT_S, title=None):
         """text sent to a session, from this chat (input's as); its answer (the turn's result) waited for, unless not
@@ -192,7 +193,7 @@ class Mesh:
             busy = (got.get("session") or {}).get("state") == "working"  # (it's at a turn: this one's answer's next)
             offset = self.request(where, {"op": "transcript", "session": session, "offset": 0, "limit": 1})["size"] \
                 if wait else 0  # (its chat as far as it's written before this: what's said to it is after)
-            sent = said_to(session, text, self.me)
+            sent = said_to(session, text, self.me, self.meta)
             ch.send(sent)
         except BaseException:
             ch.close()
@@ -245,7 +246,7 @@ class Mesh:
                             return {"session": session, "answer": cut([chat["answer"]]), "error": False}
                         skip, said = 0, []
                     elif stopped and text is not None:  # (its host stopped before its claude had it: sent again)
-                        req, skip, said = again or said_to(session, text, self.me), 0, []
+                        req, skip, said = again or said_to(session, text, self.me, self.meta), 0, []
                         ch.send(req)
                     else:  # (not written yet: the turn it's at is another's, or it's next)
                         skip, said = (1 if working else 0), []
@@ -345,6 +346,8 @@ class Mesh:
                 params[k] = a[k]
         if self.me:
             params["spawned_by"] = params["as"] = self.me  # (its task's from this chat: its host says so)
+        elif self.meta:
+            params["as_meta"] = True  # (from Meta: held to Auto at most too)
         where, wait, timeout_s = self.where(a.get("host")), a.get("wait", True), a.get("timeout_s") or WAIT_S
         named = self.named(where)
         end, dropped = time.monotonic() + BACK_S, False
@@ -470,9 +473,10 @@ class Mesh:
                            title=s.get("title")), **named}
 
 
-def said_to(session, text, me=None):
-    """The input that says text to a session: from chat me (input's as), if it's a chat's."""
-    return {"op": "input", "session": session, "req": 2, **({"as": me} if me else {}), "msg": {
+def said_to(session, text, me=None, meta=False):
+    """The input that says text to a session: from chat me (input's as), if it's a chat's, or from Meta (as_meta)."""
+    return {"op": "input", "session": session, "req": 2, **({"as": me} if me else {}),
+            **({"as_meta": True} if meta else {}), "msg": {
         "type": "user", "message": {"role": "user", "content": [{"type": "text", "text": text}]}}}
 
 
@@ -527,11 +531,11 @@ def listed():
             for n, (d, props, req) in SCHEMAS.items()]
 
 
-def serve(me=None, rfile=None, wfile=None, socket=None):
+def serve(me=None, rfile=None, wfile=None, socket=None, meta=False):
     """The MCP server: a message a line on rfile (stdin), its answers on wfile (stdout), till rfile ends; each call on
     a thread of its own (a subagent's answer can take a while: another call meanwhile is answered)."""
     rfile, wfile = rfile or sys.stdin, wfile or sys.stdout
-    mesh, lock = Mesh(me, socket), threading.Lock()
+    mesh, lock = Mesh(me, socket, meta), threading.Lock()
 
     def send(msg):
         with lock:

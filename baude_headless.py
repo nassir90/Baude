@@ -259,6 +259,7 @@ def main():
     mesh_tools = sub.add_parser("mesh-tools", help="the mesh's tools of a Bot's or Meta's agent (hosts, chats, a subagent on any "
                                                    "host, a message to another chat), as an MCP server on stdin and stdout")
     mesh_tools.add_argument("--socket", help="the socket of the host process it's for (default: this user's)")
+    mesh_tools.add_argument("--as-meta", action="store_true", help="for a head's Meta, in no chat: what it sends is from Meta")
     browser_tools = sub.add_parser("emission-tools", help="a Bot's browser tools (its own Emission profile, on any "
                                                           "host), as an MCP server on stdin and stdout")
     browser_tools.add_argument("--socket", help="the socket of the host process it's for (default: this user's)")
@@ -288,7 +289,7 @@ def main():
         return hosttools.serve(args.cwd, args.only.split(",") if args.only else None)
     if args.command == "mesh-tools":
         from baudelib import meshtools
-        return meshtools.serve(os.environ.get("BAUDE_SESSION"), socket=args.socket)
+        return meshtools.serve(os.environ.get("BAUDE_SESSION"), socket=args.socket, meta=args.as_meta)
     if args.command == "emission-tools":
         from baudelib import emissiontools
         return emissiontools.serve(os.environ.get("BAUDE_SESSION"), socket=args.socket)

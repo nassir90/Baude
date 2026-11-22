@@ -429,6 +429,15 @@ abstract class Parity(private val theme: String, private val scene: String) {
                     shot?.config?.get(SemanticsActions.OnClick)?.action?.invoke()
                     androidx.compose.runtime.snapshots.Snapshot.sendApplyNotifications()
                     settle()
+                    repeat(2) { flush(true) } // (its pages are laid out as a frame's drawn, then their pictures read)
+                }
+                if (sc.optBoolean("zoom")) { // (a double tap at the middle of the screen)
+                    val v = activity.window.decorView
+                    repeat(2) { touch(v.width / 2f, v.height / 2f, v.width / 2f) }
+                    settle()
+                }
+                if (sc.has("swipe")) activity.window.decorView.let { v ->
+                    touch(v.width * 0.8f, v.height / 2f, v.width * (0.8f - sc.getDouble("swipe").toFloat()), lift = false)
                 }
                 if (sc.has("card")) tap(sc.getString("card"))
                 if (sc.optBoolean("signal_menu")) tapDescribed(Wording.SignalMenu.tipLinks(status = "").substringBefore(":"))
@@ -635,6 +644,25 @@ abstract class Parity(private val theme: String, private val scene: String) {
         node.config[SemanticsActions.OnLongClick].action?.invoke()
         androidx.compose.runtime.snapshots.Snapshot.sendApplyNotifications()
         settle()
+    }
+
+    /** A finger put down at (x, y) and moved across to toX in steps a frame apart, then lifted (or held there). */
+    private fun touch(x: Float, y: Float, toX: Float, lift: Boolean = true) {
+        val v = activity.window.decorView
+        val down = android.os.SystemClock.uptimeMillis()
+        fun send(action: Int, at: Float) {
+            val e = android.view.MotionEvent.obtain(down, android.os.SystemClock.uptimeMillis(), action, at, y, 0)
+            e.source = android.view.InputDevice.SOURCE_TOUCHSCREEN
+            v.dispatchTouchEvent(e)
+            e.recycle()
+            org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idleFor(Duration.ofMillis(16))
+        }
+        send(android.view.MotionEvent.ACTION_DOWN, x)
+        val steps = 12
+        if (toX != x) for (i in 1..steps) send(android.view.MotionEvent.ACTION_MOVE, x + (toX - x) * i / steps)
+        if (lift) send(android.view.MotionEvent.ACTION_UP, toX)
+        androidx.compose.runtime.snapshots.Snapshot.sendApplyNotifications()
+        org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idleFor(Duration.ofMillis(48))
     }
 
     private fun find(label: String) = roots().flatMap { all(it.semanticsOwner.rootSemanticsNode) }.firstOrNull { n ->

@@ -227,7 +227,7 @@ class SessionSidebar(SidebarMenu, Gtk.Box):
                                     self.new_chat)
         self.new_btn.set_hexpand(True)
         self.folder_btn = self._action("folder-open-symbolic", wording.say("sidebar.open_folder"), wording.say("sidebar.open_folder_tip"),
-                                       lambda: win.pick_folder())
+                                       self.open_folder)
         # (beside it: the host a new session's made on, by its name, verbatim (this machine's local), and whose chats
         # are listed; kept in settings.json's new_session_host: fill_new_hosts, shown_host. A right-click, or press and
         # hold: host_menu)

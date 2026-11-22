@@ -472,6 +472,77 @@ class WindowRemote:
         entry.grab_focus()
         return entry
 
+    def ask_host_folder(self, r):
+        """Open folder… with another host picked: "Open a folder on <host>", a folder there typed or browsed, from the
+        one last used there (else its home). Under the path, the folders the host lists (list_dir) as it's typed: those
+        in the folder typed, else those of its parent that its last part begins (.. first, for the one above); one
+        clicked is put in the path. Open: a blank chat there, in it (new_session_on)."""
+        home = r.info.get("home") or "/"
+        entry = Gtk.Entry(text=(load_settings().get("remote_folders") or {}).get(r.key) or home, activates_default=True,
+                          width_chars=44)
+        rows = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE)
+        rows.add_css_class("boxed-list")
+        rows.connect("row-activated", lambda _l, row: (entry.set_text(row.path), entry.grab_focus(),
+                                                       entry.set_position(-1)))
+        scroll = Gtk.ScrolledWindow(child=rows, hscrollbar_policy=Gtk.PolicyType.NEVER, min_content_height=240,
+                                    max_content_height=240)
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        box.append(entry)
+        box.append(scroll)
+        asked = [0]
+
+        def full():  # (the path typed, absolute: ~ the host's home)
+            t = entry.get_text().strip() or "~"
+            return home.rstrip("/") + t[1:] if t == "~" or t.startswith("~/") else t
+
+        def show(folder, names):
+            while (row := rows.get_row_at_index(0)) is not None:
+                rows.remove(row)
+            above = [("..", os.path.dirname(folder.rstrip("/")) or "/")] if folder.rstrip("/") else []
+            for name, path in above + [(n, os.path.join(folder, n)) for n in names]:
+                line = Gtk.Box(spacing=8, margin_start=10, margin_end=10, margin_top=6, margin_bottom=6)
+                line.append(Gtk.Image.new_from_icon_name("go-up-symbolic" if name == ".." else "folder-symbolic"))
+                line.append(Gtk.Label(label=name, xalign=0, ellipsize=Pango.EllipsizeMode.MIDDLE, hexpand=True))
+                row = Gtk.ListBoxRow(child=line)
+                row.path = path
+                rows.append(row)
+
+        def look(*_):
+            asked[0] += 1
+            n, t = asked[0], full()
+            if not t.startswith("/"):
+                return show("", [])
+
+            def got(reply, folder, part):
+                if n != asked[0]:  # (typed on since: that one's answer's wanted)
+                    return
+                if reply.get("op") == "dir" and not reply.get("error"):
+                    show(folder, [e["name"] for e in reply.get("entries") or [] if e.get("dir") and
+                                  e["name"].casefold().startswith((part or "").casefold()) and
+                                  (not e["name"].startswith(".") or (part or "").startswith("."))])
+                elif part is None:  # (not a folder: its parent's, that its last part begins)
+                    parent, part = os.path.split(t.rstrip("/"))
+                    r.request({"op": "list_dir", "path": parent or "/"}, lambda rep: got(rep, parent or "/", part))
+                else:
+                    show(folder, [])
+            r.request({"op": "list_dir", "path": t}, lambda rep: got(rep, t, None))
+        entry.connect("changed", look)
+        look()
+        dlg = Adw.AlertDialog(heading=wording.say("sidebar.open_folder_on", host=remote_name(r)), extra_child=box,
+                              default_response="open", close_response="cancel")
+        if hasattr(dlg, "set_prefer_wide_layout"):  # (libadwaita 1.6: room for a folder's whole path)
+            dlg.set_prefer_wide_layout(True)
+        dlg.add_response("cancel", wording.say("common.cancel"))
+        dlg.add_response("open", wording.say("common.open"))
+        dlg.set_response_appearance("open", Adw.ResponseAppearance.SUGGESTED)
+        dlg.connect("response", lambda _d, res: res == "open" and
+                    self.new_session_on(r, os.path.normpath(full()) if full().startswith("/") else full()))
+        self.dialog = self.folder_dialog = dlg
+        self.folder_parts = (entry, rows)
+        dlg.present(self)
+        entry.grab_focus_without_selecting()
+        entry.set_position(-1)
+
     def spawn_form(self, servers):
         """Meta's spawn_agent form's fields and what they do: the host (servers: those to pick from; None, this
         machine's host process, started as it's needed), what runs on it (the models it offers: its own, or the top
@@ -663,15 +734,15 @@ class WindowRemote:
             return False
         GLib.timeout_add(250, look)
 
-    def new_session_on(self, r, folder=None):
-        """New session, on another host (r, picked beside it), or a folder's + there: a blank chat there, opened to be
-        written in, in folder (kept as the one last used there), else the folder last used there (else its home), on
-        the top bar's model if it's Claude's (else the host's own); listed once it's written in, as a new chat here
-        is."""
+    def new_session_on(self, r, folder=None, keep=True):
+        """New session, on another host (r, picked beside it), a folder's + there, Open folder… there or /new in a chat
+        there: a blank chat there, opened to be written in, in folder (kept as the one last used there, unless not
+        keep), else the folder last used there (else its home), on the top bar's model if it's Claude's (else the
+        host's own); listed once it's written in, as a new chat here is."""
         self.show_chat()  # (as it's asked for, from the Feedback tab or a file's code: not once it's started)
         group = self.sidebar.new_group(host_key(r))
         model = self.model if self.model and model_program(self.model) == "claude" else None
-        if folder:
+        if folder and keep:
             save_settings(remote_folders={**(load_settings().get("remote_folders") or {}), r.key: folder})
         r.request({"op": "start", "prompt": "", "cwd": folder or (load_settings().get("remote_folders") or {}).get(r.key) or "~",
                    "model": model, "effort": self.effort if model else None, "mode": "auto", "group": group,

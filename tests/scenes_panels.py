@@ -236,6 +236,71 @@ def _(app):
     return folder_plus_chat(app)
 
 
+def open_folder_step(app, typed=None, into=None):
+    """A window on lab-mac, Open folder… pressed: "Open a folder on lab-mac" from the folder last used there, its
+    folders listed; typed: a path typed instead; into: a folder in the list clicked."""
+    win = network_window(app)
+    r = NET["lab"][1]
+    net = os.path.dirname(NET["folders"][0])
+    for d in ("docs", "src", "tests"):
+        os.makedirs(os.path.join(NET["folders"][0], d), exist_ok=True)
+    baude.save_settings(remote_folders={**(baude.load_settings().get("remote_folders") or {}), r.key: net})
+    win.sidebar.folder_btn.emit("clicked")
+    T.wait_for(lambda: getattr(win, "folder_parts", None) and win.folder_parts[1].get_row_at_index(1), "its folders")
+    entry, rows = win.folder_parts
+
+    def listed(name):
+        return next((row for i in range(50) if (row := rows.get_row_at_index(i)) is not None and
+                     row.path.endswith("/" + name)), None)
+    if typed is not None:
+        entry.set_text(typed)
+        T.wait_for(lambda: listed("parser") and not listed("site"), "the folders it begins")
+    if into is not None:
+        rows.emit("row-activated", listed(into))
+        T.wait_for(lambda: listed("src"), "its folders")
+    T.pump(0.5)
+    return win
+
+
+@scene("55f3-network-open-folder", "Open folder… with lab-mac picked: \"Open a folder on lab-mac\", from the folder "
+                                   "last used there, its folders listed under the path")
+def _(app):
+    return open_folder_step(app)
+
+
+@scene("55f4-network-open-folder-typed", "A path typed in it: the folders there that its last part begins")
+def _(app):
+    return open_folder_step(app, typed=os.path.join(os.path.dirname(NET["folders"][0]), "pa"))
+
+
+@scene("55f5-network-open-folder-browsed", "A folder in the list clicked: it's the path, its folders listed")
+def _(app):
+    return open_folder_step(app, typed=os.path.join(os.path.dirname(NET["folders"][0]), "pa"), into="parser")
+
+
+@scene("55f6-network-open-folder-opened", "Open: a blank chat on lab-mac, in that folder")
+def _(app):
+    win = open_folder_step(app, into="parser")
+    win.folder_dialog.emit("response", "open")
+    win.folder_dialog.force_close()
+    T.wait_for(lambda: win.remote is not None and (win.remote.sessions.get(win.session_id) or {}).get("draft"),
+               "the new chat")
+    T.pump(0.5)
+    return win
+
+
+@scene("55f7-network-slash-new", "/new in a chat on lab-mac: a blank chat on lab-mac, in that chat's folder")
+def _(app):
+    win = network_window(app)
+    open_network_session(win, "Speed up the tokenizer's hot loop")
+    was = win.session_id
+    T.type_and_send(win, "/new")
+    T.wait_for(lambda: win.remote is not None and win.session_id != was and
+               (win.remote.sessions.get(win.session_id) or {}).get("draft"), "the new chat")
+    T.pump(0.5)
+    return win
+
+
 @scene("55f2-network-folder-new-session-sent", "That chat's first message sent: lab-mac keeps it from then on, and it's "
                                               "listed under its folder")
 def _(app):

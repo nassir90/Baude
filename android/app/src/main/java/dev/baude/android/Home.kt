@@ -55,6 +55,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
@@ -427,17 +428,76 @@ fun Home(open: (String, String) -> Unit, feedback: () -> Unit, phone: () -> Unit
     if (adding) AddHost(done = { adding = false })
 }
 
-/** Open folder… (Baude's folder chooser): the folder a new chat on host h starts in, as a path there, given as it was
- * last (else the host's home); Open: picked. */
+/** Open folder… (Baude's ask_host_folder): the folder a new chat on host h starts in, a path there typed or browsed,
+ * from the one last given there (else the host's home). Under it, the folders the host lists (list_dir) as it's typed:
+ * those in the folder typed, else those of its parent that its last part begins (.. first, for the one above); one
+ * tapped is put in the path. Open: picked. */
 @Composable
 private fun OpenFolder(h: String, done: () -> Unit, picked: (String) -> Unit) {
+    val c = LocalBaude.current
     val ctx = androidx.compose.ui.platform.LocalContext.current
-    var folder by remember { mutableStateOf(HomePrefs.folder(ctx, h) ?: Mesh.conn(h)?.info?.home?.ifBlank { null } ?: "~") }
+    val home = Mesh.conn(h)?.info?.home?.ifBlank { null } ?: "/"
+    val start = HomePrefs.folder(ctx, h) ?: home
+    var field by remember { mutableStateOf(androidx.compose.ui.text.input.TextFieldValue(start,
+        androidx.compose.ui.text.TextRange(start.length))) }
+    var listed by remember { mutableStateOf<Pair<String, List<String>>?>(null) } // (the folder listed, its folders shown)
+    fun full(t: String) = t.trim().ifBlank { "~" }.let { if (it == "~" || it.startsWith("~/")) home.trimEnd('/') + it.drop(1) else it }
+    fun up(p: String) = p.trimEnd('/').substringBeforeLast('/').ifEmpty { "/" }
+    val typed = full(field.text)
+    LaunchedEffect(typed) {
+        if (!typed.startsWith("/")) { listed = null; return@LaunchedEffect }
+        fun shown(folder: String, r: JSONObject, part: String) = folder to Msg.Dir.from(r).entries.orEmpty()
+            .mapNotNull { e -> e.name?.takeIf { e.dir == true } }
+            .filter { it.lowercase().startsWith(part.lowercase()) && (!it.startsWith(".") || part.startsWith(".")) }
+        Mesh.ask(h, Msg.ListDir(path = typed).json()) { r ->
+            if (typed != full(field.text)) return@ask // (typed on since: that one's answer's wanted)
+            if (r.optString("op") == Op.DIR && Msg.Dir.from(r).error.isNullOrBlank()) listed = shown(typed, r, "")
+            else { // (not a folder: its parent's, that its last part begins)
+                val parent = up(typed)
+                val part = typed.trimEnd('/').substringAfterLast('/')
+                Mesh.ask(h, Msg.ListDir(path = parent).json()) { p ->
+                    if (typed != full(field.text)) return@ask
+                    listed = if (p.optString("op") == Op.DIR && Msg.Dir.from(p).error.isNullOrBlank()) shown(parent, p, part)
+                        else parent to emptyList()
+                }
+            }
+        }
+    }
+    fun put(path: String) { field = androidx.compose.ui.text.input.TextFieldValue(path, androidx.compose.ui.text.TextRange(path.length)) }
+    fun open() = picked(if (typed.startsWith("/")) java.io.File(typed).normalize().path.ifEmpty { "/" } else typed)
     androidx.compose.material3.AlertDialog(
         onDismissRequest = done,
         title = { Text(Wording.Sidebar.openFolderOn(host = Mesh.label(h))) },
-        text = { NameField(folder, { folder = it }, "~", { picked(folder) }) },
-        confirmButton = { Button(Wording.Common.open, suggested = true) { picked(folder) } },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                val focusing = remember { androidx.compose.ui.focus.FocusRequester() }
+                LaunchedEffect(Unit) { focusing.requestFocus() }
+                Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(c.fg.copy(alpha = 0.08f))
+                    .padding(horizontal = 10.dp, vertical = 9.dp)) {
+                    if (field.text.isEmpty()) Text("~", style = Type.body, color = c.dim)
+                    BasicTextField(field, { field = it }, singleLine = true, textStyle = Type.body.copy(color = c.fg),
+                        cursorBrush = SolidColor(c.accentBg),
+                        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Done),
+                        keyboardActions = androidx.compose.foundation.text.KeyboardActions(onDone = { open() }),
+                        modifier = Modifier.fillMaxWidth().focusRequester(focusing))
+                }
+                val (folder, names) = listed ?: ("" to emptyList())
+                val rows = (if (folder.trimEnd('/').isNotEmpty()) listOf(".." to up(folder)) else emptyList()) +
+                    names.map { it to folder.trimEnd('/') + "/" + it }
+                LazyColumn(Modifier.fillMaxWidth().heightIn(min = 240.dp, max = 240.dp).clip(RoundedCornerShape(8.dp))
+                    .border(1.dp, c.rule, RoundedCornerShape(8.dp))) {
+                    items(rows, key = { it.second + "\u0000" + it.first }) { (name, path) ->
+                        Row(Modifier.fillMaxWidth().clickable { put(path) }.heightIn(min = 36.dp).padding(horizontal = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Icon(if (name == "..") Adwaita.GoUp else Adwaita.Folder, null, tint = c.fg, modifier = Modifier.size(16.dp.icon))
+                            Text(name, style = Type.body, color = c.fg, maxLines = 1, overflow = TextOverflow.MiddleEllipsis,
+                                modifier = Modifier.weight(1f))
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = { Button(Wording.Common.open, suggested = true) { open() } },
         dismissButton = { Button(Wording.Common.cancel, onClick = done) },
         containerColor = LocalBaude.current.dialog,
     )

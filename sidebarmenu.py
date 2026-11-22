@@ -432,6 +432,17 @@ class SidebarMenu:
         if picked is not None and group not in picked:
             self.filtered(sidebar_groups=sorted(picked | {group}))
 
+    def open_folder(self):
+        """Open folder…: a folder chooser here (pick_folder); with another host picked beside New session, a folder on
+        it (ask_host_folder); if that host is gone, deactivated or not known, a toast says why."""
+        key = self.host_dd.value() or HERE_HOST
+        if key != HERE_HOST and (said := self.host_state(r := self.shown_remote())) is not None:
+            toast(self, said)
+        elif key != HERE_HOST and r is not None:
+            self.win.ask_host_folder(r)
+        else:
+            self.win.pick_folder()
+
     def new_chat(self):
         """New session (and Ctrl+N): a chat on the host picked beside it (new_session_on), else here. With groups
         picked in ⋮, or only one group's chats listed, it's in one of them (new_group), a draft like any other till

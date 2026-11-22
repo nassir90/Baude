@@ -614,7 +614,7 @@ def kube_window(app):
 @scene("38e-kubernetes", "Kubernetes (☰ → Kubernetes…): a cluster laid out like Freelens: its categories, pods "
                          "with their CPU and memory (the metrics API), a square per container (green ready, orange "
                          "getting ready, outlined restarted lately, red failed, grey done), restarts, status and age, "
-                         "sorted by any column; any set of namespaces at once; at a pod row's end, its logs and ⋮ "
+                         "sorted by any column; any set of namespaces at once; at a pod row's end, its logs, a shell and ⋮ "
                          "(Delete, Force delete, each asked first)",
        size=(1200 + SIDEBAR, H))  # (it fits a 13" MacBook Air's 1470-point screen, where it's made too)
 def _(app):
@@ -634,6 +634,22 @@ def _(app):
     kv.show_logs("shop/api-6f7c-mnopq")
     T.wait_for(lambda: "GET /healthz 200 0.9ms" in kv.logs.buffer.get_property("text"), "its log")
     win.connect("destroy", lambda *_: kv.hide_logs())
+    return win
+
+
+@scene("38e-kubernetes-shell", "Kubernetes: a shell in a pod under the table (kubectl exec -it, in Multiplex's "
+                               "terminal), its containers to pick from; a Bot at its terminal tools there makes its "
+                               "edges glow", size=(1200 + SIDEBAR, H))
+def _(app):
+    win, kv = kube_window(app)
+    T.pump(0.3)
+    kv.show_shell("shop/api-6f7c-mnopq")
+    T.wait_for(lambda: kv.shell_term is not None and "/app#" in kv.shell_term.screen()["screen"], "its prompt")
+    kv.shell_term.type("ls\n")
+    T.pump(0.5)
+    kv.shell_term.glow.on(hold=30)
+    T.pump(0.8)
+    win.connect("destroy", lambda *_: kv.hide_shell())
     return win
 
 

@@ -266,6 +266,9 @@ def main():
     browser_tools = sub.add_parser("emission-tools", help="a Bot's browser tools (its own Emission profile, on any "
                                                           "host), as an MCP server on stdin and stdout")
     browser_tools.add_argument("--socket", help="the socket of the host process it's for (default: this user's)")
+    terminal_tools = sub.add_parser("multiplex-tools", help="a Bot's terminal tools (Multiplex's terminals, on any "
+                                                            "host), as an MCP server on stdin and stdout")
+    terminal_tools.add_argument("--socket", help="the socket of the host process it's for (default: this user's)")
     relay = sub.add_parser("mcp-relay", help=argparse.SUPPRESS)  # (an agent run here's MCP server: its caller's)
     relay.add_argument("--socket", required=True)
     for name in ("run", "name", "token"):
@@ -298,6 +301,9 @@ def main():
     if args.command == "emission-tools":
         from baudelib import emissiontools
         return emissiontools.serve(os.environ.get("BAUDE_SESSION"), socket=args.socket)
+    if args.command == "multiplex-tools":
+        from baudelib import multiplextools
+        return multiplextools.serve(os.environ.get("BAUDE_SESSION"), socket=args.socket)
     if args.command == "mcp-relay":
         from baudelib import agentproxy
         return agentproxy.relay(args.socket, args.run, args.name, args.token)

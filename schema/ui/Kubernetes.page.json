@@ -1,5 +1,5 @@
 {
-  "description": "A full-window view over the chat that lays a kubeconfig cluster out as Freelens does: a top bar to pick the cluster context, namespaces and a filter, a sidebar of resource categories, a table of the chosen kind's objects with Freelens' columns, the selected object's YAML beside it, and a pod's followed logs under both. Read-only except for pod deletes, each asked first.",
+  "description": "A full-window view over the chat that lays a kubeconfig cluster out as Freelens does: a top bar to pick the cluster context, namespaces and a filter, a sidebar of resource categories, a table of the chosen kind's objects with Freelens' columns, the selected object's YAML beside it, and a pod's followed logs or a shell in it under both. Read-only except for pod deletes, each asked first, and what's typed in a pod's shell.",
   "apps": [
     "baude",
     "record"
@@ -16,10 +16,15 @@
     "kubeview.py:KubeSquares",
     "kubeview.py:kube_diagnose",
     "baudewindow.py:BaudeWindow.__init__",
-    "record.py:RecordWindow.open_viewer"
+    "record.py:RecordWindow.open_viewer",
+    "kubeview.py:KubeView.build_shell",
+    "kubeview.py:KubeView.show_shell",
+    "kubeview.py:KubeView.start_shell",
+    "multiplexterm.py:Terminal"
   ],
   "copy": [
-    "kube"
+    "kube",
+    "multiplex"
   ],
   "parts": [
     {
@@ -193,15 +198,20 @@
         },
         {
           "name": "pod row buttons",
-          "shows": "At the end of each Pods row, two flat icon buttons: a logs button (tooltip \"Logs\") and a ⋮ menu button (tooltip \"Delete…\"). The column's heading is blank and not clickable.",
+          "shows": "At the end of each Pods row, three flat icon buttons: a logs button (tooltip \"Logs\"), a shell button (a terminal icon, tooltip \"Shell\") and a ⋮ menu button (tooltip \"Delete…\"). The column's heading is blank and not clickable.",
           "copy": [
             "kube.logs",
+            "kube.shell",
             "common.delete_ellipsis"
           ],
           "actions": [
             {
               "by": "click Logs",
               "does": "Opens the pod's logs pane under the table (see logs)."
+            },
+            {
+              "by": "click Shell",
+              "does": "Opens a shell in the pod under the table (see shell pane)."
             },
             {
               "by": "click ⋮",
@@ -247,7 +257,7 @@
         },
         {
           "by": "key Esc",
-          "does": "Closes the logs first if open, else the YAML, else the whole view."
+          "does": "Closes the shell or the logs first if open, else the YAML, else the whole view. In the shell, Esc goes to the program in it."
         }
       ]
     },
@@ -385,6 +395,32 @@
       ]
     },
     {
+      "name": "shell pane",
+      "shows": "Docks where the logs do, instead of them (opening one closes the other), opening at about half the height. A header line: a terminal icon, the title \"<pod> · <namespace>\" (heading, truncated in the middle), a small dim state text filling the space (empty while it runs, \"kubectl exited with <code>\" once it ends, or why there are no terminals here: VTE's GTK 4 build missing), a container picker of the pod's running containers (not init containers), then a flat Close (×) button, tooltip \"Close the shell (ends it)\". Below, a Multiplex terminal running kubectl exec -it in the container: bash if the container has it, else sh. Its text in the window's light or dark colours. Its edges glow in the accent while a Bot is at its terminal tools there, as Emission's page does.",
+      "copy": [
+        "kube.shell",
+        "kube.container",
+        "kube.close_shell",
+        "kube.kubectl_exited",
+        "multiplex.no_vte",
+        "multiplex.not_started"
+      ],
+      "actions": [
+        {
+          "by": "pick a container",
+          "does": "Ends the shell and starts one in that container."
+        },
+        {
+          "by": "click ×",
+          "does": "Ends the shell (kubectl and the shell in the pod) and closes the pane."
+        },
+        {
+          "by": "type",
+          "does": "Goes to the shell in the pod, as in any terminal."
+        }
+      ]
+    },
+    {
       "name": "status line",
       "shows": "A single dim line under the table, truncated at the end, of parts joined with \" · \": a note first while it's fresh (a delete's result, an owner not found; 30 seconds), the count (\"7 pods\", or \"3 pods of 7\" when the filter or namespaces hide some), \"In <namespaces>\" folded into the count when namespaces are chosen (\"3 pods of 7 in shop, jobs\"), the context's name, \"live\" while the list is watched, the metrics note (\"CPU and memory from the metrics API, every 10 s\", or \"no metrics API on this cluster (CPU and memory N/A)\"; Pods and Nodes only) and finally \"read-only but for the deletes you confirm\". The same line says progress: \"Connecting to <context>…\", \"Reading <kinds> on <context>…\", \"Finding <kind>/<name>…\", and, when a watch can't be kept, \"can't watch <kinds> (<why>): read every <n> s instead\".",
       "copy": [
@@ -490,6 +526,7 @@
   ],
   "scenes": [
     "38e-kubernetes",
-    "38e-kubernetes-logs"
+    "38e-kubernetes-logs",
+    "38e-kubernetes-shell"
   ]
 }

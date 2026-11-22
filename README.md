@@ -130,7 +130,7 @@ python3 baude.py --install            # Baude in your application menu, and Baud
 python3 baude_headless.py install     # only the commands (a host with no GTK)
 ```
 
-Either writes `~/.local/bin/baude`, `record`, `emission`, `baude-headless` (the host process) and `baude-oneshot`:
+Either writes `~/.local/bin/baude`, `record`, `emission`, `multiplex`, `baude-headless` (the host process) and `baude-oneshot`:
 small scripts that run the checkout's entry points with the Python that installed them. The launchers in your
 application menu start them, and another machine (Baude, the phone, the mesh) runs `~/.local/bin/baude-headless
 connect` over ssh, so every machine you add as a host needs it installed. Baude, Record and the host process write
@@ -184,6 +184,24 @@ keys go one at a time. A Bot only ever reaches its own profile, never yours or a
 To sign a Bot in to a site, open its profile from Emission's profile menu (its Emission steps aside) and sign in
 there, or choose Copy Sign-ins to a Bot… in your own profile to copy your sign-ins for the sites you pick. Pages say
 the browser is Safari (as its engine is); `EMISSION_USER_AGENT` sets another.
+
+## Multiplex
+
+`multiplex.py` is Baude's terminal, a window of tabs, each a terminal (VTE's GTK 4 widget: on macOS `brew install
+vte3`, on Debian and Ubuntu `gir1.2-vte-3.91`). The Kubernetes view's shell button opens one
+in a pod (`kubectl exec -it`), docked under the table where the pod's logs go.
+
+```bash
+multiplex [--cwd DIR] [--title TITLE] [COMMAND ...]
+python3 multiplex.py --install      # Multiplex in your application menu
+```
+
+A Bot's terminal tools (`mcp__multiplex__…`) reach every terminal on any host of the mesh, yours and its own:
+`list_terminals` (a query finds one by its title, folder, command or text), `open_terminal` (a new tab in Multiplex,
+its window started if it isn't), `read_terminal`, `send_text`, `send_keys`, `wait_for` and `close_terminal`. While a Bot
+is at them, the terminal's edges glow in the accent, as a Bot's browser page does. Each process with terminals (a
+Multiplex window, Baude's or Record's Kubernetes view) listens on a socket of its own beside the host process's, and the
+host process takes a Bot's requests to the one that has the terminal.
 
 ## Sessions on the network
 

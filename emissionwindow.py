@@ -113,7 +113,7 @@ class Window(Adw.ApplicationWindow):
             import widgets
             widgets.inside(body, under_bar=True)
             frame.add_css_class("baude-frame")
-        frame.add_top_bar(bar)
+        frame.add_top_bar(chrome.head)
         frame.add_top_bar(strip)
         if agent and not hosted:  # (never seen: its page the whole window, which goes as small as resize does, so a
             bar.set_visible(False)  # watcher's size is its page's, a phone's narrow one too)

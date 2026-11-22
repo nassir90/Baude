@@ -13,7 +13,7 @@ import uuid
 
 from baudelib import (
     agentproxy, emissionlink, emissiontools, hostdb, hostfiles, hostfixes, hostkube, hostlogin, mesh, meshtools,
-    routines, wire, wording, worktree,
+    multiplexlink, routines, wire, wording, worktree,
 )
 from baudelib.serverstate import (
     APPS, BOT_PICTURE_MAX, Conn, FRAME_KEYS, _mtime, _write_json, _write_text, bot_dir, clean_env,
@@ -492,6 +492,19 @@ class ServerRunning:
                 except (OSError, ValueError) as e:
                     reply("error", error=str(e))
             threading.Thread(target=browse, daemon=True, name="emission").start()
+            return None
+        if op == "multiplex":  # (a Bot's terminal tools: Multiplex's terminals here; on a thread of its own)
+            bot = msg.get("bot") if isinstance(msg.get("bot"), dict) else {}
+            if not isinstance(bot.get("id"), str) or not bot["id"] or not isinstance(msg.get("call"), dict):
+                return reply("error", error="multiplex needs a Bot (its id) and a call")
+
+            def terminal():
+                try:
+                    reply("multiplex", result=multiplexlink.call(msg["call"], {"id": bot["id"],
+                                                                               "name": bot.get("name")}))
+                except (OSError, ValueError) as e:
+                    reply("error", error=str(e))
+            threading.Thread(target=terminal, daemon=True, name="multiplex").start()
             return None
         if op == "login":  # (claude auth login run here for a head elsewhere, on this connection: hostlogin)
             return hostlogin.start(self, conn, msg)

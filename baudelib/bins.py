@@ -1,4 +1,4 @@
-"""Baude's commands in ~/.local/bin: baude, record and emission (the apps), baude-headless (the host process: what ssh
+"""Baude's commands in ~/.local/bin: baude, record, emission and multiplex (the apps), baude-headless (the host process: what ssh
 runs on a host, wire.HOST_COMMAND) and baude-oneshot. Each is a small script that runs this checkout's entry point
 with the Python that wrote it. install writes them all (each app's --install, `baude_headless.py install`); refresh
 writes again the ones that have fallen behind as Baude, Record and the host process start (the host process: its own
@@ -12,6 +12,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))  # (the chec
 # name -> (its module, beside ROOT; started by importing it, so Python uses its cached bytecode, as
 # startup.launch_command does, rather than running the file)
 NAMES = {"baude": ("baude", True), "record": ("record", False), "emission": ("emission", False),
+         "multiplex": ("multiplex", False),
          "baude-headless": ("baude_headless", False), "baude-oneshot": ("baude_oneshot", False)}
 HOST_NAMES = ("baude-headless", "baude-oneshot")
 _ROOT_LINE = re.compile(r"^root=(.+)$", re.M)

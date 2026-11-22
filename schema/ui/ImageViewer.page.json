@@ -134,7 +134,12 @@
         },
         {
           "by": "drag",
-          "does": "Pans while zoomed in (pointer: grab)."
+          "does": "Pans while zoomed in (pointer: grab).",
+          "phone": {
+            "does": "A swipe sideways moves to the previous / next image, which follows the finger and settles on lifting (half the width, or a flick), stopping at the first and last. Zoomed in, the drag pans the image first, as far as its edge, and only then moves to the next.",
+            "why": "Paging through images by touch",
+            "decided": "2026-11-22"
+          }
         }
       ]
     },
@@ -146,7 +151,12 @@
           "by": "click",
           "does": "Steps to the previous / next image, wrapping round; each shows fitted."
         }
-      ]
+      ],
+      "phone": {
+        "does": "nothing",
+        "why": "A swipe steps through the images (the stage's drag)",
+        "decided": "2026-11-22"
+      }
     },
     {
       "name": "keys",

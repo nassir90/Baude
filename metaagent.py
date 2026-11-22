@@ -13,7 +13,7 @@ import uuid
 from gi.repository import GLib  # noqa: E402
 
 import chatparts  # noqa: E402
-from baudelib import agentproxy, codex, modelfiles, wording  # noqa: E402
+from baudelib import agentproxy, codex, meshtools, modelfiles, wording  # noqa: E402
 from baudelib import models as modelslib  # noqa: E402
 from baudelib import providers as providerslib  # noqa: E402
 from baudelib.claude import ClaudeProc  # noqa: E402
@@ -56,6 +56,10 @@ servers). check_models finds Ollama's unhealthy ones; prune_models removes them 
 undone). add_mlx_model and add_endpoint add one; build_apple_adapter builds Apple's (asked first). fetch_model \
 copies a model another host in the mesh has (asked first); model_files says where a model's files are, here or there, \
 for copying them some other way. Nothing is installed or downloaded that the user didn't ask for: say what they'd run.
+
+Mesh: your mesh tools (mcp__mesh__*), if you have them, list the mesh's hosts and their models and the chats on \
+each, read a chat, message one, and start a subagent on any host with any of its models. What they start or say isn't \
+an action: it has no undo.
 
 Be brief and plain: a sentence or two, no headings. Don't describe what your tools did: the user sees it."""
 
@@ -429,6 +433,9 @@ def glob_sockets():
     return glob.glob(os.path.join(tempfile.gettempdir(), "meta-tools-*.sock"))
 
 
+MESH = meshtools.NAME  # (Meta's MCP server of the mesh's tools, beside its own: mcp__mesh__*, never asked about)
+
+
 class MetaProc(ClaudeProc):
     """baudelib's ClaudeProc, on GTK's main loop, in the app's environment for claude (env_of, if it has one)."""
     dispatch = staticmethod(GLib.idle_add)
@@ -483,10 +490,16 @@ class Agent:
         sock = ToolSocket.get()
         sock.add(self.token, lambda tool, args: chat._tool(self, tool, args), tools,
                  python=lambda args: chat._python(self, args))
-        relay = {"mcpServers": {"meta": {"command": sys.executable, "args": ["-I", "-c", RELAY, sock.path, self.token]}}}
+        # (its own tools, through the relay; and the mesh's, as this user's host process reaches it, from no chat:
+        # not on Apple's on-device models, whose small window they'd crowd, and which name a tool as its server does)
+        mesh = self.program != "apple"
+        relay = {"mcpServers": {"meta": {"command": sys.executable, "args": ["-I", "-c", RELAY, sock.path, self.token]},
+                                **({MESH: {"command": sys.executable, "args": [agentproxy.HEADLESS, "mesh-tools"],
+                                           "env": {"BAUDE_SESSION": ""}}} if mesh else {})}}
         args = ["--system-prompt", system, "--tools", ",".join(READ_TOOLS + (COMMAND_TOOLS if commands else ())),
                 "--mcp-config", json.dumps(relay), "--strict-mcp-config",
-                "--allowedTools", ",".join(f"mcp__meta__{t['name']}" for t in tools),
+                "--allowedTools", ",".join([*(f"mcp__meta__{t['name']}" for t in tools),
+                                            *(f"mcp__{MESH}__{t}" for t in meshtools.SCHEMAS if mesh)]),
                 "--no-session-persistence",  # (no transcript: it would be listed with your chats)
                 "--disable-slash-commands", "--setting-sources", ""]
         for root in self.roots:
@@ -499,7 +512,7 @@ class Agent:
                 self.proc = codex.CodexProc(
                     self.on_msg, self.on_exit, cwd, model, effort=effort, exe=exe, ephemeral=True,
                     catalog=codex_catalog(), dispatch=GLib.idle_add, meta_system=system,
-                    meta_relay=relay["mcpServers"]["meta"],
+                    meta_servers=relay["mcpServers"],
                 )
             except OSError:
                 sock.drop(self.token)
@@ -593,7 +606,7 @@ class Agent:
     def permission(self, msg):
         rid, req = msg["request_id"], msg.get("request") or {}
         name, inp = req.get("tool_name") or "", req.get("input") or {}
-        if name.startswith("mcp__meta__") or name in READ_TOOLS and self.may_read(inp.get("file_path") or inp.get("path")):
+        if name.startswith(("mcp__meta__", f"mcp__{MESH}__")) or name in READ_TOOLS and self.may_read(inp.get("file_path") or inp.get("path")):
             self.proc.respond(rid, {"behavior": "allow", "updatedInput": inp})
         elif name in EDIT_TOOLS and self.under(inp.get("file_path") or "", self.protect):
             self.proc.respond(rid, {"behavior": "deny", "message": "Those are the app's own files: change them with "

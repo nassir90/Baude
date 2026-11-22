@@ -239,9 +239,8 @@ class ServerSessions:
                                                         os.path.abspath(self.socket_path)],
                                                "env": {"BAUDE_SESSION": s.id}}
             extra += ["--mcp-config", json.dumps({"mcpServers": servers})]
-            if run["program"] == "claude":  # (a Bot's, never asked about; another chat's, its looking only: what it
-                rules = [f"mcp__{meshtools.NAME}__{t}"  # starts or says, as the chat's mode has it)
-                         for t in (meshtools.SCHEMAS if s.meta.get("bot") else meshtools.READ_ONLY)]
+            if run["program"] == "claude":  # (never asked about, a Bot's or Meta's)
+                rules = [f"mcp__{meshtools.NAME}__{t}" for t in meshtools.SCHEMAS]
                 if s.meta.get("bot"):
                     rules += [f"mcp__{emissiontools.NAME}__{t}" for t in emissiontools.SCHEMAS]
                 if "--allowedTools" in extra:

@@ -256,7 +256,7 @@ def main():
                                          "Glob), here, as an MCP server on stdin and stdout")
     tools.add_argument("--cwd", required=True, help="the folder they work in")
     tools.add_argument("--only", help="those of them it has, by name, with commas (default: all)")
-    mesh_tools = sub.add_parser("mesh-tools", help="the mesh's tools of a Bot's agent (hosts, chats, a subagent on any "
+    mesh_tools = sub.add_parser("mesh-tools", help="the mesh's tools of a Bot's or Meta's agent (hosts, chats, a subagent on any "
                                                    "host, a message to another chat), as an MCP server on stdin and stdout")
     mesh_tools.add_argument("--socket", help="the socket of the host process it's for (default: this user's)")
     browser_tools = sub.add_parser("emission-tools", help="a Bot's browser tools (its own Emission profile, on any "

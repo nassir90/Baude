@@ -266,7 +266,7 @@ object PhoneAgent {
         try {
             PhoneHost.tell(s, JSONObject().put("type", "system").put("subtype", "init").put("session_id", s.id)
                 .put("model", s.meta.optString("model")).put("cwd", s.folder.path)
-                .put("tools", JSONArray(PhoneTools.names(PhoneHost.mode(s)))).put("permissionMode", PhoneHost.mode(s)))
+                .put("tools", JSONArray(PhoneTools.names(s))).put("permissionMode", PhoneHost.mode(s)))
             var compacted = false
             while (true) {
                 if (s.cancel) throw Stopped()
@@ -287,7 +287,7 @@ object PhoneAgent {
                     "calls in this turn, the most one turn on this phone may. Answer now, in words, without tools: say " +
                     "what you've done and what's left.)"))
                 val model = (s.meta.optJSONObject("infer") ?: JSONObject()).optString("model")
-                val body = JSONObject().put("model", model).put("messages", messages).put("tools", PhoneTools.schemas(PhoneHost.mode(s)))
+                val body = JSONObject().put("model", model).put("messages", messages).put("tools", PhoneTools.schemas(s))
                     .put("stream_options", JSONObject().put("include_usage", true))
                 if (last) body.put("tool_choice", "none")
                 val mid = "msg_" + UUID.randomUUID()
@@ -349,8 +349,8 @@ object PhoneAgent {
                         use.has("_cut") -> answered(id, "This call's arguments weren't whole JSON" +
                             (if (answer.finish == "length") " (your reply reached its length limit)" else "") +
                             ", so it didn't run: call it again, with less in it.", true)
-                        name !in PhoneTools.names(PhoneHost.mode(s)) -> answered(id, "No such tool here: $name. The tools " +
-                            "are ${PhoneTools.names(PhoneHost.mode(s)).joinToString()}.", true)
+                        name !in PhoneTools.names(s) -> answered(id, "No such tool here: $name. The tools " +
+                            "are ${PhoneTools.names(s).joinToString()}.", true)
                         else -> {
                             calls++
                             val input = use.getJSONObject("input")
@@ -401,7 +401,7 @@ object PhoneAgent {
         convo.list().forEach { messages.put(it) }
         messages.put(JSONObject().put("role", "user").put("content", COMPACT_ASK))
         val body = JSONObject().put("model", (s.meta.optJSONObject("infer") ?: JSONObject()).optString("model"))
-            .put("messages", messages).put("tools", PhoneTools.schemas(PhoneHost.mode(s))).put("tool_choice", "none")
+            .put("messages", messages).put("tools", PhoneTools.schemas(s)).put("tool_choice", "none")
         val why = try {
             val answer = Inference.complete(s, body) {} ?: return false
             if (answer.text.isNotBlank()) {
@@ -433,8 +433,9 @@ object PhoneAgent {
             "last. " else "You are an agent. ") +
             "You run on ${PhoneHost.name}, an Android phone in the user's Baude mesh of machines; your model runs on " +
             "another machine of the mesh. You have no shell. Your tools: files in your own folder on the phone (Read, " +
-            "Write, Edit, Glob; paths are relative to it), questions to the user (AskUserQuestion), and the mesh's " +
-            "hosts and their chats (mcp__mesh__*). As this chat's permission mode has it, the user may be asked " +
+            "Write, Edit, Glob; paths are relative to it), questions to the user (AskUserQuestion)" +
+            (if (bot != null) ", and the mesh's hosts and their chats (mcp__mesh__*)" else "") +
+            ". As this chat's permission mode has it, the user may be asked " +
             "before a tool runs, and may say no." + (if (PhoneHost.mode(s) == "plan") " It's plan mode: look, then " +
             "put your plan to the user with ExitPlanMode; change nothing till they agree." else "") + "\n" +
             "Your folder: ${s.folder.path}"

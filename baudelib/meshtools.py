@@ -1,4 +1,4 @@
-"""The mesh's tools, for a Bot's agent (or a chat given them): an MCP server on stdin and stdout (a JSON-RPC message a
+"""The mesh's tools, for a Bot's agent and Meta's: an MCP server on stdin and stdout (a JSON-RPC message a
 line), run on the chat's host. Through that host's process it reaches every member of the mesh, as a head does
 (wire.reach: this machine's socket, or through the mesh), so its agent can see the hosts and their models, start a
 subagent on any of them with any of their models, and read and write to the other chats there, Bots too. Each is
@@ -15,7 +15,6 @@ from baudelib import wire, wording
 
 NAME = "mesh"  # (its tools are mcp__mesh__hosts, ...)
 SUBAGENT_MODES = ("auto", "acceptEdits", "default", "plan")  # (a subagent's: Auto at most; its host holds it to these)
-READ_ONLY = ("hosts", "chats", "read_chat")  # (looking, never asked about; starting or saying: as the chat's mode is)
 WAIT_S, WAIT_MAX_S = 600, 3600  # (a subagent's or a chat's reply waited for this long, by default and at most)
 ASK_S = wire.CONSTANTS["ASK_S"]  # (a subagent asking a permission no one's there to give: refused after this long)
 TEXT_MAX = 20000  # (characters of a reply, or of what a chat said, given back)

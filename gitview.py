@@ -466,10 +466,11 @@ class GitPullsScroll(Gtk.ScrolledWindow):
 
 
 def first_line_middle(label):
-    """How far down label its first line's middle is, px."""
-    it = label.get_layout().get_iter()
-    top, bottom = it.get_line_yrange()
-    return label.get_layout_offsets()[1] + (top + bottom) / 2 / Pango.SCALE
+    """How far down a label its first line's middle is, px: from its layout alone, as the label has its natural height
+    at the top of whatever it's in, so it doesn't wait on the label's own allocation (a row's lane and gutter are
+    placed before its text, and a text size changed leaves them as they are)."""
+    top, bottom = label.get_layout().get_iter().get_line_yrange()
+    return (top + bottom) / 2 / Pango.SCALE
 
 
 class GitGutter(Gtk.Widget):

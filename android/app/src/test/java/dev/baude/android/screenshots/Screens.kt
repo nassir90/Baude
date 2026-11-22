@@ -2,7 +2,10 @@ package dev.baude.android.screenshots
 
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.unit.dp
 import com.github.takahirom.roborazzi.captureRoboImage
 import com.github.takahirom.roborazzi.captureScreenRoboImage
 import dev.baude.android.Artifact
@@ -266,6 +269,45 @@ abstract class Screens(private val theme: String) {
         scrollUnder("Qwen") // (the list's end: the mesh's others)
         laidOut()
         withMenus("21-chat-model-picker-end")
+    }
+
+    // (Settings → Meta's Intelligence, and the New session dialog's model, pressed: the menu under the button or, with
+    // less room there than the list takes, over it; then Meta's Intelligence card as the page's last row, the list above it)
+    @Test fun metaModelPicker() {
+        meshModels()
+        dev.baude.android.Meta.host.value = "h1"
+        show { SettingsScreen({}, {}) }
+        tap("Haiku 4.5")
+        laidOut()
+        withMenus("22-settings-meta-intelligence")
+    }
+
+    @Test fun newSessionModelPicker() {
+        meshModels()
+        show { NewSession("h1", null, done = {}, opened = { _, _ -> }) }
+        tap("Its default model")
+        laidOut()
+        withMenus("23-new-session-model-picker")
+    }
+
+    @Test fun metaCardModelPicker() {
+        meshModels()
+        dev.baude.android.Meta.host.value = "h1"
+        val pane = dev.baude.android.MenuPane()
+        show {
+            androidx.compose.runtime.CompositionLocalProvider(dev.baude.android.LocalMenuPane provides pane) {
+                androidx.compose.foundation.layout.Box(androidx.compose.ui.Modifier.fillMaxSize()) {
+                    androidx.compose.foundation.layout.Column(androidx.compose.ui.Modifier.align(androidx.compose.ui.Alignment.BottomCenter)
+                        .padding(bottom = 100.dp)) {
+                        dev.baude.android.BoxedList(listOf(Unit), "") { dev.baude.android.IntelligenceRow() }
+                    }
+                    dev.baude.android.MenuPaneLayer(pane)
+                }
+            }
+        }
+        tap("Haiku 4.5")
+        laidOut()
+        withMenus("24-meta-card-model-picker")
     }
 
     /** What scrolls around text (a list with it in) scrolled to its end. */

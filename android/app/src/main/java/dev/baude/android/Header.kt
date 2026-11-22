@@ -4,6 +4,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.ui.layout.layout
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -202,6 +203,14 @@ fun meshModels(h: String?, shown: String? = null): List<ModelChoice> {
     val all = copies(h)
     val listed = all.filter { c -> out.any { it.value == c.value } }.toMutableList()
     val own = all.firstOrNull { it.value == shown }
+    if (own != null && out.none { it.value == own.value }) { // (shown's copy stands for its kind's host copy)
+        val at = listed.indexOfFirst { sameModel(it, own) }
+        if (at >= 0) {
+            val i = out.indexOfFirst { it.value == listed[at].value }
+            out[i] = out[i].copy(value = own.value, name = nameOf(own))
+            listed[at] = own
+        }
+    }
     for (c in all) {
         if (out.any { it.value == c.value } || listed.any { sameModel(it, c) }) continue
         val lead = own?.takeIf { sameModel(it, c) } ?: c
@@ -456,9 +465,15 @@ fun MenuPaneLayer(pane: MenuPane) {
         val width = with(density) { MODEL_LIST_WIDTH.toPx() }
         val top = pane.anchor.bottom - box.top
         val bottom = minOf(pane.floor ?: box.bottom, box.bottom) - margin - box.top
+        val above = pane.anchor.top - box.top - margin // (the room over the button, where there's little under it)
+        val up = bottom - top < with(density) { 200.dp.toPx() } && above > bottom - top
+        val room = if (up) above else bottom - top
         val x = (pane.anchor.left - box.left).coerceAtMost(box.width - width - margin).coerceAtLeast(0f)
-        content(Modifier.offset { IntOffset(x.toInt(), top.toInt()) }
-            .heightIn(max = with(density) { (bottom - top).coerceAtLeast(0f).toDp() })
+        content(Modifier.layout { m, cs ->
+                val p = m.measure(cs)
+                layout(p.width, p.height) { p.place(x.toInt(), if (up) (above - p.height).toInt() else top.toInt()) }
+            }
+            .heightIn(max = with(density) { room.coerceAtLeast(0f).toDp() })
             .pointerInput(Unit) { detectTapGestures { } }) // (a tap on the list's own: not one elsewhere)
     }
 }
@@ -516,7 +531,8 @@ fun ModelPicker(face: String, choices: List<ModelChoice>, picked: String?, pick:
         } else if (open) Popup(popupPositionProvider = BelowAnchor, onDismissRequest = { open = false },
             properties = PopupProperties(focusable = true)) {
             val margin = with(density) { 8.dp.toPx() }
-            val room = view.rootView.height - margin - anchor.bottom // (below it, else above it)
+            val frame = android.graphics.Rect().also { view.getWindowVisibleDisplayFrame(it) } // (what BelowAnchor places in)
+            val room = frame.height() - margin - anchor.bottom // (below it, else above it)
             val most = with(density) { (if (room < 200.dp.toPx()) anchor.top - margin else room).toDp() }
             list(Modifier.heightIn(max = most))
         }

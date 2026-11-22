@@ -9,14 +9,14 @@
     "A Claude Desktop transcript's frame-link record"
   ],
   "code": [
-    "baude.py:artifact_from_tool",
-    "baude.py:html_title",
-    "baude.py:ToolCard.set_result",
+    "toolcards.py:artifact_from_tool",
+    "toolcards.py:html_title",
+    "toolcards.py:ToolCard.set_result",
     "baude.py:BaudeWindow.register_artifact",
     "baude.py:BaudeWindow.add_artifact_chips",
     "baude.py:BaudeWindow.render_history",
     "markdownview.py:link_markup",
-    "baude.py:ArtifactChip"
+    "toolcards.py:ArtifactChip"
   ],
   "copy": [
     "artifacts",

@@ -11,7 +11,7 @@
     "routinespage.py:when",
     "routinespage.py:stamp",
     "baudelib/routines.py",
-    "baude.py:SidePanel.bot_changed"
+    "sidepanel.py:SidePanel.bot_changed"
   ],
   "copy": ["routines", "common"],
   "parts": [

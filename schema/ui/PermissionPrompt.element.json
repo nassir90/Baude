@@ -9,9 +9,9 @@
   "code": [
     "baude.py:BaudeWindow.h_control_request",
     "baude.py:BaudeWindow.permission_card",
-    "baude.py:ToolCard.ask",
-    "baude.py:ToolCard.answered",
-    "baude.py:ToolCard.set_decision",
+    "toolcards.py:ToolCard.ask",
+    "toolcards.py:ToolCard.answered",
+    "toolcards.py:ToolCard.set_decision",
     "baude.py:BaudeWindow.allowed_in"
   ],
   "copy": [

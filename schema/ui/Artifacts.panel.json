@@ -2,7 +2,7 @@
   "description": "The side panel's Artifacts page: every Claude artifact published or linked in this session, as rows of the same size as Subagents rows, newest first.",
   "apps": ["baude"],
   "opens": ["Side panel page button \"Artifacts\""],
-  "code": ["baude.py:ArtifactChip", "baude.py:SidePanel.update_artifact", "baude.py:BaudeWindow.register_artifact"],
+  "code": ["toolcards.py:ArtifactChip", "sidepanel.py:SidePanel.update_artifact", "baude.py:BaudeWindow.register_artifact"],
   "copy": ["artifacts", "side_panel"],
   "parts": [
     {

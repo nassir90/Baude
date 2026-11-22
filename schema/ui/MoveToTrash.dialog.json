@@ -2,7 +2,7 @@
   "description": "A confirmation alert over the main window before a session's transcript is moved to the trash.",
   "apps": ["baude"],
   "opens": ["session row right-click → Move to Trash…"],
-  "code": ["baude.py:SessionSidebar.ask_trash", "baude.py:SessionSidebar.trash", "baude.py:SessionSidebar.ask_remote"],
+  "code": ["sidebarmenu.py:SidebarMenu.ask_trash", "sidebarmenu.py:SidebarMenu.trash", "sidebarmenu.py:SidebarMenu.ask_remote"],
   "copy": ["trash"],
   "parts": [
     {

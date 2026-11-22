@@ -20,8 +20,8 @@
     "baude.py:BaudeWindow.paste_attachment",
     "baude.py:BaudeWindow.on_drop",
     "baude.py:BaudeWindow.refresh_attach_strip",
-    "baude.py:Attachment",
-    "baude.py:attachment_widget",
+    "chatinput.py:Attachment",
+    "chatinput.py:attachment_widget",
     "chatparts.py:QueuedTurn",
     "chatparts.py:HeldTurn"
   ],

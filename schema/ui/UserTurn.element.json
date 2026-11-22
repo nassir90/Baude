@@ -12,7 +12,7 @@
     "baude.py:BaudeWindow.user_bubble",
     "baude.py:BaudeWindow.send_text",
     "chatparts.py:UserTurn",
-    "baude.py:attachment_widget",
+    "chatinput.py:attachment_widget",
     "baude.py:BaudeWindow.revert_to",
     "baude.py:BaudeWindow.commit_revert",
     "baude.py:BaudeWindow.cancel_revert",

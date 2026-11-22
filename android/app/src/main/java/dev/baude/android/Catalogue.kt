@@ -5,7 +5,7 @@ import org.json.JSONObject
 
 /** What @ lists of a chat's folder, made on its host (the catalogue op: its files, branches, Kubernetes objects,
  * pull requests...), kept per host and folder for CATALOGUE_TTL, asked again when a list shows it after that
- * (baude.HostFolder). */
+ * (baudemeta.HostFolder). */
 object Catalogue {
     private const val TTL_MS = 120_000L
     private const val GONE_RETRY_MS = 5_000L

@@ -5,7 +5,7 @@
     "Side panel page button \"Side questions\"",
     "/btw <question> typed in the chat's composer and sent (works even mid-turn; doesn't interrupt; the composer is emptied; the panel opens on this page with the new question open under its line). /btw with nothing after it does nothing."
   ],
-  "code": ["baude.py:SideQuestion", "baude.py:SidePanel.ask_typed", "baude.py:SidePanel.add_side_question", "baude.py:SidePanel.open_side_question", "baude.py:SidePanel.close_side_question", "baude.py:BaudeWindow.ask_side_question"],
+  "code": ["sidequestion.py:SideQuestion", "sidepanel.py:SidePanel.ask_typed", "sidepanel.py:SidePanel.add_side_question", "sidepanel.py:SidePanel.open_side_question", "sidepanel.py:SidePanel.close_side_question", "baude.py:BaudeWindow.ask_side_question"],
   "copy": ["side_questions", "side_panel"],
   "parts": [
     {

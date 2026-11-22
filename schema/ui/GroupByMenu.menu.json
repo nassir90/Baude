@@ -7,12 +7,12 @@
     "click ⋮ beside Search sessions"
   ],
   "code": [
-    "baude.py:SessionSidebar.__init__",
-    "baude.py:SessionSidebar.fill_filters",
-    "baude.py:SessionSidebar.group_menu",
-    "baude.py:SessionSidebar.known_groups",
-    "baude.py:SessionSidebar.open_group",
-    "baude.py:FilterList"
+    "sessionsidebar.py:SessionSidebar.__init__",
+    "sessionsidebar.py:SessionSidebar.fill_filters",
+    "sessionsidebar.py:SessionSidebar.group_menu",
+    "sessionsidebar.py:SessionSidebar.known_groups",
+    "sidebarmenu.py:SidebarMenu.open_group",
+    "sessionsidebar.py:FilterList"
   ],
   "copy": [
     "sidebar",

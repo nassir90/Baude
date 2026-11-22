@@ -18,7 +18,7 @@
     "browserpane.py:BrowserWindow",
     "browserpane.py:Here",
     "browserpane.py:Stream",
-    "baude.py:SidePanel.bot_changed"
+    "sidepanel.py:SidePanel.bot_changed"
   ],
   "copy": [
     "bot_browser",

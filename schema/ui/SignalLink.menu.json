@@ -8,12 +8,12 @@
   ],
   "code": [
     "baude.py:BaudeWindow.open_ref",
-    "baude.py:RefPopover",
-    "baude.py:LookupPopover",
+    "refpopovers.py:RefPopover",
+    "refpopovers.py:LookupPopover",
     "baude.py:BaudeWindow.lookup_pending",
     "baude.py:BaudeWindow.runs_popover",
-    "baude.py:ref_place_items",
-    "baude.py:AnchoredPopover",
+    "refpopovers.py:ref_place_items",
+    "refpopovers.py:AnchoredPopover",
     "baude.py:BaudeWindow.hover_link"
   ],
   "copy": [

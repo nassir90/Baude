@@ -13,7 +13,7 @@
     "A Signal link or a name's Open: Signal page at that name; a branch or commit link: Git page; a folder link: Files page"
   ],
   "code": [
-    "baude.py:SidePanel",
+    "sidepanel.py:SidePanel",
     "baude.py:BaudeWindow.show_panel",
     "baude.py:BaudeWindow.place_split",
     "baude.py:BaudeWindow.split_dragged",

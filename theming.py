@@ -1,7 +1,7 @@
 """theming — how the apps look: their CSS, the shaders warmed before they're needed, the theme (load_css,
-theme_css), the window's corners and title bar, popovers, the accent (apply_accent, AccentFade, AccentDot),
-Settings' shared rows, and shared settings shown again as another app here changes them (follow_setting,
-watch_settings).
+theme_css), the window's corners and title bar, popovers, the accent (apply_accent, AccentFade, AccentDot) and the
+logo in it (follow_accent, theme_logo), Settings' shared rows, and shared settings shown again as another app here
+changes them (follow_setting, watch_settings).
 """
 import json
 import math
@@ -9,6 +9,7 @@ import os
 import re
 import weakref
 import sys
+import threading
 import traceback
 import warnings
 
@@ -332,8 +333,9 @@ paned.main-split.inside-before > separator { margin-left: -6px; margin-right: 6p
 /* (shaded_picture: someone's picture pressed into the page, its rim in shadow, as evenly a square's as a circle's,
    its middle as it is. The frame clips the picture and its shade to one shape: round, under a square theme square) */
 .picture-frame, .picture-frame avatar, .picture-frame picture, .picture-shade { border-radius: 9999px; }
-.picture-shade { box-shadow: inset 0 0 4px alpha(black, 0.3), inset 0 1px 2px alpha(black, 0.4),
-  inset 0 0 0 1px alpha(black, 0.16); }
+.picture-shade { box-shadow: inset 0 0 {picture-shade.blur} {picture-shade.blur-color},
+  inset 0 {picture-shade.top-y} {picture-shade.top-blur} {picture-shade.top-color},
+  inset 0 0 0 {picture-shade.ring} {picture-shade.ring-color}; }
 .git-log { background: transparent; }
 .git-log row { padding: 0 8px 0 2px; }
 .git-ref { font-size: 0.78em; padding: 0 5px; border-radius: 4px; background: alpha(@accent_bg_color, 0.14); color: @accent_color; }
@@ -951,6 +953,7 @@ def apply_accent(display):
     for win in Gtk.Window.list_toplevels() if again else ():
         if isinstance(win, AccentFade):
             win.fade_accent()
+    picked = again and name != _accent["name"]
     _accent["name"], _accent["css"] = name, css
     _accent["provider"].load_from_string(css)
     for win in Gtk.Window.list_toplevels() if again else ():
@@ -960,6 +963,76 @@ def apply_accent(display):
             if (changed := getattr(widget, "accent_changed", None)) is not None:  # (its own colours: Record's links)
                 changed()
             widget.queue_draw()
+    if picked and _logos:  # (after the windows: a logo's drawn at 1024 px, not in the fade's first frames)
+        GLib.idle_add(lambda: [redraw() for redraw in list(_logos)] and False, priority=GLib.PRIORITY_LOW)
+
+
+_logos = []  # (follow_accent's: each app's logo, drawn again in the accent)
+
+
+_jobs_lock = threading.Lock()
+_jobs = {}  # (off_main's: per job, whether one runs, and the last asked while it did)
+
+
+def off_main(job, work, done=None):
+    """work() on a worker thread (a logo's PNGs and .icns are drawn without GTK, and not in the accent's fade), its
+    result to done(result) on the main loop. Asked again while it runs, only the last ask runs after it: arrowing
+    through the accents draws the one they stop on."""
+    state = _jobs.setdefault(job, {"running": False, "next": None})
+    with _jobs_lock:
+        if state["running"]:
+            state["next"] = (work, done)
+            return
+        state["running"] = True
+
+    def run(work, done):
+        while True:
+            try:
+                result = work()
+            except Exception as e:  # (an icon isn't worth the accent's change)
+                print(f"baude: {job}:", e, file=sys.stderr)
+            else:
+                if done is not None:
+                    GLib.idle_add(lambda done=done, result=result: done(result) and False)
+            with _jobs_lock:
+                nxt, state["next"] = state["next"], None
+                if nxt is None:
+                    state["running"] = False
+                    return
+            work, done = nxt
+    threading.Thread(target=run, args=(work, done), daemon=True).start()
+
+
+def follow_accent(redraw):
+    """redraw() as the accent changes here (apply_accent: picked in Settings, set by Meta or in another Baude or
+    Record): the app's logo drawn again in it (widgets.logo), its Dock tile's or its windows' and its launcher's."""
+    if redraw not in _logos:
+        _logos.append(redraw)
+
+
+def theme_logo(root, name, svg):
+    """Linux: an app's logo, svg, as icon name in an icon folder of its own (root), which the display's icon theme
+    looks in: windows take it from there by name. Written again with another svg (the accent changed), the theme looks
+    again, and windows showing it take it anew. Its path (None: not written)."""
+    path = os.path.join(root, "hicolor", "scalable", "apps", f"{name}.svg")
+    try:
+        with open(path) as f:
+            same = f.read() == svg
+    except OSError:
+        same = False
+    if not same:
+        try:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w") as f:
+                f.write(svg)
+        except OSError:
+            return None
+    theme = Gtk.IconTheme.get_for_display(Gdk.Display.get_default())
+    if root not in theme.get_search_path():
+        theme.add_search_path(root)
+    elif not same:
+        theme.set_search_path(theme.get_search_path())
+    return path
 
 
 class AccentFade:

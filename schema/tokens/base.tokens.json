@@ -98,6 +98,20 @@
       "initials": {"$value": {"colorSpace": "srgb", "components": [0.8471, 0.8431, 0.8275], "hex": "#d8d7d3"}}
     }
   },
+  "picture-shade": {
+    "$description": "Someone's or a Bot's picture set into the page (imageviews.shaded_picture's .picture-shade; the Android app's Avatar): three inset shadows over it, its rim darker inward and its middle as it is, light and dark alike. Over a picture only, never over initials.",
+    "$extensions": {"dev.baude.android": "dp"},
+    "blur": {"$type": "dimension", "$description": "The shadow all round the rim: its blur.", "$value": {"value": 4, "unit": "px"}},
+    "blur-color": {"$type": "color", "$value": {"colorSpace": "srgb", "components": [0, 0, 0], "alpha": 0.3, "hex": "#000000"},
+      "$extensions": {"dev.baude.gtk": "alpha(black, 0.3)"}},
+    "top-y": {"$type": "dimension", "$description": "The shadow from the top edge: how far down it's moved.", "$value": {"value": 1, "unit": "px"}},
+    "top-blur": {"$type": "dimension", "$description": "The shadow from the top edge: its blur.", "$value": {"value": 2, "unit": "px"}},
+    "top-color": {"$type": "color", "$value": {"colorSpace": "srgb", "components": [0, 0, 0], "alpha": 0.4, "hex": "#000000"},
+      "$extensions": {"dev.baude.gtk": "alpha(black, 0.4)"}},
+    "ring": {"$type": "dimension", "$description": "The hairline ring just inside the edge: its width.", "$value": {"value": 1, "unit": "px"}},
+    "ring-color": {"$type": "color", "$value": {"colorSpace": "srgb", "components": [0, 0, 0], "alpha": 0.16, "hex": "#000000"},
+      "$extensions": {"dev.baude.gtk": "alpha(black, 0.16)"}}
+  },
   "gap": {
     "$type": "dimension",
     "inside": {

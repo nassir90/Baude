@@ -14,6 +14,7 @@
     "meta.py:settings_group",
     "theming.py:settings_code_font",
     "theming.py:settings_accent",
+    "theming.py:follow_accent",
     "theming.py:settings_size",
     "update.py:settings_row",
     "update.py:version_row"
@@ -128,7 +129,7 @@
         },
         {
           "name": "Accent Colour",
-          "shows": "A choice row \"Accent Colour\": \"System\" or one of libadwaita's colours, each with a dot of its colour. Taken in every window as picked.",
+          "shows": "A choice row \"Accent Colour\": \"System\" or one of libadwaita's colours, each with a dot of its colour. Taken in every window as picked, and by Record's and Baude's logos (Settings' Accent Colour).",
           "copy": [
             "shared_settings.accent_colour"
           ]
@@ -175,7 +176,7 @@
         },
         {
           "name": "Show in Applications",
-          "shows": "A switch \"Show in Applications\" (macOS) or \"Show in application menu\" (Linux), subtitle the launcher's path. On: Record is added to the platform's list of apps (per user) with its logo; off: removed.",
+          "shows": "A switch \"Show in Applications\" (macOS) or \"Show in application menu\" (Linux), subtitle the launcher's path. On: Record is added to the platform's list of apps (per user) with its logo, in the accent picked; off: removed.",
           "copy": [
             "window.show_in",
             "install.applications",

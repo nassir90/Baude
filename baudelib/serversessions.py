@@ -300,14 +300,15 @@ class ServerSessions:
         s.meta["said"] = time.time()
         self.save(s)
 
-    def take_input(self, conn, s, msg, sender=None, shown=None):
+    def take_input(self, conn, s, msg, sender=None, shown=None, again=False):
         """(lock held) What a client sends its claude. A user message is given a uuid if it has none, which its
         program keeps; sender: who it's from, if not the session's user (sent_by): said so in it, for its agent
         (wire.said_by), and kept by that uuid (stamp), with what heads show of it if not its text (shown: a held
         answer's). One whose uuid it's taken already (a head sending it again, its connection gone as it first sent
-        it) taken once: the last TAKEN kept in its meta."""
+        it) taken once: the last TAKEN kept in its meta. Those attached live but conn are told it as it's given its agent
+        and kept (tell_said). again: one taken already, held for the turn going on (codex_queue)."""
         kind = msg.get("type")
-        if kind == "user":
+        if kind == "user" and not again:
             if wire.is_id(msg.get("uuid") or ""):
                 taken = s.meta.setdefault("taken", [])
                 if msg["uuid"] in taken:
@@ -323,18 +324,19 @@ class ServerSessions:
             is_codex = models.model_program(s.meta.get("model")) == "codex"
             if is_codex:
                 codex.user_input((msg.get("message") or {}).get("content", ""))
-                if s.busy:
-                    s.codex_queue.append(msg)
-                    return
+            if is_codex and s.busy:
+                s.codex_queue.append((msg, conn))
+                return
             s.meta.pop("cut", None)  # (carried on, or something else said: not cut any more)
             if s.meta.pop("draft", None) and not s.meta.get("prompt"):  # (written in: a session of its own from now on,
                 s.meta["prompt"] = _said(msg)                           # listed and kept, titled by what was said)
             at_turn = s.busy
             self.ensure_proc(s).send(msg)
             if at_turn and s.kept():  # (taken after the turn it's sent in: kept after it too)
-                s.queued.append((msg.get("message") or {}, msg.get("uuid")))
+                s.queued.append((msg.get("message") or {}, msg.get("uuid"), conn))
             else:
                 self.keep(s, "user", msg.get("message") or {}, msg.get("uuid"))
+                self.tell_said(s, msg.get("message") or {}, msg["uuid"], conn)
             s.busy, s.used, s.meta["said"] = True, time.time(), time.time()
             self.save(s)
             self.changed()
@@ -541,10 +543,11 @@ class ServerSessions:
                 self.restart_agent(s)
             if kind == "result" and (not self.stopped.is_set() or msg.get("subtype") == "success"):
                 self.drop_waits(s)
+            told = []
             if kind == "result":
-                for message, said in s.queued:
+                for message, said, _by in s.queued:
                     self.keep(s, "user", message, said)
-                s.queued = []
+                told, s.queued = s.queued, []
                 s.busy, s.used, s.acting = False, time.time(), False
                 s.routines_out.clear()
                 s.asks.clear()
@@ -560,11 +563,24 @@ class ServerSessions:
                         conn.send(ended)
             for conn in s.live:
                 conn.send({"op": "claude", "session": s.id, "msg": msg})
+            for message, said, by in told:
+                self.tell_said(s, message, said, by)
             if kind == "result" and s.codex_queue:
                 if self.stopped.is_set() or s.deleting or getattr(proc, "stopping", False):
                     s.codex_queue.clear()
                 else:
-                    self.take_input(None, s, s.codex_queue.pop(0))
+                    held, by = s.codex_queue.pop(0)
+                    self.take_input(by, s, held, again=True)
+
+    def tell_said(self, s, message, said, conn=None):
+        """(lock held) A message given a session's agent, as it's kept (take_input; one taken at a turn, as the turn
+        ends: queued, codex_queue), told those attached live but conn, who sent it ({type: "_said"}), as its claude
+        never says it back; with who it's from (sender: with what's shown of it) if its sender store says."""
+        told = {"type": "_said", "uuid": said, "message": message}
+        if (sender := (self.senders(s) or {}).get(said)) is not None:
+            told["sender"] = sender
+        for c in s.live - {conn}:
+            c.send({"op": "claude", "session": s.id, "msg": told})
 
     def track(self, s, msg):
         """(lock held) What a session's claude runs (Session.commands), from what it says: a Bash or PowerShell call

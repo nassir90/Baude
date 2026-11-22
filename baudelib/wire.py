@@ -20,7 +20,10 @@ as well, and says on stderr what doesn't fit.
 
 A head's requests carry a "req" it picks, and the answer carries it back. Anything wrong is an error, with the
 request's req. A session's worktree that's gone is made again from its branch as a message or a revert is sent to it;
-those watching it are told so by its claude's message {type: "_note", text}.
+those watching it are told so by its claude's message {type: "_note", text}. A message a session is sent is told the
+others attached to it live as {type: "_said", uuid, message, sender?} as it's given its agent and kept (one sent at a
+turn Claude Code doesn't take into it, once that turn's over): its claude never says one back. sender: who it's from,
+as its sender store has it (shown too), if not its user.
 
 Senders. A message passed to a session from another than its user (input's as, a held message sent, a
 subagent's task) has a uuid its program keeps: Claude Code's as its transcript record's, pi's on its session entry

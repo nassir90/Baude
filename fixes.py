@@ -77,8 +77,8 @@ Rules:
 - Show the change: write fix-shots.json in this directory, a JSON list of one to four
   {"scene": "scene name", "label": "short caption"}, naming scenes of tests/screenshots.py. Each is rendered offscreen
   from the code before your change and after it, and the reviewer sees the two side by side, so pick what shows the
-  difference. If no scene shows it, add one to tests/screenshots.py (a @scene builds a window and returns it: read the
-  others). A scene that fails is sent back to you once.
+  difference. If no scene shows it, add one to tests/scenes_chat.py or tests/scenes_panels.py (a @scene builds a
+  window and returns it: read the others). A scene that fails is sent back to you once.
 - Reply to the reviewer in short Markdown: what now looks or works different, and where (file and name in `code`).
   Leave out how you worked: tools, fix-shots.json and cleanup are handled for you and aren't news to them.
 """
@@ -623,7 +623,8 @@ def take_shots(src, base, number, round_no):
     git(ROOT, "worktree", "add", "--detach", before, base)
     shots, problems = [], []
     try:
-        for name in ("screenshots.py", "mouse.py"):  # (the scenes, and the real mouse some of them use)
+        # (the scenes, and the real mouse some of them use)
+        for name in ("screenshots.py", "scenelib.py", "scenes_chat.py", "scenes_panels.py", "mouse.py"):
             if os.path.exists(os.path.join(src, "tests", name)):
                 shutil.copy(os.path.join(src, "tests", name), os.path.join(before, "tests", name))
         for s in wanted:

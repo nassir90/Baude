@@ -1054,8 +1054,8 @@ object PhoneHost {
     private fun now() = System.currentTimeMillis() / 1000.0
 
     private const val NL: Byte = 10 // (a newline)
-    private const val FILE_LIMIT = 4 shl 20 // (server.FILE_LIMIT)
-    private const val TAKEN = 64 // (server.TAKEN)
+    private const val FILE_LIMIT = 4 shl 20 // (serverstate.FILE_LIMIT)
+    private const val TAKEN = 64 // (serverstate.TAKEN)
     private const val CATALOGUE_LIMIT = 5000
     private const val DIR_LIMIT = 2000 // (hostfiles.DIR_LIMIT)
     private val SUBAGENT_MODES = setOf("auto", "acceptEdits", "default", "plan") // (meshtools.SUBAGENT_MODES)

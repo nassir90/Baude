@@ -132,7 +132,7 @@
     },
     {
       "name": "Agents",
-      "shows": "Shown only while this phone has an agent that is not archived. Heading \"Agents\", then a rounded list of them. Each row, one line: the agent's picture (set into the page: see README's A picture is set into the page) (or initials), then for a Bot its name alone (never its chat's title), else its title, else its model's name (\"Agent\" if none); its status dot (with the asking mark when it asks something), and a trash button. No second line.",
+      "shows": "Shown only while this phone has an agent that is not archived. Heading \"Agents\", then a rounded list of them. Each row, one line: the agent's picture (or initials), set into the page: see README's A picture is set into the page, then for a Bot its name alone (never its chat's title), else its title, else its model's name (\"Agent\" if none); its status dot (with the asking mark when it asks something), and a trash button. No second line.",
       "copy": [
         "this_phone.agents",
         "common.agent",

@@ -372,7 +372,11 @@ abstract class Parity(private val theme: String, private val scene: String) {
                         st.card = st.commits.first { it.subject == subject }.sha
                     }
                     androidx.compose.runtime.snapshots.Snapshot.sendApplyNotifications()
-                    repeat(6) { settle() } // (the card and the pull requests are read, then drawn)
+                    st.card?.let { sha -> // (the card is read, then drawn)
+                        val key = dev.baude.android.GitCards.key(host.getString("id"), st.page?.top.orEmpty(), sha)
+                        repeat(40) { if (dev.baude.android.GitCards.get(key) == null) settle() }
+                    }
+                    repeat(6) { settle() }
                 }
                 if (sc.has("process") || sc.has("view") || sc.has("gallery") || sc.has("hold")) flush()
                 if (sc.has("running")) {

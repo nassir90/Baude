@@ -5,6 +5,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.IntrinsicSize
@@ -42,6 +43,7 @@ import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.DpOffset
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntRect
@@ -126,17 +128,18 @@ private class Placer(val off: IntOffset, val point: Boolean, val margin: Int, va
 }
 
 /** A menu as libadwaita's popover is: its own fill, rounded, its rows (MenuChoice, MenuRow), headings and dividers;
- * as wide as its widest row, on the screen, scrolling past the screen's height. ticks: where its ticks go. */
+ * as wide as its widest row (or width), on the screen, scrolling past the screen's height. ticks: where its ticks go. */
 @Composable
 fun Popover(open: Boolean, dismiss: () -> Unit, offset: DpOffset = DpOffset.Zero, ticks: Ticks = Ticks.NONE,
-            content: @Composable ColumnScope.() -> Unit) {
+            width: Dp? = null, content: @Composable ColumnScope.() -> Unit) {
     if (!open) return
     val c = LocalBaude.current
     PopupAt(offset, dismiss) { most ->
         val shape = RoundedCornerShape(Popups.radius)
         CompositionLocalProvider(LocalTicks provides ticks) {
-            Column(Modifier.widthIn(min = Popups.minWidth, max = most.width).heightIn(max = most.height)
-                .shadow(8.dp, shape).clip(shape).background(c.dialog).width(IntrinsicSize.Max)
+            Column((if (width != null) Modifier.width(width) else Modifier.widthIn(min = Popups.minWidth, max = most.width))
+                .heightIn(max = most.height).shadow(8.dp, shape).clip(shape).background(c.dialog)
+                .then(if (width != null) Modifier else Modifier.width(IntrinsicSize.Max))
                 .verticalScroll(rememberScrollState()).padding(vertical = Popups.pad), content = content)
         }
     }
@@ -214,7 +217,7 @@ fun MenuDivider() {
 }
 
 /** A dialog (libadwaita's AlertDialog; Material's, laid out as the phone's): the chat's column wide (Popups.dialogGutter
- * in from the screen's sides), at the page's density; its heading, its body (dim), then its buttons at the end, all
+ * in from the chat's text's sides: the screen's, or, with Full-width text off and the column clamped, the column's), at the page's density; its heading, its body (dim), then its buttons at the end, all
  * Popups.dialogInset in from its edges. Every dialog of the app is this one. */
 @Composable
 fun AlertDialog(onDismissRequest: () -> Unit, confirmButton: @Composable () -> Unit, modifier: Modifier = Modifier,
@@ -224,7 +227,10 @@ fun AlertDialog(onDismissRequest: () -> Unit, confirmButton: @Composable () -> U
     Dialog(onDismissRequest, DialogProperties(usePlatformDefaultWidth = false)) {
         Paged(density) {
             val c = LocalBaude.current
-            Column(modifier.fillMaxWidth().padding(horizontal = Popups.dialogGutter).clip(RoundedCornerShape(Popups.radius))
+            BoxWithConstraints(Modifier.fillMaxWidth()) {
+            val room = maxWidth - (Gap.inside + 1.dp) * 2 // (the chat's box, as the chat is in it)
+            val side = if (Settings.fullWidth.value) 0.dp else (room - chatColumn(room)) / 2
+            Column(modifier.fillMaxWidth().padding(horizontal = Popups.dialogGutter + side).clip(RoundedCornerShape(Popups.radius))
                 .background(containerColor).padding(Popups.dialogInset)) {
                 title?.let {
                     CompositionLocalProvider(LocalContentColor provides c.fg) { ProvideTextStyle(Type.dialogTitle, it) }
@@ -240,6 +246,7 @@ fun AlertDialog(onDismissRequest: () -> Unit, confirmButton: @Composable () -> U
                     dismissButton?.invoke()
                     confirmButton()
                 }
+            }
             }
         }
     }

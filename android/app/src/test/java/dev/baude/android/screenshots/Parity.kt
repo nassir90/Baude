@@ -103,6 +103,8 @@ abstract class Parity(private val theme: String, private val scene: String) {
         freshCompose()
         ShadowChoreographer.setPaused(true)
         ShadowChoreographer.setFrameDelay(Duration.ofMillis(16))
+        if (scenes().first { it.getString("name") == scene }.optBoolean("landscape")) // (turned on its side: 891 x 411)
+            org.robolectric.RuntimeEnvironment.setQualifiers("+w891dp-h411dp")
         activity = Robolectric.buildActivity(ComponentActivity::class.java).setup().get()
         Mesh.app = activity.applicationContext
         // (the running version, as Settings' Version and the Changelog say it: the fixture's, not this build's)
@@ -120,6 +122,7 @@ abstract class Parity(private val theme: String, private val scene: String) {
         Settings.iconScale.value = set.optDouble("icon_scale", 1.0).toFloat()
         Settings.globalScale.value = set.optDouble("zoom_default", 1.0).toFloat()
         Settings.fullWidth.value = set.optBoolean("full_width", true)
+        scenes().first { it.getString("name") == scene }.let { if (it.has("fullWidth")) Settings.fullWidth.value = it.getBoolean("fullWidth") }
         Settings.readOnly.clear()
         Settings.metaModel.value = null
         Settings.metaEffort.value = null

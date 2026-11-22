@@ -85,12 +85,7 @@
           "by": "click",
           "does": "Toggles full-width chat text and remembers it (a setting shared with Settings)"
         }
-      ],
-      "phone": {
-        "does": "Its tick at the row's end while it's on, no check column before the menu's text",
-        "why": "The owner asked for the phone's popups made consistent: a check column only in menus of choices (schema/ui's README, Popups)",
-        "decided": "2026-11-22"
-      }
+      ]
     },
     {
       "name": "Read-only session",
@@ -103,12 +98,7 @@
           "by": "click",
           "does": "Toggles whether this chat can be written to. On: the whole input box is hidden (not greyed), so nothing can be sent, and files dropped on the window are not taken. Off: the box comes back"
         }
-      ],
-      "phone": {
-        "does": "As Full-width text: its tick at the row's end while it's on",
-        "why": "As Full-width text's",
-        "decided": "2026-11-22"
-      }
+      ]
     },
     {
       "name": "Database Schemas…",

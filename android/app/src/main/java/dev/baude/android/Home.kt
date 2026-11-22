@@ -462,7 +462,7 @@ private fun OpenFolder(h: String, done: () -> Unit, picked: (String) -> Unit) {
     }
     fun put(path: String) { field = androidx.compose.ui.text.input.TextFieldValue(path, androidx.compose.ui.text.TextRange(path.length)) }
     fun open() = picked(if (typed.startsWith("/")) java.io.File(typed).normalize().path.ifEmpty { "/" } else typed)
-    androidx.compose.material3.AlertDialog(
+    AlertDialog(
         onDismissRequest = done,
         title = { Text(Wording.Sidebar.openFolderOn(host = Mesh.label(h))) },
         text = {

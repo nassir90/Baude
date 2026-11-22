@@ -36,6 +36,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.AnnotatedString
@@ -352,19 +353,22 @@ fun GitPage(hostId: String, sid: String, here: Boolean, openPage: (String) -> Un
             }
         }
         val names = picked.mapNotNull { r -> branches.firstOrNull { it.rev == r } }
+        var pillWidth by remember { mutableStateOf(0.dp) }
+        val density = androidx.compose.ui.platform.LocalDensity.current
         Box(Modifier.padding(horizontal = 10.dp)) {
-            Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(c.fg.copy(alpha = 0.10f))
+            Row(Modifier.fillMaxWidth().onSizeChanged { pillWidth = with(density) { it.width.toDp() } }.clip(RoundedCornerShape(8.dp)).background(c.fg.copy(alpha = 0.10f))
                 .clickable { state.listOpen = true }.heightIn(min = Gap.barButton).padding(horizontal = 10.dp),
                 horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
                 val first = names.firstOrNull()
-                Text(first?.let { it.name ?: it.label }.orEmpty(), style = Type.body, color = c.fg, maxLines = 1, overflow = TextOverflow.MiddleEllipsis,
-                    modifier = Modifier.weight(1f, fill = false))
-                if (picked.size > 1) Text(Wording.Git.moreBranches(n = picked.size - 1), style = Type.body, color = c.dim, maxLines = 1)
-                Spacer(Modifier.weight(1f))
+                Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text(first?.let { it.name ?: it.label }.orEmpty(), style = Type.body, color = c.fg, maxLines = 1, overflow = TextOverflow.MiddleEllipsis,
+                        modifier = Modifier.weight(1f, fill = false))
+                    if (picked.size > 1) Text(Wording.Git.moreBranches(n = picked.size - 1), style = Type.body, color = c.dim, maxLines = 1)
+                }
                 Icon(Adwaita.PanDown, Wording.Git.branchesTip + if (picked.size > 1) "\n" + names.joinToString("\n") { it.name ?: it.label.orEmpty() } else "",
                     tint = c.fg, modifier = Modifier.size(16.dp.icon))
             }
-            Popover(state.listOpen, ::pick, ticks = Ticks.END) {
+            Popover(state.listOpen, ::pick, ticks = Ticks.END, width = pillWidth) {
                 Column(Modifier.heightIn(max = Tokens.Git.branchesHeight).verticalScroll(rememberScrollState())) {
                     val firstUntouched = branches.indexOfFirst { it.touched != true }
                     branches.forEachIndexed { i, b ->

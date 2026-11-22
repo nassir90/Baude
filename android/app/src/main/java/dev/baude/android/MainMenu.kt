@@ -12,13 +12,13 @@ import androidx.compose.ui.platform.LocalContext
  * one), and what it does. */
 class MenuItem(val label: String, val checked: Boolean? = null, val go: () -> Unit)
 
-/** ☰'s main menu, as the header bar's: a plain list, one line each; a toggle that's on has its tick at its end. */
+/** ☰'s main menu, as the header bar's: a plain list, one line each; with a toggle among them every item has a column for its check mark before it. */
 @Composable
 fun MainMenu(items: List<MenuItem>) {
     var open by remember { mutableStateOf(false) }
     Box {
         IconButton(Adwaita.ViewMore, Wording.ChatHeader.menu) { open = true }
-        Popover(open, { open = false }) {
+        Popover(open, { open = false }, ticks = if (items.any { it.checked != null }) Ticks.START else Ticks.NONE) {
             for (item in items) MenuChoice(item.label, item.checked == true) { open = false; item.go() }
         }
     }

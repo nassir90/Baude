@@ -443,6 +443,7 @@
     "lane-dot": {"$type": "dimension", "$description": "A commit's dot's radius.", "$value": {"value": 4, "unit": "px"}},
     "avatar": {"$type": "dimension", "$description": "An author's picture in the log (AVATAR_SIZE).", "$value": {"value": 20, "unit": "px"}},
     "row-gap": {"$type": "dimension", "$description": "Between a log row's lane, picture and text (GIT_ROW_GAP).", "$value": {"value": 6, "unit": "px"}},
+    "row-pad": {"$type": "dimension", "$description": "Over and under a log row's text (GIT_ROW_PAD).", "$value": {"value": 4, "unit": "px"}},
     "chip-pad": {"$type": "dimension", "$description": "A ref chip's text, in from its edges (LinkLabel).", "$value": {"value": 5, "unit": "px"}},
     "chip-radius": {"$type": "dimension", "$description": "A chip's or pill's corners (LinkLabel).", "$value": {"value": 4, "unit": "px"}},
     "pill-in": {"$type": "dimension", "$description": "A pull-request pill's start padding (LinkLabel).", "$value": {"value": 4, "unit": "px"}},
@@ -536,7 +537,7 @@
     "thumb": {"$description": "A picture attached in the box: its thumbnail's side.", "$value": {"value": 48, "unit": "px"}},
     "button": {"$description": "Its + and send buttons' side (.composer-actions button).", "$value": {"value": 28, "unit": "px"}},
     "inset": {
-      "$description": "Those buttons, in from the box's right and bottom edges. Empty, the box is a button's height and this above and below it, its line of text centred on the buttons'.",
+      "$description": "Those buttons, in from the box's right and bottom edges. Empty, the box is a button's height (or a line's, if that's taller) and this above and below it, its line of text and the buttons centred on each other.",
       "$value": {"value": 4, "unit": "px"}
     }
   },

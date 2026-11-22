@@ -24,7 +24,7 @@ import dev.baude.android.Key
 import dev.baude.android.Mesh
 import dev.baude.android.MeshScreen
 import dev.baude.android.Msg
-import dev.baude.android.NewSession
+import dev.baude.android.SpawnAgent
 import dev.baude.android.PhoneHost
 import dev.baude.android.PhoneScreen
 import dev.baude.android.Settings
@@ -126,11 +126,61 @@ abstract class Screens(private val theme: String) {
         screen("06-mesh-remove")
     }
 
-    @Test fun newSessionHosts() {
+    @Test fun spawnAgentHosts() {
         versionsFixture()
-        show { NewSession(null, null, done = {}, opened = { _, _ -> }) }
+        show { SpawnAgent(done = {}, opened = { _, _ -> }, given = null, edited = {}) }
         tap("workshop")
-        menu("19-new-session-hosts")
+        menu("19-spawn-agent-hosts")
+    }
+
+    @Test fun newSessionOpens() = newChat("92-new-session") { tap("New session") }
+
+    @Test fun folderPlusOpens() = newChat("93-folder-plus") { tap("New session in ~/garden, on workshop") }
+
+    @Test fun openFolderOpens() = newChat("95-open-folder-opened") {
+        tap("Open folder…")
+        screen("94-open-folder")
+        tap("Open")
+    }
+
+    /** A new chat's first message sent: it's the host's from then on (no longer a draft), and listed at home. */
+    @Test fun newChatFirstMessage() {
+        newChat("96-new-chat-written") { tap("New session in ~/garden, on workshop") }
+        val chat = Mesh.openChat("h1", "n")
+        chat.draft.value = "Tidy the changelog for 2.4"
+        settle()
+        tap("Send")
+        val s = Mesh.sessions["h1"].orEmpty()
+        Mesh.sessions["h1"] = s.map { if (it.id == "n") Msg.Session.from(it.json().put("draft", false)
+            .put("title", "Tidy the changelog for 2.4").put("said", System.currentTimeMillis() / 1000.0)) else it }
+        settle()
+        activity.window.decorView.captureRoboImage("build/screenshots/$theme/97-new-chat-sent.png")
+        Mesh.close()
+        render("98-new-chat-listed") { HomeScreen() }
+    }
+
+    /** Home, its new chat asked for (how: a tap), the host starting it as a draft ("n", in the folder asked for), and
+     * the chat that's opened at once. */
+    private fun newChat(name: String, how: () -> Unit) {
+        val now = System.currentTimeMillis() / 1000.0
+        FixtureConnection.up(activity, Mesh.hosts[0]) { m ->
+            if (m.optString("op") != "start") return@up null
+            val made = Msg.Session(id = "n", cwd = m.optString("cwd"), created = now, updated = now, state = "idle",
+                mode = "auto", draft = true, group = m.optString("group"))
+            Mesh.sessions["h1"] = Mesh.sessions["h1"].orEmpty() + made
+            org.json.JSONObject().put("op", "started").put("session", org.json.JSONObject().put("id", "n")
+                .put("cwd", m.optString("cwd")).put("draft", true))
+        }
+        val opened = androidx.compose.runtime.mutableStateOf<Pair<String, String>?>(null)
+        show {
+            val at = opened.value
+            if (at == null) Home(open = { h, s -> opened.value = h to s }, feedback = {})
+            else ChatShell(at.first, at.second, back = {}, open = { _, _ -> }, feedback = {})
+        }
+        how()
+        settle()
+        laidOut()
+        activity.window.decorView.captureRoboImage("build/screenshots/$theme/$name.png")
     }
 
     @Test fun phone() {
@@ -399,12 +449,12 @@ abstract class Screens(private val theme: String) {
         withMenus("22-settings-meta-intelligence")
     }
 
-    @Test fun newSessionModelPicker() {
+    @Test fun spawnAgentModelPicker() {
         meshModels()
-        show { NewSession("h1", null, done = {}, opened = { _, _ -> }) }
+        show { SpawnAgent(done = {}, opened = { _, _ -> }, given = null, edited = {}) }
         tap("Its default model")
         laidOut()
-        withMenus("23-new-session-model-picker")
+        withMenus("23-spawn-agent-model-picker")
     }
 
     @Test fun metaCardModelPicker() {

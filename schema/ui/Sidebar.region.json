@@ -60,7 +60,7 @@
       "actions": [
         {
           "by": "click",
-          "does": "Starts a new, blank chat on the host picked beside it. This machine: a draft chat here, in the group chosen by the rule below (switching away from the open chat first). Another host: that host's new-session form (prompt, folder, group, model, effort, mode) opens there. If that host is gone, deactivated or not known, nothing starts and a toast says why (its banner text)."
+          "does": "Opens a new, blank chat at once on the host picked beside it, in the group chosen by the rule below (switching away from the open chat first), with the header's model, effort and mode pickers to set before it's written in (see EmptyChat). This machine: in the window's folder. Another host: in the folder last used there, else that host's home. The chat is a draft on its host: it isn't listed or kept till something is sent in it, and one left empty leaves nothing behind. If that host is gone, deactivated or not known, nothing starts and a toast says why (its banner text)."
         },
         {
           "by": "key Ctrl+N",
@@ -184,7 +184,7 @@
             },
             {
               "by": "click +",
-              "does": "New session in that folder (tooltip \"New session in <folder>\"). Only if the folder exists here. If a chat made here would not be listed (this machine's host not picked, or No group ticked out), it starts through this machine's host instead (tooltip \"New session in <folder>, through local's server\"). For a folder on another host: starts a session on that host in that folder (tooltip \"New session in <folder>, on <host>\"), shown only while that host is alive."
+              "does": "Opens a new, blank chat in that folder at once, as New session does (tooltip \"New session in <folder>\"). Only if the folder exists here. For a folder on another host: the blank chat is on that host, in that folder, which becomes the folder last used there (tooltip \"New session in <folder>, on <host>\"), shown only while that host is alive."
             }
           ]
         },
@@ -393,6 +393,17 @@
       "shows": "Only the sessions of the groups ticked in ⋮ → Groups (see GroupByMenu.menu.json); ⋮ → Show All is then offered."
     }
   ],
+  "removed": [
+    {
+      "name": "New session form (a dialog of host, folder, group, prompt, model, effort and mode, from a folder's + and Open folder…)",
+      "apps": [
+        "baude",
+        "phone"
+      ],
+      "why": "A new chat is only made on its host once something's sent in it, so New session, a folder's + and Open folder… open a blank chat at once; its model, effort and mode are the header's pickers",
+      "decided": "2026-11-22"
+    }
+  ],
   "scenes": [
     "50-sessions-sidebar",
     "50b-sidebar-search",
@@ -407,6 +418,8 @@
     "55m-network-all",
     "55r-network-host-gone",
     "55r2-network-host-unknown",
-    "55t-network-host-deactivated"
+    "55t-network-host-deactivated",
+    "55f-network-folder-new-session",
+    "55f2-network-folder-new-session-sent"
   ]
 }

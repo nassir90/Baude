@@ -472,49 +472,11 @@ class WindowRemote:
         entry.grab_focus()
         return entry
 
-    def ask_remote_start(self, server=None, folder=None, here=False):
-        """New session through a server: a server's folder's + (here: this machine's, one started there if there's
-        none, local_server). A prompt, a folder and a group (new_group's, if it has one);
-        the model, effort and permission mode the top bar has (remote_start_form). Opened once its server's started it
-        (remote_started)."""
-        group = self.sidebar.new_group(HERE_HOST if here else host_key(server) if server is not None else None) or None
-        if here:
-            servers = [r for r in network().alive() if host_key(r) == HERE_HOST][:1]
-        else:
-            servers = network().alive(group)
-            if server in servers:
-                servers.remove(server)
-                servers.insert(0, server)
-            if not servers:  # (none there: through this machine's, started)
-                return self.ask_remote_start(folder=folder, here=True)
-        form = self.remote_start_form(servers or [None], folder, group, said=here, here=here)
-        dlg = Adw.AlertDialog(heading=form.heading, extra_child=form.child, default_response="start",
-                              close_response="cancel", body=form.body)
-        if hasattr(dlg, "set_prefer_wide_layout"):  # (libadwaita 1.6: room for a folder's whole path)
-            dlg.set_prefer_wide_layout(True)
-        dlg.add_response("cancel", wording.say("common.cancel"))
-        dlg.add_response("start", form.verb)
-        dlg.set_response_appearance("start", Adw.ResponseAppearance.SUGGESTED)
-        dlg.connect("response", lambda _dlg, response: response == "start" and self.submit_form(form))
-        self.dialog = self.remote_dialog = dlg
-        self.remote_fields = form.parts
-        dlg.present(self)
-        form.parts["prompt"].grab_focus()
-
-    def submit_form(self, form):
-        """A dialog's form submitted (its own button): what stops it said, as a toast, not raised in the handler."""
-        try:
-            form.submit()
-        except ValueError as e:
-            toast(self.sidebar, str(e))
-
-    def remote_start_form(self, servers, folder=None, group=None, said=False, agents=False, here=False):
-        """A new session's fields and what they do, New session…'s (ask_remote_start) and Meta's spawn_agent form's:
-        the host (servers: those to pick from; None, this machine's host process, started as it's needed; said: the
-        one, said, not picked; here: this machine's host process), with agents what runs on it (the
-        models it offers: its own, or the top bar's), the folder (the one last used on that host, else its home; empty:
-        its home, ~), the group and the prompt; the effort and mode the top
-        bar has, and its model unless an agent's picked. Started, it's opened (remote_started)."""
+    def spawn_form(self, servers):
+        """Meta's spawn_agent form's fields and what they do: the host (servers: those to pick from; None, this
+        machine's host process, started as it's needed), what runs on it (the models it offers: its own, or the top
+        bar's), the folder (the one last used on that host, else its home; empty: its home, ~), the group and the
+        prompt; the effort and mode the top bar has. Started, it's opened (remote_started)."""
         grid = Gtk.Grid(row_spacing=8, column_spacing=12, width_request=420)
         rows = []
 
@@ -531,22 +493,17 @@ class WindowRemote:
             host = r or local_host()
             return [(m["value"], m.get("displayName") or m["value"])
                     for m in (host.info.get("models", []) if host is not None else []) if m["value"] != "codex/default"] or MODELS
-        servers_dd = agent_dd = None
-        if said:  # (the host it's to be on: said, not picked)
-            field(wording.say("new_session.host"), Gtk.Label(label=named(servers[0]), xalign=0))
-        else:
-            servers_dd = Gtk.DropDown.new_from_strings([named(r) for r in servers])
-            field(wording.say("new_session.host"), servers_dd)
-        server = lambda: servers[servers_dd.get_selected()] if servers_dd is not None else servers[0]  # noqa: E731
-        if agents:
-            agent_dd = Gtk.DropDown.new_from_strings([label for _value, label in offered(servers[0])])
-            field(wording.say("common.agent"), agent_dd)
+        servers_dd = Gtk.DropDown.new_from_strings([named(r) for r in servers])
+        field(wording.say("new_session.host"), servers_dd)
+        server = lambda: servers[servers_dd.get_selected()]  # noqa: E731
+        agent_dd = Gtk.DropDown.new_from_strings([label for _value, label in offered(servers[0])])
+        field(wording.say("common.agent"), agent_dd)
         last = load_settings().get("remote_folders") or {}
         place = lambda r: HERE_HOST if r is None or host_key(r) == HERE_HOST else r.key  # noqa: E731
         home = lambda r: self.cwd if place(r) == HERE_HOST else r.info.get("home")  # noqa: E731
-        where = Gtk.Entry(text=folder or last.get(place(servers[0])) or home(servers[0]) or "~")
+        where = Gtk.Entry(text=last.get(place(servers[0])) or home(servers[0]) or "~")
         field(wording.say("common.folder"), where)
-        group_entry = Gtk.Entry(text=group or (servers[0].info.get("group") if servers[0] is not None else None) or "")
+        group_entry = Gtk.Entry(text=(servers[0].info.get("group") if servers[0] is not None else None) or "")
         field(wording.say("new_session.group"), group_entry)
         prompt = Gtk.TextView(wrap_mode=Gtk.WrapMode.WORD_CHAR, accepts_tab=False, top_margin=6, bottom_margin=6,
                               left_margin=8, right_margin=8)
@@ -555,20 +512,16 @@ class WindowRemote:
         field(wording.say("common.prompt"), frame, top=True)
         effort = lambda: (self.local_effort if model_program(self.model) == "pi" else self.effort) \
             if self.effort_dd.get_sensitive() else None  # noqa: E731  (the top bar's as it's started)
-        runs = " · ".join(x for x in (None if agents else self.model_said(self.model_dd.value()),
-                                      self.effort_dd.label() if effort() else "", self.mode_dd.label()) if x)
+        runs = " · ".join(x for x in (self.effort_dd.label() if effort() else "", self.mode_dd.label()) if x)
 
         def picked_server(*_):  # (another server: the folder last used on it, else its home; what it runs)
             r = server()
-            if not folder:
-                where.set_text((load_settings().get("remote_folders") or {}).get(place(r)) or home(r) or "~")
-            if agent_dd is not None:
-                agent_dd.set_model(Gtk.StringList.new([label for _value, label in offered(r)]))
-        if servers_dd is not None:
-            servers_dd.connect("notify::selected", picked_server)
+            where.set_text((load_settings().get("remote_folders") or {}).get(place(r)) or home(r) or "~")
+            agent_dd.set_model(Gtk.StringList.new([label for _value, label in offered(r)]))
+        servers_dd.connect("notify::selected", picked_server)
 
         def check():
-            if agent_dd is not None and agent_dd.get_selected_item() is None:
+            if agent_dd.get_selected_item() is None:
                 return f"{named(server())} offers no agent"
             return None
 
@@ -577,7 +530,7 @@ class WindowRemote:
                 raise ValueError(problem)
             buf = prompt.get_buffer()
             r = server()
-            model = offered(r)[agent_dd.get_selected()][0] if agent_dd is not None else self.model
+            model = offered(r)[agent_dd.get_selected()][0]
             params = {"op": "start", "prompt": buf.get_text(buf.get_start_iter(), buf.get_end_iter(), True).strip(),
                       "cwd": where.get_text().strip() or "~", "model": model, "effort": effort(),
                       "mode": "default" if model_program(model) == "codex" else self.mode,
@@ -589,17 +542,11 @@ class WindowRemote:
             else:
                 start(r)
             return f"starting it on {named(r)}"
-        on = THIS_MACHINE if here or servers[0] is None else remote_name(servers[0])
-        heading = wording.say("new_session.spawn_agent") if agents else \
-            wording.say("new_session.on_host", host=on) if said else wording.say("new_session.on_network")
-        fields = ([("host", "the host it runs on", servers_dd)] if servers_dd is not None else []) + \
-            ([("agent", "what runs it: one of the host's", agent_dd)] if agent_dd is not None else []) + \
-            [("folder", "the folder it starts in, on that host", where), ("group", "its group (or empty)", group_entry),
-             ("prompt", "what it's asked first", prompt)]
-        form = metalook.Form(heading, grid, fields, check, submit, verb=wording.say("new_session.start"),
-                         body=f"With the top bar's {runs}" if runs else "")
-        form.parts = {"servers": servers_dd, "agent": agent_dd, "folder": where, "group": group_entry, "prompt": prompt}
-        return form
+        fields = [("host", "the host it runs on", servers_dd), ("agent", "what runs it: one of the host's", agent_dd),
+                  ("folder", "the folder it starts in, on that host", where), ("group", "its group (or empty)", group_entry),
+                  ("prompt", "what it's asked first", prompt)]
+        return metalook.Form(wording.say("new_session.spawn_agent"), grid, fields, check, submit,
+                             verb=wording.say("new_session.start"), body=f"With the top bar's {runs}" if runs else "")
 
     def group_form(self):
         """New Group's field and what it does, as the sidebar asks for one (ask_group_name), for Meta's new_group
@@ -716,14 +663,17 @@ class WindowRemote:
             return False
         GLib.timeout_add(250, look)
 
-    def new_session_on(self, r):
-        """New session, on another host (r, picked beside it): a blank chat there, opened to be written in, in the
-        folder last used there (else its home), on the top bar's model if it's Claude's (else the host's own); listed
-        once it's written in, as a new chat here is."""
+    def new_session_on(self, r, folder=None):
+        """New session, on another host (r, picked beside it), or a folder's + there: a blank chat there, opened to be
+        written in, in folder (kept as the one last used there), else the folder last used there (else its home), on
+        the top bar's model if it's Claude's (else the host's own); listed once it's written in, as a new chat here
+        is."""
         self.show_chat()  # (as it's asked for, from the Feedback tab or a file's code: not once it's started)
         group = self.sidebar.new_group(host_key(r))
         model = self.model if self.model and model_program(self.model) == "claude" else None
-        r.request({"op": "start", "prompt": "", "cwd": (load_settings().get("remote_folders") or {}).get(r.key) or "~",
+        if folder:
+            save_settings(remote_folders={**(load_settings().get("remote_folders") or {}), r.key: folder})
+        r.request({"op": "start", "prompt": "", "cwd": folder or (load_settings().get("remote_folders") or {}).get(r.key) or "~",
                    "model": model, "effort": self.effort if model else None, "mode": "auto", "group": group,
                    "draft": True, **({"env": claudelib.claude_env()} if r.mine else {})},
                   lambda reply: self.remote_started(r, reply))

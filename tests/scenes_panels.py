@@ -219,17 +219,34 @@ def _(app):
     return win
 
 
-@scene("55f-network-new-session", "New session, while a new chat here isn't listed (only Planning): a prompt, a "
-                                  "folder and a group, through this machine's host process, with the top bar's model, "
-                                  "effort and mode")
+def folder_plus_chat(app):
+    """A window on lab-mac, a folder's + there pressed: the blank chat it opens on lab-mac, in that folder."""
+    win = network_window(app)
+    plus = T.find(win.sidebar, Gtk.Button, lambda b: (b.get_tooltip_text() or "").startswith("New session in "))
+    plus[0].emit("clicked")
+    T.wait_for(lambda: win.remote is not None and (win.remote.sessions.get(win.session_id) or {}).get("draft"),
+               "the new chat")
+    T.pump(0.5)
+    return win
+
+
+@scene("55f-network-folder-new-session", "A folder's + on lab-mac: a blank chat there, in that folder, opened at once "
+                                         "with the top bar's model, effort and mode; not listed till it's written in")
 def _(app):
-    win = network_window(app, None, host=None)
-    win.sidebar.filtered(sidebar_groups=["Planning"])  # (a new chat here, in no group, not listed)
-    win.sidebar.new_chat()
-    T.wait_for(lambda: getattr(win, "remote_fields", None), "the dialog")
-    f = win.remote_fields
-    f["folder"].set_text(NET["folders"][1])
-    f["prompt"].get_buffer().set_text("Check every link in the docs still resolves, and fix the ones that don't.")
+    return folder_plus_chat(app)
+
+
+@scene("55f2-network-folder-new-session-sent", "That chat's first message sent: lab-mac keeps it from then on, and it's "
+                                              "listed under its folder")
+def _(app):
+    win = folder_plus_chat(app)
+    T.type_and_send(win, "Tidy the changelog for 2.4")
+    T.wait_for(lambda: not (win.remote.sessions.get(win.session_id) or {}).get("draft"), "kept", 20)
+    T.wait_for(lambda: session_row(win, win.session_id) is not None, "listed", 20)
+    T.wait_for(lambda: T.button(win, "Allow"), "its question")
+    T.button(win, "Allow").emit("clicked")
+    T.wait_for(lambda: not win.busy, "turn end", 20)
+    T.pump(0.5)
     return win
 
 

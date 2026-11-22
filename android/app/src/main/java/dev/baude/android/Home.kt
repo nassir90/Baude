@@ -342,21 +342,25 @@ fun Home(open: (String, String) -> Unit, feedback: () -> Unit, phone: () -> Unit
     LaunchedEffect(Unit) { HomePrefs.load(ctx) }
     Mesh.tick.value // (a host's state changed: drawn again)
     var query by rememberSaveable { mutableStateOf("") }
-    var starting by remember { mutableStateOf<Starting?>(null) } // (New session's form: where it's from)
+    var choosing by remember { mutableStateOf<String?>(null) } // (Open folder…'s: the host it's a folder of)
     var adding by remember { mutableStateOf(false) }
     val snack = remember { SnackbarHostState() }
-    // New session: a draft on the host picked, in the folder it was last started in, with no form (Baude's new_chat)
-    fun newSession() {
-        val h = picked() ?: return
-        hostState(h)?.let { toast(it); return }
-        val group = newGroup(h)
-        val msg = Msg.Start(prompt = "", cwd = HomePrefs.folder(ctx, h) ?: "~", mode = "auto", group = group).json().put("draft", true)
-        Mesh.ask(h, msg) { r ->
+    // New session, a folder's + and Open folder…: a new chat on host h (none: the one picked), a draft till it's written
+    // in, opened at once (Baude's new_chat, start_in_folder): in folder, kept as the host's last; else in the one last
+    // given there
+    fun newSession(h: String? = picked(), folder: String? = null) {
+        val at = h ?: return
+        hostState(at)?.let { toast(it); return }
+        val group = newGroup(at)
+        val cwd = folder?.trim()?.ifBlank { "~" } ?: HomePrefs.folder(ctx, at) ?: "~"
+        val msg = Msg.Start(prompt = "", cwd = cwd, mode = "auto", group = group).json().put("draft", true)
+        Mesh.ask(at, msg) { r ->
             val id = Msg.Started.from(r).session?.id
             if (r.optString("op") == Op.STARTED && id != null) {
+                if (folder != null) HomePrefs.setFolder(ctx, at, cwd)
                 Groups.putIn(group)
-                open(h, id)
-            } else toast(Wording.NewSession.hostRefused(host = Mesh.label(h),
+                open(at, id)
+            } else toast(Wording.NewSession.hostRefused(host = Mesh.label(at),
                 why = Msg.Error.from(r).said.orEmpty().ifBlank { Wording.BotBrowser.hostSaidNo }))
         }
     }
@@ -371,13 +375,13 @@ fun Home(open: (String, String) -> Unit, feedback: () -> Unit, phone: () -> Unit
         // the top: New session and the host it's on, Open folder…, then the search and ⋮ (Baude's sidebar's top box)
         Column(Modifier.padding(start = 8.dp, end = 8.dp, top = 8.dp, bottom = 4.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-                SidebarAction(Adwaita.DocumentNew, Wording.Sidebar.newSession, Modifier.weight(1f), onClick = ::newSession)
+                SidebarAction(Adwaita.DocumentNew, Wording.Sidebar.newSession, Modifier.weight(1f)) { newSession() }
                 HostPick()
             }
             SidebarAction(Adwaita.FolderOpen, Wording.Sidebar.openFolder, Modifier.fillMaxWidth()) {
                 val h = picked()
                 val said = hostState(h)
-                if (said != null) toast(said) else starting = Starting(h, null, null, "folder")
+                if (said != null) toast(said) else choosing = h
             }
             Row(Modifier.padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(2.dp)) {
@@ -397,7 +401,7 @@ fun Home(open: (String, String) -> Unit, feedback: () -> Unit, phone: () -> Unit
                 val folded = query.isBlank() && sec.key in HomePrefs.collapsed
                 if (sec.key != "bots") item(key = "h:" + sec.key) {
                     Header(sec, folded, plus = sec.hostId?.takeIf { Mesh.conn(it)?.state == "up" }?.let { h ->
-                        { starting = Starting(null, sec.folder, h, null) } }) {
+                        { newSession(h, sec.folder) } }) {
                         if (sec.key in HomePrefs.collapsed) HomePrefs.collapsed.remove(sec.key) else HomePrefs.collapsed.add(sec.key)
                         HomePrefs.save()
                     }
@@ -415,12 +419,25 @@ fun Home(open: (String, String) -> Unit, feedback: () -> Unit, phone: () -> Unit
     }
     SnackbarHost(snack, Modifier.align(Alignment.BottomCenter).navigationBarsPadding())
     }
-    starting?.let { s -> NewSession(s.host, s.folder, done = { starting = null }, opened = open, first = s.first, focus = s.focus) }
+    choosing?.let { h -> OpenFolder(h, done = { choosing = null }) { choosing = null; newSession(h, it) } }
     if (adding) AddHost(done = { adding = false })
 }
 
-/** Where New session's form's from: the host it's on (null: pick), its folder, the host listed first, the field focused. */
-private class Starting(val host: String?, val folder: String?, val first: String?, val focus: String?)
+/** Open folder… (Baude's folder chooser): the folder a new chat on host h starts in, as a path there, given as it was
+ * last (else the host's home); Open: picked. */
+@Composable
+private fun OpenFolder(h: String, done: () -> Unit, picked: (String) -> Unit) {
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    var folder by remember { mutableStateOf(HomePrefs.folder(ctx, h) ?: Mesh.conn(h)?.info?.home?.ifBlank { null } ?: "~") }
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = done,
+        title = { Text(Wording.Sidebar.openFolderOn(host = Mesh.label(h))) },
+        text = { NameField(folder, { folder = it }, "~", { picked(folder) }) },
+        confirmButton = { Button(Wording.Common.open, suggested = true) { picked(folder) } },
+        dismissButton = { Button(Wording.Common.cancel, onClick = done) },
+        containerColor = LocalBaude.current.dialog,
+    )
+}
 
 /** What's said over the chats of a host that isn't reached (Baude's chatparts.HostState): a placeholder in the rule's
  * outline. */

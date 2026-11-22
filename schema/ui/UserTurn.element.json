@@ -17,7 +17,7 @@
     "baude.py:BaudeWindow.commit_revert",
     "baude.py:BaudeWindow.cancel_revert",
     "baudelib/transcripts.py:_command_text",
-    "record.py:Reader._add"
+    "recordreader.py:Reader._add"
   ],
   "copy": [
     "chat_turns",

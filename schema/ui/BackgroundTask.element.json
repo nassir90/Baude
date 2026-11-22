@@ -19,7 +19,7 @@
     "baude.py:BaudeWindow.task_from_note",
     "baude.py:BaudeWindow.settle_tasks",
     "widgets.py:task_note_line",
-    "record.py:Reader._add"
+    "recordreader.py:Reader._add"
   ],
   "copy": [
     "task_notes",

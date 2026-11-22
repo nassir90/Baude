@@ -2,7 +2,7 @@
   "description": "A Claude Code chat read in a tab: its prose only, live. Record has no tool calls, tool output or thinking in this view. You select passages in it to ask Meta about them, or copy them as citation links for the notes. A chat is read whichever notebook is open; a notebook has no chat of its own; one chat is \"the chat read\", the one shown last, and its folder is what @, ⌘K, Files, Git and the GitHub lists look in.",
   "apps": ["record"],
   "opens": ["☰ → Open a Chat…", "an @chat in the notes, ⌘K or Meta's reply linking a chat", "a citation link in the notes", "Baude's \"Open in Record\" (record.py --chat), or record.py --chat from the command line", "the chats open when Record last closed come back in their tabs"],
-  "code": ["record.py:Reader", "record.py:parse_records", "record.py:Picks", "record.py:Window.open_chat", "record.py:Window.open_citation", "record.py:citation_link", "record.py:Unexplained"],
+  "code": ["recordreader.py:Reader", "recordstore.py:parse_records", "recordreader.py:Picks", "recordwindow.py:Window.open_chat", "recordwindow.py:Window.open_citation", "recordstore.py:citation_link", "recordui.py:Unexplained"],
   "copy": ["find", "chats", "tabs", "common", "compaction"],
   "parts": [
     {

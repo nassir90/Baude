@@ -4,11 +4,11 @@
     "record"
   ],
   "code": [
-    "record.py:Window.rename",
-    "record.py:Window.delete",
-    "record.py:PagesList.new_page",
-    "record.py:Window.delete_page",
-    "record.py:Window.ask_rename_chat"
+    "recordhosts.py:RecordHosts.rename",
+    "recordhosts.py:RecordHosts.delete",
+    "recordreader.py:PagesList.new_page",
+    "recordwindow.py:Window.delete_page",
+    "recordwindow.py:Window.ask_rename_chat"
   ],
   "copy": [
     "common"

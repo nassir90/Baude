@@ -8,11 +8,11 @@
     "Settings → Export All Notebooks…"
   ],
   "code": [
-    "record.py:Window.ask_export",
-    "record.py:Window.choose_zip",
-    "record.py:Window.export",
-    "record.py:export_zip",
-    "record.py:zip_entries"
+    "recordwindow.py:Window.ask_export",
+    "recordwindow.py:Window.choose_zip",
+    "recordwindow.py:Window.export",
+    "recordui.py:export_zip",
+    "recordui.py:zip_entries"
   ],
   "copy": [
     "common"

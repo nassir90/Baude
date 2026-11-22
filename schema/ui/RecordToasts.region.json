@@ -1,7 +1,7 @@
 {
   "description": "Record's toasts: short messages over the bottom of the window (libadwaita toasts, 4 seconds; 6 for a name's card), sometimes with a button. A list of those Record shows, with their wording.",
   "apps": ["record"],
-  "code": ["record.py:Window.toast", "record.py:Window._toast"],
+  "code": ["recordhosts.py:RecordHosts.toast", "recordwindow.py:Window._toast"],
   "copy": ["hosts", "window", "tabs"],
   "parts": [
     {

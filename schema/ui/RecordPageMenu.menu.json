@@ -2,7 +2,7 @@
   "description": "A page's right-click menu in Record's Pages list; a popover menu with no arrow at the pointer, in sections.",
   "apps": ["record"],
   "opens": ["right-click a page row (not a page Meta deleted)"],
-  "code": ["record.py:PagesList.page_menu", "record.py:PagesList.new_page", "record.py:PagesList.rename_from_menu"],
+  "code": ["recordreader.py:PagesList.page_menu", "recordreader.py:PagesList.new_page", "recordreader.py:PagesList.rename_from_menu"],
   "copy": ["common"],
   "parts": [
     {

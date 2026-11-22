@@ -15,7 +15,7 @@
     "baude.py:CompactMarks.on_compaction",
     "baude.py:CompactMarks.compact_ended",
     "baude.py:BaudeWindow.adopt_summary",
-    "record.py:Reader._add"
+    "recordreader.py:Reader._add"
   ],
   "copy": [
     "compaction",

@@ -13918,7 +13918,7 @@ def test_look_css():
     """One look (widgets.CSS: the frame, the inside, one rule, one raised fill): Baude's stylesheet and Record's
     parse without an error, and the palette is there in light and dark (the frame and the inside apart)."""
     errors = []
-    src = open(os.path.join(os.path.dirname(HERE), "record.py")).read()
+    src = open(os.path.join(os.path.dirname(HERE), "recordui.py")).read()
     start = src.index('CSS = """') + len('CSS = """')
     for name, text in (("widgets", widgets.CSS), ("record", src[start:src.index('"""', start)])):
         provider = Gtk.CssProvider()

@@ -1,7 +1,7 @@
 {
   "description": "A change Meta proposes to a page's text, drawn on the page itself as tracked changes read: what it takes away struck through on red, what it puts in just after it on green, with Accept and Reject at the end of it. It is not the page's until accepted: it is not saved, not read back by Meta as the page, can't be typed into, and is in none of Undo.",
   "apps": ["record"],
-  "code": ["record.py:DiaryEditor.show_proposal", "record.py:DiaryEditor.decide", "record.py:EditControls", "record.py:RecordChat.propose"],
+  "code": ["diaryeditor.py:DiaryEditor.show_proposal", "diaryeditor.py:DiaryEditor.decide", "recordui.py:EditControls", "recordtools.py:RecordTools.propose"],
   "copy": ["edit_review"],
   "parts": [
     {

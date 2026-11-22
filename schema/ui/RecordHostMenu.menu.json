@@ -7,9 +7,9 @@
     "right-click the host dropdown"
   ],
   "code": [
-    "record.py:Window.host_menu",
-    "record.py:Window.ask_host_command",
-    "record.py:Window.deactivate_host"
+    "recordhosts.py:RecordHosts.host_menu",
+    "recordhosts.py:RecordHosts.ask_host_command",
+    "recordhosts.py:RecordHosts.deactivate_host"
   ],
   "copy": [
     "hosts"

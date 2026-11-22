@@ -483,6 +483,7 @@ def open_sample(tmp, size):
     os.environ["RECORD_CLAUDE"] = "/usr/bin/false"
     build(tmp, size)
     import record
+    import diaryeditor
     import widgets
     from gi.repository import Gdk, GLib, Graphene, Gtk
     widgets.SLIDE_MS = 0
@@ -503,7 +504,7 @@ def open_sample(tmp, size):
     took = time.perf_counter() - t
     bench.wait(1.5)  # (the readers' links follow on a timer)
     for child in win.tabs.children():  # (a page's logos, as it's drawn once ⌘K has its names: the caret moved, say)
-        if isinstance(child, record.DiaryEditor):
+        if isinstance(child, diaryeditor.DiaryEditor):
             child._highlight()
     shown = win.tabs.current()
     for child in win.tabs.children():  # (each read once: a tab never shown isn't laid out, as you've read what's open)

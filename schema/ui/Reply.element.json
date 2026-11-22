@@ -22,7 +22,7 @@
     "widgets.py:ChatSelection",
     "baude.py:BaudeWindow.render_assistant",
     "baude.py:BaudeWindow.reply_view",
-    "record.py:Reader._add"
+    "recordreader.py:Reader._add"
   ],
   "copy": [
     "references",

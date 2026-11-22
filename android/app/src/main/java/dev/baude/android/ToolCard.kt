@@ -447,7 +447,7 @@ fun ToolGroup(group: List<Call>, calls: ChatCalls, asking: (Call) -> Ask?, answe
         Row(Modifier.clickable { calls.opened[key] = !open }.padding(vertical = 2.dp), horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically) {
             Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
-                Icon(if (open) Adwaita.PanDown else Adwaita.PanEnd, null, tint = c.fg.copy(alpha = 0.75f), modifier = Modifier.size(16.dp))
+                Icon(if (open) Adwaita.PanDown else Adwaita.PanEnd, null, tint = c.fg.copy(alpha = 0.75f), modifier = Modifier.size(16.dp.icon))
                 Text(Wording.ToolCalls.count(n = group.size) + (if (failed > 0) Wording.ToolCalls.failed(n = failed) else "") +
                     (if (cut > 0) Wording.ToolCalls.interrupted(n = cut) else ""), style = Type.body, color = c.fg.copy(alpha = 0.8f))
             }

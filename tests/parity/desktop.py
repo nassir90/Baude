@@ -149,9 +149,38 @@ def git_scene(win, sc):
     T.pump(0.4)
 
 
+def write_glossary(cwd, name, session):
+    """fixtures/<name>'s names as this machine's Signal keeps them: <cwd>/.baude/signal.db, each mentioned in session."""
+    import sqlite3
+    import lookup
+    baude.Signal._instances.clear()  # (each scene's Signal opens its glossary afresh)
+    store = os.path.join(cwd, ".baude")
+    shutil.rmtree(store, ignore_errors=True)
+    if not name:
+        return
+    os.makedirs(store)
+    con = sqlite3.connect(os.path.join(store, "signal.db"))
+    con.executescript(lookup.REF_SCHEMA)
+    for r in fixture(name)["refs"]:
+        ref = lookup.Ref(r["surface"], r["kind"], r["status"], r["canonical"], r["reason"], r["data"], r["locations"])
+        assert ref.summary() == r["summary"], (r["surface"], ref.summary())  # (the fixture says what Baude says)
+        eid = con.execute("INSERT INTO entity (checkout, scope, kind, canonical, status, reason, data) "
+                          "VALUES ('', '', ?, ?, ?, ?, ?)",
+                          (r["kind"], r["canonical"], r["status"], r["reason"], json.dumps(r["data"]))).lastrowid
+        con.execute("INSERT INTO alias (checkout, scope, surface, entity_id) VALUES ('', '', ?, ?)", (r["surface"], eid))
+        for loc in r["locations"]:
+            con.execute("INSERT INTO location (entity_id, role, path, line, note, rev) VALUES (?, ?, ?, ?, ?, ?)",
+                        (eid, loc["role"], loc["path"], loc.get("line"), loc.get("note"), loc.get("rev")))
+        con.execute("INSERT INTO mention (entity_id, session, message, surface) VALUES (?, ?, '', ?)",
+                    (eid, session, r["surface"]))
+    con.commit()
+    con.close()
+
+
 def open_chat(app, sc):
     shutil.rmtree(os.path.join(HOME, "garden"), ignore_errors=True)  # (what an earlier scene put in the folder)
     shown = fixture("sessions.json")["sessions"][sc.get("session", 0)]
+    write_glossary(folder("garden"), sc.get("signal"), shown["id"])
     if sc.get("files"):  # (the scene's files join the chat's folder)
         shutil.copytree(os.path.join(FIX, sc["files"]), folder("garden"), dirs_exist_ok=True)
     if sc.get("git") is not None:  # (the chat's folder is the fixture repository)
@@ -192,6 +221,12 @@ def open_chat(app, sc):
                 if b.has_css_class("tool-toggle"):
                     b.set_active(True)
             T.pump(0.4)
+    if sc.get("card"):
+        win.panel.signal_page.show_ref(sc["card"])
+        T.pump(0.4)
+    if sc.get("signal_menu"):
+        win.signal_btn.popup()
+        T.pump(0.4)
     for t in sc.get("running", []):  # (background tasks heard as started)
         win.on_task_event("task_started", dict(t))
     if sc.get("process"):
@@ -226,6 +261,12 @@ def open_chat(app, sc):
     vadj = win.scroller.get_vadjustment()
     vadj.set_value(vadj.get_upper())  # (at its end, as a chat opens)
     T.pump(0.4)
+    if sc.get("ref"):  # (a tap on the Signal link in the reply that names it)
+        label = next(w for w in T.find(win, Gtk.Label) if sc["ref"] in (w.get_label() or "") and w.get_mapped())
+        ok, at = label.compute_point(win, baude.Graphene.Point().init(10, 10))
+        win.pointer = (at.x, at.y)
+        win.open_ref(sc["ref"], label)
+        T.pump(0.4)
     return win
 
 

@@ -35,6 +35,8 @@ import dev.baude.android.Queued
 import dev.baude.android.Meta
 import dev.baude.android.Msg
 import dev.baude.android.Settings
+import dev.baude.android.SignalLinks
+import dev.baude.android.SignalNames
 import dev.baude.android.SettingsScreen
 import dev.baude.android.Update
 import dev.baude.android.Wanted
@@ -81,12 +83,15 @@ abstract class Parity(private val theme: String, private val scene: String) {
         gitScene = sc.optJSONObject("git")
         github = sc.optBoolean("github")
         GitAvatars.off = true
+        signal = sc.optString("signal").ifBlank { null }?.let { JSONObject(File(root, "fixtures/$it").readText()).getJSONArray("refs") }
         subagents = sc.optString("subagents").ifBlank { null }
         FilesPrefs.gallery.value = false
         val opened = sessions.getJSONArray("sessions").getJSONObject(sc.optInt("session", 0))
         shown = (if (sc.has("transcript")) transcript(sc.getString("transcript"), sc.optInt("lines", -1))
             else if (opened.isNull("transcript")) standIn(opened)
             else transcript(opened.getString("transcript"), sc.optInt("lines", -1))).toByteArray()
+        SignalLinks.open.value = null
+        SignalNames.forget()
         freshCompose()
         ShadowChoreographer.setPaused(true)
         ShadowChoreographer.setFrameDelay(Duration.ofMillis(16))
@@ -193,6 +198,8 @@ abstract class Parity(private val theme: String, private val scene: String) {
         return failed
     }
 
+    /** The scene's `signal`: the names the folder's Signal glossary has (signal_names answers them), none without. */
+    private var signal: JSONArray? = null
     /** The scene's `subagents`: a folder of fixtures with the first session's subagents' transcripts. */
     private var subagents: String? = null
 
@@ -260,7 +267,8 @@ abstract class Parity(private val theme: String, private val scene: String) {
                     "data" to java.util.Base64.getEncoder().encodeToString(all.takeLast(limit).toByteArray()))
             }
             "git" -> return gitAnswer(msg) { more -> reply(*more) }
-            "signal_names" -> return reply("glossary" to "$home/garden/.baude", "refs" to JSONArray())
+            "signal_names" -> return reply("glossary" to "$home/garden/.baude", "root" to "$home/garden",
+                "refs" to (signal ?: JSONArray()))
             // (what Baude answers with its own functions: tests/parity/host.py, a throwaway process for each request)
             "fixes" -> {
                 val p = ProcessBuilder("python3", "-I", File(root, "host.py").path).start()
@@ -381,6 +389,13 @@ abstract class Parity(private val theme: String, private val scene: String) {
                 }
                 if (sc.has("hold")) hold(sc.getString("hold"))
                 if (name == "menu") tap(Wording.ChatHeader.menu)
+                if (sc.has("card")) tap(sc.getString("card"))
+                if (sc.optBoolean("signal_menu")) tapDescribed(Wording.SignalMenu.tipLinks(status = "").substringBefore(":"))
+                if (sc.has("ref")) {
+                    SignalLinks.tap(sc.getString("ref"))
+                    androidx.compose.runtime.snapshots.Snapshot.sendApplyNotifications()
+                    settle()
+                }
                 if (sc.optBoolean("open") && !sc.has("meta")) toEnd()
                 if (sc.has("ask")) ask(sc.getString("ask"))
                 if (sc.has("queued")) {
@@ -534,6 +549,16 @@ abstract class Parity(private val theme: String, private val scene: String) {
         } ?: error("nothing labelled $label")
         node.config[SemanticsActions.OnClick].action?.invoke()
         // (what the tap wrote is told to the composition now: in a run's later scenes the write observer's notice doesn't arrive)
+        androidx.compose.runtime.snapshots.Snapshot.sendApplyNotifications()
+        settle()
+    }
+
+    /** A click on what's described as starting with prefix. */
+    private fun tapDescribed(prefix: String) {
+        val node = roots().flatMap { all(it.semanticsOwner.rootSemanticsNode) }.firstOrNull { n ->
+            n.config.contains(SemanticsActions.OnClick) && described(n)?.startsWith(prefix) == true
+        } ?: error("nothing described as $prefix")
+        node.config[SemanticsActions.OnClick].action?.invoke()
         androidx.compose.runtime.snapshots.Snapshot.sendApplyNotifications()
         settle()
     }

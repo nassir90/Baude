@@ -167,11 +167,6 @@ class GitState(val hostId: String, val sid: String) {
     }
 }
 
-/** A commit asked for from elsewhere (a link in the chat): the page opens its card. */
-object GitLinks {
-    val want = mutableStateOf<String?>(null)
-}
-
 /** Each chat's page, kept (the least recently used dropped past GIT_KEPT_CHATS). */
 object GitPages {
     private val kept = object : LinkedHashMap<String, GitState>(16, 0.75f, true) {

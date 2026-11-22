@@ -165,7 +165,7 @@ fun SideQuestionsPage(chat: Chat) {
         if (chat.btw.isNotEmpty()) BoxedList(chat.btw.toList(), "") { sq ->
             ActionRow(sq.question, sq.thread.getOrNull(1)?.text?.lines()?.firstOrNull(), onClick = { shown = sq },
                 prefix = if (sq.status.value != "done") ({ AgentStatus(if (sq.status.value == "error") "failed" else sq.status.value) }) else null,
-                suffix = { androidx.compose.material3.Icon(Adwaita.GoNext, null, tint = c.dim) })
+                suffix = { androidx.compose.material3.Icon(Adwaita.GoNext, null, tint = c.dim, modifier = Modifier.size(16.dp.icon)) })
         }
     }
 }
@@ -185,79 +185,5 @@ private fun AskBox(hint: String, enabled: Boolean = true, send: (String) -> Unit
         val ready = enabled && text.isNotBlank()
         IconButton(Adwaita.Return, "Ask", enabled = ready, tint = if (ready) c.accentFg else c.fg,
             background = if (ready) c.accentBg else null) { send(text.trim()); text = "" }
-    }
-}
-
-// --------------------------------------------------------------------------------------------------------- signal --
-
-private val KINDS = mapOf("file" to Wording.Lookup.files, "commit" to Wording.Lookup.commits,
-    "branch" to Wording.Lookup.branches, "pr" to Wording.Lookup.pullRequests, "env" to Wording.Lookup.envVars,
-    "constant" to Wording.Lookup.constants, "symbol" to Wording.Lookup.codeSymbols, "config" to Wording.Lookup.configKeys,
-    "service" to Wording.Lookup.services, "k8s" to Wording.Lookup.kubernetesObjects, "package" to Wording.Lookup.packages,
-    "cli" to Wording.Lookup.commands, "external" to Wording.Lookup.externalTools, "tool" to Wording.Lookup.tools,
-    "subagent" to Wording.Lookup.subagentTypes, "skill" to Wording.Lookup.skills, "route" to Wording.Lookup.httpRoutes,
-    "db" to Wording.Signal.databaseTables)
-
-/** Signal's names for the chat, as Baude's Signal page lists them: those its replies named that the folder's glossary
- * has, by kind, each how it stands (linked, several matches, looking up, not found, stale) and what it is. Read from
- * its host (signal_names), as Signal last left them there: the reader runs where Baude does. */
-@Composable
-fun SignalPage(hostId: String, sid: String) {
-    val c = LocalBaude.current
-    val s = Mesh.session(hostId, sid)
-    val cwd = s?.cwd?.ifBlank { null }
-    if (cwd == null) return
-    var got by remember(cwd, sid) { mutableStateOf<Msg.SignalNamesReply?>(null) }
-    var filter by remember { mutableStateOf("") }
-    var again by remember { mutableStateOf(0) }
-    LaunchedEffect(cwd, sid, again) {
-        val msg = Msg.SignalNames(cwd = cwd, session = sid).json()
-        s.cliId?.ifBlank { null }?.let { msg.put("cli_id", it) }
-        Mesh.ask(hostId, msg) { r ->
-            got = Msg.SignalNamesReply.from(r).let { g -> if (r.optString("op") == Op.ERROR) Msg.SignalNamesReply(error = said(r, null)) else g }
-        }
-    }
-    val g = got
-    Column(Modifier.fillMaxSize()) {
-        Row(Modifier.padding(start = 8.dp, end = 6.dp, top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-            SearchField(filter, { filter = it }, Wording.Signal.filter, Modifier.weight(1f))
-            IconButton(Adwaita.ViewRefresh, "Read them again") { got = null; again++ }
-        }
-        when {
-            g == null || !g.error.isNullOrBlank() -> {}
-            else -> {
-                val refs = g.refs.orEmpty()
-                fun n(st: String) = refs.count { it.status == st }
-                Scrolled {
-                    Text(listOf<Pair<String, (Int) -> String>>("resolved" to { Wording.Signal.linked(n = it) },
-                        "ambiguous" to { Wording.Signal.several(n = it) }, "pending" to { Wording.Signal.lookingUp(n = it) },
-                        "not_found" to { Wording.Signal.notFound(n = it) }, "stale" to { Wording.Signal.stale(n = it) })
-                        .filter { n(it.first) > 0 }.joinToString(" · ") { it.second(n(it.first)) } +
-                        (g.glossary?.ifBlank { null }?.let { "\n" + Wording.Signal.glossary(path = it) } ?: ""), style = Type.caption, color = c.dim,
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp))
-                    if (refs.isEmpty()) Empty(Wording.Signal.empty)
-                    val f = filter.trim().lowercase()
-                    for ((kind, rows) in refs.filter { f.isEmpty() || it.surface.orEmpty().lowercase().contains(f) }
-                        .groupBy { it.kind.orEmpty() }) {
-                        Text(KINDS[kind] ?: kind, style = Type.folder, color = c.dim, modifier = Modifier.padding(start = 14.dp, top = 8.dp))
-                        BoxedList(rows, "") { r ->
-                            val st = r.status.orEmpty()
-                            ActionRow(r.surface.orEmpty(), r.summary.orEmpty(), prefix = {
-                                androidx.compose.material3.Icon(when (st) {
-                                    "resolved" -> Adwaita.ObjectSelect
-                                    "pending" -> Adwaita.ContentLoading
-                                    "ambiguous" -> Adwaita.ViewMore
-                                    else -> Adwaita.DialogWarning
-                                }, st, tint = when (st) {
-                                    "resolved" -> c.success
-                                    "ambiguous", "pending" -> c.dim
-                                    else -> c.warning
-                                }, modifier = Modifier.size(16.dp.icon))
-                            })
-                        }
-                    }
-                }
-            }
-        }
     }
 }

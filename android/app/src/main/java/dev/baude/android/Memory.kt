@@ -238,7 +238,7 @@ fun MemoryPage(hostId: String, sid: String, here: Boolean) {
     val offline = failed?.let { if (it in UNREACHED) Wording.BotMemory.cantConnect else Wording.BotMemory.couldntLoad }
     if (m.base == null) {
         when {
-            failed == null -> StatusPage(Adwaita.DocumentEdit, Wording.BotMemory.noMemory, Wording.BotMemory.emptyText)
+            failed == null -> StatusPage(Adwaita.DocumentEdit, Wording.BotMemory.noMemory)
             failed in UNREACHED -> StatusPage(Adwaita.DocumentEdit, Wording.BotMemory.cantConnect.removeSuffix("."),
                 Wording.BotMemory.shownWhenBack)
             else -> StatusPage(Adwaita.DocumentEdit, Wording.BotMemory.couldntLoad.removeSuffix("."), failed)
@@ -255,8 +255,6 @@ fun MemoryPage(hostId: String, sid: String, here: Boolean) {
                 BasicTextField(m.seen, { m.edit(it) }, textStyle = Type.body.copy(color = c.fg),
                     cursorBrush = SolidColor(c.accentBg), modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState())
                         .padding(horizontal = Gap.chatH, vertical = Gap.chatV))
-                if (m.seen.isEmpty()) Text(Wording.BotMemory.emptyText, style = Type.body, color = c.dim,
-                    modifier = Modifier.padding(horizontal = Gap.chatH, vertical = Gap.chatV))
                 return@Box
             }
             // its changes where they are, each to accept or reject; what's around them yours to edit

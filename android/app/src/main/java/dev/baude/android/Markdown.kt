@@ -31,6 +31,10 @@ import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.BaselineShift
+import androidx.compose.ui.text.withStyle
+import androidx.compose.foundation.text.appendInlineContent
+import androidx.compose.ui.unit.em
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDecoration
@@ -248,7 +252,7 @@ internal fun inlineMarkup(text: String, place: ChatPlace?, pills: Boolean = fals
     if ('`' in p) p = CODE_SPAN.replace(p) { m ->
         val markup = "<code>" + esc(m.groupValues[1]) + "</code>"
         val hit = place?.let { resolvePath(it, m.groupValues[1]) }
-        keep(if (hit != null) fileLink(hit, markup) else markup, markup)
+        keep(if (hit != null) fileLink(hit, markup) else refLink(m.groupValues[1], markup, true, place) ?: markup, markup)
     }
     if ("](" in p) p = MD_LINK.replace(p) { m ->
         val inner = KEPT.replace(emphasis(esc(m.groupValues[1]))) { bare[it.groupValues[1].toInt()] }
@@ -259,6 +263,7 @@ internal fun inlineMarkup(text: String, place: ChatPlace?, pills: Boolean = fals
         val pr = PullStates.bare(place, m.groupValues[1].toInt())
         if (pr == null) m.value else keep("<pill state=\"${pr.state ?: "unknown"}\" href=\"${escAttr(pr.url.orEmpty())}\">${m.groupValues[1]}</pill>")
     }
+    if (place != null) p = REF_PLAIN.replace(p) { m -> refLink(m.value, esc(m.value), false, place)?.let { keep(it) } ?: m.value }
     if ("--" in p) p = EM_DASH.replace(p, "—")
     val s = emphasis(linkPaths(esc(p), place))
     return if ('\u0000' in s) KEPT.replace(s) { marks[it.groupValues[1].toInt()] } else s
@@ -271,9 +276,11 @@ private val PILL_MARK = Regex("(\\d+)")
 
 /** inlineMarkup's markup as styled text: links in the accent, underlined; a file's or a folder's goes to file, a
  * URL's to open. */
-internal fun annotate(markup: String, accent: Color, open: (String) -> Unit, file: (String, Int?, Boolean) -> Unit): AnnotatedString =
+internal fun annotate(markup: String, accent: Color, open: (String) -> Unit, file: (String, Int?, Boolean) -> Unit,
+                      ref: (String) -> Unit = {}): AnnotatedString =
     buildAnnotatedString {
         val open_ = ArrayList<String>()
+        val counts = ArrayList<String?>() // (an open link's count of matches, shown after its text while a Signal link has several)
         var at = 0
         // (a pill's markup set aside as a marker, drawn as its own piece where the text's appended)
         val pills = ArrayList<MatchResult>()
@@ -299,6 +306,9 @@ internal fun annotate(markup: String, accent: Color, open: (String) -> Unit, fil
             if (m.groupValues[1] == "/") {
                 if (open_.lastOrNull() == tag) {
                     open_.removeAt(open_.size - 1)
+                    if (tag == "a") counts.removeLastOrNull()?.let {
+                        withStyle(SpanStyle(baselineShift = BaselineShift.Superscript, fontSize = 0.7.em)) { append(it) }
+                    }
                     pop()
                 }
                 continue
@@ -315,10 +325,27 @@ internal fun annotate(markup: String, accent: Color, open: (String) -> Unit, fil
                     val href = attrs["href"].orEmpty()
                     val kind = attrs["kind"]
                     val line = attrs["line"]?.toIntOrNull()
-                    pushLink(LinkAnnotation.Clickable(href, TextLinkStyles(SpanStyle(color = accent,
-                        textDecoration = TextDecoration.Underline))) {
-                        if (kind == "url") open(href) else file(href, line, kind == "dir")
-                    })
+                    if (kind == "ref") { // (a Signal link: its logo, then its text drawn by how far its lookup got)
+                        val status = attrs["status"].orEmpty()
+                        attrs["icon"]?.ifEmpty { null }?.let {
+                            appendInlineContent("ref-icon-$it", RefIcons.slot)
+                        }
+                        val colour = when (status) {
+                            "pending" -> accent.copy(alpha = accent.alpha * Tokens.Signal.pendingOpacity.toFloat())
+                            "not_found" -> Tokens.Signal.notFound
+                            "stale" -> Tokens.Signal.stale
+                            else -> accent
+                        }
+                        counts.add(if (status == "ambiguous") attrs["n"] else null)
+                        pushLink(LinkAnnotation.Clickable(href, TextLinkStyles(SpanStyle(color = colour,
+                            textDecoration = TextDecoration.Underline))) { ref(href) })
+                    } else {
+                        counts.add(null)
+                        pushLink(LinkAnnotation.Clickable(href, TextLinkStyles(SpanStyle(color = accent,
+                            textDecoration = TextDecoration.Underline))) {
+                            if (kind == "url") open(href) else file(href, line, kind == "dir")
+                        })
+                    }
                 }
             }
         }
@@ -339,11 +366,13 @@ internal fun rememberInline(text: String, pills: Boolean = false): AnnotatedStri
     val c = LocalBaude.current
     val uri = LocalUriHandler.current
     val known = (if (place != null) PathCheck.version.intValue else 0) + (if (pills) PullStates.version.intValue * 100_003 else 0)
-    return remember(text, place, known, c.accent, pills) {
-        val key = listOf(text, place, known, c.accent, pills)
+    val signal = if (place?.sid != null) SignalNames.version.intValue * 1000 + SignalChats.version.intValue else 0
+    return remember(text, place, known, signal, c.accent, pills) {
+        val key = listOf(text, place, known, signal, c.accent, pills)
         inlineCache.get(key) ?: annotate(text.split("\n").joinToString("\n") { inlineMarkup(it, place, pills) }, c.accent,
             { url -> try { uri.openUri(url) } catch (_: Exception) {} },
-            { path, line, dir -> place?.let { FileLinks.open(Wanted(it.hostId, path, line, dir)) } }).also { inlineCache.put(key, it) }
+            { path, line, dir -> place?.let { FileLinks.open(Wanted(it.hostId, path, line, dir)) } },
+            { name -> SignalLinks.tap(name) }).also { inlineCache.put(key, it) }
     }
 }
 

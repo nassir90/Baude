@@ -95,7 +95,7 @@ private fun RevertButton(revert: RevertOffer?) {
     val alpha = animateFloatAsState(if (shown) 1f else 0f, tween(150, easing = FastOutSlowInEasing), label = "revert").value
     Box(Modifier.padding(bottom = 6.5.dp).size(24.dp).alpha(alpha).clip(CircleShape)
         .then(if (shown) Modifier.clickable { revert?.onRevert?.invoke() } else Modifier), contentAlignment = Alignment.Center) {
-        Icon(Adwaita.ViewRefresh, Wording.ChatTurns.revert, tint = c.fg.copy(alpha = c.fg.alpha * 0.6f), modifier = Modifier.size(12.dp))
+        Icon(Adwaita.ViewRefresh, Wording.ChatTurns.revert, tint = c.fg.copy(alpha = c.fg.alpha * 0.6f), modifier = Modifier.size(12.dp.icon))
     }
 }
 
@@ -130,7 +130,7 @@ private fun Attachments(files: List<Sent>) {
                 .padding(start = 4.dp, top = 2.dp, end = 2.dp, bottom = 2.dp), verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 Icon(if (f.mime == "application/pdf") Adwaita.XOfficeDocument else Adwaita.TextXGeneric, null, tint = c.fg,
-                    modifier = Modifier.size(16.dp))
+                    modifier = Modifier.size(16.dp.icon))
                 Text(if (f.name.length > 22) f.name.take(10) + "…" + f.name.takeLast(11) else f.name, style = Type.body, color = c.fg,
                     maxLines = 1)
             }

@@ -41,16 +41,6 @@ import org.json.JSONArray
 
 // ------------------------------------------------------------------------------------------------- the logo --
 
-/** The merge logo a pull request's pill has (widgets.REF_ICON_SVG["merge"]): three rings, a line and a curve, 16 square. */
-val MergeLogo: ImageVector by lazy {
-    ImageVector.Builder("merge", 16.dp, 16.dp, 16f, 16f).apply {
-        fun ring(cx: Float, cy: Float) = "M${cx - 1.85f},$cy a1.85,1.85 0 1 0 3.7,0 a1.85,1.85 0 1 0 -3.7,0 z"
-        for (d in listOf(ring(4.6f, 3.3f), ring(4.6f, 12.7f), ring(11.6f, 9f), "M4.6 5.2v5.6M4.6 5.2c0 2.3 1.6 3.8 5.1 3.8"))
-            addPath(PathParser().parsePathString(d).toNodes(), stroke = SolidColor(Color.Black), strokeLineWidth = 1.35f,
-                strokeLineCap = StrokeCap.Round, strokeLineJoin = StrokeJoin.Round)
-    }.build()
-}
-
 /** A pull request's colour by its state (widgets.PR_COLORS); one not known is the accent. */
 fun prColor(state: String?, c: BaudeColors): Color = when (state) {
     "open" -> Tokens.Git.prOpen
@@ -79,12 +69,13 @@ fun AnnotatedString.Builder.chip(label: String, kind: String) =
 @Composable
 fun PillText(text: AnnotatedString, style: TextStyle, color: Color, modifier: Modifier = Modifier, maxLines: Int = Int.MAX_VALUE,
              overflow: TextOverflow = TextOverflow.Clip) {
-    val ids = text.getStringAnnotations(INLINE_TAG, 0, text.length).map { it.item }.distinct()
-    if (ids.isEmpty()) return Text(text, style = style, color = color, modifier = modifier, maxLines = maxLines, overflow = overflow)
+    val ids = text.getStringAnnotations(INLINE_TAG, 0, text.length).map { it.item }.filter { it.startsWith("pill$SEP") || it.startsWith("chip$SEP") }.distinct()
+    if (ids.isEmpty()) return Text(text, style = style, color = color, modifier = modifier, maxLines = maxLines, overflow = overflow,
+        inlineContent = RefIcons.inline)
     val measure = rememberTextMeasurer()
     val density = LocalDensity.current
     val size = if (style.fontSize.isSpecified) style.fontSize else 15.sp
-    val map = HashMap<String, InlineTextContent>()
+    val map = HashMap<String, InlineTextContent>(RefIcons.inline)
     for (id in ids) {
         val parts = id.split(SEP)
         val pill = parts[0] == "pill"
@@ -119,7 +110,7 @@ private fun Pill(state: String, href: String, label: String, size: TextUnit, log
         .padding(start = Tokens.Git.pillIn, end = Tokens.Git.pillOut),
         horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(Tokens.Git.pillGap),
         verticalAlignment = Alignment.CenterVertically) {
-        Icon(MergeLogo, null, tint = colour, modifier = Modifier.size(with(LocalDensity.current) { logo.toDp() }))
+        RefIcons.Draw("merge", colour, with(LocalDensity.current) { logo.toDp() })
         Text(label, fontSize = size, color = colour, maxLines = 1,
             textDecoration = if (state == "closed") TextDecoration.LineThrough else null)
     }

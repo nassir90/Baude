@@ -30,7 +30,6 @@ import baudelib.client  # noqa: E402  (the hosts, as Baude has them: another's n
 import baudelib.hosts  # noqa: E402  (this machine's host process started again: Restart Daemon)
 import baudelib.serverstate  # noqa: E402  (the sessions this machine's host process keeps: bot_started)
 from baudelib import applist  # noqa: E402  (Record in the list of apps, as Emission is)
-from baudelib import bins  # noqa: E402  (~/.local/bin/record, which its launcher starts)
 from baudelib import notes  # noqa: E402  (this machine's notebooks, as its host process gives them to another's Record)
 from baudelib.notes import data_dir  # noqa: E402,F401
 import meta  # noqa: E402  (Meta, the helper in the right bar: Baude's too, beside this file)
@@ -1049,25 +1048,25 @@ def logo():
 
 def apps_place():
     """The list of apps install() puts Record in, as the platform names it."""
-    return wording.say("install.applications") if sys.platform == "darwin" else wording.say("install.application_menu")
+    return applist.place()
 
 
 def install():
-    """macOS: ~/Applications/Record.app (an .icns of the logo). Linux: a .desktop entry and the logo in the user's
-    hicolor theme. Either starts ~/.local/bin/record, written with the other commands (bins.install). Where it is."""
-    bins.install()
-    return applist.install(APP_ID, "Record", logo(), [bins.path("record")], "public.app-category.productivity",
-                           ["Comment=Read AI prose with a peer who knows what you know", "Categories=Utility;GTK;"])[0]
+    """Baude, Record, Emission and Multiplex in the platform's list of apps, together (applist.install_all): macOS's
+    ~/Applications/NAME.app, Linux's .desktop entry and logo each, the logos in the accent picked. Each starts its
+    command in ~/.local/bin, written with the others (bins.install). Where Record's is."""
+    applist.install_all(widgets.load_settings().get("accent"))
+    return applist.launchers(APP_ID, "Record")[0]
 
 
 def installed():
-    """Whether Record is in the platform's list of apps (Settings → Show in Applications)."""
-    return os.path.exists(applist.launchers(APP_ID, "Record")[0])
+    """Whether all four are in the platform's list of apps (Settings → Show in Applications)."""
+    return applist.all_installed()
 
 
 def uninstall():
-    """Record's launcher: what was removed."""
-    return applist.uninstall(APP_ID, "Record")
+    """All four apps' launchers taken out of the list: what was removed."""
+    return applist.uninstall_all()
 
 
 def restart_path():

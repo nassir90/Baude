@@ -8,7 +8,7 @@ prompts, cost/usage. Everything "agentic" (tools, context, compaction,
 MCP, hooks, CLAUDE.md...) is done by the CLI; baude is only a view.
 
     python3 baude.py [--cwd DIR] [--model MODEL] [--resume SESSION_ID]
-    python3 baude.py --install | --uninstall   # app-menu launcher (per user), and the commands in ~/.local/bin
+    python3 baude.py --install | --uninstall   # all four apps in the app menu (per user), and ~/.local/bin's commands
 
 Keys: Ctrl+Enter (⌘Enter) sends, Enter adds a line, Esc stops, Ctrl +/-/0 (⌘ too on macOS, or Ctrl+scroll)
 zooms the text, Ctrl+V pastes images/files as attachments, Ctrl+N starts a new session, Ctrl+, (⌘,) opens Settings,
@@ -308,9 +308,9 @@ def main():
     ap.add_argument("--restore", help=argparse.SUPPRESS)  # state left by "Restart Baude"
     inst = ap.add_mutually_exclusive_group()
     inst.add_argument("--install", action="store_true",
-                      help=wording.say("install.install_help", app="Baude", where=LAUNCHER.where))
+                      help=wording.say("install.install_help", where=LAUNCHER.where))
     inst.add_argument("--uninstall", action="store_true",
-                      help=wording.say("install.uninstall_help", app="Baude", where=LAUNCHER.where))
+                      help=wording.say("install.uninstall_help", where=LAUNCHER.where))
     opts = ap.parse_args()
     if opts.install:
         LAUNCHER.install()
@@ -320,7 +320,7 @@ def main():
     if opts.uninstall:
         removed = LAUNCHER.uninstall()
         print("\n".join(wording.say("install.removed", path=p) for p in removed) or
-              wording.say("install.not_installed", app="Baude"))
+              wording.say("install.not_installed"))
         return 0
     baudelib.bins.refreshed(lambda text: print(f"baude: {text}", file=sys.stderr))
     return BaudeApp(opts).run([sys.argv[0]])

@@ -130,14 +130,16 @@ def accent_rgba():
 class Terminal(Gtk.Overlay):
     """A terminal: argv (your shell if none) run in cwd under VTE, with the glow over it. title: what it's called till
     its program names it. on_exit(terminal, status) once its program has ended; on_title(terminal) as its title
-    changes. Terminals.add gives it its id, by which a Bot's tools reach it."""
+    changes; on_close(terminal) to take it from its window when it's closed once its program has ended. Terminals.add gives it its id, by which a Bot's tools reach it."""
 
-    def __init__(self, argv=None, cwd=None, title=None, env=None, on_exit=None, on_title=None):
+    def __init__(self, argv=None, cwd=None, title=None, env=None, on_exit=None, on_title=None,
+                 on_close=None):
         super().__init__(hexpand=True, vexpand=True)
         self.add_css_class("multiplex-terminal")
         self.argv = list(argv) if argv else [os.environ.get("SHELL") or "/bin/sh", "-l"]
         self.cwd = cwd or os.path.expanduser("~")
-        self.named, self.on_exit, self.on_title = title, on_exit, on_title
+        self.named, self.on_exit, self.on_title, self.on_close = title, on_exit, on_title, on_close
+        self.closing = False  # (closed by a Bot or its window: not kept to be read when its program ends)
         self.pid, self.status, self.id, self.changed, self.started = None, None, None, time.monotonic(), time.time()
         self.bot = None  # (the Bot at its tools here last: {id, name})
         self.vte = Vte.Terminal(hexpand=True, vexpand=True, scrollback_lines=SCROLLBACK, scroll_on_output=False,
@@ -211,6 +213,14 @@ class Terminal(Gtk.Overlay):
                     os.kill(self.pid, signal.SIGHUP)
                 except OSError:
                     pass
+
+    def close(self):
+        """Closed: its program stopped, and (one that ended is in its window till now) it's gone from there."""
+        self.closing = True
+        if self.status is not None and self.on_close:
+            self.on_close(self)
+        else:
+            self.stop()
 
     # ---- what a Bot's tools read and do
     def title(self):
@@ -455,8 +465,8 @@ class Terminals:
         if op == "wait":
             return self.wait(term, msg, answer)
         if op == "close":
-            term.stop()
-            return answer({"closed": term.id})
+            answer({"closed": term.id})
+            return term.close()
         raise ValueError(f"no op {op!r}")
 
     def touched(self, term, msg):

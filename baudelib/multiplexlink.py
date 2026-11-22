@@ -129,17 +129,17 @@ def opened(msg):
                                 stderr=log, start_new_session=True, cwd=os.path.dirname(MULTIPLEX), env=env)
     end = time.monotonic() + START_S
     while time.monotonic() < end:
-        try:
-            return ask(socket_path(proc.pid), msg, 30)
-        except (FileNotFoundError, ConnectionRefusedError):
-            if proc.poll() is not None:
-                try:
-                    with open(log_path, encoding="utf-8", errors="replace") as f:
-                        said = [line.strip() for line in f.readlines()[-6:] if line.strip()]
-                except OSError:
-                    said = []
-                raise OSError("Multiplex couldn't start here" + (": " + said[-1] if said else ""))
-            time.sleep(0.2)
+        for path, info in processes():  # (by what listens, not proc's pid: under xvfb-run that's its parent's)
+            if info.get("opens"):
+                return ask(path, msg, 30)
+        if proc.poll() is not None:
+            try:
+                with open(log_path, encoding="utf-8", errors="replace") as f:
+                    said = [line.strip() for line in f.readlines()[-6:] if line.strip()]
+            except OSError:
+                said = []
+            raise OSError("Multiplex couldn't start here" + (": " + said[-1] if said else ""))
+        time.sleep(0.2)
     raise OSError(f"Multiplex didn't start (its log: {log_path})")
 
 

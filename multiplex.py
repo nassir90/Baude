@@ -71,7 +71,8 @@ def uninstall():
 
 
 class Window(Adw.ApplicationWindow):
-    """Multiplex's window: its tabs, a terminal each; the last one's program ending closes it."""
+    """Multiplex's window: its tabs, a terminal each; a program's ending closes its tab, unless a Bot's at it: that stays to be read
+    till it's closed."""
 
     def __init__(self, app):
         super().__init__(application=app, title="Multiplex", default_width=900, default_height=580)
@@ -102,10 +103,11 @@ class Window(Adw.ApplicationWindow):
 
     def open(self, argv=None, cwd=None, title=None, show=True):
         """A new tab running argv (your shell if none) in cwd: its terminal."""
-        term = Terminal(argv, cwd, title, on_exit=self._ended, on_title=self._titled)
+        term = Terminal(argv, cwd, title, on_exit=self._ended, on_title=self._titled,
+                    on_close=self._finish)
         Terminals.get().add(term)
         page = self.tabs.append(term)
-        page.set_title(term.title())
+        page.set_title(self.label(term))
         page.set_tooltip(term.id)
         self.tabs.set_selected_page(page)
         term.vte.grab_focus()
@@ -119,11 +121,20 @@ class Window(Adw.ApplicationWindow):
                 return self.tabs.get_nth_page(i)
         return None
 
+    def label(self, term):
+        return term.title() + (f" ({wording.say('multiplex.ended')})" if term.status is not None else "")
+
     def _titled(self, term):
         if (page := self.page_of(term)) is not None:
-            page.set_title(term.title())
+            page.set_title(self.label(term))
 
     def _ended(self, term, _status):
+        if term.closing or term.bot is None:
+            self._finish(term)
+        else:
+            self._titled(term)
+
+    def _finish(self, term):
         if (page := self.page_of(term)) is not None:
             self.tabs.close_page(page)
 
@@ -148,6 +159,7 @@ class Window(Adw.ApplicationWindow):
         for term in list(Terminals.get().terminals.values()):
             term.stop()
         Terminals.get().close()
+        self.get_application().quit()
         return False
 
 

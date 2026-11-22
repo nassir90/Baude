@@ -72,11 +72,20 @@ fun ChatMenu(hostId: String, sid: String, feedback: () -> Unit, screen: (String)
     ))
 }
 
-/** The home screen's ☰: the items that don't need a chat open. */
+/** The home screen's ☰: the items that don't need a chat open, and Kubernetes…, Database Schemas…, Terminal on the
+ * host picked beside New session (a host that takes them), as Baude's ☰ opens them on its window's host. tool opens
+ * one of "kubernetes", "databases" and "terminal" on a host. */
 @Composable
-fun HomeMenu(settings: () -> Unit, changelog: () -> Unit, mesh: () -> Unit, feedback: () -> Unit, fixes: () -> Unit) {
+fun HomeMenu(settings: () -> Unit, changelog: () -> Unit, mesh: () -> Unit, feedback: () -> Unit, fixes: () -> Unit,
+             tool: (String, String) -> Unit = { _, _ -> }) {
+    val host = picked()?.takeIf { it != "phone" }
     MainMenu(listOf(
         listOf(fullWidth()),
+        if (host == null) emptyList() else listOfNotNull(
+            if (takes(host, "kube")) MenuItem(Wording.Window.kubernetesMenu) { tool("kubernetes", host) } else null,
+            if (takes(host, "databases")) MenuItem(Wording.Window.databaseSchemas) { tool("databases", host) } else null,
+            if (takes(host, "terminal")) MenuItem(Wording.Multiplex.terminalMenu) { tool("terminal", host) } else null,
+        ),
         listOf(
             MenuItem(Wording.Window.settings) { settings() },
             MenuItem(Wording.Changelog.title) { changelog() },

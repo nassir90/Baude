@@ -333,6 +333,7 @@ class HostedTerminal(Terminal):
             ch, _info = wire.reach(self.host_where, timeout=30)
         except (OSError, ValueError) as e:
             return GLib.idle_add(self._failed, str(e))
+        ch.keep_alive()  # (the host takes SILENT_S without a word for gone: a terminal no one's typing in is still here)
         self.ch = ch
         cols, rows = self.vte.get_column_count(), self.vte.get_row_count()
         self.size = (cols, rows)

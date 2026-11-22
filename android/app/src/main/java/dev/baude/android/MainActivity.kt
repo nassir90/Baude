@@ -66,6 +66,7 @@ class MainActivity : ComponentActivity() {
                         feedback = { go(listOf("feedback")) }, phone = { go(listOf("phone")) },
                         settings = { go(listOf("settings")) }, mesh = { go(listOf("mesh")) },
                         changelog = { go(listOf("changelog")) }, fixes = { go(listOf("fixes")) },
+                        tool = { screen, host -> go(listOf(screen, host)) },
                         note = { if (Shares.pending.value != null) ShareBanner(::back) })
                 }
                 HostKeyAsk()

@@ -77,6 +77,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.input.nestedscroll.nestedScroll
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.first
 
 // ------------------------------------------------------------------------------------------------------ a chat --
@@ -121,13 +122,16 @@ fun ChatPage(chat: Chat, name: String, attach: Boolean = true, stop: (() -> Unit
     val left = remember(chat) { placeKey?.let { ChatPlaces.left(it) } } // (where it was left; none: at its end)
     var follow by remember(chat) { mutableStateOf(left == null) }
     var placed by remember(chat) { mutableStateOf(left == null) } // (put back where it was left, or never left)
+    var restored by remember(chat) { mutableStateOf(left == null) } // (the kept place put back, or no longer wanted)
     var settled by remember(chat) { mutableStateOf(false) } // (read to its end a moment ago: new things glide in)
     var touched by remember(chat) { mutableStateOf(false) } // (moved by the reader: a drag, or its fling)
     val reader = remember(chat) { object : androidx.compose.ui.input.nestedscroll.NestedScrollConnection {
         override fun onPreScroll(available: androidx.compose.ui.geometry.Offset,
                                  source: androidx.compose.ui.input.nestedscroll.NestedScrollSource): androidx.compose.ui.geometry.Offset {
-            touched = true
-            revealed = null
+            if (list.isScrollInProgress) { // (the list's own, not a code block's scrolling inside it)
+                touched = true
+                revealed = null
+            }
             return androidx.compose.ui.geometry.Offset.Zero
         }
     } }
@@ -195,6 +199,7 @@ fun ChatPage(chat: Chat, name: String, attach: Boolean = true, stop: (() -> Unit
         if (list.isScrollInProgress || !touched) return@LaunchedEffect
         touched = false
         placed = true
+        restored = true
         follow = !list.canScrollForward
     }
     LaunchedEffect(chat, chat.loaded.value) {
@@ -204,30 +209,47 @@ fun ChatPage(chat: Chat, name: String, attach: Boolean = true, stop: (() -> Unit
     }
     LaunchedEffect(chat) { // (opened where it was left, once it's read to its end and laid out: measured from its end)
         val at = left ?: return@LaunchedEffect
-        kotlinx.coroutines.withTimeoutOrNull(2000) {
-            androidx.compose.runtime.snapshotFlow { chat.loaded.value }.first { it }
+        suspend fun restore() {
+            androidx.compose.runtime.snapshotFlow { chat.loaded.value && chat.lines.isNotEmpty() }.first { it }
             repeat(2) { androidx.compose.runtime.withFrameNanos { } } // (its last lines in the list)
             val n = list.layoutInfo.totalItemsCount
-            if (!placed && n > 0) list.scrollToItem((n - at.fromEnd).coerceIn(0, n - 1), at.offset)
+            if (restored || n == 0) return
+            list.scrollToItem((n - at.fromEnd).coerceIn(0, n - 1), at.offset)
+            follow = false
+            restored = true
         }
+        kotlinx.coroutines.withTimeoutOrNull(2000) { restore() }
         placed = true
+        if (!restored) { // (no lines yet, a host down or slow: its end shown, the place kept and put back when they come)
+            follow = true
+            restore()
+        }
     }
     LaunchedEffect(chat) {
-        androidx.compose.runtime.snapshotFlow { follow && placed && !touched && list.canScrollForward && !list.isScrollInProgress }
-            .collect { if (it) toEnd(list, glide = settled) }
+        while (true) {
+            androidx.compose.runtime.snapshotFlow { follow && placed && !touched && list.canScrollForward && !list.isScrollInProgress }
+                .first { it }
+            try {
+                toEnd(list, glide = settled)
+            } catch (e: kotlinx.coroutines.CancellationException) { // (a glide cut off by another scroll: the next goes on)
+                kotlinx.coroutines.currentCoroutineContext().ensureActive()
+            }
+            androidx.compose.runtime.withFrameNanos { } // (what grew meanwhile is still below: taken to next)
+        }
     }
     LaunchedEffect(chat) { // (what you send brought into view, as Baude's send does, wherever the chat was)
         var was = chat.sent.size
         androidx.compose.runtime.snapshotFlow { chat.sent.size }.collect { n ->
             if (n > was) {
                 placed = true
+                restored = true
                 follow = true
             }
             was = n
         }
     }
     androidx.compose.runtime.DisposableEffect(chat) {
-        onDispose { if (placed && placeKey != null) ChatPlaces.keep(placeKey, list, follow) }
+        onDispose { if (placed && restored && placeKey != null) ChatPlaces.keep(placeKey, list, follow) }
     }
     LaunchedEffect(chat.jump.value) { // (Made by this chat: the call it names, its group opened)
         val id = chat.jump.value ?: return@LaunchedEffect
@@ -655,16 +677,34 @@ private fun senderName(kind: String?, name0: String?, hostName: String?): String
 object ChatPlaces {
     class Left(val fromEnd: Int, val offset: Int)
 
-    private val places = LinkedHashMap<String, Left>()
+    private var places: LinkedHashMap<String, Left>? = null
 
-    fun left(key: String): Left? = places[key]
+    private fun prefs() = Mesh.app.getSharedPreferences("places", android.content.Context.MODE_PRIVATE)
+
+    /** All of them, read from the phone's storage once: they survive the app being closed, as the desktop's do a restart. */
+    private fun all(): LinkedHashMap<String, Left> = places ?: LinkedHashMap<String, Left>().also { m ->
+        runCatching {
+            val a = org.json.JSONArray(prefs().getString("places", null) ?: "[]")
+            for (i in 0 until a.length()) a.getJSONArray(i).let { m[it.getString(0)] = Left(it.getInt(1), it.getInt(2)) }
+        }
+        places = m
+    }
+
+    fun left(key: String): Left? = all()[key]
 
     fun keep(key: String, list: androidx.compose.foundation.lazy.LazyListState, atEnd: Boolean) {
+        val places = all()
         places.remove(key)
         val n = list.layoutInfo.totalItemsCount
-        if (atEnd || !list.canScrollForward || n == 0) return
-        places[key] = Left(n - list.firstVisibleItemIndex, list.firstVisibleItemScrollOffset)
-        while (places.size > 500) places.remove(places.keys.first())
+        if (!atEnd && list.canScrollForward && n > 0) {
+            places[key] = Left(n - list.firstVisibleItemIndex, list.firstVisibleItemScrollOffset)
+            while (places.size > 500) places.remove(places.keys.first())
+        }
+        runCatching {
+            val a = org.json.JSONArray()
+            for ((k, v) in places) a.put(org.json.JSONArray().put(k).put(v.fromEnd).put(v.offset))
+            prefs().edit().putString("places", a.toString()).apply()
+        }
     }
 }
 

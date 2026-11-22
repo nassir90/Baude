@@ -73,7 +73,7 @@
   "states": [
     {
       "name": "opened again",
-      "shows": "A chat opens where it was last left, measured from its end, there at once and held there while what's in it takes its size (pictures, code). One never opened, or left at its end, opens at its end and stays there as pictures and code take their sizes and as new things come (a line or two at once, more gliding in over 200ms). Scrolled up by the reader, it's left where it is."
+      "shows": "A chat opens where it was last left, measured from its end, there at once and held there while what's in it takes its size (pictures, code). One never opened, or left at its end, opens at its end and stays there as pictures and code take their sizes and as new things come (a line or two at once, more gliding in over 200ms). Scrolled up by the reader, it's left where it is. Where each chat was left is kept across the app being closed or restarted, on both apps; a place that can't be put back yet (the host not answering) is kept, and its end shown until the lines come."
     },
     {
       "name": "opened, not yet written to",

@@ -326,9 +326,10 @@ abstract class Screens(private val theme: String) {
         chat.queued.add(dev.baude.android.Queued("Then tag the release as v0.9.0 and push the tag.", emptyList()))
         show { ChatShell("h1", "a", back = {}, open = { _, _ -> }, feedback = {}) }
         press("Keep the sync items first")
-        settle()
+        repeat(20) { frame() } // (the buttons' fade finished)
         activity.window.decorView.captureRoboImage("build/screenshots/$theme/40-chat-message-tapped$suffix.png")
         press("Then tag the release")
+        repeat(20) { frame() }
         activity.window.decorView.captureRoboImage("build/screenshots/$theme/41-chat-queued-tapped$suffix.png")
     }
 
@@ -368,6 +369,63 @@ abstract class Screens(private val theme: String) {
         show { ChatShell("h1", "b", back = {}, open = { _, _ -> }, feedback = {}) }
         repeat(30) { frame() }
         activity.window.decorView.captureRoboImage("build/screenshots/$theme/43-chat-reopened.png")
+    }
+
+    /** At the end, lines come in and the drag that interrupts their glide ends at the end again: a reply streaming
+     * after that is still followed. */
+    @Test fun chatFollowAfterInterrupt() {
+        dev.baude.android.ChatPlaces.keep("h1/b", androidx.compose.foundation.lazy.LazyListState(), true) // (none kept: opened at its end)
+        val chat = Mesh.openChat("h1", "b")
+        chat.lines.addAll(longChat())
+        chat.loaded.value = true
+        show { ChatShell("h1", "b", back = {}, open = { _, _ -> }, feedback = {}) }
+        repeat(90) { frame() }
+        chat.lines.addAll((1..3).map { Line("bot", "A late line $it: the profile shows the same plugins again, in the same order.") })
+        repeat(3) { frame() }
+        drag(from = 0.5f, to = 0.55f)
+        repeat(6) { drag(from = 0.7f, to = 0.15f) }
+        chat.streaming.value = (1..12).joinToString("\n\n") { "Streamed paragraph $it of the reply, which keeps on growing below." }
+        repeat(60) { frame() }
+        activity.window.decorView.captureRoboImage("build/screenshots/$theme/46-chat-follow-after-interrupt.png")
+    }
+
+    /** A code block scrolled by a finger, then what you send: the end comes into view. */
+    @Test fun chatCodeScrolledThenSend() {
+        dev.baude.android.ChatPlaces.keep("h1/b", androidx.compose.foundation.lazy.LazyListState(), true) // (none kept: opened at its end)
+        val chat = Mesh.openChat("h1", "b")
+        chat.lines.addAll(longChat().takeLast(4))
+        chat.lines.add(Line("bot", "```\n" + (1..80).joinToString("\n") { "line $it of the build log" } + "\n```"))
+        chat.loaded.value = true
+        show { ChatShell("h1", "b", back = {}, open = { _, _ -> }, feedback = {}) }
+        repeat(60) { frame() }
+        drag(from = 0.6f, to = 0.4f)
+        chat.lines.addAll((1..4).map { Line("bot", "A reply line $it, after the log.") })
+        repeat(60) { frame() }
+        activity.window.decorView.captureRoboImage("build/screenshots/$theme/47-chat-code-scrolled-then-more.png")
+    }
+
+    /** The long chat left scrolled up, opened again while its host is down (no lines): its end, then the lines
+     * arrive and it's put back where it was left. */
+    @Test fun chatReopenedHostDown() {
+        dev.baude.android.ChatPlaces.keep("h1/b", androidx.compose.foundation.lazy.LazyListState(), true) // (none kept: opened at its end)
+        val chat = Mesh.openChat("h1", "b")
+        chat.lines.addAll(longChat())
+        chat.loaded.value = true
+        show { ChatShell("h1", "b", back = {}, open = { _, _ -> }, feedback = {}) }
+        repeat(30) { frame() }
+        drag(from = 0.3f, to = 0.75f)
+        drag(from = 0.3f, to = 0.75f)
+        activity.window.decorView.captureRoboImage("build/screenshots/$theme/48-chat-left-again.png")
+        show { HomeScreen() }
+        Mesh.close()
+        val again = Mesh.openChat("h1", "b")
+        again.loaded.value = true
+        show { ChatShell("h1", "b", back = {}, open = { _, _ -> }, feedback = {}) }
+        repeat(150) { frame() }
+        activity.window.decorView.captureRoboImage("build/screenshots/$theme/48b-chat-reopened-host-down.png")
+        again.lines.addAll(longChat())
+        repeat(30) { frame() }
+        activity.window.decorView.captureRoboImage("build/screenshots/$theme/49-chat-reopened-host-back.png")
     }
 
     /** The keyboard up, then partway down past the bottom bar (as it is mid-way through going down): the keyboard

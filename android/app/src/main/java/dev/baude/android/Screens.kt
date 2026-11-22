@@ -69,6 +69,7 @@ import androidx.compose.ui.input.key.type
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.text.style.TextOverflow
@@ -861,6 +862,18 @@ fun Field(value: String, set: (String) -> Unit, hint: String) {
     Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(c.fg.copy(alpha = 0.08f))
         .padding(horizontal = 10.dp, vertical = 9.dp)) {
         if (value.isEmpty()) Text(hint, style = Type.body, color = c.dim)
+        BasicTextField(value, set, singleLine = true, textStyle = Type.body.copy(color = c.fg),
+            cursorBrush = SolidColor(c.accentBg), modifier = Modifier.fillMaxWidth())
+    }
+}
+
+/** Field with its cursor: what's in it, and where the cursor is, as a form's card sets it. */
+@Composable
+fun Field(value: TextFieldValue, set: (TextFieldValue) -> Unit, hint: String) {
+    val c = LocalBaude.current
+    Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(c.fg.copy(alpha = 0.08f))
+        .padding(horizontal = 10.dp, vertical = 9.dp)) {
+        if (value.text.isEmpty()) Text(hint, style = Type.body, color = c.dim)
         BasicTextField(value, set, singleLine = true, textStyle = Type.body.copy(color = c.fg),
             cursorBrush = SolidColor(c.accentBg), modifier = Modifier.fillMaxWidth())
     }

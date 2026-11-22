@@ -1,5 +1,5 @@
 {
-  "description": "The hosts of the mesh as Baude's and Record's windows show them: each one's state, its right-click menu, its Host Command dialog, and its daemon's restart.",
+  "description": "The hosts of the mesh as Baude's and Record's windows show them: each one's state, its right-click menu, and its daemon's restart.",
   "messages": {
     "looking": "Looking for {$host} on the network…",
     "down": "Can't connect to {$host} at the moment",
@@ -7,14 +7,11 @@
     "deactivated": "{$host} is deactivated",
     "activate": "Activate",
     "deactivate": "Deactivate",
-    "command": "Host Command…",
-    "command_heading": "Baude on {$host}",
-    "command_body": "The command ssh runs on {$host}, with connect after it",
-    "command_placeholder": "{$command}, on its PATH",
     "restart_waiting": ".input {$n :number} .match $n one {{Restarting the daemon once {$n} session finishes running a command}} * {{Restarting the daemon once {$n} sessions finish running a command}}",
     "daemon_restarted": "Daemon restarted",
     "now_deactivated": "{$host} deactivated",
     "now_activated": "{$host} activated",
-    "looking_for_baude": "Looking for Baude on {$dest}"
+    "looking_for_baude": "Looking for Baude on {$dest}",
+    "no_commands": "{$host} has no Baude commands yet: run `python3 baude_headless.py install` in its Baude checkout there"
   }
 }

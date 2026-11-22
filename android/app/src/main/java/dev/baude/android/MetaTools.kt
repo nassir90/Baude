@@ -438,9 +438,7 @@ object MetaTools {
 
     val FORMS = linkedMapOf(
         "add_host" to FormDef(Wording.NewSession.addHost, Wording.Common.add, "add a host Baude reaches over ssh", listOf(
-            Triple("destination", "user@host (or user@host:port): over Tailscale, its Tailscale name", { _: JSONObject -> null }),
-            Triple("command", "its host process's command there, run as `<command> connect`: empty if baude_headless.py " +
-                "is on its PATH, else its path (in a git checkout of Baude, <checkout>/baude_headless.py)", { _: JSONObject -> null })),
+            Triple("destination", "user@host (or user@host:port): over Tailscale, its Tailscale name", { _: JSONObject -> null })),
             said = false),
         "new_group" to FormDef(Wording.NewSession.newGroup, Wording.Common.create, "make a group of chats", listOf(
             Triple("name", "the group's name", { _: JSONObject -> null }))),
@@ -468,6 +466,8 @@ object MetaTools {
             if (n.isEmpty()) Wording.NewSession.groupNeedsName else if (n in groupNames()) Wording.NewSession.groupExists(name = n) else null
         }
         "spawn_agent" -> when {
+            hostByName(values.optString("host")) == null && values.optString("host").isNotBlank() ->
+                "host: ${values.optString("host")} isn't up now; pick another of its choices"
             hostByName(values.optString("host")) == null -> "host: pick one of its choices"
             agents(values).isEmpty() -> "${values.optString("host")} offers nothing to run"
             values.optString("agent").isNotEmpty() && agents(values).none { it.equals(values.optString("agent"), true) } ->
@@ -491,6 +491,7 @@ object MetaTools {
         val f = forms[id] ?: return
         if (f.optJSONObject("values")?.toString() == values.toString()) return
         forms[id] = JSONObject(f.toString()).put("values", values).put("error", JSONObject.NULL)
+        Meta.save()
     }
 
     /** A form submitted (what was done) or cancelled: kept so, Meta told with the next message. */

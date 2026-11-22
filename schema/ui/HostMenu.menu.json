@@ -1,15 +1,10 @@
 {
   "description": "The menu on the host picker beside New session (the host whose chats are listed), opened by right-click or press and hold at the pointer. Not opened while the picker's own list is open.",
-  "apps": ["baude"],
+  "apps": ["baude", "phone"],
   "opens": ["right-click or long-press the host picker beside New session"],
   "code": ["sessionsidebar.py:SessionSidebar.host_menu", "sessionsidebar.py:SessionSidebar.deactivate_host"],
   "copy": ["hosts", "sidebar"],
   "parts": [
-    {
-      "name": "Host Command…",
-      "shows": "\"Host Command…\", first. Only when the picked host is another machine reached over ssh. Opens HostCommand.dialog.json.",
-      "copy": ["hosts.command"]
-    },
     {
       "name": "Deactivate / Activate",
       "shows": "\"Deactivate\" for the picked host, or \"Activate\" if it is deactivated. Only for another machine (never for this one). Deactivating greys its chats and shows the banner \"<host> is deactivated\" over them; the host is not reached while off.",
@@ -29,8 +24,10 @@
   ],
   "states": [
     {"name": "this machine picked", "shows": "Only Add Host…."},
-    {"name": "another host picked, reached over ssh", "shows": "Host Command…, Deactivate (or Activate), separator, Add Host…."},
-    {"name": "another host picked, not over ssh (a mesh member reached through another)", "shows": "Deactivate (or Activate), separator, Add Host…."}
+    {"name": "another host picked", "shows": "Deactivate (or Activate), separator, Add Host…."}
   ],
-  "scenes": ["55s-network-host-menu", "55k-network-add-server", "55q-network-host-command", "55l2-network-host-picker"]
+  "removed": [
+    {"name": "Host Command…", "apps": ["baude", "phone"], "why": "Baude has no executable of its own to name: ssh always runs the one command baude-headless on a host (schema/variables/HOST_COMMAND.json)", "decided": "2026-11-22"}
+  ],
+  "scenes": ["55s-network-host-menu", "55k-network-add-server", "55l2-network-host-picker"]
 }

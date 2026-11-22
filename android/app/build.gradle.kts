@@ -1233,7 +1233,7 @@ abstract class WireSchema : DefaultTask() {
         val files = loaded.mapValues { (_, f) -> Triple(f.first, map(f.second), f.third) }
         val vars = load(variablesDir.get().asFile, "variables").mapValues { (_, f) ->
             val c = (f.second as? Map<*, *>)?.get("const")
-            if (f.first != null || c !is Number) fail("${f.third}: not a variable (Name.json, an object whose const is a number)")
+            if (f.first != null || (c !is Number && c !is String)) fail("${f.third}: not a variable (Name.json, an object whose const is a number or a string)")
             Triple(f.first, map(f.second), f.third)
         }
         if ("VERSION" !in vars) fail("schema/variables/VERSION.json: not there") // (the wire's, as a host's hello says it)
@@ -1271,9 +1271,13 @@ abstract class WireSchema : DefaultTask() {
         out.append("}\n\n")
         out.append("/** The protocol's constants (schema/variables), the wire's version among them. */\nobject WireConstants {\n")
         for ((k, f) in vars) about(f.third) {
-            val v = f.second["const"] as Number
+            val v = f.second["const"]
             out.append(doc(f.second["description"], "    "))
-            out.append("    const val $k = ${if (v is Number && v.toDouble() % 1.0 == 0.0) v.toLong().toString() else "${v}"}\n")
+            out.append("    const val $k = ${when {
+                v is String -> "\"" + v.replace("\\", "\\\\").replace("\"", "\\\"").replace("$", "\\$") + "\""
+                v is Number && v.toDouble() % 1.0 == 0.0 -> v.toLong().toString()
+                else -> "$v"
+            }}\n")
         }
         out.append("}\n\n")
         // (WireCheck: what wire.check does, a field or op the schema hasn't, in what's sent; entities looked into)

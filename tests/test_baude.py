@@ -39,6 +39,7 @@ REAL_XDG_DATA = os.environ.get("XDG_DATA_HOME")  # (the real trash lives under i
 os.environ["XDG_DATA_HOME"] = os.path.join(TMP, "xdg-data")  # never touch the real launcher
 os.environ["XDG_CONFIG_HOME"] = os.path.join(TMP, "xdg-config")  # nor the real settings
 os.environ["BAUDE_LAUNCHERS"] = os.path.join(TMP, "Applications")  # nor ~/Applications: Baude's and Record's launchers
+os.environ["BAUDE_BINS"] = os.path.join(TMP, "bin")  # nor ~/.local/bin: the commands the launchers start
 # nor your clusters, nor your containers: Signal and its name catalogue read kubeconfig contexts, what runs in local
 # clusters and the databases in Docker (a test that wants them sets up its own kubeconfig and fakes)
 os.environ["KUBECONFIG"] = os.path.join(TMP, "no-kubeconfig")
@@ -484,7 +485,7 @@ def test_freedesktop_launcher():
     assert os.path.exists(icon)
     entry = open(desktop).read()
     exec_line = next(l for l in entry.splitlines() if l.startswith("Exec="))
-    assert "import baude" in exec_line and "baude.main()" in exec_line, "started as a module (cached bytecode)"
+    assert open(os.path.join(os.environ["BAUDE_BINS"], "baude")).read().count("import baude"), "a module (cached bytecode)"
     # the Exec line, unquoted the way a desktop launcher does it, really runs baude
     argv = re.findall(r'"((?:[^"\\]|\\.)*)"|(\S+)', exec_line[len("Exec="):])
     argv = [re.sub(r"\\(.)", r"\1", q) if q else w for q, w in argv]

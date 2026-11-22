@@ -14,10 +14,6 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.SolidColor
@@ -36,36 +32,48 @@ fun SpawnAgentForm(f: JSONObject) {
     val ctx = LocalContext.current
     Mesh.tick.value
     val id = f.optString("id")
-    val given = f.optJSONObject("values")
     val up = Mesh.reached("start")
     val known = Mesh.known("start")
-    var at by remember { mutableStateOf(given?.str("host")?.let { MetaTools.hostByName(it) }
-        ?: picked()?.takeIf { h -> up.any { it.first == h } } ?: up.firstOrNull()?.first) }
+    val named = formValue(f, "host") // (the host it names; one that isn't up stays named, and the form waits for it)
+    val at = if (named.isNotBlank()) MetaTools.hostByName(named)
+        else picked()?.takeIf { h -> up.any { it.first == h } } ?: up.firstOrNull()?.first
     fun home(h: String?) = h?.let { HomePrefs.folder(ctx, it) ?: Mesh.conn(it)?.info?.home?.ifBlank { null } } ?: "~"
-    var cwd by remember { mutableStateOf(given?.str("folder") ?: home(at)) }
-    var group by remember { mutableStateOf(given?.str("group") ?: at?.let { newGroup(it).ifBlank { null } ?: Mesh.conn(it)?.info?.group }.orEmpty()) }
-    var prompt by remember { mutableStateOf(given?.str("prompt").orEmpty()) }
-    var model by remember { mutableStateOf<String?>(given?.str("agent")?.let { a -> // (Meta's spawn_agent: its agent)
-        at?.let { h -> models(h).firstOrNull { it.name.equals(a, true) || it.value == a }?.value } }) }
-    var effort by remember { mutableStateOf<String?>(null) }
-    var mode by remember { mutableStateOf("auto") }
-    val values = JSONObject().put("host", at?.let { Mesh.label(it) } ?: "").put("folder", cwd).put("group", group)
-        .put("prompt", prompt).put("agent", at?.let { h -> chosen(models(h), model ?: defaultModel(h))?.name }.orEmpty())
-    LaunchedEffect(values.toString()) { MetaTools.edited(id, values) } // (the user's own edits, kept as Meta's form)
-    val wrong = if (at == null) MetaTools.wrong("spawn_agent", values) else null
+    LaunchedEffect(id, at) { // (what's left empty: as the host it starts on has it, kept in the form)
+        val h = at ?: return@LaunchedEffect
+        val v = MetaTools.forms[id]?.optJSONObject("values") ?: return@LaunchedEffect
+        val set = buildList {
+            if (v.optString("host").isBlank()) add("host" to Mesh.label(h))
+            if (!v.has("mode")) { // (first shown with a host)
+                if (v.optString("folder").isBlank()) add("folder" to home(h))
+                if (v.optString("group").isBlank()) add("group" to (newGroup(h).ifBlank { null } ?: Mesh.conn(h)?.info?.group).orEmpty())
+                if (v.optString("agent").isBlank()) chosen(models(h), defaultModel(h))?.name?.let { add("agent" to it) }
+                add("mode" to "auto")
+            }
+        }
+        if (set.isNotEmpty()) setFormValues(id, *set.toTypedArray())
+    }
+    val (cwd, setCwd) = formText(f, "folder")
+    val (group, setGroup) = formText(f, "group")
+    val (prompt, setPrompt) = formText(f, "prompt")
+    val agent = formValue(f, "agent")
+    val model = at?.let { h -> models(h).firstOrNull { it.name.equals(agent, true) || it.value == agent }?.value }
+    val effort = formValue(f, "effort").ifBlank { null }
+    val mode = formValue(f, "mode").ifBlank { "auto" }
+    val wrong = if (at == null) MetaTools.wrong("spawn_agent", f.optJSONObject("values") ?: JSONObject()) else null
     fun start(): String? {
         val h = at ?: return wrong
-        val msg = Msg.Start(prompt = prompt.trim(), cwd = cwd.trim().ifBlank { "~" }, mode = mode,
-            group = group.trim()).json()
+        val msg = Msg.Start(prompt = prompt.text.trim(), cwd = cwd.text.trim().ifBlank { "~" }, mode = mode,
+            group = group.text.trim()).json()
         model?.let { msg.put("model", it) }
         effort?.let { msg.put("effort", it) }
-        if (prompt.isBlank()) msg.put("draft", true)
+        if (prompt.text.isBlank()) msg.put("draft", true)
         MetaTools.closed(id, "starting it on ${hostName(h)}")
-        val made = group.trim()
+        val made = group.text.trim()
+        val folder = cwd.text.trim().ifBlank { "~" }
         Mesh.ask(h, msg) { r ->
             val sid = Msg.Started.from(r).session?.id
             if (r.optString("op") == Op.STARTED && sid != null) {
-                HomePrefs.setFolder(ctx, h, cwd.trim().ifBlank { "~" })
+                HomePrefs.setFolder(ctx, h, folder)
                 Groups.putIn(made)
                 Meta.opener(h, sid)
             } else toast(Wording.NewSession.hostRefused(host = Mesh.label(h),
@@ -76,26 +84,28 @@ fun SpawnAgentForm(f: JSONObject) {
     FormFrame(f, wrong, submit = ::start) {
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             FormRow(Wording.NewSession.host) {
-                if (known.isEmpty()) Text("None of your hosts is connected", style = Type.body, color = c.dim)
-                else Picker(at?.let { a -> hostName(a) } ?: Wording.NewSession.host, Wording.NewSession.host,
+                if (known.isEmpty() && named.isBlank()) Text("None of your hosts is connected", style = Type.body, color = c.dim)
+                else Picker(at?.let { a -> hostName(a) } ?: named.ifBlank { Wording.NewSession.host }, Wording.NewSession.host,
                     known.map { hostName(it.first) to it.first }, at, dimmed = known.filter { !it.third }.map { it.first }.toSet()) {
-                    at = it
-                    cwd = home(it)
-                    group = Mesh.conn(it)?.info?.group.orEmpty()
-                    model = null
-                    effort = null
+                    setFormValues(id, "host" to Mesh.label(it), "folder" to home(it), "group" to Mesh.conn(it)?.info?.group.orEmpty(),
+                        "agent" to (chosen(models(it), defaultModel(it))?.name).orEmpty(), "effort" to "")
                 }
             }
-            FormRow(Wording.Common.folder) { NameField(cwd, { cwd = it }, "~", {}, focus = false) }
-            FormRow(Wording.NewSession.group) { Field(group, { group = it }, Wording.Sidebar.noGroup) }
+            FormRow(Wording.Common.folder) { NameField(cwd, setCwd, "~", {}, focus = false) }
+            FormRow(Wording.NewSession.group) { Field(group, setGroup, Wording.Sidebar.noGroup) }
             FormRow(Wording.Common.prompt) {
                 Box(Modifier.fillMaxWidth().heightIn(min = 96.dp).border(1.dp, c.rule, RoundedCornerShape(Gap.cardRadius))
                     .padding(horizontal = 8.dp, vertical = 6.dp)) {
-                    BasicTextField(prompt, { prompt = it }, textStyle = Type.body.copy(color = c.fg),
+                    BasicTextField(prompt, setPrompt, textStyle = Type.body.copy(color = c.fg),
                         cursorBrush = SolidColor(c.accentBg), modifier = Modifier.fillMaxWidth().heightIn(min = 84.dp))
                 }
             }
-            FormRow("With") { StartPickers(at, model, effort, mode) { m, e, md -> model = m; effort = e; mode = md } }
+            FormRow("With") {
+                StartPickers(at, model, effort, mode) { m, e, md ->
+                    setFormValues(id, "agent" to (at?.let { h -> chosen(models(h), m ?: defaultModel(h))?.name }).orEmpty(),
+                        "effort" to e.orEmpty(), "mode" to md)
+                }
+            }
         }
     }
 }

@@ -2,6 +2,9 @@ package dev.baude.android
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.focusGroup
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -30,13 +33,17 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.semantics.onLongClick
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
@@ -49,6 +56,7 @@ object MetaForms {
     const val PIN_MARGIN = 8 // dp: a pinned form hovers this far from the page's top (MetaChat.PIN_MARGIN)
     val pinned = mutableStateOf<String?>(null)    // (the form hovering over the conversation: its id)
     val heights = mutableStateMapOf<String, Int>() // (each form's card's height, px: its gap while it's pinned)
+    val focused = mutableStateOf<String?>(null)   // (the form whose card has a field you're in: its id)
 
     /** The forms a line of Meta's conversation holds, by id: a call's (what it showed), or a "rows" line's. */
     fun ids(line: Line): List<String> = when (line.kind) {
@@ -70,12 +78,15 @@ fun MetaFormSlot(id: String) {
 }
 
 /** The form pinned over the conversation's top: the last one not submitted, and pinned, whose place has gone up past
- * the list's top (MetaChat._pin_forms); none once its place is back in view. pad: the conversation's sides. */
+ * the list's top (MetaChat._pin_forms); none once its place is back in view. While you're in a field of a form's
+ * card, what's pinned stays as it is (the keyboard moving the list doesn't take the card from under you). pad: the
+ * conversation's sides. */
 @Composable
 fun BoxScope.MetaPinnedForm(list: LazyListState, pad: Dp) {
     val margin = with(LocalDensity.current) { MetaForms.PIN_MARGIN.dp.roundToPx() }
     val chat = Meta.chat
     val want by remember(chat, list) { derivedStateOf {
+        if (MetaForms.focused.value != null) return@derivedStateOf MetaForms.pinned.value
         val info = list.layoutInfo
         var pick: String? = null
         for ((i, l) in chat.lines.withIndex()) for (id in MetaForms.ids(l)) {
@@ -93,11 +104,11 @@ fun BoxScope.MetaPinnedForm(list: LazyListState, pad: Dp) {
     }
 }
 
-/** A form's card, as its form is now: drawn anew with what Meta's filled each time it fills it. */
+/** A form's card, as its form is now: what Meta fills goes into its fields where they are. */
 @Composable
 fun MetaFormCard(id: String) {
     val f = MetaTools.forms[id] ?: return
-    androidx.compose.runtime.key(id, f.optInt("filled")) {
+    androidx.compose.runtime.key(id) {
         when (f.optString("form")) {
             "add_host" -> AddHostForm(f)
             "new_group" -> NewGroupForm(f)
@@ -105,6 +116,30 @@ fun MetaFormCard(id: String) {
             else -> Text(Wording.Meta.formUnavailable(form = f.optString("form").replace('_', ' '), why = "unknown form"),
                 style = Type.caption, color = LocalBaude.current.dim)
         }
+    }
+}
+
+/** A form's field's value, as its form keeps it. */
+fun formValue(f: JSONObject, name: String): String = f.optJSONObject("values")?.optString(name).orEmpty()
+
+/** A form's field set (your edit, or a pick), kept in its form as it's made (MetaTools.edited). */
+fun setFormValues(id: String, vararg set: Pair<String, String>) {
+    val v = JSONObject(MetaTools.forms[id]?.optJSONObject("values")?.toString() ?: "{}")
+    for ((k, x) in set) v.put(k, x)
+    MetaTools.edited(id, v)
+}
+
+/** A form's text field's text and cursor: as you leave them, and set to what's in the form, the cursor at its end,
+ * once that's something else (Meta's filled it). set: your edit, kept in the form. */
+@Composable
+fun formText(f: JSONObject, name: String): Pair<TextFieldValue, (TextFieldValue) -> Unit> {
+    val id = f.optString("id")
+    val kept = formValue(f, name)
+    var text by remember(id, name) { mutableStateOf(TextFieldValue(kept, TextRange(kept.length))) }
+    val now = if (text.text == kept) text else TextFieldValue(kept, TextRange(kept.length))
+    return now to { t: TextFieldValue ->
+        text = t
+        if (t.text != kept) setFormValues(id, name to t.text)
     }
 }
 
@@ -132,10 +167,14 @@ fun FormFrame(f: JSONObject, wrong: String?, body: String? = null, submit: () ->
     var height by remember { mutableStateOf(0) }
     val shape = RoundedCornerShape(Gap.cardRadius)
     val hovering = LocalPinned.current
+    val focus = LocalFocusManager.current
+    LaunchedEffect(open) { if (!open && MetaForms.focused.value == id) focus.clearFocus() } // (shut: you're out of it)
     Box(Modifier.fillMaxWidth().onSizeChanged {
         height = it.height
         MetaForms.heights[id] = it.height
-    }) {
+    }.onFocusChanged {
+        if (it.hasFocus) MetaForms.focused.value = id else if (MetaForms.focused.value == id) MetaForms.focused.value = null
+    }.focusGroup()) {
         Column(Modifier.fillMaxWidth()
             .then(if (hovering) Modifier.shadow(6.dp, shape).background(c.inside, shape) else Modifier)
             .border(1.dp, c.rule, shape)
@@ -166,37 +205,45 @@ fun FormFrame(f: JSONObject, wrong: String?, body: String? = null, submit: () ->
     }
 }
 
-/** What's in it taking no touches: a submitted or cancelled form's fields. */
+/** What's in it taking no taps (a submitted or cancelled form's fields): a press there does nothing, a drag from it
+ * scrolls the conversation. */
 private fun Modifier.shut(): Modifier = pointerInput(Unit) {
-    awaitPointerEventScope {
-        while (true) awaitPointerEvent(PointerEventPass.Initial).changes.forEach { it.consume() }
+    awaitEachGesture {
+        val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+        down.consume()
+        var dragged = false
+        while (true) {
+            val e = awaitPointerEvent(PointerEventPass.Initial).changes.firstOrNull { it.id == down.id } ?: break
+            if ((e.position - down.position).getDistance() > viewConfiguration.touchSlop) dragged = true
+            if (!e.pressed) {
+                if (!dragged) e.consume()
+                break
+            }
+        }
     }
 }
 
-/** Meta's add_host form (Baude's host_form): where ssh goes, and its host process's command there. */
+/** Meta's add_host form (Baude's host_form): where ssh goes. */
 @Composable
 private fun AddHostForm(f: JSONObject) {
     val id = f.optString("id")
-    val given = f.optJSONObject("values")
-    var dest by remember { mutableStateOf(given?.str("destination").orEmpty()) }
-    var command by remember { mutableStateOf(given?.str("command")?.takeIf { it != "baude_headless.py" }.orEmpty()) }
-    LaunchedEffect(dest, command) { MetaTools.edited(id, JSONObject().put("destination", dest).put("command", command)) }
-    val wrong = MetaTools.wrong("add_host", JSONObject().put("destination", dest))
+    val (dest, setDest) = formText(f, "destination")
+    val wrong = MetaTools.wrong("add_host", JSONObject().put("destination", dest.text))
     fun go(): String? {
         if (wrong != null) return wrong
-        addHost(dest, command) ?: return wrong
-        MetaTools.closed(id, "looking for Baude on ${dest.trim()}")
+        addHost(dest.text) ?: return wrong
+        MetaTools.closed(id, "looking for Baude on ${dest.text.trim()}")
         return null
     }
-    FormFrame(f, wrong, submit = ::go) { AddHostFields(dest, { dest = it }, command, { command = it }, focus = false) { go() } }
+    FormFrame(f, wrong, submit = ::go) { AddHostFields(dest, setDest, focus = false) { go() } }
 }
 
 /** Meta's new_group form (Baude's group_form): the group's name, made once you press Create. */
 @Composable
 private fun NewGroupForm(f: JSONObject) {
     val id = f.optString("id")
-    var name by remember { mutableStateOf(f.optJSONObject("values")?.str("name").orEmpty()) }
-    LaunchedEffect(name) { MetaTools.edited(id, JSONObject().put("name", name)) }
+    val (field, setField) = formText(f, "name")
+    val name = field.text
     val wrong = MetaTools.wrong("new_group", JSONObject().put("name", name))
     FormFrame(f, wrong, body = "A list of chats of its own, picked in ⋮ → Groups.", submit = {
         wrong ?: run {
@@ -206,5 +253,5 @@ private fun NewGroupForm(f: JSONObject) {
             MetaTools.closed(id, "made group $g")
             null
         }
-    }) { Field(name, { name = it }, Wording.MetaApp.itsName) }
+    }) { Field(field, setField, Wording.MetaApp.itsName) }
 }

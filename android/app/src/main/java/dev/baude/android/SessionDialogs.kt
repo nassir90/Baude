@@ -23,6 +23,7 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 
 /** A short note, as Baude's toast. */
@@ -42,6 +43,21 @@ fun NameField(value: String, set: (String) -> Unit, hint: String, onDone: () -> 
     Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(c.fg.copy(alpha = 0.08f))
         .padding(horizontal = 10.dp, vertical = 9.dp)) {
         if (value.isEmpty()) Text(hint, style = Type.body, color = c.dim)
+        BasicTextField(value, set, singleLine = true, textStyle = Type.body.copy(color = c.fg),
+            cursorBrush = SolidColor(c.accentBg), keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+            keyboardActions = KeyboardActions(onDone = { onDone() }), modifier = Modifier.fillMaxWidth().focusRequester(focusing))
+    }
+}
+
+/** NameField with its cursor: what's in it, and where the cursor is, as a form's card sets it. */
+@Composable
+fun NameField(value: TextFieldValue, set: (TextFieldValue) -> Unit, hint: String, onDone: () -> Unit, focus: Boolean = true) {
+    val c = LocalBaude.current
+    val focusing = remember { FocusRequester() }
+    LaunchedEffect(Unit) { if (focus) focusing.requestFocus() }
+    Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(c.fg.copy(alpha = 0.08f))
+        .padding(horizontal = 10.dp, vertical = 9.dp)) {
+        if (value.text.isEmpty()) Text(hint, style = Type.body, color = c.dim)
         BasicTextField(value, set, singleLine = true, textStyle = Type.body.copy(color = c.fg),
             cursorBrush = SolidColor(c.accentBg), keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
             keyboardActions = KeyboardActions(onDone = { onDone() }), modifier = Modifier.fillMaxWidth().focusRequester(focusing))

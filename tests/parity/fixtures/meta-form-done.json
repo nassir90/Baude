@@ -70,8 +70,7 @@
           "input": {
             "form": "add_host",
             "values": {
-              "destination": "dev@studio.example",
-              "command": ""
+              "destination": "dev@studio.example"
             }
           },
           "result": "Form f1c4d2 is up for the user to finish and submit; you don't submit it.",
@@ -81,8 +80,7 @@
               "form": "add_host",
               "id": "f1c4d2",
               "values": {
-                "destination": "dev@studio.example",
-                "command": ""
+                "destination": "dev@studio.example"
               },
               "state": "submitted",
               "pinned": true,

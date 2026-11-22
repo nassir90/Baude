@@ -92,7 +92,7 @@
         },
         {
           "by": "right-click",
-          "does": "Opens the host menu (Host Command…, Deactivate/Activate, Add Host…): see HostMenu.menu.json. Not when its list is open."
+          "does": "Opens the host menu (Deactivate/Activate, Add Host…): see HostMenu.menu.json. Not when its list is open."
         },
         {
           "by": "long-press",

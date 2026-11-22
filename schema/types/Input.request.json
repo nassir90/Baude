@@ -19,6 +19,10 @@
       "type": "object",
       "description": "The message."
     },
+    "as_meta": {
+      "type": "boolean",
+      "description": "From a head's Meta (its mesh tools, which run in no chat), not the session's user: said as from a chat named Meta."
+    },
     "as": {
       "type": "string",
       "description": "The id of one of this host's chats whose mesh tools send it: it's from that chat, not the session's user (said_by, Senders)."

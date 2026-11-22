@@ -263,7 +263,7 @@ class CodexProc(AppServer):
     """Translate one Codex thread to Baude's host event interface."""
 
     def __init__(self, on_msg, on_exit, cwd, model, resume=None, effort=None, env=None, exe=None, ephemeral=False,
-                 catalog=(), mode="default", meta_system=None, meta_relay=None, dispatch=None,
+                 catalog=(), mode="default", meta_system=None, meta_servers=None, dispatch=None,
                  recover_empty=False):
         self.on_msg = on_msg
         self.dispatch = dispatch or (lambda fn, *args: fn(*args))
@@ -324,7 +324,7 @@ class CodexProc(AppServer):
             servers = (result.get("config") or {}).get("mcp_servers") or {}
             params.update(baseInstructions=meta_system, sandbox="read-only", approvalPolicy="never",
                           config={
-                              "mcp_servers": {**{name: {"enabled": False} for name in servers}, "meta": meta_relay},
+                              "mcp_servers": {**{name: {"enabled": False} for name in servers}, **(meta_servers or {})},
                               "features": {name: False for name in (
                                   "apps", "plugins", "shell_tool", "unified_exec", "multi_agent", "multi_agent_v2",
                                   "code_mode", "skill_search", "skill_mcp_dependency_install",

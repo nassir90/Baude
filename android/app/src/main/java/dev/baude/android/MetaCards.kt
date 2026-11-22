@@ -76,9 +76,9 @@ class OwnRevert(val can: () -> Boolean, val commit: (Reverting, String) -> Unit)
 
 private val CLAUDE_TOOLS = listOf("Read", "Grep", "Glob", "Bash", "Edit", "Write", "WebFetch", "WebSearch")
 
-/** A call's name as its card says it (meta.tool_title): Claude Code's as they are, Meta's own in words. */
+/** A call's name as its card says it (meta.tool_title): Claude Code's as they are, Meta's own and the mesh's in words. */
 fun metaToolTitle(name: String): String {
-    val n = name.removePrefix("mcp__meta__")
+    val n = name.removePrefix("mcp__meta__").removePrefix("mcp__mesh__")
     return if (n in CLAUDE_TOOLS) n else if (n.isNotEmpty()) n.replace('_', ' ').lowercase().replaceFirstChar(Char::uppercase)
     else Wording.Meta.toolChanges
 }

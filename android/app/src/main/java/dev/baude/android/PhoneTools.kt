@@ -9,9 +9,9 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 
 /** The tools an agent on this phone has: files in the agent's folder (Read, Write, Edit, Glob, named and shaped as Claude Code's so heads show them as they show
- * claude's); the user, with a question (AskUserQuestion, answered as claude's is); and the mesh, through this phone's
- * own connections to it (mcp__mesh__*, as baudelib.meshtools names a host's): every host this phone reaches, their
- * chats, a chat read or sent a message. Each runs as the chat's permission mode has it (need). */
+ * claude's); the user, with a question (AskUserQuestion, answered as claude's is); and a Bot's, the mesh, through this
+ * phone's own connections to it (mcp__mesh__*, as baudelib.meshtools names a host's): every host this phone reaches,
+ * their chats, a chat read or sent a message. Each runs as the chat's permission mode has it (need). */
 object PhoneTools {
     const val RESULT_MAX = 40_000 // (characters of a tool's result given back to the model)
     private val GONE = "This agent's been deleted" to true
@@ -49,6 +49,10 @@ object PhoneTools {
                     .put("options", JSONObject().put("type", "array").put("items", JSONObject().put("type", "object")
                         .put("required", JSONArray(listOf("label"))).put("properties", JSONObject()
                             .put("label", prop("string", "What's picked")).put("description", prop("string", "What it means"))))))))),
+    )
+
+    /** A Bot's besides (baudelib.meshtools': only a Bot's agent has them). */
+    private val MESH: List<Triple<String, String, JSONObject>> = listOf(
         Triple("mcp__mesh__hosts", "The mesh's hosts this phone reaches (this phone first): each one's id, name, " +
             "whether it's connected now, and the models it runs.", schema(emptyList())),
         Triple("mcp__mesh__chats", "The chats on a host (this phone if none's given), newest first: each one's id, " +
@@ -74,17 +78,14 @@ object PhoneTools {
 
     private val READS = setOf("Read", "Glob")
     private val EDITS = setOf("Write", "Edit")
-    private val MESH_LOOKS = setOf("mcp__mesh__hosts", "mcp__mesh__chats", "mcp__mesh__read_chat") // (meshtools.READ_ONLY)
 
     /** What a tool call needs, in a chat's permission mode, as a Baude chat's claude has it: "allow" (run, unasked),
-     * "ask" (the user's asked), or why it's refused. Reads and the mesh's looking never asked; a Bot's mesh tools
-     * never asked (as a host's Bot's); edits asked in Manual, run in Accept edits, Auto and Bypass, refused in Plan and
-     * Don't ask; another action (a message to a chat) asked in Manual and Accept edits; a question to you, or a plan
-     * put to you, always asked. */
-    fun need(mode: String, tool: String, bot: Boolean): String = when {
+     * "ask" (the user's asked), or why it's refused. Reads never asked; a Bot's mesh tools never asked (as a host's
+     * Bot's); edits asked in Manual, run in Accept edits, Auto and Bypass, refused in Plan and Don't ask; a question to
+     * you, or a plan put to you, always asked. */
+    fun need(mode: String, tool: String): String = when {
         tool == "AskUserQuestion" || tool == EXIT_PLAN.first -> "ask"
-        tool in READS || tool in MESH_LOOKS -> "allow"
-        tool.startsWith("mcp__mesh__") && bot -> "allow"
+        tool in READS || tool.startsWith("mcp__mesh__") -> "allow"
         mode == "bypassPermissions" -> "allow"
         mode == "plan" -> "It's plan mode: nothing's changed till the user agrees to your plan (ExitPlanMode)"
         mode == "dontAsk" -> "It's Don't ask mode: only what's always allowed in this chat runs"
@@ -96,12 +97,13 @@ object PhoneTools {
     private fun schema(required: List<String>, vararg props: Pair<String, JSONObject>) = JSONObject().put("type", "object")
         .put("properties", JSONObject().apply { for ((k, v) in props) put(k, v) }).put("required", JSONArray(required))
 
-    fun names(mode: String = ""): List<String> = tools(mode).map { it.first }
+    fun names(s: PhoneSession): List<String> = tools(s).map { it.first }
 
-    private fun tools(mode: String) = if (mode == "plan") TOOLS + EXIT_PLAN else TOOLS
+    private fun tools(s: PhoneSession) = TOOLS + (if (s.meta.isNull("bot")) emptyList() else MESH) +
+        (if (PhoneHost.mode(s) == "plan") listOf(EXIT_PLAN) else emptyList())
 
-    /** The tools, as OpenAI's API is given them (ExitPlanMode too, in plan mode). */
-    fun schemas(mode: String): JSONArray = JSONArray(tools(mode).map { (name, about, params) ->
+    /** A chat's tools, as OpenAI's API is given them (a Bot's mesh tools too, and ExitPlanMode in plan mode). */
+    fun schemas(s: PhoneSession): JSONArray = JSONArray(tools(s).map { (name, about, params) ->
         JSONObject().put("type", "function").put("function", JSONObject().put("name", name).put("description", about)
             .put("parameters", params))
     })

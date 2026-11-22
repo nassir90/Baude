@@ -612,7 +612,7 @@ object PhoneHost {
      * chat (never a question for you, nor a plan), or its permission asked (claude's can_use_tool) and waited for. The
      * answer (behavior: allow, with updatedInput; or deny, with a message), or null if the turn's stopped first. */
     fun permit(s: PhoneSession, toolUseId: String, tool: String, input: JSONObject): JSONObject? {
-        val need = if (editsMemory(s, tool, input)) "allow" else PhoneTools.need(mode(s), tool, !s.meta.isNull("bot"))
+        val need = if (editsMemory(s, tool, input)) "allow" else PhoneTools.need(mode(s), tool)
         val asked = tool == ASK_TOOL || tool == "ExitPlanMode"
         if (need == "allow" || !asked && mode(s) != "plan" && tool in synchronized(lock) { s.alwaysAllow })
             return JSONObject().put("behavior", "allow").put("updatedInput", input)
@@ -823,7 +823,7 @@ object PhoneHost {
                 .put("picture", picture(s).takeIf { it.exists() }?.let { it.lastModified() / 1000.0 } ?: JSONObject.NULL))
             .put("acting", s.acting && s.busy && s.asks.isEmpty()).put("fork_from", JSONObject.NULL)
             .put("spawned_by", s.meta.opt("spawned_by") ?: JSONObject.NULL).put("start_key", s.meta.opt("start_key") ?: JSONObject.NULL)
-            .put("mesh_tools", true).put("always_allow", JSONArray(s.alwaysAllow.sorted()))
+            .put("always_allow", JSONArray(s.alwaysAllow.sorted()))
             .put("held", JSONArray()).put("senders", s.meta.optInt("senders"))
             .put("asks", JSONArray(s.asks.entries.map { (rid, m) ->
                 val r = m.optJSONObject("request") ?: JSONObject()

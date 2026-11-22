@@ -1,5 +1,5 @@
 {
-  "description": "The banner when an app and this machine's daemon (host process) run different code, and its button.",
+  "description": "The banner when an app and this machine's daemon (host process) run different code, and its button. restart_app and restart_daemon are also the last items of Baude's and Record's ☰ menus.",
   "messages": {
     "app_older": "{$app} is older than its daemon",
     "restart_app": "Restart {$app}",

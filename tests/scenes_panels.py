@@ -831,6 +831,29 @@ def _(app):
     return win
 
 
+@scene("60n-models-mesh", "The model picker open on a chat whose host has eight Ollama models and whose mesh has another "
+                         "host with three more (one of them also here), an MLX model and Apple's: each listed once, under its "
+                         "family, with its family's logo")
+def _(app):
+    def m(value, name, pid, **more):
+        return {"value": value, "displayName": name, "provider": pid, **more}
+    here = [m(f"ollama/{n}", n, "ollama", id=n, window=w) for n, w in (
+        ("qwen3:8b", 40960), ("qwen3:30b", 40960), ("gemma3:4b", 32768), ("gemma3:12b", 32768),
+        ("llama3.1:8b", 131072), ("deepseek-r1:8b", 131072), ("mistral:7b", 32768), ("phi4:14b", 16384))]
+    there = "openai/mesh-studio-ollama"
+    studio = [m(f"{there}/{n}", n, there, id=n, window=w) for n, w in (
+        ("llama3.2:3b", 131072), ("gpt-oss:20b", 131072), ("qwen3:8b", 40960))]
+    mlx = [m("agent/studio/mlx-community/Mistral-7B-Instruct-v0.3-4bit", "Mistral-7B-Instruct-v0.3-4bit", "agent/studio/mlx")]
+    apple = [m("agent/studio/apple", "Apple Foundation Model", "agent/studio/apple")]
+    win = app.window(opts())
+    T.wait_for(lambda: win.model_dd.values, "models")
+    win.provider_choices = lambda: [("local|ollama", "This Mac", "Ollama", here), ("studio|ollama", "studio", "Ollama", studio),
+                                    ("studio|mlx", "studio", "MLX", mlx), ("studio|apple", "studio", "Apple", apple)]
+    win.sync_providers()
+    popup_choices(win.model_dd)
+    return win
+
+
 @scene("60-effort-unavailable", "A model without thinking effort: the effort picker is greyed out")
 def _(app):
     win = app.window(opts())

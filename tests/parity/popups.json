@@ -5,7 +5,7 @@
     {"name": "pop-home-host-picker", "what": "Home's host picker (two hosts up)", "where": "Home, tap the host name beside New session (2+ hosts)", "kind": "dropdown", "as": "home", "steps": [["desc", "The host a new session"]], "threads": "bot-threads.json"},
     {"name": "pop-home-host-menu", "what": "Home's host picker, long-pressed", "where": "Home, long-press the host name", "kind": "menu", "as": "home-host-menu"},
     {"name": "pop-add-host-dialog", "what": "Add Host… dialog", "where": "Host menu → Add Host…", "kind": "dialog", "as": "home-add-host"},
-    {"name": "pop-new-key-confirm", "what": "Add Host → New Key… confirm", "where": "Add a host → New Key…", "kind": "dialog", "as": "home-add-host", "steps": [["tap", "New Key…"]]},
+    {"name": "pop-new-key-confirm", "what": "This phone → New Key confirm", "where": "This phone, Key Material → New Key", "kind": "dialog", "as": "phone", "steps": [["tap", "New Key"]]},
     {"name": "pop-host-command-dialog", "what": "Host menu → Host Command…", "where": "Host menu → Host Command…", "kind": "dialog", "as": "home-host-menu", "steps": [["tap", "Host Command…"]]},
     {"name": "pop-home-view-menu", "what": "Home's group-by ⋮ (two groups made)", "where": "Home, ⋮ beside Search sessions (Group by)", "kind": "menu", "as": "home", "steps": [["code", "groups"], ["desc", "Group by"]]},
     {"name": "pop-home-group-menu", "what": "Group-by menu, a group long-pressed", "where": "Group-by menu, long-press a group", "kind": "menu", "as": "home", "steps": [["code", "groups"], ["desc", "Group by"], ["hold", "Release"]]},

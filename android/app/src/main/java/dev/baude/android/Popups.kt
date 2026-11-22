@@ -87,9 +87,9 @@ fun PopupAt(offset: DpOffset, dismiss: () -> Unit, content: @Composable (most: D
     val off = with(density) { IntOffset(offset.x.roundToPx(), offset.y.roundToPx()) }
     val room = remember { mutableIntStateOf(Int.MAX_VALUE) }
     val placer = remember(off, margin, view) { Placer(off, offset != DpOffset.Zero, margin, view, room) }
-    val frame = android.graphics.Rect().also { view.getWindowVisibleDisplayFrame(it) }
-    val most = with(density) { DpSize((frame.width() - 2 * margin).toDp(), minOf(frame.height() - 2 * margin, room.intValue).toDp()) }
     Popup(popupPositionProvider = placer, onDismissRequest = dismiss, properties = PopupProperties(focusable = true)) {
+        val frame = android.graphics.Rect().also { view.getWindowVisibleDisplayFrame(it) }
+        val most = with(density) { DpSize((frame.width() - 2 * margin).toDp(), minOf(frame.height() - 2 * margin, room.intValue).toDp()) }
         Paged(density) { content(most) }
     }
 }

@@ -763,9 +763,17 @@ abstract class Parity(private val theme: String, private val scene: String) {
         val node = hits(true).firstOrNull() ?: hits(false).firstOrNull() ?: error("nothing to ${if (long) "hold" else "tap"} labelled $label; have " +
             roots().flatMap { all(it.semanticsOwner.rootSemanticsNode) }.filter { it.config.contains(SemanticsActions.OnClick) }
                 .map { said(it) + "|" + described(it) }.take(60))
+        pinDialogs()
         node.config[act].action?.invoke()
         androidx.compose.runtime.snapshots.Snapshot.sendApplyNotifications()
         settle()
+    }
+
+    /** Each dialog told where it sits (its window says 0,0 once laid out): what a menu opened from it is placed against. */
+    private fun pinDialogs() {
+        val screen = activity.window.decorView
+        for (v in windows()) if (v !== screen) Measure.pin(v, screen.width, screen.height)
+        for (v in windows()) Measure.replace(v)
     }
 
     /** A finger held on the first picture (Role.Image) of the screen, then lifted. */
@@ -797,11 +805,11 @@ abstract class Parity(private val theme: String, private val scene: String) {
     private fun laidOut() = repeat(3) {
         val screen = activity.window.decorView
         for (v in windows()) if (v !== screen) Measure.dialogWidth(v)
-        for (v in windows()) if (v !== screen) Measure.pin(v, screen.width, screen.height) // (where a menu from it is placed)
         for (v in windows()) if (v.width > 0 && v.height > 0)
             v.draw(android.graphics.Canvas(android.graphics.Bitmap.createBitmap(v.width, v.height, android.graphics.Bitmap.Config.ARGB_8888)))
         androidx.compose.runtime.snapshots.Snapshot.sendApplyNotifications()
         settle()
+        pinDialogs()
     }
 
     private fun code(what: String) {

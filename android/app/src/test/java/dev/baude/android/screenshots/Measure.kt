@@ -80,6 +80,12 @@ object Measure {
         ai.javaClass.getDeclaredField("mWindowTop").apply { isAccessible = true }.setInt(ai, y)
     }
 
+    /** A popup's window placed again (once its dialog's told where it sits: a phone's knows from the start). */
+    fun replace(v: View) {
+        if (!v.javaClass.name.endsWith("PopupLayout")) return
+        v.javaClass.methods.firstOrNull { it.name.startsWith("updatePosition") && it.parameterCount == 0 }?.invoke(v)
+    }
+
     /** A dialog's window given the width a phone's window manager gives it: a WRAP_CONTENT window is measured first at
      * config_prefDialogWidth (ViewRootImpl.measureHierarchy) and its frame is that size; the rig's window manager
      * hands every window the whole screen instead, so a dialog came out the screen's width. */

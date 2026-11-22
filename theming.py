@@ -9,6 +9,7 @@ import os
 import re
 import weakref
 import sys
+import threading
 import traceback
 import warnings
 
@@ -967,6 +968,39 @@ def apply_accent(display):
 
 
 _logos = []  # (follow_accent's: each app's logo, drawn again in the accent)
+
+
+_jobs_lock = threading.Lock()
+_jobs = {}  # (off_main's: per job, whether one runs, and the last asked while it did)
+
+
+def off_main(job, work, done=None):
+    """work() on a worker thread (a logo's PNGs and .icns are drawn without GTK, and not in the accent's fade), its
+    result to done(result) on the main loop. Asked again while it runs, only the last ask runs after it: arrowing
+    through the accents draws the one they stop on."""
+    state = _jobs.setdefault(job, {"running": False, "next": None})
+    with _jobs_lock:
+        if state["running"]:
+            state["next"] = (work, done)
+            return
+        state["running"] = True
+
+    def run(work, done):
+        while True:
+            try:
+                result = work()
+            except Exception as e:  # (an icon isn't worth the accent's change)
+                print(f"baude: {job}:", e, file=sys.stderr)
+            else:
+                if done is not None:
+                    GLib.idle_add(lambda done=done, result=result: done(result) and False)
+            with _jobs_lock:
+                nxt, state["next"] = state["next"], None
+                if nxt is None:
+                    state["running"] = False
+                    return
+            work, done = nxt
+    threading.Thread(target=run, args=(work, done), daemon=True).start()
 
 
 def follow_accent(redraw):

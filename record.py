@@ -76,9 +76,10 @@ from recordwindow import Window  # noqa: E402
 
 # ---------------------------------------------------------------- the logo
 
-def icon_png(size=1024, macos=True):
-    """The logo (in the accent) as a PNG; for macOS with the margin its own icons have (the tile 824 of 1024)."""
-    return applist.icon_png(logo(), size, macos)
+def icon_png(size=1024, macos=True, svg=None):
+    """The logo (in the accent; svg: as it was when asked) as a PNG; for macOS with the margin its own icons have (the
+    tile 824 of 1024)."""
+    return applist.icon_png(svg or logo(), size, macos)
 
 
 def objc_send(obj, sel, *args, types=(), ret=None):
@@ -112,14 +113,24 @@ def macos_app_name():
                       types=(ctypes.c_void_p, ctypes.c_void_p))
 
 
-def macos_dock_icon():
-    """The Dock shows the logo instead of Python's rocket (GTK's icon names don't reach a Python process's tile)."""
+def macos_dock_image(svg=None):
+    """The logo as an NSImage. No GTK and no main-thread AppKit call: it runs on a worker thread."""
     import ctypes
-    png = icon_png()
+    png = icon_png(svg=svg)
     data = objc_send(b"NSData", b"dataWithBytes:length:", png, len(png), types=(ctypes.c_char_p, ctypes.c_ulong))
-    image = objc_send(objc_send(b"NSImage", b"alloc"), b"initWithData:", data, types=(ctypes.c_void_p,))
+    return objc_send(objc_send(b"NSImage", b"alloc"), b"initWithData:", data, types=(ctypes.c_void_p,))
+
+
+def set_dock_image(image):
+    """The Dock's tile an NSImage, on the main thread."""
+    import ctypes
     objc_send(objc_send(b"NSApplication", b"sharedApplication"), b"setApplicationIconImage:", image,
               types=(ctypes.c_void_p,))
+
+
+def macos_dock_icon():
+    """The Dock shows the logo instead of Python's rocket (GTK's icon names don't reach a Python process's tile)."""
+    set_dock_image(macos_dock_image())
 
 
 def themed_icon():
@@ -132,21 +143,24 @@ def themed_icon():
 
 
 def redraw_logo():
-    """The logo drawn again in the accent as it's picked (theming.follow_accent): the Dock's or the windows', and the
-    launcher's if Record's in the list of apps."""
-    try:
-        macos_dock_icon() if sys.platform == "darwin" else themed_icon()
-    except Exception as e:  # (an icon isn't worth the accent's change)
-        print("record: logo:", e, file=sys.stderr)
-    launcher_logo()
+    """The logo drawn again in the accent as it's picked (theming.follow_accent): the Dock's (drawn off the main
+    thread) or the windows', and the launcher's if Record's in the list of apps."""
+    svg = logo()
+    if sys.platform == "darwin":
+        theming.off_main("dock", lambda: macos_dock_image(svg), set_dock_image)
+    else:
+        try:
+            themed_icon()
+        except Exception as e:  # (an icon isn't worth the accent's change)
+            print("record: logo:", e, file=sys.stderr)
+    launcher_logo(svg)
 
 
-def launcher_logo():
-    """The launcher's logo drawn again in the accent, where it isn't already (applist.redraw_logo)."""
-    try:
-        applist.redraw_logo(APP_ID, "Record", logo())
-    except OSError as e:
-        print("record: launcher logo:", e, file=sys.stderr)
+def launcher_logo(svg=None):
+    """The launcher's logo drawn again in the accent on a worker thread, where it isn't already
+    (applist.redraw_logo)."""
+    svg = svg or logo()
+    theming.off_main("launcher", lambda: applist.redraw_logo(APP_ID, "Record", svg))
     return False
 
 

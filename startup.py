@@ -116,22 +116,33 @@ def logo():
     return widgets.logo("baude")
 
 
-def macos_icon_png(size=1024):
-    """The logo as a PNG the way macOS draws app icons: with the margin its own icons have (the tile 824 of 1024)."""
-    return applist.icon_png(logo(), size)
+def macos_icon_png(size=1024, svg=None):
+    """The logo (svg: as it was in the accent when asked) as a PNG the way macOS draws app icons: with the margin its
+    own icons have (the tile 824 of 1024)."""
+    return applist.icon_png(svg or logo(), size)
+
+
+def macos_dock_image(svg=None):
+    """The logo drawn at 1024 px (macos_icon_png) as an NSImage, through the Objective-C runtime, as there's no PyObjC.
+    No GTK and no main-thread AppKit call: it runs on a worker thread."""
+    import ctypes
+    png = macos_icon_png(svg=svg)
+    data = objc_send(b"NSData", b"dataWithBytes:length:", png, len(png), types=(ctypes.c_char_p, ctypes.c_ulong))
+    return objc_send(objc_send(b"NSImage", b"alloc"), b"initWithData:", data, types=(ctypes.c_void_p,))
+
+
+def set_dock_image(image):
+    """The Dock's tile an NSImage (-[NSApplication setApplicationIconImage:]), on the main thread."""
+    import ctypes
+    objc_send(objc_send(b"NSApplication", b"sharedApplication"), b"setApplicationIconImage:", image,
+              types=(ctypes.c_void_p,))
 
 
 def macos_dock_icon():
     """On macOS, the Dock shows the logo instead of Python's rocket: a Python process's Dock tile is Python.app's, and
-    GTK's icon names don't reach it. Drawn at 1024 px (macos_icon_png), and handed to AppKit
-    (-[NSApplication setApplicationIconImage:]) through the Objective-C runtime, as there's no PyObjC. Called again
-    as the accent changes (follow_accent)."""
-    import ctypes
-    png = macos_icon_png()
-    data = objc_send(b"NSData", b"dataWithBytes:length:", png, len(png), types=(ctypes.c_char_p, ctypes.c_ulong))
-    image = objc_send(objc_send(b"NSImage", b"alloc"), b"initWithData:", data, types=(ctypes.c_void_p,))
-    objc_send(objc_send(b"NSApplication", b"sharedApplication"), b"setApplicationIconImage:", image,
-              types=(ctypes.c_void_p,))
+    GTK's icon names don't reach it. Drawn and set at start; as the accent changes it's drawn on a worker thread
+    (redraw_logo)."""
+    set_dock_image(macos_dock_image())
 
 
 def logo_icon():
@@ -150,20 +161,25 @@ def follow_accent():
 
 
 def redraw_logo():
-    """The logo drawn again in the accent: the Dock's (macOS) or the windows', and the launcher's (launcher_logo)."""
-    try:
-        macos_dock_icon() if sys.platform == "darwin" else logo_icon()
-    except Exception as e:  # (an icon isn't worth the accent's change)
-        print("baude: logo:", e, file=sys.stderr)
-    launcher_logo()
+    """The logo drawn again in the accent: the Dock's (macOS, drawn off the main thread) or the windows', and the
+    launcher's (launcher_logo)."""
+    svg = logo()
+    if sys.platform == "darwin":
+        theming.off_main("dock", lambda: macos_dock_image(svg), set_dock_image)
+    else:
+        try:
+            logo_icon()
+        except Exception as e:  # (an icon isn't worth the accent's change)
+            print("baude: logo:", e, file=sys.stderr)
+    launcher_logo(svg)
 
 
-def launcher_logo():
-    """The launcher's logo (LAUNCHER, if it's installed) drawn again in the accent, where it isn't already."""
-    try:
-        applist.redraw_logo(APP_ID, "Baude", logo())
-    except OSError as e:
-        print("baude: launcher logo:", e, file=sys.stderr)
+def launcher_logo(svg=None):
+    """The launcher's logo (LAUNCHER, if it's installed) drawn again in the accent on a worker thread, where it isn't
+    already."""
+    svg = svg or logo()
+    where = LAUNCHER.folder
+    theming.off_main("launcher", lambda: LAUNCHER.installed() and applist.redraw_logo(APP_ID, "Baude", svg, where))
     return False
 
 
@@ -181,6 +197,7 @@ class Launcher:
     """Baude in the platform's list of apps, for this user: LAUNCHER is this platform's. paths() are the files it
     writes, the first the one install() returns; where names the list."""
     where = ""
+    folder = None  # (where the list is, where it isn't the user's: tests and rigs')
 
     def paths(self):
         raise NotImplementedError
@@ -263,7 +280,7 @@ class MacLauncher(Launcher):
     where = wording.say("install.applications")
 
     def __init__(self, folder=None):
-        self.folder = folder or os.path.expanduser("~/Applications")
+        self.folder = folder or os.environ.get("BAUDE_LAUNCHERS") or os.path.expanduser("~/Applications")
 
     def paths(self):
         return [os.path.join(self.folder, "Baude.app")]

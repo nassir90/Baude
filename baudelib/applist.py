@@ -4,6 +4,7 @@ import os
 import re
 import shlex
 import shutil
+import hashlib
 import struct
 import subprocess
 import sys
@@ -20,12 +21,14 @@ def exec_quote(arg):
     return '"' + re.sub(r'(["`$\\])', r"\\\1", arg) + '"'
 
 
-def launchers(app_id, name, small=False):
+def launchers(app_id, name, small=False, folder=None):
     """Where install puts an app's launcher: its .app (macOS), else its .desktop entry and its logo (small: and the
-    logo drawn for 16 px)."""
+    logo drawn for 16 px). folder: macOS's Applications, or Linux's data home, where it isn't the user's (a test's
+    or a rig's: BAUDE_LAUNCHERS names one for every app that starts)."""
+    folder = folder or os.environ.get("BAUDE_LAUNCHERS")
     if sys.platform == "darwin":
-        return [os.path.expanduser(f"~/Applications/{name}.app")]
-    share = os.environ.get("XDG_DATA_HOME") or os.path.expanduser("~/.local/share")
+        return [os.path.join(folder or os.path.expanduser("~/Applications"), f"{name}.app")]
+    share = folder or os.environ.get("XDG_DATA_HOME") or os.path.expanduser("~/.local/share")
     icons = os.path.join(share, "icons", "hicolor")
     return [os.path.join(share, "applications", f"{app_id}.desktop"),
             os.path.join(icons, "scalable", "apps", f"{app_id}.svg")] + (
@@ -56,20 +59,53 @@ def icns(svg):
     return b"icns" + struct.pack(">I", 8 + len(entries)) + entries
 
 
-def redraw_logo(app_id, name, svg):
+def drawn_in(bundle, name):
+    """Where an .app keeps what its .icns was drawn from (a hash of the SVG)."""
+    return os.path.join(bundle, "Contents", "Resources", f"{name}.drawn")
+
+
+def keep_drawn(bundle, name, svg):
+    with open(drawn_in(bundle, name), "w") as f:
+        f.write(hashlib.sha1(svg.encode()).hexdigest())
+
+
+def installed_by(app_id, bundle):
+    """Whether an .app is the one install() made for app_id (its Info.plist's identifier), not another app's of the
+    name."""
+    import plistlib
+    try:
+        with open(os.path.join(bundle, "Contents", "Info.plist"), "rb") as f:
+            return plistlib.load(f).get("CFBundleIdentifier") == app_id
+    except (OSError, ValueError):
+        return False
+
+
+def redraw_logo(app_id, name, svg, folder=None):
     """An installed launcher's logo drawn again as svg (the accent picked since: icons.logo), where it isn't already:
     the .app's .icns (the bundle touched, and LaunchServices told, for the Finder and the Dock) or the hicolor theme's
-    SVG (replaced, and the theme's folder touched, as menus look for a change). Whether it was drawn again."""
-    paths = launchers(app_id, name)
+    SVG (replaced, and the theme's folder touched, as menus look for a change). Whether it was drawn again. On macOS,
+    only a bundle install() made, and one not drawn from this svg already (kept beside it) is rendered at all. No
+    GTK: it runs on a worker thread."""
+    paths = launchers(app_id, name, folder=folder)
     if not os.path.exists(paths[0]):
         return False
     if sys.platform == "darwin":
+        if not installed_by(app_id, paths[0]):
+            return False
+        try:
+            with open(drawn_in(paths[0], name)) as f:
+                if f.read() == hashlib.sha1(svg.encode()).hexdigest():
+                    return False
+        except OSError:
+            pass
         path, data = os.path.join(paths[0], "Contents", "Resources", f"{name}.icns"), icns(svg)
     else:
         path, data = paths[1], svg.encode()
     try:
         with open(path, "rb") as f:
             if f.read() == data:
+                if sys.platform == "darwin":
+                    keep_drawn(paths[0], name, svg)
                 return False
     except OSError:
         pass
@@ -78,6 +114,7 @@ def redraw_logo(app_id, name, svg):
         f.write(data)
     os.replace(path + ".new", path)
     if sys.platform == "darwin":
+        keep_drawn(paths[0], name, svg)
         os.utime(paths[0])
         if os.path.exists(LSREGISTER):
             subprocess.Popen([LSREGISTER, "-f", paths[0]], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -86,12 +123,12 @@ def redraw_logo(app_id, name, svg):
     return True
 
 
-def install(app_id, name, svg, command, category, entry, small=None):
+def install(app_id, name, svg, command, category, entry, small=None, folder=None):
     """The app in the list. macOS: an .app (an .icns of svg; category its LSApplicationCategoryType) started through
     the login shell, for Homebrew's PATH. Elsewhere: a .desktop entry (entry: its lines besides the ones every app's
     has; command's arguments quoted for it, a field code like %u among them left as it is) and svg in the user's hicolor
     theme (small: the logo drawn for 16 px, there too). The paths written."""
-    paths = launchers(app_id, name, small is not None)
+    paths = launchers(app_id, name, small is not None, folder)
     if sys.platform == "darwin":
         import plistlib
         contents = os.path.join(paths[0], "Contents")
@@ -103,6 +140,7 @@ def install(app_id, name, svg, command, category, entry, small=None):
                            "LSApplicationCategoryType": category, "NSHighResolutionCapable": True}, f)
         with open(os.path.join(contents, "Resources", f"{name}.icns"), "wb") as f:
             f.write(icns(svg))
+        keep_drawn(paths[0], name, svg)
         script = os.path.join(contents, "MacOS", name)
         with open(script, "w") as f:
             f.write('#!/bin/sh\ncd "$HOME"\nexec "${SHELL:-/bin/zsh}" -lc \'exec "$0" "$@"\' '

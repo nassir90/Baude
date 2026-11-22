@@ -41,6 +41,7 @@ def main():
         env.update(GDK_BACKEND="x11", GSK_RENDERER="cairo", BAUDE_TRACE="exit",
                    XDG_CONFIG_HOME=os.path.join(tmp, "config"), XDG_CACHE_HOME=os.path.join(tmp, "cache"),
                    XDG_DATA_HOME=os.path.join(tmp, "data"), CLAUDE_CONFIG_DIR=os.path.join(tmp, "claude"),
+                   BAUDE_LAUNCHERS=os.path.join(tmp, "Applications"),
                    BAUDE_CLAUDE=os.environ.get("BAUDE_CLAUDE") or os.path.join(ROOT, "tests", "fake_claude.py"))
         script = [sys.executable, "baude.py", "--cwd", ROOT]
         sys.path.insert(0, ROOT)

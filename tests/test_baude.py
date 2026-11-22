@@ -38,6 +38,7 @@ TMP = os.path.realpath(tempfile.mkdtemp(prefix="baude-test-"))  # (macOS: /var i
 REAL_XDG_DATA = os.environ.get("XDG_DATA_HOME")  # (the real trash lives under it)
 os.environ["XDG_DATA_HOME"] = os.path.join(TMP, "xdg-data")  # never touch the real launcher
 os.environ["XDG_CONFIG_HOME"] = os.path.join(TMP, "xdg-config")  # nor the real settings
+os.environ["BAUDE_LAUNCHERS"] = os.path.join(TMP, "Applications")  # nor ~/Applications: Baude's and Record's launchers
 # nor your clusters, nor your containers: Signal and its name catalogue read kubeconfig contexts, what runs in local
 # clusters and the databases in Docker (a test that wants them sets up its own kubeconfig and fakes)
 os.environ["KUBECONFIG"] = os.path.join(TMP, "no-kubeconfig")

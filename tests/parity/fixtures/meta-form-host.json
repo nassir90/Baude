@@ -1,0 +1,48 @@
+{
+  "description": "Meta's conversation as the desktop keeps it (meta.json): a message of yours and a reply that brought up the form for adding a host, filled in. t is epoch seconds.",
+  "messages": [
+    {
+      "role": "user",
+      "text": "Add my studio machine as a host",
+      "t": 1795600900
+    },
+    {
+      "role": "meta",
+      "model": "claude-haiku-4-5",
+      "t": 1795600930,
+      "actions": [],
+      "text": "It's filled in with the address you gave. Press Add when it looks right.",
+      "items": [
+        {
+          "kind": "tool",
+          "name": "mcp__meta__open_form",
+          "state": "done",
+          "input": {
+            "form": "add_host",
+            "values": {
+              "destination": "dev@studio.example"
+            }
+          },
+          "result": "Form f1c4d2 is up for the user to finish and submit; you don't submit it.",
+          "shown": [
+            {
+              "kind": "form",
+              "form": "add_host",
+              "id": "f1c4d2",
+              "values": {
+                "destination": "dev@studio.example"
+              },
+              "state": "open",
+              "pinned": true
+            }
+          ]
+        },
+        {
+          "kind": "text",
+          "text": "It's filled in with the address you gave. Press Add when it looks right."
+        }
+      ]
+    }
+  ],
+  "actions": []
+}

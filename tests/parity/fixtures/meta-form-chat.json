@@ -1,0 +1,56 @@
+{
+  "description": "Meta's conversation as the desktop keeps it (meta.json): a message of yours and a reply that brought up the form for starting a chat, its host, folder and prompt filled in. t is epoch seconds.",
+  "messages": [
+    {
+      "role": "user",
+      "text": "Start a chat on workshop to plan the watering",
+      "t": 1795601100
+    },
+    {
+      "role": "meta",
+      "model": "claude-haiku-4-5",
+      "t": 1795601130,
+      "actions": [],
+      "text": "The form is up with the folder and the prompt. Press Start when it's ready.",
+      "items": [
+        {
+          "kind": "tool",
+          "name": "mcp__meta__open_form",
+          "state": "done",
+          "input": {
+            "form": "spawn_agent",
+            "values": {
+              "host": "workshop",
+              "agent": "",
+              "folder": "/tmp/parity-home/dev/garden",
+              "group": "",
+              "prompt": "Plan the watering for the garden"
+            }
+          },
+          "result": "Form f3b8c1 is up for the user to finish and submit; you don't submit it.",
+          "shown": [
+            {
+              "kind": "form",
+              "form": "spawn_agent",
+              "id": "f3b8c1",
+              "values": {
+                "host": "workshop",
+                "agent": "",
+                "folder": "/tmp/parity-home/dev/garden",
+                "group": "",
+                "prompt": "Plan the watering for the garden"
+              },
+              "state": "open",
+              "pinned": true
+            }
+          ]
+        },
+        {
+          "kind": "text",
+          "text": "The form is up with the folder and the prompt. Press Start when it's ready."
+        }
+      ]
+    }
+  ],
+  "actions": []
+}

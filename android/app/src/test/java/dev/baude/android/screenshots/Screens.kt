@@ -24,7 +24,6 @@ import dev.baude.android.Key
 import dev.baude.android.Mesh
 import dev.baude.android.MeshScreen
 import dev.baude.android.Msg
-import dev.baude.android.SpawnAgent
 import dev.baude.android.PhoneHost
 import dev.baude.android.PhoneScreen
 import dev.baude.android.Settings
@@ -74,6 +73,7 @@ abstract class Screens(private val theme: String) {
 
     @After fun down() {
         PhoneHost.id = ""
+        dev.baude.android.Meta.load(org.json.JSONObject())
         FixtureConnection.down()
         Mesh.hosts.clear()
         Mesh.sessions.clear()
@@ -128,9 +128,10 @@ abstract class Screens(private val theme: String) {
 
     @Test fun spawnAgentHosts() {
         versionsFixture()
-        show { SpawnAgent(done = {}, opened = { _, _ -> }, given = null, edited = {}) }
+        spawnForm()
         tap("workshop")
-        menu("19-spawn-agent-hosts")
+        laidOut()
+        withMenus("19-spawn-agent-hosts")
     }
 
     @Test fun newSessionOpens() = newChat("92-new-session") { tap("New session") }
@@ -440,6 +441,55 @@ abstract class Screens(private val theme: String) {
     }
     @Test fun chatMeta() = chatAt("11-chat-meta", "meta")
     @Test fun chatSubagents() = chatAt("12-chat-subagents", "agents")
+    // (Meta's forms, cards in its conversation: one brought up, filled by Meta, submitted; another scrolled past,
+    // pinned at the top, its long-press menu, and unpinned)
+    @Test fun metaForms() {
+        val m = dev.baude.android.Meta
+        val tools = dev.baude.android.MetaTools
+        m.host.value = "h1"
+        m.chat.hostId = "h1"
+        fun asked(text: String) = m.chat.lines.add(Line("you", text, java.util.UUID.randomUUID().toString()))
+        fun called(name: String, args: org.json.JSONObject): String {
+            val key = "c${m.calls.size + 1}"
+            val call = dev.baude.android.MetaCall(key, key, "mcp__meta__$name", args)
+            m.calls[key] = call
+            m.chat.lines.add(Line("metacall", key))
+            var said = ""
+            tools.call(name, args, call) { t, e -> said = t; call.state = if (e) "error" else "done"; call.result = t }
+            androidx.compose.runtime.snapshots.Snapshot.sendApplyNotifications() // (what it changed: composed again)
+            settle()
+            return said
+        }
+        HomePrefs.made.clear()
+        asked("Make a group for the seedling chats")
+        called("open_form", org.json.JSONObject().put("form", "new_group"))
+        val id = tools.forms.keys.first()
+        val chat = Mesh.openChat("h1", "a")
+        fill(chat)
+        show { ChatShell("h1", "a", back = {}, open = { _, _ -> }, feedback = {}, first = "meta") }
+        screen("100-meta-form-open")
+        called("fill_form", org.json.JSONObject().put("id", id).put("values", org.json.JSONObject().put("name", "Seedlings")))
+        m.chat.lines.add(Line("bot", "The form is up with the name. Press Create to make it."))
+        androidx.compose.runtime.snapshots.Snapshot.sendApplyNotifications()
+        settle()
+        screen("101-meta-form-filled")
+        tap(dev.baude.android.Wording.Common.create)
+        screen("102-meta-form-submitted")
+        asked("Start a chat on workshop to plan the watering")
+        called("open_form", org.json.JSONObject().put("form", "spawn_agent").put("values",
+            org.json.JSONObject().put("prompt", "Plan the watering for the garden")))
+        for (i in 1..10) m.chat.lines.add(Line("bot", "Pick where it runs and press Start. The folder is the one last used " +
+            "on workshop, and the group is left empty, so it's listed with no group. ($i)"))
+        androidx.compose.runtime.snapshots.Snapshot.sendApplyNotifications()
+        laidOut() // (followed to its end, as a chat read to its end is)
+        screen("103-meta-form-pinned")
+        longPress(dev.baude.android.Wording.Meta.unpin)
+        laidOut()
+        withMenus("104-meta-form-pin-menu")
+        tap(dev.baude.android.Wording.Meta.unpin)
+        screen("105-meta-form-unpinned")
+    }
+
     @Test fun chatProcesses() = chatAt("13-chat-processes", "processes")
     @Test fun chatSideQuestions() = chatAt("14-chat-side-questions", "btw")
     @Test fun chatArtifacts() = chatAt("15-chat-artifacts", "artifacts")
@@ -514,7 +564,7 @@ abstract class Screens(private val theme: String) {
 
     @Test fun spawnAgentModelPicker() {
         meshModels()
-        show { SpawnAgent(done = {}, opened = { _, _ -> }, given = null, edited = {}) }
+        spawnForm()
         tap("Its default model")
         laidOut()
         withMenus("23-spawn-agent-model-picker")
@@ -1056,6 +1106,22 @@ abstract class Screens(private val theme: String) {
         settle()
     }
 
+    /** What on screen has a long-press labelled label (its OnLongClick's), long-pressed. */
+    private fun longPress(label: String) {
+        fun roots(v: android.view.View): List<androidx.compose.ui.node.RootForTest> = when (v) {
+            is androidx.compose.ui.node.RootForTest -> listOf(v)
+            is android.view.ViewGroup -> (0 until v.childCount).flatMap { roots(v.getChildAt(it)) }
+            else -> emptyList()
+        }
+        fun all(n: androidx.compose.ui.semantics.SemanticsNode): List<androidx.compose.ui.semantics.SemanticsNode> =
+            listOf(n) + n.children.flatMap { all(it) }
+        val act = androidx.compose.ui.semantics.SemanticsActions.OnLongClick
+        windows().flatMap(::roots).flatMap { all(it.semanticsOwner.rootSemanticsNode) }
+            .first { it.config.contains(act) && it.config[act].label == label }.config[act].action!!.invoke()
+        androidx.compose.runtime.snapshots.Snapshot.sendApplyNotifications()
+        settle()
+    }
+
     /** typed put in the box on screen (its dialog's, if one's up), as typing it would. */
     private fun typeIn(typed: String) {
         val wm = Class.forName("android.view.WindowManagerGlobal").getMethod("getInstance").invoke(null)
@@ -1077,6 +1143,13 @@ abstract class Screens(private val theme: String) {
     }
 
     private var insets: androidx.core.graphics.Insets? = null
+
+    /** Meta's form for starting a chat, empty, as its card in Meta's conversation draws it. */
+    private fun spawnForm() {
+        dev.baude.android.MetaTools.forms["f1"] = org.json.JSONObject().put("id", "f1").put("form", "spawn_agent")
+            .put("values", org.json.JSONObject()).put("state", "open")
+        show { androidx.compose.foundation.layout.Column(androidx.compose.ui.Modifier.padding(12.dp)) { dev.baude.android.MetaFormCard("f1") } }
+    }
 
     private fun show(screen: @Composable () -> Unit) {
         activity.setContent { BaudeTheme { screen() } }

@@ -161,11 +161,12 @@ fun <T> MetaBoxed(rows: List<T>, modifier: Modifier = Modifier, row: @Composable
     }
 }
 
-/** What Meta showed under a call: a setting's row, chats, pages or a button, or the changelog. */
+/** What Meta showed under a call: a setting's row, chats, pages or a button, the changelog, or a form. */
 @Composable
 fun MetaShown(spec: JSONObject) {
     val setting = MetaSet.ALL[spec.optString("setting")]
     when {
+        spec.has("form_id") -> MetaFormSlot(spec.optString("form_id"))
         spec.has("setting") -> if (setting != null) MetaBoxed(listOf(Unit)) { setting.row(null, null) }
         spec.has("changelog") -> MetaChangelog()
         else -> MetaRowsOf(spec)

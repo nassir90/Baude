@@ -6,12 +6,12 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 
 /** The menu on the host picker (Baude's host_menu), opened by a long-press: Deactivate or Activate (never this phone's
@@ -36,31 +36,41 @@ fun HostMenu(open: Boolean, dismiss: () -> Unit) {
     if (adding) AddHost(done = { adding = false })
 }
 
-/** Add a host (Baude's ask_add_host): where ssh goes, which runs CONNECT there. given, edited: Meta's add_host form's
- * values, filled by it and by you. */
+/** Add a host (Baude's ask_add_host): where ssh goes, which runs CONNECT there. */
 @Composable
-fun AddHost(done: () -> Unit, given: org.json.JSONObject? = null, edited: ((org.json.JSONObject) -> Unit)? = null,
-            added: () -> Unit = {}) {
-    var dest by remember { mutableStateOf(given?.str("destination").orEmpty()) }
-    LaunchedEffect(dest) { edited?.invoke(org.json.JSONObject().put("destination", dest)) }
-    val host = Host.parse(dest)
+fun AddHost(done: () -> Unit) {
+    var dest by remember { mutableStateOf(TextFieldValue()) }
+    val host = Host.parse(dest.text)
     fun go() {
-        val h = host ?: return
-        Mesh.addHost(h)
-        toast(Wording.Hosts.lookingForBaude(dest = dest.trim()))
-        added()
+        addHost(dest.text) ?: return
         done()
     }
     AlertDialog(
         onDismissRequest = done,
         title = { Text(Wording.NewSession.addHost) },
         text = {
-            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                NameField(dest, { dest = it }, Wording.NewSession.hostPlaceholder, ::go)
+            Column(Modifier.verticalScroll(rememberScrollState())) {
+                AddHostFields(dest, { dest = it }, focus = true, onDone = ::go)
             }
         },
         confirmButton = { Button(Wording.Common.add, suggested = host != null, onClick = ::go) },
         dismissButton = { Button(Wording.Common.cancel, onClick = done) },
         containerColor = LocalBaude.current.dialog,
     )
+}
+
+/** Add a host's fields (Baude's host_form), its dialog's and Meta's add_host form's: where ssh goes. */
+@Composable
+fun AddHostFields(dest: TextFieldValue, setDest: (TextFieldValue) -> Unit, focus: Boolean, onDone: () -> Unit) {
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        NameField(dest, setDest, Wording.NewSession.hostPlaceholder, onDone, focus = focus)
+    }
+}
+
+/** A host added where ssh goes, looked for, said so: it, or null when that isn't one. */
+fun addHost(dest: String): Host? {
+    val h = Host.parse(dest) ?: return null
+    Mesh.addHost(h)
+    toast(Wording.Hosts.lookingForBaude(dest = dest.trim()))
+    return h
 }

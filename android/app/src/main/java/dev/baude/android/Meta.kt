@@ -613,7 +613,7 @@ fun MetaRowsOf(o: JSONObject) {
             val h = o.optString("host")
             val sid = o.optString("sid")
             val title = Mesh.session(h, sid)?.let { chatName(it) } ?: Wording.Trash.thisSession
-            androidx.compose.material3.AlertDialog(onDismissRequest = { asking = false },
+            AlertDialog(onDismissRequest = { asking = false },
                 title = { Text(Wording.Trash.heading(title = title)) },
                 text = { Text(Wording.Trash.body(where = Wording.Trash.onHost(host = Mesh.label(h)))) },
                 confirmButton = { Button(Wording.Trash.move, destructive = true) {

@@ -33,6 +33,7 @@
     {"name": "panel-meta", "what": "The fixture chat with the side panel's Meta page", "page": "meta", "inventory": ["Meta.panel", "SidePanel.region"]},
     {"name": "panel-meta-reply", "what": "Meta's page with a reply: a Read card, a chat moved (its change box), a setting it changed, the changelog it showed, the changes bar", "page": "meta", "meta": "meta.json", "inventory": ["Meta.panel", "MetaSettings.dialog"]},
     {"name": "panel-meta-mesh", "what": "Meta's page with a reply that used the mesh's tools: the hosts listed, a subagent started on another host", "page": "meta", "meta": "meta-mesh.json", "inventory": ["Meta.panel"]},
+    {"name": "panel-meta-start-chat", "what": "Meta's page with the form for starting a chat brought up, its prompt filled in", "page": "meta", "meta": "meta-form.json", "inventory": ["NewSessionForm.dialog", "Meta.panel"]},
     {"name": "panel-meta-form-host", "what": "Meta's page with the form for adding a host brought up, filled in", "page": "meta", "meta": "meta-form-host.json", "inventory": ["Meta.panel", "AddHost.dialog"]},
     {"name": "panel-meta-form-group", "what": "Meta's page with the form for a new group brought up, its name filled in", "page": "meta", "meta": "meta-form-group.json", "inventory": ["Meta.panel"]},
     {"name": "panel-meta-form-chat", "what": "Meta's page with the form for starting a chat brought up, its host, folder and prompt filled in", "page": "meta", "meta": "meta-form-chat.json", "inventory": ["Meta.panel"]},

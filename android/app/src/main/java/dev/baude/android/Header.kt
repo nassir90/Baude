@@ -29,6 +29,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.foundation.layout.height
@@ -36,13 +37,6 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
-import androidx.compose.ui.unit.IntOffset
-import androidx.compose.ui.unit.IntRect
-import androidx.compose.ui.unit.IntSize
-import androidx.compose.ui.unit.LayoutDirection
-import androidx.compose.ui.window.Popup
-import androidx.compose.ui.window.PopupPositionProvider
-import androidx.compose.ui.window.PopupProperties
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.imePadding
@@ -432,7 +426,7 @@ fun Picker(face: String, tip: String, choices: List<Pair<String, String>>, picke
                 modifier = Modifier.widthIn(max = 180.dp))
             Icon(Adwaita.PanDown, tip, tint = c.fg, modifier = Modifier.size(16.dp.icon))
         }
-        Popover(open, { open = false }) {
+        Popover(open, { open = false }, ticks = Ticks.END) {
             for ((label, value) in choices) MenuChoice(label, value == picked, enabled = value !in dimmed) { open = false; pick(value) }
         }
     }
@@ -481,18 +475,7 @@ fun MenuPaneLayer(pane: MenuPane) {
 /** A model's logo (its family's, as the desktop draws it beside it), or null. */
 fun modelLogo(value: String, name: String): ImageVector? = modelFamily(value, name)?.logo
 
-private val MODEL_ROW = 34.dp // (the search field's height too: its icon over the rows' logos)
 private val MODEL_LIST_WIDTH = 280.dp
-
-/** Under its anchor, at its left edge (kept on the screen); above it where it's longer than the room below. */
-private object BelowAnchor : PopupPositionProvider {
-    override fun calculatePosition(anchorBounds: IntRect, windowSize: IntSize, layoutDirection: LayoutDirection,
-                                   popupContentSize: IntSize): IntOffset {
-        val x = anchorBounds.left.coerceAtMost(windowSize.width - popupContentSize.width).coerceAtLeast(0)
-        val below = anchorBounds.bottom + popupContentSize.height <= windowSize.height
-        return IntOffset(x, if (below) anchorBounds.bottom else (anchorBounds.top - popupContentSize.height).coerceAtLeast(0))
-    }
-}
 
 /** The model picker (pickers.ModelPicker): its face the model's logo and name; a search over the models, each with its
  * family's logo, under their families' heads. On a page with a pane (a chat's, Meta's) its list opens there, under the
@@ -500,8 +483,6 @@ private object BelowAnchor : PopupPositionProvider {
 @Composable
 fun ModelPicker(face: String, choices: List<ModelChoice>, picked: String?, pick: (String) -> Unit) {
     val c = LocalBaude.current
-    val density = androidx.compose.ui.platform.LocalDensity.current
-    val view = androidx.compose.ui.platform.LocalView.current
     val pane = LocalMenuPane.current
     var open by remember { mutableStateOf(false) }
     var query by remember { mutableStateOf("") }
@@ -528,14 +509,7 @@ fun ModelPicker(face: String, choices: List<ModelChoice>, picked: String?, pick:
             androidx.compose.runtime.DisposableEffect(pane) {
                 onDispose { if (pane.owner === me) { pane.owner = null; pane.content = null } }
             }
-        } else if (open) Popup(popupPositionProvider = BelowAnchor, onDismissRequest = { open = false },
-            properties = PopupProperties(focusable = true)) {
-            val margin = with(density) { 8.dp.toPx() }
-            val frame = android.graphics.Rect().also { view.getWindowVisibleDisplayFrame(it) } // (what BelowAnchor places in)
-            val room = frame.height() - margin - anchor.bottom // (below it, else above it)
-            val most = with(density) { (if (room < 200.dp.toPx()) anchor.top - margin else room).toDp() }
-            list(Modifier.heightIn(max = most))
-        }
+        } else if (open) PopupAt(DpOffset.Zero, { open = false }) { most -> list(Modifier.heightIn(max = most.height)) }
     }
 }
 
@@ -545,16 +519,18 @@ fun ModelPicker(face: String, choices: List<ModelChoice>, picked: String?, pick:
 private fun ModelList(query: String, setQuery: (String) -> Unit, choices: List<ModelChoice>, picked: String?,
                       modifier: Modifier, pick: (String) -> Unit) {
     val c = LocalBaude.current
-    Column(modifier.width(MODEL_LIST_WIDTH).shadow(8.dp, RoundedCornerShape(12.dp)).clip(RoundedCornerShape(12.dp))
-        .background(c.dialog).padding(vertical = 6.dp)) {
-        SearchField(query, setQuery, Wording.ModelPicker.search, Modifier.fillMaxWidth().padding(horizontal = 8.dp).height(MODEL_ROW))
+    Column(modifier.width(MODEL_LIST_WIDTH).shadow(8.dp, RoundedCornerShape(Popups.radius)).clip(RoundedCornerShape(Popups.radius))
+        .background(c.dialog).padding(vertical = Popups.pad)) {
+        // (its icon over the rows' logos: the field's own 8 in from its box)
+        SearchField(query, setQuery, Wording.ModelPicker.search, Modifier.fillMaxWidth().padding(horizontal = Popups.inset - 8.dp)
+            .height(Popups.row))
         val words = query.lowercase().split(Regex("\\s+")).filter { it.isNotEmpty() }
         val shown = choices.filter { m -> "${m.value} ${m.name} ${family(m)}".lowercase().let { said -> words.all { it in said } } }
         Column(Modifier.weight(1f, fill = false).padding(top = 4.dp).verticalScroll(rememberScrollState())) {
             if (shown.isEmpty()) Text(Wording.ModelPicker.none, style = Type.body, color = c.dim,
                 textAlign = androidx.compose.ui.text.style.TextAlign.Center, modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp))
             for ((fam, ms) in shown.groupBy(::family)) {
-                Heading(fam)
+                MenuHeading(fam)
                 for (m in ms) ModelRow(m, m.value == picked) { pick(m.value) }
             }
         }
@@ -566,8 +542,7 @@ private fun ModelList(query: String, setQuery: (String) -> Unit, choices: List<M
 @Composable
 private fun ModelRow(m: ModelChoice, on: Boolean, onClick: () -> Unit) {
     val c = LocalBaude.current
-    Row(Modifier.fillMaxWidth().height(MODEL_ROW).clickable(onClick = onClick).padding(horizontal = 16.dp),
-        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+    MenuLine(onClick = onClick) {
         val logo = modelLogo(m.value, m.name)
         if (logo != null) Icon(logo, null, tint = c.fg, modifier = Modifier.size(16.dp.icon))
         else androidx.compose.foundation.layout.Spacer(Modifier.size(16.dp.icon))

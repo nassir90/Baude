@@ -131,7 +131,12 @@
           "by": "click a category heading",
           "does": "Folds its kinds away, or shows them again; which categories are folded is remembered across sessions."
         }
-      ]
+      ],
+      "phone": {
+        "does": "A page of its own, the bar's ◂ from the table. A category's heading is the body's size, bold (the desktop's 0.85em), its row at least 30 high; a kind's row at least 23 high (the desktop's 26)",
+        "why": "The owner: on the phone the categories' headings should be a bit bigger and their rows a bit narrower",
+        "decided": "2026-11-22"
+      }
     },
     {
       "name": "table",

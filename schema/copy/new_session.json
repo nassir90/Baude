@@ -7,7 +7,7 @@
     "host_named": "{$name} ({$host})",
     "host": "Host",
     "group": "Group",
-    "spawn_agent": "Spawn an agent",
+    "start_chat": "Start a chat",
     "start": "Start",
     "new_group": "New group",
     "group_needs_name": "A group needs a name",

@@ -1,5 +1,5 @@
 {
-  "description": "A message the chat's host held for the chat instead of sending it to the agent (for example a subagent's answer that arrived after the host restarted): shown under the conversation with the queue, above any queued messages, as a grey bubble from its sender, with delete and send buttons on hover.",
+  "description": "A message the chat's host held for the chat instead of sending it to the chat (for example a subagent's answer that arrived after the host restarted): shown under the conversation with the queue, above any queued messages, as a grey bubble from its sender, with delete and send buttons on hover.",
   "apps": [
     "baude"
   ],
@@ -42,7 +42,7 @@
         },
         {
           "by": "click ↑",
-          "does": "Sends it to the agent now: it disappears from the held list and appears in the chat as a SenderTurn while the turn starts. Tooltip \"Send it to the agent: it was held, not sent, as this chat's host restarted while it waited for it\"."
+          "does": "Sends it to the chat now: it disappears from the held list and appears in the chat as a SenderTurn while the turn starts. Tooltip \"Send it to the chat: it was held, not sent, as this chat's host restarted while it waited for it\"."
         }
       ]
     }

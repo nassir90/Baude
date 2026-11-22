@@ -444,7 +444,7 @@ object MetaTools {
             said = false),
         "new_group" to FormDef(Wording.NewSession.newGroup, Wording.Common.create, "make a group of chats", listOf(
             Triple("name", "the group's name", { _: JSONObject -> null }))),
-        "spawn_agent" to FormDef(Wording.NewSession.spawnAgent, Wording.NewSession.start, "start an agent (a session) on a host: the host, then what it " +
+        "spawn_agent" to FormDef(Wording.NewSession.startChat, Wording.NewSession.start, "start an agent (a session) on a host: the host, then what it " +
             "offers to run, the folder, group and prompt", listOf(
             Triple("host", "the host it runs on", { _: JSONObject -> Mesh.reached("start").map { it.second } }),
             Triple("agent", "what runs it: one of the host's", ::agents),
@@ -469,7 +469,7 @@ object MetaTools {
         }
         "spawn_agent" -> when {
             hostByName(values.optString("host")) == null -> "host: pick one of its choices"
-            agents(values).isEmpty() -> "${values.optString("host")} offers no agent"
+            agents(values).isEmpty() -> "${values.optString("host")} offers nothing to run"
             values.optString("agent").isNotEmpty() && agents(values).none { it.equals(values.optString("agent"), true) } ->
                 "agent: pick one of ${values.optString("host")}'s"
             else -> null

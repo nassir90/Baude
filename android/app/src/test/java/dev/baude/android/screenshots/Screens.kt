@@ -324,7 +324,7 @@ abstract class Screens(private val theme: String) {
         return bot
     }
 
-    /** This phone as a host of its own, named pocket: its connection up, two agents (Bots) of its own, and one in its
+    /** This phone as a host of its own, named pocket: its connection up, two Bots of its own and a chat with no Bot name, and one in its
      * trash. */
     private fun phoneFixture() {
         PhoneHost.name = "pocket"
@@ -339,7 +339,9 @@ abstract class Screens(private val theme: String) {
             Msg.Session(id = id, title = title, cwd = "/data/phone/agents/$id", updated = now - ago, said = now - ago,
                 created = now - ago - 600, state = state, model = "qwen3:8b", mode = "default", bot = Msg.BotListing(name = name))
         Mesh.sessions["phone"] = listOf(s("p-a", "Juniper", "Shopping list for Saturday", 120.0, "working"),
-            s("p-b", "Fern", "Read the bus timetable", 5_400.0))
+            s("p-b", "Fern", "Read the bus timetable", 5_400.0),
+            Msg.Session(id = "p-c", title = "Sort the seed packets", cwd = "/data/phone/agents/p-c", updated = now - 9_000.0,
+                said = now - 9_000.0, created = now - 9_600.0, state = "idle", model = "qwen3:8b", mode = "default"))
     }
 
     /** The mesh as workshop says it is: it, and two members on older code (one 45 commits behind, one whose count

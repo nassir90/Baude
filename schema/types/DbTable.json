@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "A table (or view, or collection) and its columns.",
+  "properties": {
+    "schema": {
+      "type": "string",
+      "description": "Its schema (an ArangoDB server's: collections)."
+    },
+    "name": {
+      "type": "string",
+      "description": "Its name."
+    },
+    "kind": {
+      "type": "string",
+      "description": "r table, p partitioned table, v view, m materialized view, f foreign table, e edge collection."
+    },
+    "rows": {
+      "type": "integer",
+      "description": "About how many rows it has."
+    },
+    "columns": {
+      "type": "array",
+      "items": {
+        "$ref": "DbColumn.json"
+      },
+      "description": "Its columns, in order."
+    }
+  },
+  "required": ["schema", "name"],
+  "additionalProperties": false
+}

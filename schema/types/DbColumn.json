@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "A table's column.",
+  "properties": {
+    "name": {
+      "type": "string",
+      "description": "Its name."
+    },
+    "type": {
+      "type": "string",
+      "description": "Its type."
+    },
+    "null": {
+      "type": "boolean",
+      "description": "Whether it may be null (null: not known)."
+    },
+    "pk": {
+      "type": "boolean",
+      "description": "Whether it is in the primary key."
+    },
+    "fk": {
+      "type": ["string", "null"],
+      "description": "The column it references, as the diagram's card says it (schema omitted in its own), or null."
+    }
+  },
+  "required": ["name"],
+  "additionalProperties": false
+}

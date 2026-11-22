@@ -156,6 +156,37 @@
       "$value": {"value": 8, "unit": "px"}
     }
   },
+  "kube": {
+    "$type": "dimension",
+    "$description": "The Kubernetes view (KubeView): its table and its sidebar.",
+    "name-width": {"$description": "A Name column's width, and it fills what's left (make_column).", "$value": {"value": 220, "unit": "px"}},
+    "namespace-width": {"$description": "A Namespace column's width (make_column).", "$value": {"value": 120, "unit": "px"}},
+    "row-pad": {"$description": "A table cell's padding, above and below (.kube-table cell).", "$value": {"value": 5, "unit": "px"}},
+    "square": {"$description": "A container's square (KubeSquares.SIZE).", "$value": {"value": 10, "unit": "px"}},
+    "square-gap": {"$description": "Between a pod's squares (KubeSquares.GAP).", "$value": {"value": 3, "unit": "px"}},
+    "logs-min": {"$description": "The logs pane's least height.", "$value": {"value": 140, "unit": "px"}},
+    "sidebar-width": {"$description": "The categories' column's width.", "$value": {"value": 230, "unit": "px"}}
+  },
+  "schema": {
+    "$type": "dimension",
+    "$description": "The database view's diagram (SchemaCanvas).",
+    "head-h": {"$description": "A card's head's height (SchemaCanvas.HEAD).", "$value": {"value": 34, "unit": "px"}},
+    "row-h": {"$description": "A card's row's height (SchemaCanvas.ROW).", "$value": {"value": 24, "unit": "px"}},
+    "pad": {"$description": "A card's padding in from its edges (SchemaCanvas.PAD).", "$value": {"value": 12, "unit": "px"}},
+    "max-w": {"$description": "A card's widest (SchemaCanvas.MAX_W).", "$value": {"value": 380, "unit": "px"}},
+    "mini-w": {"$description": "The minimap's widest (SchemaCanvas.MINI_W).", "$value": {"value": 180, "unit": "px"}},
+    "mini-h": {"$description": "The minimap's tallest (SchemaCanvas.MINI_H).", "$value": {"value": 120, "unit": "px"}},
+    "mini-pad": {"$description": "The minimap's distance from the edges (SchemaCanvas.MINI_PAD).", "$value": {"value": 12, "unit": "px"}},
+    "grid": {"$description": "The dotted background's step.", "$value": {"value": 24, "unit": "px"}},
+    "grid-min": {"$description": "The background's dots, drawn while the step is at least this.", "$value": {"value": 8, "unit": "px"}},
+    "link": {"$description": "A link's stroke.", "$value": {"value": 1.3, "unit": "px"}},
+    "link-hot": {"$description": "A link's stroke when its table is selected.", "$value": {"value": 2.2, "unit": "px"}}
+  },
+  "find": {
+    "$type": "color",
+    "$description": "Find's highlights.",
+    "match": {"$type": "color", "$description": "What a Find match is marked with (widgets.FIND_RGB): Adwaita's yellow 3.", "$value": {"colorSpace": "srgb", "components": [0.9647, 0.8275, 0.1765], "hex": "#f6d32d"}}
+  },
   "radius": {
     "$type": "dimension",
     "$description": "Corners' radii.",

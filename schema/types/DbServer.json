@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "A database server in a running container, as the database view lists it.",
+  "properties": {
+    "container": {
+      "type": "string",
+      "description": "The container (or pod) it runs in."
+    },
+    "engine": {
+      "type": "string",
+      "description": "postgres or arango."
+    },
+    "version": {
+      "type": "string",
+      "description": "Its version, or empty."
+    }
+  },
+  "required": ["container"],
+  "additionalProperties": false
+}

@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "kube_follow watch: the page's objects as they are now.",
+  "properties": {
+    "op": {
+      "const": "kube_rows",
+      "description": "What it is."
+    },
+    "req": {
+      "type": ["integer", "null"],
+      "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "rows": {
+      "type": "array",
+      "items": {
+        "$ref": "KubeRow.json"
+      },
+      "description": "The objects."
+    },
+    "metrics": {
+      "type": ["boolean", "null"],
+      "description": "Whether CPU and memory could be read, or null."
+    },
+    "note": {
+      "type": "string",
+      "description": "Why it can't be watched and is read every few seconds instead, or empty."
+    }
+  },
+  "required": ["op"],
+  "additionalProperties": false
+}

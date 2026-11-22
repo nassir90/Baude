@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "A cluster's objects as Freelens lists them, read through the host's kubeconfig and kubectl: its contexts (contexts), one connected to (connect), a kind's objects (list), an object's YAML (yaml), what controls an object (owner), a pod deleted (delete). Secrets' values are never read.",
+  "properties": {
+    "op": {
+      "const": "kube",
+      "description": "What it is."
+    },
+    "req": {
+      "type": ["integer", "null"],
+      "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "what": {
+      "enum": ["contexts", "connect", "list", "yaml", "owner", "delete"],
+      "description": "What to do."
+    },
+    "context": {
+      "type": "string",
+      "description": "The kubeconfig context."
+    },
+    "page": {
+      "type": "string",
+      "description": "list, yaml: the kind's page, by its resource."
+    },
+    "crd": {
+      "type": "string",
+      "description": "list, yaml: a custom resource's definition (plural.group) for a kind that isn't listed."
+    },
+    "namespace": {
+      "type": "string",
+      "description": "yaml, owner, delete: the object's namespace."
+    },
+    "name": {
+      "type": "string",
+      "description": "yaml, owner, delete: the object's name."
+    },
+    "kind": {
+      "type": "string",
+      "description": "owner: the object's kind."
+    },
+    "force": {
+      "type": "boolean",
+      "description": "delete: at once, not waiting for the pod to stop."
+    }
+  },
+  "required": ["op"],
+  "additionalProperties": false
+}

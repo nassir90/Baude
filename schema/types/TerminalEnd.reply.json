@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "The terminal's program has ended (or never started: said).",
+  "properties": {
+    "op": {
+      "const": "terminal_end",
+      "description": "What it is."
+    },
+    "req": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "status": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "description": "Its exit status (a signal's: minus its number)."
+    },
+    "said": {
+      "type": "string",
+      "description": "Why it couldn't start."
+    }
+  },
+  "required": [
+    "op"
+  ],
+  "additionalProperties": false
+}

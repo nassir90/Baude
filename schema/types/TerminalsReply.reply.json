@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "The terminals running on this host.",
+  "properties": {
+    "op": {
+      "const": "terminals",
+      "description": "What it is."
+    },
+    "req": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "terminals": {
+      "type": "array",
+      "items": {
+        "$ref": "TerminalInfo.json"
+      },
+      "description": "Each one."
+    }
+  },
+  "required": [
+    "op"
+  ],
+  "additionalProperties": false
+}

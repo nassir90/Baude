@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "A terminal on this host (Multiplex's, baudelib.hostterminal): a program run in a pty here, or attach: one already running here seen again. One a connection: its answers are terminal_opened, then terminal_out as the program writes (first, on attach, what it wrote lately) and terminal_end once it ends. The connection going leaves the program running a while (TERMINAL_KEEP_S) to be attached to again.",
+  "properties": {
+    "op": {
+      "const": "terminal",
+      "description": "What it is."
+    },
+    "req": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "argv": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "What to run: the user's login shell if none."
+    },
+    "cwd": {
+      "type": "string",
+      "description": "The folder it starts in: the home folder if none."
+    },
+    "title": {
+      "type": "string",
+      "description": "What it's called till its program names it."
+    },
+    "columns": {
+      "type": "integer",
+      "description": "Its width, in characters."
+    },
+    "rows": {
+      "type": "integer",
+      "description": "Its height, in lines."
+    },
+    "attach": {
+      "type": "string",
+      "description": "A terminal running here (terminals' id), seen again instead of a new one."
+    }
+  },
+  "required": [
+    "op"
+  ],
+  "additionalProperties": false
+}

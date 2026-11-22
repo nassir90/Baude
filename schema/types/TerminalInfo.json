@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "A terminal running on a host.",
+  "properties": {
+    "id": {
+      "type": "string",
+      "description": "Its id there, for attach."
+    },
+    "title": {
+      "type": "string",
+      "description": "Its title."
+    },
+    "argv": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "What it runs."
+    },
+    "cwd": {
+      "type": "string",
+      "description": "Where it started."
+    },
+    "columns": {
+      "type": "integer",
+      "description": "Its width."
+    },
+    "rows": {
+      "type": "integer",
+      "description": "Its height."
+    },
+    "viewers": {
+      "type": "integer",
+      "description": "Connections attached to it now."
+    },
+    "running": {
+      "type": "boolean",
+      "description": "Whether its program is still running."
+    }
+  },
+  "required": [
+    "id"
+  ],
+  "additionalProperties": false
+}

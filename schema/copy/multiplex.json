@@ -3,6 +3,8 @@
   "messages": {
     "ended": "ended",
     "no_vte": "Terminals need VTE's GTK 4 build (package {$package})",
-    "not_started": "Couldn't start: {$error}"
+    "not_started": "Couldn't start: {$error}",
+    "host_gone": "The host went",
+    "terminal_menu": "Terminal"
   }
 }

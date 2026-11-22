@@ -46,11 +46,12 @@ from pickers import PALETTE_KEY, HostPicker  # noqa: E402,F401
 from theming import settings_size, settings_switch  # noqa: E402,F401
 from codeview import find_in_focus  # noqa: E402,F401
 from kubeview import KubeView  # noqa: E402,F401
+import terminalpane  # noqa: E402  (☰ → Terminal: Record's too)
 from schemaview import SchemaView  # noqa: E402,F401
 from startup import LAUNCHER, apply_scales, record_item, take_restart_state  # noqa: E402
 from toolcards import COMMAND_TOOLS, CUT_CONTINUE, command_what  # noqa: E402
 from chatinput import Attachment, ChatRefCompleter, SlashCompleter  # noqa: E402
-from sessionlist import THIS_MACHINE, background_proc, is_desktop, network, remote_info  # noqa: E402
+from sessionlist import THIS_MACHINE, background_proc, is_desktop, network, remote_info, remote_name  # noqa: E402
 from sessionsidebar import SessionSidebar  # noqa: E402
 from sidequestion import CompactMarks  # noqa: E402
 from refpopovers import RefPalette  # noqa: E402
@@ -243,6 +244,7 @@ class BaudeWindow(WindowView, WindowProc, WindowDrafts, WindowSignal, WindowRemo
         menu.append(wording.say("window.read_only"), "win.readonly")
         menu.append(wording.say("window.database_schemas"), "win.dbschema")
         menu.append(wording.say("window.kubernetes_menu"), "win.kube")
+        menu.append(wording.say("multiplex.terminal_menu"), "win.terminal")
         menu.append(record_item(), "win.record")
         item = Gio.MenuItem.new(wording.say("fixes.send_feedback"), "win.feedback")
         item.set_attribute_value("accel", GLib.Variant.new_string(widgets.FEEDBACK_KEY))
@@ -283,6 +285,9 @@ class BaudeWindow(WindowView, WindowProc, WindowDrafts, WindowSignal, WindowRemo
         kube = Gio.SimpleAction.new("kube", None)
         kube.connect("activate", lambda *_: self.kube.open())
         self.add_action(kube)
+        terminal = Gio.SimpleAction.new("terminal", None)  # (a terminal on the host picked in the sidebar)
+        terminal.connect("activate", lambda *_: self.terminal.open())
+        self.add_action(terminal)
         record = Gio.SimpleAction.new("record", None)
         record.connect("activate", lambda *_: self.open_record())
         self.add_action(record)
@@ -503,9 +508,11 @@ class BaudeWindow(WindowView, WindowProc, WindowDrafts, WindowSignal, WindowRemo
         self.lightbox = lightbox.Lightbox(self)
         self.schema = SchemaView(self)
         self.kube = KubeView(self)
+        self.terminal = terminalpane.TerminalView(self, self.terminal_host)  # (☰ → Terminal: over it, as Kubernetes)
         host = Gtk.Overlay(child=self.toasts)
         host.add_overlay(self.schema)
         host.add_overlay(self.kube)
+        host.add_overlay(self.terminal)
         host.add_overlay(self.lightbox)
         self.repaint, self.repaint_wait = Repaint(), None
         host.add_overlay(self.repaint)
@@ -607,6 +614,13 @@ class BaudeWindow(WindowView, WindowProc, WindowDrafts, WindowSignal, WindowRemo
 
     # ---- restart, keeping what's on screen
     # ---- feedback (Menu → Send Feedback…)
+    def terminal_host(self):
+        """(where, name): the host picked in the sidebar's dropdown, for ☰ → Terminal (this machine's, if none)."""
+        r = self.sidebar.shown_remote()
+        if r is None:
+            return {"via": "local"}, THIS_MACHINE
+        return r.where, remote_name(r)
+
     def open_record(self):
         """Record (record.py, beside this file) reading this chat, on its Read tab in whichever notebook's open. One
         running already is handed the chat."""
@@ -628,7 +642,8 @@ class BaudeWindow(WindowView, WindowProc, WindowDrafts, WindowSignal, WindowRemo
         """The window's parts, by name, for the text a capture records."""
         return {self.sidebar: "sidebar", self.scroller: "chat", self.panel: "side panel",
                 self.composer_box: "input box", self.status.get_parent(): "status bar", self.header_bar: "header",
-                self.banner: "banner", self.kube: "Kubernetes", self.schema: "databases", self.lightbox: "image"}
+                self.banner: "banner", self.kube: "Kubernetes", self.schema: "databases", self.lightbox: "image",
+                self.terminal: "terminal"}
 
     def restart_state(self):
         """What a restart brings back: the chat, where it was scrolled to, the window, and whatever's being written: the

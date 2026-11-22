@@ -1060,12 +1060,12 @@ class FeedbackHost:
 
     def capture_cover(self):
         """What's over everything else in the window, if anything: the dialog on top (not Feedback or its regions, gone
-        by the time it's captured), the large image, the Kubernetes or the database view. What's under it isn't seen, and
+        by the time it's captured), the large image, the Terminal, Kubernetes or database view. What's under it isn't seen, and
         the Capture bar can't be got at."""
         dialogs = [d for d in self.get_dialogs() if not isinstance(d, (FeedbackDialog, RegionEditor))]
         if dialogs:
             return dialogs[-1]
-        return next((v for v in (self.lightbox, self.kube, self.schema) if v.get_visible()), None)
+        return next((v for v in (self.lightbox, self.terminal, self.kube, self.schema) if v.get_visible()), None)
 
     def start_feedback_capture(self, dialog):
         """The note's +: put the dialog away and show the Capture bar until a capture (or Cancel). With something over the

@@ -203,6 +203,11 @@ is at them, the terminal's edges glow in the accent, as a Bot's browser page doe
 Multiplex window, Baude's or Record's Kubernetes view) listens on a socket of its own beside the host process's, and the
 host process takes a Bot's requests to the one that has the terminal.
 
+☰ → Terminal (Baude and Record) opens a terminal over the window, as the Kubernetes view opens, on the host picked
+in the window's host dropdown: its host process runs it (the `terminal` op, any host of the mesh) and its bytes are
+drawn here, so it survives the view closing and comes back when it opens again. Its window button moves its tabs out
+to a window of their own; closing that window puts them back.
+
 ## Sessions on the network
 
 `baude-headless` is a machine's host process for Claude Code sessions: one for each user, which owns that user's

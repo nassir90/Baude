@@ -1,5 +1,5 @@
 {
-  "description": "The ☰ menu at the right end of the Baude main window's header bar: a plain list of 13 items, each one line, no icons. Items beside a check mark are toggles.",
+  "description": "The ☰ menu at the right end of the Baude main window's header bar: a plain list of 14 items, each one line, no icons. Items beside a check mark are toggles.",
   "apps": [
     "baude"
   ],
@@ -23,7 +23,8 @@
     "meta_settings",
     "fixes",
     "code_apart",
-    "hosts"
+    "hosts",
+    "multiplex"
   ],
   "phone": {
     "does": "⋮ in the chat's header bar, with the same items where they apply (the items with does: nothing aside)",
@@ -123,6 +124,19 @@
         {
           "by": "click",
           "does": "Opens the Kubernetes page, laid over the whole window"
+        }
+      ]
+    },
+    {
+      "name": "Terminal",
+      "shows": "Row \"Terminal\".",
+      "copy": [
+        "multiplex.terminal_menu"
+      ],
+      "actions": [
+        {
+          "by": "click",
+          "does": "Opens the Terminal view laid over the whole window, with a terminal on the host picked in the sidebar's host dropdown if it has none"
         }
       ]
     },

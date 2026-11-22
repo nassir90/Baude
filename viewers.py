@@ -68,13 +68,21 @@ class ViewerHost:
 
     def viewer_overlays(self, child):
         theming.load_css()
+        import terminalpane
         self.schema, self.kube = SchemaView(self), KubeView(self)
+        self.terminal = terminalpane.TerminalView(self, lambda: self.terminal_host())  # (☰ → Terminal)
         host = Gtk.Overlay(child=child)
         host.add_overlay(self.schema)
         host.add_overlay(self.kube)
+        host.add_overlay(self.terminal)
         self.lightbox = lightbox.Lightbox(self)  # (an image large: over all of it)
         host.add_overlay(self.lightbox)
         return host
+
+    def terminal_host(self):
+        """(where, name): the host a new terminal's on (this machine's; Record's: the one picked)."""
+        from sessionlist import THIS_MACHINE
+        return {"via": "local"}, THIS_MACHINE
 
     def image_source(self):
         """What the large image view goes through with ← and →: what's shown (Baude's: the chat, or its Feedback tab)."""

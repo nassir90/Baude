@@ -38,6 +38,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
@@ -234,13 +235,15 @@ fun through(depths: List<Int>): List<Set<Int>> {
 /** A nested row's part of its parents' lines, as Baude's TreeList draws them, one joined line per parent: down from
  * under the parent's title to its last child's middle, then a corner across to just short of that child's title;
  * through: the levels whose line runs on past this row. start: where the row's titles start in; lineX: how far into
- * a parent's title its line runs. */
-fun Modifier.treeLines(depth: Int, through: Set<Int>, color: Color, start: Dp = 6.dp, lineX: Dp = 5.dp): Modifier =
+ * a parent's title its line runs; root: where the top-level parent's anchor starts in (a Bot's picture is further
+ * out than a title). */
+fun Modifier.treeLines(depth: Int, through: Set<Int>, color: Color, start: Dp = 6.dp, lineX: Dp = 5.dp,
+                       root: Dp = start): Modifier =
     if (depth == 0) this else drawBehind {
         val w = 1.dp.toPx()
         val mid = (1.dp.toPx() + size.height) / 2 // (the title's middle: under the 1dp gap above the row)
         for (k in 0 until depth) {
-            val x = (start + lineX + 18.dp * k).toPx()
+            val x = ((if (k == 0) root else start + 18.dp * k) + lineX).toPx()
             if (k in through) drawRect(color, Offset(x, 0f), Size(w, size.height))
             else if (k == depth - 1) {
                 drawRect(color, Offset(x, 0f), Size(w, mid + w))
@@ -248,3 +251,10 @@ fun Modifier.treeLines(depth: Int, through: Set<Int>, color: Color, start: Dp = 
             }
         }
     }
+
+/** The top of a parent row's line to its children (TreeList's): down at x from 1dp under its anchor (the title, a
+ * Bot's picture) to the row's foot, where the first child's part of it carries on. under: the anchor's foot. */
+fun Modifier.treeStem(x: Dp, color: Color, under: DrawScope.() -> Float): Modifier = drawBehind {
+    val top = under() + 1.dp.toPx()
+    if (top < size.height) drawRect(color, Offset(x.toPx(), top), Size(1.dp.toPx(), size.height - top))
+}

@@ -48,6 +48,7 @@ import pointers  # noqa: E402
 import fontsetup  # noqa: E402  (the code font, and its size beside the prose)
 from baudelib.transcripts import ref_epoch, typed_at  # noqa: E402,F401  (Record and the viewers' too)
 from baudelib import tokens  # noqa: E402  (the measures and colours below: schema/tokens, the Android app's too)
+from baudelib import icons  # noqa: E402  (schema/icons: every app's icons, the Android app's too)
 from baudelib import wording  # noqa: E402
 
 
@@ -57,64 +58,15 @@ _scales = scales
 
 
 # A Signal link's logo, drawn just before it (LinkLabel): what it links to at a glance (git's, Kubernetes' helm,
-# a database, a graph for ArangoDB, a file…), in the text's own colour. 16×16, drawn at the text's size.
-_REF_WHEEL = "".join(  # (Kubernetes' helm: a heptagon, its wheel cut out of it)
-    f"M{8 + 1.15 * math.cos(a):.2f} {8 + 1.15 * math.sin(a):.2f}L{8 + 5.1 * math.cos(a):.2f} {8 + 5.1 * math.sin(a):.2f}"
-    for a in (-math.pi / 2 + 2 * math.pi * k / 7 for k in range(7)))
-_REF_HEPTAGON = "M" + "L".join(f"{8 + 7.6 * math.cos(a):.2f} {8 + 7.6 * math.sin(a):.2f}"
-                               for a in (-math.pi / 2 + 2 * math.pi * k / 7 for k in range(7))) + "Z"
-_REF_STROKE = 'fill="none" stroke="{c}" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round"'
-REF_ICON_SVG = {
-    "git": ('<defs><mask id="m"><rect width="16" height="16" fill="#fff"/><path d="M6.3 4.4v7.2M6.6 4.7l3.4 3.4" '
-            'stroke="#000" stroke-width="1.3"/><circle cx="6.3" cy="4.4" r="1.35"/><circle cx="6.3" cy="11.6" '
-            'r="1.35"/><circle cx="10.2" cy="8.3" r="1.35"/></mask></defs>'
-            '<path d="M8 .5 15.5 8 8 15.5.5 8z" fill="{c}" mask="url(#m)"/>'),
-    "k8s": (f'<defs><mask id="m"><rect width="16" height="16" fill="#fff"/><circle cx="8" cy="8" r="3.1" fill="none" '
-            f'stroke="#000" stroke-width="1.25"/><path d="{_REF_WHEEL}" stroke="#000" stroke-width="1.15" '
-            f'stroke-linecap="round"/><circle cx="8" cy="8" r="1.05"/></mask></defs>'
-            f'<path d="{_REF_HEPTAGON}" fill="{{c}}" mask="url(#m)"/>'),
-    "db": ('<defs><mask id="m"><rect width="16" height="16" fill="#fff"/><path d="M2.5 6.2c0 1.3 2.5 2.3 5.5 2.3s5.5-1 '
-           '5.5-2.3M2.5 10c0 1.3 2.5 2.3 5.5 2.3s5.5-1 5.5-2.3" stroke="#000" stroke-width="1.1" fill="none"/></mask>'
-           '</defs><path d="M2.5 3.5C2.5 2.2 5 1.2 8 1.2s5.5 1 5.5 2.3v9c0 1.3-2.5 2.3-5.5 2.3s-5.5-1-5.5-2.3z" '
-           'fill="{c}" mask="url(#m)"/>'),
-    "arango": (f'<path d="M4.3 4.6 11.6 6.4M4.3 4.6l2.4 7.3M11.6 6.4l-4.9 5.5" {_REF_STROKE}/><circle cx="4.3" '
-               'cy="4.6" r="2.3" fill="{c}"/><circle cx="11.6" cy="6.4" r="2.3" fill="{c}"/><circle cx="6.7" '
-               'cy="11.9" r="2.3" fill="{c}"/>'),  # (a graph: ArangoDB's collections)
-    "file": (f'<path d="M3.5 1.5h5.8l3.2 3.2v9.8h-9zM9 1.5V5h3.5" {_REF_STROKE}/>'),
-    "folder": (f'<path d="M1.5 3.5h4.5l1.5 1.5h7v8.5h-13z" {_REF_STROKE}/>'),
-    "page": (f'<path d="M3.5 1.5h9v13h-9zM5.8 5h4.4M5.8 8h4.4M5.8 11h2.6" {_REF_STROKE}/>'),  # (Record's notes)
-    "notebook": (f'<path d="M3.5 1.5h8.2a.8.8 0 0 1 .8.8v11.4a.8.8 0 0 1-.8.8H3.5zM5.6 1.5v13M7.8 5h2.6" '
-                 f'{_REF_STROKE}/>'),
-    "code": ('<path d="M6 2.5c-1.5 0-2 .6-2 2v1.6c0 .9-.5 1.4-1.5 1.4.9 0 1.5.5 1.5 1.4v1.6c0 1.4.5 2 2 2M10 2.5c1.5 0 2 '
-             '.6 2 2v1.6c0 .9.5 1.4 1.5 1.4-1 0-1.5.5-1.5 1.4v1.6c0 1.4-.5 2-2 2" fill="none" stroke="{c}" '
-             'stroke-width="1.6" stroke-linecap="round"/>'),
-    "env": ('<path d="M10.8 4.6C10.3 3.6 9.3 3 8 3 6.4 3 5.2 3.9 5.2 5.2c0 3 5.8 1.7 5.8 4.9 0 1.4-1.3 2.4-3 2.4-1.4 '
-            '0-2.6-.7-3.1-1.8M8 1.3v13.4" fill="none" stroke="{c}" stroke-width="1.5" stroke-linecap="round"/>'),
-    "route": (f'<circle cx="8" cy="8" r="6.2" {_REF_STROKE}/><path d="M1.8 8h12.4M8 1.8c-3.3 3.5-3.3 8.9 0 '
-              f'12.4M8 1.8c3.3 3.5 3.3 8.9 0 12.4" {_REF_STROKE}/>'),
-    "config": (f'<path d="M2 4h12M2 8h12M2 12h12" {_REF_STROKE}/><circle cx="5" cy="4" r="1.8" fill="{{c}}"/>'
-               '<circle cx="10.5" cy="8" r="1.8" fill="{c}"/><circle cx="6.5" cy="12" r="1.8" fill="{c}"/>'),
-    "cli": (f'<rect x="1.5" y="2.5" width="13" height="11" rx="2" {_REF_STROKE}/><path d="M4.5 6.5 7 8.5l-2.5 2M8.5 '
-            f'11h3" {_REF_STROKE}/>'),
-    "package": (f'<path d="M8 1.5 14 4.7v6.6L8 14.5 2 11.3V4.7zM2 4.7 8 8l6-3.3M8 8v6.5" {_REF_STROKE}/>'),
-    "service": ('<rect x="1.5" y="7" width="13" height="7" rx="1.8" fill="{c}"/><path d="M3 3.8h3v2.4H3zM6.6 3.8h3v2.4h-3z'
-                'M6.6.9h3v2.4h-3z" fill="{c}"/>'),
-    "issue": ('<path d="M6.4 2 4.8 14M11.2 2 9.6 14M2.6 5.7h11.4M2 10.3h11.4" fill="none" stroke="{c}" '
-              'stroke-width="1.6" stroke-linecap="round"/>'),  # (GitHub's: the # it goes by)
-    "claude": ('<path d="M8 1.5v13M2.4 4.8l11.2 6.4M2.4 11.2l11.2-6.4" fill="none" stroke="{c}" stroke-width="1.9" '
-               'stroke-linecap="round"/>'),
-    "external": (f'<path d="M9 2.5h4.5V7M13.5 2.5 7 9M11 9.5v3.5H3V5h3.5" {_REF_STROKE}/>'),
-}
+# a database, a graph for ArangoDB, a file…), in the text's own colour (currentColor). 16×16, drawn at the text's size:
+# schema/icons/links, by name.
+REF_ICON_SVG = {name: icons.svg("links", name) for name in icons.names("links")}
 # A pull request has a branch's logo, an issue its #, in a colour of their own for where they stand (lookup.github_icon),
 # light or dark: green while it's open, purple once merged, grey if it came to nothing (closed unmerged, or an issue
 # closed: an open issue is the text's colour, as most logos are).
 REF_ICON_SVG.update(pr_open=REF_ICON_SVG["git"], pr_merged=REF_ICON_SVG["git"], pr_closed=REF_ICON_SVG["git"],
                     issue_closed=REF_ICON_SVG["issue"])
 REF_ICON_TINTS = {"pr_open": "#2da44e", "pr_merged": "#8957e5", "pr_closed": "#8a8f98", "issue_closed": "#8a8f98"}
-# git's merge (two branches' ends, one bending into the other): a pull request's pill has it before its number
-REF_ICON_SVG["merge"] = (f'<circle cx="4.6" cy="3.3" r="1.85" {_REF_STROKE}/><circle cx="4.6" cy="12.7" r="1.85" '
-                         f'{_REF_STROKE}/><circle cx="11.6" cy="9" r="1.85" {_REF_STROKE}/><path d="M4.6 5.2v5.6M4.6 '
-                         f'5.2c0 2.3 1.6 3.8 5.1 3.8" {_REF_STROKE}/>')
 # A pull request's pill, in a reply and on the Git page, is in the colour of where it stands (lookup.pull_state), the
 # same light or dark (each reads on either), its patch that colour faint: green while it's open, grey while it's a
 # draft, red once a review asks for changes (whatever else it is: it's held up), purple once merged; closed without
@@ -131,12 +83,12 @@ _REF_ICON_OPS = {}
 
 def ref_icon_ops(icon):
     """A logo (REF_ICON_SVG) as what GSK draws, parsed once: [(Gsk.Path, fill or None, Gsk.Stroke or None, stroke or
-    None, mask ops or None)], the colours "c" (the text's), "#fff" or "#000". The SVG they use: path, circle and rect,
+    None, mask ops or None)], the colours currentColor (the text's), "#fff" or "#000". The SVG they use: path, circle and rect,
     filled or stroked (width, caps, joins), and a mask (white shows, black cuts) for a cut-out."""
     if icon in _REF_ICON_OPS:
         return _REF_ICON_OPS[icon]
     import xml.etree.ElementTree as ET
-    root = ET.fromstring(f'<svg xmlns="http://www.w3.org/2000/svg">{REF_ICON_SVG[icon].replace("{c}", "c")}</svg>')
+    root = ET.fromstring(REF_ICON_SVG[icon])
     ns = "{http://www.w3.org/2000/svg}"
     caps = {"round": Gsk.LineCap.ROUND, "square": Gsk.LineCap.SQUARE}
     joins = {"round": Gsk.LineJoin.ROUND, "bevel": Gsk.LineJoin.BEVEL}
@@ -190,7 +142,7 @@ def draw_ref_icon(snapshot, icon, x, y, size, rgba):
     if icon in REF_ICON_TINTS:
         rgba = Gdk.RGBA()
         rgba.parse(REF_ICON_TINTS[icon])
-    colors = {"c": rgba, "#fff": white, "#ffffff": white, "#000": black, "#000000": black}
+    colors = {"currentColor": rgba, "#fff": white, "#ffffff": white, "#000": black, "#000000": black}
 
     def paint(ops):
         for path, fill, stroke, stroke_color, mask in ops:
@@ -3112,89 +3064,30 @@ def with_image_link(image, text):
 
 
 # Icons baude draws itself follow the theme's symbolic style (16x16 grid, 2px strokes as filled
-# shapes), so GTK recolours them like any other icon and their weight matches the rest.
-BAUDE_SHAPES = {"baude-dot-symbolic": '<circle cx="8" cy="8" r="4.5"/>'}  # filled, not line icons
-
-
-BAUDE_ICONS = {
-    # Claude's logo (REF_ICON_SVG's "claude", its three strokes filled bars here): Baude's chat tab, Record's chats
-    "baude-claude-symbolic": ('<rect x="7.05" y="1.5" width="1.9" height="13" rx="0.95"/>'
-                              '<rect x="7.05" y="1.5" width="1.9" height="13" rx="0.95" transform="rotate(60 8 8)"/>'
-                              '<rect x="7.05" y="1.5" width="1.9" height="13" rx="0.95" transform="rotate(-60 8 8)"/>'),
-    # open: a box, its top right corner left open for an arrow out of it
-    "baude-open-symbolic": '<path d="M2 3h6v2H4v7h7V8h2v6H2z"/><path d="M9 1h6v6l-2.2-2.2-4.1 4.1-1.6-1.6 4.1-4.1z"/>',
-    # Enter / return: a stem down from the top right, then left to an arrowhead
-    "baude-return-symbolic": '<path d="M12 2h2v9H6.5V9H12z"/><path d="M2 10l5-4.5v9z"/>',
-    # a map pin as a 2px outline (the theme's is a solid blob, much heavier than its line icons)
-    "baude-map-symbolic": '<path fill-rule="evenodd" d="M8 1a5.5 5.5 0 0 1 5.5 5.5C13.5 10.4 8 15.5 8 15.5S2.5 '
-                          '10.4 2.5 6.5A5.5 5.5 0 0 1 8 1zm0 2a3.5 3.5 0 0 0-3.5 3.5c0 2.3 2.3 5.2 3.5 6.5 '
-                          '1.2-1.3 3.5-4.2 3.5-6.5A3.5 3.5 0 0 0 8 3z"/><circle cx="8" cy="6.5" r="1.5"/>',
-    # Meta's: a spanner, filled (Material's build icon, Apache-2.0, its 24-px drawing scaled to 16), in the right bar
-    "baude-meta-symbolic": '<g transform="scale(0.666667)"><path d="M22.7 19l-9.1-9.1c.9-2.3.4-5-1.5-6.9-2-2-5-2.4-7.4'
-                           '-1.3L9 6 6 9 1.6 4.7C.4 7.1.9 10.1 2.9 12.1c1.9 1.9 4.6 2.4 6.9 1.5l9.1 9.1c.4.4 1 .4 1.4 '
-                           '0l2.3-2.3c.5-.4.5-1.1.1-1.4z"/></g>',
-    # a log: four lines of text of different lengths (a pod's logs, in the Kubernetes view)
-    "baude-logs-symbolic": '<rect x="1" y="1" width="14" height="2" rx="1"/><rect x="1" y="5" width="9" height="2" '
-                           'rx="1"/><rect x="1" y="9" width="12" height="2" rx="1"/><rect x="1" y="13" width="7" '
-                           'height="2" rx="1"/>',
-}
-
-
-# the Kubernetes view's sidebar categories, as Freelens draws them: its own nodes, workloads and helm (MIT), and
-# the Material icons it uses for the rest (Apache-2.0): list, device_hub, storage, layers, access_time,
-# security, extension. Their 24-px (Helm's 500) drawings, scaled to 16
-KUBE_ICONS = {
-    "baude-kube-nodes-symbolic": '<g transform="scale(0.666667)"><path d="m8.7 4v16h6.7v-16zm3.3 13.3c-.3 0-.6-.3-.6-.6s.3-.6.6-.6.6.3.6.6-.3.6-.6.6zm2-6.8h-4v-1.2h4zm0-2.4h-4v-1.2h4z"/><path d="m16.6 5.1v13.8h6.2v-13.8zm2.9 11.2c-.3 0-.6-.3-.6-.6s.3-.6.6-.6.6.3.6.6-.1.6-.6.6zm1.7-4.9h-3.2v-1.3h3.2zm0-2.4h-3.2v-1.3h3.2z"/><path d="m1.2 5.1v13.8h6.2v-13.8zm3.3 11.2c-.3 0-.6-.3-.6-.6s.3-.7.6-.7.6.3.6.6-.3.7-.6.7zm1.5-4.9h-3.2v-1.3h3.2zm0-2.4h-3.2v-1.3h3.2z"/></g>',
-    "baude-kube-workloads-symbolic": '<g transform="scale(0.666667)"><path d="m12 7.47 4.25-2.47-4.25-2.44-4.25 2.44z"/><path d="m11.66 8.06-4.25-2.46v4.91l4.25 2.49z"/><path d="m12.34 8.06v4.94l4.25-2.45v-4.95z"/><path d="m16.93 15.94 4.26-2.45-4.26-2.49-4.25 2.45z"/><path d="m16.59 16.53-4.25-2.45v4.92l4.25 2.46z"/><path d="m17.26 16.53v4.91l4.26-2.44v-4.93z"/><path d="m7.07 15.94 4.25-2.45-4.25-2.49-4.25 2.49z"/><path d="m6.74 16.53-4.26-2.46v4.93l4.26 2.46z"/><path d="m7.41 16.53v4.91l4.25-2.44v-4.93z"/></g>',
-    "baude-kube-helm-symbolic": '<g transform="scale(0.032)"><path d="M136.52938,121.13478c-.572-.54252-1.19462-1.12636-1.81-1.71761-12.61677-12.12115-22.38092-26.13637-28.279-42.702-1.65073-4.63637-2.89692-9.36515-2.67587-14.35871.021-.4739.01959-.94915.05226-1.42214.445-6.44594,4.75912-9.70322,11.05839-8.17669a27.325,27.325,0,0,1,5.73149,2.19653c6.89022,3.45538,12.5062,8.56359,17.67051,14.16571a112.52651,112.52651,0,0,1,21.722,33.42965,8.29635,8.29635,0,0,0,.38946.861c.07116.12855.22232.21282.55927.51883A176.357,176.357,0,0,1,241.968,79.06864c-.17651-.8761-.28195-1.54571-.44772-2.2a112.49436,112.49436,0,0,1-2.65292-36.95637,84.07478,84.07478,0,0,1,4.44444-21.76378,31.32555,31.32555,0,0,1,5.47651-10.17139,15.687,15.687,0,0,1,3.16336-2.82149,7.026,7.026,0,0,1,8.03255-.056,17.27854,17.27854,0,0,1,5.8402,6.73185A53.05435,53.05435,0,0,1,271.08657,26.508a112.50469,112.50469,0,0,1,2.12263,33.00356,95.59806,95.59806,0,0,1-3.49052,19.91081c7.12171,1.31193,14.20955,2.32869,21.1473,3.97713a186.37909,186.37909,0,0,1,20.44069,6.0033A188.31671,188.31671,0,0,1,331.0769,97.9721c6.34538,3.16433,12.38553,6.94066,18.71757,10.53829.20571-.433.50439-.94982.706-1.50212A108.65959,108.65959,0,0,1,383.40128,60.246a37.75787,37.75787,0,0,1,11.822-6.883,17.24558,17.24558,0,0,1,3.67827-.84512c6.264-.71729,8.89351,3.2244,9.35653,7.93183a29.94372,29.94372,0,0,1-.77381,10.35466A87.90551,87.90551,0,0,1,396.75426,95.492c-6.79016,10.97178-14.85015,20.85494-25.09307,28.83042-.30234.2354-.56784.51814-1.07988.99029a177.77993,177.77993,0,0,1,26.59293,30.88244,10.96227,10.96227,0,0,1-1.689.29762c-10.59546.015-21.1911-.01829-31.78622.04607a4.004,4.004,0,0,1-3.17246-1.69,147.87522,147.87522,0,0,0-88.17776-46.54846,143.35862,143.35862,0,0,0-30.27955-1.16923,146.40735,146.40735,0,0,0-82.53728,31.81054,140.06663,140.06663,0,0,0-16.97616,15.84186,4.72839,4.72839,0,0,1-3.86326,1.75742c-10.12056-.07028-20.24188-.035-30.36293-.03495h-2.15212c.618-2.408,6.84026-10.93786,13.88352-18.55281C125.31349,132.2744,130.87768,126.8839,136.52938,121.13478Z"/><path d="M394.52934,347.9123a176.63854,176.63854,0,0,1-23.97343,27.16338c.70941.59068,1.28594,1.07041,1.86212,1.55057A108.31456,108.31456,0,0,1,406.10131,424.772a34.61831,34.61831,0,0,1,2.202,14.42026,14.88544,14.88544,0,0,1-.74786,3.69206,7.20762,7.20762,0,0,1-8.15793,5.02308,22.23329,22.23329,0,0,1-6.76276-2.00629,51.23237,51.23237,0,0,1-9.18151-5.8151,107.59183,107.59183,0,0,1-32.936-46.7072c-.18746-.51334-.39218-1.0204-.72243-1.87691a194.65008,194.65008,0,0,1-25.01223,14.00774,181.66925,181.66925,0,0,1-26.6869,9.72442,187.55649,187.55649,0,0,1-28.3045,5.38805c.16807.84015.26446,1.5098.43745,2.15907a109.172,109.172,0,0,1,2.9708,36.44311,80.804,80.804,0,0,1-4.42286,22.4773,78.24971,78.24971,0,0,1-4.16475,8.74473,13.39,13.39,0,0,1-2.33865,2.97083c-3.98009,4.109-8.73225,4.144-12.61157-.07366a27.28012,27.28012,0,0,1-3.907-5.61776c-3.07685-5.77569-4.6604-12.056-5.791-18.46021a116.86329,116.86329,0,0,1-1.35893-26.465,94.4795,94.4795,0,0,1,2.88466-19.18513c.14009-.53269.268-1.0696.37134-1.61034.02629-.13754-.06342-.2973-.17067-.73825a176.12108,176.12108,0,0,1-80.96855-24.99386c-.40992.90921-.76206,1.67473-1.10168,2.44579a110.47729,110.47729,0,0,1-30.90112,41.42041,38.16071,38.16071,0,0,1-12.04706,6.95909,12.08987,12.08987,0,0,1-6.51516.70023,7.11858,7.11858,0,0,1-5.40329-4.4892c-1.41614-3.424-1.16526-6.985-.68438-10.51691a55.45267,55.45267,0,0,1,4.30768-14.25037A112.49985,112.49985,0,0,1,134.88761,380.779c.459-.43461.92981-.857,1.38087-1.29954a3.76029,3.76029,0,0,0,.36534-.65529,178.90466,178.90466,0,0,1-28.469-31.31672c.98458-.08018,1.64327-.18,2.30205-.1806,10.51436-.00976,21.029.02736,31.54284-.04358a4.70554,4.70554,0,0,1,3.70344,1.62615,146.94611,146.94611,0,0,0,39.40276,28.88494,139.94667,139.94667,0,0,0,49.70395,14.77367q70.68048,6.87067,121.59971-42.85452a7.64571,7.64571,0,0,1,5.99261-2.44347c9.80139.12121,19.60512.04986,29.408.04986h2.53353Z"/><path d="M350.73576,197.76167c2.78711,0,5.47037.18919,8.11487-.0501,2.9951-.271,5.139.8001,7.32354,2.81308,12.61275,11.62214,25.35732,23.10129,38.05863,34.62729.63855.57948,1.29039,1.14432,2.1101,1.8701.76445-.65718,1.48119-1.24318,2.16483-1.8655Q428.14636,217.27914,447.756,199.37a5.44772,5.44772,0,0,1,4.20358-1.64576c3.21888.13038,6.44673.03746,9.8412.03746V303.13036c-1.72309.50368-24.8756.60366-27.63911.0611v-53.362l-.53656-.25427c-9.01079,8.21784-18.0216,16.43564-27.23786,24.8408-9.22584-8.31119-18.34194-16.52347-27.458-24.73577l-.52449.19192c-.023,4.45359-.00774,8.90828-.01046,13.36233q-.00408,6.63942-.00058,13.27882v26.87211h-27.428C350.45161,301.61243,350.21289,203.72342,350.73576,197.76167Z"/><path d="M97.63436,197.88229h27.26325c.55054,1.75251.65821,102.97139.09469,105.525H97.70468c-.15021-6.70344-.04736-13.38394-.06622-20.06131-.01871-6.62261-.0041-13.24531-.0041-20.03958H63.84679V303.047c-2.05946.61518-25.33374.67417-27.64758.123V197.89436H63.73742v37.18876c1.96793.56844,30.92319.67339,33.872.12942.00818-2.97713.02-6.02646.024-9.0758q.0063-4.7433.00094-9.4866,0-4.625,0-9.25C97.63437,204.32179,97.63436,201.24346,97.63436,197.88229Z"/><path d="M157.5757,303.3683V198.1946c1.617-.52913,61.545-.73586,65.46219-.20457v22.41432c-.87869.063-1.7857.18341-2.69279.18454q-16.0086.01994-32.01725.00881l-2.96767,0v17.43353H218.7067V261.2229H185.65838c-.55339,1.98509-.70531,15.81681-.25622,19.64583.84488.05679,1.75.16952,2.6553.17059q16.00862.01863,32.01727.00822h2.96945V303.3683Z"/><path d="M254.28291,303.40855c-.50074-2.82232-.39948-103.60181.09747-105.51735h27.16208v77.76453c1.17173.06084,2.09122.14921,3.01077.15005q16.128.01468,32.2561.00658c.92562,0,1.85125,0,2.90733,0v27.59622Z"/></g>',
-    "baude-kube-config-symbolic": '<g transform="scale(0.666667)"><path d="M3 13h2v-2H3v2zm0 4h2v-2H3v2zm0-8h2V7H3v2zm4 4h14v-2H7v2zm0 4h14v-2H7v2zM7 7v2h14V7H7z"/></g>',
-    "baude-kube-network-symbolic": '<g transform="scale(0.666667)"><path d="m17 16-4-4V8.82C14.16 8.4 15 7.3 15 6c0-1.66-1.34-3-3-3S9 4.34 9 6c0 1.3.84 2.4 2 2.82V12l-4 4H3v5h5v-3.05l4-4.2 4 4.2V21h5v-5h-4z"/></g>',
-    "baude-kube-storage-symbolic": '<g transform="scale(0.666667)"><path d="M2 20h20v-4H2v4zm2-3h2v2H4v-2zM2 4v4h20V4H2zm4 3H4V5h2v2zm-4 7h20v-4H2v4zm2-3h2v2H4v-2z"/></g>',
-    "baude-kube-namespaces-symbolic": '<g transform="scale(0.666667)"><path d="m11.99 18.54-7.37-5.73L3 14.07l9 7 9-7-1.63-1.27-7.38 5.74zM12 16l7.36-5.73L21 9l-9-7-9 7 1.63 1.27L12 16z"/></g>',
-    "baude-kube-events-symbolic": '<g transform="scale(0.666667)"><path d="M11.99 2C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zM12 20c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8z"/><path d="M12.5 7H11v6l5.25 3.15.75-1.23-4.5-2.67z"/></g>',
-    "baude-kube-users-symbolic": '<g transform="scale(0.666667)"><path d="M12 1 3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4zm0 10.99h7c-.53 4.12-3.28 7.79-7 8.94V12H5V6.3l7-3.11v8.8z"/></g>',
-    "baude-kube-crds-symbolic": '<g transform="scale(0.666667)"><path d="M20.5 11H19V7c0-1.1-.9-2-2-2h-4V3.5a2.5 2.5 0 0 0-5 0V5H4c-1.1 0-1.99.9-1.99 2v3.8H3.5c1.49 0 2.7 1.21 2.7 2.7s-1.21 2.7-2.7 2.7H2V20c0 1.1.9 2 2 2h3.8v-1.5c0-1.49 1.21-2.7 2.7-2.7 1.49 0 2.7 1.21 2.7 2.7V22H17c1.1 0 2-.9 2-2v-4h1.5a2.5 2.5 0 0 0 0-5z"/></g>',
-    # the known custom resources' categories, Material's too: open_in_full (KEDA's scaling), lock (cert-manager's
-    # certificates), show_chart (the Prometheus Operator's monitoring)
-    "baude-kube-scaling-symbolic": '<g transform="scale(0.666667)"><path d="M21 11V3h-8l3.29 3.29-10 10L3 13v8h8l-3.29-3.29 10-10z"/></g>',
-    "baude-kube-certificates-symbolic": '<g transform="scale(0.666667)"><path d="M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zm-6 9c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2zm3.1-9H8.9V6c0-1.71 1.39-3.1 3.1-3.1 1.71 0 3.1 1.39 3.1 3.1v2z"/></g>',
-    "baude-kube-monitoring-symbolic": '<g transform="scale(0.666667)"><path d="M3.5 18.49l6-6.01 4 4L22 6.92l-1.41-1.41-7.09 7.97-4-4L2 16.99z"/></g>',
-}
+# shapes), so GTK recolours them like any other icon and their weight matches the rest: schema/icons/baude. The
+# Kubernetes view's sidebar categories, as Freelens draws them: schema/icons/kube.
+BAUDE_ICONS = icons.names("baude")
+KUBE_ICONS = icons.names("kube")
 
 
 def ensure_icons():
-    """Write baude's icons where the icon theme looks for them, and put Adwaita's behind the desktop's theme
-    (once per run)."""
+    """Put baude's icons where the icon theme looks for them, and Adwaita's behind the desktop's theme (once per
+    run)."""
     display = Gdk.Display.get_default()
     if display is None or getattr(ensure_icons, "done", False):
         return
-    base = os.environ.get("XDG_CACHE_HOME") or os.path.expanduser("~/.cache")
-    folder = os.path.join(base, "baude", "icons")
     theme = Gtk.IconTheme.get_for_display(display)
-    try:
-        os.makedirs(folder, exist_ok=True)
-        for name, body in {**BAUDE_ICONS, **BAUDE_SHAPES, **KUBE_ICONS}.items():
-            svg = ('<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">'
-                   f'<g fill="#2e3436">{body}</g></svg>')
-            path = os.path.join(folder, f"{name}.svg")
-            try:
-                with open(path) as f:
-                    same = f.read() == svg
-            except OSError:
-                same = False
-            if not same:
-                with open(path, "w") as f:
-                    f.write(svg)
-    except OSError as e:  # (a cache that can't be written: the app starts all the same, Adwaita's icons still found)
-        print("baude: couldn't write its icons:", e, file=sys.stderr)
-    theme.add_search_path(folder)
+    theme.add_search_path(icons.folder("baude"))
+    theme.add_search_path(icons.folder("kube"))
     # GTK 4 looks only in the desktop's icon theme and hicolor, not Adwaita, so under another theme (Breeze,
     # Papirus…) an Adwaita name that theme lacks draws nothing. Adwaita's own folders, searched after every theme,
-    # fill those in; a name the desktop's theme has is still drawn from it.
+    # fill those in; a name the desktop's theme has is still drawn from it. Last, schema/icons/adwaita (the ones the
+    # phone draws), for a machine without Adwaita.
     for root in theme.get_search_path():
         for sub in sorted(glob.glob(os.path.join(root, "Adwaita", "symbolic", "*"))):
             if os.path.isdir(sub):
                 theme.add_search_path(sub)
+    theme.add_search_path(icons.folder("adwaita"))
     ensure_icons.done = True
 
 
@@ -8181,7 +8074,7 @@ class ChoiceDropDown(Gtk.DropDown):
 
 
 # Each model's family, by what its value or name says (the first that matches): the monotone icon its row in a model
-# picker shows (vendor/model-icons) and the heading it's listed under. Claude's by its own names too.
+# picker shows (schema/icons/models) and the heading it's listed under. Claude's by its own names too.
 MODEL_FAMILIES = [
     ("claude", "Claude", r"claude|opus|sonnet|haiku|fable|^default$"),
     ("qwen", "Qwen", r"qwen|qwq"),
@@ -8206,7 +8099,7 @@ MODEL_FAMILIES = [
     ("baichuan", "Baichuan", r"baichuan"),
     ("apple", "Apple", r"^apple$|apple/|apple-foundation"),
 ]
-MODEL_ICONS = os.path.join(os.path.dirname(os.path.realpath(__file__)), "vendor", "model-icons")
+MODEL_ICONS = icons.folder("models")
 
 
 def model_family(value, label=""):

@@ -28,6 +28,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -51,6 +52,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.delay
+import kotlin.math.roundToInt
 import org.json.JSONObject
 import java.util.Base64
 
@@ -63,12 +65,15 @@ class Watch(private val hostId: String, private val bot: Msg.BotRef) {
     val status = mutableStateOf("connecting") // (connecting, watching, failed, stopped)
     val why = mutableStateOf<String?>(null)
     @Volatile var size = IntSize(1080, 1600)
+    val round = mutableIntStateOf(0) // (one more each watch's first state: the page fitted again for each)
+    @Volatile private var fresh = false
     private var conn: Connection? = null
 
     fun start() {
         conn = Mesh.watch(hostId, ::heard) { c ->
             if (c.state == "up") {
                 status.value = "connecting"
+                fresh = true
                 c.send(Msg.EmissionWatch(req = REQ, bot = bot, maxW = size.width.coerceAtLeast(200),
                     maxH = size.height.coerceAtLeast(200)).json())
             } else if (c.state == "down" && status.value == "watching") {
@@ -100,7 +105,14 @@ class Watch(private val hostId: String, private val bot: Msg.BotRef) {
             Op.EMISSION_WATCH_END -> Mesh.post { status.value = "stopped" }
             Op.EMISSION_FRAME -> {
                 val f = Msg.EmissionFrame.from(msg)
-                f.state?.let { s -> Mesh.post { state.value = s } }
+                f.state?.let { s ->
+                    val first = fresh
+                    fresh = false
+                    Mesh.post {
+                        state.value = s
+                        if (first) round.intValue++
+                    }
+                }
                 f.error?.let { e -> Mesh.post { status.value = "failed"; why.value = e } }
                 val jpeg = f.jpeg.orEmpty()
                 if (jpeg.isEmpty()) return
@@ -180,14 +192,13 @@ fun BrowserPage(hostId: String, sid: String, name: String, here: Boolean) {
     val tab = state?.selected?.ifBlank { null }
     val now = state?.now
     val agent = state?.agent == true
-    LaunchedEffect(agent, readOnly, picture) { // (the page made the picture's size, while the Bot's own browser's watched)
-        if (!agent || picture.width == 0) return@LaunchedEffect
+    LaunchedEffect(agent, readOnly, picture, watch.round.intValue) { // (the page made the picture's size, while the
+        if (!agent || picture.width == 0) return@LaunchedEffect          // Bot's own browser's watched: each watch's own)
         delay(300)
         if (readOnly) calls.call(JSONObject().put("op", "resize").put("restore", true))
-        else with(density) {
-            calls.call(JSONObject().put("op", "resize").put("width", picture.width.toDp().value.toInt().coerceAtLeast(200))
-                .put("height", picture.height.toDp().value.toInt().coerceAtLeast(200)).put("fit", true))
-        }
+        else calls.call(JSONObject().put("op", "resize").put("width", (picture.width / density.density).roundToInt()
+            .coerceAtLeast(200)).put("height", (picture.height / density.density).roundToInt().coerceAtLeast(200))
+            .put("fit", true))
     }
     fun call(o: JSONObject) {
         if (readOnly || phoned) return
@@ -242,7 +253,7 @@ fun BrowserPage(hostId: String, sid: String, name: String, here: Boolean) {
         // the page: inside the frame, the picture letterboxed in it
         Box(Modifier.fillMaxSize().padding(start = Gap.inside, end = Gap.inside, bottom = Gap.inside)
             .border(if (acting) 2.dp else 1.dp, if (acting) c.accentBg else c.rule).background(c.inside)
-            .padding(if (acting) 2.dp else 1.dp).onSizeChanged { picture = it }) {
+            .padding(1.dp).onSizeChanged { picture = it }) { // (the same size while the Bot acts: its border over the edge)
             val bmp = watch.frame.value
             if (phoned) {
                 StatusPage(Adwaita.WebBrowser, Wording.BotBrowser.onPhoneTitle,

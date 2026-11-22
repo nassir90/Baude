@@ -1,14 +1,17 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
-  "description": "A session's folder's git, read only (nothing fetched): log (the host's own checkout's too, for a changelog), card (sha), diff (sha, path?).",
+  "description": "A session's folder's git: log (the host's own checkout's too, for a changelog), card (sha), diff (sha, path?), page (the Git page's whole read, fetching first and asking gh if asked), pulls (GitHub's pull requests, asked of gh).",
   "properties": {
     "op": {
       "const": "git",
       "description": "What it is."
     },
     "req": {
-      "type": ["integer", "null"],
+      "type": [
+        "integer",
+        "null"
+      ],
       "description": "The request's number, the client's pick: its answers carry it back."
     },
     "cwd": {
@@ -16,7 +19,13 @@
       "description": "The folder."
     },
     "what": {
-      "enum": ["log", "card", "diff"],
+      "enum": [
+        "log",
+        "card",
+        "diff",
+        "page",
+        "pulls"
+      ],
       "description": "What to read."
     },
     "rev": {
@@ -25,7 +34,7 @@
     },
     "limit": {
       "type": "integer",
-      "description": "log: how many."
+      "description": "log: how many. page: at least how many commits."
     },
     "skip": {
       "type": "integer",
@@ -38,8 +47,61 @@
     "path": {
       "type": "string",
       "description": "diff: one file's only."
+    },
+    "session": {
+      "type": "string",
+      "description": "page: the chat whose transcript says what it touched."
+    },
+    "revs": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "page: the branches picked. log: what to read, a ^sha allowed."
+    },
+    "follow": {
+      "type": "boolean",
+      "description": "page: the branches the chat touched."
+    },
+    "every": {
+      "type": "boolean",
+      "description": "page, log: every branch, remote branch and tag."
+    },
+    "first_parent": {
+      "type": "boolean",
+      "description": "log: only the commits made on the branches themselves."
+    },
+    "fetch": {
+      "type": "boolean",
+      "description": "page: git fetch first, GitHub read afresh."
+    },
+    "then": {
+      "type": "string",
+      "description": "page: a commit to find, from a link."
+    },
+    "repo": {
+      "type": "string",
+      "description": "pulls: owner/name, else the folder's own."
+    },
+    "head": {
+      "type": "string",
+      "description": "pulls: a branch whose pull request is wanted."
+    },
+    "people": {
+      "type": "boolean",
+      "description": "pulls: GitHub's pictures of the repository's authors."
+    },
+    "fresh": {
+      "type": "boolean",
+      "description": "pulls: read afresh."
+    },
+    "github": {
+      "type": "boolean",
+      "description": "card: GitHub's part only (the author's login, its pull requests)."
     }
   },
-  "required": ["op"],
+  "required": [
+    "op"
+  ],
   "additionalProperties": false
 }

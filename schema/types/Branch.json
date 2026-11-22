@@ -4,11 +4,17 @@
   "description": "A checkout's branch.",
   "properties": {
     "name": {
-      "type": ["string", "null"],
+      "type": [
+        "string",
+        "null"
+      ],
       "description": "Its name."
     },
     "upstream": {
-      "type": ["string", "null"],
+      "type": [
+        "string",
+        "null"
+      ],
       "description": "What it tracks."
     },
     "ahead": {
@@ -18,6 +24,40 @@
     "behind": {
       "type": "integer",
       "description": "Commits behind it."
+    },
+    "rev": {
+      "type": "string",
+      "description": "What names it to git."
+    },
+    "label": {
+      "type": "string",
+      "description": "How the branch list names it."
+    },
+    "sha": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Its tip."
+    },
+    "gone": {
+      "type": "boolean",
+      "description": "Its upstream is gone from the remote."
+    },
+    "worktree": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "The checkout it's in."
+    },
+    "remote": {
+      "type": "boolean",
+      "description": "A remote branch."
+    },
+    "touched": {
+      "type": "boolean",
+      "description": "This chat touched it (the list's first part)."
     }
   },
   "additionalProperties": false

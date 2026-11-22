@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "A commit a chat's own commands made.",
+  "properties": {
+    "sha": {
+      "type": "string",
+      "description": "Its sha, as the command's output wrote it (short)."
+    },
+    "subject": {
+      "type": "string",
+      "description": "Its first line."
+    },
+    "tool_use_id": {
+      "type": "string",
+      "description": "The tool call that made it."
+    },
+    "branch": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "The branch it was made on."
+    }
+  },
+  "additionalProperties": false
+}

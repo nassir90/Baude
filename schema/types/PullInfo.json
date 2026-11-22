@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "A GitHub pull request, as the Git page keeps it.",
+  "properties": {
+    "number": {
+      "type": "integer",
+      "description": "Its number."
+    },
+    "title": {
+      "type": "string",
+      "description": "Its title."
+    },
+    "state": {
+      "type": "string",
+      "description": "Where it stands: open, draft, changes, merged or closed."
+    },
+    "url": {
+      "type": "string",
+      "description": "Its page."
+    },
+    "head": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "The branch it's from (null for a fork's)."
+    }
+  },
+  "additionalProperties": false
+}

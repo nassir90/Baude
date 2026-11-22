@@ -195,7 +195,22 @@ private fun linkPaths(escaped: String, place: ChatPlace?): String = if (place ==
 
 /** widgets.link_markup: a link to a file or folder (a target with no scheme), an artifact (read as its title) or a
  * URL. markup: the link's text as markup already. */
-private fun linkMarkup(place: ChatPlace?, url: String, text: String?, markup: String?): String {
+private val PR_URL = Regex("https://github\\.com/([\\w.-]+/[\\w.-]+)/pull/(\\d+)(?:[/?#]\\S*)?")
+private val PR_NUMBERED = Regex("(?<![\\w&;#/.-])(?:(?:PR|pull request) ?)?(?:[\\w.-]+/[\\w.-]+)?#(\\d+)(?![\\w-])", RegexOption.IGNORE_CASE)
+private val BARE_PR = Regex("(?<![$W&#/.-])#(\\d{1,7})(?![$W-])")
+
+/** widgets.pr_link_markup: a pull request's link as a pill (its state, its number), when its repository's are known. */
+private fun prPill(place: ChatPlace?, url: String, text: String?): String? {
+    place ?: return null
+    val m = PR_URL.matchEntire(url) ?: return null
+    val n = m.groupValues[2].toInt()
+    val (state, _) = PullStates.link(place, m.groupValues[1], n) ?: return null
+    val label = PR_NUMBERED.replace(text ?: n.toString()) { if (it.groupValues[1].toInt() == n) n.toString() else it.value }
+    return "<pill state=\"${state ?: "unknown"}\" href=\"${escAttr(url)}\">${esc(label)}</pill>"
+}
+
+private fun linkMarkup(place: ChatPlace?, url: String, text: String?, markup: String?, pills: Boolean = false): String {
+    if (pills) prPill(place, url, text)?.let { return it }
     val inner = markup ?: esc(text ?: url)
     if ("://" !in url && (!SCHEME.containsMatchIn(url) || PATH.matches(url)) || url.startsWith("file:")) {
         place ?: return inner
@@ -225,7 +240,7 @@ private fun emphasis(text: String): String {
 
 /** widgets._inline_markup: a line's inline markdown as markup (<b> <i> <s> <code> <a kind href line>). Code spans and
  * links are set aside first, as placeholders, so emphasis goes round them: **`name`** is bold code. */
-internal fun inlineMarkup(text: String, place: ChatPlace?): String {
+internal fun inlineMarkup(text: String, place: ChatPlace?, pills: Boolean = false): String {
     val marks = ArrayList<String>()
     val bare = ArrayList<String>()
     fun keep(markup: String, plain: String? = null): String {
@@ -241,9 +256,13 @@ internal fun inlineMarkup(text: String, place: ChatPlace?): String {
     }
     if ("](" in p) p = MD_LINK.replace(p) { m ->
         val inner = KEPT.replace(emphasis(esc(m.groupValues[1]))) { bare[it.groupValues[1].toInt()] }
-        keep(linkMarkup(place, m.groupValues[2], m.groupValues[1], inner))
+        keep(linkMarkup(place, m.groupValues[2], m.groupValues[1], inner, pills))
     }
-    if ("://" in p) p = BARE_URL.replace(p) { keep(linkMarkup(place, it.groupValues[1], null, null)) }
+    if ("://" in p) p = BARE_URL.replace(p) { keep(linkMarkup(place, it.groupValues[1], null, null, pills)) }
+    if (pills && place != null && '#' in p) p = BARE_PR.replace(p) { m ->
+        val pr = PullStates.bare(place, m.groupValues[1].toInt())
+        if (pr == null) m.value else keep("<pill state=\"${pr.state ?: "unknown"}\" href=\"${escAttr(pr.url.orEmpty())}\">${m.groupValues[1]}</pill>")
+    }
     if (place != null) p = REF_PLAIN.replace(p) { m -> refLink(m.value, esc(m.value), false, place)?.let { keep(it) } ?: m.value }
     if ("--" in p) p = EM_DASH.replace(p, "—")
     val s = emphasis(linkPaths(esc(p), place))
@@ -252,6 +271,8 @@ internal fun inlineMarkup(text: String, place: ChatPlace?): String {
 
 private val TAG = Regex("""<(/?)(b|i|s|code|a)((?: [a-z]+="[^"]*")*)>""")
 private val ATTR = Regex(""" ([a-z]+)="([^"]*)"""")
+private val PILL = Regex("""<pill state="([^"]*)" href="([^"]*)">(.*?)</pill>""")
+private val PILL_MARK = Regex("(\\d+)")
 
 /** inlineMarkup's markup as styled text: links in the accent, underlined; a file's or a folder's goes to file, a
  * URL's to open. */
@@ -261,8 +282,25 @@ internal fun annotate(markup: String, accent: Color, open: (String) -> Unit, fil
         val open_ = ArrayList<String>()
         val counts = ArrayList<String?>() // (an open link's count of matches, shown after its text while a Signal link has several)
         var at = 0
-        for (m in TAG.findAll(markup)) {
-            append(unesc(markup.substring(at, m.range.first)))
+        // (a pill's markup set aside as a marker, drawn as its own piece where the text's appended)
+        val pills = ArrayList<MatchResult>()
+        val source = if ("<pill " !in markup) markup else PILL.replace(markup) { m ->
+            pills.add(m)
+            "${pills.size - 1}"
+        }
+        fun text(s: String) {
+            var from = 0
+            for (m in PILL_MARK.findAll(s)) {
+                append(unesc(s.substring(from, m.range.first)))
+                val p = pills[m.groupValues[1].toInt()]
+                pill(unesc(p.groupValues[3]), p.groupValues[1].takeIf { it != "unknown" }, unesc(p.groupValues[2]),
+                    minOf(1f, Tokens.Font.monoScale.toFloat()))
+                from = m.range.last + 1
+            }
+            append(unesc(s.substring(from)))
+        }
+        for (m in TAG.findAll(source)) {
+            text(source.substring(at, m.range.first))
             at = m.range.last + 1
             val tag = m.groupValues[2]
             if (m.groupValues[1] == "/") {
@@ -311,7 +349,7 @@ internal fun annotate(markup: String, accent: Color, open: (String) -> Unit, fil
                 }
             }
         }
-        append(unesc(markup.substring(at)))
+        text(source.substring(at))
         while (open_.isNotEmpty()) {
             open_.removeAt(open_.size - 1)
             pop()
@@ -323,15 +361,15 @@ private val inlineCache = LruCache<List<Any?>, AnnotatedString>(1024)
 /** A text's inline markdown (each line of it its own), as styled text; drawn again when the paths it names are
  * learned of. */
 @Composable
-internal fun rememberInline(text: String): AnnotatedString {
+internal fun rememberInline(text: String, pills: Boolean = false): AnnotatedString {
     val place = LocalChatPlace.current
     val c = LocalBaude.current
     val uri = LocalUriHandler.current
-    val known = if (place != null) PathCheck.version.intValue else 0
+    val known = (if (place != null) PathCheck.version.intValue else 0) + (if (pills) PullStates.version.intValue * 100_003 else 0)
     val signal = if (place?.sid != null) SignalNames.version.intValue * 1000 + SignalChats.version.intValue else 0
-    return remember(text, place, known, signal, c.accent) {
-        val key = listOf(text, place, known, signal, c.accent)
-        inlineCache.get(key) ?: annotate(text.split("\n").joinToString("\n") { inlineMarkup(it, place) }, c.accent,
+    return remember(text, place, known, signal, c.accent, pills) {
+        val key = listOf(text, place, known, signal, c.accent, pills)
+        inlineCache.get(key) ?: annotate(text.split("\n").joinToString("\n") { inlineMarkup(it, place, pills) }, c.accent,
             { url -> try { uri.openUri(url) } catch (_: Exception) {} },
             { path, line, dir -> place?.let { FileLinks.open(Wanted(it.hostId, path, line, dir)) } },
             { name -> SignalLinks.tap(name) }).also { inlineCache.put(key, it) }
@@ -351,23 +389,21 @@ fun MarkdownView(text: String, color: Color = LocalBaude.current.fg, under: Colo
     val markerWidth = remember(density) { with(density) { measure.measure("00", Type.body.copy(fontWeight = FontWeight.Bold)).size.width.toDp() } }
     Column(verticalArrangement = Arrangement.spacedBy(Tokens.Markdown.block)) {
         for (b in blocks) when (b) {
-            is Block.Para -> Text(rememberInline(b.lines.joinToString("\n")).found(), style = Type.body, color = color,
-                inlineContent = RefIcons.inline)
-            is Block.Heading -> Text(rememberInline(b.text).found(), color = color, inlineContent = RefIcons.inline, style = Type.body.copy(
+            is Block.Para -> PillText(rememberInline(b.lines.joinToString("\n"), pills = true).found(), style = Type.body, color = color)
+            is Block.Heading -> PillText(rememberInline(b.text, pills = true).found(), color = color, style = Type.body.copy(
                 fontSize = Type.body.fontSize * when (b.level) { 1 -> Tokens.Markdown.h1.toFloat(); 2 -> Tokens.Markdown.h2.toFloat(); else -> 1f },
                 fontWeight = FontWeight.Bold))
             is Block.Item -> Row(Modifier.padding(start = Tokens.Markdown.itemStart + Tokens.Markdown.indentStep * b.depth),
                 horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text(b.marker, style = Type.body.copy(fontWeight = FontWeight.Bold), color = color,
                     textAlign = TextAlign.End, modifier = Modifier.widthIn(min = markerWidth).alpha(Tokens.Markdown.markerOpacity.toFloat()))
-                Text(rememberInline(b.text).found(), style = Type.body, color = color, modifier = Modifier.weight(1f),
-                    inlineContent = RefIcons.inline)
+                PillText(rememberInline(b.text, pills = true).found(), style = Type.body, color = color, modifier = Modifier.weight(1f))
             }
             is Block.Quote -> Row(Modifier.height(IntrinsicSize.Min)) {
                 Box(Modifier.width(Tokens.Markdown.quoteRule).fillMaxHeight()
                     .background(c.fg.copy(alpha = c.fg.alpha * Tokens.Markdown.quoteRuleOpacity.toFloat())))
                 Spacer(Modifier.width(Tokens.Markdown.quotePad - Tokens.Markdown.quoteRule))
-                Text(rememberInline(b.text).found(), style = Type.body, color = color, inlineContent = RefIcons.inline,
+                PillText(rememberInline(b.text, pills = true).found(), style = Type.body, color = color,
                     modifier = Modifier.weight(1f).alpha(Tokens.Markdown.quoteOpacity.toFloat()))
             }
             Block.Rule -> Box(Modifier.padding(vertical = Tokens.Markdown.ruleGap).fillMaxWidth().height(1.dp).background(c.rule))

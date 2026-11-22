@@ -25,6 +25,8 @@ import dev.baude.android.Host
 import dev.baude.android.Key
 import dev.baude.android.BotSettings
 import dev.baude.android.FeedbackScreen
+import dev.baude.android.GitAvatars
+import dev.baude.android.GitPages
 import dev.baude.android.FileLinks
 import dev.baude.android.FilesPrefs
 import dev.baude.android.Fixes
@@ -80,6 +82,9 @@ abstract class Parity(private val theme: String, private val scene: String) {
     @Before fun up() {
         val sc = scenes().first { it.getString("name") == scene }
         files = sc.optString("files").ifBlank { null }
+        gitScene = sc.optJSONObject("git")
+        github = sc.optBoolean("github")
+        GitAvatars.off = true
         signal = sc.optString("signal").ifBlank { null }?.let { JSONObject(File(root, "fixtures/$it").readText()).getJSONArray("refs") }
         subagents = sc.optString("subagents").ifBlank { null }
         FilesPrefs.gallery.value = false
@@ -142,6 +147,59 @@ abstract class Parity(private val theme: String, private val scene: String) {
 
     /** The scene's `files`: a folder of fixtures whose contents join the chat's folder (as the desktop rig copies them in). */
     private var files: String? = null
+
+    /** The scene's `git` (the garden is a repository: pick, every, branches, commit) and `github` (gh signed in). */
+    private var gitScene: JSONObject? = null
+    private var github = false
+    private val gitAnswers by lazy { JSONObject(File(root, "fixtures/git-answers.json").readText()).getJSONObject("answers") }
+    private val githubFixture by lazy { JSONObject(File(root, "fixtures/github.json").readText()) }
+
+    /** git's answers (the garden's repository, recorded by tests/parity/gitfixture.py), with GitHub's part when gh is signed in. */
+    private fun gitAnswer(msg: JSONObject, reply: (Array<out Pair<String, Any?>>) -> JSONObject): JSONObject {
+        val what = msg.optString("what")
+        val failed = reply(arrayOf("what" to what, "error" to Wording.HostErrors.gitFailed))
+        val gh = githubFixture
+        if (gitScene == null && !(github && what == "pulls")) return if (what == "pulls") reply(arrayOf("what" to what, "repo" to null, "prs" to null, "gh" to false))
+            else reply(arrayOf("what" to what, "error" to Wording.HostErrors.notARepo))
+        when (what) {
+            "pulls" -> {
+                if (!github) return reply(arrayOf("what" to what, "repo" to msg.optString("repo").ifBlank { gh.getString("repo") }, "prs" to null, "gh" to false))
+                val out = reply(arrayOf("what" to what, "repo" to gh.getString("repo"), "prs" to gh.getJSONArray("prs"), "gh" to true))
+                if (msg.has("head") || msg.optBoolean("people")) {
+                    out.put("signed_in", true).put("avatars", JSONObject())
+                    val prs = gh.getJSONArray("prs")
+                    (0 until prs.length()).map { prs.getJSONObject(it) }.firstOrNull { it.optString("head") == msg.optString("head") }?.let {
+                        out.put("pr", JSONObject(it.toString()).put("head", JSONObject.NULL))
+                    }
+                }
+                return out
+            }
+            "page" -> {
+                val key = "page" + (if (msg.optBoolean("every")) "|every" else "") +
+                    (if (!msg.optBoolean("follow", true)) "|" + (0 until (msg.optJSONArray("revs")?.length() ?: 0)).joinToString(",") { msg.getJSONArray("revs").getString(it) } else "")
+                val a = gitAnswers.optJSONObject(key) ?: return failed
+                val out = JSONObject(a.toString().replace("@HOME@", home)).put("op", "git").put("req", msg.opt("req"))
+                if (github) out.put("prs", gh.getJSONArray("prs"))
+                return out
+            }
+            "card" -> {
+                val sha = msg.optString("sha")
+                val full = gitAnswers.keys().asSequence().firstOrNull { it.startsWith("card|") && it.removePrefix("card|").startsWith(sha) }
+                val a = full?.let { gitAnswers.getJSONObject(it) } ?: return failed
+                if (msg.optBoolean("github")) {
+                    if (!github) return reply(arrayOf("what" to what, "sha" to sha))
+                    val pulls = gh.getJSONArray("commit_pulls")
+                    val prs = gh.getJSONArray("prs")
+                    val mine = (0 until pulls.length()).map { pulls.getInt(it) }
+                    return reply(arrayOf("what" to what, "sha" to sha, "login" to gh.getJSONObject("logins").optString(a.optString("email")).ifBlank { null },
+                        "prs" to JSONArray((0 until prs.length()).map { prs.getJSONObject(it) }.filter { it.getInt("number") in mine })))
+                }
+                return JSONObject(a.toString().replace("@HOME@", home)).put("op", "git").put("req", msg.opt("req"))
+            }
+            "log" -> return reply(arrayOf("what" to what, "commits" to JSONArray(), "skip" to 0, "more" to false))
+        }
+        return failed
+    }
 
     /** The scene's `signal`: the names the folder's Signal glossary has (signal_names answers them), none without. */
     private var signal: JSONArray? = null
@@ -212,7 +270,7 @@ abstract class Parity(private val theme: String, private val scene: String) {
                 return reply("op" to "file", "path" to path, "size" to all.size, "truncated" to (all.size > limit),
                     "data" to java.util.Base64.getEncoder().encodeToString(all.takeLast(limit).toByteArray()))
             }
-            "git" -> return reply("what" to msg.optString("what"), "error" to Wording.HostErrors.notARepo)
+            "git" -> return gitAnswer(msg) { more -> reply(*more) }
             "signal_names" -> return reply("glossary" to "$home/garden/.baude", "root" to "$home/garden",
                 "refs" to (signal ?: JSONArray()))
             // (what Baude answers with its own functions: tests/parity/host.py, a throwaway process for each request)
@@ -305,8 +363,34 @@ abstract class Parity(private val theme: String, private val scene: String) {
                 if (sc.has("reveal")) FileLinks.wanted.value = Wanted(host.getString("id"), "$home/garden/${sc.getString("reveal")}", null, true)
                 // (the page asks its host for the folder's entries as a link to it is followed: the same here, for the chat's own)
                 if (sc.has("gallery") || sc.has("hold")) FileLinks.wanted.value = Wanted(host.getString("id"), "$home/garden", null, true)
+                GitPages.prepare(host.getString("id"), first.getString("id"),
+                    gitScene?.optJSONArray("pick")?.let { a -> (0 until a.length()).map { a.getString(it) } }, gitScene?.optBoolean("every") == true)
+                if (github) dev.baude.android.PullStates.put(host.getString("id"), "$home/${first.getString("folder")}", // (gh's answer, as the chat has it by now)
+                    githubFixture.getString("repo"), dev.baude.android.PullStates.parse(githubFixture.getJSONArray("prs")), true)
                 show { ChatShell(host.getString("id"), first.getString("id"), back = {}, open = { _, _ -> }, feedback = {},
                     first = sc.optString("page").ifBlank { "chat" }) }
+                gitScene?.let { g ->
+                    val st = GitPages.of(host.getString("id"), first.getString("id"))
+                    repeat(20) { if (st.commits.isEmpty()) settle() }
+                    settle()
+                    if (g.optBoolean("branches")) st.listOpen = true
+                    g.optString("commit").ifBlank { null }?.let { subject ->
+                        st.card = st.commits.first { it.subject == subject }.sha
+                    }
+                    androidx.compose.runtime.snapshots.Snapshot.sendApplyNotifications()
+                    st.card?.let { sha -> // (the card is read, then drawn)
+                        val key = dev.baude.android.GitCards.key(host.getString("id"), st.page?.top.orEmpty(), sha)
+                        repeat(40) { if (dev.baude.android.GitCards.get(key) == null) settle() }
+                    }
+                    repeat(3) {
+                        androidx.compose.runtime.snapshots.Snapshot.sendApplyNotifications() // (what the answers wrote is told to the composition)
+                        settle()
+                    }
+                }
+                if (github) repeat(3) { // (the pull requests' states are read, told to the composition and drawn)
+                    androidx.compose.runtime.snapshots.Snapshot.sendApplyNotifications()
+                    settle()
+                }
                 if (sc.has("process") || sc.has("view") || sc.has("gallery") || sc.has("hold")) flush()
                 if (sc.has("running")) {
                     val tasks = sc.getJSONArray("running")

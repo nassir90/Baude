@@ -122,6 +122,7 @@ fun ChatShell(hostId: String, sid: String, back: () -> Unit, open: (String, Stri
     Meta.pageOpener = { t -> all.firstOrNull { it.title.equals(t, true) }?.let { show(it.key) } }
     androidx.compose.runtime.DisposableEffect(chat) { // (its side questions' answers heard whichever page is shown)
         val l = sideQuestions(chat)
+        GitPages.showPage = { show("git") }
         SignalLinks.hostId = at
         SignalLinks.sid = sid
         val unsignal = SignalNames.listen(chat)
@@ -138,6 +139,7 @@ fun ChatShell(hostId: String, sid: String, back: () -> Unit, open: (String, Stri
             Meta.pages = { emptyList() } // (no chat open: no pages for Meta to show)
             Meta.pageOpener = {}
             FileLinks.showFiles = {}
+            GitPages.showPage = {}
         }
     }
     SignalLinks.openPage = show
@@ -185,7 +187,7 @@ fun ChatShell(hostId: String, sid: String, back: () -> Unit, open: (String, Stri
             "artifacts" -> ArtifactsPage(chat)
             "btw" -> SideQuestionsPage(chat)
             "files" -> FilesPage(chat)
-            "git" -> GitPage(at, sid)
+            "git" -> GitPage(at, sid, here, show)
             "signal" -> SignalPage(at, sid, here)
         }
     }

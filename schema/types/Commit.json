@@ -36,6 +36,26 @@
     "subject": {
       "type": "string",
       "description": "Its first line."
+    },
+    "ct": {
+      "type": "integer",
+      "description": "When it was committed, epoch seconds."
+    },
+    "title": {
+      "type": "string",
+      "description": "What the log calls it (a merged pull request's name)."
+    },
+    "files": {
+      "type": "integer",
+      "description": "How many files it changed."
+    },
+    "added": {
+      "type": "integer",
+      "description": "Lines it put in."
+    },
+    "removed": {
+      "type": "integer",
+      "description": "Lines it took out."
     }
   },
   "additionalProperties": false

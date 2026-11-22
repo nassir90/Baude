@@ -207,6 +207,10 @@ abstract class Screens(private val theme: String) {
     @Test @Config(qualifiers = "+land") fun landMeta() = chatAt("31-land-meta", "meta")
     @Test @Config(qualifiers = "+land") fun landSplit() = chatAt("32-land-split-meta", "chat", split = true)
     @Test @Config(qualifiers = "+land") fun landSplitAgents() = chatAt("33-land-split-subagents", "agents", split = true)
+    @Test @Config(qualifiers = "+land") fun landSplitInset() { // (3-button navigation down the right edge, a camera hole at the left)
+        insets = androidx.core.graphics.Insets.of(72, 0, 144, 0)
+        chatAt("35-land-split-side-insets", "chat", split = true)
+    }
     @Test @Config(qualifiers = "+land") fun landSplitWider() { // (the rule dragged left: the pages wider)
         Settings.panelWidth.value = 420f
         chatAt("34-land-split-dragged", "processes", split = true)
@@ -306,8 +310,20 @@ abstract class Screens(private val theme: String) {
         settle()
     }
 
+    private var insets: androidx.core.graphics.Insets? = null
+
     private fun show(screen: @Composable () -> Unit) {
         activity.setContent { BaudeTheme { screen() } }
+        settle()
+        insets?.let { i -> // (fake system bars at the sides)
+            val w = androidx.core.view.WindowInsetsCompat.Builder()
+                .setInsets(androidx.core.view.WindowInsetsCompat.Type.systemBars(), i).build()
+            fun give(v: android.view.View) {
+                androidx.core.view.ViewCompat.dispatchApplyWindowInsets(v, w)
+                if (v is android.view.ViewGroup) for (k in 0 until v.childCount) give(v.getChildAt(k))
+            }
+            give(activity.window.decorView)
+        }
         settle()
     }
 

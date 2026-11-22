@@ -131,7 +131,7 @@
     },
     {
       "name": "slash commands in the box",
-      "shows": "Typing / at the start of the prompt (or at a word's start after a space or new line) opens a command list over the box; see SlashCompleter. These commands are handled by Baude itself and never sent: /new and /clear (a fresh session), /cd <path> (move the conversation to another folder), /btw <question> (side question, answered without adding to the chat; works mid-turn), /login [options] and /logout (Anthropic account sign-in; /login on another host's chat says it signs in there: run claude auth login on it).",
+      "shows": "Typing / at the start of the prompt (or at a word's start after a space or new line) opens a command list over the box; see SlashCompleter. These commands are handled by Baude itself and never sent: /new and /clear (a fresh session, on the open chat's host: another host's chat gets a blank chat on that host, in its folder), /cd <path> (move the conversation to another folder), /btw <question> (side question, answered without adding to the chat; works mid-turn), /login [options] and /logout (Anthropic account sign-in; /login on another host's chat says it signs in there: run claude auth login on it).",
       "text": [
         "/new",
         "/clear",

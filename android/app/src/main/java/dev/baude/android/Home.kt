@@ -55,6 +55,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
@@ -342,21 +343,25 @@ fun Home(open: (String, String) -> Unit, feedback: () -> Unit, phone: () -> Unit
     LaunchedEffect(Unit) { HomePrefs.load(ctx) }
     Mesh.tick.value // (a host's state changed: drawn again)
     var query by rememberSaveable { mutableStateOf("") }
-    var starting by remember { mutableStateOf<Starting?>(null) } // (New session's form: where it's from)
+    var choosing by remember { mutableStateOf<String?>(null) } // (Open folder…'s: the host it's a folder of)
     var adding by remember { mutableStateOf(false) }
     val snack = remember { SnackbarHostState() }
-    // New session: a draft on the host picked, in the folder it was last started in, with no form (Baude's new_chat)
-    fun newSession() {
-        val h = picked() ?: return
-        hostState(h)?.let { toast(it); return }
-        val group = newGroup(h)
-        val msg = Msg.Start(prompt = "", cwd = HomePrefs.folder(ctx, h) ?: "~", mode = "auto", group = group).json().put("draft", true)
-        Mesh.ask(h, msg) { r ->
+    // New session, a folder's + and Open folder…: a new chat on host h (none: the one picked), a draft till it's written
+    // in, opened at once (Baude's new_chat, start_in_folder): in folder, kept as the host's last; else in the one last
+    // given there
+    fun newSession(h: String? = picked(), folder: String? = null) {
+        val at = h ?: return
+        hostState(at)?.let { toast(it); return }
+        val group = newGroup(at)
+        val cwd = folder?.trim()?.ifBlank { "~" } ?: HomePrefs.folder(ctx, at) ?: "~"
+        val msg = Msg.Start(prompt = "", cwd = cwd, mode = "auto", group = group).json().put("draft", true)
+        Mesh.ask(at, msg) { r ->
             val id = Msg.Started.from(r).session?.id
             if (r.optString("op") == Op.STARTED && id != null) {
+                if (folder != null) HomePrefs.setFolder(ctx, at, cwd)
                 Groups.putIn(group)
-                open(h, id)
-            } else toast(Wording.NewSession.hostRefused(host = Mesh.label(h),
+                open(at, id)
+            } else toast(Wording.NewSession.hostRefused(host = Mesh.label(at),
                 why = Msg.Error.from(r).said.orEmpty().ifBlank { Wording.BotBrowser.hostSaidNo }))
         }
     }
@@ -371,13 +376,13 @@ fun Home(open: (String, String) -> Unit, feedback: () -> Unit, phone: () -> Unit
         // the top: New session and the host it's on, Open folder…, then the search and ⋮ (Baude's sidebar's top box)
         Column(Modifier.padding(start = 8.dp, end = 8.dp, top = 8.dp, bottom = 4.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-                SidebarAction(Adwaita.DocumentNew, Wording.Sidebar.newSession, Modifier.weight(1f), onClick = ::newSession)
+                SidebarAction(Adwaita.DocumentNew, Wording.Sidebar.newSession, Modifier.weight(1f)) { newSession() }
                 HostPick()
             }
             SidebarAction(Adwaita.FolderOpen, Wording.Sidebar.openFolder, Modifier.fillMaxWidth()) {
                 val h = picked()
                 val said = hostState(h)
-                if (said != null) toast(said) else starting = Starting(h, null, null, "folder")
+                if (said != null) toast(said) else choosing = h
             }
             Row(Modifier.padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(2.dp)) {
@@ -397,7 +402,7 @@ fun Home(open: (String, String) -> Unit, feedback: () -> Unit, phone: () -> Unit
                 val folded = query.isBlank() && sec.key in HomePrefs.collapsed
                 if (sec.key != "bots") item(key = "h:" + sec.key) {
                     Header(sec, folded, plus = sec.hostId?.takeIf { Mesh.conn(it)?.state == "up" }?.let { h ->
-                        { starting = Starting(null, sec.folder, h, null) } }) {
+                        { newSession(h, sec.folder) } }) {
                         if (sec.key in HomePrefs.collapsed) HomePrefs.collapsed.remove(sec.key) else HomePrefs.collapsed.add(sec.key)
                         HomePrefs.save()
                     }
@@ -419,12 +424,84 @@ fun Home(open: (String, String) -> Unit, feedback: () -> Unit, phone: () -> Unit
     }
     SnackbarHost(snack, Modifier.align(Alignment.BottomCenter).navigationBarsPadding())
     }
-    starting?.let { s -> NewSession(s.host, s.folder, done = { starting = null }, opened = open, first = s.first, focus = s.focus) }
+    choosing?.let { h -> OpenFolder(h, done = { choosing = null }) { choosing = null; newSession(h, it) } }
     if (adding) AddHost(done = { adding = false })
 }
 
-/** Where New session's form's from: the host it's on (null: pick), its folder, the host listed first, the field focused. */
-private class Starting(val host: String?, val folder: String?, val first: String?, val focus: String?)
+/** Open folder… (Baude's ask_host_folder): the folder a new chat on host h starts in, a path there typed or browsed,
+ * from the one last given there (else the host's home). Under it, the folders the host lists (list_dir) as it's typed:
+ * those in the folder typed, else those of its parent that its last part begins (.. first, for the one above); one
+ * tapped is put in the path. Open: picked. */
+@Composable
+private fun OpenFolder(h: String, done: () -> Unit, picked: (String) -> Unit) {
+    val c = LocalBaude.current
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    val home = Mesh.conn(h)?.info?.home?.ifBlank { null } ?: "/"
+    val start = HomePrefs.folder(ctx, h) ?: home
+    var field by remember { mutableStateOf(androidx.compose.ui.text.input.TextFieldValue(start,
+        androidx.compose.ui.text.TextRange(start.length))) }
+    var listed by remember { mutableStateOf<Pair<String, List<String>>?>(null) } // (the folder listed, its folders shown)
+    fun full(t: String) = t.trim().ifBlank { "~" }.let { if (it == "~" || it.startsWith("~/")) home.trimEnd('/') + it.drop(1) else it }
+    fun up(p: String) = p.trimEnd('/').substringBeforeLast('/').ifEmpty { "/" }
+    val typed = full(field.text)
+    LaunchedEffect(typed) {
+        if (!typed.startsWith("/")) { listed = null; return@LaunchedEffect }
+        fun shown(folder: String, r: JSONObject, part: String) = folder to Msg.Dir.from(r).entries.orEmpty()
+            .mapNotNull { e -> e.name?.takeIf { e.dir == true } }
+            .filter { it.lowercase().startsWith(part.lowercase()) && (!it.startsWith(".") || part.startsWith(".")) }
+        Mesh.ask(h, Msg.ListDir(path = typed).json()) { r ->
+            if (typed != full(field.text)) return@ask // (typed on since: that one's answer's wanted)
+            if (r.optString("op") == Op.DIR && Msg.Dir.from(r).error.isNullOrBlank()) listed = shown(typed, r, "")
+            else { // (not a folder: its parent's, that its last part begins)
+                val parent = up(typed)
+                val part = typed.trimEnd('/').substringAfterLast('/')
+                Mesh.ask(h, Msg.ListDir(path = parent).json()) { p ->
+                    if (typed != full(field.text)) return@ask
+                    listed = if (p.optString("op") == Op.DIR && Msg.Dir.from(p).error.isNullOrBlank()) shown(parent, p, part)
+                        else parent to emptyList()
+                }
+            }
+        }
+    }
+    fun put(path: String) { field = androidx.compose.ui.text.input.TextFieldValue(path, androidx.compose.ui.text.TextRange(path.length)) }
+    fun open() = picked(if (typed.startsWith("/")) java.io.File(typed).normalize().path.ifEmpty { "/" } else typed)
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = done,
+        title = { Text(Wording.Sidebar.openFolderOn(host = Mesh.label(h))) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                val focusing = remember { androidx.compose.ui.focus.FocusRequester() }
+                LaunchedEffect(Unit) { focusing.requestFocus() }
+                Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(c.fg.copy(alpha = 0.08f))
+                    .padding(horizontal = 10.dp, vertical = 9.dp)) {
+                    if (field.text.isEmpty()) Text("~", style = Type.body, color = c.dim)
+                    BasicTextField(field, { field = it }, singleLine = true, textStyle = Type.body.copy(color = c.fg),
+                        cursorBrush = SolidColor(c.accentBg),
+                        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Done),
+                        keyboardActions = androidx.compose.foundation.text.KeyboardActions(onDone = { open() }),
+                        modifier = Modifier.fillMaxWidth().focusRequester(focusing))
+                }
+                val (folder, names) = listed ?: ("" to emptyList())
+                val rows = (if (folder.trimEnd('/').isNotEmpty()) listOf(".." to up(folder)) else emptyList()) +
+                    names.map { it to folder.trimEnd('/') + "/" + it }
+                LazyColumn(Modifier.fillMaxWidth().heightIn(min = 240.dp, max = 240.dp).clip(RoundedCornerShape(8.dp))
+                    .border(1.dp, c.rule, RoundedCornerShape(8.dp))) {
+                    items(rows, key = { it.second + "\u0000" + it.first }) { (name, path) ->
+                        Row(Modifier.fillMaxWidth().clickable { put(path) }.heightIn(min = 36.dp).padding(horizontal = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Icon(if (name == "..") Adwaita.GoUp else Adwaita.Folder, null, tint = c.fg, modifier = Modifier.size(16.dp.icon))
+                            Text(name, style = Type.body, color = c.fg, maxLines = 1, overflow = TextOverflow.MiddleEllipsis,
+                                modifier = Modifier.weight(1f))
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = { Button(Wording.Common.open, suggested = true) { open() } },
+        dismissButton = { Button(Wording.Common.cancel, onClick = done) },
+        containerColor = LocalBaude.current.dialog,
+    )
+}
 
 /** What's said over the chats of a host that isn't reached (Baude's chatparts.HostState): a placeholder in the rule's
  * outline. */

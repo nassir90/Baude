@@ -1,5 +1,5 @@
 {
-  "description": "The forms for a new session on a host, a new group, and a new host.",
+  "description": "Meta's form to spawn an agent on a host, the forms for a new group and a new host, and a host refusing a new session.",
   "messages": {
     "host_refused": "{$host} didn't start it: {$why}",
     "host_placeholder": "user@host, or an ssh alias",
@@ -8,8 +8,6 @@
     "host": "Host",
     "group": "Group",
     "start_chat": "Start a chat",
-    "on_host": "New session on {$host}",
-    "on_network": "New session on the network",
     "start": "Start",
     "new_group": "New group",
     "group_needs_name": "A group needs a name",

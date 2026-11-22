@@ -23,6 +23,7 @@
     "add_host": "Add Host…",
     "open_folder": "Open folder…",
     "open_folder_tip": "Start a session in another folder",
+    "open_folder_on": "Open a folder on {$host}",
     "host_picker_tip": "The host a new session is made on, and whose chats are listed. Right-click (or press and hold) for Add Host…",
     "no_connection": "No connection",
     "archive": "Archive",

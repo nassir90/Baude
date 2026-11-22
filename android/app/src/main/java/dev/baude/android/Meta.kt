@@ -570,8 +570,8 @@ fun MetaPage(chatHost: String, here: Boolean) {
         androidx.compose.runtime.key(MetaTools.formVersion.value) {
             val given = f.optJSONObject("values")
             when (f.optString("form")) {
-                "spawn_agent" -> NewSession(null, null, done = done, opened = { h, s -> submitted(); Meta.opener(h, s) },
-                    given = given, edited = MetaTools::edited, heading = Wording.NewSession.startChat)
+                "spawn_agent" -> SpawnAgent(done = done, opened = { h, s -> submitted(); Meta.opener(h, s) },
+                    given = given, edited = MetaTools::edited)
                 "add_host" -> AddHost(done = done, given = given, edited = MetaTools::edited, added = { submitted() })
                 "new_group" -> NewGroup(given, done = done, made = { submitted() })
             }

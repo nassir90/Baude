@@ -18,7 +18,6 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
@@ -336,16 +335,8 @@ fun Choice(title: String, values: List<String>, picked: String, label: (String) 
                 Text(label(picked), style = Type.body, color = c.fg)
                 Icon(Adwaita.PanDown, null, tint = c.fg, modifier = Modifier.size(16.dp.icon))
             }
-            Popover(open, { open = false }) {
-                for (v in values) DropdownMenuItem({
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        dot?.let { Dot(it(v)) }
-                        Text(label(v), style = Type.body, color = c.fg)
-                    }
-                }, { open = false; pick(v) }, trailingIcon = {
-                    if (v == picked) Icon(Adwaita.ObjectSelect, null, tint = c.accent,
-                        modifier = Modifier.size(16.dp.icon))
-                })
+            Popover(open, { open = false }, ticks = Ticks.END) {
+                for (v in values) MenuChoice(label(v), v == picked, dot = dot?.invoke(v)) { open = false; pick(v) }
             }
         }
         extra?.invoke()

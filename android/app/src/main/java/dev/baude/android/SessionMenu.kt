@@ -1,23 +1,12 @@
 package dev.baude.android
 
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Icon
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
-import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.DpOffset
-import androidx.compose.ui.unit.dp
 import org.json.JSONObject
 
 /** What the phone keeps of a group deleted, for Undo (Baude's delete_group's state). */
@@ -94,7 +83,6 @@ object Groups {
  * while its host's gone. at: where it was pressed, in the row. */
 @Composable
 fun SessionMenu(item: Item, open: Boolean, at: DpOffset, dismiss: () -> Unit) {
-    val c = LocalBaude.current
     val s = item.s
     val h = item.hostId
     val sid = s.id.orEmpty()
@@ -111,17 +99,14 @@ fun SessionMenu(item: Item, open: Boolean, at: DpOffset, dismiss: () -> Unit) {
     val active = !dead(h) && s.state in listOf("working", "waiting")
     val archived = s.archived == true
     val canBot = alive && takes(h, "bot") && program(s.model) in listOf("claude", "pi")
-    Popover(open, dismiss, offset = at) {
+    Popover(open, dismiss, offset = at, ticks = if (page == "groups") Ticks.END else Ticks.NONE) {
         if (page == "groups") {
-            Row(Modifier.heightIn(min = 38.dp).clickable { page = "items" }.padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-                Icon(Adwaita.GoPrevious, null, tint = c.fg, modifier = Modifier.size(16.dp.icon))
-                Text(Wording.Sidebar.moveToGroup, style = Type.bold, color = c.fg, modifier = Modifier.padding(start = 8.dp))
-            }
-            HorizontalDivider(color = c.rule)
+            MenuBack(Wording.Sidebar.moveToGroup) { page = "items" }
+            MenuDivider()
             val now = groupOf(h, s)
             for (g in Groups.names()) MenuChoice(g, now == g) { dismiss(); Groups.move("$h/$sid", g) }
             MenuChoice(Wording.Sidebar.noGroupItem, now == "") { dismiss(); Groups.move("$h/$sid", "") }
-            HorizontalDivider(color = c.rule)
+            MenuDivider()
             MenuChoice(Wording.Sidebar.newGroupEllipsis, false) { dismiss(); grouping = true }
             return@Popover
         }
@@ -164,14 +149,4 @@ fun SessionMenu(item: Item, open: Boolean, at: DpOffset, dismiss: () -> Unit) {
     if (trashing) MoveToTrash(item) { trashing = false }
     if (botting) BotSettings(item) { botting = false }
     if (grouping) GroupName(new = true, moveKey = "$h/$sid") { grouping = false }
-}
-
-/** A menu item that opens a page of the menu: its label, ▸ at the end. */
-@Composable
-fun MenuRow(label: String, onClick: () -> Unit) {
-    val c = LocalBaude.current
-    Row(Modifier.heightIn(min = 38.dp).clickable(onClick = onClick).padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-        Text(label, style = Type.body, color = c.fg, modifier = Modifier.weight(1f))
-        Icon(Adwaita.GoNext, null, tint = c.fg, modifier = Modifier.size(16.dp.icon))
-    }
 }

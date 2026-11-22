@@ -34,7 +34,6 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -229,12 +228,12 @@ private fun Detail(item: JSONObject, reply: String, setReply: (String) -> Unit) 
     }
     if (confirm == "merge" && pr != null) AlertDialog(onDismissRequest = { confirm = null },
         title = { Text(Wording.Fixes.mergeHeading(issue = Fixes.location(item))) },
-        text = { Text(Wording.Fixes.mergeBody(number = pr.optInt("number")), style = Type.body, color = c.fg) },
+        text = { Text(Wording.Fixes.mergeBody(number = pr.optInt("number"))) },
         confirmButton = { Button(Wording.Fixes.merge, suggested = true) { confirm = null; Fixes.run("merge", item) } },
         dismissButton = { Button(Wording.Common.cancel) { confirm = null } }, containerColor = c.dialog)
     if (confirm == "discard" && pr != null) AlertDialog(onDismissRequest = { confirm = null },
         title = { Text(Wording.Fixes.discardHeading(issue = Fixes.location(item))) },
-        text = { Text(Wording.Fixes.discardBody(number = pr.optInt("number")), style = Type.body, color = c.fg) },
+        text = { Text(Wording.Fixes.discardBody(number = pr.optInt("number"))) },
         confirmButton = { Button(Wording.Common.discard, destructive = true) { confirm = null; Fixes.run("discard", item) } },
         dismissButton = { Button(Wording.Common.cancel) { confirm = null } }, containerColor = c.dialog)
 }

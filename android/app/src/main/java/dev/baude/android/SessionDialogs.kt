@@ -10,7 +10,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -90,7 +89,7 @@ fun MoveToTrash(item: Item, done: () -> Unit) {
     AlertDialog(
         onDismissRequest = done,
         title = { Text(Wording.Trash.heading(title = chatName(s) ?: Wording.Trash.thisSession)) },
-        text = { Text(body, style = Type.body, color = c.fg) },
+        text = { Text(body) },
         confirmButton = {
             Button(Wording.Trash.move, destructive = true) {
                 done()

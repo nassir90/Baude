@@ -74,7 +74,7 @@ def publish_apk(built_apk, out, live=FEED):
     code, name = built["versionCode"], built["versionName"]
     if not re.fullmatch(r"[0-9a-f]{4,40}", name):
         sys.exit(f"not publishing the Android app built as {name}: build it from a clean checkout "
-                 "(android/, emission.py and schema/ committed)")
+                 "(android/, emission.py, emissioncontrol.py and schema/ committed)")
     if live:
         try:
             with urllib.request.urlopen(urllib.request.Request(live, headers={"Cache-Control": "no-cache", "User-Agent": "baude-site-build"}),

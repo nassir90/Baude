@@ -254,9 +254,11 @@ def test_lookup_folder():
 
 def test_baude_uses_lookup():
     """Baude's Signal is a lookup.Names, and its ⌘K a lookup.SearchSpace: the engine is one, in lookup.py."""
-    import baude
-    assert issubclass(baude.Signal, lookup.Names) and issubclass(baude.SearchSpace, lookup.SearchSpace)
-    assert baude.catalogue_hits is lookup.catalogue_hits and baude.ref_palette_rank is lookup.ref_palette_rank
+    import signaltools
+    import signalnames
+    import baudemeta
+    assert issubclass(signalnames.Signal, lookup.Names) and issubclass(baudemeta.SearchSpace, lookup.SearchSpace)
+    assert signaltools.catalogue_hits is lookup.catalogue_hits
 
 
 # ---------------------------------------------------------------- the window

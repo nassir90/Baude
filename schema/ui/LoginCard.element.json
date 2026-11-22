@@ -8,7 +8,7 @@
     "Sign in on the not-signed-in card"
   ],
   "code": [
-    "baude.py:LoginCard",
+    "chatinput.py:LoginCard",
     "baude.py:BaudeWindow.sign_in",
     "baude.py:BaudeWindow.login_prompt",
     "baude.py:BaudeWindow.sign_out"

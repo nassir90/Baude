@@ -7,7 +7,7 @@
     "A thinking block with words in it, live or from history"
   ],
   "code": [
-    "baude.py:ThinkingView",
+    "toolcards.py:ThinkingView",
     "baude.py:BaudeWindow.h_stream_event",
     "baude.py:BaudeWindow.render_assistant"
   ],

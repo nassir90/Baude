@@ -2,7 +2,7 @@
   "description": "A small alert dialog over the main window asking for a session's (or a Bot's) new name.",
   "apps": ["baude"],
   "opens": ["session row right-click → Rename…", "key F2 on a session row"],
-  "code": ["baude.py:SessionSidebar.ask_rename", "baude.py:SessionSidebar.rename", "baude.py:SessionSidebar.renamed_remote"],
+  "code": ["sidebarmenu.py:SidebarMenu.ask_rename", "sidebarmenu.py:SidebarMenu.rename", "sidebarmenu.py:SidebarMenu.renamed_remote"],
   "copy": ["common", "sidebar"],
   "parts": [
     {

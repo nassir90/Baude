@@ -57,9 +57,10 @@ os.environ["BAUDE_CLAUDE"] = (args.claude or shutil.which("claude")) if args.son
 os.environ["FAKE_CLAUDE_LOG"] = os.path.join(work, "fake.log")
 sys.path.insert(0, os.path.dirname(HERE))
 import baude  # noqa: E402
+import signalnames  # noqa: E402
 from baude import Gdk, Gio, GLib, Gtk  # noqa: E402
 
-orig_open = baude.Signal._open
+orig_open = signalnames.Signal._open
 
 
 def _open(self):
@@ -69,7 +70,7 @@ def _open(self):
     return orig_open(self)
 
 
-baude.Signal._open = _open
+signalnames.Signal._open = _open
 
 
 def pump(cond, timeout):

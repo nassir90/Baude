@@ -145,7 +145,7 @@ object SlashCommands {
 
 private fun JSONArray?.texts(): List<String> = if (this == null) emptyList() else (0 until length()).mapNotNull { optString(it).ifEmpty { null } }
 
-/** The / list over the box (baude.SlashCompleter): where its /word is, what's typed after it, and what matches. */
+/** The / list over the box (chatinput.SlashCompleter): where its /word is, what's typed after it, and what matches. */
 class SlashView(val start: Int, val query: String, val matches: List<JSONObject>)
 
 object SlashList {
@@ -212,8 +212,8 @@ object SlashList {
 
 private val REF_STEPS = longArrayOf(3600, 86400, 7 * 86400, 30 * 86400)
 
-/** The @ list over a chat's box (baude.ChatRefCompleter, metalook.RefCompleter): every host's chats by their titles,
- * then the names the chat's folder has; ranked as lookup.ref_palette_rank does. */
+/** The @ list over a chat's box (chatinput.ChatRefCompleter, metalook.RefCompleter): every host's chats by their
+ * titles, then the names the chat's folder has; ranked as lookup.ref_palette_rank does. */
 object MentionList {
     val REF_RE = Regex("""(?<![\w@])@(?:\{([^}\n]+)\}|([\w][\w./:\-]*[\w/]|\w))""")
     private val BARE = Regex("""[\w][\w./:\-]*[\w/]|\w""")

@@ -6,7 +6,7 @@
     "A name's popover Open button (an icon in the popover) opens this page at that name's card",
     "Header link button (icon with a dropdown, for this chat's two Signal switches) is the header's, not this page's"
   ],
-  "code": ["baude.py:SignalPage", "baude.py:SignalPage.show_ref", "baude.py:SignalPage.facts", "baude.py:SignalPage.tool_card", "baude.py:SignalPage.show_reader", "baude.py:BaudeWindow.show_ref", "lookup.py:REF_KINDS"],
+  "code": ["sidepanel.py:SignalPage", "sidepanel.py:SignalPage.show_ref", "sidepanel.py:SignalPage.facts", "sidepanel.py:SignalPage.tool_card", "sidepanel.py:SignalPage.show_reader", "baude.py:BaudeWindow.show_ref", "lookup.py:REF_KINDS"],
   "copy": ["signal", "lookup", "references", "databases", "meta"],
   "parts": [
     {

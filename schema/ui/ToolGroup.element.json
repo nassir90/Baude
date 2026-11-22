@@ -7,7 +7,7 @@
     "A second tool call arriving right after another (nothing but tool calls between them)"
   ],
   "code": [
-    "baude.py:ToolGroup",
+    "toolcards.py:ToolGroup",
     "baude.py:BaudeWindow.add_activity",
     "widgets.py:Disclosure"
   ],

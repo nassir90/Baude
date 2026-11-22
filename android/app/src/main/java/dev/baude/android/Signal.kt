@@ -271,7 +271,7 @@ fun refIcon(kind: String?, data: JSONObject, roles: List<String> = emptyList()):
         "service" to "service", "tool" to "claude", "subagent" to "claude", "skill" to "claude", "external" to "external")[kind]
 }
 
-/** baude.ref_kind_label: what a name is, as a popover's title says it (none while it's looked up). */
+/** refpopovers.ref_kind_label: what a name is, as a popover's title says it (none while it's looked up). */
 fun refKindLabel(r: Msg.SignalRef): String? {
     if (r.status == PENDING) return null
     val d = r.found
@@ -293,7 +293,8 @@ fun refGroup(r: Msg.SignalRef): String {
         else r.kind.orEmpty()
 }
 
-/** baude.ref_status_text: the status line of a popover or a card (a resolved name's summary ends in a full stop). */
+/** refpopovers.ref_status_text: the status line of a popover or a card (a resolved name's summary ends in a full
+ * stop). */
 fun refStatusText(r: Msg.SignalRef): String = when (r.status) {
     PENDING -> Wording.Lookup.lookingItUp
     NOT_FOUND -> Wording.Signal.statusNotFound(reason = r.reason.orEmpty())
@@ -304,7 +305,7 @@ fun refStatusText(r: Msg.SignalRef): String = when (r.status) {
 
 private val WORKLOADS = setOf("Deployment", "StatefulSet", "DaemonSet", "Rollout", "CronJob", "Job", "ReplicaSet", "Pod")
 
-/** baude.ref_run_names: the names a link's thing could be running under in a cluster. */
+/** refpopovers.ref_run_names: the names a link's thing could be running under in a cluster. */
 fun refRunNames(r: Msg.SignalRef): List<String> {
     val d = r.found
     if ((r.status != RESOLVED && r.status != AMBIGUOUS) || d.str("context") != null || d.optJSONObject("db") != null) return emptyList()

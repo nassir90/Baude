@@ -9,9 +9,9 @@
     "A task-notification in a transcript"
   ],
   "code": [
-    "baude.py:ToolCard.bind_task",
-    "baude.py:ToolCard.finish_task",
-    "baude.py:task_note_widget",
+    "toolcards.py:ToolCard.bind_task",
+    "toolcards.py:ToolCard.finish_task",
+    "toolcards.py:task_note_widget",
     "baude.py:BaudeWindow.on_task_event",
     "baude.py:BaudeWindow.task_note",
     "baude.py:BaudeWindow.card_task",

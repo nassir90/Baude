@@ -81,7 +81,7 @@ def look(started, module, root=HERE, follow=False):
 
 
 def importable(module, root=HERE, gtk=None):
-    """module imports from root in a Python of its own, its bytecode cached for the start (baude.launch_command's):
+    """module imports from root in a Python of its own, its bytecode cached for the start (startup.launch_command's):
     without GTK started (no display opened: nothing shown or brought to the front), or, for what needs no GTK
     (gtk False; NO_GTK's by default: the host process), without GTK at all; with what it imports only as it starts
     (ALSO: the host's menu bar item)."""

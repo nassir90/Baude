@@ -12,7 +12,7 @@ import org.json.JSONObject
  * (markdown). */
 class Out(val text: String, val tag: String = "", val markdown: Boolean = false, val numbered: Boolean = false)
 
-/** A tool call as its card has it (baude.ToolCard): its input, how it stands (running, background, done, error,
+/** A tool call as its card has it (toolcards.ToolCard): its input, how it stands (running, background, done, error,
  * interrupted), what came back, the permission answered for it, and the background task it became. */
 class Call(val id: String, val name: String, input: JSONObject = JSONObject()) {
     val base = name.substringAfterLast("__")

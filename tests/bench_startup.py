@@ -44,8 +44,9 @@ def main():
                    BAUDE_CLAUDE=os.environ.get("BAUDE_CLAUDE") or os.path.join(ROOT, "tests", "fake_claude.py"))
         script = [sys.executable, "baude.py", "--cwd", ROOT]
         sys.path.insert(0, ROOT)
-        import baude  # noqa: E402  (also leaves the cached bytecode the module start uses)
-        module = baude.launch_command("--cwd", ROOT)
+        import baude  # noqa: E402,F401  (also leaves the cached bytecode the module start uses)
+        import startup  # noqa: E402
+        module = startup.launch_command("--cwd", ROOT)
         cold = run(module, env)
         print("cold start (no saved session index), as a module:")
         for m in MILESTONES:

@@ -7,10 +7,10 @@
     "An AskUserQuestion call's permission request (always asked)"
   ],
   "code": [
-    "baude.py:QuestionForm",
+    "toolcards.py:QuestionForm",
     "baude.py:BaudeWindow.permission_card",
-    "baude.py:summarize_tool",
-    "baude.py:tool_input_view"
+    "toolcards.py:summarize_tool",
+    "toolcards.py:tool_input_view"
   ],
   "copy": [
     "asks",

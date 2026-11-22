@@ -2,7 +2,7 @@
   "description": "The command list that rises over the composer while a /word is being typed: Baude's own commands, then Claude Code's commands and skills, each with its arguments and what it does.",
   "apps": ["baude"],
   "opens": ["type / at the start of the prompt, or at a word's start after a space or new line"],
-  "code": ["baude.py:SlashCompleter", "baude.py:LOCAL_COMMANDS", "widgets.py:PickList"],
+  "code": ["chatinput.py:SlashCompleter", "chatinput.py:LOCAL_COMMANDS", "widgets.py:PickList"],
   "copy": ["meta"],
   "parts": [
     {

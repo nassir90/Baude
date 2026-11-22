@@ -7,10 +7,10 @@
     "An assistant message marked as an API error, or from the <synthetic> model, live or from history"
   ],
   "code": [
-    "baude.py:api_error_label",
+    "toolcards.py:api_error_label",
     "baude.py:BaudeWindow.h_assistant",
     "baude.py:BaudeWindow.render_history",
-    "baude.py:ended_by_stop"
+    "toolcards.py:ended_by_stop"
   ],
   "parts": [
     {

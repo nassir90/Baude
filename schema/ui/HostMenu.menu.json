@@ -2,7 +2,7 @@
   "description": "The menu on the host picker beside New session (the host whose chats are listed), opened by right-click or press and hold at the pointer. Not opened while the picker's own list is open.",
   "apps": ["baude"],
   "opens": ["right-click or long-press the host picker beside New session"],
-  "code": ["baude.py:SessionSidebar.host_menu", "baude.py:SessionSidebar.deactivate_host"],
+  "code": ["sessionsidebar.py:SessionSidebar.host_menu", "sessionsidebar.py:SessionSidebar.deactivate_host"],
   "copy": ["hosts", "sidebar"],
   "parts": [
     {

@@ -2,7 +2,7 @@
   "description": "A small alert asking for a group's name: making a new group, or renaming one. Also reached from a session's Move to Group → New Group…, where the chat is moved into the new group.",
   "apps": ["baude"],
   "opens": ["⋮ → Groups → New Group…", "⋮ → a group's right-click → Rename Group…", "session row right-click → Move to Group → New Group…"],
-  "code": ["baude.py:SessionSidebar.ask_group_name", "baude.py:SessionSidebar.ask_new_group", "baude.py:SessionSidebar.ask_rename_group"],
+  "code": ["sessionsidebar.py:SessionSidebar.ask_group_name", "sessionsidebar.py:SessionSidebar.ask_new_group", "sessionsidebar.py:SessionSidebar.ask_rename_group"],
   "copy": ["new_session", "common"],
   "parts": [
     {

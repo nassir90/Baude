@@ -11,7 +11,7 @@
     "botmemory.py:BotMemory",
     "botmemory.py:changes",
     "botmemory.py:merge",
-    "baude.py:SidePanel.bot_changed",
+    "sidepanel.py:SidePanel.bot_changed",
     "diaryeditor.py:DiaryEditor",
     "recordui.py:EditControls"
   ],

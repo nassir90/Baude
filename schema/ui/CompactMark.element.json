@@ -12,8 +12,8 @@
     "chatparts.py:CompactMark",
     "chatparts.py:compact_text",
     "chatparts.py:compact_said",
-    "baude.py:CompactMarks.on_compaction",
-    "baude.py:CompactMarks.compact_ended",
+    "sidequestion.py:CompactMarks.on_compaction",
+    "sidequestion.py:CompactMarks.compact_ended",
     "baude.py:BaudeWindow.adopt_summary",
     "recordreader.py:Reader._add"
   ],

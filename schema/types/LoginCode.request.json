@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "The code the sign-in page showed, passed to the connection's claude auth login (login). No answer: what it says next comes as login_said or login_end.",
+  "properties": {
+    "op": {
+      "const": "login_code",
+      "description": "What it is."
+    },
+    "req": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "code": {
+      "type": "string",
+      "description": "The code, as pasted."
+    }
+  },
+  "required": [
+    "op",
+    "code"
+  ],
+  "additionalProperties": false
+}

@@ -294,6 +294,23 @@ def result(text):
          "total_cost_usd": 0.001, "num_turns": 1, "duration_ms": 300, "usage": {"input_tokens": 10, "output_tokens": 5}})
 
 
+EXPIRED = ("Failed to authenticate: this login reached its time limit and cannot be renewed. Run `claude auth login` "
+           "to sign in again, or use `claude setup-token` and set CLAUDE_CODE_OAUTH_TOKEN for unattended jobs")
+
+
+def expired(n):
+    """A turn whose sign-in has run out, as claude says it (the message it writes in place of a reply, and the turn's
+    error), unless `claude auth login` (auth) has signed in since: then a short answer."""
+    if os.path.exists(os.path.join(tempfile.gettempdir(), f"fake-claude-auth-{os.getuid()}")):
+        say("Signed in again: carrying on.", f"expired{n}")
+        return result("Signed in again: carrying on.")
+    out({"type": "assistant", "parent_tool_use_id": None, "session_id": SESSION, "error": "authentication_failed",
+         "message": {"id": f"expired{n}", "model": "<synthetic>", "role": "assistant",
+                     "content": [{"type": "text", "text": EXPIRED}]}})
+    out({"type": "result", "subtype": "success", "is_error": True, "session_id": SESSION, "result": EXPIRED,
+         "total_cost_usd": 0, "num_turns": 1, "duration_ms": 120, "usage": {"input_tokens": 0, "output_tokens": 0}})
+
+
 def finish_task(tid, status="completed", summary=None):
     t = TASKS.pop(tid, None)
     if t is None:
@@ -594,7 +611,9 @@ def main():
                     f" to: {question}", f"btw{turns}")
                 result("side answer")
                 continue
-            if "BACKGROUND" in text:
+            if "EXPIRED" in text:
+                expired(turns)
+            elif "BACKGROUND" in text:
                 background_command(turns, delay)
             elif "QUESTION" in text or "QUESTION" in json.dumps(msg["message"]["content"]):
                 ask_question(turns)

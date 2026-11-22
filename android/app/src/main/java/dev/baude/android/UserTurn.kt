@@ -39,6 +39,13 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalViewConfiguration
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.TextUnit
+import androidx.compose.ui.composed
+import androidx.compose.ui.layout.AlignmentLine
+import androidx.compose.ui.layout.LastBaseline
+import androidx.compose.ui.layout.Measured
+import androidx.compose.ui.text.rememberTextMeasurer
+import kotlin.math.roundToInt
 import java.util.Base64
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
@@ -46,8 +53,8 @@ import org.json.JSONObject
 
 internal val thumbnails =android.util.LruCache<String, androidx.compose.ui.graphics.ImageBitmap>(64)
 
-/** What a message's revert needs of the chat's page: whether its button's shown, how it's shown, and what it does. */
-class RevertOffer(val revealed: Boolean, val reveal: () -> Unit, val onRevert: () -> Unit)
+/** What a message's revert needs of the chat's page: whether its button's shown, its showing or hiding, and what it does. */
+class RevertOffer(val revealed: Boolean, val show: (Boolean) -> Unit, val onRevert: () -> Unit)
 
 /** A revert asked for and not made: the message it takes back, and what was in the box before. */
 class Reverting(val uuid: String, val draft: String) {
@@ -55,29 +62,18 @@ class Reverting(val uuid: String, val draft: String) {
 }
 
 /** A message of yours as Baude draws it (.user-bubble): a bubble at the right, its files in a row over its text, which
- * is markdown, and the revert button beside it, shown by a long press on the message. */
+ * is markdown, and the revert button beside it, level with its last line, shown by a tap on the message (or a long
+ * press, which starts selecting its text too) and hidden by another tap. */
 @Composable
 fun UserTurn(line: Line, revert: RevertOffer?) {
     val c = LocalBaude.current
-    val slop = LocalViewConfiguration.current.touchSlop
-    val hold = LocalViewConfiguration.current.longPressTimeoutMillis
-    Row(Modifier.fillMaxWidth().then(if (revert == null) Modifier else Modifier.pointerInput(revert.reveal) {
-        awaitEachGesture { // (watched, not taken: a long press on the text still starts its selection)
-            val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
-            var ended = false
-            val held = withTimeoutOrNull(hold) {
-                while (!ended) {
-                    val e = awaitPointerEvent(PointerEventPass.Initial)
-                    ended = e.changes.all { !it.pressed } || e.changes.any { (it.position - down.position).getDistance() > slop }
-                }
-            } == null
-            if (held) revert.reveal()
-        }
-    }), horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.Bottom) {
-        RevertButton(revert)
+    val level = rememberLastLine()
+    Row(Modifier.fillMaxWidth().then(if (revert == null) Modifier else Modifier.revealOnTouch(revert.revealed, revert.show)),
+        horizontalArrangement = Arrangement.End) {
+        RevertButton(revert, Modifier.alignBy(level.buttons))
         Spacer(Modifier.width(6.dp))
-        Column(Modifier.weight(1f, fill = false).clip(RoundedCornerShape(Gap.bubbleRadius)).background(c.bubble)
-            .padding(horizontal = Gap.bubbleH, vertical = Gap.bubbleV), horizontalAlignment = Alignment.End,
+        Column(Modifier.alignBy(level.bubble).weight(1f, fill = false).clip(RoundedCornerShape(Gap.bubbleRadius))
+            .background(c.bubble).padding(horizontal = Gap.bubbleH, vertical = Gap.bubbleV), horizontalAlignment = Alignment.End,
             verticalArrangement = Arrangement.spacedBy(6.dp)) {
             if (line.files.isNotEmpty()) Attachments(line.files, line.uuid)
             if (line.text.isNotBlank()) SelectionContainer {
@@ -87,13 +83,65 @@ fun UserTurn(line: Line, revert: RevertOffer?) {
     }
 }
 
-/** The revert button (.revert-turn): a round flat button, faded in when the message's long-pressed; its slot's kept. */
+/** A tap on a message (watched, not taken: what's in it that's tapped, a link or a picture, takes its own) shows its
+ * buttons, or hides them if they're shown; a long press shows them (and still starts selecting its text). */
+fun Modifier.revealOnTouch(shown: Boolean, show: (Boolean) -> Unit): Modifier = composed {
+    val slop = LocalViewConfiguration.current.touchSlop
+    val hold = LocalViewConfiguration.current.longPressTimeoutMillis
+    val now by androidx.compose.runtime.rememberUpdatedState(shown)
+    val showing by androidx.compose.runtime.rememberUpdatedState(show)
+    pointerInput(Unit) {
+        awaitEachGesture {
+            val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+            var up: androidx.compose.ui.input.pointer.PointerInputChange? = null
+            val held = withTimeoutOrNull(hold) {
+                while (true) {
+                    val e = awaitPointerEvent(PointerEventPass.Final)
+                    val ch = e.changes.firstOrNull { it.id == down.id } ?: break
+                    if ((ch.position - down.position).getDistance() > slop) break
+                    if (!ch.pressed) {
+                        up = ch
+                        break
+                    }
+                }
+            } == null
+            if (held) showing(true)
+            else if (up?.isConsumed == false) showing(!now)
+        }
+    }
+}
+
+/** Where a message's buttons sit beside its bubble, as Baude's (UserTurn.show_revert): their middle level with the
+ * middle of the bubble's last line of text, whatever that line is and however big the phone's text is; with no text,
+ * a line's middle over the bubble's foot. bubble and buttons: what each is aligned in its row by. */
+class LastLine(private val middle: Int, private val foot: Int) {
+    val bubble = { m: Measured ->
+        val base = m[LastBaseline]
+        if (base == AlignmentLine.Unspecified) m.measuredHeight - foot else base - middle
+    }
+    val buttons = { m: Measured -> m.measuredHeight / 2 }
+}
+
+/** LastLine as the phone's text is now: a line's middle measured above its baseline, from the body font's own ascent
+ * and descent (Pango's line, which Baude's centred on). */
 @Composable
-private fun RevertButton(revert: RevertOffer?) {
+fun rememberLastLine(): LastLine {
+    val density = LocalDensity.current
+    val measure = rememberTextMeasurer()
+    return remember(density, measure) {
+        val one = measure.measure("Ag", Type.body.copy(lineHeight = TextUnit.Unspecified))
+        val foot = with(density) { (Gap.bubbleV + Tokens.Font.bodyLine.toDp() / 2).roundToPx() }
+        LastLine((one.firstBaseline - one.size.height / 2f).roundToInt(), foot)
+    }
+}
+
+/** The revert button (.revert-turn): a round flat button, faded in when the message is tapped; its slot's kept. */
+@Composable
+private fun RevertButton(revert: RevertOffer?, modifier: Modifier) {
     val c = LocalBaude.current
     val shown = revert?.revealed == true
     val alpha = animateFloatAsState(if (shown) 1f else 0f, tween(150, easing = FastOutSlowInEasing), label = "revert").value
-    Box(Modifier.padding(bottom = 6.5.dp).size(24.dp).alpha(alpha).clip(CircleShape)
+    Box(modifier.size(24.dp).alpha(alpha).clip(CircleShape)
         .then(if (shown) Modifier.clickable { revert?.onRevert?.invoke() } else Modifier), contentAlignment = Alignment.Center) {
         Icon(Adwaita.ViewRefresh, Wording.ChatTurns.revert, tint = c.fg.copy(alpha = c.fg.alpha * 0.6f), modifier = Modifier.size(12.dp.icon))
     }

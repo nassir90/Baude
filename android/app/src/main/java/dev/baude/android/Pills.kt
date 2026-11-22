@@ -5,17 +5,22 @@ import android.os.Looper
 import android.os.SystemClock
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.StrokeCap
@@ -29,16 +34,22 @@ import androidx.compose.ui.text.Placeholder
 import androidx.compose.ui.text.PlaceholderVerticalAlign
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.foundation.text.BasicText
 import androidx.compose.foundation.text.appendInlineContent
 import androidx.compose.foundation.text.InlineTextContent
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.TextUnit
+import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import org.json.JSONArray
+import kotlin.math.roundToInt
 
 // ------------------------------------------------------------------------------------------------- the logo --
 
@@ -66,7 +77,9 @@ fun AnnotatedString.Builder.pill(label: String, state: String?, href: String, sc
 fun AnnotatedString.Builder.chip(label: String, kind: String) =
     appendInlineContent(listOf("chip", kind, label).joinToString(SEP), label)
 
-/** Text with pills and chips in it as their own pieces, each sized by its label at the text's size. */
+/** Text with pills and chips in it as their own pieces, each sized by its label at the text's size: as wide as its
+ * label and its margins, as tall as the label's line and a pixel more each way (the desktop's patch), centred on its
+ * line. Their sizes are given in em of the text's size, so they keep to the text however the phone scales its sizes. */
 @Composable
 fun PillText(text: AnnotatedString, style: TextStyle, color: Color, modifier: Modifier = Modifier, maxLines: Int = Int.MAX_VALUE,
              overflow: TextOverflow = TextOverflow.Clip, onTextLayout: (TextLayoutResult) -> Unit = {}) {
@@ -76,32 +89,80 @@ fun PillText(text: AnnotatedString, style: TextStyle, color: Color, modifier: Mo
     val measure = rememberTextMeasurer()
     val density = LocalDensity.current
     val size = if (style.fontSize.isSpecified) style.fontSize else 15.sp
+    val sizePx = with(density) { size.toPx() }
     val map = HashMap<String, InlineTextContent>(RefIcons.inline)
     for (id in ids) {
         val parts = id.split(SEP)
         val pill = parts[0] == "pill"
         val label = if (pill) parts[4] else parts[2]
         val scale = if (pill) parts[2].toFloat() else Tokens.Git.chipScale.toFloat()
-        val labelSize = size * scale
-        val box = (size.value * 1.17f * scale + 2f).sp
-        val labelPx = measure.measure(label, style.copy(fontSize = labelSize, fontWeight = if (parts[1] == "head") FontWeight.Bold else null)).size.width
-        val logo = size * 1.17f * 0.78f * scale
+        val labelStyle = labelStyle(style, size * scale, bold = !pill && parts[1] == "head")
+        val labelLayout = measure.measure(label, labelStyle)
+        val labelSize = labelLayout.size
+        val logoPx = with(density) { (size * 1.17f * 0.78f * scale).toPx() }
         val width = with(density) {
-            if (pill) Tokens.Git.pillIn.toPx() + logo.toPx() + Tokens.Git.pillGap.toPx() + labelPx + Tokens.Git.pillOut.toPx()
-            else Tokens.Git.chipPad.toPx() * 2 + labelPx
+            if (pill) Tokens.Git.pillIn.toPx() + logoPx + Tokens.Git.pillGap.toPx() + labelSize.width + Tokens.Git.pillOut.toPx()
+            else Tokens.Git.chipPad.toPx() * 2 + labelSize.width
         }
-        map[id] = InlineTextContent(Placeholder(with(density) { width.toSp() }, box, PlaceholderVerticalAlign.TextCenter)) {
-            if (pill) Pill(parts[1], parts[3], label, labelSize, logo) else Chip(parts[1], label, labelSize)
+        val height = maxOf(labelSize.height.toFloat(), if (pill) logoPx else 0f) + with(density) { 2.dp.toPx() }
+        // (its place is its patch's part above its label's baseline, sat on the text's baseline, so its label shares
+        // the line's baseline as the desktop's chips do and the line's no taller for it; the rest's drawn below)
+        val above = (height - labelSize.height) / 2f + labelLayout.firstBaseline
+        val tall = height.roundToInt()
+        map[id] = InlineTextContent(Placeholder((width / sizePx).em, (above / sizePx).em, PlaceholderVerticalAlign.AboveBaseline)) {
+            Box(Modifier.layout { m, c ->
+                val p = m.measure(Constraints.fixed(c.maxWidth, tall))
+                layout(c.maxWidth, c.maxHeight) { p.place(0, 0) }
+            }, propagateMinConstraints = true) {
+                if (pill) Pill(parts[1], parts[3], label, labelStyle, with(density) { logoPx.toDp() }) else Chip(parts[1], label, labelStyle)
+            }
         }
     }
-    Text(text, style = style, color = color, modifier = modifier, maxLines = maxLines, overflow = overflow, inlineContent = map,
-        onTextLayout = onTextLayout)
+    if (overflow != TextOverflow.Ellipsis || maxLines == Int.MAX_VALUE)
+        return Text(text, style = style, color = color, modifier = modifier, maxLines = maxLines, overflow = overflow,
+            inlineContent = map, onTextLayout = onTextLayout)
+    // (cut short here, not by the text's own …, which drops the pills on the line it cuts and keeps their room empty)
+    val merged = LocalTextStyle.current.merge(style)
+    val places = text.getStringAnnotations(INLINE_TAG, 0, text.length)
+        .mapNotNull { a -> map[a.item]?.let { AnnotatedString.Range(it.placeholder, a.start, a.end) } }
+    BoxWithConstraints(modifier) {
+        val shown = if (!constraints.hasBoundedWidth) text else remember(text, constraints.maxWidth, merged, density) {
+            ellipsized(text, places, maxLines) { t, p ->
+                measure.measure(t, merged, TextOverflow.Clip, maxLines = maxLines, placeholders = p,
+                    constraints = Constraints(maxWidth = constraints.maxWidth)).hasVisualOverflow
+            }
+        }
+        Text(shown, style = style, color = color, maxLines = maxLines, overflow = TextOverflow.Clip, inlineContent = map,
+            onTextLayout = onTextLayout)
+    }
 }
+
+/** text as long as fits in maxLines (overflows: whether a text, with its placeholders, doesn't): all of it, or as much
+ * as fits with a … after it, never cut inside a pill. */
+private fun ellipsized(text: AnnotatedString, places: List<AnnotatedString.Range<Placeholder>>, maxLines: Int,
+                       overflows: (AnnotatedString, List<AnnotatedString.Range<Placeholder>>) -> Boolean): AnnotatedString {
+    if (!overflows(text, places)) return text
+    var end = text.length
+    while (end > 0) {
+        places.firstOrNull { it.start < end && end < it.end }?.let { end = it.start }
+        while (end > 0 && text[end - 1].isWhitespace()) end--
+        val cut = buildAnnotatedString { append(text.subSequence(0, end)); append("…") }
+        val kept = places.filter { it.end <= end }
+        if (!overflows(cut, kept)) return cut
+        end--
+    }
+    return AnnotatedString("…")
+}
+
+/** A pill's or chip's label's text: the line's, at the label's size, its line as tall as the font's own (drawn with
+ * BasicText, which doesn't take the theme's body line height in). */
+private fun labelStyle(style: TextStyle, size: TextUnit, bold: Boolean) =
+    style.copy(fontSize = size, lineHeight = TextUnit.Unspecified, fontWeight = if (bold) FontWeight.Bold else FontWeight.Normal)
 
 private val TextUnit.isSpecified get() = this != TextUnit.Unspecified
 
 @Composable
-private fun Pill(state: String, href: String, label: String, size: TextUnit, logo: TextUnit) {
+private fun Pill(state: String, href: String, label: String, style: TextStyle, logo: Dp) {
     val c = LocalBaude.current
     val uri = LocalUriHandler.current
     val colour = prColor(state.takeIf { it != "unknown" }, c)
@@ -112,14 +173,14 @@ private fun Pill(state: String, href: String, label: String, size: TextUnit, log
         .padding(start = Tokens.Git.pillIn, end = Tokens.Git.pillOut),
         horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(Tokens.Git.pillGap),
         verticalAlignment = Alignment.CenterVertically) {
-        RefIcons.Draw("merge", colour, with(LocalDensity.current) { logo.toDp() })
-        Text(label, fontSize = size, color = colour, maxLines = 1,
-            textDecoration = if (state == "closed") TextDecoration.LineThrough else null)
+        RefIcons.Draw("merge", colour, logo)
+        BasicText(label, style = style.copy(color = colour, textDecoration = if (state == "closed") TextDecoration.LineThrough else null),
+            maxLines = 1)
     }
 }
 
 @Composable
-private fun Chip(kind: String, label: String, size: TextUnit) {
+private fun Chip(kind: String, label: String, style: TextStyle) {
     val c = LocalBaude.current
     val (text, patch) = when (kind) {
         "remote" -> c.fg.copy(alpha = c.fg.alpha * Tokens.Git.remoteText.toFloat()) to c.fg.copy(alpha = Tokens.Git.remotePatch.toFloat())
@@ -129,7 +190,7 @@ private fun Chip(kind: String, label: String, size: TextUnit) {
     }
     Row(Modifier.clip(RoundedCornerShape(Tokens.Git.chipRadius)).background(patch).padding(horizontal = Tokens.Git.chipPad),
         verticalAlignment = Alignment.CenterVertically) {
-        Text(label, fontSize = size, color = text, maxLines = 1, fontWeight = if (kind == "head") FontWeight.Bold else null)
+        BasicText(label, style = style.copy(color = text), maxLines = 1)
     }
 }
 

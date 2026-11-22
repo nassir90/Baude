@@ -1300,7 +1300,7 @@ class Mesh:
         status, headers, chunks = modelfiles.serve(path, heads)
         reply("infer_head", status=status, headers=headers)
         gone = lambda: getattr(getattr(conn, "channel", None), "closed", False)  # noqa: E731
-        queued = getattr(conn, "out", None)  # (server.Conn's: what's waiting to go out to whoever asked)
+        queued = getattr(conn, "out", None)  # (serverstate.Conn's: what's waiting to go out to whoever asked)
         try:
             for chunk in (() if msg.get("method") == "HEAD" else chunks):
                 while queued is not None and queued.qsize() > BACKLOG and not gone():

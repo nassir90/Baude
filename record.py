@@ -80,7 +80,7 @@ from baudelib.transcripts import rewind_mark, started_outside, strip_reminders, 
 from baudelib.claude import MODELS  # noqa: E402  (the models Claude Code runs)
 import baudelib.client  # noqa: E402  (the hosts, as Baude has them: another's notebooks, through its host process)
 import baudelib.hosts  # noqa: E402  (this machine's host process started again: Restart Daemon)
-import baudelib.server  # noqa: E402  (the sessions this machine's host process keeps: bot_started)
+import baudelib.serverstate  # noqa: E402  (the sessions this machine's host process keeps: bot_started)
 from baudelib import applist  # noqa: E402  (Record in the list of apps, as Emission is)
 from baudelib import notes  # noqa: E402  (this machine's notebooks, as its host process gives them to another's Record)
 from baudelib.notes import data_dir, own_data_dir, socket_path  # noqa: E402,F401  (where Record keeps them)
@@ -1682,7 +1682,7 @@ def bot_started(path, kept=True):
     process's own, as it keeps them (read, not asked: no connection made; not if kept is False); another host's, as
     the hosts looked for list them (none looked for yet: no)."""
     sid = os.path.basename(path or "").removesuffix(".jsonl")
-    if kept and (meta := baudelib.server.kept_session(sid)) is not None:
+    if kept and (meta := baudelib.serverstate.kept_session(sid)) is not None:
         return bool(meta.get("spawned_by"))
     return bool(_NETWORK) and any(s.get("spawned_by") and sid in (s["id"], s.get("cli_id"))
                                   for s in network().sessions())

@@ -793,7 +793,8 @@ class AppTools:
 
 
 def close_conn(conn):
-    """A host process's connection (server.Conn) let go of, its socket too: what's at the other end hears it's gone."""
+    """A host process's connection (serverstate.Conn) let go of, its socket too: what's at the other end hears it's
+    gone."""
     conn.close()
     conn.channel.close()
 

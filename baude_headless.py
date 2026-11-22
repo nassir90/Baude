@@ -69,7 +69,8 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
 
 from baudelib import hosts, selfupdate, wire  # noqa: E402
-from baudelib.server import AlreadyRunning, Server  # noqa: E402
+from baudelib.server import Server  # noqa: E402
+from baudelib.serverstate import AlreadyRunning  # noqa: E402
 
 READY_S = 2  # (a new version found: how often it's seen whether the commands it waits for are done)
 

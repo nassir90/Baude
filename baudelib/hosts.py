@@ -7,7 +7,7 @@ import subprocess
 import sys
 
 from baudelib import wire, wording
-from baudelib.server import running_pid, state_home
+from baudelib.serverstate import running_pid, state_home
 
 HEADLESS = os.path.join(os.path.dirname(os.path.dirname(os.path.realpath(__file__))), "baude_headless.py")
 
@@ -61,7 +61,8 @@ def _in_process(path, wait):
     """(BAUDE_HOST_IN_PROCESS=1, the tests') This machine's host process in this one, on a thread: as one started
     would be, its claudes this process's children."""
     import threading
-    from baudelib.server import AlreadyRunning, Server
+    from baudelib.server import Server
+    from baudelib.serverstate import AlreadyRunning
     if not _HERE:
         try:
             server = Server(socket_path=path, log=lambda _text: None)

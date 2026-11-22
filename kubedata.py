@@ -872,8 +872,8 @@ KUBE_SECTIONS = [
         kube_page("CronJobs", "cronjobs", True, [
             K_NAME, K_NS, kube_col("Schedule", lambda o, c: _ks(o, "spec", "schedule", default="")),
             kube_col("Timezone", lambda o, c: _ks(o, "spec", "timeZone", default="")),
-            kube_col("Suspended", lambda o, c: wording.say("kube.yes") if _ks(o, "spec", "suspend") else
-                     wording.say("kube.no")),
+            kube_col("Suspended", lambda o, c: wording.say("common.yes") if _ks(o, "spec", "suspend") else
+                     wording.say("common.no")),
             kube_col("Active", lambda o, c: str(len(_ks(o, "status", "active", default=[]) or [])),
                      lambda o, c: len(_ks(o, "status", "active", default=[]) or [])),
             _age_col("Last schedule", ("status", "lastScheduleTime")), K_AGE], "cronjobs.batch"),
@@ -973,7 +973,7 @@ KUBE_SECTIONS = [
         kube_page("Storage Classes", "storageclasses", False, [
             K_NAME, kube_col("Provisioner", lambda o, c: o.get("provisioner", "")),
             kube_col("Reclaim Policy", lambda o, c: o.get("reclaimPolicy", "")),
-            kube_col("Default", lambda o, c: wording.say("kube.yes") if (_km(o).get("annotations") or {}).get(
+            kube_col("Default", lambda o, c: wording.say("common.yes") if (_km(o).get("annotations") or {}).get(
                 "storageclass.kubernetes.io/is-default-class") == "true" else ""), K_AGE],
             "storageclasses.storage.k8s.io")]),
     ("Namespaces", [kube_page("Namespaces", "namespaces", False, [

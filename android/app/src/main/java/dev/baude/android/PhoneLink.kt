@@ -331,7 +331,10 @@ object PhoneLink {
         commit = BuildConfig.COMMIT.ifEmpty { null }, made = BuildConfig.MADE.takeIf { it > 0 }, heads = emptyList()),
         links = links.values.mapNotNull { it.peer }.distinct().sorted())
 
-    /** Its record, anew (its links changed), to every link. */
+    /** This phone's name changed (PhoneHost.rename): its record, anew, to every link. */
+    fun renamed() = publish()
+
+    /** Its record, anew (its links changed, or its name), to every link. */
     private fun publish() = synchronized(this) { // (its seq and what's sent with it: one telling at a time, in order)
         seq = maxOf(seq + 1, System.currentTimeMillis() * 1_000_000)
         val mine = record()

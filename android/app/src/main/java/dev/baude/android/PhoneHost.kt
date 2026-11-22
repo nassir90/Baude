@@ -44,6 +44,7 @@ class PhoneSession(val meta: JSONObject) {
     /** Messages sent at a turn, taken after it: {message, uuid} each. */
     val queued: JSONArray get() = meta.optJSONArray("queued") ?: JSONArray().also { meta.put("queued", it) }
     var senders: JSONObject? = null // (its sender store, {uuid: sender}, once it's read: PhoneHost.senders)
+    val queuedBy = HashMap<String, Head>() // (who sent each one queued, by its uuid: not told it as it's taken, ended)
 }
 
 /** This phone as a host of the mesh: agents, each a Bot (a name, and a memory in its folder), whose loop and tools run
@@ -464,14 +465,13 @@ object PhoneHost {
                     if (s.deleted) return
                     if (given != null && repeated(s, given)) return
                     if (sender != null) stamp(s, uuid, sender)
-                    val said = Msg.Claude(session = s.id, msg = JSONObject().put("type", "_said").put("uuid", uuid)
-                        .put("message", message)).json()
-                    for (h in s.live) if (h !== head) h.send(said) // (the others attached live: its agent never says it back)
                     if (s.busy) {
                         s.queued.put(JSONObject().put("message", message).put("uuid", uuid))
+                        s.queuedBy[uuid] = head
                         save(s)
                         return
                     }
+                    tellSaid(s, message, uuid, head)
                     begin(s, listOf(message to uuid))
                 }
             }
@@ -545,6 +545,16 @@ object PhoneHost {
         s.cancel = false
         changed()
         kotlin.concurrent.thread(name = "agent-${s.id.take(8)}", isDaemon = true) { PhoneAgent.turn(s) }
+    }
+
+    /** (lock held) A message given its agent, as it's kept (input; one sent at a turn, as the turn ends: ended), told
+     * those attached live but [by], who sent it ({type: "_said"}), as its agent never says it back; with who it's from
+     * if its sender store says, as a host tells it. */
+    private fun tellSaid(s: PhoneSession, message: JSONObject, uuid: String, by: Head?) {
+        val told = JSONObject().put("type", "_said").put("uuid", uuid).put("message", message)
+        senders(s)?.optJSONObject(uuid)?.let { told.put("sender", it) }
+        val said = Msg.Claude(session = s.id, msg = told).json()
+        for (h in s.live) if (h !== by) h.send(said)
     }
 
     private fun firstWords(message: JSONObject): String? {
@@ -686,6 +696,8 @@ object PhoneHost {
             s.stopModel = null
             val next = s.queued.list().mapNotNull { q -> q.optJSONObject("message")?.let { it to q.optString("uuid") } }
             s.meta.remove("queued")
+            if (!s.deleted) for ((m, uuid) in next) tellSaid(s, m, uuid, s.queuedBy[uuid])
+            s.queuedBy.clear()
             if (stopped) for ((m, uuid) in next) record(s, "user", m, uuid) // (sent as it was stopped: said, not taken)
             if (next.isNotEmpty() && !stopped && !s.deleted && sessions[s.id] === s) {
                 begin(s, next)

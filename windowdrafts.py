@@ -1006,8 +1006,10 @@ class WindowDrafts:
         self.note(msg.get("text") or "")
 
     def h_said(self, msg):
-        """A message another head sent the chat (its host's word: claude never says one back), drawn as its
-        transcript's record of it is."""
+        """A message the chat was sent from elsewhere, as its agent's given it (its host's word: claude never says one
+        back), drawn as its transcript's record of it is: as who it's from if not you (sender), as its host says."""
+        if self.remote is not None and self.session_id and msg.get("sender") is not None:
+            self.remote.heard_sender(self.session_id, msg.get("uuid"), msg["sender"])
         rec = {"type": "user", "uuid": msg.get("uuid"), "message": msg.get("message") or {}}
         if (item := history_item(json.dumps(rec))) is not None:
             self.render_history([item], final=False)

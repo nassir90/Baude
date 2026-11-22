@@ -300,6 +300,14 @@ class Remote:
         had them when it was last fetched (sync_senders): {uuid: sender}."""
         return (self.senders.get(session_id) or (0, {}))[1]
 
+    def heard_sender(self, session_id, said, sender):
+        """Who a message just given a session's agent (uuid said) is from, as its host told it with it (_said): kept
+        with its sender store as fetched, till a newer one's fetched (sync_senders)."""
+        if wire.is_id(said or "") and isinstance(sender, dict) and (c := wire.clean_sender(sender)):
+            rev, have = self.senders.get(session_id) or (0, {})
+            self.senders[session_id] = (rev, {**have, said: {
+                **c, **({"shown": sender["shown"]} if isinstance(sender.get("shown"), str) else {})}})
+
     def sync_senders(self, session_id, done):
         """Its host's sender store for a session fetched, if what's here is older than it lists (its senders): done()
         once a newer one's here (through dispatch)."""

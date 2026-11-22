@@ -6,7 +6,8 @@
   ],
   "opens": [
     "Enter (or the send button) in the composer while no turn runs",
-    "Opening a chat: each message of yours in its history"
+    "Opening a chat: each message of yours in its history",
+    "A message sent to the open chat from elsewhere (another window, the phone, another machine, a Bot's routine): appears as its agent is given it. Sent while a turn runs, a Claude Code chat's appears at once, where Claude takes it into that turn; a Codex, pi or Apple chat's appears after that turn's reply, as the turn answering it starts. Baude and the phone show it in the same place (the phone as the chat's transcript records it)"
   ],
   "code": [
     "windowdrafts.py:WindowDrafts.user_bubble",

@@ -66,7 +66,7 @@ object Meta {
     /** Claude Code's own tools that act, given on Claude's models while Run commands is on (meta.COMMAND_TOOLS). */
     val COMMAND_TOOLS = listOf("Bash", "Edit", "Write", "WebFetch", "WebSearch")
 
-    /** What Meta is told besides SYSTEM while it runs commands (meta.COMMANDS_SYSTEM). */
+    /** What Meta is told besides SYSTEM while it runs commands (metaagent.COMMANDS_SYSTEM). */
     val COMMANDS_SYSTEM = "\n\nCommands: you run shell commands (Bash), edit files (Edit, Write) and look things up on the " +
         "web (WebFetch, WebSearch), in Claude Code's Auto mode: what looks risky is put to the user first. Check things " +
         "yourself rather than asking the user to: where a file is, what's installed, what a host has. Read and look as " +

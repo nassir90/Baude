@@ -27,7 +27,7 @@ Baude's ⌘K, for @ in the diary, for the names linked in the chat, and for what
 One Record runs at a time: started again, it hands what it was asked to the one running.
 
 Meta's session is `claude -p` speaking stream-json (baudelib's ClaudeProc), its tools Read, Grep and Glob and its own
-(meta.SHARED_TOOLS, RECORD_TOOLS), in Claude Code's default permission mode. Set RECORD_CLAUDE=/path/to/claude to use a specific claude
+(metaagent.SHARED_TOOLS, RECORD_TOOLS), in Claude Code's default permission mode. Set RECORD_CLAUDE=/path/to/claude to use a specific claude
 binary (else claude on PATH, else, on macOS, the Claude desktop app's). Records are saved in
 $XDG_DATA_HOME/record/records.json (macOS: ~/Library/Application Support/Record; RECORD_DATA=dir puts them somewhere
 else).
@@ -93,6 +93,9 @@ import update  # noqa: E402  (a new version from git, restarted onto once idle, 
 baudelib.wire.HEAD_COMMIT = update.STARTED  # (said to the host processes it reaches: logged by one on other code)
 baudelib.wire.HEAD_CLIENT = "record"  # (listed as Record among the apps connected to a host)
 import meta  # noqa: E402  (Meta, the helper in the right bar: Baude's too, beside this file)
+import metaagent  # noqa: E402
+import metalook  # noqa: E402
+import metachat  # noqa: E402
 import spelling  # noqa: E402  (the pages' spelling and grammar, as they're written: beside this file)
 
 APP_ID = "dev.baude.Record"
@@ -1123,7 +1126,7 @@ def paned_grip(paned):
 
 # ---------------------------------------------------------------- Meta, in Record
 # Record's helper is Meta (meta.py, Baude's too), in the right bar: its conversation is the window's (RecordChat, a
-# meta.MetaChat), whichever notebook's open, one session kept for it, and a new one (another chat's folder, Record
+# metachat.MetaChat), whichever notebook's open, one session kept for it, and a new one (another chat's folder, Record
 # started again, another model) told what was said before; told too when another notebook's opened. It reads (Read,
 # Grep, Glob) the notebook open's pages, as their files (Store.mirror_pages), and the folder of the chat read
 # (read_folders). A change to a page's text it proposes with propose_edit (RecordChat.propose),
@@ -1188,7 +1191,7 @@ ends so.
 
 Talk like a peer."""
 
-# Record's own tools, as Claude Code sees them (meta.SHARED_TOOLS are Baude's too); RecordChat answers them
+# Record's own tools, as Claude Code sees them (metaagent.SHARED_TOOLS are Baude's too); RecordChat answers them
 RECORD_TOOLS = [
     {"name": "propose_edit",
      "description": "Propose a change to a page of the user's notes, in the notebook open. The user sees it on the "
@@ -5131,7 +5134,7 @@ class PagesList(Gtk.Box):
         """The pages (names), each sub-page under its parent (by its own name, indented, on Baude's tree line),
         Home's first; one with nothing written in it yet is grey and italic, as Zim shows them; the page shown
         selected. Those Meta's added, deleted (listed still, struck through) or moved, till they're kept or undone,
-        marked so (meta.mark_row), and those it's highlighted."""
+        marked so (metalook.mark_row), and those it's highlighted."""
         while (r := self.index.get_row_at_index(0)) is not None:
             self.index.remove(r)
         if self.notebook is None:
@@ -5159,7 +5162,7 @@ class PagesList(Gtk.Box):
             row.tree_parent = rows.get(name.rpartition(":")[0]) if depth else None
             row.gone = name in gone  # (deleted: there's nothing to open)
             if name in marks:
-                meta.mark_row(row, ("page", own + name), marks[name], chat, lb, inline=False)  # (where it was:
+                metalook.mark_row(row, ("page", own + name), marks[name], chat, lb, inline=False)  # (where it was:
                 # under the pointer)
             if not row.gone:
                 click = Gtk.GestureClick(button=Gdk.BUTTON_SECONDARY)  # (right-click: page_menu)
@@ -5865,8 +5868,8 @@ def page_name(text):
     return ":".join(base_name(part) for part in str(text or "").split(":") if base_name(part))
 
 
-class RecordChat(meta.MetaChat):
-    """Meta in Record (meta.MetaChat), the window's conversation, whichever notebook's open: a passage picked in a
+class RecordChat(metachat.MetaChat):
+    """Meta in Record (metachat.MetaChat), the window's conversation, whichever notebook's open: a passage picked in a
     chat read, or selected
     on a page, quoted with what's asked; what's referenced goes with the message (ref_said); a change it proposes to a
     page's text is shown on the page, to accept or reject, and the pages it adds, deletes and moves are marked in the
@@ -6008,8 +6011,8 @@ class RecordChat(meta.MetaChat):
             self.win.tabs.close(key)
 
     def tint(self, editor):
-        """A page open as Meta's marks have it: one it added, all its text green (meta.mark_rgba, lit as its change's
-        box is under the pointer: light); else as it is."""
+        """A page open as Meta's marks have it: one it added, all its text green (metalook.mark_rgba, lit as its
+        change's box is under the pointer: light); else as it is."""
         key = page_key(editor.notebook, editor.page)
         mark = self.marks("page").get(key) if editor.notebook is self.notebook else None
         buf = editor.buf
@@ -6026,7 +6029,7 @@ class RecordChat(meta.MetaChat):
             spans = [(0, buf.get_char_count())]
 
         def paint(lit=False):
-            tag.set_property("background-rgba", meta.mark_rgba(mark[0], lit))
+            tag.set_property("background-rgba", metalook.mark_rgba(mark[0], lit))
             for a, b in spans:
                 buf.apply_tag(tag, buf.get_iter_at_offset(a), buf.get_iter_at_offset(b))
         paint()
@@ -6066,7 +6069,7 @@ class RecordChat(meta.MetaChat):
     def mark_name(self, kind, key, action):
         if kind == "notebook":
             nb = next((t for t in self.win.store.every_book() if t.get("id") == key), None)
-            ghost = next((p["redo"]["add"] for p in meta.action_parts(action) if p.get("kind") == "notebook" and
+            ghost = next((p["redo"]["add"] for p in metalook.action_parts(action) if p.get("kind") == "notebook" and
                           (p.get("redo") or {}).get("add", {}).get("id") == key), None)
             return full_name(nb or ghost or {"name": key})
         if kind == "page" and (nb := self._book(key.partition("\n")[0])) is not None and nb is not self.notebook:
@@ -6107,7 +6110,7 @@ class RecordChat(meta.MetaChat):
             tag = buf.create_tag("meta-tint", strikethrough=True)
 
             def paint(lit=False):
-                tag.set_property("background-rgba", meta.mark_rgba("removed", lit))
+                tag.set_property("background-rgba", metalook.mark_rgba("removed", lit))
                 buf.apply_tag(tag, *buf.get_bounds())
             paint()
             self.painted.setdefault(("page", key), {})["text"] = paint
@@ -6725,7 +6728,7 @@ class RecordChat(meta.MetaChat):
             box.append(w)
 
         def full():
-            parent = meta.Form.get(under)
+            parent = metalook.Form.get(under)
             return f"{parent}:{page_name(name.get_text())}" if parent != tops else page_name(name.get_text())
 
         def check():
@@ -6739,14 +6742,14 @@ class RecordChat(meta.MetaChat):
             if (problem := check()) is not None:
                 raise ValueError(problem)
             page = full()
-            nb["pages"][page] = meta.Form.get(text)
+            nb["pages"][page] = metalook.Form.get(text)
             if nb is self.notebook:  # (a page of that name open, empty: shown again with its text, not saved over)
                 self.pages_changed({})
                 self.win.open_note(page, select=False)
             else:
                 self.win.store.save()
             return f"made {page}"
-        return meta.Form("New page", box, [("name", "the page's own name", name),
+        return metalook.Form("New page", box, [("name", "the page's own name", name),
                                            ("under", "the page it goes under, or (the top)", under),
                                            ("text", "what it says, in Markdown (or empty)", text)],
                          check, submit, verb=wording.say("common.add"))
@@ -6927,7 +6930,7 @@ class RecordChat(meta.MetaChat):
                 return then()
             except ValueError as e:
                 return {"error": str(e)}
-        return meta.Later(work, done)
+        return metaagent.Later(work, done)
 
     def add_page(self, turn, args):
         key = self._host(args.get("host"))
@@ -8115,7 +8118,7 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost, w
         row.name.set_attributes(None)
         chat = getattr(self, "chat", None)
         if chat is not None and (mark := chat.marks("notebook").get(row.notebook.get("id"))) is not None:
-            meta.mark_row(row, ("notebook", row.notebook.get("id")), mark, chat, row.name, inline=False)
+            metalook.mark_row(row, ("notebook", row.notebook.get("id")), mark, chat, row.name, inline=False)
 
     def mark_books(self):
         """The notebooks' rows as Meta's marks have them now (one it made, green, till it's kept or undone)."""

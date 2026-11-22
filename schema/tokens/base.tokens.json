@@ -372,7 +372,7 @@
     }
   },
   "meta": {
-    "$description": "Meta's marks on the chats it changed (meta.MARK_COLORS) and its changes bar (.changes-bar).",
+    "$description": "Meta's marks on the chats it changed (metalook.MARK_COLORS) and its changes bar (.changes-bar).",
     "$extensions": {"dev.baude.android": "dp"},
     "added": {"$type": "color", "$description": "A chat Meta added, or brought back (MARK_COLORS).", "$value": {"colorSpace": "srgb", "components": [0.1804, 0.7608, 0.4941], "hex": "#2ec27e"}},
     "removed": {"$type": "color", "$description": "A chat Meta removed (MARK_COLORS).", "$value": {"colorSpace": "srgb", "components": [0.8784, 0.1059, 0.1412], "hex": "#e01b24"}},

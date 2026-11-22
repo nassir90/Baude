@@ -301,6 +301,125 @@ class Terminal(Gtk.Overlay):
             self.type(key_bytes(k))
 
 
+class HostedTerminal(Terminal):
+    """A terminal on a host (where: wire.reach's; this machine's host process too), run there by its host process
+    (wire's terminal op: baudelib.hostterminal) and drawn here: its bytes come over its own connection, what's typed
+    goes back. attach: one running there seen again. A Bot here reaches it as it does any other."""
+
+    def __init__(self, where, argv=None, cwd=None, title=None, attach=None, on_exit=None, on_title=None,
+                 on_close=None, host_name=None):
+        self.host_where, self.wanted, self.wanted_cwd, self.attach_to = where, argv, cwd, attach
+        self.host_name, self.ch, self.host_id, self.size = host_name, None, None, (0, 0)
+        super().__init__(argv or ["sh"], cwd, title, on_exit=on_exit, on_title=on_title, on_close=on_close)
+        self.argv = list(argv or [])  # (its host's login shell, if none)
+        self.vte.connect("commit", lambda _v, text, _n: self.send({"op": "terminal_in", "data": _b64(
+            text.encode() if isinstance(text, str) else text)}))
+        GLib.timeout_add(300, self._resized)
+
+    def spawn(self, env=None):
+        if self.spawned:
+            return False
+        self.spawned = True
+        import threading
+        threading.Thread(target=self._run, daemon=True, name="hosted-terminal").start()
+        return False
+
+    def _run(self):
+        import base64
+        from baudelib import hosts, wire
+        try:
+            if self.host_where.get("via") == "local" and not hosts.start_here():  # (this machine's: started if need be)
+                raise OSError(wording.say("host_status.none_started", log=hosts.log_path()))
+            ch, _info = wire.reach(self.host_where, timeout=30)
+        except (OSError, ValueError) as e:
+            return GLib.idle_add(self._failed, str(e))
+        self.ch = ch
+        cols, rows = self.vte.get_column_count(), self.vte.get_row_count()
+        self.size = (cols, rows)
+        ch.send({"op": "terminal", "req": 1, "columns": cols, "rows": rows,
+                 **({"attach": self.attach_to} if self.attach_to else
+                    {k: v for k, v in (("argv", self.wanted), ("cwd", self.wanted_cwd), ("title", self.named)) if v})})
+        try:
+            while (r := ch.reply()) is not None:
+                op = r.get("op")
+                if op == "terminal_out":
+                    GLib.idle_add(self.vte.feed, base64.b64decode(r.get("data") or ""))
+                elif op == "terminal_opened":
+                    self.host_id = r.get("id")
+                elif op == "terminal_end":
+                    return GLib.idle_add(self._ended, r.get("status"), r.get("said"))
+                elif op == "error":
+                    return GLib.idle_add(self._failed, wire.said(r))
+        except (OSError, ValueError) as e:
+            return GLib.idle_add(self._failed, str(e))
+        GLib.idle_add(self._failed, wording.say("multiplex.host_gone"))
+
+    def _failed(self, why):
+        if self.status is None:
+            self.vte.feed(f"\r\n{wording.say('multiplex.not_started', error=why)}\r\n".encode())
+            self._ended(-1, None)
+        return False
+
+    def _ended(self, status, said):
+        if self.status is not None:
+            return False
+        self.status = status if status is not None else -1
+        if said:
+            self.vte.feed(f"\r\n{said}\r\n".encode())
+        if self.ch is not None:
+            self.ch.close()
+        if self.on_exit:
+            self.on_exit(self, self.status)
+        return False
+
+    def _resized(self):
+        if self.status is not None:
+            return False
+        now = (self.vte.get_column_count(), self.vte.get_row_count())
+        if self.ch is not None and now != self.size:
+            self.size = now
+            self.send({"op": "terminal_resize", "columns": now[0], "rows": now[1]})
+        return True
+
+    def send(self, msg):
+        if self.ch is not None and self.status is None:
+            try:
+                self.ch.send(msg)
+            except (OSError, ValueError):
+                pass
+
+    def stop(self):
+        self.send({"op": "terminal_close"})
+
+    def type(self, text):
+        if self.status is not None:
+            raise ValueError(f"{self.id}'s program has ended (exit status {self.status})")
+        self.send({"op": "terminal_in", "data": _b64(text.replace("\r\n", "\r").replace("\n", "\r").encode())})
+
+    def title(self):
+        try:
+            said = self.vte.get_window_title()
+        except (AttributeError, TypeError):
+            said = None
+        return said or self.named or self.host_name or wire_said(self.host_where)
+
+    def where(self):
+        return self.wanted_cwd or ""
+
+    def info(self, app):
+        return {**super().info(app), "host": self.host_name or wire_said(self.host_where)}
+
+
+def _b64(data):
+    import base64
+    return base64.b64encode(data).decode()
+
+
+def wire_said(where):
+    from baudelib import wire
+    return wire.said_where(where)
+
+
 MONO_FONT = "Menlo 12" if sys.platform == "darwin" else "Monospace 11"
 CSS = "vte-terminal { padding: 6px 10px; }"
 

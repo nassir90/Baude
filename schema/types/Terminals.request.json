@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "The terminals running on this host, to attach to.",
+  "properties": {
+    "op": {
+      "const": "terminals",
+      "description": "What it is."
+    },
+    "req": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "description": "The request's number, the client's pick: its answers carry it back."
+    }
+  },
+  "required": [
+    "op"
+  ],
+  "additionalProperties": false
+}

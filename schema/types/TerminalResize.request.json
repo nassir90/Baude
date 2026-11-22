@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "This connection's terminal is now this size.",
+  "properties": {
+    "op": {
+      "const": "terminal_resize",
+      "description": "What it is."
+    },
+    "req": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "columns": {
+      "type": "integer",
+      "description": "Its width, in characters."
+    },
+    "rows": {
+      "type": "integer",
+      "description": "Its height, in lines."
+    }
+  },
+  "required": [
+    "op",
+    "columns",
+    "rows"
+  ],
+  "additionalProperties": false
+}

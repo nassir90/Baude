@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "Typed into this connection's terminal: what a keyboard sends, base64.",
+  "properties": {
+    "op": {
+      "const": "terminal_in",
+      "description": "What it is."
+    },
+    "req": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "data": {
+      "type": "string",
+      "description": "The bytes, base64."
+    }
+  },
+  "required": [
+    "op"
+  ],
+  "additionalProperties": false
+}

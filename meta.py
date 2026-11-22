@@ -90,7 +90,7 @@ MARK_HOWS = ("added", "removed", "moved", "highlight")
 UNAVAILABLE = wording.say("meta.unavailable")  # (Meta's, gone from the mesh: over its box, as Context Exhausted is)
 TOO_SMALL = wording.say("meta.too_small")  # (its instructions alone, as it counts
 # them, more than it holds: no clearing helps)
-HERE_NAME = "local"  # (this machine, as every host is written: by its name, which here is local)
+HERE_NAME = wording.say("senders.local")  # (this machine, as every host is written: by its name, which here is local)
 PROVIDERS_WAIT = 0.5  # (s Settings waits for this machine's providers the first time: the rest come as they're found)
 
 

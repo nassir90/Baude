@@ -33,6 +33,7 @@
     "foreign_keys": ".input {$n :number} .match $n one {{{$n} foreign key}} * {{{$n} foreign keys}}",
     "read_only": "read-only",
     "read_in": "read in {$seconds} s",
+    "no_table_like": "No table like {$text} in {$schema}",
     "null": "NULL",
     "reading_rows": "reading…",
     "first_rows": "first {$n} rows (read-only; secret-looking columns hidden)",

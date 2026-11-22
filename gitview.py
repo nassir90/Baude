@@ -287,7 +287,7 @@ class GitAvatars:
 
     def ask(self, page, commits, repo):
         """Rows were just drawn for these commits: whoever's picture isn't known is looked for, in the background, once.
-        (On every redraw: it does nothing when no one's new.) BAUDE_GH empty, as the render rigs and the fixer's renders
+        (On every redraw: it does nothing when no one's new.) BAUDE_GH empty, as tests and the fixer's runs of them
         have it: nothing's asked of GitHub at all."""
         self.pages.add(page)
         now = time.time()

@@ -300,7 +300,7 @@ class CodeView(Gtk.Box, FindInText):
         hover.connect("motion", lambda _c, x, y: self._link_cursor(x, y))
         self.view.add_controller(hover)
         self.token_tags, self.generation, self.path, self.dark = {}, 0, "", None
-        self.highlighted = 0  # spans tagged so far (the screenshots and the status wait on it)
+        self.highlighted = 0  # spans tagged so far (tests and the status wait on it)
         style = Adw.StyleManager.get_default()
         style.connect("notify::dark", lambda *_: self.restyle())
         self.restyle()
@@ -426,6 +426,9 @@ class CodeView(Gtk.Box, FindInText):
         mark = b.get_mark("jump") or b.create_mark("jump", it, True)
         b.move_mark(mark, it)
         GLib.idle_add(lambda: self.view.scroll_to_mark(mark, 0.0, True, 0.0, 0.3) and False)
+
+    def marked_line(self):
+        return self.gutter.marked
 
     # ---- wrapping
     def set_wrap(self, on):

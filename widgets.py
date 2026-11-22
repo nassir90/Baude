@@ -585,7 +585,7 @@ def fmt_scale(scale):
 # ---------------------------------------------------------------- markdown --
 
 # ------------------------------------------------------------- file links --
-# Paths in Claude's text ("baude.py:42", `tests/screenshots.sh`, /etc/hosts, ~/notes.md) become links when
+# Paths in Claude's text ("baude.py:42", `tests/run.sh`, /etc/hosts, ~/notes.md) become links when
 # they exist, relative to the session folder; the link's target is the path itself (file_href), and clicking one opens
 # it on the side panel's Code page, or in the editor (open_code).
 
@@ -2797,7 +2797,8 @@ class RefreshButton(Gtk.Button):
         return GLib.SOURCE_CONTINUE  # (frame removes it, when that's it)
 
     def frame(self, now):
-        """A frame at time now (a tick's whole job): drawn, the last if it's at rest by then."""
+        """A frame at time now (a tick's whole job: a test can call it with a time of its own): drawn, the last if it's
+        at rest by then."""
         self.queue_draw()
         if self.turning.over(now):
             self.sync(now)
@@ -3463,6 +3464,11 @@ class ComposerMarkdown:
             if first <= cur_line and (cur_line < last if closed else cur_line <= last):
                 return first, last, closed
         return None
+
+    def code_state(self):
+        """(cursor is on an opening fence or inside a code block, that block is closed)"""
+        block = self._block_here()
+        return block is not None, bool(block and block[2])
 
     def newline(self):
         """Enter's handling (a box's, not sending). In a code block: a plain new line, and an unclosed block
@@ -4779,7 +4785,7 @@ class Lightbox(Gtk.Box):
     moved with the arrow keys to go around it, the arrows no longer stepping between images. It opens out of the image
     clicked and closes back into it (fly), while what's behind it dims and comes back."""
 
-    FLY_MS = 240  # (on its way in or out. The render rigs set it to 0)
+    FLY_MS = 240  # (on its way in or out. The tests set it to 0: test_lightbox_flies has it fly)
     SHADE = 0.94  # (how far what's behind it is dimmed)
     ZOOM_MS = 160
     ZOOM_KEY = 1.5  # (+ and −: this much at a time)
@@ -5349,7 +5355,7 @@ class Lightbox(Gtk.Box):
         return True
 
 
-SLIDE_MS = 180  # (a side bar opening or closing: SideSlide. The render rigs set it to 0)
+SLIDE_MS = 180  # (a side bar opening or closing: SideSlide. The tests set it to 0)
 
 
 class SideSlide:
@@ -7932,6 +7938,7 @@ class LineGutter(Gtk.Widget):
     def __init__(self, view):
         super().__init__()
         self.view, self.marked = view, None
+        self.drawn = []  # (line, y) of the numbers drawn last (tests hold them to their lines)
         self.add_css_class("code-gutter")
 
     def do_measure(self, orientation, _for_size):
@@ -7949,6 +7956,7 @@ class LineGutter(Gtk.Widget):
         dim = Gdk.RGBA()
         dim.red, dim.green, dim.blue, dim.alpha = color.red, color.green, color.blue, color.alpha * 0.45
         layout = self.create_pango_layout("")
+        self.drawn = []
         while True:
             y, h = view.get_line_yrange(it)
             if y > rect.y + rect.height:
@@ -7958,6 +7966,7 @@ class LineGutter(Gtk.Widget):
             layout.set_markup(f"<b>{n}</b>" if n == self.marked else str(n), -1)
             w, lh = layout.get_pixel_size()
             first = view.get_iter_location(it).height or h  # (a wrapped line: its first display line's height)
+            self.drawn.append((n, wy))
             snap.save()
             snap.translate(Graphene.Point().init(width - w - 8, wy + max(0, (min(h, first) - lh) / 2)))
             snap.append_layout(layout, color if n == self.marked else dim)

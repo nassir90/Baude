@@ -4,7 +4,7 @@
     tests/ref_replay.py TRANSCRIPT.jsonl FOLDER OUT.json [--lsp] [--sonnet BUDGET] [--model sonnet|haiku]
                         [--context full|light] [--no-evidence] [--timeout SECONDS]
 
-Runs Baude headless (wrap it in xvfb-run, as tests/screenshots.sh does), opens the transcript as if you'd picked it in
+Runs Baude headless (wrap it in xvfb-run, as tests/run.sh does), opens the transcript as if you'd picked it in
 the sidebar, waits until Signal is idle, and writes every name it looked up: its kind, status and locations,
 plus the Activity log, the names it skipped and Sonnet's cost. Settings, the glossary and Baude's data live in a
 throwaway folder (--work), so your own settings and the repository's .baude stay untouched; --lsp uses language

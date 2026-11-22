@@ -691,7 +691,7 @@ def file_next_saved():
 
 def keep_filing():
     """Notes not filed yet (saved offline or signed out) filed as they can be, a note a look: started once, by the first
-    window. (BAUDE_KEEP_FILING=0: not; a render rig's stand-in gh doesn't get notes from nowhere.)"""
+    window. (BAUDE_KEEP_FILING=0: not; a test's stand-in gh doesn't get notes from nowhere.)"""
     if _filing["started"] or os.environ.get("BAUDE_KEEP_FILING") == "0":
         return
     _filing["started"] = True

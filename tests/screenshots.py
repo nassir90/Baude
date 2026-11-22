@@ -8,8 +8,8 @@ Run through tests/screenshots.sh (headless, inside Xvfb):
     tests/screenshots.sh --out DIR
 
 Writes <scene>-light.png / <scene>-dark.png, an index.html gallery (one theme at a time,
-with a Light / Dark switch) and matrix-light.png / matrix-dark.png contact sheets. Scenes drive a real BaudeWindow against tests/fake_claude.py,
-through tests/rig.py, so the pictures always match the current code.
+with a Light / Dark switch) and matrix-light.png / matrix-dark.png contact sheets. Scenes drive a real BaudeWindow against tests/fake_claude.py, the same
+way the UI tests do, so the pictures always match the current code.
 """
 import argparse
 import base64
@@ -25,8 +25,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
 import fixes_fixture  # noqa: E402
-import rig as T  # noqa: E402  (sets up the throwaway env: fake claude, temp config dirs)
-from rig import Adw, Gdk, GdkPixbuf, GLib, Gtk, baude  # noqa: E402
+import test_baude as T  # noqa: E402  (sets up the throwaway env: fake claude, temp config dirs)
+from test_baude import Adw, Gdk, GdkPixbuf, GLib, Gtk, baude  # noqa: E402
 from gi.repository import Graphene  # noqa: E402
 
 from PIL import Image, ImageDraw, ImageGrab  # noqa: E402
@@ -736,7 +736,7 @@ def _(app):
 
 
 def git_window(app, name):
-    """A chat working in a worktree's branch (rig.py's repository for the Git page), with the commit it made, and
+    """A chat working in a worktree's branch (test_baude's repository for the Git page), with the commit it made, and
     the Git page open on the side."""
     import kube_fixture as kf
     shutil.rmtree(os.path.join(T.TMP, name), ignore_errors=True)  # (made again for each theme)

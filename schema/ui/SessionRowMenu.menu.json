@@ -25,13 +25,8 @@
       ]
     },
     {
-      "name": "Mesh tools item",
-      "shows": "For a non-Bot chat on a host that takes mesh tools (the same chats that can be Bots): \"Give Mesh Tools\", or \"Remove Mesh Tools\" if it has them. Sits third (after Rename… and any Bot item, before Move to Group; for a fork, after Move to Group). With mesh tools its agent can see the mesh's hosts and models, start a subagent on any of them and message other chats, from its next start.",
-      "copy": ["sidebar.give_mesh_tools", "sidebar.remove_mesh_tools"]
-    },
-    {
       "name": "Move to Group",
-      "shows": "A submenu, for any chat (this machine's or a host's), after Rename… and any Bot and mesh items (first if there is no Rename…). Lists each group by name (those made, those chats are put in, and those hosts' sessions were started in), alphabetical, the chat's own ticked; then \"No Group\"; then, in a separate section, \"New Group…\".",
+      "shows": "A submenu, for any chat (this machine's or a host's), after Rename… and any Bot items (first if there is no Rename…). Lists each group by name (those made, those chats are put in, and those hosts' sessions were started in), alphabetical, the chat's own ticked; then \"No Group\"; then, in a separate section, \"New Group…\".",
       "copy": ["sidebar.move_to_group", "sidebar.no_group_item", "sidebar.new_group_ellipsis"],
       "actions": [
         {"by": "click a group or No Group", "does": "Puts the chat in that group (or none); the list and the ⋮ → Groups list refresh. Undo is not offered."},
@@ -73,10 +68,13 @@
   ],
   "states": [
     {"name": "this machine's session (plain)", "shows": "Rename…, Move to Group ▸, Archive (or Unarchive), Move to Trash…. Order: Rename…, Move to Group, Archive, Move to Trash…."},
-    {"name": "host session, idle", "shows": "Rename…, [Make Bot… | Bot Settings… and Turn Back into a Chat], [Give/Remove Mesh Tools], Move to Group ▸, Archive, Move to Trash…."},
+    {"name": "host session, idle", "shows": "Rename…, [Make Bot… | Bot Settings… and Turn Back into a Chat], Move to Group ▸, Archive, Move to Trash…."},
     {"name": "host session, working or waiting", "shows": "Rename…, Move to Group ▸, Stop, Move to Trash… (no Archive; an archived one at a turn shows Unarchive)."},
     {"name": "host session, host gone", "shows": "Move to Group ▸, Delete. (Rename… is absent.)"},
     {"name": "host session, deactivated", "shows": "As gone: Move to Group ▸, Delete."}
+  ],
+  "removed": [
+    {"name": "Give Mesh Tools / Remove Mesh Tools", "apps": ["baude", "phone"], "why": "Mesh tools are not handed to chats one by one: a Bot has them and Meta has them, always, and no other chat does", "decided": "2026-11-22"}
   ],
   "scenes": ["53b-sidebar-menu", "55g-network-session-menu"]
 }

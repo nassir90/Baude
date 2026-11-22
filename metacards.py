@@ -160,8 +160,9 @@ class MetaCards:
 
     # ---- a tool call, as Baude's chat shows one
     def tool_title(self, name):
-        """A tool's name as its card says it: Claude Code's as they are (Read), Meta's own in words (Move pages)."""
-        name = name.removeprefix("mcp__meta__")
+        """A tool's name as its card says it: Claude Code's as they are (Read), Meta's own and the mesh's in words (Move
+        pages, Start subagent)."""
+        name = name.removeprefix("mcp__meta__").removeprefix("mcp__mesh__")
         return name if name in READ_TOOLS + COMMAND_TOOLS else name.replace("_", " ").capitalize() if name else \
             wording.say("meta.tool_changes")
 

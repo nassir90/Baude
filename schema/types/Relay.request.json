@@ -15,6 +15,10 @@
       "type": "string",
       "description": "The member's id."
     },
+    "as_meta": {
+      "type": "boolean",
+      "description": "As input's as_meta: what's sent through it is from Meta."
+    },
     "as": {
       "type": "string",
       "description": "The id of one of this host's chats whose mesh tools open it: what's sent through it is from that chat."

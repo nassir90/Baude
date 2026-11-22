@@ -185,6 +185,7 @@ private fun AskBox(hint: String, enabled: Boolean = true, compact: Boolean = fal
     val inset = if (compact) Gap.composerInset else 6.dp
     val side = if (compact) Gap.composerButton else Gap.barButton
     val pad = if (compact) ((Gap.composerButton - line) / 2).coerceAtLeast(0.dp) else 7.dp
+    val lift = ((line + pad * 2 - side) / 2).coerceAtLeast(0.dp) // (the button centred on the last line, at any text size)
     Row(Modifier.fillMaxWidth().padding(8.dp).clip(RoundedCornerShape(Gap.composerRadius)).background(c.inside)
         .border(1.dp, c.rule, RoundedCornerShape(Gap.composerRadius)).padding(inset), verticalAlignment = Alignment.Bottom) {
         Box(Modifier.weight(1f).padding(horizontal = 6.dp, vertical = pad)) {
@@ -193,7 +194,9 @@ private fun AskBox(hint: String, enabled: Boolean = true, compact: Boolean = fal
                 cursorBrush = SolidColor(c.accentBg), modifier = Modifier.fillMaxWidth().heightIn(max = 140.dp))
         }
         val ready = enabled && text.isNotBlank()
-        IconButton(Adwaita.Return, "Ask", enabled = ready, tint = if (ready) c.accentFg else c.fg,
-            background = if (ready) c.accentBg else null, side = side) { send(text.trim()); text = "" }
+        Box(Modifier.padding(bottom = lift)) {
+            IconButton(Adwaita.Return, "Ask", enabled = ready, tint = if (ready) c.accentFg else c.fg,
+                background = if (ready) c.accentBg else null, side = side) { send(text.trim()); text = "" }
+        }
     }
 }

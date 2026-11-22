@@ -80,6 +80,8 @@ abstract class Screens(private val theme: String) {
         Mesh.infos.clear()
         Mesh.states.clear()
         Mesh.key.value = null
+        Mesh.pictures.clear()
+        Pictures.authors(emptyMap())
     }
 
     @Test fun home() = render("01-home") { HomeScreen() }
@@ -145,6 +147,83 @@ abstract class Screens(private val theme: String) {
     @Test fun makeBot() { // (a chat on workshop, its row's Make Bot…: the Bot's name, its chat's title to keep or type over)
         show { BotSettings(Item("h1", Mesh.sessions.getValue("h1")[1], 0)) {} }
         screen("42-make-bot")
+    }
+
+    // (people's and Bots' pictures, each set into the page under Avatar's shade)
+    @Test fun picturesHome() {
+        phoneFixture()
+        botPictures()
+        HomePrefs.load(activity) // (its saved host read first, so it doesn't take back the one picked)
+        HomePrefs.pick("phone")
+        render("43-pictures-home") { HomeScreen() }
+    }
+
+    @Test fun picturesPhone() {
+        phoneFixture()
+        botPictures()
+        render("44-pictures-phone") { PhoneScreen({}, open = {}) }
+    }
+
+    @Test fun picturesChat() {
+        val bot = workshopBot()
+        fill(Mesh.openChat("h1", bot.id.orEmpty()))
+        render("45-pictures-chat") { ChatShell("h1", bot.id.orEmpty(), back = {}, open = { _, _ -> }, feedback = {}, first = "chat") }
+    }
+
+    @Test fun picturesBotSettings() {
+        val bot = workshopBot()
+        show { BotSettings(Item("h1", bot, 0)) {} }
+        screen("46-pictures-bot-settings")
+    }
+
+    /** The Git page on the parity rig's repository (its recorded answers), its authors' pictures as GitHub gives them:
+     * ada's identicon, pale grey to its edge; rowan-lee's portrait. */
+    @Test fun picturesGit() {
+        val fixtures = java.io.File("../../tests/parity/fixtures")
+        val home = org.json.JSONObject(java.io.File(fixtures, "sessions.json").readText()).getJSONObject("host").getString("home")
+        val answers = org.json.JSONObject(java.io.File(fixtures, "git-answers.json").readText()).getJSONObject("answers")
+        FixtureConnection.up(activity, Mesh.hosts.first(), home) { msg ->
+            val reply = org.json.JSONObject().put("op", "git").put("req", msg.opt("req")).put("what", msg.optString("what"))
+            if (msg.optString("op") != "git") null else when (msg.optString("what")) {
+                "page" -> org.json.JSONObject(answers.getJSONObject("page").toString().replace("@HOME@", home))
+                    .put("op", "git").put("req", msg.opt("req"))
+                "pulls" -> reply.put("repo", org.json.JSONObject.NULL).put("prs", org.json.JSONObject.NULL).put("gh", false)
+                "log" -> reply.put("commits", org.json.JSONArray()).put("skip", 0).put("more", false)
+                else -> null
+            }
+        }
+        val now = System.currentTimeMillis() / 1000.0
+        Mesh.sessions["h1"] = listOf(Msg.Session(id = "a", title = "Tidy the release notes", cwd = "$home/garden",
+            updated = now - 60, said = now - 60, created = now - 660, state = "idle", model = "opus", effort = "high", mode = "default"))
+        Pictures.authors(mapOf("ada@example.com" to Pictures.identicon(7, 0xFF8DB8E8.toInt()),
+            "41000001+rowan-lee@users.noreply.github.com" to Pictures.portrait(0xFF2E3440.toInt(), 0xFFD9A47E.toInt(),
+                0xFF6F8396.toInt(), 0xFF3B2A1E.toInt())))
+        dev.baude.android.GitPages.prepare("h1", "a", null, false)
+        show { ChatShell("h1", "a", back = {}, open = { _, _ -> }, feedback = {}, first = "git") }
+        val st = dev.baude.android.GitPages.of("h1", "a")
+        repeat(20) { if (st.commits.isEmpty()) settle() }
+        repeat(3) {
+            androidx.compose.runtime.snapshots.Snapshot.sendApplyNotifications()
+            settle()
+        }
+        activity.window.decorView.captureRoboImage("build/screenshots/$theme/47-pictures-git.png")
+    }
+
+    /** The phone's two Bots' pictures: Juniper's a portrait on a dark ground, Fern's one on white. */
+    private fun botPictures() {
+        Mesh.pictures["phone/p-a/null"] = Pictures.portrait(0xFF1D1D20.toInt(), 0xFFE0B48A.toInt(), 0xFF3A3A40.toInt(), 0xFF141414.toInt())
+        Mesh.pictures["phone/p-b/null"] = Pictures.portrait(0xFFFFFFFF.toInt(), 0xFFC68B59.toInt(), 0xFF8DE6B1.toInt(), 0xFF5A3A22.toInt())
+    }
+
+    /** workshop's first chat a Bot, Juniper, with its picture: a portrait on white. */
+    private fun workshopBot(): Msg.Session {
+        val was = Mesh.sessions.getValue("h1")
+        val a = was[0]
+        val bot = Msg.Session(id = a.id, title = a.title, cwd = a.cwd, updated = a.updated, said = a.said, created = a.created,
+            state = "idle", model = a.model, effort = a.effort, mode = a.mode, bot = Msg.BotListing(name = "Juniper"))
+        Mesh.sessions["h1"] = listOf(bot) + was.drop(1)
+        Mesh.pictures["h1/${a.id}/null"] = Pictures.portrait(0xFFFFFFFF.toInt(), 0xFFC68B59.toInt(), 0xFF8DE6B1.toInt(), 0xFF5A3A22.toInt())
+        return bot
     }
 
     /** This phone as a host of its own, named pocket: its connection up, two agents (Bots) of its own, and one in its

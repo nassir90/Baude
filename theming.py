@@ -334,8 +334,9 @@ paned.main-split.inside-before > separator { margin-left: -6px; margin-right: 6p
 /* (shaded_picture: someone's picture pressed into the page, its rim in shadow, as evenly a square's as a circle's,
    its middle as it is. The frame clips the picture and its shade to one shape: round, under a square theme square) */
 .picture-frame, .picture-frame avatar, .picture-frame picture, .picture-shade { border-radius: 9999px; }
-.picture-shade { box-shadow: inset 0 0 4px alpha(black, 0.3), inset 0 1px 2px alpha(black, 0.4),
-  inset 0 0 0 1px alpha(black, 0.16); }
+.picture-shade { box-shadow: inset 0 0 {picture-shade.blur} {picture-shade.blur-color},
+  inset 0 {picture-shade.top-y} {picture-shade.top-blur} {picture-shade.top-color},
+  inset 0 0 0 {picture-shade.ring} {picture-shade.ring-color}; }
 .git-log { background: transparent; }
 .git-log row { padding: 0 8px 0 2px; }
 .git-ref { font-size: 0.78em; padding: 0 5px; border-radius: 4px; background: alpha(@accent_bg_color, 0.14); color: @accent_color; }

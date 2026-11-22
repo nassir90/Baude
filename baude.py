@@ -13095,7 +13095,7 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
                                      tooltip_text=wording.say("window.rename_tip", thing="session"))
         header.set_title_widget(self.title_label)
         self.panel_btn = Gtk.ToggleButton(icon_name="sidebar-show-right-symbolic",
-                                          tooltip_text="Side panel: subagents, processes, code, files (Ctrl+Alt+B)")
+                                          tooltip_text=wording.say("side_panel.toggle_tip") + " (Ctrl+Alt+B)")
         menu = Gio.Menu()
         item = Gio.MenuItem.new(wording.say("window.settings"), "win.settings")
         item.set_attribute_value("accel", GLib.Variant.new_string(SETTINGS_KEY))  # (its key, shown beside it)

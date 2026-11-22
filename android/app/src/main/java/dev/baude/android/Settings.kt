@@ -50,7 +50,8 @@ import kotlin.math.roundToInt
  * prefs ("settings") and taken as they're changed: the accent (null: the system's) and whether it's light or dark
  * (BaudeTheme), the text's size, the icons' and everything's (Global Scale: BaudeTheme's density), Full-width text
  * (the chat's), the chats that are read-only, Meta's model, effort and Run commands, the code font (null: the
- * default), notifications (Mesh's), and whether updates download on a metered network by themselves (Update's). */
+ * default), notifications (Mesh's), whether updates download on a metered network by themselves (Update's), and
+ * whether a chat's pages are beside it, and how wide. */
 object Settings {
     val accent = mutableStateOf<String?>(null)
     val appearance = mutableStateOf("system") // ("system", "light", "dark")
@@ -65,6 +66,8 @@ object Settings {
     val codeFont = mutableStateOf<String?>(null)
     val notify = mutableStateOf(true)
     val meteredUpdates = mutableStateOf(false)
+    val split = mutableStateOf(false)          // (on its side, a chat's pages beside it, as Baude's side panel: ChatShell's)
+    val panelWidth = mutableStateOf<Float?>(null) // (the width, in dp, the rule was dragged to: Baude's panel_width)
 
     /** libadwaita's accents (widgets.ACCENTS, schema/tokens' accent): each name and its colour. */
     val ACCENTS = linkedMapOf("blue" to Tokens.Accent.blue, "teal" to Tokens.Accent.teal, "green" to Tokens.Accent.green,
@@ -104,6 +107,8 @@ object Settings {
         codeFont.value = p.getString("code_font", null)
         notify.value = p.getBoolean("notify", true)
         meteredUpdates.value = p.getBoolean("metered_updates", false)
+        split.value = p.getBoolean("split", false)
+        panelWidth.value = p.getFloat("panel_width", 0f).takeIf { it > 0f }
     }
 
     fun save(ctx: Context) {
@@ -114,7 +119,8 @@ object Settings {
             .putString("read_only_sessions", JSONArray(readOnly.toList()).toString())
             .putString("meta_model", metaModel.value).putString("meta_effort", metaEffort.value)
             .putBoolean("meta_commands", metaCommands.value).putString("code_font", codeFont.value)
-            .putBoolean("notify", notify.value).putBoolean("metered_updates", meteredUpdates.value).apply()
+            .putBoolean("notify", notify.value).putBoolean("metered_updates", meteredUpdates.value)
+            .putBoolean("split", split.value).putFloat("panel_width", panelWidth.value ?: 0f).apply()
     }
 
     /** Whether a chat is read-only (Read-only session). */

@@ -241,13 +241,22 @@ fun controlAnswer(hostId: String, sid: String, request: JSONObject, then: (JSONO
     }
 }
 
-/** Baude's header bar's controls for a chat, in a row under its title (the phone's too narrow for them beside it):
- * where its model runs (another's only), its model, its effort, its permission mode. A model another program runs
- * starts a new chat with it, as Baude does (another kind of model can't carry the conversation on). */
+/** Where a page's pickers go: a row under the bar, the phone held upright (it's too narrow for them beside the
+ * title), else in the bar, as Baude's header bar has them. */
+@Composable
+fun ControlsRow(inBar: Boolean, content: @Composable () -> Unit) {
+    val c = LocalBaude.current
+    Row(if (inBar) Modifier.horizontalScroll(rememberScrollState()) else Modifier.fillMaxWidth().background(c.frame)
+        .horizontalScroll(rememberScrollState()).padding(start = 6.dp, end = 6.dp, bottom = 4.dp), horizontalArrangement = Arrangement.spacedBy(2.dp),
+        verticalAlignment = Alignment.CenterVertically) { content() }
+}
+
+/** Baude's header bar's controls for a chat (ControlsRow): where its model runs (another's only), its model, its
+ * effort, its permission mode. A model another program runs starts a new chat with it, as Baude does (another kind of
+ * model can't carry the conversation on). */
 @Composable
 fun ChatControls(hostId: String, sid: String, said: (String) -> Unit, open: (String, String) -> Unit,
-                 modelSet: (String) -> Unit = {}) {
-    val c = LocalBaude.current
+                 modelSet: (String) -> Unit = {}, inBar: Boolean = false) {
     Mesh.tick.value
     val s = Mesh.session(hostId, sid) ?: return
     val asked = remember(hostId, sid) { mutableStateMapOf<String, String>() } // (what's been picked, till it's listed)
@@ -261,9 +270,7 @@ fun ChatControls(hostId: String, sid: String, said: (String) -> Unit, open: (Str
     val choices = models(hostId)
     val now = chosen(choices, model ?: defaultModel(hostId))
     val prog = program(now?.value ?: model)
-    Row(Modifier.fillMaxWidth().background(c.frame).horizontalScroll(rememberScrollState())
-        .padding(start = 6.dp, end = 6.dp, bottom = 4.dp), horizontalArrangement = Arrangement.spacedBy(2.dp),
-        verticalAlignment = Alignment.CenterVertically) {
+    ControlsRow(inBar) {
         val copies = copiesOf(hostId, model)
         if (copies.isNotEmpty()) { // (where the chat's model runs: each copy of it in the mesh, by host and provider)
             val face = copies.firstOrNull { it.value == model }?.let { "${it.host} / ${it.provider}" }?.let(::middleCut)

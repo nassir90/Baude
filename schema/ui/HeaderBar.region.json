@@ -135,8 +135,8 @@
     {
       "name": "side panel toggle",
       "shows": "A toggle button with the right-sidebar icon; pressed while the side panel (subagents, processes, code, files, …) is shown.",
-      "text": [
-        "Side panel: subagents, processes, code, files (Ctrl+Alt+B)"
+      "copy": [
+        "side_panel.toggle_tip"
       ],
       "actions": [
         {

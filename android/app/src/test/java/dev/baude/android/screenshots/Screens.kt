@@ -60,6 +60,8 @@ abstract class Screens(private val theme: String) {
         Settings.notify.value = true
         Settings.meteredUpdates.value = false
         Update.state.value = ""
+        Settings.split.value = false
+        Settings.panelWidth.value = null
         fixtures()
     }
 
@@ -199,12 +201,30 @@ abstract class Screens(private val theme: String) {
     @Test fun chatGit() = chatAt("17-chat-git", "git")
     @Test fun chatSignal() = chatAt("18-chat-signal", "signal")
 
+    // (the phone turned on its side: the chat, and Meta, their pickers in the bar; then side by side, the bar's
+    // side panel toggle pressed: Meta, or the Subagents page, beside the chat)
+    @Test @Config(qualifiers = "+land") fun landChat() = chatAt("30-land-chat", "chat")
+    @Test @Config(qualifiers = "+land") fun landMeta() = chatAt("31-land-meta", "meta")
+    @Test @Config(qualifiers = "+land") fun landSplit() = chatAt("32-land-split-meta", "chat", split = true)
+    @Test @Config(qualifiers = "+land") fun landSplitAgents() = chatAt("33-land-split-subagents", "agents", split = true)
+    @Test @Config(qualifiers = "+land") fun landSplitInset() { // (3-button navigation down the right edge, a camera hole at the left)
+        insets = androidx.core.graphics.Insets.of(72, 0, 144, 0)
+        chatAt("35-land-split-side-insets", "chat", split = true)
+    }
+    @Test @Config(qualifiers = "+land") fun landSplitWider() { // (the rule dragged left: the pages wider)
+        Settings.panelWidth.value = 420f
+        chatAt("34-land-split-dragged", "processes", split = true)
+    }
+
     /** The fixture chat ("Tidy the release notes") open at page, its host up: what was said in it, its subagents,
      * side questions and artifacts. */
-    private fun chatAt(name: String, page: String) {
+    private fun chatAt(name: String, page: String, split: Boolean = false) {
         val chat = Mesh.openChat("h1", "a")
         fill(chat)
-        render(name) { ChatShell("h1", "a", back = {}, open = { _, _ -> }, feedback = {}, first = page) }
+        if (!split) return render(name) { ChatShell("h1", "a", back = {}, open = { _, _ -> }, feedback = {}, first = page) }
+        show { ChatShell("h1", "a", back = {}, open = { _, _ -> }, feedback = {}, first = page) }
+        tap(dev.baude.android.Wording.SidePanel.toggleTip)
+        activity.window.decorView.captureRoboImage("build/screenshots/$theme/$name.png")
     }
 
     private fun fill(chat: Chat) {
@@ -290,8 +310,20 @@ abstract class Screens(private val theme: String) {
         settle()
     }
 
+    private var insets: androidx.core.graphics.Insets? = null
+
     private fun show(screen: @Composable () -> Unit) {
         activity.setContent { BaudeTheme { screen() } }
+        settle()
+        insets?.let { i -> // (fake system bars at the sides)
+            val w = androidx.core.view.WindowInsetsCompat.Builder()
+                .setInsets(androidx.core.view.WindowInsetsCompat.Type.systemBars(), i).build()
+            fun give(v: android.view.View) {
+                androidx.core.view.ViewCompat.dispatchApplyWindowInsets(v, w)
+                if (v is android.view.ViewGroup) for (k in 0 until v.childCount) give(v.getChildAt(k))
+            }
+            give(activity.window.decorView)
+        }
         settle()
     }
 

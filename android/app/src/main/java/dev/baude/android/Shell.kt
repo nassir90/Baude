@@ -6,17 +6,26 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.only
+import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
@@ -36,6 +45,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
@@ -65,12 +75,15 @@ fun pages(bot: Boolean, hostId: String): List<Page> {
 
 /** A chat open: its bar (its Bot's picture and name, or its title; where it is), its pages to swipe between (the
  * chat's own with Baude's header controls over it; first: the one shown first), and the bottom bar that's Baude's
- * side panel's switcher (a row that scrolls). */
+ * side panel's switcher (a row that scrolls). On its side, the phone has the shown page's pickers in the bar, as
+ * Baude's header bar has them, and the bar's side panel toggle, which puts the chat and its other pages side by side
+ * as Baude's side panel is: a rule between them to drag, the switcher under the pages on the right. */
 @OptIn(ExperimentalFoundationApi::class, ExperimentalLayoutApi::class)
 @Composable
 fun ChatShell(hostId: String, sid: String, back: () -> Unit, open: (String, String) -> Unit, feedback: () -> Unit,
               first: String = "chat", screen: (String) -> Unit = {}) {
     val c = LocalBaude.current
+    val ctx = androidx.compose.ui.platform.LocalContext.current
     val chat = remember(hostId, sid) { Mesh.openChat(hostId, sid) }
     Meta.opener = open
     val at = chat.hostId // (where it's reached now: a member's chat moves to a host of yours that's its machine)
@@ -81,17 +94,32 @@ fun ChatShell(hostId: String, sid: String, back: () -> Unit, open: (String, Stri
     val name = if (bot != null) contact!!.name else s?.title?.ifBlank { null }?.let { if (it.length > 48) it.take(47) + "…" else it }
         ?: Wording.Sidebar.newSession
     val all = pages(bot != null, at)
+    val sideAll = all.filter { it.key != "chat" }
+    val wide = androidx.compose.ui.platform.LocalConfiguration.current.orientation ==
+        android.content.res.Configuration.ORIENTATION_LANDSCAPE // (on its side: the pickers in the bar)
+    val split = wide && Settings.split.value // (upright, one page at a time: too narrow for two)
+    val beside by androidx.compose.runtime.rememberUpdatedState(split)
     var shown by rememberSaveable(hostId, sid) { mutableStateOf(first) }
-    val pager = rememberPagerState(initialPage = all.indexOfFirst { it.key == shown }.coerceAtLeast(0)) { all.size }
+    var side by rememberSaveable(hostId, sid) { mutableStateOf(if (first == "chat") "meta" else first) } // (the page
+    val pager = rememberPagerState(initialPage = all.indexOfFirst { it.key == shown }.coerceAtLeast(0)) { all.size } // beside it)
     val scope = rememberCoroutineScope()
-    Meta.pages = { all }
-    FileLinks.showFiles = { all.indexOfFirst { it.key == "files" }.takeIf { it >= 0 }?.let { scope.launch { pager.animateScrollToPage(it) } } }
-    val place = ChatPlace(at, s?.cwd, Mesh.conn(at)?.info?.home, chat.artifacts.toList(), sid)
-    Meta.pageOpener = { t -> all.indexOfFirst { it.title.equals(t, true) }.takeIf { it >= 0 }?.let { scope.launch { pager.animateScrollToPage(it) } } }
-    val openPage = { key: String ->
-        all.indexOfFirst { it.key == key }.takeIf { it >= 0 }?.let { scope.launch { pager.animateScrollToPage(it) } }
+    val show = { key: String -> // (a page shown: beside the chat while they're side by side, else swiped to)
+        if (split && key != "chat" && sideAll.any { it.key == key }) side = key
+        else all.indexOfFirst { it.key == key }.takeIf { it >= 0 }?.let { scope.launch { pager.animateScrollToPage(it) } }
         Unit
     }
+    val toggle = { // (side by side, the page shown beside the chat; else the chat, swiped to, as Baude's closed panel)
+        val on = !Settings.split.value
+        if (on && shown != "chat") side = shown
+        Settings.split.value = on
+        Settings.save(ctx)
+        if (!on) all.indexOfFirst { it.key == "chat" }.takeIf { it >= 0 }?.let { scope.launch { pager.scrollToPage(it) } }
+        Unit
+    }
+    Meta.pages = { all }
+    FileLinks.showFiles = { show("files") }
+    val place = ChatPlace(at, s?.cwd, Mesh.conn(at)?.info?.home, chat.artifacts.toList(), sid)
+    Meta.pageOpener = { t -> all.firstOrNull { it.title.equals(t, true) }?.let { show(it.key) } }
     androidx.compose.runtime.DisposableEffect(chat) { // (its side questions' answers heard whichever page is shown)
         val l = sideQuestions(chat)
         SignalLinks.hostId = at
@@ -112,59 +140,134 @@ fun ChatShell(hostId: String, sid: String, back: () -> Unit, open: (String, Stri
             FileLinks.showFiles = {}
         }
     }
-    SignalLinks.openPage = openPage
+    SignalLinks.openPage = show
     LaunchedEffect(chat.showAgent.value) { // (View on a call's card: the Subagents page)
         if (chat.showAgent.value == null) return@LaunchedEffect
-        all.indexOfFirst { it.key == "agents" }.takeIf { it >= 0 }?.let { pager.animateScrollToPage(it) }
+        if (beside) side = "agents"
+        else all.indexOfFirst { it.key == "agents" }.takeIf { it >= 0 }?.let { pager.animateScrollToPage(it) }
         kotlinx.coroutines.delay(100) // (the page has read it by now)
         chat.showAgent.value = null
     }
     LaunchedEffect(pager.currentPage, all.size) { all.getOrNull(pager.currentPage)?.let { shown = it.key } }
     LaunchedEffect(all.size) { // (a Bot no more: its pages gone, Meta shown if one of them was, as Baude does)
+        if (sideAll.none { it.key == side }) side = "meta"
         val i = all.indexOfFirst { it.key == shown }
         if (i < 0) pager.scrollToPage(1) else if (i != pager.currentPage) pager.scrollToPage(i)
+    }
+    val modelSet = { v: String ->
+        chat.chrome.outgrown.value = false // (another model's window: as its usage says)
+        refreshContext(chat, v)
+    }
+    val chatControls = @Composable { inBar: Boolean -> // (its model, effort and mode: the chat's own, as Baude's
+        if (takes(at, "control"))                     // header has them, not its side panel's pages)
+            ChatControls(at, sid, said = { chat.said.value = it }, open = open, modelSet = modelSet, inBar = inBar)
+    }
+    @Composable
+    fun Page(key: String, here: Boolean, beside: Boolean) {
+        when (key) {
+            "chat" -> Column(Modifier.fillMaxSize().watchTouches()) {
+                if (!wide) chatControls(false)
+                ChatBanner(chat, open)
+                Box(Modifier.weight(1f)) {
+                    ChatPage(chat, name, stop = { interrupt(chat) }, foot = { StatusBar(chat) { show(it) } })
+                    SignalPopovers(chat)
+                }
+            }
+            "meta" -> Column(Modifier.fillMaxSize()) { // (Meta's pickers where the chat's are; beside the chat, over it)
+                if (!wide || beside) MetaControls()
+                Box(Modifier.weight(1f)) { MetaPage(at, here) }
+            }
+            "memory" -> MemoryPage(at, sid, here)
+            "browser" -> BrowserPage(at, sid, bot?.name.orEmpty(), here)
+            "routines" -> RoutinesPage(at, sid, here)
+            "agents" -> SubagentsPage(chat)
+            "processes" -> ProcessesPage(chat, here)
+            "artifacts" -> ArtifactsPage(chat)
+            "btw" -> SideQuestionsPage(chat)
+            "files" -> FilesPage(chat)
+            "git" -> GitPage(at, sid)
+            "signal" -> SignalPage(at, sid, here)
+        }
     }
     Column(Modifier.fillMaxSize().background(c.frame).imePadding()) {
         Bar(name, start = { IconButton(Adwaita.GoPrevious, Wording.Browser.back, onClick = back) },
             lead = if (bot != null) ({ Avatar(name, contact?.let { Mesh.pictures[it.pictureKey] }) }) else null,
             end = {
+                if (wide) when (if (split) "chat" else shown) {
+                    "chat" -> chatControls(true)
+                    "meta" -> MetaControls(inBar = true)
+                }
                 if (bot != null) PhoneBrowserButton(at, sid, name) // (Phone Use: a Bot's browser on this phone)
+                if (wide) IconButton(Adwaita.SidebarShowRight, Wording.SidePanel.toggleTip,
+                    background = if (split) c.fg.copy(alpha = 0.10f) else null, onClick = toggle)
                 ChatMenu(at, sid, feedback, screen)
             })
         androidx.compose.runtime.CompositionLocalProvider(LocalChatPlace provides place) {
-        HorizontalPager(pager, Modifier.weight(1f).fillMaxWidth(), key = { all[it].key },
-            userScrollEnabled = all.getOrNull(pager.currentPage)?.key != "browser") { i ->
-            val here = pager.currentPage == i && !pager.isScrollInProgress
-            when (all[i].key) {
-                "chat" -> Column(Modifier.fillMaxSize().watchTouches()) { // (its model, effort and mode: the chat's own, as Baude's
-                    if (takes(at, "control"))              // header has them, not its side panel's pages)
-                        ChatControls(at, sid, said = { chat.said.value = it }, open = open, modelSet = { v ->
-                            chat.chrome.outgrown.value = false // (another model's window: as its usage says)
-                            refreshContext(chat, v)
-                        })
-                    ChatBanner(chat, open)
-                    Box(Modifier.weight(1f)) {
-                        ChatPage(chat, name, stop = { interrupt(chat) }, foot = { StatusBar(chat, openPage) })
-                        SignalPopovers(chat)
-                    }
-                }
-                "meta" -> MetaPage(at, here)
-                "memory" -> MemoryPage(at, sid, here)
-                "browser" -> BrowserPage(at, sid, bot?.name.orEmpty(), here)
-                "routines" -> RoutinesPage(at, sid, here)
-                "agents" -> SubagentsPage(chat)
-                "processes" -> ProcessesPage(chat, here)
-                "artifacts" -> ArtifactsPage(chat)
-                "btw" -> SideQuestionsPage(chat)
-                "files" -> FilesPage(chat)
-                "git" -> GitPage(at, sid)
-                "signal" -> SignalPage(at, sid, here)
+        if (split) SideBySide(Modifier.weight(1f).fillMaxWidth(), close = toggle, chat = { Page("chat", true, false) }) {
+            Box(Modifier.weight(1f)) { Page(side, true, true) }
+            if (!WindowInsets.isImeVisible) BottomBar(sideAll, sideAll.indexOfFirst { it.key == side }) { side = sideAll[it].key }
+        } else {
+            HorizontalPager(pager, Modifier.weight(1f).fillMaxWidth(), key = { all[it].key },
+                userScrollEnabled = all.getOrNull(pager.currentPage)?.key != "browser") { i ->
+                Page(all[i].key, pager.currentPage == i && !pager.isScrollInProgress, false)
             }
+            if (!WindowInsets.isImeVisible) BottomBar(all, pager.currentPage) { scope.launch { pager.animateScrollToPage(it) } }
         }
         }
-        if (!WindowInsets.isImeVisible) BottomBar(all, pager.currentPage) { scope.launch { pager.animateScrollToPage(it) } }
     }
 }
+
+/** The chat and its pages side by side (Baude's main split): the chat on the left, a 1px rule, the pages on the
+ * right at the width the rule was dragged to (Settings' panelWidth), else about a third of the phone. A drag of the
+ * rule stops at the pages' least and the chat's; dragged on till the pages would be under 24 wide, they close once
+ * it's let go there, and open again at the width they had. */
+@Composable
+fun SideBySide(modifier: Modifier, close: () -> Unit, chat: @Composable () -> Unit, pages: @Composable ColumnScope.() -> Unit) {
+    val c = LocalBaude.current
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    val density = androidx.compose.ui.platform.LocalDensity.current
+    androidx.compose.foundation.layout.BoxWithConstraints(modifier) {
+        val total = maxWidth.value
+        val most = (total - CHAT_LEAST - 1f).coerceAtLeast(PANEL_LEAST)
+        val kept = Settings.panelWidth.value ?: (total * 0.36f)
+        var dragged by remember { mutableStateOf<Float?>(null) } // (where a drag has put it: the width it'd leave)
+        val wanted = dragged ?: kept
+        val shut = dragged != null && wanted <= CLOSE_WITHIN // (dragged on to close: let go there, it's closed)
+        val width = if (shut) 0f else wanted.coerceIn(PANEL_LEAST, most)
+        val from by androidx.compose.runtime.rememberUpdatedState(kept.coerceIn(PANEL_LEAST, most)) // (for the drag: as
+        val widest by androidx.compose.runtime.rememberUpdatedState(most)                            // they are then)
+        Row(Modifier.fillMaxSize()) {
+            Box(Modifier.weight(1f).fillMaxHeight() // (clear of the phone's own bar at the foot, as the switcher is)
+                .windowInsetsPadding(WindowInsets.navigationBars.only(WindowInsetsSides.Bottom))) { chat() }
+            Box(Modifier.width(1.dp).fillMaxHeight().background(c.rule))
+            if (width > 0f) Column(Modifier.width(width.dp).fillMaxHeight()) { pages() }
+        }
+        Box(Modifier.offset(x = (total - width - 1f - GRIP / 2).dp).width(GRIP.dp).fillMaxHeight() // (the rule picked
+            .pointerInput(Unit) {                                                                 // first: 8 either side)
+                detectHorizontalDragGestures(
+                    onDragStart = { dragged = from },
+                    onDragEnd = {
+                        val d = dragged
+                        dragged = null
+                        if (d != null && d <= CLOSE_WITHIN) close()
+                        else if (d != null) {
+                            Settings.panelWidth.value = d.coerceIn(PANEL_LEAST, widest)
+                            Settings.save(ctx)
+                        }
+                    },
+                    onDragCancel = { dragged = null },
+                ) { change, dx ->
+                    change.consume()
+                    dragged = (dragged ?: from) - with(density) { dx.toDp().value } // (as far as the finger's gone: drawn
+                }                                                                   // between the least and most)
+            })
+    }
+}
+
+private const val PANEL_LEAST = 200f  // (dp: the pages beside the chat at their narrowest)
+private const val CHAT_LEAST = 160f   // (the chat at its narrowest beside them)
+private const val CLOSE_WITHIN = 24f  // (widgets.PaneSlide.CLOSE_WITHIN)
+private const val GRIP = 16f          // (the rule's width to a finger)
 
 /** Baude's side panel's switcher as a bottom bar (Adw.ViewSwitcher, narrow: each page's icon over its title, the one
  * shown raised), a row that scrolls when it's wider than the phone. */

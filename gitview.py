@@ -473,16 +473,21 @@ def first_line_middle(label):
     return (top + bottom) / 2 / Pango.SCALE
 
 
+def first_line_top(label):
+    """How far down a label its first line's top is, px (from its layout alone, as first_line_middle)."""
+    return label.get_layout().get_iter().get_line_yrange()[0] / Pango.SCALE
+
+
 class GitGutter(Gtk.Widget):
     """The start of a row of the list at the top: as wide as a log row's lane and its author's picture are (width),
     its child (a pull request's pill) at its end, so what follows starts where a log row's text does. A child wider
     than that goes out past its start, rather than move the text on. A log row's author's picture is in one as wide
     as itself. A child that's valign START is centred on the first line of the label beside it (beside, whose top is
-    top px down)."""
+    top px down); with level_top, its top is level with that line's top instead."""
 
-    def __init__(self, child, width, top=0):
+    def __init__(self, child, width, top=0, level_top=False):
         super().__init__()
-        self.child, self.width, self.top = child, width, top
+        self.child, self.width, self.top, self.level_top = child, width, top, level_top
         child.set_parent(self)
 
     def set_width(self, width):
@@ -503,7 +508,7 @@ class GitGutter(Gtk.Widget):
         if self.child.get_valign() == Gtk.Align.START:  # (centred on the first line of the name beside it: beside)
             middle = height / 2
             if (beside := getattr(self, "beside", None)) is not None:
-                middle = self.top + first_line_middle(beside)
+                middle = self.top + (first_line_top(beside) + h / 2 if self.level_top else first_line_middle(beside))
             y = max(0.0, min(middle - h / 2, height - h))
         self.child.allocate(w, h, -1, Gsk.Transform().translate(Graphene.Point().init(width - w, y)))
 
@@ -516,9 +521,9 @@ class GitGutter(Gtk.Widget):
 
 class GitLane(Gtk.Widget):
     """A row's slice of the commit graph (git_lanes): the lanes passing it, those ending at its dot and those its
-    parents go on in; every commit a plain dot, a violet one if this chat made it. Its dot is level with the first
-    line of the row's subject (beside, whose top is top px down), so a row's dot is as far from the next's as the
-    rows' first lines are."""
+    parents go on in; every commit a plain dot, a violet one if this chat made it. Its dot is level with the middle
+    of the row's picture, whose top is level with the top of the first line of the row's subject (beside, whose top is
+    top px down), so a row's dot is as far from the next's as the rows' first lines are."""
 
     beside, top = None, 0
 
@@ -545,7 +550,7 @@ class GitLane(Gtk.Widget):
 
     def do_snapshot(self, snap):
         h, row = self.get_height(), self.row
-        mid = h / 2 if self.beside is None else min(h, self.top + first_line_middle(self.beside))
+        mid = h / 2 if self.beside is None else min(h, self.top + first_line_top(self.beside) + AVATAR_SIZE / 2)
         xc = self.x(row["col"])
         stroke = Gsk.Stroke.new(1.6)
 
@@ -1232,7 +1237,7 @@ class GitPage(Gtk.Stack):
         # (their initials on a colour; their picture, already if it's known, so a redrawn row doesn't flicker)
         row.avatar = Adw.Avatar(size=AVATAR_SIZE, text=c["author"], show_initials=True, valign=Gtk.Align.START,
                                 custom_image=AVATARS.pictures.get(c["email"].lower()))
-        picture = GitGutter(shaded_picture(row.avatar), AVATAR_SIZE, top=GIT_ROW_PAD)
+        picture = GitGutter(shaded_picture(row.avatar), AVATAR_SIZE, top=GIT_ROW_PAD, level_top=True)
         box.append(picture)
         text = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, hexpand=True, margin_top=GIT_ROW_PAD,
                        margin_bottom=GIT_ROW_PAD)
@@ -1246,7 +1251,8 @@ class GitPage(Gtk.Stack):
         row.line.pill_scale = LinkLabel.CHIP_SCALE  # (a pull request's pill, a chip's size)
         row.line.connect("activate-link", on_label_link)
         row.line.set_markup(self.line_markup(c, made))
-        # (the picture and the graph's dot level with the subject's first line, however many lines the row has)
+        # (the picture's top level with the subject's first line's top, the graph's dot with the picture's middle, however
+        # many lines the row has)
         picture.beside = graph.beside = row.line
         graph.top = GIT_ROW_PAD
         if own:

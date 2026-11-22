@@ -130,7 +130,7 @@ private val LANE_COLOURS get() = listOf(Tokens.Git.lane1, Tokens.Git.lane2, Toke
     Tokens.Git.lane6, Tokens.Git.lane7, Tokens.Git.lane8)
 
 /** A row's graph, drawn into the row's own height from x (its lanes' lines, and its commit's dot at dotY: level with
- * the first line of the row's title, so rows of different heights have their dots as far apart as their first lines). */
+ * the middle of the row's picture, whose top is level with the top of the row's title's first line, so rows of different heights have their dots as far apart as their first lines). */
 private fun DrawScope.lanes(row: LaneRow, x0: Float, dim: Boolean, made: Boolean, dotY: Float) {
     val step = Tokens.Git.laneStep.toPx()
     val pad = Tokens.Git.lanePad.toPx()
@@ -230,20 +230,20 @@ fun LogRow(c: Msg.Commit, lane: LaneRow, cols: Int, dim: Boolean, own: Boolean, 
     val colors = LocalBaude.current
     GitAvatars.version.intValue
     val density = LocalDensity.current
-    var lineMiddle by remember { mutableStateOf<Float?>(null) } // (px down the title, its first line's middle)
+    var lineTop by remember { mutableStateOf<Float?>(null) } // (px down the title, its first line's top)
     val pad = Tokens.Git.rowPad
     Row(Modifier.fillMaxWidth().drawBehind {
         if (found) {
             drawRect(colors.accentBg.copy(alpha = 0.2f))
             drawRect(colors.accent, size = androidx.compose.ui.geometry.Size(3.dp.toPx(), size.height))
         }
-        lanes(lane, 2.dp.toPx(), dim, made, lineMiddle?.let { pad.toPx() + it } ?: (size.height / 2))
+        lanes(lane, 2.dp.toPx(), dim, made, lineTop?.let { pad.toPx() + it + Tokens.Git.avatar.icon.toPx() / 2 } ?: (size.height / 2))
     }.clickable(onClick = open).padding(start = 2.dp, end = 8.dp), horizontalArrangement = Arrangement.spacedBy(Tokens.Git.rowGap),
         verticalAlignment = Alignment.Top) {
         Spacer(Modifier.width(laneWidth(cols)))
-        // (the picture and the graph's dot level with the title's first line, however many lines the row has)
+        // (the picture's top level with the title's first line's top, the graph's dot with the picture's middle)
         Box(Modifier.offset {
-            val y = lineMiddle?.let { pad.toPx() + it - Tokens.Git.avatar.icon.toPx() / 2 } ?: pad.toPx()
+            val y = lineTop?.let { pad.toPx() + it } ?: pad.toPx()
             IntOffset(0, y.roundToInt().coerceAtLeast(0))
         }.alpha(if (dim) Tokens.Git.rowDim.toFloat() else 1f)) {
             Avatar(c.author.orEmpty(), GitAvatars.picture(c.email.orEmpty()), Tokens.Git.avatar.icon)
@@ -251,7 +251,7 @@ fun LogRow(c: Msg.Commit, lane: LaneRow, cols: Int, dim: Boolean, own: Boolean, 
         Column(Modifier.weight(1f).padding(vertical = pad).alpha(if (dim) Tokens.Git.rowDim.toFloat() else 1f)) {
             PillText(lineText(c, made, heads), style = Type.body.copy(fontWeight = if (own) Tokens.Git.ownWeight else null),
                 color = colors.fg, maxLines = 2, overflow = TextOverflow.Ellipsis,
-                onTextLayout = { lineMiddle = (it.getLineTop(0) + it.getLineBottom(0)) / 2 })
+                onTextLayout = { lineTop = it.getLineTop(0) })
             Text(caption(c), style = Type.caption, color = colors.fg.copy(alpha = colors.fg.alpha * Tokens.Git.captionOpacity.toFloat()),
                 maxLines = 1, overflow = TextOverflow.Ellipsis)
         }

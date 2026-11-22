@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # The parity rig, start to end: every scene of tests/parity/scenes.json drawn by Baude (desktop.py) and by the phone
 # (android's Parity.kt) from tests/parity/fixtures, then laid side by side and compared (compare.py all).
-# Output: tests/parity/out/{desktop,phone,pairs,diffs}. Args pass to desktop.py (-k NAME, --theme).
+# Output: tests/parity/out/{desktop,phone,pairs,diffs}. Args pass to desktop.py (-k NAME, --theme). The phone also draws
+# popups.json's popups (out/popups: tests/parity/popups.py measures them and lays them out); PARITY_ONLY=a,b limits the
+# phone to the scenes whose names have one of those in them.
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 # (one run at a time on a machine: every checkout's run uses the fixtures' one home folder)

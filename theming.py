@@ -173,6 +173,7 @@ row.entry.focused, row.spin.focused, editablelabel:focus-within { outline: none;
 .sysnote { font-size: {font.small}em; opacity: 0.6; }
 .compact-mark label.error { opacity: 1; }
 .composer-actions button { min-width: {composer.button}; min-height: {composer.button}; padding: 0; }
+.feedback-actions button { min-width: 34px; min-height: 34px; padding: 0; }
 .attach-chip { background: @baude_raised; border-radius: {radius.card}; padding: 2px 2px 2px 4px; }
 .attach-thumb { border-radius: 6px; }
 .file-thumb { border-radius: 3px; }

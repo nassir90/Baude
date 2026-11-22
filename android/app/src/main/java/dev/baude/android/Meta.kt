@@ -106,6 +106,9 @@ object Meta {
             "adjusting. show also lists chats or the " +
             "open chat's pages as rows the user can tap, the changelog, and buttons for what you don't do yourself " +
             "(app_index buttons).",
+        "Mesh: your mesh tools (mcp__mesh__*) list the mesh's hosts and their models and the chats on each, read a " +
+            "chat, message one, and start a subagent on any host with any of its models. What they start or say isn't " +
+            "an action: it has no undo.",
         "Be brief and plain: a sentence or two, no headings. Don't describe what your tools did: the user sees it.",
     ).joinToString("\n\n")
 
@@ -120,10 +123,9 @@ object Meta {
             val conn = Mesh.conn(id)
             lines.add("host $label: ${conn?.state ?: "not connected"}")
             for (s in Mesh.sessions[id].orEmpty().filter { it.draft != true }.take(60)) {
-                val bot = s.bot?.name?.ifBlank { null }
                 lines.add("  ${s.id.orEmpty().take(8)} " + listOfNotNull(
-                    (s.title?.ifBlank { null } ?: "(untitled)").let { "\"$it\"" }, shortPath(id, s.cwd.orEmpty()),
-                    s.state.orEmpty(), bot?.let { "Bot $it" }, groupOf(id, s).ifEmpty { null }?.let { "group $it" },
+                    (chatName(s) ?: "(untitled)").let { "\"$it\"" }, shortPath(id, s.cwd.orEmpty()),
+                    s.state.orEmpty(), groupOf(id, s).ifEmpty { null }?.let { "group $it" },
                     if (s.archived == true) "archived" else null, s.model?.ifBlank { null }).joinToString(" · "))
             }
         }
@@ -597,7 +599,7 @@ fun MetaRowsOf(o: JSONObject) {
             {
                 val (h, sid) = r.optString(0) to r.optString(1)
                 val s = Mesh.session(h, sid)
-                ActionRow(s?.bot?.name?.ifBlank { null } ?: s?.title?.ifBlank { null } ?: Wording.Common.untitled,
+                ActionRow(s?.let { chatName(it) } ?: Wording.Common.untitled,
                     listOfNotNull(Mesh.label(h), s?.let { shortPath(h, it.cwd.orEmpty()) },
                         s?.let { groupOf(h, it) }?.ifEmpty { null }?.let { Wording.MetaChats.groupNamed(name = it) }).joinToString(" · "),
                     onClick = { Meta.opener(h, sid) }, suffix = chevron)
@@ -619,7 +621,7 @@ fun MetaRowsOf(o: JSONObject) {
         if (asking) {
             val h = o.optString("host")
             val sid = o.optString("sid")
-            val title = Mesh.session(h, sid)?.let { it.bot?.name?.ifBlank { null } ?: it.title?.ifBlank { null } } ?: Wording.Trash.thisSession
+            val title = Mesh.session(h, sid)?.let { chatName(it) } ?: Wording.Trash.thisSession
             androidx.compose.material3.AlertDialog(onDismissRequest = { asking = false },
                 title = { Text(Wording.Trash.heading(title = title)) },
                 text = { Text(Wording.Trash.body(where = Wording.Trash.onHost(host = Mesh.label(h)))) },

@@ -33,8 +33,6 @@
     "make_bot_ellipsis": "Make Bot…",
     "bot_settings_ellipsis": "Bot Settings…",
     "unbot": "Turn Back into a Chat",
-    "give_mesh_tools": "Give Mesh Tools",
-    "remove_mesh_tools": "Remove Mesh Tools",
     "rename_group_ellipsis": "Rename Group…",
     "delete_group": "Delete Group",
     "group_deleted": "Group “{$name}” deleted",

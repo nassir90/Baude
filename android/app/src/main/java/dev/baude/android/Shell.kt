@@ -43,6 +43,8 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.positionInWindow
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
@@ -191,6 +193,9 @@ fun ChatShell(hostId: String, sid: String, back: () -> Unit, open: (String, Stri
             "signal" -> SignalPage(at, sid, here)
         }
     }
+    val pane = remember { MenuPane() } // (the model pickers' lists, over the page, down to the bottom bar's top)
+    val bar = Modifier.onGloballyPositioned { pane.floor = it.positionInWindow().y }
+    androidx.compose.runtime.CompositionLocalProvider(LocalMenuPane provides pane) {
     Box(Modifier.fillMaxSize()) {
     Column(Modifier.fillMaxSize().background(c.frame).imePadding()) {
         Bar(name, start = { IconButton(Adwaita.GoPrevious, Wording.Browser.back, onClick = back) },
@@ -208,17 +213,21 @@ fun ChatShell(hostId: String, sid: String, back: () -> Unit, open: (String, Stri
         androidx.compose.runtime.CompositionLocalProvider(LocalChatPlace provides place) {
         if (split) SideBySide(Modifier.weight(1f).fillMaxWidth(), close = toggle, chat = { Page("chat", true, false) }) {
             Box(Modifier.weight(1f)) { Page(side, true, true) }
-            if (!WindowInsets.isImeVisible) BottomBar(sideAll, sideAll.indexOfFirst { it.key == side }) { side = sideAll[it].key }
+            if (!WindowInsets.isImeVisible) BottomBar(sideAll, sideAll.indexOfFirst { it.key == side }, bar) { side = sideAll[it].key }
+            else androidx.compose.runtime.SideEffect { pane.floor = null }
         } else {
             HorizontalPager(pager, Modifier.weight(1f).fillMaxWidth(), key = { all[it].key },
                 userScrollEnabled = all.getOrNull(pager.currentPage)?.key != "browser") { i ->
                 Page(all[i].key, pager.currentPage == i && !pager.isScrollInProgress, false)
             }
-            if (!WindowInsets.isImeVisible) BottomBar(all, pager.currentPage) { scope.launch { pager.animateScrollToPage(it) } }
+            if (!WindowInsets.isImeVisible) BottomBar(all, pager.currentPage, bar) { scope.launch { pager.animateScrollToPage(it) } }
+            else androidx.compose.runtime.SideEffect { pane.floor = null }
         }
         }
     }
+    MenuPaneLayer(pane)
     ViewerOverlay()
+    }
     }
 }
 
@@ -277,9 +286,9 @@ private const val GRIP = 16f          // (the rule's width to a finger)
 /** Baude's side panel's switcher as a bottom bar (Adw.ViewSwitcher, narrow: each page's icon over its title, the one
  * shown raised), a row that scrolls when it's wider than the phone. */
 @Composable
-fun BottomBar(pages: List<Page>, current: Int, pick: (Int) -> Unit) {
+fun BottomBar(pages: List<Page>, current: Int, modifier: Modifier = Modifier, pick: (Int) -> Unit) {
     val c = LocalBaude.current
-    Box(Modifier.fillMaxWidth().background(c.frame).navigationBarsPadding(), contentAlignment = Alignment.Center) {
+    Box(modifier.fillMaxWidth().background(c.frame).navigationBarsPadding(), contentAlignment = Alignment.Center) {
         Row(Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 6.dp, vertical = 6.dp),
             horizontalArrangement = Arrangement.spacedBy(2.dp)) {
             pages.forEachIndexed { i, p ->

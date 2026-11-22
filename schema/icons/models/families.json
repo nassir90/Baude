@@ -1,0 +1,27 @@
+{
+  "description": "Each model's family, by what its name or value says: the first whose match finds a word of the model's name, else its value's last part (case ignored). Its icon (baude-model-<icon>-symbolic.svg here) is drawn beside the model in the model pickers, and its name heads its models there. A model that matches none is under \"Other\" (common.other), with no icon.",
+  "families": [
+    {"icon": "claude", "name": "Claude", "match": "claude|opus|sonnet|haiku|fable|^default$"},
+    {"icon": "qwen", "name": "Qwen", "match": "qwen|qwq"},
+    {"icon": "gemma", "name": "Gemma", "match": "gemma"},
+    {"icon": "gemini", "name": "Gemini", "match": "gemini"},
+    {"icon": "openai", "name": "GPT", "match": "gpt|openai|(^|[/:])o[134]\\b"},
+    {"icon": "meta", "name": "Llama", "match": "llama"},
+    {"icon": "mistral", "name": "Mistral", "match": "mistral|mixtral|stral\\b|ministral"},
+    {"icon": "deepseek", "name": "DeepSeek", "match": "deepseek"},
+    {"icon": "microsoft", "name": "Phi", "match": "(^|[/:\\-])phi"},
+    {"icon": "ibm", "name": "Granite", "match": "granite"},
+    {"icon": "kimi", "name": "Kimi", "match": "kimi|moonshot"},
+    {"icon": "zhipu", "name": "GLM", "match": "glm"},
+    {"icon": "nvidia", "name": "Nemotron", "match": "nemotron|nvidia"},
+    {"icon": "cohere", "name": "Command", "match": "command-r|cohere|\\baya\\b"},
+    {"icon": "minimax", "name": "MiniMax", "match": "minimax"},
+    {"icon": "huggingface", "name": "SmolLM", "match": "smol"},
+    {"icon": "ai2", "name": "OLMo", "match": "olmo|tulu"},
+    {"icon": "internlm", "name": "InternLM", "match": "internlm"},
+    {"icon": "yi", "name": "Yi", "match": "(^|[/:\\-])yi[\\-:]"},
+    {"icon": "stepfun", "name": "Step", "match": "stepfun|(^|[/:\\-])step-"},
+    {"icon": "baichuan", "name": "Baichuan", "match": "baichuan"},
+    {"icon": "apple", "name": "Apple", "match": "^apple$|apple/|apple-foundation"}
+  ]
+}

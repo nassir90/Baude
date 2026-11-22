@@ -87,6 +87,11 @@ def _git_ok(root, *args):
 STOPPING_SAID_S = 60  # (how long a host's last word as it stopped is said, while it isn't back)
 
 
+def chat_name(info):
+    """What a chat is called wherever it's named: a Bot, by its name alone; else its title (None if it has none)."""
+    return (info.get("bot") or {}).get("name") or info.get("title")
+
+
 def stopping_line(name, restart, left, total):
     """A host stopping (or restarting), how far along, as its menu bar item and the heads' banners say it."""
     if left is not None and left > 0:

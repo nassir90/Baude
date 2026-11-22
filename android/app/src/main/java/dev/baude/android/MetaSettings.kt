@@ -5,21 +5,9 @@ import androidx.compose.runtime.Composable
 /** The host Meta runs on (MetaPage's choice): the one it's on, else the first that can run it. */
 fun metaHost(): String? = Meta.host.value ?: Mesh.reached("app_tools").firstOrNull()?.first
 
-/** What Intelligence lists (meta.listed_models): the models h offers (Claude's first, then its own others), then each
- * model another provider in the mesh runs that's not of a kind listed already. */
-fun metaModels(h: String?): List<ModelChoice> {
-    h ?: return emptyList()
-    val out = ArrayList(models(h))
-    val all = copies(h)
-    val listed = all.filter { c -> out.any { it.value == c.value } }.toMutableList()
-    for (c in all) {
-        if (out.any { it.value == c.value } || listed.any { sameModel(it, c) }) continue
-        listed.add(c)
-        out.add(ModelChoice(c.value, c.m.displayName?.ifBlank { null } ?: c.value,
-            if (c.m.thinking == true) listOf("off", "low", "medium", "high") else emptyList()))
-    }
-    return out
-}
+/** What Intelligence lists (meta.listed_models): what a chat on h lists (meshModels), Meta's own copy where it's of a
+ * kind listed. */
+fun metaModels(h: String?): List<ModelChoice> = meshModels(h, Settings.metaModel.value)
 
 /** The entry of list for a model value (meta.model_entry): its own; the same model served another way (a copy in the
  * mesh); else, for an alias (haiku), the first listed model with it as a word of its value. */
@@ -87,8 +75,9 @@ fun MetaControls(inBar: Boolean = false) {
         if (copies.isNotEmpty()) Picker(copies.firstOrNull { it.value == value }?.let { "${it.host} / ${it.provider}" }
             ?.let(::middleCut) ?: Wording.MetaSettings.provider, Wording.MetaSettings.providerPicker,
             copies.map { "${it.host} / ${it.provider}" to it.value }, value, enabled = copies.size > 1) { v -> putMetaModel(ctx, v) }
-        ModelPicker((entry?.name ?: wanted).let { if (it.length > 30) it.take(29) + "…" else it }, list, entry?.value,
-            logo = if (entry != null && family(entry) == "Claude") Adwaita.Claude else null) { v -> putMetaModel(ctx, v) }
+        ModelPicker((entry?.name ?: wanted).let { if (it.length > 30) it.take(29) + "…" else it }, list, entry?.value ?: wanted) { v ->
+            putMetaModel(ctx, v)
+        }
         val levels = entry?.efforts.orEmpty()
         val level = Settings.metaEffort.value?.takeIf { it in levels }
         Picker(level?.let(::effortLabel) ?: Wording.MetaSettings.effort,
@@ -111,7 +100,7 @@ fun IntelligenceRow(fallback: String? = null, extra: (@Composable () -> Unit)? =
     val wanted = Settings.metaModel.value ?: "haiku"
     val entry = metaEntry(wanted, list, h)
     ActionRow(Wording.MetaSettings.intelligence, Wording.MetaSettings.intelligenceDetail, suffix = {
-        ModelPicker(entry?.name ?: wanted, list, entry?.value) { v -> putMetaModel(ctx, v) }
+        ModelPicker(entry?.name ?: wanted, list, entry?.value ?: wanted) { v -> putMetaModel(ctx, v) }
         extra?.invoke()
     })
 }

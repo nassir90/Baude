@@ -9,7 +9,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.realpath(__file__))))
 
 from macos import ns_string, objc_send  # noqa: E402
 from baudelib import wording  # noqa: E402
-from baudelib.client import stopping_line  # noqa: E402
+from baudelib.client import chat_name, stopping_line  # noqa: E402
 
 NS_VARIABLE_LENGTH = -1.0
 USER_INITIATED_ALLOWING_SLEEP = 0x00FFFFFF  # (NSActivityUserInitiatedAllowingIdleSystemSleep: no App Nap)
@@ -50,7 +50,7 @@ def say(listing):
     shown = sorted(running, key=lambda s: ({"waiting": 0, "working": 1}.get(s["state"], 2), -(s.get("said") or 0)))
     words = {"waiting": wording.say("host_menu.asking"), "working": wording.say("host_menu.working"),
              "idle": wording.say("host_menu.waiting_for_you")}
-    return title, [line], [((s.get("title") or wording.say("common.untitled"))[:48], words[s["state"]])
+    return title, [line], [((chat_name(s) or wording.say("common.untitled"))[:48], words[s["state"]])
                            for s in shown[:12]]
 
 

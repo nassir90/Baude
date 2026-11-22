@@ -20,7 +20,7 @@ Claude Code keeps, live ones included), whichever notebook's open: you select a 
 
     python3 record.py
     python3 record.py --chat TRANSCRIPT.jsonl   # reading that chat (Baude's menu → Open in Record does this)
-    python3 record.py --install | --uninstall   # app-menu launcher with the logo (per user), and ~/.local/bin's commands
+    python3 record.py --install | --uninstall   # all four apps in the app menu (per user), and ~/.local/bin's commands
 
 Record is part of Baude: it lives beside baude.py and searches the chat read's folder with lookup.py, the engine behind
 Baude's ⌘K, for @ in the diary, for the names linked in the chat, and for what its questions say those names are.
@@ -154,14 +154,14 @@ def redraw_logo():
             themed_icon()
         except Exception as e:  # (an icon isn't worth the accent's change)
             print("record: logo:", e, file=sys.stderr)
-    launcher_logo(svg)
+    launcher_logo()
 
 
-def launcher_logo(svg=None):
-    """The launcher's logo drawn again in the accent on a worker thread, where it isn't already
-    (applist.redraw_logo)."""
-    svg = svg or logo()
-    theming.off_main("launcher", lambda: applist.redraw_logo(APP_ID, "Record", svg))
+def launcher_logo():
+    """The launchers' logos that take the accent (Record's and Baude's, those installed) drawn again in it on a worker
+    thread, where they aren't already (applist.redraw_logos)."""
+    accent = widgets.load_settings().get("accent")
+    theming.off_main("launcher", lambda: applist.redraw_logos(accent))
     return False
 
 
@@ -322,16 +322,18 @@ def main():
     ap = argparse.ArgumentParser(prog="record", description="Read AI prose with a peer who knows what you know.")
     ap.add_argument("--chat", help="a Claude Code transcript (.jsonl) to read")
     ap.add_argument("--install", action="store_true",
-                    help=wording.say("install.install_help", app="Record", where=apps_place()))
+                    help=wording.say("install.install_help", where=apps_place()))
     ap.add_argument("--uninstall", action="store_true",
-                    help=wording.say("install.uninstall_help", app="Record", where=apps_place()))
+                    help=wording.say("install.uninstall_help", where=apps_place()))
     args = ap.parse_args()
     if args.install:
-        print("\n".join(wording.say("install.installed", path=p) for p in [*map(bins.path, bins.NAMES), install()]))
+        install()
+        print("\n".join(wording.say("install.installed", path=p)
+                        for p in [*map(bins.path, bins.NAMES), *applist.all_paths()]))
         return 0
     if args.uninstall:
         print("\n".join(wording.say("install.removed", path=path) for path in uninstall())
-              or wording.say("install.not_installed", app="Record"))
+              or wording.say("install.not_installed"))
         return 0
     bins.refreshed(lambda text: print(f"record: {text}", file=sys.stderr))
     chat = os.path.realpath(args.chat) if args.chat else None

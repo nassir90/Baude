@@ -176,7 +176,7 @@
         },
         {
           "name": "Show in Applications",
-          "shows": "A switch \"Show in Applications\" (macOS) or \"Show in application menu\" (Linux), subtitle the launcher's path. On: Record is added to the platform's list of apps (per user) with its logo, in the accent picked, starting ~/.local/bin/record, written with Baude's other commands; off: removed (the commands stay).",
+          "shows": "A switch \"Show in Applications\" (macOS) or \"Show in application menu\" (Linux), no subtitle. The same one setting as Baude's Settings row: on when Baude, Record, Emission and Multiplex are all in the platform's list of apps, read again each time Settings opens. On: all four are added (per user), each with its logo (Baude's and Record's in the accent picked), each starting its command in ~/.local/bin, written with Baude's other commands; off: all four removed (the commands stay).",
           "copy": [
             "window.show_in",
             "install.applications",

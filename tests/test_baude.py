@@ -186,10 +186,6 @@ baude = _Baude()
 panels.SLIDE_MS = 0  # (a side bar opens and closes at once here: test_side_bars_slide has it slide)
 lightbox.Lightbox.FLY_MS = 0  # (the large view opens and closes at once here: test_lightbox_flies has it fly)
 
-if sys.platform == "darwin":  # never touch the real launcher, nor register a test one with LaunchServices
-    baude.LAUNCHER = baude.MacLauncher(os.path.join(TMP, "Applications"))
-    baude.LAUNCHER.refresh = lambda: None
-
 OPTS = argparse.Namespace(cwd=TMP, model=None, resume=None)
 SHOTS = None
 
@@ -477,56 +473,26 @@ def test_completer(app):
         close(win)
 
 
-def test_freedesktop_launcher():
-    launcher = baude.FreedesktopLauncher()
-    desktop, icon = launcher.paths()
-    assert desktop.startswith(os.environ["XDG_DATA_HOME"])
-    assert launcher.install() == desktop and launcher.installed()
-    assert os.path.exists(icon)
-    entry = open(desktop).read()
-    exec_line = next(l for l in entry.splitlines() if l.startswith("Exec="))
-    assert open(os.path.join(os.environ["BAUDE_BINS"], "baude")).read().count("import baude"), "a module (cached bytecode)"
-    # the Exec line, unquoted the way a desktop launcher does it, really runs baude
-    argv = re.findall(r'"((?:[^"\\]|\\.)*)"|(\S+)', exec_line[len("Exec="):])
-    argv = [re.sub(r"\\(.)", r"\1", q) if q else w for q, w in argv]
-    assert "usage" in subprocess.run(argv + ["--help"], capture_output=True, text=True, check=True).stdout
-    assert "Icon=dev.baude.Baude" in entry
-    if shutil.which("desktop-file-validate"):
-        v = subprocess.run(["desktop-file-validate", desktop], capture_output=True, text=True)
-        assert v.returncode == 0 and not v.stdout.strip(), v.stdout + v.stderr
-    assert launcher.uninstall() == [desktop, icon]
-    assert not os.path.exists(desktop) and not os.path.exists(icon) and not launcher.installed()
-    assert launcher.uninstall() == []
-
-
-def test_mac_launcher():
+def test_launcher():
+    """All four apps go in the list together and come out together; Baude's own launcher starts baude."""
     import plistlib
-    launcher = baude.MacLauncher(os.path.join(TMP, "mac-apps"))
-    launcher.refresh = lambda: None  # (not registered with LaunchServices)
-    app_path = launcher.install()
-    assert app_path == os.path.join(TMP, "mac-apps", "Baude.app") and launcher.installed()
-    contents = os.path.join(app_path, "Contents")
-    with open(os.path.join(contents, "Info.plist"), "rb") as f:
-        info = plistlib.load(f)
-    assert info["CFBundleExecutable"] == "Baude" and info["CFBundlePackageType"] == "APPL"
-    assert info["CFBundleIdentifier"] == baude.APP_ID
-    # the icon: an .icns of the four PNG sizes, each entry's length its header and data
-    icns = open(os.path.join(contents, "Resources", info["CFBundleIconFile"] + ".icns"), "rb").read()
-    assert icns[:4] == b"icns" and struct.unpack(">I", icns[4:8])[0] == len(icns)
-    at, kinds = 8, []
-    while at < len(icns):
-        kind, size = icns[at:at + 4], struct.unpack(">I", icns[at + 4:at + 8])[0]
-        assert icns[at + 8:at + 16] == b"\x89PNG\r\n\x1a\n", kind
-        kinds.append(kind)
-        at += size
-    assert at == len(icns) and kinds == [b"ic07", b"ic08", b"ic09", b"ic10"]
-    # the executable runs baude through a login shell (Homebrew's PATH), passing its arguments on
-    script = os.path.join(contents, "MacOS", "Baude")
-    assert os.access(script, os.X_OK)
-    env = dict(os.environ, SHELL="/bin/sh")
-    assert "usage" in subprocess.run([script, "--help"], env=env, capture_output=True, text=True,
-                                     check=True).stdout
-    assert launcher.uninstall() == [app_path] and not os.path.exists(app_path) and not launcher.installed()
+    launcher = baude.Launcher(os.path.join(TMP, "launchers"))
+    assert launcher.install() == launcher.paths()[0] and launcher.installed()
+    assert len(launcher.paths()) == 4 and all(os.path.exists(p) for p in launcher.paths())
+    if sys.platform == "darwin":
+        contents = os.path.join(launcher.paths()[0], "Contents")
+        with open(os.path.join(contents, "Info.plist"), "rb") as f:
+            assert plistlib.load(f)["CFBundleIdentifier"] == baude.APP_ID
+        argv = [os.path.join(contents, "MacOS", "Baude"), "--help"]
+        env = dict(os.environ, SHELL="/bin/sh")
+    else:
+        exec_line = next(l for l in open(launcher.paths()[0]).read().splitlines() if l.startswith("Exec="))
+        argv = re.findall(r'"((?:[^"\\]|\\.)*)"|(\S+)', exec_line[len("Exec="):])
+        argv = [re.sub(r"\\(.)", r"\1", q) if q else w for q, w in argv] + ["--help"]
+        env = os.environ
+    assert "usage" in subprocess.run(argv, env=env, capture_output=True, text=True, check=True).stdout
+    assert launcher.uninstall() and not any(os.path.exists(p) for p in launcher.paths())
+    assert not launcher.installed() and launcher.uninstall() == []
 
 
 def test_claude_exe():

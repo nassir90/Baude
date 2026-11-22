@@ -5,8 +5,6 @@ start ~/.local/bin/baude (baudelib/bins.py).
 """
 import json
 import os
-import shutil
-import subprocess
 import sys
 import time
 
@@ -173,15 +171,14 @@ def redraw_logo():
             logo_icon()
         except Exception as e:  # (an icon isn't worth the accent's change)
             print("baude: logo:", e, file=sys.stderr)
-    launcher_logo(svg)
+    launcher_logo()
 
 
-def launcher_logo(svg=None):
-    """The launcher's logo (LAUNCHER, if it's installed) drawn again in the accent on a worker thread, where it isn't
-    already."""
-    svg = svg or logo()
-    where = LAUNCHER.folder
-    theming.off_main("launcher", lambda: LAUNCHER.installed() and applist.redraw_logo(APP_ID, "Baude", svg, where))
+def launcher_logo():
+    """The launchers' logos that take the accent (Baude's and Record's, those installed) drawn again in it on a worker
+    thread, where they aren't already."""
+    where, accent = LAUNCHER.folder, widgets.load_settings().get("accent")
+    theming.off_main("launcher", lambda: applist.redraw_logos(accent, where))
     return False
 
 
@@ -196,138 +193,29 @@ def launch_command(*args):
 
 
 class Launcher:
-    """Baude in the platform's list of apps, for this user: LAUNCHER is this platform's. paths() are the files it
-    writes, the first the one install() returns; where names the list. Installing writes the commands in ~/.local/bin
-    too (bins.install), which the launcher starts."""
-    where = ""
-    folder = None  # (where the list is, where it isn't the user's: tests and rigs')
+    """Baude, Record, Emission and Multiplex in the platform's list of apps, for this user, together (applist.APPS): on
+    macOS ~/Applications/NAME.app each, which Spotlight and the Finder list, elsewhere a .desktop entry and the logo in
+    the user's hicolor theme each. Each starts its command in ~/.local/bin (bins), written as they're installed. where
+    names the list; folder is where it is when it isn't the user's (a test's or a rig's)."""
+    where = applist.place()
+
+    def __init__(self, folder=None):
+        self.folder = folder
 
     def paths(self):
-        raise NotImplementedError
-
-    def write(self):
-        raise NotImplementedError
-
-    def refresh(self):
-        """Tells the platform the files changed (optional: it notices anyway)."""
+        """Each app's launcher, Baude's first."""
+        return applist.all_paths(self.folder)
 
     def installed(self):
-        return os.path.exists(self.paths()[0])
+        return applist.all_installed(self.folder)
 
     def install(self):
-        bins.install()
-        self.write()
-        self.refresh()
+        """All four in the list, the logos in the accent picked: Baude's launcher."""
+        applist.install_all(widgets.load_settings().get("accent"), self.folder)
         return self.paths()[0]
 
     def uninstall(self):
-        removed = []
-        for path in self.paths():
-            if os.path.isdir(path):
-                shutil.rmtree(path)
-            elif os.path.exists(path):
-                os.remove(path)
-            else:
-                continue
-            removed.append(path)
-        self.refresh()
-        return removed
+        return applist.uninstall_all(self.folder)
 
 
-class FreedesktopLauncher(Launcher):
-    """Linux: a .desktop entry in $XDG_DATA_HOME/applications and an icon in the user's hicolor theme, as the
-    freedesktop specs have it."""
-    where = wording.say("install.application_menu")
-
-    def paths(self):
-        return [os.path.join(_data_home(), "applications", f"{APP_ID}.desktop"),
-                os.path.join(_data_home(), "icons", "hicolor", "scalable", "apps", f"{APP_ID}.svg")]
-
-    def write(self):
-        entry = "\n".join([
-            "[Desktop Entry]",
-            "Type=Application",
-            "Name=Baude",
-            "GenericName=Claude Code client",
-            "Comment=GTK front-end for the claude CLI",
-            "Exec=" + _exec_quote(bins.path("baude")),
-            f"Icon={APP_ID}",
-            "Terminal=false",
-            "Categories=Development;GTK;",
-            "Keywords=claude;ai;agent;chat;",
-            "StartupNotify=true",
-            f"StartupWMClass={APP_ID}",
-            "",
-        ])
-        desktop, icon = self.paths()
-        for path, data in ((icon, logo()), (desktop, entry)):
-            os.makedirs(os.path.dirname(path), exist_ok=True)
-            with open(path, "w") as f:
-                f.write(data)
-
-    def refresh(self):
-        # (menus watch the folder anyway; this refreshes the MIME cache)
-        if shutil.which("update-desktop-database"):
-            subprocess.run(["update-desktop-database", os.path.dirname(self.paths()[0])],
-                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
-
-
-MACOS_LSREGISTER = "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework" \
-    "/Support/lsregister"
-
-
-class MacLauncher(Launcher):
-    """macOS: an app bundle, ~/Applications/Baude.app, which Spotlight and the Finder list. Its
-    executable is a script that starts ~/.local/bin/baude through the user's login shell, as an app opened
-    from the Finder gets launchd's bare PATH, without Homebrew's tools. Its icon is an .icns of PNGs (the
-    format's ic07 to ic10 entries, 128 to 1024 px)."""
-    where = wording.say("install.applications")
-
-    def __init__(self, folder=None):
-        self.folder = folder or os.environ.get("BAUDE_LAUNCHERS") or os.path.expanduser("~/Applications")
-
-    def paths(self):
-        return [os.path.join(self.folder, "Baude.app")]
-
-    @staticmethod
-    def icns():
-        return applist.icns(logo())
-
-    def write(self):
-        import plistlib
-        import shlex
-        contents = os.path.join(self.paths()[0], "Contents")
-        os.makedirs(os.path.join(contents, "MacOS"), exist_ok=True)
-        os.makedirs(os.path.join(contents, "Resources"), exist_ok=True)
-        with open(os.path.join(contents, "Info.plist"), "wb") as f:
-            plistlib.dump({
-                "CFBundleName": "Baude",
-                "CFBundleDisplayName": "Baude",
-                "CFBundleIdentifier": APP_ID,
-                "CFBundlePackageType": "APPL",
-                "CFBundleExecutable": "Baude",
-                "CFBundleIconFile": "Baude",
-                "LSApplicationCategoryType": "public.app-category.developer-tools",
-                "NSHighResolutionCapable": True,
-            }, f)
-        with open(os.path.join(contents, "Resources", "Baude.icns"), "wb") as f:
-            f.write(self.icns())
-        script = os.path.join(contents, "MacOS", "Baude")
-        with open(script, "w") as f:
-            f.write("#!/bin/sh\n"
-                    'cd "$HOME"\n'  # (the Finder starts apps in /; Linux's launchers in your home)
-                    'exec "${SHELL:-/bin/zsh}" -lc \'exec "$0" "$@"\' '
-                    + shlex.quote(bins.path("baude")) + ' "$@"\n')
-        os.chmod(script, 0o755)
-
-    def refresh(self):
-        # (LaunchServices and Spotlight find the bundle in time, a minute or more; this lists it now, for ⌘Space too)
-        path = self.paths()[0]
-        if os.path.exists(MACOS_LSREGISTER):
-            subprocess.run([MACOS_LSREGISTER, "-f" if os.path.exists(path) else "-u", path],
-                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
-        if os.path.exists(path) and shutil.which("mdimport"):
-            subprocess.run(["mdimport", path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
-
-
-LAUNCHER = MacLauncher() if sys.platform == "darwin" else FreedesktopLauncher()
+LAUNCHER = Launcher()

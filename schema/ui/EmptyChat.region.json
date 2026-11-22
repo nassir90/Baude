@@ -1,6 +1,12 @@
 {
   "description": "What the Baude main window shows for a brand-new chat, before anything has been written: the header and sidebar as usual, an empty chat column, the composer and the status bar. There is no welcome text, logo or example prompt.",
-  "apps": ["baude"],
+  "apps": ["baude", "phone"],
+  "opens": [
+    "the sidebar's New session (Ctrl+N), on the host picked beside it, in the folder last used there (this machine: the window's folder)",
+    "a folder header's + in the sidebar, on that folder's host, in that folder",
+    "Open folder…, on the host picked beside New session, in the folder picked (this machine: its folder chooser; another host: its \"Open a folder on <host>\" step)",
+    "/new or /clear in a chat, on that chat's host: another host's, in that chat's folder; this machine's, in the window's folder"
+  ],
   "code": ["baudewindow.py:BaudeWindow.__init__", "windowproc.py:WindowProc.draft_changed", "windowdrafts.py:WindowDrafts.sync_models"],
   "copy": ["sidebar.new_session"],
   "parts": [
@@ -26,5 +32,5 @@
       "shows": "A new chat is not listed in the sessions sidebar until something is typed or attached (text or an attachment begins it); it is listed from then on, even before the first send. A new chat keeps one shared draft that the next new chat opens with. Starting another new chat with /new, /clear or Ctrl+N comes back to this same blank state."
     }
   ],
-  "scenes": ["01-empty"]
+  "scenes": ["01-empty", "55f-network-folder-new-session", "55f6-network-open-folder-opened", "55f7-network-slash-new"]
 }

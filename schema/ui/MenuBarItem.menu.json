@@ -1,0 +1,29 @@
+{
+  "description": "The host process's item in macOS's menu bar (baude_headless.py serve): a few words of what it is doing, the sessions at a turn or asking, and Quit.",
+  "apps": ["baude"],
+  "opens": ["click the item in the menu bar"],
+  "code": ["baudelib/menubar.py:say"],
+  "copy": ["host_menu"],
+  "parts": [
+    {
+      "name": "Title",
+      "shows": "\"Baude · N asking\" or \"Baude · N working\" (asking first), else \"Baude\"; \"Baude · restarting\" or \"Baude · stopping\" while it is.",
+      "copy": ["host_menu.title_asking", "host_menu.title_working", "host_menu.title_restarting", "host_menu.title_stopping"]
+    },
+    {
+      "name": "Count line",
+      "shows": "\"N sessions, M running\" (or \"none running\").",
+      "copy": ["host_menu.sessions_running", "host_menu.sessions_none_running"]
+    },
+    {
+      "name": "Session lines",
+      "shows": "Up to twelve running sessions, asking first, then working, then the most recently active: each the chat's name (a Bot's name, never its chat's title; the title for any other chat; \"(untitled)\" if none), cut at 48 characters, then \"asking\", \"working\" or \"waiting for you\".",
+      "copy": ["host_menu.asking", "host_menu.working", "host_menu.waiting_for_you", "common.untitled"]
+    },
+    {
+      "name": "Quit",
+      "shows": "\"Quit Baude's Host Process\".",
+      "copy": ["host_menu.quit"]
+    }
+  ]
+}

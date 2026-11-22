@@ -146,17 +146,16 @@ object MetaTools {
     private fun all(): List<Pair<String, Msg.Session>> =
         Mesh.sessions.flatMap { (h, list) -> list.filter { it.draft != true }.map { h to it } }
 
-    /** A chat named as Meta names one: its short id (or more of it), its title, or its Bot's name. */
+    /** A chat named as Meta names one: its short id (or more of it), or its name: a Bot's, else its title. */
     private fun find(ref: String): Pair<String, Msg.Session>? {
         val r = ref.trim().lowercase()
         if (r.isEmpty()) return null
         val all = all()
         return all.firstOrNull { (_, s) -> r.length >= 4 && s.id.orEmpty().lowercase().startsWith(r) }
-            ?: all.firstOrNull { (_, s) -> s.title?.ifBlank { null }?.lowercase() == r }
-            ?: all.firstOrNull { (_, s) -> s.bot?.name?.ifBlank { null }?.lowercase() == r }
+            ?: all.firstOrNull { (_, s) -> chatName(s)?.lowercase() == r }
     }
 
-    private fun title(s: Msg.Session) = s.bot?.name?.ifBlank { null }?.let { "Bot $it" } ?: s.title?.ifBlank { null } ?: Wording.Common.untitled
+    private fun title(s: Msg.Session) = chatName(s) ?: Wording.Common.untitled
 
     private fun chats(refs: List<String>): Pair<List<Pair<String, Msg.Session>>, List<String>> =
         refs.mapNotNull(::find).distinctBy { it.first + it.second.id.orEmpty() } to refs.filter { find(it) == null }
@@ -724,8 +723,8 @@ object MetaTools {
             "${Mesh.label(id)}: ${Mesh.conn(id)?.state ?: "not connected"}" + if (id.startsWith("mesh:")) " (through the mesh)" else ""
         }
         "chats", "sessions" -> all().map { (h, s) ->
-            "${s.id.orEmpty().take(8)} " + listOfNotNull("\"${s.title?.ifBlank { null } ?: "(untitled)"}\"", Mesh.label(h),
-                shortPath(h, s.cwd.orEmpty()), s.state.orEmpty(), s.bot?.name?.ifBlank { null }?.let { "Bot $it" },
+            "${s.id.orEmpty().take(8)} " + listOfNotNull("\"${chatName(s) ?: "(untitled)"}\"", Mesh.label(h),
+                shortPath(h, s.cwd.orEmpty()), s.state.orEmpty(),
                 groupOf(h, s).ifEmpty { null }?.let { "group $it" }, if (s.archived == true) "archived" else null,
                 s.model?.ifBlank { null }).joinToString(" · ")
         }

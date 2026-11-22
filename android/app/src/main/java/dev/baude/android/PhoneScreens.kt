@@ -57,7 +57,8 @@ fun PhoneScreen(back: () -> Unit, open: (String) -> Unit) {
                 Panel(rows = true) {
                     agents.forEachIndexed { i, s ->
                         if (i > 0) Rule()
-                        val name = s.bot?.name?.ifBlank { null } ?: Wording.Common.agent
+                        val name = s.bot?.name?.ifBlank { null } ?: s.title?.ifBlank { null } // (a Bot: its name alone)
+                            ?: modelSaid(s.model.orEmpty()).ifBlank { Wording.Common.agent }
                         Row(Modifier.fillMaxWidth().clickable { open(s.id.orEmpty()) }.padding(start = 12.dp, top = 8.dp, bottom = 8.dp, end = 4.dp),
                             verticalAlignment = Alignment.CenterVertically) {
                             val contact = Mesh.contact("phone", s.id.orEmpty())
@@ -67,11 +68,8 @@ fun PhoneScreen(back: () -> Unit, open: (String) -> Unit) {
                                 pick.launch("image/*")
                             }) { Avatar(name, contact?.let { Mesh.pictures[it.pictureKey] }) }
                             Spacer(Modifier.width(Gap.avatarGap))
-                            Column(Modifier.weight(1f)) {
-                                Text(name, style = Type.bold, color = c.fg, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                val what = s.title.orEmpty().ifBlank { modelSaid(s.model.orEmpty()) }
-                                Text(what, style = Type.caption, color = c.dim, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            }
+                            Text(name, style = Type.bold, color = c.fg, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f))
                             StatusDot(s.state.orEmpty(), !s.asks.isNullOrEmpty())
                             IconButton(Adwaita.UserTrash, Wording.Trash.moveDots) { deleting = s }
                         }
@@ -87,12 +85,10 @@ fun PhoneScreen(back: () -> Unit, open: (String) -> Unit) {
                         if (i > 0) Rule()
                         Row(Modifier.fillMaxWidth().padding(start = 12.dp, top = 6.dp, bottom = 6.dp, end = 8.dp),
                             verticalAlignment = Alignment.CenterVertically) {
-                            Column(Modifier.weight(1f)) {
-                                Text(m.optJSONObject("bot")?.optString("name")?.ifBlank { null } ?: Wording.Common.agent, style = Type.bold,
-                                    color = c.fg, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                Text((if (m.isNull("title")) "" else m.optString("title")).ifBlank { modelSaid(m.optString("model")) },
-                                    style = Type.caption, color = c.dim, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            }
+                            Text(m.optJSONObject("bot")?.optString("name")?.ifBlank { null } // (a Bot: its name alone)
+                                ?: (if (m.isNull("title")) "" else m.optString("title")).ifBlank { modelSaid(m.optString("model")) }
+                                    .ifBlank { Wording.Common.agent },
+                                style = Type.bold, color = c.fg, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
                             Button(Wording.ThisPhone.putBack) { PhoneHost.putBack(m.optString("id")) }
                         }
                     }

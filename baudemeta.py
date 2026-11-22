@@ -29,6 +29,7 @@ import metachat  # noqa: E402
 from widgets import load_settings, pretty_path, save_settings, time_ago, toast  # noqa: E402,F401
 from markdownview import open_code  # noqa: E402,F401
 
+from baudelib.client import chat_name  # noqa: E402
 from sessionlist import (  # noqa: E402
     HERE_HOST, THIS_MACHINE, chat_group, chat_groups, host_key, is_desktop, last_used, made_groups, network,
     remote_info, remote_name, remote_path,
@@ -233,12 +234,13 @@ class MetaNames(lookup.SearchSpace):
     def chat_items(self):
         sidebar = getattr(self.win, "sidebar", None)
         sessions = sidebar.sessions if sidebar is not None else None
-        net = tuple((x["id"], x["server"].key, x.get("title"), x.get("cwd"), x.get("said"), x.get("draft"))
-                    for x in network().sessions())
+        net = tuple((x["id"], x["server"].key, x.get("title"), (x.get("bot") or {}).get("name"), x.get("cwd"),
+                     x.get("said"), x.get("draft")) for x in network().sessions())
         if self._chats[0] is not sessions or self._chats[1] != net:
             items = []
             for info in sorted(all_chats(sidebar), key=last_used, reverse=True):
-                if not info.get("title"):
+                name = chat_name(info)
+                if not name:
                     continue
                 r = info.get("remote")
                 host = host_key(r) if r is not None else HERE_HOST
@@ -248,7 +250,7 @@ class MetaNames(lookup.SearchSpace):
                     wording.say("chats.no_folder")
                 if host != HERE_HOST:  # (another host's: by its name, as the status line says it)
                     where = f"{remote_name(r)} · {where}"
-                items.append({"surface": info["title"], "canonical": "", "icon": "claude",
+                items.append({"surface": name, "canonical": "", "icon": "claude",
                               "what": wording.say("chats.chat"),
                               "kind": "chat", "at": at, "ago": (ago := time_ago(at)), "where": where,
                               "summary": f"{where} · {ago}", "path": info.get("path"), "id": info["id"], "line": None,
@@ -374,11 +376,11 @@ class BaudeMeta(metachat.MetaChat):
             return None
         infos = self.all_infos()
         for test in (lambda i: i["id"] == ref, lambda i: len(ref) >= 4 and i["id"].startswith(ref),
-                     lambda i: (i.get("title") or "").lower() == ref.lower()):
+                     lambda i: (chat_name(i) or "").lower() == ref.lower()):
             found = [i for i in infos if test(i)]
             if len(found) == 1:
                 info = found[0]
-                return {"key": info["id"], "title": info.get("title") or wording.say("common.untitled"),
+                return {"key": info["id"], "title": chat_name(info) or wording.say("common.untitled"),
                         "path": info.get("path"),
                         "info": info}
         return None
@@ -391,7 +393,7 @@ class BaudeMeta(metachat.MetaChat):
 
     @staticmethod
     def said(infos):
-        titles = [wording.say("senders.chat", name=i.get("title") or wording.say("common.untitled")) for i in infos]
+        titles = [wording.say("senders.chat", name=chat_name(i) or wording.say("common.untitled")) for i in infos]
         return titles[0] if len(titles) == 1 else wording.say("meta_chats.chats", n=len(titles))
 
     def open_chat(self, info):
@@ -415,7 +417,7 @@ class BaudeMeta(metachat.MetaChat):
             info = self._chat(ref)["info"]
             group = chat_group(info, assigned)
             in_group = group and wording.say("meta_chats.group_named", name=group)
-            title = info.get("title") or wording.say("common.untitled")
+            title = chat_name(info) or wording.say("common.untitled")
             rows.append({"icon": "baude-claude-symbolic", "title": title,
                          "subtitle": " · ".join(filter(None, [pretty_path(info.get("folder") or info.get("cwd") or ""),
                                                              time_ago(last_used(info)), in_group])),
@@ -466,7 +468,7 @@ class BaudeMeta(metachat.MetaChat):
             raise ValueError(f"There's no button {action}{'' if items else ' without items'}: app_index buttons.")
         info = self._chat(items[0])["info"]
         btn = Gtk.Button(label=wording.say("trash.move_title",
-                                           title=info.get("title") or wording.say("common.untitled")))
+                                           title=chat_name(info) or wording.say("common.untitled")))
         btn.add_css_class("destructive-action")
         btn.connect("clicked", lambda *_: self.win.sidebar.ask_trash(self.find_chat(info["id"])["info"]
                                                                      if self.find_chat(info["id"]) else info))
@@ -772,7 +774,7 @@ class BaudeMeta(metachat.MetaChat):
 
         def chats(_f):
             assigned, archived = chat_groups(), sidebar.archived_ids()
-            return [{"id": i["id"][:8], "title": i.get("title") or wording.say("common.untitled"),
+            return [{"id": i["id"][:8], "title": chat_name(i) or wording.say("common.untitled"),
                      "folder": pretty_path(i.get("folder") or i.get("cwd") or "") or wording.say("chats.no_folder"),
                      "group": chat_group(i, assigned),
                      "host": remote_name(i["remote"]) if i.get("remote") and host_key(i["remote"]) != HERE_HOST else

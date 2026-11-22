@@ -1,0 +1,13 @@
+{
+  "description": "Two chats made Bots: Juniper on the host that is up, Fern on one that is gone. The titles are the chats' own; a Bot is shown by its name alone. folder is under the host's home; ago is seconds since something was said.",
+  "host": {"id": "h1", "name": "workshop", "home": "/tmp/parity-home/dev"},
+  "gone": {"id": "h2", "name": "build-box"},
+  "sessions": [
+    {"id": "6f1c2a90-1111-4c4e-9a11-0000000000b1", "title": "Write the release notes for 2.4", "bot": "Juniper",
+     "folder": "garden", "ago": 300, "state": "idle", "transcript": null, "model": "opus", "effort": "high",
+     "mode": "default", "gone": false},
+    {"id": "6f1c2a90-1111-4c4e-9a11-0000000000b2", "title": "Run the nightly benchmarks", "bot": "Fern",
+     "folder": "garden", "ago": 5400, "state": "idle", "transcript": null, "model": "opus", "effort": "high",
+     "mode": "default", "gone": true}
+  ]
+}

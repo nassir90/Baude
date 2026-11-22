@@ -1,0 +1,25 @@
+{
+  "description": "The desktop notification Baude posts when a chat finishes a turn or asks you something while you're elsewhere (the system's own banner, not drawn in the window).",
+  "apps": ["baude"],
+  "opens": ["a chat's turn ends or it asks a question or needs a permission answer, while its window is not in front or another chat is open"],
+  "code": ["windowsignal.py:WindowSignal.tell_desktop", "windowproc.py:WindowProc.watch_left_remote"],
+  "copy": ["asks", "meta"],
+  "parts": [
+    {
+      "name": "Title",
+      "shows": "The chat's name: for the open chat, the window's title; for a Bot, its name, never its chat's title; for any other chat, its title (\"(untitled)\" if it has none).",
+      "copy": ["common.untitled"]
+    },
+    {
+      "name": "Body",
+      "shows": "What happened: the reply's first words when a turn finishes (\"Finished\" when there is nothing to say), \"Waiting for your answer: <tool>\", or \"Claude has a question for you\".",
+      "copy": ["meta.finished", "asks.waiting", "asks.waiting_for_tool", "asks.has_question_for_you"],
+      "actions": [
+        {"by": "click", "does": "Brings the window up with that chat open (a chat on a host has its transcript fetched first)."}
+      ]
+    }
+  ],
+  "states": [
+    {"name": "a Bot switched away from, mid-turn", "shows": "Its notification, titled with the Bot's name, when its turn ends or it waits."}
+  ]
+}

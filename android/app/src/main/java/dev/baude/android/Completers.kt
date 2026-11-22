@@ -224,20 +224,23 @@ object MentionList {
     /** The one spelling of a name as written: trimmed, an ellipsised hash without its dots. */
     fun refKey(text: String): String = text.trim().replace(Regex("\\s+"), " ").replace(Regex("(?<=[0-9a-f]{7})(?:…|\\.\\.\\.)$"), "")
 
-    /** Every host's chats by title, newest first (the chat's host's first, as they're ranked), then the folder's. */
+    /** Every host's chats by title (a Bot by its name), newest first (the chat's host's first, as they're ranked), then
+     * the folder's. */
     fun items(chat: Chat): List<Ref> {
         val at = chat.hostId
         val cwd = Mesh.session(at, chat.sid)?.cwd.orEmpty()
-        val chats = Mesh.sessions.flatMap { (h, list) -> list.filter { it.draft != true && !it.title.isNullOrBlank() }.map { h to it } }
+        val chats = Mesh.sessions.flatMap { (h, list) -> list.filter { it.draft != true && !named(it).isNullOrBlank() }.map { h to it } }
             .sortedByDescending { (_, s) -> (s.said ?: s.updated)?.toDouble() ?: 0.0 }.map { (h, s) ->
                 val when_ = (s.said ?: s.updated)?.toDouble()
                 val folder = s.cwd?.takeIf { it.isNotBlank() }?.let { shortPath(h, it) } ?: Wording.Chats.noFolder
                 val where = if (h != at) "${Mesh.label(h)} · $folder" else folder
-                Ref(s.title.orEmpty(), null, "", "claude", Wording.Chats.chat,
+                Ref(named(s).orEmpty(), null, "", "claude", Wording.Chats.chat,
                     where + (when_?.let { " · " + ago(it.toLong()) } ?: ""), where, when_, false, h != at)
             }
         return chats + Catalogue.items(at, cwd)
     }
+
+    private fun named(s: Msg.Session): String? = chatName(s)
 
     private fun item(r: Ref): Double? = r.at
 

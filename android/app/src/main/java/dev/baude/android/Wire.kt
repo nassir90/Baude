@@ -70,6 +70,9 @@ object WireStrict {
 }
 
 /** What an error says, for a person: its error, and a refusal's detail after it (null: it says nothing). */
+/** What a chat is called wherever it is named: a Bot, by its name alone; else its title. */
+fun chatName(s: Msg.Session): String? = s.bot?.name?.ifBlank { null } ?: s.title?.ifBlank { null }
+
 val Msg.Error.said: String? get() = error?.let { e -> detail?.ifBlank { null }?.let { "$e: $it" } ?: e }
 
 /** Why a request didn't do what it asked, for a person: an error's (said), else what its reply's own error field

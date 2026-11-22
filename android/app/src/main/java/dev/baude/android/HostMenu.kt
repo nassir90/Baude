@@ -1,17 +1,8 @@
 package dev.baude.android
 
-import android.content.ClipData
-import android.content.ClipboardManager
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Text
@@ -22,9 +13,6 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 
 /** The menu on the host picker (Baude's host_menu), opened by a long-press: Host Command… (a host reached over ssh),
@@ -74,7 +62,6 @@ fun AddHost(done: () -> Unit, given: org.json.JSONObject? = null, edited: ((org.
         title = { Text(Wording.NewSession.addHost) },
         text = {
             Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                PhoneKey()
                 NameField(dest, { dest = it }, Wording.NewSession.hostPlaceholder, ::go)
                 Field(command, { command = it }, Wording.Hosts.commandPlaceholder(command = "baude_headless.py"))
             }
@@ -83,46 +70,6 @@ fun AddHost(done: () -> Unit, given: org.json.JSONObject? = null, edited: ((org.
         dismissButton = { Button(Wording.Common.cancel, onClick = done) },
         containerColor = LocalBaude.current.dialog,
     )
-}
-
-/** This phone's own ssh key, where a host's added (it has no ssh agent): its authorized_keys line to copy, a new one to
- * make, or Make Key while it has none. */
-@Composable
-private fun PhoneKey() {
-    val c = LocalBaude.current
-    val ctx = LocalContext.current
-    var renewing by remember { mutableStateOf(false) }
-    val key = Mesh.key.value
-    val error = Mesh.keyError.value
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text(Wording.PhoneKeys.heading, style = Type.bold, color = c.fg)
-        if (key == null && error != null) {
-            Text(error, style = Type.caption, color = c.destructive)
-            Button(Wording.Common.tryAgain) { Mesh.readKey() }
-        } else if (key == null) {
-            Text(Wording.PhoneKeys.none, style = Type.caption, color = c.dim)
-            if (Mesh.making.value) Text(Wording.PhoneKeys.making, style = Type.caption, color = c.dim)
-            else Button(Wording.PhoneKeys.make, suggested = true) { Mesh.makeKey() }
-        } else {
-            Text(Wording.PhoneKeys.putLine, style = Type.caption, color = c.dim)
-            SelectionContainer {
-                Text(key.line, style = Type.mono, color = c.fg, modifier = Modifier.fillMaxWidth()
-                    .clip(RoundedCornerShape(Gap.codeRadius)).background(c.raised).padding(8.dp))
-            }
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                Button(Wording.Common.copy) {
-                    ctx.getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText("Baude's key", key.line))
-                    toast(Wording.Report.copied)
-                }
-                Button(Wording.PhoneKeys.newEllipsis) { renewing = true }
-            }
-        }
-        HorizontalDivider(color = c.rule)
-    }
-    if (renewing) AlertDialog(onDismissRequest = { renewing = false }, title = { Text(Wording.PhoneKeys.newHeading) },
-        text = { Text(Wording.PhoneKeys.newBody) },
-        confirmButton = { Button(Wording.PhoneKeys.make, destructive = true) { Mesh.makeKey(); renewing = false } },
-        dismissButton = { Button(Wording.Common.cancel) { renewing = false } }, containerColor = c.dialog)
 }
 
 /** Host Command… (Baude's ask_host_command): the command ssh runs on the host, with connect after it. */

@@ -402,9 +402,13 @@ fun Home(open: (String, String) -> Unit, feedback: () -> Unit, phone: () -> Unit
                 if (folded) continue
                 val rows = sec.rows
                 val through = through(rows.map { it.depth })
+                val isBot = { item: Item -> item.bot != null && item.depth == 0 && !dead(item.hostId) }
+                var top: Item? = null
+                val underBot = rows.map { if (it.depth == 0) top = it; top?.let(isBot) == true }
                 itemsIndexed(rows, key = { _, it -> sec.key + "/" + it.hostId + "/" + it.id }) { i, item ->
-                    if (item.bot != null && item.depth == 0 && !dead(item.hostId)) BotRow(item) { open(item.hostId, item.id) }
-                    else SessionRow(item, through[i]) { open(item.hostId, item.id) }
+                    val kids = rows.getOrNull(i + 1)?.let { it.depth > item.depth } == true
+                    if (isBot(item)) BotRow(item, kids) { open(item.hostId, item.id) }
+                    else SessionRow(item, through[i], underBot[i]) { open(item.hostId, item.id) }
                 }
             }
         }
@@ -480,10 +484,10 @@ private fun Modifier.pressed(at: (Offset) -> Unit, onClick: () -> Unit, onLong: 
     this.pointerInput(Unit) { awaitEachGesture { at(awaitFirstDown(requireUnconsumed = false).position) } }
         .combinedClickable(onClick = onClick, onLongClick = onLong)
 
-/** A chat's row (Baude's session_row): its title on one line, nested under its parent with its parents' lines, its
- * status dot; a long-press: its menu. A host that's gone or deactivated: its title dim, and a crossed-out cloud if it's gone. */
+/** A chat's row (Baude's session_row): its title on one line, nested under its parent with its parents' lines
+ * (underBot: the top one comes down from a Bot's picture), its status dot; a long-press: its menu. A host that's gone or deactivated: its title dim, and a crossed-out cloud if it's gone. */
 @Composable
-private fun SessionRow(item: Item, through: Set<Int>, onClick: () -> Unit) {
+private fun SessionRow(item: Item, through: Set<Int>, underBot: Boolean, onClick: () -> Unit) {
     val c = LocalBaude.current
     val s = item.s
     val off = off(item.hostId)
@@ -492,7 +496,8 @@ private fun SessionRow(item: Item, through: Set<Int>, onClick: () -> Unit) {
     var pressed by remember { mutableStateOf(Offset.Zero) }
     var height by remember { mutableStateOf(0) }
     Box(Modifier.onSizeChanged { height = it.height }) {
-        Row(Modifier.fillMaxWidth().treeLines(item.depth, through, c.fg.copy(alpha = 0.3f)).padding(top = 1.dp).heightIn(min = Gap.homeRow).clip(RoundedCornerShape(6.dp))
+        Row(Modifier.fillMaxWidth().treeLines(item.depth, through, c.fg.copy(alpha = 0.3f), root = if (underBot) BOT_START else 6.dp)
+            .padding(top = 1.dp).heightIn(min = Gap.homeRow).clip(RoundedCornerShape(6.dp))
             .pressed({ pressed = it }, onClick) { menu = true }
             .padding(start = 6.dp + 18.dp * item.depth, end = 4.dp, top = 1.dp, bottom = 1.dp),
             verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -509,10 +514,13 @@ private fun SessionRow(item: Item, through: Set<Int>, onClick: () -> Unit) {
     }
 }
 
+/** Where a Bot's row starts its picture in (bot_row's margin). */
+private val BOT_START = 4.dp
+
 /** A Bot's row (Baude's bot_row): its picture, its name (nothing else of its chat's), its status dot; a long-press: its
- * menu. */
+ * menu. kids: the line to the chats under it starts under its picture. */
 @Composable
-private fun BotRow(item: Item, onClick: () -> Unit) {
+private fun BotRow(item: Item, kids: Boolean, onClick: () -> Unit) {
     val c = LocalBaude.current
     val contact = Contact(item.hostId, item.s)
     var menu by remember { mutableStateOf(false) }
@@ -520,9 +528,12 @@ private fun BotRow(item: Item, onClick: () -> Unit) {
     var height by remember { mutableStateOf(0) }
     LaunchedEffect(contact.pictureKey) { Mesh.picture(contact) }
     Box(Modifier.onSizeChanged { height = it.height }) {
-        Row(Modifier.fillMaxWidth().heightIn(min = Gap.homeBotRow).clip(RoundedCornerShape(6.dp))
+        Row(Modifier.fillMaxWidth()
+            .then(if (kids) Modifier.treeStem(BOT_START + 5.dp, c.fg.copy(alpha = 0.3f)) { (size.height + Gap.avatar.toPx()) / 2 }
+                  else Modifier)
+            .heightIn(min = Gap.homeBotRow).clip(RoundedCornerShape(6.dp))
             .pressed({ pressed = it }, onClick) { menu = true }
-            .padding(horizontal = 4.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+            .padding(horizontal = BOT_START, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
             Avatar(contact.name, Mesh.pictures[contact.pictureKey])
             Spacer(Modifier.width(Gap.avatarGap))
             val mark = metaMark(item.hostId, item.id)

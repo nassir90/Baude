@@ -189,25 +189,28 @@ def unlock_profile(pid):
         os.close(fd)
 
 
-def open_pages(pid, urls=None, why=None):
-    """A Bot's browser's pages, written down as they change (urls; why: it's closing itself, "idle"), so the next one
-    started knows what was lost if this one ends without closing them; or (no urls) what the last wrote, read and
-    forgotten: (urls, why)."""
+def open_pages(pid, urls=None, why=None, selected=0):
+    """A profile's browser's tabs, written down as they change (urls, the one in front selected; why: it's closing,
+    "idle" when it went unused, "moved" when Baude took it), so the next browser started on that profile opens them
+    again, as a browser continues where it left off; or (no urls) what the last wrote: (urls, selected, why). urls []:
+    none to open again (its last tab closed)."""
     path = os.path.join(data_home(), "profiles", pid + ".open")
     if urls is None:
         try:
             with open(path, encoding="utf-8") as f:
                 had = json.load(f)
-            os.unlink(path)
             had = had if isinstance(had, dict) else {"urls": had}
-            return [u for u in had.get("urls") or [] if isinstance(u, str)], had.get("why")
+            urls = [u for u in had.get("urls") or [] if isinstance(u, str)]
+            at = had.get("selected")
+            return urls, at if isinstance(at, int) and 0 <= at < len(urls) else 0, had.get("why")
         except (OSError, ValueError, AttributeError):
-            return [], None
+            return [], 0, None
     try:
         if urls:
             os.makedirs(os.path.dirname(path), exist_ok=True)
-            with open(path, "w", encoding="utf-8") as f:
-                json.dump({"urls": urls, "why": why}, f)
+            with open(path + ".new", "w", encoding="utf-8") as f:
+                json.dump({"urls": urls, "selected": selected, "why": why}, f)
+            os.replace(path + ".new", path)
         elif os.path.exists(path):
             os.unlink(path)
     except OSError:

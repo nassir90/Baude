@@ -132,7 +132,7 @@
     },
     {
       "name": "Bots",
-      "shows": "Shown only while this phone has a chat that is not archived. Heading \"Bots\", then a rounded list of them. Each row, one line: the chat's picture (set into the page: see README's A picture is set into the page) (or initials), then for a Bot its name alone (never its chat's title), else its title, else \"(untitled)\"; its status dot (with the asking mark when it asks something), and a trash button. No second line.",
+      "shows": "Shown only while this phone has a Bot (a chat with a Bot) that is not archived. Heading \"Bots\", then a rounded list of them. Each row, one line: the Bot's picture (set into the page: see README's A picture is set into the page) (or initials), then its name alone (never its chat's title), else its title, else \"(untitled)\"; its status dot (with the asking mark when it asks something), and a trash button. No second line. A chat without a Bot is not here: it is under Chats.",
       "copy": [
         "common.bots",
         "common.untitled",
@@ -141,11 +141,30 @@
       "actions": [
         {
           "by": "tap the row",
-          "does": "opens the agent's chat (a chat on host \"phone\")"
+          "does": "opens the Bot's chat (a chat on host \"phone\")"
         },
         {
-          "by": "tap the picture (a Bot)",
+          "by": "tap the picture",
           "does": "picks an image from the phone, shrinks it to a PNG 256 across at most and sets it as the Bot's picture"
+        },
+        {
+          "by": "tap the trash button",
+          "does": "asks to move it to this phone's trash (below)"
+        }
+      ]
+    },
+    {
+      "name": "Chats",
+      "shows": "Shown only while this phone hosts a chat without a Bot that is not archived. Heading \"Chats\", then a rounded list of them, below Bots. Each row, one line: the chat's initials in a round picture, then its title, else \"(untitled)\"; its status dot (with the asking mark when it asks something), and a trash button. No second line.",
+      "copy": [
+        "this_phone.chats",
+        "common.untitled",
+        "trash.move_dots"
+      ],
+      "actions": [
+        {
+          "by": "tap the row",
+          "does": "opens the chat (a chat on host \"phone\")"
         },
         {
           "by": "tap the trash button",
@@ -173,7 +192,7 @@
       "actions": [
         {
           "by": "tap Restore",
-          "does": "restores its transcript, folder, picture and senders where they were and lists it again in Bots"
+          "does": "restores its transcript, folder, picture and senders where they were and lists it again in Bots or Chats"
         }
       ]
     },
@@ -188,7 +207,7 @@
     },
     {
       "name": "Move to trash dialog",
-      "shows": "Opened by an agent's trash button. Title \"Move “<name>” to the trash?\" (name: the Bot's, else \"this session\"); body: its transcript, its memory and the files in its folder will be moved to this phone's trash, where you can restore it. Buttons Cancel and Move to Trash (destructive).",
+      "shows": "Opened by a Bot's or chat's trash button. Title \"Move “<name>” to the trash?\" (name: the Bot's, else \"this session\"); body: its transcript, its memory and the files in its folder will be moved to this phone's trash, where you can restore it. Buttons Cancel and Move to Trash (destructive).",
       "copy": [
         "trash.heading",
         "trash.this_session",
@@ -204,8 +223,8 @@
       ]
     },
     {
-      "name": "Chats with a phone agent",
-      "shows": "Its sessions are listed on the home screen under the host \"local\" (this machine, as Baude names its own) like any host's and open as an ordinary chat; the mesh knows the host by the phone's name. They differ from a chat on another host: the agent's loop and tools run on this phone, in its own folder; its model calls go through the mesh to a machine that serves the model, so only models the mesh serves can be picked, and none served means it cannot start; there is no connection banner for the host since it is the app itself; going back to an earlier message (rewind) is not supported; and a Bot's globe button is shown as in any Bot chat (PhoneUse.page.json).",
+      "name": "Chats on this phone",
+      "shows": "Its sessions are listed on the home screen under the host \"local\" (this machine, as Baude names its own) like any host's and open as an ordinary chat; the mesh knows the host by the phone's name. They differ from a chat on another host: the chat's loop and tools run on this phone, in its own folder; its model calls go through the mesh to a machine that serves the model, so only models the mesh serves can be picked, and none served means it cannot start; there is no connection banner for the host since it is the app itself; going back to an earlier message (rewind) is not supported; and a Bot's globe button is shown as in any Bot chat (PhoneUse.page.json).",
       "text": [
         "a chat on this phone can't be taken back to an earlier message yet"
       ]
@@ -214,7 +233,7 @@
   "states": [
     {
       "name": "nothing yet",
-      "shows": "Only the bar, the Name row and Key Material: no agents and an empty trash"
+      "shows": "Only the bar, the Name row and Key Material: no Bots or chats and an empty trash"
     }
   ],
   "scenes": []

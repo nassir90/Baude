@@ -2,6 +2,7 @@
   "description": "The phone's This phone page: its name in the mesh, its key, the Bots and chats it runs, and its trash.",
   "messages": {
     "title": "This phone",
+    "chats": "Chats",
     "trash": "Trash",
     "restore": "Restore",
     "trash_body": "Its transcript, its memory and the files in its folder will be moved to this phone's trash, where you can restore it."

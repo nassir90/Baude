@@ -429,8 +429,8 @@ object PhoneAgent {
     private fun system(s: PhoneSession): String {
         val bot = s.meta.optJSONObject("bot")
         val memory = File(s.folder, PhoneHost.MEMORY).takeIf { it.exists() }?.readText()?.trim().orEmpty()
-        val head = (if (bot != null) "You are ${bot.optString("name")}, a Bot: an agent with a name and a memory that " +
-            "last. " else "You are an agent. ") +
+        val head = (if (bot != null) "You are ${bot.optString("name")}, a Bot: a chat the user keeps coming back to, " +
+            "with a name and a memory that last. " else "You are the assistant in a chat the user has started. ") +
             "You run on ${PhoneHost.name}, an Android phone in the user's Baude mesh of machines; your model runs on " +
             "another machine of the mesh. You have no shell. Your tools: files in your own folder on the phone (Read, " +
             "Write, Edit, Glob; paths are relative to it), questions to the user (AskUserQuestion)" +

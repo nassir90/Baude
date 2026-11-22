@@ -71,11 +71,13 @@ fun PhoneScreen(back: () -> Unit, open: (String) -> Unit) {
             KeyMaterial()
 
             val far = startedElsewhere() // (a chat on another host started it: under that one in Home's list only)
-            val agents = Mesh.sessions["phone"].orEmpty().filter { it.archived != true && "phone/${it.id.orEmpty()}" !in far }
-            if (agents.isNotEmpty()) {
-                PanelHeading(Wording.Common.bots)
+            val hosted = Mesh.sessions["phone"].orEmpty().filter { it.archived != true && "phone/${it.id.orEmpty()}" !in far }
+            val (bots, plain) = hosted.partition { it.bot != null }
+            for ((heading, rows) in listOf(Wording.Common.bots to bots, Wording.ThisPhone.chats to plain)) {
+                if (rows.isEmpty()) continue
+                PanelHeading(heading)
                 Panel(rows = true) {
-                    agents.forEachIndexed { i, s ->
+                    rows.forEachIndexed { i, s ->
                         if (i > 0) Rule()
                         val name = s.bot?.name?.ifBlank { null } ?: s.title?.ifBlank { null } // (a Bot: its name alone)
                             ?: Wording.Common.untitled

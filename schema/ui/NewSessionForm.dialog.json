@@ -11,7 +11,7 @@
   "parts": [
     {
       "name": "heading",
-      "shows": "Which words depend on how it opened: \"New session on the network\" when the host is picked in the dialog; \"New session on <host>\" when the host is said, not picked (this machine's, \"local\", or the host the + belongs to when it is the only choice); \"Spawn an agent\" in Meta's card.",
+      "shows": "Which words depend on how it opened: \"New session on the network\" when the host is picked in the dialog; \"New session on <host>\" when the host is said, not picked (this machine's, \"local\", or the host the + belongs to when it is the only choice); \"Start a chat\" in Meta's card.",
       "copy": ["new_session.on_network", "new_session.on_host", "new_session.start_chat"]
     },
     {

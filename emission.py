@@ -44,6 +44,7 @@ AGENT_IDLE_S = 30 * 60  # (an Emission started for a Bot: gone after this long w
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from baudelib import applist  # noqa: E402  (Emission in the list of apps, as Record is)
 from baudelib import selfupdate  # noqa: E402
+from baudelib import icons  # noqa: E402  (its logo: schema/icons)
 from baudelib import tokens  # noqa: E402  (its pointer's sizes and times: schema/tokens, the Android app's too)
 from baudelib import wire  # noqa: E402  (its screenshots' sizes and qualities, as the phone's: the wire's schema)
 from baudelib import wording  # noqa: E402  (its words, Baude's browser's: schema/copy)
@@ -2440,6 +2441,10 @@ class Window(Adw.ApplicationWindow):
             frame.add_css_class("baude-frame")
         frame.add_top_bar(bar)
         frame.add_top_bar(strip)
+        if agent and not hosted:  # (never seen: its page the whole window, which goes as small as resize does, so a
+            bar.set_visible(False)  # watcher's size is its page's, a phone's narrow one too)
+            strip.set_visible(False)
+            self.set_size_request(200, 200)
         self.set_content(frame)
         if self.Engine is None:
             self.who.set_sensitive(False)
@@ -4052,8 +4057,12 @@ class Control:
             raise ValueError(f"width between 200 and {SCREEN[0] - 200}, height between 200 and {SCREEN[1] - 300}")
 
         def sized(now):
-            ww, wh = self.win.get_default_size()
-            self.win.set_default_size(max(300, ww + w - int(now["w"])), max(300, wh + h - int(now["h"])))
+            ww, wh = self.win.get_width() or self.win.get_default_size()[0], \
+                self.win.get_height() or self.win.get_default_size()[1]
+            iw, ih = int(now["w"]), int(now["h"])
+            if iw < 1 or ih < 1:  # (not laid out yet: the window's all page)
+                iw, ih = ww, wh
+            self.win.set_default_size(max(200, ww + w - iw), max(200, wh + h - ih))
             GLib.timeout_add(500, guarded(lambda: self.js(t, "return {width: innerWidth, height: innerHeight}",
                                                           answer, lambda v: answer({**self.describe(t), "size": v}))
                                           and False, answer))
@@ -4269,30 +4278,8 @@ def jpeg(w, h, stride, data, quality=wire.CONSTANTS["FRAME_QUALITY"]):
 # with a cream page on it (their bubble's, without its tail) and a globe cut out of the page through a mask, so every
 # cut is the tile itself: a meridian and two parallels. At 16 px, the same a pixel wide, on whole pixels (ICON_SVG_16).
 
-ICON_SVG = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
-  <mask id="cut">
-    <rect x="22" y="38" width="84" height="52" rx="8" fill="#fff"/>
-    <g fill="none" stroke="#000" stroke-width="4.5">
-      <ellipse cx="64" cy="64" rx="22" ry="34"/>
-      <path d="M22 50h84M22 78h84"/>
-    </g>
-  </mask>
-  <rect x="8" y="8" width="112" height="112" rx="26" fill="#d9b44a"/>
-  <rect x="22" y="38" width="84" height="52" rx="8" fill="#fff8f0" mask="url(#cut)"/>
-</svg>
-"""
-ICON_SVG_16 = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
-  <mask id="cut">
-    <rect x="22" y="38" width="84" height="52" rx="8" fill="#fff"/>
-    <g fill="none" stroke="#000" stroke-width="8">
-      <ellipse cx="64" cy="64" rx="20" ry="36"/>
-      <path d="M22 52h84M22 76h84"/>
-    </g>
-  </mask>
-  <rect x="8" y="8" width="112" height="112" rx="26" fill="#d9b44a"/>
-  <rect x="22" y="38" width="84" height="52" rx="8" fill="#fff8f0" mask="url(#cut)"/>
-</svg>
-"""
+ICON_SVG = icons.svg("apps", "emission")  # (schema/icons/apps)
+ICON_SVG_16 = icons.svg("apps", "emission-16")
 
 
 def icon_png(size=1024, mac=True):

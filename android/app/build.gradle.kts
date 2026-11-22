@@ -1,3 +1,5 @@
+import java.math.BigDecimal
+import java.math.MathContext
 import java.time.Duration
 
 plugins {
@@ -670,6 +672,255 @@ val baudeCopy = tasks.register<BaudeCopy>("baudeCopy") {
 
 androidComponents {
     onVariants { variant -> variant.sources.java?.addGeneratedSourceDirectory(baudeCopy, BaudeCopy::outputDir) }
+}
+
+/** schema/icons as the app's built (in build/generated: never kept): the symbolic sets the phone draws, adwaita
+ * (GNOME's Adwaita icons) and baude (Baude's own), as dev.baude.android.Adwaita, an ImageVector each by its name
+ * (go-previous-symbolic.svg: Adwaita.GoPrevious; baude-return-symbolic.svg: Adwaita.Return), its 16-square drawing in
+ * the middle of a 19.2 square (so drawn at the sizes Material's 24-square ones were, it's as big as they looked); and
+ * links (a link's logo, drawn in the text's colour) as dev.baude.android.LinkLogos, each logo's shapes, filled or
+ * stroked, and what its mask cuts from them; and apps/baude-notification.svg as the notification's icon (drawable
+ * ic_baude). The SVG they use: path, rect and circle, filled or stroked, in groups that scale, translate or rotate,
+ * with opacity, and a mask (white shows, black cuts) for a cut-out. */
+abstract class BaudeIcons : DefaultTask() {
+    @get:InputDirectory abstract val icons: DirectoryProperty
+    @get:OutputDirectory abstract val outputDir: DirectoryProperty
+    @get:OutputDirectory abstract val resDir: DirectoryProperty
+
+    private fun read(f: File): org.w3c.dom.Element = javax.xml.parsers.DocumentBuilderFactory.newInstance()
+        .apply { isNamespaceAware = false }.newDocumentBuilder().parse(f).documentElement
+
+    private fun org.w3c.dom.Element.attr(k: String): String? = if (hasAttribute(k)) getAttribute(k) else null
+
+    private fun org.w3c.dom.Element.kids() = (0 until childNodes.length).map { childNodes.item(it) }
+        .filterIsInstance<org.w3c.dom.Element>()
+
+    private fun num(s: String?) = s?.takeIf { it.isNotEmpty() }?.toDouble() ?: 0.0
+
+    /** v as Python's repr says a float (a whole one with its ".0"), as the paths it's in were always written. */
+    private fun f(v: Double) = v.toString()
+
+    /** v as %g says it: six significant figures, no trailing zeros. */
+    private fun g(v: Double) = BigDecimal(v).round(MathContext(6)).stripTrailingZeros()
+        .toPlainString()
+
+    private fun rectD(e: org.w3c.dom.Element): String {
+        val (x, y, w, h) = listOf("x", "y", "width", "height").map { num(e.attr(it)) }
+        val r = minOf(num(e.attr("rx")?.takeIf { it.isNotEmpty() } ?: e.attr("ry")), w / 2, h / 2)
+        if (r == 0.0) return "M${f(x)},${f(y)}h${f(w)}v${f(h)}h${f(-w)}z"
+        return "M${f(x + r)},${f(y)}H${f(x + w - r)}A${f(r)},${f(r)} 0 0 1 ${f(x + w)},${f(y + r)}V${f(y + h - r)}" +
+            "A${f(r)},${f(r)} 0 0 1 ${f(x + w - r)},${f(y + h)}H${f(x + r)}A${f(r)},${f(r)} 0 0 1 ${f(x)},${f(y + h - r)}" +
+            "V${f(y + r)}A${f(r)},${f(r)} 0 0 1 ${f(x + r)},${f(y)}z"
+    }
+
+    private fun circleD(e: org.w3c.dom.Element): String {
+        val (cx, cy, r) = listOf("cx", "cy", "r").map { num(e.attr(it)) }
+        return "M${f(cx - r)},${f(cy)}a${f(r)},${f(r)} 0 1 0 ${f(2 * r)},0a${f(r)},${f(r)} 0 1 0 ${f(-2 * r)},0z"
+    }
+
+    /** An SVG transform as the group's arguments (scale, translate and rotate about a point, which is all these use). */
+    private fun transform(t: String?, where: String): Map<String, Double> {
+        val out = LinkedHashMap<String, Double>()
+        for (m in Regex("(\\w+)\\(([^)]*)\\)").findAll(t ?: "")) {
+            val a = m.groupValues[2].trim().split(Regex("[ ,]+")).map { it.toDouble() }
+            when (m.groupValues[1]) {
+                "scale" -> { out["scaleX"] = a[0]; out["scaleY"] = a.getOrElse(1) { a[0] } }
+                "translate" -> { out["translationX"] = a[0]; out["translationY"] = a.getOrElse(1) { 0.0 } }
+                "rotate" -> {
+                    out["rotate"] = a[0]
+                    if (a.size == 3) { out["pivotX"] = a[1]; out["pivotY"] = a[2] }
+                }
+                else -> throw GradleException("schema/icons/$where: transform ${m.groupValues[1]} isn't drawn here")
+            }
+        }
+        return out
+    }
+
+    private fun alpha(e: org.w3c.dom.Element): Double {
+        val style = (e.attr("style") ?: "").replace(" ", "").split(";").filter { ":" in it }
+            .associate { it.substringBefore(":") to it.substringAfter(":") }
+        var a = 1.0
+        for (k in listOf("opacity", "fill-opacity")) (e.attr(k)?.takeIf { it.isNotEmpty() } ?: style[k])?.let { a *= it.toDouble() }
+        return a
+    }
+
+    private fun group(t: Map<String, Double>) = "addGroup(${t.entries.joinToString(", ") { "${it.key} = ${g(it.value)}f" }})"
+
+    /** Kotlin lines drawing e's shapes (groups for transforms), each path's alpha as its own and its groups' times. */
+    private fun walk(e: org.w3c.dom.Element, out: MutableList<String>, depth: Int, inherited: Double, where: String) {
+        val tag = e.tagName.substringAfter(':')
+        val a = inherited * alpha(e)
+        if (e.attr("fill") == "none" || tag in setOf("defs", "title", "metadata", "clipPath", "style")) return
+        val pad = "            " + "    ".repeat(depth)
+        if (tag in setOf("path", "rect", "circle")) {
+            val d = when (tag) { "path" -> e.attr("d") ?: ""; "rect" -> rectD(e); else -> circleD(e) }
+            if (d.isEmpty()) return
+            val rule = if ((e.attr("fill-rule")?.takeIf { it.isNotEmpty() } ?: e.attr("clip-rule")) == "evenodd") "EvenOdd"
+                else "NonZero"
+            val line = "p(\"$d\", ${g(a)}f, PathFillType.$rule)"
+            val t = transform(e.attr("transform"), where)
+            if (t.isEmpty()) out.add(pad + line)
+            else { out.add(pad + group(t)); out.add("$pad    $line"); out.add("${pad}clearGroup()") }
+            return
+        }
+        if (tag != "svg" && tag != "g") throw GradleException("schema/icons/$where: <$tag> isn't drawn here")
+        val t = if (tag == "g") transform(e.attr("transform"), where) else emptyMap()
+        if (t.isNotEmpty()) out.add(pad + group(t))
+        for (c in e.kids()) walk(c, out, if (t.isNotEmpty()) depth + 1 else depth, a, where)
+        if (t.isNotEmpty()) out.add("${pad}clearGroup()")
+    }
+
+    private fun pascal(name: String) = name.split("-").joinToString("") { it.replaceFirstChar { c -> c.uppercase() } }
+
+    /** apps/baude-notification.svg as a vector drawable: its paths, in its colours, as Android's notifications take. */
+    private fun drawable(f: File): String {
+        val svg = read(f)
+        val box = svg.getAttribute("viewBox").trim().split(Regex("[ ,]+"))
+        val out = StringBuilder("<?xml version=\"1.0\" encoding=\"utf-8\"?>\n")
+        out.append("<!-- Made from schema/icons/apps/${f.name} as the app's built (build.gradle.kts's baudeIcons). -->\n")
+        out.append("<vector xmlns:android=\"http://schemas.android.com/apk/res/android\"\n")
+        out.append("    android:width=\"${svg.getAttribute("width")}dp\" android:height=\"${svg.getAttribute("height")}dp\"")
+        out.append(" android:viewportWidth=\"${box[2]}\" android:viewportHeight=\"${box[3]}\">\n")
+        for (p in svg.kids()) {
+            if (p.tagName != "path") throw GradleException("schema/icons/apps/${f.name}: <${p.tagName}> isn't drawn here")
+            val hex = (p.attr("fill") ?: "#000").removePrefix("#")
+            val rgb = if (hex.length == 3) hex.map { "$it$it" }.joinToString("") else hex
+            out.append("    <path android:fillColor=\"#FF${rgb.uppercase()}\"")
+            if (p.attr("fill-rule") == "evenodd") out.append(" android:fillType=\"evenOdd\"")
+            out.append("\n        android:pathData=\"${p.getAttribute("d")}\" />\n")
+        }
+        return out.append("</vector>\n").toString()
+    }
+
+    /** A shape of a logo as LinkLogos has it: P (a path), C (a circle) or Rr (a rectangle), stroked if it has a
+     * stroke, else filled. */
+    private fun shape(e: org.w3c.dom.Element, where: String): String {
+        fun n(k: String) = "${num(e.attr(k))}f"
+        val stroke = e.attr("stroke")?.takeIf { it != "none" } != null
+        val how = if (stroke) "width = ${num(e.attr("stroke-width") ?: "1")}f" else "fill = true"
+        return when (e.tagName) {
+            "path" -> "P(\"${e.getAttribute("d")}\", $how)"
+            "circle" -> "C(${n("cx")}, ${n("cy")}, ${n("r")}, $how)"
+            "rect" -> "Rr(${n("x")}, ${n("y")}, ${n("width")}, ${n("height")}, ${n("rx")}, $how)"
+            else -> throw GradleException("schema/icons/$where: <${e.tagName}> isn't drawn here")
+        }
+    }
+
+    /** LinkLogos: schema/icons/links' logos, by their files' names. */
+    private fun linkLogos(dir: File): String {
+        val out = StringBuilder()
+        out.append("// Made from schema/icons/links as the app's built (build.gradle.kts's baudeIcons): never edited, never kept.\n")
+        out.append("package dev.baude.android\n\n")
+        out.append("/** A link's logos (schema/icons/links, as the desktop draws them), in a 16 by 16 square. */\n")
+        out.append("object LinkLogos {\n")
+        out.append("    /** A logo's shape: a path, circle or rectangle, filled or stroked in the text's colour. */\n")
+        out.append("    sealed interface Shape\n")
+        out.append("    class P(val d: String, val fill: Boolean = false, val width: Float = 1.35f) : Shape\n")
+        out.append("    class C(val x: Float, val y: Float, val r: Float, val fill: Boolean = false, val width: Float = 1.35f) : Shape\n")
+        out.append("    class Rr(val x: Float, val y: Float, val w: Float, val h: Float, val rx: Float, val fill: Boolean = false,\n")
+        out.append("             val width: Float = 1.35f) : Shape\n\n")
+        out.append("    /** A logo: its shapes, and for a cut-out one (git, Kubernetes, a database) what's cut from them. */\n")
+        out.append("    class Logo(val shapes: List<Shape>, val cut: List<Shape> = emptyList())\n\n")
+        out.append("    /** Each logo, by its file's name. */\n")
+        out.append("    val all: Map<String, Logo> = mapOf(\n")
+        for (f in dir.listFiles { f -> f.name.endsWith(".svg") }!!.sortedBy { it.name }) {
+            val where = "links/${f.name}"
+            val svg = read(f)
+            val masks = svg.getElementsByTagName("mask").let { m -> (0 until m.length).map { m.item(it) as org.w3c.dom.Element } }
+            val shapes = ArrayList<String>()
+            val cut = ArrayList<String>()
+            for (e in svg.kids()) {
+                if (e.tagName == "defs") continue
+                shapes.add(shape(e, where))
+                val ref = e.attr("mask") ?: continue
+                val mask = masks.firstOrNull { "url(#${it.getAttribute("id")})" == ref }
+                    ?: throw GradleException("schema/icons/$where: no mask $ref")
+                for (c in mask.kids()) if (c.attr("fill")?.lowercase() !in setOf("#fff", "#ffffff", "white")) cut.add(shape(c, where))
+            }
+            val name = f.name.removeSuffix(".svg")
+            out.append("        \"$name\" to Logo(listOf(${shapes.joinToString(", ")})")
+            if (cut.isNotEmpty()) out.append(", listOf(${cut.joinToString(", ")})")
+            out.append("),\n")
+        }
+        return out.append("    )\n}\n").toString()
+    }
+
+    @TaskAction
+    fun write() {
+        val root = icons.get().asFile
+        val blocks = StringBuilder()
+        val seen = HashMap<String, String>()
+        for (set in listOf("adwaita", "baude")) {
+            val files = root.resolve(set).listFiles { f -> f.name.endsWith("-symbolic.svg") }!!.sortedBy { it.name }
+            for (f in files) {
+                val name = f.name.removeSuffix("-symbolic.svg")
+                val where = "$set/${f.name}"
+                val member = pascal(if (set == "baude") name.removePrefix("baude-") else name)
+                seen.put(member, where)?.let { throw GradleException("schema/icons/$where: Adwaita.$member, as $it is") }
+                val lines = ArrayList<String>()
+                walk(read(f), lines, 0, 1.0, where)
+                if (lines.isEmpty()) throw GradleException("schema/icons/$where: nothing drawn")
+                blocks.append("\n    val $member: ImageVector by lazy {\n        icon(\"$name\") {\n")
+                lines.forEach { blocks.append(it).append('\n') }
+                blocks.append("        }\n    }\n")
+            }
+        }
+        val dir = outputDir.get().asFile.resolve("dev/baude/android")
+        dir.mkdirs()
+        dir.resolve("Adwaita.kt").writeText("""
+            |// Made from schema/icons as the app's built (build.gradle.kts's baudeIcons): never edited, never kept. GNOME's
+            |// Adwaita icons (schema/icons/adwaita: CC-BY-SA-3.0 or LGPL-3.0, its LICENSE) and Baude's own (schema/icons/baude).
+            |package dev.baude.android
+            |
+            |import androidx.compose.ui.graphics.Color
+            |import androidx.compose.ui.graphics.PathFillType
+            |import androidx.compose.ui.graphics.SolidColor
+            |import androidx.compose.ui.graphics.vector.ImageVector
+            |import androidx.compose.ui.graphics.vector.PathParser
+            |import androidx.compose.ui.unit.dp
+            |
+            |/** The icons the desktop draws (Adwaita's symbolic ones, and Baude's own), for the same things here. */
+            |object Adwaita {
+            |    private class Draw(val b: ImageVector.Builder) {
+            |        fun p(d: String, alpha: Float, rule: PathFillType) {
+            |            b.addPath(PathParser().parsePathString(d).toNodes(), fill = SolidColor(Color.Black), fillAlpha = alpha,
+            |                pathFillType = rule)
+            |        }
+            |        fun addGroup(rotate: Float = 0f, pivotX: Float = 0f, pivotY: Float = 0f, scaleX: Float = 1f, scaleY: Float = 1f,
+            |                     translationX: Float = 0f, translationY: Float = 0f) {
+            |            b.addGroup(rotate = rotate, pivotX = pivotX, pivotY = pivotY, scaleX = scaleX, scaleY = scaleY,
+            |                translationX = translationX, translationY = translationY)
+            |        }
+            |        fun clearGroup() { b.clearGroup() }
+            |    }
+            |
+            |    /** A 16-square drawing in the middle of a 19.2 square: at Material's sizes, as big as its 24-square ones looked. */
+            |    private fun icon(name: String, draw: Draw.() -> Unit): ImageVector {
+            |        val b = ImageVector.Builder(name, 24.dp, 24.dp, 19.2f, 19.2f)
+            |        b.addGroup(translationX = 1.6f, translationY = 1.6f)
+            |        Draw(b).draw()
+            |        b.clearGroup()
+            |        return b.build()
+            |    }
+            |""".trimMargin() + blocks + "}\n")
+        dir.resolve("LinkLogos.kt").writeText(linkLogos(root.resolve("links")))
+        val res = resDir.get().asFile.resolve("drawable")
+        res.mkdirs()
+        res.resolve("ic_baude.xml").writeText(drawable(root.resolve("apps/baude-notification.svg")))
+    }
+}
+
+val baudeIcons = tasks.register<BaudeIcons>("baudeIcons") {
+    icons.set(rootProject.layout.projectDirectory.dir("../schema/icons"))
+    outputDir.set(layout.buildDirectory.dir("generated/baudeIcons"))
+    resDir.set(layout.buildDirectory.dir("generated/baudeIconsRes"))
+}
+
+androidComponents {
+    onVariants { variant ->
+        variant.sources.java?.addGeneratedSourceDirectory(baudeIcons, BaudeIcons::outputDir)
+        variant.sources.res?.addGeneratedSourceDirectory(baudeIcons, BaudeIcons::resDir)
+    }
 }
 
 /** schema/types and schema/variables, the wire Baude's heads and hosts speak, as Kotlin (WireSchema.kt): Op's names,

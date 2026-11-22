@@ -1049,10 +1049,11 @@ class SessionSidebar(SidebarMenu, Gtk.Box):
         r = info.get("remote")
         if info.get("dead"):  # (its server's gone from the network, or deactivated: listed as it was last seen)
             title.add_css_class("dim-label")
-        if info.get("dead") and not info.get("off"):
-            tag = Gtk.Label(label=wording.say("sidebar.dead"), valign=Gtk.Align.CENTER)
-            tag.add_css_class("row-tag")
-            box.append(tag)
+        if info.get("dead") and not info.get("off"):  # (no connection to its host: a crossed-out cloud)
+            cloud = Gtk.Image.new_from_icon_name("baude-no-connection-symbolic")
+            cloud.set_tooltip_text(wording.say("sidebar.no_connection"))
+            cloud.add_css_class("dim-label")
+            box.append(cloud)
         elif info.get("held"):
             box.append(self.held_tag())
         box.append(dot)

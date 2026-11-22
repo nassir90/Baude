@@ -294,9 +294,10 @@ object Mesh {
         c.start()
     }
 
-    /** Where a connection's id is, as you'd say it: a host's name, or a member's (the one it's given here, if it's
-     * been renamed). */
+    /** Where a connection's id is, as you'd say it: this phone's own host, local (as Baude names its own machine's); a
+     * host's name, or a member's (the one it's given here, if it's been renamed). */
     fun label(id: String): String {
+        if (id == "phone") return Wording.Senders.local
         (hosts.firstOrNull { it.id == id } ?: conns[id]?.host)?.let { h ->
             return h.name.ifBlank { null } ?: infos[id]?.name?.ifBlank { null }
                 ?: conns[id]?.info?.name?.ifBlank { null } ?: h.address

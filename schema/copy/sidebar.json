@@ -24,7 +24,7 @@
     "open_folder": "Open folder…",
     "open_folder_tip": "Start a session in another folder",
     "host_picker_tip": "The host a new session is made on, and whose chats are listed. Right-click (or press and hold) for Add Host…",
-    "dead": "dead",
+    "no_connection": "No connection",
     "archive": "Archive",
     "unarchive": "Unarchive",
     "move_to_group": "Move to Group",

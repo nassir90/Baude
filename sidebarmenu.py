@@ -24,6 +24,7 @@ from livefeed import TURN_OPEN_SECONDS, external_state, transcript_turn_open  # 
 import imageviews  # noqa: E402
 from widgets import load_settings, save_settings, toast  # noqa: E402,F401
 
+from baudelib.client import chat_name  # noqa: E402
 from sessionlist import (  # noqa: E402
     HERE_HOST, background_proc, bot_picture, can_be_bot, chat_group, host_key, network, remote_info, remote_name,
     stopping_said,
@@ -64,9 +65,6 @@ class SidebarMenu:
             items[1:1] = [(wording.say("sidebar.bot_settings_ellipsis"), "make_bot"),
                                 (wording.say("sidebar.unbot"), "unbot")] if info.get("bot") else \
                 [(wording.say("sidebar.make_bot_ellipsis"), "make_bot")]
-        if can_be_bot(info) and not info.get("bot") and baudelib.wire.takes(info["remote"].info, "mesh_tools"):
-            items.insert(2, (wording.say("sidebar.remove_mesh_tools"), "mesh_off") if info.get("mesh_tools") else
-                         (wording.say("sidebar.give_mesh_tools"), "mesh_on"))  # (a Bot has them: hosts, a subagent anywhere, other chats)
         for label, action in items:
             if action is None:
                 menu.append_submenu(label, self.group_submenu(info))
@@ -206,12 +204,6 @@ class SidebarMenu:
         dlg.present(self.win)
         entry.grab_focus()
 
-    def set_mesh_tools(self, info, on):
-        """Give Mesh Tools (or take them away): its agent can see the mesh's hosts and models, start a subagent on any of
-        them and message other chats (baudelib.meshtools), from its next start, as a Bot's can."""
-        if info is not None and info.get("remote") is not None:
-            info["remote"].request({"op": "mesh_tools", "session": info["id"], "on": on}, self.bot_set)
-
     def unbot(self, info):
         """Turn Back into a Chat: listed as a chat; its memory and picture kept on its host, for if it's made a Bot again."""
         if info is not None and info.get("remote") is not None:
@@ -292,7 +284,7 @@ class SidebarMenu:
         body = wording.say("trash.body_copies", n=n, where=where) if n else wording.say("trash.body", where=where)
         if model_program(info.get("model")) == "codex":
             body += " " + wording.say("trash.codex_copy")
-        dlg = Adw.AlertDialog(heading=wording.say("trash.heading", title=info.get("title") or
+        dlg = Adw.AlertDialog(heading=wording.say("trash.heading", title=chat_name(info) or
                                                   wording.say("trash.this_session")), body=body,
                               default_response="cancel", close_response="cancel")
         dlg.add_response("cancel", wording.say("common.cancel"))

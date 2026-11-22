@@ -1,8 +1,8 @@
 {
-  "description": "The dialog to make a chat on a host a Bot (a name, a picture and a memory it reads each time it starts), or change an existing Bot's name and picture.",
-  "apps": ["baude"],
-  "opens": ["session row right-click → Make Bot…", "session row right-click → Bot Settings…"],
-  "code": ["sidebarmenu.py:SidebarMenu.ask_bot", "sidebarmenu.py:SidebarMenu.bot_set"],
+  "description": "The dialog to make a chat on a host a Bot (a name, a picture and a memory it reads each time it starts), or change an existing Bot's name and picture. Making a Bot is where its name is set: from then on the Bot is shown by that name alone, everywhere both apps list or show it (sidebar and home rows, the chat's header, notifications, This phone, share targets, the @ and ⌘K lists), never with its chat's title.",
+  "apps": ["baude", "phone"],
+  "opens": ["session row right-click → Make Bot…", "session row right-click → Bot Settings…", "phone: session row long-press → Make Bot… / Bot Settings…"],
+  "code": ["sidebarmenu.py:SidebarMenu.ask_bot", "sidebarmenu.py:SidebarMenu.bot_set", "BotSettings.kt:BotSettings", "SessionMenu.kt:SessionMenu"],
   "copy": ["common", "bot_settings"],
   "parts": [
     {
@@ -26,7 +26,7 @@
     },
     {
       "name": "name field",
-      "shows": "A text entry with placeholder \"Name\", pre-filled with the Bot's name, or for a new one the chat's title (80 characters at most); focused. The avatar's initials follow it.",
+      "shows": "A text entry with placeholder \"Name\": the Bot's name. Pre-filled with the Bot's name, or for a new one the chat's title (80 characters at most) to keep or type over; focused. The avatar's initials follow it.",
       "copy": ["common.name"]
     },
     {

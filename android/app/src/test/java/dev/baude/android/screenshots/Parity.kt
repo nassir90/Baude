@@ -24,6 +24,7 @@ import dev.baude.android.Home
 import dev.baude.android.Host
 import dev.baude.android.Key
 import dev.baude.android.BotSettings
+import dev.baude.android.HomePrefs
 import dev.baude.android.FeedbackScreen
 import dev.baude.android.GitAvatars
 import dev.baude.android.GitPages
@@ -73,7 +74,7 @@ abstract class Parity(private val theme: String, private val scene: String) {
     private lateinit var activity: ComponentActivity
     private val root = File("../../tests/parity")
     private val out = File(root, "out/phone")
-    private val sessions = JSONObject(File(root, "fixtures/sessions.json").readText())
+    private var sessions = JSONObject(File(root, "fixtures/sessions.json").readText())
     private val host = sessions.getJSONObject("host")
     private val home = host.getString("home")
 
@@ -81,6 +82,8 @@ abstract class Parity(private val theme: String, private val scene: String) {
 
     @Before fun up() {
         val sc = scenes().first { it.getString("name") == scene }
+        // (a scene's `bots`: that fixture's chats instead of sessions.json's, one of them on a host that is gone)
+        sessions = JSONObject(File(root, "fixtures/${sc.optString("bots").ifBlank { "sessions.json" }}").readText())
         files = sc.optString("files").ifBlank { null }
         gitScene = sc.optJSONObject("git")
         github = sc.optBoolean("github")
@@ -131,15 +134,21 @@ abstract class Parity(private val theme: String, private val scene: String) {
         val now = System.currentTimeMillis() / 1000.0
         val list = sessions.getJSONArray("sessions")
         val first = list.getJSONObject(0)
-        Mesh.sessions[h.id] = (0 until list.length()).map { list.getJSONObject(it) }.mapIndexed { i, s ->
-            Msg.Session(id = s.getString("id"), title = s.getString("title"), cwd = "$home/${s.getString("folder")}",
+        val gone = sessions.optJSONObject("gone")?.let { Host(id = it.getString("id"), name = it.getString("name"), user = "dev", address = "build.example") }
+        gone?.let { Mesh.hosts.add(it) }  // (no connection: it is gone)
+        // (one host's chats are listed at a time, as Baude's: home-bots has the gone one picked)
+        if (scene == "home-bots" && gone != null) HomePrefs.host.value = gone.id
+        val byHost = (0 until list.length()).map { list.getJSONObject(it) }.mapIndexed { i, s ->
+            (if (s.optBoolean("gone")) gone!!.id else h.id) to Msg.Session(id = s.getString("id"), title = s.getString("title"), cwd = "$home/${s.getString("folder")}",
                 updated = now - s.getDouble("ago"), said = now - s.getDouble("ago"),
                 created = now - s.getDouble("ago") - 600,
                 state = (if (i == 0) sc.optString("state").ifBlank { null } else null) ?: s.getString("state"), model = s.getString("model"),
                 effort = s.getString("effort"), mode = s.getString("mode"),
                 cut = if (i == 0 && sc.optBoolean("cut")) now else null,
+                bot = s.optString("bot").ifBlank { null }?.let { Msg.BotListing(name = it) },
                 size = if (s.getString("id") == opened.getString("id")) shown.size else 0)
         }
+        for ((id, ss) in byHost.groupBy({ it.first }, { it.second })) Mesh.sessions[id] = ss
     }
 
     /** The scene's transcript, as the host has it: the first `lines` lines of the fixture's (all, without). */
@@ -314,6 +323,7 @@ abstract class Parity(private val theme: String, private val scene: String) {
         Mesh.infos.clear()
         Mesh.states.clear()
         Mesh.key.value = null
+        HomePrefs.host.value = ""
     }
 
     @Test fun draw() {

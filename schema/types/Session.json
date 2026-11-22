@@ -132,10 +132,6 @@
       "type": "integer",
       "description": "Its sender store's revision (0 for none): what a head's copy is checked against."
     },
-    "mesh_tools": {
-      "type": "boolean",
-      "description": "Its agent has the mesh's tools (a Bot's always)."
-    },
     "always_allow": {
       "type": "array",
       "items": {

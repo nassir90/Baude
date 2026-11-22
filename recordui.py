@@ -1010,6 +1010,9 @@ class DiaryPlace(ZoomPlace):
     def split(self):
         return self.view.get_line_at_y(self._top())[0].get_line(), [], [], []
 
+    def _mark(self, top):
+        return None  # (its anchor is a line number: no labels to hold a line of, the place is how far through the line)
+
 
 class NotesView(Gtk.TextView):
     """The notes' text, with what's drawn over what's kept unseen in it (the DiaryEditor's _highlight says where):

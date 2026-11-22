@@ -1,0 +1,43 @@
+{
+  "description": "Meta's conversation as the desktop keeps it (meta.json): one message of yours and one reply, whose calls use the mesh's tools: the hosts listed, a subagent started on another host. t is epoch seconds.",
+  "messages": [
+    {
+      "role": "user",
+      "text": "Have workshop check why the build is slow",
+      "t": 1795600900
+    },
+    {
+      "role": "meta",
+      "model": "claude-haiku-4-5",
+      "t": 1795600960,
+      "actions": [],
+      "text": "Started on workshop: the build spends most of its time compiling the docs.",
+      "items": [
+        {
+          "kind": "tool",
+          "name": "mcp__mesh__hosts",
+          "state": "done",
+          "input": {},
+          "result": "[{\"id\": \"h1\", \"name\": \"workshop\", \"reachable\": true, \"models\": [\"opus\", \"haiku\"]}]"
+        },
+        {
+          "kind": "tool",
+          "name": "mcp__mesh__start_subagent",
+          "state": "done",
+          "input": {
+            "host": "workshop",
+            "model": "haiku",
+            "cwd": "~/garden",
+            "prompt": "Find out why the build is slow"
+          },
+          "result": "It answered: the build spends most of its time compiling the docs."
+        },
+        {
+          "kind": "text",
+          "text": "Started on workshop: the build spends most of its time compiling the docs."
+        }
+      ]
+    }
+  ],
+  "actions": []
+}

@@ -89,7 +89,7 @@ fun MoveToTrash(item: Item, done: () -> Unit) {
     val body = Wording.Trash.body(where = where) + if (program(s.model) == "codex") " " + Wording.Trash.codexCopy else ""
     AlertDialog(
         onDismissRequest = done,
-        title = { Text(Wording.Trash.heading(title = s.title?.ifBlank { null } ?: Wording.Trash.thisSession)) },
+        title = { Text(Wording.Trash.heading(title = chatName(s) ?: Wording.Trash.thisSession)) },
         text = { Text(body, style = Type.body, color = c.fg) },
         confirmButton = {
             Button(Wording.Trash.move, destructive = true) {

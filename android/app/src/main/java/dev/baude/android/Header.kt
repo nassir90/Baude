@@ -4,6 +4,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.ui.layout.layout
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -30,6 +31,23 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.layout.boundsInWindow
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.IntRect
+import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.unit.LayoutDirection
+import androidx.compose.ui.window.Popup
+import androidx.compose.ui.window.PopupPositionProvider
+import androidx.compose.ui.window.PopupProperties
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.offset
+import androidx.compose.ui.input.pointer.pointerInput
 import org.json.JSONObject
 import java.util.concurrent.atomic.AtomicInteger
 
@@ -91,13 +109,17 @@ fun defaultModel(hostId: String): String? = Mesh.conn(hostId)?.info?.init?.optJS
 fun chosen(choices: List<ModelChoice>, model: String?): ModelChoice? =
     choices.firstOrNull { it.value == model } ?: choices.firstOrNull { it.resolved != null && it.resolved == model }
 
-/** A model's family, as Baude's model picker heads them (pickers.MODEL_FAMILIES, the common ones). */
-fun family(m: ModelChoice): String {
-    val said = (m.name + " " + m.value.substringAfterLast('/')).lowercase()
-    return listOf("Claude" to "claude|opus|sonnet|haiku|fable", "GPT" to "gpt|openai|codex", "Qwen" to "qwen|qwq",
-        "Gemma" to "gemma", "Gemini" to "gemini", "Llama" to "llama", "Mistral" to "mistral|mixtral|stral",
-        "DeepSeek" to "deepseek", "Apple" to "apple").firstOrNull { Regex(it.second).containsMatchIn(said) }?.first ?: Wording.Common.other
+/** The family a model (its value, its name) is of (pickers.model_family: schema/icons/models/families.json): the
+ * first that matches a word of its name, else its value's last part (not what serves it: ollama/…'s "llama"); null:
+ * none. */
+fun modelFamily(value: String, name: String): ModelFamilies.Family? {
+    for (said in listOf(name.lowercase().split(Regex("\\s+")).filter { it.isNotEmpty() }, listOf(value.lowercase().substringAfterLast('/'))))
+        ModelFamilies.all.firstOrNull { f -> said.any { f.match.containsMatchIn(it) } }?.let { return it }
+    return null
 }
+
+/** A model's family's name, as Baude's model picker heads them ("Other": none). */
+fun family(m: ModelChoice): String = modelFamily(m.value, m.name)?.name ?: Wording.Common.other
 
 /** A copy of a model somewhere in the mesh, as Baude's provider picker lists it (provider_choices): its value as a
  * chat on this host runs it, the host it's on, its provider there, what it says of itself, and the provider it's run
@@ -169,6 +191,49 @@ fun copies(hostId: String): List<Copy> {
         }
     }
     return out
+}
+
+/** Every model a chat on h can run, as Baude's model picker lists them (sync_providers; Meta's Intelligence too:
+ * meta.listed_models): h's own (Claude's first), then each other model in the mesh, one of each kind (the same model
+ * on two hosts, or served two ways, is one entry: shown's copy where it's of that kind, else the first that has it),
+ * a provider's told apart where two of a name aren't the same (providers.told_apart). */
+fun meshModels(h: String?, shown: String? = null): List<ModelChoice> {
+    h ?: return emptyList()
+    val out = ArrayList(models(h))
+    val all = copies(h)
+    val listed = all.filter { c -> out.any { it.value == c.value } }.toMutableList()
+    val own = all.firstOrNull { it.value == shown }
+    if (own != null && out.none { it.value == own.value }) { // (shown's copy stands for its kind's host copy)
+        val at = listed.indexOfFirst { sameModel(it, own) }
+        if (at >= 0) {
+            val i = out.indexOfFirst { it.value == listed[at].value }
+            out[i] = out[i].copy(value = own.value, name = nameOf(own))
+            listed[at] = own
+        }
+    }
+    for (c in all) {
+        if (out.any { it.value == c.value } || listed.any { sameModel(it, c) }) continue
+        val lead = own?.takeIf { sameModel(it, c) } ?: c
+        listed.add(lead)
+        out.add(ModelChoice(lead.value, nameOf(lead), if (lead.m.thinking == true) listOf("off", "low", "medium", "high") else emptyList()))
+    }
+    return out.map { m -> listed.firstOrNull { it.value == m.value }?.let { m.copy(name = toldApart(it, listed)) } ?: m }
+}
+
+private fun nameOf(c: Copy) = c.m.displayName?.ifBlank { null } ?: c.value
+
+/** A copy's name, with what tells it from another of listed with its name after it (providers.told_apart): its
+ * window or version where they differ, else its digest; just its name where none other has its name. */
+fun toldApart(m: Copy, listed: List<Copy>): String {
+    val name = nameOf(m)
+    val same = listed.filter { nameOf(it).equals(name, true) && it.value != m.value }
+    if (same.isEmpty()) return name
+    val window = same.any { it.m.window?.toLong() != m.m.window?.toLong() }
+    val version = same.any { it.m.version != m.m.version }
+    val tags = listOfNotNull(m.m.window?.toLong()?.takeIf { window }?.let { "${it / 1024}k" },
+        m.m.version?.ifBlank { null }?.takeIf { version }?.let { "v$it" },
+        m.m.digest?.ifBlank { null }?.takeIf { !window && !version }?.removePrefix("sha256:")?.take(7))
+    return if (tags.isEmpty()) name else "$name (${tags.joinToString(", ")})"
 }
 
 /** The copies of the model a chat runs (none: it's Claude's, or nothing else has it). */
@@ -267,7 +332,7 @@ fun ChatControls(hostId: String, sid: String, said: (String) -> Unit, open: (Str
         else -> null
     }?.ifBlank { null }
     val model = asked["model"] ?: listed("model")
-    val choices = models(hostId)
+    val choices = meshModels(hostId, model)
     val now = chosen(choices, model ?: defaultModel(hostId))
     val prog = program(now?.value ?: model)
     ControlsRow(inBar) {
@@ -282,13 +347,13 @@ fun ChatControls(hostId: String, sid: String, said: (String) -> Unit, open: (Str
                 if (s.state.orEmpty() in setOf("working", "waiting")) { // (at a turn: moved once it's over)
                     asked["model"] = v
                     Moves.later(hostId, sid, v) { value ->
-                        Mesh.session(hostId, sid)?.let { pickModel(hostId, sid, it, value, models(hostId), HashMap(), said, open, modelSet) }
+                        Mesh.session(hostId, sid)?.let { pickModel(hostId, sid, it, value, meshModels(hostId, value), HashMap(), said, open, modelSet) }
                     }
                 } else pickModel(hostId, sid, s, v, choices, asked, said, open, modelSet)
             }
         }
         ModelPicker((now?.name ?: model ?: Wording.Common.model).let { if (it.length > 30) it.take(29) + "…" else it },
-            choices, now?.value, logo = if (now != null && family(now) == "Claude") Adwaita.Claude else null) { v ->
+            choices, now?.value ?: model) { v ->
             pickModel(hostId, sid, s, v, choices, asked, said, open, modelSet)
         }
         val efforts = now?.efforts.orEmpty()
@@ -373,15 +438,77 @@ fun Picker(face: String, tip: String, choices: List<Pair<String, String>>, picke
     }
 }
 
-/** The model picker (pickers.ModelPicker): its face the model's name; a search over them, under their families'
- * heads. */
+/** A page's pane for a picker's list (ChatShell's: MenuPaneLayer), drawn over the page under the picker's button and
+ * down to the page's bottom bar at most; the list it shows, the button it's under (in the window, px), how it's closed,
+ * and the bottom bar's top (px; none while there's no bar). */
+class MenuPane {
+    var content by mutableStateOf<(@Composable (Modifier) -> Unit)?>(null)
+    var anchor by mutableStateOf(androidx.compose.ui.geometry.Rect.Zero)
+    var floor by mutableStateOf<Float?>(null)
+    var close: () -> Unit = {}
+    var owner: Any? = null
+}
+
+val LocalMenuPane = androidx.compose.runtime.compositionLocalOf<MenuPane?> { null }
+
+/** A pane's list over the page (in a Box filling it): from under its button, kept on the screen, down to the bottom
+ * bar (or the keyboard's top); a tap elsewhere or Back closes it. */
 @Composable
-fun ModelPicker(face: String, choices: List<ModelChoice>, picked: String?, logo: ImageVector? = null,
-                pick: (String) -> Unit) {
+fun MenuPaneLayer(pane: MenuPane) {
+    val content = pane.content ?: return
+    val density = androidx.compose.ui.platform.LocalDensity.current
+    var box by remember { mutableStateOf(androidx.compose.ui.geometry.Rect.Zero) }
+    androidx.activity.compose.BackHandler { pane.close() }
+    Box(Modifier.fillMaxSize().imePadding().onGloballyPositioned { box = it.boundsInWindow() }
+        .pointerInput(Unit) { detectTapGestures { pane.close() } }) {
+        val margin = with(density) { 8.dp.toPx() }
+        val width = with(density) { MODEL_LIST_WIDTH.toPx() }
+        val top = pane.anchor.bottom - box.top
+        val bottom = minOf(pane.floor ?: box.bottom, box.bottom) - margin - box.top
+        val above = pane.anchor.top - box.top - margin // (the room over the button, where there's little under it)
+        val up = bottom - top < with(density) { 200.dp.toPx() } && above > bottom - top
+        val room = if (up) above else bottom - top
+        val x = (pane.anchor.left - box.left).coerceAtMost(box.width - width - margin).coerceAtLeast(0f)
+        content(Modifier.layout { m, cs ->
+                val p = m.measure(cs)
+                layout(p.width, p.height) { p.place(x.toInt(), if (up) (above - p.height).toInt() else top.toInt()) }
+            }
+            .heightIn(max = with(density) { room.coerceAtLeast(0f).toDp() })
+            .pointerInput(Unit) { detectTapGestures { } }) // (a tap on the list's own: not one elsewhere)
+    }
+}
+
+/** A model's logo (its family's, as the desktop draws it beside it), or null. */
+fun modelLogo(value: String, name: String): ImageVector? = modelFamily(value, name)?.logo
+
+private val MODEL_ROW = 34.dp // (the search field's height too: its icon over the rows' logos)
+private val MODEL_LIST_WIDTH = 280.dp
+
+/** Under its anchor, at its left edge (kept on the screen); above it where it's longer than the room below. */
+private object BelowAnchor : PopupPositionProvider {
+    override fun calculatePosition(anchorBounds: IntRect, windowSize: IntSize, layoutDirection: LayoutDirection,
+                                   popupContentSize: IntSize): IntOffset {
+        val x = anchorBounds.left.coerceAtMost(windowSize.width - popupContentSize.width).coerceAtLeast(0)
+        val below = anchorBounds.bottom + popupContentSize.height <= windowSize.height
+        return IntOffset(x, if (below) anchorBounds.bottom else (anchorBounds.top - popupContentSize.height).coerceAtLeast(0))
+    }
+}
+
+/** The model picker (pickers.ModelPicker): its face the model's logo and name; a search over the models, each with its
+ * family's logo, under their families' heads. On a page with a pane (a chat's, Meta's) its list opens there, under the
+ * button and down to the bottom bar at most, scrolling; elsewhere (a dialog, Settings) in a menu under it. */
+@Composable
+fun ModelPicker(face: String, choices: List<ModelChoice>, picked: String?, pick: (String) -> Unit) {
     val c = LocalBaude.current
+    val density = androidx.compose.ui.platform.LocalDensity.current
+    val view = androidx.compose.ui.platform.LocalView.current
+    val pane = LocalMenuPane.current
     var open by remember { mutableStateOf(false) }
     var query by remember { mutableStateOf("") }
-    Box {
+    var anchor by remember { mutableStateOf(androidx.compose.ui.geometry.Rect.Zero) }
+    val now = choices.firstOrNull { it.value == picked }
+    val logo = picked?.let { modelLogo(it, now?.name ?: face) }
+    Box(Modifier.onGloballyPositioned { anchor = it.boundsInWindow() }) {
         Row(Modifier.clip(RoundedCornerShape(6.dp)).clickable(enabled = choices.isNotEmpty()) { open = true; query = "" }
             .padding(start = 8.dp, end = 4.dp, top = 6.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
             if (logo != null) Icon(logo, null, tint = c.fg, modifier = Modifier.padding(end = 6.dp).size(16.dp.icon))
@@ -389,24 +516,70 @@ fun ModelPicker(face: String, choices: List<ModelChoice>, picked: String?, logo:
                 modifier = Modifier.widthIn(max = 180.dp))
             Icon(Adwaita.PanDown, Wording.Common.model, tint = c.fg, modifier = Modifier.size(16.dp.icon))
         }
-        Popover(open, { open = false }) {
-            SearchField(query, { query = it }, Wording.ModelPicker.search, Modifier.width(260.dp).padding(horizontal = 8.dp, vertical = 4.dp))
-            val q = query.trim().lowercase()
-            val shown = choices.filter { q.isEmpty() || it.name.lowercase().contains(q) || it.value.lowercase().contains(q) }
+        val list = @Composable { m: Modifier -> ModelList(query, { query = it }, choices, picked, m) { v -> open = false; pick(v) } }
+        if (open && pane != null) {
+            val me = remember { Any() }
+            androidx.compose.runtime.SideEffect {
+                pane.owner = me
+                pane.anchor = anchor
+                pane.content = list
+                pane.close = { open = false }
+            }
+            androidx.compose.runtime.DisposableEffect(pane) {
+                onDispose { if (pane.owner === me) { pane.owner = null; pane.content = null } }
+            }
+        } else if (open) Popup(popupPositionProvider = BelowAnchor, onDismissRequest = { open = false },
+            properties = PopupProperties(focusable = true)) {
+            val margin = with(density) { 8.dp.toPx() }
+            val frame = android.graphics.Rect().also { view.getWindowVisibleDisplayFrame(it) } // (what BelowAnchor places in)
+            val room = frame.height() - margin - anchor.bottom // (below it, else above it)
+            val most = with(density) { (if (room < 200.dp.toPx()) anchor.top - margin else room).toDp() }
+            list(Modifier.heightIn(max = most))
+        }
+    }
+}
+
+/** The model picker's list: the search field, then the models it finds (every word typed in a model's name, its
+ * value or its family's name) under their families' heads; "No models match" where it finds none. */
+@Composable
+private fun ModelList(query: String, setQuery: (String) -> Unit, choices: List<ModelChoice>, picked: String?,
+                      modifier: Modifier, pick: (String) -> Unit) {
+    val c = LocalBaude.current
+    Column(modifier.width(MODEL_LIST_WIDTH).shadow(8.dp, RoundedCornerShape(12.dp)).clip(RoundedCornerShape(12.dp))
+        .background(c.dialog).padding(vertical = 6.dp)) {
+        SearchField(query, setQuery, Wording.ModelPicker.search, Modifier.fillMaxWidth().padding(horizontal = 8.dp).height(MODEL_ROW))
+        val words = query.lowercase().split(Regex("\\s+")).filter { it.isNotEmpty() }
+        val shown = choices.filter { m -> "${m.value} ${m.name} ${family(m)}".lowercase().let { said -> words.all { it in said } } }
+        Column(Modifier.weight(1f, fill = false).padding(top = 4.dp).verticalScroll(rememberScrollState())) {
             if (shown.isEmpty()) Text(Wording.ModelPicker.none, style = Type.body, color = c.dim,
-                modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp))
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center, modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp))
             for ((fam, ms) in shown.groupBy(::family)) {
                 Heading(fam)
-                for (m in ms) MenuChoice(m.name, m.value == picked) { open = false; pick(m.value) }
+                for (m in ms) ModelRow(m, m.value == picked) { pick(m.value) }
             }
         }
+    }
+}
+
+/** A model's row (pickers.ModelPicker's): its family's logo (the room of one where it has none), its name on one
+ * line, the tick on the one picked. */
+@Composable
+private fun ModelRow(m: ModelChoice, on: Boolean, onClick: () -> Unit) {
+    val c = LocalBaude.current
+    Row(Modifier.fillMaxWidth().height(MODEL_ROW).clickable(onClick = onClick).padding(horizontal = 16.dp),
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        val logo = modelLogo(m.value, m.name)
+        if (logo != null) Icon(logo, null, tint = c.fg, modifier = Modifier.size(16.dp.icon))
+        else androidx.compose.foundation.layout.Spacer(Modifier.size(16.dp.icon))
+        Text(m.name, style = Type.body, color = c.fg, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+        Icon(Adwaita.ObjectSelect, null, tint = c.accent, modifier = Modifier.size(16.dp.icon).alpha(if (on) 1f else 0f))
     }
 }
 
 /** A short line of what a session runs with, for the New session dialog's pickers' defaults. */
 @Composable
 fun StartPickers(hostId: String?, model: String?, effort: String?, mode: String, set: (String?, String?, String) -> Unit) {
-    val choices = if (hostId == null) emptyList() else models(hostId)
+    val choices = meshModels(hostId, model)
     val now = chosen(choices, model ?: hostId?.let { defaultModel(it) })
     Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
         Row(Modifier.heightIn(min = 34.dp), verticalAlignment = Alignment.CenterVertically) {

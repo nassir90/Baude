@@ -31,6 +31,8 @@ Plain JSON, two-space indent, no `x-` keys. Fields, in this order, each left out
   (message keys), `text` (literal strings not in `schema/copy`), `actions` (`[{"by": "click", "does": "…"}]`),
   `phone`, `apps` (only when not every app of the entry has this part), and nested `parts`.
 - `states`: distinct looks: empty, loading, error, working, asking, signed out, host gone.
+- `removed`: parts taken out on purpose, so no app brings them back: each `{name, apps, why, decided}`, `apps` naming
+  every app it's gone from (`baude`, `record`, `phone`).
 - `scenes`: `tests/screenshots.py` scenes that show it.
 
 ## Overrides: where the phone differs on purpose
@@ -46,3 +48,10 @@ An entry or a part may carry:
   hover or a right-click).
 - Only the owner decides overrides. A change may propose one in its PR; it lands when the owner agrees.
 - Where there's no override, the phone matches the entry. Anything on the phone with no entry is invented.
+
+## Rules every entry follows
+
+- **A Bot has only its Name.** Wherever an app lists or shows a Bot (a sidebar or home row, the open chat's header and
+  window title, a notification, the macOS menu bar item, This phone, a share target, the @ and ⌘K lists, Meta's lists, captions and trash button, a sender), it shows the Bot's name and
+  nothing of the chat under it: no chat title, no second line. The name is set when the chat is made a Bot
+  (BotSettings.dialog.json) and changed with Rename… or Bot Settings…. A new entry that shows a Bot says so.

@@ -49,6 +49,7 @@ work = args.work or tempfile.mkdtemp(prefix="baude-replay-")
 real_data = os.environ.get("XDG_DATA_HOME") or os.path.expanduser("~/.local/share")
 os.environ["XDG_CONFIG_HOME"] = os.path.join(work, "config")
 os.environ["XDG_DATA_HOME"] = os.path.join(work, "data")
+os.environ["BAUDE_LAUNCHERS"] = os.path.join(work, "Applications")  # (nor ~/Applications: the launchers)
 if args.lsp and os.path.isdir(os.path.join(real_data, "baude", "lsp")):  # the servers you fetched, not a new copy
     os.makedirs(os.path.join(work, "data", "baude"), exist_ok=True)
     if not os.path.exists(os.path.join(work, "data", "baude", "lsp")):

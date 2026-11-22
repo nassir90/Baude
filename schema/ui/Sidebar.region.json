@@ -273,7 +273,7 @@
             "why": "Twice the phone's 48dp chat row leaves a Bot's row mostly empty round its 32-unit avatar",
             "decided": "2026-11-22"
           },
-          "shows": "For a session on a host that is a Bot (top level only, its host reachable; a Bot whose host is gone is a session row showing its name, dimmed, with the crossed-out cloud): twice a chat's height: a round avatar with the Bot's picture (its initials until it has one), the Bot's name in bold on one line, a \"held\" tag if any, the status dot. A Bot has only its Name: the row never shows its chat's title or any second line. Bots are listed first in the list with no header, the last used first, each with what is under it (its forks and threads, whatever host). By date, Bots are among the chats by time. Tooltip: name; folder; \"On <host> (<address>)\"; held; \"Group <name>\"; worktree (never the chat's title).",
+          "shows": "For a session on a host that is a Bot (top level only, its host reachable; a Bot whose host is gone is a session row showing its name, dimmed, with the crossed-out cloud): twice a chat's height: a round avatar with the Bot's picture (set into the page: see README's A picture is set into the page) (its initials until it has one), the Bot's name in bold on one line, a \"held\" tag if any, the status dot. A Bot has only its Name: the row never shows its chat's title or any second line. Bots are listed first in the list with no header, the last used first, each with what is under it (its forks and threads, whatever host). By date, Bots are among the chats by time. Tooltip: name; folder; \"On <host> (<address>)\"; held; \"Group <name>\"; worktree (never the chat's title).",
           "copy": [
             "sidebar.bot",
             "sidebar.held",

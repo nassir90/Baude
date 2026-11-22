@@ -55,3 +55,9 @@ An entry or a part may carry:
   window title, a notification, the macOS menu bar item, This phone, a share target, the @ and ⌘K lists, Meta's lists, captions and trash button, a sender), it shows the Bot's name and
   nothing of the chat under it: no chat title, no second line. The name is set when the chat is made a Bot
   (BotSettings.dialog.json) and changed with Rename… or Bot Settings…. A new entry that shows a Bot says so.
+- **A picture is set into the page.** Wherever an app shows someone's or a Bot's picture (the Git page's authors, a Bot's
+  sidebar or home row, Bot Settings, This phone's agents, the phone's chat header), it's round, under the inset shade
+  `picture-shade` in schema/tokens: a blurred shadow round its rim, one from its top edge and a hairline ring just inside
+  its edge, black at the tokens' strengths in light and dark alike (imageviews.shaded_picture; the phone's Avatar).
+  Initials on their colour get no shade. Launcher shortcut icons (ShareSheet.dialog.json) get none either: the launcher
+  cuts them to its own shape.

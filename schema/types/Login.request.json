@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "claude auth login run on the host (a chat's claude signed in again there): one a connection, its answers login_said as it says each line, then login_end; the connection's going stops it.",
+  "properties": {
+    "op": {
+      "const": "login",
+      "description": "What it is."
+    },
+    "req": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "args": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "claude auth login's arguments (--console, --sso, --email <address>)."
+    }
+  },
+  "required": [
+    "op"
+  ],
+  "additionalProperties": false
+}

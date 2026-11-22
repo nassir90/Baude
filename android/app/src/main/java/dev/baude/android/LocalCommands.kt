@@ -1,5 +1,7 @@
 package dev.baude.android
 
+import org.json.JSONObject
+
 /** What typed is, if Baude handles it itself and never sends it (BaudeWindow.on_send's /new, /clear, /cd and the
  * rest): the ones that go even when the box couldn't send (context exhausted, its host gone). */
 fun isLocal(typed: String): Boolean {
@@ -7,15 +9,44 @@ fun isLocal(typed: String): Boolean {
     return t in setOf("/clear", "/new", "/cd", "/login", "/logout") || t.startsWith("/cd ") || t.startsWith("/login ")
 }
 
-/** A turn's error that signing in again would fix (NEEDS_LOGIN). */
-private val NEEDS_LOGIN = Regex("Please run /login|Invalid API key|OAuth token (?:has )?(?:expired|revoked)|" +
-    "[Nn]ot (?:logged|signed) in|authentication_error", RegexOption.IGNORE_CASE)
+/** A turn's error that signing in again would fix (hostlogin.NEEDS_LOGIN, as it is there): claude's own words for it
+ * ("Invalid API key · Please run /login", "OAuth token has expired", "Failed to authenticate: this login reached its
+ * time limit and cannot be renewed. Run `claude auth login` to sign in again…", "Not logged in"), or the API's. */
+private val NEEDS_LOGIN = Regex("Please run /login|\\brun /login\\b|claude (?:auth )?login|claude setup-token|Invalid API key|" +
+    "OAuth token (?:has )?(?:expired|revoked)|\\b(?:not|n't) (?:logged|signed) in|authentication_(?:error|failed)|" +
+    "Failed to authenticate|API Error: 401\\b|" +
+    "\\b(?:login|sign-in|session|token|credentials?)\\b[^.\\n]{0,40}\\b(?:expired|time limit|cannot be renewed|revoked)|" +
+    "\\b(?:log|sign) in again", RegexOption.IGNORE_CASE)
 
 fun needsLogin(text: String?): Boolean = !text.isNullOrEmpty() && NEEDS_LOGIN.containsMatchIn(text)
 
+/** The error of a message of claude's that signing in again would fix (hostlogin.login_error), or null: a turn's
+ * result, if it's an error; the message it writes in place of a reply, said to be the sign-in's or saying so. */
+fun loginError(m: JSONObject): String? {
+    if (m.optString("type") == "result") {
+        val text = m.optString("result")
+        return text.takeIf { m.optBoolean("is_error") && needsLogin(it) }
+    }
+    if (m.optString("type") != "assistant" || m.str("parent_tool_use_id") != null) return null
+    val message = m.optJSONObject("message") ?: JSONObject()
+    val failed = m.optString("error") == "authentication_failed"
+    if (!(m.optBoolean("isApiErrorMessage") || m.optBoolean("is_api_error_message") ||
+            message.optString("model") == "<synthetic>" || failed)) return null
+    val text = message.optJSONArray("content").list().filter { it.optString("type") == "text" }
+        .joinToString("") { it.optString("text") }.trim()
+    return if (failed || needsLogin(text)) text.ifEmpty { m.optString("error") } else null
+}
+
+/** A sign-in error as its card says why (hostlogin.reason): its first sentence. */
+fun loginReason(text: String): String =
+    AUTH_ESCAPES.replace(text, "").trim().split(Regex("(?<=[.!?])\\s+"), limit = 2)[0].take(200)
+
+/** A terminal's link and colour codes, in what claude auth login writes (chatinput's _AUTH_ESCAPES). */
+val AUTH_ESCAPES = Regex("\u001b\\][^\u0007\u001b]*(?:\u0007|\u001b\\\\)|\u001b\\[[0-9;?]*[A-Za-z]")
+
 /** A command of Baude's own in the box (a host's chat only), handled here: true if it was one (nothing is sent or
- * queued then). empty: the box emptied. A phone's chats are all another machine's, so signing in and /cd are said to
- * be there. */
+ * queued then). empty: the box emptied. A phone's chats are all another machine's: /login signs in there (its card),
+ * /logout and /cd are said to be there. */
 fun localCommand(chat: Chat, typed: String, working: Boolean, empty: () -> Unit, openPage: (String) -> Unit,
                  open: (String, String) -> Unit): Boolean {
     if (chat.sender != null) return false
@@ -30,9 +61,14 @@ fun localCommand(chat: Chat, typed: String, working: Boolean, empty: () -> Unit,
         }
         return true
     }
-    if (t == "/login" || t == "/logout" || t.startsWith("/login ")) {
+    if (t == "/login" || t.startsWith("/login ")) { // (claude auth login, on the chat's host: its card)
         empty()
-        chat.lines.add(Line("note", Wording.SignIn.signsInThere(host = Mesh.label(at))))
+        Logins.start(chat, t.removePrefix("/login").trim().split(Regex("\\s+")).filter { it.isNotEmpty() })
+        return true
+    }
+    if (t == "/logout") {
+        empty()
+        chat.lines.add(Line("note", Wording.SignIn.signsOutThere(host = Mesh.label(at))))
         return true
     }
     if (t == "/new" || t == "/clear") {

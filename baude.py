@@ -77,7 +77,8 @@ import theming  # noqa: E402
 from widgets import ensure_icons  # noqa: E402,F401
 from theming import macos_appearance, CSS  # noqa: E402,F401
 from startup import (  # noqa: E402
-    APP_ID, LAUNCHER, TRACE, launch_command, logo_icon, macos_dock_icon, restart_state_path, take_restart_state, trace,
+    APP_ID, LAUNCHER, TRACE, follow_accent, launch_command, logo_icon, macos_dock_icon, restart_state_path,
+    take_restart_state, trace,
 )
 from sessionlist import THIS_MACHINE, _NETWORK, local_host, save_info_cache  # noqa: E402
 from baudewindow import BaudeWindow  # noqa: E402
@@ -111,6 +112,7 @@ class BaudeApp(Adw.Application):
                     print(f"baude: {fn.__name__}:", e, file=sys.stderr)
         else:
             widgets.notify_as(logo_icon())
+        follow_accent()  # (the logo in the accent as it's picked: Settings → Accent Colour)
         ensure_icons()
         pointers.start()
         install_debug_hooks(self)

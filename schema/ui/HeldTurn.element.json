@@ -25,15 +25,15 @@
     },
     {
       "name": "buttons",
-      "shows": "Two small round flat buttons (24px) left of the bubble, level with its last line, fading in on hover: ✕ and a bold ↑.",
+      "shows": "Two small round flat buttons (24px) left of the bubble, their middle level with the middle of its last line of text, fading in on hover: ✕ and a bold ↑.",
       "copy": [
         "held.delete",
         "held.send"
       ],
       "phone": {
-        "does": "A long-press reveals the same controls",
-        "why": "No hover on touch; a long-press is Android's equivalent of the desktop's right-click",
-        "decided": "2026-11-21"
+        "does": "A tap on the message shows the same buttons, centred on its last line of text as here; another tap hides them. A long press shows them too",
+        "why": "No hover on touch; the owner asked for a single tap",
+        "decided": "2026-11-22"
       },
       "actions": [
         {

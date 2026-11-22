@@ -80,6 +80,8 @@ abstract class Screens(private val theme: String) {
         Mesh.infos.clear()
         Mesh.states.clear()
         Mesh.key.value = null
+        Mesh.pictures.clear()
+        Pictures.authors(emptyMap())
     }
 
     @Test fun home() = render("01-home") { HomeScreen() }
@@ -145,6 +147,83 @@ abstract class Screens(private val theme: String) {
     @Test fun makeBot() { // (a chat on workshop, its row's Make Bot…: the Bot's name, its chat's title to keep or type over)
         show { BotSettings(Item("h1", Mesh.sessions.getValue("h1")[1], 0)) {} }
         screen("42-make-bot")
+    }
+
+    // (people's and Bots' pictures, each set into the page under Avatar's shade)
+    @Test fun picturesHome() {
+        phoneFixture()
+        botPictures()
+        HomePrefs.load(activity) // (its saved host read first, so it doesn't take back the one picked)
+        HomePrefs.pick("phone")
+        render("43-pictures-home") { HomeScreen() }
+    }
+
+    @Test fun picturesPhone() {
+        phoneFixture()
+        botPictures()
+        render("44-pictures-phone") { PhoneScreen({}, open = {}) }
+    }
+
+    @Test fun picturesChat() {
+        val bot = workshopBot()
+        fill(Mesh.openChat("h1", bot.id.orEmpty()))
+        render("45-pictures-chat") { ChatShell("h1", bot.id.orEmpty(), back = {}, open = { _, _ -> }, feedback = {}, first = "chat") }
+    }
+
+    @Test fun picturesBotSettings() {
+        val bot = workshopBot()
+        show { BotSettings(Item("h1", bot, 0)) {} }
+        screen("46-pictures-bot-settings")
+    }
+
+    /** The Git page on the parity rig's repository (its recorded answers), its authors' pictures as GitHub gives them:
+     * ada's identicon, pale grey to its edge; rowan-lee's portrait. */
+    @Test fun picturesGit() {
+        val fixtures = java.io.File("../../tests/parity/fixtures")
+        val home = org.json.JSONObject(java.io.File(fixtures, "sessions.json").readText()).getJSONObject("host").getString("home")
+        val answers = org.json.JSONObject(java.io.File(fixtures, "git-answers.json").readText()).getJSONObject("answers")
+        FixtureConnection.up(activity, Mesh.hosts.first(), home) { msg ->
+            val reply = org.json.JSONObject().put("op", "git").put("req", msg.opt("req")).put("what", msg.optString("what"))
+            if (msg.optString("op") != "git") null else when (msg.optString("what")) {
+                "page" -> org.json.JSONObject(answers.getJSONObject("page").toString().replace("@HOME@", home))
+                    .put("op", "git").put("req", msg.opt("req"))
+                "pulls" -> reply.put("repo", org.json.JSONObject.NULL).put("prs", org.json.JSONObject.NULL).put("gh", false)
+                "log" -> reply.put("commits", org.json.JSONArray()).put("skip", 0).put("more", false)
+                else -> null
+            }
+        }
+        val now = System.currentTimeMillis() / 1000.0
+        Mesh.sessions["h1"] = listOf(Msg.Session(id = "a", title = "Tidy the release notes", cwd = "$home/garden",
+            updated = now - 60, said = now - 60, created = now - 660, state = "idle", model = "opus", effort = "high", mode = "default"))
+        Pictures.authors(mapOf("ada@example.com" to Pictures.identicon(7, 0xFF8DB8E8.toInt()),
+            "41000001+rowan-lee@users.noreply.github.com" to Pictures.portrait(0xFF2E3440.toInt(), 0xFFD9A47E.toInt(),
+                0xFF6F8396.toInt(), 0xFF3B2A1E.toInt())))
+        dev.baude.android.GitPages.prepare("h1", "a", null, false)
+        show { ChatShell("h1", "a", back = {}, open = { _, _ -> }, feedback = {}, first = "git") }
+        val st = dev.baude.android.GitPages.of("h1", "a")
+        repeat(20) { if (st.commits.isEmpty()) settle() }
+        repeat(3) {
+            androidx.compose.runtime.snapshots.Snapshot.sendApplyNotifications()
+            settle()
+        }
+        activity.window.decorView.captureRoboImage("build/screenshots/$theme/47-pictures-git.png")
+    }
+
+    /** The phone's two Bots' pictures: Juniper's a portrait on a dark ground, Fern's one on white. */
+    private fun botPictures() {
+        Mesh.pictures["phone/p-a/null"] = Pictures.portrait(0xFF1D1D20.toInt(), 0xFFE0B48A.toInt(), 0xFF3A3A40.toInt(), 0xFF141414.toInt())
+        Mesh.pictures["phone/p-b/null"] = Pictures.portrait(0xFFFFFFFF.toInt(), 0xFFC68B59.toInt(), 0xFF8DE6B1.toInt(), 0xFF5A3A22.toInt())
+    }
+
+    /** workshop's first chat a Bot, Juniper, with its picture: a portrait on white. */
+    private fun workshopBot(): Msg.Session {
+        val was = Mesh.sessions.getValue("h1")
+        val a = was[0]
+        val bot = Msg.Session(id = a.id, title = a.title, cwd = a.cwd, updated = a.updated, said = a.said, created = a.created,
+            state = "idle", model = a.model, effort = a.effort, mode = a.mode, bot = Msg.BotListing(name = "Juniper"))
+        Mesh.sessions["h1"] = listOf(bot) + was.drop(1)
+        Mesh.pictures["h1/${a.id}/null"] = Pictures.portrait(0xFFFFFFFF.toInt(), 0xFFC68B59.toInt(), 0xFF8DE6B1.toInt(), 0xFF5A3A22.toInt())
+        return bot
     }
 
     /** This phone as a host of its own, named pocket: its connection up, two agents (Bots) of its own, and one in its
@@ -268,6 +347,30 @@ abstract class Screens(private val theme: String) {
     @Test @Config(qualifiers = "+land") fun landSplitWider() { // (the rule dragged left: the pages wider)
         Settings.panelWidth.value = 420f
         chatAt("34-land-split-dragged", "processes", split = true)
+    }
+
+    // (a turn on workshop whose sign-in ran out, as claude says it: its card in place of the error, then signing in
+    // again from it: the sign-in page's link, then signed in, with Send again)
+    @Test fun chatLoginExpired() = loginAt("19a-chat-login-expired")
+    @Test fun chatLoginPage() = loginAt("19b-chat-login-page", then = { stage.value = "page"; url.value = "https://claude.ai/oauth/authorize?code=true" })
+    @Test fun chatLoginSigned() = loginAt("19c-chat-login-signed", then = { stage.value = "signed"; said.value = "ada@example.com (Example Org · team)" })
+
+    // (signed in while another turn runs: its claude there started again once that turn's over, not under it)
+    @Test fun chatLoginSignedWorking() = loginAt("19d-chat-login-signed-working", working = true) {
+        stage.value = "signed"; said.value = "ada@example.com (Example Org · team)"
+    }
+
+    private fun loginAt(name: String, working: Boolean = false, then: dev.baude.android.Login.() -> Unit = {}) {
+        val chat = Mesh.openChat("h1", "b")
+        if (working) chat.thinking.value = true
+        val asked = "Why is the release build twice as slow as last week's?"
+        chat.lines.addAll(listOf(Line("you", asked), Line("error", EXPIRED)))
+        chat.chrome.turnSent = asked to emptyList() // (sent from this phone)
+        val said = org.json.JSONObject().put("type", "result").put("subtype", "success").put("is_error", true)
+            .put("result", EXPIRED)
+        dev.baude.android.chrome(chat)("h1", org.json.JSONObject().put("op", "claude").put("session", "b").put("msg", said))
+        chat.lines.mapNotNull { dev.baude.android.Logins.all[it.text].takeIf { _ -> it.kind == "login" } }.forEach { it.then() }
+        render(name) { ChatShell("h1", "b", back = {}, open = { _, _ -> }, feedback = {}, first = "chat") }
     }
 
     // (the chat's model button pressed: Claude's models, workshop's own Ollama models, and studio's, another member of
@@ -403,6 +506,30 @@ abstract class Screens(private val theme: String) {
             mesh = Msg.MeshView(members = listOf(Msg.Member(id = "h1", name = "workshop"), studio)))
     }
 
+    /** The launcher's icon (mipmap ic_launcher, made of schema/icons/apps), as a launcher draws it: in its colours, then
+     * themed (Android 13's: its monochrome layer on the system palette's colours, as Launcher3 takes them), each at
+     * 192 px on the theme's background. */
+    @Test fun launcherIcon() {
+        val icon = activity.getDrawable(dev.baude.android.R.mipmap.ic_launcher) as android.graphics.drawable.AdaptiveIconDrawable
+        val dark = theme == "dark"
+        val bg = activity.getColor(if (dark) android.R.color.system_neutral1_800 else android.R.color.system_accent1_100)
+        val fg = activity.getColor(if (dark) android.R.color.system_accent1_100 else android.R.color.system_neutral2_700)
+        val themed = android.graphics.drawable.AdaptiveIconDrawable(android.graphics.drawable.ColorDrawable(bg),
+            icon.monochrome!!.mutate().apply { setTint(fg) })
+        val (px, gap) = 192 to 32
+        val bitmap = android.graphics.Bitmap.createBitmap(2 * px + 3 * gap, px + 2 * gap, android.graphics.Bitmap.Config.ARGB_8888)
+        val canvas = android.graphics.Canvas(bitmap)
+        canvas.drawColor(if (dark) 0xFF242424.toInt() else 0xFFFAFAFA.toInt())
+        for ((i, d) in listOf(icon, themed).withIndex()) {
+            d.setBounds(gap + i * (px + gap), gap, gap + i * (px + gap) + px, gap + px)
+            d.draw(canvas)
+        }
+        java.io.File("build/screenshots/$theme").mkdirs()
+        java.io.File("build/screenshots/$theme/42-launcher-icon.png").outputStream().use {
+            bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it)
+        }
+    }
+
     /** The fixture chat ("Tidy the release notes") open at page, its host up: what was said in it, its subagents,
      * side questions and artifacts. */
     private fun chatAt(name: String, page: String, split: Boolean = false) {
@@ -444,6 +571,240 @@ abstract class Screens(private val theme: String) {
             Artifact("https://claude.ai/artifact/sync-times", "First sync times", icon = "chart",
                 description = "Before and after, by folder size"),
         ))
+    }
+
+    /** A message of yours tapped: its revert button beside its last line. Then a queued one tapped: its ✕, ↑ and
+     * revert beside its last line. */
+    @Test fun chatMessageTapped() = messageTapped("")
+
+    /** The same with the phone's text at its larger size. */
+    @Test fun chatMessageTappedLarger() {
+        Settings.textScale.value = 1.3f
+        messageTapped("-larger")
+    }
+
+    private fun messageTapped(suffix: String) {
+        val chat = Mesh.openChat("h1", "a")
+        chat.lines.addAll(listOf(
+            Line("you", "Tidy the release notes for 0.9.", uuid = "u1"),
+            Line("bot", "Here's a tidier draft, grouped by area. Want me to write it to `CHANGELOG.md`?"),
+            Line("you", "Yes, and link each item to its PR. Keep the sync items first, then settings, and leave the " +
+                "internal refactors out.", uuid = "u2"),
+            Line("tool", "Edit CHANGELOG.md"),
+        ))
+        chat.loaded.value = true
+        chat.queued.add(dev.baude.android.Queued("Then tag the release as v0.9.0 and push the tag.", emptyList()))
+        show { ChatShell("h1", "a", back = {}, open = { _, _ -> }, feedback = {}) }
+        press("Keep the sync items first")
+        repeat(20) { frame() } // (the buttons' fade finished)
+        activity.window.decorView.captureRoboImage("build/screenshots/$theme/40-chat-message-tapped$suffix.png")
+        press("Then tag the release")
+        repeat(20) { frame() }
+        activity.window.decorView.captureRoboImage("build/screenshots/$theme/41-chat-queued-tapped$suffix.png")
+    }
+
+    /** A long chat opened for the first time, its transcript read in parts as a host sends it, a picture you sent
+     * near its end read a moment after it's drawn, taking its size then: open at its end. */
+    @Test fun chatOpened() {
+        val chat = Mesh.openChat("h1", "b")
+        show { ChatShell("h1", "b", back = {}, open = { _, _ -> }, feedback = {}) }
+        for (part in longChat().chunked(12)) {
+            chat.lines.addAll(part)
+            androidx.compose.runtime.snapshots.Snapshot.sendApplyNotifications()
+            repeat(3) { frame() }
+        }
+        chat.loaded.value = true
+        androidx.compose.runtime.snapshots.Snapshot.sendApplyNotifications()
+        repeat(60) { frame() }
+        Thread.sleep(1500) // (the picture read meanwhile, off the main thread)
+        repeat(30) { frame() }
+        activity.window.decorView.captureRoboImage("build/screenshots/$theme/42-chat-opened.png")
+    }
+
+    /** The long chat scrolled up by a drag, left for the home screen, and opened again: where it was left. */
+    @Test fun chatReopened() {
+        val chat = Mesh.openChat("h1", "b")
+        chat.lines.addAll(longChat())
+        chat.loaded.value = true
+        show { ChatShell("h1", "b", back = {}, open = { _, _ -> }, feedback = {}) }
+        repeat(30) { frame() }
+        drag(from = 0.3f, to = 0.75f)
+        drag(from = 0.3f, to = 0.75f)
+        activity.window.decorView.captureRoboImage("build/screenshots/$theme/43-chat-left.png")
+        show { HomeScreen() }
+        Mesh.close()
+        val again = Mesh.openChat("h1", "b")
+        again.lines.addAll(longChat())
+        again.loaded.value = true
+        show { ChatShell("h1", "b", back = {}, open = { _, _ -> }, feedback = {}) }
+        repeat(30) { frame() }
+        activity.window.decorView.captureRoboImage("build/screenshots/$theme/43-chat-reopened.png")
+    }
+
+    /** At the end, lines come in and the drag that interrupts their glide ends at the end again: a reply streaming
+     * after that is still followed. */
+    @Test fun chatFollowAfterInterrupt() {
+        Mesh.close()
+        dev.baude.android.ChatPlaces.keep("h1/b", androidx.compose.foundation.lazy.LazyListState(), true) // (none kept: opened at its end)
+        val chat = Mesh.openChat("h1", "b")
+        chat.lines.addAll(longChat())
+        chat.loaded.value = true
+        show { ChatShell("h1", "b", back = {}, open = { _, _ -> }, feedback = {}) }
+        repeat(90) { frame() }
+        chat.lines.addAll((1..3).map { Line("bot", "A late line $it: the profile shows the same plugins again, in the same order.") })
+        repeat(3) { frame() }
+        drag(from = 0.5f, to = 0.55f)
+        repeat(6) { drag(from = 0.7f, to = 0.15f) }
+        chat.streaming.value = (1..12).joinToString("\n\n") { "Streamed paragraph $it of the reply, which keeps on growing below." }
+        repeat(60) { frame() }
+        activity.window.decorView.captureRoboImage("build/screenshots/$theme/46-chat-follow-after-interrupt.png")
+    }
+
+    /** A code block scrolled by a finger, then what you send: the end comes into view. */
+    @Test fun chatCodeScrolledThenSend() {
+        Mesh.close()
+        dev.baude.android.ChatPlaces.keep("h1/b", androidx.compose.foundation.lazy.LazyListState(), true) // (none kept: opened at its end)
+        val chat = Mesh.openChat("h1", "b")
+        chat.lines.addAll(longChat().takeLast(4))
+        chat.lines.add(Line("bot", "```\n" + (1..80).joinToString("\n") { "line $it of the build log" } + "\n```"))
+        chat.loaded.value = true
+        show { ChatShell("h1", "b", back = {}, open = { _, _ -> }, feedback = {}) }
+        repeat(60) { frame() }
+        drag(from = 0.6f, to = 0.4f)
+        chat.lines.addAll((1..4).map { Line("bot", "A reply line $it, after the log.") })
+        repeat(60) { frame() }
+        activity.window.decorView.captureRoboImage("build/screenshots/$theme/47-chat-code-scrolled-then-more.png")
+    }
+
+    /** The long chat left scrolled up, opened again while its host is down (no lines): its end, then the lines
+     * arrive and it's put back where it was left. */
+    @Test fun chatReopenedHostDown() {
+        Mesh.close()
+        dev.baude.android.ChatPlaces.keep("h1/b", androidx.compose.foundation.lazy.LazyListState(), true) // (none kept: opened at its end)
+        val chat = Mesh.openChat("h1", "b")
+        chat.lines.addAll(longChat())
+        chat.loaded.value = true
+        show { ChatShell("h1", "b", back = {}, open = { _, _ -> }, feedback = {}) }
+        repeat(30) { frame() }
+        drag(from = 0.3f, to = 0.75f)
+        drag(from = 0.3f, to = 0.75f)
+        activity.window.decorView.captureRoboImage("build/screenshots/$theme/48-chat-left-again.png")
+        show { HomeScreen() }
+        Mesh.close()
+        val again = Mesh.openChat("h1", "b")
+        again.loaded.value = true
+        show { ChatShell("h1", "b", back = {}, open = { _, _ -> }, feedback = {}) }
+        repeat(150) { frame() }
+        activity.window.decorView.captureRoboImage("build/screenshots/$theme/48b-chat-reopened-host-down.png")
+        again.lines.addAll(longChat())
+        repeat(30) { frame() }
+        activity.window.decorView.captureRoboImage("build/screenshots/$theme/49-chat-reopened-host-back.png")
+    }
+
+    /** The keyboard up, then partway down past the bottom bar (as it is mid-way through going down): the keyboard
+     * drawn as a grey block where it is, which the rig doesn't draw. */
+    @Test fun chatKeyboard() {
+        val chat = Mesh.openChat("h1", "a")
+        fill(chat)
+        show { ChatShell("h1", "a", back = {}, open = { _, _ -> }, feedback = {}) }
+        for ((name, dp) in listOf("44-chat-keyboard-up" to 300, "45-chat-keyboard-going-down" to 40)) {
+            val px = (dp * activity.resources.displayMetrics.density).toInt()
+            val w = androidx.core.view.WindowInsetsCompat.Builder()
+                .setInsets(androidx.core.view.WindowInsetsCompat.Type.ime(), androidx.core.graphics.Insets.of(0, 0, 0, px))
+                .setVisible(androidx.core.view.WindowInsetsCompat.Type.ime(), true).build()
+            fun give(v: android.view.View) {
+                androidx.core.view.ViewCompat.dispatchApplyWindowInsets(v, w)
+                if (v is android.view.ViewGroup) for (k in 0 until v.childCount) give(v.getChildAt(k))
+            }
+            give(activity.window.decorView)
+            repeat(20) { frame() }
+            val v = activity.window.decorView
+            val bitmap = android.graphics.Bitmap.createBitmap(v.width, v.height, android.graphics.Bitmap.Config.ARGB_8888)
+            val canvas = android.graphics.Canvas(bitmap)
+            v.draw(canvas)
+            canvas.drawRect(0f, (v.height - px).toFloat(), v.width.toFloat(), v.height.toFloat(),
+                android.graphics.Paint().apply { color = android.graphics.Color.rgb(120, 120, 128) })
+            java.io.File("build/screenshots/$theme").mkdirs()
+            java.io.File("build/screenshots/$theme/$name.png").outputStream().use {
+                bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it)
+            }
+        }
+    }
+
+    private fun longChat(): List<Line> = (1..18).flatMap { i -> listOf(
+        Line("you", "Step $i: check the build on the release branch and say what's slow.", uuid = "s$i"),
+        Line("tool", "Bash ./gradlew assemble --profile"),
+        Line("bot", "Step $i done. Configuration took most of the time: the plugins resolve their dependencies on " +
+            "every run. Caching the configuration would save about a third of it."),
+    ) } + Line("you", "Here's the profile from my machine.", uuid = "pic",
+        files = listOf(dev.baude.android.Sent("image", "profile.png", "image/png", picture()))) +
+        Line("bot", "Thanks: the same three plugins stand out there too.")
+
+    /** A frame as a phone draws one: its time passed, then what changed laid out and drawn (the rig lays out only
+     * when it's drawn). */
+    private fun frame() {
+        org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idleFor(java.time.Duration.ofMillis(16))
+        val v = activity.window.decorView
+        v.draw(android.graphics.Canvas(android.graphics.Bitmap.createBitmap(v.width, v.height, android.graphics.Bitmap.Config.ARGB_8888)))
+    }
+
+    /** A small picture, as a message's attachment has one (base64 PNG). */
+    private fun picture(): String {
+        val b = android.graphics.Bitmap.createBitmap(3000, 3000, android.graphics.Bitmap.Config.ARGB_8888)
+        android.graphics.Canvas(b).apply { // (a phone camera's size: read a moment after its message is drawn)
+            drawColor(android.graphics.Color.rgb(80, 120, 200))
+            drawCircle(1500f, 1500f, 940f, android.graphics.Paint().apply { color = android.graphics.Color.rgb(240, 200, 80) })
+        }
+        val out = java.io.ByteArrayOutputStream()
+        b.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, out)
+        return java.util.Base64.getEncoder().encodeToString(out.toByteArray())
+    }
+
+    /** Where the words text are on screen (the first that has them), as Compose's semantics have them. */
+    private fun where(text: String): android.graphics.RectF {
+        fun roots(v: android.view.View): List<androidx.compose.ui.node.RootForTest> = when (v) {
+            is androidx.compose.ui.node.RootForTest -> listOf(v)
+            is android.view.ViewGroup -> (0 until v.childCount).flatMap { roots(v.getChildAt(it)) }
+            else -> emptyList()
+        }
+        fun all(n: androidx.compose.ui.semantics.SemanticsNode): List<androidx.compose.ui.semantics.SemanticsNode> =
+            listOf(n) + n.children.flatMap { all(it) }
+        val node = roots(activity.window.decorView).flatMap { all(it.semanticsOwner.unmergedRootSemanticsNode) }.first { n ->
+            n.config.getOrElse(androidx.compose.ui.semantics.SemanticsProperties.Text) { emptyList() }.any { text in it.text }
+        }
+        val b = node.boundsInWindow
+        return android.graphics.RectF(b.left, b.top, b.right, b.bottom)
+    }
+
+    /** A finger put down on the words text and lifted (held: for a long press). */
+    private fun press(text: String, held: Boolean = false) {
+        val r = where(text)
+        val root = activity.window.decorView
+        val t = android.os.SystemClock.uptimeMillis()
+        root.dispatchTouchEvent(android.view.MotionEvent.obtain(t, t, android.view.MotionEvent.ACTION_DOWN, r.centerX(), r.centerY(), 0))
+        org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idleFor(java.time.Duration.ofMillis(if (held) 700 else 60))
+        val u = android.os.SystemClock.uptimeMillis()
+        root.dispatchTouchEvent(android.view.MotionEvent.obtain(t, u, android.view.MotionEvent.ACTION_UP, r.centerX(), r.centerY(), 0))
+        settle()
+    }
+
+    /** A finger dragged down the middle of the screen, from and to fractions of its height, then let go still. */
+    private fun drag(from: Float, to: Float) {
+        val root = activity.window.decorView
+        val x = root.width / 2f
+        val t = android.os.SystemClock.uptimeMillis()
+        val looper = org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper())
+        root.dispatchTouchEvent(android.view.MotionEvent.obtain(t, t, android.view.MotionEvent.ACTION_DOWN, x, root.height * from, 0))
+        for (k in 1..20) {
+            looper.idleFor(java.time.Duration.ofMillis(16))
+            val y = root.height * (from + (to - from) * k / 20f)
+            root.dispatchTouchEvent(android.view.MotionEvent.obtain(t, android.os.SystemClock.uptimeMillis(),
+                android.view.MotionEvent.ACTION_MOVE, x, y, 0))
+        }
+        looper.idleFor(java.time.Duration.ofMillis(300))
+        root.dispatchTouchEvent(android.view.MotionEvent.obtain(t, android.os.SystemClock.uptimeMillis(),
+            android.view.MotionEvent.ACTION_UP, x, root.height * to, 0))
+        settle()
     }
 
     @Composable
@@ -550,6 +911,10 @@ abstract class Screens(private val theme: String) {
         )
     }
 }
+
+/** What claude says when its sign-in has run out and can't be renewed. */
+private const val EXPIRED = "Failed to authenticate: this login reached its time limit and cannot be renewed. Run " +
+    "`claude auth login` to sign in again, or use `claude setup-token` and set CLAUDE_CODE_OAUTH_TOKEN for unattended jobs"
 
 @RunWith(RobolectricTestRunner::class)
 @Config(qualifiers = "w411dp-h891dp-notnight-xxhdpi")

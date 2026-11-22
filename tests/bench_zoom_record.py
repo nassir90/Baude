@@ -477,6 +477,7 @@ def open_sample(tmp, size):
     os.environ["KUBECONFIG"] = os.path.join(tmp, "no-kubeconfig")
     os.environ["DOCKER_HOST"] = "unix://" + os.path.join(tmp, "no-docker.sock")
     os.environ["XDG_DATA_HOME"] = os.path.join(tmp, "xdg-data")
+    os.environ["BAUDE_LAUNCHERS"] = os.path.join(tmp, "Applications")  # (nor ~/Applications)
     os.environ["RECORD_NOUNS"] = "off"
     os.environ["BAUDE_GH"] = ""
     os.environ["BAUDE_UPDATE"] = "0"

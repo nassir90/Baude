@@ -592,11 +592,21 @@ class Chrome:
         self.bar.set_title_widget(self.entry)
         self.bar.pack_end(self.who)
         self.bar.pack_end(self.new)
-        self.tab_bar = Adw.TabBar(autohide=False)
+        self.tab_bar = Adw.TabBar(autohide=True)  # (one tab: no strip, as Multiplex's window)
         self.strip = Gtk.Overlay(child=self.tab_bar)
+        self.head = Gtk.Overlay(child=self.bar)  # (the bar, as it's put in the window: chrome.head, not chrome.bar)
         self.progress = Gtk.ProgressBar(visible=False, valign=Gtk.Align.END, can_target=False)
         self.progress.add_css_class("osd")
-        self.strip.add_overlay(self.progress)  # (over the strip's foot: the page doesn't move as it shows and hides)
+        self.strip.add_overlay(self.progress)  # (over the strip's foot, or the bar's while there's no strip: the page
+        self.tab_bar.connect("notify::tabs-revealed", lambda *_: self.place_progress())  # doesn't move as it shows)
+        self.place_progress()
+
+    def place_progress(self):
+        want = self.strip if self.tab_bar.get_tabs_revealed() else self.head
+        if self.progress.get_parent() is not want:
+            if (was := self.progress.get_parent()) is not None:
+                was.remove_overlay(self.progress)
+            want.add_overlay(self.progress)
 
     def show(self, now, address=True):
         """now: the page in front's state (MacWeb.state's); address: its address put in the entry too (not while

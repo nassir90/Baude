@@ -902,7 +902,7 @@ class BrowserPane(Gtk.Box):
         content.append(self.said)
         frame = Adw.ToolbarView(content=content, vexpand=True)
         frame.add_css_class("baude-frame")  # (the bars on the frame: theming.CSS)
-        frame.add_top_bar(chrome.bar)
+        frame.add_top_bar(chrome.head)
         frame.add_top_bar(chrome.strip)
         self.append(frame)
 

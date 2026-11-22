@@ -10,12 +10,18 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.MutatePriority
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.calculatePan
+import androidx.compose.foundation.gestures.calculateZoom
+import androidx.compose.foundation.gestures.calculateCentroid
 import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.foundation.gestures.detectTransformGestures
+import androidx.compose.foundation.gestures.stopScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -25,25 +31,29 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -63,6 +73,8 @@ import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.positionChange
+import androidx.compose.ui.input.pointer.util.VelocityTracker
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.platform.LocalContext
@@ -77,6 +89,7 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
@@ -288,6 +301,29 @@ private suspend fun hostFile(hostId: String, path: String): ByteArray? = suspend
     }
 }
 
+/** A picture's bytes decoded, then swapped for its file's on its host if that's the same picture, larger. */
+@Composable
+private fun loadedOf(item: ViewItem, got: (Loaded) -> Unit): Loaded? {
+    val loaded by produceState<Loaded?>(null, item.key) {
+        value = null
+        val first = withContext(Dispatchers.Default) { item.bytes()?.let { decodeBig(it) } }
+        value = first
+        first?.let(got)
+        val path = item.path
+        val host = item.hostId
+        if (first != null && path != null && host != null && takes(host, "read_file")) { // (the file's own, if it's bigger and the same)
+            val file = hostFile(host, path)
+            val big = withContext(Dispatchers.Default) { file?.let { decodeBig(it) } }
+            if (big != null && big.w > first.w && Math.abs(big.w.toDouble() / big.h - first.w.toDouble() / first.h) < 0.02 &&
+                withContext(Dispatchers.Default) { samePicture(first.bitmap, big.bitmap) }) {
+                value = big
+                got(big)
+            }
+        }
+    }
+    return loaded
+}
+
 /** The large view over the chat's whole screen (lightbox.Lightbox). */
 @Composable
 fun ViewerOverlay() {
@@ -301,21 +337,14 @@ private fun ViewerStage(st: ViewerState) {
     val uri = LocalUriHandler.current
     val density = LocalDensity.current
     val scope = rememberCoroutineScope()
-    val item = st.items[st.index]
     val n = st.items.size
-    val loaded by produceState<Loaded?>(null, item.key) {
-        value = null
-        val first = withContext(Dispatchers.Default) { item.bytes()?.let { decodeBig(it) } }
-        value = first
-        val path = item.path
-        val host = item.hostId
-        if (first != null && path != null && host != null && takes(host, "read_file")) { // (the file's own, if it's bigger and the same)
-            val file = hostFile(host, path)
-            val big = withContext(Dispatchers.Default) { file?.let { decodeBig(it) } }
-            if (big != null && big.w > first.w && Math.abs(big.w.toDouble() / big.h - first.w.toDouble() / first.h) < 0.02 &&
-                withContext(Dispatchers.Default) { samePicture(first.bitmap, big.bitmap) }) value = big
-        }
-    }
+    // the pictures side by side, a swipe from one to the next: the one shown is the one the pager last came to rest on
+    val pager = rememberPagerState(initialPage = st.index) { n }
+    var held by remember { mutableStateOf(false) } // (a finger's on it, or the pages are going where it left them)
+    LaunchedEffect(pager) { snapshotFlow { if (held) -1 else pager.settledPage }.collect { if (it >= 0) st.index = it } }
+    val item = st.items[st.index]
+    val loads = remember { mutableStateMapOf<String, Loaded>() } // (the pages drawn, by their pictures' keys)
+    val loaded = loads[item.key]
     val progress = remember { Animatable(0f) }
     var zoom by remember(item.key) { mutableFloatStateOf(1f) }
     var pan by remember(item.key) { mutableStateOf(Offset.Zero) }
@@ -323,6 +352,9 @@ private fun ViewerStage(st: ViewerState) {
     var closing by remember { mutableStateOf(false) }
     val focus = remember { FocusRequester() }
     val keys = remember { arrayOf<(Key) -> Boolean>({ false }) }
+    // (what a finger's move and its lifting do, as this composition has the picture: the gesture outlives it)
+    val moves = remember { arrayOf<(Int, Float, Offset, Offset, Int, Boolean) -> Unit>({ _, _, _, _, _, _ -> }) }
+    val lifts = remember { arrayOf<(Int, Float, Boolean) -> Unit>({ _, _, _ -> }) }
     LaunchedEffect(Unit) {
         focus.requestFocus()
         progress.animateTo(1f, tween(Viewer.flyMs, easing = FastOutSlowInEasing))
@@ -349,10 +381,11 @@ private fun ViewerStage(st: ViewerState) {
         val img = loaded
         val availW = stageW - 2 * with(density) { Tokens.Lightbox.side.toPx() }
         val availH = stageH - with(density) { (Tokens.Lightbox.top + Tokens.Lightbox.bottom).toPx() }
-        val fit = if (img == null) 1f else {
-            val shrink = minOf(availW / img.w, availH / img.h)
-            if (maxOf(img.w, img.h) >= 400) shrink else minOf(density.density, shrink)
+        fun fitOf(im: Loaded?): Float = if (im == null) 1f else {
+            val shrink = minOf(availW / im.w, availH / im.h)
+            if (maxOf(im.w, im.h) >= 400) shrink else minOf(density.density, shrink)
         }
+        val fit = fitOf(img)
         val maxZoom = maxOf(1f, Tokens.Lightbox.mostPixels.toFloat() / (fit / density.density))
         val center = Offset(stageW / 2, barPx + with(density) { Tokens.Lightbox.top.toPx() } + availH / 2)
         fun clamp(z: Float, o: Offset): Offset {
@@ -376,12 +409,17 @@ private fun ViewerStage(st: ViewerState) {
                 }
             }
         }
+        fun turn(d: Int) { // (wrapping round from the last to the first, and back)
+            if (n < 2) return
+            val to = st.index + d
+            scope.launch { if (to in 0 until n) pager.animateScrollToPage(to) else pager.scrollToPage((to + n) % n) }
+        }
         keys[0] = l@{ k ->
             val step = Offset(stageW, stageH) / 5f
             when (k) {
                 Key.Escape -> close()
-                Key.DirectionLeft -> if (zoom <= 1f) { if (n > 1) st.index = (st.index - 1 + n) % n } else pan = clamp(zoom, pan + Offset(step.x, 0f))
-                Key.DirectionRight -> if (zoom <= 1f) { if (n > 1) st.index = (st.index + 1) % n } else pan = clamp(zoom, pan - Offset(step.x, 0f))
+                Key.DirectionLeft -> if (zoom <= 1f) turn(-1) else pan = clamp(zoom, pan + Offset(step.x, 0f))
+                Key.DirectionRight -> if (zoom <= 1f) turn(1) else pan = clamp(zoom, pan - Offset(step.x, 0f))
                 Key.DirectionUp -> if (zoom > 1f) pan = clamp(zoom, pan + Offset(0f, step.y))
                 Key.DirectionDown -> if (zoom > 1f) pan = clamp(zoom, pan - Offset(0f, step.y))
                 Key.Plus, Key.Equals, Key.NumPadAdd -> zoomTo(zoom * Tokens.Lightbox.zoomKey.toFloat(), center + pan)
@@ -391,40 +429,109 @@ private fun ViewerStage(st: ViewerState) {
             }
             true
         }
-        val dest = if (img == null) null else Rect(center + pan - Offset(img.w * fit * zoom / 2, img.h * fit * zoom / 2),
-            Size(img.w * fit * zoom, img.h * fit * zoom))
+        fun placed(im: Loaded?, f: Float, z: Float, o: Offset): Rect? = if (im == null) null else
+            Rect(center + o - Offset(im.w * f * z / 2, im.h * f * z / 2), Size(im.w * f * z, im.h * f * z))
+        val dest = placed(img, fit, zoom, pan)
         val spot = (if (closing) ImageSpots.rects[item.key] else st.from ?: ImageSpots.rects[item.key])?.translate(-origin)
         val shown = if (dest == null) null else if (spot != null && p < 1f) Rect(
             Offset(spot.left + (dest.left - spot.left) * p, spot.top + (dest.top - spot.top) * p),
             Size(spot.width + (dest.width - spot.width) * p, spot.height + (dest.height - spot.height) * p)) else dest
-        Box(Modifier.fillMaxSize().pointerInput(item.key, img?.w, fit) {
-            detectTapGestures(onTap = { at -> if (dest == null || !dest.contains(at)) close() },
-                onDoubleTap = { at -> zoomTo(if (zoom > 1.01f) 1f else 2f, at) })
-        }.pointerInput(item.key, img?.w, fit) {
-            detectTransformGestures { centroid, dp, zc, _ ->
-                if (zoom <= 1f && zc == 1f) return@detectTransformGestures
+        val fling = with(density) { 400.dp.toPx() } // (a finger leaving faster than this a second goes on to the next)
+        fun paged(from: Int) = (pager.currentPage - from) + pager.currentPageOffsetFraction // (in pages, + towards the next)
+        moves[0] = { from, zc, dp, centroid, fingers, settling ->
+            val resting = Math.abs(paged(from)) < 0.001f
+            if (zc != 1f && fingers > 1 && (resting || settling)) { // (a second finger's landing turns paging into zooming)
                 val z2 = (zoom * zc).coerceIn(1f, maxZoom)
                 val c0 = center + pan
                 val moved = centroid - (centroid - c0) * (z2 / zoom) + dp
                 zoom = z2
                 pan = if (z2 <= 1f) Offset.Zero else clamp(z2, moved - center)
+            } else if (!resting && settling) {
+                // (the pages are going back to this picture)
+            } else {
+                var dx = dp.x
+                val off = paged(from) * stageW
+                if (off != 0f) { // (a picture part way in: the drag moves the pages first, back to this one at most)
+                    val toPages = if (off > 0f) maxOf(-dx, -off) else minOf(-dx, -off)
+                    val took = pager.dispatchRawDelta(toPages)
+                    dx = if (toPages == -off) dx + took else 0f // (what's left once back pans the picture)
+                }
+                val next = clamp(zoom, Offset(pan.x + dx, pan.y + dp.y))
+                val rest = dx - (next.x - pan.x)
+                pan = if (zoom <= 1f) Offset.Zero else next
+                if (rest != 0f) pager.dispatchRawDelta(-rest)
             }
-        }) {
-            if (img != null && shown != null) Canvas(Modifier.fillMaxSize()) {
-                clipRect(0f, barPx, size.width, size.height) {
-                    drawImage(img.bitmap.asImageBitmap(), srcOffset = androidx.compose.ui.unit.IntOffset.Zero,
-                        srcSize = IntSize(img.bitmap.width, img.bitmap.height),
-                        dstOffset = IntOffset(shown.left.toInt(), shown.top.toInt()),
-                        dstSize = IntSize(shown.width.toInt().coerceAtLeast(1), shown.height.toInt().coerceAtLeast(1)),
-                        filterQuality = FilterQuality.High)
+        }
+        lifts[0] = { from, vx, settling ->
+            val at = paged(from)
+            if (Math.abs(at) <= 0.001f) held = false else {
+                val by = when {
+                    settling -> 0
+                    vx < -fling && at > 0f -> 1
+                    vx > fling && at < 0f -> -1
+                    Math.abs(at) > 0.5f -> if (at > 0f) 1 else -1
+                    else -> 0
+                }
+                scope.launch {
+                    pager.animateScrollToPage((from + by).coerceIn(0, n - 1))
+                    held = false
                 }
             }
         }
-        if (n > 1 && zoom <= 1f) for ((left, d) in listOf(true to -1, false to 1)) {
-            Box(Modifier.align(if (left) Alignment.CenterStart else Alignment.CenterEnd).padding(horizontal = Tokens.Lightbox.arrowInset)
-                .offset(y = bar / 2).alpha(p).size(Tokens.Lightbox.arrow).clip(CircleShape).background(Color.Black.copy(alpha = 0.65f))
-                .clickable { st.index = (st.index + d + n) % n }, contentAlignment = Alignment.Center) {
-                Icon(if (left) Adwaita.GoPrevious else Adwaita.GoNext, null, tint = Color.White, modifier = Modifier.size(20.dp.icon))
+        Box(Modifier.fillMaxSize().pointerInput(item.key, img?.w, fit) {
+            detectTapGestures(onTap = { at -> if (dest == null || !dest.contains(at)) close() },
+                onDoubleTap = { at -> zoomTo(if (zoom > 1.01f) 1f else 2f, at) })
+        }.pointerInput(pager) {
+            // a drag pans the picture while it's zoomed in, as far as its edge, and pages past that; a pinch zooms
+            awaitEachGesture {
+                awaitFirstDown(requireUnconsumed = false)
+                held = true
+                if (pager.isScrollInProgress) scope.launch(start = CoroutineStart.UNDISPATCHED) { pager.stopScroll(MutatePriority.UserInput) }
+                st.index = pager.currentPage // (the page the pager is on, the one a swipe's lifting settles from, even if the last swipe's spring is still running)
+                val from = st.index
+                var settling = false // (a second finger landed with the pages away from this picture: they go back, and the gesture zooms)
+                val velocity = VelocityTracker()
+                var slop = Offset.Zero
+                var moving = false
+                try {
+                    while (true) {
+                        val e = awaitPointerEvent()
+                        val down = e.changes.filter { it.pressed }
+                        if (down.isEmpty()) break
+                        if (down.size > 1 && !settling && Math.abs((pager.currentPage - from) + pager.currentPageOffsetFraction) > 0.001f) {
+                            settling = true
+                            scope.launch { pager.animateScrollToPage(from) }
+                        }
+                        down.first().let { velocity.addPosition(it.uptimeMillis, it.position) }
+                        val zc = e.calculateZoom()
+                        val dp = e.calculatePan()
+                        if (!moving) {
+                            slop += dp
+                            if (slop.getDistance() > viewConfiguration.touchSlop || (zc != 1f && down.size > 1)) moving = true else continue
+                        }
+                        moves[0](from, zc, dp, e.calculateCentroid(useCurrent = false), down.size, settling)
+                        e.changes.forEach { if (it.positionChange() != Offset.Zero) it.consume() }
+                    }
+                } finally {
+                    lifts[0](from, velocity.calculateVelocity().x, settling)
+                }
+            }
+        }) {
+            HorizontalPager(pager, Modifier.fillMaxSize(), beyondViewportPageCount = 1, userScrollEnabled = false) { i ->
+                val pic = st.items[i]
+                val im = loadedOf(pic) { loads[pic.key] = it }
+                DisposableEffect(pic.key) { onDispose { loads.remove(pic.key) } }
+                val here = i == st.index
+                val at = if (here) shown else placed(im, fitOf(im), 1f, Offset.Zero)
+                if (im != null && at != null) Canvas(Modifier.fillMaxSize()) {
+                    clipRect(0f, barPx, size.width, size.height) {
+                        drawImage(im.bitmap.asImageBitmap(), srcOffset = IntOffset.Zero,
+                            srcSize = IntSize(im.bitmap.width, im.bitmap.height),
+                            dstOffset = IntOffset(at.left.toInt(), at.top.toInt()),
+                            dstSize = IntSize(at.width.toInt().coerceAtLeast(1), at.height.toInt().coerceAtLeast(1)),
+                            filterQuality = FilterQuality.High)
+                    }
+                }
             }
         }
         // the bar: its title, what's known of the picture, and what can be done with it

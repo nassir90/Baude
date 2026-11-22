@@ -9,7 +9,7 @@ import androidx.compose.ui.text.font.FontWeight
 import java.util.regex.Matcher
 import java.util.regex.Pattern
 
-/* The code highlighter: widgets.py's code_spans, regex_spans, grep_patterns and numbered_spans, ported. Pygments'
+/* The code highlighter: codespans.py's code_spans, regex_spans, grep_patterns and numbered_spans, ported. Pygments'
  * lexers are replaced by small regex lexers (one per language family) that classify as Pygments does. */
 
 /** A span's token class: Pygments' token types the desktop's styles colour (schema/tokens' syntax). */

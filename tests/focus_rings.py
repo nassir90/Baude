@@ -7,7 +7,7 @@ from gi.repository import Adw, Gtk
 from PIL import Image, ImageChops
 
 import mouse
-import widgets
+import imageviews
 
 
 def walk(widget):
@@ -78,7 +78,7 @@ def controls():
     scale = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL, 0, 10, 1)
     return [
         of(Gtk.Button, "a button", label="A button"),
-        of(widgets.RefreshButton, "a refresh button"),
+        of(imageviews.RefreshButton, "a refresh button"),
         of(Gtk.ToggleButton, "a toggle", label="A toggle"),
         ("a flat toggle, on", flat_toggle, flat_toggle),
         of(Gtk.Switch, "a switch"),

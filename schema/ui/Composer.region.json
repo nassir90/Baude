@@ -4,14 +4,14 @@
     "baude"
   ],
   "code": [
-    "widgets.py:Composer",
-    "widgets.py:ComposerView",
-    "widgets.py:ComposerMarkdown",
-    "widgets.py:sends",
-    "widgets.py:newline_key",
-    "widgets.py:tab_key",
-    "widgets.py:wrap_selection",
-    "widgets.py:Exhausted",
+    "composerview.py:Composer",
+    "composerview.py:ComposerView",
+    "composerview.py:ComposerMarkdown",
+    "composerview.py:sends",
+    "composerview.py:newline_key",
+    "composerview.py:tab_key",
+    "composerview.py:wrap_selection",
+    "chatparts.py:Exhausted",
     "baude.py:BaudeWindow.on_key",
     "baude.py:BaudeWindow.on_send",
     "baude.py:BaudeWindow.queue_message",
@@ -22,8 +22,8 @@
     "baude.py:BaudeWindow.refresh_attach_strip",
     "baude.py:Attachment",
     "baude.py:attachment_widget",
-    "widgets.py:QueuedTurn",
-    "widgets.py:HeldTurn"
+    "chatparts.py:QueuedTurn",
+    "chatparts.py:HeldTurn"
   ],
   "copy": [
     "composer",

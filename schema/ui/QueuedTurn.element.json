@@ -7,7 +7,7 @@
     "Enter in the composer (with text or attachments) while a turn runs"
   ],
   "code": [
-    "widgets.py:QueuedTurn",
+    "chatparts.py:QueuedTurn",
     "baude.py:BaudeWindow.queue_message",
     "baude.py:BaudeWindow.queue_send",
     "baude.py:BaudeWindow.queue_edit",

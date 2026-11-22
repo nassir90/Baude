@@ -15,6 +15,8 @@ from gi.repository import Adw, Gdk, GLib, Graphene, Gtk, Pango  # noqa: E402
 
 import pointers  # noqa: E402  (the pointer's shape: beside this file)
 import widgets  # noqa: E402  (what Record draws as Baude does: the links' logos; beside this file)
+import markdownview  # noqa: E402
+import composerview  # noqa: E402
 from codeview import FindInText  # noqa: E402
 import spelling  # noqa: E402  (the pages' spelling and grammar, as they're written: beside this file)
 from recordstore import (  # noqa: E402
@@ -69,9 +71,9 @@ class DiaryEditor(DiaryFind, Gtk.Box, FindInText):
             "proposal-new": {"background": "rgba(46,194,126,0.22)"},
             "proposal-lock": {"editable": False}}
     MARGIN = 22  # the page's text, and its title, this far in
-    # a list as Baude's chat lays one out (widgets.MarkdownView): LIST_PAD in, INDENT more a level (its spaces kept,
-    # unseen), its text MARKER_GAP after its marker's column (NotesView.marker_col)
-    INDENT, LIST_PAD, MARKER_GAP = widgets.INDENT_STEP, 6, 6
+    # a list as Baude's chat lays one out (markdownview.MarkdownView): LIST_PAD in, INDENT more a level (its spaces
+    # kept, unseen), its text MARKER_GAP after its marker's column (NotesView.marker_col)
+    INDENT, LIST_PAD, MARKER_GAP = markdownview.INDENT_STEP, 6, 6
     # Markdown, as Self's editor has it: (pattern, tag, the markup's length each side) for the text between
     INLINE = ((re.compile(r"`([^`\n]+)`"), "verbatim", 1),
               (re.compile(r"\*\*(?=\S)(.+?)(?<=\S)\*\*"), "bold", 2),
@@ -111,8 +113,8 @@ class DiaryEditor(DiaryFind, Gtk.Box, FindInText):
         self.view = NotesView(wrap_mode=Gtk.WrapMode.WORD_CHAR, left_margin=self.MARGIN, right_margin=self.MARGIN,
                               top_margin=7, bottom_margin=40, pixels_above_lines=3, accepts_tab=False)
         self.view.add_css_class("diary")
-        widgets.no_text_drag(self.view)  # (a selection isn't dragged away: a press in it places the caret)
-        widgets.word_steps(self.view)  # (Option and an arrow: as far as a closing } or a line's full stop too)
+        composerview.no_text_drag(self.view)  # (a selection isn't dragged away: a press in it places the caret)
+        composerview.word_steps(self.view)  # (Option and an arrow: as far as a closing } or a line's full stop too)
         self.buf = self.view.get_buffer()
         for name, props in self.TAGS.items():  # (code, `x` and ``` blocks, at code's size beside the notes': widgets')
             self.buf.create_tag(name, **({**props, "scale": widgets.code_scale()} if name in ("verbatim", "pre") else props))
@@ -465,7 +467,7 @@ class DiaryEditor(DiaryFind, Gtk.Box, FindInText):
 
     def accent_changed(self):
         """Links, [[pages]] and [names](url), in the accent as Baude's are (Settings → Accent Colour), its shade for
-        text in the theme, light or dark (widgets.apply_accent asks again as it changes)."""
+        text in the theme, light or dark (theming.apply_accent asks again as it changes)."""
         self.buf.get_tag_table().lookup("link").set_property("foreground-rgba", widgets.accent_text_rgba())
 
     def _highlight(self):
@@ -529,7 +531,7 @@ class DiaryEditor(DiaryFind, Gtk.Box, FindInText):
                     tag("hidden", m.end() - 1, m.end())
         pos, item = 0, None  # (item: the list item the lines after it may go on with: its text's margin)
         # (an edit's Accept and Reject, U+FFFC and a joiner, after a ``` its green ends with: still a bare fence)
-        spans = widgets.fence_spans(text.replace("\ufffc", "").replace(WORD_JOINER, "").split("\n"), typing=shown)
+        spans = markdownview.fence_spans(text.replace("\ufffc", "").replace(WORD_JOINER, "").split("\n"), typing=shown)
         blocks = [[first, last] for first, last, _closed in spans]  # (each code block's lines, for its card: NotesView)
         in_block = {n for first, last, _closed in spans for n in range(first, last + 1)}
         fences = {first for first, _last, _closed in spans} | {last for _first, last, closed in spans if closed}

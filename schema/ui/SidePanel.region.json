@@ -17,8 +17,8 @@
     "baude.py:BaudeWindow.show_panel",
     "baude.py:BaudeWindow.place_split",
     "baude.py:BaudeWindow.split_dragged",
-    "widgets.py:PaneSlide",
-    "widgets.py:ExpandStack"
+    "panels.py:PaneSlide",
+    "panels.py:ExpandStack"
   ],
   "copy": [
     "side_panel",

@@ -2,7 +2,7 @@
   "description": "A dialog listing the commits (newest first, merges left out) the running version has, 640 x 720 px, with a header naming that version. The same dialog, for another commit, is what the commit links in Mesh open. Baude's and Record's.",
   "apps": ["baude", "record"],
   "opens": ["☰ → Changelog", "a commit link (short hash) on a row of ☰ → Mesh (opens it for that commit)"],
-  "code": ["update.py:changelog_dialog", "update.py:changelog", "update.py:changelog_group", "update.py:version", "update.py:made_when", "widgets.py:changelog_of"],
+  "code": ["update.py:changelog_dialog", "update.py:changelog", "update.py:changelog_group", "update.py:version", "update.py:made_when", "meshui.py:changelog_of"],
   "copy": ["changelog", "meta"],
   "parts": [
     {

@@ -111,10 +111,19 @@ import diaryeditor  # noqa: E402
 import recordreader  # noqa: E402
 import recordwindow  # noqa: E402
 import widgets  # noqa: E402
+import refkinds  # noqa: E402
+import imageviews  # noqa: E402
+import markdownview  # noqa: E402
+import composerview  # noqa: E402
+import panels  # noqa: E402
+import lightbox  # noqa: E402
+import chatfind  # noqa: E402
+import pickers  # noqa: E402
+import meshui  # noqa: E402
 from gi.repository import Adw, Gdk, Gio, GLib, Graphene, Gtk  # noqa: E402
 
-widgets.SLIDE_MS = 0  # (a side bar opens and closes at once here: test_side_bars_slide has it slide)
-widgets.Lightbox.FLY_MS = 0  # (the large view opens and closes at once here: test_lightbox_flies has it fly)
+panels.SLIDE_MS = 0  # (a side bar opens and closes at once here: test_side_bars_slide has it slide)
+lightbox.Lightbox.FLY_MS = 0  # (the large view opens and closes at once here: test_lightbox_flies has it fly)
 
 SHOTS = None
 
@@ -344,7 +353,7 @@ def test_notes_code_block_is_one_card(app):
 
 
 def test_read_code_block_height(app):
-    """Read draws a reply in Baude's chat's scroller (widgets.markdown_scroller): a code block in a chat taller than
+    """Read draws a reply in Baude's chat's scroller (panels.markdown_scroller): a code block in a chat taller than
     the window is its own height, not squashed to a line (the viewport at its child's natural height). The
     notebooks' column is the pages' width, a notebook a line as tall as a page's, no subtitle."""
     win = app.win
@@ -448,7 +457,7 @@ def test_word_steps_reach_what_ends_a_line():
     def stops(text, at=0, forward=True, hidden=()):
         found = []
         while True:
-            to = widgets.word_stop(text, at, forward, lambda i: i in hidden)
+            to = composerview.word_stop(text, at, forward, lambda i: i in hidden)
             if to == at:
                 return found
             found.append(text[to:] if not forward else text[:to])
@@ -644,7 +653,7 @@ def test_list_item_swaps_with_its_sibling():
     order; a code block's lines aren't items. (#74)"""
     def swap(text, at, by):
         lines = text.split("\n")
-        swapped = widgets.swap_list_item(lines, at, by)
+        swapped = composerview.swap_list_item(lines, at, by)
         return None if swapped is None else ("\n".join(lines[:swapped[1]] + swapped[0] + lines[swapped[2]:]), swapped[3])
 
     assert swap("- a\n- b\n- c", 1, -1) == ("- b\n- a\n- c", 0)
@@ -868,12 +877,12 @@ def test_right_bar_closed_at_launch_opens(app):
     win = app.win
     select(win, "a")
     slide, paned = win.right_slide, win.paned
-    saved, widgets.SLIDE_MS = widgets.SLIDE_MS, 0
+    saved, panels.SLIDE_MS = panels.SLIDE_MS, 0
     slide.set_shown(False)
     pump(0.1)
     paned.set_position(100_000)
     pump(0.1)
-    widgets.SLIDE_MS = 150
+    panels.SLIDE_MS = 150
     try:
         slide.set_shown(True)
         wait_for(lambda: slide.anim is None, "opened", 3)
@@ -882,7 +891,7 @@ def test_right_bar_closed_at_launch_opens(app):
         assert slide.open_size >= least and slide.pane.get_width() >= least, (slide.open_size, least)
         assert 0 < paned.get_width() - paned.get_position() < paned.get_width() / 2, paned.get_position()
     finally:
-        widgets.SLIDE_MS = saved
+        panels.SLIDE_MS = saved
         slide.set_shown(True)
         pump(0.1)
 
@@ -1130,7 +1139,7 @@ def test_unmatched_fence_keeps_to_its_lines():
     """A fence nothing closes has the lines right after it, up to a blank one, not the rest of the page; one that's closed
     goes to its close, blank lines and all. One left over, it's the one being typed on, or else the one leaving least in
     code, so blocks that were there stay as they were; ```python can't close anything. (#70)"""
-    spans = lambda text, **kw: widgets.fence_spans(text.split("\n"), **kw)  # noqa: E731
+    spans = lambda text, **kw: markdownview.fence_spans(text.split("\n"), **kw)  # noqa: E731
     assert spans("Above\n```\ncode\nmore\n\nBelow\n\nAnd below") == [(1, 3, False)]
     assert spans("```") == [(0, 0, False)] and spans("```\n") == [(0, 0, False)] and spans("no code") == []
     assert spans("```\na\n\nb\n```\nafter") == [(0, 4, True)], "closed: blank lines and all"
@@ -1339,7 +1348,7 @@ def test_ongoing_feedback_tab(app):
         assert page.merge_btn.get_visible() and not page.fix_btn.get_visible()
         assert win.tabs.pages[("fixes",)].get_title().endswith("(1)")
         assert page.stack.get_visible_child_name() == "main"
-        assert isinstance(page.refresh_btn, widgets.RefreshButton)  # (it turns as it reads: test_refresh_turns, Baude's)
+        assert isinstance(page.refresh_btn, imageviews.RefreshButton)  # (it turns as it reads: test_refresh_turns, Baude's)
         page.send_btn.emit("clicked")  # (+: Send Feedback…, in Record's window)
         pump(0.1)
         assert isinstance(win.get_visible_dialog(), feedback.FeedbackDialog)
@@ -1378,7 +1387,7 @@ def test_ongoing_feedback_tab(app):
 
 
 def test_one_look(app):
-    """Baude's look (widgets.CSS): the notebooks and pages, the bars and the right bar (the Record, Files, Git) the
+    """Baude's look (theming.CSS): the notebooks and pages, the bars and the right bar (the Record, Files, Git) the
     frame; the tabs (a page, a chat, code) the inside, a box set into it; no rule under the Record's title."""
     win = app.win
     select(win, "a")
@@ -1449,7 +1458,7 @@ def test_reader_formats_what_you_wrote(app):
     try:
         wait_for(lambda: len(reader.rows) == 2, "both read")
         row = reader.rows[0]
-        assert isinstance(row.prose, record.widgets.MarkdownView) and row.has_css_class("reader-user")
+        assert isinstance(row.prose, markdownview.MarkdownView) and row.has_css_class("reader-user")
         said = " ".join(w.get_label() for w in walk(row.prose) if isinstance(w, Gtk.Label))
         assert "<b>this</b>" in said and "**" not in said and "- one" not in said, said
         assert any(w.get_selectable() for w in walk(row.prose) if isinstance(w, Gtk.Label)), "still selectable"
@@ -1471,7 +1480,7 @@ def test_reader_picks(app):
     second = next(w for w in r._labels() if "Merge" in w.get_text())
 
     def at(label, i):
-        rect = widgets.passage_rects(label, i, i + 1, r.over)[0]
+        rect = chatfind.passage_rects(label, i, i + 1, r.over)[0]
         return rect.get_x() + 1, rect.get_y() + rect.get_height() / 2
 
     def drag(label, words, state=Gdk.ModifierType.CONTROL_MASK):
@@ -2169,19 +2178,21 @@ def test_diary_hash_lists_issues(app):
             assert "PR #77" not in names.refs and "acme/tools#77" in names.refs, "the chat's own repository's, not " \
                 "its upstream's"
             assert "PR #60" not in recordui.ReaderNames(space).refs, "no chat's: no repository a bare number means"
-            was, widgets.SIGNAL = widgets.SIGNAL, names
+            was, markdownview.SIGNAL = markdownview.SIGNAL, names
             try:
-                assert "baude-icon-pr_merged" in widgets.ref_link("acme/shop#60", "acme/shop#60", False)
-                assert "ref:acme%2Fshop%2360" in widgets.ref_link("PR #60", "PR #60", False)
-                assert "baude-icon-pr_merged" in widgets.ref_link("acme/shop#60", "acme/shop#60", True)
+                assert "baude-icon-pr_merged" in markdownview.ref_link("acme/shop#60", "acme/shop#60", False)
+                assert "ref:acme%2Fshop%2360" in markdownview.ref_link("PR #60", "PR #60", False)
+                assert "baude-icon-pr_merged" in markdownview.ref_link("acme/shop#60", "acme/shop#60", True)
                 # (a bare number in code is no link, whatever's listed: a colour's #333, a comment's)
                 names.refs["#12"] = names.refs["acme/shop#12"]
-                assert widgets.ref_link("#12", "#12", True) is None, "backticked"
-                assert "ref:" not in (widgets.ref_code_markup("color: #12;\n# or #12", None) or ""), "in a code block"
-                assert "ref:" in widgets.ref_code_markup("see acme/shop#12 for it", None), "its full name is fine"
-                assert "ref:" not in widgets._inline_markup("See #12 and #60, and `#60`."), "nor in prose, on its own"
+                assert markdownview.ref_link("#12", "#12", True) is None, "backticked"
+                assert "ref:" not in (markdownview.ref_code_markup("color: #12;\n# or #12", None) or ""), \
+                    "in a code block"
+                assert "ref:" in markdownview.ref_code_markup("see acme/shop#12 for it", None), "its full name is fine"
+                assert "ref:" not in markdownview._inline_markup("See #12 and #60, and `#60`."), \
+                    "nor in prose, on its own"
             finally:
-                widgets.SIGNAL = was
+                markdownview.SIGNAL = was
             assert "acme/shop#60" in win.names_in("That's acme/shop#60, merged.")
             assert 'href="ref:acme%2Fshop%2360"' in recordmeta.md_markup("That's acme/shop#60.", {"acme/shop#60"})
 
@@ -2266,7 +2277,7 @@ def test_github_shots(app):
                 d.buf.place_cursor(d.buf.get_iter_at_offset(3))
                 pump(0.3)
                 shot(win, f"github-note-{name}")
-                pal = widgets.RefPalette(win, space, lambda item: None)
+                pal = pickers.RefPalette(win, space, lambda item: None)
                 pal.present(win)
                 wait_for(lambda: win.get_visible_dialog() is pal, "⌘K")
                 pal.entry.set_text("the")
@@ -2290,18 +2301,18 @@ def test_watch_github(app):
     """While a window's shown, and only then, GitHub's lists are looked at (once a minute); once they've changed, what's
     on show is told. It holds nothing of the window."""
     asked, told = [], []
-    real_look, tick = lookupgit.GITHUB.look, widgets.GITHUB_TICK_S
+    real_look, tick = lookupgit.GITHUB.look, meshui.GITHUB_TICK_S
     # (only what's asked of "a folder": the app's own window has a watch of its own)
-    lookupgit.GITHUB.look, widgets.GITHUB_TICK_S = (lambda folders: "a folder" in folders and asked.append(folders)), 1
+    lookupgit.GITHUB.look, meshui.GITHUB_TICK_S = (lambda folders: "a folder" in folders and asked.append(folders)), 1
     in_use = ["a folder"]
     try:
         win = Adw.Window(default_width=200, default_height=100)
-        widgets.watch_github(win, lambda w: list(in_use), told.append)
+        meshui.watch_github(win, lambda w: list(in_use), told.append)
         pump(1.3)
-        assert not asked and not widgets.window_shown(win), "not shown yet"
+        assert not asked and not meshui.window_shown(win), "not shown yet"
         win.present()
         wait_for(lambda: asked == [["a folder"]], "a look, once it's shown")
-        assert widgets.window_shown(win) and not told
+        assert meshui.window_shown(win) and not told
         pump(1.2)
         assert len(asked) == 1, "not again for a minute"
         in_use.append("a folder too")
@@ -2311,7 +2322,7 @@ def test_watch_github(app):
         win.set_visible(False)
         lookupgit.GITHUB.generation += 1
         pump(1.2)
-        assert len(told) == 1 and not widgets.window_shown(win), "not while it's hidden"
+        assert len(told) == 1 and not meshui.window_shown(win), "not while it's hidden"
         win.set_visible(True)
         wait_for(lambda: len(told) == 2, "told, shown again")
         gone = weakref.ref(win)
@@ -2322,7 +2333,7 @@ def test_watch_github(app):
         pump(1.2)
         assert gone() is None, "let go of"
     finally:
-        lookupgit.GITHUB.look, widgets.GITHUB_TICK_S = real_look, tick
+        lookupgit.GITHUB.look, meshui.GITHUB_TICK_S = real_look, tick
 
 
 def test_hash_key_never_rewrites_what_is_typed(app):
@@ -2754,7 +2765,7 @@ def test_images_open_in_the_large_view(app):
     through that fix's images, and zooming, panning and closing just as there."""
     win = app.win
     select(win, "a")
-    assert isinstance(win.lightbox, widgets.Lightbox)
+    assert isinstance(win.lightbox, lightbox.Lightbox)
     png = Gdk.MemoryTexture.new(800, 400, Gdk.MemoryFormat.R8G8B8A8, GLib.Bytes.new(bytes([9, 90, 200, 255]) * (800 * 400)),
                                 3200).save_to_png_bytes().get_data()
     page = win.open_fixes()
@@ -2762,7 +2773,7 @@ def test_images_open_in_the_large_view(app):
     pictures = []
     for name in ("a.png", "b.png"):
         pic = Gtk.Picture(paintable=Gdk.Texture.new_from_bytes(GLib.Bytes.new(png)), css_classes=["fix-shot"])
-        widgets.make_image_interactive(pic, png, name=name)
+        imageviews.make_image_interactive(pic, png, name=name)
         pictures.append(pic)
     holder = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
     page.clamp.set_child(holder)
@@ -2770,8 +2781,8 @@ def test_images_open_in_the_large_view(app):
         holder.append(pic)
     page.stack.set_visible_child_name("main")
     pump(0.2)
-    opened, saved = [], widgets.ImageActions.open
-    widgets.ImageActions.open = lambda self: opened.append(self)
+    opened, saved = [], imageviews.ImageActions.open
+    imageviews.ImageActions.open = lambda self: opened.append(self)
     box = win.lightbox
     try:
         pictures[0].image_actions.view()
@@ -2787,7 +2798,7 @@ def test_images_open_in_the_large_view(app):
         box.on_key(None, Gdk.KEY_Escape, 0, Gdk.ModifierType(0))
         assert not box.get_visible() and box.picture.get_paintable() is None
     finally:
-        widgets.ImageActions.open = saved
+        imageviews.ImageActions.open = saved
         win.tabs.close(("fixes",))
         pump(0.1)
 
@@ -2994,13 +3005,13 @@ def test_baude_niceties(app):
     dlg.text.get_buffer().set_text("Too tall.")
     dlg.save()
     assert recordwindow.feedback.feedback_items()[0]["text"] == "Too tall."
-    pal = record.widgets.RefPalette(win, space, win.open_item)
+    pal = pickers.RefPalette(win, space, win.open_item)
     pal.entry.set_text("relay")
     pal.fill()
     assert "relay_jobs.py" in pal.shown()
     pal.close()
     row = next(r for r in win.reader.rows if r.item["role"] == "assistant")
-    assert isinstance(row.prose, record.widgets.MarkdownView)
+    assert isinstance(row.prose, markdownview.MarkdownView)
     markup = " ".join(w.get_label() for w in walk(row.prose) if isinstance(w, record.Gtk.Label))
     assert "baude-ref:relay_jobs.py" in markup and "baude-icon-file" in markup, markup[:300]
     d = win.open_note(recordstore.HOME)
@@ -3177,11 +3188,11 @@ def test_zoom_does_only_what_shows(app):
 
     # (counted: the zoom's applied, a style sheet's loaded, what's written, which labels' logos are placed again)
     applied, loaded, saved, placed = [], [], [], set()
-    apply_zoom, save_now, place_icons = win.apply_zoom, win.store.save_now, widgets.LinkLabel.place_icons
+    apply_zoom, save_now, place_icons = win.apply_zoom, win.store.save_now, refkinds.LinkLabel.place_icons
     win.apply_zoom = lambda: (applied.append(win.store.zoom), apply_zoom())[1]
     win.zoom_css.load_from_string = lambda css: loaded.append(css)
     win.store.save_now = lambda: (saved.append(True), save_now())[1]
-    widgets.LinkLabel.place_icons = lambda label: (placed.add(label), place_icons(label))[1]
+    refkinds.LinkLabel.place_icons = lambda label: (placed.add(label), place_icons(label))[1]
     win.ZOOM_SAVE_MS = 60_000  # (a burst's save not due, however slowly this is going)
     try:
         frames = []
@@ -3217,7 +3228,7 @@ def test_zoom_does_only_what_shows(app):
 
         # the tabs not shown: nothing of theirs touched
         assert hidden.box.zoomed == hidden_class and font(label_of(hidden_at[0])) == hidden_font, "the chat not shown"
-        assert not placed & {lb for lb in walk(hidden.box) if isinstance(lb, widgets.LinkLabel)}, "its logos neither"
+        assert not placed & {lb for lb in walk(hidden.box) if isinstance(lb, refkinds.LinkLabel)}, "its logos neither"
         assert note.zoomed != recordui.zoom_class(1.3), "nor the page"
 
         # shown: at the new size in its first frame, its place kept, the rest coming back as the chat's did
@@ -3297,7 +3308,7 @@ def test_zoom_does_only_what_shows(app):
         assert all(r.get_visible() for r in hidden.rows)
         assert max(abs(y - hidden_y) for y in drawn) <= 3, f"its place moved: {hidden_y:.0f} -> {drawn[:4]}"
     finally:
-        widgets.LinkLabel.place_icons = place_icons
+        refkinds.LinkLabel.place_icons = place_icons
         del win.apply_zoom, win.zoom_css.load_from_string, win.store.save_now, win.ZOOM_SAVE_MS
         widgets.save_settings(text_scale=1.0)
         widgets.apply_scales(win.get_display())
@@ -3568,8 +3579,8 @@ def test_restart_keeps_scroll_positions(app):
         os.remove(chat)
 
     fresh = Gtk.ScrolledWindow(child=Gtk.Label(label="x"))  # (never shown: nothing to put back)
-    assert record.widgets.scroll_place(fresh) is None
-    record.widgets.hold_place(fresh, None)
+    assert panels.scroll_place(fresh) is None
+    panels.hold_place(fresh, None)
     assert not getattr(fresh, "held", False)
 
 
@@ -3612,7 +3623,7 @@ def test_images_fly_into_the_large_view(app):
     page = win.open_fixes()
     page.draw_detail = lambda: None  # (what's in it is this test's: not what was read, or read last time)
     pic = Gtk.Picture(paintable=Gdk.Texture.new_from_bytes(GLib.Bytes.new(png)), css_classes=["fix-shot"])
-    widgets.make_image_interactive(pic, png, name="a.png")
+    imageviews.make_image_interactive(pic, png, name="a.png")
     holder = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
     page.clamp.set_child(holder)
     holder.append(pic)
@@ -3621,7 +3632,7 @@ def test_images_fly_into_the_large_view(app):
     pump(0.3)
     assert pic.get_mapped() and pic.get_width() > 0
     box, big = win.lightbox, win.lightbox.picture
-    saved, widgets.Lightbox.FLY_MS = widgets.Lightbox.FLY_MS, 240
+    saved, lightbox.Lightbox.FLY_MS = lightbox.Lightbox.FLY_MS, 240
 
     def frames(go):
         got, clock = [], win.get_frame_clock()
@@ -3653,14 +3664,14 @@ def test_images_fly_into_the_large_view(app):
         assert not box.get_visible() and box.shown == 0.0 and big.get_paintable() is None and not box.items
         assert box.get_can_target() and pic.get_opacity() == 1.0 and big.flight is None
     finally:
-        widgets.Lightbox.FLY_MS = saved
+        lightbox.Lightbox.FLY_MS = saved
         win.tabs.close(("fixes",))
         pump(0.1)
 
 
 def test_side_bars_slide(app):
     """The notebooks and the right bar open and close smoothly, in steps; the notebooks' toggles stay one switch."""
-    saved, widgets.SLIDE_MS = widgets.SLIDE_MS, 180
+    saved, panels.SLIDE_MS = panels.SLIDE_MS, 180
     win = app.win
     slide, column = win.left_slide, win.left_slide.fixed
     try:
@@ -3693,7 +3704,7 @@ def test_side_bars_slide(app):
         win.paned.disconnect(watch)
         assert win.right.get_visible() and abs(win.paned.get_position() - at) <= 1
     finally:
-        widgets.SLIDE_MS = saved
+        panels.SLIDE_MS = saved
 
 
 def test_nothing_jumps_as_the_notebooks_slide(app):
@@ -3701,7 +3712,7 @@ def test_nothing_jumps_as_the_notebooks_slide(app):
     a second): as the notebooks close and open, their toggle, the right bar's and ☰ stay put in the window's bar, and the
     first tab moves one way only, no further in a frame than the column did, from where it sits steady to where it sits
     steady. The right bar shown or hidden; its own slide, the notebooks shown or hidden, leaves all that where it is."""
-    saved, widgets.SLIDE_MS = widgets.SLIDE_MS, 180
+    saved, panels.SLIDE_MS = panels.SLIDE_MS, 180
     win = app.win
     select(win, "a")
     win.open_note(recordstore.HOME)
@@ -3779,7 +3790,7 @@ def test_nothing_jumps_as_the_notebooks_slide(app):
         slide.set_shown(True)
         right.set_shown(True)
         wait_for(lambda: slide.anim is None and right.anim is None, "all settled")
-        widgets.SLIDE_MS = saved
+        panels.SLIDE_MS = saved
 
 
 def test_window_bar_stays_in_sight(app):
@@ -3834,7 +3845,7 @@ def test_selection_runs_across_paragraphs(app):
     hand = mouse.Mouse(win)
 
     def at(label, i):
-        rect = widgets.passage_rects(label, i, i + 1, win)[0]
+        rect = chatfind.passage_rects(label, i, i + 1, win)[0]
         return rect.get_x() + 1, rect.get_y() + rect.get_height() / 2
 
     def drag(*points):
@@ -3903,7 +3914,7 @@ def test_selection_runs_across_paragraphs(app):
     assert len(r.selection.parts()) == len(labels), "⌘A: the whole chat"
     r.selection.select_all()
     assert len(r.picks) == 1 and r.selection.shown
-    rect = widgets.passage_rects(first, plain, plain + 1, r.over)[0]
+    rect = chatfind.passage_rects(first, plain, plain + 1, r.over)[0]
     x, y = rect.get_x() + 1, rect.get_y() + rect.get_height() / 2
     press = Press(x, y, Gdk.ModifierType.CONTROL_MASK)
     r._pick_begin(press, x, y)
@@ -4009,7 +4020,7 @@ def test_citation_links(app):
     pump(0.1)
 
     def at(label, i):
-        rect = widgets.passage_rects(label, i, i + 1, win)[0]
+        rect = chatfind.passage_rects(label, i, i + 1, win)[0]
         return rect.get_x() + 1, rect.get_y() + rect.get_height() / 2
 
     hand.down(*at(near, 6))
@@ -4102,9 +4113,9 @@ def test_citation_links(app):
     wait_for(lambda: c.cited, "the passage shown", 5)
     pump(0.3)
     q = c.cited[0]
-    inner = widgets.inner_scroller(q["label"], c.box)
+    inner = chatfind.inner_scroller(q["label"], c.box)
     assert inner is not None and inner.get_vadjustment().get_value() > 100, "the block's own view moved"
-    rect = widgets.passage_rects(q["label"], q["start"], q["end"], inner)[0]
+    rect = chatfind.passage_rects(q["label"], q["start"], q["end"], inner)[0]
     assert 0 <= rect.get_y() < inner.get_height(), f"in the block's view: {rect.get_y()} of {inner.get_height()}"
     win.open_chat(long)
     pump(0.1)
@@ -4144,7 +4155,7 @@ def test_selection_scrolls_at_the_edges(app):
         pump(0.1)
         assert adj.get_upper() > adj.get_page_size() + 400, "long enough to scroll"
         labels = list(reader._labels())
-        hand, start = mouse.Mouse(win), widgets.passage_rects(labels[0], 0, 1, win)[0]
+        hand, start = mouse.Mouse(win), chatfind.passage_rects(labels[0], 0, 1, win)[0]
         hand.down(start.get_x() + 1, start.get_y() + 3)
         pump(0.05)
         ok, bottom = reader.scroll.compute_point(win, widgets.Graphene.Point().init(40, reader.scroll.get_height() + 30))
@@ -5323,7 +5334,7 @@ def _feedback_note_box(app):
     def buttons(dlg, picture):
         """The strip's thumbnails' buttons (the picture in them), or their ×s."""
         return [w for w in walk(dlg.shots) if isinstance(w, Gtk.Button)
-                and any(isinstance(p, widgets.FixedPicture) for p in walk(w)) == picture]
+                and any(isinstance(p, imageviews.FixedPicture) for p in walk(w)) == picture]
 
     dlg = win.open_feedback()
     pump(0.3)
@@ -5648,7 +5659,7 @@ def test_times_say_when(app):
         pump(0.3)
         says(next(w for w in walk(d.pop_list) if isinstance(w, Gtk.Label) and w.get_mapped() and "2h ago" in w.get_text()))
         d._hide_pop()
-        pal = widgets.RefPalette(win, win.space(), lambda item: None)
+        pal = pickers.RefPalette(win, win.space(), lambda item: None)
         pal.present(win)
         wait_for(lambda: win.get_visible_dialog() is pal, "⌘K")
         pal.entry.set_text("zebra")
@@ -5685,13 +5696,14 @@ def test_unexplained_nouns():
     assert recordstore.without_to_learn(page) == "- platform: where apps run\n\n## Later\n- more"
     names = recordui.ReaderNames(type("NoNames", (), {"items": lambda self: []})())
     reply = "Then the platform's backend restarts `the platform`, as the platform does."
-    names.said = {widgets.message_key(reply): re.compile(r"(?<![\w-])(?:the platform's backend|the platform)(?![\w-])")}
-    was = widgets.SIGNAL
-    widgets.SIGNAL = names
+    names.said = {markdownview.message_key(reply):
+                  re.compile(r"(?<![\w-])(?:the platform's backend|the platform)(?![\w-])")}
+    was = markdownview.SIGNAL
+    markdownview.SIGNAL = names
     try:
-        markup = widgets.markdown_blocks(reply)[0][1]
+        markup = markdownview.markdown_blocks(reply)[0][1]
     finally:
-        widgets.SIGNAL = was
+        markdownview.SIGNAL = was
     red = re.findall(r'<span foreground="#[0-9a-f]{6}">([^<]*)</span>', markup)
     assert red == ["the platform's backend", "the platform"], markup
     assert 'bgalpha="22%">the platform</span>' in markup, "the code span: code, not red"

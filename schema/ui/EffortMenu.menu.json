@@ -2,7 +2,7 @@
   "description": "The header's thinking-effort drop-down: the effort levels the current model supports, a tick on the current one, opened centred under its button.",
   "apps": ["baude"],
   "opens": ["header effort picker"],
-  "code": ["widgets.py:ChoiceDropDown", "baude.py:BaudeWindow.sync_effort_choices", "baude.py:BaudeWindow.on_effort_changed", "baudelib/claude.py:EFFORT_LABELS"],
+  "code": ["pickers.py:ChoiceDropDown", "baude.py:BaudeWindow.sync_effort_choices", "baude.py:BaudeWindow.on_effort_changed", "baudelib/claude.py:EFFORT_LABELS"],
   "copy": ["mode_effort", "chat_header", "meta_settings"],
   "parts": [
     {

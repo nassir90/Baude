@@ -26,6 +26,7 @@ import lookup  # noqa: E402  (⌘K's engine: what a chat's folder has; beside th
 import lookupgit  # noqa: E402
 import pointers  # noqa: E402  (the pointer's shape: beside this file)
 import widgets  # noqa: E402  (what Record draws as Baude does: the links' logos; beside this file)
+import panels  # noqa: E402
 from baudelib import tokens  # noqa: E402  (its measures, Baude's: schema/tokens)
 from baudelib import wording  # noqa: E402  (its words, Baude's: schema/copy)
 import baudelib.client  # noqa: E402  (the hosts, as Baude has them: another's notebooks, through its host process)
@@ -71,7 +72,7 @@ button.quote-drop { min-width: 24px; min-height: 24px; padding: 0; border-radius
 dropdown.notes-host > button { padding: 2px 1px 2px 4px; min-height: 24px; }
 dropdown.notes-host > button > box { border-spacing: 2px; }  /* (the notebooks' host, beside Notebooks: room for its
    name in the column) */
-/* Baude's look (widgets.CSS): the notebooks, the bars, the pages' list and Meta's column the frame, no lines
+/* Baude's look (theming.CSS): the notebooks, the bars, the pages' list and Meta's column the frame, no lines
    between them; the page, Read and the viewers each the inside, a box set into it */
 paned.notes-split > separator { background: none; background-image: none; box-shadow: none; }
 .ref-card contents { padding: 6px 8px; }  /* (a name's card, just under the pointer: Window.ref_card) */
@@ -565,10 +566,10 @@ def notes_first(items):
 
 
 class ReaderNames:
-    """What Baude's markdown (widgets.MarkdownView, through widgets.SIGNAL) asks of a Signal to link a reply's names,
-    from the notebook's search (Record has no Signal, and looks nothing up): a name its folders have is a link with
-    its logo before it, as Baude links what its catalogue has; clicked, it says what it is (Window.open_ref). folder:
-    the chat's, whose repository is what a bare PR #12 in it means (never a vendored checkout's)."""
+    """What Baude's markdown (markdownview.MarkdownView, through markdownview.SIGNAL) asks of a Signal to link a reply's
+    names, from the notebook's search (Record has no Signal, and looks nothing up): a name its folders have is a link
+    with its logo before it, as Baude links what its catalogue has; clicked, it says what it is (Window.open_ref).
+    folder: the chat's, whose repository is what a bare PR #12 in it means (never a vendored checkout's)."""
 
     phrase_re, strong, _by_surface = None, frozenset(), {}
 
@@ -727,7 +728,7 @@ class ZoomPlace:
     def saved(self):
         """Where it's been read to, for a restart: with messages still hidden, its tab left in the middle of a zoom, its
         scrollbar's place says nothing of that, so where it was as the zoom began."""
-        return self.before if (self.left or self.away is not None) and self.before else widgets.scroll_place(self.scroll)
+        return self.before if (self.left or self.away is not None) and self.before else panels.scroll_place(self.scroll)
 
     def split(self):
         """(What's at the top of the view, the messages above it to bring back, those below it to bring back, those
@@ -815,7 +816,7 @@ class ZoomPlace:
             for unit in near:
                 self._show(unit)
         else:
-            if self.job is None and not self.left and (place := widgets.scroll_place(self.scroll)):
+            if self.job is None and not self.left and (place := panels.scroll_place(self.scroll)):
                 self.before = {**place, "value": place["value"] * ratio}
             if self.job is None:  # (how far down it is, as the scrollbar has it: held there meanwhile, _hold)
                 adj = self.scroll.get_vadjustment()
@@ -962,7 +963,7 @@ class ZoomPlace:
             for handler in job["handlers"]:
                 job["clock"].disconnect(handler)
             job["clock"].end_updating()
-            if getattr(self.scroll, "let_go", None) is None:  # (unless it's being held somewhere: widgets.hold_place)
+            if getattr(self.scroll, "let_go", None) is None:  # (unless it's being held somewhere: panels.hold_place)
                 self.scroll.held = False
 
     def zoom(self, name):
@@ -977,7 +978,7 @@ class ZoomPlace:
         adj = self.scroll.get_vadjustment()
         if self.away is not None or adj.get_page_size() <= 0:
             return
-        self.before = self.before if self.left else widgets.scroll_place(self.scroll)
+        self.before = self.before if self.left else panels.scroll_place(self.scroll)
         anchor, above, below, near = self.split()
         at = self.extent(anchor) if anchor is not None else None
         through = (adj.get_value() - at[0]) / at[1] if at and at[1] > 0 else None

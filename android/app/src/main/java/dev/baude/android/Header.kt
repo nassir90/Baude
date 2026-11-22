@@ -91,7 +91,7 @@ fun defaultModel(hostId: String): String? = Mesh.conn(hostId)?.info?.init?.optJS
 fun chosen(choices: List<ModelChoice>, model: String?): ModelChoice? =
     choices.firstOrNull { it.value == model } ?: choices.firstOrNull { it.resolved != null && it.resolved == model }
 
-/** A model's family, as Baude's model picker heads them (widgets.MODEL_FAMILIES, the common ones). */
+/** A model's family, as Baude's model picker heads them (pickers.MODEL_FAMILIES, the common ones). */
 fun family(m: ModelChoice): String {
     val said = (m.name + " " + m.value.substringAfterLast('/')).lowercase()
     return listOf("Claude" to "claude|opus|sonnet|haiku|fable", "GPT" to "gpt|openai|codex", "Qwen" to "qwen|qwq",
@@ -373,7 +373,7 @@ fun Picker(face: String, tip: String, choices: List<Pair<String, String>>, picke
     }
 }
 
-/** The model picker (widgets.ModelPicker): its face the model's name; a search over them, under their families'
+/** The model picker (pickers.ModelPicker): its face the model's name; a search over them, under their families'
  * heads. */
 @Composable
 fun ModelPicker(face: String, choices: List<ModelChoice>, picked: String?, logo: ImageVector? = null,

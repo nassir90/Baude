@@ -12,6 +12,8 @@ gi.require_version("Adw", "1")
 from gi.repository import Adw, Gdk, Gtk  # noqa: E402
 
 import widgets  # noqa: E402
+import lightbox  # noqa: E402
+import theming  # noqa: E402
 from baudelib import wording  # noqa: E402
 from codeview import CODE_LIMIT, CodePage, CodeView, FilesPage, find_in_focus, in_code  # noqa: E402
 from gitview import GitPage  # noqa: E402
@@ -65,12 +67,12 @@ class ViewerHost:
             self.input = stack  # (what a view gives the focus back to as it closes)
 
     def viewer_overlays(self, child):
-        widgets.load_css()
+        theming.load_css()
         self.schema, self.kube = SchemaView(self), KubeView(self)
         host = Gtk.Overlay(child=child)
         host.add_overlay(self.schema)
         host.add_overlay(self.kube)
-        self.lightbox = widgets.Lightbox(self)  # (an image large: over all of it)
+        self.lightbox = lightbox.Lightbox(self)  # (an image large: over all of it)
         host.add_overlay(self.lightbox)
         return host
 

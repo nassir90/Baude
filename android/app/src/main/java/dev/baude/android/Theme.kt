@@ -19,7 +19,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 
-/** Baude's colours (libadwaita's, as GTK resolves them, light and dark: widgets.CSS's baude_frame, _inside, _rule and
+/** Baude's colours (libadwaita's, as GTK resolves them, light and dark: theming.CSS's baude_frame, _inside, _rule and
  * _raised made of them; schema/tokens', Tokens.light and Tokens.dark), so the app looks as Baude does. */
 data class BaudeColors(
     val frame: Color,      // (sidebar_bg_color: the frame, where the chats are listed)
@@ -60,7 +60,7 @@ val LightBaude = baudeColors(Tokens.light)
 
 val DarkBaude = baudeColors(Tokens.dark)
 
-/** Baude's measures (widgets.CSS and baude.py's margins: schema/tokens'), in dp. */
+/** Baude's measures (theming.CSS and baude.py's margins: schema/tokens'), in dp. */
 object Gap {
     val sidebarRowV = Tokens.Gap.sidebarRowV        // (.session-row's padding)
     val sidebarRowH = Tokens.Gap.sidebarRowH

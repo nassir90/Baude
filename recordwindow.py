@@ -17,6 +17,13 @@ gi.require_version("Adw", "1")
 from gi.repository import Adw, Gdk, Gio, GLib, Gtk, Pango  # noqa: E402
 
 import widgets  # noqa: E402  (what Record draws as Baude does: the links' logos; beside this file)
+import markdownview  # noqa: E402
+import chatparts  # noqa: E402
+import panels  # noqa: E402
+import chatfind  # noqa: E402
+import pickers  # noqa: E402
+import theming  # noqa: E402
+import meshui  # noqa: E402
 from baudelib import wording  # noqa: E402  (its words, Baude's: schema/copy)
 from baudelib.transcripts import transcript_model  # noqa: E402
 from baudelib import applist  # noqa: E402  (Record in the list of apps, as Emission is)
@@ -24,6 +31,7 @@ import feedback  # noqa: E402  (Send Feedback…, as Baude's: beside this file)
 import fixview  # noqa: E402  (☰ → Ongoing Feedback, as Baude's)
 import viewers  # noqa: E402  (Baude's viewers, in Record's window: beside this file)
 from codeview import find_in_focus  # noqa: E402
+from macos import window_frame  # noqa: E402
 import update  # noqa: E402  (a new version from git, restarted onto once idle, as Baude's: beside this file)
 import meta  # noqa: E402  (Meta, the helper in the right bar: Baude's too, beside this file)
 import metalook  # noqa: E402
@@ -44,13 +52,13 @@ from recordchat import RecordChat  # noqa: E402
 from recordhosts import RecordHosts  # noqa: E402
 
 
-_HOST_APART = []  # (widgets.HostApart: this machine's host process on other code than Record's, said in the banner)
+_HOST_APART = []  # (meshui.HostApart: this machine's host process on other code than Record's, said in the banner)
 
 
 def host_apart(app):
-    """The app's widgets.HostApart, made as it's first wanted: what it says, in its windows' banner."""
+    """The app's meshui.HostApart, made as it's first wanted: what it says, in its windows' banner."""
     if not _HOST_APART:
-        _HOST_APART.append(widgets.HostApart(app, update.STARTED, lambda: [
+        _HOST_APART.append(meshui.HostApart(app, update.STARTED, lambda: [
             w.show_host_apart() for w in app.get_windows() if isinstance(w, Window)]))
     return _HOST_APART[0]
 
@@ -69,32 +77,32 @@ class Settings(Adw.PreferencesDialog):
         page = widgets.settings_page()
         page.add(meta.settings_group(win.chat))  # (Baude's too, and the same settings)
         group = Adw.PreferencesGroup()
-        group.add(widgets.settings_switch(wording.say("meta_settings.full_width"), None, "win.fullwidth"))
+        group.add(theming.settings_switch(wording.say("meta_settings.full_width"), None, "win.fullwidth"))
         group.add(markup_row(win))
-        group.add(widgets.settings_code_font(win, "Record"))  # (Baude's too, and the same setting)
-        group.add(widgets.settings_accent())  # (Baude's too, and the same setting)
+        group.add(theming.settings_code_font(win, "Record"))  # (Baude's too, and the same setting)
+        group.add(theming.settings_accent())  # (Baude's too, and the same setting)
         group.add(update.settings_row())  # (Baude's too: the one setting)
-        group.add(widgets.notifications_row())  # (Baude's too)
+        group.add(theming.notifications_row())  # (Baude's too)
         self.version_row = update.version_row()
         group.add(self.version_row)
-        spell = widgets.settings_switch("Check Spelling", spelling.about(), "win.spellcheck")
+        spell = theming.settings_switch("Check Spelling", spelling.about(), "win.spellcheck")
         spelling.when_made(lambda: spell.set_subtitle(spelling.about()))  # (said once it's known)
         group.add(spell)
-        group.add(widgets.settings_switch("Include glossary and chats in backup",
+        group.add(theming.settings_switch("Include glossary and chats in backup",
                                           backup_zip().replace(os.path.expanduser("~"), "~", 1),
                                           "win.backupall"))
-        group.add(widgets.settings_switch(wording.say("window.show_in", where=apps_place()),
+        group.add(theming.settings_switch(wording.say("window.show_in", where=apps_place()),
                                           applist.launchers(APP_ID, "Record")[0].replace(os.path.expanduser("~"), "~", 1),
                                           "win.launcher"))
         page.add(group)
         sizes = Adw.PreferencesGroup(title=wording.say("window.size"))  # (the text's and the icons' are Baude's too)
-        sizes.add(widgets.settings_size(wording.say("meta_settings.text_scale"), None,
+        sizes.add(theming.settings_size(wording.say("meta_settings.text_scale"), None,
                                         widgets.scale_setting("text_scale"),
                                         lambda s: win.set_scale("text_scale", s), key="text_scale"))
-        sizes.add(widgets.settings_size(wording.say("meta_settings.icon_scale"), None,
+        sizes.add(theming.settings_size(wording.say("meta_settings.icon_scale"), None,
                                         widgets.scale_setting("icon_scale"),
                                         lambda s: win.set_scale("icon_scale", s), key="icon_scale"))
-        sizes.add(widgets.settings_size(wording.say("meta_settings.global_scale"), None,
+        sizes.add(theming.settings_size(wording.say("meta_settings.global_scale"), None,
                                         win.store.zoom_default,  # (the zoom ⌘0 goes back to)
                                         win.set_zoom_default, widgets.ZOOM_MIN, widgets.ZOOM_MAX, key="zoom_default"))
         page.add(sizes)
@@ -151,15 +159,15 @@ class Settings(Adw.PreferencesDialog):
         return False
 
 
-class Window(RecordHosts, Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost, widgets.AccentFade):
+class Window(RecordHosts, Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost, theming.AccentFade):
     """Record's window, as Baude's is laid out: on the left the notebooks and, under them, the open one's pages
-    (PagesList); in the middle what's open, a tab each (widgets.MainTabs: a page of notes, a chat to read, a file's
+    (PagesList); in the middle what's open, a tab each (panels.MainTabs: a page of notes, a chat to read, a file's
     code), their bar at the top of the inside, as Baude's are over its chat; on the right Meta (your conversation
     with it), Files and Git, as Baude's side panel has them. Either side shown or hidden at once (Ctrl+B,
     Ctrl+Alt+B); Ctrl+M shows Meta, its box focused, or closes it."""
 
     def do_snapshot(self, snapshot):
-        self.snapshot_fading(snapshot, Adw.ApplicationWindow)  # (widgets.AccentFade: the accent changed, fading)
+        self.snapshot_fading(snapshot, Adw.ApplicationWindow)  # (theming.AccentFade: the accent changed, fading)
 
     def __init__(self, app):
         super().__init__(application=app, title=noun(), default_width=1320, default_height=860)
@@ -173,16 +181,16 @@ class Window(RecordHosts, Adw.ApplicationWindow, feedback.FeedbackHost, viewers.
         # which fold away; its toggle in the window's bar, by the window's buttons, as Baude's sessions' is
         side = self.books = Adw.ToolbarView(top_bar_style=Adw.ToolbarStyle.FLAT, width_request=FixedWidth.LEAST)
         side.add_css_class("record-books")
-        side.add_css_class("baude-frame")  # (the frame, as the bars and the right bar are: widgets.CSS)
+        side.add_css_class("baude-frame")  # (the frame, as the bars and the right bar are: theming.CSS)
         side_toggle = self._sidebar_toggle()
         books = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         books.add_css_class("session-sidebar")  # (Baude's look: its group headers, its compact rows)
         self.pages = PagesList(self)  # (first: pages are gone to more often than notebooks)
         # (over it all: what's in the way of the host picked, as Baude's banner over a host's chats says it)
-        self.host_note = widgets.HostState()
+        self.host_note = chatparts.HostState()
         books.append(self.host_note)
         books.append(self.pages)
-        self.books_head = widgets.group_header(book(plural=True), self.store.books_folded,
+        self.books_head = markdownview.group_header(book(plural=True), self.store.books_folded,
                                                lambda: self.fold_books(not self.store.books_folded),
                                                plus=("list-add-symbolic", f"New {book()} (Ctrl+N)", self.new_notebook))
         self.books_head.set_margin_start(12)
@@ -190,7 +198,7 @@ class Window(RecordHosts, Adw.ApplicationWindow, feedback.FeedbackHost, viewers.
         self.books_head.set_margin_top(10)
         # (beside it, before its +: the host whose notebooks are listed, by its name (this machine's local), as Baude's
         # New session has its hosts; kept in records.json, shown once that host's there: pick_host, on_network)
-        self.host_dd = widgets.ellipsize_dropdown(widgets.ChoiceDropDown(
+        self.host_dd = pickers.ellipsize_dropdown(pickers.ChoiceDropDown(
             [(HERE_HOST, THIS_MACHINE)], f"The host whose {book(plural=True).lower()} are listed", self.pick_host), 12)
         self.host_dd.add_css_class("flat")
         self.host_dd.add_css_class("notes-host")
@@ -224,7 +232,7 @@ class Window(RecordHosts, Adw.ApplicationWindow, feedback.FeedbackHost, viewers.
         books.append(self.books_reveal)
         side.set_content(books)
         # (at the foot, under a rule from the notebooks: Update, while a new version waits: update_waiting)
-        self.update_bar = widgets.UpdateBar(self.update_now)
+        self.update_bar = chatparts.UpdateBar(self.update_now)
         side.add_bottom_bar(self.update_bar)
         self.left_sizes()
         # (held at its width: as it'd lay itself out, a long notebook's or page's name in full makes it wider; a name
@@ -235,7 +243,7 @@ class Window(RecordHosts, Adw.ApplicationWindow, feedback.FeedbackHost, viewers.
         # the middle: what's open, a tab each, their bar at the top of it, in the inside with what they show: the tabs
         # and the page they're over one island set into the frame, as Baude's chat has its tabs
         # (⌥⌘← ⌥⌘→: back and forward through them)
-        self.tabs = widgets.MainTabs(closed=self._tab_closed, reopen=self.reopen_tab, copy_links=True,
+        self.tabs = panels.MainTabs(closed=self._tab_closed, reopen=self.reopen_tab, copy_links=True,
                                      rename=(lambda c: isinstance(c, Reader) and c.chat, self.ask_rename_chat))
         self.tabs.view.connect("notify::selected-page", lambda *_: self._tab_shown())
         self.tabs.prepend(self.tabs.bar)
@@ -254,7 +262,7 @@ class Window(RecordHosts, Adw.ApplicationWindow, feedback.FeedbackHost, viewers.
         self.show_title()
         menu = Gio.Menu()
         menu.append("Open a Chat…", "win.openchat")
-        menu.append(widgets.COPY_LINK, "win.copylink")
+        menu.append(markdownview.COPY_LINK, "win.copylink")
         menu.append(wording.say("window.copy_transcript"), "win.copyreport")
         view = Gio.Menu()
         view.append(wording.say("meta_settings.full_width"), "win.fullwidth")
@@ -286,7 +294,7 @@ class Window(RecordHosts, Adw.ApplicationWindow, feedback.FeedbackHost, viewers.
                          ("settings", lambda: Settings(self).present(self)), ("feedback", lambda: self.open_feedback()),
                          ("fixes", lambda: self.open_fixes()),
                          ("changelog", lambda: update.changelog_dialog().present(self)),
-                         ("mesh", lambda: widgets.mesh_dialog(network()).present(self))):
+                         ("mesh", lambda: meshui.mesh_dialog(network()).present(self))):
             a = Gio.SimpleAction(name=name)
             a.connect("activate", lambda _a, _p, fn=fn: fn())
             self.add_action(a)
@@ -311,7 +319,7 @@ class Window(RecordHosts, Adw.ApplicationWindow, feedback.FeedbackHost, viewers.
         off.connect("activate", lambda _a, v, ref: (w := ref()) and w.deactivate_host(*v.unpack()), weakref.ref(self))
         self.add_action(off)
         app.set_accels_for_action("win.new", ["<primary>n"])
-        app.set_accels_for_action("win.copylink", [widgets.COPY_LINK_KEY])
+        app.set_accels_for_action("win.copylink", [markdownview.COPY_LINK_KEY])
         launcher = Gio.SimpleAction.new_stateful("launcher", None, GLib.Variant.new_boolean(installed()))
         launcher.connect("change-state", Window._launcher_toggled)
         self.add_action(launcher)
@@ -320,7 +328,7 @@ class Window(RecordHosts, Adw.ApplicationWindow, feedback.FeedbackHost, viewers.
         # (as Baude's, before the focused widget, as macOS's text boxes take Ctrl+B / Ctrl+F as Emacs's back / forward;
         # ⌘F too, as Ctrl+F: the find bar of the text the focus is in first, else what's over it, else the tab's)
         find = lambda: find_in_focus(self) or self.kube.find() or self.schema.start_find() or \
-            ((chat := widgets.ChatFind.for_focus(self)) is not None and chat.open()) or self.find_in_code()
+            ((chat := chatfind.ChatFind.for_focus(self)) is not None and chat.open()) or self.find_in_code()
         widgets.first_keys(self, (("<Control>b F9", lambda: self.left_slide.toggle()),
                                   (" ".join(m + "f" for m in widgets.ZOOM_MODS), find)))
         for triggers, fn in (("<Control><Alt>b", lambda: self.right_slide.toggle()),
@@ -330,7 +338,7 @@ class Window(RecordHosts, Adw.ApplicationWindow, feedback.FeedbackHost, viewers.
                              (widgets.NAV_KEYS["forward"], lambda: self.tabs.forward()),  # back, forward, up)
                              (widgets.NAV_KEYS["up"], lambda: self.go_up()),
                              (widgets.SETTINGS_KEY, lambda: Settings(self).present(self)),
-                             (widgets.PALETTE_KEY, lambda: self.open_palette()),
+                             (pickers.PALETTE_KEY, lambda: self.open_palette()),
                              (widgets.zoom_keys("plus", "<Shift>plus", "equal", "KP_Add"),
                               lambda: self.zoom_code(+1) or self.set_zoom(self.store.zoom + widgets.ZOOM_STEP)),
                              (widgets.zoom_keys("minus", "underscore", "KP_Subtract"),
@@ -390,13 +398,13 @@ class Window(RecordHosts, Adw.ApplicationWindow, feedback.FeedbackHost, viewers.
         self.paned.add_css_class("main-split")  # (its rule unseen: the inside's edge is the line; still dragged)
         self.paned.add_css_class("inside-before")
         split.append(self.paned)
-        self.right_slide = widgets.PaneSlide(self.paned, right, [self.right_toggle])
+        self.right_slide = panels.PaneSlide(self.paned, right, [self.right_toggle])
         self.connect("notify::focus-widget", Window._focus_moved)
         self.left_slide = ColumnSlide(column, side, [side_toggle])
         column.slide = self.left_slide
         self.left_slide.moving = self.right_slide.moving = self._side_moving
         framed = Adw.ToolbarView(content=split)
-        framed.add_css_class("baude-frame")  # (the bar on the frame, as the columns are: widgets.CSS)
+        framed.add_css_class("baude-frame")  # (the bar on the frame, as the columns are: theming.CSS)
         framed.add_top_bar(head)
         # (this machine's host process on other code than Record's: show_host_apart)
         self.apart_banner = Adw.Banner(revealed=False)
@@ -424,9 +432,9 @@ class Window(RecordHosts, Adw.ApplicationWindow, feedback.FeedbackHost, viewers.
         if self.store.picked != HERE_HOST:  # (another host picked when it last closed: its notebooks, there or not)
             self.start_network()
             self.show_host(self.store.picked)
-        widgets.watch_github(self, Window.github_folders, Window._github_changed)
+        meshui.watch_github(self, Window.github_folders, Window._github_changed)
         update.watch_input(self)  # (what update.quiet reads: a new version waits while you're at it)
-        widgets.warm_shaders(self)  # (after its first frame)
+        theming.warm_shaders(self)  # (after its first frame)
 
     BOOKS_WIDTH = DiaryEditor.PAGES_WIDTH  # the notebooks' column, in px: the pages' column's width
 
@@ -482,7 +490,7 @@ class Window(RecordHosts, Adw.ApplicationWindow, feedback.FeedbackHost, viewers.
         return {"record": self.current["id"] if self.current else None,
                 "tab": list(shown.tab_key) if shown is not None and shown.tab_key[0] != "code" else None,
                 "size": [self.get_width(), self.get_height()], "maximized": self.is_maximized(),
-                "frame": widgets.window_frame(self),  # (macOS: the display it's on, where; widgets.put_back)
+                "frame": window_frame(self),  # (macOS: the display it's on, where; theming.put_back)
                 "right": self.paned.get_width() - self.paned.get_position() if self.right.get_visible() else None,
                 "right_page": self.right_stack.get_visible_child_name(),
                 "fixes": self.tabs.get(("fixes",)).state() if self.tabs.get(("fixes",)) else None,
@@ -490,15 +498,15 @@ class Window(RecordHosts, Adw.ApplicationWindow, feedback.FeedbackHost, viewers.
                 "quote": self.chat.quote, "note_caret": widgets.caret_of(note.view) if note else None,
                 "note_title": note.title.get_text() if note else None,
                 "focus": "composer" if focus is self.chat.composer else "note" if note and focus is note.view else None,
-                "places": [[list(c.tab_key), c.place.saved() if hasattr(c, "place") else widgets.scroll_place(c.scroll)]
+                "places": [[list(c.tab_key), c.place.saved() if hasattr(c, "place") else panels.scroll_place(c.scroll)]
                            for c in self.tabs.children()
                            if isinstance(c, (DiaryEditor, Reader))],
-                "chat_place": widgets.scroll_place(self.chat.scroll)}
+                "chat_place": panels.scroll_place(self.chat.scroll)}
 
     def restore(self, state):
         if state.get("size") and all(state["size"]):
             self.set_default_size(*state["size"])
-        widgets.put_back(self, state.get("frame"), state.get("maximized"))  # (where it was, on macOS)
+        theming.put_back(self, state.get("frame"), state.get("maximized"))  # (where it was, on macOS)
         if state.get("right"):  # (the right bar's width, once the window's laid out)
             GLib.idle_add(lambda: self.paned.set_position(max(0, self.paned.get_width() - state["right"])) and False)
         if state.get("right_page") and self.right_stack.get_child_by_name(state["right_page"]) is not None:
@@ -519,8 +527,8 @@ class Window(RecordHosts, Adw.ApplicationWindow, feedback.FeedbackHost, viewers.
                     note.title.set_text(state["note_title"])
             for key, place in state.get("places") or ():
                 if isinstance(tab := self.tabs.get(tuple(key)), (DiaryEditor, Reader)):
-                    widgets.hold_place(tab.scroll, place)
-            widgets.hold_place(self.chat.scroll, state.get("chat_place"))
+                    panels.hold_place(tab.scroll, place)
+            panels.hold_place(self.chat.scroll, state.get("chat_place"))
             focus = self.chat.composer if state.get("focus") == "composer" else \
                 note.view if state.get("focus") == "note" and isinstance(note, DiaryEditor) else None
             if focus is not None:  # (once it's shown: you go on typing)
@@ -624,7 +632,7 @@ class Window(RecordHosts, Adw.ApplicationWindow, feedback.FeedbackHost, viewers.
         self.set_zoom(zoom)
 
     def settings_changed(self, keys, _before):
-        """Shared settings changed in another app here (widgets.watch_settings): the text's and the icons' sizes; the
+        """Shared settings changed in another app here (theming.watch_settings): the text's and the icons' sizes; the
         Global Scale, the zoom with it if it was at the one before (one zoomed apart stays as it is). (The accent's
         taken already; Meta's are meta.settings_changed's.)"""
         if keys & {"text_scale", "icon_scale"}:
@@ -848,7 +856,7 @@ class Window(RecordHosts, Adw.ApplicationWindow, feedback.FeedbackHost, viewers.
         row = Gtk.ListBoxRow()
         row.notebook = t
         box = Gtk.Box(spacing=6, margin_start=6, margin_end=4)  # (a line, as a page's in the pages' list)
-        row.name = widgets.FadeLabel(xalign=0, hexpand=True)  # (too long: it fades where it's cut)
+        row.name = pickers.FadeLabel(xalign=0, hexpand=True)  # (too long: it fades where it's cut)
         box.append(row.name)
         row.set_child(box)
         self._fill_row(row)
@@ -963,7 +971,7 @@ class Window(RecordHosts, Adw.ApplicationWindow, feedback.FeedbackHost, viewers.
         self.chat.composer.grab_focus()
 
     def check_host_code(self):
-        """This machine's host process on other code than Record (widgets.HostApart, as Baude's): looked at, and said
+        """This machine's host process on other code than Record (meshui.HostApart, as Baude's): looked at, and said
         in the banner under the header once it's lasted, with the restart that puts them on the same code."""
         if (app := self.get_application()) is not None:
             host_apart(app).look(local_remote())

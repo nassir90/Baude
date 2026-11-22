@@ -11,7 +11,7 @@
   "code": [
     "baude.py:BaudeWindow.user_bubble",
     "baude.py:BaudeWindow.send_text",
-    "widgets.py:UserTurn",
+    "chatparts.py:UserTurn",
     "baude.py:attachment_widget",
     "baude.py:BaudeWindow.revert_to",
     "baude.py:BaudeWindow.commit_revert",

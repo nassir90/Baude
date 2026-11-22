@@ -2,7 +2,7 @@
   "description": "A tab's right-click menu in Record.",
   "apps": ["record"],
   "opens": ["right-click a tab"],
-  "code": ["widgets.py:MainTabs.__init__", "recordwindow.py:Window.ask_rename_chat"],
+  "code": ["panels.py:MainTabs.__init__", "recordwindow.py:Window.ask_rename_chat"],
   "copy": ["tabs", "common"],
   "parts": [
     {

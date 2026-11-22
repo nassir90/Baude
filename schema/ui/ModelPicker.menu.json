@@ -2,7 +2,7 @@
   "description": "The popover under the header's model button: a command palette over every model the chat can run, with a search box on top and the models listed under their family's name.",
   "apps": ["baude"],
   "opens": ["header model button"],
-  "code": ["widgets.py:ModelPicker", "widgets.py:model_family", "widgets.py:model_icon", "baude.py:BaudeWindow.sync_models", "baude.py:BaudeWindow.sync_providers", "baude.py:BaudeWindow.on_model_changed"],
+  "code": ["pickers.py:ModelPicker", "pickers.py:model_family", "pickers.py:model_icon", "baude.py:BaudeWindow.sync_models", "baude.py:BaudeWindow.sync_providers", "baude.py:BaudeWindow.on_model_changed"],
   "copy": ["model_picker", "common"],
   "parts": [
     {

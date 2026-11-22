@@ -14,10 +14,10 @@
     "baude.py:BaudeApp.show_update_bars",
     "baude.py:BaudeApp.update_now",
     "baude.py:SessionSidebar.show_host_state",
-    "widgets.py:UpdateBar",
-    "widgets.py:HostState",
-    "widgets.py:HostApart",
-    "widgets.py:ShutBar"
+    "chatparts.py:UpdateBar",
+    "chatparts.py:HostState",
+    "meshui.py:HostApart",
+    "chatparts.py:ShutBar"
   ],
   "copy": [
     "host_status",

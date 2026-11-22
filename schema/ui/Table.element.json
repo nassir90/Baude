@@ -5,9 +5,9 @@
     "record"
   ],
   "code": [
-    "widgets.py:markdown_table",
-    "widgets.py:TableScroll",
-    "widgets.py:relink_table"
+    "markdownview.py:markdown_table",
+    "markdownview.py:TableScroll",
+    "markdownview.py:relink_table"
   ],
   "parts": [
     {

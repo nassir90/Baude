@@ -168,7 +168,7 @@ class Tail:
 class FollowEnd:
     """A scrolled window kept at its end as what's in it grows, once it's been read all the way down (being near isn't
     enough), and left alone once it's scrolled up. stick says which. Till it's scrolled by hand after being put back
-    where it was read to (widgets.hold_place: scroller.held), it's left there."""
+    where it was read to (panels.hold_place: scroller.held), it's left there."""
 
     GLIDE_US = 200_000  # a big arrival (a tool result while tailing) eases in over this long
 

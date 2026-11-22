@@ -202,7 +202,7 @@ private val CLOUD_PROVIDERS = listOf("Cloudflare", "Vercel", "Netlify", "Supabas
     "Mailgun", "Sentry", "Datadog", "New Relic", "GitHub Pages", "Oracle Cloud", "IBM Cloud", "Alibaba Cloud",
     "Backblaze").map { it.lowercase() }.toSet()
 
-/** widgets.ref_cloud_provider: a cloud provider's name, or one and a word after it, written with a capital. */
+/** refkinds.ref_cloud_provider: a cloud provider's name, or one and a word after it, written with a capital. */
 fun refCloudProvider(surface: String): Boolean {
     val name = surface.trim()
     if (name == name.lowercase()) return false
@@ -216,14 +216,14 @@ fun refCloudProvider(surface: String): Boolean {
     return false
 }
 
-/** widgets.ref_hashlike: a commit hash as people write one, with letters and digits both. */
+/** refkinds.ref_hashlike: a commit hash as people write one, with letters and digits both. */
 fun refHashlike(t: String) = Regex("[0-9a-f]{7,12}|[0-9a-f]{40}|[0-9a-f]{64}").matches(t) &&
     Regex("[a-f]").containsMatchIn(t) && Regex("\\d").containsMatchIn(t)
 
 private const val ID = "[A-Za-z_]\\w*"
 private val SYMBOLISH = Regex("($ID(?:\\[\\d*\\*?\\])?(?:\\.$ID(?:\\[\\d*\\*?\\])?)*)(\\([^()]*\\))?")
 
-/** widgets.ref_symbolish: whether a name looks like code. */
+/** refkinds.ref_symbolish: whether a name looks like code. */
 private fun refSymbolish(t: String): Boolean {
     val m = SYMBOLISH.matchEntire(t) ?: return false
     val name = m.groupValues[1].replace(Regex("\\[[^\\]]*]"), "")
@@ -233,12 +233,12 @@ private fun refSymbolish(t: String): Boolean {
 
 private const val METHODS = "GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS"
 
-/** widgets.ref_span's excerpt: code as it's written (a name with a value, a call, a subscript). */
+/** refkinds.ref_span's excerpt: code as it's written (a name with a value, a call, a subscript). */
 private fun refExcerpt(t: String): Boolean = !refSymbolish(t) && Regex("[A-Za-z_]\\w").containsMatchIn(t) &&
     Regex("[=\\[\"'(]|->").containsMatchIn(t) && "://" !in t && !Regex("(?:-|\\$|(?:$METHODS)\\s).*").matches(t) &&
     t.replace(Regex("\\.\\.\\.|…|\\W"), "").length >= 3
 
-/** widgets.ref_kind's command-line case: a flag, or a command with its flags. */
+/** refkinds.ref_kind's command-line case: a flag, or a command with its flags. */
 private fun refCli(t: String): Boolean {
     if (Regex("--[A-Za-z][\\w-]*").matches(t)) return true
     if (' ' !in t) return false
@@ -247,7 +247,7 @@ private fun refCli(t: String): Boolean {
         words.drop(1).any { it.startsWith("-") })
 }
 
-/** widgets.ref_quiet: a span linked only once it's found: code, a command or flag, or a bare kebab-case name. */
+/** refkinds.ref_quiet: a span linked only once it's found: code, a command or flag, or a bare kebab-case name. */
 fun refQuiet(surface: String): Boolean = refExcerpt(surface) || refCli(surface) ||
     Regex("[a-z0-9]+(?:-[a-z0-9]+)+").matches(surface)
 
@@ -328,7 +328,7 @@ fun refDate(iso: String?): String {
 private const val REF_EXT = "py|pyi|ts|tsx|js|jsx|mjs|cjs|rs|go|java|kt|rb|sh|bash|ya?ml|toml|json|md|css|scss|html|sql|tf|tsl|tsp|mmd|svg|ini|cfg|conf"
 private const val WORD = "\\p{L}\\p{N}_"
 
-/** widgets._REF_PLAIN: names worth looking up in plain text, only shapes that are rarely ordinary words. */
+/** refkinds._REF_PLAIN: names worth looking up in plain text, only shapes that are rarely ordinary words. */
 val REF_PLAIN = Regex("(?<![$WORD/.@`$-])(?:" +
     "(?:[A-Za-z_]\\w*(?:\\.[A-Za-z_]\\w*)*\\(\\))" +
     "|(?:(?:$METHODS)\\s+(?:…|\\.\\.\\.)?/[\\w./{}<>:~*-]*[\\w}>*-])" +
@@ -340,7 +340,7 @@ val REF_PLAIN = Regex("(?<![$WORD/.@`$-])(?:" +
 
 private val BARE_NUMBER = Regex("#\\d+")
 
-/** widgets.ref_markup: inner as a Signal link, drawn by how far its lookup got: its logo, then the link. */
+/** markdownview.ref_markup: inner as a Signal link, drawn by how far its lookup got: its logo, then the link. */
 private fun refMarkup(r: Msg.SignalRef, inner: String): String {
     val surface = r.surface.orEmpty()
     val icon = if (r.status == RESOLVED || r.status == AMBIGUOUS || r.status == STALE)
@@ -349,7 +349,7 @@ private fun refMarkup(r: Msg.SignalRef, inner: String): String {
         " status=\"${r.status}\" icon=\"$icon\" n=\"${r.places.size}\">$inner</a>"
 }
 
-/** widgets.ref_link: inner linked to what the chat's Signal knows about text, or null. */
+/** markdownview.ref_link: inner linked to what the chat's Signal knows about text, or null. */
 fun refLink(text: String, inner: String, backticked: Boolean, place: ChatPlace?): String? {
     place ?: return null
     val refs = SignalNames.refsFor(place) ?: return null

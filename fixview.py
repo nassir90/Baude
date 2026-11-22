@@ -20,10 +20,10 @@ import feedback  # noqa: E402
 import fixes  # noqa: E402
 import pointers  # noqa: E402
 from baudelib import tokens, wording  # noqa: E402
-from widgets import (  # noqa: E402
-    MarkdownView, RefreshButton, discard, make_image_interactive, markdown_scroller, paned_grip, retime, say_time,
-    time_tip,
-)
+from widgets import discard, paned_grip, retime, say_time, time_tip  # noqa: E402
+from imageviews import RefreshButton, make_image_interactive  # noqa: E402
+from markdownview import MarkdownView  # noqa: E402
+from panels import markdown_scroller  # noqa: E402
 
 POLL_S = 60  # (read again this often while it's shown)
 POLL_WORKING_S = 15  # (and this often while a round's running)

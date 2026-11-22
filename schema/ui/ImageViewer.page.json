@@ -10,12 +10,12 @@
     "A picture on the side panel's Files page"
   ],
   "code": [
-    "widgets.py:Lightbox",
-    "widgets.py:ZoomPicture",
-    "widgets.py:ImageActions",
-    "widgets.py:FileImageActions",
-    "widgets.py:make_image_interactive",
-    "widgets.py:image_description"
+    "lightbox.py:Lightbox",
+    "lightbox.py:ZoomPicture",
+    "imageviews.py:ImageActions",
+    "imageviews.py:FileImageActions",
+    "imageviews.py:make_image_interactive",
+    "lightbox.py:image_description"
   ],
   "copy": [
     "images",

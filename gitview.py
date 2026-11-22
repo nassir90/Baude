@@ -36,10 +36,12 @@ import lookup  # noqa: E402,F401
 import lookupgit  # noqa: E402
 from lookupgit import _git  # noqa: E402,F401  (⌘K's engine: what a folder has)
 from widgets import (  # noqa: E402,F401
-    LinkLabel, PR_COLORS, RefreshButton, WorkerPool, chip_markup, discard, draw_ref_icon, full_time, keep_times,
-    on_label_link, pr_pill_markup, pr_title, pretty_path, ref_epoch, ref_pr_info, say_time, sel_label, shaded_picture,
-    themed_icon, toast,
+    PR_COLORS, WorkerPool, discard, draw_ref_icon, full_time, keep_times, pretty_path, say_time, themed_icon, toast,
 )
+from refkinds import LinkLabel, chip_markup, pr_pill_markup, pr_title, ref_pr_info  # noqa: E402,F401
+from baudelib.transcripts import ref_epoch  # noqa: E402,F401
+from imageviews import RefreshButton, shaded_picture  # noqa: E402,F401
+from markdownview import on_label_link, sel_label  # noqa: E402,F401
 from widgets import empty_label  # noqa: E402
 import pointers  # noqa: E402
 from baudelib import tokens  # noqa: E402  (a diff's green and red: schema/tokens)
@@ -380,7 +382,7 @@ AVATARS = GitAvatars()
 
 
 def git_ref_chip(ref):
-    """A ref as git's log names it (HEAD -> main, origin/main, tag: v1) as a log row's chip (widgets.chip_markup): a
+    """A ref as git's log names it (HEAD -> main, origin/main, tag: v1) as a log row's chip (refkinds.chip_markup): a
     long name cut short in the middle (GIT_CHIP_CHARS), its start and its end what tell branches apart."""
     name = ref.removeprefix("tag: ").replace("HEAD -> ", "")
     kind = "tag" if ref.startswith("tag: ") else "head" if ref.startswith("HEAD") else \
@@ -430,7 +432,7 @@ def git_pull_pill(p):
 
 
 def git_pull_markup(p, repo):
-    """A pull request's pill in a log row's line (widgets.pr_pill_markup), a link to its page, a chip's size."""
+    """A pull request's pill in a log row's line (refkinds.pr_pill_markup), a link to its page, a chip's size."""
     pill = pr_pill_markup(str(p["number"]), p["url"], pr_title(p, repo, p["number"]), p.get("state"))
     return f'<span allow_breaks="false" size="{round(LinkLabel.CHIP_SCALE * 100)}%">{pill}</span>'
 

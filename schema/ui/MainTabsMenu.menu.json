@@ -2,7 +2,7 @@
   "description": "The right-click menu on a tab of the main area's tab bar. Record only (Baude's tabs have no menu).",
   "apps": ["record"],
   "opens": ["Right-click a tab in Record's main tab bar"],
-  "code": ["widgets.py:MainTabs.__init__"],
+  "code": ["panels.py:MainTabs.__init__"],
   "copy": ["tabs", "common"],
   "parts": [
     {

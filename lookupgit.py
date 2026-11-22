@@ -77,7 +77,7 @@ def github_icon(issue, state):
 #
 # A look costs nothing while nothing's changed: asked again with the ETag of its last answer, GitHub answers 304, which
 # doesn't count against the rate limit. So a repository in use is looked at about once a minute, while a window's shown
-# (widgets.watch_github), with one request: the latest of everything, sorted by when it changed, which is what any
+# (meshui.watch_github), with one request: the latest of everything, sorted by when it changed, which is what any
 # change changes. Only when that's changed is the list of open ones asked for too: two requests a change. An answer with
 # no ETag (no free lunch on offer) is asked again every 5 minutes.
 #

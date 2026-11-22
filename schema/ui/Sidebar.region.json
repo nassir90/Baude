@@ -21,12 +21,12 @@
     "baude.py:date_group",
     "baude.py:chat_group",
     "baude.py:remote_info",
-    "widgets.py:group_header",
-    "widgets.py:TreeList",
-    "widgets.py:FadeLabel",
-    "widgets.py:HostState",
-    "widgets.py:UpdateBar",
-    "widgets.py:sidebar_action"
+    "markdownview.py:group_header",
+    "pickers.py:TreeList",
+    "pickers.py:FadeLabel",
+    "chatparts.py:HostState",
+    "chatparts.py:UpdateBar",
+    "pickers.py:sidebar_action"
   ],
   "copy": [
     "sidebar",

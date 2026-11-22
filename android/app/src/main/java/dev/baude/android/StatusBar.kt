@@ -90,7 +90,7 @@ fun WorkingDots(working: Boolean) {
         modifier = Modifier.tip(Wording.Common.working))
 }
 
-/** The chat's context as its meter says it (widgets.ContextUsage): the label, the bar's count and fill (none: no
+/** The chat's context as its meter says it (chatparts.ContextUsage): the label, the bar's count and fill (none: no
  * bar), what its tooltip says. */
 class ContextShown(val label: String, val text: String?, val value: Float, val tip: String, val over: Boolean)
 
@@ -164,7 +164,7 @@ private fun runsFree(model: String?): Boolean {
     return pid.startsWith("openai/mesh-") && Regex("mesh-[a-z0-9]{1,8}-(ollama|mlx|apple)").matches(pid.removePrefix("openai/"))
 }
 
-/** The context's word and its bar (widgets.ContextUsage): the count drawn in the bar, in the window's colour over the
+/** The context's word and its bar (chatparts.ContextUsage): the count drawn in the bar, in the window's colour over the
  * fill and in the text's after it; the fill the accent, amber past 60 %, red past 85 %. */
 @Composable
 fun ContextMeter(shown: ContextShown, full: Boolean, text: Color) {

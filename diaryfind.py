@@ -11,6 +11,8 @@ from gi.repository import Gdk, GLib, Graphene, Gtk, Pango  # noqa: E402
 
 import pointers  # noqa: E402  (the pointer's shape: beside this file)
 import widgets  # noqa: E402  (what Record draws as Baude does: the links' logos; beside this file)
+import markdownview  # noqa: E402
+import composerview  # noqa: E402
 from baudelib import wording  # noqa: E402  (its words, Baude's: schema/copy)
 from codeview import FindInText  # noqa: E402
 from recordstore import (  # noqa: E402
@@ -567,7 +569,7 @@ class DiaryFind:
         text = self.text()
         before = text[:offset]
         at = before.count("\n")
-        return any(first <= at <= last for first, last, _closed in widgets.fence_spans(text.split("\n"), typing=(at,))) or \
+        return any(first <= at <= last for first, last, _closed in markdownview.fence_spans(text.split("\n"), typing=(at,))) or \
             before.rpartition("\n")[2].count("`") % 2 == 1
 
     def _mark_token(self):
@@ -713,10 +715,10 @@ class DiaryFind:
             self._whole_links()  # (what's selected, about to go: no link's marks left behind)
         if Gdk.keyval_to_unicode(keyval) and not state & (Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.META_MASK):
             self._into_span()  # (a whole formatted span selected: what's typed goes in it, the formatting kept)
-        if widgets.leave_wrapped(self.buf, keyval, state):
+        if composerview.leave_wrapped(self.buf, keyval, state):
             return True  # (just formatted, and Left or Right: outside its marks)
         if not state & (Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.META_MASK) and \
-                widgets.wrap_selection(self.buf, chr(Gdk.keyval_to_unicode(keyval) or 0)):
+                composerview.wrap_selection(self.buf, chr(Gdk.keyval_to_unicode(keyval) or 0)):
             return True  # (a selection, and * ` or /: bold, code, italic)
         if keyval in (Gdk.KEY_space, Gdk.KEY_Return, Gdk.KEY_KP_Enter) and \
                 not state & (Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.META_MASK):
@@ -839,7 +841,7 @@ class DiaryFind:
             start -= 1
         if not LIST_ITEM_RE.match(lines[start]):
             return False
-        self._swap_lines(lines, widgets.swap_list_item(lines, at, by))
+        self._swap_lines(lines, composerview.swap_list_item(lines, at, by))
         return True
 
     def _swap_heading(self, lines, at, by):
@@ -907,8 +909,8 @@ class DiaryFind:
 
     def _em_dash(self):
         """-- just typed on its own, whitespace before it, then a space or Enter: it's an em dash, as the text's -- is
-        drawn in a reply (widgets.EM_DASH). Not in code: a `span` (an odd number of backticks before it on the line,
-        so one still being typed too) or a ``` block. True if it was."""
+        drawn in a reply (markdownview.EM_DASH). Not in code: a `span` (an odd number of backticks before it on the
+        line, so one still being typed too) or a ``` block. True if it was."""
         if self.notebook is None or self.buf.get_has_selection():
             return False
         ins = self.buf.get_iter_at_mark(self.buf.get_insert())

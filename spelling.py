@@ -30,7 +30,7 @@ gi.require_version("Gdk", "4.0")
 gi.require_version("Gsk", "4.0")
 from gi.repository import Gdk, Gio, GLib, Gsk, Gtk  # noqa: E402
 
-import widgets  # noqa: E402
+import markdownview  # noqa: E402
 from baudelib import wording  # noqa: E402
 
 SPELLING, GRAMMAR = "spelling", "grammar"
@@ -62,7 +62,7 @@ def masked_lines(text):
     controls (their anchor and word joiner, in the buffer's slice) are spaces, so offsets stay the buffer's."""
     lines = text.replace(_ANCHOR, " ").replace(_JOINER, " ").split("\n")
     bare = text.replace(_ANCHOR, "").replace(_JOINER, "").split("\n")
-    code = {n for first, last, _closed in widgets.fence_spans(bare) for n in range(first, last + 1)}
+    code = {n for first, last, _closed in markdownview.fence_spans(bare) for n in range(first, last + 1)}
     return ["" if n in code else _SKIP.sub(lambda m: " " * len(m.group()), line) for n, line in enumerate(lines)]
 
 

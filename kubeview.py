@@ -38,10 +38,11 @@ from lookupkube import (  # noqa: E402,F401  (⌘K's engine: what a folder has)
     kubeconfig_paths,
 )
 from widgets import (  # noqa: E402,F401
-    Fade, RefreshButton, WorkerPool, ellipsize_dropdown, ensure_icons, find_label, full_time, inside, load_settings,
-    paned_grip, pretty_path, save_settings, themed_icon, time_tip, toast, view_bar,
-    _scales,
+    WorkerPool, ensure_icons, find_label, full_time, inside, load_settings, paned_grip, pretty_path, save_settings,
+    themed_icon, time_tip, toast, view_bar, _scales,
 )
+from imageviews import Fade, RefreshButton  # noqa: E402,F401
+from pickers import ellipsize_dropdown  # noqa: E402,F401
 from codeview import (  # noqa: E402,F401
     CodeView,
 )
@@ -299,7 +300,7 @@ class KubeView(Gtk.Box):
 
     def __init__(self, win):
         super().__init__(orientation=Gtk.Orientation.VERTICAL, visible=False, focusable=True)
-        self.add_css_class("baude-frame")  # (the bar and the sidebar: widgets.CSS; the rest the inside, set into it)
+        self.add_css_class("baude-frame")  # (the bar and the sidebar: theming.CSS; the rest the inside, set into it)
         ensure_icons()
         self.win, self.contexts, self.context = win, [], None
         self.ns_shown, self.ns_by_context, self.ns_checks = [], {}, {}  # (none shown: all of them)

@@ -18,6 +18,7 @@ gi.require_version("Adw", "1")
 from gi.repository import Adw, Gdk, GLib, Gtk  # noqa: E402
 
 import widgets  # noqa: E402
+import theming  # noqa: E402
 # (git and the look at it, with no GTK: the host process's updater uses them too)
 from baudelib import selfupdate, wording  # noqa: E402
 from baudelib.selfupdate import (BROKEN, CHECK_S, GIT_ENV, HERE, git, importable, look, new_commits,  # noqa: E402,F401
@@ -153,7 +154,7 @@ def settings_row():
                         active=enabled() and up is not None, sensitive=up is not None)
     row.connect("notify::active", lambda r, _p: r.get_sensitive() and not r.syncing
                 and widgets.save_settings(auto_update=r.get_active()))
-    return widgets.follow_setting(row, "auto_update", lambda v: row.set_active(v is True and up is not None))
+    return theming.follow_setting(row, "auto_update", lambda v: row.set_active(v is True and up is not None))
 
 
 def made_when(stamp):

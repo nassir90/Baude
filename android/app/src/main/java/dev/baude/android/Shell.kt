@@ -271,7 +271,7 @@ fun SideBySide(modifier: Modifier, close: () -> Unit, chat: @Composable () -> Un
 
 private const val PANEL_LEAST = 200f  // (dp: the pages beside the chat at their narrowest)
 private const val CHAT_LEAST = 160f   // (the chat at its narrowest beside them)
-private const val CLOSE_WITHIN = 24f  // (widgets.PaneSlide.CLOSE_WITHIN)
+private const val CLOSE_WITHIN = 24f  // (panels.PaneSlide.CLOSE_WITHIN)
 private const val GRIP = 16f          // (the rule's width to a finger)
 
 /** Baude's side panel's switcher as a bottom bar (Adw.ViewSwitcher, narrow: each page's icon over its title, the one

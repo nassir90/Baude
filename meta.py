@@ -47,6 +47,9 @@ import lookup  # noqa: E402
 import lookupgit  # noqa: E402
 import update  # noqa: E402
 import widgets  # noqa: E402
+import chatparts  # noqa: E402
+import pickers  # noqa: E402
+import theming  # noqa: E402
 from baudelib import codex, wire, wording  # noqa: E402
 from baudelib import models as modelslib  # noqa: E402
 from baudelib import providers as providerslib  # noqa: E402
@@ -539,7 +542,7 @@ def report_text(head, messages, limit=REPORT_ITEM, most=None):
                 continue
             if it["kind"] == "compact":
                 done = it.get("state") == "done"
-                out.append(f"[{widgets.compact_text(it.get('meta')) if done else 'compaction ' + it.get('state', '?')}]")
+                out.append(f"[{chatparts.compact_text(it.get('meta')) if done else 'compaction ' + it.get('state', '?')}]")
                 continue
             inp = json.dumps(it.get("input") or {}, ensure_ascii=False, indent=1)
             out.append(wording.say("report.meta_tool", name=it.get("name") or "?", state=it.get("state") or "?")
@@ -566,7 +569,7 @@ def transcript_report(head, path, limit=REPORT_ITEM, most=None):
                     continue
                 if e.get("type") == "system" and e.get("subtype") == "compact_boundary" and not e.get("isSidechain"):
                     when = (e.get("timestamp") or "").replace("T", " ")[:19]
-                    parts.append(f"## {widgets.compact_text(e.get('compactMetadata'))}" + (f" · {when}" if when else ""))
+                    parts.append(f"## {chatparts.compact_text(e.get('compactMetadata'))}" + (f" · {when}" if when else ""))
                     continue
                 if e.get("type") not in ("user", "assistant") or e.get("isSidechain") or e.get("isMeta"):
                     continue
@@ -906,7 +909,7 @@ META_SETTINGS = {"meta_model", "meta_effort", "meta_code_mode", "meta_commands"}
 
 
 def settings_changed(keys, _before):
-    """Meta's model, effort, Code mode or Run commands changed in another app here (widgets.watch_settings): every row up
+    """Meta's model, effort, Code mode or Run commands changed in another app here (theming.watch_settings): every row up
     shows it, and each conversation's next message is the new model's."""
     if keys & META_SETTINGS:
         sync_rows()
@@ -926,10 +929,10 @@ def model_picked(chat, value):
 def model_row(chat):
     """Settings → Meta → Intelligence: the model Meta thinks with, from its next message: Claude's, then every
     other in the mesh (listed_models; where it runs: provider_row), in a search box's list with each family's icon
-    (widgets.ModelPicker). Its sync() lists them as they are now (sync_rows)."""
+    (pickers.ModelPicker). Its sync() lists them as they are now (sync_rows)."""
     row = Adw.ActionRow(title=wording.say("meta_settings.intelligence"),
                         subtitle=wording.say("meta_settings.intelligence_detail"))
-    picker = widgets.ModelPicker([], wording.say("meta_settings.intelligence_detail"), lambda v: model_picked(chat, v))
+    picker = pickers.ModelPicker([], wording.say("meta_settings.intelligence_detail"), lambda v: model_picked(chat, v))
     picker.set_valign(Gtk.Align.CENTER)
     picker.add_css_class("flat")
     row.add_suffix(picker)
@@ -957,7 +960,7 @@ def provider_row(chat):
     row = Adw.ActionRow(title=wording.say("meta_settings.provider"),
                         subtitle=wording.say("meta_settings.provider_detail"))
     same = {}  # (each provider that has Meta's model: its copy there)
-    picker = widgets.HostPicker(wording.say("meta_settings.provider_picker"), lambda pid: model_picked(chat, same[pid])
+    picker = pickers.HostPicker(wording.say("meta_settings.provider_picker"), lambda pid: model_picked(chat, same[pid])
                                 if pid in same and same[pid] != model() else sync_rows())
     picker.set_valign(Gtk.Align.CENTER)
     picker.add_css_class("flat")
@@ -1025,7 +1028,7 @@ def code_mode_row(chat):
                         active=code_mode())
     row.connect("notify::active", lambda r, _p: r.syncing or (widgets.save_settings(meta_code_mode=r.get_active()),
                                                               chat is not None and chat.model_changed()))
-    return widgets.follow_setting(row, "meta_code_mode", lambda v: row.set_active(bool(v)))
+    return theming.follow_setting(row, "meta_code_mode", lambda v: row.set_active(bool(v)))
 
 
 def commands_row(chat):
@@ -1046,7 +1049,7 @@ def commands_row(chat):
                           wording.say("meta_settings.run_commands_detail")) if takes else
                          wording.say("meta_settings.only_reads", model=model_name()))
     row.sync = sync
-    widgets.follow_setting(row, "meta_commands", lambda _v: sync())
+    theming.follow_setting(row, "meta_commands", lambda _v: sync())
     sync()
     COMMAND_ROWS.add(row)
     return row
@@ -1071,7 +1074,7 @@ def shared_settings(win, chat, app, zoom_default):
 
     def accent(v):
         widgets.save_settings(accent=None if v == "system" else v)
-        widgets.apply_accent(display)
+        theming.apply_accent(display)
 
     def wide(v):
         if (action := win.lookup_action("fullwidth")) is not None:
@@ -1087,31 +1090,31 @@ def shared_settings(win, chat, app, zoom_default):
         return out + [f for f in (fontsetup.code_font(), fontsetup.running_font()) if f not in out]
     out = [
         Setting("accent", wording.say("shared_settings.accent_colour"), lambda: widgets.load_settings().get("accent") or "system",
-                accent, widgets.settings_accent, ["system", *widgets.ACCENTS]),
+                accent, theming.settings_accent, ["system", *widgets.ACCENTS]),
         Setting("code_font", wording.say("shared_settings.code_font"), fontsetup.code_font,
                 lambda v: widgets.save_settings(code_font=v),
-                lambda: widgets.settings_code_font(win, app), fonts(),
+                lambda: theming.settings_code_font(win, app), fonts(),
                 note=f"takes from {app}'s next start: its row has Restart"),
         Setting("text_scale", wording.say("meta_settings.text_scale"), lambda: widgets.scale_setting("text_scale"),
                 lambda v: win.set_scale("text_scale", v),
-                lambda: widgets.settings_size(wording.say("meta_settings.text_scale"), None,
+                lambda: theming.settings_size(wording.say("meta_settings.text_scale"), None,
                                               widgets.scale_setting("text_scale"),
                                               lambda s: win.set_scale("text_scale", s), key="text_scale"),
                 (widgets.SCALE_MIN, widgets.SCALE_MAX)),
         Setting("icon_scale", wording.say("meta_settings.icon_scale"), lambda: widgets.scale_setting("icon_scale"),
                 lambda v: win.set_scale("icon_scale", v),
-                lambda: widgets.settings_size(wording.say("meta_settings.icon_scale"), None,
+                lambda: theming.settings_size(wording.say("meta_settings.icon_scale"), None,
                                               widgets.scale_setting("icon_scale"),
                                               lambda s: win.set_scale("icon_scale", s), key="icon_scale"),
                 (widgets.SCALE_MIN, widgets.SCALE_MAX)),
         Setting("global_scale", wording.say("meta_settings.global_scale"), zoom_default, win.set_zoom_default,
-                lambda: widgets.settings_size(wording.say("meta_settings.global_scale"), None, zoom_default(),
+                lambda: theming.settings_size(wording.say("meta_settings.global_scale"), None, zoom_default(),
                                               win.set_zoom_default,
                                               widgets.ZOOM_MIN, widgets.ZOOM_MAX, key="zoom_default"),
                 (widgets.ZOOM_MIN, widgets.ZOOM_MAX), note="what ⌘0 / Ctrl+0 goes back to"),
         Setting("full_width", wording.say("meta_settings.full_width"),
                 lambda: bool((a := win.lookup_action("fullwidth")) and a.get_state().get_boolean()), wide,
-                lambda: widgets.settings_switch(wording.say("meta_settings.full_width"), None, "win.fullwidth"), bool),
+                lambda: theming.settings_switch(wording.say("meta_settings.full_width"), None, "win.fullwidth"), bool),
         Setting("auto_update", wording.say("updates.auto_restart"), update.enabled, auto, update.settings_row, bool),
         Setting("meta_model", wording.say("meta_settings.intelligence"), model_value, lambda v: model_picked(chat, v),
                 lambda: model_row(chat),

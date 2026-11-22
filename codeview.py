@@ -35,12 +35,17 @@ from gi.repository import Adw, Gdk, GdkPixbuf, Gio, GLib, GObject, Graphene, Gsk
 from baudelib import wording  # noqa: E402
 import lookup  # noqa: E402,F401
 import widgets  # noqa: E402
+import chatfind  # noqa: E402
+import pickers  # noqa: E402
 from lookupgit import _git, git_exe  # noqa: E402,F401  (⌘K's engine: what a folder has)
 from widgets import (  # noqa: E402,F401
-    IMAGE_POOL, FindBar, LineGutter, WorkerPool, ZOOM_MAX, ZOOM_MIN, ZOOM_STEP,
-    code_spans, code_style, discard, load_settings, open_code,
-    open_in_editor, pretty_path, save_settings, themed_icon, toast,
+    IMAGE_POOL, WorkerPool, ZOOM_MAX, ZOOM_MIN, ZOOM_STEP, discard, load_settings, pretty_path, save_settings,
+    themed_icon, toast,
 )
+from codespans import code_spans, code_style  # noqa: E402,F401
+from markdownview import open_code, open_in_editor  # noqa: E402,F401
+from chatparts import FindBar  # noqa: E402,F401
+from pickers import LineGutter  # noqa: E402,F401
 from widgets import empty_label  # noqa: E402
 import pointers  # noqa: E402
 import thumbs  # noqa: E402
@@ -148,7 +153,7 @@ class FindInText:
 
     def find_tints(self):
         """The (red, green, blue, alpha) of a match and of the current one, for the light or dark theme."""
-        return widgets.find_tints()
+        return chatfind.find_tints()
 
     def find_colours(self):
         """The matches' colours, as the theme changes."""
@@ -480,7 +485,7 @@ class CodePage(Gtk.Box):
         super().__init__(orientation=Gtk.Orientation.VERTICAL)
         self.win, self.path, self.text, self.line = win, None, "", None
         head = Gtk.Box(spacing=6)
-        head.add_css_class("code-bar")  # (on the frame's colour, as the window's bars are: widgets.CSS)
+        head.add_css_class("code-bar")  # (on the frame's colour, as the window's bars are: theming.CSS)
         self.where = Gtk.Label(xalign=0, ellipsize=Pango.EllipsizeMode.START, hexpand=True)  # (the folder it's in)
         self.where.add_css_class("dim-label")
         self.where.add_css_class("caption")
@@ -777,7 +782,7 @@ class FilesPage(Gtk.Box):
         factory = Gtk.SignalListItemFactory()
         factory.connect("setup", self._setup)
         factory.connect("bind", self._bind)
-        self.view = widgets.TreeListView(line_x=self.THUMB // 2, factory=factory, single_click_activate=True)
+        self.view = pickers.TreeListView(line_x=self.THUMB // 2, factory=factory, single_click_activate=True)
         self.view.add_css_class("navigation-sidebar")
         self.view.add_css_class("file-tree")
         self.view.connect("activate", self._activate)

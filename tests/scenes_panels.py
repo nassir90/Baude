@@ -1036,7 +1036,7 @@ def _(app):
 def _(app):
     win, page = fixes_tab(app)
     page.refresh_btn.set_loading(True)
-    page.refresh_btn.turning.at = lambda _now: (0.125, T.widgets.Turning.SPEED)  # (a picture holds still)
+    page.refresh_btn.turning.at = lambda _now: (0.125, T.imageviews.Turning.SPEED)  # (a picture holds still)
     page.refresh_btn.queue_draw()
     return win
 

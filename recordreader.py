@@ -16,6 +16,13 @@ from gi.repository import Adw, Gdk, Gio, GLib, Graphene, Gsk, Gtk, Pango  # noqa
 
 import pointers  # noqa: E402  (the pointer's shape: beside this file)
 import widgets  # noqa: E402  (what Record draws as Baude does: the links' logos; beside this file)
+import refkinds  # noqa: E402
+import markdownview  # noqa: E402
+import chatparts  # noqa: E402
+import composerview  # noqa: E402
+import panels  # noqa: E402
+import chatfind  # noqa: E402
+import pickers  # noqa: E402
 from baudelib import wording  # noqa: E402  (its words, Baude's: schema/copy)
 import livefeed  # noqa: E402  (a chat followed as it's written, as Baude's: beside this file)
 import metalook  # noqa: E402
@@ -36,7 +43,7 @@ class FixedWidth(Gtk.Widget):
 
     GRIP = 6  # px of its right edge that drag it
     LEAST, MOST = 160, 600  # px: past the window's buttons and the toggle at the least, the most for a very wide window
-    CLOSE_WITHIN = widgets.PaneSlide.CLOSE_WITHIN  # (dragged on till it'd be this wide: slide, holds it shut)
+    CLOSE_WITHIN = panels.PaneSlide.CLOSE_WITHIN  # (dragged on till it'd be this wide: slide, holds it shut)
 
     def __init__(self, child, width):
         super().__init__(hexpand=False)  # (set: never the spare width, whatever's inside would take)
@@ -150,7 +157,7 @@ class FixedWidth(Gtk.Widget):
         Gtk.Widget.do_dispose(self)
 
 
-class ColumnSlide(widgets.SideSlide):
+class ColumnSlide(panels.SideSlide):
     """The notebooks' column opened and closed smoothly: how much of it's shown (FixedWidth.showing), what's beside it
     following its edge, and nothing left to change when it's done. (Its toggle's in the window's bar: that doesn't move.)"""
 
@@ -194,14 +201,14 @@ class PagesList(Gtk.Box):
         super().__init__(orientation=Gtk.Orientation.VERTICAL)
         self.win, self.notebook, self.listed = win, None, None
         self.typing = {}  # (a page's title being typed in, not yet kept: {page: (its notebook, the name shown)}, typed)
-        self.head = widgets.group_header("Pages", win.store.pages_folded, lambda: self.set_folded(not self.folded),
+        self.head = markdownview.group_header("Pages", win.store.pages_folded, lambda: self.set_folded(not self.folded),
                                          plus=("list-add-symbolic", "New page (+Name in a page makes one under it)",
                                                self.new_page))
         self.head.set_margin_start(12)
         self.head.set_margin_end(8)
         self.head.set_margin_top(6)
         self.append(self.head)
-        self.index = widgets.TreeList(selection_mode=Gtk.SelectionMode.SINGLE)
+        self.index = pickers.TreeList(selection_mode=Gtk.SelectionMode.SINGLE)
         self.index.add_css_class("navigation-sidebar")
         self.index.connect("row-activated", lambda _l, row: not row.gone and self.win.open_note(row.page))
         self.revealer = Gtk.Revealer(child=Gtk.ScrolledWindow(vexpand=True, hscrollbar_policy=Gtk.PolicyType.NEVER,
@@ -286,8 +293,8 @@ class PagesList(Gtk.Box):
         rows = {}
         for name in order:
             depth = name.count(":")
-            box = Gtk.Box(spacing=6, margin_start=6 + depth * widgets.TreeList.INDENT, margin_end=4)
-            lb = widgets.FadeLabel(label=self.shown_name(name), xalign=0, hexpand=True)  # (too long: it fades where it's cut)
+            box = Gtk.Box(spacing=6, margin_start=6 + depth * pickers.TreeList.INDENT, margin_end=4)
+            lb = pickers.FadeLabel(label=self.shown_name(name), xalign=0, hexpand=True)  # (too long: it fades where it's cut)
             if name in grey:
                 lb.add_css_class("dim-label")
                 lb.add_css_class("page-placeholder")
@@ -402,8 +409,8 @@ def on_name_hover(widget, win):
             w = w.get_parent()
         # (by where the pointer is: get_current_uri is the caret's link, the first in a selectable label not clicked in)
         ok, at = widget.compute_point(w, Graphene.Point().init(x, y)) if isinstance(w, Gtk.Label) else (False, None)
-        uri = (widgets.hover_uri(w, at.x, at.y) if ok else None) or ""
-        name = next((urllib.parse.unquote(uri[len(s):].partition("#")[0]) for s in ("ref:", widgets.REF_SCHEME)
+        uri = (markdownview.hover_uri(w, at.x, at.y) if ok else None) or ""
+        name = next((urllib.parse.unquote(uri[len(s):].partition("#")[0]) for s in ("ref:", refkinds.REF_SCHEME)
                      if uri.startswith(s)), None)
         if name != getattr(widget, "hovered", None):
             widget.hovered = name
@@ -453,7 +460,7 @@ class Picks(Gtk.Widget):
         fill.alpha = 0.3
         for q in cited:  # (a citation followed to here: Reader.show_passage; a message far off, hidden for now: not yet)
             if q["label"].get_mapped():
-                widgets.shade_passage(snapshot, fill, q["label"], widgets.passage_rects(q["label"], q["start"], q["end"], self),
+                chatfind.shade_passage(snapshot, fill, q["label"], chatfind.passage_rects(q["label"], q["start"], q["end"], self),
                                       self, self.reader.box)
         for n, p in enumerate(picks, 1):
             first = None
@@ -461,14 +468,14 @@ class Picks(Gtk.Widget):
                 label = q["label"]
                 if not label.get_mapped():  # (a message far off, hidden for now: ZoomPlace)
                     continue
-                rects = widgets.passage_rects(label, q["start"], q["end"], self)
+                rects = chatfind.passage_rects(label, q["start"], q["end"], self)
                 if not rects:
                     continue
                 first = first or (label, rects[0])
                 ok, a, b = label.get_selection_bounds()
                 if not (ok and (a, b) == (q["start"], q["end"]) or p.get("parts") and self.reader.selection.shown):
                     # (a label's own selection, or ChatSelection's, is drawn already)
-                    widgets.shade_passage(snapshot, fill, label, rects, self, self.reader.box)
+                    chatfind.shade_passage(snapshot, fill, label, rects, self, self.reader.box)
             if first is not None and len(picks) > 1:
                 self._number(snapshot, first[0], n, first[1], accent)
 
@@ -543,12 +550,12 @@ class Reader(Gtk.Box):
         keys.connect("key-pressed", self._copy_picks)
         self.over.add_controller(keys)
         self.clamp = Adw.Clamp(maximum_size=self.WIDTH, child=self.over)  # (Window.apply_full_width)
-        self.scroll = widgets.markdown_scroller(self.clamp)  # (Baude's chat's: a code block its own height)
-        self.selection = widgets.ChatSelection(self.box, self.scroll, self.over, on_selected=self._took_across,
+        self.scroll = panels.markdown_scroller(self.clamp)  # (Baude's chat's: a code block its own height)
+        self.selection = chatfind.ChatSelection(self.box, self.scroll, self.over, on_selected=self._took_across,
                                                 on_own=self._took_selection)
         self.selection.menu_at = self._passage_menu
         self.place = ZoomPlace(self.scroll, self.box, self.box)  # (through the zoom: Window.zoom_tab)
-        self.chat_find = widgets.ChatFind(self.box, self.scroll, pane=self)  # (⌘F / Ctrl+F: Window.find_in_code)
+        self.chat_find = chatfind.ChatFind(self.box, self.scroll, pane=self)  # (⌘F / Ctrl+F: Window.find_in_code)
         self.stack.add_named(self.chat_find.wrap(), "chat")
         self.append(self.stack)
         self.follow = livefeed.FollowEnd(self.scroll)  # (the newest in view, once it's read to, as in Baude's chat)
@@ -611,7 +618,7 @@ class Reader(Gtk.Box):
     def _mark_nouns(self):
         self.nouns_wait = None
         if self.path and self.items:
-            texts = [{"id": widgets.message_key(it["text"]) if it["role"] == "assistant" else f"you {i}",
+            texts = [{"id": markdownview.message_key(it["text"]) if it["role"] == "assistant" else f"you {i}",
                       "text": it["text"], "mark": it["role"] == "assistant"} for i, it in enumerate(self.items)]
             known = [without_to_learn(p) for p in ((self.win.current or {}).get("pages") or {}).values()]
             path = self.path
@@ -629,7 +636,7 @@ class Reader(Gtk.Box):
         def relink():
             for row in self.rows:
                 if row.item["role"] == "assistant":
-                    key = widgets.message_key(row.item["text"])
+                    key = markdownview.message_key(row.item["text"])
                     if getattr(before.get(key), "pattern", None) != getattr(said.get(key), "pattern", None):
                         row.prose.relink()
         self.as_mine(relink)
@@ -638,7 +645,7 @@ class Reader(Gtk.Box):
     def _relink_marked(self):
         if self.names is not None and self.names.said:
             self.as_mine(lambda: [row.prose.relink() for row in self.rows if row.item["role"] == "assistant" and
-                                  widgets.message_key(row.item["text"]) in self.names.said])
+                                  markdownview.message_key(row.item["text"]) in self.names.said])
 
     def _catalogued(self):
         """The folder's names are in (or one folder's of several, the rest waited for): the replies shown, linked again
@@ -659,20 +666,20 @@ class Reader(Gtk.Box):
         self._cite_again()
 
     def activate(self):
-        """Its chat's names the ones replies are linked with (widgets.SIGNAL and MarkdownView.base_dir are
+        """Its chat's names the ones replies are linked with (markdownview.SIGNAL and MarkdownView.base_dir are
         everyone's: each chat open has its own, put in place as its tab's shown, and as it draws)."""
         if self.names is not None:
-            widgets.SIGNAL, widgets.MarkdownView.base_dir = self.names, self.base_dir
+            markdownview.SIGNAL, markdownview.MarkdownView.base_dir = self.names, self.base_dir
 
     def as_mine(self, fn):
         """fn() with this chat's names in place (activate); the shown chat's again after, if this isn't it."""
-        was = widgets.SIGNAL, widgets.MarkdownView.base_dir
+        was = markdownview.SIGNAL, markdownview.MarkdownView.base_dir
         self.activate()
         try:
             return fn()
         finally:
             if self.win.reader is not self:
-                widgets.SIGNAL, widgets.MarkdownView.base_dir = was
+                markdownview.SIGNAL, markdownview.MarkdownView.base_dir = was
 
     def stop(self):
         """Its tab closed (or the window going): its reading and its timers stopped (each holds it)."""
@@ -729,7 +736,7 @@ class Reader(Gtk.Box):
             self.box.append(row)
             return
         if it["role"] == "compact":  # (where Claude Code compacted it: its marker, as Baude's chat draws one)
-            mark = widgets.CompactMark(it.get("meta") or {})
+            mark = chatparts.CompactMark(it.get("meta") or {})
             mark.set_summary(it.get("summary"))
             row.append(mark)
             row.prose, row.item = mark, it
@@ -737,7 +744,7 @@ class Reader(Gtk.Box):
             self.box.append(row)
             return
         if it["role"] == "start":  # (what a session started from outside was asked: at its top, as Baude has it)
-            view = widgets.start_prompt_view(it["text"])
+            view = composerview.start_prompt_view(it["text"])
             row.append(view)
             row.prose, row.item = view, it
             self.rows.append(row)
@@ -745,12 +752,12 @@ class Reader(Gtk.Box):
             return
         if it["role"] == "user":
             # (Baude's markdown, as a reply's and as Baude's chat draws what you wrote)
-            prose = widgets.MarkdownView(it["text"] if len(it["text"]) < 1200 else it["text"][:1200] + "…")
+            prose = markdownview.MarkdownView(it["text"] if len(it["text"]) < 1200 else it["text"][:1200] + "…")
             prose.add_css_class("prose")
             row.add_css_class("reader-user")
             row.set_halign(Gtk.Align.END)
         else:  # (Baude's markdown: tables, code with its copy button, images; its names links, with their logos)
-            prose = widgets.MarkdownView(it["text"])
+            prose = markdownview.MarkdownView(it["text"])
             prose.add_css_class("prose")
             row.add_css_class("reader-assistant")
             on_name_hover(prose, self.win)
@@ -788,7 +795,7 @@ class Reader(Gtk.Box):
         return False
 
     def _took_across(self, text):
-        """A selection across labels (widgets.ChatSelection): the one passage picked, whole, and quoted."""
+        """A selection across labels (chatfind.ChatSelection): the one passage picked, whole, and quoted."""
         parts = [self._pick(*part) for part in self.selection.parts()]
         if parts:
             self.picks = [{**parts[0], "text": text, "parts": parts}]
@@ -840,7 +847,7 @@ class Reader(Gtk.Box):
 
     def _char(self, label, x, y):
         ok, p = self.over.compute_point(label, Graphene.Point().init(x, y))
-        return widgets.char_at(label, p.x, p.y) if ok else 0
+        return chatfind.char_at(label, p.x, p.y) if ok else 0
 
     def _pick_begin(self, gesture, x, y):
         """A press on the chat. With Ctrl (or ⌘): another passage being picked, where it is (the press the Reader's
@@ -910,7 +917,7 @@ class Reader(Gtk.Box):
         self.get_clipboard().set("\n\n".join(p["text"].strip() for p in self.picks if self._there(p)))
 
     def _passage_menu(self, label, at):
-        """What a right click on a passage picked offers (widgets.ChatSelection); elsewhere, the label's own menu."""
+        """What a right click on a passage picked offers (chatfind.ChatSelection); elsewhere, the label's own menu."""
         if not any(self._there(p) and self._meets(p, label, at - 1, at + 1) for p in self.picks):
             return None
         return [(wording.say("common.copy"), self.copy_passages), ("Copy citation link", self.copy_citations)]
@@ -949,7 +956,7 @@ class Reader(Gtk.Box):
 
     def _to_cited(self):
         """Once the chat's laid out, a few frames in a long one: the view at the passage, a code block's own too, and
-        held there as it settles (widgets.hold_place). Going to it, it's no longer following the chat's end."""
+        held there as it settles (panels.hold_place). Going to it, it's no longer following the chat's end."""
         if self.citing is None:
             return False
         if self.place.job is not None:  # (a zoom bringing messages back: what's far off isn't anywhere yet)
@@ -959,21 +966,21 @@ class Reader(Gtk.Box):
             self.win.toast("That passage isn't in the chat any more")
             return False
         first = found[0]
-        inner = widgets.inner_scroller(first["label"], self.box)
+        inner = chatfind.inner_scroller(first["label"], self.box)
         ok, at = (inner or first["label"]).compute_point(self.clamp, Graphene.Point().init(0, 0))
         adj = self.scroll.get_vadjustment()
         self.cite_tries += 1
         if (not ok or not first["label"].get_mapped() or at.y + 1 > adj.get_upper()) and self.cite_tries < 60:
             return True
         self.cited = found
-        if inner is not None and (rects := widgets.passage_rects(first["label"], first["start"], first["end"], inner)):
+        if inner is not None and (rects := chatfind.passage_rects(first["label"], first["start"], first["end"], inner)):
             for inner_adj, place, size in ((inner.get_vadjustment(), rects[0].get_y(), inner.get_height()),
                                            (inner.get_hadjustment(), rects[0].get_x(), inner.get_width())):
                 if not 0 <= place < size:
                     inner_adj.set_value(inner_adj.get_value() + place - size / 3)
         self.follow.stop_glide()
         self.follow.stick = False
-        widgets.hold_place(self.scroll, {"value": max(0, at.y - adj.get_page_size() / 3), "at_end": False}, 1.5)
+        panels.hold_place(self.scroll, {"value": max(0, at.y - adj.get_page_size() / 3), "at_end": False}, 1.5)
         self.marks.queue_draw()
         return False
 

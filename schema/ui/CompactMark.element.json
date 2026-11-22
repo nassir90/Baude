@@ -9,9 +9,9 @@
     "A compact_boundary in a transcript"
   ],
   "code": [
-    "widgets.py:CompactMark",
-    "widgets.py:compact_text",
-    "widgets.py:compact_said",
+    "chatparts.py:CompactMark",
+    "chatparts.py:compact_text",
+    "chatparts.py:compact_said",
     "baude.py:CompactMarks.on_compaction",
     "baude.py:CompactMarks.compact_ended",
     "baude.py:BaudeWindow.adopt_summary",

@@ -13,8 +13,8 @@
     "meta.py:model_picked",
     "meta.py:listed_models",
     "meta.py:takes_commands",
-    "widgets.py:ModelPicker",
-    "widgets.py:HostPicker",
+    "pickers.py:ModelPicker",
+    "pickers.py:HostPicker",
     "baude.py:SettingsDialog",
     "record.py:SettingsDialog"
   ],

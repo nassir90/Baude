@@ -55,6 +55,8 @@ gi.require_version("Gsk", "4.0")
 from gi.repository import Adw, Gdk, Gio, GLib, Gtk  # noqa: E402
 import pointers  # noqa: E402  (the pointer's shape: beside this file)
 import widgets  # noqa: E402  (what Record draws as Baude does: the links' logos; beside this file)
+import pickers  # noqa: E402
+import theming  # noqa: E402
 from baudelib import wording  # noqa: E402  (its words, Baude's: schema/copy)
 import fontsetup  # noqa: E402  (its fonts, as Baude's: set up before Pango's first used)
 fontsetup.setup()
@@ -198,8 +200,8 @@ class App(Adw.Application):
         self.do_startup_look()
         widgets.ensure_icons()
         pointers.start()
-        widgets.press_opens_dropdowns()  # (a dropdown's list open as the mouse goes down on it)
-        widgets.theme_css(CSS)  # (whose stylesheet Baude's look is drawn over: libadwaita's, or a GTK_THEME's)
+        pickers.press_opens_dropdowns()  # (a dropdown's list open as the mouse goes down on it)
+        theming.theme_css(CSS)  # (whose stylesheet Baude's look is drawn over: libadwaita's, or a GTK_THEME's)
         import signal  # (told to stop, as logging out or `kill` does: what's typed is saved, then it stops)
         for sig in (signal.SIGTERM, signal.SIGHUP, signal.SIGINT):
             try:
@@ -210,10 +212,10 @@ class App(Adw.Application):
                 GLib.unix_signal_add(GLib.PRIORITY_HIGH, sig, self._stop)
 
     def do_startup_look(self):
-        """Light or dark as macOS is, as Baude follows it (widgets.macos_appearance), and Baude's sizes."""
+        """Light or dark as macOS is, as Baude follows it (theming.macos_appearance), and Baude's sizes."""
         if sys.platform == "darwin":
             try:
-                widgets.macos_appearance()
+                theming.macos_appearance()
             except Exception as e:  # noqa: BLE001 (the look isn't worth not starting over)
                 print("record: light and dark won't follow macOS:", e, file=sys.stderr)
 
@@ -234,9 +236,9 @@ class App(Adw.Application):
             self.win.settings_changed(keys, before)
 
     def do_activate(self):
-        widgets.load_css()  # (Baude's: its compact lists, its viewers; its classes aren't Record's)
+        theming.load_css()  # (Baude's: its compact lists, its viewers; its classes aren't Record's)
         widgets.apply_scales(Gdk.Display.get_default())  # (Settings → Size: the text's and the icons', Baude's)
-        widgets.apply_accent(Gdk.Display.get_default())  # (Settings → Accent Colour, Baude's)
+        theming.apply_accent(Gdk.Display.get_default())  # (Settings → Accent Colour, Baude's)
         css = Gtk.CssProvider()
         css.load_from_string(CSS)
         Gtk.StyleContext.add_provider_for_display(Gdk.Display.get_default(), css,
@@ -253,7 +255,7 @@ class App(Adw.Application):
         except OSError as e:
             print("record: another start won't find this one:", e, file=sys.stderr)
         self.win = Window(self)
-        widgets.flat_popovers(Gdk.Display.get_default())  # (X11 under picom: its shadow is round the whole popover)
+        theming.flat_popovers(Gdk.Display.get_default())  # (X11 under picom: its shadow is round the whole popover)
         state = None
         try:  # (restarted, ☰ → Restart Record or a new version: what the one before showed)
             with open(restart_path()) as f:
@@ -265,7 +267,7 @@ class App(Adw.Application):
         update.show(self.win, state if isinstance(state, dict) else None)
         if isinstance(state, dict):
             update.restarted(self.win, state, noun())
-        widgets.watch_settings(self.settings_changed)  # (changed in Baude, or another Record here)
+        theming.watch_settings(self.settings_changed)  # (changed in Baude, or another Record here)
         if self.updater is None:
             self.updater = update.Updater("record", lambda: self.win is None or self.win.idle(),
                                           lambda updated: self.win.restart(updated),

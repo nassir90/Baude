@@ -42,7 +42,7 @@ import androidx.compose.ui.unit.dp
 
 // -------------------------------------------------------------------------------------------------- the blocks --
 
-/** A reply's markdown as blocks (widgets.markdown_blocks); their text is source, its inline markdown applied as
+/** A reply's markdown as blocks (markdownview.markdown_blocks); their text is source, its inline markdown applied as
  * they're drawn. */
 sealed interface Block {
     data class Para(val lines: List<String>) : Block
@@ -68,7 +68,7 @@ private val blocksCache = LruCache<String, List<Block>>(256)
 /** markdownBlocks, kept by text (a long chat's items that scroll back in aren't parsed again). */
 fun cachedBlocks(text: String): List<Block> = blocksCache.get(text) ?: markdownBlocks(text).also { blocksCache.put(text, it) }
 
-/** widgets.markdown_parse: line by line, the same checks in the same order. An unclosed fence runs to the end. */
+/** markdownview.markdown_parse: line by line, the same checks in the same order. An unclosed fence runs to the end. */
 fun markdownBlocks(md: String): List<Block> {
     val blocks = ArrayList<Block>()
     val para = ArrayList<String>()
@@ -178,7 +178,7 @@ private fun unesc(s: String) = s.replace("&lt;", "<").replace("&gt;", ">").repla
 
 private class Found(val path: String, val line: Int?, val dir: Boolean)
 
-/** widgets.resolve_path: the existing file or folder text names (it's all of it a path, at least 3 characters). */
+/** markdownview.resolve_path: the existing file or folder text names (it's all of it a path, at least 3 characters). */
 private fun resolvePath(place: ChatPlace, text: String): Found? {
     val m = PATH.matchEntire(text.trim()) ?: return null
     val raw = m.groupValues[1]
@@ -193,13 +193,14 @@ private fun fileLink(f: Found, inner: String) =
 private fun linkPaths(escaped: String, place: ChatPlace?): String = if (place == null) escaped else
     PATH.replace(escaped) { m -> resolvePath(place, unesc(m.value))?.let { fileLink(it, m.value) } ?: m.value }
 
-/** widgets.link_markup: a link to a file or folder (a target with no scheme), an artifact (read as its title) or a
+/** markdownview.link_markup: a link to a file or folder (a target with no scheme), an artifact (read as its title) or a
  * URL. markup: the link's text as markup already. */
 private val PR_URL = Regex("https://github\\.com/([\\w.-]+/[\\w.-]+)/pull/(\\d+)(?:[/?#]\\S*)?")
 private val PR_NUMBERED = Regex("(?<![\\w&;#/.-])(?:(?:PR|pull request) ?)?(?:[\\w.-]+/[\\w.-]+)?#(\\d+)(?![\\w-])", RegexOption.IGNORE_CASE)
 private val BARE_PR = Regex("(?<![$W&#/.-])#(\\d{1,7})(?![$W-])")
 
-/** widgets.pr_link_markup: a pull request's link as a pill (its state, its number), when its repository's are known. */
+/** markdownview.pr_link_markup: a pull request's link as a pill (its state, its number), when its repository's are
+ * known. */
 private fun prPill(place: ChatPlace?, url: String, text: String?): String? {
     place ?: return null
     val m = PR_URL.matchEntire(url) ?: return null
@@ -226,7 +227,8 @@ private fun linkMarkup(place: ChatPlace?, url: String, text: String?, markup: St
     return "<a kind=\"url\" href=\"${escAttr(url)}\">$inner</a>"
 }
 
-/** widgets._emphasis: bold, italic and strike-through in escaped text, CommonMark's way (2 * 3 * 4 isn't italic). */
+/** markdownview._emphasis: bold, italic and strike-through in escaped text, CommonMark's way (2 * 3 * 4 isn't
+ * italic). */
 private fun emphasis(text: String): String {
     var s = text
     if ('*' in s) {
@@ -238,8 +240,8 @@ private fun emphasis(text: String): String {
     return if ("~~" in s) STRIKE.replace(s, "<s>$1</s>") else s
 }
 
-/** widgets._inline_markup: a line's inline markdown as markup (<b> <i> <s> <code> <a kind href line>). Code spans and
- * links are set aside first, as placeholders, so emphasis goes round them: **`name`** is bold code. */
+/** markdownview._inline_markup: a line's inline markdown as markup (<b> <i> <s> <code> <a kind href line>). Code spans
+ * and links are set aside first, as placeholders, so emphasis goes round them: **`name`** is bold code. */
 internal fun inlineMarkup(text: String, place: ChatPlace?, pills: Boolean = false): String {
     val marks = ArrayList<String>()
     val bare = ArrayList<String>()
@@ -378,7 +380,7 @@ internal fun rememberInline(text: String, pills: Boolean = false): AnnotatedStri
 
 // ------------------------------------------------------------------------------------------------------- drawn --
 
-/** A reply's markdown as Baude's chat draws it (widgets.MarkdownView): its blocks 6 apart. under: the colour the
+/** A reply's markdown as Baude's chat draws it (markdownview.MarkdownView): its blocks 6 apart. under: the colour the
  * code blocks and tables sit on. */
 @Composable
 fun MarkdownView(text: String, color: Color = LocalBaude.current.fg, under: Color = LocalBaude.current.inside) {

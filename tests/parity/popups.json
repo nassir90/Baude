@@ -36,7 +36,6 @@
     {"name": "pop-meta-model-picker", "what": "Meta page's model picker (pane)", "where": "Meta page, model name", "kind": "pane", "as": "panel-x", "steps": [["code", "meshModels"], ["tap", "Model"]], "measure": {"pane": "Claude"}, "page": "meta"},
     {"name": "pop-meta-effort", "what": "Meta page's effort picker", "where": "Meta page, effort", "kind": "dropdown", "as": "panel-x", "steps": [["code", "metaOpus"], ["tap", "How hard Meta thinks"]], "page": "meta"},
     {"name": "pop-meta-trash-confirm", "what": "A Meta reply's Move to Trash button pressed", "where": "A Meta reply's Move to Trash… button", "kind": "dialog", "as": "custom", "steps": [["tap", "Move to Trash…"]]},
-    {"name": "pop-meta-new-group", "what": "Meta's new_group form", "where": "Meta's new_group form", "kind": "dialog", "as": "custom"},
     {"name": "pop-settings-appearance", "what": "Settings → Appearance", "where": "Settings → Appearance", "kind": "dropdown", "as": "settings", "steps": [["tap", "Appearance"]]},
     {"name": "pop-settings-accent", "what": "Settings → Accent Colour", "where": "Settings → Accent Colour", "kind": "dropdown", "as": "settings", "steps": [["tap", "Accent Colour"]]},
     {"name": "pop-settings-code-font", "what": "Settings → Code Font", "where": "Settings → Code Font", "kind": "dropdown", "as": "settings", "steps": [["tap", "Code Font"]]},

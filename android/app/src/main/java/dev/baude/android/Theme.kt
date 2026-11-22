@@ -1,6 +1,13 @@
 package dev.baude.android
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.displayCutout
+import androidx.compose.foundation.layout.only
+import androidx.compose.foundation.layout.systemBars
+import androidx.compose.foundation.layout.union
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
@@ -116,8 +123,13 @@ fun BaudeTheme(content: @Composable () -> Unit) {
     CompositionLocalProvider(LocalBaude provides c, androidx.compose.ui.platform.LocalDensity provides
         androidx.compose.ui.unit.Density(density.density * Settings.BASE_SCALE * Settings.globalScale.value,
             density.fontScale * Settings.textScale.value)) {
-        MaterialTheme(colorScheme = scheme, typography = Typography(bodyLarge = Type.body, bodyMedium = Type.body),
-            content = content)
+        MaterialTheme(colorScheme = scheme, typography = Typography(bodyLarge = Type.body, bodyMedium = Type.body)) {
+            // (turned on its side: kept clear of the phone's buttons and a camera cut-out at either edge, on every screen)
+            androidx.compose.foundation.layout.Box(androidx.compose.ui.Modifier.fillMaxSize().background(c.frame)
+                .windowInsetsPadding(androidx.compose.foundation.layout.WindowInsets.systemBars
+                    .union(androidx.compose.foundation.layout.WindowInsets.displayCutout)
+                    .only(androidx.compose.foundation.layout.WindowInsetsSides.Horizontal))) { content() }
+        }
     }
 }
 

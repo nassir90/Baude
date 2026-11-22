@@ -58,12 +58,12 @@ fun diffBlock(old: String, new: String): List<Pair<String, String>> =
     (splitLines(old).map { "del" to it } + splitLines(new).map { "add" to it }).ifEmpty { listOf("ctx" to "") }
 
 
-private typealias Spans = List<Triple<Int, Int, Tok>>
+internal typealias Spans = List<Triple<Int, Int, Tok>>
 
 private val styledCache = android.util.LruCache<List<Any?>, AnnotatedString>(1024)
 
 /** A text's coloured string, made once for the text, its spans and the colours (a block scrolled back in isn't made again). */
-private fun styled(text: String, spans: List<Triple<Int, Int, Tok>>, c: BaudeColors, dark: Boolean): AnnotatedString {
+internal fun styled(text: String, spans: List<Triple<Int, Int, Tok>>, c: BaudeColors, dark: Boolean): AnnotatedString {
     val key = listOf(text, spans.size, spans.firstOrNull(), spans.lastOrNull(), dark, c.fg)
     return styledCache.get(key) ?: highlighted(text, spans, c, dark).also { styledCache.put(key, it) }
 }
@@ -71,7 +71,7 @@ private fun styled(text: String, spans: List<Triple<Int, Int, Tok>>, c: BaudeCol
 private val spansCache = android.util.LruCache<List<Any?>, List<Spans>>(128)
 
 /** The spans to colour a block by: for plain code one list; for a diff one for each of its lines. */
-private fun colour(code: String, syntax: String?, path: String, numbered: Boolean, diff: List<Pair<String, String>>?): List<Spans> {
+internal fun colour(code: String, syntax: String?, path: String, numbered: Boolean, diff: List<Pair<String, String>>?): List<Spans> {
     if (diff == null) return listOf(if (numbered) numberedSpans(code, path) else codeSpans(code, path, syntax.orEmpty()))
     val out = MutableList<Spans>(diff.size) { emptyList() }
     for (kind in listOf("del", "add", "ctx")) {

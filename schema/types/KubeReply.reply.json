@@ -1,0 +1,111 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "kube's answer: contexts {contexts, where}; connect {sections, namespaces, nodes}; list {columns, rows, metrics, page}; yaml {text, file, refs}; owner {kind, name, resource}; delete {said}; fault when a cluster can't be read.",
+  "properties": {
+    "op": {
+      "const": "kube",
+      "description": "What it is."
+    },
+    "req": {
+      "type": ["integer", "null"],
+      "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "what": {
+      "type": "string",
+      "description": "What was done."
+    },
+    "error": {
+      "type": "string",
+      "description": "What's wrong with the request."
+    },
+    "fault": {
+      "$ref": "KubeFault.json",
+      "description": "The cluster can't be read: why."
+    },
+    "contexts": {
+      "type": "array",
+      "items": {
+        "$ref": "KubeContext.json"
+      },
+      "description": "contexts: the kubeconfig's."
+    },
+    "where": {
+      "type": "string",
+      "description": "contexts: the kubeconfig files, or what stands for none."
+    },
+    "sections": {
+      "type": "array",
+      "items": {
+        "$ref": "KubeSection.json"
+      },
+      "description": "connect: the sidebar's categories, each kind with whether the cluster serves it."
+    },
+    "namespaces": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "connect: the cluster's namespaces."
+    },
+    "nodes": {
+      "type": "integer",
+      "description": "connect: how many nodes it has."
+    },
+    "page": {
+      "$ref": "KubePage.json",
+      "description": "list of a definition: its kind's page."
+    },
+    "columns": {
+      "type": "array",
+      "items": {
+        "$ref": "KubeColumn.json"
+      },
+      "description": "list: the page's columns on this cluster."
+    },
+    "rows": {
+      "type": "array",
+      "items": {
+        "$ref": "KubeRow.json"
+      },
+      "description": "list: the objects."
+    },
+    "metrics": {
+      "type": ["boolean", "null"],
+      "description": "list: whether CPU and memory could be read (pods, nodes), or null for another kind."
+    },
+    "text": {
+      "type": "string",
+      "description": "yaml: the YAML (a Secret's keys only, a Helm release's JSON)."
+    },
+    "file": {
+      "type": "string",
+      "description": "yaml: what it is called, for its highlighting."
+    },
+    "refs": {
+      "type": "array",
+      "items": {
+        "$ref": "KubeRef.json"
+      },
+      "description": "yaml: the names in it that are other objects."
+    },
+    "kind": {
+      "type": "string",
+      "description": "owner: the controlling kind, climbed up from a ReplicaSet or a Job."
+    },
+    "name": {
+      "type": "string",
+      "description": "owner: its name."
+    },
+    "resource": {
+      "type": "string",
+      "description": "owner: its kind's resource."
+    },
+    "said": {
+      "type": "string",
+      "description": "delete: what kubectl said."
+    }
+  },
+  "required": ["op"],
+  "additionalProperties": false
+}

@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "A context of the host's kubeconfig.",
+  "properties": {
+    "name": {
+      "type": "string",
+      "description": "Its name."
+    },
+    "current": {
+      "type": "boolean",
+      "description": "The kubeconfig's current context."
+    },
+    "local": {
+      "type": "boolean",
+      "description": "Its API server is on the host itself."
+    }
+  },
+  "required": ["name"],
+  "additionalProperties": false
+}

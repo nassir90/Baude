@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "A table's column.",
+  "properties": {
+    "title": {
+      "type": "string",
+      "description": "Its title."
+    },
+    "kind": {
+      "type": ["string", "null"],
+      "description": "name, namespace, owner, containers, age, status or null."
+    }
+  },
+  "required": ["title"],
+  "additionalProperties": false
+}

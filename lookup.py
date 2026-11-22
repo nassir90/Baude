@@ -2591,3 +2591,10 @@ class Folder(Names):
             if catalogue is not None:
                 self.catalogue = catalogue
             self.catalogue_at, self.catalogue_busy = time.time(), False
+
+
+def full_time(at):
+    """A time in full, local: 00:00 Mon 4th May 2020. What every relative time says under the pointer (time_tip)."""
+    t = time.localtime(at)
+    return time.strftime("%H:%M %a ", t) + wording.say("time.day_of_month", day=t.tm_mday) + " " + \
+        time.strftime("%B %Y", t)

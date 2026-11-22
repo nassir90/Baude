@@ -4,8 +4,8 @@ host's git answers (baudelib.hostfiles) both use it."""
 import json
 import os
 import re
-import shutil
 import subprocess
+import threading
 import time
 import urllib.parse
 
@@ -17,16 +17,34 @@ from lookup import _git
 
 def _gh_json(*args, timeout=20):
     """A `gh` call's JSON answer (GET only), or None if gh is missing, offline or says no."""
-    if not shutil.which("gh"):
+    gh = lookup.gh_path()
+    if gh is None:
         return None
     try:
-        p = subprocess.run(["gh", *args], stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=timeout)
+        p = subprocess.run([gh, *args], stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=timeout)
     except (OSError, subprocess.TimeoutExpired):
         return None
     try:
         return json.loads(p.stdout) if p.returncode == 0 else None
     except ValueError:
         return None
+
+
+AVATAR_LIST_KEEP = 600          # a repository's commits' authors, used again for this long
+AVATAR_QUIET = 300              # nothing read (gh can't say): not asked again for this long
+_AVATAR_LISTS, _AVATAR_LOCK = {}, threading.Lock()
+
+
+def avatar_list(repo):
+    """{email: picture URL} of a repository's recent commits (one GET, kept for AVATAR_LIST_KEEP), or {} if gh can't say."""
+    with _AVATAR_LOCK:
+        until, known = _AVATAR_LISTS.get(repo, (0, None))
+        if until > time.time():
+            return known or {}
+        found = _gh_json("api", f"repos/{repo}/commits?per_page=100")
+        known = avatar_urls(found) if isinstance(found, list) else None
+        _AVATAR_LISTS[repo] = (time.time() + (AVATAR_QUIET if known is None else AVATAR_LIST_KEEP), known)
+        return known or {}
 
 
 def git_fetch(top):
@@ -369,11 +387,12 @@ def gh_state(refresh=False):
     after five minutes."""
     if not refresh and _GH_STATE.get("at", 0) > time.time() - 300:
         return _GH_STATE["state"]
-    if not shutil.which("gh"):
+    gh = lookup.gh_path()
+    if gh is None:
         state = ("missing", None)
     else:
         try:
-            ok = subprocess.run(["gh", "auth", "status", "--hostname", "github.com"], stdin=subprocess.DEVNULL,
+            ok = subprocess.run([gh, "auth", "status", "--hostname", "github.com"], stdin=subprocess.DEVNULL,
                                 capture_output=True, timeout=20).returncode == 0
         except (OSError, subprocess.TimeoutExpired):
             ok = False

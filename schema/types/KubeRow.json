@@ -1,0 +1,70 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "An object's row.",
+  "properties": {
+    "cells": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Each column's text."
+    },
+    "keys": {
+      "type": "array",
+      "items": {},
+      "description": "Each column's sort key: a number, a list of numbers or text."
+    },
+    "tones": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Each column's tone (ok, warn, bad), or empty."
+    },
+    "tips": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Each column's tooltip, or empty (an age's: its time in full)."
+    },
+    "name": {
+      "type": "string",
+      "description": "The object's name."
+    },
+    "namespace": {
+      "type": "string",
+      "description": "Its namespace, or empty."
+    },
+    "uid": {
+      "type": "string",
+      "description": "What it is known by across reads."
+    },
+    "version": {
+      "type": "string",
+      "description": "Its resource version."
+    },
+    "owner_kind": {
+      "type": "string",
+      "description": "What controls it: the kind, or empty."
+    },
+    "owner_name": {
+      "type": "string",
+      "description": "What controls it: the name, or empty."
+    },
+    "containers": {
+      "type": "array",
+      "items": {
+        "$ref": "KubeContainer.json"
+      },
+      "description": "A pod's containers, init ones first."
+    },
+    "default": {
+      "type": "string",
+      "description": "A pod's default container (its annotation), or empty."
+    }
+  },
+  "required": ["name"],
+  "additionalProperties": false
+}

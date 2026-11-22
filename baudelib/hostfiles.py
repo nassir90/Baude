@@ -162,7 +162,7 @@ def _pulls(server, msg):
                 reply["pr"] = {"number": int(p["number"]), "title": str(p.get("title") or ""),
                                "state": str(p.get("state") or "").lower(), "url": str(p.get("url") or ""), "head": None}
         if signed and msg.get("people"):
-            reply["avatars"] = gitread.avatar_urls(gitread._gh_json("api", f"repos/{repo}/commits?per_page=100"))
+            reply["avatars"] = gitread.avatar_list(repo)
     return reply
 
 

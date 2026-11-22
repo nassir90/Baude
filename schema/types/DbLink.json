@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "A foreign key: a column that references another table's.",
+  "properties": {
+    "from_schema": {
+      "type": "string",
+      "description": "The referencing table's schema."
+    },
+    "from_table": {
+      "type": "string",
+      "description": "The referencing table."
+    },
+    "from_column": {
+      "type": "string",
+      "description": "The referencing column."
+    },
+    "to_schema": {
+      "type": "string",
+      "description": "The referenced table's schema."
+    },
+    "to_table": {
+      "type": "string",
+      "description": "The referenced table."
+    },
+    "to_column": {
+      "type": "string",
+      "description": "The referenced column."
+    }
+  },
+  "required": ["from_table", "to_table"],
+  "additionalProperties": false
+}

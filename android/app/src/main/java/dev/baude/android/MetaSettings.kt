@@ -71,6 +71,36 @@ fun MetaSettingsGroup() {
     ), "") { it() }
 }
 
+/** Meta's Provider, Intelligence and Effort as pickers (ControlsRow), where a chat's own are: each applied from
+ * Meta's next message, as their rows in Settings → Meta are. */
+@Composable
+fun MetaControls(inBar: Boolean = false) {
+    val h = metaHost()
+    Mesh.tick.value
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    val list = metaModels(h)
+    val wanted = Settings.metaModel.value ?: "haiku"
+    val entry = metaEntry(wanted, list, h)
+    val value = entry?.value ?: wanted
+    ControlsRow(inBar) {
+        val copies = copiesOf(h.orEmpty(), value)
+        if (copies.isNotEmpty()) Picker(copies.firstOrNull { it.value == value }?.let { "${it.host} / ${it.provider}" }
+            ?.let(::middleCut) ?: Wording.MetaSettings.provider, Wording.MetaSettings.providerPicker,
+            copies.map { "${it.host} / ${it.provider}" to it.value }, value, enabled = copies.size > 1) { v -> putMetaModel(ctx, v) }
+        ModelPicker((entry?.name ?: wanted).let { if (it.length > 30) it.take(29) + "…" else it }, list, entry?.value,
+            logo = if (entry != null && family(entry) == "Claude") Adwaita.Claude else null) { v -> putMetaModel(ctx, v) }
+        val levels = entry?.efforts.orEmpty()
+        val level = Settings.metaEffort.value?.takeIf { it in levels }
+        Picker(level?.let(::effortLabel) ?: Wording.MetaSettings.effort,
+            if (levels.isEmpty()) Wording.MetaSettings.noEffort(model = entry?.name ?: wanted) else Wording.MetaSettings.effortDetail,
+            listOf(Wording.MetaSettings.effortDefault to "") + levels.map { effortLabel(it) to it }, level ?: "",
+            enabled = levels.isNotEmpty()) {
+            Settings.metaEffort.value = it.ifEmpty { null }
+            Settings.save(ctx)
+        }
+    }
+}
+
 /** Meta's Intelligence row (fallback: a subtitle where the row has none; extra: after its picker). */
 @Composable
 fun IntelligenceRow(fallback: String? = null, extra: (@Composable () -> Unit)? = null) {

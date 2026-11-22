@@ -173,7 +173,7 @@ object PullStates {
         main.post {
             Mesh.ask(place.hostId, Msg.Git(what = "pulls", cwd = place.cwd, repo = repo).json()) { r ->
                 val g = Msg.GitReply.from(r)
-                if (r.optString("op") == Op.GIT && g.error.isNullOrBlank()) put(place.hostId, place.cwd, g.repo, parse(g.prs), g.gh == true)
+                if (r.optString("op") == Op.GIT && g.error.isNullOrBlank()) put(place.hostId, if (repo == null) place.cwd else null, g.repo, parse(g.prs), g.gh == true)
             }
         }
     }

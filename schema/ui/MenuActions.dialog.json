@@ -1,5 +1,5 @@
 {
-  "description": "The ☰ menu items that do something small instead of opening a view of their own, with the one confirmation dialog and the toasts that go with them: Copy Transcript for an Issue, Restart Baude, Read-only session, Open in Record…, and the Restart Now confirmation. These are dialogs/toasts/actions, grouped in one file as none is a dialog of its own (Settings, Changelog, Mesh, Send Feedback, Ongoing Feedback each have their own file; Kubernetes, Database Schemas and the menu itself are elsewhere).",
+  "description": "The ☰ menu items that do something small instead of opening a view of their own, with the one confirmation dialog and the toasts that go with them: Copy Transcript for an Issue, Restart Baude, Restart Daemon, Read-only session, Open in Record…, and the Restart Now confirmation. These are dialogs/toasts/actions, grouped in one file as none is a dialog of its own (Settings, Changelog, Mesh, Send Feedback, Ongoing Feedback each have their own file; Kubernetes, Database Schemas and the menu itself are elsewhere).",
   "apps": [
     "baude",
     "record"
@@ -12,6 +12,8 @@
     "windowproc.py:WindowProc.report",
     "meta.py:transcript_report",
     "baudewindow.py:BaudeWindow.restart_app",
+    "windowremote.py:WindowRemote.restart_host",
+    "recordhosts.py:RecordHosts.restart_host",
     "baude.py:BaudeApp.restart",
     "baude.py:BaudeApp.update_now",
     "windowproc.py:WindowProc.set_read_only",
@@ -23,6 +25,7 @@
     "window",
     "report",
     "code_apart",
+    "hosts",
     "update_bar"
   ],
   "parts": [
@@ -58,7 +61,7 @@
     },
     {
       "name": "Restart Baude",
-      "shows": "Menu item \"Restart Baude\" (Record's: \"Restart Record\"), the last item. No confirmation.",
+      "shows": "Menu item \"Restart Baude\" (Record's: \"Restart Record\"), just above Restart Daemon. No confirmation.",
       "copy": [
         "code_apart.restart_app"
       ],
@@ -71,6 +74,26 @@
         {
           "by": "click",
           "does": "every window of the app is replaced by a fresh process that puts each back as it was (chat, scroll place, drafts, open tabs, feedback draft), giving the front back to the app you were in; chats of this machine's host process go on through it; a chat running as the app's own claude has its turn cut short and resumed after (\"Cut short by a restart\", with Continue). Nothing is said after a plain restart; after an automatic update a toast \"Baude updated: N new commit(s)\" (5 s) appears."
+        }
+      ]
+    },
+    {
+      "name": "Restart Daemon",
+      "shows": "Menu item \"Restart Daemon\" (Record has it too), the last item, under Restart Baude. No confirmation. The banner's Restart Daemon button does the same.",
+      "copy": [
+        "code_apart.restart_daemon",
+        "hosts.restart_waiting",
+        "hosts.daemon_restarted"
+      ],
+      "phone": {
+        "does": "nothing",
+        "why": "A daemon is started again only by an app on its own machine; the phone's hosts are other machines, and This phone's host runs inside the app.",
+        "decided": "2026-11-22"
+      },
+      "actions": [
+        {
+          "by": "click",
+          "does": "asks this machine's host process to stop and start again once no command is running on it (it answers busy while one is; asked again every 5 s). A model turn going on is cut short (\"Cut short by a restart\", with Continue). Its chats are kept and resume as they're next written to. Toast \"Restarting the daemon once N sessions finish running a command\" while it waits, \"Daemon restarted\" once the new one is there. With no host process running, one is started."
         }
       ]
     },

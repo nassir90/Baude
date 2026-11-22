@@ -130,7 +130,7 @@ class RecordHosts:
                 self.start_host(then)
                 return False
             GLib.timeout_add(250, gone)
-        r.request({"op": "quit", "if_idle": True}, answered)
+        r.request({"op": "quit", "if_idle": True, "restart": True}, answered)
 
     def start_host(self, then=None):
         def start():

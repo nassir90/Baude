@@ -283,6 +283,7 @@ class Window(RecordHosts, Adw.ApplicationWindow, feedback.FeedbackHost, viewers.
         app_menu.append_item(item)
         app_menu.append(wording.say("window.ongoing_feedback"), "win.fixes")
         app_menu.append(wording.say("code_apart.restart_app", app=noun()), "win.restart")
+        app_menu.append(wording.say("code_apart.restart_daemon"), "win.restartdaemon")
         menu.append_section(None, app_menu)
         menu_btn = self.menu_button = Gtk.MenuButton(icon_name="open-menu-symbolic", menu_model=menu)
         for name, fn in (("openchat", self.choose_chat), ("copylink", self.tabs.copy_link), ("copyreport", self.copy_report),
@@ -291,6 +292,7 @@ class Window(RecordHosts, Adw.ApplicationWindow, feedback.FeedbackHost, viewers.
                          ("exportall", lambda: self.ask_export(self.store.notebooks, book(plural=True))),
                          ("delete", self.delete),
                          ("new", lambda *_: self.new_notebook()), ("restart", lambda: self.restart()),
+                         ("restartdaemon", lambda: self.restart_host()),
                          ("settings", lambda: Settings(self).present(self)), ("feedback", lambda: self.open_feedback()),
                          ("fixes", lambda: self.open_fixes()),
                          ("changelog", lambda: update.changelog_dialog().present(self)),

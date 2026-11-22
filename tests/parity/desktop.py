@@ -35,6 +35,9 @@ import time  # noqa: E402
 import types  # noqa: E402
 
 import screenshots as S  # noqa: E402  (tests/test_baude's throwaway env, the window machinery, capture)
+import scenelib  # noqa: E402
+import scenes_chat  # noqa: E402
+import scenes_panels  # noqa: E402
 from screenshots import T, Adw, Gtk, baude  # noqa: E402
 import update  # noqa: E402
 import baudelib.wording as wording  # noqa: E402
@@ -42,7 +45,7 @@ import dump  # noqa: E402
 import gitfixture  # noqa: E402
 
 FIX = os.path.join(HERE, "fixtures")
-SIZE = (S.W, S.H)
+SIZE = (scenelib.W, scenelib.H)
 
 
 def fixture(name):
@@ -188,7 +191,7 @@ def open_chat(app, sc):
     path = write_sessions(sc.get("lines"), sc.get("transcript"), sc.get("subagents"))[sc.get("session", 0)]
     if sc.get("meta"):  # (Meta's conversation, as its store keeps it)
         baude._META[:] = [{k: v for k, v in fixture(sc["meta"]).items() if k != "description"}]
-    win = app.window(S.opts(cwd=folder("garden")))
+    win = app.window(scenelib.opts(cwd=folder("garden")))
     info = baude.read_session_info(path)
     win.resume_session(info)
     T.wait_for(lambda: win.session_id == info["id"] and win.transcript.get_first_child() is not None, "its history")
@@ -297,16 +300,16 @@ def build(app, sc):
         gitfixture.stub_github(True, os.path.join(HOME, "garden"))
     if name.startswith("home"):
         write_sessions()
-        win = app.window(S.opts(cwd=folder("garden")))
+        win = app.window(scenelib.opts(cwd=folder("garden")))
         if name == "home":
             return win
         title = fixture("sessions.json")["sessions"][0]["title"]
-        T.wait_for(lambda: S.sidebar_row(win, title) is not None, "rows")
+        T.wait_for(lambda: scenelib.sidebar_row(win, title) is not None, "rows")
         T.pump(1)  # (the list settled: the row kept)
         if name == "home-row-menu":
-            win.sidebar.show_menu(S.sidebar_row(win, title), 120, 14)
+            win.sidebar.show_menu(scenelib.sidebar_row(win, title), 120, 14)
         elif name == "home-host-menu":
-            S.host_right_click(win)
+            scenes_panels.host_right_click(win)
         elif name == "home-add-host":
             win.ask_add_host()
         return win
@@ -330,7 +333,7 @@ def build(app, sc):
         update.changelog_dialog().present(win)
         return win
     if name == "databases":
-        win = app.window(S.opts())
+        win = app.window(scenelib.opts())
         fx = fixture("databases.json")
         sv = win.schema
         sv.set_visible(True)
@@ -346,18 +349,18 @@ def build(app, sc):
         sv.canvas.fit()
         return win
     if name == "kubernetes":
-        return S.kube_window(app)[0]
+        return scenes_chat.kube_window(app)[0]
     if name == "bot-settings":
         win = open_chat(app, sc)
         title = fixture("sessions.json")["sessions"][0]["title"]
-        T.wait_for(lambda: S.sidebar_row(win, title) is not None, "rows")
-        row = S.sidebar_row(win, title)
+        T.wait_for(lambda: scenelib.sidebar_row(win, title) is not None, "rows")
+        row = scenelib.sidebar_row(win, title)
         win.sidebar.ask_bot({**row.info, "remote": types.SimpleNamespace(request=lambda *a, **k: None)})
         return win
     if name.startswith("feedback-ongoing"):
         with open(os.path.join(FIX, "gallery", "docs", "flow.png"), "rb") as f:
             png = f.read()
-        return S.fixes_tab(app, shots={"12/1/1-before.png": png, "12/1/1-after.png": png})[0]
+        return scenes_panels.fixes_tab(app, shots={"12/1/1-before.png": png, "12/1/1-after.png": png})[0]
     return None
 
 

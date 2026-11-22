@@ -12,14 +12,20 @@ import androidx.compose.ui.platform.LocalContext
  * one), and what it does. */
 class MenuItem(val label: String, val checked: Boolean? = null, val go: () -> Unit)
 
-/** ☰'s main menu, as the header bar's: a plain list, one line each; with a toggle among them every item has a column for its check mark before it. */
+/** ☰'s main menu, as the header bar's: sections of one-line items with a rule between them (as Baude's and Record's:
+ * the chat's, the view's, the views over the window, the app's); with a toggle among them every item has a column for
+ * its check mark before it. An empty section isn't shown. */
 @Composable
-fun MainMenu(items: List<MenuItem>) {
+fun MainMenu(sections: List<List<MenuItem>>) {
     var open by remember { mutableStateOf(false) }
+    val shown = sections.filter { it.isNotEmpty() }
     Box {
         IconButton(Adwaita.ViewMore, Wording.ChatHeader.menu) { open = true }
-        Popover(open, { open = false }, ticks = if (items.any { it.checked != null }) Ticks.START else Ticks.NONE) {
-            for (item in items) MenuChoice(item.label, item.checked == true) { open = false; item.go() }
+        Popover(open, { open = false }, ticks = if (shown.flatten().any { it.checked != null }) Ticks.START else Ticks.NONE) {
+            shown.forEachIndexed { i, items ->
+                if (i > 0) MenuDivider()
+                for (item in items) MenuChoice(item.label, item.checked == true) { open = false; item.go() }
+            }
         }
     }
 }
@@ -34,27 +40,33 @@ private fun fullWidth(): MenuItem {
     }
 }
 
-/** A chat's ☰ (baudewindow.BaudeWindow's menu): Settings…, Changelog, Mesh, Full-width text, Read-only session,
- * Database Schemas…, Kubernetes… (a host that takes them), Send Feedback…, Ongoing Feedback, Copy Transcript for an
- * Issue. screen opens one of "settings", "changelog", "mesh", "fixes", "databases" and "kubernetes" over the chat. */
+/** A chat's ☰ (baudewindow.BaudeWindow's menu, in its sections): Find, Copy Transcript for an Issue, Read-only
+ * session; Full-width text; Kubernetes…, Database Schemas… (a host that takes them); Settings…, Changelog, Mesh, Send
+ * Feedback…, Ongoing Feedback. screen opens one of "settings", "changelog", "mesh", "fixes", "databases" and "kubernetes" over the chat. */
 @Composable
 fun ChatMenu(hostId: String, sid: String, feedback: () -> Unit, screen: (String) -> Unit) {
     val ctx = LocalContext.current
-    MainMenu(listOfNotNull(
-        MenuItem(Wording.Window.settings) { screen("settings") },
-        MenuItem(Wording.Changelog.title) { screen("changelog") },
-        MenuItem(Wording.MeshVersions.title) { screen("mesh") },
-        fullWidth(),
-        if (sid.isEmpty()) null else MenuItem(Wording.Window.readOnly, Settings.isReadOnly(sid)) {
-            if (sid in Settings.readOnly) Settings.readOnly.remove(sid) else Settings.readOnly.add(sid)
-            Settings.save(ctx)
-        },
-        if (takes(hostId, "databases")) MenuItem(Wording.Window.databaseSchemas) { screen("databases") } else null,
-        if (takes(hostId, "kube")) MenuItem(Wording.Window.kubernetesMenu) { screen("kubernetes") } else null,
-        MenuItem(Wording.Find.placeholder) { Find.open["$hostId/$sid"] = true },
-        MenuItem(Wording.Fixes.sendFeedback) { feedback() },
-        MenuItem(Wording.Window.ongoingFeedback) { screen("fixes") },
-        MenuItem(Wording.Window.copyTranscript) { copyReport(ctx, hostId, sid) },
+    MainMenu(listOf(
+        listOfNotNull(
+            MenuItem(Wording.Find.placeholder) { Find.open["$hostId/$sid"] = true },
+            MenuItem(Wording.Window.copyTranscript) { copyReport(ctx, hostId, sid) },
+            if (sid.isEmpty()) null else MenuItem(Wording.Window.readOnly, Settings.isReadOnly(sid)) {
+                if (sid in Settings.readOnly) Settings.readOnly.remove(sid) else Settings.readOnly.add(sid)
+                Settings.save(ctx)
+            },
+        ),
+        listOf(fullWidth()),
+        listOfNotNull(
+            if (takes(hostId, "kube")) MenuItem(Wording.Window.kubernetesMenu) { screen("kubernetes") } else null,
+            if (takes(hostId, "databases")) MenuItem(Wording.Window.databaseSchemas) { screen("databases") } else null,
+        ),
+        listOf(
+            MenuItem(Wording.Window.settings) { screen("settings") },
+            MenuItem(Wording.Changelog.title) { screen("changelog") },
+            MenuItem(Wording.MeshVersions.title) { screen("mesh") },
+            MenuItem(Wording.Fixes.sendFeedback) { feedback() },
+            MenuItem(Wording.Window.ongoingFeedback) { screen("fixes") },
+        ),
     ))
 }
 
@@ -62,11 +74,13 @@ fun ChatMenu(hostId: String, sid: String, feedback: () -> Unit, screen: (String)
 @Composable
 fun HomeMenu(settings: () -> Unit, changelog: () -> Unit, mesh: () -> Unit, feedback: () -> Unit, fixes: () -> Unit) {
     MainMenu(listOf(
-        MenuItem(Wording.Window.settings) { settings() },
-        MenuItem(Wording.Changelog.title) { changelog() },
-        MenuItem(Wording.MeshVersions.title) { mesh() },
-        fullWidth(),
-        MenuItem(Wording.Fixes.sendFeedback) { feedback() },
-        MenuItem(Wording.Window.ongoingFeedback) { fixes() },
+        listOf(fullWidth()),
+        listOf(
+            MenuItem(Wording.Window.settings) { settings() },
+            MenuItem(Wording.Changelog.title) { changelog() },
+            MenuItem(Wording.MeshVersions.title) { mesh() },
+            MenuItem(Wording.Fixes.sendFeedback) { feedback() },
+            MenuItem(Wording.Window.ongoingFeedback) { fixes() },
+        ),
     ))
 }

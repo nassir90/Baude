@@ -137,6 +137,7 @@ abstract class Parity(private val theme: String, private val scene: String) {
                 created = now - s.getDouble("ago") - 600,
                 state = (if (i == 0) sc.optString("state").ifBlank { null } else null) ?: s.getString("state"), model = s.getString("model"),
                 effort = s.getString("effort"), mode = s.getString("mode"),
+                cut = if (i == 0 && sc.optBoolean("cut")) now else null,
                 size = if (s.getString("id") == opened.getString("id")) shown.size else 0)
         }
     }
@@ -280,6 +281,7 @@ abstract class Parity(private val theme: String, private val scene: String) {
                 p.waitFor()
                 return JSONObject(out)
             }
+            "catalogue" -> return reply("cwd" to msg.optString("cwd"), "items" to JSONArray(), "busy" to false)
         }
         return null
     }
@@ -295,6 +297,8 @@ abstract class Parity(private val theme: String, private val scene: String) {
     }
 
     @After fun down() {
+        dev.baude.android.CompactFolds.open.clear()
+        dev.baude.android.Viewer.state.value = null
         Fixes.items = emptyList()
         Fixes.repo = null
         Fixes.error = null
@@ -350,7 +354,7 @@ abstract class Parity(private val theme: String, private val scene: String) {
                         call.outputOpen = true
                     }
                 }
-                if (sc.optBoolean("open")) openAll(first.getString("id"))
+                if (sc.optBoolean("open") || sc.optBoolean("lightbox")) openAll(first.getString("id"))
                 if (sc.optBoolean("down")) {
                     conn.state = "down"
                     Mesh.tick.value++
@@ -415,6 +419,17 @@ abstract class Parity(private val theme: String, private val scene: String) {
                 }
                 if (sc.has("hold")) hold(sc.getString("hold"))
                 if (name == "menu") tap(Wording.ChatHeader.menu)
+                if (sc.has("typed")) type(sc.getString("typed"))
+                if (sc.optBoolean("lightbox")) {
+                    toEnd()
+                    dev.baude.android.Viewer.flyMs = 0
+                    val shot = roots().flatMap { all(it.semanticsOwner.rootSemanticsNode) }.firstOrNull { n ->
+                        n.config.getOrNull(SemanticsProperties.Role) == Role.Image && n.config.contains(SemanticsActions.OnClick)
+                    }
+                    shot?.config?.get(SemanticsActions.OnClick)?.action?.invoke()
+                    androidx.compose.runtime.snapshots.Snapshot.sendApplyNotifications()
+                    settle()
+                }
                 if (sc.has("card")) tap(sc.getString("card"))
                 if (sc.optBoolean("signal_menu")) tapDescribed(Wording.SignalMenu.tipLinks(status = "").substringBefore(":"))
                 if (sc.has("ref")) {
@@ -422,8 +437,11 @@ abstract class Parity(private val theme: String, private val scene: String) {
                     androidx.compose.runtime.snapshots.Snapshot.sendApplyNotifications()
                     settle()
                 }
-                if (sc.optBoolean("open") && !sc.has("meta")) toEnd()
-                if (sc.has("ask")) ask(sc.getString("ask"))
+                if ((sc.optBoolean("open") || sc.optBoolean("lightbox")) && !sc.has("meta")) toEnd()
+                if (sc.has("ask")) {
+                    ask(sc.getString("ask"))
+                    toEnd()
+                }
                 if (sc.has("queued")) {
                     Mesh.open!!.queued.add(Queued(sc.getString("queued"), emptyList()))
                     androidx.compose.runtime.snapshots.Snapshot.sendApplyNotifications()
@@ -545,6 +563,18 @@ abstract class Parity(private val theme: String, private val scene: String) {
             call.inputOpen = true
             call.outputOpen = true
             chat.calls.opened[call.id] = true
+        }
+        for (line in chat.lines) if (line.kind == "compact") line.uuid?.let { dev.baude.android.CompactFolds.open[it] = true }
+    }
+
+    /** typed put in the box a character at a time, as typing (what starts the / and @ lists is the one just typed). */
+    private fun type(typed: String) {
+        val box = roots().flatMap { all(it.semanticsOwner.rootSemanticsNode) }.firstOrNull { it.config.contains(SemanticsActions.SetText) }
+            ?: error("no box to type in")
+        for (k in 1..typed.length) {
+            box.config[SemanticsActions.SetText].action?.invoke(androidx.compose.ui.text.AnnotatedString(typed.take(k)))
+            androidx.compose.runtime.snapshots.Snapshot.sendApplyNotifications()
+            settle()
         }
     }
 

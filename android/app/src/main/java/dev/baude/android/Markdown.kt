@@ -389,21 +389,21 @@ fun MarkdownView(text: String, color: Color = LocalBaude.current.fg, under: Colo
     val markerWidth = remember(density) { with(density) { measure.measure("00", Type.body.copy(fontWeight = FontWeight.Bold)).size.width.toDp() } }
     Column(verticalArrangement = Arrangement.spacedBy(Tokens.Markdown.block)) {
         for (b in blocks) when (b) {
-            is Block.Para -> PillText(rememberInline(b.lines.joinToString("\n"), pills = true), style = Type.body, color = color)
-            is Block.Heading -> PillText(rememberInline(b.text, pills = true), color = color, style = Type.body.copy(
+            is Block.Para -> PillText(rememberInline(b.lines.joinToString("\n"), pills = true).found(), style = Type.body, color = color)
+            is Block.Heading -> PillText(rememberInline(b.text, pills = true).found(), color = color, style = Type.body.copy(
                 fontSize = Type.body.fontSize * when (b.level) { 1 -> Tokens.Markdown.h1.toFloat(); 2 -> Tokens.Markdown.h2.toFloat(); else -> 1f },
                 fontWeight = FontWeight.Bold))
             is Block.Item -> Row(Modifier.padding(start = Tokens.Markdown.itemStart + Tokens.Markdown.indentStep * b.depth),
                 horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text(b.marker, style = Type.body.copy(fontWeight = FontWeight.Bold), color = color,
                     textAlign = TextAlign.End, modifier = Modifier.widthIn(min = markerWidth).alpha(Tokens.Markdown.markerOpacity.toFloat()))
-                PillText(rememberInline(b.text, pills = true), style = Type.body, color = color, modifier = Modifier.weight(1f))
+                PillText(rememberInline(b.text, pills = true).found(), style = Type.body, color = color, modifier = Modifier.weight(1f))
             }
             is Block.Quote -> Row(Modifier.height(IntrinsicSize.Min)) {
                 Box(Modifier.width(Tokens.Markdown.quoteRule).fillMaxHeight()
                     .background(c.fg.copy(alpha = c.fg.alpha * Tokens.Markdown.quoteRuleOpacity.toFloat())))
                 Spacer(Modifier.width(Tokens.Markdown.quotePad - Tokens.Markdown.quoteRule))
-                PillText(rememberInline(b.text, pills = true), style = Type.body, color = color,
+                PillText(rememberInline(b.text, pills = true).found(), style = Type.body, color = color,
                     modifier = Modifier.weight(1f).alpha(Tokens.Markdown.quoteOpacity.toFloat()))
             }
             Block.Rule -> Box(Modifier.padding(vertical = Tokens.Markdown.ruleGap).fillMaxWidth().height(1.dp).background(c.rule))

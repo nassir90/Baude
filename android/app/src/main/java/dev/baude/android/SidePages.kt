@@ -102,6 +102,38 @@ fun sideQuestions(chat: Chat): (String, JSONObject) -> Unit = l@{ at, msg ->
 private const val PREFACE = "(This is a side question, asked while you work on the conversation above. Answer it " +
     "briefly from what you already know; don't continue the task or use tools.)\n\n"
 
+/** A question asked after a side question's answer (its thread, in its own session). */
+fun askAfter(chat: Chat, q: SideQuestion, text: String) {
+    q.thread.add(Line("you", text))
+    q.status.value = "running"
+    val msg = JSONObject().put("type", "user").put("message", JSONObject().put("role", "user")
+        .put("content", (if (q.thread.count { it.kind == "you" } == 1) PREFACE else "") + text))
+    Mesh.ask(chat.hostId, Msg.Input(session = q.sid, msg = msg).json()) { r ->
+        if (r.optString("op") == Op.ERROR) { q.status.value = "error"; q.thread.add(Line("error", Msg.Error.from(r).said.orEmpty())) }
+    }
+}
+
+/** A side question asked of the chat: a session of its host's of its own, forked from it, and the question put to it. */
+fun askSide(chat: Chat, text: String) {
+    val hostId = chat.hostId
+    val s = Mesh.session(hostId, chat.sid)
+    val q = SideQuestion(text)
+    chat.btw.add(0, q)
+    val model = s?.model?.ifBlank { null }
+    val msg = Msg.Start(ephemeral = true, prompt = "", forkFrom = chat.sid, model = model,
+        mode = if (program(model) == "codex") "default" else "plan", attach = true, answers = true).json()
+    Mesh.ask(hostId, msg) { r ->
+        val id = Msg.Started.from(r).session?.id
+        if (r.optString("op") != Op.STARTED || id == null) {
+            q.status.value = "error"
+            q.thread.add(Line("error", Wording.SideQuestions.notAsked(why = Msg.Error.from(r).said.orEmpty())))
+            return@ask
+        }
+        q.sid = id
+        askAfter(chat, q, text)
+    }
+}
+
 /** Side questions, as Baude's page has them: a box to ask one, then each (newest first), opening into its thread
  * with a box to ask after it. Each is a session of its host's of its own (ephemeral, forked from the chat, in plan
  * mode), let go of with the chat. */
@@ -110,33 +142,6 @@ fun SideQuestionsPage(chat: Chat) {
     val c = LocalBaude.current
     val hostId = chat.hostId
     var shown by remember(chat) { mutableStateOf<SideQuestion?>(null) }
-    fun ask(q: SideQuestion, text: String) {
-        q.thread.add(Line("you", text))
-        q.status.value = "running"
-        val msg = JSONObject().put("type", "user").put("message", JSONObject().put("role", "user")
-            .put("content", (if (q.thread.count { it.kind == "you" } == 1) PREFACE else "") + text))
-        Mesh.ask(hostId, Msg.Input(session = q.sid, msg = msg).json()) { r ->
-            if (r.optString("op") == Op.ERROR) { q.status.value = "error"; q.thread.add(Line("error", Msg.Error.from(r).said.orEmpty())) }
-        }
-    }
-    fun start(text: String) {
-        val s = Mesh.session(hostId, chat.sid)
-        val q = SideQuestion(text)
-        chat.btw.add(0, q)
-        val model = s?.model?.ifBlank { null }
-        val msg = Msg.Start(ephemeral = true, prompt = "", forkFrom = chat.sid, model = model,
-            mode = if (program(model) == "codex") "default" else "plan", attach = true, answers = true).json()
-        Mesh.ask(hostId, msg) { r ->
-            val id = Msg.Started.from(r).session?.id
-            if (r.optString("op") != Op.STARTED || id == null) {
-                q.status.value = "error"
-                q.thread.add(Line("error", Wording.SideQuestions.notAsked(why = Msg.Error.from(r).said.orEmpty())))
-                return@ask
-            }
-            q.sid = id
-            ask(q, text)
-        }
-    }
     val q = shown
     if (q != null) {
         BackHandler { shown = null }
@@ -153,14 +158,14 @@ fun SideQuestionsPage(chat: Chat) {
                     items(q.thread.drop(1)) { Said(it) }
                     if (q.status.value == "running") item { Text("Working…", style = Type.caption, color = c.dim) }
                 }
-                AskBox("Ask after it", enabled = q.sid.isNotEmpty() && q.status.value != "running" && q.status.value != "interrupted") { ask(q, it) }
+                AskBox("Ask after it", enabled = q.sid.isNotEmpty() && q.status.value != "running" && q.status.value != "interrupted") { askAfter(chat, q, it) }
             }
         }
         return
     }
     Scrolled {
         Box(Modifier.padding(start = 10.dp, end = 10.dp, top = 10.dp)) {
-            AskBox("Ask a side question", enabled = takes(hostId, "ephemeral") && Mesh.session(hostId, chat.sid) != null, ::start)
+            AskBox("Ask a side question", enabled = takes(hostId, "ephemeral") && Mesh.session(hostId, chat.sid) != null, { askSide(chat, it) })
         }
         if (chat.btw.isNotEmpty()) BoxedList(chat.btw.toList(), "") { sq ->
             ActionRow(sq.question, sq.thread.getOrNull(1)?.text?.lines()?.firstOrNull(), onClick = { shown = sq },

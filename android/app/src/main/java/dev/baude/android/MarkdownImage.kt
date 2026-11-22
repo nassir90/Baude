@@ -62,7 +62,7 @@ fun java.io.InputStream.readUpTo(n: Int): ByteArray {
 }
 
 /** A picture's bytes: a web one fetched, a file of the chat's host read from it; null if it can't be had. */
-private suspend fun bytesOf(place: ChatPlace?, src: String): ByteArray? {
+internal suspend fun bytesOf(place: ChatPlace?, src: String): ByteArray? {
     if (src.startsWith("http://") || src.startsWith("https://")) return withContext(Dispatchers.IO) {
         try {
             val conn = java.net.URL(src).openConnection() as java.net.HttpURLConnection
@@ -148,8 +148,10 @@ fun MarkdownImage(alt: String, src: String) {
             val scale = minOf(1f, Tokens.Markdown.imageEdge.value / longest)
             val w = minOf((pic.width * scale).dp, maxWidth)
             val h = w * pic.height / pic.width
-            Image(pic.bitmap.asImageBitmap(), Wording.Images.clickTip(name = shown.ifBlank { alt }), contentScale = ContentScale.FillBounds,
-                modifier = Modifier.width(w).height(h).clip(RoundedCornerShape(Tokens.Markdown.imageRadius)))
+            ImageTouch("md:$src") {
+                Image(pic.bitmap.asImageBitmap(), Wording.Images.clickTip(name = shown.ifBlank { alt }), contentScale = ContentScale.FillBounds,
+                    modifier = Modifier.width(w).height(h).clip(RoundedCornerShape(Tokens.Markdown.imageRadius)))
+            }
         }
     }
 }

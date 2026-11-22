@@ -67,6 +67,7 @@ fun ChatMenu(hostId: String, sid: String, feedback: () -> Unit, screen: (String)
         },
         if (takes(hostId, "databases")) MenuItem(Wording.Window.databaseSchemas) { screen("databases") } else null,
         if (takes(hostId, "kube")) MenuItem(Wording.Window.kubernetesMenu) { screen("kubernetes") } else null,
+        MenuItem(Wording.Find.placeholder) { Find.open["$hostId/$sid"] = true },
         MenuItem(Wording.Fixes.sendFeedback) { feedback() },
         MenuItem(Wording.Window.ongoingFeedback) { screen("fixes") },
         MenuItem(Wording.Window.copyTranscript) { copyReport(ctx, hostId, sid) },

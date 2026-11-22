@@ -218,10 +218,11 @@ def open_pages(pid, urls=None, why=None, selected=0):
     return urls
 
 
-def pending_note(pid, note=None):
+def pending_note(pid, note=None, slot="note"):
     """What the Bot's to be told about its browser, kept till it is (a browser that ends first hands it on to the
-    next): note "" once it's told; note None, what's waiting read."""
-    path = os.path.join(data_home(), "profiles", pid + ".note")
+    next): note "" once it's told; note None, what's waiting read. slot: which of the things it's to be told (its
+    own: "reopen", that its pages were opened again, put in place of the last, not added to the others)."""
+    path = os.path.join(data_home(), "profiles", pid + "." + slot)
     try:
         if note is None:
             with open(path, encoding="utf-8") as f:

@@ -423,5 +423,37 @@
     "pr-merged": {"$type": "color", "$description": "A merged pull request's logo.", "$value": {"colorSpace": "srgb", "components": [0.5373, 0.3412, 0.898], "hex": "#8957e5"}},
     "pr-closed": {"$type": "color", "$description": "A pull request closed unmerged, or a closed issue: the logo.", "$value": {"colorSpace": "srgb", "components": [0.5412, 0.5608, 0.5961], "hex": "#8a8f98"}},
     "pending-opacity": {"$type": "number", "$description": "A name still being looked up: its link's opacity (alpha=\"55%\").", "$value": 0.55}
+  },
+  "color": {
+    "$type": "color",
+    "reference": {"$description": "An @name's text in the box you write in and in notes (a chat, a file, a name that's known).", "$value": {"colorSpace": "srgb", "components": [0.1843, 0.5608, 0.4471], "hex": "#2f8f72"}},
+    "reference-tint": {"$description": "Behind an @name.", "$value": {"colorSpace": "srgb", "components": [0.3098, 0.5412, 0.4863], "alpha": 0.14, "hex": "#4f8a7c"}}
+  },
+  "picklist": {
+    "$type": "dimension",
+    "width": {"$description": "The / and @ lists over the box: at most this wide (PickList.WIDTH).", "$value": {"value": 520, "unit": "px"}},
+    "height": {"$description": "And at most this tall (PickList.HEIGHT).", "$value": {"value": 360, "unit": "px"}},
+    "gap": {"$description": "Between the list's foot and the box.", "$value": {"value": 10, "unit": "px"}}
+  },
+  "composer": {
+    "$type": "dimension",
+    "thumb": {"$description": "A picture attached in the box: its thumbnail's side.", "$value": {"value": 48, "unit": "px"}}
+  },
+  "compact": {
+    "$type": "dimension",
+    "margin": {"$description": "A compaction's mark: above and below it.", "$value": {"value": 6, "unit": "px"}},
+    "indent": {"$description": "Its summary's text: in from its heading.", "$value": {"value": 18, "unit": "px"}}
+  },
+  "lightbox": {
+    "fly": {"$type": "duration", "$description": "A picture opened into the large view, and closed back (Lightbox.FLY_MS).", "$value": {"value": 240, "unit": "ms"}},
+    "zoom": {"$type": "duration", "$description": "A double-click's zoom in the large view.", "$value": {"value": 160, "unit": "ms"}},
+    "shade": {"$type": "number", "$description": "The large view's backdrop's opacity.", "$value": 0.94},
+    "side": {"$type": "dimension", "$description": "The picture's room at each side of the stage.", "$value": {"value": 56, "unit": "px"}},
+    "top": {"$type": "dimension", "$description": "Above the picture.", "$value": {"value": 8, "unit": "px"}},
+    "bottom": {"$type": "dimension", "$description": "Under the picture.", "$value": {"value": 40, "unit": "px"}},
+    "arrow": {"$type": "dimension", "$description": "A step button's side.", "$value": {"value": 44, "unit": "px"}},
+    "arrow-inset": {"$type": "dimension", "$description": "A step button, in from the stage's edge.", "$value": {"value": 10, "unit": "px"}},
+    "most-pixels": {"$type": "number", "$description": "Zoomed in, a picture's pixel at most this many of the screen's.", "$value": 8},
+    "zoom-key": {"$type": "number", "$description": "A zoom key's step.", "$value": 1.5}
   }
 }

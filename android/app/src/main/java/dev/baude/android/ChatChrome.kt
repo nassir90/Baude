@@ -108,7 +108,12 @@ private fun heard(chat: Chat, m: JSONObject) {
                 put(c, id, merge(c.tasks[id] ?: JSONObject().put("status", "running"), t))
             }
             "codex_context", "baude_context" -> m.optJSONObject("usage")?.let { showUsage(chat, it) }
-            "compact_boundary" -> refreshContext(chat)
+            "compact_boundary" -> {
+                if (top) CompactMarks.heard(chat, m)
+                refreshContext(chat)
+            }
+            "status" -> if (top) CompactMarks.heard(chat, m)
+            "commands_changed" -> SlashCommands.changed(chat, m.optJSONArray("commands"))
             "api_retry" -> if (top) c.retrying.value = m
         }
         "assistant", "user" -> if (type == "assistant" || carriesResult(m)) contextSoon(chat)
@@ -136,8 +141,11 @@ private fun result(chat: Chat, m: JSONObject) {
         seconds = String.format(Locale.ROOT, "%.1f", m.optDouble("duration_ms", 0.0) / 1000), used = fmtTokens(used),
         written = fmtTokens(u.optInt("output_tokens")))
     if (m.optBoolean("is_error") && OVERFLOW.containsMatchIn(m.optString("result"))) c.outgrown.value = true
+    if (m.optBoolean("is_error") && needsLogin(m.optString("result")))
+        chat.lines.add(Line("note", Wording.SignIn.notSignedInThere(host = Mesh.label(chat.hostId))))
     c.interrupting = 0
     c.retrying.value = null
+    CompactMarks.turnEnded(chat)
     refreshContext(chat)
 }
 
@@ -232,11 +240,11 @@ private fun stopStuck(chat: Chat, ran: Boolean) {
 
 /** A new chat on the host of one it no longer has (new_session_on): its folder the last used there, its model the
  * chat's if claude runs it; opened once the host has started it. */
-fun newChatOn(chat: Chat, open: (String, String) -> Unit) {
+fun newChatOn(chat: Chat, open: (String, String) -> Unit, cwd: String? = null) {
     val at = chat.hostId
     val s = Mesh.session(at, chat.sid)
     val model = s?.model?.ifBlank { null }?.takeIf { program(it) == "claude" }
-    val msg = Msg.Start(prompt = "", cwd = HomePrefs.folder(Mesh.app, at) ?: "~", model = model,
+    val msg = Msg.Start(prompt = "", cwd = cwd ?: HomePrefs.folder(Mesh.app, at) ?: "~", model = model,
         effort = if (model != null) s?.effort?.ifBlank { null } else null, mode = "auto", draft = true,
         group = s?.group).json()
     Mesh.ask(at, msg) { r ->

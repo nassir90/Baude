@@ -764,6 +764,11 @@ object Mesh {
                                 tasksFrom(chat, line)
                             }
                             "use", "link" -> noted(chat, line)
+                            "compact" -> {
+                                CompactMarks.dropLive(chat)
+                                chat.lines.add(line)
+                            }
+                            "compactsum" -> CompactMarks.addSummary(chat, line)
                             "record" -> line.uuid?.let { chat.ends[it] = chat.lines.size }
                             "rewind" -> { // (what's after the record it keeps last dropped: all of what's read, if
                                 val keep = line.uuid?.let { chat.ends[it] } ?: 0 // that's before it)
@@ -881,7 +886,7 @@ object Mesh {
     /** What you wrote (and the files you chose) sent to the chat at once, as Baude sends it: a user message for its
      * agent, drawn as yours meanwhile (Outgoing). If its host says no, it's taken out and put back in the box, and why
      * said. */
-    fun send(chat: Chat, text: String, files: List<Picked>) {
+    fun send(chat: Chat, text: String, files: List<Picked>, keep: Boolean = true, failed: (() -> Unit)? = null) {
         val c = conns[chat.hostId]?.takeIf { it.state == "up" } ?: return
         chat.said.value = null
         Shares.used(chat)
@@ -908,7 +913,8 @@ object Mesh {
                         if (r.optString("op") == Op.ERROR) {
                             val e = Msg.Error.from(r)
                             chat.sent.remove(sent)
-                            Queue.addDraft(chat.hostId, chat.sid, text, files)
+                            if (keep) Queue.addDraft(chat.hostId, chat.sid, text, files)
+                            failed?.invoke()
                             chat.said.value = Wording.HeldSend.notSent(why = when (e.error) {
                                 Connection.NOT_CONNECTED, Connection.WENT -> Wording.HostStatus.connectionDropped
                                 else -> e.said?.ifBlank { null } ?: Wording.BotBrowser.hostSaidNo
@@ -1129,10 +1135,21 @@ private fun queued(o: JSONObject, type: String): Line? {
 /** The lines one record shows (none, for most). */
 private fun record(o: JSONObject, type: String, uuid: String?, out: MutableList<Line>, sidechain: Boolean) {
     run {
+        if (type == "system" && o.optString("subtype") == "compact_boundary") { // (where claude compacted it)
+            if (sidechain || !o.optBoolean("isSidechain")) out.add(Line("compact",
+                JSONObject().put("meta", o.optJSONObject("compactMetadata") ?: JSONObject()).toString(), uuid))
+            return
+        }
         if (type != "user" && type != "assistant") return
         if (o.optBoolean("isMeta") || (o.optBoolean("isSidechain") && !sidechain)) return
-        if (o.optBoolean("isCompactSummary")) {
-            out.add(Line("note", Wording.Compaction.compacted, uuid))
+        if (o.optBoolean("isCompactSummary")) { // (what it wrote for itself: under its mark)
+            val content = o.optJSONObject("message")?.opt("content")
+            val first = when (content) {
+                is String -> content
+                is JSONArray -> content.list().firstOrNull { it.optString("type") == "text" }?.optString("text")
+                else -> null
+            }.orEmpty()
+            out.add(Line("compactsum", first, uuid))
             return
         }
         val msg = o.optJSONObject("message") ?: return

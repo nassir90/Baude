@@ -19,7 +19,13 @@ class FixtureConnection(ctx: Context, host: Host, home: String = "/home/dev", pr
         val levels = JSONArray(listOf("low", "medium", "high", "xhigh", "max"))
         fun model(value: String, name: String, efforts: JSONArray?) = JSONObject().put("value", value).put("displayName", name)
             .put("resolvedModel", "claude-$value").apply { if (efforts != null) put("supportsEffort", true).put("supportedEffortLevels", efforts) }
-        val init = JSONObject().put("models", JSONArray(listOf(model("opus", "Opus 5.5", levels),
+        fun command(name: String, about: String, hint: String, builtin: Boolean) = JSONObject().put("name", name)
+            .put("description", about).put("argumentHint", hint).put("builtin", builtin)
+        val commands = JSONArray(listOf(command("debug", "Enable debug logging", "[issue]", true),
+            command("deep-research", "Fan-out web research", "", true), command("design", "Make a new Design artifact", "[what]", true),
+            command("clear", "Clear conversation", "", true), command("compact", "Compact conversation", "", true),
+            command("code-review", "Review the current diff", "", false)))
+        val init = JSONObject().put("commands", commands).put("models", JSONArray(listOf(model("opus", "Opus 5.5", levels),
             model("sonnet", "Sonnet 5.5", JSONArray(listOf("low", "medium", "high", "xhigh"))), model("claude-haiku-4-5", "Haiku 4.5", null))))
         info = Msg.Info(id = host.id, name = host.name, home = home, init = init)
     }

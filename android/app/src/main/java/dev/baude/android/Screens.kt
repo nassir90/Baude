@@ -60,8 +60,12 @@ import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.isCtrlPressed
 import androidx.compose.ui.input.key.isMetaPressed
-import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.isShiftPressed
 import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
@@ -80,7 +84,7 @@ import androidx.compose.ui.unit.dp
 @Composable
 fun ChatPage(chat: Chat, name: String, attach: Boolean = true, stop: (() -> Unit)? = null,
              foot: (@Composable () -> Unit)? = null, overBox: (@Composable () -> Unit)? = null, own: OwnRevert? = null,
-             sendTip: String? = null) {
+             sendTip: String? = null, openPage: (String) -> Unit = {}, open: (String, String) -> Unit = { _, _ -> }) {
     val c = LocalBaude.current
     val ctx = LocalContext.current
     val sid = chat.sid
@@ -114,7 +118,45 @@ fun ChatPage(chat: Chat, name: String, attach: Boolean = true, stop: (() -> Unit
     val canRevert = own?.can?.invoke() ?: (takes(at, "control") && chat.sender == null)
     val focus = remember { androidx.compose.ui.focus.FocusRequester() }
     var field by remember { mutableStateOf(androidx.compose.ui.text.input.TextFieldValue(text)) }
-    if (field.text != text) field = androidx.compose.ui.text.input.TextFieldValue(text, androidx.compose.ui.text.TextRange(text.length))
+    if (field.text != text) { // (put in from outside: its bullets made as typed ones are)
+        field = makeBullets(androidx.compose.ui.text.input.TextFieldValue(text, androidx.compose.ui.text.TextRange(text.length)))
+        if (field.text != text) text = field.text
+    }
+    val host = chat.sender == null // (Baude's own commands, the / and @ lists: a host's chat's)
+    val marks = remember(chat) { Marks() }
+    val composer = remember(chat) { ComposerState() }
+    val slashLit = remember(chat) { Lit() }
+    val mentionLit = remember(chat) { Lit() }
+    var marksVersion by remember(chat) { mutableStateOf(0) } // (a list left without the text changing)
+    marksVersion
+    val cwd = session?.cwd.orEmpty()
+    val hasAt = host && '@' in field.text
+    LaunchedEffect(hasAt, cwd, at) { if (hasAt) Catalogue.soon(at, cwd) }
+    val refs = if (hasAt) MentionList.items(chat) else emptyList()
+    val slash = if (host && !readOnly && marks.dismissed != field.text) SlashList.view(chat, field.text, field.selection.end, marks.typed, marks.typedIn) else null
+    LaunchedEffect(slash != null) { if (slash != null) SlashCommands.ask(chat) }
+    val mention = if (hasAt && slash == null) MentionList.word(field.text, marks.at, field.selection.end)
+        ?.takeIf { !SlashList.inCode(field.text, it.first) } else null
+    val found = mention?.let { MentionList.search(refs, it.second) }
+    val mentionShown = if (mention != null && found!!.first.isEmpty() && " " in mention.second) { marks.at = -1; null } else mention
+    val caretLine = field.text.substring(0, field.selection.end.coerceIn(0, field.text.length)).count { it == '\n' }
+    val atRange = mentionShown?.let { it.first until field.selection.end }
+    val look = remember(field.text, caretLine, atRange, refs.size, c) {
+        ComposerLook(caretLine, MentionList.known(refs), atRange, c.fg, Tokens.Color.reference, Tokens.Color.referenceTint,
+            Type.body.fontSize * Tokens.Markdown.h1.toFloat(), Type.body.fontSize * Tokens.Markdown.h2.toFloat(),
+            androidx.compose.ui.text.SpanStyle(fontFamily = CodeFont.family, fontSize = Tokens.Font.mono))
+    }
+    var layout by remember { mutableStateOf<androidx.compose.ui.text.TextLayoutResult?>(null) }
+    var fieldX by remember { mutableStateOf(0f) }
+    var boxX by remember { mutableStateOf(0f) }
+    var composerWidth by remember { mutableStateOf(0) }
+    fun apply(v: androidx.compose.ui.text.input.TextFieldValue) {
+        marks.edited(field.text, v.text)
+        field = v
+        text = v.text
+    }
+    fun forgetAt() { marks.at = -1; marksVersion++ }
+    fun dismissSlash() { marks.dismissed = field.text; marksVersion++ }
     fun cancelRevert() {
         val r = reverting ?: return
         if (r.asked) return // (asked of claude: its answer's waited for)
@@ -148,8 +190,21 @@ fun ChatPage(chat: Chat, name: String, attach: Boolean = true, stop: (() -> Unit
     }
     Mesh.tick.value
     val density = androidx.compose.ui.platform.LocalDensity.current
+    val openImage = remember(chat) { { key: String -> Viewer.openFrom(chat, key) } }
+    val findKey = Find.key(chat)
+    val finding = Find.open[findKey] == true && chat.sender == null
+    val findQuery = if (finding) Find.query[findKey].orEmpty() else ""
+    var findBarHeight by remember { mutableStateOf(0.dp) } // (what the bar covers at the top: the match scrolled below it)
+    val matches = remember(findQuery, chat.lines.size) { findMatches(chat, findQuery) }
+    val findAt = (Find.at[findKey] ?: 0).coerceIn(0, maxOf(0, matches.size - 1))
+    LaunchedEffect(findQuery, findAt, matches.size) { // (stepped to: scrolled into view)
+        matches.getOrNull(findAt)?.let { list.animateScrollToItem(itemIndex(chat, it.lineIndex), -with(density) { findBarHeight.toPx().toInt() }) }
+    }
+    androidx.compose.runtime.CompositionLocalProvider(LocalImageOpener provides openImage,
+        LocalImageItem provides { key: String -> Viewer.item(chat, key) }, LocalFind provides findQuery,
+        LocalFindCurrent provides matches.getOrNull(findAt)?.line) {
     Column(Modifier.fillMaxSize().inside(c)) {
-        BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
+        BoxWithConstraints(Modifier.weight(1f).fillMaxWidth().onGloballyPositioned { boxX = it.positionInRoot().x }) {
         val side = if (Settings.fullWidth.value) 0.dp else (maxWidth - chatColumn(maxWidth)) / 2
         LazyColumn(Modifier.fillMaxSize().onSizeChanged {
             CodeBlocks.maxHeight = CodeBlocks.forChat(with(density) { it.height.toDp() })
@@ -163,6 +218,7 @@ fun ChatPage(chat: Chat, name: String, attach: Boolean = true, stop: (() -> Unit
             drawn(shown, chat.calls, asking = { call -> chat.asks.firstOrNull { it.toolUseId == call.id } },
                 answer = { AskButtons(chat, it, offered, askName) }, view = { chat.showAgent.value = it.id }) { line ->
                 val uuid = line.uuid
+                androidx.compose.runtime.CompositionLocalProvider(LocalFindLine provides line) {
                 Said(line, uuid?.let { chat.senders[it] }.takeIf { line.kind == "you" },
                     if (canRevert && line.kind == "you" && uuid != null) RevertOffer(revealed == uuid, { revealed = uuid }) {
                         revealed = null
@@ -170,6 +226,7 @@ fun ChatPage(chat: Chat, name: String, attach: Boolean = true, stop: (() -> Unit
                         reverting = Reverting(uuid, reverting?.draft ?: text)
                         text = line.text
                     } else null)
+                }
             }
             if (taken == null) items(chat.sent.flatMap { it.lines }) { line -> Said(line) }
             if (taken == null && chat.streamingThought.value.isNotBlank()) item {
@@ -182,6 +239,34 @@ fun ChatPage(chat: Chat, name: String, attach: Boolean = true, stop: (() -> Unit
             val held = session?.held.orEmpty().filter { it.id.orEmpty() !in chat.holding }
             items(held, key = { "held:" + it.id.orEmpty() }) { h -> Held(chat, h, working) }
             items(chat.queued.toList(), key = { "queued:" + System.identityHashCode(it) }) { QueuedRow(chat, it, isWorking(chat)) }
+            if (session?.cut != null && chat.sender == null) item(key = "cut-short") { CutShortLine(chat) }
+        }
+        if (finding) FindBar(chat, matches, Modifier.align(Alignment.TopCenter).onSizeChanged { findBarHeight = with(density) { it.height.toDp() } })
+        // the / list or the @ list over the box: its left side on the / or @ that started it, a gap above the box
+        val listWidth = if (composerWidth > 0) minOf(Tokens.Picklist.width, with(density) { composerWidth.toDp() } - 10.dp) else Tokens.Picklist.width
+        fun left(at: Int): androidx.compose.ui.unit.Dp {
+            val x = layout?.let { l -> if (at in 0..l.layoutInput.text.length) l.getHorizontalPosition(look.mapped(at).coerceAtMost(l.layoutInput.text.length), true) else 0f } ?: 0f
+            return with(density) { (x + fieldX - boxX).toDp() }.coerceIn(0.dp, (maxWidth - listWidth).coerceAtLeast(0.dp))
+        }
+        if (slash != null) {
+            val keys = slash.matches.map { it.optString("name") }
+            PickList(slash.matches.map { SlashList.row(it) }, slashLit.at(keys, slash.query),
+                if (keys.isNotEmpty()) Wording.Meta.found(n = keys.size) else Wording.Meta.nothingFound, false, listWidth, true,
+                Modifier.align(Alignment.BottomStart).padding(start = left(slash.start), bottom = Tokens.Picklist.gap)) { i ->
+                apply(SlashList.accept(field, slash, keys[i]))
+                focus.requestFocus()
+            }
+        } else if (mentionShown != null) {
+            val (shown, matched) = found!!
+            val keys = shown.map { it.surface }
+            PickList(shown.map { MentionList.row(it) }, mentionLit.at(keys, mentionShown.second),
+                if (matched > 0) Wording.Meta.found(n = matched) else Wording.Meta.nothingFound, Catalogue.busy(at, cwd), listWidth, false,
+                Modifier.align(Alignment.BottomStart).padding(start = left(mentionShown.first), bottom = Tokens.Picklist.gap)) { i ->
+                val from = marks.at
+                forgetAt()
+                apply(MentionList.accept(field, from, keys[i]))
+                focus.requestFocus()
+            }
         }
         }
         chat.said.value?.let { Text(it, style = Type.caption, color = c.dim, modifier = Modifier.padding(horizontal = Gap.chatH)) }
@@ -190,67 +275,161 @@ fun ChatPage(chat: Chat, name: String, attach: Boolean = true, stop: (() -> Unit
         overBox?.invoke()
         // the composer: rounded 12, a ring of the rule, its files over what's written, + and send/stop beside it
         if (!readOnly) Column(
-            Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 8.dp)
+            Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 8.dp).onSizeChanged { composerWidth = it.width }
                 .clip(RoundedCornerShape(Gap.composerRadius)).background(c.inside)
                 .border(1.dp, c.rule, RoundedCornerShape(Gap.composerRadius)).padding(6.dp),
         ) {
             if (files.isNotEmpty()) Row(Modifier.padding(bottom = 6.dp).horizontalScroll(rememberScrollState()),
                 horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                for (f in files.toList()) Row(
-                    Modifier.clip(RoundedCornerShape(8.dp)).background(c.raised).padding(start = 8.dp, end = 2.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(f.name, style = Type.caption, color = c.fg, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.widthIn(max = 140.dp))
-                    IconButton(Adwaita.WindowClose, Wording.Common.remove) { files.remove(f) }
-                }
+                for (f in files.toList()) Attached(f, { files.remove(f) }) { openImage("picked:${System.identityHashCode(f)}") }
             }
             val line = with(LocalDensity.current) { Tokens.Font.bodyLine.toDp() }
-            val send = {
-                val r = reverting
-                if (r != null && own != null) {
-                    own.commit(r, text)
-                    text = ""
-                } else if (r != null) commitRevert(chat, r, text, files.toList()) { ok -> if (ok) text = "" }
-                else {
-                    Queue.submit(chat, isWorking(chat), text, files.toList())
-                    text = ""
-                    files.clear()
-                }
-            }
             val busy = isWorking(chat)
             val conn = Mesh.conn(chat.hostId)
             val gone = chat.sender == null && (conn?.state != "up" || Stopping.line(chat.hostId) != null)
+            val ready = !chat.busy.value && chat.preparing.value == 0 && !gone && !chat.chrome.missing.value &&
+                !(chat.sender == null && exhausted(chat)) && reverting?.asked != true
+            val sendable = ready || (chat.sender == null && isLocal(text))
+            val send = {
+                val typed = text.trim()
+                val local = host && localCommand(chat, typed, busy, { text = ""; marks.at = -1 }, openPage, open)
+                if (!local) {
+                    val r = reverting
+                    val markdown = toMarkdown(text)
+                    if (r != null && own != null) {
+                        own.commit(r, markdown)
+                        text = ""
+                    } else if (r != null) commitRevert(chat, r, markdown, files.toList()) { ok -> if (ok) text = "" }
+                    else {
+                        Queue.submit(chat, busy, markdown, files.toList())
+                        text = ""
+                        files.clear()
+                    }
+                }
+            }
+            fun key(e: androidx.compose.ui.input.key.KeyEvent): Boolean { // (the lists' keys, the box's, then Ctrl+Enter sends)
+                if (e.type != KeyEventType.KeyDown) return false
+                val sends = e.key == Key.Enter && (e.isCtrlPressed || e.isMetaPressed)
+                val steps = mapOf(Key.DirectionUp to -1, Key.DirectionDown to 1, Key.PageUp to -10, Key.PageDown to 10)
+                val sideways = e.key == Key.DirectionLeft || e.key == Key.DirectionRight
+                if (slash != null) {
+                    val names = slash.matches.map { it.optString("name") }
+                    when {
+                        e.isShiftPressed && (e.key in steps || sideways) -> { dismissSlash(); return false }
+                        e.key in steps -> { slashLit.move(names, slash.query, steps.getValue(e.key)); return true }
+                        sends -> dismissSlash()
+                        e.key == Key.Tab || e.key == Key.Enter -> if (names.isNotEmpty()) {
+                            apply(SlashList.accept(field, slash, names[slashLit.at(names, slash.query)]))
+                            return true
+                        }
+                        e.key == Key.Escape -> { dismissSlash(); return names.isNotEmpty() }
+                    }
+                } else if (mentionShown != null) {
+                    val shown = found!!.first
+                    val names = shown.map { it.surface }
+                    when {
+                        e.key == Key.Enter && (sends || e.isShiftPressed || !mentionLit.moved && " " in mentionShown.second.trim()) -> forgetAt()
+                        e.key == Key.Escape -> { forgetAt(); return shown.isNotEmpty() }
+                        e.isShiftPressed && (e.key in steps || sideways) -> { forgetAt(); return false }
+                        e.key in steps -> { mentionLit.move(names, mentionShown.second, steps.getValue(e.key)); return true }
+                        e.key == Key.Tab || e.key == Key.Enter -> if (names.isNotEmpty()) {
+                            val from = marks.at
+                            val i = mentionLit.at(names, mentionShown.second)
+                            forgetAt()
+                            apply(MentionList.accept(field, from, names[i]))
+                            return true
+                        }
+                    }
+                }
+                composerKey(e, field, composer)?.let { apply(it); return true }
+                if (sends && (text.isNotBlank() || files.isNotEmpty()) && sendable) send() // (while a turn runs it queues)
+                return sends
+            }
             Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 Box(Modifier.weight(1f).heightIn(min = line * 2 + 14.dp, max = line * 9 + 14.dp)
-                    .padding(horizontal = 6.dp, vertical = 7.dp)) {
-                    BasicTextField(field, { field = it; text = it.text }, textStyle = Type.body.copy(color = c.fg),
-                        cursorBrush = SolidColor(c.accentBg), modifier = Modifier.fillMaxWidth()
-                            .focusRequester(focus)
-                            .onPreviewKeyEvent { e -> // (Ctrl+Enter sends; while a turn runs it queues)
-                                val go = e.type == KeyEventType.KeyDown && e.key == Key.Enter && (e.isCtrlPressed || e.isMetaPressed)
-                                if (go && (text.isNotBlank() || files.isNotEmpty()) && !chat.busy.value && chat.preparing.value == 0 && !gone) send()
-                                go
-                            }.onKeyEvent {
-                                if (it.key == androidx.compose.ui.input.key.Key.Escape && reverting != null) {
-                                    if (it.type == androidx.compose.ui.input.key.KeyEventType.KeyUp) cancelRevert()
-                                    true
-                                } else false
-                            })
+                    .padding(vertical = 7.dp)) {
+                    Column(Modifier.verticalScroll(rememberScrollState())) {
+                        BasicTextField(field, { v -> // (made over as the desktop's box is: bullets, lists, wraps; a soft keyboard's Enter taken by a list)
+                            val names = slash?.matches?.map { it.optString("name") }.orEmpty()
+                            when {
+                                isNewline(field, v) && names.isNotEmpty() ->
+                                    apply(SlashList.accept(field, slash!!, names[slashLit.at(names, slash.query)]))
+                                isNewline(field, v) && mentionShown != null && found!!.first.isNotEmpty() &&
+                                    (mentionLit.moved || " " !in mentionShown.second.trim()) -> {
+                                    val shown = found.first.map { it.surface }
+                                    val from = marks.at
+                                    val i = mentionLit.at(shown, mentionShown.second)
+                                    forgetAt()
+                                    apply(MentionList.accept(field, from, shown[i]))
+                                }
+                                else -> {
+                                    if (isNewline(field, v) && mentionShown != null) forgetAt()
+                                    apply(composerEdit(field, v, composer))
+                                }
+                            }
+                        }, textStyle = Type.body.copy(color = c.fg), cursorBrush = SolidColor(c.accentBg),
+                            visualTransformation = look, onTextLayout = { layout = it },
+                            modifier = Modifier.fillMaxWidth().heightIn(min = line * 2)
+                                .drawBehind { look.drawBlocks(this, layout, c.fg.copy(alpha = c.fg.alpha * 0.07f), Tokens.Radius.code, 2.dp) }
+                                .padding(horizontal = 6.dp)
+                                .onGloballyPositioned { fieldX = it.positionInRoot().x }
+                                .focusRequester(focus)
+                                .onPreviewKeyEvent { e -> key(e) }.onKeyEvent {
+                                    if (it.key == androidx.compose.ui.input.key.Key.Escape && reverting != null) {
+                                        if (it.type == androidx.compose.ui.input.key.KeyEventType.KeyUp) cancelRevert()
+                                        true
+                                    } else false
+                                })
+                    }
                 }
                 if (attach) IconButton(Adwaita.ListAdd, Wording.Attachments.attachTip) { pick.launch(arrayOf("*/*")) }
                 if (busy && stop != null && text.isBlank() && files.isEmpty())
                     IconButton(Adwaita.MediaPlaybackStop, Wording.Composer.stop, tint = c.destructive,
                         background = c.destructive.copy(alpha = 0.2f), onClick = stop)
-                else {
-                    val ready = !chat.busy.value && chat.preparing.value == 0 && !gone && !chat.chrome.missing.value &&
-                        !(chat.sender == null && exhausted(chat)) && reverting?.asked != true
-                    IconButton(Adwaita.Return, Wording.Common.send, enabled = ready, tint = c.fg,
+                else
+                    IconButton(Adwaita.Return, Wording.Common.send, enabled = sendable, tint = c.fg,
                         background = c.fg.copy(alpha = 0.10f), tip = sendTip) { if (text.isNotBlank() || files.isNotEmpty()) send() }
-                }
             }
         }
         foot?.invoke()
+    }
+    }
+}
+
+/** A file attached in the box (attachment_widget): a picture a square thumbnail, centre-cropped, a tap on it opens the
+ * viewer; any other a logo and its name (the middle left out past 22 characters); and a small × to take it off. */
+@Composable
+private fun Attached(f: Picked, remove: () -> Unit, view: () -> Unit) {
+    val c = LocalBaude.current
+    val px = with(LocalDensity.current) { Tokens.Composer.thumb.toPx() }.toInt()
+    val key = "picked:" + System.identityHashCode(f)
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+        if (f.mime.startsWith("image/")) {
+            val bmp by androidx.compose.runtime.produceState<androidx.compose.ui.graphics.ImageBitmap?>(thumbnails.get(key), f) {
+                if (value != null) return@produceState
+                value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+                    try {
+                        val o = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                        android.graphics.BitmapFactory.decodeByteArray(f.bytes, 0, f.bytes.size, o)
+                        var n = 1
+                        while (minOf(o.outWidth, o.outHeight) / (n * 2) >= px) n *= 2
+                        android.graphics.BitmapFactory.decodeByteArray(f.bytes, 0, f.bytes.size,
+                            android.graphics.BitmapFactory.Options().apply { inSampleSize = n })?.let {
+                            it.asImageBitmap()
+                        }?.also { thumbnails.put(key, it) }
+                    } catch (_: Exception) { null }
+                }
+            }
+            bmp?.let {
+                androidx.compose.foundation.Image(it, f.name, contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                    modifier = Modifier.size(Tokens.Composer.thumb).clip(RoundedCornerShape(6.dp)).clickable { view() })
+            } ?: Box(Modifier.size(Tokens.Composer.thumb))
+        } else {
+            androidx.compose.material3.Icon(if (f.mime == "application/pdf") Adwaita.XOfficeDocument else Adwaita.TextXGeneric, null,
+                tint = c.fg, modifier = Modifier.size(16.dp.icon))
+            Text(if (f.name.length > 22) f.name.take(10) + "…" + f.name.takeLast(11) else f.name, style = Type.body, color = c.fg, maxLines = 1)
+        }
+        IconButton(Adwaita.WindowClose, Wording.Common.remove, onClick = remove)
     }
 }
 
@@ -312,7 +491,7 @@ fun AskButtons(chat: Chat, ask: Ask, alwaysOffered: Boolean, name: String = "Cla
     val c = LocalBaude.current
     val questions = ask.input.optJSONArray("questions")
     if (ask.tool == "AskUserQuestion" && questions != null) {
-        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Questions(questions, answer = { Mesh.answer(chat, ask, allow = true, answers = it) },
                 skip = { Mesh.answer(chat, ask, allow = false) })
         }
@@ -344,12 +523,17 @@ fun Questions(questions: org.json.JSONArray, answer: (org.json.JSONObject) -> Un
             put(q.optString("question"), all.joinToString(", "))
         }
     }
+    fun ready() = qs.indices.all { picked[it].isNotEmpty() || !other[it].isNullOrBlank() }
     qs.forEachIndexed { i, q ->
         val multi = q.optBoolean("multiSelect")
-        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
             val head = q.optString("header")
-            if (head.isNotBlank()) Text(head, style = Type.caption, color = c.dim)
-            Text(q.optString("question"), style = Type.bold, color = c.fg)
+            Text(androidx.compose.ui.text.buildAnnotatedString { // (the header and the question, one wrapping line)
+                if (head.isNotBlank()) {
+                    withStyle(androidx.compose.ui.text.SpanStyle(color = c.fg.copy(alpha = c.fg.alpha * 0.6f))) { append("$head  ") }
+                }
+                withStyle(androidx.compose.ui.text.SpanStyle(fontWeight = Tokens.Font.semibold)) { append(q.optString("question")) }
+            }, style = Type.body, color = c.fg)
             val options = q.optJSONArray("options")
             for (j in 0 until (options?.length() ?: 0)) {
                 val o = options!!.opt(j)
@@ -365,12 +549,11 @@ fun Questions(questions: org.json.JSONArray, answer: (org.json.JSONObject) -> Un
                 other[i] = if (other[i] != null) null else ""
                 if (!multi && other[i] != null) picked[i] = emptySet()
             }
-            other[i]?.let { Field(it, { v -> other[i] = v }, Wording.Asks.ownAnswer) }
+            other[i]?.let { NameField(it, { v -> other[i] = v }, Wording.Asks.ownAnswer, { if (ready()) answer(answers()) }) }
         }
     }
     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-        val ready = qs.indices.all { picked[it].isNotEmpty() || !other[it].isNullOrBlank() }
-        Button(Wording.Asks.answer, suggested = ready) { if (ready) answer(answers()) }
+        Button(Wording.Asks.answer, suggested = true, enabled = ready()) { if (ready()) answer(answers()) }
         Button(Wording.Asks.skip, onClick = skip)
     }
 }
@@ -392,7 +575,7 @@ private fun Choice(on: Boolean, multi: Boolean, label: String, about: String, to
         Spacer(Modifier.width(8.dp))
         Column {
             Text(label, style = Type.body, color = c.fg)
-            if (about.isNotBlank()) Text(about, style = Type.caption, color = c.dim)
+            if (about.isNotBlank()) Text(about, style = Type.body, color = c.dim)
         }
     }
 }
@@ -450,6 +633,8 @@ private fun SaidLine(line: Line, revert: RevertOffer? = null) {
         "tool" -> Text(line.text, style = Type.caption, color = c.dim, maxLines = 2, overflow = TextOverflow.Ellipsis,
             modifier = Modifier.fillMaxWidth().card(c))
         "tasknote" -> TaskNoteLine(line.text)
+        "compact" -> CompactMark(line)
+        "compactsum" -> LoneSummary(line)
         "rows" -> MetaRows(line.text)
         "metacall" -> MetaCallLine(line.text)
         "action" -> MetaAction(line.text)

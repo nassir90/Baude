@@ -351,23 +351,23 @@ fun MarkdownView(text: String, color: Color = LocalBaude.current.fg, under: Colo
     val markerWidth = remember(density) { with(density) { measure.measure("00", Type.body.copy(fontWeight = FontWeight.Bold)).size.width.toDp() } }
     Column(verticalArrangement = Arrangement.spacedBy(Tokens.Markdown.block)) {
         for (b in blocks) when (b) {
-            is Block.Para -> Text(rememberInline(b.lines.joinToString("\n")), style = Type.body, color = color,
+            is Block.Para -> Text(rememberInline(b.lines.joinToString("\n")).found(), style = Type.body, color = color,
                 inlineContent = RefIcons.inline)
-            is Block.Heading -> Text(rememberInline(b.text), color = color, inlineContent = RefIcons.inline, style = Type.body.copy(
+            is Block.Heading -> Text(rememberInline(b.text).found(), color = color, inlineContent = RefIcons.inline, style = Type.body.copy(
                 fontSize = Type.body.fontSize * when (b.level) { 1 -> Tokens.Markdown.h1.toFloat(); 2 -> Tokens.Markdown.h2.toFloat(); else -> 1f },
                 fontWeight = FontWeight.Bold))
             is Block.Item -> Row(Modifier.padding(start = Tokens.Markdown.itemStart + Tokens.Markdown.indentStep * b.depth),
                 horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text(b.marker, style = Type.body.copy(fontWeight = FontWeight.Bold), color = color,
                     textAlign = TextAlign.End, modifier = Modifier.widthIn(min = markerWidth).alpha(Tokens.Markdown.markerOpacity.toFloat()))
-                Text(rememberInline(b.text), style = Type.body, color = color, modifier = Modifier.weight(1f),
+                Text(rememberInline(b.text).found(), style = Type.body, color = color, modifier = Modifier.weight(1f),
                     inlineContent = RefIcons.inline)
             }
             is Block.Quote -> Row(Modifier.height(IntrinsicSize.Min)) {
                 Box(Modifier.width(Tokens.Markdown.quoteRule).fillMaxHeight()
                     .background(c.fg.copy(alpha = c.fg.alpha * Tokens.Markdown.quoteRuleOpacity.toFloat())))
                 Spacer(Modifier.width(Tokens.Markdown.quotePad - Tokens.Markdown.quoteRule))
-                Text(rememberInline(b.text), style = Type.body, color = color, inlineContent = RefIcons.inline,
+                Text(rememberInline(b.text).found(), style = Type.body, color = color, inlineContent = RefIcons.inline,
                     modifier = Modifier.weight(1f).alpha(Tokens.Markdown.quoteOpacity.toFloat()))
             }
             Block.Rule -> Box(Modifier.padding(vertical = Tokens.Markdown.ruleGap).fillMaxWidth().height(1.dp).background(c.rule))

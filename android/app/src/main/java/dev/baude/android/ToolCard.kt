@@ -132,7 +132,7 @@ fun ToolCard(call: Call, ask: Ask?, answer: @Composable (Ask) -> Unit, view: ((C
                     }
                 }
             }
-            if (call.images.isNotEmpty()) Media(call.images.toList())
+            if (call.images.isNotEmpty()) Media(call.id, call.images.toList())
             if (ask != null) Box(Modifier.padding(top = 8.dp)) { answer(ask) }
         }
     }
@@ -184,10 +184,10 @@ private fun sizeOf(data: String): IntArray = sizes.get(data) ?: run {
 /** The pictures a call returned, right under its line (6dp below), each as it is up to 480dp on its long side: its
  * place kept from its header before it's decoded (once, off the main thread, to the size shown). */
 @Composable
-private fun Media(pictures: List<String>) {
+private fun Media(id: String, pictures: List<String>) {
     val density = androidx.compose.ui.platform.LocalDensity.current.density
     Column(Modifier.fillMaxWidth().padding(top = 6.dp, bottom = 2.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        for (data in pictures) {
+        for ((index, data) in pictures.withIndex()) {
             val (w, h) = sizeOf(data)
             val got by produceState<Pic?>(pics.get(data), data) {
                 if (value != null) return@produceState
@@ -204,7 +204,7 @@ private fun Media(pictures: List<String>) {
             val bitmap = got?.bmp
             if (w > 0 && h > 0) {
                 val k = minOf(1f, 480f / maxOf(w, h))
-                Box(Modifier.widthIn(max = (w * k).dp).aspectRatio(w / h.toFloat()).clip(RoundedCornerShape(6.dp))) {
+                ImageTouch("call:$id:$index", Modifier.widthIn(max = (w * k).dp).aspectRatio(w / h.toFloat()).clip(RoundedCornerShape(6.dp))) {
                     if (bitmap != null) Image(bitmap, null, Modifier.fillMaxSize())
                 }
             }

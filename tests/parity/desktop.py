@@ -229,6 +229,21 @@ def open_chat(app, sc):
         win.composer_box.gate("host", True)
     if sc.get("draft"):
         win.input.get_buffer().set_text(sc["draft"])
+    if sc.get("cut"):
+        win.cut_pending = time.time()
+        win.show_cut(win.cut_pending)
+    if sc.get("typed"):  # (a character at a time, as typing: the / or @ that starts a list is the one just typed)
+        if sc["typed"].startswith("/"):
+            T.wait_for(lambda: len(win.completer.commands) > len(baude.LOCAL_COMMANDS), "commands")
+        buf = win.input.get_buffer()
+        buf.set_text("")
+        for ch in sc["typed"]:
+            buf.insert_at_cursor(ch)
+        T.pump(0.6)
+    if sc.get("open"):
+        for m in T.find(win, baude.widgets.CompactMark):
+            if m.fold is not None:
+                m.fold.set_expanded(True)
     vadj = win.scroller.get_vadjustment()
     vadj.set_value(vadj.get_upper())  # (at its end, as a chat opens)
     T.pump(0.4)
@@ -238,6 +253,12 @@ def open_chat(app, sc):
         win.pointer = (at.x, at.y)
         win.open_ref(sc["ref"], label)
         T.pump(0.4)
+    if sc.get("lightbox"):  # (the first picture of the chat, opened large)
+        baude.widgets.Lightbox.FLY_MS = 0
+        w = next(w for w in baude.widgets.walk(win.transcript)
+                 if getattr(w, "image_actions", None) is not None and not isinstance(w, Gtk.Overlay))
+        w.image_actions.view()
+        T.pump(0.6)
     return win
 
 

@@ -1,0 +1,13 @@
+{
+  "description": "The / list over the box you write in: Baude's own commands and what they say.",
+  "messages": {
+    "new": "Start a fresh session",
+    "cd": "Move the conversation to another folder",
+    "btw": "Ask a side question: answered from this conversation, without adding to it",
+    "login": "Sign in to your Anthropic account (claude auth login)",
+    "logout": "Sign out of your Anthropic account (claude auth logout)",
+    "also": "also {$names}",
+    "cd_elsewhere": "/cd is this machine's: a session on {$host} stays in its folder there",
+    "cd_busy": "wait for the current turn to finish (or Stop it) before changing folder"
+  }
+}

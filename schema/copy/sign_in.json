@@ -1,0 +1,12 @@
+{
+  "description": "Signing in to Claude from a chat: the cards and the notes for another machine's chat.",
+  "messages": {
+    "not_signed_in": "Claude Code isn't signed in",
+    "sign_in": "Sign in",
+    "signing_in": "Signing in to Claude…",
+    "starting": "Starting the sign-in…",
+    "code_hint": "If the page shows a code, paste it here",
+    "signs_in_there": "{$host}'s claude signs in there: run claude auth login on it",
+    "not_signed_in_there": "{$host}'s claude isn't signed in: run claude auth login on it"
+  }
+}

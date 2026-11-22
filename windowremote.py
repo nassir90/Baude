@@ -38,7 +38,7 @@ from startup import trace  # noqa: E402
 from toolcards import (  # noqa: E402
     QuestionForm, StatusSlot, ToolCard, ended_by_stop, summarize_tool, tool_display, tool_input_view,
 )
-from chatinput import LoginCard, _AUTH_ESCAPES, needs_login  # noqa: E402
+from chatinput import LoginCard, _AUTH_ESCAPES  # noqa: E402
 from sessionlist import (  # noqa: E402
     HERE_HOST, THIS_MACHINE, _HOST_APART, _LOCAL_SERVER, cached_session_info, chat_group, chat_groups, host_apart,
     host_key, is_desktop, local_host, made_groups, main_folder, network, on_main, remote_info, remote_name,
@@ -1046,12 +1046,12 @@ class WindowRemote:
             if (gone := msg.get("gone")) and self.remote is not None and not self.remote.mine:  # (no /cd there)
                 shown = f"{gone.get('why')}: start a new chat " + (f"in {gone['folder']} " if gone.get("folder") else "") \
                     + f"on {remote_name(self.remote)} to carry on"
-            if (msg.get("result") or "").strip().removeprefix("⚠").strip() != said:
+            if (msg.get("result") or "").strip().removeprefix("⚠").strip() != said and self.login_ask(msg) is None:
                 self.note(f"turn ended with error: {shown or msg.get('subtype')}")
             if meta.OVERFLOW_RE.search(msg.get("result") or ""):
                 self.outgrown = True
-            if needs_login(msg.get("result")):
-                self.login_prompt(msg["result"])
+            if (why := self.login_ask(msg)) is not None and not getattr(self, "login_asked", False):
+                self.login_prompt(why)
         self.end_turn()
         self.tell_desktop(self.session_id, turn_said(msg))
         self.update_status(wording.say("status_bar.last_turn", turns=msg.get("num_turns", 0),
@@ -1063,6 +1063,7 @@ class WindowRemote:
         what waited for its end done."""
         proc = self.proc if proc is None else proc
         self.set_busy(False)
+        self.login_asked, self.turn_sent = False, None  # (login_prompt's, send_text's: the next turn's own)
         self.keep_chat_model()
         if getattr(self, "restart_after_turn", False):  # (signed in while it ran: on the new sign-in now)
             self.restart_after_turn = False
@@ -1133,24 +1134,47 @@ class WindowRemote:
                           if name == "AskUserQuestion"
                           else wording.say("asks.waiting_for_tool", tool=name or wording.say("asks.a_tool")))
 
-    def sign_in(self, args=()):
-        """/login (or Sign in on a turn that failed for want of it): claude auth login, as a card (LoginCard)."""
-        self.add(LoginCard(self, args))
+    def sign_in(self, args=(), ask=None):
+        """/login (or a turn that failed for want of it: ask, its error): claude auth login on the machine the chat runs
+        on, as a card (LoginCard): this one's here; another's by its host process there."""
+        elsewhere = self.remote is not None and not self.remote.local
+        self.add(LoginCard(self, args, where=self.remote.reach_where() if elsewhere else None,
+                           host=remote_name(self.remote) if elsewhere else None, ask=ask,
+                           retry=getattr(self, "turn_sent", None) if ask is not None else None))
         self.stick_bottom = True
 
-    def signed_in(self):
-        """Signed in afresh: the chat's claude started again on it (after the turn, if one's running)."""
+    def at_chat(self, chat):
+        """Whether chat (a sign-in card's, its host and session) is the one open."""
+        return chat == (self.remote, self.session_id)
+
+    def signed_in(self, chat=None):
+        """Signed in afresh: the chat's claude started again on it (after the turn, if one's running). chat: the one
+        a sign-in card was made in, if another's open now: its host stops its claude, to start again on its next
+        message."""
+        if chat is not None and not self.at_chat(chat):
+            if chat[0] is not None and chat[1]:
+                chat[0].request({"op": "stop", "session": chat[1], "restart": True})
+            return
         if self.busy:
             self.restart_after_turn = True
         else:
             self.restart_claude()
 
     def restart_claude(self):
-        """The chat's claude started again (signed in or out since): Baude's own, here (restart_proc); this machine's
-        host process's, stopped there, so its next message starts it again, as it's signed in now."""
-        if self.remote is not None and self.remote.mine and self.session_id:
+        """The chat's claude started again (signed in or out since): Baude's own, here (restart_proc); a host process's
+        (this machine's, or the one the chat runs on), stopped there, so its next message starts it again, as it's
+        signed in now."""
+        if self.remote is not None and self.session_id:
             self.remote.request({"op": "stop", "session": self.session_id, "restart": True})
         self.restart_proc(resume=True)
+
+    def send_again(self, sent):
+        """A sign-in card's Send again: what a turn that failed for want of signing in sent (its text and its
+        attachments, and no others), sent again, unless a turn's going or the box can't send. Whether it was."""
+        if self.busy or self.composer_box.gates or self.live_elsewhere():
+            return False
+        self.send_text(sent[0], again=sent[1])
+        return True
 
     def sign_out(self):
         """/logout: claude auth logout, said in the chat; the chat's claude started again (signed out, as it is)."""
@@ -1169,20 +1193,10 @@ class WindowRemote:
         threading.Thread(target=run, daemon=True).start()
 
     def login_prompt(self, why):
-        """A turn that failed for want of signing in: said, with Sign in (sign_in); another machine's: where to."""
-        if self.remote is not None and not self.remote.local:
-            self.note(wording.say("sign_in.not_signed_in_there", host=remote_name(self.remote)))
-            return
-        card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
-        card.add_css_class("perm-card")
-        card.append(sel_label(f"<b>{html.escape(wording.say('sign_in.not_signed_in'))}</b>  <span alpha='60%'>"
-                              f"{html.escape(why[:200])}</span>"))
-        btn = Gtk.Button(label=wording.say("sign_in.sign_in"), halign=Gtk.Align.START)
-        btn.add_css_class("suggested-action")
-        btn.connect("clicked", lambda *_: (card.get_parent() and card.get_parent().remove(card), self.sign_in()))
-        card.append(btn)
-        self.add(card)
-        self.stick_bottom = True
+        """A turn that failed for want of signing in (why: its error): said in a card in place of the error, with Sign
+        in, on whichever machine the chat runs on (sign_in); once a turn."""
+        self.login_asked = True
+        self.sign_in(ask=why)
 
     def permission_card(self, rid, name, inp, tool_use_id):
         """Asks whether to allow a call: in the call's own card, when it's in the chat (ToolCard.ask); else (no card for

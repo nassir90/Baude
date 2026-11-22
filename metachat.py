@@ -30,6 +30,7 @@ from meta import (  # noqa: E402
 from metaagent import SETUP_TOOLS  # noqa: E402
 from metalook import RefCompleter, install_css  # noqa: E402
 from metacards import MetaCards  # noqa: E402
+from chatinput import LoginCard  # noqa: E402
 from metatools import MetaTools  # noqa: E402
 
 
@@ -52,6 +53,7 @@ class MetaChat(MetaCards, MetaTools, Gtk.Box):
         theming.watch_settings(settings_changed)
         CHATS.add(self)
         self.win, self.ask, self.agent = win, None, None
+        self.logins, self.signed_in_after = {}, False  # (a failed reply's sign-in card, by the reply; signed in mid-turn)
         self.live_widget, self.asking = None, []  # (the reply coming; the reads it asks to make)
         self.reverting = None  # (a message of yours being reverted, not sent yet: {msg, draft}: revert_to)
         self.lit = {}  # (what highlight_ asked for, by kind: {kind: {key, …}}; gone with the next message)
@@ -473,6 +475,34 @@ class MetaChat(MetaCards, MetaTools, Gtk.Box):
         for ms in (60, 300):  # (and again once what's tall, a changelog, a list of rows, is laid out)
             GLib.timeout_add(ms, self._to_bottom)
 
+    def login_card(self, m):
+        """A reply that failed for want of signing in, as LoginCard: Sign in, on this machine's claude, and Send again
+        (what it was asked), kept as it is across the conversation's being drawn again."""
+        card = self.logins.get(id(m))
+        if card is None:
+            said = self.messages()
+            asked = next((u["text"] for u in reversed(said[:said.index(m)]) if u["role"] == "user"), None)
+            card = self.logins[id(m)] = LoginCard(self, ask=m.get("text"), retry=(asked, []) if asked else None)
+        if card.get_parent() is not None:
+            card.get_parent().remove(card)
+        return card
+
+    def signed_in(self):
+        """A LoginCard's: signed in afresh, its session started again on it (after its turn, if one's running)."""
+        if self.ask is not None:
+            self.signed_in_after = True
+        else:
+            self.close_agent()
+
+    def send_again(self, sent):
+        """A LoginCard's Send again: what the failed reply was asked, asked again, unless a turn's going. Whether it was."""
+        buf = self.composer.get_buffer()
+        if self.ask is not None or self.exhausted.on or buf.get_char_count():
+            return False
+        buf.set_text(sent[0])
+        self.submit()
+        return True
+
     def _to_bottom(self):
         if getattr(self.scroll, "held", False):
             return False  # (put back where it was read to: panels.hold_place)
@@ -528,6 +558,9 @@ class MetaChat(MetaCards, MetaTools, Gtk.Box):
                         self.add_shown(reply, it.get("shown") or ())
                 elif it["kind"] == "tool" and self.call_hunks(it):
                     reply.append(self.tool_card(it, controls=False))
+            if m.get("login"):
+                reply.append(self.login_card(m))
+                return reply
             reply.prose = label(m.get("text") or "", css=("error",), select=True)
             reply.append(reply.prose)
             return reply

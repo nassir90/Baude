@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "login's last answer: claude auth login ended.",
+  "properties": {
+    "op": {
+      "const": "login_end",
+      "description": "What it is."
+    },
+    "req": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "code": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "description": "Its exit code; null if it couldn't be started."
+    },
+    "why": {
+      "type": "string",
+      "description": "Why it couldn't be started."
+    },
+    "who": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Signed in (code 0): who as, as claude auth status says it; null if it didn't say."
+    }
+  },
+  "required": [
+    "op"
+  ],
+  "additionalProperties": false
+}

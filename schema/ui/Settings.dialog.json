@@ -12,6 +12,7 @@
     "baudewindow.py:BaudeWindow.open_settings",
     "theming.py:settings_code_font",
     "theming.py:settings_accent",
+    "theming.py:follow_accent",
     "theming.py:settings_switch",
     "theming.py:settings_size",
     "theming.py:notifications_row",
@@ -75,10 +76,15 @@
           "copy": [
             "shared_settings.accent_colour"
           ],
+          "phone": {
+            "does": "applies it in the app at once and keeps it; System clears the choice. The launcher icon keeps Baude's colours, and on Android 13 and later its monochrome layer follows the system's palette when the launcher's themed icons are on",
+            "why": "Android can't recolour an app's launcher icon as it runs; swapping launcher aliases per accent drops the icon from the home screen on common launchers",
+            "decided": "2026-11-22"
+          },
           "actions": [
             {
               "by": "pick an accent",
-              "does": "applies it in every open Baude and Record window at once and keeps it; System clears the choice"
+              "does": "applies it in every open Baude and Record window at once and keeps it; System clears the choice. Baude's and Record's logos take it too: the logo's tile colour (schema/icons/apps) becomes the accent's, in the macOS Dock tile, the windows' icon elsewhere, and the launcher if the app is in the platform's list of apps; with System they keep their own colours"
             }
           ]
         },
@@ -117,7 +123,7 @@
           "actions": [
             {
               "by": "toggle the switch",
-              "does": "adds Baude to (writes the .desktop file and icon, or the macOS app bundle) or removes it from the platform's list of apps; a note in the chat says what was done (\"added to <where>: <path>\", \"removed from <where>\"), or the error; the switch ends up showing the real state"
+              "does": "adds Baude to (writes the .desktop file and icon, or the macOS app bundle, the logo in the accent picked) or removes it from the platform's list of apps; a note in the chat says what was done (\"added to <where>: <path>\", \"removed from <where>\"), or the error; the switch ends up showing the real state"
             }
           ]
         },

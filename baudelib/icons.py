@@ -3,6 +3,9 @@ Emission put the symbolic sets in GTK's icon theme and read the others' SVG; the
 same files. No GTK."""
 import json
 import os
+import re
+
+from baudelib import tokens
 
 FOLDER = os.path.join(os.path.dirname(os.path.dirname(os.path.realpath(__file__))), "schema", "icons")
 
@@ -29,3 +32,13 @@ def model_families():
     name or value."""
     with open(os.path.join(folder("models"), "families.json"), encoding="utf-8") as f:
         return [(x["icon"], x["name"], x["match"]) for x in json.load(f)["families"]]
+
+
+def logo(app, accent=None):
+    """app's logo (apps/<app>.svg) in accent, an accent's name (schema/tokens' accent): the tile's colour (its first
+    rect's fill) the accent's, wherever the logo draws in it. None, or a name that isn't an accent's: as it's drawn."""
+    drawn = svg("apps", app)
+    if accent not in tokens.names("accent"):
+        return drawn
+    tile = re.search(r'<rect\b[^>]*\bfill="(#[0-9a-fA-F]{6})"', drawn).group(1)
+    return drawn.replace(tile, tokens.color_hex(f"accent.{accent}"))

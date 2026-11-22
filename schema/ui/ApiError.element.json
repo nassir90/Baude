@@ -26,6 +26,10 @@
     {
       "name": "retrying",
       "shows": "While claude retries the API, that's said in the banner above the chat (Banners), not here."
+    },
+    {
+      "name": "sign-in error",
+      "shows": "A live turn's error that signing in again would fix (its sign-in ran out, say) isn't drawn here: the sign-in card (LoginCard) is, in its place. One in history keeps its line."
     }
   ],
   "scenes": []

@@ -105,6 +105,7 @@ class Chat(hostId: String, sid: String) {
     val uses = HashMap<String, JSONObject>()       // (an Artifact or Agent call's id: the call, till its result's read)
     var offset = -1L
     var reading = false
+    val loaded = mutableStateOf(false) // (its transcript read to its end once: where it was left can be found)
     var again = false
     val sent = mutableStateListOf<Outgoing>()     // (what you sent that its transcript doesn't show yet: drawn as sent)
     val queued = mutableStateListOf<Queued>() // (written while a turn ran: sent when it ends)
@@ -779,7 +780,9 @@ object Mesh {
                             }
                             else -> {
                                 if (line.kind == "you") chat.sent.removeAll { it.id == line.uuid }
-                                chat.lines.add(line)
+                                if (line.kind == "error" && chat.chrome.loginStandsIn && needsLogin(line.text))
+                                    chat.chrome.loginStandsIn = false // (its sign-in card's in its place already)
+                                else chat.lines.add(line)
                             }
                         }
                     }
@@ -791,6 +794,7 @@ object Mesh {
                 } else {
                     settle(chat.calls, session(chat.hostId, chat.sid)?.state)
                     settleTasks(chat)
+                    chat.loaded.value = true
                 }
             }
         }
@@ -891,6 +895,8 @@ object Mesh {
     fun send(chat: Chat, text: String, files: List<Picked>, keep: Boolean = true, failed: (() -> Unit)? = null) {
         val c = conns[chat.hostId]?.takeIf { it.state == "up" } ?: return
         chat.said.value = null
+        // (what it sent, text and files, sent again from a sign-in card, if the turn fails for want of it)
+        chat.chrome.turnSent = if (text.isBlank() && files.isEmpty()) null else text to files
         Shares.used(chat)
         chat.busy.value = true
         val id = java.util.UUID.randomUUID().toString()

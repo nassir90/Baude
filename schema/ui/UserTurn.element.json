@@ -13,6 +13,7 @@
     "windowdrafts.py:WindowDrafts.user_bubble",
     "windowproc.py:WindowProc.send_text",
     "chatparts.py:UserTurn",
+    "chatparts.py:UserTurn.show_revert",
     "chatinput.py:attachment_widget",
     "windowdrafts.py:WindowDrafts.revert_to",
     "windowdrafts.py:WindowDrafts.commit_revert",
@@ -55,14 +56,14 @@
     },
     {
       "name": "revert button",
-      "shows": "A small round flat button (24px, a 12px circular-arrows icon, the grey of the chat's notes) just left of the bubble, level with the bubble's last line. Invisible until the pointer is anywhere on the message's row (the whole chat width), then fades in over 150ms; fades out as the pointer leaves. Only offered when the message has an id and the chat can be reverted here (not a session only being read because it's active elsewhere).",
+      "shows": "A small round flat button (24px, a 12px circular-arrows icon, the grey of the chat's notes) just left of the bubble, its middle level with the middle of the bubble's last line of text. Invisible until the pointer is anywhere on the message's row (the whole chat width), then fades in over 150ms; fades out as the pointer leaves. Only offered when the message has an id and the chat can be reverted here (not a session only being read because it's active elsewhere).",
       "copy": [
         "chat_turns.revert"
       ],
       "phone": {
-        "does": "A long-press reveals the same controls",
-        "why": "No hover on touch; a long-press is Android's equivalent of the desktop's right-click",
-        "decided": "2026-11-21"
+        "does": "A tap on the message shows the same controls, centred on its last line of text as here; another tap hides them, and so does scrolling the chat. A long press shows them too",
+        "why": "No hover on touch; the owner asked for a single tap",
+        "decided": "2026-11-22"
       },
       "actions": [
         {

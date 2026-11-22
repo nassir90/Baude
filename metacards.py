@@ -731,11 +731,13 @@ class MetaCards:
     def worked(self, turn):
         return any(it["kind"] == "tool" for it in turn.get("items") or ())
 
-    def _done(self, agent, text, error, turn, outgrown=False, need=None, small=False):
+    def _done(self, agent, text, error, turn, outgrown=False, need=None, small=False, login=False):
         """A turn's end; outgrown: the session said the conversation's more than its window holds; need: a new
         session's first message is (the tokens it'd take: Agent.first), and wasn't sent; small: as the session
-        counts its instructions and tools, they're more than its window alone (TOO_SMALL). Either way, exhausted."""
-        if agent is self.ask:
+        counts its instructions and tools, they're more than its window alone (TOO_SMALL). Either way, exhausted. login: the error
+        is its sign-in's running out (the reply shows a card to sign in again: MetaChat.login_card)."""
+        was_asked = agent is self.ask
+        if was_asked:
             self.ask, self.live_widget = None, None
             self._busy(False)
             self._drop_asking()
@@ -763,12 +765,17 @@ class MetaCards:
             self.finish(m, turn)
             if error:  # (what it did before the error: kept, its actions undone from its cards)
                 m["text"], m["error"] = error, True
+                if login:
+                    m["login"] = True
         else:
             m = None
         if m is not None:
             self.store_reply(agent, m)
             self.tell_desktop(wording.say("meta.ended_error", error=error) if error else
                               text.strip() or wording.say("meta.finished"))
+        if was_asked and self.signed_in_after:  # (signed in while it ran: its next message on the new sign-in)
+            self.signed_in_after = False
+            self.close_agent()
         self.save(now=True)
         if self.showing(agent):
             self.render()

@@ -69,16 +69,17 @@ from baudelib.notes import data_dir, socket_path  # noqa: E402,F401
 import update  # noqa: E402  (a new version from git, restarted onto once idle, as Baude's: beside this file)
 baudelib.wire.HEAD_COMMIT = update.STARTED  # (said to the host processes it reaches: logged by one on other code)
 baudelib.wire.HEAD_CLIENT = "record"  # (listed as Record among the apps connected to a host)
-from recordstore import APP_ID, ICON_SVG, apps_place, install, noun, restart_path, uninstall  # noqa: E402
+from recordstore import APP_ID, apps_place, install, logo, noun, restart_path, uninstall  # noqa: E402
 from recordui import CSS, UNEXPLAINED  # noqa: E402
 from recordwindow import Window  # noqa: E402
 
 
 # ---------------------------------------------------------------- the logo
 
-def icon_png(size=1024, macos=True):
-    """The logo as a PNG; for macOS with the margin its own icons have (the tile 824 of 1024)."""
-    return applist.icon_png(ICON_SVG, size, macos)
+def icon_png(size=1024, macos=True, svg=None):
+    """The logo (in the accent; svg: as it was when asked) as a PNG; for macOS with the margin its own icons have (the
+    tile 824 of 1024)."""
+    return applist.icon_png(svg or logo(), size, macos)
 
 
 def objc_send(obj, sel, *args, types=(), ret=None):
@@ -112,30 +113,55 @@ def macos_app_name():
                       types=(ctypes.c_void_p, ctypes.c_void_p))
 
 
-def macos_dock_icon():
-    """The Dock shows the logo instead of Python's rocket (GTK's icon names don't reach a Python process's tile)."""
+def macos_dock_image(svg=None):
+    """The logo as an NSImage. No GTK and no main-thread AppKit call: it runs on a worker thread."""
     import ctypes
-    png = icon_png()
+    png = icon_png(svg=svg)
     data = objc_send(b"NSData", b"dataWithBytes:length:", png, len(png), types=(ctypes.c_char_p, ctypes.c_ulong))
-    image = objc_send(objc_send(b"NSImage", b"alloc"), b"initWithData:", data, types=(ctypes.c_void_p,))
+    return objc_send(objc_send(b"NSImage", b"alloc"), b"initWithData:", data, types=(ctypes.c_void_p,))
+
+
+def set_dock_image(image):
+    """The Dock's tile an NSImage, on the main thread."""
+    import ctypes
     objc_send(objc_send(b"NSApplication", b"sharedApplication"), b"setApplicationIconImage:", image,
               types=(ctypes.c_void_p,))
 
 
+def macos_dock_icon():
+    """The Dock shows the logo instead of Python's rocket (GTK's icon names don't reach a Python process's tile)."""
+    set_dock_image(macos_dock_image())
+
+
 def themed_icon():
-    """Elsewhere, windows take the logo from the icon theme: it's put in an icon folder of Record's own."""
-    root = os.path.join(data_dir(), "icons")
-    path = os.path.join(root, "hicolor", "scalable", "apps", f"{APP_ID}.svg")
-    try:
-        if not os.path.exists(path) or open(path).read() != ICON_SVG:
-            os.makedirs(os.path.dirname(path), exist_ok=True)
-            with open(path, "w") as f:
-                f.write(ICON_SVG)
-    except OSError:
-        return None
-    Gtk.IconTheme.get_for_display(Gdk.Display.get_default()).add_search_path(root)
-    Gtk.Window.set_default_icon_name(APP_ID)
+    """Elsewhere, windows take the logo from the icon theme: it's put in an icon folder of Record's own
+    (theming.theme_logo)."""
+    path = theming.theme_logo(os.path.join(data_dir(), "icons"), APP_ID, logo())
+    if path is not None:
+        Gtk.Window.set_default_icon_name(APP_ID)
     return path
+
+
+def redraw_logo():
+    """The logo drawn again in the accent as it's picked (theming.follow_accent): the Dock's (drawn off the main
+    thread) or the windows', and the launcher's if Record's in the list of apps."""
+    svg = logo()
+    if sys.platform == "darwin":
+        theming.off_main("dock", lambda: macos_dock_image(svg), set_dock_image)
+    else:
+        try:
+            themed_icon()
+        except Exception as e:  # (an icon isn't worth the accent's change)
+            print("record: logo:", e, file=sys.stderr)
+    launcher_logo(svg)
+
+
+def launcher_logo(svg=None):
+    """The launcher's logo drawn again in the accent on a worker thread, where it isn't already
+    (applist.redraw_logo)."""
+    svg = svg or logo()
+    theming.off_main("launcher", lambda: applist.redraw_logo(APP_ID, "Record", svg))
+    return False
 
 
 def hand_over(request, path=None):
@@ -250,6 +276,8 @@ class App(Adw.Application):
                 print("record: no Dock icon:", e, file=sys.stderr)
         else:
             widgets.notify_as(themed_icon())
+        theming.follow_accent(redraw_logo)  # (Settings → Accent Colour: the logo in it)
+        GLib.idle_add(launcher_logo, priority=GLib.PRIORITY_LOW)  # (picked in Baude since Record last ran)
         try:  # (first: a change from another machine's Record waits for the window, not written under it: notes.write)
             self.server = listen(self.request)
         except OSError as e:

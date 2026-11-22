@@ -1,101 +1,156 @@
 {
-  "description": "Signing in to Claude from the chat: /login (or Sign in on a turn that failed for want of it) runs claude auth login and shows its progress in an amber-bordered card in the chat; a turn that fails because Claude Code isn't signed in shows a card with Sign in.",
+  "description": "Signing in to Claude from the chat, on the machine the chat runs on: a turn of a Claude Code chat (or of Meta, which is a Claude Code session of this machine's) that fails for want of it (claude's sign-in ran out, was revoked, or isn't there) shows an amber-bordered card in place of its error, with Sign in; /login (or Sign in) runs claude auth login there and shows its progress in that card, and once it's signed in the failed turn can be sent again, with the attachments it had (what's attached since stays). This machine's chats sign in here; another machine's (and every chat on the phone) sign in by that machine's host process, through the mesh if that's how it's reached (the login request).",
   "apps": [
-    "baude"
+    "baude",
+    "record",
+    "phone"
   ],
   "opens": [
     "/login (optionally with claude auth login's arguments) sent in the composer",
-    "Sign in on the not-signed-in card"
+    "A turn whose result is an error that signing in again would fix, or whose reply claude wrote in its place saying so (error authentication_failed, or text matching hostlogin.NEEDS_LOGIN: \"Please run /login\", \"claude auth login\", \"Invalid API key\", \"OAuth token has expired\", \"Failed to authenticate\", \"Not logged in\", \"login … time limit / cannot be renewed\", authentication_error, API Error: 401…); once a turn, live only (an old one in history keeps its red line); a Codex or pi chat's keeps its own error"
   ],
   "code": [
     "chatinput.py:LoginCard",
+    "chatinput.py:_HereLogin",
+    "chatinput.py:_HostLogin",
+    "baudelib/hostlogin.py:login_error",
+    "baudelib/hostlogin.py:start",
+    "metachat.py:MetaChat.login_card",
+    "metaagent.py:Agent",
+    "Logins.kt:Login",
+    "Logins.kt:LoginCard",
     "windowremote.py:WindowRemote.sign_in",
     "windowremote.py:WindowRemote.login_prompt",
+    "windowremote.py:WindowRemote.send_again",
+    "windowremote.py:WindowRemote.restart_claude",
     "windowremote.py:WindowRemote.sign_out"
   ],
   "copy": [
+    "sign_in",
     "common"
   ],
   "parts": [
     {
-      "name": "not-signed-in card",
-      "shows": "Amber-bordered box (1px warning colour, 8px corners, 8px/12px padding): \"Claude Code isn't signed in\" in bold, then dimmed (60%) the first 200 characters of why; under it a \"Sign in\" button (accent).",
-      "text": [
-        "Claude Code isn't signed in",
-        "Sign in"
-      ],
-      "actions": [
+      "name": "card",
+      "shows": "Amber-bordered box (1px warning colour, 8px corners, 8px/12px padding): a bold title line, a line under it, then what can be done now. It's where the turn's error would be: that error's red line isn't drawn (nor the \"turn ended with error\" note).",
+      "parts": [
         {
-          "by": "click Sign in",
-          "does": "Removes this card and adds the sign-in card."
-        }
-      ]
-    },
-    {
-      "name": "sign-in card",
-      "shows": "Same amber box. A bold title line, a body line under it, then a row: a text field filling the width (placeholder \"If the page shows a code, paste it here\"), \"Send\", \"Cancel\".",
-      "copy": [
-        "common.send",
-        "common.cancel",
-        "common.try_again"
-      ],
-      "text": [
-        "Signing in to Claude…",
-        "Starting the sign-in…",
-        "If the page shows a code, paste it here"
-      ],
-      "actions": [
-        {
-          "by": "Enter in the field / click Send",
-          "does": "Passes the pasted code to the sign-in; the body says \"Checking the code…\"."
+          "name": "title",
+          "shows": "Bold: the stage's title (states)."
         },
         {
-          "by": "click Cancel",
-          "does": "Stops the sign-in."
+          "name": "line",
+          "shows": "The stage's line (states): plain, dimmed (60%), or with a link."
         },
         {
-          "by": "click the sign-in page link",
-          "does": "Opens the sign-in page in the browser."
+          "name": "code row",
+          "shows": "While signing in (starting, the page's link): a text field filling the width, then \"Send\", \"Cancel\".",
+          "copy": [
+            "sign_in.code_hint",
+            "common.send",
+            "common.cancel"
+          ],
+          "phone": {
+            "does": "The field fills a row of its own, with Send and Cancel in a row under it",
+            "why": "A phone's width leaves a field beside them too narrow to type a code in",
+            "decided": "2026-11-22"
+          },
+          "actions": [
+            {
+              "by": "Enter in the field / click Send",
+              "does": "Passes the pasted code to claude auth login (on another machine: login_code); the line says \"Checking the code…\"."
+            },
+            {
+              "by": "click Cancel",
+              "does": "Stops the sign-in (on another machine: lets go of its connection, which stops it there)."
+            }
+          ]
         },
         {
-          "by": "click Try again",
-          "does": "Starts the sign-in again."
+          "name": "button",
+          "shows": "One accent button under the line, left-aligned: \"Sign in\" (not signed in), \"Try again\" (failed, cancelled) or \"Send again\" (signed in, when the failed turn was sent from this window; gone once pressed).",
+          "copy": [
+            "sign_in.sign_in",
+            "common.try_again",
+            "sign_in.send_again"
+          ],
+          "actions": [
+            {
+              "by": "click Sign in / Try again",
+              "does": "Starts claude auth login on the chat's machine; the card goes to starting."
+            },
+            {
+              "by": "click Send again",
+              "does": "Sends what the failed turn sent again, as your message (only when no turn is going and the box could send)."
+            }
+          ]
         }
       ]
     }
   ],
   "states": [
     {
-      "name": "starting",
-      "shows": "\"Signing in to Claude…\" / dimmed \"Starting the sign-in…\"."
+      "name": "not signed in",
+      "shows": "\"Claude Code isn't signed in\" (another machine's chat: \"Claude Code on <host> isn't signed in\") / dimmed the error's first sentence (at most 200 characters), and Sign in.",
+      "copy": [
+        "sign_in.not_signed_in",
+        "sign_in.not_signed_in_on"
+      ]
     },
     {
-      "name": "browser opened",
-      "shows": "Body: \"A browser window should have opened to sign in. If it didn't, open the sign-in page.\" (the last words a link)."
+      "name": "starting",
+      "shows": "\"Signing in to Claude…\" / dimmed \"Starting the sign-in…\", and the code row.",
+      "copy": [
+        "sign_in.signing_in",
+        "sign_in.starting"
+      ]
+    },
+    {
+      "name": "the page's link",
+      "shows": "This machine's: \"A browser window should have opened to sign in. If it didn't, open the sign-in page.\" (the last words a link). Another machine's (its browser isn't here): \"Open the sign-in page to sign in.\" (the first words a link, opened here). The code row stays.",
+      "copy": [
+        "sign_in.browser_opened",
+        "sign_in.open_page",
+        "sign_in.page_there",
+        "sign_in.open_page_there"
+      ]
     },
     {
       "name": "checking",
-      "shows": "Body: \"Checking the code…\" after a code is sent; \"Signed in; checking who as…\" once it succeeds. The field row goes."
+      "shows": "Dimmed \"Checking the code…\" after a code is sent.",
+      "copy": [
+        "sign_in.checking_code"
+      ]
     },
     {
       "name": "signed in",
-      "shows": "\"Signed in to Claude\" / \"as <account>\" (or dimmed \"claude auth status didn't say who as\"); the chat's claude restarts on the new sign-in (after the turn if one runs)."
+      "shows": "\"Signed in to Claude\" / \"as <account>\" (or dimmed \"claude auth status didn't say who as\"), and Send again if there's a turn to send again. The chat's claude restarts on the new sign-in (after the turn if one runs): here, or stopped on its host so its next message starts it; the chat that failed, whichever's open by then.",
+      "copy": [
+        "sign_in.signed_in",
+        "sign_in.as_who",
+        "sign_in.who_unknown"
+      ]
     },
     {
       "name": "failed",
-      "shows": "\"Sign-in didn't finish\" / dimmed reason, and a \"Try again\" button (accent)."
+      "shows": "\"Sign-in didn't finish\" / dimmed reason (what claude auth login said last, or why the machine couldn't be reached), and Try again.",
+      "copy": [
+        "sign_in.failed"
+      ]
     },
     {
       "name": "cancelled",
-      "shows": "\"Sign-in cancelled\" and \"Try again\"."
-    },
-    {
-      "name": "another machine's chat",
-      "shows": "No card: a quiet note \"<host>'s claude signs in there: run claude auth login on it\" (or, for a failed turn, \"<host>'s claude isn't signed in: run claude auth login on it\")."
+      "shows": "\"Sign-in cancelled\" and Try again.",
+      "copy": [
+        "sign_in.cancelled"
+      ]
     },
     {
       "name": "/logout",
-      "shows": "Quiet notes: \"signing out…\" then \"signed out of Claude\" or \"sign-out failed: <why>\"."
+      "shows": "Quiet notes: \"signing out…\" then \"signed out of Claude\" or \"sign-out failed: <why>\"; another machine's chat: \"<host>'s claude signs out there: run claude auth logout on it\".",
+      "copy": [
+        "sign_in.signs_out_there"
+      ]
     }
   ],
   "scenes": []

@@ -1,20 +1,19 @@
 {
-  "description": "The phone's own host as a page: its name and whether it is in the mesh, the agents (Bots) that run on this phone, the models the mesh serves them, the phone's trash, and what the agents reach. Opened from the home screen's header; the phone's agents are also listed on the home screen under the host \"phone\".",
+  "description": "The phone's own host as a page: its name in the mesh, the agents that run on this phone, and the phone's trash. Opened from the home screen's header; the phone's agents are also listed on the home screen under the host \"local\".",
   "apps": [
     "phone"
   ],
   "opens": [
-    "the \"This phone\" button (phone icon) in the home screen's header bar, left of Hosts",
-    "back from New Agent returns to it"
+    "the \"This phone\" button (phone icon) in the home screen's header bar, left of ⋮"
   ],
   "code": [
     "PhoneScreens.kt:PhoneScreen",
     "Home.kt:Home",
     "MainActivity.kt:MainActivity",
-    "PhoneHost.kt:PhoneHost",
-    "PhoneLink.kt:PhoneLink"
+    "PhoneHost.kt:PhoneHost"
   ],
   "copy": [
+    "this_phone",
     "browser",
     "trash",
     "common"
@@ -22,60 +21,46 @@
   "parts": [
     {
       "name": "Bar",
-      "shows": "Title \"This phone\"; a back button at the start and a \"New Agent\" (+) button at the end.",
+      "shows": "Title \"This phone\" and a back button at the start; nothing at the end.",
       "copy": [
+        "this_phone.title",
         "browser.back"
-      ],
-      "text": [
-        "This phone",
-        "New Agent"
       ],
       "actions": [
         {
           "by": "tap back",
           "does": "returns to the home screen"
-        },
-        {
-          "by": "tap +",
-          "does": "opens the New Agent screen (NewAgent.dialog.json)"
         }
       ]
     },
     {
-      "name": "Phone card",
-      "shows": "The phone's name (its name in Android's settings, else its model's), a line saying whether it is in the mesh, and a paragraph: agents made here run on this phone (their chats, tools and files are here) and their models run on a machine of the mesh that serves them.",
-      "text": [
-        "In the mesh, through <host>",
-        "Joining the mesh through <host>…",
-        "Not in the mesh: add a host first",
-        "Not in the mesh: <why>",
-        "Not in the mesh: none of your hosts is connected",
-        "Agents made here run on this phone: their chats, their tools and their files are here. Their models run on a machine of the mesh that serves them."
+      "name": "New Agent",
+      "shows": "No New Agent button, screen or empty-list button: an agent on this phone is made as on any host, with New session and \"local\" picked beside it.",
+      "phone": {
+        "does": "nothing",
+        "why": "The desktop has no New Agent; the owner dropped it",
+        "decided": "2026-11-22"
+      }
+    },
+    {
+      "name": "Name card",
+      "shows": "One line, \"Name: <name>\": the phone's name in the mesh (its name in Android's settings, else its model's). No mesh state line and no paragraph under it.",
+      "copy": [
+        "this_phone.name"
       ],
-      "states": [
-        {
-          "name": "linked",
-          "shows": "\"In the mesh, through <host>\" in the success colour"
-        },
-        {
-          "name": "linking",
-          "shows": "\"Joining the mesh through <host>…\" dimmed"
-        },
-        {
-          "name": "not linked",
-          "shows": "\"Not in the mesh\" with the reason, or \"add a host first\" when no host is added; dimmed"
-        }
-      ]
+      "phone": {
+        "does": "the name line only",
+        "why": "The owner asked for the name alone, no description",
+        "decided": "2026-11-22"
+      }
     },
     {
       "name": "Agents",
-      "shows": "Heading \"Agents\", then a rounded list of this phone's agents that are not archived. Each row: the agent's picture (or initials), its name (\"Agent\" if it has none), its title or else its model's name, its status dot (with the asking mark when it asks something), and a trash button.",
+      "shows": "Shown only while this phone has an agent that is not archived. Heading \"Agents\", then a rounded list of them. Each row: the agent's picture (or initials), its name (\"Agent\" if it has none), its title or else its model's name, its status dot (with the asking mark when it asks something), and a trash button.",
       "copy": [
+        "this_phone.agents",
+        "common.agent",
         "trash.move_dots"
-      ],
-      "text": [
-        "Agents",
-        "Agent"
       ],
       "actions": [
         {
@@ -90,35 +75,24 @@
           "by": "tap the trash button",
           "does": "asks to move it to this phone's trash (below)"
         }
-      ],
-      "states": [
-        {
-          "name": "empty",
-          "shows": "\"No agents on this phone yet.\" and a New Agent button (the primary look when the mesh serves a model)"
-        }
       ]
     },
     {
       "name": "Models",
-      "shows": "Heading \"Models\", a caption saying these are what the mesh's machines serve over an API (a model call goes through the mesh to the machine that has the model and runs there as that machine's own settings say), then a list with one row per provider and machine: \"<provider> on <machine>\" and the model names, two lines at most.",
-      "text": [
-        "Models",
-        "What the mesh's machines serve over an API. A model call goes through the mesh to the machine that has the model, and runs there as that machine's own settings say.",
-        "<provider> on <machine>"
-      ],
-      "states": [
-        {
-          "name": "none served",
-          "shows": "\"No machine in reach serves a model over an API (Ollama, or an OpenAI-compatible server).\""
-        }
-      ]
+      "shows": "No Models section: the models the mesh serves are in the model picker's list.",
+      "phone": {
+        "does": "nothing",
+        "why": "The owner dropped it: models are visible in the model picker",
+        "decided": "2026-11-22"
+      }
     },
     {
       "name": "Trash",
-      "shows": "Shown only while the phone's trash holds an agent. Heading \"Trash\", then a row per trashed agent, newest first: its name and title (or model), and a Put Back button.",
-      "text": [
-        "Trash",
-        "Put Back"
+      "shows": "Shown only while the phone's trash holds an agent. Heading \"Trash\", then a row per trashed agent, newest first: its name (\"Agent\" if it has none) and title (or model), and a Put Back button.",
+      "copy": [
+        "this_phone.trash",
+        "this_phone.put_back",
+        "common.agent"
       ],
       "actions": [
         {
@@ -129,11 +103,12 @@
     },
     {
       "name": "What they reach",
-      "shows": "Heading \"What they reach\" and a paragraph: files in each agent's own folder on this phone, questions to you, and the mesh's hosts and chats through this phone's connections to them; nothing else of the phone's; what it asks first is as its permission mode says, as in Baude.",
-      "text": [
-        "What they reach",
-        "Files in each agent's own folder on this phone; questions to you; and the mesh's hosts and chats, through this phone's connections to them. Nothing else of the phone's. What it asks you first is as its permission mode says, as in Baude."
-      ]
+      "shows": "No What they reach section.",
+      "phone": {
+        "does": "nothing",
+        "why": "The owner dropped it",
+        "decided": "2026-11-22"
+      }
     },
     {
       "name": "Move to trash dialog",
@@ -141,11 +116,9 @@
       "copy": [
         "trash.heading",
         "trash.this_session",
+        "this_phone.trash_body",
         "trash.move",
         "common.cancel"
-      ],
-      "text": [
-        "Its transcript, its memory and the files in its folder will be moved to this phone's trash, where you can restore it."
       ],
       "actions": [
         {
@@ -156,7 +129,7 @@
     },
     {
       "name": "Chats with a phone agent",
-      "shows": "Its sessions are listed on the home screen under the host \"phone\" like any host's and open as an ordinary chat; the host's own name is the phone's. They differ from a chat on another host: the agent's loop and tools run on this phone, in its own folder; its model calls go through the mesh to a machine that serves the model, so only models the mesh serves can be picked, and none served means it cannot start; there is no connection banner for the host since it is the app itself; going back to an earlier message (rewind) is not supported; and a Bot's globe button is shown as in any Bot chat (PhoneUse.page.json).",
+      "shows": "Its sessions are listed on the home screen under the host \"local\" (this machine, as Baude names its own) like any host's and open as an ordinary chat; the mesh knows the host by the phone's name. They differ from a chat on another host: the agent's loop and tools run on this phone, in its own folder; its model calls go through the mesh to a machine that serves the model, so only models the mesh serves can be picked, and none served means it cannot start; there is no connection banner for the host since it is the app itself; going back to an earlier message (rewind) is not supported; and a Bot's globe button is shown as in any Bot chat (PhoneUse.page.json).",
       "text": [
         "an agent on this phone can't be taken back to an earlier message yet"
       ]
@@ -164,8 +137,8 @@
   ],
   "states": [
     {
-      "name": "no mesh",
-      "shows": "The Models list says none is served and New Agent cannot be made until a machine serves one"
+      "name": "nothing yet",
+      "shows": "Only the bar and the name line: no agents and an empty trash"
     }
   ],
   "scenes": []

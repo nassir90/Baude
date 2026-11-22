@@ -755,7 +755,7 @@ def is_desktop(session_id):
 
 
 HERE_HOST = "here"  # (New session's hosts: this machine's key; another's is its server's)
-THIS_MACHINE = "local"  # (this machine, as every host is written: by its name, which here is local)
+THIS_MACHINE = wording.say("senders.local")  # (this machine, as every host is written: by its name, which here is local)
 
 
 def host_key(r):

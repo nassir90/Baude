@@ -342,7 +342,7 @@ fun Home(open: (String, String) -> Unit, feedback: () -> Unit, phone: () -> Unit
     Box(Modifier.fillMaxSize().background(c.frame)) {
     Column(Modifier.fillMaxSize()) {
         Bar("Baude", left = true, end = {
-            IconButton(Adwaita.Phone, "This phone", onClick = phone) // (its own agents: PhoneScreen)
+            IconButton(Adwaita.Phone, Wording.ThisPhone.title, onClick = phone) // (its own agents: PhoneScreen)
             HomeMenu(settings, changelog, mesh, feedback, fixes)
         })
         note()
@@ -463,7 +463,7 @@ private fun Modifier.pressed(at: (Offset) -> Unit, onClick: () -> Unit, onLong: 
         .combinedClickable(onClick = onClick, onLongClick = onLong)
 
 /** A chat's row (Baude's session_row): its title on one line, nested under its parent with its parents' lines, its
- * status dot; a long-press: its menu. A host that's gone or deactivated: its title dim, and "dead" if it's gone. */
+ * status dot; a long-press: its menu. A host that's gone or deactivated: its title dim, and a crossed-out cloud if it's gone. */
 @Composable
 private fun SessionRow(item: Item, through: Set<Int>, onClick: () -> Unit) {
     val c = LocalBaude.current
@@ -483,7 +483,8 @@ private fun SessionRow(item: Item, through: Set<Int>, onClick: () -> Unit) {
             val mark = metaMark(item.hostId, item.id)
             Text(markedName(bot ?: title, mark?.how, mark != null), style = Type.body, color = if (dead || off) c.dim else c.fg,
                 maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
-            if (dead) RowTag(Wording.Sidebar.dead) else HeldTag(s)
+            if (dead) Icon(Adwaita.NoConnection, Wording.Sidebar.noConnection, tint = c.dim, modifier = Modifier.size(16.dp.icon))
+            else HeldTag(s)
             StatusDot(if (dead || off) "" else s.state.orEmpty(), !dead && !off && (!s.asks.isNullOrEmpty() || s.state == "waiting"))
             MarkNote(mark)
         }
@@ -571,7 +572,7 @@ fun SearchField(value: String, set: (String) -> Unit, hint: String, modifier: Mo
 }
 
 /** The host the home screen shows and a new session's made on (beside New session, as Baude's): its name cut with …
- * in the middle; with one to pick, nothing to open. A long-press: its menu (Host Command…, Deactivate, Add Host…). */
+ * in the middle; listed local (this phone) first, then the rest by name; with one to pick, nothing to open. A long-press: its menu (Host Command…, Deactivate, Add Host…). */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun HostPick() {
@@ -592,7 +593,7 @@ private fun HostPick() {
             Icon(Adwaita.PanDown, Wording.Sidebar.hostPickerTip, tint = c.fg, modifier = Modifier.size(16.dp.icon))
         }
         Popover(open, { open = false }) {
-            for (id in ids.sortedBy { name(it).lowercase() }) MenuChoice(name(id), pick == id, textColor = if (dead(id)) c.dim else null) {
+            for (id in ids.sortedWith(compareBy<String>({ it != "phone" }, { name(it).lowercase() }))) MenuChoice(name(id), pick == id, textColor = if (dead(id)) c.dim else null) {
                 HomePrefs.pick(id); open = false
             }
         }

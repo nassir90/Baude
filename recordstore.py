@@ -342,7 +342,7 @@ def diary_mentions(notebook, term):
 
 
 HERE_HOST = "here"  # (the host whose notebooks are shown: this machine's key, as Baude's New session has it)
-THIS_MACHINE = "local"  # (this machine, by name, as Baude says it)
+THIS_MACHINE = wording.say("senders.local")  # (this machine, by name, as Baude says it)
 _NETWORK = []
 
 

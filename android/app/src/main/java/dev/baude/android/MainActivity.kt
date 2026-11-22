@@ -51,8 +51,7 @@ class MainActivity : ComponentActivity() {
                             feedback = { go(listOf("feedback", now[1], now[2])) },
                             screen = { go(listOf(it, now[1], now[2])) })
                     }
-                    "phone" -> PhoneScreen(::back, open = { go(listOf("chat", "phone", it)) }, make = { go(listOf("new-agent")) })
-                    "new-agent" -> NewAgentScreen({ go(listOf("phone")) }) { go(listOf("chat", "phone", it)) }
+                    "phone" -> PhoneScreen(::back, open = { go(listOf("chat", "phone", it)) })
                     "feedback" -> FeedbackScreen(feedbackContext(now), ::back)
                     "settings" -> SettingsScreen(::back, feedback = {
                         go(if (now.size == 3) listOf("feedback", now[1], now[2]) else listOf("feedback"))

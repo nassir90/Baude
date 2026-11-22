@@ -425,6 +425,20 @@ abstract class Screens(private val theme: String) {
 
     // (a chat open on workshop, which is up: each of its pages, as its bottom bar switches to them)
     @Test fun chat() = chatAt("10-chat", "chat")
+    /** The chat with the phone's text at a size whose line is taller than the box's buttons. */
+    @Test fun chatLargerText() {
+        Settings.textScale.value = 2.0f
+        chatAt("10b-chat-larger-text", "chat")
+    }
+
+    /** The same with two lines written in the box. */
+    @Test fun chatLargerTextTyped() {
+        Settings.textScale.value = 2.0f
+        val chat = Mesh.openChat("h1", "a")
+        fill(chat)
+        chat.draft.value = "Group them by area\nand link each item to its PR"
+        render("10c-chat-larger-text-typed") { ChatShell("h1", "a", back = {}, open = { _, _ -> }, feedback = {}, first = "chat") }
+    }
     @Test fun chatMeta() = chatAt("11-chat-meta", "meta")
     @Test fun chatSubagents() = chatAt("12-chat-subagents", "agents")
     // (Meta's forms, cards in its conversation: one brought up, filled by Meta, submitted; another scrolled past,

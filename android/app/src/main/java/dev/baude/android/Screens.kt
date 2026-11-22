@@ -363,7 +363,10 @@ fun ChatPage(chat: Chat, name: String, attach: Boolean = true, stop: (() -> Unit
                 for (f in files.toList()) Attached(f, { files.remove(f) }) { openImage("picked:${System.identityHashCode(f)}") }
             }
             val line = with(LocalDensity.current) { Tokens.Font.bodyLine.toDp() }
-            val pad = ((Gap.composerButton - line) / 2).coerceAtLeast(0.dp) // (a line centred on the buttons)
+            // (a line and the buttons each centred in a band as tall as the taller: a line's centred on the buttons,
+            // its last line's as it grows, at any text size)
+            val pad = ((Gap.composerButton - line) / 2).coerceAtLeast(0.dp)
+            val lift = ((line - Gap.composerButton) / 2).coerceAtLeast(0.dp)
             val busy = isWorking(chat)
             val conn = Mesh.conn(chat.hostId)
             val gone = chat.sender == null && (conn?.state != "up" || Stopping.line(chat.hostId) != null)
@@ -462,13 +465,15 @@ fun ChatPage(chat: Chat, name: String, attach: Boolean = true, stop: (() -> Unit
                                 })
                     }
                 }
-                if (attach) IconButton(Adwaita.ListAdd, Wording.Attachments.attachTip, side = Gap.composerButton) { pick.launch(arrayOf("*/*")) }
-                if (busy && stop != null && text.isBlank() && files.isEmpty())
-                    IconButton(Adwaita.MediaPlaybackStop, Wording.Composer.stop, tint = c.destructive,
-                        background = c.destructive.copy(alpha = 0.2f), side = Gap.composerButton, onClick = stop)
-                else
-                    IconButton(Adwaita.Return, Wording.Common.send, enabled = sendable, tint = c.fg,
-                        background = c.fg.copy(alpha = 0.10f), tip = sendTip, side = Gap.composerButton) { if (text.isNotBlank() || files.isNotEmpty()) send() }
+                Row(Modifier.padding(bottom = lift), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    if (attach) IconButton(Adwaita.ListAdd, Wording.Attachments.attachTip, side = Gap.composerButton) { pick.launch(arrayOf("*/*")) }
+                    if (busy && stop != null && text.isBlank() && files.isEmpty())
+                        IconButton(Adwaita.MediaPlaybackStop, Wording.Composer.stop, tint = c.destructive,
+                            background = c.destructive.copy(alpha = 0.2f), side = Gap.composerButton, onClick = stop)
+                    else
+                        IconButton(Adwaita.Return, Wording.Common.send, enabled = sendable, tint = c.fg,
+                            background = c.fg.copy(alpha = 0.10f), tip = sendTip, side = Gap.composerButton) { if (text.isNotBlank() || files.isNotEmpty()) send() }
+                }
             }
         }
         foot?.invoke()

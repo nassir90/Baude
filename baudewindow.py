@@ -251,6 +251,7 @@ class BaudeWindow(WindowView, WindowProc, WindowDrafts, WindowSignal, WindowRemo
         menu.append(wording.say("window.copy_transcript"), "win.copyreport")
         self.main_menu = menu
         menu.append(wording.say("code_apart.restart_app", app="Baude"), "win.restart")
+        menu.append(wording.say("code_apart.restart_daemon"), "win.restartdaemon")
         menu_btn = Gtk.MenuButton(icon_name="open-menu-symbolic", menu_model=menu,
                                   tooltip_text=wording.say("chat_header.menu"))
         self.signal_btn = Gtk.MenuButton(icon_name=themed_icon("insert-link-symbolic", "emblem-symbolic-link-symbolic"),
@@ -304,6 +305,9 @@ class BaudeWindow(WindowView, WindowProc, WindowDrafts, WindowSignal, WindowRemo
         restart = Gio.SimpleAction.new("restart", None)
         restart.connect("activate", lambda *_: self.restart_app())
         self.add_action(restart)
+        restart_daemon = Gio.SimpleAction.new("restartdaemon", None)  # (as the banner's Restart Daemon)
+        restart_daemon.connect("activate", lambda *_: self.restart_host())
+        self.add_action(restart_daemon)
 
         # transcript
         chat_h, chat_v = tokens.px("gap.chat-h"), tokens.px("gap.chat-v")

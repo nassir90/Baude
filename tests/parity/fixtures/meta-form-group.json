@@ -1,0 +1,48 @@
+{
+  "description": "Meta's conversation as the desktop keeps it (meta.json): a message of yours and a reply that brought up the form for a new group, its name filled in. t is epoch seconds.",
+  "messages": [
+    {
+      "role": "user",
+      "text": "Make a group for the seedling chats",
+      "t": 1795601000
+    },
+    {
+      "role": "meta",
+      "model": "claude-haiku-4-5",
+      "t": 1795601030,
+      "actions": [],
+      "text": "The form is up with the name. Press Create to make it.",
+      "items": [
+        {
+          "kind": "tool",
+          "name": "mcp__meta__open_form",
+          "state": "done",
+          "input": {
+            "form": "new_group",
+            "values": {
+              "name": "Seedlings"
+            }
+          },
+          "result": "Form f2a9e7 is up for the user to finish and submit; you don't submit it.",
+          "shown": [
+            {
+              "kind": "form",
+              "form": "new_group",
+              "id": "f2a9e7",
+              "values": {
+                "name": "Seedlings"
+              },
+              "state": "open",
+              "pinned": true
+            }
+          ]
+        },
+        {
+          "kind": "text",
+          "text": "The form is up with the name. Press Create to make it."
+        }
+      ]
+    }
+  ],
+  "actions": []
+}

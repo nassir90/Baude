@@ -8,7 +8,6 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -43,35 +42,46 @@ fun HostMenu(open: Boolean, dismiss: () -> Unit) {
     if (adding) AddHost(done = { adding = false })
 }
 
-/** Add a host (Baude's ask_add_host): where ssh goes, and its host process's command there (empty: on its PATH).
- * given, edited: Meta's add_host form's values, filled by it and by you. */
+/** Add a host (Baude's ask_add_host): where ssh goes, and its host process's command there (empty: on its PATH). */
 @Composable
-fun AddHost(done: () -> Unit, given: org.json.JSONObject? = null, edited: ((org.json.JSONObject) -> Unit)? = null,
-            added: () -> Unit = {}) {
-    var dest by remember { mutableStateOf(given?.str("destination").orEmpty()) }
-    var command by remember { mutableStateOf(given?.str("command")?.takeIf { it != "baude_headless.py" }.orEmpty()) }
-    LaunchedEffect(dest, command) { edited?.invoke(org.json.JSONObject().put("destination", dest).put("command", command)) }
+fun AddHost(done: () -> Unit) {
+    var dest by remember { mutableStateOf("") }
+    var command by remember { mutableStateOf("") }
     val host = Host.parse(dest, "", command)
     fun go() {
-        val h = host ?: return
-        Mesh.addHost(h)
-        toast(Wording.Hosts.lookingForBaude(dest = dest.trim()))
-        added()
+        addHost(dest, command) ?: return
         done()
     }
     AlertDialog(
         onDismissRequest = done,
         title = { Text(Wording.NewSession.addHost) },
         text = {
-            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                NameField(dest, { dest = it }, Wording.NewSession.hostPlaceholder, ::go)
-                Field(command, { command = it }, Wording.Hosts.commandPlaceholder(command = "baude_headless.py"))
+            Column(Modifier.verticalScroll(rememberScrollState())) {
+                AddHostFields(dest, { dest = it }, command, { command = it }, focus = true, onDone = ::go)
             }
         },
         confirmButton = { Button(Wording.Common.add, suggested = host != null, onClick = ::go) },
         dismissButton = { Button(Wording.Common.cancel, onClick = done) },
         containerColor = LocalBaude.current.dialog,
     )
+}
+
+/** Add a host's fields (Baude's host_form), its dialog's and Meta's add_host form's: where ssh goes, then the command. */
+@Composable
+fun AddHostFields(dest: String, setDest: (String) -> Unit, command: String, setCommand: (String) -> Unit, focus: Boolean,
+                  onDone: () -> Unit) {
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        NameField(dest, setDest, Wording.NewSession.hostPlaceholder, onDone, focus = focus)
+        Field(command, setCommand, Wording.Hosts.commandPlaceholder(command = "baude_headless.py"))
+    }
+}
+
+/** A host added where ssh goes (and its command there), looked for, said so: it, or null when that isn't one. */
+fun addHost(dest: String, command: String): Host? {
+    val h = Host.parse(dest, "", command) ?: return null
+    Mesh.addHost(h)
+    toast(Wording.Hosts.lookingForBaude(dest = dest.trim()))
+    return h
 }
 
 /** Host Command… (Baude's ask_host_command): the command ssh runs on the host, with connect after it. */

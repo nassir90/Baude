@@ -316,6 +316,7 @@ abstract class Parity(private val theme: String, private val scene: String) {
     @After fun down() {
         dev.baude.android.CompactFolds.open.clear()
         dev.baude.android.Viewer.state.value = null
+        dev.baude.android.MetaTools.forms.clear()
         Fixes.items = emptyList()
         Fixes.repo = null
         Fixes.error = null
@@ -501,6 +502,7 @@ abstract class Parity(private val theme: String, private val scene: String) {
         val lines = JSONArray()
         val calls = JSONObject()
         val turns = JSONObject()
+        val forms = JSONObject()
         val messages = src.getJSONArray("messages")
         var user = ""
         for (i in 0 until messages.length()) {
@@ -527,6 +529,10 @@ abstract class Parity(private val theme: String, private val scene: String) {
                     when (sp.getString("kind")) {
                         "setting" -> shown.put(JSONObject().put("setting", sp.getString("name")).put("set", sp.get("set")))
                         "changelog" -> shown.put(JSONObject().put("changelog", true))
+                        "form" -> { // (kept as the phone keeps a form: by its id, its place in the reply)
+                            forms.put(sp.getString("id"), JSONObject(sp.toString()).apply { remove("kind") })
+                            shown.put(JSONObject().put("form_id", sp.getString("id")))
+                        }
                     }
                 }
                 calls.put(key, JSONObject().put("key", key).put("id", key).put("name", it.getString("name"))
@@ -554,7 +560,7 @@ abstract class Parity(private val theme: String, private val scene: String) {
                 .put("turn", 1).put("undone", a.getString("state") != "done").put("kept", a.getBoolean("kept")).put("marks", marks))
         }
         return JSONObject().put("host", host.getString("id")).put("lines", lines).put("calls", calls).put("turns", turns)
-            .put("actions", actions).put("started", false)
+            .put("actions", actions).put("forms", forms).put("started", false)
     }
 
     /** What the desktop rig writes for a session with no transcript of its own: its prompt, a reply, its title. */

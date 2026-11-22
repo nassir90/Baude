@@ -138,7 +138,7 @@ object Meta {
 
     private fun file() = java.io.File(Mesh.app.filesDir, "meta.json")
 
-    /** Its conversation, its session's place, its journal and where its form is, written out (after each change). */
+    /** Its conversation, its session's place, its journal and its forms, written out (after each change). */
     fun save() {
         if (!loaded) return
         val o = JSONObject().put("host", host.value).put("sid", chat.sid).put("started", started)
@@ -149,6 +149,7 @@ object Meta {
             .put("actions", JSONArray(MetaTools.actions.map { it.json() })).put("next", MetaTools.next).put("turn", MetaTools.turn)
             .put("bundle", MetaTools.bundle ?: JSONObject.NULL).put("next_call", nextCall)
             .put("told", JSONArray(MetaTools.told.toList())).put("late", JSONArray(late))
+            .put("forms", JSONObject().also { f -> MetaTools.forms.forEach { (k, v) -> f.put(k, v) } })
         try {
             file().writeText(o.toString())
         } catch (_: Exception) {
@@ -193,6 +194,9 @@ object Meta {
         MetaTools.told.addAll(o.optJSONArray("told").strings())
         late.clear()
         late.addAll(o.optJSONArray("late").strings())
+        MetaTools.forms.clear()
+        o.optJSONObject("forms")?.let { f -> f.keys().forEach { k -> MetaTools.forms[k] = f.getJSONObject(k) } }
+        MetaForms.pinned.value = null
         started = o.optBoolean("started") && chat.sid.isNotEmpty()
         startedWith = o.optString("started_with")
         startedModel = o.optString("started_model")
@@ -521,7 +525,8 @@ object Meta {
         waiting.clear()
         relays.clear()
         shown.clear()
-        MetaTools.form.value = null
+        MetaTools.forms.clear()
+        MetaForms.pinned.value = null
         calls.clear()
         turns.clear()
         MetaTools.told.clear()
@@ -561,21 +566,7 @@ fun MetaPage(chatHost: String, here: Boolean) {
     }
     Column(Modifier.fillMaxSize()) {
         ChatPage(Meta.chat, "Meta", attach = false, overBox = { MetaChangesBar() }, own = Meta.ownRevert, sendTip = metaSendTip(),
-            foot = { MetaFoot() })
-    }
-    MetaTools.form.value?.takeIf { it.optString("state", "open") == "open" }?.let { f -> // (a form Meta brought up, as
-        val done = { MetaTools.form.value = MetaTools.form.value?.let { JSONObject(it.toString())   // it's filled: the
-            .put("state", if (it.optString("state") == "submitted") "submitted" else "closed") } }   // user submits)
-        val submitted = { MetaTools.form.value = MetaTools.form.value?.let { JSONObject(it.toString()).put("state", "submitted") } }
-        androidx.compose.runtime.key(MetaTools.formVersion.value) {
-            val given = f.optJSONObject("values")
-            when (f.optString("form")) {
-                "spawn_agent" -> SpawnAgent(done = done, opened = { h, s -> submitted(); Meta.opener(h, s) },
-                    given = given, edited = MetaTools::edited)
-                "add_host" -> AddHost(done = done, given = given, edited = MetaTools::edited, added = { submitted() })
-                "new_group" -> NewGroup(given, done = done, made = { submitted() })
-            }
-        }
+            foot = { MetaFoot() }, over = { list, pad -> MetaPinnedForm(list, pad) })
     }
 }
 
@@ -647,30 +638,4 @@ fun MetaAction(id: String) {
         if (a.undone.value) IconButton(Adwaita.EditRedo, Wording.Common.redo) { MetaTools.redoMany(listOf(a), byUser = true) }
         else IconButton(Adwaita.EditUndo, Wording.Common.undo) { MetaTools.undoMany(listOf(a), byUser = true) }
     }
-}
-
-/** Meta's new_group form: the group's name (Baude's New group), made once the user presses Create. */
-@Composable
-fun NewGroup(given: JSONObject?, done: () -> Unit, made: () -> Unit) {
-    val c = LocalBaude.current
-    var name by androidx.compose.runtime.remember { mutableStateOf(given?.str("name").orEmpty()) }
-    androidx.compose.runtime.LaunchedEffect(name) { MetaTools.edited(JSONObject().put("name", name)) }
-    val wrong = MetaTools.wrong("new_group", JSONObject().put("name", name))
-    androidx.compose.material3.AlertDialog(onDismissRequest = done, title = { Text(Wording.NewSession.newGroup) },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("A list of chats of its own, picked in ⋮ → Groups.", style = Type.body, color = c.dim)
-                Field(name, { name = it }, Wording.MetaApp.itsName)
-                if (name.isNotBlank() && wrong != null) Text(wrong, style = Type.caption, color = c.destructive)
-            }
-        },
-        confirmButton = { Button(Wording.Common.create, suggested = wrong == null) {
-            if (wrong != null) return@Button
-            val g = name.split(Regex("\\s+")).filter { it.isNotEmpty() }.joinToString(" ")
-            HomePrefs.made.add(g)
-            HomePrefs.save()
-            made()
-            done()
-        } },
-        dismissButton = { Button(Wording.Common.cancel, onClick = done) }, containerColor = c.dialog)
 }

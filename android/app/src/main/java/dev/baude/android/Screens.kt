@@ -84,11 +84,13 @@ import kotlinx.coroutines.flow.first
 
 /** A chat's page: what it and you have said, what it did, and a box to write in (files too: pictures and PDFs as
  * Baude sends them, text files in the message). stop: the button that ends a turn while it runs and nothing's
- * written; foot: what's under the box. */
+ * written; foot: what's under the box; over: what's drawn over the conversation (its list, its sides' padding). */
 @Composable
 fun ChatPage(chat: Chat, name: String, attach: Boolean = true, stop: (() -> Unit)? = null,
              foot: (@Composable () -> Unit)? = null, overBox: (@Composable () -> Unit)? = null, own: OwnRevert? = null,
-             sendTip: String? = null, openPage: (String) -> Unit = {}, open: (String, String) -> Unit = { _, _ -> }) {
+             sendTip: String? = null, openPage: (String) -> Unit = {}, open: (String, String) -> Unit = { _, _ -> },
+             over: (@Composable androidx.compose.foundation.layout.BoxScope.(androidx.compose.foundation.lazy.LazyListState,
+                                                                             androidx.compose.ui.unit.Dp) -> Unit)? = null) {
     val c = LocalBaude.current
     val ctx = LocalContext.current
     val sid = chat.sid
@@ -315,6 +317,7 @@ fun ChatPage(chat: Chat, name: String, attach: Boolean = true, stop: (() -> Unit
             items(chat.queued.toList(), key = { "queued:" + System.identityHashCode(it) }) { QueuedRow(chat, it, isWorking(chat)) }
             if (session?.cut != null && chat.sender == null) item(key = "cut-short") { CutShortLine(chat) }
         }
+        over?.invoke(this, list, Gap.chatH + side)
         if (finding) FindBar(chat, matches, Modifier.align(Alignment.TopCenter).onSizeChanged { findBarHeight = with(density) { it.height.toDp() } })
         // the / list or the @ list over the box: its left side on the / or @ that started it, a gap above the box
         val listWidth = if (composerWidth > 0) minOf(Tokens.Picklist.width, with(density) { composerWidth.toDp() } - 10.dp) else Tokens.Picklist.width

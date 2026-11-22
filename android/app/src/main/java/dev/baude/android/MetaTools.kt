@@ -2,6 +2,7 @@ package dev.baude.android
 
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import org.json.JSONArray
@@ -52,8 +53,8 @@ object MetaTools {
     const val NAME = "meta"
     val actions = mutableStateListOf<Action>()
     val highlight = mutableStateListOf<String>() // ("host/session": chats highlighted on the home screen)
-    val form = mutableStateOf<JSONObject?>(null)  // (the form brought up: {id, form, values, state})
-    val formVersion = mutableStateOf(0)           // (filled by Meta: the dialog drawn anew with its values)
+    val forms = mutableStateMapOf<String, JSONObject>() // (the forms brought up, by id: {id, form, values, state,
+                                                         // pinned, said, error, filled: Meta's fills so far})
     var next = 1
     var turn = 0                                   // (the user's messages so far: an action's turn)
     val BUTTONS = mapOf( // (desktop Baude's, trash and host, and the phone's own)
@@ -426,21 +427,24 @@ object MetaTools {
 
     // ---- the forms (desktop Meta's: Baude's forms(), as the phone has them)
 
-    /** A form: its heading, its verb, and its fields, each (name, what it takes, its choices or null). */
-    class FormDef(val heading: String, val verb: String, val about: String, val fields: List<Triple<String, String, (JSONObject) -> List<String>?>>)
+    /** A form: its heading, its verb, and its fields, each (name, what it takes, its choices or null); said: what was
+     * done is said on its card once it's submitted (Form.said). */
+    class FormDef(val heading: String, val verb: String, val about: String, val fields: List<Triple<String, String, (JSONObject) -> List<String>?>>,
+                  val said: Boolean = true)
 
     /** What a host offers to run (spawn_agent's agent): its models, by name. */
     private fun agents(values: JSONObject): List<String> =
         hostByName(values.optString("host"))?.let { h -> models(h).map { it.name } }.orEmpty()
 
     val FORMS = linkedMapOf(
-        "add_host" to FormDef("Add a host", "Add", "add a host Baude reaches over ssh", listOf(
+        "add_host" to FormDef(Wording.NewSession.addHost, Wording.Common.add, "add a host Baude reaches over ssh", listOf(
             Triple("destination", "user@host (or user@host:port): over Tailscale, its Tailscale name", { _: JSONObject -> null }),
             Triple("command", "its host process's command there, run as `<command> connect`: empty if baude_headless.py " +
-                "is on its PATH, else its path (in a git checkout of Baude, <checkout>/baude_headless.py)", { _: JSONObject -> null }))),
-        "new_group" to FormDef("New group", "Create", "make a group of chats", listOf(
+                "is on its PATH, else its path (in a git checkout of Baude, <checkout>/baude_headless.py)", { _: JSONObject -> null })),
+            said = false),
+        "new_group" to FormDef(Wording.NewSession.newGroup, Wording.Common.create, "make a group of chats", listOf(
             Triple("name", "the group's name", { _: JSONObject -> null }))),
-        "spawn_agent" to FormDef("Spawn an agent", "Start", "start an agent (a session) on a host: the host, then what it " +
+        "spawn_agent" to FormDef(Wording.NewSession.spawnAgent, Wording.NewSession.start, "start an agent (a session) on a host: the host, then what it " +
             "offers to run, the folder, group and prompt", listOf(
             Triple("host", "the host it runs on", { _: JSONObject -> Mesh.reached("start").map { it.second } }),
             Triple("agent", "what runs it: one of the host's", ::agents),
@@ -482,10 +486,21 @@ object MetaTools {
         return null
     }
 
-    /** The dialog's own edits, kept in the form (so Meta's next fill keeps what the user wrote). */
-    fun edited(values: JSONObject) {
-        val f = form.value ?: return
-        form.value = JSONObject(f.toString()).put("values", values)
+    /** A form's card's own edits, kept in its form (so Meta's next fill keeps what the user wrote). */
+    fun edited(id: String, values: JSONObject) {
+        val f = forms[id] ?: return
+        if (f.optJSONObject("values")?.toString() == values.toString()) return
+        forms[id] = JSONObject(f.toString()).put("values", values).put("error", JSONObject.NULL)
+    }
+
+    /** A form submitted (what was done) or cancelled: kept so, Meta told with the next message. */
+    fun closed(id: String, done: String?) {
+        val f = forms[id]?.takeIf { it.optString("state", "open") == "open" } ?: return
+        val heading = FORMS[f.optString("form")]?.heading ?: f.optString("form")
+        forms[id] = JSONObject(f.toString()).put("state", if (done != null) "submitted" else "cancelled")
+            .put("said", done ?: JSONObject.NULL).put("error", JSONObject.NULL)
+        told.add(if (done != null) "(The user submitted the form $id, $heading: $done)" else "(The user cancelled the form $id, $heading.)")
+        Meta.save()
     }
 
     // ---- the tools
@@ -573,21 +588,23 @@ object MetaTools {
                 val values = JSONObject().apply { def.fields.forEach { put(it.first, "") } }
                 fill(f, values, args.optJSONObject("values") ?: JSONObject())?.let { return no(it) }
                 val id = "f${next++}"
-                form.value = JSONObject().put("id", id).put("form", f).put("values", values).put("state", "open")
-                formVersion.value++
+                forms[id] = JSONObject().put("id", id).put("form", f).put("values", values).put("state", "open")
+                    .put("pinned", true).put("filled", 0)
+                shown(at, JSONObject().put("form_id", id))
+                Meta.save()
                 val w = wrong(f, values)
                 ok("Form $id (${def.heading}) is up for the user to finish and submit; you don't submit it. Its fields: " +
                     "${described(f, values)}. " + (w?.let { "Still wrong: $it" } ?: "It's ready to submit."))
             }
             "fill_form" -> {
                 val id = args.optString("id").trim()
-                val f = form.value?.takeIf { it.optString("id") == id } ?: return no("No form '$id' of yours: open_form " +
-                    "gives a form's id.")
+                val f = forms[id] ?: return no("No form '$id' of yours: open_form gives a form's id.")
                 if (f.optString("state", "open") != "open") return no("That form is ${f.optString("state")} already.")
                 val values = JSONObject(f.optJSONObject("values")?.toString() ?: "{}")
                 fill(f.optString("form"), values, args.optJSONObject("values") ?: JSONObject())?.let { return no(it) }
-                form.value = JSONObject(f.toString()).put("values", values)
-                formVersion.value++
+                forms[id] = JSONObject(f.toString()).put("values", values).put("filled", f.optInt("filled") + 1)
+                    .put("error", JSONObject.NULL)
+                Meta.save()
                 val w = wrong(f.optString("form"), values)
                 ok(if (w != null) "Filled. Still wrong: $w" else "Filled: it's ready for the user to submit.")
             }

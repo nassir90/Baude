@@ -615,6 +615,7 @@ class WindowProc:
     # window or another. Meanwhile a permission it asks for waits, its chat's dot saying so (Sidebar.file_state), and
     # is asked when the chat's opened. Once its turn's over it's let go; it goes with the window.
     def detach_proc(self):
+        self.stop_left = bool(getattr(self.proc, "stop_asked", False))  # (a stop asked of its turn: queue_state)
         if self.remote is not None:  # (a host's session: its turn goes on there, attached or not: let go of here)
             if self.session_id:  # (what it does there said as it's listed: watch_left_remote)
                 self.left_remote[self.session_id] = [self.remote, "working"]
@@ -668,8 +669,10 @@ class WindowProc:
                 self.tell_desktop(proc.key, wording.say("asks.waiting_for_tool",
                                                         tool=req.get("tool_name") or wording.say("asks.a_tool")))
         elif t == "result":
-            self.let_go_background(proc)
             self.tell_desktop(proc.key, turn_said(msg))
+            if not self.left_turn_ended(proc.key, lambda content, said, done: (proc.user(content, said),
+                                                                               done({"op": "accepted"}))):
+                self.let_go_background(proc)  # (else kept for the turn its queue starts)
         return False
 
     def let_go_background(self, proc):
@@ -709,7 +712,9 @@ class WindowProc:
         """The chat emptied for another (closing: the window's going). Its draft kept for it (keep_draft), the box
         emptied for the next one's. keep_box: what's typed in the box goes on to the next one (a new conversation for
         another kind of model: remote_new_conversation; the chat deleted: carry_on), the rest of its draft (its queue,
-        a revert written over) kept for it, or, gone, dropped with it."""
+        a revert written over) kept for it, or, gone, dropped with it. Its queue's kept with its draft (keep_draft), to
+        be sent as its turn ends meanwhile (send_left_queues) or drawn again as it's opened (take_draft); a new chat's,
+        whose draft any new chat takes, goes into its box as a queued message's revert puts it."""
         self.remember_place()  # (to open it there again)
         key = self.draft_key()  # (what its draft's kept under, below)
         self.restore_scroll = None
@@ -735,9 +740,13 @@ class WindowProc:
         while (c := self.transcript.get_first_child()) is not None:
             self.transcript.remove(c)
             discard(c)
-        if self.queued:  # (not sent: in its draft, before what's in the box, as a queued message's revert puts it)
+        queue = self.queue_state()
+        if queue and not key:
             self.put_ahead([t.text for t in self.queued if t.text], [a for t in self.queued for a in t.atts])
-        self.unqueue(list(self.queued))  # (another chat: this one's queue gone from under it)
+            queue = None
+        elif queue and not gone:  # (whether its turn's going on as it's left: its end, seen as it's listed, sends it)
+            self.QUEUE_SEEN[key] = "working" if self.busy or key in self.left_remote else None
+        self.unqueue(list(self.queued))  # (another chat: this one's queue kept for it, not shown under the next)
         self.held_after_revert = None
         for t in getattr(self, "held_turns", {}).values():  # (and what its host holds for it: the next one's own)
             if t.get_parent() is self.queue_box:
@@ -745,7 +754,7 @@ class WindowProc:
         self.held_turns = {}
         self.queue_box.set_visible(False)
         if not gone:
-            self.keep_draft(key)  # (the box this chat's to come back to; the next chat's own put in it: take_draft)
+            self.keep_draft(key, queue)  # (the box and queue this chat's to come back to; the next chat's: take_draft)
         if carried is not None:
             self.set_box(*carried)
         self.cut_row = self.cut_pending = None  # (the next chat's own: cut_state)
@@ -987,7 +996,8 @@ class WindowProc:
     # ---- the queue: messages written while the agent's at a turn (QueuedTurn), under the conversation, grey. A turn
     # that ends on its own sends them all, together as one message; one stopped (Esc, the stop button) leaves them.
     # A queued message's ↑ interrupts the turn and sends it with every one before it; its revert puts it back in the
-    # box; its ✕ drops it. They're the open chat's: another chat opened, they go into its draft (clear_transcript)
+    # box; its ✕ drops it. They're the open chat's: another chat opened, they're kept with its draft
+    # (clear_transcript), sent as its turn ends meanwhile (send_left_queues) and drawn again as it's opened (take_draft)
     def queue_message(self):
         buf = self.input.get_buffer()
         text = ComposerMarkdown.to_markdown(buf.get_text(buf.get_start_iter(), buf.get_end_iter(), True)).strip()
@@ -999,6 +1009,35 @@ class WindowProc:
         self.queued.append(turn)
         self.queue_box.append(turn)
         self.queue_box.set_visible(True)
+        self.stick_bottom, self.restore_scroll = True, None
+
+    def queue_state(self):
+        """The queue as the chat's draft keeps it (keep_draft): its messages (text, attachments, and the uuid one put
+        back is sent by), the one whose ↑ the turn's stopping for (its place), and whether the turn was stopped
+        otherwise (hold: its end sends nothing); None if nothing's queued."""
+        stopped = self.__dict__.pop("stop_left", False) or bool(self.busy and getattr(self.proc, "stop_asked", False))
+        if not self.queued:
+            return None
+        upto = self.queue_upto
+        return {"turns": [{"text": t.text, "attachments": list(t.atts), "said": t.said} for t in self.queued],
+                "upto": self.queued.index(upto) if isinstance(upto, QueuedTurn) else None, "hold": stopped}
+
+    def put_queue(self, queue):
+        """A queue the chat's draft kept (queue_state) under the conversation again, after what's queued; its ↑ and
+        stop for the turn going on, if one is."""
+        if not queue:
+            return
+        before = len(self.queued)
+        for t in queue["turns"]:
+            turn = QueuedTurn(self, self.user_bubble(t["text"], t["attachments"]), t["text"], t["attachments"],
+                              t.get("said"))
+            self.queued.append(turn)
+            self.queue_box.append(turn)
+        if self.busy and queue.get("upto") is not None and self.queue_upto is None:
+            self.queue_upto = self.queued[before + queue["upto"]]
+        elif self.busy and queue.get("hold") and self.proc is not None:
+            self.proc.stop_asked = True
+        self.queue_box.set_visible(bool(self.queued))
         self.stick_bottom, self.restore_scroll = True, None
 
     def unqueue(self, turns):
@@ -1051,7 +1090,9 @@ class WindowProc:
         draft, draft_atts = buf.get_text(buf.get_start_iter(), buf.get_end_iter(), True).strip(), self.attachments
         buf.set_text(text)
         self.attachments = [a for t in turns for a in t.atts]
+        self.send_said = turns[0].said if len(turns) == 1 else None  # (sent before, maybe taken: taken once)
         self.on_send()
+        self.send_said = None
         left = widgets.typed_text(self.input).strip()
         buf.set_text("\n\n".join(p for p in (left, draft) if p))  # (not sent yet, or at all: still there, to send)
         self.attachments = self.attachments + draft_atts
@@ -1257,7 +1298,8 @@ class WindowProc:
             atts, self.attachments = ([], self.attachments) if going else (self.attachments, [])
         self.turn_sent = (text, list(atts))  # (sent again, if the turn fails for want of signing in: LoginCard's Send again)
         self.refresh_attach_strip()
-        said = str(uuid.uuid4())  # (claude keeps it as the message's: what a revert names, revert_to)
+        said = getattr(self, "send_said", None) or str(uuid.uuid4())  # (claude keeps it as the message's: what a
+        self.send_said = None  # revert names, revert_to)
         self.add(UserTurn(self, self.user_bubble(text, atts), text, said))
         self.stick_bottom, self.restore_scroll = True, None  # (what you sent in view, whatever place was held)
         self.proc.stop_asked = False  # (a new turn: a stop asked of the last isn't this one's)

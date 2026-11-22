@@ -294,6 +294,17 @@ def result(text):
          "total_cost_usd": 0.001, "num_turns": 1, "duration_ms": 300, "usage": {"input_tokens": 10, "output_tokens": 5}})
 
 
+def linger(n, slow):
+    """"LINGER": a turn that takes a while (FAKE_LINGER_S seconds, 6 by default), and its session's plain messages
+    after it each answered at once in a line."""
+    state["linger"] = True
+    if slow:
+        say("Going through the notes now.", f"linger{n}a")
+        time.sleep(float(os.environ.get("FAKE_LINGER_S", "6")))
+    say("Done." if slow else "On it: done.", f"linger{n}")
+    result("done")
+
+
 EXPIRED = ("Failed to authenticate: this login reached its time limit and cannot be renewed. Run `claude auth login` "
            "to sign in again, or use `claude setup-token` and set CLAUDE_CODE_OAUTH_TOKEN for unattended jobs")
 
@@ -621,6 +632,8 @@ def main():
                 nested_subagent(turns, "HOLD" in text)
             elif "SUBAGENT" in text:
                 subagent(turns, delay)
+            elif "LINGER" in text or state.get("linger"):
+                linger(turns, "LINGER" in text)
             else:
                 turn(turns)
 

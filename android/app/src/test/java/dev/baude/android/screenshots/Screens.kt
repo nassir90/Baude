@@ -500,6 +500,75 @@ abstract class Screens(private val theme: String) {
         activity.window.decorView.captureRoboImage("build/screenshots/$theme/41-chat-queued-tapped$suffix.png")
     }
 
+    /** A chat at a turn with two messages queued under it, another chat opened, then the first again: its queue as it
+     * was left. */
+    @Test fun chatQueueKept() {
+        val sid = androidx.compose.runtime.mutableStateOf("a")
+        queueThenLeave(sid)
+        switch(sid, "a")
+        chatSoFar(Mesh.open!!)
+        repeat(20) { frame() }
+        activity.window.decorView.captureRoboImage("build/screenshots/$theme/50-chat-queue-kept.png")
+    }
+
+    /** The same, its turn then ending while the other chat's open (its host lists it idle): what was queued sent to it
+     * then (by the input its host takes), and in its conversation as it's opened again. */
+    @Test fun chatQueueSentElsewhere() {
+        val sent = ArrayList<org.json.JSONObject>()
+        FixtureConnection.up(activity, Mesh.hosts.first()) { m ->
+            if (m.optString("op") == "input" && m.optJSONObject("msg")?.optString("type") == "user")
+                org.json.JSONObject().put("op", "accepted").also { sent.add(m) } else null }
+        val sid = androidx.compose.runtime.mutableStateOf("a")
+        queueThenLeave(sid)
+        val listed = org.json.JSONObject().put("op", "sessions").put("sessions", org.json.JSONArray(Mesh.sessions["h1"]!!.map {
+            it.json().apply { if (it.id == "a") put("state", "idle") } }))
+        Mesh::class.java.getDeclaredMethod("heard", dev.baude.android.Connection::class.java, org.json.JSONObject::class.java)
+            .apply { isAccessible = true }.invoke(Mesh, Mesh.states["h1"], listed)
+        repeat(10) {
+            settle()
+            Thread.sleep(100) // (the message made off the main thread)
+        }
+        switch(sid, "a")
+        val chat = Mesh.open!!
+        chatSoFar(chat)
+        for (m in sent) { // (as its transcript has it now)
+            val blocks = m.getJSONObject("msg").getJSONObject("message").getJSONArray("content")
+            val text = (0 until blocks.length()).map { blocks.getJSONObject(it) }.filter { it.optString("type") == "text" }
+                .joinToString("\n\n") { it.optString("text") }
+            chat.lines.add(Line("you", text, uuid = m.getJSONObject("msg").optString("uuid")))
+            chat.lines.add(Line("bot", "On it: done."))
+        }
+        repeat(20) { frame() }
+        activity.window.decorView.captureRoboImage("build/screenshots/$theme/50b-chat-queue-sent-elsewhere.png")
+    }
+
+    /** Chat a's conversation as its host has it: a long turn begun. */
+    private fun chatSoFar(chat: Chat) {
+        chat.lines.addAll(listOf(Line("you", "Tidy the release notes for 0.9.", uuid = "u1"),
+            Line("bot", "Going through the notes now.")))
+        chat.loaded.value = true
+    }
+
+    /** Chat a open (sid's), at a turn, two messages sent meanwhile (queued under it), then chat b opened. */
+    private fun queueThenLeave(sid: androidx.compose.runtime.MutableState<String>) {
+        Mesh.drafts.clear() // (none another screen left)
+        show { androidx.compose.runtime.key(sid.value) { ChatShell("h1", sid.value, back = {}, open = { _, _ -> }, feedback = {}) } }
+        val chat = Mesh.open!!
+        chatSoFar(chat)
+        dev.baude.android.Queue.submit(chat, true, "Then tag the release as v0.9.0.", emptyList())
+        dev.baude.android.Queue.submit(chat, true, "And push the tag to origin.", emptyList())
+        repeat(10) { frame() }
+        switch(sid, "b")
+    }
+
+    /** The chat shown (sid's) switched to another, as opening it from the list does. */
+    private fun switch(sid: androidx.compose.runtime.MutableState<String>, to: String) {
+        sid.value = to
+        androidx.compose.runtime.snapshots.Snapshot.sendApplyNotifications()
+        settle()
+        check(Mesh.open?.sid == to) { "chat $to not open" }
+    }
+
     /** A long chat opened for the first time, its transcript read in parts as a host sends it, a picture you sent
      * near its end read a moment after it's drawn, taking its size then: open at its end. */
     @Test fun chatOpened() {

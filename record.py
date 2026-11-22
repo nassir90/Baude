@@ -3040,8 +3040,7 @@ class DiaryEditor(Gtk.Box, FindInText):
         # @'s list: every name found, best first, each with its logo as ⌘K lists it (widgets.PickList: Baude's / is
         # one too). Its rows are pop_shown's.
         self.picks = widgets.PickList(self.view, self._pop_bind, self._insert_ref)
-        self.pop, self.pop_list, self.pop_sel, self.pop_model, self.pop_note = \
-            self.picks.pop, self.picks.list, self.picks.sel, self.picks.model, self.picks.note
+        self.pop, self.pop_sel = self.picks.pop, self.picks.sel
         self.pop_shown = []  # (nothing picked till it's asked for, in #'s: _fill_pop)
         self.pop_moved, self.pop_query = False, None  # (moved in with the arrows, while this was what's searched for)
         self.waiting = None

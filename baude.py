@@ -4950,9 +4950,8 @@ REF_LSP_LANG = {".py": "python", ".pyi": "python", ".ts": "typescript", ".mts": 
                 ".tsx": "typescriptreact", ".js": "javascript", ".mjs": "javascript", ".cjs": "javascript",
                 ".jsx": "javascriptreact"}
 # the parts of each server Baude starts, under lsp_dir()/node_modules, and the command if one is on PATH instead
-_REF_LSP_SERVERS = (("python", "BAUDE_LSP_PYTHON", "pyright", "langserver.index.js", "pyright-langserver"),
-                    ("typescript", "BAUDE_LSP_TYPESCRIPT", "typescript-language-server", "lib/cli.mjs",
-                     "typescript-language-server"))
+_REF_LSP_SERVERS = (("python", "pyright", "langserver.index.js", "pyright-langserver"),
+                    ("typescript", "typescript-language-server", "lib/cli.mjs", "typescript-language-server"))
 
 
 def lsp_dir():
@@ -4971,20 +4970,16 @@ def lsp_node():
 
 def lsp_commands():
     """How to start each language server that's there: {"python": argv, "typescript": argv}. Baude's own (fetched
-    at the pinned version) come first, then ones on PATH; BAUDE_LSP_PYTHON and BAUDE_LSP_TYPESCRIPT (a command
-    line each) override both, as the tests do."""
-    import shlex
+    at the pinned version) come first, then ones on PATH."""
     out, node, pins = {}, lsp_node(), dict(REF_LSP_PACKAGES)
-    for lang, env, package, script, exe in _REF_LSP_SERVERS:
+    for lang, package, script, exe in _REF_LSP_SERVERS:
         mine = os.path.join(lsp_dir(), "node_modules", package)
         try:
             with open(os.path.join(mine, "package.json")) as f:
                 version = json.load(f).get("version")
         except (OSError, ValueError):
             version = None
-        if os.environ.get(env):
-            out[lang] = shlex.split(os.environ[env])
-        elif node and version == pins[package]:
+        if node and version == pins[package]:
             out[lang] = [node, os.path.join(mine, script), "--stdio"]
         elif shutil.which(exe) and version is None:  # (an older fetch of Baude's own is updated instead)
             out[lang] = [shutil.which(exe), "--stdio"]
@@ -7304,8 +7299,8 @@ def desktop_used(entry):
 
 
 def claude_desktop_dir():
-    """The Claude desktop app's own folder: $XDG_CONFIG_HOME/Claude when that's set (Linux's way, and how the tests
-    point it elsewhere), else ~/Library/Application Support/Claude on a Mac (where Electron keeps it), ~/.config/Claude
+    """The Claude desktop app's own folder: $XDG_CONFIG_HOME/Claude when that's set (Linux's way, and how the render
+    rigs point it elsewhere), else ~/Library/Application Support/Claude on a Mac (where Electron keeps it), ~/.config/Claude
     elsewhere."""
     if os.environ.get("XDG_CONFIG_HOME"):
         return os.path.join(os.environ["XDG_CONFIG_HOME"], "Claude")
@@ -13251,7 +13246,6 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
 
         self.status = Gtk.Label(xalign=0, ellipsize=Pango.EllipsizeMode.END, hexpand=True)
         ctx = self.ctx_box = widgets.ContextUsage(window=self.shown_window)  # (Meta's too)
-        self.ctx_label, self.ctx_bar = ctx.label, ctx.bar
         statusbar = Gtk.Box(spacing=12)
         statusbar.add_css_class("statusbar")
         self.working_dots = widgets.WorkingDots()

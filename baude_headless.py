@@ -225,7 +225,7 @@ def main():
         c.add_argument("--group", help="the group its sessions are in unless started in another (default: its name)")
         c.add_argument("--name", help="what heads call it (default: this machine's name)")
         c.add_argument("--state", help="where it keeps its sessions' settings (default: ~/.local/share/baude/server)")
-        c.add_argument("--socket", help=argparse.SUPPRESS)  # (another socket than this user's one: a test's)
+        c.add_argument("--socket", help=argparse.SUPPRESS)  # (another socket than this user's one: a rig's or a bench's)
         c.add_argument("--idle-minutes", type=float, default=30, help="a session's claude stops after this long unused")
         c.add_argument("--exit-after-hours", type=float, default=4,
                        help="with nothing running and nobody attached this long, it goes (0: never)")

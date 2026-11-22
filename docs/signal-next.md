@@ -21,8 +21,6 @@ Notes for picking the work up again: what's open, what was found so far, and how
   kubeconfig contexts (names only). `tests/kube_fixture.py` is a chat and repository
   to measure it on (rules only: 15.6% → 81.2% right). Not yet measured with the real reader.
 - **Two switches** on the header's link button: Show links and Activate Signal, apart.
-- **Tests.** `tests/run.sh` passes (104 tests, against `tests/fake_claude.py`). They run on macOS too, outside Xvfb
-  (`python3 tests/test_baude.py`), but for three that are about image decoding and the trash there.
 
 ## Why the reader takes so long and costs so much
 
@@ -165,7 +163,7 @@ $0.01 less per new session.
 ### Recording a run
 
 `--no-session-persistence` means Claude Code keeps no transcript of the reader's session, so record its
-stream instead. Replay a session under Xvfb, as `tests/run.sh` does, with the recording wrapper as its claude:
+stream instead. Replay a session under Xvfb, as `tests/screenshots.sh` does, with the recording wrapper as its claude:
 
 ```bash
 env -u WAYLAND_DISPLAY GDK_BACKEND=x11 GSK_RENDERER=cairo TRACE_DIR=/tmp/signal-trace \

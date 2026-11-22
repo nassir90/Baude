@@ -300,14 +300,15 @@ class ServerSessions:
         s.meta["said"] = time.time()
         self.save(s)
 
-    def take_input(self, conn, s, msg, sender=None, shown=None):
+    def take_input(self, conn, s, msg, sender=None, shown=None, again=False):
         """(lock held) What a client sends its claude. A user message is given a uuid if it has none, which its
         program keeps; sender: who it's from, if not the session's user (sent_by): said so in it, for its agent
         (wire.said_by), and kept by that uuid (stamp), with what heads show of it if not its text (shown: a held
         answer's). One whose uuid it's taken already (a head sending it again, its connection gone as it first sent
-        it) taken once: the last TAKEN kept in its meta."""
+        it) taken once: the last TAKEN kept in its meta. Those attached live but conn are told it ({type: "_said"}),
+        as its claude never says it back. again: one taken already, held for the turn going on (codex_queue)."""
         kind = msg.get("type")
-        if kind == "user":
+        if kind == "user" and not again:
             if wire.is_id(msg.get("uuid") or ""):
                 taken = s.meta.setdefault("taken", [])
                 if msg["uuid"] in taken:
@@ -323,9 +324,14 @@ class ServerSessions:
             is_codex = models.model_program(s.meta.get("model")) == "codex"
             if is_codex:
                 codex.user_input((msg.get("message") or {}).get("content", ""))
-                if s.busy:
-                    s.codex_queue.append(msg)
-                    return
+            if not again:
+                said = {"op": "claude", "session": s.id,
+                        "msg": {"type": "_said", "uuid": msg["uuid"], "message": msg.get("message") or {}}}
+                for c in s.live - {conn}:
+                    c.send(said)
+            if is_codex and s.busy:
+                s.codex_queue.append(msg)
+                return
             s.meta.pop("cut", None)  # (carried on, or something else said: not cut any more)
             if s.meta.pop("draft", None) and not s.meta.get("prompt"):  # (written in: a session of its own from now on,
                 s.meta["prompt"] = _said(msg)                           # listed and kept, titled by what was said)
@@ -564,7 +570,7 @@ class ServerSessions:
                 if self.stopped.is_set() or s.deleting or getattr(proc, "stopping", False):
                     s.codex_queue.clear()
                 else:
-                    self.take_input(None, s, s.codex_queue.pop(0))
+                    self.take_input(None, s, s.codex_queue.pop(0), again=True)
 
     def track(self, s, msg):
         """(lock held) What a session's claude runs (Session.commands), from what it says: a Bash or PowerShell call

@@ -464,6 +464,9 @@ object PhoneHost {
                     if (s.deleted) return
                     if (given != null && repeated(s, given)) return
                     if (sender != null) stamp(s, uuid, sender)
+                    val said = Msg.Claude(session = s.id, msg = JSONObject().put("type", "_said").put("uuid", uuid)
+                        .put("message", message)).json()
+                    for (h in s.live) if (h !== head) h.send(said) // (the others attached live: its agent never says it back)
                     if (s.busy) {
                         s.queued.put(JSONObject().put("message", message).put("uuid", uuid))
                         save(s)

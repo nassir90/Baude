@@ -39,21 +39,20 @@ one on the same machine reads it there rather than fetching a copy.
 Where a server is: a host process (baude_headless.py) listens on a Unix socket only (socket_path(), in a folder that's
 its user's alone: that folder is all the say there is in who may use it), with no port on the network. What's on the
 same machine connects to the socket (connect_local); another machine reaches it over ssh (connect_ssh), as
-`ssh <host> baude_headless.py connect`, which carries these lines between ssh's stdin and stdout and the socket (bridge),
-starting the host process if it isn't running. So ssh says who may, and keeps what's said private: the keys in
-authorized_keys and known_hosts, never a password asked for. A client that isn't Python asks `baude_headless.py
+`ssh <host> ~/.local/bin/baude-headless connect` (HOST_COMMAND, the command Baude installs on every machine:
+baudelib/bins.py), which carries these lines between ssh's stdin and stdout and the socket (bridge), starting the host
+process if it isn't running. So ssh says who may, and keeps what's said private: the keys in
+authorized_keys and known_hosts, never a password asked for. A client that isn't Python asks `baude-headless
 socket` where this user's socket is, rather than copying runtime_dir's rules: $BAUDE_RUNTIME_DIR, else
 $XDG_RUNTIME_DIR/baude (which a session over ssh and one at the screen may have differently, or lose as a session
 ends), else $XDG_STATE_HOME/baude/run (~/.local/state/baude/run), or /tmp/baude-<uid> where that's too long a path for
-a socket; never $TMPDIR, which macOS gives ssh's sessions another of. Or it runs `baude_headless.py connect` and talks
+a socket; never $TMPDIR, which macOS gives ssh's sessions another of. Or it runs `baude-headless connect` and talks
 to its stdin and stdout. reach(where)
 connects to any of them:
     {"via": "local"}                                this machine's host process (socket_path())
     {"via": "unix", "path": P}                      one listening on another socket
-    {"via": "ssh", "dest": D, "command"?, "strict"?}  ssh D (an alias in ~/.ssh/config, a host, user@host): command,
-                                                    the host process on D, as it's given here (default
-                                                    baude_headless.py, found on its PATH); strict: its key must be
-                                                    known already
+    {"via": "ssh", "dest": D, "strict"?}            ssh D (an alias in ~/.ssh/config, a host, user@host), its
+                                                    HOST_COMMAND; strict: its key must be known already
     {"via": "mesh", "host": ID, "path"?}            member ID of the mesh this machine's host process is in (or the
                                                     one listening at path), through it: relay
 """
@@ -149,8 +148,8 @@ def _check(types, variables):
                 raise SchemaError(f"{path}: no type {ref}")
     for kind, v, path in variables.values():
         const = v.get("const") if isinstance(v, dict) else None
-        if kind is not None or not isinstance(const, (int, float)) or isinstance(const, bool):
-            raise SchemaError(f"{path}: not a variable (Name.json, an object whose const is a number)")
+        if kind is not None or not isinstance(const, (int, float, str)) or isinstance(const, bool):
+            raise SchemaError(f"{path}: not a variable (Name.json, an object whose const is a number or a string)")
 
 
 def _name(ref):
@@ -783,7 +782,7 @@ class Channel:
                 proc.kill()
 
 
-SSH_COMMAND = "baude_headless.py"  # (the host process on another machine, found on its PATH)
+HOST_COMMAND = CONSTANTS["HOST_COMMAND"]  # (what ssh runs on a host, connect after it: ~/.local/bin/baude-headless)
 _DEST = re.compile(r"[A-Za-z0-9_.@%:\[\]+-]+")
 _NAME = re.compile(r"[A-Za-z0-9_][A-Za-z0-9_.-]*")
 _ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}")
@@ -873,12 +872,11 @@ def is_dest(dest):
     return isinstance(dest, str) and bool(_DEST.fullmatch(dest)) and not dest.startswith("-")
 
 
-def ssh_args(dest, command=None, strict=False):
+def ssh_args(dest, strict=False):
     """ssh's command line for a host's process: no password or passphrase ever asked (BatchMode: its keys and agent,
     as ~/.ssh/config has them), a connection to each host kept for a minute and shared (ControlMaster), so a
     session's own connection doesn't wait for another handshake. strict: the host's key must be in known_hosts
-    already (as a host taken up once from what the network said was kept). command: the host's process, a command line
-    (default SSH_COMMAND, on its PATH)."""
+    already (as a host taken up once from what the network said was kept). It runs HOST_COMMAND there."""
     if not is_dest(dest):
         raise OSError(f"not somewhere ssh can go: {dest!r}")
     control = control_path(dest)
@@ -887,7 +885,7 @@ def ssh_args(dest, command=None, strict=False):
     return [os.environ.get("BAUDE_SSH") or "ssh", "-T", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10",
             "-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=3", *share,
             *(["-o", "StrictHostKeyChecking=yes"] if strict else []), "--", dest,
-            f"{command or SSH_COMMAND} connect"]
+            f"{HOST_COMMAND} connect"]
 
 
 def control_path(dest):
@@ -907,12 +905,12 @@ def control_path(dest):
     return None
 
 
-def connect_ssh(dest, command=None, strict=False, timeout=25.0):
+def connect_ssh(dest, strict=False, timeout=25.0):
     """A Channel to another machine's host process, over ssh (ssh_args): its stdin and stdout one end of a socket
     pair, this the other, so a Channel takes it as it takes a socket. OSError, with what ssh said, if it can't."""
     mine, theirs = socket.socketpair()
     try:
-        proc = subprocess.Popen(ssh_args(dest, command, strict), stdin=theirs, stdout=theirs, stderr=subprocess.PIPE,
+        proc = subprocess.Popen(ssh_args(dest, strict), stdin=theirs, stdout=theirs, stderr=subprocess.PIPE,
                                 start_new_session=True)
     except OSError:
         mine.close()
@@ -974,10 +972,15 @@ def reach(where, timeout=5.0, as_=None, meta=False):
     if via == "unix":
         return connect_local(where["path"], timeout)
     if via == "ssh":
-        return connect_ssh(where["dest"], where.get("command"), bool(where.get("strict")), max(timeout, 3.0))
+        return connect_ssh(where["dest"], bool(where.get("strict")), max(timeout, 3.0))
     if via == "mesh":
         return connect_mesh(where["host"], where.get("path"), timeout, as_, meta)
     raise OSError(f"nowhere to reach: {where!r}")
+
+
+def place(where):
+    """where with only what says where it is (Where's fields)."""
+    return {k: v for k, v in (where or {}).items() if k in DEFS["Where"]["properties"]}
 
 
 def is_where(where):
@@ -986,7 +989,7 @@ def is_where(where):
         return False
     via = where.get("via")
     return via == "local" or via == "unix" and isinstance(where.get("path"), str) or \
-        via == "ssh" and is_dest(where.get("dest")) and isinstance(where.get("command") or "", str) or \
+        via == "ssh" and is_dest(where.get("dest")) or \
         via == "mesh" and is_id(where.get("host")) and isinstance(where.get("path") or "", str)
 
 

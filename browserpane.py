@@ -107,7 +107,7 @@ class Stream:
 
     def run_there(self):
         """Another host's Emission: through that host process, frames as JPEG."""
-        ch, _info = wire.reach(self.remote.reach_where(), timeout=30)
+        ch, _info = wire.reach(self.remote.where, timeout=30)
         self.ch = ch
         if self.stopped:
             return

@@ -28,17 +28,14 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 
-/** The menu on the host picker (Baude's host_menu), opened by a long-press: Host Command… (a host reached over ssh),
- * Deactivate or Activate (never this phone's own), then Add Host…. */
+/** The menu on the host picker (Baude's host_menu), opened by a long-press: Deactivate or Activate (never this phone's
+ * own), then Add Host…. */
 @Composable
 fun HostMenu(open: Boolean, dismiss: () -> Unit) {
     val c = LocalBaude.current
     val id = picked()
-    val h = Mesh.hosts.firstOrNull { it.id == id }
-    var command by remember { mutableStateOf<Host?>(null) }
     var adding by remember { mutableStateOf(false) }
     Popover(open, dismiss) {
-        if (h != null) MenuChoice(Wording.Hosts.command, false) { dismiss(); command = h }
         if (id != null && id != "phone") {
             val now = off(id)
             MenuChoice(if (now) Wording.Hosts.activate else Wording.Hosts.deactivate, false) {
@@ -48,22 +45,20 @@ fun HostMenu(open: Boolean, dismiss: () -> Unit) {
                 toast(if (now) Wording.Hosts.nowActivated(host = name) else Wording.Hosts.nowDeactivated(host = name))
             }
         }
-        if (h != null || id != null && id != "phone") HorizontalDivider(color = c.rule)
+        if (id != null && id != "phone") HorizontalDivider(color = c.rule)
         MenuChoice(Wording.Sidebar.addHost, false) { dismiss(); adding = true }
     }
-    command?.let { HostCommand(it) { command = null } }
     if (adding) AddHost(done = { adding = false })
 }
 
-/** Add a host (Baude's ask_add_host): where ssh goes, and its host process's command there (empty: on its PATH).
- * given, edited: Meta's add_host form's values, filled by it and by you. */
+/** Add a host (Baude's ask_add_host): where ssh goes, which runs CONNECT there. given, edited: Meta's add_host form's
+ * values, filled by it and by you. */
 @Composable
 fun AddHost(done: () -> Unit, given: org.json.JSONObject? = null, edited: ((org.json.JSONObject) -> Unit)? = null,
             added: () -> Unit = {}) {
     var dest by remember { mutableStateOf(given?.str("destination").orEmpty()) }
-    var command by remember { mutableStateOf(given?.str("command")?.takeIf { it != "baude_headless.py" }.orEmpty()) }
-    LaunchedEffect(dest, command) { edited?.invoke(org.json.JSONObject().put("destination", dest).put("command", command)) }
-    val host = Host.parse(dest, "", command)
+    LaunchedEffect(dest) { edited?.invoke(org.json.JSONObject().put("destination", dest)) }
+    val host = Host.parse(dest)
     fun go() {
         val h = host ?: return
         Mesh.addHost(h)
@@ -78,7 +73,6 @@ fun AddHost(done: () -> Unit, given: org.json.JSONObject? = null, edited: ((org.
             Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 PhoneKey()
                 NameField(dest, { dest = it }, Wording.NewSession.hostPlaceholder, ::go)
-                Field(command, { command = it }, Wording.Hosts.commandPlaceholder(command = "baude_headless.py"))
             }
         },
         confirmButton = { Button(Wording.Common.add, suggested = host != null, onClick = ::go) },
@@ -125,28 +119,4 @@ private fun PhoneKey() {
         text = { Text(Wording.PhoneKeys.newBody) },
         confirmButton = { Button(Wording.PhoneKeys.make, destructive = true) { Mesh.makeKey(); renewing = false } },
         dismissButton = { Button(Wording.Common.cancel) { renewing = false } }, containerColor = c.dialog)
-}
-
-/** Host Command… (Baude's ask_host_command): the command ssh runs on the host, with connect after it. */
-@Composable
-fun HostCommand(h: Host, done: () -> Unit) {
-    val c = LocalBaude.current
-    var text by remember { mutableStateOf(h.command.takeIf { it != "baude_headless.py" }.orEmpty()) }
-    fun go() {
-        Mesh.setCommand(h, text.trim())
-        done()
-    }
-    AlertDialog(
-        onDismissRequest = done,
-        title = { Text(Wording.Hosts.commandHeading(host = Mesh.label(h.id))) },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(Wording.Hosts.commandBody(host = h.dest), style = Type.body, color = c.dim)
-                NameField(text, { text = it }, Wording.Hosts.commandPlaceholder(command = "baude_headless.py"), ::go)
-            }
-        },
-        confirmButton = { Button(Wording.Common.save, suggested = true, onClick = ::go) },
-        dismissButton = { Button(Wording.Common.cancel, onClick = done) },
-        containerColor = c.dialog,
-    )
 }

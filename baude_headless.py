@@ -8,14 +8,15 @@ it owns that user's sessions there and their claude processes. On baudelib (see 
                                       [--auto-update] [--follow-checkout]
     python3 baude_headless.py [--auto-update] connect   # for ssh: stdin and stdout to this machine's host process
     python3 baude_headless.py socket              # where this user's host process listens (or would), to connect to
+    python3 baude_headless.py install             # Baude's commands in ~/.local/bin, for this checkout
     python3 baude_headless.py quit                # this machine's host process stopped (its sessions kept)
-    python3 baude_headless.py list   [--archived] [--host DEST [--host-command CMD]]   # a host's sessions
-    python3 baude_headless.py models [--host DEST [--host-command CMD]]   # the models it can run
-    python3 baude_headless.py stop      SESSION [--host DEST [--host-command CMD]]   # its claude stopped
+    python3 baude_headless.py list   [--archived] [--host DEST]   # a host's sessions
+    python3 baude_headless.py models [--host DEST]   # the models it can run
+    python3 baude_headless.py stop      SESSION [--host DEST]   # its claude stopped
     python3 baude_headless.py archive   SESSION [...]   # stopped, and listed only with --archived
     python3 baude_headless.py unarchive SESSION [...]
     python3 baude_headless.py delete    SESSION [...]   # stopped, gone, its transcript moved to the trash
-    python3 baude_headless.py link   DEST [--host-command CMD]   # this host linked to DEST's, both ways: the mesh
+    python3 baude_headless.py link   DEST                       # this host linked to DEST's, both ways: the mesh
     python3 baude_headless.py unlink DEST|ID                    # that link let go of (or one straight to a member)
     python3 baude_headless.py deactivate DEST|ID   # a member not reached, nor let reach here, till it's activated
     python3 baude_headless.py activate   DEST|ID
@@ -27,10 +28,11 @@ A command that takes --host takes --member ID instead: a member of the mesh, rea
 A session's prompt, folder, model and the rest come over the wire, in start: baude_oneshot.py starts one from the
 command line. The host process listens only on a Unix socket in a folder of its user's own (no port on the network):
 what runs as that user on the same machine may use it. Another machine reaches it over ssh, as
-`ssh DEST baude_headless.py connect`, so ssh's keys say who may: put baude_headless.py on that machine's PATH (or give
-Baude its path, per host). connect, and the commands here, start the host process if it isn't running.
+`ssh DEST ~/.local/bin/baude-headless connect`, so ssh's keys say who may. Installing Baude on a machine (install here,
+or an app's --install) writes that command, and the host process keeps it following this checkout as it starts
+(baudelib/bins.py). connect, and the commands here, start the host process if it isn't running.
 
-A client on the same machine that isn't Python asks `baude_headless.py socket` where to connect, rather than working
+A client on the same machine that isn't Python asks `baude-headless socket` where to connect, rather than working
 it out: $BAUDE_RUNTIME_DIR/host.sock, else $XDG_RUNTIME_DIR/baude/host.sock, else $XDG_STATE_HOME/baude/run/host.sock
 (~/.local/state/baude/run), or /tmp/baude-<uid>/host.sock where that path's too long for a socket. XDG_RUNTIME_DIR
 can differ between a session at the screen and one over ssh, or be gone once a session ends: ask from the
@@ -68,7 +70,7 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
 
-from baudelib import hosts, selfupdate, wire  # noqa: E402
+from baudelib import bins, hosts, selfupdate, wire  # noqa: E402
 from baudelib.server import Server  # noqa: E402
 from baudelib.serverstate import AlreadyRunning  # noqa: E402
 
@@ -84,6 +86,7 @@ def serve(args):
     except AlreadyRunning as e:
         sys.exit(f"baude-headless: {e}")
     print(json.dumps({"socket": server.socket_path, "id": server.me["id"], "group": server.me["group"]}), flush=True)
+    bins.refreshed(server.log)  # (the commands in ~/.local/bin following this checkout: ssh runs baude-headless)
     if server.commit:  # (a git checkout: kept up to date, once that's asked for)
         threading.Thread(target=updater, args=(server, args), daemon=True, name="updater").start()
     item = None
@@ -198,7 +201,7 @@ def connect(args):
 
 def ask(args, msg):
     try:
-        ch, _info = hosts.reach(args.host, args.host_command, getattr(args, "member", None))
+        ch, _info = hosts.reach(args.host, getattr(args, "member", None))
     except OSError as e:
         sys.exit(f"baude-headless: {e}")
     ch.send({**msg, "req": 1})
@@ -217,7 +220,6 @@ def main():
         c = sub.add_parser(name, help=help_)
         c.add_argument("--host", help="where ssh reaches another machine's host process: an alias in ~/.ssh/config, a "
                                       "host, or user@host (default: this machine's)")
-        c.add_argument("--host-command", help="the host process there, if baude_headless.py isn't on its PATH")
         c.add_argument("--member", help="a member of the mesh (its id, as `mesh` lists it), reached through this "
                                         "machine's host process")
         return c
@@ -243,13 +245,14 @@ def main():
     serving(sub.add_parser("serve", help="the host process (the default)"))
     serving(p)
     sub.add_parser("connect", help="this machine's host process on stdin and stdout, for ssh (started if need be)")
+    sub.add_parser("install", help="Baude's commands written in ~/.local/bin (baude, record, emission, baude-headless, "
+                                   "baude-oneshot), for this checkout: what ssh runs here is baude-headless")
     sub.add_parser("socket", help="the path of this user's host process's socket, to connect to (running or not)")
     sub.add_parser("quit", help="this machine's host process stopped, its claudes too (their sessions kept)")
     client("list", "a host's sessions").add_argument("--archived", action="store_true", help="archived ones too")
     client("models", "the models a host can run")
     link = sub.add_parser("link", help="this machine's host process linked to another's, over ssh, both ways: the mesh")
     link.add_argument("dest", help="where ssh goes: an alias in ~/.ssh/config, a host, or user@host")
-    link.add_argument("--host-command", help="the host process there, if baude_headless.py isn't on its PATH")
     sub.add_parser("unlink", help="a link this machine's host process makes let go of").add_argument("dest")
     sub.add_parser("mesh", help="the mesh's members, and the links this machine's host process makes")
     tools = sub.add_parser("tools", help="the tools of an agent run on another host (Read, Write, Edit, Bash, Grep, "
@@ -284,6 +287,8 @@ def main():
         return connect(args)
     if args.command == "socket":
         return print(wire.socket_path())
+    if args.command == "install":
+        return print("\n".join(f"installed {p}" for p in bins.install()))
     if args.command == "tools":
         from baudelib import hosttools
         return hosttools.serve(args.cwd, args.only.split(",") if args.only else None)
@@ -315,23 +320,22 @@ def main():
             print(f"{m['value']:24}  {m['displayName']}")
         return
     if args.command == "unlink":  # (a link made from here, or straight to a member found: by where, or its id)
-        args.host, args.host_command = None, None
+        args.host = None
         said = ask(args, {"op": "unlink", **({"id": args.dest} if wire.is_id(args.dest) else
                                              {"where": {"via": "ssh", "dest": args.dest}})})
         return print(f"no longer linked to {args.dest}" if said.get("any") else f"no link to {args.dest} here")
     if args.command == "link":
-        where = {"via": "ssh", "dest": args.dest, **({"command": args.host_command}
-                                                      if getattr(args, "host_command", None) else {})}
-        args.host, args.host_command = None, None
+        where = {"via": "ssh", "dest": args.dest}
+        args.host = None
         ask(args, {"op": args.command, "where": where})
         return print(f"linking to {args.dest}: `{os.path.basename(sys.argv[0])} mesh` says how it goes")
     if args.command in ("deactivate", "activate"):
-        args.host, args.host_command = None, None
+        args.host = None
         said = ask(args, {"op": args.command, **({"id": args.target} if wire.is_id(args.target) else {}),
                           **({"where": {"via": "ssh", "dest": args.target}} if wire.is_dest(args.target) else {})})
         return print(f"{args.target} {args.command}d" if said.get("any") else f"no member or link {args.target} here")
     if args.command == "mesh":
-        args.host, args.host_command = None, None
+        args.host = None
         mesh = ask(args, {"op": "subscribe"})["server"].get("mesh") or {}
         for m in mesh.get("members") or []:
             print(f"{m['id']}  {m['name']:16}  " + (f"through {m['through']}" if m.get("through") else "linked") +

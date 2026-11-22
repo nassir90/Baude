@@ -396,7 +396,7 @@ class WindowProc:
             self.drop_running = self.drop_session = None
         if r.state == "alive":
             try:
-                self.proc = RemoteProc(self.on_msg, self.on_exit, r.reach_where(), self.session_id,
+                self.proc = RemoteProc(self.on_msg, self.on_exit, r.where, self.session_id,
                                        live=not self.resume_pending,  # (this machine's: as Baude's own claude would
                                        env=claudelib.claude_env() if r.mine else None,  # have had it)
                                        always_allow=sorted(self.allowed_in(self.session_id)))
@@ -508,7 +508,7 @@ class WindowProc:
             return None, False
         forked = bool(reply.get("forked"))
         try:
-            return RemoteProc(on_msg, on_exit, r.reach_where(), reply["session"]["id"], live=True,
+            return RemoteProc(on_msg, on_exit, r.where, reply["session"]["id"], live=True,
                               env=claudelib.claude_env() if r.mine else None), forked
         except OSError as e:
             self.note(wording.say("side_questions.not_asked", why=e))

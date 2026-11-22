@@ -6,11 +6,6 @@
   "copy": ["hosts", "sidebar"],
   "parts": [
     {
-      "name": "Host Command…",
-      "shows": "\"Host Command…\", first. Only when the picked host is another machine reached over ssh. Opens HostCommand.dialog.json.",
-      "copy": ["hosts.command"]
-    },
-    {
       "name": "Deactivate / Activate",
       "shows": "\"Deactivate\" for the picked host, or \"Activate\" if it is deactivated. Only for another machine (never for this one). Deactivating greys its chats and shows the banner \"<host> is deactivated\" over them; the host is not reached while off.",
       "copy": ["hosts.deactivate", "hosts.activate", "hosts.now_deactivated", "hosts.now_activated"],
@@ -29,8 +24,7 @@
   ],
   "states": [
     {"name": "this machine picked", "shows": "Only Add Host…."},
-    {"name": "another host picked, reached over ssh", "shows": "Host Command…, Deactivate (or Activate), separator, Add Host…."},
-    {"name": "another host picked, not over ssh (a mesh member reached through another)", "shows": "Deactivate (or Activate), separator, Add Host…."}
+    {"name": "another host picked", "shows": "Deactivate (or Activate), separator, Add Host…."}
   ],
-  "scenes": ["55s-network-host-menu", "55k-network-add-server", "55q-network-host-command", "55l2-network-host-picker"]
+  "scenes": ["55s-network-host-menu", "55k-network-add-server", "55l2-network-host-picker"]
 }

@@ -435,9 +435,7 @@ object MetaTools {
 
     val FORMS = linkedMapOf(
         "add_host" to FormDef("Add a host", "Add", "add a host Baude reaches over ssh", listOf(
-            Triple("destination", "user@host (or user@host:port): over Tailscale, its Tailscale name", { _: JSONObject -> null }),
-            Triple("command", "its host process's command there, run as `<command> connect`: empty if baude_headless.py " +
-                "is on its PATH, else its path (in a git checkout of Baude, <checkout>/baude_headless.py)", { _: JSONObject -> null }))),
+            Triple("destination", "user@host (or user@host:port): over Tailscale, its Tailscale name", { _: JSONObject -> null }))),
         "new_group" to FormDef("New group", "Create", "make a group of chats", listOf(
             Triple("name", "the group's name", { _: JSONObject -> null }))),
         "spawn_agent" to FormDef("Spawn an agent", "Start", "start an agent (a session) on a host: the host, then what it " +

@@ -246,13 +246,10 @@ def _(app):
 
 
 @scene("55k-network-add-server", "New session's host right-clicked → Add Host…: another machine's host, by where ssh goes (an "
-                                 "alias, or user@host), and its host process's command there if it isn't on PATH; "
-                                 "kept from then on, reached or not")
+                                 "alias, or user@host); kept from then on, reached or not")
 def _(app):
     win = network_window(app)
-    dest, command = win.ask_add_host()
-    dest.set_text("lab@build-box.lan")
-    command.set_text("~/src/Baude/baude_headless.py")
+    win.ask_add_host().set_text("lab@build-box.lan")
     return win
 
 
@@ -290,14 +287,6 @@ def studio(win):
     return r
 
 
-@scene("55q-network-host-command", "Host Command…: the command ssh runs on the host, with connect after it")
-def _(app):
-    win = network_window(app, None)
-    r = studio(win)
-    win.ask_host_command(r.key).set_text("~/src/Baude/baude_headless.py")
-    return win
-
-
 def host_right_click(win):
     """New session's host right-clicked: its menu."""
     ok, rect = win.sidebar.host_dd.compute_bounds(win.sidebar.host_dd)
@@ -322,8 +311,7 @@ def _(app):
     return win
 
 
-@scene("55s-network-host-menu", "Right-click New session's host, one reached over ssh: Host Command… and Deactivate, "
-                                "then Add Host…")
+@scene("55s-network-host-menu", "Right-click New session's host, one reached over ssh: Deactivate, then Add Host…")
 def _(app):
     win = network_window(app, None, host=None)
     r = studio(win)

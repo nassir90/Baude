@@ -250,16 +250,6 @@ object Mesh {
         tick.value++
     }
 
-    /** A host's command changed (empty: baude_headless.py, on its PATH), and the host reached again. */
-    fun setCommand(h: Host, command: String) {
-        val now = h.copy(command = command.ifBlank { "baude_headless.py" })
-        val i = hosts.indexOfFirst { it.id == h.id }
-        if (i >= 0) hosts[i] = now
-        declined.removeAll { it.startsWith("${h.id} ") }
-        HostStore.save(app, hosts)
-        connect(now)
-    }
-
     /** A host's or a member's name here (Mesh's Rename): a host's, as it was added; a member's, kept by its id. Empty:
      * its own again. */
     fun rename(id: String, name: String) {

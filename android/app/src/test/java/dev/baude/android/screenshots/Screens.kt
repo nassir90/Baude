@@ -18,6 +18,7 @@ import dev.baude.android.SideQuestion
 import dev.baude.android.Subagent
 import dev.baude.android.Home
 import dev.baude.android.HomePrefs
+import dev.baude.android.AddHost
 import dev.baude.android.Host
 import dev.baude.android.Item
 import dev.baude.android.Key
@@ -132,6 +133,15 @@ abstract class Screens(private val theme: String) {
         tap("workshop")
         menu("19-new-session-hosts")
     }
+
+    @Test fun hostMenu() { // (the host picker's long-press: workshop, reached over ssh)
+        show { HomeScreen() }
+        tap("workshop", long = true)
+        layOut()
+        screen("19b-host-menu")
+    }
+
+    @Test fun addHost() = show { AddHost(done = {}) }.also { screen("19c-add-host") }
 
     @Test fun phone() {
         phoneFixture()

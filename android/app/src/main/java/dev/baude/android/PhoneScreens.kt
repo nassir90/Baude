@@ -109,7 +109,7 @@ fun PhoneScreen(back: () -> Unit, open: (String) -> Unit) {
                                 ?: (if (m.isNull("title")) "" else m.optString("title")).ifBlank { modelSaid(m.optString("model")) }
                                     .ifBlank { Wording.Common.agent },
                                 style = Type.bold, color = c.fg, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
-                            Button(Wording.ThisPhone.putBack) { PhoneHost.putBack(m.optString("id")) }
+                            Button(Wording.ThisPhone.restore) { PhoneHost.putBack(m.optString("id")) }
                         }
                     }
                 }

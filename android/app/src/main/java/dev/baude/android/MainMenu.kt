@@ -41,8 +41,9 @@ private fun fullWidth(): MenuItem {
 }
 
 /** A chat's ☰ (baudewindow.BaudeWindow's menu, in its sections): Find, Copy Transcript for an Issue, Read-only
- * session; Full-width text; Kubernetes…, Database Schemas… (a host that takes them); Settings…, Changelog, Mesh, Send
- * Feedback…, Ongoing Feedback. screen opens one of "settings", "changelog", "mesh", "fixes", "databases" and "kubernetes" over the chat. */
+ * session; Full-width text; Kubernetes…, Database Schemas…, Terminal (a host that takes them); Settings…, Changelog, Mesh, Send
+ * Feedback…, Ongoing Feedback. screen opens one of "settings", "changelog", "mesh", "fixes", "databases", "kubernetes" and
+ * "terminal" over the chat. */
 @Composable
 fun ChatMenu(hostId: String, sid: String, feedback: () -> Unit, screen: (String) -> Unit) {
     val ctx = LocalContext.current
@@ -59,6 +60,7 @@ fun ChatMenu(hostId: String, sid: String, feedback: () -> Unit, screen: (String)
         listOfNotNull(
             if (takes(hostId, "kube")) MenuItem(Wording.Window.kubernetesMenu) { screen("kubernetes") } else null,
             if (takes(hostId, "databases")) MenuItem(Wording.Window.databaseSchemas) { screen("databases") } else null,
+            if (takes(hostId, "terminal")) MenuItem(Wording.Multiplex.terminalMenu) { screen("terminal") } else null,
         ),
         listOf(
             MenuItem(Wording.Window.settings) { screen("settings") },

@@ -60,6 +60,20 @@ object CodeFont {
         }
     }
 
+    /** The running font's upright regular as Android's Typeface (a terminal's cells are drawn with it), or the system's
+     * monospace. */
+    val typeface: android.graphics.Typeface by lazy {
+        try {
+            val f = FILES.getValue(running)
+            val path = "fonts/${f.folder}/${f.regular}"
+            android.graphics.Typeface.Builder(Mesh.app.assets, path)
+                .apply { if (f.regular.endsWith("-VF.ttf")) setFontVariationSettings("'wght' 400") }
+                .build() ?: android.graphics.Typeface.MONOSPACE
+        } catch (_: Throwable) {
+            android.graphics.Typeface.MONOSPACE
+        }
+    }
+
     /** The app started again, where it was (the chat open: its host and session): its launch intent started from the
      * foreground activity, then this process ended. */
     fun restart(ctx: Context, chat: List<String> = emptyList()) {

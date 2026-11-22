@@ -448,6 +448,15 @@ def build(app, sc):
         return win
     if name == "kubernetes":
         return scenes_chat.kube_window(app)[0]
+    if name == "kubernetes-shell":
+        win, kv = scenes_chat.kube_window(app)
+        T.pump(0.3)
+        kv.show_shell("shop/api-6f7c-mnopq")
+        T.wait_for(lambda: kv.shell_term is not None and "/app#" in kv.shell_term.screen()["screen"], "its prompt")
+        kv.shell_term.type("ls\n")
+        T.pump(0.5)
+        win.connect("destroy", lambda *_: kv.hide_shell())
+        return win
     if name == "bot-settings":
         win = open_chat(app, sc)
         title = fixture("sessions.json")["sessions"][0]["title"]

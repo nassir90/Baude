@@ -169,12 +169,13 @@ private fun RowButton(icon: androidx.compose.ui.graphics.vector.ImageVector, lab
     }
 }
 
-/** A pod's last cell: its logs, and a menu to delete it or force-delete it. */
+/** A pod's last cell: its logs, a shell in it (a host that runs terminals), and a menu to delete it or force-delete it. */
 @Composable
 private fun PodButtons(st: KubeState, row: Msg.KubeRow) {
     var open by remember { mutableStateOf(false) }
     Row(verticalAlignment = Alignment.CenterVertically) {
         RowButton(Adwaita.Logs, Wording.Kube.logs) { st.showLogs(row) }
+        if (takes(st.hostId, "terminal")) RowButton(Adwaita.UtilitiesTerminal, Wording.Kube.shell) { st.showShell(row) }
         Box {
             RowButton(Adwaita.ViewMore, Wording.Common.deleteEllipsis) { open = true }
             Popover(open, { open = false }) {

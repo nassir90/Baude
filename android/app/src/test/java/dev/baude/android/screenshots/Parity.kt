@@ -376,7 +376,10 @@ abstract class Parity(private val theme: String, private val scene: String) {
                         val key = dev.baude.android.GitCards.key(host.getString("id"), st.page?.top.orEmpty(), sha)
                         repeat(40) { if (dev.baude.android.GitCards.get(key) == null) settle() }
                     }
-                    repeat(6) { settle() }
+                    repeat(3) {
+                        androidx.compose.runtime.snapshots.Snapshot.sendApplyNotifications() // (what the answers wrote is told to the composition)
+                        settle()
+                    }
                 }
                 if (sc.has("process") || sc.has("view") || sc.has("gallery") || sc.has("hold")) flush()
                 if (sc.has("running")) {

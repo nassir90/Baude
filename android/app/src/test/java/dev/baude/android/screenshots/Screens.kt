@@ -204,8 +204,7 @@ abstract class Screens(private val theme: String) {
         screen("46-pictures-bot-settings")
     }
 
-    /** The Git page on the parity rig's repository (its recorded answers), its authors' pictures as GitHub gives them:
-     * ada's identicon, pale grey to its edge; rowan-lee's portrait. */
+    /** The Git page on the parity rig's repository (its recorded answers), rowan-lee's picture a portrait as GitHub gives it, ada's none (initials). */
     @Test fun picturesGit() {
         val fixtures = java.io.File("../../tests/parity/fixtures")
         val home = org.json.JSONObject(java.io.File(fixtures, "sessions.json").readText()).getJSONObject("host").getString("home")
@@ -223,7 +222,7 @@ abstract class Screens(private val theme: String) {
         val now = System.currentTimeMillis() / 1000.0
         Mesh.sessions["h1"] = listOf(Msg.Session(id = "a", title = "Tidy the release notes", cwd = "$home/garden",
             updated = now - 60, said = now - 60, created = now - 660, state = "idle", model = "opus", effort = "high", mode = "default"))
-        Pictures.authors(mapOf("ada@example.com" to Pictures.identicon(7, 0xFF8DB8E8.toInt()),
+        Pictures.authors(mapOf(
             "41000001+rowan-lee@users.noreply.github.com" to Pictures.portrait(0xFF2E3440.toInt(), 0xFFD9A47E.toInt(),
                 0xFF6F8396.toInt(), 0xFF3B2A1E.toInt())))
         dev.baude.android.GitPages.prepare("h1", "a", null, false)
@@ -237,10 +236,9 @@ abstract class Screens(private val theme: String) {
         activity.window.decorView.captureRoboImage("build/screenshots/$theme/47-pictures-git.png")
     }
 
-    /** The phone's two Bots' pictures: Juniper's a portrait on a dark ground, Fern's one on white. */
+    /** The phone's two Bots: Juniper's picture a portrait on a dark ground, Fern with none (initials). */
     private fun botPictures() {
         Mesh.pictures["phone/p-a/null"] = Pictures.portrait(0xFF1D1D20.toInt(), 0xFFE0B48A.toInt(), 0xFF3A3A40.toInt(), 0xFF141414.toInt())
-        Mesh.pictures["phone/p-b/null"] = Pictures.portrait(0xFFFFFFFF.toInt(), 0xFFC68B59.toInt(), 0xFF8DE6B1.toInt(), 0xFF5A3A22.toInt())
     }
 
     /** workshop's first chat a Bot, Juniper, with its picture: a portrait on white. */

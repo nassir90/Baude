@@ -64,7 +64,7 @@ class BrowserActivity : ComponentActivity() {
     private var why by mutableStateOf<String?>(null)
     private var made = false
     private var suspended = false // (its host stopped carrying the Bot's requests here a while: the Bot told)
-    private var restarted: List<String>? = null // (this browser started again after Android ended it: what it had)
+    private var reopened: List<String>? = null // (the pages its last time had open, opened again: told to the Bot)
     private var byHand = false // (what's being done is yours, said as it's done: not a page's)
     private lateinit var pagesFile: File
 
@@ -83,11 +83,14 @@ class BrowserActivity : ComponentActivity() {
         made = true
         val name = intent.getStringExtra("name") ?: "Bot"
         pagesFile = File(filesDir, "emission-$profile.open")
-        restarted = try { // (as emission.open_pages: what an earlier one had open, if it ended without closing them)
-            pagesFile.readLines().filter { it.isNotBlank() }.takeIf { it.isNotEmpty() }
+        val had = try { // (as emissionlink.open_pages: the tabs it had last time, and the one in front)
+            JSONObject(pagesFile.readText())
         } catch (_: Exception) {
-            null
+            JSONObject()
         }
+        val urls = had.optJSONArray("urls")?.let { a -> (0 until a.length()).map { a.optString(it) } }
+            ?.filter { it.isNotBlank() }.orEmpty()
+        reopened = urls.takeIf { it.isNotEmpty() }
         enableEdgeToEdge()
         BrowserService.keep(this, name)
         stage = Stage(this, ACCENT)
@@ -99,18 +102,10 @@ class BrowserActivity : ComponentActivity() {
         browser.changed = { t, how -> // (a page's own: a tab a click opened, or one it closed)
             if (!byHand && busy == 0) hand += if (how == "opened") "a page opened ${t.id}" else "a page closed ${t.id}"
         }
-        main.post(object : Runnable { // (the pages it has open, written down as they change: open_pages)
-            var said: List<String>? = null
+        main.post(object : Runnable { // (its tabs written down as they change, for its next time: open_pages)
             override fun run() {
                 if (isDestroyed) return
-                val urls = browser.tabs.values.map { it.url }.filter { it.isNotEmpty() && it != "about:blank" }
-                if (urls != said) {
-                    said = urls
-                    try {
-                        if (urls.isEmpty()) pagesFile.delete() else pagesFile.writeText(urls.joinToString("\n"))
-                    } catch (_: Exception) {
-                    }
-                }
+                keepPages()
                 main.postDelayed(this, 1000)
             }
         })
@@ -118,7 +113,10 @@ class BrowserActivity : ComponentActivity() {
             touchedAt = SystemClock.uptimeMillis()
             browser.current?.let { hand += "touched the page in ${it.id}" }
         }
-        browser.open("about:blank")
+        // (its tabs as it left them, the one in front in front again, as Emission's are; none, a blank one)
+        for (url in urls) asked[browser.open(url)] = url
+        if (urls.isEmpty()) browser.open("about:blank")
+        else browser.tabs.values.elementAtOrNull(had.optInt("selected"))?.let(browser::select)
         connect(intent.getStringExtra("socket") ?: "", intent.getStringExtra("host") ?: "", bot, name)
         val where = intent.getStringExtra("where") ?: "its host"
         setContent {
@@ -172,6 +170,24 @@ class BrowserActivity : ComponentActivity() {
                         modifier = Modifier.padding(start = 8.dp, end = 8.dp, bottom = 4.dp))
                 }
             }
+        }
+    }
+
+    private var pagesSaid: String? = null
+    private val asked = HashMap<Tab, String>() // (a tab opened again: its address till its page has one of its own)
+
+    /** Its tabs (their order, the one in front) written down if they've changed, as Emission's are: opened again the
+     * next time this Bot's browser opens here. None (its last closed, a blank one left): none to open again. */
+    private fun keepPages() {
+        val url = { t: Tab -> t.url.ifEmpty { asked[t] ?: "" } }
+        val tabs = browser.tabs.values.filter { url(it).isNotEmpty() && url(it) != "about:blank" }
+        val now = JSONObject().put("urls", JSONArray(tabs.map(url)))
+            .put("selected", tabs.indexOf(browser.current).coerceAtLeast(0)).toString()
+        if (now == pagesSaid) return
+        pagesSaid = now
+        try {
+            if (tabs.isEmpty()) pagesFile.delete() else pagesFile.writeText(now)
+        } catch (_: Exception) {
         }
     }
 
@@ -261,9 +277,9 @@ class BrowserActivity : ComponentActivity() {
      * and what you've done by hand since its last; or "" if nothing. */
     private fun note(): String {
         val out = ArrayList<String>()
-        restarted?.let {
-            out += "This browser was started again after Android ended it, out of sight: these pages it had open " +
-                "are closed now: " + it.take(10).joinToString(", ") + "."
+        reopened?.let {
+            out += "This browser opened again the pages it had open last time, from their addresses, in new tabs " +
+                "(what was typed in them, and their history, is gone): " + it.take(10).joinToString(", ") + "."
         }
         if (suspended) out += "Its connection to its host dropped for a while (Android may have held the phone back): " +
             "what you asked meanwhile went to that host's own browser."
@@ -298,7 +314,7 @@ class BrowserActivity : ComponentActivity() {
                     r.put("note", said)
                     noted = true
                     suspended = false
-                    restarted = null
+                    reopened = null
                     hand.clear()
                 }
                 out.put("result", r)
@@ -324,6 +340,7 @@ class BrowserActivity : ComponentActivity() {
         super.onDestroy()
         if (!made) return
         val urls = browser.tabs.values.map { it.url }.filter { it.isNotEmpty() && it != "about:blank" }
+        keepPages()
         for (t in browser.tabs.values.toList()) t.web.destroy()
         if (!isFinishing) { // (made again, by Android: its link let go of, this one's the new one's)
             try {
@@ -345,7 +362,6 @@ class BrowserActivity : ComponentActivity() {
             } catch (_: Exception) {
             }
         }.join(500)
-        pagesFile.delete()
         android.webkit.CookieManager.getInstance().flush()
         BrowserService.drop(this)
         Process.killProcess(Process.myPid()) // (a process of its own each time: its WebView's profile this Bot's)

@@ -62,24 +62,20 @@ class Window(Adw.ApplicationWindow):
         super().__init__(application=None if hosted else app, title="Emission", default_width=1280,
                          default_height=900)
         self.hosted, self.blocked = hosted, False  # (blocked: its pages not to be clicked or typed in, but watched)
-        self.open_said = None  # (the pages it has open, as last written down for the next to find: open_pages)
+        self.open_said = None  # (its tabs, as last written down for the next browser on its profile: open_pages)
+        self.kept = False  # (its tabs its profile's to write down: it has them, its last ones opened again)
+        self.leaving = None  # (why it's closing, written down with its tabs: "idle", "moved")
         self.page_size = None  # (hosted: the Bot's own size for its pages, out of sight; None: 1280 by 900)
         self.fit_size = None  # (hosted, out of sight, watched: the watcher's size for its pages meanwhile)
         self.asked_at = GLib.get_monotonic_time()  # (the Bot's last request: how long it's left its browser alone)
         self.released = None  # (hosted: what lets its profile go when someone's Emission asks for it)
-        self.note = None  # (what the Bot's next request is told: this browser's a new one, and what it had's gone)
+        self.note = None  # (what the Bot's next request is told besides that: a phone's note)
+        self.reopened = None  # (and what it's told of the pages this browser opened again: from this start alone)
         self.pointer = BotPointer()  # (what its tools do with the mouse: drawn over its pages while hosted, and told
         self.accent = None           # watchers; accent: the glow's colour there, Baude's, as rgb)
-        if agent:
-            pid = profile_id(profile) or ""
-            had, why = open_pages(pid)
-            self.note = pending_note(pid)  # (one a browser before it had for the Bot and never gave)
-            if had:
-                self.note = ((self.note + " ") if self.note else "") + (
-                    ("This browser was closed after going unused for a while" if why == "idle" else
-                     "This browser was restarted (Baude or its host restarted)") +
-                    ": these pages it had open are closed now: " + ", ".join(had[:10]))
-            pending_note(pid, self.note)
+        if agent:  # (one a browser before it had for the Bot and never gave)
+            self.note = pending_note(profile_id(profile) or "")
+            self.reopened = pending_note(profile_id(profile) or "", slot="reopen")
         self.Engine, why = engine()
         self.profile, self.profile_id, self.tabs = profile, profile_id(profile) or add_profile(profile), {}
         self.agent, self.control, self.waiting, self.downloads = agent, Control(self), {}, []
@@ -150,8 +146,51 @@ class Window(Adw.ApplicationWindow):
         self.connect("close-request", self.closing_window)
         if self.Engine is not None:
             if not why:
-                self.open(url or ("about:blank" if agent else HOME_PAGE))
+                self.restore(url)
             GLib.timeout_add(POLL_MS, self.tick)
+
+    def restore(self, url):
+        """Its profile's tabs as its last browser left them, the one in front in front again (as a browser continues
+        where it left off); url opened after them, in front. Neither: a new tab (the home page; an agent's, blank). A
+        Bot's next request is told which pages it has again (in new tabs, with ids of their own) and why."""
+        urls, selected, why = open_pages(self.profile_id)
+        tabs = [self.open(u) for u in urls]
+        if url:
+            self.open(url)
+        elif tabs:
+            self.view.set_selected_page(next(p for p, t in self.tabs.items() if t is tabs[selected]))
+        else:
+            self.open("about:blank" if self.agent else HOME_PAGE)
+        self.kept = True
+        if self.agent:  # (a new sentence each start: the Bot's told what this browser has, not every one's before)
+            self.reopened = ((
+                "This browser was closed after going unused for a while" if why == "idle" else
+                "This browser moved into Baude" if why == "moved" else
+                "This browser was restarted (Baude or its host restarted)") + (
+                ": its pages were opened again from their addresses, in new tabs (what was typed in them, and their "
+                "history, is gone): " + ", ".join(urls[:10]))) if urls and why != "owner" else None
+            pending_note(self.profile_id, self.reopened or "", slot="reopen")
+
+    def keep_pages(self, fresh=False):
+        """Its tabs, in their order, and the one in front, written down for the next browser on its profile to open
+        again (open_pages), if they've changed. fresh: their addresses asked now, not as the last tick saw them."""
+        if not self.kept:
+            return
+        tabs = []
+        for i in range(self.view.get_n_pages()):
+            tab = self.tabs.get(self.view.get_nth_page(i))
+            try:
+                url = (tab.web.state() if fresh else tab.last).get("url") if tab is not None else None
+            except Exception:  # (its page already gone: as the last tick saw it)
+                url = tab.last.get("url")
+            if url and url != "about:blank":
+                tabs.append((tab, url))
+        now = self.current()
+        said = ([u for _t, u in tabs], next((i for i, (t, _u) in enumerate(tabs) if t is now), 0),
+                self.leaving or (None if self.agent else "owner"))  # ("owner": a window of the owner's, no Bot's)
+        if said != self.open_said:
+            self.open_said = said
+            open_pages(self.profile_id, said[0], why=said[2], selected=said[1])
 
     def free_from_agent(self, pid):
         """True if pid's profile was an agent's Emission's (a Bot's, out of sight) and now isn't: it's asked to go,
@@ -253,6 +292,8 @@ class Window(Adw.ApplicationWindow):
             return None
         if op == "quit":
             answer({"ok": True})
+            if msg.get("from_pane"):  # (Baude's taking it: the Bot's told its pages moved there)
+                self.leaving = "moved"
             GLib.timeout_add(100, lambda: (self.closing_window(), self.get_application().quit()) and False)
             return None
         if self.Engine is None:
@@ -281,11 +322,13 @@ class Window(Adw.ApplicationWindow):
                     tab.web.follow()
             return answer({"ok": True})
         self.watch_kick()  # (something's being done: frames often for a while)
-        if self.note and not msg.get("from_pane"):  # (the first of the Bot's requests told what became of the
+        told = " ".join(n for n in (self.reopened, self.note) if n)
+        if told and not msg.get("from_pane"):  # (the first of the Bot's requests told what became of the
             # browser it had: not Baude's Browser page's)
-            note, said = self.note, answer
-            self.note = None
+            note, said = told, answer
+            self.note = self.reopened = None
             pending_note(self.profile_id, "")
+            pending_note(self.profile_id, "", slot="reopen")
             answer = lambda r: said({**r, "note": note} if isinstance(r, dict) else r)  # noqa: E731
         return self.control.run(op, msg, answer)
 
@@ -569,6 +612,7 @@ class Window(Adw.ApplicationWindow):
                 self.say(f"Couldn't remove “{name}”", why)
                 return
             forget_profile(name)
+            open_pages(pid, [])
             try:
                 os.unlink(os.path.join(data_home(), "profiles", pid + ".lock"))
             except OSError:
@@ -579,8 +623,8 @@ class Window(Adw.ApplicationWindow):
         self.Engine.remove_store(pid, removed)
 
     def switch_profile(self, name):
-        """Its tabs again, in another profile (its own cookies: a page signed in there is again there). False if
-        that profile's open in another Emission."""
+        """The tabs of another profile (its own, as it left them; its cookies: a page signed in there is again there).
+        The tabs this window has go to the profile it leaves. False if that profile's open in another Emission."""
         if name == self.profile:
             return True
         pid = profile_id(name)
@@ -594,7 +638,7 @@ class Window(Adw.ApplicationWindow):
             else:
                 self.say(f"“{name}” isn't responding", "It's open in another Emission window.")
             return False
-        urls = [t.last.get("url") or HOME_PAGE for t in self.tabs.values()]
+        self.keep_pages()  # (the profile it leaves: its tabs as they were, for when it's opened again)
         self.switching = True
         try:
             for page in list(self.tabs):
@@ -602,13 +646,17 @@ class Window(Adw.ApplicationWindow):
         finally:
             self.switching = False
         old = self.profile_id
-        self.profile, self.profile_id = name, pid
+        self.profile, self.profile_id, self.open_said = name, pid, None
         self.refresh_profiles()
         self.show_body(None)
         if not self.agent and any(p.get("bot") and p["id"] == old for p in profiles()):
             self.give_back(old)
-        for url in urls or [HOME_PAGE]:
-            self.open(url)
+        urls, selected, _why = open_pages(pid)  # (the profile's own tabs, not the ones this window had)
+        tabs = [self.open(u) for u in urls]
+        if tabs:
+            self.view.set_selected_page(next(p for p, t in self.tabs.items() if t is tabs[selected]))
+        else:
+            self.open("about:blank" if self.agent else HOME_PAGE)
         return True
 
     # (asking the user: drawn by GTK in the window, so a macOS page, a view laid over it, is hidden meanwhile)
@@ -814,6 +862,8 @@ class Window(Adw.ApplicationWindow):
         return True
 
     def closing_window(self, *_):
+        if not self.done:  # (its tabs as it closes, for its profile's next browser; its last one closed: none)
+            self.keep_pages(fresh=True)
         for w in list(self.watchers):
             self.unwatch(w)
         for tab in self.tabs.values():
@@ -839,7 +889,7 @@ class Window(Adw.ApplicationWindow):
             self.used = GLib.get_monotonic_time()  # (watched: in use)
         if self.agent and not self.hosted and (GLib.get_monotonic_time() - self.used) / 1e6 > AGENT_IDLE_S and \
                 not self.waiting:
-            open_pages(self.profile_id, self.open_said or [], why="idle")
+            self.leaving = "idle"
             self.closing_window()
             self.get_application().quit()
             return False
@@ -849,11 +899,6 @@ class Window(Adw.ApplicationWindow):
             self.later = [(when, fn) for when, fn in self.later if when > now]
             for fn in due:
                 fn()
-        if self.agent:
-            urls = [u for t in self.tabs.values() if (u := t.last.get("url")) and u != "about:blank"]
-            if urls != self.open_said:
-                self.open_said = urls
-                open_pages(self.profile_id, urls)
         for page, tab in list(self.tabs.items()):
             tab.web.follow()
             now = tab.web.state()
@@ -863,6 +908,7 @@ class Window(Adw.ApplicationWindow):
                 if tab is self.current():
                     self.show_state(tab, now)
                 tab.last = now
+        self.keep_pages()
         return True
 
     def typing(self):

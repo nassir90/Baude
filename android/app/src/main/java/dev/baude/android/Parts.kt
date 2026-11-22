@@ -51,8 +51,8 @@ import kotlin.math.abs
 import kotlin.math.exp
 import kotlin.math.sqrt
 
-/** Someone's or a Bot's picture set into the page (imageviews.shaded_picture), or their initials on libadwaita's
- * gradient for their name (as AdwAvatar draws one, with no shade). */
+/** Someone's or a Bot's picture, or their initials on libadwaita's gradient for their name (as AdwAvatar draws one),
+ * set into the page under .picture-shade (imageviews.shaded_picture). */
 @Composable
 fun Avatar(name: String, picture: ImageBitmap?, size: Dp = Gap.avatar) {
     if (picture != null) {
@@ -61,7 +61,7 @@ fun Avatar(name: String, picture: ImageBitmap?, size: Dp = Gap.avatar) {
     }
     val (top, bottom, fg) = avatarColors(name)
     Box(
-        Modifier.size(size).clip(CircleShape).background(Brush.verticalGradient(listOf(top, bottom))),
+        Modifier.size(size).clip(CircleShape).background(Brush.verticalGradient(listOf(top, bottom))).pictureShade(),
         contentAlignment = Alignment.Center,
     ) {
         Text(initials(name), color = fg, fontWeight = FontWeight.Bold, fontSize = (size.value * 0.4f).sp)

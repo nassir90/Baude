@@ -8,7 +8,7 @@ prompts, cost/usage. Everything "agentic" (tools, context, compaction,
 MCP, hooks, CLAUDE.md...) is done by the CLI; baude is only a view.
 
     python3 baude.py [--cwd DIR] [--model MODEL] [--resume SESSION_ID]
-    python3 baude.py --install | --uninstall   # app-menu launcher (per user)
+    python3 baude.py --install | --uninstall   # app-menu launcher (per user), and the commands in ~/.local/bin
 
 Keys: Ctrl+Enter (⌘Enter) sends, Enter adds a line, Esc stops, Ctrl +/-/0 (⌘ too on macOS, or Ctrl+scroll)
 zooms the text, Ctrl+V pastes images/files as attachments, Ctrl+N starts a new session, Ctrl+, (⌘,) opens Settings,
@@ -26,6 +26,7 @@ import threading
 import time
 from macos import full_redraws, ns_string, objc_send
 from baudelib import claude as claudelib  # (its ClaudeProc: Baude's is it, on the GTK main loop)
+import baudelib.bins  # (the commands in ~/.local/bin, kept up to date as it starts: see baudelib/bins.py)
 import baudelib.client  # noqa: E402  (servers on the network and their sessions: see baudelib/client.py)
 import baudelib.hosts  # noqa: E402  (this machine's host process, started when it's wanted: see baudelib/hosts.py)
 from baudelib import wording  # noqa: E402  (the words Baude shows: schema/copy, Record's and the Android app's too)
@@ -313,13 +314,15 @@ def main():
     opts = ap.parse_args()
     if opts.install:
         LAUNCHER.install()
-        print("\n".join(wording.say("install.installed", path=p) for p in LAUNCHER.paths()))
+        print("\n".join(wording.say("install.installed", path=p)
+                        for p in [*map(baudelib.bins.path, baudelib.bins.NAMES), *LAUNCHER.paths()]))
         return 0
     if opts.uninstall:
         removed = LAUNCHER.uninstall()
         print("\n".join(wording.say("install.removed", path=p) for p in removed) or
               wording.say("install.not_installed", app="Baude"))
         return 0
+    baudelib.bins.refreshed(lambda text: print(f"baude: {text}", file=sys.stderr))
     return BaudeApp(opts).run([sys.argv[0]])
 
 

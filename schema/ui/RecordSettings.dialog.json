@@ -176,7 +176,7 @@
         },
         {
           "name": "Show in Applications",
-          "shows": "A switch \"Show in Applications\" (macOS) or \"Show in application menu\" (Linux), subtitle the launcher's path. On: Record is added to the platform's list of apps (per user) with its logo, in the accent picked; off: removed.",
+          "shows": "A switch \"Show in Applications\" (macOS) or \"Show in application menu\" (Linux), subtitle the launcher's path. On: Record is added to the platform's list of apps (per user) with its logo, in the accent picked, starting ~/.local/bin/record, written with Baude's other commands; off: removed (the commands stay).",
           "copy": [
             "window.show_in",
             "install.applications",

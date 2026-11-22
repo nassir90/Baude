@@ -1,9 +1,9 @@
 # Baude for Android
 
 Baude on your phone: the chats on your hosts, your Bots as contacts, and Meta, the helper that operates the app. The
-phone runs no `claude` of its own. It reaches each host's host process (`baude_headless.py`) over ssh, as Baude on
-another machine does: add a host as `user@host`, its Tailscale name on a tailnet, and the phone runs
-`baude_headless.py connect` there. Its ssh key is made in the Android Keystore, which signs with it and never gives it
+phone runs no `claude` of its own. It reaches each host's host process over ssh, as Baude on another machine does:
+install Baude on the host (`python3 baude_headless.py install` in its checkout), add it as `user@host`, its Tailscale
+name on a tailnet, and the phone runs `~/.local/bin/baude-headless connect` there. Its ssh key is made in the Android Keystore, which signs with it and never gives it
 out; put its public half (Hosts shows it) in the host's `~/.ssh/authorized_keys`. A host's own key is trusted once
 you've compared it. Through the hosts you add, the phone reaches every member of their mesh, and joins it: agents
 made on the phone ("This phone") run there, their models served by a machine of the mesh.

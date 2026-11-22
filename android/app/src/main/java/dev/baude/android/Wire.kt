@@ -108,9 +108,12 @@ sealed class Place {
     }
 }
 
-/** A connection to a host's process, as Baude's own (wire.connect_ssh): ssh to the host, "<command> connect" run
- * there, and the host process's JSON lines over its stdin and stdout. A member of the mesh is reached the same way
- * through a host that's up and lists it (route): another "<command> connect" on that host's ssh, told to relay to the
+/** What ssh runs on a host for its host process: the command Baude installs on every machine, then connect. */
+const val CONNECT = "${WireConstants.HOST_COMMAND} connect"
+
+/** A connection to a host's process, as Baude's own (wire.connect_ssh): ssh to the host, CONNECT run there
+ * (~/.local/bin/baude-headless connect), and the host process's JSON lines over its stdin and stdout. A member of the
+ * mesh is reached the same way through a host that's up and lists it (route): another CONNECT on that host's ssh, told to relay to the
  * member, and from then on a tunnel to it, hello first as ever (wire.through). Made again whenever it drops, a little
  * later each time (a member: every RELAY_RETRY_MS while a host lists it, else once one does); not while the host's key
  * isn't one you've trusted (shown, for you to say). */
@@ -208,12 +211,11 @@ open class Connection(
 
     private class NoRoute(why: String) : Exception(why)
 
-    /** Another "<command> connect" on this host's ssh, for a member reached through it (null if it isn't up). */
+    /** Another CONNECT on this host's ssh, for a member reached through it (null if it isn't up). */
     fun exec(): ChannelExec? {
         val s = session ?: return null
-        val h = host ?: return null
-        if (state != "up" || !s.isConnected) return null
-        return (s.openChannel("exec") as ChannelExec).apply { setCommand("${h.command} connect") }
+        if (host == null || state != "up" || !s.isConnected) return null
+        return (s.openChannel("exec") as ChannelExec).apply { setCommand(CONNECT) }
     }
 
     /** The channel to the host process: ssh to a host you added, or one on the ssh of the host a member's reached
@@ -237,7 +239,7 @@ open class Connection(
             session = s
             end = { s.disconnect() }
             s.connect(15_000)
-            (s.openChannel("exec") as ChannelExec).apply { setCommand("${p.host.command} connect") }
+            (s.openChannel("exec") as ChannelExec).apply { setCommand(CONNECT) }
         }
         is Place.Phone -> throw NoRoute("this phone's own host isn't reached over ssh")
         is Place.Member -> {
@@ -359,6 +361,8 @@ open class Connection(
             for (i in 0 until 10) if (!ch.isClosed) Thread.sleep(50) // (its exit status comes after its end: a moment)
             stderr.join(500)
             if (said.isBlank() && ch.exitStatus > 0) said = "the host's command ended (status ${ch.exitStatus})"
+            if (place is Place.Direct && (ch.exitStatus == 127 || "No such file or directory" in said || "not found" in said))
+                said = Wording.Hosts.noCommands(host = host?.label ?: id)
         }
         return reached
     }

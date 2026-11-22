@@ -199,15 +199,11 @@ class RecordHosts:
         self.host_note.set_revealed(said is not None)
 
     def host_menu(self, x, y):
-        """Right-click the notebooks' host (another machine's), as Baude's New session's: Host Command…, for one
-        reached over ssh; Deactivate, or Activate for one that's deactivated."""
+        """Right-click the notebooks' host (another machine's), as Baude's New session's: Deactivate, or Activate for
+        one that's deactivated."""
         if (r := self.host_remote(self.store.picked)) is None:
             return
         menu = Gio.Menu()
-        if r.where.get("via") == "ssh":  # (its host process's command there, if it isn't on PATH)
-            item = Gio.MenuItem.new(wording.say("hosts.command"), None)
-            item.set_action_and_target_value("win.host_command", GLib.Variant.new_string(host_key(r)))
-            menu.append_item(item)
         item = Gio.MenuItem.new(wording.say("hosts.activate") if r.deactivated else wording.say("hosts.deactivate"),
                                 None)
         item.set_action_and_target_value("win.deactivate_host", GLib.Variant("(sb)", (host_key(r), not r.deactivated)))
@@ -228,25 +224,6 @@ class RecordHosts:
             network().deactivate(r, off)
             self.toast(wording.say("hosts.now_deactivated" if off else "hosts.now_activated", host=remote_name(r)))
             self.show_host_state()
-
-    def ask_host_command(self, key):
-        """Right-click → Host Command…, as Baude's: the command a host's process is started by there (ssh's
-        `<command> connect`), if baude_headless.py isn't on its PATH or isn't the one; none: what it says, or PATH's."""
-        if (r := self.host_remote(key)) is None:
-            return None
-        entry = Gtk.Entry(text=r.command or "", activates_default=True, width_chars=36,
-                          placeholder_text=r.where.get("command") or wording.say("hosts.command_placeholder",
-                                                                                    command=baudelib.wire.SSH_COMMAND))
-        dlg = Adw.AlertDialog(heading=wording.say("hosts.command_heading", host=remote_name(r)), extra_child=entry,
-                              default_response="save", close_response="cancel",
-                              body=wording.say("hosts.command_body", host=r.host))
-        dlg.add_response("cancel", wording.say("common.cancel"))
-        dlg.add_response("save", wording.say("common.save"))
-        dlg.set_response_appearance("save", Adw.ResponseAppearance.SUGGESTED)
-        dlg.connect("response", lambda _d, res: res == "save" and network().set_command(r, entry.get_text().strip()))
-        dlg.present(self)
-        entry.grab_focus()
-        return entry
 
     def pick_host(self, key):
         """A host picked in the dropdown (or with Meta's button:host): its notebooks listed; kept, across restarts

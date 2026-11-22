@@ -9,35 +9,33 @@ import org.json.JSONObject
 import java.util.Base64
 import java.util.UUID
 
-/** A host of the mesh, as ssh reaches it: user@address:port, its host process the command there (Baude's own default,
- * found on its PATH: baude_headless.py, run as "<command> connect"). Over Tailscale, address is its name or address
- * there. */
+/** A host of the mesh, as ssh reaches it: user@address:port, its host process WireConstants.HOST_COMMAND there (run
+ * as "<command> connect", as Baude's own). Over Tailscale, address is its name or address there. */
 data class Host(
     val id: String = UUID.randomUUID().toString(),
     val name: String,
     val user: String,
     val address: String,
     val port: Int = 22,
-    val command: String = "baude_headless.py",
 ) {
     val dest: String get() = "$user@$address" + if (port != 22) ":$port" else ""
     val label: String get() = name.ifBlank { address }
 
     fun json() = JSONObject().put("id", id).put("name", name).put("user", user).put("address", address)
-        .put("port", port).put("command", command)
+        .put("port", port)
 
     companion object {
         fun of(o: JSONObject) = Host(
             o.getString("id"), o.optString("name"), o.getString("user"), o.getString("address"),
-            o.optInt("port", 22), o.optString("command").ifBlank { "baude_headless.py" },
+            o.optInt("port", 22),
         )
 
         /** "user@address[:port]" read, or null if it isn't one. */
-        fun parse(dest: String, name: String = "", command: String = ""): Host? {
+        fun parse(dest: String, name: String = ""): Host? {
             val m = Regex("""^\s*([^@\s]+)@([^:\s]+)(?::(\d+))?\s*$""").find(dest) ?: return null
             return Host(
                 name = name.trim(), user = m.groupValues[1], address = m.groupValues[2],
-                port = m.groupValues[3].toIntOrNull() ?: 22, command = command.trim().ifBlank { "baude_headless.py" },
+                port = m.groupValues[3].toIntOrNull() ?: 22,
             )
         }
     }

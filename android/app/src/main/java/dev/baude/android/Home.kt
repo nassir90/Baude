@@ -674,7 +674,7 @@ fun SearchField(value: String, set: (String) -> Unit, hint: String, modifier: Mo
 }
 
 /** The host the home screen shows and a new session's made on (beside New session, as Baude's): its name cut with …
- * in the middle; listed local (this phone) first, then the rest by name; with one to pick, nothing to open. A long-press: its menu (Host Command…, Deactivate, Add Host…). */
+ * in the middle; listed local (this phone) first, then the rest by name; with one to pick, nothing to open. A long-press: its menu (Deactivate, Add Host…). */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun HostPick() {

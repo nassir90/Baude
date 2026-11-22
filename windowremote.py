@@ -406,38 +406,28 @@ class WindowRemote:
         self.update_banner()
 
     def host_form(self):
-        """Add a host's fields and what they do, Add a host…'s (ask_add_host) and Meta's add_host form's: where ssh goes
-        (an alias in ~/.ssh/config, a host, or user@host), and its host process's command there, if
-        baude_headless.py isn't on its PATH. Kept from then on, reached or not."""
+        """Add a host's field and what it does, Add a host…'s (ask_add_host) and Meta's add_host form's: where ssh goes
+        (an alias in ~/.ssh/config, a host, or user@host), which runs ~/.local/bin/baude-headless there
+        (wire.HOST_COMMAND). Kept from then on, reached or not."""
         dest = Gtk.Entry(placeholder_text=wording.say("new_session.host_placeholder"), activates_default=True,
                          width_chars=30)
-        command = Gtk.Entry(placeholder_text=wording.say("hosts.command_placeholder",
-                                                         command=baudelib.wire.SSH_COMMAND), activates_default=True)
-        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
-        box.append(dest)
-        box.append(command)
         where = lambda: dest.get_text().strip() if baudelib.wire.is_dest(dest.get_text().strip()) else None  # noqa: E731
 
         def submit():
             if (to := where()) is None:
                 raise ValueError("Where ssh goes: user@host, or an alias in ~/.ssh/config")
-            network().add({"via": "ssh", "dest": to}, by_hand=True, command=command.get_text().strip() or None)
+            network().add({"via": "ssh", "dest": to}, by_hand=True)
             toast(self.sidebar, wording.say("hosts.looking_for_baude", dest=to))
             return f"looking for Baude on {to}"
         heading = wording.say("new_session.add_host")
-        return metalook.Form(heading, box, [("destination", "user@host, or an alias in ~/.ssh/config", dest),
-                                        ("command", "its host process's command there, run as `<command> "
-                                                    "connect`: empty if baude_headless.py is on its PATH, else "
-                                                    "its path (in a git checkout of Baude, <checkout>/"
-                                                    "baude_headless.py; not the baude launcher, which runs the "
-                                                    "app)", command)],
-                         lambda: None if where() else "Where ssh goes: user@host, or an alias in ~/.ssh/config",
-                         submit, verb=wording.say("common.add"), said=False)
+        return metalook.Form(heading, dest, [("destination", "user@host, or an alias in ~/.ssh/config", dest)],
+                             lambda: None if where() else "Where ssh goes: user@host, or an alias in ~/.ssh/config",
+                             submit, verb=wording.say("common.add"), said=False)
 
     def ask_add_host(self):
         """New session's host right-clicked → Add Host…: another machine's host, by where ssh goes, as host_form has it."""
         form = self.host_form()
-        dest, command = (w for _name, _takes, w in form.fields)
+        dest = form.fields[0][2]
         dlg = Adw.AlertDialog(heading=form.heading, extra_child=form.child, default_response="add",
                               close_response="cancel", body=form.body)
         dlg.add_response("cancel", wording.say("common.cancel"))
@@ -449,28 +439,7 @@ class WindowRemote:
         self.dialog = self.add_server_dialog = dlg
         dlg.present(self)
         dest.grab_focus()
-        return dest, command
-
-    def ask_host_command(self, key):
-        """A host's right-click → Host Command…: the command its host process is started by there (ssh's
-        `<command> connect`), if baude_headless.py isn't on its PATH or isn't the one; none: what it says, or PATH's."""
-        r = next((r for r in network().remotes() if host_key(r) == key), None)
-        if r is None:
-            return
-        entry = Gtk.Entry(text=r.command or "", activates_default=True, width_chars=36,
-                          placeholder_text=r.where.get("command") or
-                          wording.say("hosts.command_placeholder", command=baudelib.wire.SSH_COMMAND))
-        dlg = Adw.AlertDialog(heading=wording.say("hosts.command_heading", host=remote_name(r)), extra_child=entry,
-                              default_response="save", close_response="cancel",
-                              body=wording.say("hosts.command_body", host=r.host))
-        dlg.add_response("cancel", wording.say("common.cancel"))
-        dlg.add_response("save", wording.say("common.save"))
-        dlg.set_response_appearance("save", Adw.ResponseAppearance.SUGGESTED)
-        dlg.connect("response", lambda _d, res: res == "save" and network().set_command(r, entry.get_text().strip()))
-        self.dialog = dlg
-        dlg.present(self)
-        entry.grab_focus()
-        return entry
+        return dest
 
     def ask_host_folder(self, r):
         """Open folder… with another host picked: "Open a folder on <host>", a folder there typed or browsed, from the
@@ -1160,7 +1129,7 @@ class WindowRemote:
         """/login (or a turn that failed for want of it: ask, its error): claude auth login on the machine the chat runs
         on, as a card (LoginCard): this one's here; another's by its host process there."""
         elsewhere = self.remote is not None and not self.remote.local
-        self.add(LoginCard(self, args, where=self.remote.reach_where() if elsewhere else None,
+        self.add(LoginCard(self, args, where=self.remote.where if elsewhere else None,
                            host=remote_name(self.remote) if elsewhere else None, ask=ask,
                            retry=getattr(self, "turn_sent", None) if ask is not None else None))
         self.stick_bottom = True

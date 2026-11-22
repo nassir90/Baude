@@ -122,6 +122,10 @@
       "type": "number",
       "description": "Seconds an ephemeral session waits for its head to come back (GRACE_MAX_S at most; else EPHEMERAL_S)."
     },
+    "as_meta": {
+      "type": "boolean",
+      "description": "As input's as_meta, for the prompt; the session is held to Auto at most, as a subagent of a chat is."
+    },
     "as": {
       "type": "string",
       "description": "As input's, for the prompt."

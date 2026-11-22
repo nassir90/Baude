@@ -48,8 +48,9 @@ class ServerSessions:
             raise ValueError(wording.say("host_errors.fork_folder", path=src.meta["cwd"]))
         model = model or (src.meta.get("model") if src else None)
         mode = params.get("mode") or "default"
-        if params.get("spawned_by") and mode not in meshtools.SUBAGENT_MODES:  # (a Bot's subagent: Auto at most;
-            mode = "auto"  # a program without Auto's modes, launch's next best: manual)
+        if (params.get("spawned_by") or params.get("as_meta")) and mode not in meshtools.SUBAGENT_MODES:
+            mode = "auto"  # (a subagent of a chat's or Meta's: Auto at most; a program without Auto's modes,
+            # launch's next best: manual)
         if params.get("ephemeral") and models.model_program(model) == "codex":
             mode = "default"
         run = models.launch(model, mode, params.get("effort") or None)
@@ -239,9 +240,8 @@ class ServerSessions:
                                                         os.path.abspath(self.socket_path)],
                                                "env": {"BAUDE_SESSION": s.id}}
             extra += ["--mcp-config", json.dumps({"mcpServers": servers})]
-            if run["program"] == "claude":  # (a Bot's, never asked about; another chat's, its looking only: what it
-                rules = [f"mcp__{meshtools.NAME}__{t}"  # starts or says, as the chat's mode has it)
-                         for t in (meshtools.SCHEMAS if s.meta.get("bot") else meshtools.READ_ONLY)]
+            if run["program"] == "claude":  # (never asked about, a Bot's or Meta's)
+                rules = [f"mcp__{meshtools.NAME}__{t}" for t in meshtools.SCHEMAS]
                 if s.meta.get("bot"):
                     rules += [f"mcp__{emissiontools.NAME}__{t}" for t in emissiontools.SCHEMAS]
                 if "--allowedTools" in extra:
@@ -654,9 +654,13 @@ class ServerSessions:
             f.write(json.dumps(rec, separators=(",", ":"), ensure_ascii=False) + "\n")
 
     # ---- who a session's messages are from, if not its user (wire's Senders): kept by their uuids beside it
-    def chat_sender(self, sid):
+    def chat_sender(self, sid, meta=False):
         """(lock held) One of this host's chats as a message from it is from: a Bot by its name, else by its title, on
-        this host; None if there's no such chat here."""
+        this host; None if there's no such chat here. meta: a head's Meta's, which is no chat here: a chat named Meta,
+        as a phone's Meta is."""
+        if meta:
+            return wire.clean_sender({"kind": "chat", "name": meshtools.META, "host": self.me["id"],
+                                      "host_name": self.me["name"]})
         s = self.sessions.get(sid) if wire.is_id(sid or "") else None
         if s is None:
             return None
@@ -676,7 +680,7 @@ class ServerSessions:
             name = self.mesh.name_of(conn.origin)
             return wire.clean_sender({**said, "host": conn.origin,
                                       "host_name": said.get("host_name") if name == conn.origin[:8] else name})
-        return self.chat_sender(msg.get("as"))
+        return self.chat_sender(msg.get("as"), msg.get("as_meta"))
 
     def senders_path(self, sid):
         return os.path.join(self.state_dir, "senders", f"{sid}.json")

@@ -20,7 +20,7 @@
   "parts": [
     {
       "name": "Bots as share targets",
-      "shows": "Each Bot (as many as the launcher takes, most recently active first) is a sharing shortcut: its name (only its name, never its chat's title), its picture or its initials on its avatar's gradient as the icon. Sending a message to a Bot ranks it higher. A Bot that is gone (deleted, archived, made a chat again, or its host removed) has its shortcut taken away or disabled (\"This Bot isn't there any more\"); one whose host has not listed yet is kept.",
+      "shows": "Each Bot (as many as the launcher takes, most recently active first) is a sharing shortcut: its name (only its name, never its chat's title), its picture or its initials on its avatar's gradient as the icon, with no shade (the launcher cuts the icon to its own shape, which a ring can't follow). Sending a message to a Bot ranks it higher. A Bot that is gone (deleted, archived, made a chat again, or its host removed) has its shortcut taken away or disabled (\"This Bot isn't there any more\"); one whose host has not listed yet is kept.",
       "text": [
         "This Bot isn't there any more"
       ],

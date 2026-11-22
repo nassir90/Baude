@@ -51,7 +51,8 @@ fun PhoneScreen(back: () -> Unit, open: (String) -> Unit) {
             verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Panel { Text(Wording.ThisPhone.name(name = PhoneHost.name), style = Type.body, color = c.fg) }
 
-            val agents = Mesh.sessions["phone"].orEmpty().filter { it.archived != true }
+            val far = startedElsewhere() // (an agent on another host started it: under that one in Home's list only)
+            val agents = Mesh.sessions["phone"].orEmpty().filter { it.archived != true && "phone/${it.id.orEmpty()}" !in far }
             if (agents.isNotEmpty()) {
                 PanelHeading(Wording.ThisPhone.agents)
                 Panel(rows = true) {

@@ -21,7 +21,6 @@ import widgets  # noqa: E402  (what Record draws as Baude does: the links' logos
 import refkinds  # noqa: E402
 import markdownview  # noqa: E402
 import chatparts  # noqa: E402
-from baudelib import icons  # noqa: E402  (its logo: schema/icons)
 from baudelib import wording  # noqa: E402  (its words, Baude's: schema/copy)
 from baudelib.transcripts import (  # noqa: E402
     ref_epoch, rewind_mark, started_outside, strip_reminders, task_notification, typed_at,
@@ -1038,9 +1037,11 @@ def short_dir(d):
 
 
 # ---------------------------------------------------------------- the logo
-# Baude's speech bubble, in green, holding three lines that fade from the newest: the three messages it remembers.
+# Baude's speech bubble, in green (or the accent picked), holding three lines that fade from the newest: the three messages it remembers.
 
-ICON_SVG = icons.svg("apps", "record")  # (schema/icons/apps)
+def logo():
+    """The logo (schema/icons/apps/record.svg) in the accent picked in Settings, Baude's: widgets.logo's."""
+    return widgets.logo("record")
 
 
 # ---------------------------------------------------------------- in the list of apps
@@ -1057,7 +1058,7 @@ def apps_place():
 def install():
     """macOS: ~/Applications/Record.app (an .icns of the logo). Linux: a .desktop entry and the logo in the user's
     hicolor theme. Where it is."""
-    return applist.install(APP_ID, "Record", ICON_SVG, launch_command(), "public.app-category.productivity",
+    return applist.install(APP_ID, "Record", logo(), launch_command(), "public.app-category.productivity",
                            ["Comment=Read AI prose with a peer who knows what you know", "Categories=Utility;GTK;"])[0]
 
 

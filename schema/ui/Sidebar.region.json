@@ -21,6 +21,8 @@
     "sessionlist.py:date_group",
     "sessionlist.py:chat_group",
     "sessionlist.py:remote_info",
+    "sessionlist.py:started_elsewhere",
+    "Home.kt:startedElsewhere",
     "markdownview.py:group_header",
     "pickers.py:TreeList",
     "pickers.py:FadeLabel",
@@ -215,6 +217,11 @@
         },
         {
           "name": "Session row",
+          "phone": {
+            "does": "At least 48dp tall (40 of the phone's units at Global Scale 1.0, Theme.kt's Gap.homeRow), the title and dot centred in it",
+            "why": "Android's least touch target: rows the desktop's height are too small to tap",
+            "decided": "2026-11-22"
+          },
           "shows": "One line: the title (for a Bot whose host is gone, its name, never its chat's title; a title too long fades out at the cut, no …), then a status dot at the far right. The title is \"(untitled)\" if it has none. A session on another host that is gone shows its title (a Bot: its name) dimmed with a crossed-out cloud icon (schema/icons/baude/baude-no-connection-symbolic.svg) before the dot, tooltip \"No connection\" (not for a deactivated host: just dimmed). A chat its host holds messages for shows a small \"held\" tag before the dot. A chat open but not yet written in shows as \"New session\" at the top of its folder (never while blank), and has no right-click menu. Tooltip (several lines, those that apply): title (a Bot: its name); its folder; \"N message(s) held for it, to send or delete in it\"; \"On <host> (<address>)\" with \", deactivated\" or \", gone from the network since <time ago>\"; \"Group <name>\"; \"Worktree <name> of <folder>\"; the source line (for a session of this machine's Claude Desktop or Claude Code, and \"<host>, on the network\" for a session on a host); \"N earlier copy/copies of this conversation hidden\".",
           "copy": [
             "common.untitled",
@@ -247,7 +254,7 @@
           "parts": [
             {
               "name": "Fork nesting",
-              "shows": "A fork sits under the session it came from, indented 18px per level, joined by a thin tree line: down from under the parent's title to its last child, then a corner across to each child. A fork named \"<parent's title> (…)\" shows only the \"…\" part, in a distinct fork style. A Claude Desktop side session or fork sits under the chat Claude Desktop says it came from, in that chat's group whatever its own folder. A chat an agent (Bot) started is under that agent. Forks are found within a folder, by date too."
+              "shows": "A fork sits under the session it came from, indented 18px per level, joined by a thin tree line: down from under the parent's title to its last child, then a corner across to each child. A fork named \"<parent's title> (…)\" shows only the \"…\" part, in a distinct fork style. A Claude Desktop side session or fork sits under the chat Claude Desktop says it came from, in that chat's group whatever its own folder. A chat an agent (Bot) started is under that agent. A chat an agent on another host started (its spawned_by a chat of another host, none of its own host's: an archived or gone-host chat counts, one whose agent is deleted doesn't), and any chat that one started in turn on its host, is listed only under that agent, never among its own host's chats: under it whichever host's chats are listed, if the agent is listed (not deleted here, or missed by a search), and nowhere otherwise. An archived agent's chats are under it in Archived, whatever host they're on. The phone's home list and This phone's agents follow the same rule. Forks are found within a folder, by date too."
             },
             {
               "name": "Desktop chats",
@@ -261,7 +268,7 @@
         },
         {
           "name": "Bot row",
-          "shows": "For a session on a host that is a Bot (top level only, its host reachable; a Bot whose host is gone is a session row showing its name, dimmed, with the crossed-out cloud): twice a chat's height: a round avatar with the Bot's picture (its initials until it has one), the Bot's name in bold on one line, a \"held\" tag if any, the status dot. A Bot has only its Name: the row never shows its chat's title or any second line. Bots are listed first in the list with no header, the last used first, each with what is under it (its forks and threads, whatever host). By date, Bots are among the chats by time. Tooltip: name; folder; \"On <host> (<address>)\"; held; \"Group <name>\"; worktree (never the chat's title).",
+          "shows": "For a session on a host that is a Bot (top level only, its host reachable; a Bot whose host is gone is a session row showing its name, dimmed, with the crossed-out cloud): twice a chat's height: a round avatar with the Bot's picture (set into the page: see README's A picture is set into the page) (its initials until it has one), the Bot's name in bold on one line, a \"held\" tag if any, the status dot. A Bot has only its Name: the row never shows its chat's title or any second line. Bots are listed first in the list with no header, the last used first, each with what is under it (its forks and threads, whatever host). By date, Bots are among the chats by time. Tooltip: name; folder; \"On <host> (<address>)\"; held; \"Group <name>\"; worktree (never the chat's title).",
           "copy": [
             "sidebar.bot",
             "sidebar.held",

@@ -32,11 +32,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
@@ -44,12 +46,16 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlin.math.abs
+import kotlin.math.exp
+import kotlin.math.sqrt
 
-/** A Bot's picture, or its initials on libadwaita's gradient for its name (as AdwAvatar draws one). */
+/** Someone's or a Bot's picture set into the page (imageviews.shaded_picture), or their initials on libadwaita's
+ * gradient for their name (as AdwAvatar draws one, with no shade). */
 @Composable
 fun Avatar(name: String, picture: ImageBitmap?, size: Dp = Gap.avatar) {
     if (picture != null) {
-        Image(picture, null, Modifier.size(size).clip(CircleShape), contentScale = ContentScale.Crop)
+        Image(picture, null, Modifier.size(size).clip(CircleShape).pictureShade(), contentScale = ContentScale.Crop)
         return
     }
     val (top, bottom, fg) = avatarColors(name)
@@ -59,6 +65,37 @@ fun Avatar(name: String, picture: ImageBitmap?, size: Dp = Gap.avatar) {
     ) {
         Text(initials(name), color = fg, fontWeight = FontWeight.Bold, fontSize = (size.value * 0.4f).sp)
     }
+}
+
+/** .picture-shade over a round picture: CSS's three inset shadows (Tokens.PictureShade), each a radial gradient that
+ * fades as a Gaussian blur does (sigma half the blur) from the edge of its circle, moved down by its offset. */
+private fun Modifier.pictureShade() = drawWithContent {
+    drawContent()
+    val s = Tokens.PictureShade
+    val r = size.minDimension / 2
+    fun inset(dy: Float, blur: Float, colour: Color) {
+        val sigma = (blur / 2).coerceAtLeast(0.01f)
+        val reach = r + abs(dy) + 1f // (as far as the picture's farthest point from the moved circle's middle)
+        val from = (r - 3 * sigma).coerceAtLeast(0f)
+        val stops = (0..12).map { i ->
+            val at = from + (reach - from) * i / 12
+            at / reach to colour.copy(alpha = colour.alpha * gaussTail((r - at) / sigma))
+        }
+        val all = (if (from > 0f) listOf(0f to Color.Transparent) else emptyList()) + stops
+        drawCircle(Brush.radialGradient(*all.toTypedArray(), center = center + Offset(0f, dy), radius = reach), r)
+    }
+    inset(0f, s.blur.toPx(), s.blurColor)
+    inset(s.topY.toPx(), s.topBlur.toPx(), s.topColor)
+    val w = s.ring.toPx()
+    drawCircle(s.ringColor, r - w / 2, style = Stroke(w))
+}
+
+/** How much of a unit Gaussian lies beyond x (1 - its CDF): Abramowitz and Stegun's 7.1.26 for erf. */
+private fun gaussTail(x: Float): Float {
+    val z = abs(x) / sqrt(2f)
+    val t = 1f / (1f + 0.3275911f * z)
+    val erf = 1f - (((((1.061405429f * t - 1.453152027f) * t) + 1.421413741f) * t - 0.284496736f) * t + 0.254829592f) * t * exp(-z * z)
+    return if (x >= 0) (1f - erf) / 2 else (1f + erf) / 2
 }
 
 /** A chat's state, as Baude's StatusDot: working (grey, pulsing), waiting (asking: yellow); nothing between turns. */

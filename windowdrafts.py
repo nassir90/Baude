@@ -1,10 +1,11 @@
 """windowdrafts — what each of a Baude window's chats keeps (WindowDrafts): its draft, its model, the inference
 providers, the stream-json protocol, compaction, its title, background tasks and artifacts.
 """
+import json
 import os
 import uuid
 from baudelib.claude import EFFORT_LABELS, MODELS, MODES
-from baudelib.transcripts import session_file, transcript_model
+from baudelib.transcripts import history_item, session_file, transcript_model
 import baudelib.client  # noqa: E402  (servers on the network and their sessions: see baudelib/client.py)
 import baudelib.hosts  # noqa: E402  (this machine's host process, started when it's wanted: see baudelib/hosts.py)
 from baudelib import models as modelslib  # noqa: E402  (what runs a model: claude, apple-claude or pi-claude)
@@ -1093,6 +1094,15 @@ class WindowDrafts:
 
     def h_note(self, msg):  # (the host process's word on the chat: its worktree made again, say)
         self.note(msg.get("text") or "")
+
+    def h_said(self, msg):
+        """A message the chat was sent from elsewhere, as its agent's given it (its host's word: claude never says one
+        back), drawn as its transcript's record of it is: as who it's from if not you (sender), as its host says."""
+        if self.remote is not None and self.session_id and msg.get("sender") is not None:
+            self.remote.heard_sender(self.session_id, msg.get("uuid"), msg["sender"])
+        rec = {"type": "user", "uuid": msg.get("uuid"), "message": msg.get("message") or {}}
+        if (item := history_item(json.dumps(rec))) is not None:
+            self.render_history([item], final=False)
 
     def h_stderr(self, msg):
         own = model_program(self.model) != "claude"  # (apple-claude and pi-claude say things there for the chat)

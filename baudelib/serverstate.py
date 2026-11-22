@@ -358,8 +358,9 @@ class Session:
         return out
 
     def mesh_tools(self):
-        """Has its agent the mesh's tools (baudelib.meshtools): a Bot's always; another chat's if it's been given them."""
-        return bool(self.meta.get("bot") or self.meta.get("mesh_tools"))
+        """Has its agent the mesh's tools (baudelib.meshtools): a Bot's, and a head's Meta's (its chat run with the
+        head's own tools: start's app_tools); no other chat's."""
+        return bool(self.meta.get("bot")) or self.app_tools is not None
 
     def bot_listing(self):
         """A Bot's name, and when its picture last changed (None: no picture): what a head draws it with."""
@@ -392,7 +393,7 @@ class Session:
                 "held": [{"id": h["id"], "text": h["text"], "shown": h.get("shown"), "sender": h.get("sender"),
                           "at": h.get("at")} for h in self.meta.get("held") or []],
                 "senders": self.meta.get("senders") or 0,
-                "mesh_tools": self.mesh_tools(), "always_allow": sorted(self.always_allow),
+                "always_allow": sorted(self.always_allow),
                 "asks": [{"request_id": rid, "tool": (m.get("request") or {}).get("tool_name"),
                           "input": _shown((m.get("request") or {}).get("input"))} for rid, m in self.asks.items()]}
 

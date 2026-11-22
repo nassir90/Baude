@@ -1167,10 +1167,10 @@ class Mesh:
     def relay(self, ch, msg):
         """relay {to, as?} on a connection to this host process's socket: that connection, from now on, a tunnel to the
         member to (once relayed's said), run on this thread till either end's done; as: what's sent through it is from
-        that chat here, as this host has it."""
+        that chat here, as this host has it (as_meta: from a head's Meta)."""
         end = Here(self, ch)
         with self.server.lock:
-            sender = self.server.chat_sender(msg.get("as"))
+            sender = self.server.chat_sender(msg.get("as"), msg.get("as_meta"))
         if (error := self.connect(end, msg.get("to"), sender)) is not None:
             end.out.close()
             ch.send({"op": "error", "req": msg.get("req"), "error": error})

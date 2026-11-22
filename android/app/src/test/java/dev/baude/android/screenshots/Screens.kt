@@ -227,6 +227,13 @@ abstract class Screens(private val theme: String) {
         render("09b-home-host-down") { HomeScreen() }
     }
 
+    @Test fun homeSessionMenu() { // (a chat's long-press menu, on a host that's up)
+        show { HomeScreen() }
+        tap("Why the build is slow", long = true)
+        layOut()
+        screen("09c-home-session-menu")
+    }
+
     // (a chat open on workshop, which is up: each of its pages, as its bottom bar switches to them)
     @Test fun chat() = chatAt("10-chat", "chat")
     @Test fun chatMeta() = chatAt("11-chat-meta", "meta")
@@ -480,6 +487,21 @@ abstract class Screens(private val theme: String) {
     /** What's on the screen, its dialogs too. */
     private fun screen(name: String) = captureScreenRoboImage("build/screenshots/$theme/$name.png")
 
+    /** Every window laid out again: a menu opened with nothing else on screen changing is placed (its anchor's
+     * position known) only once its window's laid out, and drawn only then. */
+    private fun layOut() {
+        val wm = Class.forName("android.view.WindowManagerGlobal").getMethod("getInstance").invoke(null)
+        @Suppress("UNCHECKED_CAST")
+        val views = wm.javaClass.getDeclaredField("mViews").apply { isAccessible = true }.get(wm) as List<android.view.View>
+        fun roots(v: android.view.View): List<androidx.compose.ui.node.RootForTest> = when (v) {
+            is androidx.compose.ui.node.RootForTest -> listOf(v)
+            is android.view.ViewGroup -> (0 until v.childCount).flatMap { roots(v.getChildAt(it)) }
+            else -> emptyList()
+        }
+        views.flatMap(::roots).forEach { it.measureAndLayoutForTest() }
+        settle()
+    }
+
     /** The menu that's up (a window of its own), alone. */
     private fun menu(name: String) {
         val wm = Class.forName("android.view.WindowManagerGlobal").getMethod("getInstance").invoke(null)
@@ -495,8 +517,9 @@ abstract class Screens(private val theme: String) {
     }
 
     /** The nth thing on screen (its dialogs and menus too) whose words or description are label tapped, as Compose's
-     * semantics have it (its click action). */
-    private fun tap(label: String, nth: Int = 0) {
+     * semantics have it (its click action; long: its long-press). */
+    private fun tap(label: String, nth: Int = 0, long: Boolean = false) {
+        val act = if (long) androidx.compose.ui.semantics.SemanticsActions.OnLongClick else androidx.compose.ui.semantics.SemanticsActions.OnClick
         val wm = Class.forName("android.view.WindowManagerGlobal").getMethod("getInstance").invoke(null)
         @Suppress("UNCHECKED_CAST")
         val views = wm.javaClass.getDeclaredField("mViews").apply { isAccessible = true }.get(wm) as List<android.view.View>
@@ -510,12 +533,12 @@ abstract class Screens(private val theme: String) {
         fun hits() = views.drop(views.indexOf(activity.window.decorView)).flatMap(::roots) // (this test's windows)
             .flatMap { all(it.semanticsOwner.rootSemanticsNode) }.filter { n ->
                 val c = n.config
-                c.contains(androidx.compose.ui.semantics.SemanticsActions.OnClick) &&
+                c.contains(act) &&
                     (c.getOrElse(androidx.compose.ui.semantics.SemanticsProperties.Text) { emptyList() }.any { it.text == label } ||
                         c.getOrElse(androidx.compose.ui.semantics.SemanticsProperties.ContentDescription) { emptyList() }.contains(label))
             }
         repeat(20) { if (hits().size <= nth) settle() } // (a menu that's opening: once it's up)
-        hits()[nth].config[androidx.compose.ui.semantics.SemanticsActions.OnClick].action!!.invoke()
+        hits()[nth].config[act].action!!.invoke()
         androidx.compose.runtime.snapshots.Snapshot.sendApplyNotifications() // (what it changed: composed again)
         settle()
     }

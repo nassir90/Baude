@@ -646,12 +646,6 @@ class ServerRunning:
                 s.meta["waits_on"] = waits or None
                 self.save(s)
                 return reply("waits_on", session=s.id)
-            if op == "mesh_tools":  # (a chat given the mesh's tools, or not: from its next start)
-                s.meta["mesh_tools"] = bool(msg.get("on"))
-                self.save(s)
-                self.renew_agent(s)
-                self.changed()
-                return reply("mesh_tools_set", session=s.listing())
             if op == "bot_picture":
                 return reply("bot_picture", session=s.id, picture=self.bot_picture(s))
             if op == "routines":  # (a Bot's routines: read; or one set (made, or changed by its id), or deleted (by its

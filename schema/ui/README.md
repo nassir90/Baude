@@ -31,6 +31,8 @@ Plain JSON, two-space indent, no `x-` keys. Fields, in this order, each left out
   (message keys), `text` (literal strings not in `schema/copy`), `actions` (`[{"by": "click", "does": "…"}]`),
   `phone`, `apps` (only when not every app of the entry has this part), and nested `parts`.
 - `states`: distinct looks: empty, loading, error, working, asking, signed out, host gone.
+- `removed`: parts taken out on purpose, so no app brings them back: each `{name, apps, why, decided}`, `apps` naming
+  every app it's gone from (`baude`, `record`, `phone`).
 - `scenes`: `tests/screenshots.py` scenes that show it.
 
 ## Overrides: where the phone differs on purpose

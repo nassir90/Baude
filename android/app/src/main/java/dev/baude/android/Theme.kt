@@ -76,7 +76,9 @@ object Gap {
     val bubbleV = Tokens.Gap.bubbleV
     val bubbleH = Tokens.Gap.bubbleH
     val composerRadius = Tokens.Radius.composer     // (.composer-box: a 1px ring of the rule)
-    val composerButton = Tokens.Gap.composerButton  // (.composer-actions button)
+    val barButton = Tokens.Gap.barButton            // (a flat button in a bar: IconButton)
+    val composerButton = Tokens.Composer.button     // (.composer-actions button: + and send)
+    val composerInset = Tokens.Composer.inset       // (those buttons, in from the box's edges)
     val cardRadius = Tokens.Radius.card             // (.tool-card: border 1px, its radius and padding)
     val cardV = Tokens.Gap.cardV
     val cardH = Tokens.Gap.cardH

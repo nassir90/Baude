@@ -64,7 +64,7 @@ fun EmissionBar(b: Browser, profile: String, go: (String) -> Unit, nav: (String)
         else IconButton(Adwaita.ViewRefresh, Wording.Browser.reload) { nav("reload") }
         Address(b.shownUrl.value, go, Modifier.weight(1f))
         IconButton(Adwaita.TabNew, Wording.Browser.newTab, onClick = newTab)
-        Row(Modifier.heightIn(min = Gap.composerButton).padding(horizontal = 8.dp), // (who: the profile's, the Bot's
+        Row(Modifier.heightIn(min = Gap.barButton).padding(horizontal = 8.dp), // (who: the profile's, the Bot's
             verticalAlignment = Alignment.CenterVertically) {                        // own, shown not changed here)
             Text(profile, style = Type.bold, color = c.fg.copy(alpha = c.fg.alpha * 0.5f), maxLines = 1,
                 overflow = TextOverflow.Ellipsis, modifier = Modifier.widthIn(max = 96.dp))
@@ -82,7 +82,7 @@ private fun Address(url: String, go: (String) -> Unit, modifier: Modifier) {
     var typing by remember { mutableStateOf(false) }
     var text by remember { mutableStateOf("") }
     if (!typing && text != url) text = url
-    Box(modifier.height(Gap.composerButton).clip(RoundedCornerShape(8.dp)).background(c.fg.copy(alpha = 0.1f))
+    Box(modifier.height(Gap.barButton).clip(RoundedCornerShape(8.dp)).background(c.fg.copy(alpha = 0.1f))
         .padding(horizontal = 9.dp), contentAlignment = Alignment.CenterStart) {
         if (text.isEmpty()) Text(Wording.Browser.address, style = Type.body, color = c.dim, maxLines = 1,
             overflow = TextOverflow.Clip)
@@ -116,7 +116,7 @@ fun TabStrip(b: Browser, pick: (String) -> Unit, close: (String) -> Unit) {
             for (t in b.strip) {
                 val front = t.id == b.selected.value
                 Row(
-                    Modifier.width(wide).height(Gap.composerButton).clip(RoundedCornerShape(8.dp))
+                    Modifier.width(wide).height(Gap.barButton).clip(RoundedCornerShape(8.dp))
                         .then(if (front) Modifier.background(c.fg.copy(alpha = 0.1f)) else Modifier)
                         .clickable { pick(t.id) }.padding(start = 8.dp, end = 3.dp),
                     verticalAlignment = Alignment.CenterVertically,
@@ -165,7 +165,7 @@ fun PromptCards(b: Browser, answer: (org.json.JSONObject) -> Unit) {
                     else -> p.optString("message")
                 }
                 Text(text, style = Type.body, color = c.fg)
-                for ((k, v) in fields) Box(Modifier.fillMaxWidth().height(Gap.composerButton).clip(RoundedCornerShape(8.dp))
+                for ((k, v) in fields) Box(Modifier.fillMaxWidth().height(Gap.barButton).clip(RoundedCornerShape(8.dp))
                     .background(c.fg.copy(alpha = 0.1f)).padding(horizontal = 9.dp), contentAlignment = Alignment.CenterStart) {
                     if (v.value.isEmpty() && k != "text") Text(if (k == "user") Wording.Browser.userName else Wording.Browser.password, style = Type.body,
                         color = c.dim)

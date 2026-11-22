@@ -332,7 +332,7 @@ fun GitPage(hostId: String, sid: String, here: Boolean, openPage: (String) -> Un
                 state.every = !state.every
                 cwd?.let { state.load(it, lines) }
             }
-            Box(Modifier.size(Gap.composerButton).clip(RoundedCornerShape(8.dp)).clickable { cwd?.let { state.load(it, lines, fetch = true) } },
+            Box(Modifier.size(Gap.barButton).clip(RoundedCornerShape(8.dp)).clickable { cwd?.let { state.load(it, lines, fetch = true) } },
                 contentAlignment = Alignment.Center) {
                 Icon(Adwaita.ViewRefresh, Wording.Git.fetchTip, tint = c.fg, modifier = Modifier.size(18.dp.icon).rotate(turn.value))
             }
@@ -357,7 +357,7 @@ fun GitPage(hostId: String, sid: String, here: Boolean, openPage: (String) -> Un
         val names = picked.mapNotNull { r -> branches.firstOrNull { it.rev == r } }
         Box(Modifier.padding(horizontal = 10.dp)) {
             Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(c.fg.copy(alpha = 0.10f))
-                .clickable { state.listOpen = true }.heightIn(min = Gap.composerButton).padding(horizontal = 10.dp),
+                .clickable { state.listOpen = true }.heightIn(min = Gap.barButton).padding(horizontal = 10.dp),
                 horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
                 val first = names.firstOrNull()
                 Text(first?.let { it.name ?: it.label }.orEmpty(), style = Type.body, color = c.fg, maxLines = 1, overflow = TextOverflow.MiddleEllipsis,

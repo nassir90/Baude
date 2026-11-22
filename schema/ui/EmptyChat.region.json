@@ -15,7 +15,7 @@
     },
     {
       "name": "composer",
-      "shows": "The empty text box (two lines tall, no placeholder), the + attach button and the grey send button, with the focus in the box when the window opens. See Composer."
+      "shows": "The empty text box (one line tall, wrapped close round its buttons, no placeholder), the + attach button and the grey send button, with the focus in the box when the window opens. See Composer."
     },
     {
       "name": "status bar",

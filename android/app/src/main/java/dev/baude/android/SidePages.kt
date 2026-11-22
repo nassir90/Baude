@@ -175,20 +175,23 @@ fun SideQuestionsPage(chat: Chat) {
     }
 }
 
-/** A box to ask in (the composer's look: rounded 12, its ring), its send button off while it's empty. */
+/** A box to ask in (the composer's look: rounded 12, its ring, a line tall wrapped close round its button), its send
+ * button off while it's empty. */
 @Composable
 private fun AskBox(hint: String, enabled: Boolean = true, send: (String) -> Unit) {
     val c = LocalBaude.current
     var text by remember { mutableStateOf("") }
+    val line = with(androidx.compose.ui.platform.LocalDensity.current) { Tokens.Font.bodyLine.toDp() }
     Row(Modifier.fillMaxWidth().padding(8.dp).clip(RoundedCornerShape(Gap.composerRadius)).background(c.inside)
-        .border(1.dp, c.rule, RoundedCornerShape(Gap.composerRadius)).padding(6.dp), verticalAlignment = Alignment.Bottom) {
-        Box(Modifier.weight(1f).padding(horizontal = 6.dp, vertical = 7.dp)) {
+        .border(1.dp, c.rule, RoundedCornerShape(Gap.composerRadius)).padding(Gap.composerInset),
+        verticalAlignment = Alignment.Bottom) {
+        Box(Modifier.weight(1f).padding(horizontal = 6.dp, vertical = ((Gap.composerButton - line) / 2).coerceAtLeast(0.dp))) {
             if (text.isEmpty()) Text(hint, style = Type.body, color = c.dim)
             BasicTextField(text, { text = it }, enabled = enabled, textStyle = Type.body.copy(color = c.fg),
                 cursorBrush = SolidColor(c.accentBg), modifier = Modifier.fillMaxWidth().heightIn(max = 140.dp))
         }
         val ready = enabled && text.isNotBlank()
         IconButton(Adwaita.Return, "Ask", enabled = ready, tint = if (ready) c.accentFg else c.fg,
-            background = if (ready) c.accentBg else null) { send(text.trim()); text = "" }
+            background = if (ready) c.accentBg else null, side = Gap.composerButton) { send(text.trim()); text = "" }
     }
 }

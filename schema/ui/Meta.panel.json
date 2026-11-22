@@ -165,7 +165,7 @@
     },
     {
       "name": "box",
-      "shows": "The composer, the same widget as Baude's and Record's own: a card with a Markdown text area (at least two lines tall, scrolls past nine) and a round send button in the bottom right; no attach button. Markdown is shown as you type; a list continues on Enter. Record only: above the text, inside the card, a quote chip (up to 3 lines, ellipsis) with an x button (tooltip 'Drop the passage') when a passage of a chat read, or a selection on a page, is quoted; for a selection the chip starts with '<page> · '. With a quote and no text, sending asks 'What does this mean?'.",
+      "shows": "The composer, the same widget as Baude's and Record's own: a card with a Markdown text area (empty, one line tall wrapped close round its button as Composer's is; growing with the text, scrolls past nine) and a round send button in the bottom right; no attach button. Markdown is shown as you type; a list continues on Enter. Record only: above the text, inside the card, a quote chip (up to 3 lines, ellipsis) with an x button (tooltip 'Drop the passage') when a passage of a chat read, or a selection on a page, is quoted; for a selection the chip starts with '<page> · '. With a quote and no text, sending asks 'What does this mean?'.",
       "copy": ["composer.send", "composer.stop", "meta.send_tip"],
       "text": ["Drop the passage", "What does this mean?"],
       "actions": [

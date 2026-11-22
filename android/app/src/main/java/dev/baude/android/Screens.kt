@@ -347,17 +347,20 @@ fun ChatPage(chat: Chat, name: String, attach: Boolean = true, stop: (() -> Unit
         if (chat.sender == null && exhausted(chat)) Text(Wording.ContextUsage.exhausted, style = Type.caption, color = c.dim,
             modifier = Modifier.padding(horizontal = Gap.chatH))
         overBox?.invoke()
-        // the composer: rounded 12, a ring of the rule, its files over what's written, + and send/stop beside it
+        // the composer: rounded 12, a ring of the rule, its files over what's written, + and send/stop beside it; a
+        // line tall, it's wrapped close round them (their inset above and below), and grows with what's written
         if (!readOnly) Column(
             Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 8.dp).onSizeChanged { composerWidth = it.width }
                 .clip(RoundedCornerShape(Gap.composerRadius)).background(c.inside)
-                .border(1.dp, c.rule, RoundedCornerShape(Gap.composerRadius)).padding(6.dp),
+                .border(1.dp, c.rule, RoundedCornerShape(Gap.composerRadius)).padding(Gap.composerInset),
         ) {
-            if (files.isNotEmpty()) Row(Modifier.padding(bottom = 6.dp).horizontalScroll(rememberScrollState()),
+            if (files.isNotEmpty()) Row(Modifier.padding(start = 2.dp, top = 2.dp, end = 2.dp, bottom = 6.dp)
+                .horizontalScroll(rememberScrollState()),
                 horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 for (f in files.toList()) Attached(f, { files.remove(f) }) { openImage("picked:${System.identityHashCode(f)}") }
             }
             val line = with(LocalDensity.current) { Tokens.Font.bodyLine.toDp() }
+            val pad = ((Gap.composerButton - line) / 2).coerceAtLeast(0.dp) // (a line centred on the buttons)
             val busy = isWorking(chat)
             val conn = Mesh.conn(chat.hostId)
             val gone = chat.sender == null && (conn?.state != "up" || Stopping.line(chat.hostId) != null)
@@ -420,8 +423,8 @@ fun ChatPage(chat: Chat, name: String, attach: Boolean = true, stop: (() -> Unit
                 return sends
             }
             Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                Box(Modifier.weight(1f).heightIn(min = line * 2 + 14.dp, max = line * 9 + 14.dp)
-                    .padding(vertical = 7.dp)) {
+                Box(Modifier.weight(1f).heightIn(min = Gap.composerButton, max = line * 9 + pad * 2)
+                    .padding(vertical = pad)) {
                     Column(Modifier.verticalScroll(rememberScrollState())) {
                         BasicTextField(field, { v -> // (made over as the desktop's box is: bullets, lists, wraps; a soft keyboard's Enter taken by a list)
                             val names = slash?.matches?.map { it.optString("name") }.orEmpty()
@@ -443,7 +446,7 @@ fun ChatPage(chat: Chat, name: String, attach: Boolean = true, stop: (() -> Unit
                             }
                         }, textStyle = Type.body.copy(color = c.fg), cursorBrush = SolidColor(c.accentBg),
                             visualTransformation = look, onTextLayout = { layout = it },
-                            modifier = Modifier.fillMaxWidth().heightIn(min = line * 2)
+                            modifier = Modifier.fillMaxWidth().heightIn(min = line)
                                 .drawBehind { look.drawBlocks(this, layout, c.fg.copy(alpha = c.fg.alpha * 0.07f), Tokens.Radius.code, 2.dp) }
                                 .padding(horizontal = 6.dp)
                                 .onGloballyPositioned { fieldX = it.positionInRoot().x }
@@ -456,13 +459,13 @@ fun ChatPage(chat: Chat, name: String, attach: Boolean = true, stop: (() -> Unit
                                 })
                     }
                 }
-                if (attach) IconButton(Adwaita.ListAdd, Wording.Attachments.attachTip) { pick.launch(arrayOf("*/*")) }
+                if (attach) IconButton(Adwaita.ListAdd, Wording.Attachments.attachTip, side = Gap.composerButton) { pick.launch(arrayOf("*/*")) }
                 if (busy && stop != null && text.isBlank() && files.isEmpty())
                     IconButton(Adwaita.MediaPlaybackStop, Wording.Composer.stop, tint = c.destructive,
-                        background = c.destructive.copy(alpha = 0.2f), onClick = stop)
+                        background = c.destructive.copy(alpha = 0.2f), side = Gap.composerButton, onClick = stop)
                 else
                     IconButton(Adwaita.Return, Wording.Common.send, enabled = sendable, tint = c.fg,
-                        background = c.fg.copy(alpha = 0.10f), tip = sendTip) { if (text.isNotBlank() || files.isNotEmpty()) send() }
+                        background = c.fg.copy(alpha = 0.10f), tip = sendTip, side = Gap.composerButton) { if (text.isNotBlank() || files.isNotEmpty()) send() }
             }
         }
         foot?.invoke()

@@ -12,8 +12,8 @@ import time
 import uuid
 
 from baudelib import (
-    agentproxy, emissionlink, emissiontools, hostdb, hostfiles, hostfixes, hostkube, mesh, meshtools, routines, wire,
-    wording, worktree,
+    agentproxy, emissionlink, emissiontools, hostdb, hostfiles, hostfixes, hostkube, hostlogin, mesh, meshtools,
+    routines, wire, wording, worktree,
 )
 from baudelib.serverstate import (
     APPS, BOT_PICTURE_MAX, Conn, FRAME_KEYS, _mtime, _write_json, _write_text, bot_dir, clean_env,
@@ -238,6 +238,7 @@ class ServerRunning:
             conn.gone = True  # (a relay starting meanwhile: let go of as it would be)
             self.phones.gone(conn)
             hostkube.stop(conn)  # (its pod logs and watches: kubectl ended with it)
+            hostlogin.stop(conn)  # (a sign-in it ran: stopped)
             if getattr(conn, "emission_watch", None) is not None:  # (its pane gone: Emission's watcher with it)
                 try:
                     conn.emission_watch.shutdown(socket.SHUT_RDWR)  # (its recv woken, Emission told)
@@ -492,6 +493,10 @@ class ServerRunning:
                     reply("error", error=str(e))
             threading.Thread(target=browse, daemon=True, name="emission").start()
             return None
+        if op == "login":  # (claude auth login run here for a head elsewhere, on this connection: hostlogin)
+            return hostlogin.start(self, conn, msg)
+        if op == "login_code":
+            return hostlogin.code(conn, msg)
         if op == "kube_follow":  # (a pod's log followed, or a kind's list watched, for a head elsewhere: on this
             threading.Thread(target=hostkube.follow, args=(self, conn, msg), daemon=True,  # connection, ended with it)
                              name="kube-follow").start()

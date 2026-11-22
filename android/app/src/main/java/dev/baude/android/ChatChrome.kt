@@ -23,6 +23,9 @@ class Chrome {
     val missing = mutableStateOf(false)             // (its host answered the attach: no such session)
     var interrupting = 0L                           // (an interrupt waiting: its token)
     var contextSoon = false                         // (the meter asked again a moment from now)
+    var turnText: String? = null                    // (what this phone sent for the turn going: Send again's, a sign-in's)
+    var loginAsked = false                          // (the turn's sign-in card's there: one a turn)
+    var loginStandsIn = false                       // (its card's in for the error the transcript has yet to give)
 }
 
 /** What claude's retrying, and what a host said as it stopped, per host: what it said and when (elapsed ms), kept
@@ -116,7 +119,10 @@ private fun heard(chat: Chat, m: JSONObject) {
             "commands_changed" -> SlashCommands.changed(chat, m.optJSONArray("commands"))
             "api_retry" -> if (top) c.retrying.value = m
         }
-        "assistant", "user" -> if (type == "assistant" || carriesResult(m)) contextSoon(chat)
+        "assistant", "user" -> {
+            if (type == "assistant" && !c.loginAsked) loginError(m)?.let { c.loginAsked = true; Logins.ask(chat, it) }
+            if (type == "assistant" || carriesResult(m)) contextSoon(chat)
+        }
     }
     if (top && type in setOf("stream_event", "assistant")) c.retrying.value = null
 }
@@ -141,8 +147,9 @@ private fun result(chat: Chat, m: JSONObject) {
         seconds = String.format(Locale.ROOT, "%.1f", m.optDouble("duration_ms", 0.0) / 1000), used = fmtTokens(used),
         written = fmtTokens(u.optInt("output_tokens")))
     if (m.optBoolean("is_error") && OVERFLOW.containsMatchIn(m.optString("result"))) c.outgrown.value = true
-    if (m.optBoolean("is_error") && needsLogin(m.optString("result")))
-        chat.lines.add(Line("note", Wording.SignIn.notSignedInThere(host = Mesh.label(chat.hostId))))
+    if (!c.loginAsked) loginError(m)?.let { Logins.ask(chat, it) } // (in place of the error: a card to sign in again)
+    c.loginAsked = false
+    c.turnText = null
     c.interrupting = 0
     c.retrying.value = null
     CompactMarks.turnEnded(chat)

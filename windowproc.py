@@ -925,11 +925,10 @@ class WindowProc:
         if self.composer_box.gates and not self.busy and not (typed in ("/clear", "/new", "/cd", "/login", "/logout") or
                                                               typed.startswith(("/cd ", "/login "))):
             return  # (the context exhausted, a host gone or its connection dropped: only what Baude does itself goes)
-        if (typed in ("/login", "/logout") or typed.startswith("/login ")) and self.remote is not None \
-                and not self.remote.local:  # (signing in is a machine's: another's claude signs in there)
-            buf.set_text("")
+        if typed == "/logout" and self.remote is not None and not self.remote.local:  # (another's claude signs out
+            buf.set_text("")  # there)
             self.completer.hide()
-            self.note(wording.say("sign_in.signs_in_there", host=remote_name(self.remote)))
+            self.note(wording.say("sign_in.signs_out_there", host=remote_name(self.remote)))
             return
         if typed == "/btw" or typed.startswith("/btw "):  # even mid-turn: it doesn't interrupt
             question = typed[4:].strip()
@@ -1208,6 +1207,7 @@ class WindowProc:
         """(on_send's) What was written, and what's attached, sent: to the host process for a chat of Baude's, taken up
         by it first (take_up; once it's started, if it isn't yet), or to the chat's claude here (a Desktop chat's)."""
         self.cut_pending = None  # (written to: no longer a turn cut short; its host forgets its own as it's sent)
+        self.turn_text = text  # (sent again, if the turn fails for want of signing in: LoginCard's Send again)
         going = getattr(self, "cut_continuing", False) and text == CUT_CONTINUE  # (Continue's: not the box's to keep)
         if not going:
             self.cut_continuing = False

@@ -26,6 +26,7 @@ from codeview import CodePage  # noqa: E402,F401
 from startup import LAUNCHER  # noqa: E402
 from signalrefs import TOOL_NAMES  # noqa: E402
 from toolcards import ARTIFACT_URL, STOP_SAID_RE, ThinkingView, ToolCard, api_error_label  # noqa: E402
+from baudelib.hostlogin import login_error  # noqa: E402
 from chatinput import Attachment, attachment_widget  # noqa: E402
 from sessionlist import HERE_HOST, THIS_MACHINE, local_host, main_folder, network, on_main, remote_name  # noqa: E402
 from sidequestion import SideQuestion  # noqa: E402
@@ -1256,6 +1257,10 @@ class WindowDrafts:
         for w in self.blocks.values():  # its streamed text is complete: no frame's delay
             if isinstance(w, (MarkdownView, ThinkingView)):
                 w.finish()
+        if (why := login_error(msg)) is not None:  # (its sign-in ran out, say: a card to sign in again, not the error)
+            if not getattr(self, "login_asked", False):
+                self.login_prompt(why)
+            return
         if msg.get("is_api_error_message") or m.get("model") == "<synthetic>":
             stopped = parent is None and getattr(self.proc, "stop_asked", False)
             for c in m.get("content", []):

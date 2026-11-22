@@ -647,6 +647,7 @@ private fun SaidLine(line: Line, revert: RevertOffer? = null) {
         "rows" -> MetaRows(line.text)
         "metacall" -> MetaCallLine(line.text)
         "action" -> MetaAction(line.text)
+        "login" -> Logins.all[line.text]?.let { LoginCard(it) }
         "note", "error" -> Text(line.text, style = Type.caption, color = c.dim, textAlign = TextAlign.Center,
             modifier = Modifier.fillMaxWidth())  // (.sysnote: 0.85em, faded)
         else -> SelectionContainer { Prose(line.text) }

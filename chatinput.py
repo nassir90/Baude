@@ -3,13 +3,14 @@
 """
 import base64
 import html
-import json
 import os
 import re
 import subprocess
 import threading
 
 from baudelib.claude import claude_env, claude_exe
+from baudelib import hostlogin, wire  # noqa: E402  (signing in on another machine; what a turn's error needing it is)
+from baudelib.hostlogin import auth_status, needs_login, signed_in_as  # noqa: E402,F401
 import baudelib.client  # noqa: E402  (servers on the network and their sessions: see baudelib/client.py)
 import baudelib.hosts  # noqa: E402  (this machine's host process, started when it's wanted: see baudelib/hosts.py)
 from baudelib import wording  # noqa: E402  (the words Baude shows: schema/copy, Record's and the Android app's too)
@@ -215,50 +216,111 @@ LOCAL_COMMANDS = [  # handled by baude itself, never sent to claude
 
 # ------------------------------------------------------------- /login --
 
-_AUTH_ESCAPES = re.compile(r"\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b\[[0-9;?]*[A-Za-z]")  # (a link's, a colour's)
-NEEDS_LOGIN = re.compile(r"Please run /login|Invalid API key|OAuth token (?:has )?(?:expired|revoked)|"
-                         r"[Nn]ot (?:logged|signed) in|authentication_error", re.I)
+_AUTH_ESCAPES = hostlogin.ESCAPES
 
 
-def needs_login(text):
-    """A turn's error that signing in again would fix (claude's "Invalid API key · Please run /login")."""
-    return bool(text) and bool(NEEDS_LOGIN.search(text))
+class _HereLogin:
+    """claude auth login run on this machine, for LoginCard (it needs no terminal: it writes lines, and reads a pasted
+    code from its input): heard(self, line) as it writes each, done(self, problem, code, who) once it's over (who: as
+    claude auth status says, signed in). OSError if it can't be started."""
+
+    def __init__(self, args, heard, done):
+        self.proc = subprocess.Popen([claude_exe(), "auth", "login", *args], stdin=subprocess.PIPE,
+                                     stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1,
+                                     env=claude_env())
+        threading.Thread(target=self._read, args=(heard, done), daemon=True, name="login").start()
+
+    def _read(self, heard, done):
+        for line in self.proc.stdout:
+            GLib.idle_add(heard, self, line)
+        code = self.proc.wait()
+        who = signed_in_as(auth_status()) if code == 0 else None
+        GLib.idle_add(done, self, None, code, who)
+
+    def paste(self, code):
+        if self.proc.poll() is not None:
+            return False
+        try:
+            self.proc.stdin.write(code + "\n")
+            self.proc.stdin.flush()
+        except OSError:
+            return False
+        return True
+
+    def stop(self):
+        if self.proc.poll() is None:
+            self.proc.terminate()
 
 
-def auth_status():
-    """claude auth status --json: {loggedIn, email, orgName, subscriptionType, authMethod…}, or {} (it failed)."""
-    try:
-        out = subprocess.run([claude_exe(), "auth", "status", "--json"], capture_output=True, text=True, timeout=30,
-                             stdin=subprocess.DEVNULL, env=claude_env()).stdout
-        return json.loads(out)
-    except (OSError, ValueError, subprocess.SubprocessError):
-        return {}
+class _HostLogin:
+    """claude auth login run on another machine, by its host process (hostlogin there), on a connection of its own to
+    it (through the mesh, if that's how it's reached), for LoginCard as _HereLogin is; stop() lets go of the
+    connection, which stops it there."""
 
+    REQ = 1
 
-def signed_in_as(status):
-    """Who auth_status says is signed in, in a few words, or None."""
-    if not status.get("loggedIn"):
-        return None
-    who = status.get("email") or status.get("authMethod") or "your account"
-    extra = " · ".join(x for x in (status.get("orgName"), status.get("subscriptionType")) if x)
-    return f"{who} ({extra})" if extra else who
+    def __init__(self, where, args, heard, done):
+        self.ch, self.stopped = None, False
+        threading.Thread(target=self._run, args=(where, list(args), heard, done), daemon=True,
+                         name="host-login").start()
+
+    def _run(self, where, args, heard, done):
+        try:
+            ch, _info = wire.reach(where, timeout=10)
+        except OSError as e:
+            GLib.idle_add(done, self, str(e) or wording.say("host_status.no_answer"), None, None)
+            return
+        self.ch = ch
+        if self.stopped:
+            ch.close()
+        ch.sock.settimeout(wire.SILENT_S)
+        ch.keep_alive()
+        ch.send({"op": "login", "req": self.REQ, "args": args})
+        end = None
+        for msg in ch:
+            if msg.get("req") != self.REQ:
+                continue
+            if msg.get("op") == "login_said":
+                GLib.idle_add(heard, self, (msg.get("line") or "") + "\n")
+            elif msg.get("op") == "login_end":
+                end = (msg.get("why"), msg.get("code"), msg.get("who"))
+                break
+            elif msg.get("op") == "error":
+                end = (wire.said(msg), None, None)
+                break
+        ch.close()
+        if self.stopped:
+            end = (None, -15, None)
+        GLib.idle_add(done, self, *(end or (wording.say("host_status.connection_dropped"), None, None)))
+
+    def paste(self, code):
+        return self.ch is not None and self.ch.send({"op": "login_code", "code": code})
+
+    def stop(self):
+        self.stopped = True
+        if self.ch is not None:
+            self.ch.close()
 
 
 class LoginCard(Gtk.Box):
-    """/login in the chat: claude auth login run here (it needs no terminal: it writes lines, and reads a pasted code
-    from its input). The sign-in page opens in the browser (its link here too, if it didn't); if the page shows a code
-    instead of coming back by itself, it's pasted in the box; Cancel stops it. Once it's done, who's signed in, and the
-    chat's claude started again on it (win.signed_in). args: claude auth login's (--console, --sso, --email …)."""
+    """Signing in to Claude in the chat, on the machine the chat runs on: claude auth login run there (this one's here;
+    another machine's by its host process: where, its wire.reach place, and host, its name). /login starts it at once;
+    a turn that failed for want of it (ask) first says so, with why and Sign in. The sign-in page opens in the browser
+    here (another machine's, its link to open); if the page shows a code instead of coming back by itself, it's pasted
+    in the box; Cancel stops it. Once it's done, who's signed in, and the chat's claude started again on it
+    (win.signed_in); retry: what the failed turn sent from here, Send again to send it again (win.send_again).
+    args: claude auth login's (--console, --sso, --email …)."""
 
-    def __init__(self, win, args=()):
+    def __init__(self, win, args=(), where=None, host=None, ask=None, retry=None):
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=6)
         self.add_css_class("perm-card")
-        self.win, self.args, self.proc, self.said = win, list(args), None, []
-        self.title = sel_label(f"<b>{html.escape(wording.say('sign_in.signing_in'))}</b>")
-        self.body = sel_label(f"<span alpha='60%'>{html.escape(wording.say('sign_in.starting'))}</span>")
+        self.win, self.args, self.where, self.host, self.retry = win, list(args), where, host, retry
+        self.proc, self.said = None, []
+        self.title = sel_label("")
+        self.body = sel_label("")
         self.append(self.title)
         self.append(self.body)
-        self.row = Gtk.Box(spacing=6)
+        self.row = Gtk.Box(spacing=6, visible=False)
         self.code = Gtk.Entry(hexpand=True, placeholder_text=wording.say("sign_in.code_hint"))
         self.code.connect("activate", lambda *_: self.paste())
         self.send = Gtk.Button(label=wording.say("common.send"))
@@ -272,26 +334,36 @@ class LoginCard(Gtk.Box):
         self.again.add_css_class("suggested-action")
         self.again.connect("clicked", lambda *_: self.start())
         self.append(self.again)
-        self.start()
+        self.resend = Gtk.Button(label=wording.say("sign_in.send_again"), halign=Gtk.Align.START, visible=False)
+        self.resend.add_css_class("suggested-action")
+        self.resend.connect("clicked", lambda *_: self.send_again())
+        self.append(self.resend)
+        if ask is None:
+            self.start()
+            return
+        self.say(wording.say("sign_in.not_signed_in_on", host=host) if host else wording.say("sign_in.not_signed_in"),
+                 hostlogin.reason(ask), dim=True)
+        self.again.set_label(wording.say("sign_in.sign_in"))
+        self.again.set_visible(True)
+
+    def say(self, title, body="", dim=False, markup=False):
+        self.title.set_markup(f"<b>{html.escape(title)}</b>")
+        text = body if markup else html.escape(body or "")
+        self.body.set_markup(f"<span alpha='60%'>{text}</span>" if dim and text else text)
+        self.body.set_visible(bool(body))
 
     def start(self):
-        self.title.set_markup(f"<b>{html.escape(wording.say('sign_in.signing_in'))}</b>")
-        self.body.set_markup(f"<span alpha='60%'>{html.escape(wording.say('sign_in.starting'))}</span>")
+        self.say(wording.say("sign_in.signing_in"), wording.say("sign_in.starting"), dim=True)
         self.row.set_visible(True)
         self.again.set_visible(False)
+        self.again.set_label(wording.say("common.try_again"))
         self.said = []
         try:
-            self.proc = subprocess.Popen([claude_exe(), "auth", "login", *self.args], stdin=subprocess.PIPE,
-                                         stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1,
-                                         env=claude_env())
+            self.proc = _HostLogin(self.where, self.args, self.heard, self.done) if self.where is not None else \
+                _HereLogin(self.args, self.heard, self.done)
         except OSError as e:
-            return self.done(None, f"couldn't start claude: {e}")
-        threading.Thread(target=self._read, args=(self.proc,), daemon=True).start()
-
-    def _read(self, proc):
-        for line in proc.stdout:
-            GLib.idle_add(self.heard, proc, line)
-        GLib.idle_add(self.done, proc, None, proc.wait())
+            self.proc = None
+            self.done(None, f"couldn't start claude: {e}")
 
     def heard(self, proc, line):
         """A line from claude auth login: the sign-in page's address shown as a link; anything else kept, for if it
@@ -301,60 +373,57 @@ class LoginCard(Gtk.Box):
         # (its prompt has no line break: what it says next, "Login failed: …", comes on the prompt's line)
         line = _AUTH_ESCAPES.sub("", line).replace("Paste code here if prompted > ", "").strip()
         if m := re.search(r"https://\S+", line):
-            url = m.group(0).rstrip(".,)")
-            self.body.set_markup("A browser window should have opened to sign in. If it didn't, "
-                                 f"<a href=\"{html.escape(url)}\">open the sign-in page</a>.")
+            url = html.escape(m.group(0).rstrip(".,)"))
+            if self.where is None:
+                link = f"<a href=\"{url}\">{html.escape(wording.say('sign_in.open_page'))}</a>"
+                said = html.escape(wording.say("sign_in.browser_opened", link="\x00")).replace("\x00", link)
+            else:  # (another machine's: its browser isn't here, nor maybe anywhere: the page opened here)
+                link = f"<a href=\"{url}\">{html.escape(wording.say('sign_in.open_page_there'))}</a>"
+                said = html.escape(wording.say("sign_in.page_there", link="\x00")).replace("\x00", link)
+            self.body.set_markup(said)
+            self.body.set_visible(True)
         elif line and not line.startswith("Opening browser"):
             self.said.append(line)
         return False
 
     def paste(self):
         code = self.code.get_text().strip()
-        if not code or self.proc is None or self.proc.poll() is not None:
-            return
-        try:
-            self.proc.stdin.write(code + "\n")
-            self.proc.stdin.flush()
-        except OSError:
+        if not code or self.proc is None or not self.proc.paste(code):
             return
         self.code.set_text("")
-        self.body.set_markup("<span alpha='60%'>Checking the code…</span>")
+        self.body.set_markup(f"<span alpha='60%'>{html.escape(wording.say('sign_in.checking_code'))}</span>")
 
     def stop(self):
-        if self.proc is not None and self.proc.poll() is None:
-            self.proc.terminate()
+        if self.proc is not None:
+            self.proc.stop()
 
-    def done(self, proc, problem=None, code=None):
-        """It's finished: signed in (who as, from claude auth status), or why not, with Try again."""
+    def done(self, proc, problem=None, code=None, who=None):
+        """It's finished: signed in (who as), or why not, with Try again."""
         if proc is not None and proc is not self.proc:
             return False
         self.proc = None
         self.row.set_visible(False)
         if code == 0:
-            self.title.set_markup(f"<b>{html.escape(wording.say('sign_in.signing_in'))}</b>")
-            self.body.set_markup("<span alpha='60%'>Signed in; checking who as…</span>")
-
-            def check():
-                who = signed_in_as(auth_status())
-                GLib.idle_add(self.signed_in, who)
-            threading.Thread(target=check, daemon=True).start()
-            return False
+            return self.signed_in(who)
         why = problem or next((x for x in reversed(self.said) if x.lower().startswith(("login failed", "error"))),
                               None) or (self.said[-1] if self.said else None)
-        self.title.set_markup("<b>Sign-in cancelled</b>" if code in (-15, 130) and not problem else
-                              "<b>Sign-in didn't finish</b>")
-        self.body.set_markup(f"<span alpha='60%'>{html.escape(why)}</span>" if why and code not in (-15,) else "")
-        self.body.set_visible(bool(self.body.get_text()))
+        cancelled = code in (-15, 130) and not problem
+        self.say(wording.say("sign_in.cancelled") if cancelled else wording.say("sign_in.failed"),
+                 why if why and code != -15 else "", dim=True)
         self.again.set_visible(True)
         return False
 
     def signed_in(self, who):
-        self.title.set_markup("<b>Signed in to Claude</b>")
-        self.body.set_visible(True)
-        self.body.set_markup(html.escape(f"as {who}") if who else "<span alpha='60%'>claude auth status didn't say "
-                                                                   "who as</span>")
+        self.say(wording.say("sign_in.signed_in"), wording.say("sign_in.as_who", who=who) if who else
+                 wording.say("sign_in.who_unknown"), dim=not who)
+        self.resend.set_visible(bool(self.retry))
         self.win.signed_in()
         return False
+
+    def send_again(self):
+        """Send again: what the failed turn sent, sent again (once the chat's claude has started on the new sign-in)."""
+        if self.retry and self.win.send_again(self.retry):
+            self.resend.set_visible(False)
 
 
 class SlashCompleter:

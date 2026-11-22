@@ -83,7 +83,7 @@ object PhoneHost {
             ctx = c.applicationContext
             val prefs = ctx.getSharedPreferences("phone", Context.MODE_PRIVATE)
             id = prefs.getString("id", null) ?: UUID.randomUUID().toString().also { prefs.edit().putString("id", it).apply() }
-            name = deviceName()
+            name = prefs.getString("name", null)?.ifBlank { null } ?: deviceName()
             root = File(ctx.filesDir, "phone")
             for (d in listOf("sessions", "transcripts", "agents", "pictures", "trash", "senders")) File(root, d).mkdirs()
             File(root, "ephemeral").deleteRecursively() // (side questions from before: gone with the app, as with their heads)
@@ -128,8 +128,19 @@ object PhoneHost {
         save(s)
     }
 
-    /** What the phone's called: its name in Android's settings, else its model's. */
-    private fun deviceName(): String {
+    /** Its name in the mesh changed (This phone's Name; empty: the phone's own again): kept, and told to its heads and
+     * to the mesh, whose members list it by the new one. */
+    fun rename(to: String) {
+        val n = tidy(to).take(64)
+        ctx.getSharedPreferences("phone", Context.MODE_PRIVATE).edit()
+            .apply { if (n.isEmpty()) remove("name") else putString("name", n) }.apply()
+        name = n.ifEmpty { deviceName() }
+        changed()
+        PhoneLink.renamed()
+    }
+
+    /** What the phone's called by Android: its name in Android's settings, else its model's. */
+    fun deviceName(): String {
         val set = try {
             android.provider.Settings.Global.getString(ctx.contentResolver, "device_name")
         } catch (_: Exception) {

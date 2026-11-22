@@ -22,7 +22,7 @@ def start_here(wait=20.0, follow_checkout=True, auto_update=False):
     path = wire.socket_path()
     if wire.wait_for_socket(path, 0.2):
         return True
-    if os.environ.get("BAUDE_HOST_IN_PROCESS") == "1":  # (the render rigs': one in this process, gone with it)
+    if os.environ.get("BAUDE_HOST_IN_PROCESS") == "1":  # (the tests': one in this process, gone with it)
         return _in_process(path, wait)
     if (pid := running_pid()) is not None:  # (running, but its socket's gone, its folder taken away: listening again)
         try:
@@ -58,7 +58,7 @@ _HERE = []
 
 
 def _in_process(path, wait):
-    """(BAUDE_HOST_IN_PROCESS=1, the render rigs') This machine's host process in this one, on a thread: as one started
+    """(BAUDE_HOST_IN_PROCESS=1, the tests') This machine's host process in this one, on a thread: as one started
     would be, its claudes this process's children."""
     import threading
     from baudelib.server import AlreadyRunning, Server

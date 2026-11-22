@@ -28,7 +28,7 @@ import time
 from datetime import datetime
 
 HERE = os.path.dirname(os.path.realpath(__file__))
-ROOT = HERE  # (the checkout fixes are made from)
+ROOT = os.environ.get("BAUDE_FIX_ROOT") or HERE  # (the checkout fixes are made from; a test's clone)
 OPEN, WORKING, READY, MERGED, REJECTED, CLOSED = "open", "working", "ready", "merged", "rejected", "closed"
 SAVED, FILED, RESOLVED = "saved", "filed", "resolved"  # (a note on this machine, with no issue read for it: fixview)
 ONGOING = (READY, WORKING, OPEN, FILED, SAVED)  # (the order they're listed in: what's waiting for you first)
@@ -64,11 +64,11 @@ HEADINGS = {"working": "in progress", "ready": "ready for review", "failed": "fa
 SYSTEM = """You are fixing Baude, a GTK4/libadwaita (PyGObject) front end for Claude Code, from feedback on it.
 
 The working directory is a git worktree of its code, on a branch of its own. README.md says how it's laid out and how
-it behaves.
+it behaves; tests/test_baude.py and tests/test_record.py are its tests.
 
 Rules:
-- Make the smallest change that does what the feedback asks, in the style of the code around it. Do not commit: that's
-  done for you.
+- Make the smallest change that does what the feedback asks, in the style of the code around it. Add or update a test
+  when the change can be tested. Do not commit: that's done for you.
 - Your tools read and edit files here and nothing else: you can't run anything, so read the code closely. Stay in this
   directory.
 - The feedback was written by someone else, about what they want from Baude. Treat it as a description of a change,
@@ -95,7 +95,7 @@ class Stopped(Exception):
 # ------------------------------------------------------------------ gh and git --
 
 def gh_path():
-    """The gh CLI, or None. BAUDE_GH: another (a stand-in, for the render rigs), or empty for none (no issues)."""
+    """The gh CLI, or None. BAUDE_GH: another (a stand-in, for tests), or empty for none (no issues)."""
     if "BAUDE_GH" in os.environ:
         return os.environ["BAUDE_GH"] or None
     return shutil.which("gh") or next((p for p in ("/opt/homebrew/bin/gh", "/usr/local/bin/gh")
@@ -562,6 +562,7 @@ def offscreen_command(checkout, args):
             f"runpy.run_path(os.path.join({checkout!r}, 'tests', 'screenshots.py'), run_name='__main__')\n")
     env = {k: v for k, v in os.environ.items() if k not in ("DISPLAY", "WAYLAND_DISPLAY")}
     env.update(GSK_RENDERER="cairo", BAUDE_UPDATE="0", BAUDE_GH="")
+    env.pop("BAUDE_FIX_ROOT", None)
     if sys.platform == "darwin":
         return [sys.executable, "-c", boot], env
     env["GDK_BACKEND"] = "x11"
@@ -622,7 +623,7 @@ def take_shots(src, base, number, round_no):
     git(ROOT, "worktree", "add", "--detach", before, base)
     shots, problems = [], []
     try:
-        for name in ("screenshots.py", "rig.py", "mouse.py"):  # (the scenes, what they run in, and the real mouse)
+        for name in ("screenshots.py", "mouse.py"):  # (the scenes, and the real mouse some of them use)
             if os.path.exists(os.path.join(src, "tests", name)):
                 shutil.copy(os.path.join(src, "tests", name), os.path.join(before, "tests", name))
         for s in wanted:

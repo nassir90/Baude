@@ -128,8 +128,8 @@
         },
         {
           "name": "status line",
-          "shows": "Overlaid bottom left of the diagram, one line: the summary \"<database> · <schema> · <n> tables · <n> foreign key(s) · read-only · read in <s> s\" (the last only after a fresh read; singular \"1 foreign key\"); or progress and results: \"Looking for Postgres servers…\", \"Looking for <table> in <n> databases on <m> servers…\", \"Looking for a column <column> in <n> databases on <m> servers…\", \"Reading <database>…\", \"No database here has a table <table>.\", \"No database here has a table with a column <column>.\", \"<database>: <error>\", and find's \"<n> out of <total>\". With no table found the first database is drawn anyway.",
-          "copy": ["databases.tables", "databases.foreign_keys", "databases.read_only", "databases.read_in", "databases.looking_for_servers", "databases.looking_for_table", "databases.looking_for_column", "databases.reading", "databases.no_table_here", "databases.no_column_here", "glossary.count"]
+          "shows": "Overlaid bottom left of the diagram, one line: the summary \"<database> · <schema> · <n> tables · <n> foreign key(s) · read-only · read in <s> s\" (the last only after a fresh read; singular \"1 foreign key\"); or progress and results: \"Looking for Postgres servers…\", \"Looking for <table> in <n> databases on <m> servers…\", \"Looking for a column <column> in <n> databases on <m> servers…\", \"Reading <database>…\", \"No database here has a table <table>.\", \"No database here has a table with a column <column>.\", \"No table like <text> in <schema>\", \"<database>: <error>\", and find's \"<n> out of <total>\". With no table found the first database is drawn anyway.",
+          "copy": ["databases.tables", "databases.foreign_keys", "databases.read_only", "databases.read_in", "databases.looking_for_servers", "databases.looking_for_table", "databases.looking_for_column", "databases.reading", "databases.no_table_here", "databases.no_column_here", "databases.no_table_like", "glossary.count"]
         }
       ]
     },

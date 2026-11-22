@@ -5,7 +5,7 @@
     python3 tests/bench_zoom_record.py --sizes large --steps 9 --profile --sample
     python3 tests/bench_zoom_record.py --sizes large --pages 800 --messages 3000 --out result.json
 
-The sample, in a throwaway folder (nothing touches your Records, settings or
+The sample, in a throwaway folder (env as tests/test_record.py has it: nothing touches your Records, settings or
 chats): a notebook of many pages full of [[links]] and @names, its folder a git repository with a glossary
 (.baude/signal.db) and so a ⌘K catalogue with a lot of names, some of the pages open in tabs, and long chats open in
 Readers, each of them read once (a tab never shown isn't laid out). --pages, --links, --names, --glossary, --files,

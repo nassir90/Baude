@@ -868,6 +868,16 @@ class SchemaView(Gtk.Box):
         self.canvas.focus(i)
         self.say(wording.say("glossary.count", matched=self.match_at + 1, total=len(matches)))
 
+    def find_table(self, text, quiet=False):
+        text = text.strip().lower()
+        hit = next((i for i, c in enumerate(self.canvas.cards) if c["table"]["name"].lower() == text), None)
+        if hit is None:
+            hit = next((i for i, c in enumerate(self.canvas.cards) if text in c["table"]["name"].lower()), None)
+        if hit is not None:
+            self.canvas.focus(hit)
+        elif not quiet:
+            self.say(wording.say("databases.no_table_like", text=text, schema=self.namespace))
+
     ZOOM_STEP = 1.2  # (React Flow's zoomIn and zoomOut)
 
     def zoom(self, steps):

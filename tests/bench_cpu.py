@@ -2,7 +2,7 @@
 """Load-test baude's CPU, scenario by scenario, against copies of your own sessions (nothing real is
 written: see bench_memory.py, whose set-up this shares).
 
-    python3 tests/bench_cpu.py                     # macOS: as is; Linux: under xvfb-run, like screenshots.sh
+    python3 tests/bench_cpu.py                     # macOS: as is; Linux: under xvfb-run, like run.sh
     python3 tests/bench_cpu.py --profile 12        # + the 12 functions the process spent most in
     python3 tests/bench_cpu.py --only tail,stream  # some scenarios only
 
@@ -84,7 +84,7 @@ class Meter:
 
 
 def M_GLib():
-    from rig import GLib
+    from test_baude import GLib
     return GLib
 
 
@@ -99,8 +99,8 @@ def main():
     only = [s for s in args.only.split(",") if s] or SCENARIOS
     rows = []
 
-    import rig as T  # noqa: E402  (throwaway config dirs and the fake claude from here on)
-    from rig import baude, GLib  # noqa: E402
+    import test_baude as T  # noqa: E402  (throwaway config dirs and the fake claude from here on)
+    from test_baude import baude, GLib  # noqa: E402
 
     projects = os.path.join(os.environ["CLAUDE_CONFIG_DIR"], "projects")
     os.makedirs(os.path.dirname(projects), exist_ok=True)

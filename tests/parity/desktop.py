@@ -5,7 +5,7 @@ text, buttons, inputs, switches and images a user sees, top to bottom). A render
 
     python3 tests/parity/desktop.py [--out DIR] [-k NAME] [--theme light|dark]
 
-Runs against tests/fake_claude.py in a throwaway HOME and config dirs (tests/rig.py's), never the real claude,
+Runs against tests/fake_claude.py in a throwaway HOME and config dirs (tests/test_baude.py's), never the real claude,
 never the real data; on macOS its windows never reach the screen (macos.stay_offscreen)."""
 import json
 import os
@@ -34,7 +34,7 @@ import re  # noqa: E402
 import time  # noqa: E402
 import types  # noqa: E402
 
-import screenshots as S  # noqa: E402  (tests/rig.py's throwaway env, the window machinery, capture)
+import screenshots as S  # noqa: E402  (tests/test_baude's throwaway env, the window machinery, capture)
 from screenshots import T, Adw, Gtk, baude  # noqa: E402
 import update  # noqa: E402
 import baudelib.wording as wording  # noqa: E402

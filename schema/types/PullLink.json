@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "A pull request a chat's replies name.",
+  "properties": {
+    "repo": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Its repository, owner/name (null for a bare #12)."
+    },
+    "number": {
+      "type": "integer",
+      "description": "Its number."
+    }
+  },
+  "additionalProperties": false
+}

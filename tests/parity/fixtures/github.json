@@ -1,0 +1,34 @@
+{
+ "description": "GitHub as the git scenes see it (gh signed in): the garden's repository, who is signed in, each author's GitHub login by email, the pull requests a commit is in (by number), and the repository's pull requests as lookup.pull_info keeps them.",
+ "repo": "garden-dev/garden",
+ "login": "dev",
+ "logins": {
+  "ada@example.com": "ada-park"
+ },
+ "commit_pulls": [
+  128
+ ],
+ "prs": [
+  {
+   "number": 128,
+   "title": "Back off before reconnecting the upload socket",
+   "state": "open",
+   "url": "https://github.com/garden-dev/garden/pull/128",
+   "head": "fix/upload-retry"
+  },
+  {
+   "number": 120,
+   "title": "Time the bench's drops",
+   "state": "merged",
+   "url": "https://github.com/garden-dev/garden/pull/120",
+   "head": "bench-timer"
+  },
+  {
+   "number": 124,
+   "title": "Draft the uploads notes",
+   "state": "draft",
+   "url": "https://github.com/garden-dev/garden/pull/124",
+   "head": "docs-notes"
+  }
+ ]
+}

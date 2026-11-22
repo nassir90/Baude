@@ -1,0 +1,879 @@
+{
+ "description": "What the host answers about the garden's repository (gitfixture.make): the Git page's reads (page: the branches the chat touched; page|every; page|<the branches picked>) and the chat's commit's card. Recorded by tests/parity/gitfixture.py; GitHub's parts are fixtures/github.json's. @HOME@ is the host's home.",
+ "answers": {
+  "page": {
+   "what": "page",
+   "top": "@HOME@/garden",
+   "folder": "@HOME@/garden",
+   "branches": [
+    {
+     "rev": "origin/main",
+     "name": "origin/main",
+     "sha": "8ea3d5d59435c87a2c0d954d98a2bd3ad599628f",
+     "upstream": null,
+     "ahead": 0,
+     "behind": 0,
+     "gone": false,
+     "worktree": null,
+     "label": "origin/main",
+     "remote": true,
+     "touched": true
+    },
+    {
+     "rev": "fix/upload-retry",
+     "name": "fix/upload-retry",
+     "sha": "0975ffd32d45c9c39b61f6093238d2bfe48287d6",
+     "upstream": "origin/fix/upload-retry",
+     "ahead": 1,
+     "behind": 0,
+     "gone": false,
+     "worktree": "@HOME@/garden",
+     "label": "fix/upload-retry — garden",
+     "touched": true,
+     "remote": false
+    },
+    {
+     "rev": "origin/fix/upload-retry",
+     "name": "origin/fix/upload-retry",
+     "sha": "089f2c6f65a8157ecdaa710bbf6c70a04bd6671e",
+     "upstream": null,
+     "ahead": 0,
+     "behind": 0,
+     "gone": false,
+     "worktree": null,
+     "label": "origin/fix/upload-retry",
+     "remote": true,
+     "touched": true
+    },
+    {
+     "rev": "main",
+     "name": "main",
+     "sha": "8ea3d5d59435c87a2c0d954d98a2bd3ad599628f",
+     "upstream": "origin/main",
+     "ahead": 0,
+     "behind": 0,
+     "gone": false,
+     "worktree": null,
+     "label": "main",
+     "touched": false,
+     "remote": false
+    },
+    {
+     "rev": "bench-timer",
+     "name": "bench-timer",
+     "sha": "169cb7e7f66727c40932a642736eca43f978661e",
+     "upstream": null,
+     "ahead": 0,
+     "behind": 0,
+     "gone": false,
+     "worktree": null,
+     "label": "bench-timer",
+     "touched": false,
+     "remote": false
+    },
+    {
+     "rev": "origin/docs-notes",
+     "name": "origin/docs-notes",
+     "sha": "31132fc56d4d40ffd2ec38cabef7f03d54bf5050",
+     "upstream": null,
+     "ahead": 0,
+     "behind": 0,
+     "gone": false,
+     "worktree": null,
+     "label": "origin/docs-notes",
+     "remote": true,
+     "touched": false
+    }
+   ],
+   "picked": [
+    "origin/main",
+    "fix/upload-retry",
+    "origin/fix/upload-retry"
+   ],
+   "rev": "origin/main",
+   "mine": "fix/upload-retry",
+   "branch": null,
+   "parent": null,
+   "commits": [
+    {
+     "sha": "0975ffd32d45c9c39b61f6093238d2bfe48287d6",
+     "parents": [
+      "089f2c6f65a8157ecdaa710bbf6c70a04bd6671e"
+     ],
+     "author": "Ada Park",
+     "email": "ada@example.com",
+     "at": 1795171200,
+     "ct": 1795171200,
+     "refs": [
+      "HEAD -> fix/upload-retry"
+     ],
+     "subject": "Note the retry in the docs",
+     "title": "Note the retry in the docs",
+     "files": 1,
+     "added": 2,
+     "removed": 0
+    },
+    {
+     "sha": "089f2c6f65a8157ecdaa710bbf6c70a04bd6671e",
+     "parents": [
+      "07330ae9dee9b703dbbbb6f189d1318dbeee3198"
+     ],
+     "author": "Ada Park",
+     "email": "ada@example.com",
+     "at": 1795170000,
+     "ct": 1795170000,
+     "refs": [
+      "origin/fix/upload-retry"
+     ],
+     "subject": "Back off before reconnecting the upload socket",
+     "title": "Back off before reconnecting the upload socket",
+     "files": 2,
+     "added": 18,
+     "removed": 2
+    },
+    {
+     "sha": "07330ae9dee9b703dbbbb6f189d1318dbeee3198",
+     "parents": [
+      "2fe398e18b3d998fb59cd842d85248c907e0707f"
+     ],
+     "author": "Ada Park",
+     "email": "ada@example.com",
+     "at": 1795169100,
+     "ct": 1795169100,
+     "refs": [],
+     "subject": "Run the upload test twenty times",
+     "title": "Run the upload test twenty times",
+     "files": 1,
+     "added": 3,
+     "removed": 0
+    },
+    {
+     "sha": "8ea3d5d59435c87a2c0d954d98a2bd3ad599628f",
+     "parents": [
+      "2fe398e18b3d998fb59cd842d85248c907e0707f"
+     ],
+     "author": "Rowan Lee",
+     "email": "41000001+rowan-lee@users.noreply.github.com",
+     "at": 1794582000,
+     "ct": 1794582000,
+     "refs": [
+      "origin/main",
+      "origin/HEAD",
+      "main"
+     ],
+     "subject": "Tidy the release notes",
+     "title": "Tidy the release notes",
+     "files": 1,
+     "added": 2,
+     "removed": 0
+    },
+    {
+     "sha": "2fe398e18b3d998fb59cd842d85248c907e0707f",
+     "parents": [
+      "354ce7ed09c900edbf4b1a3c3d4b871bf673792a"
+     ],
+     "author": "Ada Park",
+     "email": "ada@example.com",
+     "at": 1793876400,
+     "ct": 1793876400,
+     "refs": [
+      "tag: v0.3.0"
+     ],
+     "subject": "Release 0.3",
+     "title": "Release 0.3",
+     "files": 1,
+     "added": 2,
+     "removed": 0
+    },
+    {
+     "sha": "354ce7ed09c900edbf4b1a3c3d4b871bf673792a",
+     "parents": [
+      "41e5c52659f53bd38a0d37cc6c34fc43b2ff52c0",
+      "169cb7e7f66727c40932a642736eca43f978661e"
+     ],
+     "author": "Ada Park",
+     "email": "ada@example.com",
+     "at": 1793786400,
+     "ct": 1793786400,
+     "refs": [],
+     "subject": "Merge pull request #120 from garden-dev/bench-timer",
+     "title": "#120 Time the bench's drops",
+     "files": 1,
+     "added": 3,
+     "removed": 0
+    },
+    {
+     "sha": "41e5c52659f53bd38a0d37cc6c34fc43b2ff52c0",
+     "parents": [],
+     "author": "Ada Park",
+     "email": "ada@example.com",
+     "at": 1793610000,
+     "ct": 1793610000,
+     "refs": [],
+     "subject": "Start the garden",
+     "title": "Start the garden",
+     "files": 3,
+     "added": 11,
+     "removed": 0
+    }
+   ],
+   "own": [],
+   "theirs": [],
+   "revs": [
+    "origin/main",
+    "fix/upload-retry",
+    "origin/fix/upload-retry"
+   ],
+   "repo": "garden-dev/garden",
+   "every": false,
+   "fetched": null,
+   "found": null,
+   "more": false,
+   "made": [
+    {
+     "sha": "089f2c6",
+     "subject": "Back off before reconnecting the upload socket",
+     "tool_use_id": "toolu_g1",
+     "branch": "fix/upload-retry"
+    }
+   ],
+   "heads": [
+    "fix/upload-retry"
+   ],
+   "opened": [
+    128
+   ],
+   "links": [
+    {
+     "repo": null,
+     "number": 128
+    },
+    {
+     "repo": "garden-dev/garden",
+     "number": 128
+    },
+    {
+     "repo": null,
+     "number": 120
+    }
+   ],
+   "prs": null
+  },
+  "page|every": {
+   "what": "page",
+   "top": "@HOME@/garden",
+   "folder": "@HOME@/garden",
+   "branches": [
+    {
+     "rev": "origin/main",
+     "name": "origin/main",
+     "sha": "8ea3d5d59435c87a2c0d954d98a2bd3ad599628f",
+     "upstream": null,
+     "ahead": 0,
+     "behind": 0,
+     "gone": false,
+     "worktree": null,
+     "label": "origin/main",
+     "remote": true,
+     "touched": true
+    },
+    {
+     "rev": "fix/upload-retry",
+     "name": "fix/upload-retry",
+     "sha": "0975ffd32d45c9c39b61f6093238d2bfe48287d6",
+     "upstream": "origin/fix/upload-retry",
+     "ahead": 1,
+     "behind": 0,
+     "gone": false,
+     "worktree": "@HOME@/garden",
+     "label": "fix/upload-retry — garden",
+     "touched": true,
+     "remote": false
+    },
+    {
+     "rev": "origin/fix/upload-retry",
+     "name": "origin/fix/upload-retry",
+     "sha": "089f2c6f65a8157ecdaa710bbf6c70a04bd6671e",
+     "upstream": null,
+     "ahead": 0,
+     "behind": 0,
+     "gone": false,
+     "worktree": null,
+     "label": "origin/fix/upload-retry",
+     "remote": true,
+     "touched": true
+    },
+    {
+     "rev": "main",
+     "name": "main",
+     "sha": "8ea3d5d59435c87a2c0d954d98a2bd3ad599628f",
+     "upstream": "origin/main",
+     "ahead": 0,
+     "behind": 0,
+     "gone": false,
+     "worktree": null,
+     "label": "main",
+     "touched": false,
+     "remote": false
+    },
+    {
+     "rev": "bench-timer",
+     "name": "bench-timer",
+     "sha": "169cb7e7f66727c40932a642736eca43f978661e",
+     "upstream": null,
+     "ahead": 0,
+     "behind": 0,
+     "gone": false,
+     "worktree": null,
+     "label": "bench-timer",
+     "touched": false,
+     "remote": false
+    },
+    {
+     "rev": "origin/docs-notes",
+     "name": "origin/docs-notes",
+     "sha": "31132fc56d4d40ffd2ec38cabef7f03d54bf5050",
+     "upstream": null,
+     "ahead": 0,
+     "behind": 0,
+     "gone": false,
+     "worktree": null,
+     "label": "origin/docs-notes",
+     "remote": true,
+     "touched": false
+    }
+   ],
+   "picked": [
+    "origin/main",
+    "fix/upload-retry",
+    "origin/fix/upload-retry"
+   ],
+   "rev": "origin/main",
+   "mine": "fix/upload-retry",
+   "branch": null,
+   "parent": null,
+   "commits": [
+    {
+     "sha": "0975ffd32d45c9c39b61f6093238d2bfe48287d6",
+     "parents": [
+      "089f2c6f65a8157ecdaa710bbf6c70a04bd6671e"
+     ],
+     "author": "Ada Park",
+     "email": "ada@example.com",
+     "at": 1795171200,
+     "ct": 1795171200,
+     "refs": [
+      "HEAD -> fix/upload-retry"
+     ],
+     "subject": "Note the retry in the docs",
+     "title": "Note the retry in the docs",
+     "files": 1,
+     "added": 2,
+     "removed": 0
+    },
+    {
+     "sha": "089f2c6f65a8157ecdaa710bbf6c70a04bd6671e",
+     "parents": [
+      "07330ae9dee9b703dbbbb6f189d1318dbeee3198"
+     ],
+     "author": "Ada Park",
+     "email": "ada@example.com",
+     "at": 1795170000,
+     "ct": 1795170000,
+     "refs": [
+      "origin/fix/upload-retry"
+     ],
+     "subject": "Back off before reconnecting the upload socket",
+     "title": "Back off before reconnecting the upload socket",
+     "files": 2,
+     "added": 18,
+     "removed": 2
+    },
+    {
+     "sha": "07330ae9dee9b703dbbbb6f189d1318dbeee3198",
+     "parents": [
+      "2fe398e18b3d998fb59cd842d85248c907e0707f"
+     ],
+     "author": "Ada Park",
+     "email": "ada@example.com",
+     "at": 1795169100,
+     "ct": 1795169100,
+     "refs": [],
+     "subject": "Run the upload test twenty times",
+     "title": "Run the upload test twenty times",
+     "files": 1,
+     "added": 3,
+     "removed": 0
+    },
+    {
+     "sha": "8ea3d5d59435c87a2c0d954d98a2bd3ad599628f",
+     "parents": [
+      "2fe398e18b3d998fb59cd842d85248c907e0707f"
+     ],
+     "author": "Rowan Lee",
+     "email": "41000001+rowan-lee@users.noreply.github.com",
+     "at": 1794582000,
+     "ct": 1794582000,
+     "refs": [
+      "origin/main",
+      "origin/HEAD",
+      "main"
+     ],
+     "subject": "Tidy the release notes",
+     "title": "Tidy the release notes",
+     "files": 1,
+     "added": 2,
+     "removed": 0
+    },
+    {
+     "sha": "31132fc56d4d40ffd2ec38cabef7f03d54bf5050",
+     "parents": [
+      "2fe398e18b3d998fb59cd842d85248c907e0707f"
+     ],
+     "author": "Sam Ortiz",
+     "email": "sam@example.com",
+     "at": 1794475800,
+     "ct": 1794475800,
+     "refs": [
+      "origin/docs-notes"
+     ],
+     "subject": "Draft the uploads notes",
+     "title": "Draft the uploads notes",
+     "files": 1,
+     "added": 1,
+     "removed": 0
+    },
+    {
+     "sha": "2fe398e18b3d998fb59cd842d85248c907e0707f",
+     "parents": [
+      "354ce7ed09c900edbf4b1a3c3d4b871bf673792a"
+     ],
+     "author": "Ada Park",
+     "email": "ada@example.com",
+     "at": 1793876400,
+     "ct": 1793876400,
+     "refs": [
+      "tag: v0.3.0"
+     ],
+     "subject": "Release 0.3",
+     "title": "Release 0.3",
+     "files": 1,
+     "added": 2,
+     "removed": 0
+    },
+    {
+     "sha": "354ce7ed09c900edbf4b1a3c3d4b871bf673792a",
+     "parents": [
+      "41e5c52659f53bd38a0d37cc6c34fc43b2ff52c0",
+      "169cb7e7f66727c40932a642736eca43f978661e"
+     ],
+     "author": "Ada Park",
+     "email": "ada@example.com",
+     "at": 1793786400,
+     "ct": 1793786400,
+     "refs": [],
+     "subject": "Merge pull request #120 from garden-dev/bench-timer",
+     "title": "#120 Time the bench's drops",
+     "files": 1,
+     "added": 3,
+     "removed": 0
+    },
+    {
+     "sha": "169cb7e7f66727c40932a642736eca43f978661e",
+     "parents": [
+      "4b7ed9216b6e344a7ddec30a7fb8e59de8b3a651"
+     ],
+     "author": "Sam Ortiz",
+     "email": "sam@example.com",
+     "at": 1793723400,
+     "ct": 1793723400,
+     "refs": [
+      "bench-timer"
+     ],
+     "subject": "Report how long a drop takes",
+     "title": "Report how long a drop takes",
+     "files": 1,
+     "added": 2,
+     "removed": 0
+    },
+    {
+     "sha": "4b7ed9216b6e344a7ddec30a7fb8e59de8b3a651",
+     "parents": [
+      "41e5c52659f53bd38a0d37cc6c34fc43b2ff52c0"
+     ],
+     "author": "Sam Ortiz",
+     "email": "sam@example.com",
+     "at": 1793714400,
+     "ct": 1793714400,
+     "refs": [],
+     "subject": "Add a timer to the bench",
+     "title": "Add a timer to the bench",
+     "files": 1,
+     "added": 1,
+     "removed": 0
+    },
+    {
+     "sha": "41e5c52659f53bd38a0d37cc6c34fc43b2ff52c0",
+     "parents": [],
+     "author": "Ada Park",
+     "email": "ada@example.com",
+     "at": 1793610000,
+     "ct": 1793610000,
+     "refs": [],
+     "subject": "Start the garden",
+     "title": "Start the garden",
+     "files": 3,
+     "added": 11,
+     "removed": 0
+    }
+   ],
+   "own": [],
+   "theirs": [],
+   "revs": [],
+   "repo": "garden-dev/garden",
+   "every": true,
+   "fetched": null,
+   "found": null,
+   "more": false,
+   "made": [
+    {
+     "sha": "089f2c6",
+     "subject": "Back off before reconnecting the upload socket",
+     "tool_use_id": "toolu_g1",
+     "branch": "fix/upload-retry"
+    }
+   ],
+   "heads": [
+    "fix/upload-retry"
+   ],
+   "opened": [
+    128
+   ],
+   "links": [
+    {
+     "repo": null,
+     "number": 128
+    },
+    {
+     "repo": "garden-dev/garden",
+     "number": 128
+    },
+    {
+     "repo": null,
+     "number": 120
+    }
+   ],
+   "prs": null
+  },
+  "page|fix/upload-retry": {
+   "what": "page",
+   "top": "@HOME@/garden",
+   "folder": "@HOME@/garden",
+   "branches": [
+    {
+     "rev": "origin/main",
+     "name": "origin/main",
+     "sha": "8ea3d5d59435c87a2c0d954d98a2bd3ad599628f",
+     "upstream": null,
+     "ahead": 0,
+     "behind": 0,
+     "gone": false,
+     "worktree": null,
+     "label": "origin/main",
+     "remote": true,
+     "touched": true
+    },
+    {
+     "rev": "fix/upload-retry",
+     "name": "fix/upload-retry",
+     "sha": "0975ffd32d45c9c39b61f6093238d2bfe48287d6",
+     "upstream": "origin/fix/upload-retry",
+     "ahead": 1,
+     "behind": 0,
+     "gone": false,
+     "worktree": "@HOME@/garden",
+     "label": "fix/upload-retry — garden",
+     "touched": true,
+     "remote": false
+    },
+    {
+     "rev": "origin/fix/upload-retry",
+     "name": "origin/fix/upload-retry",
+     "sha": "089f2c6f65a8157ecdaa710bbf6c70a04bd6671e",
+     "upstream": null,
+     "ahead": 0,
+     "behind": 0,
+     "gone": false,
+     "worktree": null,
+     "label": "origin/fix/upload-retry",
+     "remote": true,
+     "touched": true
+    },
+    {
+     "rev": "main",
+     "name": "main",
+     "sha": "8ea3d5d59435c87a2c0d954d98a2bd3ad599628f",
+     "upstream": "origin/main",
+     "ahead": 0,
+     "behind": 0,
+     "gone": false,
+     "worktree": null,
+     "label": "main",
+     "touched": false,
+     "remote": false
+    },
+    {
+     "rev": "bench-timer",
+     "name": "bench-timer",
+     "sha": "169cb7e7f66727c40932a642736eca43f978661e",
+     "upstream": null,
+     "ahead": 0,
+     "behind": 0,
+     "gone": false,
+     "worktree": null,
+     "label": "bench-timer",
+     "touched": false,
+     "remote": false
+    },
+    {
+     "rev": "origin/docs-notes",
+     "name": "origin/docs-notes",
+     "sha": "31132fc56d4d40ffd2ec38cabef7f03d54bf5050",
+     "upstream": null,
+     "ahead": 0,
+     "behind": 0,
+     "gone": false,
+     "worktree": null,
+     "label": "origin/docs-notes",
+     "remote": true,
+     "touched": false
+    }
+   ],
+   "picked": [
+    "fix/upload-retry"
+   ],
+   "rev": "fix/upload-retry",
+   "mine": "fix/upload-retry",
+   "branch": {
+    "rev": "fix/upload-retry",
+    "name": "fix/upload-retry",
+    "sha": "0975ffd32d45c9c39b61f6093238d2bfe48287d6",
+    "upstream": "origin/fix/upload-retry",
+    "ahead": 1,
+    "behind": 0,
+    "gone": false,
+    "worktree": "@HOME@/garden",
+    "label": "fix/upload-retry — garden"
+   },
+   "parent": {
+    "name": "origin/main",
+    "base": "2fe398e18b3d998fb59cd842d85248c907e0707f",
+    "ahead": 3,
+    "behind": 1
+   },
+   "commits": [
+    {
+     "sha": "0975ffd32d45c9c39b61f6093238d2bfe48287d6",
+     "parents": [
+      "089f2c6f65a8157ecdaa710bbf6c70a04bd6671e"
+     ],
+     "author": "Ada Park",
+     "email": "ada@example.com",
+     "at": 1795171200,
+     "ct": 1795171200,
+     "refs": [
+      "HEAD -> fix/upload-retry"
+     ],
+     "subject": "Note the retry in the docs",
+     "title": "Note the retry in the docs",
+     "files": 1,
+     "added": 2,
+     "removed": 0
+    },
+    {
+     "sha": "089f2c6f65a8157ecdaa710bbf6c70a04bd6671e",
+     "parents": [
+      "07330ae9dee9b703dbbbb6f189d1318dbeee3198"
+     ],
+     "author": "Ada Park",
+     "email": "ada@example.com",
+     "at": 1795170000,
+     "ct": 1795170000,
+     "refs": [
+      "origin/fix/upload-retry"
+     ],
+     "subject": "Back off before reconnecting the upload socket",
+     "title": "Back off before reconnecting the upload socket",
+     "files": 2,
+     "added": 18,
+     "removed": 2
+    },
+    {
+     "sha": "07330ae9dee9b703dbbbb6f189d1318dbeee3198",
+     "parents": [
+      "2fe398e18b3d998fb59cd842d85248c907e0707f"
+     ],
+     "author": "Ada Park",
+     "email": "ada@example.com",
+     "at": 1795169100,
+     "ct": 1795169100,
+     "refs": [],
+     "subject": "Run the upload test twenty times",
+     "title": "Run the upload test twenty times",
+     "files": 1,
+     "added": 3,
+     "removed": 0
+    },
+    {
+     "sha": "8ea3d5d59435c87a2c0d954d98a2bd3ad599628f",
+     "parents": [
+      "2fe398e18b3d998fb59cd842d85248c907e0707f"
+     ],
+     "author": "Rowan Lee",
+     "email": "41000001+rowan-lee@users.noreply.github.com",
+     "at": 1794582000,
+     "ct": 1794582000,
+     "refs": [
+      "origin/main",
+      "origin/HEAD",
+      "main"
+     ],
+     "subject": "Tidy the release notes",
+     "title": "Tidy the release notes",
+     "files": 1,
+     "added": 2,
+     "removed": 0
+    },
+    {
+     "sha": "2fe398e18b3d998fb59cd842d85248c907e0707f",
+     "parents": [
+      "354ce7ed09c900edbf4b1a3c3d4b871bf673792a"
+     ],
+     "author": "Ada Park",
+     "email": "ada@example.com",
+     "at": 1793876400,
+     "ct": 1793876400,
+     "refs": [
+      "tag: v0.3.0"
+     ],
+     "subject": "Release 0.3",
+     "title": "Release 0.3",
+     "files": 1,
+     "added": 2,
+     "removed": 0
+    },
+    {
+     "sha": "354ce7ed09c900edbf4b1a3c3d4b871bf673792a",
+     "parents": [
+      "41e5c52659f53bd38a0d37cc6c34fc43b2ff52c0",
+      "169cb7e7f66727c40932a642736eca43f978661e"
+     ],
+     "author": "Ada Park",
+     "email": "ada@example.com",
+     "at": 1793786400,
+     "ct": 1793786400,
+     "refs": [],
+     "subject": "Merge pull request #120 from garden-dev/bench-timer",
+     "title": "#120 Time the bench's drops",
+     "files": 1,
+     "added": 3,
+     "removed": 0
+    },
+    {
+     "sha": "41e5c52659f53bd38a0d37cc6c34fc43b2ff52c0",
+     "parents": [],
+     "author": "Ada Park",
+     "email": "ada@example.com",
+     "at": 1793610000,
+     "ct": 1793610000,
+     "refs": [],
+     "subject": "Start the garden",
+     "title": "Start the garden",
+     "files": 3,
+     "added": 11,
+     "removed": 0
+    }
+   ],
+   "own": [
+    "07330ae9dee9b703dbbbb6f189d1318dbeee3198",
+    "089f2c6f65a8157ecdaa710bbf6c70a04bd6671e",
+    "0975ffd32d45c9c39b61f6093238d2bfe48287d6"
+   ],
+   "theirs": [
+    "8ea3d5d59435c87a2c0d954d98a2bd3ad599628f"
+   ],
+   "revs": [
+    "fix/upload-retry",
+    "origin/main"
+   ],
+   "repo": "garden-dev/garden",
+   "every": false,
+   "fetched": null,
+   "found": null,
+   "more": false,
+   "made": [
+    {
+     "sha": "089f2c6",
+     "subject": "Back off before reconnecting the upload socket",
+     "tool_use_id": "toolu_g1",
+     "branch": "fix/upload-retry"
+    }
+   ],
+   "heads": [
+    "fix/upload-retry"
+   ],
+   "opened": [
+    128
+   ],
+   "links": [
+    {
+     "repo": null,
+     "number": 128
+    },
+    {
+     "repo": "garden-dev/garden",
+     "number": 128
+    },
+    {
+     "repo": null,
+     "number": 120
+    }
+   ],
+   "prs": null
+  },
+  "card|089f2c6f65a8157ecdaa710bbf6c70a04bd6671e": {
+   "what": "card",
+   "sha": "089f2c6f65a8157ecdaa710bbf6c70a04bd6671e",
+   "parents": [
+    "07330ae9dee9b703dbbbb6f189d1318dbeee3198"
+   ],
+   "author": "Ada Park",
+   "email": "ada@example.com",
+   "at": 1795170000,
+   "ct": 1795170000,
+   "committer": "Ada Park",
+   "message": "Back off before reconnecting the upload socket",
+   "files": [
+    [
+     "garden/upload.py",
+     6,
+     2
+    ],
+    [
+     "tests/test_upload.py",
+     12,
+     0
+    ]
+   ],
+   "more_files": false,
+   "on": [
+    "fix/upload-retry"
+   ],
+   "remotes": [
+    "origin/fix/upload-retry"
+   ],
+   "login": null,
+   "url": "https://github.com/garden-dev/garden/commit/089f2c6f65a8157ecdaa710bbf6c70a04bd6671e"
+  }
+ }
+}

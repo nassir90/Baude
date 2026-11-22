@@ -9,15 +9,15 @@ import threading
 import time
 import urllib.parse
 
-import lookup
+import lookupgit
 from baudelib import wording
 from baudelib.transcripts import ref_epoch
-from lookup import _git
+from lookupgit import _git
 
 
 def _gh_json(*args, timeout=20):
     """A `gh` call's JSON answer (GET only), or None if gh is missing, offline or says no."""
-    gh = lookup.gh_path()
+    gh = lookupgit.gh_path()
     if gh is None:
         return None
     try:
@@ -53,7 +53,7 @@ def git_fetch(top):
     after a minute."""
     env = {**os.environ, "GIT_TERMINAL_PROMPT": "0", "SSH_ASKPASS_REQUIRE": "never", "GCM_INTERACTIVE": "never"}
     try:
-        return subprocess.run([lookup.git_exe(), "-C", top, "fetch", "--all", "--quiet"], env=env,
+        return subprocess.run([lookupgit.git_exe(), "-C", top, "fetch", "--all", "--quiet"], env=env,
                               stdin=subprocess.DEVNULL, capture_output=True, timeout=60,
                               start_new_session=True).returncode == 0
     except (OSError, subprocess.TimeoutExpired):
@@ -387,7 +387,7 @@ def gh_state(refresh=False):
     after five minutes."""
     if not refresh and _GH_STATE.get("at", 0) > time.time() - 300:
         return _GH_STATE["state"]
-    gh = lookup.gh_path()
+    gh = lookupgit.gh_path()
     if gh is None:
         state = ("missing", None)
     else:
@@ -563,9 +563,9 @@ def chat_pr_links(path):
 
 
 def git_touched_pulls(prs, repo, heads, opened=(), links=()):
-    """The pull requests a chat touches, of prs (lookup.PULLS: {number: pull_info}): those from the branches it worked
-    on (heads: their names) and those it opened (opened: their numbers), the latest first, then those its replies name
-    (links: chat_pr_links'), the last named first. [pull_info]."""
+    """The pull requests a chat touches, of prs (lookupgit.PULLS: {number: pull_info}): those from the branches it
+    worked on (heads: their names) and those it opened (opened: their numbers), the latest first, then those its
+    replies name (links: chat_pr_links'), the last named first. [pull_info]."""
     heads = set(heads)
     own = {n for n in opened if n in prs} | {p["number"] for p in prs.values() if p.get("head") in heads}
     out, seen = sorted((prs[n] for n in own), key=lambda p: -p["number"]), set(own)
@@ -577,8 +577,8 @@ def git_touched_pulls(prs, repo, heads, opened=(), links=()):
 
 
 def git_pull_heads(prs):
-    """{branch: the pull request from it}, of prs (lookup.PULLS'), the latest if there are several (a fork's left out:
-    its branch isn't this repository's)."""
+    """{branch: the pull request from it}, of prs (lookupgit.PULLS'), the latest if there are several (a fork's left
+    out: its branch isn't this repository's)."""
     heads = {}
     for p in sorted((prs or {}).values(), key=lambda p: p["number"]):
         if p.get("head"):

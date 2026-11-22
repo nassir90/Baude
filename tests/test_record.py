@@ -71,6 +71,7 @@ os.makedirs(os.path.join(REPO, ".baude"))
 GLOSSARY = os.path.join(REPO, ".baude", "signal.db")
 db = sqlite3.connect(GLOSSARY)
 import lookup  # noqa: E402
+import lookupgit  # noqa: E402
 db.executescript(lookup.REF_SCHEMA)
 db.execute("INSERT INTO entity (id, kind, canonical, status, data) VALUES (1, 'symbol', 'RelayRunner', 'resolved', "
            "'{}')")
@@ -1628,7 +1629,7 @@ def checkout(path, url=None):
 
 
 class Github:
-    """tests/fake_gh.py as gh, with these repositories on it, lookup.GITHUB from nothing; no gh again after."""
+    """tests/fake_gh.py as gh, with these repositories on it, lookupgit.GITHUB from nothing; no gh again after."""
 
     def __init__(self, rest, **state):
         self.state, self.path = {"viewer": "ADMIN", "issues": [], "prs": [], "rest": rest, **state}, \
@@ -1643,13 +1644,13 @@ class Github:
         os.environ.update(BAUDE_GH=fake, FAKE_GH_STATE=self.path, FAKE_GH_SIGNED_IN="1")
         os.environ.pop("FAKE_GH_OFFLINE", None)
         shutil.rmtree(os.path.join(os.environ["XDG_CACHE_HOME"], "baude", "github"), ignore_errors=True)
-        lookup.GITHUB.forget()
+        lookupgit.GITHUB.forget()
         return self
 
     def __exit__(self, *_):
         os.environ["BAUDE_GH"] = ""
         os.environ.pop("FAKE_GH_OFFLINE", None)
-        lookup.GITHUB.forget()
+        lookupgit.GITHUB.forget()
 
     def write(self):
         with open(self.path, "w") as f:
@@ -1668,7 +1669,7 @@ class Github:
 
     def due(self, gh=None):
         """It's time to look again."""
-        for r in (gh or lookup.GITHUB)._repos.values():
+        for r in (gh or lookupgit.GITHUB)._repos.values():
             r["looked"] = 0.0
 
 
@@ -1693,7 +1694,7 @@ def test_github_lists(app):
                          *(rest_item(n, f"Closed long ago {n}", state="closed", ago=9e5) for n in range(100, 400))],
             "acme/two": [rest_item(7, "The other seven")], "acme/three": [rest_item(1, "Not on GitHub")],
             "acme/under": [rest_item(1, "A checkout under it: not looked for")]}
-    gh = lookup.GITHUB
+    gh = lookupgit.GITHUB
     with Github(rest) as hub:
         gh.round([work])
         asked = hub.calls()
@@ -1735,8 +1736,8 @@ def test_github_lists(app):
         ref = lookup.catalogue_ref("acme/one#6", one["acme/one#6"]["entry"])
         assert ref.kind == "pr" and ref.status == "resolved" and ref.data["url"] == "https://github.com/acme/one/pull/6"
         assert lookup.ref_icon(ref.kind, ref.data) == "pr_merged" and "Merged pull request" in ref.summary()
-        assert lookup.github_url("acme/one#6") == "https://github.com/acme/one/issues/6"
-        assert lookup.github_url("feature/login#12") is None, "a repository it has read, not whatever's spelt so"
+        assert lookupgit.github_url("acme/one#6") == "https://github.com/acme/one/issues/6"
+        assert lookupgit.github_url("feature/login#12") is None, "a repository it has read, not whatever's spelt so"
 
         # nothing's changed: not looked at again before it's time; then one request each, not counted, nothing new
         gh.round([work])
@@ -1777,7 +1778,7 @@ def test_github_lists(app):
         # the next start: what's kept is listed at once, whatever GitHub says, and costs nothing to check
         os.environ["FAKE_GH_OFFLINE"] = "1"
         left = hub.now()["left"]
-        fresh = lookup.GitHub()
+        fresh = lookupgit.GitHub()
         fresh.round([work])
         assert {it["surface"] for it in fresh.listed(work)} >= {"acme/one#5", "acme/one#11", "acme/two#7"}, "kept on disk"
         assert next(it for it in fresh.listed(work) if it["surface"] == "acme/one#5")["icon"] == "pr_merged"
@@ -1847,7 +1848,7 @@ def test_github_lists(app):
         shutil.rmtree(os.path.join(os.environ["XDG_CACHE_HOME"], "baude", "github"), ignore_errors=True)
 
         # no ETag, no free lunch: every 5 minutes, not every minute
-        lookup.GITHUB.forget()
+        lookupgit.GITHUB.forget()
         hub.state.update(no_etag=True)
         hub.write()
         hub.calls()
@@ -1886,7 +1887,7 @@ def test_github_lists(app):
         hub.calls()
         gh.round(many)
         asked = hub.calls()
-        assert len({c.split("/issues")[0] for c in asked}) == lookup.GITHUB_REPOS, len(asked)
+        assert len({c.split("/issues")[0] for c in asked}) == lookupgit.GITHUB_REPOS, len(asked)
         assert asked[0].startswith("repos/acme/own/issues"), asked[0]
         for r in gh._repos.values():
             r["looked"] = time.time() - 120
@@ -1895,7 +1896,7 @@ def test_github_lists(app):
         for r in gh._repos.values():
             r["looked"] = time.time() - 241
         gh.round(many)
-        assert len(hub.calls()) == lookup.GITHUB_REPOS
+        assert len(hub.calls()) == lookupgit.GITHUB_REPOS
 
         # shared out: each folder's own first, then an upstream, in turn
         small = checkout(os.path.join(TMP, "gh-small"), "https://github.com/acme/small.git")
@@ -1935,7 +1936,7 @@ def test_github_lists(app):
         assert not hub.now().get("wrote")
 
     # no gh (as these tests run but for this): no thread woken, nothing read, nothing kept
-    assert os.environ["BAUDE_GH"] == "" and lookup.gh_path() is None
+    assert os.environ["BAUDE_GH"] == "" and lookupgit.gh_path() is None
     cached = os.path.join(os.environ["XDG_CACHE_HOME"], "baude", "github")
     shutil.rmtree(cached, ignore_errors=True)
     size = gh._todo.qsize()
@@ -1993,7 +1994,7 @@ def test_diary_hash_lists_issues(app):
             space = win.space()
             space.refresh()
             wait_for(lambda: not space.busy, "the folder catalogued")
-            lookup.GITHUB.round(win.github_folders())
+            lookupgit.GITHUB.round(win.github_folders())
             assert space.find("acme/shop#12") is not None
             d = win.open_note(page)
             d.view.grab_focus()
@@ -2148,7 +2149,7 @@ def test_diary_hash_lists_issues(app):
             hub.now()["rest"]["acme/shop"][2] = rest_item(61, "Fix the wrap", pr=True, state="closed", merged=True)
             hub.write()
             hub.due()
-            lookup.GITHUB.round(win.github_folders())
+            lookupgit.GITHUB.round(win.github_folders())
             record.Window._github_changed(win)
             assert (at, "pr_merged") in d.view.logos, d.view.logos
             wait_for(lambda: space.find("acme/shop#61")["icon"] == "pr_merged", "the items")
@@ -2226,7 +2227,7 @@ def test_github_shots(app):
             space = win.space()
             space.refresh()
             wait_for(lambda: not space.busy, "the folder catalogued")
-            lookup.GITHUB.round(win.github_folders())
+            lookupgit.GITHUB.round(win.github_folders())
             for scheme, name in ((Adw.ColorScheme.FORCE_LIGHT, "light"), (Adw.ColorScheme.FORCE_DARK, "dark")):
                 manager.set_color_scheme(scheme)
                 pump(0.3)
@@ -2280,9 +2281,9 @@ def test_watch_github(app):
     """While a window's shown, and only then, GitHub's lists are looked at (once a minute); once they've changed, what's
     on show is told. It holds nothing of the window."""
     asked, told = [], []
-    real_look, tick = lookup.GITHUB.look, widgets.GITHUB_TICK_S
+    real_look, tick = lookupgit.GITHUB.look, widgets.GITHUB_TICK_S
     # (only what's asked of "a folder": the app's own window has a watch of its own)
-    lookup.GITHUB.look, widgets.GITHUB_TICK_S = (lambda folders: "a folder" in folders and asked.append(folders)), 1
+    lookupgit.GITHUB.look, widgets.GITHUB_TICK_S = (lambda folders: "a folder" in folders and asked.append(folders)), 1
     in_use = ["a folder"]
     try:
         win = Adw.Window(default_width=200, default_height=100)
@@ -2296,10 +2297,10 @@ def test_watch_github(app):
         assert len(asked) == 1, "not again for a minute"
         in_use.append("a folder too")
         wait_for(lambda: len(asked) == 2 and asked[1] == in_use, "at once, for folders that are new")
-        lookup.GITHUB.generation += 1
+        lookupgit.GITHUB.generation += 1
         wait_for(lambda: len(told) == 1, "told it's changed")
         win.set_visible(False)
-        lookup.GITHUB.generation += 1
+        lookupgit.GITHUB.generation += 1
         pump(1.2)
         assert len(told) == 1 and not widgets.window_shown(win), "not while it's hidden"
         win.set_visible(True)
@@ -2312,7 +2313,7 @@ def test_watch_github(app):
         pump(1.2)
         assert gone() is None, "let go of"
     finally:
-        lookup.GITHUB.look, widgets.GITHUB_TICK_S = real_look, tick
+        lookupgit.GITHUB.look, widgets.GITHUB_TICK_S = real_look, tick
 
 
 def test_hash_key_never_rewrites_what_is_typed(app):
@@ -2338,7 +2339,7 @@ def test_hash_key_never_rewrites_what_is_typed(app):
             space = win.space()
             space.refresh()
             wait_for(lambda: not space.busy, "the folder catalogued")
-            lookup.GITHUB.round(win.github_folders())
+            lookupgit.GITHUB.round(win.github_folders())
             d = win.open_note(page)
             d.view.grab_focus()
             pump(0.2)
@@ -2504,13 +2505,13 @@ def test_hash_key_never_rewrites_what_is_typed(app):
             d.github_changed()
             assert d.pop_selected()["surface"] == picked, "picked, it stays"
             # and the folders looked through again with nothing changed: nothing's told of it at all
-            generation, listing = lookup.GITHUB.generation, lookup.GITHUB.listed(folder)
-            for known in lookup.GITHUB._folders.values():
+            generation, listing = lookupgit.GITHUB.generation, lookupgit.GITHUB.listed(folder)
+            for known in lookupgit.GITHUB._folders.values():
                 known["at"] = 0.0
-            for r in lookup.GITHUB._repos.values():
+            for r in lookupgit.GITHUB._repos.values():
                 r["looked"] = 0.0
-            lookup.GITHUB.round(win.github_folders())
-            assert lookup.GITHUB.generation == generation and lookup.GITHUB.listed(folder) is listing
+            lookupgit.GITHUB.round(win.github_folders())
+            assert lookupgit.GITHUB.generation == generation and lookupgit.GITHUB.listed(folder) is listing
             assert d.pop_selected()["surface"] == picked
             key(mouse.ESCAPE)
         finally:

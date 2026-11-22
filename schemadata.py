@@ -5,8 +5,9 @@ import threading
 import time
 
 import lookup  # noqa: E402,F401
-from lookup import (  # noqa: E402,F401
-    PG_LISTS, arango_eval, at_once, db_index, db_names, find_spans, pg_databases_cached, pg_query, pg_servers_cached,
+from lookup import find_spans  # noqa: E402,F401
+from lookupkube import (  # noqa: E402,F401
+    PG_LISTS, arango_eval, at_once, db_index, db_names, pg_databases_cached, pg_query, pg_servers_cached,
 )
 from baudelib import wording  # noqa: E402
 

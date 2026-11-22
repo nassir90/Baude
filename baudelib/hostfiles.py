@@ -139,7 +139,7 @@ def _pulls(server, msg):
     own) as gh last read them (read now if due, fresh: whether or not): {repo, prs, gh}; with head or people and gh
     signed in too: signed_in, pr (the branch head's pull request) and avatars (the repository's authors' pictures)."""
     import gitread
-    import lookup
+    import lookupgit
     cwd = _inside(server, msg.get("cwd"))
     repo = msg.get("repo") if isinstance(msg.get("repo"), str) and REPO.fullmatch(msg["repo"]) else None
     if repo is None:
@@ -148,9 +148,9 @@ def _pulls(server, msg):
     if repo is None:
         return {"what": "pulls", "repo": None, "prs": None, "gh": False}
     fresh = bool(msg.get("fresh"))
-    prs = lookup.PULLS.read(repo, fresh=fresh)
+    prs = lookupgit.PULLS.read(repo, fresh=fresh)
     reply = {"what": "pulls", "repo": repo, "prs": list(prs.values()) if prs is not None else None,
-             "gh": lookup.gh_path() is not None and not lookup.PULLS.signed_out()}
+             "gh": lookupgit.gh_path() is not None and not lookupgit.PULLS.signed_out()}
     head = msg.get("head") if isinstance(msg.get("head"), str) and not msg["head"].startswith("-") else None
     if head or msg.get("people"):
         reply["signed_in"] = signed = _signed_in(fresh)
@@ -171,7 +171,7 @@ def _page(server, msg, cwd):
     as Baude's own page reads it): the branches to choose from and shown, the log with what each commit changed, the
     branch's parent, what this chat's commands did, and the pull requests as last read."""
     import gitread
-    import lookup
+    import lookupgit
     session = None
     if isinstance(msg.get("session"), str):
         with server.lock:
@@ -196,7 +196,7 @@ def _page(server, msg, cwd):
         m = gitread._CHAT_PR_URL.search(ev.get("url") or "") if ev["kind"] == "pr" else None
         if m and repo and m[1].lower() == repo.lower() and int(m[2]) not in opened:
             opened.append(int(m[2]))
-    prs = lookup.PULLS.states(repo, want=False) if repo else None
+    prs = lookupgit.PULLS.states(repo, want=False) if repo else None
     return {"what": "page", "top": res["top"], "folder": cwd,
             "branches": [{**b, "remote": bool(b.get("remote")), "touched": bool(b.get("touched"))}
                          for b in res["branches"]],

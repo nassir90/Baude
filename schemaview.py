@@ -32,9 +32,9 @@ gi.require_version("Graphene", "1.0")
 from gi.repository import Adw, Gdk, GdkPixbuf, Gio, GLib, GObject, Graphene, Gsk, Gtk, Pango  # noqa: E402,F401
 
 import lookup  # noqa: E402,F401
-from lookup import (  # noqa: E402,F401  (⌘K's engine: what a folder has)
-    PG_LISTS, arango_eval, at_once, db_index, db_names, find_spans,
-    pg_databases_cached, pg_query, pg_servers_cached,
+from lookup import find_spans  # noqa: E402,F401  (⌘K's engine: what a folder has)
+from lookupkube import (  # noqa: E402,F401
+    PG_LISTS, arango_eval, at_once, db_index, db_names, pg_databases_cached, pg_query, pg_servers_cached,
 )
 from widgets import (  # noqa: E402,F401
     FIND_RGB, Fade, WorkerPool, ZOOM_STEP, ellipsize_dropdown, find_attrs, inside,

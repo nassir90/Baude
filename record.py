@@ -67,6 +67,7 @@ gi.require_version("Gsk", "4.0")
 from gi.repository import Adw, Gdk, Gio, GLib, Graphene, Gsk, Gtk, Pango  # noqa: E402
 
 import lookup  # noqa: E402  (⌘K's engine: what a chat's folder has; beside this file)
+import lookupgit  # noqa: E402
 import pointers  # noqa: E402  (the pointer's shape: beside this file)
 import widgets  # noqa: E402  (what Record draws as Baude does: the links' logos; beside this file)
 from baudelib import tokens  # noqa: E402  (its measures, Baude's: schema/tokens)
@@ -348,7 +349,7 @@ def ref_text(surface, label=None):
 def github_ref(m):
     """Whether a link (a LINK_RE match) is a pull request's or an issue's, as ref_text writes one: #12 is all that's
     seen of it, and it's one thing, to take whole (a branch called feature/login#12 is written with no label)."""
-    return bool(m.group(2)) and bool(lookup.GITHUB_NAME.fullmatch(m.group(1).strip().removeprefix("@"))) and \
+    return bool(m.group(2)) and bool(lookupgit.GITHUB_NAME.fullmatch(m.group(1).strip().removeprefix("@"))) and \
         m.group(1).lstrip().startswith("@")
 
 
@@ -2054,7 +2055,7 @@ class ReaderNames:
 
     def update(self):
         """The names as the folders have them now (once they're catalogued)."""
-        refs, catalogue, own = {}, {}, lookup.GITHUB.own_repository(self.folder)
+        refs, catalogue, own = {}, {}, lookupgit.GITHUB.own_repository(self.folder)
         for it in self.space.items():
             s = it["surface"]
             if s in refs:
@@ -8069,8 +8070,8 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost, w
             win.store.flush()  # (gone to another window: what's typed is on the disk)
 
     def github_folders(self):
-        """What GitHub's lists are read for (lookup.GitHub.look), as Baude's: the repository the chat read's folder is
-        in."""
+        """What GitHub's lists are read for (lookupgit.GitHub.look), as Baude's: the repository the chat read's folder
+        is in."""
         return self.read_folders()
 
     @staticmethod
@@ -8721,8 +8722,8 @@ class Window(Adw.ApplicationWindow, feedback.FeedbackHost, viewers.ViewerHost, w
             item = self.notes.find(name)
         if item is not None and item.get("kind") in NotesNames.KINDS:
             return self.open_notes_item(item)
-        if item is None and (url := lookup.github_url(name)) is not None:  # (not listed now: its page is still there)
-            return fixview.web(self, url)
+        if item is None and (url := lookupgit.github_url(name)) is not None:
+            return fixview.web(self, url)  # (not listed now: its page is still there)
         if item is None:
             where = ", ".join(short_dir(f) for f in self.read_folders())
             return self.toast(f"@{name}: not found in {where}" if where

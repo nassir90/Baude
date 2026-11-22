@@ -47,14 +47,14 @@ def kube(msg):
 
 def databases(msg):
     """databases: fixtures/databases.json's server, read as hostdb.py reads a real one."""
-    import lookup
+    import lookupkube
     import schemadata
     from baudelib import hostdb
     with open(os.path.join(HERE, "fixtures", "databases.json")) as f:
         fixture = json.load(f)
     server = {**fixture["server"], "engine": "postgres"}
-    lookup.pg_servers_cached = lambda max_age=30: [server]
-    lookup.pg_databases_cached = lambda s, max_age=30: [fixture["database"]]
+    lookupkube.pg_servers_cached = lambda max_age=30: [server]
+    lookupkube.pg_databases_cached = lambda s, max_age=30: [fixture["database"]]
     schemadata.pg_schema = lambda s, database, max_age=60: schemadata.pg_normalize(fixture["raw"])
     hostdb.time = types.SimpleNamespace(monotonic=lambda: 0.0)  # (no time taken: as the desktop scene's)
     return hostdb.answer(None, msg)

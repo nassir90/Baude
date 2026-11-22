@@ -175,10 +175,10 @@ _ORIGINALS = []
 
 
 def stub_github(on, folder=None):
-    """GitHub's answers from fixtures/github.json for its repository: the pull requests (lookup.PULLS), gh signed in,
+    """GitHub's answers from fixtures/github.json for its repository: the pull requests (lookupgit.PULLS), gh signed in,
     and the calls gh would make for a branch's pull request and a commit's. With on false, what was there is back."""
     import gitread
-    import lookup
+    import lookupgit
     global _ORIGINALS
     mods = [m for m in (gitread, sys.modules.get("gitview")) if m is not None]
     if not on:
@@ -212,7 +212,7 @@ def stub_github(on, folder=None):
                      "merged_at": "2026-11-20T11:00:00Z" if prs[n]["state"] == "merged" else None}
                     for n in data["commit_pulls"]]
         if args[0] == "api" and (m := re.search(r"/commits/([0-9a-f]+)$", args[1])):
-            email = (lookup._git(folder, "log", "-1", "--format=%ae", m[1]) or "").strip()
+            email = (lookupgit._git(folder, "log", "-1", "--format=%ae", m[1]) or "").strip()
             return {"author": {"login": data["logins"][email]}} if email in data["logins"] else {"author": None}
         if args[:2] == ("api", "user"):
             return {"login": data["login"]}
@@ -220,10 +220,10 @@ def stub_github(on, folder=None):
             return []
         return None
     states = lambda repo, want=True: mine(repo)  # noqa: E731
-    put(lookup.PULLS, "states", states)
-    put(lookup.PULLS, "read", lambda repo, fresh=False: mine(repo))
-    put(lookup.PULLS, "pull", lambda repo, number: (mine(repo) or {}).get(number))
-    put(lookup.PULLS, "signed_out", lambda: False)
+    put(lookupgit.PULLS, "states", states)
+    put(lookupgit.PULLS, "read", lambda repo, fresh=False: mine(repo))
+    put(lookupgit.PULLS, "pull", lambda repo, number: (mine(repo) or {}).get(number))
+    put(lookupgit.PULLS, "signed_out", lambda: False)
     for m in mods:
         put(m, "gh_state", lambda refresh=False: ("signed_in", data["login"]))
         put(m, "_gh_json", gh_json)

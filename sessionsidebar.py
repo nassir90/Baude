@@ -513,8 +513,20 @@ class SessionSidebar(SidebarMenu, Gtk.Box):
         pop.connect("closed", lambda p: GLib.idle_add(p.unparent))
         # (on an idle, after the one its sections' separators are shown in: popped up before it, it's sized without
         # them, and macOS never sizes it again, so its last item was cut off)
-        GLib.idle_add(pop.popup)
+        GLib.idle_add(self.popup_on_screen, pop)
         return pop
+
+    @staticmethod
+    def popup_on_screen(pop):
+        """menu_at's idle: pop shown while its parent's still on screen. The list rebuilt before it (a chat archived,
+        trashed or refreshed) takes the row out of the window, and a popover over a widget with no window has no
+        surface to open from: GTK crashes. Then it's dropped instead."""
+        parent = pop.get_parent()
+        if parent is not None and parent.get_mapped():
+            pop.popup()
+        elif parent is not None:
+            pop.unparent()
+        return False
 
     # ---- groups: chats moved to one, and groups made, renamed and deleted (settings' chat_groups and group_names).
     # Each saves, keeps what's picked in ⋮ → Groups (a group renamed: picked by its new name; deleted: not), lists it

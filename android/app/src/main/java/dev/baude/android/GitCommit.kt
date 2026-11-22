@@ -58,6 +58,8 @@ object GitCards {
     fun put(key: String, c: Card) {
         kept[key] = c
     }
+
+    fun clear() = kept.clear()
 }
 
 private val MERGED_PR = Regex("Merge pull request #(\\d+) from (?:[^\\s/]+/(\\S+)|.+)")

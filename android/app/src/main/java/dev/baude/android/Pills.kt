@@ -162,6 +162,12 @@ object PullStates {
         version.intValue++
     }
 
+    /** Everything forgotten (the rig starts each scene afresh). */
+    fun reset() {
+        known.clear()
+        asked.clear()
+    }
+
     fun of(hostId: String, repo: String?): Known? = repo?.let { known[key(hostId, it)] }
 
     private fun ask(place: ChatPlace, repo: String?) {

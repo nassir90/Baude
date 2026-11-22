@@ -506,7 +506,7 @@
     "thumb": {"$description": "A picture attached in the box: its thumbnail's side.", "$value": {"value": 48, "unit": "px"}},
     "button": {"$description": "Its + and send buttons' side (.composer-actions button).", "$value": {"value": 28, "unit": "px"}},
     "inset": {
-      "$description": "Those buttons, in from the box's right and bottom edges. Empty, the box is a button's height and this above and below it, its line of text centred on the buttons'.",
+      "$description": "Those buttons, in from the box's right and bottom edges. Empty, the box is a button's height (or a line's, if that's taller) and this above and below it, its line of text and the buttons centred on each other.",
       "$value": {"value": 4, "unit": "px"}
     }
   },

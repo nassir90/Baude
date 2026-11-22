@@ -540,7 +540,7 @@ class WindowRemote:
         server = lambda: servers[servers_dd.get_selected()] if servers_dd is not None else servers[0]  # noqa: E731
         if agents:
             agent_dd = Gtk.DropDown.new_from_strings([label for _value, label in offered(servers[0])])
-            field(wording.say("common.agent"), agent_dd)
+            field(wording.say("common.model"), agent_dd)
         last = load_settings().get("remote_folders") or {}
         place = lambda r: HERE_HOST if r is None or host_key(r) == HERE_HOST else r.key  # noqa: E731
         home = lambda r: self.cwd if place(r) == HERE_HOST else r.info.get("home")  # noqa: E731
@@ -569,7 +569,7 @@ class WindowRemote:
 
         def check():
             if agent_dd is not None and agent_dd.get_selected_item() is None:
-                return f"{named(server())} offers no agent"
+                return f"{named(server())} offers nothing to run"
             return None
 
         def submit():
@@ -590,7 +590,7 @@ class WindowRemote:
                 start(r)
             return f"starting it on {named(r)}"
         on = THIS_MACHINE if here or servers[0] is None else remote_name(servers[0])
-        heading = wording.say("new_session.spawn_agent") if agents else \
+        heading = wording.say("new_session.start_chat") if agents else \
             wording.say("new_session.on_host", host=on) if said else wording.say("new_session.on_network")
         fields = ([("host", "the host it runs on", servers_dd)] if servers_dd is not None else []) + \
             ([("agent", "what runs it: one of the host's", agent_dd)] if agent_dd is not None else []) + \

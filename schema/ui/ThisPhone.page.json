@@ -1,5 +1,5 @@
 {
-  "description": "The phone's own host as a page: its name in the mesh, its ssh key, the agents that run on this phone, and the phone's trash. Opened from the home screen's header; the phone's agents are also listed on the home screen under the host \"local\".",
+  "description": "The phone's own host as a page: its name in the mesh, its ssh key, the Bots and chats that run on this phone, and the phone's trash. Opened from the home screen's header; the phone's chats are also listed on the home screen under the host \"local\".",
   "apps": [
     "phone"
   ],
@@ -39,11 +39,11 @@
       ]
     },
     {
-      "name": "New Agent",
-      "shows": "No New Agent button, screen or empty-list button: an agent on this phone is made as on any host, with New session and \"local\" picked beside it.",
+      "name": "New Bot",
+      "shows": "No New Bot button, screen or empty-list button: a chat on this phone is made as on any host, with New session and \"local\" picked beside it.",
       "phone": {
         "does": "nothing",
-        "why": "The desktop has no New Agent; the owner dropped it",
+        "why": "The desktop has no New Bot; the owner dropped it",
         "decided": "2026-11-22"
       }
     },
@@ -131,11 +131,11 @@
       ]
     },
     {
-      "name": "Agents",
-      "shows": "Shown only while this phone has an agent that is not archived. Heading \"Agents\", then a rounded list of them. Each row, one line: the agent's picture (set into the page: see README's A picture is set into the page) (or initials), then for a Bot its name alone (never its chat's title), else its title, else its model's name (\"Agent\" if none); its status dot (with the asking mark when it asks something), and a trash button. No second line.",
+      "name": "Bots",
+      "shows": "Shown only while this phone has a chat that is not archived. Heading \"Bots\", then a rounded list of them. Each row, one line: the chat's picture (set into the page: see README's A picture is set into the page) (or initials), then for a Bot its name alone (never its chat's title), else its title, else \"(untitled)\"; its status dot (with the asking mark when it asks something), and a trash button. No second line.",
       "copy": [
-        "this_phone.agents",
-        "common.agent",
+        "common.bots",
+        "common.untitled",
         "trash.move_dots"
       ],
       "actions": [
@@ -164,16 +164,16 @@
     },
     {
       "name": "Trash",
-      "shows": "Shown only while the phone's trash holds an agent. Heading \"Trash\", then a row per trashed agent, newest first, one line: for a Bot its name alone, else its title, else its model's name (\"Agent\" if none); and a Restore button.",
+      "shows": "Shown only while the phone's trash holds a chat. Heading \"Trash\", then a row per trashed chat, newest first, one line: for a Bot its name alone, else its title, else \"(untitled)\"; and a Restore button.",
       "copy": [
         "this_phone.trash",
         "this_phone.restore",
-        "common.agent"
+        "common.untitled"
       ],
       "actions": [
         {
           "by": "tap Restore",
-          "does": "restores its transcript, folder, picture and senders where they were and lists it again in Agents"
+          "does": "restores its transcript, folder, picture and senders where they were and lists it again in Bots"
         }
       ]
     },
@@ -207,7 +207,7 @@
       "name": "Chats with a phone agent",
       "shows": "Its sessions are listed on the home screen under the host \"local\" (this machine, as Baude names its own) like any host's and open as an ordinary chat; the mesh knows the host by the phone's name. They differ from a chat on another host: the agent's loop and tools run on this phone, in its own folder; its model calls go through the mesh to a machine that serves the model, so only models the mesh serves can be picked, and none served means it cannot start; there is no connection banner for the host since it is the app itself; going back to an earlier message (rewind) is not supported; and a Bot's globe button is shown as in any Bot chat (PhoneUse.page.json).",
       "text": [
-        "an agent on this phone can't be taken back to an earlier message yet"
+        "a chat on this phone can't be taken back to an earlier message yet"
       ]
     }
   ],

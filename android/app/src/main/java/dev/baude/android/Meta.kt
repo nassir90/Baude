@@ -571,7 +571,7 @@ fun MetaPage(chatHost: String, here: Boolean) {
             val given = f.optJSONObject("values")
             when (f.optString("form")) {
                 "spawn_agent" -> NewSession(null, null, done = done, opened = { h, s -> submitted(); Meta.opener(h, s) },
-                    given = given, edited = MetaTools::edited, heading = Wording.NewSession.spawnAgent)
+                    given = given, edited = MetaTools::edited, heading = Wording.NewSession.startChat)
                 "add_host" -> AddHost(done = done, given = given, edited = MetaTools::edited, added = { submitted() })
                 "new_group" -> NewGroup(given, done = done, made = { submitted() })
             }

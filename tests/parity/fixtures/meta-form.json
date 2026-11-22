@@ -1,0 +1,15 @@
+{
+  "description": "Meta's conversation as the desktop keeps it (meta.json): one message of yours and a reply that brought up the form for starting a chat, its prompt filled in. t is epoch seconds.",
+  "messages": [
+    {"role": "user", "text": "Start a chat to plan the watering for the garden", "t": 1795600900},
+    {"role": "meta", "model": "claude-haiku-4-5", "t": 1795600930, "actions": [],
+     "text": "The form is up with the prompt filled in. Pick where it runs and press Start.",
+     "items": [
+       {"kind": "tool", "name": "mcp__meta__open_form", "state": "done", "input": {"form": "spawn_agent", "values": {"prompt": "Plan the watering for the garden"}},
+        "result": "Form f1a2b3 is up for the user to finish and submit; you don't submit it.",
+        "shown": [{"kind": "form", "form": "spawn_agent", "id": "f1a2b3", "values": {"prompt": "Plan the watering for the garden"}, "state": "open", "pinned": true}]},
+       {"kind": "text", "text": "The form is up with the prompt filled in. Pick where it runs and press Start."}
+     ]}
+  ],
+  "actions": []
+}

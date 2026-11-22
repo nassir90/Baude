@@ -92,7 +92,7 @@ object Inference {
      * turn closes the channel, so the host lets go of the provider, which stops. Failed saying why; null if it's
      * stopped. */
     fun complete(s: PhoneSession, body: JSONObject, text: (String) -> Unit): Answer? {
-        val served = s.meta.optJSONObject("infer")?.let { Served.of(it) } ?: throw Failed("this agent has no model")
+        val served = s.meta.optJSONObject("infer")?.let { Served.of(it) } ?: throw Failed("this chat has no model")
         val conn = connTo(served.member) ?: throw Failed("${served.memberName} isn't connected now")
         val base = if (conn.place is Place.Direct) conn else conn.via ?: throw Failed("${served.memberName} isn't reached now")
         val ch = base.exec() ?: throw Failed("${base.host?.label ?: "its host"} isn't connected now")

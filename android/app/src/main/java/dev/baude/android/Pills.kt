@@ -1,5 +1,6 @@
 package dev.baude.android
 
+import java.text.BreakIterator
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
@@ -28,6 +29,8 @@ import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.vector.PathParser
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.platform.LocalFontFamilyResolver
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.Placeholder
@@ -78,8 +81,8 @@ fun AnnotatedString.Builder.chip(label: String, kind: String) =
     appendInlineContent(listOf("chip", kind, label).joinToString(SEP), label)
 
 /** Text with pills and chips in it as their own pieces, each sized by its label at the text's size: as wide as its
- * label and its margins, as tall as the label's line and a pixel more each way (the desktop's patch), centred on its
- * line. Their sizes are given in em of the text's size, so they keep to the text however the phone scales its sizes. */
+ * label and its margins, as tall as the label's line and 1dp more each way (the desktop's patch), its label on the
+ * text's baseline. Their sizes are given in em of the text's size, so they keep to the text however the phone scales its sizes. */
 @Composable
 fun PillText(text: AnnotatedString, style: TextStyle, color: Color, modifier: Modifier = Modifier, maxLines: Int = Int.MAX_VALUE,
              overflow: TextOverflow = TextOverflow.Clip, onTextLayout: (TextLayoutResult) -> Unit = {}) {
@@ -125,11 +128,13 @@ fun PillText(text: AnnotatedString, style: TextStyle, color: Color, modifier: Mo
     val merged = LocalTextStyle.current.merge(style)
     val places = text.getStringAnnotations(INLINE_TAG, 0, text.length)
         .mapNotNull { a -> map[a.item]?.let { AnnotatedString.Range(it.placeholder, a.start, a.end) } }
+    val direction = LocalLayoutDirection.current
+    val fonts = LocalFontFamilyResolver.current
     BoxWithConstraints(modifier) {
-        val shown = if (!constraints.hasBoundedWidth) text else remember(text, constraints.maxWidth, merged, density) {
+        val shown = if (!constraints.hasBoundedWidth) text else remember(text, constraints.maxWidth, merged, density, direction, fonts, maxLines, places) {
             ellipsized(text, places, maxLines) { t, p ->
                 measure.measure(t, merged, TextOverflow.Clip, maxLines = maxLines, placeholders = p,
-                    constraints = Constraints(maxWidth = constraints.maxWidth)).hasVisualOverflow
+                    constraints = Constraints(maxWidth = constraints.maxWidth), layoutDirection = direction, density = density)
             }
         }
         Text(shown, style = style, color = color, maxLines = maxLines, overflow = TextOverflow.Clip, inlineContent = map,
@@ -137,21 +142,50 @@ fun PillText(text: AnnotatedString, style: TextStyle, color: Color, modifier: Mo
     }
 }
 
-/** text as long as fits in maxLines (overflows: whether a text, with its placeholders, doesn't): all of it, or as much
- * as fits with a … after it, never cut inside a pill. */
+/** text as long as fits in maxLines (layout: the layout of a text with its placeholders): all of it, or as much as
+ * fits with a … after it, cut between graphemes and never inside a pill. The full text's last visible line says where to
+ * look, so a cut takes a few layouts, not one for each character taken off. */
 private fun ellipsized(text: AnnotatedString, places: List<AnnotatedString.Range<Placeholder>>, maxLines: Int,
-                       overflows: (AnnotatedString, List<AnnotatedString.Range<Placeholder>>) -> Boolean): AnnotatedString {
-    if (!overflows(text, places)) return text
-    var end = text.length
-    while (end > 0) {
+                       layout: (AnnotatedString, List<AnnotatedString.Range<Placeholder>>) -> TextLayoutResult): AnnotatedString {
+    val whole = layout(text, places)
+    if (!whole.hasVisualOverflow) return text
+    val graphemes = BreakIterator.getCharacterInstance().apply { setText(text.text) }
+    fun settled(at: Int): Int {  // (the end at or before at that leaves a pill whole and no space before the …)
+        var end = at
         places.firstOrNull { it.start < end && end < it.end }?.let { end = it.start }
         while (end > 0 && text[end - 1].isWhitespace()) end--
-        val cut = buildAnnotatedString { append(text.subSequence(0, end)); append("…") }
-        val kept = places.filter { it.end <= end }
-        if (!overflows(cut, kept)) return cut
-        end--
+        return end
     }
-    return AnnotatedString("…")
+    fun cut(end: Int) = buildAnnotatedString { append(text.subSequence(0, end)); append("…") }
+    // (an overflowing layout's last visible line ends where its room does)
+    fun fits(end: Int) = !layout(cut(end), places.filter { it.end <= end }).hasVisualOverflow
+    fun shown(l: TextLayoutResult) = l.getLineEnd(maxOf(l.lineCount, 1) - 1, visibleEnd = true)
+    var end = settled(shown(whole))
+    var last = layout(cut(end), places.filter { it.end <= end })
+    while (last.hasVisualOverflow && end > 0) {
+        val before = graphemes.preceding(minOf(end, shown(last)).coerceAtLeast(1)).coerceAtLeast(0)
+        end = settled(before)
+        last = layout(cut(end), places.filter { it.end <= end })
+    }
+    if (end == 0 && last.hasVisualOverflow) return AnnotatedString("…")
+    // (words the line's end cut off may fit with the …: take them, and as much of the one that doesn't as does)
+    while (end < text.length) {
+        var word = end
+        while (word < text.length && text[word].isWhitespace()) word++
+        while (word < text.length && !text[word].isWhitespace()) word++
+        places.firstOrNull { it.start < word && word < it.end }?.let { word = it.end }
+        if (fits(word)) { end = word; continue }
+        val steps = generateSequence(graphemes.following(end)) { graphemes.following(it) }.takeWhile { it != BreakIterator.DONE && it < word }
+            .filter { n -> !text[n - 1].isWhitespace() && places.none { it.start < n && n < it.end } }.toList()
+        var lo = 0
+        var hi = steps.size
+        while (lo < hi) {
+            val mid = (lo + hi) / 2
+            if (fits(steps[mid])) { end = steps[mid]; lo = mid + 1 } else hi = mid
+        }
+        break
+    }
+    return cut(end)
 }
 
 /** A pill's or chip's label's text: the line's, at the label's size, its line as tall as the font's own (drawn with

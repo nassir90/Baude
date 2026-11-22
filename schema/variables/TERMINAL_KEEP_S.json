@@ -1,0 +1,4 @@
+{
+  "description": "A terminal (terminal op) no connection is attached to now: its program kept running this long to be attached to again, in seconds.",
+  "const": 600
+}

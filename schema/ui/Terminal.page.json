@@ -1,0 +1,69 @@
+{
+  "description": "☰ → Terminal: a full-window view over the chat, as the Kubernetes view is, of tabs of Multiplex terminals, each run on a host by its host process (wire's terminal op) and drawn here. It can move out to a window of its own (Multiplex's look) and back.",
+  "apps": [
+    "baude",
+    "record"
+  ],
+  "opens": [
+    "☰ → Terminal"
+  ],
+  "code": [
+    "terminalpane.py:TerminalView",
+    "terminalpane.py:TerminalPane",
+    "terminalpane.py:TerminalWindow",
+    "multiplexterm.py:HostedTerminal",
+    "baudelib/hostterminal.py:HostTerminal"
+  ],
+  "copy": [
+    "multiplex",
+    "browser",
+    "images"
+  ],
+  "parts": [
+    {
+      "name": "bar",
+      "shows": "The view's top bar: \"Terminal\" (heading), the shown terminal's host by name (dim), then flat buttons New tab and Move to Its Own Window, and a round Close (×).",
+      "copy": [
+        "multiplex.terminal_menu",
+        "browser.new_tab",
+        "images.close"
+      ],
+      "text": [
+        "Move to Its Own Window"
+      ],
+      "actions": [
+        {
+          "by": "click New tab",
+          "does": "A new terminal on the host picked in the window's host dropdown, in a new tab"
+        },
+        {
+          "by": "click Move to Its Own Window",
+          "does": "The tabs move to a window titled Multiplex (its frame, a New tab button in its header); the view closes. Closing that window puts them back here, shown."
+        },
+        {
+          "by": "click ×",
+          "does": "Closes the view; its terminals keep running and are there when it opens again"
+        }
+      ]
+    },
+    {
+      "name": "tabs",
+      "shows": "A tab per terminal, titled by its program (else its host); the strip only with more than one tab, as Emission's and Multiplex's. A tab whose program ended while a Bot was at it says (ended) and stays till closed; any other closes as its program ends.",
+      "copy": [
+        "multiplex.ended"
+      ]
+    },
+    {
+      "name": "terminal",
+      "shows": "The terminal (VTE), its edges glowing in the accent while a Bot is at its terminal tools there. What's typed goes to the program on its host. A host that can't be reached says why in it.",
+      "copy": [
+        "multiplex.not_started",
+        "multiplex.host_gone"
+      ]
+    }
+  ],
+  "scenes": [
+    "38f-terminal",
+    "38f-terminal-window"
+  ]
+}

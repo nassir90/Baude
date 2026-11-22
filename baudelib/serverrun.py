@@ -13,7 +13,7 @@ import uuid
 
 from baudelib import (
     agentproxy, emissionlink, emissiontools, hostdb, hostfiles, hostfixes, hostkube, hostlogin, mesh, meshtools,
-    multiplexlink, routines, wire, wording, worktree,
+    hostterminal, multiplexlink, routines, wire, wording, worktree,
 )
 from baudelib.serverstate import (
     APPS, BOT_PICTURE_MAX, Conn, FRAME_KEYS, _mtime, _write_json, _write_text, bot_dir, clean_env,
@@ -238,6 +238,7 @@ class ServerRunning:
             conn.gone = True  # (a relay starting meanwhile: let go of as it would be)
             self.phones.gone(conn)
             hostkube.stop(conn)  # (its pod logs and watches: kubectl ended with it)
+            hostterminal.gone(conn)  # (its terminal: left running a while, to be attached to again)
             hostlogin.stop(conn)  # (a sign-in it ran: stopped)
             if getattr(conn, "emission_watch", None) is not None:  # (its pane gone: Emission's watcher with it)
                 try:
@@ -492,6 +493,10 @@ class ServerRunning:
                 except (OSError, ValueError) as e:
                     reply("error", error=str(e))
             threading.Thread(target=browse, daemon=True, name="emission").start()
+            return None
+        if op in ("terminal", "terminal_in", "terminal_resize", "terminal_close", "terminals"):  # (a terminal here:
+            if (bad := hostterminal.take(conn, msg)) is not None:  # hostterminal, its bytes carried on this connection)
+                return reply("error", error=bad)
             return None
         if op == "multiplex":  # (a Bot's terminal tools: Multiplex's terminals here; on a thread of its own)
             bot = msg.get("bot") if isinstance(msg.get("bot"), dict) else {}

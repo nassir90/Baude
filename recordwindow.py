@@ -270,6 +270,7 @@ class Window(RecordHosts, Adw.ApplicationWindow, feedback.FeedbackHost, viewers.
         for title, page in ((wording.say("window.kubernetes_menu"), "kube"),
                             (wording.say("window.database_schemas"), "db")):
             tools.append(title, f"win.viewer::{page}")
+        tools.append(wording.say("multiplex.terminal_menu"), "win.viewer::terminal")
         menu.append_section(None, tools)
         app_menu = Gio.Menu()
         item = Gio.MenuItem.new(wording.say("window.settings"), "win.settings")
@@ -694,7 +695,8 @@ class Window(RecordHosts, Adw.ApplicationWindow, feedback.FeedbackHost, viewers.
     def capture_areas(self):
         """The window's parts, by name, for the text a feedback capture records."""
         areas = {self.notebook_list: "notebooks", self.pages.index: "pages", self.chat: "conversation",
-                 self.kube: "Kubernetes", self.schema: "databases", self.lightbox: "image"}
+                 self.kube: "Kubernetes", self.schema: "databases", self.lightbox: "image",
+                 self.terminal: "terminal"}
         for child in self.tabs.children():
             if isinstance(child, DiaryEditor):
                 areas[child.view] = f"notes: {child.page}"

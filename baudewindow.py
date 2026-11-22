@@ -46,11 +46,12 @@ from pickers import PALETTE_KEY, HostPicker  # noqa: E402,F401
 from theming import settings_size, settings_switch  # noqa: E402,F401
 from codeview import find_in_focus  # noqa: E402,F401
 from kubeview import KubeView  # noqa: E402,F401
+import terminalpane  # noqa: E402  (☰ → Terminal: Record's too)
 from schemaview import SchemaView  # noqa: E402,F401
 from startup import LAUNCHER, apply_scales, record_item, take_restart_state  # noqa: E402
 from toolcards import COMMAND_TOOLS, CUT_CONTINUE, command_what  # noqa: E402
 from chatinput import Attachment, ChatRefCompleter, SlashCompleter  # noqa: E402
-from sessionlist import THIS_MACHINE, background_proc, is_desktop, network, remote_info  # noqa: E402
+from sessionlist import THIS_MACHINE, background_proc, is_desktop, network, remote_info, remote_name  # noqa: E402
 from sessionsidebar import SessionSidebar  # noqa: E402
 from sidequestion import CompactMarks  # noqa: E402
 from refpopovers import RefPalette  # noqa: E402
@@ -78,8 +79,9 @@ class SettingsDialog(Adw.PreferencesDialog):
         group.add(self.switch(wording.say("meta_settings.full_width"), None, "win.fullwidth"))
         group.add(theming.settings_code_font(win, "Baude"))
         group.add(theming.settings_accent())
-        group.add(self.switch(wording.say("window.show_in", where=LAUNCHER.where),
-                              LAUNCHER.paths()[0].replace(os.path.expanduser("~"), "~", 1), "win.launcher"))
+        # (one setting for all four apps: what Record's Settings, or an --install, did since shown)
+        win.lookup_action("launcher").set_state(GLib.Variant.new_boolean(LAUNCHER.installed()))
+        group.add(self.switch(wording.say("window.show_in", where=LAUNCHER.where), None, "win.launcher"))
         group.add(update.settings_row())  # (Record's too: the one setting)
         group.add(theming.notifications_row())  # (Record's too)
         self.version_row = update.version_row()
@@ -233,25 +235,33 @@ class BaudeWindow(WindowView, WindowProc, WindowDrafts, WindowSignal, WindowRemo
         header.set_title_widget(self.title_label)
         self.panel_btn = Gtk.ToggleButton(icon_name="sidebar-show-right-symbolic",
                                           tooltip_text=wording.say("side_panel.toggle_tip") + " (Ctrl+Alt+B)")
+        # (in sections as Record's: the chat's, the view's, the views over the window, the app's)
         menu = Gio.Menu()
+        menu.append(record_item(), "win.record")
+        menu.append(wording.say("window.copy_transcript"), "win.copyreport")
+        menu.append(wording.say("window.read_only"), "win.readonly")
+        view = Gio.Menu()
+        view.append(wording.say("meta_settings.full_width"), "win.fullwidth")
+        menu.append_section(None, view)
+        tools = Gio.Menu()
+        tools.append(wording.say("window.kubernetes_menu"), "win.kube")
+        tools.append(wording.say("window.database_schemas"), "win.dbschema")
+        tools.append(wording.say("multiplex.terminal_menu"), "win.terminal")
+        menu.append_section(None, tools)
+        app_menu = Gio.Menu()
         item = Gio.MenuItem.new(wording.say("window.settings"), "win.settings")
         item.set_attribute_value("accel", GLib.Variant.new_string(SETTINGS_KEY))  # (its key, shown beside it)
-        menu.append_item(item)
-        menu.append(wording.say("changelog.title"), "win.changelog")
-        menu.append(wording.say("mesh_versions.title"), "win.mesh")  # (Record's too)
-        menu.append(wording.say("meta_settings.full_width"), "win.fullwidth")
-        menu.append(wording.say("window.read_only"), "win.readonly")
-        menu.append(wording.say("window.database_schemas"), "win.dbschema")
-        menu.append(wording.say("window.kubernetes_menu"), "win.kube")
-        menu.append(record_item(), "win.record")
+        app_menu.append_item(item)
+        app_menu.append(wording.say("changelog.title"), "win.changelog")
+        app_menu.append(wording.say("mesh_versions.title"), "win.mesh")  # (Record's too)
         item = Gio.MenuItem.new(wording.say("fixes.send_feedback"), "win.feedback")
         item.set_attribute_value("accel", GLib.Variant.new_string(widgets.FEEDBACK_KEY))
-        menu.append_item(item)
-        menu.append(wording.say("window.ongoing_feedback"), "win.fixes")
-        menu.append(wording.say("window.copy_transcript"), "win.copyreport")
+        app_menu.append_item(item)
+        app_menu.append(wording.say("window.ongoing_feedback"), "win.fixes")
+        app_menu.append(wording.say("code_apart.restart_app", app="Baude"), "win.restart")
+        app_menu.append(wording.say("code_apart.restart_daemon"), "win.restartdaemon")
+        menu.append_section(None, app_menu)
         self.main_menu = menu
-        menu.append(wording.say("code_apart.restart_app", app="Baude"), "win.restart")
-        menu.append(wording.say("code_apart.restart_daemon"), "win.restartdaemon")
         menu_btn = Gtk.MenuButton(icon_name="open-menu-symbolic", menu_model=menu,
                                   tooltip_text=wording.say("chat_header.menu"))
         self.signal_btn = Gtk.MenuButton(icon_name=themed_icon("insert-link-symbolic", "emblem-symbolic-link-symbolic"),
@@ -283,6 +293,9 @@ class BaudeWindow(WindowView, WindowProc, WindowDrafts, WindowSignal, WindowRemo
         kube = Gio.SimpleAction.new("kube", None)
         kube.connect("activate", lambda *_: self.kube.open())
         self.add_action(kube)
+        terminal = Gio.SimpleAction.new("terminal", None)  # (a terminal on the host picked in the sidebar)
+        terminal.connect("activate", lambda *_: self.terminal.open())
+        self.add_action(terminal)
         record = Gio.SimpleAction.new("record", None)
         record.connect("activate", lambda *_: self.open_record())
         self.add_action(record)
@@ -503,9 +516,11 @@ class BaudeWindow(WindowView, WindowProc, WindowDrafts, WindowSignal, WindowRemo
         self.lightbox = lightbox.Lightbox(self)
         self.schema = SchemaView(self)
         self.kube = KubeView(self)
+        self.terminal = terminalpane.TerminalView(self, self.terminal_host)  # (☰ → Terminal: over it, as Kubernetes)
         host = Gtk.Overlay(child=self.toasts)
         host.add_overlay(self.schema)
         host.add_overlay(self.kube)
+        host.add_overlay(self.terminal)
         host.add_overlay(self.lightbox)
         self.repaint, self.repaint_wait = Repaint(), None
         host.add_overlay(self.repaint)
@@ -607,6 +622,13 @@ class BaudeWindow(WindowView, WindowProc, WindowDrafts, WindowSignal, WindowRemo
 
     # ---- restart, keeping what's on screen
     # ---- feedback (Menu → Send Feedback…)
+    def terminal_host(self):
+        """(where, name): the host picked in the sidebar's dropdown, for ☰ → Terminal (this machine's, if none)."""
+        r = self.sidebar.shown_remote()
+        if r is None:
+            return {"via": "local"}, THIS_MACHINE
+        return r.where, remote_name(r)
+
     def open_record(self):
         """Record (record.py, beside this file) reading this chat, on its Read tab in whichever notebook's open. One
         running already is handed the chat."""
@@ -628,7 +650,8 @@ class BaudeWindow(WindowView, WindowProc, WindowDrafts, WindowSignal, WindowRemo
         """The window's parts, by name, for the text a capture records."""
         return {self.sidebar: "sidebar", self.scroller: "chat", self.panel: "side panel",
                 self.composer_box: "input box", self.status.get_parent(): "status bar", self.header_bar: "header",
-                self.banner: "banner", self.kube: "Kubernetes", self.schema: "databases", self.lightbox: "image"}
+                self.banner: "banner", self.kube: "Kubernetes", self.schema: "databases", self.lightbox: "image",
+                self.terminal: "terminal"}
 
     def restart_state(self):
         """What a restart brings back: the chat, where it was scrolled to, the window, and whatever's being written: the

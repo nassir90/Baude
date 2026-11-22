@@ -1,5 +1,5 @@
 {
-  "description": "The ☰ menu at the right end of the Baude main window's header bar: a plain list of 13 items, each one line, no icons. Items beside a check mark are toggles.",
+  "description": "The ☰ menu at the right end of the Baude main window's header bar, in sections with a rule between them as Record's: the chat's (Open in Record…, Copy Transcript for an Issue, Read-only session), the view's (Full-width text), the views over the window (Kubernetes…, Database Schemas…, Terminal), the app's (Settings…, Changelog, Mesh, Send Feedback…, Ongoing Feedback, Restart Baude, Restart Daemon). Items beside a check mark are toggles.",
   "apps": [
     "baude"
   ],
@@ -23,7 +23,8 @@
     "meta_settings",
     "fixes",
     "code_apart",
-    "hosts"
+    "hosts",
+    "multiplex"
   ],
   "phone": {
     "does": "⋮ in the chat's header bar, with the same items where they apply (the items with does: nothing aside)",
@@ -31,6 +32,103 @@
     "decided": "2026-11-21"
   },
   "parts": [
+    {
+      "name": "Open in Record…",
+      "shows": "Row \"Open in Record…\".",
+      "text": [
+        "Open in Record…"
+      ],
+      "phone": {
+        "does": "nothing",
+        "why": "Launches the sibling desktop program Record as another process; a phone has no Record to launch",
+        "decided": "2026-11-21"
+      },
+      "actions": [
+        {
+          "by": "click",
+          "does": "Starts Record (or hands its running window) with this chat on its Read tab. A chat with no transcript file yet opens Record without a chat"
+        }
+      ]
+    },
+    {
+      "name": "Copy Transcript for an Issue",
+      "shows": "Row \"Copy Transcript for an Issue\".",
+      "copy": [
+        "window.copy_transcript",
+        "window.transcript_copied"
+      ],
+      "actions": [
+        {
+          "by": "click",
+          "does": "Copies the open chat as text (app, session id, model, effort, mode, host, folder, Claude Code version, context, tools, time, then every message with each tool call's input and result) to the clipboard and shows the toast \"Transcript copied\". With nothing said yet, copies a short \"nothing said\" line"
+        }
+      ]
+    },
+    {
+      "name": "Read-only session",
+      "shows": "Row \"Read-only session\", a check mark when on. Per chat: remembered for the chat once it has an id.",
+      "text": [
+        "Read-only session"
+      ],
+      "actions": [
+        {
+          "by": "click",
+          "does": "Toggles whether this chat can be written to. On: the whole input box is hidden (not greyed), so nothing can be sent, and files dropped on the window are not taken. Off: the box comes back"
+        }
+      ]
+    },
+    {
+      "name": "Full-width text",
+      "shows": "Row \"Full-width text\", a check mark when on. On from a fresh installation. Off limits the chat column to 860 px wide; on lets it fill the window.",
+      "copy": [
+        "meta_settings.full_width"
+      ],
+      "actions": [
+        {
+          "by": "click",
+          "does": "Toggles full-width chat text and remembers it (a setting shared with Settings)"
+        }
+      ]
+    },
+    {
+      "name": "Kubernetes…",
+      "shows": "Row \"Kubernetes…\".",
+      "copy": [
+        "window.kubernetes_menu"
+      ],
+      "actions": [
+        {
+          "by": "click",
+          "does": "Opens the Kubernetes page, laid over the whole window"
+        }
+      ]
+    },
+    {
+      "name": "Database Schemas…",
+      "shows": "Row \"Database Schemas…\".",
+      "copy": [
+        "window.database_schemas"
+      ],
+      "actions": [
+        {
+          "by": "click",
+          "does": "Opens the Database Schemas page, laid over the whole window"
+        }
+      ]
+    },
+    {
+      "name": "Terminal",
+      "shows": "Row \"Terminal\".",
+      "copy": [
+        "multiplex.terminal_menu"
+      ],
+      "actions": [
+        {
+          "by": "click",
+          "does": "Opens the Terminal view laid over the whole window, with a terminal on the host picked in the sidebar's host dropdown if it has none"
+        }
+      ]
+    },
     {
       "name": "Settings…",
       "shows": "First row. Label \"Settings…\", its key (Ctrl+, ; ⌘, on a Mac) shown at the right.",
@@ -75,76 +173,6 @@
       ]
     },
     {
-      "name": "Full-width text",
-      "shows": "Row \"Full-width text\", a check mark when on. On from a fresh installation. Off limits the chat column to 860 px wide; on lets it fill the window.",
-      "copy": [
-        "meta_settings.full_width"
-      ],
-      "actions": [
-        {
-          "by": "click",
-          "does": "Toggles full-width chat text and remembers it (a setting shared with Settings)"
-        }
-      ]
-    },
-    {
-      "name": "Read-only session",
-      "shows": "Row \"Read-only session\", a check mark when on. Per chat: remembered for the chat once it has an id.",
-      "text": [
-        "Read-only session"
-      ],
-      "actions": [
-        {
-          "by": "click",
-          "does": "Toggles whether this chat can be written to. On: the whole input box is hidden (not greyed), so nothing can be sent, and files dropped on the window are not taken. Off: the box comes back"
-        }
-      ]
-    },
-    {
-      "name": "Database Schemas…",
-      "shows": "Row \"Database Schemas…\".",
-      "copy": [
-        "window.database_schemas"
-      ],
-      "actions": [
-        {
-          "by": "click",
-          "does": "Opens the Database Schemas page, laid over the whole window"
-        }
-      ]
-    },
-    {
-      "name": "Kubernetes…",
-      "shows": "Row \"Kubernetes…\".",
-      "copy": [
-        "window.kubernetes_menu"
-      ],
-      "actions": [
-        {
-          "by": "click",
-          "does": "Opens the Kubernetes page, laid over the whole window"
-        }
-      ]
-    },
-    {
-      "name": "Open in Record…",
-      "shows": "Row \"Open in Record…\".",
-      "text": [
-        "Open in Record…"
-      ],
-      "phone": {
-        "does": "nothing",
-        "why": "Launches the sibling desktop program Record as another process; a phone has no Record to launch",
-        "decided": "2026-11-21"
-      },
-      "actions": [
-        {
-          "by": "click",
-          "does": "Starts Record (or hands its running window) with this chat on its Read tab. A chat with no transcript file yet opens Record without a chat"
-        }
-      ]
-    },
-    {
       "name": "Send Feedback…",
       "shows": "Row \"Send Feedback…\", its key (Ctrl+. ; ⌘. on a Mac) at the right.",
       "copy": [
@@ -171,20 +199,6 @@
         {
           "by": "click",
           "does": "Opens the Ongoing Feedback page in a tab of the main area"
-        }
-      ]
-    },
-    {
-      "name": "Copy Transcript for an Issue",
-      "shows": "Row \"Copy Transcript for an Issue\".",
-      "copy": [
-        "window.copy_transcript",
-        "window.transcript_copied"
-      ],
-      "actions": [
-        {
-          "by": "click",
-          "does": "Copies the open chat as text (app, session id, model, effort, mode, host, folder, Claude Code version, context, tools, time, then every message with each tool call's input and result) to the clipboard and shows the toast \"Transcript copied\". With nothing said yet, copies a short \"nothing said\" line"
         }
       ]
     },

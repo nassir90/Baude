@@ -26,7 +26,6 @@ import theming  # noqa: E402
 import meshui  # noqa: E402
 from baudelib import wording  # noqa: E402  (its words, Baude's: schema/copy)
 from baudelib.transcripts import transcript_model  # noqa: E402
-from baudelib import applist  # noqa: E402  (Record in the list of apps, as Emission is)
 import feedback  # noqa: E402  (Send Feedback…, as Baude's: beside this file)
 import fixview  # noqa: E402  (☰ → Ongoing Feedback, as Baude's)
 import viewers  # noqa: E402  (Baude's viewers, in Record's window: beside this file)
@@ -37,7 +36,7 @@ import meta  # noqa: E402  (Meta, the helper in the right bar: Baude's too, besi
 import metalook  # noqa: E402
 import spelling  # noqa: E402  (the pages' spelling and grammar, as they're written: beside this file)
 from recordstore import (  # noqa: E402
-    APP_ID, HERE_HOST, HOME, Store, THIS_MACHINE, apps_place, book, file_part, full_name, install, installed,
+    HERE_HOST, HOME, Store, THIS_MACHINE, apps_place, book, file_part, full_name, install, installed,
     local_remote, network, noun, parse_citation, restart_path, session_info, session_path, short_dir, short_page,
     uninstall,
 )
@@ -91,9 +90,9 @@ class Settings(Adw.PreferencesDialog):
         group.add(theming.settings_switch("Include glossary and chats in backup",
                                           backup_zip().replace(os.path.expanduser("~"), "~", 1),
                                           "win.backupall"))
-        group.add(theming.settings_switch(wording.say("window.show_in", where=apps_place()),
-                                          applist.launchers(APP_ID, "Record")[0].replace(os.path.expanduser("~"), "~", 1),
-                                          "win.launcher"))
+        # (one setting for all four apps: what Baude's Settings, or an --install, did since shown)
+        win.lookup_action("launcher").set_state(GLib.Variant.new_boolean(installed()))
+        group.add(theming.settings_switch(wording.say("window.show_in", where=apps_place()), None, "win.launcher"))
         page.add(group)
         sizes = Adw.PreferencesGroup(title=wording.say("window.size"))  # (the text's and the icons' are Baude's too)
         sizes.add(theming.settings_size(wording.say("meta_settings.text_scale"), None,
@@ -271,6 +270,7 @@ class Window(RecordHosts, Adw.ApplicationWindow, feedback.FeedbackHost, viewers.
         for title, page in ((wording.say("window.kubernetes_menu"), "kube"),
                             (wording.say("window.database_schemas"), "db")):
             tools.append(title, f"win.viewer::{page}")
+        tools.append(wording.say("multiplex.terminal_menu"), "win.viewer::terminal")
         menu.append_section(None, tools)
         app_menu = Gio.Menu()
         item = Gio.MenuItem.new(wording.say("window.settings"), "win.settings")
@@ -685,7 +685,7 @@ class Window(RecordHosts, Adw.ApplicationWindow, feedback.FeedbackHost, viewers.
 
     @staticmethod
     def _launcher_toggled(action, value):
-        """Settings → Show in Applications: Record's launcher made, or taken away."""
+        """Settings → Show in Applications: all four apps' launchers made, or taken away."""
         try:
             install() if value.get_boolean() else uninstall()
         except OSError as e:
@@ -695,7 +695,8 @@ class Window(RecordHosts, Adw.ApplicationWindow, feedback.FeedbackHost, viewers.
     def capture_areas(self):
         """The window's parts, by name, for the text a feedback capture records."""
         areas = {self.notebook_list: "notebooks", self.pages.index: "pages", self.chat: "conversation",
-                 self.kube: "Kubernetes", self.schema: "databases", self.lightbox: "image"}
+                 self.kube: "Kubernetes", self.schema: "databases", self.lightbox: "image",
+                 self.terminal: "terminal"}
         for child in self.tabs.children():
             if isinstance(child, DiaryEditor):
                 areas[child.view] = f"notes: {child.page}"

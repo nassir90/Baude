@@ -653,6 +653,57 @@ def _(app):
     return win
 
 
+def terminal_home():
+    """A HOME of fixtures for a scene's terminals (the shell's prompt and folder: nobody's real ones)."""
+    home = os.path.join(T.TMP, "terminal-home", "shop")
+    os.makedirs(home, exist_ok=True)
+    for name in ("cart.py", "pay.py", "README.md", "tests"):
+        open(os.path.join(home, name), "a").close()
+    os.environ.update(SHELL="/bin/sh", HOME=home, PS1="demo@box ~/shop $ ", ENV="")
+    return home
+
+
+def settled_terminal(term):
+    T.wait_for(lambda: term.host_id is not None and term.screen()["screen"].strip(), "the host's terminal")
+    term.type("PS1='demo@box ~/shop $ '; cd ~; clear\n")
+    T.wait_for(lambda: term.screen()["screen"].startswith("demo@box"), "its prompt")
+
+
+@scene("38f-terminal", "☰ → Terminal: over the window as the Kubernetes view is, a terminal on the host picked in the "
+                      "sidebar (this machine's here), run by its host process; its bar names the host; a Bot at it "
+                      "makes its edges glow; the window button moves it out", size=(1200 + SIDEBAR, H))
+def _(app):
+    win = app.window(opts())
+    terminal_home()
+    win.terminal.open()
+    term = win.terminal.pane.current()
+    settled_terminal(term)
+    term.type("git log --oneline -3 2>/dev/null || printf 'a1b2c3d Cart totals\\n9f8e7d6 Pay retries\\n'\n")
+    T.pump(0.8)
+    term.glow.on(hold=30)
+    T.pump(0.8)
+    win.connect("destroy", lambda *_: win.terminal.pane.close_all())
+    return win
+
+
+@scene("38f-terminal-window", "☰ → Terminal, moved out to a window of its own (Multiplex's look, two tabs): "
+                             "closed, it's put back over the window", size=(900, 580))
+def _(app):
+    win = app.window(opts())
+    terminal_home()
+    win.terminal.open()
+    settled_terminal(win.terminal.pane.current())
+    term = win.terminal.pane.open()
+    settled_terminal(term)
+    term.type("ls\n")
+    win.terminal.put_out()
+    T.pump(0.8)
+    out = win.terminal.window
+    out.set_default_size(900, 580)
+    win.connect("destroy", lambda *_: win.terminal.pane.close_all())
+    return out
+
+
 @scene("38d-tool-card", "Tool schemas: a tool a reply talks about (the Agent tool, TodoWrite, an MCP server's tool) "
                        "links to its card: what it does, whether it asks permission, its inputs from Anthropic's "
                        "Agent SDK types, and the subagent types defined here", size=(1250 + SIDEBAR, H))

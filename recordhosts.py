@@ -60,6 +60,12 @@ class RecordHosts:
         page = shown.page if isinstance(shown, DiaryEditor) and shown.notebook is self.current else None
         return " / ".join([self.store.host_name, full_name(self.current), *([page] if page else [])])
 
+    def terminal_host(self):
+        """(where, name): the host picked in the dropdown, for ☰ → Terminal (this machine's, if none)."""
+        key = self.store.picked or HERE_HOST
+        r = self.host_remote(key)
+        return ({"via": "local"}, THIS_MACHINE) if r is None else (r.where, remote_name(r))
+
     def host_remote(self, key):
         """A host's Remote, by its key, there or not (None for this machine, or one not known)."""
         if key == HERE_HOST or not _NETWORK:
@@ -623,11 +629,13 @@ class RecordHosts:
         return viewers.ViewerWindow.for_folder(folder, self.get_application())
 
     def open_viewer(self, page):
-        """☰ → Kubernetes… or Databases… (over the window), or a page of the right bar's (files, git)."""
+        """☰ → Kubernetes…, Databases… or Terminal (over the window), or a page of the right bar's (files, git)."""
         if page == "kube":
             self.kube.open()
         elif page == "db":
             self.schema.open()
+        elif page == "terminal":
+            self.terminal.open()
         else:
             self.right_slide.set_shown(True)
             self.right_stack.set_visible_child_name(page)

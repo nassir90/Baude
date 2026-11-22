@@ -1,5 +1,6 @@
-"""An app in the platform's list of apps, for this user (Record's and Emission's): on macOS ~/Applications/NAME.app,
-elsewhere a .desktop entry and the app's logo in the user's hicolor theme. No GTK until a logo's drawn."""
+"""An app in the platform's list of apps, for this user: on macOS ~/Applications/NAME.app, elsewhere a .desktop entry
+and the app's logo in the user's hicolor theme. Baude, Record, Emission and Multiplex go in and out of it together
+(APPS: install_all, uninstall_all), whichever app's Settings or --install asks. No GTK until a logo's drawn."""
 import os
 import re
 import shlex
@@ -9,8 +10,16 @@ import struct
 import subprocess
 import sys
 
+from baudelib import bins, icons
+
 LSREGISTER = "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework" \
     "/Support/lsregister"
+
+
+def _registers(folder):
+    """Whether a launcher in folder is told to LaunchServices and Spotlight: the user's own list, not a test's or a
+    rig's (BAUDE_LAUNCHERS)."""
+    return folder is None and not os.environ.get("BAUDE_LAUNCHERS")
 
 
 def exec_quote(arg):
@@ -116,7 +125,7 @@ def redraw_logo(app_id, name, svg, folder=None):
     if sys.platform == "darwin":
         keep_drawn(paths[0], name, svg)
         os.utime(paths[0])
-        if os.path.exists(LSREGISTER):
+        if _registers(folder) and os.path.exists(LSREGISTER):
             subprocess.Popen([LSREGISTER, "-f", paths[0]], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     else:
         os.utime(os.path.dirname(os.path.dirname(os.path.dirname(path))))  # (hicolor)
@@ -146,9 +155,9 @@ def install(app_id, name, svg, command, category, entry, small=None, folder=None
             f.write('#!/bin/sh\ncd "$HOME"\nexec "${SHELL:-/bin/zsh}" -lc \'exec "$0" "$@"\' '
                     + " ".join(shlex.quote(a) for a in command if not re.fullmatch(r"%[a-zA-Z]", a)) + ' "$@"\n')
         os.chmod(script, 0o755)
-        if os.path.exists(LSREGISTER):  # (listed now, ⌘Space too: they find it in time, a minute or more)
+        if _registers(folder) and os.path.exists(LSREGISTER):  # (listed now, ⌘Space too: in time, a minute or more)
             subprocess.run([LSREGISTER, "-f", paths[0]], capture_output=True, check=False)
-        if shutil.which("mdimport"):
+        if _registers(folder) and shutil.which("mdimport"):
             subprocess.run(["mdimport", paths[0]], capture_output=True, check=False)
         return paths
     lines = ["[Desktop Entry]", "Type=Application", f"Name={name}", *entry,
@@ -161,10 +170,11 @@ def install(app_id, name, svg, command, category, entry, small=None, folder=None
     return paths
 
 
-def uninstall(app_id, name):
+def uninstall(app_id, name, folder=None):
     """The app's launcher taken out of the list: the paths that were there."""
-    there = [p for p in launchers(app_id, name, True) if os.path.exists(p)]
-    if sys.platform == "darwin" and there and os.path.exists(LSREGISTER):  # (while the bundle's still there to read)
+    there = [p for p in launchers(app_id, name, True, folder) if os.path.exists(p)]
+    # (told while the bundle's still there to read)
+    if sys.platform == "darwin" and there and _registers(folder) and os.path.exists(LSREGISTER):
         subprocess.run([LSREGISTER, "-u", there[0]], capture_output=True, check=False)
     for p in there:
         if os.path.isdir(p):
@@ -172,3 +182,69 @@ def uninstall(app_id, name):
         else:
             os.remove(p)
     return there
+
+
+# ------------------------------------------------------------ all of them
+# The apps one switch puts in the list (Settings → Show in Applications, Baude's and Record's; every app's --install):
+# name -> its app id, its logo's icon (schema/icons/apps), whether the logo takes the accent, the command it starts
+# (bins, then its arguments), its macOS category, its .desktop lines besides every app's, and its 16 px logo's icon.
+APPS = {
+    "Baude": ("dev.baude.Baude", "baude", True, ["baude"], "public.app-category.developer-tools",
+              ["GenericName=Claude Code client", "Comment=GTK front-end for the claude CLI",
+               "Categories=Development;GTK;", "Keywords=claude;ai;agent;chat;", "StartupNotify=true"], None),
+    "Record": ("dev.baude.Record", "record", True, ["record"], "public.app-category.productivity",
+               ["Comment=Read AI prose with a peer who knows what you know", "Categories=Utility;GTK;"], None),
+    "Emission": ("dev.baude.Emission", "emission", False, ["emission", "%u"], "public.app-category.productivity",
+                 ["GenericName=Web Browser", "Comment=Baude's browser", "Categories=Network;WebBrowser;GTK;"],
+                 "emission-16"),
+    "Multiplex": ("dev.baude.Multiplex", "multiplex", False, ["multiplex"], "public.app-category.developer-tools",
+                  ["GenericName=Terminal", "Comment=Baude's terminal", "Categories=System;TerminalEmulator;GTK;"],
+                  "multiplex-16"),
+}
+
+
+def place():
+    """The list of apps they go in, as the platform names it (schema/copy install)."""
+    from baudelib import wording
+    return wording.say("install.applications") if sys.platform == "darwin" else wording.say("install.application_menu")
+
+
+def app_logo(name, accent=None):
+    """name's logo (APPS) as its launcher draws it: Baude's and Record's in accent (icons.logo), the others' as
+    drawn."""
+    _, icon, follows, *_ = APPS[name]
+    return icons.logo(icon, accent) if follows else icons.svg("apps", icon)
+
+
+def all_paths(folder=None):
+    """Each app's launcher (its .app, or its .desktop entry), in APPS's order."""
+    return [launchers(app_id, name, folder=folder)[0] for name, (app_id, *_) in APPS.items()]
+
+
+def all_installed(folder=None):
+    """Whether every one of APPS is in the list: what each app's switch shows."""
+    return all(os.path.exists(p) for p in all_paths(folder))
+
+
+def install_all(accent=None, folder=None):
+    """Every one of APPS in the list (install), with ~/.local/bin's commands they start (bins.install): the paths
+    written."""
+    written = bins.install()
+    for name, (app_id, icon, _, command, category, entry, small) in APPS.items():
+        written += install(app_id, name, app_logo(name, accent), [bins.path(command[0]), *command[1:]], category,
+                           entry, small=small and icons.svg("apps", small), folder=folder)
+    return written
+
+
+def uninstall_all(folder=None):
+    """Every one of APPS taken out of the list (the commands in ~/.local/bin stay: other machines reach this one's
+    host process through them): the paths that were there."""
+    return [p for name, (app_id, *_) in APPS.items() for p in uninstall(app_id, name, folder)]
+
+
+def redraw_logos(accent=None, folder=None):
+    """The installed launchers' logos that take the accent (Baude's, Record's) drawn again in it (redraw_logo). No
+    GTK: it runs on a worker thread."""
+    for name, (app_id, _, follows, *_) in APPS.items():
+        if follows:
+            redraw_logo(app_id, name, app_logo(name, accent), folder)

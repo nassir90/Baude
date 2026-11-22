@@ -4,7 +4,7 @@ Bot can find, read and type into with its terminal tools (baudelib.multiplextool
 A Bot's open starts it if it isn't running; on a Linux host with no display it starts one of its own (xvfb-run).
 
     python3 multiplex.py [--cwd DIR] [--title TITLE] [-- COMMAND ...]
-    python3 multiplex.py --install | --uninstall   # app-menu launcher with the logo (per user)
+    python3 multiplex.py --install | --uninstall   # all four apps in the app menu, with their logos (per user)
 """
 import argparse
 import ctypes
@@ -18,7 +18,7 @@ import gi  # noqa: E402
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Adw, Gdk, Gio, GLib, Gtk  # noqa: E402
-from baudelib import applist, bins, icons, multiplexlink, wording  # noqa: E402
+from baudelib import applist, icons, multiplexlink, wording  # noqa: E402
 import multiplexterm  # noqa: E402
 from multiplexterm import Terminal, Terminals  # noqa: E402
 
@@ -59,15 +59,16 @@ def themed_icon():
 
 
 def install():
-    """Multiplex in the platform's list of apps, for this user (applist), which starts ~/.local/bin/multiplex."""
-    return bins.install() + applist.install(APP_ID, "Multiplex", ICON_SVG, [bins.path("multiplex")],
-                                            "public.app-category.developer-tools",
-                                            ["GenericName=Terminal", "Comment=Baude's terminal",
-                                             "Categories=System;TerminalEmulator;GTK;"], small=ICON_SVG_16)
+    """Baude, Record, Emission and Multiplex in the platform's list of apps, for this user, together
+    (applist.install_all), each starting its command in ~/.local/bin, written with the others (bins.install). What it
+    wrote."""
+    import widgets  # (the accent Baude's and Record's logos take)
+    return applist.install_all(widgets.load_settings().get("accent"))
 
 
 def uninstall():
-    return applist.uninstall(APP_ID, "Multiplex")
+    """All four apps' launchers removed: what was there."""
+    return applist.uninstall_all()
 
 
 class Window(Adw.ApplicationWindow):
@@ -219,9 +220,9 @@ def main():
     where = wording.say("install.applications") if sys.platform == "darwin" else \
         wording.say("install.application_menu")
     inst.add_argument("--install", action="store_true",
-                      help=wording.say("install.install_help", app="Multiplex", where=where))
+                      help=wording.say("install.install_help", where=where))
     inst.add_argument("--uninstall", action="store_true",
-                      help=wording.say("install.uninstall_help", app="Multiplex", where=where))
+                      help=wording.say("install.uninstall_help", where=where))
     argv = sys.argv[1:]
     if "-ApplePersistenceIgnoreState" in argv:  # (macOS's, for AppKit: not Multiplex's)
         at = argv.index("-ApplePersistenceIgnoreState")
@@ -232,7 +233,7 @@ def main():
         return 0
     if a.uninstall:
         print("\n".join(wording.say("install.removed", path=path) for path in uninstall())
-              or wording.say("install.not_installed", app="Multiplex"))
+              or wording.say("install.not_installed"))
         return 0
     if (why := multiplexterm.available()) is not None:
         print(why, file=sys.stderr)

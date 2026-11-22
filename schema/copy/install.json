@@ -1,12 +1,12 @@
 {
-  "description": "What --install and --uninstall say on the command line, and the name of the list of apps the app is added to.",
+  "description": "What --install and --uninstall say on the command line, and the name of the list of apps the four apps are added to together.",
   "messages": {
     "applications": "Applications",
     "application_menu": "application menu",
-    "install_help": "add {$app} to your {$where} (per user) and exit",
-    "uninstall_help": "remove {$app} from your {$where} and exit",
+    "install_help": "add Baude, Record, Emission and Multiplex to your {$where} (per user) and exit",
+    "uninstall_help": "remove Baude, Record, Emission and Multiplex from your {$where} and exit",
     "installed": "installed {$path}",
     "removed": "removed {$path}",
-    "not_installed": "{$app} was not installed"
+    "not_installed": "Baude, Record, Emission and Multiplex were not installed"
   }
 }

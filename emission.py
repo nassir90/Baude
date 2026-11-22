@@ -7,10 +7,10 @@ widget of its own. On a Linux host with no display it starts one of its own (xvf
 
 Its parts: emissioncore.py (what they share), emissionmac.py (macOS's pages), emissiongtk.py (Linux's, a tab,
 the bars), emissionpointer.py (the Bot's pointer), emissioncontrol.py (what the Bot's tools and watchers ask),
-emissionwindow.py (the window). Here: its logo, its launcher, the app.
+emissionwindow.py (the window). Here: its logo, the launchers, the app.
 
     python3 emission.py [URL] [--profile NAME]
-    python3 emission.py --install | --uninstall   # app-menu launcher with the logo (per user)
+    python3 emission.py --install | --uninstall   # all four apps in the app menu, with their logos (per user)
 """
 import argparse
 import ctypes
@@ -27,7 +27,6 @@ from gi.repository import Adw, Gdk, Gio, GLib, Gtk  # noqa: E402
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from baudelib import applist  # noqa: E402  (Emission in the list of apps, as Record is)
-from baudelib import bins  # noqa: E402  (~/.local/bin/emission, which its launcher starts)
 from baudelib import icons  # noqa: E402  (its logo: schema/icons)
 from baudelib import wording  # noqa: E402  (its words, Baude's browser's: schema/copy)
 from baudelib.emissionlink import (  # noqa
@@ -85,18 +84,16 @@ def themed_icon():
 
 
 def install():
-    """Emission in the platform's list of apps, for this user (applist): macOS's ~/Applications/Emission.app, Linux's
-    .desktop entry and logo, which start ~/.local/bin/emission, written with the other commands (bins.install). What
-    it wrote."""
-    return bins.install() + applist.install(APP_ID, "Emission", ICON_SVG, [bins.path("emission"), "%u"],
-                           "public.app-category.productivity",
-                           ["GenericName=Web Browser", "Comment=Baude's browser", "Categories=Network;WebBrowser;GTK;"],
-                           small=ICON_SVG_16)
+    """Baude, Record, Emission and Multiplex in the platform's list of apps, for this user, together
+    (applist.install_all), each starting its command in ~/.local/bin, written with the others (bins.install). What it
+    wrote."""
+    import widgets  # (the accent Baude's and Record's logos take)
+    return applist.install_all(widgets.load_settings().get("accent"))
 
 
 def uninstall():
-    """Emission's launcher removed: what was there."""
-    return applist.uninstall(APP_ID, "Emission")
+    """All four apps' launchers removed: what was there."""
+    return applist.uninstall_all()
 
 
 class App(Adw.Application):
@@ -148,16 +145,16 @@ def main():
     where = wording.say("install.applications") if sys.platform == "darwin" else \
         wording.say("install.application_menu")
     inst.add_argument("--install", action="store_true",
-                      help=wording.say("install.install_help", app="Emission", where=where))
+                      help=wording.say("install.install_help", where=where))
     inst.add_argument("--uninstall", action="store_true",
-                      help=wording.say("install.uninstall_help", app="Emission", where=where))
+                      help=wording.say("install.uninstall_help", where=where))
     a = p.parse_args()
     if a.install:
         print("\n".join(wording.say("install.installed", path=path) for path in install()))
         return 0
     if a.uninstall:
         print("\n".join(wording.say("install.removed", path=path) for path in uninstall())
-              or wording.say("install.not_installed", app="Emission"))
+              or wording.say("install.not_installed"))
         return 0
     if a.agent and not a.bot:
         p.error("--agent is for a Bot's Emission: --bot too")

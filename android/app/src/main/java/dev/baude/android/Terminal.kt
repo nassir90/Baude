@@ -127,7 +127,7 @@ fun TerminalScreen(hostId: String, back: () -> Unit) {
     val t = remember(hostId) { Terms.plain(hostId) }
     BackHandler(onBack = back)
     Column(Modifier.fillMaxSize().background(c.frame)) {
-        val title = t.title.ifBlank { Wording.Multiplex.terminal } + if (t.ended != null) " (${Wording.Multiplex.ended})" else ""
+        val title = t.title.ifBlank { Wording.Multiplex.terminalMenu } + if (t.ended != null) " (${Wording.Multiplex.ended})" else ""
         Bar(title, start = { IconButton(Adwaita.GoPrevious, Wording.Browser.back, onClick = back) }, end = {
             IconButton(Adwaita.WindowClose, Wording.Multiplex.close) { t.close(); back() }
         })

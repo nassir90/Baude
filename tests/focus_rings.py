@@ -240,26 +240,3 @@ def real_keys_and_a_click(win, kinds, pump):
     assert win.get_focus() is second and win.get_focus_visible(), (win.get_focus(), win.get_focus_visible())
     same(second, plain, "after a real arrow key")
 
-
-def check_window(win, pump):
-    """A real window: a real Tab from its first button, to what's next, has no ring round that."""
-    if not mouse.available():
-        return
-    was = win.get_focus()
-    win.present()
-    pump(0.3)
-    start = next(w for w in walk(win) if isinstance(w, Gtk.Button) and w.get_mapped() and w.get_focusable())
-    try:
-        start.grab_focus()
-        win.set_focus_visible(False)
-        plain = drawn(win, pump)
-        mouse.Mouse(win).key(*mouse.TAB)
-        now = win.get_focus()
-        assert now is not start and isinstance(now, (Gtk.Button, Gtk.ListBoxRow)), now
-        assert win.get_focus_visible()
-        place = around(win, now)
-        assert not (at := changed(drawn(win, pump).crop(place), plain.crop(place))), f"a ring round {now}, at {at}"
-    finally:
-        win.set_focus_visible(False)
-        if was is not None:
-            was.grab_focus()

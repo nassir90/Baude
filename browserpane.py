@@ -253,7 +253,7 @@ def open_home(app, ours):
     of its own, as before)."""
     if HOME["app"] is not None or sys.platform != "darwin":
         return
-    import emission
+    import emissioncore
     HOME["app"] = app
 
     def handle(_pid, msg, answer, _conn=None):
@@ -265,7 +265,7 @@ def open_home(app, ours):
         if here is None:
             here = HERE[msg["bot"]] = Here(app, msg["bot"], msg.get("name"))
         here.when_ready(lambda h: answer({"ok": True} if h.win is not None else {"error": h.why or "not here"}))
-    emission.ProfileSocket.listen("home", handle)
+    emissioncore.ProfileSocket.listen("home", handle)
 
 
 def can_host(remote):
@@ -322,13 +322,15 @@ class Here:
 
     def made(self, pid, urls):
         try:
-            import emission
+            import emissioncore
+            import emissionmac
+            import emissionwindow
             profile = next(p["name"] for p in emissionlink.profiles() if p["id"] == pid)
-            win = emission.Window(self.app, urls[0] if urls else None, profile, agent=True, hosted=True)
+            win = emissionwindow.Window(self.app, urls[0] if urls else None, profile, agent=True, hosted=True)
             if win.Engine is None or win.status is not None:
                 why = win.status.get_description() if win.status is not None else "no page engine here"
                 self.free(win)
-                emission.ProfileSocket.close(pid)
+                emissioncore.ProfileSocket.close(pid)
                 emissionlink.unlock_profile(pid)
                 return self.done(why)
             for url in urls[1:]:
@@ -338,18 +340,18 @@ class Here:
                 win.note = ((win.note + " ") if win.note else "") + (
                     "This browser moved into Baude: its pages were opened again from their addresses (what was "
                     "typed in them, and their history, is gone): " + ", ".join(urls[:10]))
-                emission.pending_note(pid, win.note)
+                emissionlink.pending_note(pid, win.note)
             win.get_content().set_content(None)  # (its pages, its downloads' banner: the Browser page's to show)
             if not HOME.get("awake"):
                 HOME["awake"] = True
-                emission.MacWeb.stay_awake()  # (a page of a Bot's runs on while Baude's out of sight)
+                emissionmac.MacWeb.stay_awake()  # (a page of a Bot's runs on while Baude's out of sight)
             self.pid, self.win = pid, win
         except Exception as e:  # (streamed instead: its window and socket, if it got that far, let go of)
             try:
-                import emission
+                import emissioncore
                 if "win" in locals():
                     self.free(win)
-                emission.ProfileSocket.close(pid)
+                emissioncore.ProfileSocket.close(pid)
             except Exception:
                 sys.excepthook(*sys.exc_info())
             emissionlink.unlock_profile(pid)
@@ -373,12 +375,12 @@ class Here:
 
     def idle_check(self):
         """Gone unused (by the Bot) this long, and not shown: let go of, as an agent's Emission goes when idle."""
-        import emission
+        import emissioncore
         win = self.win
         if win is None:
             return False
-        if not win.body.get_mapped() and (GLib.get_monotonic_time() - win.asked_at) / 1e6 > emission.AGENT_IDLE_S:
-            emission.open_pages(self.pid, win.open_said or [], why="idle")
+        if not win.body.get_mapped() and (GLib.get_monotonic_time() - win.asked_at) / 1e6 > emissioncore.AGENT_IDLE_S:
+            emissionlink.open_pages(self.pid, win.open_said or [], why="idle")
             self.release()
             return False
         return True
@@ -386,7 +388,7 @@ class Here:
     def release(self):
         """Its browser closed, its profile let go of (another Emission's to have; the Bot's next one tells it what
         it had open), and nothing left of it here."""
-        import emission
+        import emissioncore
         win, self.win = self.win, None
         HERE.pop(self.sid, None)
         if win is None:
@@ -395,10 +397,10 @@ class Here:
             if pane.here is self and pane.bound is not None:  # on a view that's about to go)
                 pane.tabs.set_view(pane.mirror)
         self.free(win)
-        emission.ProfileSocket.close(self.pid)
+        emissioncore.ProfileSocket.close(self.pid)
         pid = self.pid
         RELEASED[pid] = time.monotonic()
-        GLib.timeout_add(2000, lambda: pid not in emission.ProfileSocket.open and emissionlink.unlock_profile(pid)
+        GLib.timeout_add(2000, lambda: pid not in emissioncore.ProfileSocket.open and emissionlink.unlock_profile(pid)
                          and False)
         # (WebKit's store let go of first; not if it's been taken here again meanwhile)
 
@@ -424,13 +426,13 @@ def guard_keys(root):
     if getattr(root, "keys_back", False):
         return
     root.keys_back = True
-    import emission
+    import emissionmac
     clicks = Gtk.GestureClick(propagation_phase=Gtk.PropagationPhase.CAPTURE)
-    clicks.connect("pressed", lambda *_: emission.MacWeb.keys_to_gtk(root))
+    clicks.connect("pressed", lambda *_: emissionmac.MacWeb.keys_to_gtk(root))
     root.add_controller(clicks)
     keys = Gtk.EventControllerKey(propagation_phase=Gtk.PropagationPhase.CAPTURE)
     for signal in ("key-pressed", "key-released"):
-        keys.connect(signal, lambda c, kv, *_: emission.MacWeb.page_has_keys(root, c.get_current_event_time(), kv))
+        keys.connect(signal, lambda c, kv, *_: emissionmac.MacWeb.page_has_keys(root, c.get_current_event_time(), kv))
     root.add_controller(keys)
 
 
@@ -526,7 +528,7 @@ def restore_windows(win):
 
 class BrowserWindow(Adw.ApplicationWindow):
     """A Bot's browser out of the side panel (Disembody), in a window of its own that's an Emission window to look at
-    (its bars: emission.Chrome), the Bot's browser still: the same pages and tabs, its profile, hosted or streamed as
+    (its bars: emissiongtk.Chrome), the Bot's browser still: the same pages and tabs, its profile, hosted or streamed as
     it was, nothing reloaded. Its Bot's, whatever chat's open (several out at once, each its own). Its chat's side
     panel page says it's out; closed, it's back there. Out as Baude last ran: out again (restore_windows). main: the
     Baude window it came from (gone, this goes too, to come back next time)."""
@@ -537,8 +539,9 @@ class BrowserWindow(Adw.ApplicationWindow):
                          default_height=820)
         if sys.platform != "darwin":  # (Emission's logo, not Baude's, where a title bar or a task list shows it)
             import emission
+            import emissioncore
             if emission.themed_icon() is not None:
-                self.set_icon_name(emission.APP_ID)
+                self.set_icon_name(emissioncore.APP_ID)
         self.main, self.sid, self.done = main, info["id"], False
         DISEMBODIED[self.sid] = self
         remember()
@@ -595,8 +598,8 @@ class BrowserWindow(Adw.ApplicationWindow):
 
     def keys_to_gtk(self):
         if sys.platform == "darwin":
-            import emission
-            emission.MacWeb.keys_to_gtk(self)
+            import emissionmac
+            emissionmac.MacWeb.keys_to_gtk(self)
 
     def put_back(self, closing=False):
         """Back in the side panel (its window closed, or asked from there)."""
@@ -648,16 +651,16 @@ class Presence(Gtk.Widget):
     draws them there instead."""
 
     def __init__(self, pane):
-        import emission
+        import emissionpointer
         super().__init__(can_target=False, hexpand=True, vexpand=True)
-        self.pane, self.pointer, self.ticking = pane, emission.BotPointer(), None
+        self.pane, self.pointer, self.ticking = pane, emissionpointer.BotPointer(), None
         self.connect("unmap", lambda *_: self.ticking is not None and (self.remove_tick_callback(self.ticking),
                                                                        setattr(self, "ticking", None)))
 
     def draw_glow(self, snapshot, x, y, w, h, rgb):
         """The glow over the frame at x, y, w by h (on device pixels' edges): one texture of it at that size
-        (emission.glow_frame), made once for each size and accent."""
-        import emission
+        (emissionpointer.glow_frame), made once for each size and accent."""
+        import emissionpointer
         k = self.get_scale_factor() or 1
         key = (round(w * k), round(h * k), rgb, k)
         if key[0] <= 0 or key[1] <= 0:
@@ -666,7 +669,7 @@ class Presence(Gtk.Widget):
             if len(GLOW_TEXTURES) > 4:  # (sizes it's no longer at, an accent no longer picked: let go of)
                 GLOW_TEXTURES.clear()
             GLOW_TEXTURES[key] = Gdk.MemoryTexture.new(key[0], key[1], Gdk.MemoryFormat.R8G8B8A8_PREMULTIPLIED,
-                                                       GLib.Bytes.new(emission.glow_frame(*key)), key[0] * 4)
+                                                       GLib.Bytes.new(emissionpointer.glow_frame(*key)), key[0] * 4)
         snapshot.append_texture(GLOW_TEXTURES[key], Graphene.Rect().init(x, y, w, h))
 
     def accent_changed(self):
@@ -731,7 +734,7 @@ class Presence(Gtk.Widget):
     def draw_pointer(self, snapshot, look, rgb, ox, oy, sx, sy):
         """look's rings, chevrons and pointer (emission's shapes), the page's point (x, y) at (ox + x * sx,
         oy + y * sy)."""
-        import emission
+        import emissionpointer
         a, white, winding = look["alpha"], (1, 1, 1), Gsk.FillRule.WINDING
 
         def stroke(width):
@@ -742,20 +745,20 @@ class Presence(Gtk.Widget):
         for x, y, r, ra in look["rings"]:
             ring = self.path([], circle=(ox + x * sx, oy + y * sy, r))
             snapshot.append_fill(ring, winding, self.rgba(rgb, 0.22 * ra * a))
-            snapshot.append_stroke(ring, stroke(emission.RING_EDGE), self.rgba(rgb, ra * a))
+            snapshot.append_stroke(ring, stroke(emissionpointer.RING_EDGE), self.rgba(rgb, ra * a))
         for x, y, dx, dy, k, ha in look["hints"]:
-            (ux, uy), (cx, cy) = emission.hint_at(ox + x * sx, oy + y * sy, dx, dy, k)
-            lines = self.path(emission.chevrons(cx, cy, ux, uy))
-            snapshot.append_stroke(lines, stroke(emission.HINT_HALO), self.rgba(white, ha * a))
-            snapshot.append_stroke(lines, stroke(emission.HINT_EDGE), self.rgba(rgb, ha * a))
+            (ux, uy), (cx, cy) = emissionpointer.hint_at(ox + x * sx, oy + y * sy, dx, dy, k)
+            lines = self.path(emissionpointer.chevrons(cx, cy, ux, uy))
+            snapshot.append_stroke(lines, stroke(emissionpointer.HINT_HALO), self.rgba(white, ha * a))
+            snapshot.append_stroke(lines, stroke(emissionpointer.HINT_EDGE), self.rgba(rgb, ha * a))
         if look["x"] is not None and a > 0:
             tx, ty = ox + look["x"] * sx, oy + look["y"] * sy
-            dx, dy = emission.ARROW_SHADOW
-            snapshot.append_fill(self.path([emission.arrow_at(tx + dx, ty + dy, look["scale"])], closed=True), winding,
-                                 self.rgba((0, 0, 0), 0.28 * a))
-            arrow = self.path([emission.arrow_at(tx, ty, look["scale"])], closed=True)
+            dx, dy = emissionpointer.ARROW_SHADOW
+            snapshot.append_fill(self.path([emissionpointer.arrow_at(tx + dx, ty + dy, look["scale"])], closed=True),
+                                 winding, self.rgba((0, 0, 0), 0.28 * a))
+            arrow = self.path([emissionpointer.arrow_at(tx, ty, look["scale"])], closed=True)
             snapshot.append_fill(arrow, winding, self.rgba(rgb, a))
-            snapshot.append_stroke(arrow, stroke(emission.ARROW_EDGE), self.rgba(white, a))
+            snapshot.append_stroke(arrow, stroke(emissionpointer.ARROW_EDGE), self.rgba(white, a))
 
 
 GLOW_TEXTURES = {}  # ((its pixels' width and height, the accent, the scale): the glow's texture, made once for each)
@@ -876,11 +879,11 @@ class BrowserPane(Gtk.Box):
         self.append(self.said)
 
     def window_bars(self, over):
-        """A BrowserWindow's: Emission's own (emission.Chrome: back, forward, reload, the address, a new tab, the
+        """A BrowserWindow's: Emission's own (emissiongtk.Chrome: back, forward, reload, the address, a new tab, the
         profile; the tabs' strip), Restart as Native and read-only beside them. Its tabs those of the Bot's page hosted
         here (their own view), or (streamed) a view of stand-ins for them (mirror), kept as its state says."""
-        import emission
-        self.chrome = chrome = emission.Chrome("")
+        import emissiongtk
+        self.chrome = chrome = emissiongtk.Chrome("")
         self.back, self.fwd, self.reload, self.address, self.new = chrome.back, chrome.fwd, chrome.reload, \
             chrome.entry, chrome.new
         for b, url in ((self.back, "back"), (self.fwd, "forward")):
@@ -923,8 +926,9 @@ class BrowserPane(Gtk.Box):
             return
         self.stop()
         self.phoned = False  # (another Bot's: where its browser is, looked at again; its drives as read-only has them)
-        import emission
-        self.presence.pointer, self.pointer_seen = emission.BotPointer(), None  # (another Bot's: its own pointer)
+        import emissionpointer
+        self.presence.pointer, self.pointer_seen = emissionpointer.BotPointer(), None  # (another Bot's: its own
+        # pointer)
         self.sid, self.home, self.info = sid, info.get("remote") if bot else None, info if bot else None
         self.remote = self.home
         self.name = (info.get("bot") or {}).get("name") if bot else None

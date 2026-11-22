@@ -45,12 +45,12 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
-// An Emission window's bars (emission.Chrome), as the phone's browser has them: back, forward, reload (a stop while a
-// page loads), the address, a new tab and the profile, in an Adw.HeaderBar's place on the frame; under it the tabs'
+// An Emission window's bars (emissiongtk.Chrome), as the phone's browser has them: back, forward, reload (a stop while
+// a page loads), the address, a new tab and the profile, in an Adw.HeaderBar's place on the frame; under it the tabs'
 // strip (Adw.TabBar's: every tab, each as wide as the others, the one in front raised with its close), a page's
 // progress along its foot. The window's own close is the phone's back.
 
-/** The bar: emission.Chrome's bar, its parts in its order. go: the address typed (activated, as its entry is). */
+/** The bar: emissiongtk.Chrome's bar, its parts in its order. go: the address typed (activated, as its entry is). */
 @Composable
 fun EmissionBar(b: Browser, profile: String, go: (String) -> Unit, nav: (String) -> Unit, newTab: () -> Unit) {
     val c = LocalBaude.current

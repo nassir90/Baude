@@ -15,9 +15,9 @@ import kotlin.math.pow
 import kotlin.math.roundToInt
 import kotlin.math.sin
 
-/** The Bot's pointer as it's drawn over its page, never in it (emission.BotPointer's, as Baude and Emission draw it
- * on a desktop): what its tools do with the mouse (hover, click, drag, scroll; where, the page's CSS pixels) played in
- * turn. It glides there; a click presses it (a ring spreads from it, one each for a double click's presses), a drag
+/** The Bot's pointer as it's drawn over its page, never in it (emissionpointer.BotPointer's, as Baude and Emission draw
+ * it on a desktop): what its tools do with the mouse (hover, click, drag, scroll; where, the page's CSS pixels) played
+ * in turn. It glides there; a click presses it (a ring spreads from it, one each for a double click's presses), a drag
  * takes it pressed along its path, a scroll shows the wheel's way (a chevron going that way). It fades once the Bot's
  * let it be a while. The glow (the page's edges in the accent) fades in while the Bot's at its tools (acting) or its
  * pointer's moving, and out once neither is, GLOW_HOLD_S after. */
@@ -228,9 +228,9 @@ class PointerOverlay(ctx: Context, private val accent: Int) : View(ctx) {
     /** Drawn each frame while anything moves. */
     fun kick() = postInvalidateOnAnimation()
 
-    /** The glow's corners and edges (emission.glow_pixels'): a square 2 * its reach and a pixel across, each pixel as
-     * strong as its two nearest edges make it together, so its corners are as soft as its sides; its middle row and
-     * column stretched to the page's size as it's drawn. Made once for each scale. */
+    /** The glow's corners and edges (emissionpointer.glow_pixels'): a square 2 * its reach and a pixel across, each
+     * pixel as strong as its two nearest edges make it together, so its corners are as soft as its sides; its middle
+     * row and column stretched to the page's size as it's drawn. Made once for each scale. */
     private fun glow(): Bitmap {
         glowPicture?.takeIf { glowKey == k }?.let { return it }
         val reach = (BotPointer.GLOW_REACH * k).toInt().coerceAtLeast(1)

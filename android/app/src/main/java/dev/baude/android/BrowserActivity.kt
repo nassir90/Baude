@@ -42,8 +42,8 @@ import java.security.MessageDigest
 import java.util.UUID
 import kotlin.concurrent.thread
 
-/** A Bot's browser on this phone (PhoneBrowser's), as an Emission window is (emission.Chrome's bars on the frame, the
- * page set into it: widgets.inside), its pointer over the page and the glow, as Baude's Browser page shows a Bot's
+/** A Bot's browser on this phone (PhoneBrowser's), as an Emission window is (emissiongtk.Chrome's bars on the frame,
+ * the page set into it: widgets.inside), its pointer over the page and the glow, as Baude's Browser page shows a Bot's
  * Emission. You can use it too: what you do by hand is told to the Bot with its next request, as Emission tells it its
  * browser changed. In a process of its own, its profile the Bot's (WebView's data, by emissionlink.bot_profile_id's
  * id: its cookies, storage and sign-ins kept from one time to the next, as Emission's profile keeps them); it goes on

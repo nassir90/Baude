@@ -21,8 +21,9 @@ fun git(vararg args: String): String? = try {
 
 val FROM = 1000
 
-/** What goes into the APK (android/, emission.py's scripts, schema/'s tokens and types): its commits count. */
-val APP_PATHS = arrayOf("android", "emission.py", "schema")
+/** What goes into the APK (android/, emissioncontrol.py's scripts, schema/'s tokens and types): its commits count,
+ * and emission.py's, where the scripts were (so the count never goes down). */
+val APP_PATHS = arrayOf("android", "emission.py", "emissioncontrol.py", "schema")
 
 /** The build's version, as Baude's Version is the commit it runs: (versionCode, versionName). versionCode is how many
  * commits (not merges) have changed what goes into the APK, so each build of main that changes it installs over the
@@ -100,8 +101,9 @@ kotlin {
     jvmToolchain(17)
 }
 
-/** emission.py's PAGE_JS and REPL_RUN, as the phone's browser runs them (assets emission/page.js, emission/repl.js):
- * read from it as the app's built, so its pages are read and driven by the one script Emission's are. */
+/** emissioncontrol.py's PAGE_JS and REPL_RUN, as the phone's browser runs them (assets emission/page.js,
+ * emission/repl.js): read from it as the app's built, so its pages are read and driven by the one script
+ * Emission's are. */
 abstract class EmissionJs : DefaultTask() {
     @get:InputFile abstract val source: RegularFileProperty
     @get:OutputDirectory abstract val outputDir: DirectoryProperty
@@ -113,7 +115,7 @@ abstract class EmissionJs : DefaultTask() {
     fun write() {
         val py = source.get().asFile.readText()
         fun string(name: String): String {
-            val m = Regex("(?s)\\n$name = (r?)\"\"\"(.*?)\"\"\"").find(py) ?: throw GradleException("no $name in emission.py")
+            val m = Regex("(?s)\\n$name = (r?)\"\"\"(.*?)\"\"\"").find(py) ?: throw GradleException("no $name in emissioncontrol.py")
             return if (m.groupValues[1] == "r") m.groupValues[2] else m.groupValues[2].replace("\\\\", "\\")
         }
         val page = string("PAGE_JS")
@@ -134,7 +136,7 @@ abstract class EmissionJs : DefaultTask() {
 }
 
 val emissionJs = tasks.register<EmissionJs>("emissionJs") {
-    source.set(rootProject.layout.projectDirectory.file("../emission.py"))
+    source.set(rootProject.layout.projectDirectory.file("../emissioncontrol.py"))
     outputDir.set(layout.buildDirectory.dir("generated/emissionJs"))
 }
 

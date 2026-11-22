@@ -675,7 +675,7 @@ class Control(private val b: Browser, private val pageJs: String, private val re
         private fun sha1(text: String) = java.security.MessageDigest.getInstance("SHA-1").digest(text.toByteArray())
             .joinToString("") { "%02x".format(it) }
 
-        /** What's typed in the address bar as a URL (emission.address): one as it is; a local host or an IP address
+        /** What's typed in the address bar as a URL (emissioncore.address): one as it is; a local host or an IP address
          * given http://, another host https://; anything else searched for. */
         fun address(raw: String): String {
             val text = raw.trim()
@@ -694,9 +694,9 @@ class Control(private val b: Browser, private val pageJs: String, private val re
             return SEARCH + URLEncoder.encode(text, "UTF-8")
         }
 
-        /** text, as a REPL reads it, as async function bodies to try in turn (emission.repl_bodies): all of it one
-         * expression (returned); then, from the last statement back, the statements before one and that one returned;
-         * then all of it, returning nothing. */
+        /** text, as a REPL reads it, as async function bodies to try in turn (emissioncontrol.repl_bodies): all of it
+         * one expression (returned); then, from the last statement back, the statements before one and that one
+         * returned; then all of it, returning nothing. */
         fun replBodies(raw: String): List<String> {
             val text = raw.trim().trimEnd(';').trimEnd()
             val splits = ArrayList<Int>()

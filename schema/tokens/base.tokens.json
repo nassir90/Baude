@@ -285,7 +285,7 @@
     }
   },
   "pointer": {
-    "$description": "The Bot's pointer, drawn over its page (emission.BotPointer's; Baude's browser pane, Emission's window and the phone's draw it), and the glow round the page's edges while the Bot's at its tools. Sizes in the page's points.",
+    "$description": "The Bot's pointer, drawn over its page (emissionpointer.BotPointer's; Baude's browser pane, Emission's window and the phone's draw it), and the glow round the page's edges while the Bot's at its tools. Sizes in the page's points.",
     "$extensions": {"dev.baude.android": "double"},
     "glide-shortest": {
       "$description": "A glide's time: the shortest (about a second for 1500 points between).",

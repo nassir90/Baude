@@ -23,7 +23,7 @@ Processes, Side questions, Artifacts, Files, Git and Signal.
 
 You need JDK 17 and the Android SDK (Android Studio has both; or set `sdk.dir` in `local.properties`, or
 `ANDROID_HOME`). Build from a checkout of the whole repository: the phone's browser takes its page scripts from
-`../emission.py`.
+`../emissioncontrol.py`.
 
 ```bash
 cd android

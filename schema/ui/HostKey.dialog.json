@@ -1,0 +1,75 @@
+{
+  "description": "The phone's question about a host's ssh key it hasn't seen, worded and laid out as OpenSSH asks it in a terminal. Shown over whatever screen is up while a host waits on it. Baude and Record have none: they run the system's ssh, which goes by known_hosts.",
+  "apps": [
+    "phone"
+  ],
+  "opens": [
+    "connecting to a host (Add Host, or the app starting) whose key this phone hasn't trusted"
+  ],
+  "code": [
+    "HostKey.kt:HostKeyAsk",
+    "HostKey.kt:sshKeyType",
+    "Keys.kt:fingerprintOf",
+    "Hosts.kt:TrustedKeys"
+  ],
+  "copy": [
+    "phone_keys",
+    "common"
+  ],
+  "parts": [
+    {
+      "name": "authenticity",
+      "shows": "No title. \"The authenticity of host '<name> (<address>)' can't be established.\": the host's name in the mesh and the address ssh goes to.",
+      "copy": [
+        "phone_keys.authenticity"
+      ]
+    },
+    {
+      "name": "fingerprint",
+      "shows": "\"<TYPE> key fingerprint is SHA256:<base64>.\": TYPE as ssh names it (ED25519, ECDSA, RSA, DSA, ED25519-SK, ECDSA-SK); the fingerprint is SHA-256 of the key's blob in base64 without padding, as ssh-keygen -l prints it, in the code font. Selectable.",
+      "copy": [
+        "phone_keys.fingerprint"
+      ]
+    },
+    {
+      "name": "question",
+      "shows": "\"Are you sure you want to continue connecting?\"",
+      "copy": [
+        "phone_keys.continue_connecting"
+      ]
+    },
+    {
+      "name": "No",
+      "shows": "\"No\" button.",
+      "copy": [
+        "common.no"
+      ],
+      "actions": [
+        {
+          "by": "tap",
+          "does": "leaves the host unconnected; asked again the next time the app starts"
+        }
+      ]
+    },
+    {
+      "name": "Yes",
+      "shows": "\"Yes\" button, suggested.",
+      "copy": [
+        "common.yes"
+      ],
+      "actions": [
+        {
+          "by": "tap",
+          "does": "trusts the key for that host and connects"
+        }
+      ]
+    }
+  ],
+  "states": [
+    {
+      "name": "dismissed",
+      "shows": "Tapped outside: closed without an answer, asked again the next time that key is shown"
+    }
+  ],
+  "scenes": []
+}

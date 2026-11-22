@@ -20,6 +20,8 @@
     "discard": "Discard",
     "allow": "Allow",
     "deny": "Deny",
+    "yes": "Yes",
+    "no": "No",
     "remove": "Remove",
     "remove_ellipsis": "Remove…",
     "add": "Add",

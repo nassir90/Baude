@@ -53,7 +53,7 @@ object CodeBlocks {
     fun forChat(visible: Dp): Dp = maxOf(Tokens.Markdown.codeMin, visible * Tokens.Markdown.codeHeight.toFloat())
 }
 
-/** An edit's hunk as CodeBlock's diff lines (widgets.diff_block): what it replaced, then what it put in. */
+/** An edit's hunk as CodeBlock's diff lines (markdownview.diff_block): what it replaced, then what it put in. */
 fun diffBlock(old: String, new: String): List<Pair<String, String>> =
     (splitLines(old).map { "del" to it } + splitLines(new).map { "add" to it }).ifEmpty { listOf("ctx" to "") }
 

@@ -8,6 +8,9 @@ gi.require_version("Adw", "1")
 from gi.repository import Adw, Gdk, GLib, Gtk, Pango  # noqa: E402
 
 import widgets  # noqa: E402
+import refkinds  # noqa: E402
+import composerview  # noqa: E402
+import theming  # noqa: E402
 from baudelib import tokens  # noqa: E402  (Meta's measures: schema/tokens, Baude's)
 from baudelib import wording  # noqa: E402
 from meta import REF_COLOR, REF_RE, plain_ref  # noqa: E402
@@ -50,7 +53,7 @@ def install_css(display):
         provider.load_from_string(CSS)
         Gtk.StyleContext.add_provider_for_display(display, provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
         _CSS.append(provider)
-        widgets.rounded_css(display, CSS)  # (a form's corners, its rows', as Baude's under a GTK theme)
+        theming.rounded_css(display, CSS)  # (a form's corners, its rows', as Baude's under a GTK theme)
 
 
 MARK_STRENGTH = {"archived": 4, "added": 3, "moved": 2, "edited": 1}  # (a row a change marks twice, after the
@@ -138,7 +141,7 @@ def mark_row(row, key, mark, chat, name_label, inline=True):
         row.get_child().append(said)
 
 
-class SaidLabel(widgets.LinkLabel):
+class SaidLabel(refkinds.LinkLabel):
     """What you wrote to Meta (MetaChat._said): a LinkLabel whose logos are in the @names' colour, as a page draws
     them, not the text's."""
 
@@ -291,7 +294,7 @@ class RefCompleter:
             if self.shown:
                 self.picks.move(steps[keyval])
                 self.moved = True
-        elif keyval in (Gdk.KEY_Return, Gdk.KEY_KP_Enter) and widgets.sends(state):
+        elif keyval in (Gdk.KEY_Return, Gdk.KEY_KP_Enter) and composerview.sends(state):
             self.forget()  # (Ctrl/⌘+Enter sends, past the list)
             return False
         elif keyval in (Gdk.KEY_Tab, Gdk.KEY_Return, Gdk.KEY_KP_Enter) and self.picks.picked() is not None:

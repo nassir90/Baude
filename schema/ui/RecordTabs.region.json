@@ -1,7 +1,7 @@
 {
   "description": "The tab bar of Record's middle: each open page of notes, chat being read, file's code and the Feedback page is a tab. A closed tab is remembered for next time (pages of the notebook, chats).",
   "apps": ["record"],
-  "code": ["recordwindow.py:Window.open_note", "recordwindow.py:Window.open_chat", "recordwindow.py:Window.show_code", "recordwindow.py:Window.open_fixes", "recordwindow.py:Window._tab_closed", "recordwindow.py:Window._keep_open", "widgets.py:MainTabs"],
+  "code": ["recordwindow.py:Window.open_note", "recordwindow.py:Window.open_chat", "recordwindow.py:Window.show_code", "recordwindow.py:Window.open_fixes", "recordwindow.py:Window._tab_closed", "recordwindow.py:Window._keep_open", "panels.py:MainTabs"],
   "copy": ["tabs", "feedback", "window"],
   "parts": [
     {

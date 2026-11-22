@@ -7,7 +7,7 @@
     "The open chat's host lists held messages for it"
   ],
   "code": [
-    "widgets.py:HeldTurn",
+    "chatparts.py:HeldTurn",
     "baude.py:BaudeWindow.show_held",
     "baude.py:BaudeWindow.held_send",
     "baude.py:BaudeWindow.held_drop"

@@ -48,7 +48,7 @@ import uuid
 
 import lookup
 import lookupgit
-from macos import full_redraws, ns_string, objc_send  # (no GTK: used before it loads)
+from macos import full_redraws, ns_string, objc_send, window_frame  # (no GTK: used before it loads)
 from baudelib.claude import (  # (Claude Code's process, without GTK: see baudelib/)
     _CLAUDE_VERSION, claude_env, claude_exe, claude_version, EFFORT_LABELS, HOST_SESSION_ENV, MACOS_DESKTOP_CLAUDE,
     MODELS, MODES, spent_since,
@@ -59,7 +59,7 @@ from baudelib.transcripts import (  # (Claude Code's transcripts, without GTK: s
     _pack_keys, _prompt_texts, _RECORD_TIME, _RECORD_UUID, _scan_line, _scan_state, _TOOL_RESULT_REC, _unpack_keys,
     ChunkFill, ci_event, clean_prompt, find_session, history_item, history_items, HistoryIndex, projects_dir,
     read_history, read_session_info, record_key, scan_session, session_file, SESSION_SOURCES, task_notification,
-    transcript_model,
+    transcript_model, ref_epoch,
 )
 import baudelib.client  # noqa: E402  (servers on the network and their sessions: see baudelib/client.py)
 import baudelib.hosts  # noqa: E402  (this machine's host process, started when it's wanted: see baudelib/hosts.py)
@@ -139,37 +139,58 @@ from feedback import (  # noqa: E402,F401
 )
 import thumbs  # noqa: E402  (files' thumbnails, the system's)
 import widgets  # noqa: E402  (what Record draws as Baude does: the links' logos; see widgets.py)
-from widgets import hover_uri, markup_links  # noqa: E402,F401  (a label's links, by where the pointer is)
+import refkinds  # noqa: E402
+import codespans  # noqa: E402
+import imageviews  # noqa: E402
+import markdownview  # noqa: E402
+import chatparts  # noqa: E402
+import composerview  # noqa: E402
+import panels  # noqa: E402
+import lightbox  # noqa: E402
+import chatfind  # noqa: E402
+import pickers  # noqa: E402
+import theming  # noqa: E402
+import meshui  # noqa: E402
+from markdownview import hover_uri, markup_links  # noqa: E402,F401  (a label's links, by where the pointer is)
 from widgets import REF_ICON_SVG, RefIcon, draw_ref_icon, ref_icon_ops  # noqa: E402,F401
-from widgets import HEADING_SCALE, Composer, ComposerMarkdown, ComposerView, fmt_tokens  # noqa: E402,F401
+from chatparts import fmt_tokens  # noqa: E402,F401
+from composerview import HEADING_SCALE, Composer, ComposerMarkdown, ComposerView  # noqa: E402,F401
 from widgets import ICON_SLOT, Disclosure, Spinner, Ticker, _card_status, _slot, _status_icon  # noqa: E402,F401
-from widgets import HeldTurn, QueuedTurn, SenderTurn, UserTurn  # noqa: E402  (a message of yours, its revert button: Meta's and side questions' too)
-from widgets import ChoiceDropDown  # noqa: E402  (a dropdown over (value, label): Record's hosts too)
-from widgets import (  # noqa: E402,F401
-    _data_home, SCALE_MAX, SCALE_MIN, SETTINGS_KEY, settings_size, settings_switch, ZOOM_MODS, macos_appearance, scale_setting, zoom_keys,
-    CSS, PALETTE_KEY, RefPaletteRow, TreeList, load_css, sidebar_action, ARTIFACT_TITLES, BAUDE_ICONS, BULLET, CODE_STYLES, CodeBlock, diff_block,
-    EXISTS_FOR, FIND_RGB, Fade, FixedPicture, GUI_EDITORS,
-    HOME_NAME, IMAGE_POOL, INDENT_STEP, INLINE_MEMO_BYTES, ImageActions, KUBE_ICONS,
-    KUBE_KINDS, LineGutter, LinkLabel, MarkdownView, PictureWatch, natural_height,
-    REF_ABSENT_WHY, REF_SCHEME, SETTINGS_RENAMED, SUB_BULLET, TableScroll, WEB_IMAGE_MAX,
-    WorkerPool, ZOOM_MAX, ZOOM_MIN, ZOOM_STEP, _ARTIFACT_URL, _BARE_URL,
-    _BOLD, _BOLD_ITALIC, _CODE_SPAN, _FENCE, _HEADING, _IMAGE,
-    _ITEM, _KEPT_LINK, _KUBE_PASCAL, _MD_LINK, _PATH, _QUOTE_MARK,
-    _REF_DOTTED, _REF_EXT, _REF_ID, _REF_METHODS, _REF_MORE_EXT, _REF_PLAIN,
-    _RULE, _STAR_ITALIC, _STRIKE, _TABLE_RULE, _UNDERSCORE_ITALIC, _dispose_tree,
-    _emphasis, _exists_cache, _image_ext, _inline, _inline_markup, _inline_memo,
-    _memo_bytes, _settings_path, _web_images, _web_waiting, bullet_for, code_spans,
-    HostPicker, code_style, discard, editor_args, editor_command, ellipsize_dropdown, empty_label,
-    ensure_icons, fetch_web_image, file_href, find_attrs, find_label, fit_size,
-    IMAGE_LINK, fmt_scale, globe_icon, image_cache_path, image_dims, image_link_markup, image_widget, link_markup,
-    link_paths, load_settings, make_image_interactive, markdown_blocks,
-    markdown_parse, markdown_table, on_label_link, open_code, open_in_editor, paned_grip,
-    pretty_path, ref_code_markup, ref_command, ref_commit_range, ref_decision_markup, ref_epoch,
-    ref_hashlike, ref_icon_slot, ref_kind, ref_kube, ref_kube_command, ref_link,
-    ref_markup, ref_pr_info, ref_quiet, ref_span, ref_symbolish, relink_table,
-    resolve_link, resolve_path, save_settings, scaled_texture, screen_scale, sel_label,
-    set_markup_safe, themed_icon, time_ago, time_tip, toast, view_bar, walk,
+from chatparts import (  # noqa: E402  (a message of yours, its revert button: Meta's and side questions' too)
+    HeldTurn, QueuedTurn, SenderTurn, UserTurn,
 )
+from pickers import ChoiceDropDown  # noqa: E402  (a dropdown over (value, label): Record's hosts too)
+from widgets import (  # noqa: E402,F401
+    SCALE_MAX, SCALE_MIN, SETTINGS_KEY, ZOOM_MODS, scale_setting, zoom_keys, BAUDE_ICONS, FIND_RGB, HOME_NAME,
+    IMAGE_POOL, KUBE_ICONS, SETTINGS_RENAMED, WorkerPool, ZOOM_MAX, ZOOM_MIN, ZOOM_STEP, _dispose_tree, _settings_path,
+    discard, empty_label, ensure_icons, find_attrs, find_label, fit_size, fmt_scale, globe_icon, image_dims,
+    load_settings, paned_grip, pretty_path, save_settings, scaled_texture, screen_scale, themed_icon, time_ago,
+    time_tip, toast, view_bar, walk,
+)
+from refkinds import (  # noqa: E402,F401
+    KUBE_KINDS, LinkLabel, REF_SCHEME, _KUBE_PASCAL, _REF_DOTTED, _REF_EXT, _REF_ID, _REF_METHODS, _REF_MORE_EXT,
+    _REF_PLAIN, ref_command, ref_commit_range, ref_hashlike, ref_icon_slot, ref_kind, ref_kube, ref_kube_command,
+    ref_pr_info, ref_quiet, ref_span, ref_symbolish,
+)
+from codespans import CODE_STYLES, code_spans, code_style  # noqa: E402,F401
+from imageviews import (  # noqa: E402,F401
+    Fade, FixedPicture, ImageActions, PictureWatch, WEB_IMAGE_MAX, _image_ext, _web_images, _web_waiting,
+    fetch_web_image, IMAGE_LINK, image_cache_path, image_link_markup, image_widget, make_image_interactive,
+)
+from markdownview import (  # noqa: E402,F401
+    ARTIFACT_TITLES, BULLET, CodeBlock, diff_block, EXISTS_FOR, GUI_EDITORS, INDENT_STEP, INLINE_MEMO_BYTES,
+    MarkdownView, REF_ABSENT_WHY, SUB_BULLET, TableScroll, _ARTIFACT_URL, _BARE_URL, _BOLD, _BOLD_ITALIC, _CODE_SPAN,
+    _FENCE, _HEADING, _IMAGE, _ITEM, _KEPT_LINK, _MD_LINK, _PATH, _QUOTE_MARK, _RULE, _STAR_ITALIC, _STRIKE,
+    _TABLE_RULE, _UNDERSCORE_ITALIC, _emphasis, _exists_cache, _inline, _inline_markup, _inline_memo, _memo_bytes,
+    bullet_for, editor_args, editor_command, file_href, link_markup, link_paths, markdown_blocks, markdown_parse,
+    markdown_table, on_label_link, open_code, open_in_editor, ref_code_markup, ref_decision_markup, ref_link,
+    ref_markup, relink_table, resolve_link, resolve_path, sel_label, set_markup_safe,
+)
+from panels import natural_height  # noqa: E402,F401
+from pickers import (  # noqa: E402,F401
+    _data_home, PALETTE_KEY, RefPaletteRow, TreeList, sidebar_action, LineGutter, HostPicker, ellipsize_dropdown,
+)
+from theming import settings_size, settings_switch, macos_appearance, CSS, load_css  # noqa: E402,F401
 import botmemory  # noqa: E402  (a Bot's memory, the side panel's Memory page: beside this file)
 import browserpane  # noqa: E402  (a Bot's browser, the side panel's Browser page: beside this file)
 import routinespage  # noqa: E402  (a Bot's routines, the side panel's Routines page: beside this file)
@@ -1904,7 +1925,7 @@ class Signal(Names):
                 row["why"] = why
                 refs.append(self._absent_entity(surface, row, old, st))
             elif verdict == "plain":
-                if ref_codeish(surface) and not widgets.ref_cloud_provider(surface):  # (Fly.io, DigitalOcean: plain)
+                if ref_codeish(surface) and not refkinds.ref_cloud_provider(surface):  # (Fly.io, DigitalOcean: plain)
                     rejected.append({"i": i, "name": name, "why": f"{surface!r} is written as code, not English: "
                                      "link it, or not_in_code with why proposed, external, elsewhere or not_found"})
                     continue
@@ -1952,7 +1973,7 @@ class Signal(Names):
                     names[key] = (ref_kind(key) or "name", False)
             for surface, (kind, _strong) in names.items():
                 if kind in REF_TOOL_KINDS or decided.get(surface, set()) & before or \
-                        widgets.ref_cloud_provider(surface):
+                        refkinds.ref_cloud_provider(surface):
                     continue
                 ref = self._load(surface)
                 if ref is not None and ref.status == "resolved" and (ref.kind in ("commit", "branch", "pr") or
@@ -5788,7 +5809,7 @@ def ended_by_stop(msg):
 
 def api_error_label(text):
     """What Claude Code says in place of a reply that didn't come ("API Error: …", or a synthetic message): in the
-    colour a failed tool call's is (Adwaita's error), its text where a tool call's starts (api-error: widgets.CSS), and
+    colour a failed tool call's is (Adwaita's error), its text where a tool call's starts (api-error: theming.CSS), and
     "API Error" in bold."""
     m = re.match(r"(API Error)(.*)", text or "", re.S)
     markup = f"<b>{m.group(1)}</b>{html.escape(m.group(2))}" if m else html.escape(text or "")
@@ -5806,7 +5827,7 @@ def task_note_widget(note, card=None, on_jump=None):
     row = Gtk.Box(halign=Gtk.Align.START)
     row.add_css_class("task-note")
     summary = html.unescape(note.get("summary") or "")
-    ending = widgets.TASK_ENDINGS_SAID.get(status, status)
+    ending = chatparts.TASK_ENDINGS_SAID.get(status, status)
     if (code := re.search(r"exit code (\d+)", summary)) is not None:
         ending = wording.say("task_notes.ending_exit", ending=ending, code=code.group(1))
     label = Gtk.Label(xalign=0, wrap=True, selectable=True)
@@ -6827,12 +6848,12 @@ def thumbnail_texture(data, size, scale):
 
 def attachment_widget(att, size, on_remove=None):
     """A thumbnail (images) or icon + name, optionally with a remove button. A thumbnail is its size at once, and decoded
-    off the main thread as it nears the view (widgets.FixedPicture): made here, a chat's history stopped for 9 ms an
+    off the main thread as it nears the view (imageviews.FixedPicture): made here, a chat's history stopped for 9 ms an
     image as it was drawn, 300 ms a chunk of screenshots, mid-scroll."""
     box = Gtk.Box(spacing=4, valign=Gtk.Align.CENTER, tooltip_text=att.path or att.name)
     thumb = None
     if att.kind == "image" and widgets.image_dims(att.data):
-        thumb = widgets.FixedPicture(size=(size, size), load=lambda scale, data=att.data:
+        thumb = imageviews.FixedPicture(size=(size, size), load=lambda scale, data=att.data:
                                      thumbnail_texture(data, size, scale))
     elif att.kind == "image":  # (a header image_dims can't read: decoded now, to know it's an image at all)
         try:
@@ -7092,7 +7113,7 @@ class SlashCompleter:
         before = text[:offset]
         at = before.count("\n")
         return any(first <= at <= last for first, last, _closed in
-                   widgets.fence_spans(text.split("\n"), tildes=False, typing=(at,))) or \
+                   markdownview.fence_spans(text.split("\n"), tildes=False, typing=(at,))) or \
             before.rpartition("\n")[2].count("`") % 2 == 1
 
     def refresh(self):
@@ -7168,7 +7189,7 @@ class SlashCompleter:
             if self.matches:
                 self.picks.move(steps[keyval])
                 self.moved = True
-        elif keyval in (Gdk.KEY_Return, Gdk.KEY_KP_Enter) and widgets.sends(state):
+        elif keyval in (Gdk.KEY_Return, Gdk.KEY_KP_Enter) and composerview.sends(state):
             self.hide()  # (Ctrl/⌘+Enter sends what's typed, past the list)
             return False
         elif keyval in (Gdk.KEY_Tab, Gdk.KEY_Return, Gdk.KEY_KP_Enter) and self.picks.picked() is not None:
@@ -7202,7 +7223,7 @@ class ChatRefCompleter(metalook.RefCompleter):
         if not self.visible():
             return False
         if keyval in (Gdk.KEY_Return, Gdk.KEY_KP_Enter) and (
-                widgets.sends(state) or state & Gdk.ModifierType.SHIFT_MASK or
+                composerview.sends(state) or state & Gdk.ModifierType.SHIFT_MASK or
                 not self.moved and " " in (self.word() or (0, ""))[1].strip()):
             self.forget()
             return False
@@ -7843,7 +7864,7 @@ def on_main(fn):
 
 _NETWORK = []
 _LOCAL_SERVER = {"wanted": None}
-_HOST_APART = []  # (widgets.HostApart: this Mac's host process on other code than Baude's, said in the banner)  # (local_server's: what waits for the server on this machine it's started)
+_HOST_APART = []  # (meshui.HostApart: this Mac's host process on other code than Baude's, said in the banner)  # (local_server's: what waits for the server on this machine it's started)
 
 
 def network():
@@ -7953,9 +7974,9 @@ def local_host():
 
 
 def host_apart(app):
-    """The app's widgets.HostApart, made as it's first wanted: what it says, in every window's banner."""
+    """The app's meshui.HostApart, made as it's first wanted: what it says, in every window's banner."""
     if not _HOST_APART:
-        _HOST_APART.append(widgets.HostApart(app, update.STARTED, lambda: [w.update_banner() for w in app.windows()
+        _HOST_APART.append(meshui.HostApart(app, update.STARTED, lambda: [w.update_banner() for w in app.windows()
                                                                           if not getattr(w, "let_go_done", False)]))
     return _HOST_APART[0]
 
@@ -8235,7 +8256,7 @@ class SessionSidebar(Gtk.Box):
         top.append(find_row)
         self.append(top)
         # (the host picked isn't there, or is deactivated: said over its chats, as they were last seen: show_host_state)
-        self.host_note = widgets.HostState()  # (its titles: show_host_state's markup)
+        self.host_note = chatparts.HostState()  # (its titles: show_host_state's markup)
         self.append(self.host_note)
         self.list = TreeList(selection_mode=Gtk.SelectionMode.SINGLE)
         self.list.add_css_class("navigation-sidebar")
@@ -8243,7 +8264,7 @@ class SessionSidebar(Gtk.Box):
         self.scroller = Gtk.ScrolledWindow(child=self.list, vexpand=True, hscrollbar_policy=Gtk.PolicyType.NEVER)
         self.append(self.scroller)
         # (at the foot, under a rule from the chats: Update, while a new version waits: show_update_bars)
-        self.update_bar = widgets.UpdateBar(lambda: win.get_application().update_now(win))
+        self.update_bar = chatparts.UpdateBar(lambda: win.get_application().update_now(win))
         self.append(self.update_bar)
         keys = Gtk.EventControllerKey()
         keys.connect("key-pressed", self.on_key)
@@ -8896,8 +8917,8 @@ class SessionSidebar(Gtk.Box):
         GLib.idle_add(restore)  # again once the new rows are laid out
 
     def header_row(self, key, label, folder, is_here, collapsed=False):
-        # (widgets.group_header: Record's pages and notebooks have the same; the arrow just right of the name, shown
-        # when the pointer is near, or while collapsed)
+        # (markdownview.group_header: Record's pages and notebooks have the same; the arrow just right of the name,
+        # shown when the pointer is near, or while collapsed)
         plus = ("list-add-symbolic", wording.say("sidebar.new_session_in", folder=label),
                 lambda: self.win.switch_to(lambda: self.win.start_in_folder(folder))) \
             if folder and os.path.isdir(folder) else None
@@ -8907,7 +8928,7 @@ class SessionSidebar(Gtk.Box):
         if (r := self.remote_keys.get(key)) is not None:  # (a folder on a server: a session there, on it, if it's there)
             plus = ("list-add-symbolic", wording.say("sidebar.new_session_in_on", folder=remote_path(folder, r), host=remote_name(r)),
                     lambda: self.win.ask_remote_start(server=r, folder=folder)) if r.state == "alive" else None
-        box = widgets.group_header(short_group_label(key, label), collapsed, lambda: self.toggle_folder(key), plus,
+        box = markdownview.group_header(short_group_label(key, label), collapsed, lambda: self.toggle_folder(key), plus,
                                    tooltip=label, current=is_here)
         box.set_margin_top(tokens.px("gap.header-top"))
         box.set_margin_start(tokens.px("gap.header-start"))
@@ -8934,12 +8955,12 @@ class SessionSidebar(Gtk.Box):
         name = bot.get("name") or wording.say("sidebar.bot")
         avatar = Adw.Avatar(size=tokens.px("gap.avatar"), text=name, show_initials=True, valign=Gtk.Align.CENTER)
         bot_picture(info, lambda tex: tex is not None and avatar.set_custom_image(tex))
-        box.append(widgets.shaded_picture(avatar))
+        box.append(imageviews.shaded_picture(avatar))
         words = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, valign=Gtk.Align.CENTER, hexpand=True)
-        title = widgets.FadeLabel(label=name, xalign=0, hexpand=True)
+        title = pickers.FadeLabel(label=name, xalign=0, hexpand=True)
         title.add_css_class("bot-name")
         words.append(title)
-        what = widgets.FadeLabel(label=info.get("title") or "", xalign=0, hexpand=True)
+        what = pickers.FadeLabel(label=info.get("title") or "", xalign=0, hexpand=True)
         what.add_css_class("dim-label")
         what.add_css_class("caption")
         words.append(what)
@@ -8989,8 +9010,8 @@ class SessionSidebar(Gtk.Box):
         is_open = info.get("unsaved") or info["id"] == self.win.session_id
         dot = StatusDot(self.win.session_state() if is_open else self.file_state(info))
         label = info.get("fork_label") if depth else None
-        # (a title too long for the row fades out where it's cut: widgets.FadeLabel)
-        title = widgets.FadeLabel(label=label or info.get("title") or wording.say("common.untitled"), xalign=0,
+        # (a title too long for the row fades out where it's cut: pickers.FadeLabel)
+        title = pickers.FadeLabel(label=label or info.get("title") or wording.say("common.untitled"), xalign=0,
                                   hexpand=True)
         if depth:
             title.add_css_class("fork-title")
@@ -9170,7 +9191,7 @@ class SessionSidebar(Gtk.Box):
         buttons.append(choose)
         buttons.append(remove)
         body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
-        body.append(widgets.shaded_picture(avatar))
+        body.append(imageviews.shaded_picture(avatar))
         body.append(buttons)
         body.append(entry)
         dlg = Adw.AlertDialog(heading=wording.say("bot_settings.settings") if bot else wording.say("bot_settings.make_bot"),
@@ -9567,9 +9588,9 @@ class SessionSidebar(Gtk.Box):
 # --------------------------------------------------------- side questions --
 
 class CompactMarks:
-    """A conversation with claude that marks its compactions (widgets.compact_said: Baude's chat, a side question's):
+    """A conversation with claude that marks its compactions (chatparts.compact_said: Baude's chat, a side question's):
     where it's compacting, as it happens (it can take a minute), then what it did, the summary it wrote folded under
-    that (widgets.CompactMark). Its compact_add(mark) puts a marker where the conversation's at (returning it),
+    that (chatparts.CompactMark). Its compact_add(mark) puts a marker where the conversation's at (returning it),
     compact_here(mark) says whether one's still in it, compact_started() that it's busy."""
 
     compact_mark = None  # (this turn's: compact_ended lets go of it as the turn ends, or its claude does)
@@ -9579,12 +9600,12 @@ class CompactMarks:
         """The marker of this turn's compaction under way, made where the conversation's at if there's none."""
         mark = self.compact_mark
         if mark is None or mark.state != "running" or not self.compact_here(mark):
-            mark = self.compact_mark = self.compact_add(widgets.CompactMark())
+            mark = self.compact_mark = self.compact_add(chatparts.CompactMark())
         return mark
 
     def on_compaction(self, msg):
         """What msg says of a compaction, marked; True if it was the summary (nothing more to draw of it)."""
-        what, detail = widgets.compact_said(msg) or (None, None)
+        what, detail = chatparts.compact_said(msg) or (None, None)
         mark = self.compact_mark
         if what == "running":
             self.compact_started()
@@ -9666,11 +9687,11 @@ class SideQuestion(CompactMarks, Gtk.ListBoxRow):
         self.body.add_css_class("zoomable")
         self.scroll = natural_height(Gtk.ScrolledWindow(child=self.body, hscrollbar_policy=Gtk.PolicyType.NEVER,
                                                         visible=False))  # (nothing over its box till something's asked)
-        self.chat_find = widgets.ChatFind(self.body, self.scroll, pane=self.inside)  # (⌘F / Ctrl+F in it)
+        self.chat_find = chatfind.ChatFind(self.body, self.scroll, pane=self.inside)  # (⌘F / Ctrl+F in it)
         self.inside.append(self.chat_find.wrap())
         comp = self.comp = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, margin_start=10, margin_end=10,
                                    margin_top=10, margin_bottom=10)
-        self.writing = widgets.Composer(follow_text=True)  # (its button by the text's last line)
+        self.writing = composerview.Composer(follow_text=True)  # (its button by the text's last line)
         self.composer = self.writing.input
         keys = Gtk.EventControllerKey()
         keys.connect("key-pressed", self._key)
@@ -9681,7 +9702,7 @@ class SideQuestion(CompactMarks, Gtk.ListBoxRow):
         self.foot.add_css_class("meta-foot")
         self.dots = widgets.WorkingDots()
         self.foot.append(self.dots)
-        self.ctx = widgets.ContextUsage(hexpand=True, halign=Gtk.Align.END,  # (the window of the model it's asked on)
+        self.ctx = chatparts.ContextUsage(hexpand=True, halign=Gtk.Align.END,  # (the window of the model it's asked on)
                                         window=lambda: win.shown_window(self.model or getattr(win, "model_shown", None)))
         self.context_soon = None
         self.foot.append(self.ctx)
@@ -9716,7 +9737,8 @@ class SideQuestion(CompactMarks, Gtk.ListBoxRow):
         actions = self.writing.send.get_parent()
         actions.set_margin_end(4 if on else 10)
         actions.set_margin_bottom(4 if on else 10)
-        self.composer.set_top_margin(10 if on else widgets.Composer.FOLLOW_TOP)  # (a line tall: the button beside it)
+        # (a line tall: the button beside it)
+        self.composer.set_top_margin(10 if on else composerview.Composer.FOLLOW_TOP)
 
     def put_inside_row(self):
         """Its thread back under its line (from the whole page), as tall as it is, its box slimmer."""
@@ -9760,14 +9782,14 @@ class SideQuestion(CompactMarks, Gtk.ListBoxRow):
     def _key(self, _c, keyval, _code, state):
         """Ctrl+Enter (⌘Enter) asks; Enter is a new line (a list's next item); Esc stops the answer: as in Meta's
         box."""
-        if widgets.leave_wrapped(self.composer.get_buffer(), keyval, state):
+        if composerview.leave_wrapped(self.composer.get_buffer(), keyval, state):
             return True
-        if widgets.tab_key(self.writing.markdown, keyval, state):
+        if composerview.tab_key(self.writing.markdown, keyval, state):
             return True  # (a list item in or out a level, as on a Record page)
         if keyval in (Gdk.KEY_Return, Gdk.KEY_KP_Enter):
             markdown = self.writing.markdown
-            if not widgets.sends(state):
-                return widgets.newline_key(markdown, state)  # (a list's next item; Shift: a plain line break)
+            if not composerview.sends(state):
+                return composerview.newline_key(markdown, state)  # (a list's next item; Shift: a plain line break)
             self.submit()
             return True
         if keyval == Gdk.KEY_Escape and self.busy:
@@ -10921,13 +10943,13 @@ def paint_command(label, text):
     def done(spans):
         if (lbl := ref()) is not None and getattr(lbl, "command_text", None) == text:
             lbl.command_spans = (text, spans)
-            lbl.set_attributes(widgets.code_attrs(text, spans, Adw.StyleManager.get_default().get_dark())
+            lbl.set_attributes(codespans.code_attrs(text, spans, Adw.StyleManager.get_default().get_dark())
                                if spans else None)
         return False
-    if widgets._pygments_loaded():
-        done(widgets.code_spans(text, lang="bash"))
+    if markdownview._pygments_loaded():
+        done(codespans.code_spans(text, lang="bash"))
     else:
-        IMAGE_POOL.submit(lambda: GLib.idle_add(done, widgets.code_spans(text, lang="bash")))
+        IMAGE_POOL.submit(lambda: GLib.idle_add(done, codespans.code_spans(text, lang="bash")))
 
 
 def unpaint_command(label):
@@ -10948,7 +10970,7 @@ class SidePanel(Gtk.Box):
         self.stack = Adw.ViewStack(vexpand=True)  # without this the pages get 0px of height
         switcher = Adw.ViewSwitcher(stack=self.stack, policy=Adw.ViewSwitcherPolicy.NARROW,
                                     margin_top=6, margin_bottom=6, halign=Gtk.Align.CENTER)
-        self.append(switcher)  # (no rule under it: the frame has none: widgets.CSS)
+        self.append(switcher)  # (no rule under it: the frame has none: theming.CSS)
         self.append(self.stack)
 
         # Meta, Baude's helper: first, its spanner
@@ -10973,7 +10995,7 @@ class SidePanel(Gtk.Box):
 
         # subagents: list -> detail, a subagent's opening out of its row (its title the header, the row the square its
         # chat's in) and closing back into it
-        self.agent_expand = widgets.ExpandStack(vexpand=True)
+        self.agent_expand = panels.ExpandStack(vexpand=True)
         self.agent_stack = self.agent_expand.stack
         self.agent_list = TreeList(line_x=8, selection_mode=Gtk.SelectionMode.NONE)
         self.agent_list.add_css_class("boxed-list")
@@ -11015,8 +11037,8 @@ class SidePanel(Gtk.Box):
         # (and ⌘F / Ctrl+F in the subagent shown, its find bar inside it: its box, the holder's child)
         self.detail_holder = natural_height(Gtk.ScrolledWindow(  # (each subagent's code unsquashed)
             vexpand=True, hscrollbar_policy=Gtk.PolicyType.NEVER))
-        self.agent_find = widgets.ChatFind(lambda: getattr(self.detail_holder.get_child(), "get_child", lambda: None)(),
-                                           self.detail_holder)
+        self.agent_find = chatfind.ChatFind(
+            lambda: getattr(self.detail_holder.get_child(), "get_child", lambda: None)(), self.detail_holder)
         self.detail_inside = widgets.inside(self.agent_find.wrap(), start=False)
         self.detail_inside.set_margin_top(6)
         detail.append(self.detail_inside)
@@ -11026,7 +11048,7 @@ class SidePanel(Gtk.Box):
 
         # background processes: rows as wide and tall as subagents', each opening under its line or filling the
         # page, out of its row, as a side question's does (list -> detail: ExpandStack)
-        self.proc_expand = widgets.ExpandStack(vexpand=True)
+        self.proc_expand = panels.ExpandStack(vexpand=True)
         self.proc_stack = self.proc_expand.stack
         self.proc_list = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE)
         self.proc_list.add_css_class("boxed-list")
@@ -11080,7 +11102,7 @@ class SidePanel(Gtk.Box):
         self.artifact_rows = {}
         # /btw side questions, newest first: rows titled with their questions, each opening under its line or
         # filling the page, out of its row as a subagent's does (list -> detail: ExpandStack)
-        self.btw_expand = widgets.ExpandStack(vexpand=True)
+        self.btw_expand = panels.ExpandStack(vexpand=True)
         self.btw_stack = self.btw_expand.stack
         self.btw_list = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE)
         self.btw_list.add_css_class("boxed-list")
@@ -11089,9 +11111,9 @@ class SidePanel(Gtk.Box):
         btw_page = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         # (over them, a pill of its own: the box a new one's asked in; Enter and its send button off while it's
         # empty)
-        self.btw_ask = widgets.Composer(send_tip=wording.say("side_questions.ask_tip", key=widgets.SEND_KEY),
+        self.btw_ask = composerview.Composer(send_tip=wording.say("side_questions.ask_tip", key=composerview.SEND_KEY),
                                         follow_text=True)
-        self.btw_ask.add_css_class("side-question-ask")  # (Search sessions' fill: widgets.CSS)
+        self.btw_ask.add_css_class("side-question-ask")  # (Search sessions' fill: theming.CSS)
         # (at least as tall as the other pages' empty lists, whatever the theme and text size: over one, unseen, the
         # box filling it; taller as more's typed. Its text fills the box, so a click anywhere in it is in the text)
         self.btw_ask.input.get_parent().set_vexpand(True)
@@ -11195,14 +11217,14 @@ class SidePanel(Gtk.Box):
     def _ask_key(self, _c, keyval, _code, state):
         """Ctrl+Enter (⌘Enter) asks what's typed in the box over the list (nothing, while it's empty); Enter is a
         new line: as in a side question's own box."""
-        if widgets.leave_wrapped(self.btw_ask.input.get_buffer(), keyval, state):
+        if composerview.leave_wrapped(self.btw_ask.input.get_buffer(), keyval, state):
             return True
-        if widgets.tab_key(self.btw_ask.markdown, keyval, state):
+        if composerview.tab_key(self.btw_ask.markdown, keyval, state):
             return True  # (a list item in or out a level, as on a Record page)
         if keyval in (Gdk.KEY_Return, Gdk.KEY_KP_Enter):
             markdown = self.btw_ask.markdown
-            if not widgets.sends(state):
-                return widgets.newline_key(markdown, state)  # (a list's next item; Shift: a plain line break)
+            if not composerview.sends(state):
+                return composerview.newline_key(markdown, state)  # (a list's next item; Shift: a plain line break)
             self.ask_typed()
             return True
         return False
@@ -11517,7 +11539,7 @@ class SidePanel(Gtk.Box):
         for label in [row.title for row in self.proc_rows.values()] + [self.proc_title]:
             text, spans = getattr(label, "command_spans", None) or (None, None)
             if spans and text == getattr(label, "command_text", None):  # (not another's, its own still coming)
-                label.set_attributes(widgets.code_attrs(text, spans, Adw.StyleManager.get_default().get_dark()))
+                label.set_attributes(codespans.code_attrs(text, spans, Adw.StyleManager.get_default().get_dark()))
 
     def open_process(self, row):
         """row's command and output filling the page, opening out of its row (out of them under it, if they're open
@@ -12103,7 +12125,7 @@ class SearchSpace(lookup.SearchSpace):
         return ref_palette_items(self.source)
 
 
-class RefPalette(widgets.RefPalette):
+class RefPalette(pickers.RefPalette):
     """⌘K in Baude: what @ lists (MetaNames): every host's chats, and the names the open chat's folder has, made on its
     host (this machine's Signal's, or fetched from the host it runs on, listed as they come). Opened: palette_open."""
 
@@ -12214,7 +12236,7 @@ def ref_place_items(win, ref, on_open=None):
     return items
 
 
-class SignalPage(widgets.ExpandStack):
+class SignalPage(panels.ExpandStack):
     """The side panel's Signal page: the names this chat's replies mention, by kind, with how far
     each lookup got; a name opens its card (locations, a commit's PRs, ...), sliding in; the reader's row opens its
     chat out of the row, as a subagent's does (ExpandStack)."""
@@ -12548,7 +12570,7 @@ class SignalPage(widgets.ExpandStack):
         for s in list(self.win.ref_surfaces) + sorted(linked - set(self.win.ref_surfaces)):
             r = ref.refs.get(s)
             if r is None or (r.status in ("not_found", "pending") and s not in ref.strong) or r.data.get("plain") or \
-                    widgets.ref_cloud_provider(s):  # (never a link: not a name to list either)
+                    refkinds.ref_cloud_provider(s):  # (never a link: not a name to list either)
                 continue
             if want and want not in s.lower() and want not in r.canonical.lower():
                 continue
@@ -12947,12 +12969,12 @@ class SettingsDialog(Adw.PreferencesDialog):
         page.add(meta.settings_group(win.panel.meta))  # (Record's too, and the same settings)
         group = Adw.PreferencesGroup()
         group.add(self.switch(wording.say("meta_settings.full_width"), None, "win.fullwidth"))
-        group.add(widgets.settings_code_font(win, "Baude"))
-        group.add(widgets.settings_accent())
+        group.add(theming.settings_code_font(win, "Baude"))
+        group.add(theming.settings_accent())
         group.add(self.switch(wording.say("window.show_in", where=LAUNCHER.where),
                               LAUNCHER.paths()[0].replace(os.path.expanduser("~"), "~", 1), "win.launcher"))
         group.add(update.settings_row())  # (Record's too: the one setting)
-        group.add(widgets.notifications_row())  # (Record's too)
+        group.add(theming.notifications_row())  # (Record's too)
         self.version_row = update.version_row()
         group.add(self.version_row)
         page.add(group)
@@ -13017,9 +13039,9 @@ class Repaint(Gtk.Widget):
             snap.append_color(Repaint.TINT, Graphene.Rect().init(0, 0, self.get_width(), self.get_height()))
 
 
-class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.AccentFade):
+class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, theming.AccentFade):
     def do_snapshot(self, snapshot):
-        self.snapshot_fading(snapshot, Adw.ApplicationWindow)  # (widgets.AccentFade: the accent changed, fading)
+        self.snapshot_fading(snapshot, Adw.ApplicationWindow)  # (theming.AccentFade: the accent changed, fading)
 
     def __init__(self, app, opts):
         super().__init__(application=app, title="Baude", default_width=900, default_height=800)
@@ -13083,7 +13105,7 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
         # None = let the CLI decide (settings / account default); shown once it reports back
         self.model = None if opts.model in (None, "default") else opts.model
         self.mode = "auto"  # until you pick another mode
-        self.model_dd = widgets.ModelPicker([], wording.say("common.model"), self.on_model_changed)
+        self.model_dd = pickers.ModelPicker([], wording.say("common.model"), self.on_model_changed)
         # (left of it: where the chat's model runs, each provider that has it by host: sync_providers)
         self.provider_dd = HostPicker(wording.say("chat_header.provider_tip"), self.on_provider_changed, 24)
         self.provider_dd.set_visible(False)
@@ -13095,7 +13117,7 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
                                             tooltip_text="Sessions sidebar (Ctrl+B)")
         header.pack_start(self.sidebar_btn)
         # (the chat's name in the text's own weight: a .heading's bold was the one bold thing up here. .title, a header
-        # bar's title, for a GTK theme's title bar (widgets.theme_css): over libadwaita, still the text's own weight)
+        # bar's title, for a GTK theme's title bar (theming.theme_css): over libadwaita, still the text's own weight)
         self.title_label = Gtk.Label(label=wording.say("sidebar.new_session"), max_width_chars=48,
                                      ellipsize=Pango.EllipsizeMode.END,
                                      css_classes=["title", "baude-title"],
@@ -13168,7 +13190,7 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
         changelog.connect("activate", lambda *_: update.changelog_dialog().present(self))
         self.add_action(changelog)
         mesh = Gio.SimpleAction.new("mesh", None)  # (☰ → Mesh, Record's too)
-        mesh.connect("activate", lambda *_: widgets.mesh_dialog(network()).present(self))
+        mesh.connect("activate", lambda *_: meshui.mesh_dialog(network()).present(self))
         self.add_action(mesh)
         self.feedback_draft = None
         restart = Gio.SimpleAction.new("restart", None)
@@ -13190,9 +13212,9 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
         column.append(self.queue_box)
         over = Gtk.Overlay(child=column)
         self.clamp = Adw.Clamp(child=over)
-        # (at its natural height, its code blocks at most 2/3 of it: widgets.markdown_scroller, Record's Read's too)
-        self.scroller = widgets.markdown_scroller(self.clamp, vexpand=True)
-        self.text_selection = widgets.ChatSelection(self.transcript, self.scroller, over)  # (Record's Read's too)
+        # (at its natural height, its code blocks at most 2/3 of it: panels.markdown_scroller, Record's Read's too)
+        self.scroller = panels.markdown_scroller(self.clamp, vexpand=True)
+        self.text_selection = chatfind.ChatSelection(self.transcript, self.scroller, over)  # (Record's Read's too)
         self.apply_full_width(bool(self.settings.get("full_width")))
         self.follow = livefeed.FollowEnd(self.scroller)  # (the newest in view, once it's read to: on_layout)
         self.restore_scroll = None  # (distance from the bottom, until) after a restart
@@ -13205,7 +13227,7 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
         self.scroller.add_controller(wheel)
         # (its own scrolling and glide, each a step from where the view is: GTK's glide undid the view's moving by a
         # chunk of history drawn above it, mid-glide)
-        self.scroll_glide = widgets.ScrollGlide(self.scroller, lambda: bool(self.history and self.history.more),
+        self.scroll_glide = panels.ScrollGlide(self.scroller, lambda: bool(self.history and self.history.more),
                                                 rested=self.chat_still, moved=self.reader_moved)
         # (the reader's other ways of moving it, as against GTK clamping it, the view held, or the end followed: the
         # scrollbar while it's held, the keys while they're pressed and a moment after, as GTK eases to where they go)
@@ -13223,14 +13245,14 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
         self.fill_held, self.looked_in = None, (None, set())  # (load_history; find_beyond)
         self.fill_sweeping, self.above_changed, self.place_at = False, False, None
 
-        # composer (widgets.Composer: Record's too)
+        # composer (composerview.Composer: Record's too)
         self.attach_btn = Gtk.Button(icon_name="list-add-symbolic",
                                      tooltip_text=wording.say("attachments.attach_tip"))
         self.attach_btn.add_css_class("flat")
         self.attach_btn.connect("clicked", self.on_pick_attachments)
         box_overlay = self.composer_box = Composer(
             buttons=[self.attach_btn],
-            send_tip=f"Send ({widgets.SEND_KEY})\nNew line: Enter\n"
+            send_tip=f"Send ({composerview.SEND_KEY})\nNew line: Enter\n"
                      "@: a chat, a file, a pull request…")
         self.input, self.composer_md, self.send_btn = box_overlay.input, box_overlay.markdown, box_overlay.send
         self.input.get_buffer().connect("changed", lambda *_: self.draft_changed())
@@ -13257,7 +13279,7 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
         self.set_send_button(busy=False)
 
         self.status = Gtk.Label(xalign=0, ellipsize=Pango.EllipsizeMode.END, hexpand=True)
-        ctx = self.ctx_box = widgets.ContextUsage(window=self.shown_window)  # (Meta's too)
+        ctx = self.ctx_box = chatparts.ContextUsage(window=self.shown_window)  # (Meta's too)
         self.ctx_label, self.ctx_bar = ctx.label, ctx.bar
         statusbar = Gtk.Box(spacing=12)
         statusbar.add_css_class("statusbar")
@@ -13286,10 +13308,10 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
         press.connect("pressed", lambda *_: self.chat_still())
         root.add_controller(press)
         self.chat_fade = Fade(root)  # it fades lighter while the chat is swapped (switch_to)
-        # the main area's tabs (widgets.MainTabs, Record's too): the chat, pinned first, and code clicked in it, each
+        # the main area's tabs (panels.MainTabs, Record's too): the chat, pinned first, and code clicked in it, each
         # file a tab of its own (show_code); the tabs' bar only while there's code open
         # (⌥⌘← ⌥⌘→: back and forward through them)
-        self.tabs = widgets.MainTabs(shown_alone=False, reopen=self.reopen_tab, closed=BaudeWindow.tab_closed)
+        self.tabs = panels.MainTabs(shown_alone=False, reopen=self.reopen_tab, closed=BaudeWindow.tab_closed)
         self.tabs.prepend(self.tabs.bar)
         self.tabs.open("chat", lambda: root, wording.say("chats.chat"), icon="baude-claude-symbolic",
                        pinned=True)  # (Claude's logo)
@@ -13299,7 +13321,7 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
         self.banner.connect("button-clicked", lambda *_: self.new_chat_on_host() if self.banner_kind == "missing" else
                             self.act_host_apart() if self.banner_kind == "apart" else None)
         root.append(self.banner)
-        self.chat_find = widgets.ChatFind(self.transcript, self.scroller, pane=root)  # (⌘F / Ctrl+F: find_in_chat)
+        self.chat_find = chatfind.ChatFind(self.transcript, self.scroller, pane=root)  # (⌘F / Ctrl+F: find_in_chat)
         self.chat_find.undrawn, self.chat_find.beyond = self.find_undrawn, self.find_beyond
         self.chat_find.drawn = lambda: None if self.history is None else (
             self.history.shown, sum(len(job.items) + len(job.hidden) for job in self.fill_jobs))
@@ -13307,7 +13329,7 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
         root.append(composer)
         # (more said than the model's window holds: said over the box, its send button off, till a bigger model or a
         # new chat)
-        self.exhausted = widgets.Exhausted(self.scroller, box_overlay)
+        self.exhausted = chatparts.Exhausted(self.scroller, box_overlay)
         self.drop_running = self.drop_session = None  # (a host's connection dropped: whether its claude was running
         # then, and the chat: drop)
         self.drop_timer = self.resume_reason = None  # (resume_reason: (chat, why) the next message resumes it)
@@ -13333,7 +13355,7 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
         # "panel_width"); only a drag of the rule sets it, not the window resizing nor Baude placing it
         self.panel_width, self.split_save = self.settings.get("panel_width"), None
         self.split.connect("notify::position", lambda *_: self.split_dragged())
-        self.panel_slide = widgets.PaneSlide(self.split, self.panel, [self.panel_btn])
+        self.panel_slide = panels.PaneSlide(self.split, self.panel, [self.panel_btn])
         self.panel_slide.closed_by_drag = self.panel_closed_by_drag
         self.panel.connect("notify::visible", lambda *_: self.panel.get_visible() and self.place_split())
         self.sidebar = SessionSidebar(self)
@@ -13354,10 +13376,10 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
         self.outer.add_css_class("inside-after")
         # the binding copies the button's state on creation, so set the button first
         self.sidebar.set_visible(self.settings.get("sidebar", True))
-        self.sidebar_slide = widgets.PaneSlide(self.outer, self.sidebar, [self.sidebar_btn], end=False)
+        self.sidebar_slide = panels.PaneSlide(self.outer, self.sidebar, [self.sidebar_btn], end=False)
         self.sidebar.connect("notify::visible", lambda *_: save_settings(sidebar=self.sidebar.get_visible()))
         tv = Adw.ToolbarView()
-        tv.add_css_class("baude-frame")  # (the bar, the sessions, the panel: widgets.CSS)
+        tv.add_css_class("baude-frame")  # (the bar, the sessions, the panel: theming.CSS)
         tv.add_top_bar(header)
         tv.set_content(self.outer)
         self.header_bar = header
@@ -13366,7 +13388,7 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
         self.zoom_toast = None
         self.zoom_timer = self.zoom_job = None
         self.zoom_wheel = 0.0  # Ctrl+scroll that hasn't added up to a step yet
-        self.lightbox = widgets.Lightbox(self)
+        self.lightbox = lightbox.Lightbox(self)
         self.schema = SchemaView(self)
         self.kube = KubeView(self)
         host = Gtk.Overlay(child=self.toasts)
@@ -13425,8 +13447,8 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
         self.add_controller(drop)
         self.apply_zoom()
         apply_scales(self.get_display())
-        widgets.apply_accent(self.get_display())  # (Settings → Accent Colour)
-        widgets.watch_settings(BaudeWindow.settings_changed)  # (and each as it's changed in Record, or another Baude)
+        theming.apply_accent(self.get_display())  # (Settings → Accent Colour)
+        theming.watch_settings(BaudeWindow.settings_changed)  # (and each as it's changed in Record, or another Baude)
         self.connect("close-request", lambda *_: (self.proc and self.proc.kill(),
                                                   [self.let_go_background(p) for p in list(self.background.values())],
                                                   [sq.close() for sq in self.panel.side_questions()],
@@ -13447,13 +13469,13 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
         self.connect("notify::is-active", lambda *_: self.is_active() and self.links_on_focus())
         self.connect("notify::is-active", lambda *_: self.is_active() and self.seen_chat())
         self.tabs.view.connect("notify::selected-page", lambda *_: self.seen_chat())
-        widgets.watch_github(self, BaudeWindow.github_folders, BaudeWindow._github_changed)
+        meshui.watch_github(self, BaudeWindow.github_folders, BaudeWindow._github_changed)
         self.signal_run_handler = self.signal_run.connect("notify::active", lambda sw, _p: self.set_signal(on=sw.get_active()))
         self.signal_show_handler = self.signal_show.connect("notify::active",
                                                             lambda sw, _p: self.set_signal(links=sw.get_active()))
 
         update.watch_input(self)  # (what quiet reads: a new version waits while you're at it)
-        widgets.warm_shaders(self)  # (the first window's: after its first frame)
+        theming.warm_shaders(self)  # (the first window's: after its first frame)
         restore = take_restart_state(getattr(opts, "restore", None))
         if restore:
             self.session_id = restore.get("session_id") or self.session_id
@@ -13515,7 +13537,7 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
             "fixes": fixes_page.state() if fixes_page else None, "fixes_shown": self.tabs.current() is fixes_page,
             "model": self.model, "mode": self.mode, "cost": self.total_cost,
             "size": [self.get_width(), self.get_height()], "maximized": self.is_maximized(),
-            "frame": widgets.window_frame(self),  # (macOS: the display it's on, where; put back by put_back)
+            "frame": window_frame(self),  # (macOS: the display it's on, where; put back by put_back)
             "panel": self.panel.get_visible(),
             "places": self.PLACES,  # (where the other chats were left: open_at)
         }
@@ -13529,7 +13551,7 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
             self.keep_draft(self.draft_key())                   # kept for it, this window's own put back below)
         if state.get("size") and not state.get("maximized"):
             self.set_default_size(*state["size"])
-        widgets.put_back(self, state.get("frame"), state.get("maximized"))  # (where it was, on macOS)
+        theming.put_back(self, state.get("frame"), state.get("maximized"))  # (where it was, on macOS)
         if state.get("panel"):
             self.show_panel(True)
         if state.get("draft"):
@@ -14317,7 +14339,7 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
 
     @staticmethod
     def settings_changed(keys, _before):
-        """Shared settings changed in another app here (widgets.watch_settings): the text's and the icons' sizes, and
+        """Shared settings changed in another app here (theming.watch_settings): the text's and the icons' sizes, and
         the Global Scale, in every window. (The accent's taken already; Meta's are meta.settings_changed's.)"""
         display = Gdk.Display.get_default()
         if keys & {"text_scale", "icon_scale"}:
@@ -15190,22 +15212,22 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
     def on_key(self, _ctl, keyval, _code, state):
         if self.completer.handle_key(keyval, state) or self.refs.handle_key(keyval, state):
             return True
-        if widgets.leave_wrapped(self.input.get_buffer(), keyval, state):
+        if composerview.leave_wrapped(self.input.get_buffer(), keyval, state):
             return True  # (just formatted, and Left or Right: outside its marks)
-        if widgets.tab_key(self.composer_md, keyval, state):
+        if composerview.tab_key(self.composer_md, keyval, state):
             return True  # (a list item in or out a level, as on a Record page)
         if keyval in (Gdk.KEY_Up, Gdk.KEY_Down) and state & Gdk.ModifierType.ALT_MASK and \
                 not state & (Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.META_MASK | Gdk.ModifierType.SHIFT_MASK):
             return self.composer_md.move_item(-1 if keyval == Gdk.KEY_Up else 1)  # (a list item, past its neighbour)
         if not state & (Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.META_MASK) and \
-                widgets.wrap_selection(self.input.get_buffer(), chr(Gdk.keyval_to_unicode(keyval) or 0)):
+                composerview.wrap_selection(self.input.get_buffer(), chr(Gdk.keyval_to_unicode(keyval) or 0)):
             return True  # (a selection, and * ` or /: bold, code, italic)
         if keyval in (Gdk.KEY_v, Gdk.KEY_V) and state & Gdk.ModifierType.CONTROL_MASK and sys.platform == "darwin":
             self.input.emit("paste-clipboard")  # (GTK binds only ⌘V on a Mac: Ctrl+V pastes there as well)
             return True
         if keyval in (Gdk.KEY_Return, Gdk.KEY_KP_Enter):
-            if not widgets.sends(state):  # (Enter: a new line, a list's next item; Ctrl/⌘+Enter sends)
-                return widgets.newline_key(self.composer_md, state)  # False: the TextView inserts a plain newline
+            if not composerview.sends(state):  # (Enter: a new line, a list's next item; Ctrl/⌘+Enter sends)
+                return composerview.newline_key(self.composer_md, state)  # False: the TextView inserts a plain newline
             self.on_send()
             return True
         if keyval == Gdk.KEY_Escape and self.reverting is not None:
@@ -16977,8 +16999,8 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
                 self.queue_refs(view.text)
             if self.history and not self.history.todo:  # the replies further up, not drawn yet (or, while the start of
                 self.queue_history_refs(self.history.earlier_replies())  # a long chat's indexed, once it is)
-        elif widgets.SIGNAL is old:
-            widgets.SIGNAL = None
+        elif markdownview.SIGNAL is old:
+            markdownview.SIGNAL = None
         if old is not None and was_on and (old is not self.signal or not on) and old.runners:
             old.steer((runner := next(iter(old.runners))).ref_transcript(), runner)  # (another window's chat runs it: its reader reads that)
         for view in self.assistant_views():
@@ -17038,16 +17060,16 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
 
     def links_on_focus(self):
         """This window became the active one: its own links are drawn (another window's chat may show none)."""
-        before = widgets.SIGNAL
+        before = markdownview.SIGNAL
         self.use_links()
-        if widgets.SIGNAL is not before:
+        if markdownview.SIGNAL is not before:
             for view in self.assistant_views():
                 view.relink()
 
     def use_links(self):
-        """Point widgets.SIGNAL (what _inline links names with) at this window's Signal if its chat shows links, else at
-        none: before this window's replies are drawn, and when it becomes the active window."""
-        widgets.SIGNAL = self.signal if self.signal is not None and self.signal_show.get_active() else None
+        """Point markdownview.SIGNAL (what _inline links names with) at this window's Signal if its chat shows links,
+        else at none: before this window's replies are drawn, and when it becomes the active window."""
+        markdownview.SIGNAL = self.signal if self.signal is not None and self.signal_show.get_active() else None
 
     def destroy(self):
         self.drop_signal()  # (destroyed without being closed: its Signal is let go too)
@@ -17103,8 +17125,8 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
             ref.links_only()  # (another window shows its links; none runs it now)
         elif ran and ref.runners:
             ref.steer((runner := next(iter(ref.runners))).ref_transcript(), runner)  # (its reader reads the chat that runs it now)
-        if widgets.SIGNAL is ref:
-            widgets.SIGNAL = None
+        if markdownview.SIGNAL is ref:
+            markdownview.SIGNAL = None
 
     def git_chat(self):
         """The chat the Git page keeps its state for (GitPage.chat_check): its session."""
@@ -17267,7 +17289,7 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
         ref = self.signal
         running = ref is not None and not ref.halted and self in ref.runners  # (this chat's: another may run it)
         busy = running and ref_busy(ref)
-        shown = ref is not None and widgets.SIGNAL is ref
+        shown = ref is not None and markdownview.SIGNAL is ref
         for css, on in (("ref-working", busy), ("ref-on", running), ("ref-links", shown and not running)):
             (self.signal_btn.add_css_class if on else self.signal_btn.remove_css_class)(css)
         if (icon := next((w for w in walk(self.signal_btn) if isinstance(w, Gtk.Image)), None)) is not None:
@@ -17300,7 +17322,7 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
         if self.signal is None:
             return
         self.use_links()  # (this window's replies are drawn with this window's links)
-        for view in self.assistant_views() if widgets.SIGNAL is self.signal else ():  # (links hidden: nothing to redraw)
+        for view in self.assistant_views() if markdownview.SIGNAL is self.signal else ():  # (links hidden: nothing to redraw)
             if any(s in view.text for s in surfaces):
                 view.relink()
         self.panel.signal_page.changed()
@@ -17524,9 +17546,9 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
         return current if current in pages else pages[-1] if pages else None
 
     def find_in_chat(self):
-        """⌘F / Ctrl+F: find in the chat the focus is in (Meta's, a side question's, a subagent's: widgets.ChatFind),
+        """⌘F / Ctrl+F: find in the chat the focus is in (Meta's, a side question's, a subagent's: chatfind.ChatFind),
         else in the code tab shown, else in the main chat."""
-        find = widgets.ChatFind.for_focus(self)
+        find = chatfind.ChatFind.for_focus(self)
         if find is not None:
             return find.open()
         if self.find_in_code():
@@ -17662,10 +17684,10 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
     @staticmethod
     def _github_changed(win):
         """GitHub's lists, or where its pull requests stand (lookupgit.PULLS), have changed: the replies naming one
-        drawn again (their pills: widgets.pr_pill), the Git page's list and pills too."""
+        drawn again (their pills: markdownview.pr_pill), the Git page's list and pills too."""
         if win.signal is not None:
             win.signal.github_changed()
-        was = widgets.SIGNAL, MarkdownView.base_dir  # (drawn with this window's links, as it would itself: then
+        was = markdownview.SIGNAL, MarkdownView.base_dir  # (drawn with this window's links, as it would itself: then
         win.use_links()                                # the window that was being drawn's again)
         MarkdownView.base_dir = win.run_cwd
         try:
@@ -17673,7 +17695,7 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
                 if "/pull/" in view.text or re.search(r"#\d", view.text):
                     view.relink()
         finally:
-            widgets.SIGNAL, MarkdownView.base_dir = was
+            markdownview.SIGNAL, MarkdownView.base_dir = was
         win.panel.git_page.pulls_changed()
 
     def catalogue_signal(self):
@@ -18259,7 +18281,7 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
         if self.looked_in[0] != (history, needle):
             self.looked_in = ((history, needle), set())
         looked, places = self.looked_in[1], []
-        content = widgets.ChatFind._content(self.scroller)  # (heights as find has them: in what's scrolled)
+        content = chatfind.ChatFind._content(self.scroller)  # (heights as find has them: in what's scrolled)
         for slot in list(self.chunk_slots or ()) + [job.slot for job in self.fill_jobs]:
             ok, b = slot.compute_bounds(content)
             if ok and slot not in looked:
@@ -18482,7 +18504,7 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
         where = target = self.render_target or self.transcript
         while where is not None:
             child = where.get_last_child()
-            while child is not None and not isinstance(child, widgets.CompactMark):
+            while child is not None and not isinstance(child, chatparts.CompactMark):
                 child = child.get_prev_sibling()
             if child is not None:
                 return child if child.fold is None and child.state == "done" else None
@@ -18513,7 +18535,7 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
                 else:
                     node = where.get_first_child()
                 continue
-            if isinstance(node, widgets.CompactMark):
+            if isinstance(node, chatparts.CompactMark):
                 return
             if getattr(node, "compact_summary", None) is not None:
                 mark.set_summary(node.compact_summary)
@@ -18554,7 +18576,7 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
                     self.compact_mark.state == "running" and self.compact_here(self.compact_mark):
                 self.compact_mark.finish(content)  # (drawn going on: one kept through a dropped connection, finished)
             elif kind == "compact_boundary":  # (where claude compacted it, as it did live: on_compaction)
-                self.adopt_summary(self.add(widgets.CompactMark(content)))
+                self.adopt_summary(self.add(chatparts.CompactMark(content)))
             elif kind == "compact_summary" and (mark := self.last_compact_mark()) is not None:
                 mark.set_summary(content)  # (what it wrote for itself on compacting: folded under its marker)
             elif kind == "compact_summary":  # (its boundary not drawn yet, or none: on its own till it is, adopt_summary)
@@ -18590,7 +18612,7 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
                     row = Gtk.Box(spacing=6)
                     for a in atts:
                         row.append(attachment_widget(a, 96))
-                    self.add(widgets.start_prompt_view(text, row if atts else None))
+                    self.add(composerview.start_prompt_view(text, row if atts else None))
                 else:
                     turn = UserTurn(self, self.user_bubble(text, atts), text, said)
                     turn.atts = atts  # (drawn again as another's if its host's sender store says so: senders_came)
@@ -19001,7 +19023,7 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
             host_apart(app).look(local_host())
 
     def host_apart_said(self):
-        """(apart, title, button label) for the banner, or None (widgets.HostApart.now)."""
+        """(apart, title, button label) for the banner, or None (meshui.HostApart.now)."""
         app = self.get_application()
         if app is None or not _HOST_APART:
             return None
@@ -19687,8 +19709,8 @@ class BaudeApp(Adw.Application):
         ensure_icons()
         pointers.start()
         install_debug_hooks(self)
-        widgets.press_opens_dropdowns()  # (a dropdown's list open as the mouse goes down on it)
-        widgets.theme_css()  # (whose stylesheet Baude's look is drawn over: libadwaita's, or a GTK_THEME's)
+        pickers.press_opens_dropdowns()  # (a dropdown's list open as the mouse goes down on it)
+        theming.theme_css()  # (whose stylesheet Baude's look is drawn over: libadwaita's, or a GTK_THEME's)
 
     def do_activate(self):
         trace("activate")
@@ -19717,7 +19739,7 @@ class BaudeApp(Adw.Application):
                 win.connect("realize", lambda w: clock_id.append(
                     w.get_frame_clock().connect("after-paint", painted)))
             update.show(win, restore)  # (in the order they were in: the last one you were in, last, on top)
-        widgets.flat_popovers(Gdk.Display.get_default())  # (X11 under picom: its shadow is round the whole popover)
+        theming.flat_popovers(Gdk.Display.get_default())  # (X11 under picom: its shadow is round the whole popover)
         if restore:
             update.restarted(win, restore, "Baude")
         if self.updater is None and not TRACE:

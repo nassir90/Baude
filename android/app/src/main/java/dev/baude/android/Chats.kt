@@ -56,7 +56,7 @@ fun taskNote(t: String): JSONObject = JSONObject().put("task_id", taskTag(t, "ta
     .put("summary", taskTag(t, "summary").orEmpty().ifBlank { Wording.TranscriptNotes.taskFinished })
     .put("result", taskTag(t, "result").orEmpty()).put("output_file", taskTag(t, "output-file").orEmpty())
 
-/** What a background task's end line says (widgets.task_note_line): what it was, which one, how it ended; failed:
+/** What a background task's end line says (chatparts.task_note_line): what it was, which one, how it ended; failed:
  * it went wrong. */
 class TaskSaid(val what: String, val desc: String, val ending: String, val failed: Boolean) {
     override fun toString() = "$what · $desc — $ending"

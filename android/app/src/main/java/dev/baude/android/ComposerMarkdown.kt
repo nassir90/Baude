@@ -24,8 +24,8 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.TextUnit
 
-// The box a message is written in: its markdown shown as it's written (widgets.ComposerMarkdown). Bullets are kept as
-// "•" while editing and turned back into "-" by toMarkdown as the message is sent.
+// The box a message is written in: its markdown shown as it's written (composerview.ComposerMarkdown). Bullets are kept
+// as "•" while editing and turned back into "-" by toMarkdown as the message is sent.
 
 const val BULLET = '•'
 const val SUB_BULLET = '◦'
@@ -50,9 +50,9 @@ private fun width(s: String): Int {
 // ---------------------------------------------------------------------------------------------------- fences --
 
 /** Where the code blocks are in text being written, of its lines: (first line, last line, closed), in order
- * (widgets.fence_spans). A fence that a later bare one closes goes to it. One nothing closes has only the lines right
- * after it, up to a blank one. With an odd number, one's left over: one on a line being typed on if there is, else the
- * one that leaves the fewest lines in code. */
+ * (markdownview.fence_spans). A fence that a later bare one closes goes to it. One nothing closes has only the lines
+ * right after it, up to a blank one. With an odd number, one's left over: one on a line being typed on if there is,
+ * else the one that leaves the fewest lines in code. */
 fun fenceSpans(lines: List<String>, tildes: Boolean = true, typing: Set<Int> = emptySet()): List<Triple<Int, Int, Boolean>> {
     val fences = ArrayList<Pair<Int, Boolean>>() // (line, bare)
     for ((n, line) in lines.withIndex()) {
@@ -205,7 +205,7 @@ fun makeBullets(v: TextFieldValue): TextFieldValue {
 
 /** A selection, and *, ` or / typed: what's selected made bold, code or italic, as markdown has them, each of its
  * lines on its own (a list's marker, a box, a heading's #s left out), and still selected so another can go round it
- * too; marked so already: taken off (widgets.wrap_selection). Null: nothing to do. */
+ * too; marked so already: taken off (composerview.wrap_selection). Null: nothing to do. */
 private fun wrapSelection(old: TextFieldValue, ch: Char, st: ComposerState): TextFieldValue? {
     val mark = WRAP_MARKS[ch] ?: return null
     val full = old.text
@@ -315,7 +315,7 @@ private fun indent(v: TextFieldValue, step: Int): TextFieldValue? {
 }
 
 /** The list item the line at is in, with all under it, swapped with its sibling above (by -1) or below (1): the nearest
- * item that way at its level (widgets.swap_list_item). (the new lines, the first and past the last line replaced,
+ * item that way at its level (composerview.swap_list_item). (the new lines, the first and past the last line replaced,
  * where the line at is now), or null. */
 fun swapListItem(lines: List<String>, at: Int, by: Int): Triple<List<String>, Pair<Int, Int>, Int>? {
     val fenced = lines.take(at + 1).count { Regex("^\\s*(```|~~~)").containsMatchIn(it) } % 2 == 1

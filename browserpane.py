@@ -673,7 +673,7 @@ class Presence(Gtk.Widget):
         snapshot.append_texture(GLOW_TEXTURES[key], Graphene.Rect().init(x, y, w, h))
 
     def accent_changed(self):
-        """(widgets.apply_accent's) Drawn again in the new accent, hosted too."""
+        """(theming.apply_accent's) Drawn again in the new accent, hosted too."""
         self.pane.presence_check()
         self.queue_draw()
 
@@ -909,7 +909,7 @@ class BrowserPane(Gtk.Box):
         content.append(widgets.inside(over, under_bar=True))  # (set into the frame, as the other apps' windows are)
         content.append(self.said)
         frame = Adw.ToolbarView(content=content, vexpand=True)
-        frame.add_css_class("baude-frame")  # (the bars on the frame: widgets.CSS)
+        frame.add_css_class("baude-frame")  # (the bars on the frame: theming.CSS)
         frame.add_top_bar(chrome.bar)
         frame.add_top_bar(chrome.strip)
         self.append(frame)

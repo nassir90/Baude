@@ -10,11 +10,11 @@
   "code": [
     "baude.py:SettingsDialog",
     "baude.py:BaudeWindow.open_settings",
-    "widgets.py:settings_code_font",
-    "widgets.py:settings_accent",
-    "widgets.py:settings_switch",
-    "widgets.py:settings_size",
-    "widgets.py:notifications_row",
+    "theming.py:settings_code_font",
+    "theming.py:settings_accent",
+    "theming.py:settings_switch",
+    "theming.py:settings_size",
+    "theming.py:notifications_row",
     "update.py:settings_row",
     "update.py:version_row"
   ],

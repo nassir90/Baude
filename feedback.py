@@ -20,10 +20,11 @@ from gi.repository import Adw, Gdk, Gio, GLib, Graphene, Gsk, Gtk, Pango  # noqa
 from baudelib import wording  # noqa: E402
 from fixes import gh, gh_path, code_repo, known_submit_issue_target, submit_issue_target  # noqa: E402,F401
 import pointers  # noqa: E402
-from widgets import (  # noqa: E402,F401
-    FEEDBACK_KEY, ZOOM_MODS, FixedPicture, ShutBar, _data_home, discard, fit_size, no_text_drag, scaled_texture,
-    screen_scale, walk,
-)
+from widgets import FEEDBACK_KEY, ZOOM_MODS, discard, fit_size, scaled_texture, screen_scale, walk  # noqa: E402,F401
+from imageviews import FixedPicture  # noqa: E402,F401
+from chatparts import ShutBar  # noqa: E402,F401
+from composerview import no_text_drag  # noqa: E402,F401
+from pickers import _data_home  # noqa: E402,F401
 
 
 # ----------------------------------------------------------------- window --
@@ -754,7 +755,7 @@ class FeedbackDraft:
 
 
 class FeedbackDialog(Adw.Dialog):
-    """Menu → Send Feedback… (⌘. / Ctrl+.): the note, in a box as the chat's is (widgets.Composer), and screen captures (its
+    """Menu → Send Feedback… (⌘. / Ctrl+.): the note, in a box as the chat's is (composerview.Composer), and screen captures (its
     +: Baude hides this, you go to what you want to show, and press Capture in the bar at the bottom; or, over a dialog or a
     view that the bar's under, it captures that at once). A capture goes on to its regions (RegionEditor), then back here,
     its thumbnail over the box as an attachment is over the chat's."""

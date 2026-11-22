@@ -31,7 +31,7 @@ import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 
-/** Find in a chat (widgets.FindBar): its bar over the transcript, shown by a chat's ⋮ menu; its matches shaded. */
+/** Find in a chat (chatparts.FindBar): its bar over the transcript, shown by a chat's ⋮ menu; its matches shaded. */
 object Find {
     val open = mutableStateMapOf<String, Boolean>()
     val query = mutableStateMapOf<String, String>()

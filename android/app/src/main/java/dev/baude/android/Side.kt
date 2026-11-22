@@ -100,7 +100,7 @@ fun AgentStatus(status: String) {
     }
 }
 
-/** A count of tokens as widgets.fmt_tokens says it: 950, 12.3k, 1M. */
+/** A count of tokens as chatparts.fmt_tokens says it: 950, 12.3k, 1M. */
 fun fmtTokens(n: Int): String {
     fun one(x: Double) = String.format(java.util.Locale.ROOT, "%.1f", x).removeSuffix(".0")
     return if (n >= 1_000_000) Wording.Tokens.millions(n = one(n / 1_000_000.0))

@@ -22,13 +22,14 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import org.json.JSONObject
 
-/** Which compaction marks have their summary opened, by the mark's uuid (widgets.CompactMark's fold). */
+/** Which compaction marks have their summary opened, by the mark's uuid (chatparts.CompactMark's fold). */
 object CompactFolds {
     val open = mutableStateMapOf<String, Boolean>()
 }
 
 /** The compaction marks in a chat's lines: a "compact" line's JSON is {meta, summary?} once its transcript says it, or
- * {live: true, state: running | done | failed | unfinished, ...} while claude's stream does (widgets.compact_said). */
+ * {live: true, state: running | done | failed | unfinished, ...} while claude's stream does
+ * (chatparts.compact_said). */
 object CompactMarks {
     private fun live(line: Line): Boolean = line.kind == "compact" && try {
         JSONObject(line.text).optBoolean("live")
@@ -100,7 +101,7 @@ object CompactMarks {
     }
 }
 
-/** Where claude compacted the conversation (widgets.CompactMark): a quiet line between two rules, what it did said in
+/** Where claude compacted the conversation (chatparts.CompactMark): a quiet line between two rules, what it did said in
  * it (or that it's running, failed or didn't finish), and the summary it wrote folded under it. */
 @Composable
 fun CompactMark(line: Line) {

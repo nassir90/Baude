@@ -117,17 +117,31 @@ import macos  # noqa: E402
 import schemaview  # noqa: E402
 import update  # noqa: E402
 import widgets  # noqa: E402
+import refkinds  # noqa: E402
+import codespans  # noqa: E402
+import imageviews  # noqa: E402
+import markdownview  # noqa: E402
+import chatparts  # noqa: E402
+import composerview  # noqa: E402
+import panels  # noqa: E402
+import lightbox  # noqa: E402
+import chatfind  # noqa: E402
+import pickers  # noqa: E402
+import theming  # noqa: E402
+import meshui  # noqa: E402
 from baude import Adw, Gdk, GdkPixbuf, Gio, GLib, Gtk, Pango  # noqa: E402
 
-_MOVED = (widgets, codeview, kubeview, schemaview, gitview, feedback,  # (what was in baude.py: the viewers, what they
-          baudelib.claude, baudelib.transcripts, baudelib.models)        # share, and Claude Code's process and transcripts)
+_MOVED = (widgets, refkinds, codespans, imageviews, markdownview, chatparts, composerview, panels, lightbox, chatfind,
+          pickers, theming, meshui,  # (widgets, and what it was split into)
+          codeview, kubeview, schemaview, gitview, feedback,  # (what was in baude.py: the viewers, what they
+          baudelib.claude, baudelib.transcripts, baudelib.models)  # share, and Claude Code's process and transcripts)
 
 
 class _Baude:
     """baude, as the tests use it: a name a test replaces is replaced wherever it's held: in baude, in lookup,
     lookupkube and lookupgit (⌘K's engine, whose own functions call it), and in the modules code moved to out of
     baude.py (widgets and the viewers'), whose code saw baude's when it was there. A name baude doesn't hold is read
-    from those (SIGNAL is widgets')."""
+    from those (SIGNAL is markdownview's)."""
 
     def __getattr__(self, name):
         for m in (_baude, *_MOVED, lookup, lookupkube, lookupgit):
@@ -141,8 +155,8 @@ class _Baude:
 
 
 baude = _Baude()
-widgets.SLIDE_MS = 0  # (a side bar opens and closes at once here: test_side_bars_slide has it slide)
-widgets.Lightbox.FLY_MS = 0  # (the large view opens and closes at once here: test_lightbox_flies has it fly)
+panels.SLIDE_MS = 0  # (a side bar opens and closes at once here: test_side_bars_slide has it slide)
+lightbox.Lightbox.FLY_MS = 0  # (the large view opens and closes at once here: test_lightbox_flies has it fly)
 
 if sys.platform == "darwin":  # never touch the real launcher, nor register a test one with LaunchServices
     baude.LAUNCHER = baude.MacLauncher(os.path.join(TMP, "Applications"))
@@ -2106,7 +2120,7 @@ def test_pointers_everywhere(app):
         pump(0.2)
         png = Gdk.MemoryTexture.new(120, 80, Gdk.MemoryFormat.R8G8B8A8, GLib.Bytes.new(bytes(120 * 80 * 4)), 480) \
             .save_to_png_bytes().get_data()
-        image = widgets.image_widget(png, name="x.png")
+        image = imageviews.image_widget(png, name="x.png")
         win.transcript.append(image)
         plain = Gtk.Label(xalign=0)
         plain.set_markup('Plain <a href="line:1">a crumb</a> beside')
@@ -2164,7 +2178,7 @@ def test_pointers_popover():
     small = Gtk.Window(default_width=300, default_height=30)
     opener = Gtk.Button(label="Opens a popover")
     small.set_child(opener)
-    inner = widgets.sel_label('In it <a href="https://example.com/in">the link</a> here')
+    inner = markdownview.sel_label('In it <a href="https://example.com/in">the link</a> here')
     body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
     body.append(Gtk.Entry())  # (has the focus, as a label would, which selects all of itself: no links then)
     body.append(inner)
@@ -2264,10 +2278,10 @@ def test_lightbox_flies(app):
         win = app.window()
     finally:
         app.next_size = None
-    saved, widgets.Lightbox.FLY_MS = widgets.Lightbox.FLY_MS, 240
+    saved, lightbox.Lightbox.FLY_MS = lightbox.Lightbox.FLY_MS, 240
     settings = Gtk.Settings.get_default()
-    texture, decoded = widgets.ImageActions.texture, []
-    widgets.ImageActions.texture = lambda self: (decoded.append(self), texture(self))[1]
+    texture, decoded = imageviews.ImageActions.texture, []
+    imageviews.ImageActions.texture = lambda self: (decoded.append(self), texture(self))[1]
     box, pic, none = win.lightbox, win.lightbox.picture, Gdk.ModifierType(0)
 
     def at(widget):
@@ -2498,7 +2512,7 @@ def test_lightbox_flies(app):
         if mouse.available():
             adj.set_value(0)
             pump(0.3)
-            hand, widgets.Lightbox.FLY_MS = mouse.Mouse(win), 1000  # (long enough for its clicks to land part way)
+            hand, lightbox.Lightbox.FLY_MS = mouse.Mouse(win), 1000  # (long enough for its clicks to land part way)
             first, second = at(pics[0]), at(pics[1])
             hand.down(first[0] + 240, first[1] + 135)
             hand.up(first[0] + 240, first[1] + 135)
@@ -2517,7 +2531,7 @@ def test_lightbox_flies(app):
             assert box.closing and box.get_visible()
             wait_for(lambda: box.flying is None, "it closed")
             settled(False)
-            widgets.Lightbox.FLY_MS = 240
+            lightbox.Lightbox.FLY_MS = 240
 
         # going, the chat scrolled under it: back to where the image is now; the keys aren't its by then
         box.close()
@@ -2544,8 +2558,8 @@ def test_lightbox_flies(app):
         settled(False)
     finally:
         settings.set_property("gtk-enable-animations", True)
-        widgets.ImageActions.texture = texture
-        widgets.Lightbox.FLY_MS = saved
+        imageviews.ImageActions.texture = texture
+        lightbox.Lightbox.FLY_MS = saved
         close(win)
 
 
@@ -5716,7 +5730,7 @@ def test_refresh_turns(app):
     nothing ticking while it's hidden, and shown again it's right; closed as it turns, freed."""
     import math
     import threading
-    Turning, top, step = widgets.Turning, widgets.Turning.SPEED, 1 / 240
+    Turning, top, step = imageviews.Turning, imageviews.Turning.SPEED, 1 / 240
     sharpest = 1.5 * top / Turning.UP_S  # (the most its speed changes by in a second: a smoothstep's steepest)
 
     def played(*events, until):
@@ -5811,7 +5825,7 @@ def test_refresh_turns(app):
         win.activate_action("win.fixes")
         page = win.tabs.get(("fixes",))
         button = page.refresh_btn
-        assert isinstance(button, widgets.RefreshButton)
+        assert isinstance(button, imageviews.RefreshButton)
         wait_for(lambda: reads, "the first read")
         wait_for(lambda: button.get_mapped() and button.tick is not None, "it's there, turning, from the first")
         button.set_visible(False)
@@ -5886,7 +5900,7 @@ def test_refresh_turns(app):
         assert button.tick is None and button.turning.at(end)[0] % 1 == 0
 
         # hidden as it comes to rest, nothing runs: shown again in time, it goes on; past its time, it's upright, no ticks
-        probe = widgets.RefreshButton()
+        probe = imageviews.RefreshButton()
         head.append(probe)
         pump(0.05)
         assert probe.get_mapped() and probe.tick is None
@@ -6010,7 +6024,7 @@ def test_fix_round():
         assert "--strict-mcp-config" in args and "--allowedTools" not in args  # (a bare rule would allow every path)
         assert run(origin, "log", "-1", "--format=%s", "fix/1") == "Fix #1, round 1: Issue 1"
         assert "Fixes #1" in run(origin, "log", "-1", "--format=%b", "fix/1")
-        assert run(origin, "diff", "--name-only", "main", "fix/1") == "widgets.py"  # (fix-shots.json isn't in it)
+        assert run(origin, "diff", "--name-only", "main", "fix/1") == "theming.py"  # (fix-shots.json isn't in it)
         shots = marks(1)[1]["shots"]
         assert shots == [{"label": "The empty chat", "before": "1/1/1-before.png", "after": "1/1/1-after.png"}], shots
         pics = [subprocess.run(["git", "show", f"fix-shots:{p}"], cwd=origin, capture_output=True, check=True).stdout
@@ -6252,7 +6266,7 @@ def test_side_bars_closed_at_launch_open(app):
     finally:
         app.next_size = None
         baude.save_settings(sidebar=True)
-    saved, widgets.SLIDE_MS = widgets.SLIDE_MS, 150
+    saved, panels.SLIDE_MS = panels.SLIDE_MS, 150
     moved = []
     watch = win.outer.connect("notify::position", lambda p, _: moved.append(p.get_position()))
     try:
@@ -6275,7 +6289,7 @@ def test_side_bars_closed_at_launch_open(app):
             assert win.outer.get_position() == was + 40, "there to drag"
     finally:
         win.outer.disconnect(watch)
-        widgets.SLIDE_MS = saved
+        panels.SLIDE_MS = saved
         close(win)
 
 
@@ -6289,7 +6303,7 @@ def test_side_bars_settle_as_the_drag_ends(app):
         win = app.window()
     finally:
         app.next_size = None
-    saved, widgets.SLIDE_MS = widgets.SLIDE_MS, 120
+    saved, panels.SLIDE_MS = panels.SLIDE_MS, 120
     try:
         win.sidebar.set_visible(True)
         win.panel.set_visible(True)
@@ -6398,7 +6412,7 @@ def test_side_bars_settle_as_the_drag_ends(app):
                         break
                 assert pane.get_visible() and slide.target and button.get_active()
     finally:
-        widgets.SLIDE_MS = saved
+        panels.SLIDE_MS = saved
         close(win)
 
 
@@ -6469,7 +6483,7 @@ def test_side_bars_close_only_when_dragged_nearly_shut(app):
         win = app.window()
     finally:
         app.next_size = None
-    saved = widgets.SLIDE_MS
+    saved = panels.SLIDE_MS
     try:
         win.sidebar.set_visible(True)
         win.panel.set_visible(True)
@@ -6514,13 +6528,13 @@ def test_side_bars_close_only_when_dragged_nearly_shut(app):
                          closing * (width - slide.CLOSE_WITHIN - 2)), "nearly shut: still at its least, open"
             assert again(lambda: slide.target and paned.get_position() == least, closing * (room + 60), steps=1), \
                 "a flick past its least: open"
-            widgets.SLIDE_MS = 150
+            panels.SLIDE_MS = 150
             moved = []
             watch = paned.connect("notify::position", lambda p, _: moved.append(p.get_position()))
             assert again(lambda: not slide.target, closing * (width - slide.CLOSE_WITHIN + 2)), "next to nothing: closing"
             pump(0.4)
             paned.disconnect(watch)
-            widgets.SLIDE_MS = 0
+            panels.SLIDE_MS = 0
             assert not pane.get_visible(), "closed"
             assert len({p for p in moved if closing * (p - least) > 0}) > 2, ("it slides, from its least", least, moved)
             slide.set_shown(True)
@@ -6529,7 +6543,7 @@ def test_side_bars_close_only_when_dragged_nearly_shut(app):
             if slide is win.panel_slide:
                 assert win.panel_width == paned.get_width() - was, ("the width it was is what's kept", win.panel_width)
     finally:
-        widgets.SLIDE_MS = saved
+        panels.SLIDE_MS = saved
         close(win)
 
 
@@ -6539,7 +6553,7 @@ def test_side_bars_slide(app):
     from where it's got to; set directly, it takes effect and its button follows. Afterwards the panes are as they were."""
     def one_way(steps, sign):  # (a pixel's rounding aside, where the rule stops at the window's edge)
         return all((b - a) * sign >= -1 for a, b in zip(steps, steps[1:]))
-    saved, widgets.SLIDE_MS = widgets.SLIDE_MS, 180
+    saved, panels.SLIDE_MS = panels.SLIDE_MS, 180
     win = app.window()
     moved = []
     panes = (win.split, win.outer)
@@ -6584,7 +6598,7 @@ def test_side_bars_slide(app):
     finally:
         for pane, watch in zip(panes, watches):
             pane.disconnect(watch)
-        widgets.SLIDE_MS = saved
+        panels.SLIDE_MS = saved
         close(win)
 
 
@@ -8597,10 +8611,10 @@ def test_feedback_region_text_in_the_issue(app):
 
 def test_feedback_note_box(app):
     """#152, #153: Send Feedback is its header and the note's box, as wide as there's room for, the chat's look
-    (widgets.Composer), and no words under the header, gh signed in or not. The + in the corner, a real click, starts a
-    capture, or takes one at once over a dialog, its tooltip telling them apart. Captures show over the box, only when
-    there are some: a thumbnail's click marks its regions, its × removes it, and ⌘↩ still saves after. A long note scrolls
-    in the box, no character under the +, in light and dark and at every size."""
+    (composerview.Composer), and no words under the header, gh signed in or not. The + in the corner, a real click,
+    starts a capture, or takes one at once over a dialog, its tooltip telling them apart. Captures show over the box,
+    only when there are some: a thumbnail's click marks its regions, its × removes it, and ⌘↩ still saves after. A long
+    note scrolls in the box, no character under the +, in light and dark and at every size."""
     import mouse
     win = app.window()
     style = Adw.StyleManager.get_default()
@@ -8671,8 +8685,8 @@ def test_feedback_note_box(app):
         pairs = []
         for shot in iter_children(dlg.shots):
             buttons = find(shot, Gtk.Button)
-            pairs.append((next(b for b in buttons if find(b, widgets.FixedPicture)),
-                          next(b for b in buttons if not find(b, widgets.FixedPicture))))
+            pairs.append((next(b for b in buttons if find(b, imageviews.FixedPicture)),
+                          next(b for b in buttons if not find(b, imageviews.FixedPicture))))
         return pairs
 
     try:
@@ -8720,7 +8734,7 @@ def test_feedback_note_box(app):
         pump(0.4)
         adj = dlg.strip.get_hadjustment()
         assert adj.get_upper() > adj.get_page_size() and dlg.get_child().get_width() == wide, (adj.get_upper(), wide)
-        pictures = find(dlg.shots, widgets.FixedPicture)
+        pictures = find(dlg.shots, imageviews.FixedPicture)
         assert len(pictures) == 5
         wait_for(lambda: all(p.get_paintable() is not None for p in pictures), "the thumbnails")
 
@@ -13865,7 +13879,7 @@ def test_git_links_without_signal(app):
 
 
 def test_tab_history():
-    """The tabs' history (widgets.MainTabs: Baude's and Record's), as a browser's: back and forward show what was
+    """The tabs' history (panels.MainTabs: Baude's and Record's), as a browser's: back and forward show what was
     shown, a closed tab opened again (reopen), one gone left out; a new step forgets what was forward of it. The keys:
     ⌥⌘ and an arrow on macOS (⌘ alone moves the caret in text), Alt and one elsewhere."""
     reopened = []
@@ -13875,7 +13889,7 @@ def test_tab_history():
             return False
         reopened.append(key)
         return tabs.open(key, lambda: Gtk.Label(label=str(key)), str(key)) is not None
-    tabs = widgets.MainTabs(reopen=reopen)
+    tabs = panels.MainTabs(reopen=reopen)
     for k in (("a",), ("b",), ("gone",), ("c",)):
         tabs.open(k, lambda k=k: Gtk.Label(label=str(k)), str(k))
     assert [e[0] for e in tabs.history] == [("a",), ("b",), ("gone",), ("c",)]
@@ -13894,8 +13908,8 @@ def test_tab_history():
 
 def test_no_text_drag():
     """A selection isn't dragged away (GTK's: pressed in and dragged, the text moves): a press in it puts the caret
-    there (widgets.no_text_drag: the input box, Record's notes, the feedback box); outside it, or none, as ever."""
-    view = widgets.no_text_drag(Gtk.TextView())
+    there (composerview.no_text_drag: the input box, Record's notes, the feedback box); outside it, or none, as ever."""
+    view = composerview.no_text_drag(Gtk.TextView())
     buf = view.get_buffer()
     buf.set_text("alpha beta gamma delta")
     win = Gtk.Window(child=view)
@@ -13910,17 +13924,17 @@ def test_no_text_drag():
     assert view.press_at(*at(11)) and not buf.get_has_selection() and buf.get_property("cursor-position") == 11
     buf.select_range(buf.get_iter_at_offset(6), buf.get_iter_at_offset(16))
     assert not view.press_at(*at(18)) and buf.get_has_selection(), "outside it: as ever"
-    assert isinstance(widgets.Composer().input.press_at, type(view.press_at)), "the input box's too"
+    assert isinstance(composerview.Composer().input.press_at, type(view.press_at)), "the input box's too"
     win.destroy()
 
 
 def test_look_css():
-    """One look (widgets.CSS: the frame, the inside, one rule, one raised fill): Baude's stylesheet and Record's
+    """One look (theming.CSS: the frame, the inside, one rule, one raised fill): Baude's stylesheet and Record's
     parse without an error, and the palette is there in light and dark (the frame and the inside apart)."""
     errors = []
     src = open(os.path.join(os.path.dirname(HERE), "recordui.py")).read()
     start = src.index('CSS = """') + len('CSS = """')
-    for name, text in (("widgets", widgets.CSS), ("record", src[start:src.index('"""', start)])):
+    for name, text in (("widgets", theming.CSS), ("record", src[start:src.index('"""', start)])):
         provider = Gtk.CssProvider()
         provider.connect("parsing-error", lambda _p, section, err, name=name: errors.append(
             f"{name}: {section.to_string()}: {err.message}"))
@@ -13942,8 +13956,8 @@ def test_look_css():
 
 
 def test_wrap_selection():
-    """A selection, and *, ` or / typed: bold, code or italic round it (widgets.wrap_selection, the input box's, the
-    Record's and its notes'), each of its lines on its own (a list's marker, a box, a heading's #s left out), kept
+    """A selection, and *, ` or / typed: bold, code or italic round it (composerview.wrap_selection, the input box's,
+    the Record's and its notes'), each of its lines on its own (a list's marker, a box, a heading's #s left out), kept
     selected so another can go round it, and off again with the same key; any other key, or no selection: typed."""
     buf = Gtk.TextBuffer()
 
@@ -13957,15 +13971,15 @@ def test_wrap_selection():
     pick("hello world", 6, 11)
     for ch, want in (("*", "hello **world**"), ("/", "hello ***world***"), ("/", "hello **world**"),
                      ("*", "hello world"), ("`", "hello `world`"), ("`", "hello world")):
-        assert widgets.wrap_selection(buf, ch) and now() == (want, "world"), (ch, now())
+        assert composerview.wrap_selection(buf, ch) and now() == (want, "world"), (ch, now())
     pick("- one\n  - [ ] two\n# Head", 0, 24)
-    assert widgets.wrap_selection(buf, "/") and now()[0] == "- *one*\n  - [ ] *two*\n# *Head*", now()
+    assert composerview.wrap_selection(buf, "/") and now()[0] == "- *one*\n  - [ ] *two*\n# *Head*", now()
     pick("a  b", 1, 3)
-    assert not widgets.wrap_selection(buf, "*"), "only space: typed"
+    assert not composerview.wrap_selection(buf, "*"), "only space: typed"
     pick("abc", 0, 3)
-    assert not widgets.wrap_selection(buf, "_")
+    assert not composerview.wrap_selection(buf, "_")
     buf.set_text("abc")
-    assert not widgets.wrap_selection(buf, "*"), "nothing selected"
+    assert not composerview.wrap_selection(buf, "*"), "nothing selected"
 
     right, left, none = Gdk.KEY_Right, Gdk.KEY_Left, Gdk.ModifierType(0)  # (then Left or Right: outside its marks)
 
@@ -13973,31 +13987,31 @@ def test_wrap_selection():
         return buf.get_iter_at_mark(buf.get_insert()).get_offset()
     for ch, want in (("*", "hello **world**"), ("/", "hello *world*"), ("`", "hello `world`")):
         pick("hello world", 6, 11)
-        assert widgets.wrap_selection(buf, ch) and widgets.leave_wrapped(buf, right, none), ch
+        assert composerview.wrap_selection(buf, ch) and composerview.leave_wrapped(buf, right, none), ch
         assert not buf.get_has_selection() and caret() == len(want), (ch, caret())
         pick("hello world", 6, 11)
-        assert widgets.wrap_selection(buf, ch) and widgets.leave_wrapped(buf, left, none), ch
+        assert composerview.wrap_selection(buf, ch) and composerview.leave_wrapped(buf, left, none), ch
         assert not buf.get_has_selection() and caret() == 6, (ch, caret())
     pick("hello world", 6, 11)  # (all the marks round it)
-    widgets.wrap_selection(buf, "*")
-    widgets.wrap_selection(buf, "/")
-    assert widgets.leave_wrapped(buf, right, none) and caret() == len("hello ***world***")
+    composerview.wrap_selection(buf, "*")
+    composerview.wrap_selection(buf, "/")
+    assert composerview.leave_wrapped(buf, right, none) and caret() == len("hello ***world***")
     pick("one\ntwo", 0, 7)  # (of several lines: past the last line's marks)
-    widgets.wrap_selection(buf, "`")
-    assert buf.get_property("text") == "`one`\n`two`" and widgets.leave_wrapped(buf, right, none) and caret() == 11
+    composerview.wrap_selection(buf, "`")
+    assert buf.get_property("text") == "`one`\n`two`" and composerview.leave_wrapped(buf, right, none) and caret() == 11
     pick("hello world", 6, 11)  # (taken off again, with nothing round it: just its end)
-    widgets.wrap_selection(buf, "*")
-    widgets.wrap_selection(buf, "*")
-    assert widgets.leave_wrapped(buf, right, none) and caret() == 11 and buf.get_property("text") == "hello world"
+    composerview.wrap_selection(buf, "*")
+    composerview.wrap_selection(buf, "*")
+    assert composerview.leave_wrapped(buf, right, none) and caret() == 11 and buf.get_property("text") == "hello world"
     pick("hello **world**", 8, 13)  # (selected any other way, marks or not: as ever)
-    assert not widgets.leave_wrapped(buf, right, none) and buf.get_has_selection()
+    assert not composerview.leave_wrapped(buf, right, none) and buf.get_has_selection()
     pick("hello world", 6, 11)
-    widgets.wrap_selection(buf, "*")
-    assert not widgets.leave_wrapped(buf, Gdk.KEY_Up, none), "only Left and Right"
+    composerview.wrap_selection(buf, "*")
+    assert not composerview.leave_wrapped(buf, Gdk.KEY_Up, none), "only Left and Right"
     for held in (Gdk.ModifierType.SHIFT_MASK, Gdk.ModifierType.CONTROL_MASK, Gdk.ModifierType.ALT_MASK, Gdk.ModifierType.META_MASK):
-        assert not widgets.leave_wrapped(buf, right, held) and buf.get_has_selection(), f"{held}: extends or moves as ever"
+        assert not composerview.leave_wrapped(buf, right, held) and buf.get_has_selection(), f"{held}: extends or moves as ever"
     buf.select_range(buf.get_iter_at_offset(9), buf.get_iter_at_offset(10))  # (selected again, elsewhere)
-    assert not widgets.leave_wrapped(buf, right, none)
+    assert not composerview.leave_wrapped(buf, right, none)
 
 
 def test_input_box_moves_list_items(app):
@@ -14069,7 +14083,7 @@ def test_chat_selection_runs_across_paragraphs(app):
         return
     win = app.window()
     try:
-        view = widgets.MarkdownView("First paragraph of the reply.\n\n- one item\n- another item\n\n"
+        view = markdownview.MarkdownView("First paragraph of the reply.\n\n- one item\n- another item\n\n"
                             "Last paragraph, [a link](https://example.com/x), the end.")
         win.transcript.append(view)
         clicks = []
@@ -14082,7 +14096,7 @@ def test_chat_selection_runs_across_paragraphs(app):
         hand = mouse.Mouse(win)
 
         def at(label, i):
-            ox, oy = widgets.layout_origin(label)
+            ox, oy = chatfind.layout_origin(label)
             pos = label.get_layout().index_to_pos(len(label.get_text()[:i].encode()))
             ok, p = label.compute_point(win, widgets.Graphene.Point().init(ox + pos.x / Pango.SCALE + 1,
                                                                             oy + (pos.y + pos.height / 2) / Pango.SCALE))
@@ -14562,14 +14576,14 @@ def test_github_in_the_glossary_search(app):
         assert lookupgit.github_url("feature/login#12") is None
 
         # a bare number in a reply's code is no link, whatever's been looked up (a colour's #333)
-        was, baude.widgets.SIGNAL = baude.widgets.SIGNAL, sig
+        was, markdownview.SIGNAL = markdownview.SIGNAL, sig
         try:
             sig.refs["#8"] = sig._pr("#8")
-            assert baude.widgets.ref_link("#8", "#8", True) is None
-            assert "baude-ref:" not in (baude.widgets.ref_code_markup("color: #8;", None) or "")
-            assert baude.widgets.ref_link("PR #8", "PR #8", False) is not None
+            assert markdownview.ref_link("#8", "#8", True) is None
+            assert "baude-ref:" not in (markdownview.ref_code_markup("color: #8;", None) or "")
+            assert markdownview.ref_link("PR #8", "PR #8", False) is not None
         finally:
-            baude.widgets.SIGNAL = was
+            markdownview.SIGNAL = was
 
         if own:  # (one of Baude's own: on the Feedback tab)
             checkout = os.path.join(TMP, "gh-baude-own")

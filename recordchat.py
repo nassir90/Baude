@@ -11,7 +11,7 @@ gi.require_version("Gtk", "4.0")
 from gi.repository import GLib, Gtk, Pango  # noqa: E402
 
 import pointers  # noqa: E402  (the pointer's shape: beside this file)
-import widgets  # noqa: E402  (what Record draws as Baude does: the links' logos; beside this file)
+import theming  # noqa: E402
 from baudelib import wording  # noqa: E402  (its words, Baude's: schema/copy)
 import meta  # noqa: E402  (Meta, the helper in the right bar: Baude's too, beside this file)
 import metalook  # noqa: E402
@@ -45,7 +45,7 @@ class RecordChat(RecordTools, metachat.MetaChat):
     def __init__(self, win):
         super().__init__(win)
         self.notebook, self.quote, self.selection, self.drawn = None, "", None, False
-        self.add_css_class("record-column")  # (the frame's: widgets.CSS)
+        self.add_css_class("record-column")  # (the frame's: theming.CSS)
         self.place = ZoomPlace(self.scroll, self.box, self.box)  # (through the zoom: Window.apply_zoom)
         self._spans_seen = {}  # (a page's key: (its text before, now, where what was put in is): changed_spans)
         self.pending_box = self._pending_bar()
@@ -142,7 +142,7 @@ class RecordChat(RecordTools, metachat.MetaChat):
         out["backup_all"] = meta.Setting(
             "backup_all", backup, lambda: win.store.backup_all,
             lambda v: win.change_action_state("backupall", GLib.Variant.new_boolean(v)),
-            lambda: widgets.settings_switch(backup, backup_zip().replace(os.path.expanduser("~"), "~", 1),
+            lambda: theming.settings_switch(backup, backup_zip().replace(os.path.expanduser("~"), "~", 1),
                                             "win.backupall"), bool)
 
         return out

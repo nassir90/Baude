@@ -273,7 +273,7 @@ def open_chat(app, sc):
             buf.insert_at_cursor(ch)
         T.pump(0.6)
     if sc.get("open"):
-        for m in T.find(win, baude.widgets.CompactMark):
+        for m in T.find(win, baude.chatparts.CompactMark):
             if m.fold is not None:
                 m.fold.set_expanded(True)
     vadj = win.scroller.get_vadjustment()
@@ -286,7 +286,7 @@ def open_chat(app, sc):
         win.open_ref(sc["ref"], label)
         T.pump(0.4)
     if sc.get("lightbox"):  # (the first picture of the chat, opened large)
-        baude.widgets.Lightbox.FLY_MS = 0
+        baude.lightbox.Lightbox.FLY_MS = 0
         w = next(w for w in baude.widgets.walk(win.transcript)
                  if getattr(w, "image_actions", None) is not None and not isinstance(w, Gtk.Overlay))
         w.image_actions.view()

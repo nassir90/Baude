@@ -97,7 +97,7 @@ class ViewerState(val items: List<ViewItem>, index: Int, val from: Rect?) {
     var index by mutableIntStateOf(index)
 }
 
-/** The chat's pictures, opened large (widgets.Lightbox): over the whole of the chat's screen. */
+/** The chat's pictures, opened large (lightbox.Lightbox): over the whole of the chat's screen. */
 object Viewer {
     var flyMs = Tokens.Lightbox.flyMs
     val state = mutableStateOf<ViewerState?>(null)
@@ -266,8 +266,8 @@ private fun decodeBig(bytes: ByteArray): Loaded? {
     return Loaded(b, o.outWidth, o.outHeight, bytes)
 }
 
-/** Whether data scaled to a grid across it is the picture small is (widgets.same_picture): its pixels, 24 by 24, within
- * a little of small's. */
+/** Whether data scaled to a grid across it is the picture small is (imageviews.same_picture): its pixels, 24 by 24,
+ * within a little of small's. */
 fun samePicture(a: Bitmap, b: Bitmap): Boolean {
     val x = Bitmap.createScaledBitmap(a, 24, 24, true)
     val y = Bitmap.createScaledBitmap(b, 24, 24, true)
@@ -288,7 +288,7 @@ private suspend fun hostFile(hostId: String, path: String): ByteArray? = suspend
     }
 }
 
-/** The large view over the chat's whole screen (widgets.Lightbox). */
+/** The large view over the chat's whole screen (lightbox.Lightbox). */
 @Composable
 fun ViewerOverlay() {
     val st = Viewer.state.value ?: return

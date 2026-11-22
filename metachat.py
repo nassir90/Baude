@@ -15,6 +15,12 @@ gi.require_version("Graphene", "1.0")
 from gi.repository import Gdk, GLib, Graphene, Gtk, Pango  # noqa: E402
 
 import widgets  # noqa: E402
+import markdownview  # noqa: E402
+import chatparts  # noqa: E402
+import composerview  # noqa: E402
+import panels  # noqa: E402
+import chatfind  # noqa: E402
+import theming  # noqa: E402
 from baudelib import wording  # noqa: E402
 from baudelib.claude import EFFORT_LABELS  # noqa: E402
 from meta import (  # noqa: E402
@@ -43,7 +49,7 @@ class MetaChat(MetaCards, MetaTools, Gtk.Box):
         super().__init__(orientation=Gtk.Orientation.VERTICAL)
         install_css(Gdk.Display.get_default())
         widgets.ensure_icons()
-        widgets.watch_settings(settings_changed)
+        theming.watch_settings(settings_changed)
         CHATS.add(self)
         self.win, self.ask, self.agent = win, None, None
         self.live_widget, self.asking = None, []  # (the reply coming; the reads it asks to make)
@@ -52,11 +58,11 @@ class MetaChat(MetaCards, MetaTools, Gtk.Box):
         self.painted = {}  # ((kind, key): {where: paint(lit)}: its highlight in the left bar, Meta's boxes, a page)
         self.box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10, margin_top=12, margin_bottom=12,
                            margin_start=12, margin_end=12)
-        # (a selection across messages, yours and its replies, as Baude's chat has one: widgets.ChatSelection, its
+        # (a selection across messages, yours and its replies, as Baude's chat has one: chatfind.ChatSelection, its
         # shading in an overlay over the conversation, under the forms pinned over it)
         shaded = Gtk.Overlay(child=self.box)
-        self.scroll = widgets.markdown_scroller(shaded, vexpand=True)
-        self.text_selection = widgets.ChatSelection(self.box, self.scroll, shaded)
+        self.scroll = panels.markdown_scroller(shaded, vexpand=True)
+        self.text_selection = chatfind.ChatSelection(self.box, self.scroll, shaded)
         # the conversation and the box asked in, set into the column as a chat is into Baude's window (the inside:
         # widgets.inside), all of the column's height theirs (clear, or /clear, asked: cleared, submit)
         talk = widgets.inside(Gtk.Box(orientation=Gtk.Orientation.VERTICAL), start=False)
@@ -65,7 +71,7 @@ class MetaChat(MetaCards, MetaTools, Gtk.Box):
                             margin_start=12, margin_end=12)
         self.forms_open = {}  # (each form's id: {spec, form, widget (its card), slot (its place in its reply)})
         over = Gtk.Overlay(child=self.scroll, vexpand=True)
-        self.chat_find = widgets.ChatFind(self.box, self.scroll, pane=self)  # (⌘F / Ctrl+F in Meta: its bar over the
+        self.chat_find = chatfind.ChatFind(self.box, self.scroll, pane=self)  # (⌘F / Ctrl+F in Meta: its bar over the
         over.add_overlay(self.chat_find.marks)                              # conversation, its matches under the forms)
         over.add_overlay(self.pins)
         for change in ("value-changed", "changed"):  # (scrolled; laid out again, the conversation's height changed)
@@ -79,7 +85,7 @@ class MetaChat(MetaCards, MetaTools, Gtk.Box):
         comp.append(self.bars)
         self.changes_box = self._changes_bar()
         comp.append(self.changes_box)
-        self.writing = widgets.Composer()  # (its button's tip says the model: model_changed)
+        self.writing = composerview.Composer()  # (its button's tip says the model: model_changed)
         self.composer, self.send = self.writing.input, self.writing.send
         self.refs = RefCompleter(self.space, self.composer, self.writing, self.first_refs)
         keys = Gtk.EventControllerKey()
@@ -89,7 +95,7 @@ class MetaChat(MetaCards, MetaTools, Gtk.Box):
         comp.append(self.writing)
         # (more said than the model's window holds: said over the box, the box off, till a model with a bigger
         # window's picked or it's cleared; used: the tokens it takes, as its session last said)
-        self.exhausted, self.used = widgets.Exhausted(self.scroll, self.writing), None
+        self.exhausted, self.used = chatparts.Exhausted(self.scroll, self.writing), None
         self.outgrew = None  # (the session that said the conversation's more than its window holds)
         self.too_small = None  # (the model whose window's too small for Meta's own instructions: Agent.first)
         foot = Gtk.Box(spacing=12)
@@ -104,7 +110,7 @@ class MetaChat(MetaCards, MetaTools, Gtk.Box):
         foot.append(copy)
         self.dots = widgets.WorkingDots()  # (after Clear: it doesn't move when they come)
         foot.append(self.dots)
-        self.ctx = widgets.ContextUsage(hexpand=True, halign=Gtk.Align.END, window=lambda: window(model()))
+        self.ctx = chatparts.ContextUsage(hexpand=True, halign=Gtk.Align.END, window=lambda: window(model()))
         self.context_soon_id = None
         foot.append(self.ctx)
         comp.append(foot)
@@ -225,7 +231,7 @@ class MetaChat(MetaCards, MetaTools, Gtk.Box):
             name = wording.say("meta.with_commands", model=name)
         if code_mode():
             name = wording.say("meta.with_code_mode", model=name)
-        self.writing.send_tip = wording.say("meta.send_tip", model=name, shortcut=widgets.SEND_KEY)
+        self.writing.send_tip = wording.say("meta.send_tip", model=name, shortcut=composerview.SEND_KEY)
         if self.ask is None:
             self.send.set_tooltip_text(self.writing.send_tip)
         self.ctx.window_changed()  # (no session's said what it's used: the new model's window)
@@ -362,20 +368,20 @@ class MetaChat(MetaCards, MetaTools, Gtk.Box):
         (RefCompleter); Esc stops the reply."""
         if self.refs.handle_key(keyval, state):
             return True
-        if widgets.leave_wrapped(self.composer.get_buffer(), keyval, state):
+        if composerview.leave_wrapped(self.composer.get_buffer(), keyval, state):
             return True
-        if widgets.tab_key(self.writing.markdown, keyval, state):
+        if composerview.tab_key(self.writing.markdown, keyval, state):
             return True  # (a list item in or out a level, as on a Record page)
         if keyval in (Gdk.KEY_Up, Gdk.KEY_Down) and state & Gdk.ModifierType.ALT_MASK and \
                 not state & (Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.META_MASK | Gdk.ModifierType.SHIFT_MASK):
             return self.writing.markdown.move_item(-1 if keyval == Gdk.KEY_Up else 1)
         if not state & (Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.META_MASK) and \
-                widgets.wrap_selection(self.composer.get_buffer(), chr(Gdk.keyval_to_unicode(keyval) or 0)):
+                composerview.wrap_selection(self.composer.get_buffer(), chr(Gdk.keyval_to_unicode(keyval) or 0)):
             return True
         if keyval in (Gdk.KEY_Return, Gdk.KEY_KP_Enter):
             markdown = self.writing.markdown
-            if not widgets.sends(state):
-                return widgets.newline_key(markdown, state)  # (a list's next item; Shift: a plain line break)
+            if not composerview.sends(state):
+                return composerview.newline_key(markdown, state)  # (a list's next item; Shift: a plain line break)
             self.submit()
             return True
         if keyval == Gdk.KEY_Escape and self.ask:
@@ -469,7 +475,7 @@ class MetaChat(MetaCards, MetaTools, Gtk.Box):
 
     def _to_bottom(self):
         if getattr(self.scroll, "held", False):
-            return False  # (put back where it was read to: widgets.hold_place)
+            return False  # (put back where it was read to: panels.hold_place)
         adj = self.scroll.get_vadjustment()
         adj.set_value(adj.get_upper())
         return False
@@ -482,7 +488,7 @@ class MetaChat(MetaCards, MetaTools, Gtk.Box):
 
     def prose(self, text):
         """A reply's text, as Baude's chat shows one: Markdown, in no bubble (Record's links its folders' names)."""
-        return widgets.MarkdownView(text)
+        return markdownview.MarkdownView(text)
 
     def set_prose(self, widget, text):
         widget.set_text(text)
@@ -498,7 +504,7 @@ class MetaChat(MetaCards, MetaTools, Gtk.Box):
                 b.append(label(q, css=("quote-in-bubble",), select=True))
             b.append(self._said(m))
             # (its row the conversation's width, its revert button fading in beside it as the chat's: UserTurn)
-            outer = widgets.UserTurn(self, b, m["text"], m.get("t", 0))
+            outer = chatparts.UserTurn(self, b, m["text"], m.get("t", 0))
             outer.set_margin_start(28)
             outer.message = m
             return outer

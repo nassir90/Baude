@@ -401,7 +401,7 @@ fun Home(open: (String, String) -> Unit, feedback: () -> Unit, phone: () -> Unit
 /** Where New session's form's from: the host it's on (null: pick), its folder, the host listed first, the field focused. */
 private class Starting(val host: String?, val folder: String?, val first: String?, val focus: String?)
 
-/** What's said over the chats of a host that isn't reached (Baude's widgets.HostState): a placeholder in the rule's
+/** What's said over the chats of a host that isn't reached (Baude's chatparts.HostState): a placeholder in the rule's
  * outline. */
 @Composable
 private fun HostBanner(text: String) {
@@ -543,7 +543,7 @@ private fun HeldTag(s: Msg.Session) {
     RowTag(Wording.Sidebar.held)
 }
 
-/** A flat button with an icon and a label, as the sidebar's New session (widgets.sidebar_action). */
+/** A flat button with an icon and a label, as the sidebar's New session (pickers.sidebar_action). */
 @Composable
 fun SidebarAction(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, modifier: Modifier = Modifier,
                   onClick: () -> Unit) {

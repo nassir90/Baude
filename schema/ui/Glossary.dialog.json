@@ -2,7 +2,7 @@
   "description": "The glossary search (⌘K on macOS, Ctrl+K elsewhere): a modal dialog listing every name Baude knows for the open chat's folder and every chat, searched as you type. It's the same list the @ picker uses in the composer and Meta.",
   "apps": ["baude"],
   "opens": ["key ⌘K / Ctrl+K, from anywhere in the window"],
-  "code": ["baude.py:RefPalette", "widgets.py:RefPalette", "baude.py:MetaNames", "baude.py:SearchSpace", "baude.py:ref_palette_items", "baude.py:ref_palette_open", "baude.py:palette_open", "lookup.py:SearchSpace"],
+  "code": ["baude.py:RefPalette", "pickers.py:RefPalette", "baude.py:MetaNames", "baude.py:SearchSpace", "baude.py:ref_palette_items", "baude.py:ref_palette_open", "baude.py:palette_open", "lookup.py:SearchSpace"],
   "copy": ["glossary", "common.search", "lookup"],
   "parts": [
     {

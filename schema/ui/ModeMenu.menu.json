@@ -2,7 +2,7 @@
   "description": "The header's permission-mode drop-down: a plain list of the modes the chat's program offers, a tick on the current one, opened centred under its button.",
   "apps": ["baude"],
   "opens": ["header mode picker"],
-  "code": ["widgets.py:ChoiceDropDown", "baude.py:BaudeWindow.on_mode_changed", "baude.py:BaudeWindow.mode_refused", "baude.py:BaudeWindow.sync_mode", "baudelib/claude.py:MODES", "baudelib/models.py:CODEX_MODES"],
+  "code": ["pickers.py:ChoiceDropDown", "baude.py:BaudeWindow.on_mode_changed", "baude.py:BaudeWindow.mode_refused", "baude.py:BaudeWindow.sync_mode", "baudelib/claude.py:MODES", "baudelib/models.py:CODEX_MODES"],
   "copy": ["mode_effort", "chat_header"],
   "parts": [
     {

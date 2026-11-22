@@ -107,9 +107,9 @@ class App(Adw.Application):
         if self.agent:  # (never seen: no logo, no look)
             return
         GLib.set_application_name("Emission")
-        import widgets
-        widgets.load_css()  # (Baude's look: the frame, the inside set into it)
-        widgets.theme_css()  # (whose stylesheet that's drawn over: libadwaita's, or a GTK_THEME's)
+        import theming
+        theming.load_css()  # (Baude's look: the frame, the inside set into it)
+        theming.theme_css()  # (whose stylesheet that's drawn over: libadwaita's, or a GTK_THEME's)
         if sys.platform == "darwin":
             try:
                 dock_icon()

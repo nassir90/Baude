@@ -389,7 +389,7 @@
     "$extensions": {"dev.baude.android": "dp"},
     "block": {"$type": "dimension", "$description": "Between a reply's blocks (MarkdownView's spacing).", "$value": {"value": 6, "unit": "px"}},
     "item-start": {"$type": "dimension", "$description": "A list item's start margin, before its depth's steps (MarkdownView's item row).", "$value": {"value": 6, "unit": "px"}},
-    "indent-step": {"$type": "dimension", "$description": "A list item's step in for each level of depth (widgets.INDENT_STEP).", "$value": {"value": 18, "unit": "px"}},
+    "indent-step": {"$type": "dimension", "$description": "A list item's step in for each level of depth (markdownview.INDENT_STEP).", "$value": {"value": 18, "unit": "px"}},
     "quote-rule": {"$type": "dimension", "$description": "A quote's bar's width (.md-quote).", "$value": {"value": 3, "unit": "px"}},
     "quote-pad": {"$type": "dimension", "$description": "A quote's text, in from its bar.", "$value": {"value": 10, "unit": "px"}},
     "rule-gap": {"$type": "dimension", "$description": "A rule's margin, above and below (.md-hr).", "$value": {"value": 4, "unit": "px"}},
@@ -415,7 +415,7 @@
     "code-span": {"$type": "color", "$description": "An inline code span's background (_inline_markup's bgcolor).", "$value": {"colorSpace": "srgb", "components": [0.498, 0.498, 0.498], "alpha": 0.22, "hex": "#7f7f7f"}}
   },
   "git": {
-    "$description": "The Git page: its log's graph and rows, ref chips, pull-request pills, the commit card's bars (gitview.py, widgets.LinkLabel, the .git-* CSS).",
+    "$description": "The Git page: its log's graph and rows, ref chips, pull-request pills, the commit card's bars (gitview.py, refkinds.LinkLabel, the .git-* CSS).",
     "$extensions": {"dev.baude.android": "dp"},
     "lane-step": {"$type": "dimension", "$description": "A graph lane's step across (GitLane.STEP).", "$value": {"value": 12, "unit": "px"}},
     "lane-pad": {"$type": "dimension", "$description": "The graph's edge, before the first lane (GitLane.PAD).", "$value": {"value": 9, "unit": "px"}},

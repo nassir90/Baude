@@ -18,6 +18,9 @@ from gi.repository import Adw, GLib, Gtk, Pango  # noqa: E402
 import lookupgit  # noqa: E402
 import update  # noqa: E402
 import widgets  # noqa: E402
+import refkinds  # noqa: E402
+import markdownview  # noqa: E402
+import chatparts  # noqa: E402
 from baudelib import wording  # noqa: E402
 from meta import (  # noqa: E402
     CODE_LINES, COMMAND_TOOLS, EDIT_TOOLS, NAME, READ_TOOLS, REF_COLOR, REF_RE, api_doc, auto_mode_note, available,
@@ -66,13 +69,13 @@ class MetaCards:
             return None
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, margin_top=6)
         for old, new in pairs:
-            box.append(widgets.diff_block(old, new, wrap=True))
+            box.append(markdownview.diff_block(old, new, wrap=True))
         if batch and all(a["state"] != "done" for a in batch):
             box.add_css_class("dim-label")
         return box
 
     def outline(self, batch, caption):
-        """A box with a tool card's outline (widgets.CSS's .tool-card): what was done, in a line, with the batch's Keep
+        """A box with a tool card's outline (theming.CSS's .tool-card): what was done, in a line, with the batch's Keep
         and Undo (or Redo) at its end; the pointer over it lights what it changed (light)."""
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
         box.add_css_class("tool-card")
@@ -186,7 +189,7 @@ class MetaCards:
         return " · ".join(short(v) for v in inp.values() if v not in (None, "", []))[:200]
 
     def tool_card(self, it, controls=True):
-        """A tool card as Baude's chat has one (widgets.CSS's .tool-card): its name, what it was for, an edit's hunks
+        """A tool card as Baude's chat has one (theming.CSS's .tool-card): its name, what it was for, an edit's hunks
         under its line (hunks) or else Input (Code) to open, and Output; a spinner while it runs, red if it failed. A
         call that changed things: its actions one batch, said undone once they are, and (controls) Keep and Undo
         (Redo, undone) on its line, and the pointer over it lights what it changed in the left bar (light)."""
@@ -248,7 +251,7 @@ class MetaCards:
 
         def build():
             if d.get_child() is None:
-                block = widgets.CodeBlock(text, lang)
+                block = markdownview.CodeBlock(text, lang)
                 block.set_margin_top(6)
                 d.set_child(block)
         d.on_expand.append(build)
@@ -327,7 +330,7 @@ class MetaCards:
             out += [html.escape(text[at:found.start()], False),
                     f'<a href="ref:{urllib.parse.quote(r["surface"], safe="")}"><span foreground="{REF_COLOR}" '
                     f'background="#4f8a7c" bgalpha="14%" weight="600" underline="none">'
-                    f'{widgets.ref_icon_slot(r.get("icon")) or "@"}{name}</span></a>']
+                    f'{refkinds.ref_icon_slot(r.get("icon")) or "@"}{name}</span></a>']
             at = found.end()
         out.append(html.escape(text[at:], False))
         said = SaidLabel(xalign=0.0, wrap=True, selectable=True)
@@ -533,7 +536,7 @@ class MetaCards:
             self._refresh_live(turn)
 
     def _compaction(self, agent, turn, what, detail):
-        """Claude Code compacting the conversation in a turn (widgets.compact_said's what and detail): an item of the
+        """Claude Code compacting the conversation in a turn (chatparts.compact_said's what and detail): an item of the
         reply, {"kind": "compact", "state": running|done|failed, "written", "meta", "error", "summary"}, its marker
         (compact_mark); none, if it ended with none made."""
         items = turn["items"]
@@ -557,7 +560,7 @@ class MetaCards:
 
     def compact_mark(self, it):
         """A reply's compaction (_compaction's item), as Baude's chat marks one."""
-        mark = widgets.CompactMark(it.get("meta") or {}) if it.get("state") == "done" else widgets.CompactMark()
+        mark = chatparts.CompactMark(it.get("meta") or {}) if it.get("state") == "done" else chatparts.CompactMark()
         if it.get("state") == "running":
             mark.running(it.get("written"))
         elif it.get("state") != "done":

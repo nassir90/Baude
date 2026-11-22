@@ -7,7 +7,7 @@
     "key Ctrl+K (Cmd+K on macOS), from anywhere in the window"
   ],
   "code": [
-    "widgets.py:RefPalette",
+    "pickers.py:RefPalette",
     "recordhosts.py:RecordHosts.open_palette",
     "recordhosts.py:RecordHosts.open_item",
     "recordui.py:Spaces",

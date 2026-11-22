@@ -5,12 +5,12 @@
     "record"
   ],
   "code": [
-    "widgets.py:MarkdownView.render_image",
-    "widgets.py:image_widget",
-    "widgets.py:with_image_link",
-    "widgets.py:image_link_markup",
-    "widgets.py:make_image_interactive",
-    "widgets.py:fetch_web_image"
+    "markdownview.py:MarkdownView.render_image",
+    "imageviews.py:image_widget",
+    "imageviews.py:with_image_link",
+    "imageviews.py:image_link_markup",
+    "imageviews.py:make_image_interactive",
+    "imageviews.py:fetch_web_image"
   ],
   "copy": [
     "images"

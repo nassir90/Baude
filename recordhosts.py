@@ -15,6 +15,7 @@ from gi.repository import Adw, Gdk, Gio, GLib, Gtk, Pango  # noqa: E402
 
 import lookupgit  # noqa: E402
 import widgets  # noqa: E402  (what Record draws as Baude does: the links' logos; beside this file)
+import pickers  # noqa: E402
 from baudelib import wording  # noqa: E402  (its words, Baude's: schema/copy)
 import baudelib.client  # noqa: E402  (the hosts, as Baude has them: another's notebooks, through its host process)
 import baudelib.hosts  # noqa: E402  (this machine's host process started again: Restart Daemon)
@@ -697,7 +698,7 @@ class RecordHosts:
         """⌘K / Ctrl+K, as Baude's: every name the chat read's folder has, and the notebooks and their pages, searched
         as you type, a name opened where it is (open_item: its page, its file, the Git page, the Kubernetes view, the
         database diagram)."""
-        widgets.RefPalette(self, self.space(), self.open_item).present(self)
+        pickers.RefPalette(self, self.space(), self.open_item).present(self)
 
     def open_notes_item(self, item):
         """A notebook (shown) or a page (open, in its notebook) from @ or ⌘K."""

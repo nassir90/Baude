@@ -12,7 +12,7 @@ import uuid
 
 from gi.repository import GLib  # noqa: E402
 
-import widgets  # noqa: E402
+import chatparts  # noqa: E402
 from baudelib import agentproxy, codex, modelfiles, wording  # noqa: E402
 from baudelib import models as modelslib  # noqa: E402
 from baudelib import providers as providerslib  # noqa: E402
@@ -634,7 +634,7 @@ class Agent:
             self.chat.context_soon(self)
         elif t == "system" and msg.get("subtype") == "baude_context" and self is self.chat.agent:  # (pi-claude's: the
             self.chat.show_usage(msg.get("usage") or {})  # tokens of the request it's sent, as MLX's server says)
-        said = widgets.compact_said(msg) if turn is not None else None  # (compacting: said in the reply)
+        said = chatparts.compact_said(msg) if turn is not None else None  # (compacting: said in the reply)
         if said is not None and said[0] != "summary":
             self.chat._compaction(self, turn, *said)
         if t == "_stderr":

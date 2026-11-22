@@ -2,7 +2,7 @@
   "description": "☰ → Mesh: a dialog (640 x 720 px, title \"Mesh\") that shows what code every host's daemon in the mesh runs, and every app connected to each host, against the newest in the mesh. Baude's and Record's; the phone has the same under ⋮ → Mesh.",
   "apps": ["baude", "record"],
   "opens": ["☰ → Mesh"],
-  "code": ["widgets.py:mesh_dialog", "widgets.py:mesh_versions", "widgets.py:version_standing", "widgets.py:version_row", "widgets.py:changelog_of"],
+  "code": ["meshui.py:mesh_dialog", "widgets.py:mesh_versions", "meshui.py:version_standing", "meshui.py:version_row", "meshui.py:changelog_of"],
   "copy": ["mesh_versions", "host_menu", "updates"],
   "parts": [
     {

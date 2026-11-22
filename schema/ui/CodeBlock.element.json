@@ -5,12 +5,12 @@
     "record"
   ],
   "code": [
-    "widgets.py:CodeBlock",
-    "widgets.py:diff_block",
-    "widgets.py:code_spans",
-    "widgets.py:numbered_spans",
-    "widgets.py:markdown_scroller",
-    "widgets.py:CodeBlock.set_max_height"
+    "markdownview.py:CodeBlock",
+    "markdownview.py:diff_block",
+    "codespans.py:code_spans",
+    "codespans.py:numbered_spans",
+    "panels.py:markdown_scroller",
+    "markdownview.py:CodeBlock.set_max_height"
   ],
   "copy": [
     "common"

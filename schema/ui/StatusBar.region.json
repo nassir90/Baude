@@ -1,7 +1,7 @@
 {
   "description": "The thin bar under the composer in the Baude main window's chat column: from the left a working indicator, the chat's host, the folder and last-turn summary, a background-tasks button, what the chat has spent, and the context meter at the far right.",
   "apps": ["baude"],
-  "code": ["baude.py:BaudeWindow.update_status", "baude.py:BaudeWindow.cost_said", "baude.py:BaudeWindow.update_tasks_indicator", "baude.py:BaudeWindow.show_context", "baude.py:BaudeWindow.h_result", "widgets.py:WorkingDots", "widgets.py:ContextUsage", "widgets.py:ContextMeter"],
+  "code": ["baude.py:BaudeWindow.update_status", "baude.py:BaudeWindow.cost_said", "baude.py:BaudeWindow.update_tasks_indicator", "baude.py:BaudeWindow.show_context", "baude.py:BaudeWindow.h_result", "widgets.py:WorkingDots", "chatparts.py:ContextUsage", "chatparts.py:ContextMeter"],
   "copy": ["context_usage", "common"],
   "parts": [
     {

@@ -37,9 +37,10 @@ from lookupkube import (  # noqa: E402,F401
     PG_LISTS, arango_eval, at_once, db_index, db_names, pg_databases_cached, pg_query, pg_servers_cached,
 )
 from widgets import (  # noqa: E402,F401
-    FIND_RGB, Fade, WorkerPool, ZOOM_STEP, ellipsize_dropdown, find_attrs, inside,
-    paned_grip, view_bar, _scales,
+    FIND_RGB, WorkerPool, ZOOM_STEP, find_attrs, inside, paned_grip, view_bar, _scales,
 )
+from imageviews import Fade  # noqa: E402,F401
+from pickers import ellipsize_dropdown  # noqa: E402,F401
 from baudelib import tokens, wording  # noqa: E402
 
 
@@ -569,7 +570,7 @@ class SchemaView(Gtk.Box):
 
     def __init__(self, win):
         super().__init__(orientation=Gtk.Orientation.VERTICAL, visible=False, focusable=True)
-        self.add_css_class("baude-frame")  # (the bar: widgets.CSS; the diagram and its rows the inside, set into it)
+        self.add_css_class("baude-frame")  # (the bar: theming.CSS; the diagram and its rows the inside, set into it)
         self.win, self.servers, self.databases, self.schema = win, [], [], None
         self.server = self.database = self.focus_name = self.focus_column = self.code_link = None
         self.dbs, self.namespace, self.hint, self.syncing = {}, "public", "", False

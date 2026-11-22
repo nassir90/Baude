@@ -8,7 +8,7 @@
     "Opening a chat whose first message came from outside (its transcript's turnOrigin isn't human)"
   ],
   "code": [
-    "widgets.py:start_prompt_view",
+    "composerview.py:start_prompt_view",
     "baude.py:BaudeWindow.render_history",
     "recordreader.py:Reader._add"
   ],

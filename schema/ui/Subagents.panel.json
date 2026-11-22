@@ -6,7 +6,7 @@
     "Status bar \"⚙ ... running\" button when a subagent is running",
     "View button on a subagent's tool card in the chat (opens this page with that subagent's detail; opens from its row with the animation only if the list was already on screen)"
   ],
-  "code": ["baude.py:SidePanel.update_agent", "baude.py:SidePanel.open_agent", "baude.py:SidePanel.close_agent", "baude.py:SidePanel.describe", "baude.py:SidePanel.link_card", "widgets.py:ExpandStack"],
+  "code": ["baude.py:SidePanel.update_agent", "baude.py:SidePanel.open_agent", "baude.py:SidePanel.close_agent", "baude.py:SidePanel.describe", "baude.py:SidePanel.link_card", "panels.py:ExpandStack"],
   "copy": ["side_panel"],
   "parts": [
     {

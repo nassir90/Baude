@@ -15,7 +15,7 @@
     "baude.py:BaudeWindow.register_artifact",
     "baude.py:BaudeWindow.add_artifact_chips",
     "baude.py:BaudeWindow.render_history",
-    "widgets.py:link_markup",
+    "markdownview.py:link_markup",
     "baude.py:ArtifactChip"
   ],
   "copy": [

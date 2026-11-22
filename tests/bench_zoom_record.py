@@ -484,9 +484,9 @@ def open_sample(tmp, size):
     build(tmp, size)
     import record
     import diaryeditor
-    import widgets
+    import panels
     from gi.repository import Gdk, GLib, Graphene, Gtk
-    widgets.SLIDE_MS = 0
+    panels.SLIDE_MS = 0
     app = record.App()
     app.register(None)
     app.activate()

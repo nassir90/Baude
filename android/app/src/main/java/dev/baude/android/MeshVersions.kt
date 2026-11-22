@@ -38,7 +38,7 @@ private class Machine(val id: String, val name: String, val phone: Boolean, val 
 
 private fun Number?.long(): Long? = this?.toLong()
 
-/** Every machine as the Mesh page lists it (widgets.mesh_machines), this phone first: those your first host that's up
+/** Every machine as the Mesh page lists it (meshui.mesh_machines), this phone first: those your first host that's up
  * lists in its mesh; then each host and member known here it doesn't (every one New session's picker has); then
  * those its mesh reached lately; none removed here. With (the newest code's commit and when it was made, or null). */
 private fun meshMachines(): Pair<Pair<String, Long?>?, List<Machine>> {
@@ -94,7 +94,7 @@ private fun meshMachines(): Pair<Pair<String, Long?>?, List<Machine>> {
     return (newest to made) to out
 }
 
-/** Where a daemon's or an app's code stands against the newest (widgets.version_standing): (newest, behind, older,
+/** Where a daemon's or an app's code stands against the newest (meshui.version_standing): (newest, behind, older,
  * unknown or null; what's said of it). */
 private fun standing(code: Code, newest: Pair<String, Long?>?): Pair<String?, String> = when {
     code.commit == null -> "unknown" to ""

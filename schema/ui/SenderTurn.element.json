@@ -9,7 +9,7 @@
     "Opening a chat whose host's sender store says a message is someone else's"
   ],
   "code": [
-    "widgets.py:SenderTurn",
+    "chatparts.py:SenderTurn",
     "baude.py:BaudeWindow.sender_turn",
     "baude.py:BaudeWindow.sender_bubble",
     "baude.py:BaudeWindow.senders_came",

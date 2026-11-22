@@ -8,8 +8,8 @@
     "Always present; the bar is shown according to the rules below"
   ],
   "code": [
-    "widgets.py:MainTabs",
-    "widgets.py:TabBody",
+    "panels.py:MainTabs",
+    "panels.py:TabBody",
     "baude.py:BaudeWindow.show_code",
     "baude.py:BaudeWindow.open_fixes",
     "baude.py:BaudeWindow.reopen_tab",

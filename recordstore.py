@@ -18,9 +18,14 @@ from gi.repository import GLib  # noqa: E402
 
 import lookupgit  # noqa: E402
 import widgets  # noqa: E402  (what Record draws as Baude does: the links' logos; beside this file)
+import refkinds  # noqa: E402
+import markdownview  # noqa: E402
+import chatparts  # noqa: E402
 from baudelib import icons  # noqa: E402  (its logo: schema/icons)
 from baudelib import wording  # noqa: E402  (its words, Baude's: schema/copy)
-from baudelib.transcripts import rewind_mark, started_outside, strip_reminders, task_notification  # noqa: E402
+from baudelib.transcripts import (  # noqa: E402
+    ref_epoch, rewind_mark, started_outside, strip_reminders, task_notification, typed_at,
+)
 from baudelib.claude import MODELS  # noqa: E402  (the models Claude Code runs)
 import baudelib.client  # noqa: E402  (the hosts, as Baude has them: another's notebooks, through its host process)
 import baudelib.hosts  # noqa: E402  (this machine's host process started again: Restart Daemon)
@@ -126,7 +131,7 @@ def relinked_pages(pages, moved):
 
 def heading_levels(lines):
     """Each line's heading level, as the notes draw headings: 0 if it isn't one (nor is a # in a code fence)."""
-    code = {n for first, last, _closed in widgets.fence_spans(lines) for n in range(first, last + 1)}
+    code = {n for first, last, _closed in markdownview.fence_spans(lines) for n in range(first, last + 1)}
     levels = []
     for n, line in enumerate(lines):
         m = None if n in code else re.match(r"(#{1,6})\s", line)
@@ -763,11 +768,12 @@ def parse_records(lines, items, seen=None, spawned=False):
     message written as several records (one per block) becomes one item. A background task's ending, which Claude Code
     writes as a message of yours (<task-notification>), is a quiet line of its own: {"role": "note", "text", "markup",
     "failed", "summary"}, as Baude's chat says it. Where Claude Code compacted the conversation is {"role": "compact",
-    "text" (widgets.compact_text), "meta" (its compactMetadata), "summary" (what it wrote, once read), "id"}. The prompt
-    a session was started with from outside (its first user record, not typed: started_outside) is {"role": "start",
-    "text", "id"}, drawn at the chat's top, unless a Bot started the chat on the mesh (spawned: bot_started), whose
-    task is a message of yours as any prompt is. A revert (rewind_mark) takes back the items after the record it keeps;
-    seen: each record's uuid -> how many items there were after it (kept by a caller that reads on, as written)."""
+    "text" (chatparts.compact_text), "meta" (its compactMetadata), "summary" (what it wrote, once read), "id"}. The
+    prompt a session was started with from outside (its first user record, not typed: started_outside) is {"role":
+    "start", "text", "id"}, drawn at the chat's top, unless a Bot started the chat on the mesh (spawned: bot_started),
+    whose task is a message of yours as any prompt is. A revert (rewind_mark) takes back the items after the record it
+    keeps; seen: each record's uuid -> how many items there were after it (kept by a caller that reads on, as
+    written)."""
     seen, last = ({} if seen is None else seen), None
     for line in lines:
         if last:  # (the record before: how many items there were once it was read)
@@ -786,7 +792,7 @@ def parse_records(lines, items, seen=None, spawned=False):
         kind = d.get("type")
         if kind == "system" and d.get("subtype") == "compact_boundary" and not d.get("isSidechain"):
             meta = d.get("compactMetadata") or {}
-            items.append({"role": "compact", "text": widgets.compact_text(meta), "meta": meta, "id": d.get("uuid")})
+            items.append({"role": "compact", "text": chatparts.compact_text(meta), "meta": meta, "id": d.get("uuid")})
             continue
         if d.get("isCompactSummary"):  # (under its boundary's: the messages a partial compaction kept between them)
             mark = next((it for it in reversed(items) if it["role"] == "compact"), None)
@@ -807,7 +813,7 @@ def parse_records(lines, items, seen=None, spawned=False):
             if _is_noise(text) or d.get("toolUseResult") is not None:
                 continue
             if (note := task_notification(text)) is not None:
-                markup, plain, failed = widgets.task_note_line(note)
+                markup, plain, failed = chatparts.task_note_line(note)
                 items.append({"role": "note", "text": plain, "markup": markup, "failed": failed,
                               "summary": note.get("summary"), "id": d.get("uuid")})
                 continue
@@ -926,7 +932,7 @@ def session_info(path):
 
 def session_facts(path):
     """(title, cwd, when it was last typed in) of a transcript, the first two from its first and last 256 KB, the last
-    as epoch seconds (widgets.typed_at: read back from the end till there's one, widgets.last_typed), else None."""
+    as epoch seconds (typed_at: read back from the end till there's one, refkinds.last_typed), else None."""
     title = first = cwd = said = None
     try:
         size = os.path.getsize(path)
@@ -946,7 +952,7 @@ def session_facts(path):
             except ValueError:
                 continue
             cwd = cwd or d.get("cwd")
-            if last and (when := widgets.typed_at(d)) and when > (said or ""):
+            if last and (when := typed_at(d)) and when > (said or ""):
                 said = when
             k = d.get("type")
             if k == "custom-title" and d.get("customTitle"):
@@ -958,7 +964,7 @@ def session_facts(path):
                 if not _is_noise(t):
                     first = t
     title = title or (first or "").split("\n")[0][:90] or "Untitled chat"
-    return title, cwd, widgets.ref_epoch(said) if said or not tail else widgets.last_typed(path)
+    return title, cwd, ref_epoch(said) if said or not tail else refkinds.last_typed(path)
 
 
 def projects_dir():

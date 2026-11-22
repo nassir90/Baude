@@ -18,7 +18,7 @@
     "baude.py:BaudeWindow.task_from_result",
     "baude.py:BaudeWindow.task_from_note",
     "baude.py:BaudeWindow.settle_tasks",
-    "widgets.py:task_note_line",
+    "chatparts.py:task_note_line",
     "recordreader.py:Reader._add"
   ],
   "copy": [

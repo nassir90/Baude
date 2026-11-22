@@ -18,6 +18,7 @@ if ROOT not in sys.path:  # (as server.catalogue has it: the modules at the root
 
 import kubedata as kd  # noqa: E402
 import lookup  # noqa: E402
+import lookupkube  # noqa: E402
 from baudelib import wording  # noqa: E402
 
 PAGES = {p["resource"]: p for _title, pages in kd.KUBE_SECTIONS for p in pages}
@@ -75,10 +76,11 @@ def _rows(page, items, ctx, columns):
                      for kind, k in zip(kinds, keys)],
             "name": obj["name"], "namespace": obj["namespace"],
             "uid": "/".join(uid) if isinstance(uid, tuple) else str(uid),
-            "version": str(lookup._km(raw).get("resourceVersion") or ""),
+            "version": str(lookupkube._km(raw).get("resourceVersion") or ""),
             "owner_kind": owner.get("kind") or "", "owner_name": owner.get("name") or "",
             "containers": _containers(raw, now) if page["resource"] == "pods" else [],
-            "default": (lookup._km(raw).get("annotations") or {}).get("kubectl.kubernetes.io/default-container") or ""})
+            "default": (lookupkube._km(raw).get("annotations") or {}).get("kubectl.kubernetes.io/default-container")
+            or ""})
     return out
 
 
@@ -88,10 +90,10 @@ def _metrics(page, ctx):
 
 
 def _contexts():
-    contexts = [c for c in lookup.kube_contexts() if not c.get("cluster_only")]
-    where = ", ".join(_home(p) for p in lookup.kubeconfig_paths()) or wording.say("kube.no_kubeconfig")
+    contexts = [c for c in lookupkube.kube_contexts() if not c.get("cluster_only")]
+    where = ", ".join(_home(p) for p in lookupkube.kubeconfig_paths()) or wording.say("kube.no_kubeconfig")
     return {"contexts": [{"name": c["name"], "current": bool(c.get("current")),
-                          "local": bool(lookup.kube_local(c.get("server")))} for c in contexts], "where": where}
+                          "local": bool(lookupkube.kube_local(c.get("server")))} for c in contexts], "where": where}
 
 
 def _connect(context):
@@ -100,7 +102,7 @@ def _connect(context):
     except RuntimeError as e:
         return {"fault": _fault(getattr(e, "said", str(e)), context)}
     try:
-        spaces = sorted(lookup._km(n).get("name", "") for n in json.loads(
+        spaces = sorted(lookupkube._km(n).get("name", "") for n in json.loads(
             kd.kube_get(context, "namespaces", "-o", "json") or "{}").get("items") or [])
     except (RuntimeError, ValueError):
         spaces = []
@@ -134,7 +136,7 @@ def _yaml(msg):
     namespace, name = msg.get("namespace") or "", msg.get("name")
     if page["source"] in ("secrets", "helm"):
         item = next((o for o in kd.kube_list(context, page)
-                     if (lookup._km(o).get("name") or o.get("name"), lookup._km(o).get("namespace") or
+                     if (lookupkube._km(o).get("name") or o.get("name"), lookupkube._km(o).get("namespace") or
                          o.get("namespace") or "") == (name, namespace)), {})
         if page["source"] == "secrets":
             return {"text": kd.kube_secret_yaml(namespace, name, item.get("type", ""), item.get("keys") or []),
@@ -204,7 +206,7 @@ def answer(server, msg):
 # ---------------------------------------------------------------- following
 def _start(conn, args, **kw):
     """kubectl with args, kept on the connection (stopped when it goes)."""
-    proc = subprocess.Popen([lookup.kube_tool("kubectl"), *args], stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, **kw)
+    proc = subprocess.Popen([lookupkube.kube_tool("kubectl"), *args], stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, **kw)
     if getattr(conn, "kube_procs", None) is None:
         conn.kube_procs = []
     conn.kube_procs.append(proc)
@@ -272,8 +274,8 @@ def _apply(objects, events):
         have = objects.get(key)
         if kind == "DELETED":
             changed |= objects.pop(key, None) is not None
-        elif have is None or (lookup._km(o).get("resourceVersion") != lookup._km(have).get("resourceVersion")
-                              if lookup._km(o).get("resourceVersion") else o != have):
+        elif have is None or (lookupkube._km(o).get("resourceVersion") != lookupkube._km(have).get("resourceVersion")
+                              if lookupkube._km(o).get("resourceVersion") else o != have):
             objects[key], changed = o, True
     return changed
 
@@ -299,7 +301,7 @@ def _watch(conn, req, msg):
         ["--watch", "--output-watch-events", "-o", "json"]
     while not getattr(conn, "gone", False):
         seen, said, code = 0, "", 0
-        if (fault := lookup.kube_fault("kubectl")) is not None:
+        if (fault := lookupkube.kube_fault("kubectl")) is not None:
             code, said = 1, fault
         else:
             try:

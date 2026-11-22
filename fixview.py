@@ -94,9 +94,9 @@ def web(win, url):
 
 
 def open_github(win, listed):
-    """A pull request or an issue the @ list or ⌘K has (lookup.GITHUB) opened: an issue on a repository Baude's feedback
-    is on (fixes.issue_locations) is feedback, shown on this tab, with what's been done about it; anything else, its page
-    on GitHub."""
+    """A pull request or an issue the @ list or ⌘K has (lookupgit.GITHUB) opened: an issue on a repository Baude's
+    feedback is on (fixes.issue_locations) is feedback, shown on this tab, with what's been done about it; anything
+    else, its page on GitHub."""
     code = fixes.code_repo()
     if listed["pr"] or listed["repo"] not in fixes.issue_locations(fixes.known_submit_issue_target(), code):
         return web(win, listed["url"])

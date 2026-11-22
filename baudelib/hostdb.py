@@ -10,13 +10,13 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if ROOT not in sys.path:  # (as server.catalogue has it: the modules at the root)
     sys.path.insert(0, ROOT)
 
-import lookup  # noqa: E402
+import lookupkube  # noqa: E402
 import schemadata  # noqa: E402
 from baudelib import wording  # noqa: E402
 
 
 def _server(container):
-    server = next((s for s in lookup.pg_servers_cached() if s["container"] == container), None)
+    server = next((s for s in lookupkube.pg_servers_cached() if s["container"] == container), None)
     if server is None:
         raise ValueError(wording.say("databases.no_postgres"))
     return server
@@ -24,12 +24,12 @@ def _server(container):
 
 def _servers():
     try:
-        servers = lookup.pg_servers_cached()
+        servers = lookupkube.pg_servers_cached()
         if not servers:
             return {"error": wording.say("databases.no_postgres")}
         return {"servers": [{"container": s["container"], "engine": s.get("engine") or "postgres",
                              "version": s.get("version") or ""} for s in servers],
-                "databases": {s["container"]: lookup.pg_databases_cached(s) for s in servers}}
+                "databases": {s["container"]: lookupkube.pg_databases_cached(s) for s in servers}}
     except RuntimeError as e:
         return {"error": wording.say("databases.docker_unreachable", why=str(e))}
 

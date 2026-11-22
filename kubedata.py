@@ -5,8 +5,9 @@ import re
 import time
 
 import lookup  # noqa: E402,F401
-from lookup import (  # noqa: E402,F401
-    _km, _ks, full_time, kube_fault, kube_fmt_age, kube_get, kube_run, kube_seconds, kube_tool,
+from lookup import full_time  # noqa: E402,F401
+from lookupkube import (  # noqa: E402,F401
+    _km, _ks, kube_fault, kube_fmt_age, kube_get, kube_run, kube_seconds, kube_tool,
 )
 from baudelib import wording  # noqa: E402
 

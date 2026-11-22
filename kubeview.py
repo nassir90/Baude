@@ -33,9 +33,9 @@ gi.require_version("Graphene", "1.0")
 from gi.repository import Adw, Gdk, GdkPixbuf, Gio, GLib, GObject, Graphene, Gsk, Gtk, Pango  # noqa: E402,F401
 
 import lookup  # noqa: E402,F401
-from lookup import (  # noqa: E402,F401  (⌘K's engine: what a folder has)
-    _km, _ks, kube_contexts, kube_fault, kube_fmt_age,
-    kube_get, kube_local, kube_run, kube_seconds, kube_tool, kubeconfig_paths,
+from lookupkube import (  # noqa: E402,F401  (⌘K's engine: what a folder has)
+    _km, _ks, kube_contexts, kube_fault, kube_fmt_age, kube_get, kube_local, kube_run, kube_seconds, kube_tool,
+    kubeconfig_paths,
 )
 from widgets import (  # noqa: E402,F401
     Fade, RefreshButton, WorkerPool, ellipsize_dropdown, ensure_icons, find_label, full_time, inside, load_settings,

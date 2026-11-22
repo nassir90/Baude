@@ -2,7 +2,7 @@
 """A stand-in for the gh CLI, for the Feedback tab and its fixer: GitHub's issues and pull requests, in a JSON file
 (FAKE_GH_STATE: {viewer, issues, prs, calls, issues_on: {owner/name: the issues of a private repository it shows you}}).
 What's changed is what `gh` would change; every call's kept in calls.
-And `gh api`, as lookup.GITHUB asks it (rest): {rest: {owner/name: [issues as GitHub's REST API says them]}}."""
+And `gh api`, as lookupgit.GITHUB asks it (rest): {rest: {owner/name: [issues as GitHub's REST API says them]}}."""
 import fcntl
 import hashlib
 import json
@@ -158,7 +158,7 @@ def main():
         else:
             code = run(state, args)
         if args[0] == "api" and "rest" not in state:
-            return code  # (lookup.GITHUB, while a test of something else runs: its state left to it)
+            return code  # (lookupgit.GITHUB, while a test of something else runs: its state left to it)
         with open(os.environ["FAKE_GH_STATE"] + ".new", "w", encoding="utf-8") as f:
             json.dump(state, f)
         os.replace(os.environ["FAKE_GH_STATE"] + ".new", os.environ["FAKE_GH_STATE"])  # (a test may be reading it)

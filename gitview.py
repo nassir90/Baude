@@ -33,9 +33,8 @@ gi.require_version("Graphene", "1.0")
 from gi.repository import Adw, Gdk, GdkPixbuf, Gio, GLib, GObject, Graphene, Gsk, Gtk, Pango  # noqa: E402,F401
 
 import lookup  # noqa: E402,F401
-from lookup import (  # noqa: E402,F401  (⌘K's engine: what a folder has)
-    _git,
-)
+import lookupgit  # noqa: E402
+from lookupgit import _git  # noqa: E402,F401  (⌘K's engine: what a folder has)
 from widgets import (  # noqa: E402,F401
     LinkLabel, PR_COLORS, RefreshButton, WorkerPool, chip_markup, discard, draw_ref_icon, full_time, keep_times,
     on_label_link, pr_pill_markup, pr_title, pretty_path, ref_epoch, ref_pr_info, say_time, sel_label, shaded_picture,
@@ -61,7 +60,7 @@ from gitread import (  # noqa: E402,F401  (what's read, with no GTK: a host answ
 # the branch it came from, when each commit was made (the clock time) and how much it changed (lines added and
 # removed, in all and per file), and the commits this chat's own commands made. GitHub adds pull requests when gh is
 # signed in (the ones this chat touches, listed at the top, and a pill on each branch that has one, each in the colour
-# of where it stands: lookup.PULLS); otherwise there are links only. Everything is read with git, in a worker thread.
+# of where it stands: lookupgit.PULLS); otherwise there are links only. Everything is read with git, in a worker thread.
 # (Who made each commit, with their picture: "authors' pictures", below.)
 
 GIT_POOL = WorkerPool(2)
@@ -393,9 +392,9 @@ def git_ref_chip(ref):
 
 # ------------------------------------------------------- the chat's pull requests --
 # At the top of the Git page, the pull requests the chat touches, each a link to its page in the colour of where it
-# stands (lookup.PULLS, widgets.PR_COLORS): those from the branches it worked on (the chat's checkout's, and those its
-# own commands committed on or pushed to), those it opened (gh pr create), and those its replies name (a link to one, a
-# bare #12 that's one of the repository's). Record has no chat: there, those from the branches of the folder's
+# stands (lookupgit.PULLS, widgets.PR_COLORS): those from the branches it worked on (the chat's checkout's, and those
+# its own commands committed on or pushed to), those it opened (gh pr create), and those its replies name (a link to
+# one, a bare #12 that's one of the repository's). Record has no chat: there, those from the branches of the folder's
 # checkout. In the log, each branch's tip that a pull request is from has a pill before the branch's name.
 
 
@@ -621,7 +620,7 @@ class GitPage(Gtk.Stack):
         top.append(self.info)
         # the pull requests this chat touches (git_touched_pulls), each a link to its page: nothing at all, not even a
         # gap, while there are none (no gh, or signed out, too)
-        self.pulls, self.heads = None, {}  # (lookup.PULLS' of the repository shown; git_pull_heads')
+        self.pulls, self.heads = None, {}  # (lookupgit.PULLS' of the repository shown; git_pull_heads')
         # (each row as a log row is: its text where theirs starts, after the graph's lanes, as many as it has, and the
         # author's picture; its pill before that)
         self.lane_cols = 1  # (the graph's lanes, as the log was last drawn)
@@ -901,7 +900,7 @@ class GitPage(Gtk.Stack):
         self.info.set_markup(markup)
         self.info.set_visible(bool(markup))
         self.commits = res["commits"]
-        self.pulls = lookup.PULLS.states(res["repo"], want=False)  # (as last read: GitHub's answer comes after)
+        self.pulls = lookupgit.PULLS.states(res["repo"], want=False)  # (as last read: GitHub's answer comes after)
         self.heads = git_pull_heads(self.pulls)
         self.show_pulls()
         shown = (tuple(res["picked"]), res["every"])
@@ -1000,14 +999,14 @@ class GitPage(Gtk.Stack):
         GLib.timeout_add(16, scroll)
 
     def read_github(self, token, res):
-        """GitHub's part of the branch, after its history is shown: where the pull requests stand (lookup.PULLS: the
+        """GitHub's part of the branch, after its history is shown: where the pull requests stand (lookupgit.PULLS: the
         list at the top, the log's pills), and the branch's pull request (gh signed in only)."""
         b, repo = res["branch"], res["repo"]
         if not repo:
             return
 
         def work():
-            pulls = lookup.PULLS.read(repo, fresh=res["gh_refresh"])
+            pulls = lookupgit.PULLS.read(repo, fresh=res["gh_refresh"])
             GLib.idle_add(self.pulls_read, token, pulls)
             if not (b and b["name"]) or gh_state(refresh=res["gh_refresh"])[0] != "signed_in":
                 return
@@ -1023,9 +1022,9 @@ class GitPage(Gtk.Stack):
         return False
 
     def pulls_changed(self):
-        """Where the pull requests stand has changed (lookup.PULLS, read for something else): shown so here too."""
+        """Where the pull requests stand has changed (lookupgit.PULLS, read for something else): shown so here too."""
         if self.top and self.state.get("repo"):
-            self.set_pulls(lookup.PULLS.states(self.state["repo"], want=False))
+            self.set_pulls(lookupgit.PULLS.states(self.state["repo"], want=False))
 
     def set_pulls(self, pulls):
         """The pull requests as GitHub says they are now: the list at the top, and the log's pills where they've

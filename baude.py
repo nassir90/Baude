@@ -47,6 +47,7 @@ import urllib.parse
 import uuid
 
 import lookup
+import lookupgit
 from macos import full_redraws, ns_string, objc_send  # (no GTK: used before it loads)
 from baudelib.claude import (  # (Claude Code's process, without GTK: see baudelib/)
     _CLAUDE_VERSION, claude_env, claude_exe, claude_version, EFFORT_LABELS, HOST_SESSION_ENV, MACOS_DESKTOP_CLAUDE,
@@ -72,13 +73,16 @@ from baudelib.models import (  # noqa: E402,F401
     APPLE_MODEL, apple_exe, LOCAL_MODELS, local_models, model_program, PI_CLAUDE, pi_exe,
 )
 from lookup import (  # (⌘K's engine: the names a folder has; see lookup.py)
-    CATALOGUE_TTL, GITHUB, Names, PG_LISTS, REF_KINDS, REF_LOC_FIELDS, Ref, _CATALOGUE_TOKEN, _KUBE_ACTION, _KUBE_NAME,
-    _git, _km, _ks, _kube_args, arango_eval, at_once, catalogue_hits, catalogue_ref, catalogue_shaped, db_index,
-    db_names, find_spans, git_exe, github_data, kube_contexts, kube_fault, kube_fmt_age, kube_get, kube_local, kube_made_as,
-    kube_run, kube_running, kube_seconds, kube_tool, kubeconfig_paths, pg_databases, pg_databases_cached, pg_query,
-    pg_servers, pg_servers_cached, ref_date, ref_icon, ref_key, ref_palette_rank, ref_yaml_path,
-    signal_glossary_exists, signal_place, signal_store,
+    CATALOGUE_TTL, Names, REF_KINDS, REF_LOC_FIELDS, Ref, _CATALOGUE_TOKEN, catalogue_hits, catalogue_ref,
+    catalogue_shaped, find_spans, ref_date, ref_icon, ref_key, ref_palette_rank, signal_glossary_exists, signal_place,
+    signal_store,
 )
+from lookupkube import (
+    PG_LISTS, _KUBE_ACTION, _KUBE_NAME, _km, _ks, _kube_args, arango_eval, at_once, db_index, db_names, kube_contexts,
+    kube_fault, kube_fmt_age, kube_get, kube_local, kube_made_as, kube_run, kube_running, kube_seconds, kube_tool,
+    kubeconfig_paths, pg_databases, pg_databases_cached, pg_query, pg_servers, pg_servers_cached, ref_yaml_path,
+)
+from lookupgit import GITHUB, _git, git_exe, github_data
 
 
 def macos_fonts():
@@ -1236,7 +1240,7 @@ class Signal(Names):
 
     # ---- worker thread
     def _run(self):
-        lookup.git_wait(self.wait_still)
+        lookupgit.git_wait(self.wait_still)
         while True:
             jobs = [self.jobs.get()]
             self.wait_still()  # (and what's queued meanwhile goes with it)
@@ -17649,13 +17653,13 @@ class BaudeWindow(CompactMarks, Adw.ApplicationWindow, FeedbackHost, widgets.Acc
         return pop
 
     def github_folders(self):
-        """What GitHub's lists are read for (lookup.GitHub.look): the repository this chat's folder is in."""
+        """What GitHub's lists are read for (lookupgit.GitHub.look): the repository this chat's folder is in."""
         return [self.signal.root if self.signal is not None else self.ref_checkout or self.cwd]
 
     @staticmethod
     def _github_changed(win):
-        """GitHub's lists, or where its pull requests stand (lookup.PULLS), have changed: the replies naming one drawn
-        again (their pills: widgets.pr_pill), the Git page's list and pills too."""
+        """GitHub's lists, or where its pull requests stand (lookupgit.PULLS), have changed: the replies naming one
+        drawn again (their pills: widgets.pr_pill), the Git page's list and pills too."""
         if win.signal is not None:
             win.signal.github_changed()
         was = widgets.SIGNAL, MarkdownView.base_dir  # (drawn with this window's links, as it would itself: then

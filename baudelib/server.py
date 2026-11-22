@@ -2738,14 +2738,16 @@ class Server:
         if root not in sys.path:
             sys.path.insert(0, root)
         import lookup
+        import lookupgit
         with self.catalogue_lock:  # (two heads asking at once: one Folder, made once)
             folder = lookup.Folder.for_folder(real)
             folder.catalogue_soon()
             first = self.catalogue_asked.setdefault(folder.root, time.monotonic())
-        lookup.GITHUB.look([folder.root])
+        lookupgit.GITHUB.look([folder.root])
 
         def busy():
-            github = lookup.gh_path() is not None and lookup.GITHUB.listed(folder.root) is lookup.GITHUB.NOTHING and \
+            github = lookupgit.gh_path() is not None and \
+                lookupgit.GITHUB.listed(folder.root) is lookupgit.GITHUB.NOTHING and \
                 time.monotonic() - first < CATALOGUE_WAIT_S  # (its first read: a folder that's on GitHub's, soon)
             return folder.catalogue_busy or github
         if wait or not folder.catalogue:

@@ -1,5 +1,5 @@
 {
- "description": "GitHub as the git scenes see it (gh signed in): the garden's repository, who is signed in, each author's GitHub login by email, the pull requests a commit is in (by number), and the repository's pull requests as lookup.pull_info keeps them.",
+ "description": "GitHub as the git scenes see it (gh signed in): the garden's repository, who is signed in, each author's GitHub login by email, the pull requests a commit is in (by number), and the repository's pull requests as lookupgit.pull_info keeps them.",
  "repo": "garden-dev/garden",
  "login": "dev",
  "logins": {

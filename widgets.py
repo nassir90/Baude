@@ -39,10 +39,11 @@ gi.require_version("Graphene", "1.0")
 from gi.repository import Adw, Gdk, GdkPixbuf, Gio, GLib, GObject, Graphene, Gsk, Gtk, Pango  # noqa: E402,F401
 
 import lookup  # noqa: E402,F401
+import lookupgit  # noqa: E402
 from lookup import (  # noqa: E402,F401  (⌘K's engine: what a folder has)
-    _CATALOGUE_TOKEN, _KUBE_NAME, _kube_args, catalogue_shaped, find_spans, full_time, ref_icon,
-    ref_key,
+    _CATALOGUE_TOKEN, catalogue_shaped, find_spans, full_time, ref_icon, ref_key,
 )
+from lookupkube import _KUBE_NAME, _kube_args  # noqa: E402,F401
 from macos import ns_string, objc_send, set_window_frame, window_frame  # noqa: E402,F401
 import pointers  # noqa: E402
 import fontsetup  # noqa: E402  (the code font, and its size beside the prose)
@@ -61,13 +62,13 @@ _scales = scales
 # a database, a graph for ArangoDB, a file…), in the text's own colour (currentColor). 16×16, drawn at the text's size:
 # schema/icons/links, by name.
 REF_ICON_SVG = {name: icons.svg("links", name) for name in icons.names("links")}
-# A pull request has a branch's logo, an issue its #, in a colour of their own for where they stand (lookup.github_icon),
+# A pull request has a branch's logo, an issue its #, in a colour of their own for where they stand (lookupgit.github_icon),
 # light or dark: green while it's open, purple once merged, grey if it came to nothing (closed unmerged, or an issue
 # closed: an open issue is the text's colour, as most logos are).
 REF_ICON_SVG.update(pr_open=REF_ICON_SVG["git"], pr_merged=REF_ICON_SVG["git"], pr_closed=REF_ICON_SVG["git"],
                     issue_closed=REF_ICON_SVG["issue"])
 REF_ICON_TINTS = {"pr_open": "#2da44e", "pr_merged": "#8957e5", "pr_closed": "#8a8f98", "issue_closed": "#8a8f98"}
-# A pull request's pill, in a reply and on the Git page, is in the colour of where it stands (lookup.pull_state), the
+# A pull request's pill, in a reply and on the Git page, is in the colour of where it stands (lookupgit.pull_state), the
 # same light or dark (each reads on either), its patch that colour faint: green while it's open, grey while it's a
 # draft, red once a review asks for changes (whatever else it is: it's held up), purple once merged; closed without
 # being merged, the same grey fainter and struck through. One not known yet is a plain link on a patch of the text's
@@ -1144,7 +1145,7 @@ def chat_repo():
     """The GitHub repository (owner/name) the reply being drawn is in, what a bare #12 in it means: its Signal's (the
     chat's checkout's origin), else its folder's as GITHUB has read it. None if there's none."""
     return getattr(SIGNAL, "github", None) or \
-        lookup.GITHUB.own_repository(getattr(SIGNAL, "folder", None) or MarkdownView.base_dir)
+        lookupgit.GITHUB.own_repository(getattr(SIGNAL, "folder", None) or MarkdownView.base_dir)
 
 
 def pr_pill(repo, number, inner, href=None, known=False, any_repo=False):
@@ -1156,9 +1157,10 @@ def pr_pill(repo, number, inner, href=None, known=False, any_repo=False):
     at code's size (pill_code_scale: a number among `names` is as big as they are; LinkLabel's logo and patch follow)."""
     if not repo or not any_repo and repo.lower() != (chat_repo() or "").lower():
         return None
-    if lookup.PULLS.states(repo) is None and not (any_repo and lookup.gh_path() and not lookup.PULLS.signed_out()):
+    if lookupgit.PULLS.states(repo) is None and \
+            not (any_repo and lookupgit.gh_path() and not lookupgit.PULLS.signed_out()):
         return None
-    p = lookup.PULLS.pull(repo, number)
+    p = lookupgit.PULLS.pull(repo, number)
     if p is None and known:
         return None
     # (a size="…%" is a share of the label's own size, not of the span it's in: code in a link's text keeps its)
@@ -10160,7 +10162,7 @@ class RefPalette(Adw.Dialog):
         GLib.idle_add(lambda: self.on_open(item) and False)
 
 
-# ---- GitHub's pull requests and issues (lookup.GITHUB), kept up with while a window's shown
+# ---- GitHub's pull requests and issues (lookupgit.GITHUB), kept up with while a window's shown
 GITHUB_TICK_S = 5
 
 
@@ -10172,13 +10174,13 @@ def window_shown(win):
 
 
 def watch_github(win, folders, changed=None):
-    """While win's shown: GitHub's lists of the folders in use (folders(win): a list, lookup.GitHub.look)
+    """While win's shown: GitHub's lists of the folders in use (folders(win): a list, lookupgit.GitHub.look)
     looked at when it's time, or the folders are others, and once they've changed, what's on show drawn afresh: ⌘K if
     it's open and its first row is what's picked (changed(win), the rest). Where the pull requests of those folders'
-    repositories stand (lookup.PULLS, once something's shown them) likewise. folders and changed are plain functions,
+    repositories stand (lookupgit.PULLS, once something's shown them) likewise. folders and changed are plain functions,
     as this holds nothing of the window: it goes when the window does."""
-    window, seen, looked, asked = weakref.ref(win), [lookup.GITHUB.generation], [-lookup.GITHUB_LOOK_S], [None]
-    pulls = [lookup.PULLS.generation]
+    window, seen, looked, asked = weakref.ref(win), [lookupgit.GITHUB.generation], [-lookupgit.GITHUB_LOOK_S], [None]
+    pulls = [lookupgit.PULLS.generation]
 
     def tick():
         win = window()
@@ -10187,12 +10189,12 @@ def watch_github(win, folders, changed=None):
         if not window_shown(win):
             return True
         now, in_use = time.monotonic(), folders(win)
-        if now - looked[0] >= lookup.GITHUB_LOOK_S or in_use != asked[0]:
+        if now - looked[0] >= lookupgit.GITHUB_LOOK_S or in_use != asked[0]:
             looked[0], asked[0] = now, in_use
-            lookup.GITHUB.look(in_use)
-        lookup.PULLS.look(lookup.GITHUB.own_repository(f) for f in in_use)
-        if seen[0] != lookup.GITHUB.generation or pulls[0] != lookup.PULLS.generation:
-            seen[0], pulls[0] = lookup.GITHUB.generation, lookup.PULLS.generation
+            lookupgit.GITHUB.look(in_use)
+        lookupgit.PULLS.look(lookupgit.GITHUB.own_repository(f) for f in in_use)
+        if seen[0] != lookupgit.GITHUB.generation or pulls[0] != lookupgit.PULLS.generation:
+            seen[0], pulls[0] = lookupgit.GITHUB.generation, lookupgit.PULLS.generation
             dialog = win.get_visible_dialog()
             if isinstance(dialog, RefPalette) and dialog.selection.get_selected() in (0, Gtk.INVALID_LIST_POSITION):
                 dialog.fill()

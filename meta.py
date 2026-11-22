@@ -44,6 +44,7 @@ from gi.repository import Adw, Gdk, GLib, Graphene, Gtk, Pango  # noqa: E402
 
 import fontsetup  # noqa: E402
 import lookup  # noqa: E402
+import lookupgit  # noqa: E402
 import update  # noqa: E402
 import widgets  # noqa: E402
 from baudelib import tokens  # noqa: E402  (Meta's measures: schema/tokens, Baude's)
@@ -363,7 +364,7 @@ def _inline(s, names=()):
         found = []  # (the names in prose, kept out of the formatting as \0n\0, put back linked)
         if names:
             keep = lambda m: m[0] if m[0] not in names else (found.append(m[0]) or f"\0{len(found) - 1}\0")  # noqa: E731
-            part = lookup._CATALOGUE_TOKEN.sub(keep, lookup.GITHUB_NAME.sub(keep, part))
+            part = lookup._CATALOGUE_TOKEN.sub(keep, lookupgit.GITHUB_NAME.sub(keep, part))
         t = html.escape(part, False)
         t = re.sub(r"\[([^\]]+)\]\((https?://[^)\s]+)\)",
                    lambda m: f'<a href="{html.escape(m.group(2))}">{m.group(1)}</a>', t)
@@ -3359,8 +3360,8 @@ class MetaChat(Gtk.Box):
             r = refs.get(found.group(1) or found.group(2))
             if r is None:
                 continue
-            github = lookup.GITHUB_NAME.fullmatch(r["surface"]) if (r.get("icon") or "").startswith(("pr_", "issue")) \
-                else None
+            github = lookupgit.GITHUB_NAME.fullmatch(r["surface"]) \
+                if (r.get("icon") or "").startswith(("pr_", "issue")) else None
             name = html.escape(github[2] if github else r["surface"], False)
             out += [html.escape(text[at:found.start()], False),
                     f'<a href="ref:{urllib.parse.quote(r["surface"], safe="")}"><span foreground="{REF_COLOR}" '

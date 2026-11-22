@@ -111,6 +111,8 @@ import fixview  # noqa: E402
 import gitview  # noqa: E402
 import kubeview  # noqa: E402
 import lookup  # noqa: E402
+import lookupgit  # noqa: E402
+import lookupkube  # noqa: E402
 import macos  # noqa: E402
 import schemaview  # noqa: E402
 import update  # noqa: E402
@@ -122,18 +124,19 @@ _MOVED = (widgets, codeview, kubeview, schemaview, gitview, feedback,  # (what w
 
 
 class _Baude:
-    """baude, as the tests use it: a name a test replaces is replaced wherever it's held: in baude, in lookup (⌘K's
-    engine, whose own functions call it), and in the modules code moved to out of baude.py (widgets and the viewers'),
-    whose code saw baude's when it was there. A name baude doesn't hold is read from those (SIGNAL is widgets')."""
+    """baude, as the tests use it: a name a test replaces is replaced wherever it's held: in baude, in lookup,
+    lookupkube and lookupgit (⌘K's engine, whose own functions call it), and in the modules code moved to out of
+    baude.py (widgets and the viewers'), whose code saw baude's when it was there. A name baude doesn't hold is read
+    from those (SIGNAL is widgets')."""
 
     def __getattr__(self, name):
-        for m in (_baude, *_MOVED, lookup):
+        for m in (_baude, *_MOVED, lookup, lookupkube, lookupgit):
             if name in vars(m):
                 return getattr(m, name)
         raise AttributeError(name)
 
     def __setattr__(self, name, value):
-        for m in [m for m in (_baude, *_MOVED, lookup) if name in vars(m)] or [_baude]:
+        for m in [m for m in (_baude, *_MOVED, lookup, lookupkube, lookupgit) if name in vars(m)] or [_baude]:
             setattr(m, name, value)
 
 
@@ -14493,7 +14496,7 @@ def test_github_in_the_glossary_search(app):
         saved["rest"][own] = [rest(3, "Baude's own"), rest(4, "Not feedback, somehow"), rest(5, "Baude's other")]
     with open(state, "w") as f:
         json.dump(saved, f)
-    lookup.GITHUB.forget()
+    lookupgit.GITHUB.forget()
     win = app.window()
     opened, real_web, saved_signal = [], fixview.web, win.signal
     fixview.web = lambda _win, url: opened.append(url)
@@ -14502,7 +14505,7 @@ def test_github_in_the_glossary_search(app):
         win.signal = types.SimpleNamespace(refs={"#9": ref}, catalogue={}, catalogue_busy=False, root=folder,
                                            catalogue_soon=lambda: None, github_changed=lambda: None)
         assert win.github_folders() == [folder], "the repository the chat's folder is in, alone"
-        lookup.GITHUB.round([folder])
+        lookupgit.GITHUB.round([folder])
         pal = baude.RefPalette(win)
         pal.present(win)
         wait_for(lambda: win.get_visible_dialog() is pal, "the palette")
@@ -14546,8 +14549,8 @@ def test_github_in_the_glossary_search(app):
         saved["rest"]["acme/shop"][2] = rest(7, "Lists scroll past the end", state="closed")
         with open(state, "w") as f:
             json.dump(saved, f)
-        lookup.GITHUB._repos["acme/shop"]["looked"] = 0.0
-        lookup.GITHUB.round([folder])
+        lookupgit.GITHUB._repos["acme/shop"]["looked"] = 0.0
+        lookupgit.GITHUB.round([folder])
         sig.github_changed()
         assert told == [["acme/shop#7"]], told
         assert baude.ref_icon(sig.refs["acme/shop#7"].kind, sig.refs["acme/shop#7"].data) == "issue_closed"
@@ -14556,7 +14559,7 @@ def test_github_in_the_glossary_search(app):
         # a branch that's spelt as one is a branch
         sig.catalogue = {**sig.catalogue, "feature/login#12": {"kind": "branch", "hint": None, "sources": [("Branch", "")]}}
         assert sig._pr("feature/login#12").kind == "branch"
-        assert lookup.github_url("feature/login#12") is None
+        assert lookupgit.github_url("feature/login#12") is None
 
         # a bare number in a reply's code is no link, whatever's been looked up (a colour's #333)
         was, baude.widgets.SIGNAL = baude.widgets.SIGNAL, sig
@@ -14573,8 +14576,8 @@ def test_github_in_the_glossary_search(app):
             os.makedirs(checkout, exist_ok=True)
             subprocess.run(git + ["init", "-q"], cwd=checkout, check=True, capture_output=True)
             subprocess.run(git + ["remote", "add", "origin", f"https://github.com/{own}.git"], cwd=checkout, check=True)
-            lookup.GITHUB.round([checkout])
-            listed = {it["surface"]: it["entry"]["github"] for it in lookup.GITHUB.listed(checkout)}
+            lookupgit.GITHUB.round([checkout])
+            listed = {it["surface"]: it["entry"]["github"] for it in lookupgit.GITHUB.listed(checkout)}
             opened.clear()
             baude.ref_palette_open(win, f"{own}#3", {"github": listed[f"{own}#3"], "kind": "issue"}, checkout)
             page = win.tabs.get(("fixes",))
@@ -14595,7 +14598,7 @@ def test_github_in_the_glossary_search(app):
         fixview.web = real_web
         win.signal = saved_signal
         no_github()
-        lookup.GITHUB.forget()
+        lookupgit.GITHUB.forget()
         win.close()
 
 

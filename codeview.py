@@ -35,9 +35,7 @@ from gi.repository import Adw, Gdk, GdkPixbuf, Gio, GLib, GObject, Graphene, Gsk
 from baudelib import wording  # noqa: E402
 import lookup  # noqa: E402,F401
 import widgets  # noqa: E402
-from lookup import (  # noqa: E402,F401  (⌘K's engine: what a folder has)
-    _git, git_exe,
-)
+from lookupgit import _git, git_exe  # noqa: E402,F401  (⌘K's engine: what a folder has)
 from widgets import (  # noqa: E402,F401
     IMAGE_POOL, FindBar, LineGutter, WorkerPool, ZOOM_MAX, ZOOM_MIN, ZOOM_STEP,
     code_spans, code_style, discard, load_settings, open_code,

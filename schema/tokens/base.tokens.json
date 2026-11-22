@@ -152,8 +152,8 @@
       "$value": {"value": 8, "unit": "px"}
     },
     "bubble-h": {"$description": "And its sides.", "$value": {"value": 12, "unit": "px"}},
-    "composer-button": {
-      "$description": "A button under the box you write in (.composer-actions).",
+    "bar-button": {
+      "$description": "A flat button in a bar on the phone, as libadwaita's (IconButton): its side.",
       "$value": {"value": 34, "unit": "px"}
     },
     "card-v": {
@@ -502,7 +502,13 @@
   },
   "composer": {
     "$type": "dimension",
-    "thumb": {"$description": "A picture attached in the box: its thumbnail's side.", "$value": {"value": 48, "unit": "px"}}
+    "$description": "The box you write in: the chat's, Meta's, Record's and a side question's.",
+    "thumb": {"$description": "A picture attached in the box: its thumbnail's side.", "$value": {"value": 48, "unit": "px"}},
+    "button": {"$description": "Its + and send buttons' side (.composer-actions button).", "$value": {"value": 28, "unit": "px"}},
+    "inset": {
+      "$description": "Those buttons, in from the box's right and bottom edges. Empty, the box is a button's height and this above and below it, its line of text centred on the buttons'.",
+      "$value": {"value": 4, "unit": "px"}
+    }
   },
   "compact": {
     "$type": "dimension",

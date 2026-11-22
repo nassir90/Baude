@@ -12,7 +12,7 @@ gi.require_version("Gsk", "4.0")
 gi.require_version("Graphene", "1.0")
 from gi.repository import Gdk, GLib, Graphene, Gsk, Gtk, Pango  # noqa: E402,F401
 
-from baudelib import wording  # noqa: E402
+from baudelib import tokens, wording  # noqa: E402
 from widgets import code_scale, ensure_icons  # noqa: E402
 from markdownview import BULLET, INDENT_STEP, MarkdownView, SUB_BULLET, _ITEM, bullet_for, fence_spans  # noqa: E402
 
@@ -606,22 +606,31 @@ def newline_key(markdown, state):
 
 class Composer(Gtk.Overlay):
     """The box a message is written in, Baude's and Record's alike: its text (ComposerView, its markdown shown as it's
-    written: ComposerMarkdown) in a card, at least two lines tall and scrolling past nine, with its buttons in its
-    bottom right corner, the send button last; the text's right margin keeps it from running under them. buttons:
-    any to go before the send button (Baude's attach). head: what's over the text, in the card, the card as tall again
-    as it needs (Record's quote). Its owner connects the send button and the keys."""
+    written: ComposerMarkdown) in a card, wrapped close round its buttons while it's a line (schema/tokens' composer:
+    a button's height, its inset above and below), growing with the text and scrolling past nine lines, with its
+    buttons in its bottom right corner, the send button last; the text's right margin keeps it from running under
+    them. buttons: any to go before the send button (Baude's attach). head: what's over the text, in the card, the
+    card as tall again as it needs (Record's quote). Its owner connects the send button and the keys."""
 
-    FOLLOW_TOP = 20  # (follow_text's text top margin: its first line's middle level with the send button's)
+    BUTTON, INSET = tokens.px("composer.button"), tokens.px("composer.inset")
+    LEAST = BUTTON + 2 * INSET  # (a line's: the buttons and their inset)
+    PAD = 10  # (the text's margins: a line of the chat's text, 16px, centred on the buttons')
 
     def __init__(self, buttons=(), send_tip=wording.say("composer.send", key=SEND_KEY), follow_text=False):
-        self.input = ComposerView(wrap_mode=Gtk.WrapMode.WORD_CHAR, top_margin=10, bottom_margin=10,
-                                  left_margin=10, right_margin=20 + 38 * (len(buttons) + 1), accepts_tab=False)
+        across = (self.BUTTON + 4) * (len(buttons) + 1) - 4  # (the buttons, 4 apart: actions' spacing)
+        self.input = ComposerView(wrap_mode=Gtk.WrapMode.WORD_CHAR, top_margin=self.PAD, bottom_margin=self.PAD,
+                                  left_margin=self.PAD, right_margin=self.INSET + across + self.PAD, accepts_tab=False)
         self.input.add_css_class("zoomable")
         no_text_drag(self.input)  # (a selection isn't dragged away: a press in it places the caret)
         word_steps(self.input)
         self.markdown = ComposerMarkdown(self.input)
-        scroll = Gtk.ScrolledWindow(min_content_height=56, max_content_height=220, propagate_natural_height=True,
-                                    hexpand=True, child=self.input)
+        # (no scrollbar till the text's past the box's most: a shown one's least length would keep it two lines tall)
+        scroll = Gtk.ScrolledWindow(min_content_height=self.LEAST, max_content_height=220, propagate_natural_height=True,
+                                    hexpand=True, child=self.input, hscrollbar_policy=Gtk.PolicyType.NEVER,
+                                    vscrollbar_policy=Gtk.PolicyType.EXTERNAL)
+        adj = scroll.get_vadjustment()
+        adj.connect("changed", lambda *_: self._scrollbar_soon())
+        self.scroll, self.scrollbar_soon = scroll, None
         self.head = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         self.head.add_css_class("composer-head")
         click = Gtk.GestureClick()  # (a click there puts the caret in the text, as one in the card's margins does)
@@ -632,7 +641,8 @@ class Composer(Gtk.Overlay):
         body.append(scroll)
         super().__init__(child=body, hexpand=True)
         self.send, self.send_tip = Gtk.Button(), send_tip
-        actions = Gtk.Box(spacing=4, halign=Gtk.Align.END, valign=Gtk.Align.END, margin_end=10, margin_bottom=10)
+        actions = Gtk.Box(spacing=4, halign=Gtk.Align.END, valign=Gtk.Align.END, margin_end=self.INSET,
+                          margin_bottom=self.INSET)
         actions.add_css_class("composer-actions")
         for button in buttons:
             actions.append(button)
@@ -640,16 +650,28 @@ class Composer(Gtk.Overlay):
         self.add_overlay(actions)
         if follow_text:  # (a box taller than its text: the buttons level with its last line, at most at the bottom)
             self.actions = actions
-            self.input.set_top_margin(self.FOLLOW_TOP)  # (the first line's middle level with the buttons', as far
-            #                                             from the top as they are from the side)
             self.connect("get-child-position", self._place_actions)
             self.input.get_buffer().connect("changed", lambda *_: self.queue_allocate())
-            scroll.get_vadjustment().connect("value-changed", lambda *_: self.queue_allocate())
+            adj.connect("value-changed", lambda *_: self.queue_allocate())
         self.add_css_class("card")
         self.add_css_class("composer-box")
         self.set_overflow(Gtk.Overflow.HIDDEN)
         self.gates, self.busy = set(), False  # (what keeps what's written from being sent now: gate)
         self.set_busy(False)
+
+    def _scrollbar_soon(self):
+        """The scrollbar shown once the text's past the box's most, hidden again under it: after this layout (it's
+        laid out again, its least height changed), not in it."""
+        if self.scrollbar_soon is None:
+            self.scrollbar_soon = GLib.idle_add(self._scrollbar)
+
+    def _scrollbar(self):
+        self.scrollbar_soon = None
+        adj = self.scroll.get_vadjustment()
+        want = Gtk.PolicyType.AUTOMATIC if adj.get_upper() > adj.get_page_size() + 0.5 else Gtk.PolicyType.EXTERNAL
+        if self.scroll.get_policy()[1] != want:
+            self.scroll.set_policy(Gtk.PolicyType.NEVER, want)
+        return GLib.SOURCE_REMOVE
 
     def _place_actions(self, _overlay, child, rect):
         """follow_text's buttons: in the bottom right, but no lower than centred on the text's last line."""

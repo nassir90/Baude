@@ -36,7 +36,7 @@
         },
         {
           "name": "opened thread (under the line)",
-          "shows": "On a darker inside inset from the row: the thread (the answer as a markdown reply, then each follow-up as a user bubble followed by its answer), nothing at all above the box until something has been asked; then under it a one-line-tall box for a follow-up with a small send button (a stop button while answering). Scrolls past nine lines of typing. No dots or context meter here.",
+          "shows": "On a darker inside inset from the row: the thread (the answer as a markdown reply, then each follow-up as a user bubble followed by its answer), nothing at all above the box until something has been asked; then under it the box for a follow-up, the composer's (Composer): one line tall wrapped close round its send button (a stop button while answering). Scrolls past nine lines of typing. No dots or context meter here.",
           "actions": [
             {"by": "key Ctrl+Enter / ⌘Enter, or send", "does": "asks the follow-up in the same claude; the box is emptied (kept if it couldn't be sent)"},
             {"by": "key Enter", "does": "new line"},
@@ -49,7 +49,7 @@
     },
     {
       "name": "full page (detail)",
-      "shows": "Header over the thread. Header: status mark (as in the row), the question as one ellipsised line, a back button ‹ (tooltip \"All side questions\") at the end. Under it the thread fills the page and scrolls; at its foot a Meta-style box (at least two lines tall, scrolls vertically if long), and under the box working dots on the left while it answers and a context meter (how much of the model's window the question's context uses, e.g. \"24k / 200k\") at the right, refreshed about once a second while answering and after each answer.",
+      "shows": "Header over the thread. Header: status mark (as in the row), the question as one ellipsised line, a back button ‹ (tooltip \"All side questions\") at the end. Under it the thread fills the page and scrolls; at its foot the same box (one line tall till more is typed, scrolls vertically if long), and under the box working dots on the left while it answers and a context meter (how much of the model's window the question's context uses, e.g. \"24k / 200k\") at the right, refreshed about once a second while answering and after each answer.",
       "copy": ["side_questions.all"],
       "actions": [
         {"by": "click back", "does": "closes into its row (into its thread under the line, if it was open there)"},

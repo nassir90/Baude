@@ -37,7 +37,7 @@
   "parts": [
     {
       "name": "text box",
-      "shows": "A card with the text in the chat's font (scales with chat zoom), word-wrapped, at least two lines tall, growing with the text and scrolling past about nine lines (220 px). The right margin keeps text from running under the buttons. No placeholder text. Spell check is not on in Baude's box (it is a Record page feature). The box takes the focus when a window opens; a click anywhere in the card puts the caret in the text.",
+      "shows": "A card with the text in the chat's font (scales with chat zoom), word-wrapped. Empty or one line, it is wrapped close round its buttons: as tall as a button (composer.button, 28 px) with the buttons' inset (composer.inset, 4 px) above and below, the line centred on the buttons, the same height as a side question's box under its question (SideQuestions). It grows with the text and scrolls past about nine lines (220 px), its scrollbar shown only then. The right margin keeps text from running under the buttons. No placeholder text. Spell check is not on in Baude's box (it is a Record page feature). The box takes the focus when a window opens; a click anywhere in the card puts the caret in the text.",
       "actions": [
         {
           "by": "key Enter",
@@ -85,7 +85,7 @@
     },
     {
       "name": "attach button",
-      "shows": "A flat button with a + (list-add) icon, left of the send button, bottom right of the card.",
+      "shows": "A flat button with a + (list-add) icon, left of the send button, bottom right of the card: 28 px square (composer.button), 4 px apart.",
       "copy": [
         "attachments.attach_tip"
       ],
@@ -102,7 +102,7 @@
     },
     {
       "name": "send / stop button",
-      "shows": "A round icon button, last in the corner. Idle: grey, a return-arrow icon. While the agent works: red (destructive), a stop square icon.",
+      "shows": "A round icon button, last in the corner, 28 px square (composer.button), 4 px in from the card's right and bottom edges (composer.inset). Idle: grey, a return-arrow icon. While the agent works: red (destructive), a stop square icon.",
       "copy": [
         "composer.send",
         "composer.stop"

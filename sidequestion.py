@@ -81,12 +81,11 @@ class SideQuestion(CompactMarks, Gtk.ListBoxRow):
     (SidePanel.ask_typed) is made with no question and given it at once. One whose claude couldn't be had keeps its
     question in its own box, to send again: its claude starts then.
     Its thread (inside: the darker inside, the box it's asked in under it, Meta's) opens under its line (toggle: ⌄, −
-    to close it again), the box slimmer there, or fills the page (full: SidePanel.open_side_question, back out of it),
-    the box as Meta's is, its dots and context meter under it."""
+    to close it again), or fills the page (full: SidePanel.open_side_question, back out of it), its dots and context
+    meter under the box there."""
 
     PREFACE = ("(This is a side question, asked while you work on the conversation above. Answer it "
                "briefly from what you already know; don't continue the task or use tools.)\n\n")
-    SLIM = 36  # (its box's least height under its line: a line; Meta's, filling the page, two)
     CONTEXT_EVERY_MS = 1000
 
     def __init__(self, win, question=None):
@@ -165,21 +164,8 @@ class SideQuestion(CompactMarks, Gtk.ListBoxRow):
         self.toggle.set_icon_name("list-remove-symbolic" if on else "pan-down-symbolic")
         self.toggle.set_tooltip_text("Hide this side question" if on else "Show this side question")
 
-    def _box_scroll(self):
-        return self.composer.get_parent()  # (Composer's scrolled window)
-
-    def _slim(self, on):
-        """Its box a line tall, its send button smaller and as far from the box's edges as from its top (CSS's .slim);
-        or Meta's."""
-        (self.writing.add_css_class if on else self.writing.remove_css_class)("slim")
-        actions = self.writing.send.get_parent()
-        actions.set_margin_end(4 if on else 10)
-        actions.set_margin_bottom(4 if on else 10)
-        # (a line tall: the button beside it)
-        self.composer.set_top_margin(10 if on else composerview.Composer.FOLLOW_TOP)
-
     def put_inside_row(self):
-        """Its thread back under its line (from the whole page), as tall as it is, its box slimmer."""
+        """Its thread back under its line (from the whole page), as tall as it is."""
         if (parent := self.inside.get_parent()) is not None:
             parent.remove(self.inside)
         self.scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.NEVER)
@@ -188,17 +174,12 @@ class SideQuestion(CompactMarks, Gtk.ListBoxRow):
         self.scroll.set_visible(self.answer is not None)  # (nothing over its box till something's asked)
         self.inside.set_vexpand(False)
         self.inside.set_margin_start(widgets.INSIDE_GAP)
-        box = self._box_scroll()
-        box.set_min_content_height(self.SLIM)
-        # (no scrollbar: a shown one's least length would keep it two lines tall; still scrolled, past nine)
-        box.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.EXTERNAL)
-        self._slim(True)
         self.comp.set_margin_bottom(10)
         self.foot.set_visible(False)
         self.reveal.set_child(self.inside)
 
     def take_inside(self):
-        """Its thread, for the whole page: scrolled there, the box under it Meta's, dots and context meter too."""
+        """Its thread, for the whole page: scrolled there, the box under it, dots and context meter too."""
         self.reveal.set_child(None)
         self.scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
         self.scroll.set_propagate_natural_height(False)
@@ -206,10 +187,6 @@ class SideQuestion(CompactMarks, Gtk.ListBoxRow):
         self.scroll.set_visible(True)  # (asked or not: the page over its box, the box at its foot, as Meta's)
         self.inside.set_vexpand(True)
         self.inside.set_margin_start(0)  # (as a subagent's square: none on the main chat's side, its gap's the one)
-        box = self._box_scroll()
-        box.set_min_content_height(56)  # (Composer's own)
-        box.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
-        self._slim(False)
         self.comp.set_margin_bottom(0)  # (as Meta's: its box as far up from the page's foot as Meta's and the chat's)
         self.foot.set_visible(True)
         return self.inside

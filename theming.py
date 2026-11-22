@@ -172,7 +172,8 @@ row.entry.focused, row.spin.focused, editablelabel:focus-within { outline: none;
 .statusbar .chat-host { padding: 0 5px; border-radius: 4px; background: alpha(currentColor, 0.1); }
 .sysnote { font-size: {font.small}em; opacity: 0.6; }
 .compact-mark label.error { opacity: 1; }
-.composer-actions button { min-width: {gap.composer-button}; min-height: {gap.composer-button}; padding: 0; }
+.composer-actions button { min-width: {composer.button}; min-height: {composer.button}; padding: 0; }
+.feedback-actions button { min-width: 34px; min-height: 34px; padding: 0; }
 .attach-chip { background: @baude_raised; border-radius: {radius.card}; padding: 2px 2px 2px 4px; }
 .attach-thumb { border-radius: 6px; }
 .file-thumb { border-radius: 3px; }
@@ -297,7 +298,6 @@ listview.file-tree > row { min-height: 24px; padding-top: 1px; padding-bottom: 1
 .side-panel .process-row > box > row { margin: 2px; }
 .side-panel .process-row .process-body { background-color: color-mix(in srgb, var(--card-shade-color) 50%, transparent);
   box-shadow: inset 0 1px var(--border-color); }
-.composer-box.slim .composer-actions button { min-width: 28px; min-height: 28px; }
 /* (the inside's edge is the line. Filled as the frame is: left clear, the pixel between the panes shows the darker window
    behind them, a second line beside it. The paned too, as the rule's moved off that pixel, below) */
 paned.main-split { background-color: @baude_frame; }

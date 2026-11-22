@@ -158,14 +158,14 @@ fun SideQuestionsPage(chat: Chat) {
                     items(q.thread.drop(1)) { Said(it) }
                     if (q.status.value == "running") item { Text("Working…", style = Type.caption, color = c.dim) }
                 }
-                AskBox("Ask after it", enabled = q.sid.isNotEmpty() && q.status.value != "running" && q.status.value != "interrupted") { askAfter(chat, q, it) }
+                AskBox("Ask after it", enabled = q.sid.isNotEmpty() && q.status.value != "running" && q.status.value != "interrupted", compact = true) { askAfter(chat, q, it) }
             }
         }
         return
     }
     Scrolled {
         Box(Modifier.padding(start = 10.dp, end = 10.dp, top = 10.dp)) {
-            AskBox("Ask a side question", enabled = takes(hostId, "ephemeral") && Mesh.session(hostId, chat.sid) != null, { askSide(chat, it) })
+            AskBox("Ask a side question", enabled = takes(hostId, "ephemeral") && Mesh.session(hostId, chat.sid) != null) { askSide(chat, it) }
         }
         if (chat.btw.isNotEmpty()) BoxedList(chat.btw.toList(), "") { sq ->
             ActionRow(sq.question, sq.thread.getOrNull(1)?.text?.lines()?.firstOrNull(), onClick = { shown = sq },
@@ -175,20 +175,25 @@ fun SideQuestionsPage(chat: Chat) {
     }
 }
 
-/** A box to ask in (the composer's look: rounded 12, its ring), its send button off while it's empty. */
+/** A box to ask in (the composer's look: rounded 12, its ring), its send button off while it's empty. compact: a line
+ * tall wrapped close round its button (a follow-up's, the composer's); else the new question's, with room round it. */
 @Composable
-private fun AskBox(hint: String, enabled: Boolean = true, send: (String) -> Unit) {
+private fun AskBox(hint: String, enabled: Boolean = true, compact: Boolean = false, send: (String) -> Unit) {
     val c = LocalBaude.current
     var text by remember { mutableStateOf("") }
+    val line = with(androidx.compose.ui.platform.LocalDensity.current) { Tokens.Font.bodyLine.toDp() }
+    val inset = if (compact) Gap.composerInset else 6.dp
+    val side = if (compact) Gap.composerButton else Gap.barButton
+    val pad = if (compact) ((Gap.composerButton - line) / 2).coerceAtLeast(0.dp) else 7.dp
     Row(Modifier.fillMaxWidth().padding(8.dp).clip(RoundedCornerShape(Gap.composerRadius)).background(c.inside)
-        .border(1.dp, c.rule, RoundedCornerShape(Gap.composerRadius)).padding(6.dp), verticalAlignment = Alignment.Bottom) {
-        Box(Modifier.weight(1f).padding(horizontal = 6.dp, vertical = 7.dp)) {
+        .border(1.dp, c.rule, RoundedCornerShape(Gap.composerRadius)).padding(inset), verticalAlignment = Alignment.Bottom) {
+        Box(Modifier.weight(1f).padding(horizontal = 6.dp, vertical = pad)) {
             if (text.isEmpty()) Text(hint, style = Type.body, color = c.dim)
             BasicTextField(text, { text = it }, enabled = enabled, textStyle = Type.body.copy(color = c.fg),
                 cursorBrush = SolidColor(c.accentBg), modifier = Modifier.fillMaxWidth().heightIn(max = 140.dp))
         }
         val ready = enabled && text.isNotBlank()
         IconButton(Adwaita.Return, "Ask", enabled = ready, tint = if (ready) c.accentFg else c.fg,
-            background = if (ready) c.accentBg else null) { send(text.trim()); text = "" }
+            background = if (ready) c.accentBg else null, side = side) { send(text.trim()); text = "" }
     }
 }

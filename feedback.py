@@ -798,7 +798,7 @@ class FeedbackDialog(Adw.Dialog):
         self.add_btn.add_css_class("flat")
         self.add_btn.connect("clicked", lambda *_: self.win.start_feedback_capture(self))
         actions = Gtk.Box(halign=Gtk.Align.END, valign=Gtk.Align.END, margin_end=10, margin_bottom=10)
-        actions.add_css_class("composer-actions")
+        actions.add_css_class("feedback-actions")
         actions.append(self.add_btn)
         self.box.add_overlay(actions)
         body.append(self.box)

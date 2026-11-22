@@ -203,7 +203,7 @@ def open_chat(app, sc):
     if sc.get("process"):
         row = win.panel.proc_rows[sc["process"]]
         win.panel.open_process(row) if sc.get("full") else row.set_expanded(True)
-    if sc.get("lightbox"):
+    if sc.get("view"):
         win.tool_cards[sc["view"]].view_btn.set_active(True)
     if sc.get("reveal"):
         win.show_folder(os.path.join(HOME, "garden", sc["reveal"]))
@@ -214,7 +214,7 @@ def open_chat(app, sc):
         exp = next(e for e in T.find(win.panel.files_page.view, Gtk.TreeExpander)
                    if getattr(e, "node", None) is not None and os.path.basename(e.node.path) == sc["hold"])
         win.panel.files_page.menu(exp, 40, 12)
-    if sc.get("running") or sc.get("process") or sc.get("lightbox") or sc.get("reveal") or sc.get("gallery") or sc.get("hold"):
+    if sc.get("running") or sc.get("process") or sc.get("view") or sc.get("reveal") or sc.get("gallery") or sc.get("hold"):
         T.pump(0.6)
     if sc.get("state") == "working":
         win.set_busy(True)

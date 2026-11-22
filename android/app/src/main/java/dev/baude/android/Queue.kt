@@ -230,14 +230,14 @@ fun QueuedRow(chat: Chat, q: Queued, working: Boolean) {
         horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.Bottom) {
         Revealed(shown) {
             TurnButton(Wording.ChatTurns.queuedDelete, { chat.queued.remove(q) }) {
-                Icon(Adwaita.WindowClose, null, tint = c.dim, modifier = Modifier.size(12.dp))
+                Icon(Adwaita.WindowClose, null, tint = c.dim, modifier = Modifier.size(12.dp.icon))
             }
             TurnButton(Wording.ChatTurns.queuedSendNow, { Queue.sendNow(chat, q, working) }) { UpArrow() }
             TurnButton(Wording.ChatTurns.queuedEdit, {
                 chat.queued.remove(q)
                 chat.edit.value = q.text
                 chat.files.addAll(0, q.files)
-            }) { Icon(Adwaita.ViewRefresh, null, tint = c.dim, modifier = Modifier.size(12.dp)) }
+            }) { Icon(Adwaita.ViewRefresh, null, tint = c.dim, modifier = Modifier.size(12.dp.icon)) }
         }
         Column(Modifier.weight(1f, fill = false).padding(start = if (shown) 0.dp else 48.dp)
             .clip(RoundedCornerShape(Gap.bubbleRadius)).background(c.quiet)
@@ -266,7 +266,7 @@ fun Held(chat: Chat, h: Msg.HeldMessage, working: Boolean) {
         horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.Bottom) {
         Revealed(shown) {
             TurnButton(Wording.Held.delete, { Mesh.held(chat, h.id.orEmpty(), false) }) {
-                Icon(Adwaita.WindowClose, null, tint = c.dim, modifier = Modifier.size(12.dp))
+                Icon(Adwaita.WindowClose, null, tint = c.dim, modifier = Modifier.size(12.dp.icon))
             }
             TurnButton(Wording.Held.send, { heldSend(ctx, chat, h, working) }) { UpArrow() }
         }

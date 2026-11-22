@@ -8,7 +8,6 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -25,9 +24,13 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.layout.layoutId
 import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
@@ -36,12 +39,15 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.delay
 import org.json.JSONObject
 import java.util.Locale
+import kotlin.math.floor
 
 /** A control's tooltip words: its description, and shown by a long-press (there's no hover on a phone); a tap does
  * onClick, if it has one. */
@@ -120,10 +126,10 @@ fun rememberWindow(hostId: String, model: String?, tokens: Int) {
 
 private fun usedOf(u: JSONObject) = if (u.has("totalTokens") && !u.isNull("totalTokens")) u.optInt("totalTokens") else null
 
-fun contextShown(chat: Chat): ContextShown {
+fun contextShown(chat: Chat, model: String? = Mesh.session(chat.hostId, chat.sid)?.model?.ifBlank { null },
+                 usage: JSONObject? = chat.chrome.usage.value): ContextShown {
     val at = chat.hostId
-    val model = Mesh.session(at, chat.sid)?.model?.ifBlank { null }
-    val u = chat.chrome.usage.value
+    val u = usage
     val total = u?.optInt("maxTokens", 0) ?: 0
     if (u == null) {
         val window = contextWindow(at, model)
@@ -173,16 +179,24 @@ fun ContextMeter(shown: ContextShown, full: Boolean, text: Color) {
             else -> c.accentBg
         }
         val small = Type.caption.copy(fontSize = Type.caption.fontSize * 0.8f, fontFeatureSettings = "tnum")
+        // (the fill's edge, and each colour's span of the count, in the bar's own width: the count's centred in it)
+        fun DrawScope.edge() = floor(size.width * value)
+        fun DrawScope.fillFrom() = if (layoutDirection == LayoutDirection.Rtl) size.width - edge() else 0f
         Box(Modifier.width(Tokens.Gap.contextMeter).height(Tokens.Gap.contextMeterH)
-            .clip(RoundedCornerShape(Tokens.Radius.contextMeter)).background(c.fg.copy(alpha = 0.10f)),
+            .clip(RoundedCornerShape(Tokens.Radius.contextMeter)).background(c.fg.copy(alpha = 0.10f))
+            .drawBehind { drawRect(fill, Offset(fillFrom(), 0f), Size(edge(), size.height)) },
             contentAlignment = Alignment.Center) {
-            Box(Modifier.fillMaxHeight().fillMaxWidth(value).background(fill).align(Alignment.CenterStart))
-            Text(count, style = small, color = c.window, maxLines = 1, modifier = Modifier.drawWithContent {
-                clipRect(right = size.width * value) { this@drawWithContent.drawContent() }
-            })
-            Text(count, style = small, color = c.fg, maxLines = 1, modifier = Modifier.drawWithContent {
-                clipRect(left = size.width * value) { this@drawWithContent.drawContent() }
-            })
+            for (onFill in listOf(true, false)) Text(count, style = small, color = if (onFill) c.window else c.fg,
+                maxLines = 1, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth().drawWithContent {
+                    val from = fillFrom()
+                    val to = from + edge()
+                    if (onFill) clipRect(left = from, right = to) { this@drawWithContent.drawContent() }
+                    else {
+                        clipRect(right = from) { this@drawWithContent.drawContent() }
+                        clipRect(left = to) { this@drawWithContent.drawContent() }
+                    }
+                }.padding(horizontal = 3.dp))
         }
     }
 }
@@ -230,6 +244,7 @@ fun StatusBar(chat: Chat, openPage: (String) -> Unit) {
             Box(Modifier.layoutId("tasks")) {
                 Text(Wording.StatusBar.running(tasks = parts.joinToString(" · ")),
                     style = Type.caption.copy(fontSize = Type.caption.fontSize * 0.95f), color = text, maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.padding(horizontal = 8.dp).tip(what + "\n" + Wording.StatusBar.openPanel) {
                         openPage(if (agents > 0) "agents" else "processes")
                     })
@@ -246,20 +261,25 @@ fun StatusBar(chat: Chat, openPage: (String) -> Unit) {
 
 /** The status bar's row: parts 12 apart, never wider than the bar, the cost and the context meter at its right.
  * What doesn't fit gives way: the folder and the turn's figures first (they have what room is left, and none when
- * it's short), then the tasks button, the host, the working dots; the cost and the meter never do. */
+ * it's short), then the host, the working dots, the tasks button; the cost and the meter never do. */
 @Composable
 private fun StatusRow(modifier: Modifier, content: @Composable () -> Unit) {
     androidx.compose.ui.layout.Layout(content, modifier) { measurables, k ->
         val gap = 12.dp.roundToPx()
         val loose = androidx.compose.ui.unit.Constraints()
         val by = measurables.associateBy { it.layoutId as String }
-        val kept = by.filterKeys { it != "folder" }.mapValues { it.value.measure(loose) }.toMutableMap()
-        fun width() = kept.values.sumOf { it.width } + gap * (kept.size - 1)
-        for (id in listOf("tasks", "host", "dots")) if (width() > k.maxWidth) kept.remove(id)
-        val room = k.maxWidth - width() - gap * 2
+        val kept = by.filterKeys { it != "folder" && it != "tasks" }.mapValues { it.value.measure(loose) }.toMutableMap()
+        val tasksWide = by["tasks"]?.maxIntrinsicWidth(Int.MAX_VALUE) ?: 0 // (it shortens rather than goes)
+        val count = { kept.size + if (by["tasks"] != null) 1 else 0 }
+        fun width() = kept.values.sumOf { it.width } + tasksWide + gap * (count() - 1)
+        for (id in listOf("host", "dots")) if (width() > k.maxWidth) kept.remove(id)
+        val others = kept.values.sumOf { it.width } + gap * kept.size
+        val tasks = by["tasks"]?.measure(androidx.compose.ui.unit.Constraints(
+            maxWidth = minOf(tasksWide, (k.maxWidth - others).coerceAtLeast(0))))
+        val room = k.maxWidth - others - (tasks?.width ?: 0) - gap * 2
         val folder = by["folder"]?.takeIf { room >= 40.dp.roundToPx() }
             ?.measure(androidx.compose.ui.unit.Constraints(maxWidth = room))
-        val left = listOf("dots", "host").mapNotNull { kept[it] } + listOfNotNull(folder) + listOfNotNull(kept["tasks"])
+        val left = listOf("dots", "host").mapNotNull { kept[it] } + listOfNotNull(folder) + listOfNotNull(tasks)
         val right = listOfNotNull(kept["cost"], kept["context"])
         val h = (left + right).maxOfOrNull { it.height } ?: 0
         layout(k.maxWidth, h) {

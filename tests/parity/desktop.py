@@ -32,6 +32,7 @@ sys.path.insert(0, HERE)
 import argparse  # noqa: E402
 import re  # noqa: E402
 import time  # noqa: E402
+import types  # noqa: E402
 
 import screenshots as S  # noqa: E402  (tests/test_baude's throwaway env, the window machinery, capture)
 from screenshots import T, Adw, Gtk, baude  # noqa: E402
@@ -66,7 +67,7 @@ def transcript_lines(name, cwd, lines=None):
     return (body if lines is None else body[:lines]) + title
 
 
-def write_sessions(lines=None, transcript=None):
+def write_sessions(lines=None, transcript=None, subagents=None):
     """fixtures/sessions.json's sessions as this machine's Claude Code keeps them, each its age (the first's from the
     fixture named by transcript, if given); their paths, in the fixture's order."""
     paths = []
@@ -87,6 +88,14 @@ def write_sessions(lines=None, transcript=None):
         with open(path, "w") as f:
             f.write("\n".join(recs) + "\n")
         os.utime(path, (now - s["ago"], now - s["ago"]))
+        if subagents and not paths:  # (the first session's subagents' transcripts, where claude keeps them)
+            into = os.path.join(d, s["id"], "subagents")
+            os.makedirs(into, exist_ok=True)
+            for name in os.listdir(os.path.join(FIX, subagents)):
+                with open(os.path.join(FIX, subagents, name)) as f:
+                    text = f.read().replace("@CWD@", cwd)
+                with open(os.path.join(into, name), "w") as f:
+                    f.write(text)
         paths.append(path)
     return paths
 
@@ -115,11 +124,43 @@ def pick_header(win, s):
     T.pump(0.5)
 
 
+def write_glossary(cwd, name, session):
+    """fixtures/<name>'s names as this machine's Signal keeps them: <cwd>/.baude/signal.db, each mentioned in session."""
+    import sqlite3
+    import lookup
+    baude.Signal._instances.clear()  # (each scene's Signal opens its glossary afresh)
+    store = os.path.join(cwd, ".baude")
+    shutil.rmtree(store, ignore_errors=True)
+    if not name:
+        return
+    os.makedirs(store)
+    con = sqlite3.connect(os.path.join(store, "signal.db"))
+    con.executescript(lookup.REF_SCHEMA)
+    for r in fixture(name)["refs"]:
+        ref = lookup.Ref(r["surface"], r["kind"], r["status"], r["canonical"], r["reason"], r["data"], r["locations"])
+        assert ref.summary() == r["summary"], (r["surface"], ref.summary())  # (the fixture says what Baude says)
+        eid = con.execute("INSERT INTO entity (checkout, scope, kind, canonical, status, reason, data) "
+                          "VALUES ('', '', ?, ?, ?, ?, ?)",
+                          (r["kind"], r["canonical"], r["status"], r["reason"], json.dumps(r["data"]))).lastrowid
+        con.execute("INSERT INTO alias (checkout, scope, surface, entity_id) VALUES ('', '', ?, ?)", (r["surface"], eid))
+        for loc in r["locations"]:
+            con.execute("INSERT INTO location (entity_id, role, path, line, note, rev) VALUES (?, ?, ?, ?, ?, ?)",
+                        (eid, loc["role"], loc["path"], loc.get("line"), loc.get("note"), loc.get("rev")))
+        con.execute("INSERT INTO mention (entity_id, session, message, surface) VALUES (?, ?, '', ?)",
+                    (eid, session, r["surface"]))
+    con.commit()
+    con.close()
+
+
 def open_chat(app, sc):
+    shutil.rmtree(os.path.join(HOME, "garden"), ignore_errors=True)  # (what an earlier scene put in the folder)
     shown = fixture("sessions.json")["sessions"][sc.get("session", 0)]
+    write_glossary(folder("garden"), sc.get("signal"), shown["id"])
     if sc.get("files"):  # (the scene's files join the chat's folder)
         shutil.copytree(os.path.join(FIX, sc["files"]), folder("garden"), dirs_exist_ok=True)
-    path = write_sessions(sc.get("lines"), sc.get("transcript"))[sc.get("session", 0)]
+    path = write_sessions(sc.get("lines"), sc.get("transcript"), sc.get("subagents"))[sc.get("session", 0)]
+    if sc.get("meta"):  # (Meta's conversation, as its store keeps it)
+        baude._META[:] = [{k: v for k, v in fixture(sc["meta"]).items() if k != "description"}]
     win = app.window(S.opts(cwd=folder("garden")))
     info = baude.read_session_info(path)
     win.resume_session(info)
@@ -146,6 +187,35 @@ def open_chat(app, sc):
     if sc.get("page"):
         win.show_panel(True, {"signal": "refs"}.get(sc["page"], sc["page"]))
         T.pump(0.4)
+        if sc.get("meta") and sc.get("open"):  # (Meta's cards' Input and Output opened)
+            for b in T.find(win.panel.meta, Gtk.ToggleButton):
+                if b.has_css_class("tool-toggle"):
+                    b.set_active(True)
+            T.pump(0.4)
+    if sc.get("card"):
+        win.panel.signal_page.show_ref(sc["card"])
+        T.pump(0.4)
+    if sc.get("signal_menu"):
+        win.signal_btn.popup()
+        T.pump(0.4)
+    for t in sc.get("running", []):  # (background tasks heard as started)
+        win.on_task_event("task_started", dict(t))
+    if sc.get("process"):
+        row = win.panel.proc_rows[sc["process"]]
+        win.panel.open_process(row) if sc.get("full") else row.set_expanded(True)
+    if sc.get("view"):
+        win.tool_cards[sc["view"]].view_btn.set_active(True)
+    if sc.get("reveal"):
+        win.show_folder(os.path.join(HOME, "garden", sc["reveal"]))
+    if sc.get("gallery"):
+        win.panel.files_page.show_gallery(True, os.path.join(HOME, "garden", sc["gallery"]), save=False)
+        T.pump(1.5)  # (the pictures' shapes and thumbnails load off the main thread)
+    if sc.get("hold"):
+        exp = next(e for e in T.find(win.panel.files_page.view, Gtk.TreeExpander)
+                   if getattr(e, "node", None) is not None and os.path.basename(e.node.path) == sc["hold"])
+        win.panel.files_page.menu(exp, 40, 12)
+    if sc.get("running") or sc.get("process") or sc.get("view") or sc.get("reveal") or sc.get("gallery") or sc.get("hold"):
+        T.pump(0.6)
     if sc.get("state") == "working":
         win.set_busy(True)
     if sc.get("queued"):
@@ -177,6 +247,12 @@ def open_chat(app, sc):
     vadj = win.scroller.get_vadjustment()
     vadj.set_value(vadj.get_upper())  # (at its end, as a chat opens)
     T.pump(0.4)
+    if sc.get("ref"):  # (a tap on the Signal link in the reply that names it)
+        label = next(w for w in T.find(win, Gtk.Label) if sc["ref"] in (w.get_label() or "") and w.get_mapped())
+        ok, at = label.compute_point(win, baude.Graphene.Point().init(10, 10))
+        win.pointer = (at.x, at.y)
+        win.open_ref(sc["ref"], label)
+        T.pump(0.4)
     if sc.get("view"):  # (the first picture of the chat, opened large)
         baude.widgets.Lightbox.FLY_MS = 0
         w = next(w for w in baude.widgets.walk(win.transcript)
@@ -222,6 +298,17 @@ def build(app, sc):
         win = open_chat(app, sc)
         update.changelog_dialog().present(win)
         return win
+    if name == "bot-settings":
+        win = open_chat(app, sc)
+        title = fixture("sessions.json")["sessions"][0]["title"]
+        T.wait_for(lambda: S.sidebar_row(win, title) is not None, "rows")
+        row = S.sidebar_row(win, title)
+        win.sidebar.ask_bot({**row.info, "remote": types.SimpleNamespace(request=lambda *a, **k: None)})
+        return win
+    if name.startswith("feedback-ongoing"):
+        with open(os.path.join(FIX, "gallery", "docs", "flow.png"), "rb") as f:
+            png = f.read()
+        return S.fixes_tab(app, shots={"12/1/1-before.png": png, "12/1/1-after.png": png})[0]
     return None
 
 
@@ -261,6 +348,7 @@ def main():
     out = os.path.join(os.path.abspath(args.out), "desktop")
     os.makedirs(out, exist_ok=True)
     fixture_changelog()
+    shutil.copytree(os.path.join(FIX, "tasks"), "/tmp/parity/tasks", dirs_exist_ok=True)  # (the fixture transcript's path)
     app = T.App()
     style = Adw.StyleManager.get_default()
     failed = 0
@@ -295,6 +383,7 @@ def main():
                 for w in Gtk.Window.list_toplevels():
                     if isinstance(w, baude.BaudeWindow):
                         T.close(w)
+                baude._META.clear()
                 S.reset_state()
                 shutil.rmtree(os.path.join(os.environ["CLAUDE_CONFIG_DIR"], "projects"), ignore_errors=True)
     print(f"{failed} failures -> {out}")

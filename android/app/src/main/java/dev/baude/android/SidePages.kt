@@ -170,7 +170,7 @@ fun SideQuestionsPage(chat: Chat) {
         if (chat.btw.isNotEmpty()) BoxedList(chat.btw.toList(), "") { sq ->
             ActionRow(sq.question, sq.thread.getOrNull(1)?.text?.lines()?.firstOrNull(), onClick = { shown = sq },
                 prefix = if (sq.status.value != "done") ({ AgentStatus(if (sq.status.value == "error") "failed" else sq.status.value) }) else null,
-                suffix = { androidx.compose.material3.Icon(Adwaita.GoNext, null, tint = c.dim) })
+                suffix = { androidx.compose.material3.Icon(Adwaita.GoNext, null, tint = c.dim, modifier = Modifier.size(16.dp.icon)) })
         }
     }
 }
@@ -193,123 +193,6 @@ private fun AskBox(hint: String, enabled: Boolean = true, send: (String) -> Unit
     }
 }
 
-// ---------------------------------------------------------------------------------------------------------- files --
-
-/** The chat's folder, as Baude's Files page has it: folders first, then files, git's ignored ones faint; a folder
- * opened into (the phone's narrow for a tree: one folder at a time, up to go back), a file read (its text; a picture
- * shown). Read from its host (list_dir, read_file). */
-@Composable
-fun FilesPage(hostId: String, sid: String) {
-    val c = LocalBaude.current
-    val root = Mesh.session(hostId, sid)?.cwd?.ifBlank { null }
-    if (root == null) return
-    var at by remember(root) { mutableStateOf(root) }
-    var entries by remember(at) { mutableStateOf<List<Msg.DirEntry>?>(null) }
-    var file by remember(root) { mutableStateOf<String?>(null) }
-    var fileLine by remember(root) { mutableStateOf<Int?>(null) }
-    var again by remember { mutableStateOf(0) }
-    LaunchedEffect(FileLinks.wanted.value) { // (a link in the chat to a file or folder of this host's: shown here)
-        val w = FileLinks.wanted.value ?: return@LaunchedEffect
-        if (w.hostId != hostId) return@LaunchedEffect
-        if (w.dir) {
-            at = w.path
-            file = null
-        } else {
-            at = w.path.substringBeforeLast('/')
-            file = w.path
-            fileLine = w.line
-        }
-        FileLinks.wanted.value = null
-    }
-    LaunchedEffect(at, again) {
-        Mesh.ask(hostId, Msg.ListDir(path = at).json()) { r ->
-            val d = Msg.Dir.from(r)
-            if (r.optString("op") == Op.DIR && d.error.isNullOrBlank()) entries = d.entries.orEmpty()
-        }
-    }
-    file?.let { f -> return FileView(hostId, f, fileLine) { file = null; fileLine = null } }
-    if (at != root) BackHandler { at = at.substringBeforeLast('/') }
-    Column(Modifier.fillMaxSize()) {
-        Row(Modifier.fillMaxWidth().padding(start = 12.dp, end = 6.dp, top = 6.dp, bottom = 2.dp), verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f)) {
-                Text(at.substringAfterLast('/').ifEmpty { "/" }, style = Type.title, color = c.fg, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text(shortPath(hostId, at.substringBeforeLast('/')), style = Type.caption, color = c.dim, maxLines = 1,
-                    overflow = TextOverflow.Ellipsis)
-            }
-            if (at != root) IconButton(Adwaita.GoUp, Wording.CodeView.upFolder) { at = at.substringBeforeLast('/') }
-            IconButton(Adwaita.ViewRefresh, Wording.CodeView.readFoldersAgain) { entries = null; again++ }
-        }
-        Scrolled {
-            when {
-                entries == null -> {}
-                else -> BoxedList(entries!!, Wording.CodeView.emptyFolder) { e ->
-                    val path = "$at/${e.name.orEmpty()}"
-                    val dir = e.dir == true
-                    Box(Modifier.alpha(if (e.ignored == true) 0.55f else 1f)) {
-                        ActionRow(e.name.orEmpty(), null,
-                            onClick = { if (dir) at = path else { file = path; fileLine = null } },
-                            prefix = { androidx.compose.material3.Icon(if (dir) Adwaita.Folder
-                                else Adwaita.TextXGeneric, null, tint = c.dim, modifier = Modifier.size(18.dp.icon)) })
-                    }
-                }
-            }
-        }
-    }
-}
-
-private val PICTURES = setOf("png", "jpg", "jpeg", "gif", "webp", "bmp")
-
-/** A file of the host's, read (read_file): its text in the code's type, a picture shown, or why it can't be. */
-@Composable
-private fun FileView(hostId: String, path: String, line: Int? = null, back: () -> Unit) {
-    val c = LocalBaude.current
-    BackHandler(onBack = back)
-    var data by remember(path) { mutableStateOf<ByteArray?>(null) }
-    var why by remember(path) { mutableStateOf<String?>(null) }
-    var cut by remember(path) { mutableStateOf(false) }
-    LaunchedEffect(path) {
-        Mesh.ask(hostId, Msg.ReadFile(path = path, limit = 1_000_000).json()) { r ->
-            val f = Msg.File.from(r)
-            if (r.optString("op") == Op.FILE && f.error.isNullOrBlank()) {
-                data = Base64.getDecoder().decode(f.data.orEmpty())
-                cut = f.truncated == true || (f.size?.toLong() ?: 0L) > (data?.size ?: 0)
-            } else why = said(r, f.error).ifBlank { Wording.FileView.notText }
-        }
-    }
-    Column(Modifier.fillMaxSize()) {
-        Row(Modifier.fillMaxWidth().padding(start = 12.dp, end = 6.dp, top = 6.dp, bottom = 2.dp), verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f)) {
-                Text(path.substringAfterLast('/'), style = Type.title, color = c.fg, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text(Wording.FileView.onHost(host = Mesh.label(hostId)) + if (cut) " · its first part" else "", style = Type.caption, color = c.dim)
-            }
-            IconButton(Adwaita.GoPrevious, Wording.Browser.back, onClick = back)
-        }
-        Box(Modifier.fillMaxSize().padding(top = 6.dp).inside(c)) {
-            val d = data
-            when {
-                why != null -> Empty(Wording.FileView.unreadable(path = path, host = Mesh.label(hostId), why = why!!))
-                d == null -> {}
-                path.substringAfterLast('.').lowercase() in PICTURES -> BitmapFactory.decodeByteArray(d, 0, d.size)?.let {
-                    Image(it.asImageBitmap(), path, contentScale = ContentScale.Fit, modifier = Modifier.fillMaxSize().padding(8.dp))
-                } ?: Empty("Not a picture this phone can read")
-                d.take(8192).contains(0.toByte()) -> Empty(Wording.FileView.unreadable(path = path, host = Mesh.label(hostId),
-                    why = Wording.FileView.notText))
-                else -> {
-                    val scroll = rememberScrollState()
-                    val scope = androidx.compose.runtime.rememberCoroutineScope()
-                    Text(String(d, Charsets.UTF_8), style = Type.mono, color = c.fg, modifier = Modifier.fillMaxSize()
-                        .verticalScroll(scroll).horizontalScroll(rememberScrollState()).padding(12.dp),
-                        onTextLayout = { layout -> // (a link's line: scrolled to, a line from the top)
-                            if (line != null && line > 1 && line <= layout.lineCount && scroll.value == 0) scope.launch {
-                                scroll.scrollTo(maxOf(0f, layout.getLineTop(line - 2)).toInt())
-                            }
-                        })
-                }
-            }
-        }
-    }
-}
-
 // ------------------------------------------------------------------------------------------------------------ git --
 
 /** The chat's folder's git, as Baude's Git page has it: its branch and how it stands with its upstream, then its
@@ -324,6 +207,8 @@ fun GitPage(hostId: String, sid: String) {
     val commits = remember(cwd) { mutableStateListOf<Msg.Commit>() }
     var why by remember(cwd) { mutableStateOf<String?>(null) }
     var commit by remember(cwd) { mutableStateOf<String?>(null) }
+    val want = GitLinks.want.value // (a Signal link's commit: shown here)
+    LaunchedEffect(want) { if (want != null) { commit = want; GitLinks.want.value = null } }
     var again by remember { mutableStateOf(0) }
     fun more(skip: Int) = Mesh.ask(hostId, Msg.Git(what = "log", cwd = cwd, limit = 50, skip = skip).json()) { r ->
         val g = Msg.GitReply.from(r)
@@ -374,7 +259,7 @@ private fun stamped(at: Long): String {
     return SimpleDateFormat("HH:mm EEE ", Locale.ENGLISH).format(d) + Wording.Time.dayOfMonth(day = day) + " " + SimpleDateFormat("MMMM yyyy", Locale.ENGLISH).format(d)
 }
 
-fun ago(at: Long): String {
+internal fun ago(at: Long): String {
     val secs = maxOf(0L, System.currentTimeMillis() / 1000 - at)
     for ((n, said) in listOf<Pair<Long, (Long) -> String>>(365 * 86400L to { Wording.Time.yearsAgo(n = it) },
         30 * 86400L to { Wording.Time.monthsAgo(n = it) }, 7 * 86400L to { Wording.Time.weeksAgo(n = it) },
@@ -466,80 +351,6 @@ private fun CommitCard(hostId: String, cwd: String, sha: String, back: () -> Uni
                     else if (on.size > 8) Wording.Git.onBranchesMore(branches = on.take(8).joinToString(", "), n = on.size - 8)
                     else Wording.Git.onBranches(branches = on.joinToString(", ")),
                     style = Type.caption, color = c.dim, modifier = Modifier.padding(12.dp))
-            }
-        }
-    }
-}
-
-// --------------------------------------------------------------------------------------------------------- signal --
-
-private val KINDS = mapOf("file" to Wording.Lookup.files, "commit" to Wording.Lookup.commits,
-    "branch" to Wording.Lookup.branches, "pr" to Wording.Lookup.pullRequests, "env" to Wording.Lookup.envVars,
-    "constant" to Wording.Lookup.constants, "symbol" to Wording.Lookup.codeSymbols, "config" to Wording.Lookup.configKeys,
-    "service" to Wording.Lookup.services, "k8s" to Wording.Lookup.kubernetesObjects, "package" to Wording.Lookup.packages,
-    "cli" to Wording.Lookup.commands, "external" to Wording.Lookup.externalTools, "tool" to Wording.Lookup.tools,
-    "subagent" to Wording.Lookup.subagentTypes, "skill" to Wording.Lookup.skills, "route" to Wording.Lookup.httpRoutes,
-    "db" to Wording.Signal.databaseTables)
-
-/** Signal's names for the chat, as Baude's Signal page lists them: those its replies named that the folder's glossary
- * has, by kind, each how it stands (linked, several matches, looking up, not found, stale) and what it is. Read from
- * its host (signal_names), as Signal last left them there: the reader runs where Baude does. */
-@Composable
-fun SignalPage(hostId: String, sid: String) {
-    val c = LocalBaude.current
-    val s = Mesh.session(hostId, sid)
-    val cwd = s?.cwd?.ifBlank { null }
-    if (cwd == null) return
-    var got by remember(cwd, sid) { mutableStateOf<Msg.SignalNamesReply?>(null) }
-    var filter by remember { mutableStateOf("") }
-    var again by remember { mutableStateOf(0) }
-    LaunchedEffect(cwd, sid, again) {
-        val msg = Msg.SignalNames(cwd = cwd, session = sid).json()
-        s.cliId?.ifBlank { null }?.let { msg.put("cli_id", it) }
-        Mesh.ask(hostId, msg) { r ->
-            got = Msg.SignalNamesReply.from(r).let { g -> if (r.optString("op") == Op.ERROR) Msg.SignalNamesReply(error = said(r, null)) else g }
-        }
-    }
-    val g = got
-    Column(Modifier.fillMaxSize()) {
-        Row(Modifier.padding(start = 8.dp, end = 6.dp, top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-            SearchField(filter, { filter = it }, Wording.Signal.filter, Modifier.weight(1f))
-            IconButton(Adwaita.ViewRefresh, "Read them again") { got = null; again++ }
-        }
-        when {
-            g == null || !g.error.isNullOrBlank() -> {}
-            else -> {
-                val refs = g.refs.orEmpty()
-                fun n(st: String) = refs.count { it.status == st }
-                Scrolled {
-                    Text(listOf<Pair<String, (Int) -> String>>("resolved" to { Wording.Signal.linked(n = it) },
-                        "ambiguous" to { Wording.Signal.several(n = it) }, "pending" to { Wording.Signal.lookingUp(n = it) },
-                        "not_found" to { Wording.Signal.notFound(n = it) }, "stale" to { Wording.Signal.stale(n = it) })
-                        .filter { n(it.first) > 0 }.joinToString(" · ") { it.second(n(it.first)) } +
-                        (g.glossary?.ifBlank { null }?.let { "\n" + Wording.Signal.glossary(path = it) } ?: ""), style = Type.caption, color = c.dim,
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp))
-                    if (refs.isEmpty()) Empty(Wording.Signal.empty)
-                    val f = filter.trim().lowercase()
-                    for ((kind, rows) in refs.filter { f.isEmpty() || it.surface.orEmpty().lowercase().contains(f) }
-                        .groupBy { it.kind.orEmpty() }) {
-                        Text(KINDS[kind] ?: kind, style = Type.folder, color = c.dim, modifier = Modifier.padding(start = 14.dp, top = 8.dp))
-                        BoxedList(rows, "") { r ->
-                            val st = r.status.orEmpty()
-                            ActionRow(r.surface.orEmpty(), r.summary.orEmpty(), prefix = {
-                                androidx.compose.material3.Icon(when (st) {
-                                    "resolved" -> Adwaita.ObjectSelect
-                                    "pending" -> Adwaita.ContentLoading
-                                    "ambiguous" -> Adwaita.ViewMore
-                                    else -> Adwaita.DialogWarning
-                                }, st, tint = when (st) {
-                                    "resolved" -> c.success
-                                    "ambiguous", "pending" -> c.dim
-                                    else -> c.warning
-                                }, modifier = Modifier.size(16.dp.icon))
-                            })
-                        }
-                    }
-                }
             }
         }
     }

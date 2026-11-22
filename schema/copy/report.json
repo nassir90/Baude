@@ -25,6 +25,21 @@
     "more_characters": "[… {$n} more characters]",
     "more_characters_read": "[… {$n} more characters: Read {$where}]",
     "left_out": ".input {$n :number} .match $n one {{[… the first {$n} message left out: too long to paste]}} * {{[… the first {$n} messages left out: too long to paste]}}",
-    "not_read": "(transcript not read: {$why})"
+    "not_read": "(transcript not read: {$why})",
+    "next_message": "Next message",
+    "picked_since": "{$name} ({$value}), picked since",
+    "runs_on": "Runs on",
+    "runs_commands": "Runs commands",
+    "default": "default",
+    "on": "on",
+    "off": "off",
+    "no_session": "no session yet",
+    "not_said_by_session": "not said by its session yet",
+    "tokens_of": "{$used} / {$total} tokens",
+    "meta_model": "Meta ({$model})",
+    "error": "(error)",
+    "meta_tool": "[tool {$name} · {$state}]",
+    "result": "[result]",
+    "still_replying": "still replying"
   }
 }

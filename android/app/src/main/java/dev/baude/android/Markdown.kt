@@ -31,6 +31,10 @@ import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.BaselineShift
+import androidx.compose.ui.text.withStyle
+import androidx.compose.foundation.text.appendInlineContent
+import androidx.compose.ui.unit.em
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDecoration
@@ -233,13 +237,14 @@ internal fun inlineMarkup(text: String, place: ChatPlace?): String {
     if ('`' in p) p = CODE_SPAN.replace(p) { m ->
         val markup = "<code>" + esc(m.groupValues[1]) + "</code>"
         val hit = place?.let { resolvePath(it, m.groupValues[1]) }
-        keep(if (hit != null) fileLink(hit, markup) else markup, markup)
+        keep(if (hit != null) fileLink(hit, markup) else refLink(m.groupValues[1], markup, true, place) ?: markup, markup)
     }
     if ("](" in p) p = MD_LINK.replace(p) { m ->
         val inner = KEPT.replace(emphasis(esc(m.groupValues[1]))) { bare[it.groupValues[1].toInt()] }
         keep(linkMarkup(place, m.groupValues[2], m.groupValues[1], inner))
     }
     if ("://" in p) p = BARE_URL.replace(p) { keep(linkMarkup(place, it.groupValues[1], null, null)) }
+    if (place != null) p = REF_PLAIN.replace(p) { m -> refLink(m.value, esc(m.value), false, place)?.let { keep(it) } ?: m.value }
     if ("--" in p) p = EM_DASH.replace(p, "—")
     val s = emphasis(linkPaths(esc(p), place))
     return if ('\u0000' in s) KEPT.replace(s) { marks[it.groupValues[1].toInt()] } else s
@@ -250,9 +255,11 @@ private val ATTR = Regex(""" ([a-z]+)="([^"]*)"""")
 
 /** inlineMarkup's markup as styled text: links in the accent, underlined; a file's or a folder's goes to file, a
  * URL's to open. */
-internal fun annotate(markup: String, accent: Color, open: (String) -> Unit, file: (String, Int?, Boolean) -> Unit): AnnotatedString =
+internal fun annotate(markup: String, accent: Color, open: (String) -> Unit, file: (String, Int?, Boolean) -> Unit,
+                      ref: (String) -> Unit = {}): AnnotatedString =
     buildAnnotatedString {
         val open_ = ArrayList<String>()
+        val counts = ArrayList<String?>() // (an open link's count of matches, shown after its text while a Signal link has several)
         var at = 0
         for (m in TAG.findAll(markup)) {
             append(unesc(markup.substring(at, m.range.first)))
@@ -261,6 +268,9 @@ internal fun annotate(markup: String, accent: Color, open: (String) -> Unit, fil
             if (m.groupValues[1] == "/") {
                 if (open_.lastOrNull() == tag) {
                     open_.removeAt(open_.size - 1)
+                    if (tag == "a") counts.removeLastOrNull()?.let {
+                        withStyle(SpanStyle(baselineShift = BaselineShift.Superscript, fontSize = 0.7.em)) { append(it) }
+                    }
                     pop()
                 }
                 continue
@@ -277,10 +287,27 @@ internal fun annotate(markup: String, accent: Color, open: (String) -> Unit, fil
                     val href = attrs["href"].orEmpty()
                     val kind = attrs["kind"]
                     val line = attrs["line"]?.toIntOrNull()
-                    pushLink(LinkAnnotation.Clickable(href, TextLinkStyles(SpanStyle(color = accent,
-                        textDecoration = TextDecoration.Underline))) {
-                        if (kind == "url") open(href) else file(href, line, kind == "dir")
-                    })
+                    if (kind == "ref") { // (a Signal link: its logo, then its text drawn by how far its lookup got)
+                        val status = attrs["status"].orEmpty()
+                        attrs["icon"]?.ifEmpty { null }?.let {
+                            appendInlineContent("ref-icon-$it", RefIcons.slot)
+                        }
+                        val colour = when (status) {
+                            "pending" -> accent.copy(alpha = accent.alpha * Tokens.Signal.pendingOpacity.toFloat())
+                            "not_found" -> Tokens.Signal.notFound
+                            "stale" -> Tokens.Signal.stale
+                            else -> accent
+                        }
+                        counts.add(if (status == "ambiguous") attrs["n"] else null)
+                        pushLink(LinkAnnotation.Clickable(href, TextLinkStyles(SpanStyle(color = colour,
+                            textDecoration = TextDecoration.Underline))) { ref(href) })
+                    } else {
+                        counts.add(null)
+                        pushLink(LinkAnnotation.Clickable(href, TextLinkStyles(SpanStyle(color = accent,
+                            textDecoration = TextDecoration.Underline))) {
+                            if (kind == "url") open(href) else file(href, line, kind == "dir")
+                        })
+                    }
                 }
             }
         }
@@ -301,11 +328,13 @@ internal fun rememberInline(text: String): AnnotatedString {
     val c = LocalBaude.current
     val uri = LocalUriHandler.current
     val known = if (place != null) PathCheck.version.intValue else 0
-    return remember(text, place, known, c.accent) {
-        val key = listOf(text, place, known, c.accent)
+    val signal = if (place?.sid != null) SignalNames.version.intValue * 1000 + SignalChats.version.intValue else 0
+    return remember(text, place, known, signal, c.accent) {
+        val key = listOf(text, place, known, signal, c.accent)
         inlineCache.get(key) ?: annotate(text.split("\n").joinToString("\n") { inlineMarkup(it, place) }, c.accent,
             { url -> try { uri.openUri(url) } catch (_: Exception) {} },
-            { path, line, dir -> place?.let { FileLinks.open(Wanted(it.hostId, path, line, dir)) } }).also { inlineCache.put(key, it) }
+            { path, line, dir -> place?.let { FileLinks.open(Wanted(it.hostId, path, line, dir)) } },
+            { name -> SignalLinks.tap(name) }).also { inlineCache.put(key, it) }
     }
 }
 
@@ -322,21 +351,23 @@ fun MarkdownView(text: String, color: Color = LocalBaude.current.fg, under: Colo
     val markerWidth = remember(density) { with(density) { measure.measure("00", Type.body.copy(fontWeight = FontWeight.Bold)).size.width.toDp() } }
     Column(verticalArrangement = Arrangement.spacedBy(Tokens.Markdown.block)) {
         for (b in blocks) when (b) {
-            is Block.Para -> Text(rememberInline(b.lines.joinToString("\n")).found(), style = Type.body, color = color)
-            is Block.Heading -> Text(rememberInline(b.text).found(), color = color, style = Type.body.copy(
+            is Block.Para -> Text(rememberInline(b.lines.joinToString("\n")).found(), style = Type.body, color = color,
+                inlineContent = RefIcons.inline)
+            is Block.Heading -> Text(rememberInline(b.text).found(), color = color, inlineContent = RefIcons.inline, style = Type.body.copy(
                 fontSize = Type.body.fontSize * when (b.level) { 1 -> Tokens.Markdown.h1.toFloat(); 2 -> Tokens.Markdown.h2.toFloat(); else -> 1f },
                 fontWeight = FontWeight.Bold))
             is Block.Item -> Row(Modifier.padding(start = Tokens.Markdown.itemStart + Tokens.Markdown.indentStep * b.depth),
                 horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text(b.marker, style = Type.body.copy(fontWeight = FontWeight.Bold), color = color,
                     textAlign = TextAlign.End, modifier = Modifier.widthIn(min = markerWidth).alpha(Tokens.Markdown.markerOpacity.toFloat()))
-                Text(rememberInline(b.text).found(), style = Type.body, color = color, modifier = Modifier.weight(1f))
+                Text(rememberInline(b.text).found(), style = Type.body, color = color, modifier = Modifier.weight(1f),
+                    inlineContent = RefIcons.inline)
             }
             is Block.Quote -> Row(Modifier.height(IntrinsicSize.Min)) {
                 Box(Modifier.width(Tokens.Markdown.quoteRule).fillMaxHeight()
                     .background(c.fg.copy(alpha = c.fg.alpha * Tokens.Markdown.quoteRuleOpacity.toFloat())))
                 Spacer(Modifier.width(Tokens.Markdown.quotePad - Tokens.Markdown.quoteRule))
-                Text(rememberInline(b.text).found(), style = Type.body, color = color,
+                Text(rememberInline(b.text).found(), style = Type.body, color = color, inlineContent = RefIcons.inline,
                     modifier = Modifier.weight(1f).alpha(Tokens.Markdown.quoteOpacity.toFloat()))
             }
             Block.Rule -> Box(Modifier.padding(vertical = Tokens.Markdown.ruleGap).fillMaxWidth().height(1.dp).background(c.rule))

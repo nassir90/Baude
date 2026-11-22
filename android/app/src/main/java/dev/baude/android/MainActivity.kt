@@ -16,7 +16,7 @@ class MainActivity : ComponentActivity() {
     private val screen = mutableStateOf<List<String>>(listOf("contacts"))
 
     /** The screens laid over a chat, opened with its host and session: back goes to the chat. */
-    private val OVER = setOf("feedback", "settings", "changelog", "mesh")
+    private val OVER = setOf("feedback", "settings", "changelog", "mesh", "fixes")
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -59,10 +59,11 @@ class MainActivity : ComponentActivity() {
                     }, chat = now.drop(1))
                     "changelog" -> ChangelogScreen(null, ::back)
                     "mesh" -> MeshScreen(::back)
+                    "fixes" -> FixesScreen(::back, feedback = { go(listOf("feedback") + now.drop(1) + "fixes") })
                     else -> Home(open = { h, s -> go(listOf("chat", h, s)) },
                         feedback = { go(listOf("feedback")) }, phone = { go(listOf("phone")) },
                         settings = { go(listOf("settings")) }, mesh = { go(listOf("mesh")) },
-                        changelog = { go(listOf("changelog")) },
+                        changelog = { go(listOf("changelog")) }, fixes = { go(listOf("fixes")) },
                         note = { if (Shares.pending.value != null) ShareBanner(::back) })
                 }
                 HostKeyAsk()
@@ -106,6 +107,10 @@ class MainActivity : ComponentActivity() {
 
     private fun back() {
         val now = screen.value
+        if (now[0] == "feedback" && now.last() == "fixes") { // (Send Feedback from Ongoing Feedback: back to it)
+            screen.value = listOf("fixes") + now.drop(1).dropLast(1)
+            return
+        }
         if (now[0] == "contacts" && Shares.pending.value != null || now[0] == "chat" && Shares.returns) {
             if (now[0] == "chat") Mesh.close()
             Shares.pending.value = null

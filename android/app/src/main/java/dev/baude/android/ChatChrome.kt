@@ -1,6 +1,7 @@
 package dev.baude.android
 
 import android.os.SystemClock
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import org.json.JSONArray
@@ -18,6 +19,7 @@ class Chrome {
     val outgrown = mutableStateOf(false)            // (a turn ended saying the prompt's too long)
     val retrying = mutableStateOf<JSONObject?>(null) // (an api_retry, till what it says next)
     val tasks = mutableStateMapOf<String, JSONObject>() // (a task's id: its fields, replaced whole as they change)
+    val taskOrder = mutableStateListOf<String>()    // (the tasks' ids, in the order each was first heard)
     val missing = mutableStateOf(false)             // (its host answered the attach: no such session)
     var interrupting = 0L                           // (an interrupt waiting: its token)
     var contextSoon = false                         // (the meter asked again a moment from now)
@@ -100,10 +102,10 @@ private fun heard(chat: Chat, m: JSONObject) {
     when (type) {
         "result" -> if (top) result(chat, m)
         "system" -> when (val sub = m.optString("subtype")) {
-            "task_started", "task_progress", "task_updated", "task_notification" -> task(c, sub, m)
+            "task_started", "task_progress", "task_updated", "task_notification" -> taskEvent(c, sub, m)
             "background_tasks_changed" -> for (t in m.optJSONArray("tasks").list()) {
                 val id = t.str("task_id") ?: continue
-                c.tasks[id] = merge(c.tasks[id] ?: JSONObject().put("status", "running"), t)
+                put(c, id, merge(c.tasks[id] ?: JSONObject().put("status", "running"), t))
             }
             "codex_context", "baude_context" -> m.optJSONObject("usage")?.let { showUsage(chat, it) }
             "compact_boundary" -> {
@@ -148,7 +150,7 @@ private fun result(chat: Chat, m: JSONObject) {
 }
 
 /** A background task's event (on_task_event): its fields kept, its status as the event says. */
-private fun task(c: Chrome, kind: String, m: JSONObject) {
+fun taskEvent(c: Chrome, kind: String, m: JSONObject) {
     val id = m.str("task_id") ?: return
     var t = c.tasks[id] ?: JSONObject().put("task_id", id).put("status", "running")
     val skip = setOf("type", "subtype", "uuid", "session_id")
@@ -161,6 +163,11 @@ private fun task(c: Chrome, kind: String, m: JSONObject) {
         else -> merge(t, m, skip)
     }
     if (kind == "task_notification") t = merge(t, JSONObject().put("status", m.str("status") ?: "completed"))
+    put(c, id, t)
+}
+
+private fun put(c: Chrome, id: String, t: JSONObject) {
+    if (id !in c.tasks) c.taskOrder.add(id)
     c.tasks[id] = t
 }
 

@@ -1,0 +1,2 @@
+<!-- Material's layers (Apache-2.0), as Freelens uses it, its 24-px drawing scaled to 16 -->
+<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16"><g fill="#2e3436"><g transform="scale(0.666667)"><path d="m11.99 18.54-7.37-5.73L3 14.07l9 7 9-7-1.63-1.27-7.38 5.74zM12 16l7.36-5.73L21 9l-9-7-9 7 1.63 1.27L12 16z"/></g></g></svg>

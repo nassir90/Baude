@@ -1,11 +1,10 @@
 {
-  "description": "The phone's This phone page: its name in the mesh, the agents it runs, and its trash.",
+  "description": "The phone's This phone page: its name in the mesh, its key, the agents it runs, and its trash.",
   "messages": {
     "title": "This phone",
-    "name": "Name: {$name}",
     "agents": "Agents",
     "trash": "Trash",
-    "put_back": "Put Back",
+    "restore": "Restore",
     "trash_body": "Its transcript, its memory and the files in its folder will be moved to this phone's trash, where you can restore it."
   }
 }

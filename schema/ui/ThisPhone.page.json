@@ -1,5 +1,5 @@
 {
-  "description": "The phone's own host as a page: its name in the mesh, the agents that run on this phone, and the phone's trash. Opened from the home screen's header; the phone's agents are also listed on the home screen under the host \"local\".",
+  "description": "The phone's own host as a page: its name in the mesh, its ssh key, the agents that run on this phone, and the phone's trash. Opened from the home screen's header; the phone's agents are also listed on the home screen under the host \"local\".",
   "apps": [
     "phone"
   ],
@@ -8,12 +8,17 @@
   ],
   "code": [
     "PhoneScreens.kt:PhoneScreen",
+    "PhoneScreens.kt:KeyMaterial",
+    "PhoneScreens.kt:RenamePhone",
     "Home.kt:Home",
     "MainActivity.kt:MainActivity",
     "PhoneHost.kt:PhoneHost"
   ],
   "copy": [
     "this_phone",
+    "phone_keys",
+    "mesh_versions",
+    "report",
     "browser",
     "trash",
     "common"
@@ -43,16 +48,87 @@
       }
     },
     {
-      "name": "Name card",
-      "shows": "One line, \"Name: <name>\": the phone's name in the mesh (its name in Android's settings, else its model's). No mesh state line and no paragraph under it.",
+      "name": "Name row",
+      "shows": "A rounded group of one row, as a Settings row: \"Name\" at the start, the phone's name in the mesh at the end (dim, its own name in Android's settings, else its model's, until it's renamed) and a › after it. No line under it.",
       "copy": [
-        "this_phone.name"
+        "common.name"
+      ],
+      "actions": [
+        {
+          "by": "tap the row",
+          "does": "opens the Rename dialog (below)"
+        }
       ],
       "phone": {
-        "does": "the name line only",
-        "why": "The owner asked for the name alone, no description",
+        "does": "a Settings-style Name row, tapped to rename",
+        "why": "The owner asked for a Name row like a Settings row, label left, name right, customisable",
         "decided": "2026-11-22"
       }
+    },
+    {
+      "name": "Rename dialog",
+      "shows": "Title \"Rename <name>\"; a text entry holding the current name, its placeholder the name Android gives the phone. Buttons Cancel and Rename (suggested); Done renames.",
+      "copy": [
+        "mesh_versions.rename_heading",
+        "common.rename",
+        "common.cancel"
+      ],
+      "actions": [
+        {
+          "by": "tap Rename",
+          "does": "keeps the name (spaces tidied, 64 characters at most; left empty, the name Android gives it again), tells this app's heads and publishes the phone's mesh record anew, so every member of the mesh lists the phone by the new name"
+        }
+      ]
+    },
+    {
+      "name": "Key Material",
+      "shows": "Heading \"Key Material\", then a rounded group: the phone's ssh public key as an authorized_keys line (ecdsa-sha2-nistp256 <base64> baude@<model>) in the code font on a raised block, selectable; under it Copy and New Key. While the phone has no key: Make Key alone (\"Making the key…\" while it's made). If the Keystore can't be read: why, in red, and Try Again. No caption or instructions.",
+      "copy": [
+        "phone_keys.heading",
+        "common.copy",
+        "phone_keys.new_key",
+        "phone_keys.make",
+        "phone_keys.making",
+        "phone_keys.unreadable",
+        "phone_keys.not_made",
+        "common.try_again",
+        "report.copied"
+      ],
+      "actions": [
+        {
+          "by": "tap Copy",
+          "does": "copies the line and toasts \"Copied\""
+        },
+        {
+          "by": "tap New Key",
+          "does": "opens the New Key dialog (below)"
+        },
+        {
+          "by": "tap Make Key",
+          "does": "makes a key in the Android Keystore and tries each host again with it"
+        }
+      ],
+      "phone": {
+        "does": "This phone holds the key; Add Host has none of it",
+        "why": "The owner: the phone's key belongs on the phone's page, not in Add Host",
+        "decided": "2026-11-22"
+      }
+    },
+    {
+      "name": "New Key dialog",
+      "shows": "Title \"Make a new key?\"; body \"The old key can't be recovered. You will have to re-authenticate into your mesh.\" Buttons Cancel and Make Key (destructive).",
+      "copy": [
+        "phone_keys.new_heading",
+        "phone_keys.new_body",
+        "phone_keys.make",
+        "common.cancel"
+      ],
+      "actions": [
+        {
+          "by": "tap Make Key",
+          "does": "makes a new key in place of the old one and tries each host again with it"
+        }
+      ]
     },
     {
       "name": "Agents",
@@ -88,15 +164,15 @@
     },
     {
       "name": "Trash",
-      "shows": "Shown only while the phone's trash holds an agent. Heading \"Trash\", then a row per trashed agent, newest first, one line: for a Bot its name alone, else its title, else its model's name (\"Agent\" if none); and a Put Back button.",
+      "shows": "Shown only while the phone's trash holds an agent. Heading \"Trash\", then a row per trashed agent, newest first, one line: for a Bot its name alone, else its title, else its model's name (\"Agent\" if none); and a Restore button.",
       "copy": [
         "this_phone.trash",
-        "this_phone.put_back",
+        "this_phone.restore",
         "common.agent"
       ],
       "actions": [
         {
-          "by": "tap Put Back",
+          "by": "tap Restore",
           "does": "restores its transcript, folder, picture and senders where they were and lists it again in Agents"
         }
       ]
@@ -138,7 +214,7 @@
   "states": [
     {
       "name": "nothing yet",
-      "shows": "Only the bar and the name line: no agents and an empty trash"
+      "shows": "Only the bar, the Name row and Key Material: no agents and an empty trash"
     }
   ],
   "scenes": []

@@ -214,6 +214,34 @@ abstract class Screens(private val theme: String) {
         render("44-pictures-phone") { PhoneScreen({}, open = {}) }
     }
 
+    // (This phone's Name and Key Material, Add Host, and a host's key to trust)
+    @Test fun addHost() {
+        show { dev.baude.android.AddHost(done = {}) }
+        screen("45-add-host")
+    }
+
+    @Test fun phoneNewKey() {
+        phoneFixture()
+        show { PhoneScreen({}, open = {}) }
+        tap(dev.baude.android.Wording.PhoneKeys.newKey)
+        screen("46-phone-new-key")
+    }
+
+    @Test fun phoneRename() {
+        phoneFixture()
+        show { PhoneScreen({}, open = {}) }
+        tap(dev.baude.android.Wording.Common.name)
+        screen("47-phone-rename")
+    }
+
+    @Test fun hostKey() {
+        val c = Mesh.conn("h1")!!
+        c.state = "key"
+        c.shown = dev.baude.android.ShownKey("ssh-ed25519", HOST_KEY)
+        show { dev.baude.android.HostKeyAsk() }
+        screen("48-host-key")
+    }
+
     @Test fun picturesChat() {
         val bot = workshopBot()
         fill(Mesh.openChat("h1", bot.id.orEmpty()))
@@ -1030,6 +1058,10 @@ abstract class Screens(private val theme: String) {
         )
     }
 }
+
+/** A host's ed25519 key, as ssh sends it: string "ssh-ed25519", string its 32 bytes. */
+private val HOST_KEY = byteArrayOf(0, 0, 0, 11) + "ssh-ed25519".toByteArray() + byteArrayOf(0, 0, 0, 32) +
+    ByteArray(32) { (it * 37 + 11).toByte() }
 
 /** What claude says when its sign-in has run out and can't be renewed. */
 private const val EXPIRED = "Failed to authenticate: this login reached its time limit and cannot be renewed. Run " +

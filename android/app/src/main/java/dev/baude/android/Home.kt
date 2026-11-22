@@ -210,6 +210,21 @@ fun shortPath(hostId: String, cwd: String): String {
     return if (home.isNotEmpty() && (cwd == home || cwd.startsWith("$home/"))) "~" + cwd.removePrefix(home) else cwd
 }
 
+/** The chats ("host/id") an agent on another host started (spawned_by: none of their own host's chats), and those
+ * such a chat started in turn there: each is listed only under the agent that started it, never among its own host's
+ * chats (Baude's started_elsewhere; schema/ui/Sidebar.region.json). */
+fun startedElsewhere(): Set<String> {
+    val byKey = HashMap<String, Msg.Session>() // ("host/id" and "host/cli_id": the session)
+    for ((h, list) in Mesh.sessions) for (s in list) for (id in listOfNotNull(s.id?.ifBlank { null }, s.cliId?.ifBlank { null }))
+        byKey["$h/$id"] = s
+    fun far(h: String, s: Msg.Session, seen: Set<String>): Boolean {
+        val p = s.spawnedBy?.ifBlank { null } ?: return false
+        val up = byKey["$h/$p"]?.takeIf { it !== s } ?: return true
+        return up.id.orEmpty() !in seen && far(h, up, seen + s.id.orEmpty()) // (a loop of them: its host's own)
+    }
+    return Mesh.sessions.flatMap { (h, list) -> list.filter { far(h, it, emptySet()) }.map { "$h/${it.id.orEmpty()}" } }.toSet()
+}
+
 /** The sections, as Baude's sidebar makes them (groups()): the Bots first (by folder), then each folder by its newest
  * chat, or each day; a chat nested under the one that forked or started it; archived ones last. query: what's
  * searched for (title, folder, host, Bot's name). */
@@ -222,7 +237,8 @@ fun sections(query: String): List<Section> {
     val archived = ArrayList<Item>()
     val groups = HomePrefs.groups.toSet()
     // (as Baude's sidebar lists them: each host's sessions that pass the host picked and the groups shown; a chat an
-    // agent started, on another host or in another group, pulled in to go under it if that's listed; then the search)
+    // agent started, on another host or in another group, pulled in to go under it if that's listed (one an agent on
+    // another host started: only so); then the search)
     val everywhere = Mesh.sessions.flatMap { (h, list) -> list.filter { it.draft != true && "$h/${it.id.orEmpty()}" !in HomePrefs.hidden }.map { h to it } }
     fun key(h: String, s: Msg.Session) = "$h/${s.id.orEmpty()}"
     val byKey = HashMap<String, Pair<String, Msg.Session>>() // ("host/id" and "host/cli_id": the session)
@@ -232,7 +248,8 @@ fun sections(query: String): List<Section> {
         byId.putIfAbsent(id, h to s)
     }
     fun agent(h: String, s: Msg.Session) = s.spawnedBy?.ifBlank { null }?.let { p -> byKey["$h/$p"] ?: byId[p] }?.takeIf { it.second !== s }
-    val listedKeys = everywhere.filter { (h, s) -> h in shown && (groups.isEmpty() || groupOf(h, s) in groups) }
+    val far = startedElsewhere() // (only ever under the agent on another host that started it)
+    val listedKeys = everywhere.filter { (h, s) -> h in shown && (groups.isEmpty() || groupOf(h, s) in groups) && key(h, s) !in far }
         .map { (h, s) -> key(h, s) }.toMutableSet()
     val pulled = HashSet<String>()
     while (true) {
@@ -474,7 +491,7 @@ private fun SessionRow(item: Item, through: Set<Int>, onClick: () -> Unit) {
     var pressed by remember { mutableStateOf(Offset.Zero) }
     var height by remember { mutableStateOf(0) }
     Box(Modifier.onSizeChanged { height = it.height }) {
-        Row(Modifier.fillMaxWidth().treeLines(item.depth, through, c.fg.copy(alpha = 0.3f)).padding(top = 1.dp).heightIn(min = 26.dp).clip(RoundedCornerShape(6.dp))
+        Row(Modifier.fillMaxWidth().treeLines(item.depth, through, c.fg.copy(alpha = 0.3f)).padding(top = 1.dp).heightIn(min = Gap.homeRow).clip(RoundedCornerShape(6.dp))
             .pressed({ pressed = it }, onClick) { menu = true }
             .padding(start = 6.dp + 18.dp * item.depth, end = 4.dp, top = 1.dp, bottom = 1.dp),
             verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -502,7 +519,7 @@ private fun BotRow(item: Item, onClick: () -> Unit) {
     var height by remember { mutableStateOf(0) }
     LaunchedEffect(contact.pictureKey) { Mesh.picture(contact) }
     Box(Modifier.onSizeChanged { height = it.height }) {
-        Row(Modifier.fillMaxWidth().heightIn(min = Gap.botRow).clip(RoundedCornerShape(6.dp))
+        Row(Modifier.fillMaxWidth().heightIn(min = Gap.homeBotRow).clip(RoundedCornerShape(6.dp))
             .pressed({ pressed = it }, onClick) { menu = true }
             .padding(horizontal = 4.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
             Avatar(contact.name, Mesh.pictures[contact.pictureKey])

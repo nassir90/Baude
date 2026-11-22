@@ -32,7 +32,7 @@ from sessionlist import (  # noqa: E402
     HERE_HOST, THIS_MACHINE, apply_desktop_index, bot_picture, chat_group, chat_groups, collapse_copies, date_group,
     desktop_index, desktop_parents, fork_tree, host_key, last_used, list_sessions, made_groups, main_folder, network,
     next_midnight, place_sessions, remote_info, remote_name, remote_path, save_info_cache, session_group,
-    short_group_label,
+    short_group_label, started_elsewhere,
 )
 from sidebarmenu import SidebarMenu  # noqa: E402
 
@@ -739,7 +739,9 @@ class SessionSidebar(SidebarMenu, Gtk.Box):
         self.remote_keys = {}
         everywhere = [s for s in network().sessions() if not s.get("draft")]  # (a draft, the open one's: not a new
         # chat not written in yet)
-        shown = {s["id"] for s in everywhere if self.shows(s, hosts, picked, assigned) or s["id"] in marks}
+        far = started_elsewhere(network().sessions())  # (only ever under the agent on another host that started it)
+        shown = {s["id"] for s in everywhere
+                 if self.shows(s, hosts, picked, assigned) and s["id"] not in far or s["id"] in marks}
         # a chat an agent started, on another host or in another group: listed under the agent, if that's listed
         # (pulled: dropped below where the agent isn't, archived, say, or not found by a search)
         pulled = set()

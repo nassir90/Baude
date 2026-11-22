@@ -65,6 +65,10 @@ object Gap {
     val sidebarRowV = Tokens.Gap.sidebarRowV        // (.session-row's padding)
     val sidebarRowH = Tokens.Gap.sidebarRowH
     val botRow = Tokens.Gap.botRow                  // (row.bot-row's min-height)
+    // (Home's rows, the phone's own heights (schema/ui's Sidebar.region): a chat's Android's least touch target, 48dp
+    // at Global Scale 1.0 (BASE_SCALE's 1.2 of these), a Bot's half as tall again)
+    val homeRow = androidx.compose.ui.unit.Dp(40f)
+    val homeBotRow = homeRow * 1.5f
     val avatar = Tokens.Gap.avatar                  // (bot_row's Adw.Avatar)
     val avatarGap = Tokens.Gap.avatarGap            // (bot_row's box spacing)
     val headerTop = Tokens.Gap.headerTop            // (header_row's margins, top and start)

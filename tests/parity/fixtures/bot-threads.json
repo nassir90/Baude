@@ -1,0 +1,20 @@
+{
+  "description": "A Bot, Juniper, on workshop, and two chats it started on studio, another host (spawned_by: the chat that started it); studio has a chat of its own too. folder is under the host's home; ago is seconds since something was said; on is the host a chat is on.",
+  "host": {"id": "h1", "name": "workshop", "home": "/tmp/parity-home/dev"},
+  "other": {"id": "h3", "name": "studio"},
+  "sessions": [
+    {"id": "6f1c2a90-1111-4c4e-9a11-0000000000b1", "title": "Write the release notes for 2.4", "bot": "Juniper",
+     "folder": "garden", "ago": 1500, "state": "idle", "transcript": null, "model": "opus", "effort": "high",
+     "mode": "default", "on": "workshop"},
+    {"id": "6f1c2a90-1111-4c4e-9a11-0000000000c1", "title": "Check the changelog links", "spawned_by": "6f1c2a90-1111-4c4e-9a11-0000000000b1",
+     "folder": "lantern", "ago": 600, "state": "idle", "transcript": null, "model": "sonnet", "effort": "medium",
+     "mode": "auto", "on": "studio"},
+    {"id": "6f1c2a90-1111-4c4e-9a11-0000000000c2", "title": "List the broken links", "spawned_by": "6f1c2a90-1111-4c4e-9a11-0000000000b1",
+     "folder": "lantern", "ago": 900, "state": "idle", "transcript": null, "model": "sonnet", "effort": "medium",
+     "mode": "auto", "on": "studio"},
+    {"id": "6f1c2a90-1111-4c4e-9a11-0000000000c3", "title": "Draft the README", "folder": "lantern", "ago": 1200,
+     "state": "idle", "transcript": null, "model": "opus", "effort": "high", "mode": "default", "on": "studio"},
+    {"id": "6f1c2a90-1111-4c4e-9a11-0000000000c4", "title": "Why the build is slow", "folder": "garden", "ago": 3600,
+     "state": "idle", "transcript": null, "model": "opus", "effort": "high", "mode": "default", "on": "workshop"}
+  ]
+}

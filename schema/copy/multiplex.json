@@ -2,7 +2,7 @@
   "description": "Multiplex, Baude's terminal: what a terminal says when it can't be, and the phone's Terminal page and the keys it adds.",
   "messages": {
     "ended": "ended",
-    "no_vte": "Terminals need VTE's GTK 4 build (package {$package})",
+    "no_vte": "Terminal unavailable. {$package} Restart the app after installation.",
     "not_started": "Couldn't start: {$error}",
     "host_gone": "The host went",
     "terminal_menu": "Terminal",

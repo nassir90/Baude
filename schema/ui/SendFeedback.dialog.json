@@ -174,7 +174,7 @@
     },
     {
       "name": "context in the note",
-      "shows": "The note carries, under Context: the session id and title, the folder, the app's path, and the open chat's and Meta's transcripts in code fences (as Copy Transcript copies them, shared out of a budget so the issue body stays under GitHub's limit)",
+      "shows": "The note carries, under Context: the session id and title, the folder, the app's path, and, when Attach open chat transcripts is checked, the open chat's and Meta's transcripts in code fences (as Copy Transcript copies them, shared out of a budget so the issue body stays under GitHub's limit)",
       "copy": [
         "report.folder_line",
         "report.the_chat"

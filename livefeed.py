@@ -23,6 +23,7 @@ def read_appended(path, offset, partial=b""):
                 return [], size, b""
             f.seek(offset)
             data = partial + f.read()
+            size = f.tell()  # includes any append between the seek and the read
     except OSError:
         return [], offset, partial
     *done, rest = data.split(b"\n")

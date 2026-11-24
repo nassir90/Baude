@@ -780,6 +780,20 @@ def inside(widget, start=True, end=True, under_bar=False):
     return widget
 
 
+def watch_style(widget, signal, update):
+    """Follow the shared style manager for the lifetime of the widget."""
+    manager = Adw.StyleManager.get_default()
+    target = widget.weak_ref()
+
+    def changed(*_):
+        current = target()
+        if current is not None:
+            update(current)
+
+    handler = manager.connect(signal, changed)
+    widget.weak_ref(manager.disconnect, handler)
+
+
 def themed_icon(name, fallback):
     """name if the current icon theme has it, else fallback (themes differ: Yaru vs Adwaita)."""
     ensure_icons()

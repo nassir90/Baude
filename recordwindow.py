@@ -127,7 +127,11 @@ class Settings(Adw.PreferencesDialog):
             row.connect("activated", go, action)
             group.add(row)
         page.add(group)
+        page.set_title("General")
+        page.set_icon_name("preferences-system-symbolic")
         self.add(page)
+        from providerpage import page as providers_page
+        self.add(providers_page())
         copies, stop = json.loads(json.dumps([notebooks for _title, _action, notebooks in exports])), threading.Event()
         self.connect("closed", lambda *_: stop.set())  # (nothing to say them to: no more reading large chats)
         threading.Thread(target=Settings._work_out_sizes, args=([self], copies, stop), daemon=True).start()
@@ -267,7 +271,7 @@ class Window(RecordHosts, Adw.ApplicationWindow, feedback.FeedbackHost, viewers.
         view.append(wording.say("meta_settings.full_width"), "win.fullwidth")
         menu.append_section(None, view)
         tools = Gio.Menu()  # (Baude's views over the window; Files and Git are in the right bar, code in tabs)
-        for title, page in ((wording.say("window.kubernetes_menu"), "kube"),
+        for title, page in ((wording.say("window.kubernetes"), "kube"),
                             (wording.say("window.database_schemas"), "db")):
             tools.append(title, f"win.viewer::{page}")
         tools.append(wording.say("multiplex.terminal_menu"), "win.viewer::terminal")
@@ -711,8 +715,10 @@ class Window(RecordHosts, Adw.ApplicationWindow, feedback.FeedbackHost, viewers.
         return [f"- session: {os.path.splitext(os.path.basename(chat.get('path') or '-'))[0]} "
                 f"({book()} {full_name(t) if t else '-'})",
                 wording.say("report.folder_line", folder=folders[0] if folders else '-'),
-                f"- Record: {os.path.join(os.path.dirname(os.path.realpath(__file__)), 'record.py')}",
-                *feedback.report_lines([(wording.say("report.the_chat"), self.report), ("Meta", self.chat.report)])]
+                f"- Record: {os.path.join(os.path.dirname(os.path.realpath(__file__)), 'record.py')}"]
+
+    def feedback_transcripts(self):
+        return feedback.report_lines([(wording.say("report.the_chat"), self.report), ("Meta", self.chat.report)])
 
     def report(self, most=None):
         """The chat open as text for an issue (Copy Transcript for an Issue; a note sent with Send Feedback): its model

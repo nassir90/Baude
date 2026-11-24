@@ -96,6 +96,13 @@ and Codex-specific approval requests without a Baude UI are outside its scope.
 
 ## Local models
 
+In Baude or Record, open **Settings → Providers** to add named subscriptions on this machine.
+For Claude, paste a token from `claude setup-token`. For Codex, link an existing file-backed
+`CODEX_HOME` signed in with ChatGPT or sign in with a device code to create a separate profile.
+Select the account before creating a chat. Hosted sessions keep their account when resumed.
+Each mesh host uses its own profiles. Claude tokens are stored in an owner-only local database
+under Baude’s configuration directory. Codex manages its credentials inside each profile.
+
 Besides Claude's, a chat can run a model one of this machine's inference providers serves: Apple's on-device model
 (`apple-claude`, once it's built), MLX (`pi-claude`'s own server, on the models in `pi-claude/models.json`, or
 added in `settings.json`'s `mlx_models`, that you've downloaded), [Ollama](https://ollama.com) (`settings.json`'s `ollama_url`, else `OLLAMA_HOST`, else 127.0.0.1:11434), or any OpenAI-compatible server

@@ -94,8 +94,9 @@ class Window(Adw.ApplicationWindow):
         view.add_top_bar(head)
         view.add_top_bar(bar)
         self.set_content(view)
-        for name, keys, fn in (("new-tab", ["<Primary><Shift>t", "<Meta>t"], lambda: self.open()),
-                               ("close-tab", ["<Primary><Shift>w", "<Meta>w"], self.close_tab)):
+        prefix = "<Meta>" if sys.platform == "darwin" else "<Control><Shift>"
+        for name, keys, fn in (("new-tab", [prefix + "t"], lambda: self.open()),
+                               ("close-tab", [prefix + "w"], self.close_tab)):
             act = Gio.SimpleAction.new(name, None)
             act.connect("activate", lambda *_a, fn=fn: fn())
             self.add_action(act)

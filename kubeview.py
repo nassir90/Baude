@@ -39,7 +39,7 @@ from lookupkube import (  # noqa: E402,F401  (⌘K's engine: what a folder has)
 )
 from widgets import (  # noqa: E402,F401
     WorkerPool, ensure_icons, find_label, full_time, inside, load_settings, paned_grip, pretty_path, save_settings,
-    themed_icon, time_tip, toast, view_bar, _scales,
+    time_tip, toast, view_bar, _scales,
 )
 from imageviews import Fade, RefreshButton  # noqa: E402,F401
 from pickers import ellipsize_dropdown  # noqa: E402,F401
@@ -518,7 +518,7 @@ class KubeView(Gtk.Box):
         self.logs_follow = Gtk.ToggleButton(icon_name="go-bottom-symbolic", active=True,
                                             tooltip_text=wording.say("kube.follow_tip"))
         self.logs_follow.connect("toggled", lambda b: self.syncing or self.follow_logs(b.get_active()))
-        wrap = Gtk.ToggleButton(icon_name=themed_icon("text-wrap-symbolic", "format-justify-fill-symbolic"),
+        wrap = Gtk.ToggleButton(icon_name="baude-wrap-symbolic",
                                 tooltip_text=wording.say("code_view.wrap"),
                                 active=bool(load_settings().get("kube_log_wrap")))
         wrap.connect("toggled", lambda b: (self.logs.set_wrap(b.get_active()),

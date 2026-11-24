@@ -1,5 +1,5 @@
 {
-  "description": "Baude's Settings dialog: one scrolling page of groups of rows, each applied as it is changed and kept in settings.json (shared with Record, which has its own Settings dialog with the same rows). Title \"Settings\".",
+  "description": "Baude's Settings dialog: a General page of settings and a Providers page for local subscriptions, each applied as it is changed and kept in settings.json (shared with Record, which has its own Settings dialog with the same rows). Title \"Settings\".",
   "apps": [
     "baude"
   ],
@@ -27,6 +27,10 @@
     "fixes"
   ],
   "parts": [
+    {
+      "name": "Providers page",
+      "shows": "A Claude and a Codex account picker, with Add account for each provider. Claude also has a Subscription usage row."
+    },
     {
       "name": "Meta group",
       "shows": "The first group, Meta's settings (Intelligence, Provider, Effort, Run commands, Code mode), the same rows Meta's own page has. Described in MetaSettings.dialog.json.",

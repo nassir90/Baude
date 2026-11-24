@@ -58,7 +58,7 @@ fun ChatMenu(hostId: String, sid: String, feedback: () -> Unit, screen: (String)
         ),
         listOf(fullWidth()),
         listOfNotNull(
-            if (takes(hostId, "kube")) MenuItem(Wording.Window.kubernetesMenu) { screen("kubernetes") } else null,
+            if (takes(hostId, "kube")) MenuItem(Wording.Window.kubernetes) { screen("kubernetes") } else null,
             if (takes(hostId, "databases")) MenuItem(Wording.Window.databaseSchemas) { screen("databases") } else null,
             if (takes(hostId, "terminal")) MenuItem(Wording.Multiplex.terminalMenu) { screen("terminal") } else null,
         ),
@@ -82,7 +82,7 @@ fun HomeMenu(settings: () -> Unit, changelog: () -> Unit, mesh: () -> Unit, feed
     MainMenu(listOf(
         listOf(fullWidth()),
         if (host == null) emptyList() else listOfNotNull(
-            if (takes(host, "kube")) MenuItem(Wording.Window.kubernetesMenu) { tool("kubernetes", host) } else null,
+            if (takes(host, "kube")) MenuItem(Wording.Window.kubernetes) { tool("kubernetes", host) } else null,
             if (takes(host, "databases")) MenuItem(Wording.Window.databaseSchemas) { tool("databases", host) } else null,
             if (takes(host, "terminal")) MenuItem(Wording.Multiplex.terminalMenu) { tool("terminal", host) } else null,
         ),

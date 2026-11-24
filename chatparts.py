@@ -202,6 +202,7 @@ class ContextUsage(Gtk.Box):
         if not total and usage.get("showWithoutLimit"):
             self.said = True
             self.bar.set_visible(False)
+            self.label.set_visible(True)
             self.over = False
             self.label.set_text(wording.say("context_usage.used_no_limit", used=fmt_tokens(used))
                                 if usage.get("totalTokens") is not None else
@@ -213,7 +214,8 @@ class ContextUsage(Gtk.Box):
         self.said = True
         self.bar.set_visible(True)
         self.over = used > total
-        self.label.set_text(wording.say("context_usage.label"))
+        self.label.set_text("")
+        self.label.set_visible(False)
         self.bar.set_text(wording.say("context_usage.count", used=fmt_tokens(used), total=fmt_tokens(total)))
         self.bar.set_value(min(1.0, used / total))
         lines = [f"{c['name']}: {fmt_tokens(c.get('tokens', 0))}" for c in usage.get("categories") or []
@@ -224,7 +226,8 @@ class ContextUsage(Gtk.Box):
     def reset(self):
         """No session's: nothing used yet, of the window its model has (window_changed)."""
         self.over = self.said = False
-        self.label.set_text(wording.say("context_usage.label"))
+        self.label.set_text("")
+        self.label.set_visible(False)
         self.bar.set_visible(True)
         self.bar.set_value(0)
         self.window_changed()

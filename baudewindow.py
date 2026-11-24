@@ -104,7 +104,11 @@ class SettingsDialog(Adw.PreferencesDialog):
         self.feedback_row.connect("activated", lambda row: (row.get_ancestor(Adw.Dialog).close(), win.open_feedback()))
         group.add(self.feedback_row)
         page.add(group)
+        page.set_title("General")
+        page.set_icon_name("preferences-system-symbolic")
         self.add(page)
+        from providerpage import page as providers_page
+        self.add(providers_page())
 
     switch = staticmethod(settings_switch)  # (widgets': Record's Settings has them too)
     size_row = staticmethod(settings_size)
@@ -244,7 +248,7 @@ class BaudeWindow(WindowView, WindowProc, WindowDrafts, WindowSignal, WindowRemo
         view.append(wording.say("meta_settings.full_width"), "win.fullwidth")
         menu.append_section(None, view)
         tools = Gio.Menu()
-        tools.append(wording.say("window.kubernetes_menu"), "win.kube")
+        tools.append(wording.say("window.kubernetes"), "win.kube")
         tools.append(wording.say("window.database_schemas"), "win.dbschema")
         tools.append(wording.say("multiplex.terminal_menu"), "win.terminal")
         menu.append_section(None, tools)
@@ -642,9 +646,11 @@ class BaudeWindow(WindowView, WindowProc, WindowDrafts, WindowSignal, WindowRemo
         """What a note sent from here says it came from (feedback.save_feedback)."""
         return [f"- session: {self.session_id or '-'} ({getattr(self, 'session_title', None) or 'untitled'})",
                 wording.say("report.folder_line", folder=self.cwd),
-                f"- Baude: {os.path.join(os.path.dirname(os.path.realpath(__file__)), 'baude.py')}",
-                *feedback.report_lines([(wording.say("report.the_chat"), self.report),
-                                        ("Meta", self.panel.meta.report)])]
+                f"- Baude: {os.path.join(os.path.dirname(os.path.realpath(__file__)), 'baude.py')}"]
+
+    def feedback_transcripts(self):
+        return feedback.report_lines([(wording.say("report.the_chat"), self.report),
+                                        ("Meta", self.panel.meta.report)])
 
     def capture_areas(self):
         """The window's parts, by name, for the text a capture records."""

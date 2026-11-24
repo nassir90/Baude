@@ -733,15 +733,14 @@ object Mesh {
         }
     }
 
-    /** More of the chat's transcript read (its last part, the first time: a long one isn't all fetched). */
+    /** Read the chat from its first record, continuing from the last complete line in each reply. */
     fun read(chat: Chat) {
         if (chat.reading) {
             chat.again = true
             return
         }
         val c = conns[chat.hostId] ?: return
-        val size = session(chat.hostId, chat.sid)?.size?.toLong() ?: 0
-        val from = if (chat.offset < 0) (size - TAIL).coerceAtLeast(0) else chat.offset
+        val from = chat.offset.coerceAtLeast(0)
         if (chat.offset < 0 && sessions[chat.hostId] == null) return // (its size not known yet: read once it is)
         chat.reading = true
         c.request(Msg.Transcript(session = chat.sid, offset = from).json()) { r ->
@@ -749,8 +748,8 @@ object Mesh {
             val data = got.data.orEmpty()
             val text = if (data.isEmpty()) "" else String(Base64.getDecoder().decode(data), Charsets.UTF_8)
             val next = got.next?.toLong() ?: from
-            val more = next < (got.size?.toLong() ?: next)
-            val lines = parse(text, cutFirst = chat.offset < 0 && from > 0)
+            val more = next > from && next < (got.size?.toLong() ?: next)
+            val lines = parse(text, cutFirst = false)
             main.post {
                 if (r.optString("op") == Op.TRANSCRIPT) {
                     chat.offset = next
@@ -1102,7 +1101,6 @@ object Mesh {
     const val MESSAGES = "messages"
     private const val ASK_NOTE = 2 // (an ask's notification: its tag says which)
     const val LINKED = "linked"
-    private const val TAIL = 400_000L // (a chat's transcript read from its last this much, the first time)
     val IMAGE_TYPES = setOf("image/png", "image/jpeg", "image/gif", "image/webp")
 }
 

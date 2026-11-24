@@ -295,7 +295,7 @@ def install_debug_hooks(app):
         gi.require_version("GLibUnix", "2.0")
         from gi.repository import GLibUnix
         GLibUnix.signal_add(GLib.PRIORITY_HIGH, signal.SIGUSR2, state)
-    except (ImportError, ValueError):  # older GLib
+    except (AttributeError, ImportError, ValueError):  # older GLib
         GLib.unix_signal_add(GLib.PRIORITY_HIGH, signal.SIGUSR2, state)
     return path
 

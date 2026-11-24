@@ -10,16 +10,27 @@ import threading
 
 from gi.repository import Adw, GLib, Gtk
 
-from baudelib import accounts, models
+from baudelib import accounts, icons, models
 
 
 def page():
     result = Adw.PreferencesPage(title="Providers", icon_name="system-users-symbolic")
-    for provider, title in (("claude", "Claude"), ("codex", "Codex")):
-        group = Adw.PreferencesGroup(title=title, description="Account for new sessions on this machine")
+    for provider, title, logo in (("claude", "Claude", "claude"), ("codex", "Codex", "openai")):
+        group = Adw.PreferencesGroup()
+        content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        heading = Gtk.Box(spacing=8)
+        heading.append(Gtk.Image.new_from_file(os.path.join(icons.folder("models"), f"baude-model-{logo}-symbolic.svg")))
+        label = Gtk.Label(label=title)
+        label.add_css_class("heading")
+        heading.append(label)
+        content.append(heading)
+        rows = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE, css_classes=["boxed-list"])
+        content.append(rows)
+        group.add(content)
+        group.update_property([Gtk.AccessibleProperty.LABEL], [title])
         result.add(group)
         chooser = Adw.ComboRow(title="Account")
-        group.add(chooser)
+        rows.append(chooser)
         names = []
 
         def refresh(provider=provider, chooser=chooser, names=names):
@@ -43,10 +54,10 @@ def page():
             usage.add_suffix(Gtk.Image(icon_name="view-refresh-symbolic"))
             usage.connect("activated", refresh_usage)
             chooser.connect("notify::selected", lambda *_, row=usage: row.set_subtitle(""))
-            group.add(usage)
+            rows.append(usage)
         add = Adw.ButtonRow(title="Add account", end_icon_name="list-add-symbolic")
         add.connect("activated", lambda row, p=provider, refresh=refresh: add_account(row, p, refresh))
-        group.add(add)
+        rows.append(add)
     return result
 
 

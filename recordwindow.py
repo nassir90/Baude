@@ -128,7 +128,7 @@ class Settings(Adw.PreferencesDialog):
             group.add(row)
         page.add(group)
         page.set_title("General")
-        page.set_icon_name("preferences-system-symbolic")
+        page.set_icon_name("emblem-system-symbolic")
         self.add(page)
         from providerpage import page as providers_page
         self.add(providers_page())

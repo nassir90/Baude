@@ -9,8 +9,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
 
 /** An item of the main menu: its label, a check mark where it's a toggle (checked: whether it's on; null: it isn't
- * one), and what it does. */
-class MenuItem(val label: String, val checked: Boolean? = null, val go: () -> Unit)
+ * one), whether it can be picked (greyed if not), and what it does. */
+class MenuItem(val label: String, val checked: Boolean? = null, val enabled: Boolean = true, val go: () -> Unit)
 
 /** ☰'s main menu, as the header bar's: sections of one-line items with a rule between them (as Baude's and Record's:
  * the chat's, the view's, the views over the window, the app's); with a toggle among them every item has a column for
@@ -24,7 +24,7 @@ fun MainMenu(sections: List<List<MenuItem>>) {
         Popover(open, { open = false }, ticks = if (shown.flatten().any { it.checked != null }) Ticks.START else Ticks.NONE) {
             shown.forEachIndexed { i, items ->
                 if (i > 0) MenuDivider()
-                for (item in items) MenuChoice(item.label, item.checked == true) { open = false; item.go() }
+                for (item in items) MenuChoice(item.label, item.checked == true, enabled = item.enabled) { open = false; item.go() }
             }
         }
     }
@@ -41,7 +41,7 @@ private fun fullWidth(): MenuItem {
 }
 
 /** A chat's ☰ (baudewindow.BaudeWindow's menu, in its sections): Find, Copy Transcript for an Issue, Read-only
- * session; Full-width text; Kubernetes…, Database Schemas…, Terminal (a host that takes them); Settings…, Changelog, Mesh, Send
+ * session (checked and greyed while the chat's archived: read-only till it's unarchived); Full-width text; Kubernetes…, Database Schemas…, Terminal (a host that takes them); Settings…, Changelog, Mesh, Send
  * Feedback…, Ongoing Feedback. screen opens one of "settings", "changelog", "mesh", "fixes", "databases", "kubernetes" and
  * "terminal" over the chat. */
 @Composable
@@ -51,7 +51,8 @@ fun ChatMenu(hostId: String, sid: String, feedback: () -> Unit, screen: (String)
         listOfNotNull(
             MenuItem(Wording.Find.placeholder) { Find.open["$hostId/$sid"] = true },
             MenuItem(Wording.Window.copyTranscript) { copyReport(ctx, hostId, sid) },
-            if (sid.isEmpty()) null else MenuItem(Wording.Window.readOnly, Settings.isReadOnly(sid)) {
+            if (sid.isEmpty()) null else MenuItem(Wording.Window.readOnly, Settings.isReadOnly(sid) || isArchived(hostId, sid),
+                                                  enabled = !isArchived(hostId, sid)) {
                 if (sid in Settings.readOnly) Settings.readOnly.remove(sid) else Settings.readOnly.add(sid)
                 Settings.save(ctx)
             },
@@ -95,3 +96,6 @@ fun HomeMenu(settings: () -> Unit, changelog: () -> Unit, mesh: () -> Unit, feed
         ),
     ))
 }
+
+/** Whether a chat is archived on its host: read-only till it's unarchived (baudewindow's chat_archived). */
+fun isArchived(hostId: String, sid: String) = sid.isNotEmpty() && Mesh.session(hostId, sid)?.archived == true

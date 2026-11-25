@@ -854,30 +854,45 @@ class WindowProc:
         self.input.grab_focus()
 
     # ---- read-only sessions (☰ → Read-only session): no text box, for a chat you only watch (tailing one with
-    # Signal on, say); the status line, with the context it uses, stays. Remembered per session. A session another
-    # program has (update_banner) is read-only too while it does, and has no text box either: show_composer
+    # Signal on, say); the status line, with the context it uses, stays. Remembered per session. An archived chat is
+    # read-only till it's unarchived, its ☰ item checked and greyed. A session another program has (update_banner) is
+    # read-only too while it does, and has no text box either: show_composer
     def read_only_ids(self):
         return [i for i in load_settings().get("read_only_sessions") or [] if isinstance(i, str)]
 
+    def chat_archived(self):
+        """Whether the open chat is archived: here, in Claude Desktop (sidebar.archived_ids) or on its host."""
+        sid = self.session_id
+        if not sid or getattr(self, "sidebar", None) is None:
+            return False
+        if self.remote is not None and (self.remote.sessions.get(sid) or {}).get("archived"):
+            return True
+        return sid in self.sidebar.archived_ids()
+
     def set_read_only(self, on):
         """Make this session read-only, or not (and remember it for the session, once it has an id)."""
+        if self.archived:
+            return  # (read-only till it's unarchived: the item's greyed)
         if self.session_id:
             ids = [i for i in self.read_only_ids() if i != self.session_id] + ([self.session_id] if on else [])
             save_settings(read_only_sessions=ids or None)
         self.apply_read_only(on)
 
     def apply_read_only(self, on=None):
-        """Show or hide the text box as the session asks (on: as given, None: as remembered for it)."""
+        """Show or hide the text box as the session asks (on: as given, None: as remembered for it); archived, it's
+        hidden whatever was chosen, and ☰ → Read-only session is checked and greyed."""
         if on is None:
             on = bool(self.session_id) and self.session_id in self.read_only_ids()
-        self.read_only = on
+        self.archived = self.chat_archived()
+        self.read_only = on or self.archived
         if (action := self.lookup_action("readonly")) is not None:
-            action.set_state(GLib.Variant.new_boolean(on))
+            action.set_state(GLib.Variant.new_boolean(self.read_only))
+            action.set_enabled(not self.archived)
         self.show_composer()
 
     def show_composer(self):
-        """The text box, there unless the session can't be written to: read-only by choice (☰ → Read-only session),
-        or while another program has it (update_banner). Read-only is no text box at all, not a greyed-out one."""
+        """The text box, there unless the session can't be written to: read-only by choice (☰ → Read-only session)
+        or archived, or while another program has it (update_banner). Read-only is no text box at all, not a greyed-out one."""
         hidden = self.read_only or self.locked
         self.composer.set_visible(not hidden)
         if hidden and self.input.has_focus():

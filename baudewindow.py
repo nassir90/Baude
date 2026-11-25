@@ -403,8 +403,8 @@ class BaudeWindow(WindowView, WindowProc, WindowDrafts, WindowSignal, WindowRemo
                            margin_start=12, margin_end=12, margin_bottom=6)
         composer.append(self.attach_strip)
         composer.append(box_overlay)
-        # (☰ → Read-only session hides it, and so does another program having the session: show_composer)
-        self.composer, self.read_only, self.locked = composer, False, False
+        # (☰ → Read-only session hides it, as does the chat being archived or another program having it: show_composer)
+        self.composer, self.read_only, self.locked, self.archived = composer, False, False, False
         self.set_send_button(busy=False)
 
         self.status = Gtk.Label(xalign=0, ellipsize=Pango.EllipsizeMode.END, hexpand=True)

@@ -166,11 +166,11 @@ fun MenuChoice(label: String, on: Boolean, enabled: Boolean = true, textColor: C
     val c = LocalBaude.current
     val ticks = LocalTicks.current
     MenuLine(enabled, onLongClick, onClick) {
-        if (ticks == Ticks.START) Tick(on)
+        if (ticks == Ticks.START) Tick(on, enabled)
         dot?.let { Box(Modifier.size(14.dp).clip(CircleShape).background(it)) }
         Text(label, style = Type.body, color = textColor ?: if (enabled) c.fg else c.dim, maxLines = 1,
             overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
-        if (ticks == Ticks.END || ticks == Ticks.NONE && on) Tick(on)
+        if (ticks == Ticks.END || ticks == Ticks.NONE && on) Tick(on, enabled)
     }
 }
 
@@ -232,9 +232,9 @@ fun MenuBack(label: String, onClick: () -> Unit) {
 
 /** The tick of a row picked (the room of one where it isn't). */
 @Composable
-private fun Tick(on: Boolean) {
+private fun Tick(on: Boolean, enabled: Boolean = true) {
     val c = LocalBaude.current
-    if (on) Icon(Adwaita.ObjectSelect, null, tint = c.accent, modifier = Modifier.size(16.dp.icon))
+    if (on) Icon(Adwaita.ObjectSelect, null, tint = if (enabled) c.accent else c.dim, modifier = Modifier.size(16.dp.icon))
     else Spacer(Modifier.size(16.dp.icon))
 }
 

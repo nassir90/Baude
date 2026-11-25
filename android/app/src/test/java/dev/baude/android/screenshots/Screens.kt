@@ -525,6 +525,15 @@ abstract class Screens(private val theme: String) {
         chat.draft.value = "Group them by area\nand link each item to its PR"
         render("10c-chat-larger-text-typed") { ChatShell("h1", "a", back = {}, open = { _, _ -> }, feedback = {}, first = "chat") }
     }
+    /** An archived chat open, its ☰ open: no text box, Read-only session checked and greyed. */
+    @Test fun chatArchived() {
+        Mesh.sessions["h1"] = Mesh.sessions["h1"].orEmpty().map { if (it.id == "a") Msg.Session.from(it.json().put("archived", true)) else it }
+        fill(Mesh.openChat("h1", "a"))
+        show { ChatShell("h1", "a", back = {}, open = { _, _ -> }, feedback = {}, first = "chat") }
+        tap("Menu")
+        layOut()
+        screen("10d-chat-archived")
+    }
     @Test fun chatMeta() = chatAt("11-chat-meta", "meta")
     @Test fun chatSubagents() = chatAt("12-chat-subagents", "agents")
     // (Meta's forms, cards in its conversation: one brought up, filled by Meta, submitted; another scrolled past,

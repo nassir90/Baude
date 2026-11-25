@@ -33,6 +33,7 @@ Plain JSON, two-space indent, no `x-` keys. Fields, in this order, each left out
 - `states`: distinct looks: empty, loading, error, working, asking, signed out, host gone.
 - `removed`: parts taken out on purpose, so no app brings them back: each `{name, apps, why, decided}`, `apps` naming
   every app it's gone from (`baude`, `record`, `phone`).
+- `decisions`: the owner's complaints and corrections about it, each `{said, rule, decided}`: the owner's words, what every app does because of it, the date.
 - `scenes`: `tests/screenshots.py` scenes that show it.
 
 ## Overrides: where the phone differs on purpose
@@ -51,6 +52,7 @@ An entry or a part may carry:
 
 ## Rules every entry follows
 
+- **A closed window leaves nothing listening.** Anything an entry draws that follows the theme (dark or light, the accent) stops following it when its window closes; the owner found Baude and Record growing in memory the longer they run (2026-11-24).
 - **A Bot has only its Name.** Wherever an app lists or shows a Bot (a sidebar or home row, the open chat's header and
   window title, a notification, the macOS menu bar item, This phone, a share target, the @ and ⌘K lists, Meta's lists, captions and trash button, a sender), it shows the Bot's name and
   nothing of the chat under it: no chat title, no second line. The name is set when the chat is made a Bot

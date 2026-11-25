@@ -76,7 +76,7 @@
     },
     {
       "name": "other settings Meta can show or change",
-      "shows": "Not rows of this group but settings Meta can name with 'show setting:<name>' and change with set_setting, drawn as the row Settings has for them: Accent Colour, Code Font, Text Scale, Icon Scale, Global Scale, Full-width text, automatic update (the 'auto restart' row), and in Baude 'group_by' (the sidebar's group-by: Folder or Date), in Record 'markup' (Markup visibility) and 'backup_all' (Include glossary and chats in backup). Their rows and wording are described with Settings.",
+      "shows": "Not rows of this group but settings Meta can name with 'show setting:<name>' and change with set_setting, drawn as the row Settings has for them: Accent Colour, Code Font, Text Scale, Icon Scale, Global Scale, Full-width text, automatic update (the 'auto restart' row), and in Baude 'group_by' (the sidebar's group-by: Folder, Created or Updated), in Record 'markup' (Markup visibility) and 'backup_all' (Include glossary and chats in backup). Their rows and wording are described with Settings.",
       "copy": ["shared_settings.accent_colour", "shared_settings.code_font", "meta_settings.text_scale", "meta_settings.icon_scale", "meta_settings.global_scale", "meta_settings.full_width"]
     }
   ]

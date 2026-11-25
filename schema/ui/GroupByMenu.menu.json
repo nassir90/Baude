@@ -1,5 +1,5 @@
 {
-  "description": "The ⋮ menu beside the sidebar's search: how the list is grouped (Folder or Date), and which of Baude's own groups are listed. A group is a named list of chats of Baude's own, whatever host they're on. Opened by clicking the ⋮ button.",
+  "description": "The ⋮ popover beside the sidebar's search: how the list is grouped (Folder, Created or Updated), and which of Baude's own groups are listed. A group is a named list of chats of Baude's own, whatever host they're on. Opened by clicking the ⋮ button.",
   "apps": [
     "baude"
   ],
@@ -12,7 +12,7 @@
     "sessionsidebar.py:SessionSidebar.group_menu",
     "sessionsidebar.py:SessionSidebar.known_groups",
     "sidebarmenu.py:SidebarMenu.open_group",
-    "sessionsidebar.py:FilterList"
+    "pickers.py:CheckList"
   ],
   "copy": [
     "sidebar",
@@ -22,52 +22,45 @@
   "parts": [
     {
       "name": "Group by",
-      "shows": "A section headed \"Group by\" with two radio-style items: \"Folder\" and \"Date\", the current one marked. Remembered across restarts. Folder is the default.",
+      "shows": "A heading \"Group by\" over three radio buttons: \"Folder\", \"Created\" and \"Updated\", the current one marked. Remembered across restarts (\"date\" from before is Updated). Folder is the default.",
       "copy": [
         "sidebar.group_by",
         "common.folder",
-        "sidebar.date"
+        "sidebar.created",
+        "sidebar.updated"
       ],
       "actions": [
         {
-          "by": "click Folder / Date",
-          "does": "Regroups the list: by folder (open chat's folder first, then by latest activity), or by day (Today, Yesterday, five days, Older)."
+          "by": "click Folder / Created / Updated",
+          "does": "Regroups the list: by folder (open chat's folder first, then by latest activity); by the day each chat was made (Created: Today, Yesterday, five days, Older; a chat and those under it by the day the top one was made, newest made first); or by the day each was last used (Updated: the same days, a chat and those under it by the latest activity of any of them)."
         }
       ]
     },
     {
       "name": "Groups",
-      "shows": "A section headed \"Groups\" with: a list of every group (Baude's own groups), alphabetical case-insensitively, then \"No group\" last; then \"New Group…\"; then \"Show All\" (only while something is left out). Groups known: those made with New Group…, those chats are put in, and those hosts' sessions were started in.",
+      "shows": "Under a separator, the Groups checks: the same widget as the Kubernetes page's Namespaces menu (pickers.CheckList; the phone's MenuChecks, as its Namespaces). A check \"Groups\" over them all, a separator, then a check per group (Baude's own groups), alphabetical case-insensitively, then \"No group\" last; then, under a separator, \"New Group…\". Groups known: those made with New Group…, those chats are put in, and those hosts' sessions were started in.",
       "copy": [
         "sidebar.groups",
         "sidebar.no_group",
-        "sidebar.show_all"
+        "sidebar.new_group_ellipsis"
       ],
       "parts": [
         {
-          "name": "Group list (filter)",
-          "shows": "One row per group: a tick on the left (visible while the group is listed), the group's name (cut with … at about 24 characters, dim when marked so), and an optional dim note after it. Everything is listed until some are picked; ticks show what's listed. Which groups are listed is remembered across restarts, and a group that has gone is neither shown nor counted out.",
+          "name": "Group checks",
+          "shows": "\"Groups\": checked while every group is listed (none picked). Then one square check per group with its name, checked while it's picked. Everything is listed until some are picked. Which groups are listed is remembered across restarts, and a group that has gone is neither shown nor counted out.",
           "phone": {
-            "does": "A tap toggles one group in or out of the list",
-            "why": "No Shift/Ctrl or arrow keys on touch",
-            "decided": "2026-11-21"
+            "does": "As the phone's Namespaces menu: \"Groups\" and each group are menu rows with a tick where the desktop has a check",
+            "why": "The phone's Namespaces menu is ticks; the owner asked for the group menu to be the same as Namespaces",
+            "decided": "2026-11-25"
           },
           "actions": [
             {
-              "by": "click a row",
-              "does": "Lists only that group's chats."
+              "by": "click Groups",
+              "does": "Lists every group (no group picked); it can't be unchecked."
             },
             {
-              "by": "Shift or Ctrl/⌘ + click",
-              "does": "Adds that group to those listed, or takes it out; with none left, everything is listed again (all ticked)."
-            },
-            {
-              "by": "key Up / Down",
-              "does": "Moves among rows without picking; at either end leaves the list to the menu's other items."
-            },
-            {
-              "by": "key Space or Enter",
-              "does": "Lists only the focused group, as a click does; Ctrl/⌘ + Space adds or takes it out."
+              "by": "click a group's check",
+              "does": "Picks that group too, or takes it out; with none left picked, every group is listed again (Groups checked)."
             },
             {
               "by": "right-click a group",
@@ -83,7 +76,11 @@
             "sidebar.delete_group",
             "sidebar.group_deleted"
           ],
-          "phone": {"does": "Opened by a long-press on a group's row", "why": "Touch's right-click", "decided": "2026-11-21"},
+          "phone": {
+            "does": "Opened by a long-press on a group's row",
+            "why": "Touch's right-click",
+            "decided": "2026-11-21"
+          },
           "actions": [
             {
               "by": "click Rename Group…",
@@ -107,19 +104,6 @@
               "does": "Opens the group-name dialog \"New group\" (GroupName.dialog.json); the group is made, listed even if empty, no chat moved."
             }
           ]
-        },
-        {
-          "name": "Show All",
-          "shows": "\"Show All\", shown only while some group is left out of the list.",
-          "copy": [
-            "sidebar.show_all"
-          ],
-          "actions": [
-            {
-              "by": "click",
-              "does": "Lists every group again."
-            }
-          ]
         }
       ]
     },
@@ -134,15 +118,15 @@
   "states": [
     {
       "name": "all groups listed",
-      "shows": "Every row ticked, \"Show All\" absent."
+      "shows": "\"Groups\" checked, every group unchecked."
     },
     {
       "name": "some listed",
-      "shows": "Only those rows ticked; \"Show All\" present."
+      "shows": "\"Groups\" unchecked, those groups checked."
     },
     {
       "name": "no groups at all",
-      "shows": "Just \"No group\" in the list, ticked."
+      "shows": "\"Groups\" checked, and just \"No group\" under it."
     }
   ],
   "scenes": [

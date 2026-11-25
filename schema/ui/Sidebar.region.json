@@ -172,7 +172,7 @@
     },
     {
       "name": "Session list",
-      "shows": "A scrolling list (no horizontal scroll) of group headers, each followed by its session rows and, when cut short, a \"Show N more\" row. Scroll position and focus are kept when it is rebuilt. The open session's row is highlighted (selected). Order: Bots first (no header), then groups; by folder the folder of the open chat first then by latest activity; by date newest day first; then the Archived group at the end.",
+      "shows": "A scrolling list (no horizontal scroll) of group headers, each followed by its session rows and, when cut short, a \"Show N more\" row. Scroll position and focus are kept when it is rebuilt. The open session's row is highlighted (selected). Order: Bots first (no header), then groups; by folder the folder of the open chat first then by latest activity; by Created or Updated newest day first; then the Archived group at the end.",
       "parts": [
         {
           "name": "Group header (folder)",
@@ -202,7 +202,7 @@
         },
         {
           "name": "Group header (date)",
-          "shows": "When grouped by Date: \"Today\", \"Yesterday\", then each of the 5 days before as \"Oct 20\" style (month abbreviation, day), then \"Older\". Same arrow; no + button. A session and its forks go together by the latest activity of any of them; a fork used today brings its parent into today. Days regroup at local midnight, and when the window comes to the front after one.",
+          "shows": "When grouped by Created or Updated: \"Today\", \"Yesterday\", then each of the 5 days before as \"Oct 20\" style (month abbreviation, day), then \"Older\". Same arrow; no + button. Updated: a session and its forks go together by the latest activity of any of them; a fork used today brings its parent into today. Created: a session and its forks go together by the day the session was made, the newest made first. Days regroup at local midnight, and when the window comes to the front after one.",
           "copy": [
             "sidebar.today",
             "sidebar.yesterday",
@@ -211,7 +211,7 @@
         },
         {
           "name": "Show more row",
-          "shows": "A dimmed row \"Show N more\" at the end of a group cut short. Limits count top-level sessions, their forks come with them: this folder's group none; another folder 8; by date, today none, yesterday 10, an earlier day 5.",
+          "shows": "A dimmed row \"Show N more\" at the end of a group cut short. Limits count top-level sessions, their forks come with them: this folder's group none; another folder 8; by day, today none, yesterday 10, an earlier day 5.",
           "copy": [
             "meta.show_more"
           ],
@@ -234,7 +234,7 @@
             "why": "Android's least touch target: rows the desktop's height are too small to tap",
             "decided": "2026-11-22"
           },
-          "shows": "One line: the title (for a Bot whose host is gone, its name, never its chat's title; a title too long fades out at the cut, no …), then a status dot at the far right. The title is \"(untitled)\" if it has none. A session on another host that is gone shows its title (a Bot: its name) dimmed with a crossed-out cloud icon (schema/icons/baude/baude-no-connection-symbolic.svg) before the dot, tooltip \"No connection\" (not for a deactivated host: just dimmed). A chat its host holds messages for shows a small \"held\" tag before the dot. A chat open but not yet written in shows as \"New session\" at the top of its folder (never while blank), and has no right-click menu. Tooltip (several lines, those that apply): title (a Bot: its name); its folder; \"N message(s) held for it, to send or delete in it\"; \"On <host> (<address>)\" with \", deactivated\" or \", gone from the network since <time ago>\"; \"Group <name>\"; \"Worktree <name> of <folder>\"; the source line (for a session of this machine's Claude Desktop or Claude Code, and \"<host>, on the network\" for a session on a host); \"N earlier copy/copies of this conversation hidden\".",
+          "shows": "One line: the title (for a Bot whose host is gone, its name, never its chat's title; a title too long fades out at the cut, no …), then a status dot at the far right. The title is \"(untitled)\" if it has none. A session on another host that is gone shows its title (a Bot: its name) dimmed with a crossed-out cloud icon (schema/icons/baude/baude-no-connection-symbolic.svg) before the dot, tooltip \"No connection\" (not for a deactivated host: just dimmed). A chat its host holds messages for shows a small \"held\" tag before the dot. A chat open that is already listed (archived, say) is listed only there, highlighted. A chat open but not yet written in shows as \"New session\" at the top of its folder (never while blank), and has no right-click menu. Tooltip (several lines, those that apply): title (a Bot: its name); its folder; \"N message(s) held for it, to send or delete in it\"; \"On <host> (<address>)\" with \", deactivated\" or \", gone from the network since <time ago>\"; \"Group <name>\"; \"Worktree <name> of <folder>\"; the source line (for a session of this machine's Claude Desktop or Claude Code, and \"<host>, on the network\" for a session on a host); \"N earlier copy/copies of this conversation hidden\".",
           "copy": [
             "common.untitled",
             "sidebar.held",
@@ -393,8 +393,8 @@
       "shows": "Default. The open chat's folder first, others by latest activity."
     },
     {
-      "name": "grouped by date",
-      "shows": "Today, Yesterday, the last five days, Older."
+      "name": "grouped by Created or Updated",
+      "shows": "Today, Yesterday, the last five days, Older: by the day each chat was made, or last used."
     },
     {
       "name": "searching",
@@ -402,7 +402,7 @@
     },
     {
       "name": "groups filtered",
-      "shows": "Only the sessions of the groups ticked in ⋮ → Groups (see GroupByMenu.menu.json); ⋮ → Show All is then offered."
+      "shows": "Only the sessions of the groups checked in ⋮ → Groups (see GroupByMenu.menu.json); checking Groups lists every one again."
     }
   ],
   "removed": [

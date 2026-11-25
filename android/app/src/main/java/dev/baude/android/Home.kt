@@ -89,7 +89,8 @@ object HomePrefs {
         if (ctx != null) return
         ctx = c.applicationContext
         val p = c.getSharedPreferences("home", Context.MODE_PRIVATE)
-        by.value = p.getString("by", "folder") ?: "folder"
+        by.value = p.getString("by", "folder").let { if (it == "date") "updated" else it } ?: "folder" // ("date", from
+        // before: by when they were last used)
         collapsed.addAll(p.getStringSet("collapsed", setOf("archived")).orEmpty())
         groups.addAll(p.getStringSet("groups", emptySet()).orEmpty())
         host.value = p.getString("host", "") ?: ""
@@ -297,10 +298,12 @@ fun sections(query: String): List<Section> {
         for (i in items) if (i.depth == 0 || r.isEmpty()) r.add(mutableListOf(i)) else r.last().add(i)
         return r
     }
-    if (HomePrefs.by.value == "date") {
+    if (HomePrefs.by.value != "folder") {
         val today = LocalDate.now()
-        val days = runs(live).groupBy { run ->
-            val d = Instant.ofEpochMilli((said(run[0].s) * 1000).toLong()).atZone(ZoneId.systemDefault()).toLocalDate()
+        // (Created: by the day the top one of each was made, the newest made first; Updated: by when it was last used)
+        fun day(run: List<Item>) = if (HomePrefs.by.value == "created") run[0].s.created?.toDouble() ?: said(run[0].s) else said(run[0].s)
+        val days = runs(live).sortedByDescending { day(it) }.groupBy { run ->
+            val d = Instant.ofEpochMilli((day(run) * 1000).toLong()).atZone(ZoneId.systemDefault()).toLocalDate()
             ChronoUnit.DAYS.between(d, today).coerceAtLeast(0).let { if (it >= 7) 7L else it }
         }
         for ((n, group) in days.toSortedMap()) {
@@ -330,7 +333,7 @@ fun sections(query: String): List<Section> {
 }
 
 /** The home screen: Baude's whole sidebar. New session (on the host picked beside it), search, the sessions of every
- * host (or one) grouped as Baude groups them: Bots first, each folder, archived folded; ⋮ to group by date and pick
+ * host (or one) grouped as Baude groups them: Bots first, each folder, archived folded; ⋮ to group by day and pick
  * groups. */
 @Composable
 fun Home(open: (String, String) -> Unit, feedback: () -> Unit, phone: () -> Unit = {},
@@ -704,8 +707,8 @@ private fun HostPick() {
     }
 }
 
-/** ⋮ beside the search: Group by (Folder, Date), the groups shown (a long-press on one: Rename Group…, Delete Group),
- * New Group…, Show All (Baude's sidebar menu). */
+/** ⋮ beside the search: Group by (Folder, Created, Updated), the groups shown (a long-press on one: Rename Group…,
+ * Delete Group), New Group… (Baude's sidebar menu). */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun ViewMenu(snack: SnackbarHostState) {
@@ -718,20 +721,19 @@ private fun ViewMenu(snack: SnackbarHostState) {
         Popover(open, { open = false }, ticks = Ticks.START) {
             MenuHeading(Wording.Sidebar.groupBy)
             MenuChoice(Wording.Common.folder, HomePrefs.by.value == "folder") { HomePrefs.by.value = "folder"; HomePrefs.save() }
-            MenuChoice(Wording.Sidebar.date, HomePrefs.by.value == "date") { HomePrefs.by.value = "date"; HomePrefs.save() }
+            MenuChoice(Wording.Sidebar.created, HomePrefs.by.value == "created") { HomePrefs.by.value = "created"; HomePrefs.save() }
+            MenuChoice(Wording.Sidebar.updated, HomePrefs.by.value == "updated") { HomePrefs.by.value = "updated"; HomePrefs.save() }
             MenuDivider()
-            MenuHeading(Wording.Sidebar.groups)
+            // (Groups: a tick each and one over them all, as the Kubernetes page's Namespaces)
             val names = Groups.names() + ""
-            for (g in names) MenuChoice(g.ifEmpty { Wording.Sidebar.noGroup }, HomePrefs.groups.isEmpty() || g in HomePrefs.groups,
-                onLongClick = if (g.isEmpty()) null else { { held = g } }) {
-                val now = if (HomePrefs.groups.isEmpty()) names else HomePrefs.groups.toList()
-                val next = if (g in now) now - g else now + g
-                HomePrefs.groups.clear()
-                if (next.toSet() != names.toSet()) HomePrefs.groups.addAll(next)
-                HomePrefs.save()
-            }
+            MenuChecks(Wording.Sidebar.groups, names.map { it to it.ifEmpty { Wording.Sidebar.noGroup } },
+                HomePrefs.groups.filter { it in names }, { next ->
+                    HomePrefs.groups.clear()
+                    if (next.toSet() != names.toSet()) HomePrefs.groups.addAll(next)
+                    HomePrefs.save()
+                }) { g -> if (g.isNotEmpty()) held = g }
+            MenuDivider()
             MenuChoice(Wording.Sidebar.newGroupEllipsis, false) { open = false; naming = true to "" }
-            if (HomePrefs.groups.isNotEmpty()) MenuChoice(Wording.Sidebar.showAll, false) { HomePrefs.groups.clear(); HomePrefs.save() }
         }
         Popover(held != null, { held = null }) {
             val g = held.orEmpty()

@@ -173,6 +173,24 @@ fun MenuChoice(label: String, on: Boolean, enabled: Boolean = true, textColor: C
     }
 }
 
+/** A tick for each of a list of things and one over them all, as the Kubernetes page's Namespaces and home's ⋮ →
+ * Groups have them (Baude's pickers.CheckList): those ticked are shown, in the order ticked; none ticked is every one
+ * (an empty list), the one over them ticked. Tapping that one shows every one again; it's never unticked. items: (key,
+ * label); pick(the keys shown, empty for every one); onLongClick(key): one pressed and held. */
+@Composable
+fun MenuChecks(allLabel: String, items: List<Pair<String, String>>, shown: List<String>, pick: (List<String>) -> Unit,
+               onLongClick: ((String) -> Unit)? = null) {
+    MenuChoice(allLabel, shown.isEmpty()) { pick(emptyList()) }
+    MenuDivider()
+    Column(Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState())) {
+        for ((key, label) in items) {
+            MenuChoice(label, key in shown, onLongClick = onLongClick?.let { { it(key) } }) {
+                pick(shown.filter { it != key } + if (key in shown) emptyList() else listOf(key))
+            }
+        }
+    }
+}
+
 /** A menu item that opens a page of the menu: its label, ▸ at the end, where a picker's tick is. */
 @Composable
 fun MenuRow(label: String, onClick: () -> Unit) {

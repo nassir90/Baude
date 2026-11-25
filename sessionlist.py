@@ -11,7 +11,8 @@ import threading
 import time
 
 from baudelib import claude as claudelib  # (its ClaudeProc: Baude's is it, on the GTK main loop)
-from baudelib.transcripts import _pack_keys, _scan_line, _scan_state, _unpack_keys, projects_dir, scan_session
+from baudelib.transcripts import _pack_keys, _scan_line, _scan_state, _unpack_keys, projects_dir, ref_epoch, \
+    scan_session
 import baudelib.client  # noqa: E402  (servers on the network and their sessions: see baudelib/client.py)
 import baudelib.hosts  # noqa: E402  (this machine's host process, started when it's wanted: see baudelib/hosts.py)
 from baudelib import models as modelslib  # noqa: E402  (what runs a model: claude, apple-claude or pi-claude)
@@ -352,6 +353,12 @@ def last_used(info):
     return max(said, info["desktop_used"]) if info.get("desktop_used") else said
 
 
+def made_at(info):
+    """When a listed chat was made: its first record's time (scan_session's born), a host's session's created; for the
+    open one not saved yet, now. What the sidebar's days go by, grouped by Created."""
+    return info.get("created") or ref_epoch(info.get("born")) or last_used(info)
+
+
 _info_cache = {}  # path -> (inode, size, mtime, scan state, info); None -> loaded from disk yet
 _info_lock = threading.Lock()
 
@@ -652,6 +659,7 @@ def remote_info(s):
     when = s.get("said") or s.get("created") or 0.0
     return {"id": s["id"], "path": r.mirror(s["id"]), "title": s.get("title"), "cwd": s.get("cwd"),
             "folder": s.get("cwd"), "worktree": None, "mtime": s.get("updated") or when, "said": when,
+            "created": s.get("created"),
             "prompts": s.get("prompts") or 0, "source": f"{r.info.get('name') or r.host}, on the network", "copies": 0,
             # (this machine's host process, asleep: its sessions' claudes went with it, whatever was last listed)
             "remote": r, "remote_state": "stopped" if r.mine and r.state != "alive" else s.get("state"),

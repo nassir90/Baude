@@ -69,12 +69,28 @@
       "shows": "The ending line, in order in the chat."
     },
     {
+      "name": "turn stopped while it runs",
+      "shows": "Stopping the turn (Esc, the stop button, Send now) stops only the turn: the card keeps spinning, the status bar and the side panel still list the task, and it finishes and reports as it would have. Only its own stop (Processes / Subagents) or the chat's claude ending stops it."
+    },
+    {
       "name": "never heard the end (finished session)",
       "shows": "Opening a chat whose transcript never says the task ended: its card shows interrupted, not spinning for ever."
     },
     {
       "name": "Record",
       "shows": "Record's reader draws the same ending line (no link) for each task notification in a chat."
+    }
+  ],
+  "decisions": [
+    {
+      "said": "Stopping a Claude chat's turn also stopped the subagents it was running in the background.",
+      "rule": "Every app's interrupt stops the turn only. Background commands and subagents keep running and report when they end; each is stopped only by its own stop control or when the chat's agent ends. An app tells the agent it has per-task stops (Claude Code's initialize: perTaskStopAffordance), so the agent spares them.",
+      "decided": "2026-11-25",
+      "source": [
+        {
+          "issue": "BaudeInternal#222"
+        }
+      ]
     }
   ],
   "scenes": [

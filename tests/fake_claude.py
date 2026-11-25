@@ -371,8 +371,26 @@ def background_command(n, delay):
         TASKS[tid]["timer"].start()
 
 
-def subagent(n, delay):
-    """An Agent call: runs as a background task, forwards its own messages, then reports."""
+def interrupted():
+    """An interrupt, as claude 2.1's takes it: a turn still open ends, stopped (error_during_execution); and its
+    background subagents are swept (killed, agents_killed) unless initialize declared perTaskStopAffordance."""
+    if not state.get("spares_tasks"):
+        swept = [tid for tid, t in TASKS.items() if t["type"] == "local_agent"]
+        for tid in swept:
+            if TASKS[tid].get("timer"):
+                TASKS[tid]["timer"].cancel()
+            finish_task(tid, "killed", "Stopped by the interrupt")
+        if swept:
+            system("agents_killed")
+    if state.pop("open_turn", None) is not None:
+        out({"type": "result", "subtype": "error_during_execution", "is_error": True, "session_id": SESSION,
+             "total_cost_usd": 0.001, "num_turns": 1, "duration_ms": 300, "usage": {"input_tokens": 10,
+                                                                                    "output_tokens": 5}})
+
+
+def subagent(n, delay, open_turn=False):
+    """An Agent call: runs as a background task, forwards its own messages, then reports. open_turn ("OPEN"): the
+    turn goes on after it (no result) until it's interrupted."""
     tid, tool = f"ag{n}", f"toolu_ag{n}"
     inp = {"description": "Survey the tests", "subagent_type": "Explore",
            "prompt": "Count the test functions in `tests/test_baude.py`."}
@@ -389,7 +407,10 @@ def subagent(n, delay):
     out({"type": "user", "session_id": SESSION, "message": {"role": "user", "content": [
         {"type": "tool_result", "tool_use_id": tool, "content": [{"type": "text", "text": launched(tid)}]}]}})
     say("A subagent is surveying the tests.", f"s{tid}")
-    result("launched")
+    if open_turn:
+        state["open_turn"] = n
+    else:
+        result("launched")
 
     def work():
         sub = lambda content: out({"type": "assistant", "parent_tool_use_id": tool, "session_id": SESSION,  # noqa: E731
@@ -600,6 +621,10 @@ def main():
                 if t.get("timer"):
                     t["timer"].cancel()
                 finish_task(msg["request"]["task_id"], "killed", "Stopped by the user")
+            if sub == "interrupt":
+                interrupted()
+            if sub == "initialize":
+                state["spares_tasks"] = msg["request"].get("perTaskStopAffordance") is True
             if sub == "rename_session":
                 system("session_title_changed", title=msg["request"].get("title"))
             if sub == "initialize":
@@ -610,7 +635,8 @@ def main():
             turns += 1
             state["messages"] += 1
             text = msg["message"]["content"] if isinstance(msg["message"]["content"], str) else ""
-            # "BACKGROUND" / "SUBAGENT" scripts; "...HOLD" keeps the task running until stopped
+            # "BACKGROUND" / "SUBAGENT" scripts; "...HOLD" keeps the task running until stopped; "SUBAGENT OPEN" keeps
+            # the turn going after the subagent starts, until an interrupt
             delay = None if "HOLD" in text else 0.6
             if "You are Baude's Signal reader" in text or re.match(r"Part \d+: replies", text) or \
                     "Signal reader" in system_prompt():
@@ -631,7 +657,7 @@ def main():
             elif "NESTED" in text:
                 nested_subagent(turns, "HOLD" in text)
             elif "SUBAGENT" in text:
-                subagent(turns, delay)
+                subagent(turns, delay, "OPEN" in text)
             elif "LINGER" in text or state.get("linger"):
                 linger(turns, "LINGER" in text)
             else:

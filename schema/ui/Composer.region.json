@@ -53,7 +53,7 @@
         },
         {
           "by": "key Esc",
-          "does": "While a turn is running: stops it (interrupt). With a revert pending: cancels the revert. With a completer list open: closes the list first"
+          "does": "While a turn is running: stops it (interrupt); background commands and subagents go on (BackgroundTask). With a revert pending: cancels the revert. With a completer list open: closes the list first"
         },
         {
           "by": "key Tab / Shift+Tab",
@@ -126,7 +126,7 @@
         },
         {
           "by": "click (working)",
-          "does": "Stops the turn (also with a revert pending). Enter/Ctrl+Enter with text meanwhile queues instead of stopping"
+          "does": "Stops the turn (also with a revert pending); background commands and subagents go on (BackgroundTask). Enter/Ctrl+Enter with text meanwhile queues instead of stopping"
         }
       ]
     },

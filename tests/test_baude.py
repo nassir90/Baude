@@ -2037,6 +2037,22 @@ def test_stop_background_task(app):
         close(win)
 
 
+def test_interrupt_spares_background_subagents(app):
+    """A turn stopped while a subagent it started runs in the background: only the turn ends."""
+    win = app.window()
+    try:
+        type_and_send(win, "SUBAGENT HOLD OPEN")
+        wait_for(lambda: win.tasks.get("ag1", {}).get("status") == "running" and win.busy, "subagent in an open turn")
+        win.interrupt()
+        wait_for(lambda: not win.busy, "the turn stopped")
+        pump(0.3)
+        assert win.tasks["ag1"]["status"] == "running" and win.tool_cards["toolu_ag1"].state == "background"
+        win.show_panel(True)
+        snapshot(win, "interrupt_spares_subagent")
+    finally:
+        close(win)
+
+
 def test_rename_session(app):
     folder = os.path.join(TMP, "rename")
     os.makedirs(folder, exist_ok=True)

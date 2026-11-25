@@ -9,7 +9,7 @@
   },
   "install": {
     "macos": "brew install kubectl",
-    "debian": "sudo snap install kubectl --classic",
+    "debian": "curl -LO \"https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/$(dpkg --print-architecture)/kubectl\" && sudo install kubectl /usr/local/bin/kubectl",
     "fedora": "sudo dnf install kubectl",
     "arch": "sudo pacman -S kubectl"
   },

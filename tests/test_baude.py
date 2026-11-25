@@ -1189,7 +1189,7 @@ def test_ticker_holds_what_it_moves(app):
 def test_login_card():
     """/login: claude auth login run as a card in the chat (it needs no terminal): the sign-in page's link, a pasted
     code sent to it, who's signed in once it's done (claude auth status) and the chat's claude told (signed_in); a
-    bad code says why, with Try again; Cancel stops it. A turn's not-signed-in error is known (needs_login)."""
+    bad code says why, with Try Again; Cancel stops it. A turn's not-signed-in error is known (needs_login)."""
     assert baude.needs_login("API Error: 401 Invalid API key \u00b7 Please run /login")
     assert baude.needs_login("OAuth token has expired") and not baude.needs_login("Usage limit reached")
     told = []
@@ -4695,7 +4695,7 @@ def test_signal(app):
             assert "Database table" in labels_text(pop) and not schema_calls and pop.get_parent() is label
             [b for b in find(pop, Gtk.Button) if "app_test" in labels_text(b)][0].emit("clicked")
             assert schema_calls[-1]["found"] == other
-            # none has it: said so, with the definition and Try again, and no database opens
+            # none has it: said so, with the definition and Try Again, and no database opens
             baude.db_locate = lambda *a: {"hits": [], "best": None, "error": "No running database has a table svc_jobs."}
             schema_calls.clear()
             opened.clear()
@@ -4703,12 +4703,12 @@ def test_signal(app):
             wait_for(lambda: len(pops) == 2 and "No running database has a table svc_jobs" in labels_text(pops[-1]),
                      "said it isn't running")
             buttons = {b.get_label(): b for b in find(pops[-1], Gtk.Button) if b.get_label()}
-            assert {"Try again", "Open the definition"} <= set(buttons) and not schema_calls, list(buttons)
+            assert {"Try Again", "Open the definition"} <= set(buttons) and not schema_calls, list(buttons)
             buttons["Open the definition"].emit("clicked")
             assert opened[-1] == (os.path.join(repo, "svc/app/migrations/0001_jobs.py"), 3)
-            # Try again reads the servers again; found this time, it opens
+            # Try Again reads the servers again; found this time, it opens
             baude.db_locate = lambda *a: {"hits": [hit], "best": hit, "error": None}
-            buttons["Try again"].emit("clicked")
+            buttons["Try Again"].emit("clicked")
             wait_for(lambda: schema_calls, "found on the second try")
             # a name not looked up yet: "Looking it up…", no kind claimed; then what it turned out to be
             ref = win.signal
@@ -4724,7 +4724,7 @@ def test_signal(app):
             ref.refs["svc_later"] = baude.Ref("svc_later", "symbol", "not_found", reason="not in any code file")
             ref.notify(["svc_later"])
             assert "Not found: not in any code file" in labels_text(pop)
-            [b for b in find(pop, Gtk.Button) if b.get_label() == "Try again"][0].emit("clicked")
+            [b for b in find(pop, Gtk.Button) if b.get_label() == "Try Again"][0].emit("clicked")
             assert refreshed == [["svc_later"]]
             ref.refresh = orig_refresh
             listening = len(ref.listeners)

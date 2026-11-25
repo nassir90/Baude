@@ -751,7 +751,7 @@ def kube_page_for(resource):
 
 
 def pg_forget():
-    """Read the servers, databases and schemas again next time (Try again)."""
+    """Read the servers, databases and schemas again next time (Try Again)."""
     PG_LISTS.clear()
     PG_CACHE.clear()
     _FORGOTTEN[0] += 1  # (a lookup on its way began before this: not joined)

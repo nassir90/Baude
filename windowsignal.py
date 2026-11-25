@@ -865,7 +865,7 @@ class WindowSignal:
     def open_db_name(self, table, column, hint, code, anchor=None, title=None):
         """A table or column: find the running database that has it first, and open the schema diagram there,
         with it selected. Several databases have it (and the code's path names none): pick one. None has it: say
-        so, with its definition and Try again, rather than open a database it isn't in. The popover only shows
+        so, with its definition and Try Again, rather than open a database it isn't in. The popover only shows
         if finding it takes a moment, or there's something to say."""
         name = title or (f"{table}.{column}" if table and column else table or column or "")
         kind = "Database column" if column else wording.say("databases.database_table")
@@ -949,7 +949,7 @@ class WindowSignal:
 
     def lookup_pending(self, surface, anchor, message=None):
         """A name Signal hasn't looked up yet: "Looking it up…" (it may be anything: no kind is claimed), then
-        Found, with Open, or Not found, with Try again."""
+        Found, with Open, or Not found, with Try Again."""
         sig = self.signal
         pop = self.lookup_popover(anchor, surface)
 

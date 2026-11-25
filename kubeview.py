@@ -439,7 +439,7 @@ class KubeView(Gtk.Box):
 
     def build_error(self):
         """What's shown instead of the table when the cluster can't be read: what went wrong (kube_diagnose), the
-        command that fixes it (a sign-in, say) to copy, Try again, and all kubectl wrote, folded away."""
+        command that fixes it (a sign-in, say) to copy, Try Again, and all kubectl wrote, folded away."""
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10, valign=Gtk.Align.CENTER,
                       halign=Gtk.Align.CENTER, margin_start=24, margin_end=24, margin_top=24, margin_bottom=24)
         box.add_css_class("kube-error")
@@ -559,6 +559,8 @@ class KubeView(Gtk.Box):
         """The host's kubeconfig contexts read (there, by its host process, if it's another), the one wanted then
         picked and read; without kubectl there, what's missing shown instead."""
         host = self.host
+        if self.table_stack.get_visible_child_name() == "missing":  # (a retry: the missing state is let go of first,
+            self.table_stack.set_visible_child_name("table")  # as the phone's KubeState.open does)
         if host.here:
             if (missing := deps.missing("kubectl")) is not None:
                 return self.show_missing(missing)

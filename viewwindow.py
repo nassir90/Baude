@@ -7,7 +7,7 @@ import gi  # noqa: E402
 
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
-from gi.repository import Adw, Gtk, Pango  # noqa: E402
+from gi.repository import Adw, Gio, Gtk, Pango  # noqa: E402
 
 from baudelib import wording  # noqa: E402
 
@@ -95,6 +95,9 @@ class ViewWindow(Adw.ApplicationWindow):
                 keys.add_shortcut(Gtk.Shortcut.new(Gtk.ShortcutTrigger.parse_string(accel), Gtk.CallbackAction.new(
                     lambda *_, n=steps: (zoom(n), True)[1])))
         self.add_controller(keys)
+        restart = Gio.SimpleAction.new("restart", None)  # (a missing dependency's Restart in it: its app's)
+        restart.connect("activate", lambda *_: main.activate_action("win.restart", None))
+        self.add_action(restart)
         self.connect("close-request", lambda *_: (self._closed(False), False)[1])  # (False: the window goes)
         self.gone_id = main.get_application().connect("window-removed",
                                                       lambda _a, w: w is main and self._closed(True) and self.destroy())

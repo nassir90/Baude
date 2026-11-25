@@ -6,7 +6,8 @@ op, and a reply's missing), so the phone and another machine's apps show what th
 schema/deps has a file for each, named by its key: {"description", "name" (as it's shown: a program's own spelling),
 "where" ("app": the app's own process needs it, "host": the host process does), "needed_by" (the features, as the
 schema/copy keys that name them), "detect" ({"macos"|"linux": [way, …]}: any way that finds it finds it; a platform
-not there doesn't need it), "install" ({"macos"|"debian"|"fedora"|"arch": the command}), "link" (its install page)}.
+not there doesn't need it), "install" ({"macos"|"debian"|"fedora"|"arch": the command}), "link" (its install page),
+"no_display" (true: only a host with no display needs it)}.
 A way is {"env": VAR} (the program VAR names, if it's set and runnable), {"which": name, "not": path?} (on PATH, but
 not path: macOS's /usr/bin/git, a stub until the Command Line Tools are in), {"gi": namespace, "version": v} (a GObject
 typelib), {"glob": pattern} (a runnable file there) or {"run": argv} (a command that succeeds).
@@ -91,16 +92,22 @@ def _found(way):
     return False
 
 
+def has_display():
+    return SYSTEM == "macos" or bool(os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"))
+
+
 def needed(key):
-    """Does anything here need it (is it a dependency on this platform at all)?"""
-    return SYSTEM in TABLE[key]["detect"]
+    """Does anything here need it (is it a dependency on this platform at all, and, for one with "no_display": true,
+    on this host: Xvfb is for a host with no display)?"""
+    d = TABLE[key]
+    return SYSTEM in d["detect"] and not (d.get("no_display") and has_display())
 
 
 def present(key):
     if key in hidden():
         return False
     ways = TABLE[key]["detect"].get(SYSTEM)
-    return ways is None or any(_found(w) for w in ways)
+    return ways is None or not needed(key) or any(_found(w) for w in ways)
 
 
 def info(key, here=None):
@@ -130,9 +137,9 @@ def feature_name(feature):
 
 def title(dep, feature):
     """What a feature without dep shows as its heading: "Kubernetes needs kubectl" ("Git isn't installed", where the
-    feature has its name). dep: a Dep (info's)."""
+    feature's name is in the dependency's: "Claude Code isn't installed"). dep: a Dep (info's)."""
     name = feature_name(feature)
-    if name.lower() == dep["name"].lower():
+    if name.lower() in dep["name"].lower():  # (Git is Git; Claude is in Claude Code)
         return wording.say("deps.not_installed", dep=dep["name"])
     return wording.say("deps.needs", feature=name, dep=dep["name"])
 
@@ -148,7 +155,7 @@ class Missing(OSError):
 def say(dep, feature):
     """The same in a line (a status line, a toast, stderr): what's missing and how it's installed."""
     name = feature_name(feature)
-    if dep.get("fix") and name.lower() == dep["name"].lower():
+    if dep.get("fix") and name.lower() in dep["name"].lower():
         return wording.say("deps.not_installed_fix", dep=dep["name"], fix=dep["fix"])
     if dep.get("fix"):
         return wording.say("deps.needs_fix", feature=name, dep=dep["name"], fix=dep["fix"])

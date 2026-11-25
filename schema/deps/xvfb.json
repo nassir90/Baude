@@ -1,7 +1,8 @@
 {
-  "description": "Xvfb's xvfb-run, which gives a Bot's browser and terminals a display of their own on a Linux host with none. macOS needs nothing.",
+  "description": "Xvfb's xvfb-run, which gives a Bot's browser and terminals a display of their own on a Linux host with no display. macOS and a host with a display need nothing.",
   "name": "Xvfb",
   "where": "host",
+  "no_display": true,
   "needed_by": ["bot_browser.title", "multiplex.terminal_menu"],
   "detect": {
     "linux": [{"which": "xvfb-run"}]

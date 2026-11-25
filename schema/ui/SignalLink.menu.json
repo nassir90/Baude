@@ -43,7 +43,7 @@
       "parts": [
         {
           "name": "icon buttons (top right)",
-          "shows": "In order, each only when it applies: a Kubernetes logo (tooltip \"Open this cluster in the Kubernetes view\") for a kubeconfig context; a database logo (tooltip \"Show it in its database's schema diagram\") for a table or column; a refresh icon (tooltip \"Search again\", or \"Try again\" when not found or stale); an open icon (tooltip \"Open\").",
+          "shows": "In order, each only when it applies: a Kubernetes logo (tooltip \"Open this cluster in the Kubernetes view\") for a kubeconfig context; a database logo (tooltip \"Show it in its database's schema diagram\") for a table or column; a refresh icon (tooltip \"Search again\", or \"Try Again\" when not found or stale); an open icon (tooltip \"Open\").",
           "copy": [
             "common.try_again",
             "common.open"
@@ -131,13 +131,13 @@
         },
         {
           "name": "not found",
-          "shows": "\"Not found: <reason>.\" with a default button \"Try again\".",
+          "shows": "\"Not found: <reason>.\" with a default button \"Try Again\".",
           "copy": [
             "common.try_again"
           ],
           "actions": [
             {
-              "by": "click Try again",
+              "by": "click Try Again",
               "does": "searches again and shows \"Looking it up…\""
             }
           ]
@@ -160,7 +160,7 @@
     },
     {
       "name": "not found",
-      "shows": "\"Not found: <reason>.\" with a Try again icon; for a name the reader said isn't in the code, the reader's note or its stock reason"
+      "shows": "\"Not found: <reason>.\" with a Try Again icon; for a name the reader said isn't in the code, the reader's note or its stock reason"
     },
     {
       "name": "stale",

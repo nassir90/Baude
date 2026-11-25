@@ -143,6 +143,10 @@ class Window(Adw.ApplicationWindow):
             self.add_action(act)
             if not hosted:
                 app.set_accels_for_action(f"win.{name}", keys)
+        if not hosted:  # (a missing dependency's Restart, here: this Emission started again as it was)
+            restart = Gio.SimpleAction.new("restart", None)
+            restart.connect("activate", lambda *_a: os.execv(sys.executable, [sys.executable, *sys.orig_argv[1:]]))
+            self.add_action(restart)
         if self.Engine is MacWeb and not hosted:
             clicks = Gtk.GestureClick(propagation_phase=Gtk.PropagationPhase.CAPTURE)
             clicks.connect("pressed", lambda *_: MacWeb.keys_to_gtk(self))

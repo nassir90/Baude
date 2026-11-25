@@ -70,7 +70,7 @@
         },
         {
           "name": "button",
-          "shows": "One accent button under the line, left-aligned: \"Sign in\" (not signed in), \"Try again\" (failed, cancelled) or \"Send again\" (signed in, when the failed turn was sent from this window; gone once pressed).",
+          "shows": "One accent button under the line, left-aligned: \"Sign in\" (not signed in), \"Try Again\" (failed, cancelled) or \"Send again\" (signed in, when the failed turn was sent from this window; gone once pressed).",
           "copy": [
             "sign_in.sign_in",
             "common.try_again",
@@ -78,7 +78,7 @@
           ],
           "actions": [
             {
-              "by": "click Sign in / Try again",
+              "by": "click Sign in / Try Again",
               "does": "Starts claude auth login on the chat's machine; the card goes to starting."
             },
             {
@@ -135,14 +135,14 @@
     },
     {
       "name": "failed",
-      "shows": "\"Sign-in didn't finish\" / dimmed reason (what claude auth login said last, or why the machine couldn't be reached), and Try again.",
+      "shows": "\"Sign-in didn't finish\" / dimmed reason (what claude auth login said last, or why the machine couldn't be reached), and Try Again.",
       "copy": [
         "sign_in.failed"
       ]
     },
     {
       "name": "cancelled",
-      "shows": "\"Sign-in cancelled\" and Try again.",
+      "shows": "\"Sign-in cancelled\" and Try Again.",
       "copy": [
         "sign_in.cancelled"
       ]

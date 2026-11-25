@@ -36,7 +36,7 @@
     "filter": "Filter",
     "filter_tip": "Filter (Ctrl+F)",
     "hide": "Hide",
-    "copied_try_again": "Copied: run it in a terminal, then Try again",
+    "copied_try_again": "Copied: run it in a terminal, then Try Again",
     "kubectl_output": "kubectl's output",
     "container": "Container",
     "previous": "Previous",

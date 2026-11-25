@@ -34,7 +34,7 @@ def hide(app, names, waits=True, **env):
 
 
 @scene("39a-missing-kubectl", "Kubernetes (☰ → Kubernetes) on a host without kubectl: what's missing, the command "
-                              "that installs it there with Copy, and Try again", size=(1200 + SIDEBAR, H))
+                              "that installs it there with Copy, and Try Again", size=(1200 + SIDEBAR, H))
 def _(app):
     import kube_fixture as kf
     win = hide(app, ["kubectl"], BAUDE_KUBECTL=os.path.join(T.TMP, "no-kubectl"),
@@ -45,7 +45,7 @@ def _(app):
 
 
 @scene("39b-missing-docker", "Database Schemas (☰ → Database Schemas) on a host without Docker and no server found: "
-                             "what's missing, the command that installs it there with Copy, and Try again",
+                             "what's missing, the command that installs it there with Copy, and Try Again",
        size=(1200 + SIDEBAR, H))
 def _(app):
     win = hide(app, ["docker"], BAUDE_KUBECTL=os.path.join(T.TMP, "no-kubectl"),
@@ -88,5 +88,20 @@ def _(app):
 def _(app):
     win = hide(app, ["claude"], waits=False, BAUDE_CLAUDE=os.path.join(T.TMP, "no-claude"))
     T.type_and_send(win, "Tidy the README")
+    T.pump(3.0)
+    return win
+
+
+@scene("39f-kubectl-installed", "Kubernetes (☰ → Kubernetes) after kubectl appears on the host and Try Again is "
+                                "pressed: the table is back, the missing state gone", size=(1200 + SIDEBAR, H))
+def _(app):
+    import kube_fixture as kf
+    win = hide(app, ["kubectl"], BAUDE_KUBECTL=os.path.join(T.TMP, "no-kubectl"),
+               KUBECONFIG=kf.make_kubeconfig(os.path.join(T.TMP, "shot-kubeconfig")),
+               FAKE_KUBECTL_LOG=os.path.join(T.TMP, "fake-kubectl.log"))
+    win.kube.open()
+    T.pump(2.0)
+    os.environ.update(BAUDE_HIDE_DEPS="", BAUDE_KUBECTL=os.path.join(T.HERE, "fake_kubectl.py"))
+    win.kube.missing.button.emit("clicked")
     T.pump(3.0)
     return win

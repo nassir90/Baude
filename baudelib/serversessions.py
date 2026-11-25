@@ -387,7 +387,10 @@ class ServerSessions:
             if s.meta.get("init") is not None and (s.proc is None or s.proc.init_rid is None):
                 return answer(self.init({**s.meta["init"], "current_permission_mode": s.meta.get("mode") or "default"}))
             s.waiting_init.append((conn, rid))
-            self.ensure_proc(s)
+            try:
+                self.ensure_proc(s)
+            except deps.Missing:  # (its program isn't here: said once, by the message sent after, not here above it)
+                pass
             return
         if sub == "set_model" and request.get("model") and \
                 models.model_program(request["model"]) != models.model_program(s.meta.get("model")):

@@ -11,7 +11,7 @@ from baudelib import deps, wire, wording
 
 class Missing(Gtk.ScrolledWindow):
     """A feature without a dependency: its icon, "Kubernetes needs kubectl", the command that installs it with Copy
-    (or, with none for this platform, its install page), and Try again (a host's: again()) or Restart (the app's own,
+    (or, with none for this platform, its install page), and Try Again (a host's: again()) or Restart (the app's own,
     which it loads as it starts)."""
 
     def __init__(self, again=None):
@@ -59,10 +59,7 @@ class Missing(Gtk.ScrolledWindow):
         self.button.set_visible(own or self.again is not None)
 
     def copy(self):
-        from widgets import toast
-        self.get_clipboard().set(self.fix.get_label())
-        toast(self, wording.say("deps.copied_restart") if self.dep.get("where") == "app" else
-              wording.say("kube.copied_try_again"))
+        copy_fix(self, {**self.dep, "fix": self.fix.get_label()})
 
     def pressed(self):
         if self.dep.get("where") == "app":
@@ -97,6 +94,18 @@ def ask(where, done):
     threading.Thread(target=run, daemon=True, name="deps").start()
 
 
+def copy_fix(widget, dep):
+    """Copy's: the command on the clipboard, and a toast saying what to do next (Restart for the app's own, else Try Again)."""
+    from widgets import toast
+    widget.get_clipboard().set(dep["fix"])
+    text = wording.say("deps.copied_restart") if dep.get("where") == "app" else wording.say("kube.copied_try_again")
+    dialog = widget.get_ancestor(Adw.PreferencesDialog)  # (Settings: its toast is over its own page)
+    if dialog is not None:
+        dialog.add_toast(Adw.Toast(title=text, timeout=2))
+    else:
+        toast(widget, text)
+
+
 def row(dep):
     """A dependency's row: its name, then Installed, or the command that installs it with Copy (else its page)."""
     out = Adw.ActionRow(title=GLib.markup_escape_text(dep["name"]))
@@ -107,7 +116,7 @@ def row(dep):
         out.add_suffix(fix)
         copy = Gtk.Button(icon_name="edit-copy-symbolic", tooltip_text=wording.say("common.copy"),
                           valign=Gtk.Align.CENTER, css_classes=["flat"])
-        copy.connect("clicked", lambda b: b.get_clipboard().set(dep["fix"]))
+        copy.connect("clicked", lambda b: copy_fix(b, dep))
         out.add_suffix(copy)
     elif dep.get("link"):
         out.add_suffix(Gtk.LinkButton(uri=dep["link"], label=wording.say("deps.install_page"),

@@ -471,7 +471,7 @@ class LoginCard(Gtk.Box):
             self.proc.stop()
 
     def done(self, proc, problem=None, code=None, who=None):
-        """It's finished: signed in (who as), or why not, with Try again."""
+        """It's finished: signed in (who as), or why not, with Try Again."""
         if proc is not None and proc is not self.proc:
             return False
         self.proc = None

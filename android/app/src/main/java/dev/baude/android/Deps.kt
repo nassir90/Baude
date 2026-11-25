@@ -74,7 +74,10 @@ fun DepRow(dep: Msg.Dep) {
         else if (!fix.isNullOrBlank()) Row(verticalAlignment = Alignment.CenterVertically) {
             Text(fix, style = Type.mono, color = c.fg, maxLines = 2, overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.widthIn(max = 160.dp))
-            IconButton(Adwaita.EditCopy, Wording.Common.copy) { clip.setText(AnnotatedString(fix)) }
+            IconButton(Adwaita.EditCopy, Wording.Common.copy) {
+                clip.setText(AnnotatedString(fix))
+                toast(Wording.Kube.copiedTryAgain)
+            }
         } else if (!link.isNullOrBlank()) Button(Wording.Deps.installPage) { try { uri.openUri(link) } catch (_: Exception) {} }
     })
 }

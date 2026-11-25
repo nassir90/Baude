@@ -88,7 +88,7 @@ An entry or a part may carry:
   (schema/deps: VTE, WebKitGTK, kubectl, Docker, Claude Code, Codex CLI, Git, GitHub CLI, Node.js, Xvfb), every app
   shows the same thing in the feature's place, never a toast alone, a raw error or nothing: a package icon
   (`package-x-generic-symbolic`), "<Feature> needs <dependency>" ("Git isn't installed" where they share a name), the
-  command that installs it on that machine in monospace with Copy (else its install page), and Try again, or Restart
+  command that installs it on that machine in monospace with Copy (else its install page), and Try Again, or Restart
   for the app's own library (loaded as it starts). A host's are the host's to say (its deps request, a reply's
   `missing`), so the phone and another machine's apps show what that host lacks with that host's command; where only a
   line fits (a chat's note, stderr, Signal's note) it's that sentence with the command. Settings → Dependencies lists

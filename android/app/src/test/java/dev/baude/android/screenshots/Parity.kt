@@ -521,6 +521,15 @@ abstract class Parity(private val theme: String, private val scene: String) {
                 dev.baude.android.Terms.live.last().feed("root@api-6f7c-mnopq:/app# ls\r\nroot@api-6f7c-mnopq:/app# ".toByteArray())
                 flush(true)
             }
+            name == "kubernetes-dock" -> {
+                show { KubeScreen(host.getString("id"), {}) }
+                tap("CPU")
+                tap("CPU")
+                tapInRow(Wording.Kube.logs, "worker-5c4b-klmno")
+                tapInRow(Wording.Kube.shell, "api-6f7c-mnopq")
+                dev.baude.android.Terms.live.last().feed("root@api-6f7c-mnopq:/app# ls\r\nroot@api-6f7c-mnopq:/app# ".toByteArray())
+                flush(true)
+            }
             name == "terminal" -> {
                 show { dev.baude.android.TerminalScreen(host.getString("id"), {}) }
                 flush(true)

@@ -70,6 +70,10 @@ class RecordHosts:
         r = self.host_remote(key)
         return ({"via": "local"}, THIS_MACHINE) if r is None else (r.where, remote_name(r))
 
+    def view_remote(self):
+        """The host picked's Remote (None: this machine), for the Kubernetes and database views (kubehost.picked)."""
+        return self.host_remote(self.store.picked or HERE_HOST)
+
     def host_remote(self, key):
         """A host's Remote, by its key, there or not (None for this machine, or one not known)."""
         if key == HERE_HOST or not _NETWORK:

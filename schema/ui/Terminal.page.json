@@ -26,10 +26,8 @@
       "copy": [
         "multiplex.terminal_menu",
         "browser.new_tab",
+        "common.move_out",
         "images.close"
-      ],
-      "text": [
-        "Move to Its Own Window"
       ],
       "actions": [
         {

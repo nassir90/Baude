@@ -46,7 +46,10 @@ from pickers import CheckList, ellipsize_dropdown  # noqa: E402,F401
 from codeview import (  # noqa: E402,F401
     CodeView,
 )
-from baudelib import tokens, wire, wording  # noqa: E402
+from baudelib import tokens, wording  # noqa: E402
+import kubehost  # noqa: E402
+from kubedock import KubeDock, LogsTab, ShellTab  # noqa: E402
+import viewwindow  # noqa: E402
 
 
 # ---------------------------------------------------------- kubernetes --
@@ -312,12 +315,14 @@ class KubeView(Gtk.Box):
         self.objects, self.ctx, self.watch, self.watch_fails = {}, {"now": 0, "metrics": None, "node_metrics": None}, None, 0
         self.metrics_note, self.node_count, self.note, self.dialog = "", 0, None, None
         self.found = weakref.WeakKeyDictionary()  # the table's labels and their text (find_label)
-        self.log_tail = self.log_pod = None
-        self.log_containers, self.log_following = [], True
+        self.host = kubehost.Host(None, {"via": "local"}, wording.say("senders.local"))  # (where it reads: open)
+        self.last_context = {}  # (by host: the context it showed last; this machine's is in the settings)
         bar = view_bar()
         title = Gtk.Label(label=wording.say("window.kubernetes"))
         title.add_css_class("heading")
         bar.append(title)
+        self.host_label = viewwindow.host_label()
+        bar.append(self.host_label)
         self.context_dd = ellipsize_dropdown(Gtk.DropDown.new_from_strings([]), 32)
         self.context_dd.set_tooltip_text(wording.say("kube.context_tip"))
         self.context_dd.connect("notify::selected", self.on_pick)
@@ -340,10 +345,8 @@ class KubeView(Gtk.Box):
         self.refresh_btn = RefreshButton(tooltip_text=wording.say("common.read_again"))
         self.refresh_btn.connect("clicked", lambda *_: self.load())
         bar.append(self.refresh_btn)
-        close = Gtk.Button(icon_name="window-close-symbolic", tooltip_text=wording.say("images.close"))
-        close.add_css_class("circular")
-        close.connect("clicked", lambda *_: self.close())
-        bar.append(close)
+        self.out = viewwindow.Out(self, bar, wording.say("window.kubernetes"), self.search)  # (out to a window of
+        # its own, as ☰ → Terminal's goes; its close)
         self.append(Gtk.WindowHandle(child=bar))  # (dragged, it moves the window; double-clicked, maximizes)
         # the sidebar: Freelens' categories (a category of one kind is just that kind: Nodes, Namespaces, Events)
         self.side = Gtk.ListBox(selection_mode=Gtk.SelectionMode.SINGLE)
@@ -406,17 +409,16 @@ class KubeView(Gtk.Box):
                                      end_child=self.details_box, resize_start_child=True, resize_end_child=False,
                                      shrink_end_child=False))
         self.right = right
-        # a pod's logs under the table and the YAML, the width of both, as Freelens docks them: a log's lines are long
-        self.logs_box = self.build_logs()
-        self.shell_box = self.build_shell()  # (or a pod's shell there instead: one or the other docked)
-        self.dock = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, visible=False)
-        self.dock.append(self.logs_box)
-        self.dock.append(self.shell_box)
-        self.lower = inside(paned_grip(Gtk.Paned(orientation=Gtk.Orientation.VERTICAL, start_child=right,
-                                                 end_child=self.dock, resize_start_child=True,
-                                                 resize_end_child=False, shrink_end_child=False)))
+        # pods' logs and shells under the table and the YAML, the width of both, as Freelens docks them (a log's lines
+        # are long): a tab each, on a strip in the frame's grey
+        self.dock = KubeDock()
+        self.lower = inside(right)
+        self.dock_split = paned_grip(Gtk.Paned(orientation=Gtk.Orientation.VERTICAL, start_child=self.lower,
+                                               end_child=self.dock, resize_start_child=True, resize_end_child=False,
+                                               shrink_end_child=False))
+        self.dock_split.add_css_class("main-split")  # (on the frame: its rule unseen, still dragged)
         body = paned_grip(Gtk.Paned(orientation=Gtk.Orientation.HORIZONTAL, start_child=side_scroll,
-                                    end_child=self.lower, resize_start_child=False, shrink_start_child=False,
+                                    end_child=self.dock_split, resize_start_child=False, shrink_start_child=False,
                                     vexpand=True))
         body.add_css_class("main-split")  # (its rule unseen: the inside's edge is the line; still dragged)
         self.append(body)
@@ -489,65 +491,6 @@ class KubeView(Gtk.Box):
         else:
             self.load(switch=True)
 
-    def build_logs(self):
-        """The logs pane: the pod, its containers to pick from (init containers marked), the previous run's, follow,
-        wrap, find, close; the log itself (CodeView: Ctrl+F finds in it)."""
-        self.logs = CodeView()
-        head = Gtk.Box(spacing=6, margin_start=10, margin_end=6, margin_top=4, margin_bottom=2)
-        head.append(Gtk.Image.new_from_icon_name("baude-logs-symbolic"))  # (the row's button: these are its logs)
-        self.logs_title = Gtk.Label(xalign=0, ellipsize=Pango.EllipsizeMode.MIDDLE)
-        self.logs_title.add_css_class("heading")
-        head.append(self.logs_title)
-        self.logs_state = Gtk.Label(xalign=0, hexpand=True, ellipsize=Pango.EllipsizeMode.END)
-        self.logs_state.add_css_class("dim-label")
-        self.logs_state.add_css_class("caption")
-        head.append(self.logs_state)
-        self.logs_container = ellipsize_dropdown(Gtk.DropDown.new_from_strings([]), 28)
-        self.logs_container.set_tooltip_text(wording.say("kube.container"))
-        self.logs_container.connect("notify::selected", lambda *_: self.syncing or self.tail_logs())
-        head.append(self.logs_container)
-        self.logs_previous = Gtk.ToggleButton(label=wording.say("kube.previous"),
-                                              tooltip_text=wording.say("kube.previous_tip"))
-        self.logs_previous.connect("toggled", lambda *_: self.syncing or self.tail_logs())
-        self.logs_follow = Gtk.ToggleButton(icon_name="go-bottom-symbolic", active=True,
-                                            tooltip_text=wording.say("kube.follow_tip"))
-        self.logs_follow.connect("toggled", lambda b: self.syncing or self.follow_logs(b.get_active()))
-        wrap = Gtk.ToggleButton(icon_name="baude-wrap-symbolic",
-                                tooltip_text=wording.say("code_view.wrap"),
-                                active=bool(load_settings().get("kube_log_wrap")))
-        wrap.connect("toggled", lambda b: (self.logs.set_wrap(b.get_active()),
-                                           save_settings(kube_log_wrap=b.get_active())))
-        self.logs.set_wrap(wrap.get_active())
-        find = Gtk.Button(icon_name="edit-find-symbolic", tooltip_text=wording.say("code_view.find_tip"))
-        find.connect("clicked", lambda *_: self.logs.open_search())
-        hide = Gtk.Button(icon_name="window-close-symbolic", tooltip_text=wording.say("kube.close_logs"))
-        hide.connect("clicked", lambda *_: self.hide_logs())
-        for b in (self.logs_previous, self.logs_follow, wrap, find, hide):
-            b.add_css_class("flat")
-            head.append(b)
-        # following stops when you scroll up (the wheel, the scrollbar, the keys), not whenever the view moves: a
-        # text view moves itself as it measures lines it had guessed at, and that mustn't stop it
-        adj = self.logs.scroll.get_vadjustment()
-        adj.connect("changed", self._logs_moved)
-        adj.connect("value-changed", self._logs_moved)
-        self.log_wheel = Gtk.EventControllerScroll(flags=Gtk.EventControllerScrollFlags.VERTICAL)
-        self.log_wheel.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
-        self.log_wheel.connect("scroll", lambda _c, _dx, dy: (dy < 0 and self.follow_logs(False), False)[1])
-        self.logs.scroll.add_controller(self.log_wheel)
-        self.log_dragging = False
-        drag = Gtk.GestureDrag(propagation_phase=Gtk.PropagationPhase.CAPTURE)
-        drag.connect("drag-begin", lambda *_: setattr(self, "log_dragging", True))
-        drag.connect("drag-end", lambda *_: setattr(self, "log_dragging", False))
-        self.logs.scroll.get_vscrollbar().add_controller(drag)
-        keys = Gtk.EventControllerKey(propagation_phase=Gtk.PropagationPhase.CAPTURE)
-        up = {Gdk.KEY_Up, Gdk.KEY_Page_Up, Gdk.KEY_Home, Gdk.KEY_KP_Up, Gdk.KEY_KP_Page_Up, Gdk.KEY_KP_Home}
-        keys.connect("key-pressed", lambda _c, kv, _k, _s: (kv in up and self.follow_logs(False), False)[1])
-        self.logs.view.add_controller(keys)
-        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, visible=False, vexpand=True, height_request=tokens.px("kube.logs-min"))  # (the pane's rule over it)
-        box.append(head)
-        box.append(self.logs)
-        return box
-
     def add_page_row(self, page, nested=True, after=None, icon=None, section=None):
         label = Gtk.Label(label=page["title"], xalign=0, ellipsize=Pango.EllipsizeMode.END)
         # (a kind under a category lines up with the category's name, past its icon)
@@ -584,36 +527,69 @@ class KubeView(Gtk.Box):
 
     # ---- opening and closing
     def open(self, context=None, page=None, search=None, namespace=None):
-        """Show the view: on context (else the one used last, else your kubeconfig's current one), at page (Pods by
-        default), filtered by search, in namespace (else the namespaces shown in that context last)."""
-        self.contexts = [c for c in kube_contexts() if not c.get("cluster_only")]
-        names = [c["name"] for c in self.contexts]
-        self.set_visible(True)
-        self.grab_focus()
-        if not names:
+        """Show the view, on the host picked in the window's host dropdown (as ☰ → Terminal's new tabs are; its
+        kubeconfig, its kubectl): on context (else the one used last there, else its kubeconfig's current one), at page
+        (Pods by default), filtered by search, in namespace (else the namespaces shown in that context last). Out in a
+        window of its own: that window brought up."""
+        host = kubehost.picked(self.win)
+        if host.key() != self.host.key():  # (another host's clusters: nothing of the last one's shown)
+            self.leave_host()
+        self.host = host
+        self.host_label.set_label(host.name)
+        if not self.out.present():
+            self.set_visible(True)
+            self.grab_focus()
+        if search is not None:
+            self.search.set_text(search)
+        if page is not None:
+            self.page = page
+        self.select_page_row(self.page)
+        if self.timer is None:
+            self.timer = GLib.timeout_add_seconds(KUBE_REFRESH_S, self.tick)
+        if host.here:
+            contexts = [c for c in kube_contexts() if not c.get("cluster_only")]
             where = ", ".join(pretty_path(p) for p in kubeconfig_paths()) or wording.say("kube.no_kubeconfig")
-            self.say(wording.say("kube.no_context", where=where))
+            self._contexts(host, contexts, where, context, namespace)
             return
-        last = load_settings().get("kube_context")
+        self.say(wording.say("kube.connecting", context=host.name))
+        host.ask("kube", {"what": "contexts"}, lambda r: self._contexts(
+            host, r.get("contexts") or [], r.get("where") or "", context, namespace, r.get("error")))
+
+    def _contexts(self, host, contexts, where, context, namespace, error=None):
+        """The host's kubeconfig contexts are in: the one wanted picked and read."""
+        if host is not self.host:
+            return
+        self.contexts = contexts
+        names = [c["name"] for c in self.contexts]
+        if error or not names:
+            self.say(f"{host.name}: {error}" if error else wording.say("kube.no_context", where=where))
+            return
+        last = load_settings().get("kube_context") if host.here else self.last_context.get(host.key())
         current = next((c["name"] for c in self.contexts if c.get("current")), None)
         want = context if context in names else last if last in names else current or names[0]
         self.syncing = True  # (no "(current)" after one: Freelens doesn't, and the one it opens on says enough)
         self.context_dd.set_model(Gtk.StringList.new(names))
         self.context_dd.set_selected(names.index(want))
         self.syncing = False
-        if search is not None:
-            self.search.set_text(search)
-        if page is not None:
-            self.page = page
-        self.select_page_row(self.page)
         self.switch_context(want, namespaces=[namespace] if namespace else None)
-        if self.timer is None:
-            self.timer = GLib.timeout_add_seconds(KUBE_REFRESH_S, self.tick)
+
+    def leave_host(self):
+        """Another host picked: the last one's clusters let go of (its watch, its logs and shells, its table)."""
+        self.dock.close_all()
+        self.stop_watch()
+        self.hide_details()
+        self.generation += 1
+        self.context, self.contexts, self.resources, self.ns_by_context = None, [], None, {}
+        self.syncing = True
+        self.context_dd.set_model(Gtk.StringList.new([]))
+        self.syncing = False
+        if self.store is not None:
+            self.store.remove_all()
+        self.table_stack.set_visible_child_name("table")
 
     def close(self):
         self.set_visible(False)
-        self.hide_logs()
-        self.hide_shell()
+        self.dock.close_all()
         self.stop_watch()
         if self.timer is not None:
             GLib.source_remove(self.timer)
@@ -621,20 +597,18 @@ class KubeView(Gtk.Box):
         self.win.input.grab_focus()
 
     def escape(self):
-        if self.shell_box.get_visible():
-            self.hide_shell()
-        elif self.logs_box.get_visible():
-            self.hide_logs()
+        if self.dock.get_visible():
+            self.dock.close_current()
         elif self.details_box.get_visible():
             self.hide_details()
-        else:
+        elif self.out.window is None:  # (out in a window of its own: that window's to close)
             self.close()
 
     def find(self):
         """Ctrl+F while the view is open: its filter, focused, its text selected to type over. The window's Ctrl+F asks
         here first, as the view covers the window (so not the find bar of a Code page under it); in the YAML, the
-        YAML's own Ctrl+F finds in it. False if the view is closed."""
-        if not self.get_visible():
+        YAML's own Ctrl+F finds in it. False if the view is closed, or out in a window of its own (its own Ctrl+F)."""
+        if not self.out.here():
             return False
         self.search.grab_focus()
         self.search.select_region(0, -1)
@@ -643,7 +617,8 @@ class KubeView(Gtk.Box):
     def tick(self):  # (the pods' CPU and memory read again while the view is open; the list too, if it isn't watched)
         if self.get_visible() and not self.loading and self.context:
             if self.watch is not None:
-                self.refresh_metrics()
+                if self.host.here:  # (another host's watch reads them there)
+                    self.refresh_metrics()
             else:
                 self.load(quiet=True)
         return True
@@ -668,15 +643,26 @@ class KubeView(Gtk.Box):
         self.ns_shown = list(namespaces) if namespaces is not None else list(self.ns_by_context.get(name, []))
         self.ns_by_context[name] = list(self.ns_shown)
         self.fill_namespaces()
-        save_settings(kube_context=name)
+        if self.host.here:
+            save_settings(kube_context=name)
+        else:
+            self.last_context[self.host.key()] = name
         self.say(wording.say("kube.connecting", context=name))
         self.hide_details()
-        self.hide_logs()  # (another cluster's: not its pod's)
-        self.hide_shell()
+        self.dock.close_all()  # (another cluster's: not its pods')
         self.stop_watch()  # (the other cluster's)
         self.fade.hold()
         self.loading = True  # (no refresh meanwhile: it would be read before the context's resources)
         gen = self.generation = self.generation + 1
+        if not self.host.here:
+            def connected(r):
+                if r.get("error") or r.get("fault"):
+                    fault = r.get("fault") or {"title": r["error"], "why": "", "fix": None, "said": ""}
+                    return self._failed(gen, fault, fault.get("said") or "")
+                served = {p["resource"] for s in r.get("sections") or [] for p in s.get("pages") or [] if p.get("served")}
+                self._connected(gen, name, served, r.get("namespaces") or [], r.get("nodes") or 0)
+            self.host.ask("kube", {"what": "connect", "context": name}, connected)
+            return
 
         def work():
             try:
@@ -718,7 +704,8 @@ class KubeView(Gtk.Box):
         self.fill_namespaces()
         for row in self.page_rows.values():
             api = row.page["api"]
-            served = not api or api in resources or row.page["resource"] in resources
+            served = row.page["resource"] in resources if not self.host.here else \
+                not api or api in resources or row.page["resource"] in resources  # (another host's: as it said)
             if row.page.get("known"):  # (KEDA's, cert-manager's…: listed only on a cluster that has them)
                 row.served = served
                 row.set_visible(served and row.section not in self.folded)
@@ -812,6 +799,10 @@ class KubeView(Gtk.Box):
         when it has one; its page, with it selected (its YAML beside the table)."""
         context = self.context
         self.say(wording.say("kube.finding", kind=kind, name=name))
+        if not self.host.here:
+            return self.host.ask("kube", {"what": "owner", "context": context, "kind": kind, "name": name,
+                                          "namespace": ns or None},
+                                 lambda r: self._go_to(context, r.get("kind") or kind, r.get("name") or name, ns))
 
         def work():
             k, n = kind, name
@@ -863,6 +854,9 @@ class KubeView(Gtk.Box):
         if not quiet:
             self.say(wording.say("kube.reading", kind=page['title'].lower(), context=context))
             self.refresh_btn.set_loading(True)
+        if not self.host.here:
+            return self.host.ask("kube", {"what": "list", "context": context, **self.page_ref(page)},
+                                 lambda r: self._listed(gen, page, r))
 
         def work():
             # (a custom resource's definition, read alongside the list: two kubectl round trips at once, not after)
@@ -882,12 +876,45 @@ class KubeView(Gtk.Box):
             GLib.idle_add(self._loaded, gen, page, columns, kube_rows(page, items, ctx, columns), ctx, items)
         KUBE_POOL.submit(work)
 
+    @staticmethod
+    def page_ref(page):
+        """How another host's kube op knows a page: by its resource, or a custom resource's by its definition."""
+        return {"crd": page["host_crd"]} if page.get("host_crd") else {"page": page["resource"]}
+
+    def _listed(self, gen, page, r):
+        """A page's objects, as another host read them: its rows made already, and whether its metrics were read."""
+        if gen != self.generation:
+            return
+        if r.get("error") or r.get("fault"):
+            fault = r.get("fault") or {"title": r["error"], "why": "", "fix": None, "said": ""}
+            return self._failed(gen, fault, fault.get("said") or "")
+        if page.get("host_crd") and r.get("page"):  # (a custom resource's, as its definition names it there)
+            page.update(title=r["page"].get("title") or page["title"], namespaced=bool(r["page"].get("namespaced")))
+            if (row := self.page_rows.get(id(page))) is not None:
+                row.get_child().get_last_child().set_label(page["title"])
+        columns = kubehost.columns(r.get("columns"))
+        if self.table_page is page and self.table_cols == columns:  # (the same: the table kept, scrolled as it was)
+            columns = self.table_cols
+        self._loaded(gen, page, columns, kubehost.rows(r.get("rows")), self.host_ctx(r.get("metrics")))
+
+    @staticmethod
+    def host_ctx(metrics):
+        """What the view knows of a list's metrics read on another host: whether there were any."""
+        read = {} if metrics else None
+        return {"now": time.time(), "metrics": read, "node_metrics": read}
+
     # ---- kept up to date, as Freelens keeps its lists: one read, then the changes as they happen
     def watch_page(self, gen, page):
         """Watch the page's kind (not Secrets: their values would come with them; nor Helm's releases): each change
         lands in the table within a second of its happening. The list is read every KUBE_REFRESH_S only if the
         cluster can't be watched."""
         if page["source"] != "kubectl" or gen != self.generation or not self.get_visible():
+            return
+        if not self.host.here:  # (watched there: its rows sent whole as they change, its metrics read there)
+            self.watch = kubehost.Follow(self.host.where, {"what": "watch", "context": self.context,
+                                                           **self.page_ref(page)},
+                                         lambda w, code, said: self._watch_ended(w, gen, page, code, said),
+                                         on_rows=lambda w, r: self._host_rows(w, gen, page, r))
             return
         args = ["--context", self.context, "get", page["resource"]] + (["--all-namespaces"] if page["namespaced"]
                                                                         else [])
@@ -922,6 +949,17 @@ class KubeView(Gtk.Box):
             self.show_rows(page, kube_rows(page, list(self.objects.values()), dict(self.ctx, now=time.time()),
                                            self.table_cols))
             self.update_status()
+
+    def _host_rows(self, w, gen, page, r):
+        """A watched list's rows as another host sent them, as it changed (with why it's read, not watched, if so)."""
+        if w is not self.watch or gen != self.generation:
+            return
+        self.watch_fails = 0
+        self.show_rows(page, kubehost.rows(r.get("rows")))
+        self.ctx = self.host_ctx(r.get("metrics"))
+        if r.get("note"):
+            self.set_note(r["note"])
+        self.update_status()
 
     def _watch_ended(self, w, gen, page, code, said):
         """The watch ended (the API server ends them after a while; or it failed): watched again after a second, or
@@ -1053,7 +1091,7 @@ class KubeView(Gtk.Box):
             text, w = item.get_item().texts[i], item.get_child()
             if col["kind"] == "owner":
                 obj = item.get_item().obj
-                ref = kube_controller(obj["raw"]) or {}
+                ref = (obj["owner"] if obj["raw"] is None else kube_controller(obj["raw"])) or {}
                 self.find_label(w.get_child(), text)
                 w.owner = (ref["kind"], ref["name"], obj["namespace"]) if ref.get("kind") and ref.get("name") else None
                 return
@@ -1063,7 +1101,7 @@ class KubeView(Gtk.Box):
                 w.set_tooltip_text(wording.say("kube.only_namespace", namespace=text) if text else None)
                 return
             if isinstance(w, KubeSquares):
-                w.set_containers(kube_containers(item.get_item().obj["raw"], time.time()))
+                w.set_containers(self.pod_look(item.get_item().obj)[0])
                 return
             self.find_label(w, text)
             w.set_tooltip_text(text if len(text) > (30 if col["kind"] == "name" else 40) else None)
@@ -1073,7 +1111,9 @@ class KubeView(Gtk.Box):
             if col["kind"] == "status":
                 for t in tones:
                     w.remove_css_class(t)
-                if tone := kube_cell_tone(col, text):
+                obj = item.get_item().obj
+                if tone := (obj["tones"][i] if obj["raw"] is None and i < len(obj["tones"]) else
+                            None if obj["raw"] is None else kube_cell_tone(col, text)):
                     w.add_css_class(f"kube-{tone}")
         f.connect("setup", setup)
         f.connect("bind", bind)
@@ -1172,6 +1212,8 @@ class KubeView(Gtk.Box):
         if self.right.get_position() < 200 or self.right.get_position() > self.right.get_width() - 200:
             # (the table keeps two thirds: the Pods table's Restarts stays in sight in a 1280-wide window)
             self.right.set_position(max(320, int(self.right.get_width() * 0.65)))
+        if not self.host.here:  # (read there, as it's listed there: a Secret's keys' names only, too)
+            return self.host_yaml(page, obj, context)
         if page["source"] in ("secrets", "helm"):
             self.details_shown = None  # (shown from what's listed: nothing read)
         if page["source"] == "secrets":  # (only its keys' names: its values are never read)
@@ -1198,16 +1240,30 @@ class KubeView(Gtk.Box):
             GLib.idle_add(self._details_read, shown, text, again)
         KUBE_POOL.submit(work)
 
-    def _details_read(self, shown, text, again):
+    def host_yaml(self, page, obj, context):
+        """An object's YAML read on another host (its kube op's yaml), shown as one read here is."""
+        shown = ((context, page["resource"], obj["name"], obj["namespace"]), obj["version"])
+        if shown == self.details_shown and page["source"] == "kubectl":
+            return
+        again = self.details_shown is not None and self.details_shown[0] == shown[0]
+        self.details_shown = shown
+        self.details_fade.hold()
+        self.host.ask("kube", {"what": "yaml", "context": context, "namespace": obj["namespace"] or None,
+                               "name": obj["name"], **self.page_ref(page)},
+                      lambda r: self._details_read(shown, r.get("text") or f"# {r.get('error') or ''}\n", again,
+                                                   r.get("file") or "object.yaml"))
+
+    def _details_read(self, shown, text, again, file="object.yaml"):
         """An object's YAML is in: shown (where it was scrolled to, if it's the same object read again), with the
         names of other objects in it as links."""
         if shown != self.details_shown:
             return False
         adj = self.details.scroll.get_vadjustment()
         at = adj.get_value() if again else 0
-        self.details.load(text, "object.yaml")
+        self.details.load(text, file)
         ns = shown[0][3] or None
-        self.details.set_links(kube_yaml_refs(text, ns), self.open_ref)
+        if file == "object.yaml":
+            self.details.set_links(kube_yaml_refs(text, ns), self.open_ref)
         if at:
             GLib.idle_add(lambda: adj.set_value(min(at, adj.get_upper() - adj.get_page_size())) and False)
         self.details_fade.done()
@@ -1234,7 +1290,8 @@ class KubeView(Gtk.Box):
         if self.table_page["resource"] == "namespaces":  # (a namespace: its pods)
             self.set_namespace(row.obj["name"])
         elif self.table_page["resource"] == "customresourcedefinitions":  # (a definition: its objects)
-            page = kube_custom_page(row.obj["raw"])
+            page = kube_custom_page(row.obj["raw"]) if self.host.here else \
+                kubehost.page({"title": row.obj["name"], "resource": row.obj["name"], "crd": row.obj["name"]})
             key = page["resource"]
             existing = next((r for r in self.page_rows.values() if r.page["resource"] == key), None)
             if existing is None:
@@ -1263,212 +1320,74 @@ class KubeView(Gtk.Box):
         else:
             self.say(text)
 
-    # ---- a pod's logs, followed
+    # ---- pods' logs, followed, and shells in pods: a tab each in the dock (kubedock)
+    def pod_look(self, obj):
+        """A pod's containers, as kube_containers has them ([(name, look, words, init)]), and its default container."""
+        if obj["raw"] is None:  # (read on another host: as it said them)
+            return obj["containers"], obj["default"]
+        return kube_containers(obj["raw"], time.time()), \
+            (_km(obj["raw"]).get("annotations") or {}).get("kubectl.kubernetes.io/default-container")
+
     def show_logs(self, key):
-        """A pod's logs under the table: its default container's (the one its kubectl.kubernetes.io/default-container
-        annotation names, else its first), from its last KUBE_LOG_TAIL lines on, followed. Another pod's, asked for,
-        stop the one before's."""
+        """A pod's logs in a tab of the dock (its tab again, if it has one): its default container's (the one its
+        kubectl.kubernetes.io/default-container annotation names, else its first), from its last KUBE_LOG_TAIL lines
+        on, followed."""
         obj = self.pod_obj(key)
         if obj is None:
             return
-        pod = obj["raw"]
-        self.log_containers = [(name, init) for name, _l, _w, init in kube_containers(pod, time.time())]
-        if not self.log_containers:
+        containers, default = self.pod_look(obj)
+        pod_key = (self.context, obj["namespace"], obj["name"])
+        if (tab := self.dock.find(LogsTab, pod_key)) is not None:
+            return self.dock.show(tab)
+        cs = [(name, init) for name, _l, _w, init in containers]
+        if not cs:
             self.set_note(wording.say("kube.no_containers", pod=obj['name']))
             return
-        names = [n for n, _i in self.log_containers]
-        default = (_km(pod).get("annotations") or {}).get("kubectl.kubernetes.io/default-container")
-        pick = names.index(default) if default in names else \
-            next((i for i, (_n, init) in enumerate(self.log_containers) if not init), 0)
-        self.log_pod = (self.context, obj["namespace"], obj["name"])
-        self.logs_title.set_label(f"{obj['name']} · {obj['namespace']}")
-        self.syncing = True
-        self.logs_container.set_model(Gtk.StringList.new([wording.say("kube.init_container", name=n) if init else n
-                                                          for n, init in self.log_containers]))
-        self.logs_container.set_selected(pick)
-        self.logs_previous.set_active(False)
-        self.syncing = False
-        self.hide_shell()
-        self.logs_box.set_visible(True)
+        names = [n for n, _i in cs]
+        pick = names.index(default) if default in names else next((i for i, (_n, init) in enumerate(cs) if not init), 0)
         self.show_dock()
-        self.tail_logs()
-
-    def tail_logs(self):
-        """The container picked, its log from the start: this run's followed (kubectl logs -f), or, with Previous,
-        its last run's (which has ended). The one followed before is stopped first."""
-        self.stop_logs()
-        i = self.logs_container.get_selected()
-        if self.log_pod is None or not 0 <= i < len(self.log_containers):
-            return
-        context, ns, pod = self.log_pod
-        previous = self.logs_previous.get_active()
-        args = ["--context", context, "logs", "--previous" if previous else "-f", f"--tail={KUBE_LOG_TAIL}",
-                "-n", ns, pod, "-c", self.log_containers[i][0]]
-        self.logs.load("", "pod.log")
-        self.follow_logs(True)
-        try:
-            self.log_tail = KubeLogTail(args, self._log_text, self._log_end)
-        except OSError as e:
-            self.logs_state.set_label(wording.say("kube.kubectl_error", error=e))
-            return
-        self.logs_state.set_label(wording.say("kube.previous_run") if previous else wording.say("kube.following"))
-
-    def stop_logs(self):
-        if self.log_tail is not None:
-            self.log_tail.stop()
-            self.log_tail = None
-
-    def hide_logs(self):
-        """Close the logs: kubectl, following them, is stopped (never left running)."""
-        self.stop_logs()
-        self.log_pod = None
-        self.logs_box.set_visible(False)
-        self.dock.set_visible(self.shell_box.get_visible())
-
-    def show_dock(self):
-        """The logs' or the shell's place under the table, half the view's height as it opens."""
-        if not self.dock.get_visible():
-            self.dock.set_visible(True)
-            self.lower.set_position(max(160, self.lower.get_height() // 2))
-
-    # ---- a shell in a pod (Multiplex's terminal: a Bot can find it, read it and type in it, as Multiplex's own)
-    def build_shell(self):
-        """The shell pane: the pod, its containers to pick from (running ones: an init container's has ended), close;
-        the terminal (kubectl exec -it), or why there can't be one."""
-        head = Gtk.Box(spacing=6, margin_start=10, margin_end=6, margin_top=4, margin_bottom=2)
-        head.append(Gtk.Image.new_from_icon_name("utilities-terminal-symbolic"))
-        self.shell_title = Gtk.Label(xalign=0, ellipsize=Pango.EllipsizeMode.MIDDLE)
-        self.shell_title.add_css_class("heading")
-        head.append(self.shell_title)
-        self.shell_state = Gtk.Label(xalign=0, hexpand=True, ellipsize=Pango.EllipsizeMode.END)
-        self.shell_state.add_css_class("dim-label")
-        self.shell_state.add_css_class("caption")
-        head.append(self.shell_state)
-        self.shell_container = ellipsize_dropdown(Gtk.DropDown.new_from_strings([]), 28)
-        self.shell_container.set_tooltip_text(wording.say("kube.container"))
-        self.shell_container.connect("notify::selected", lambda *_: self.syncing or self.start_shell())
-        head.append(self.shell_container)
-        hide = Gtk.Button(icon_name="window-close-symbolic", tooltip_text=wording.say("kube.close_shell"))
-        hide.add_css_class("flat")
-        hide.connect("clicked", lambda *_: self.hide_shell())
-        head.append(hide)
-        self.shell_slot = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, vexpand=True)
-        self.shell_term, self.shell_pod, self.shell_containers = None, None, []
-        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, visible=False, vexpand=True,
-                      height_request=tokens.px("kube.logs-min"))
-        box.append(head)
-        box.append(self.shell_slot)
-        return box
+        self.dock.add(LogsTab(self.dock, self.host, *pod_key, cs, pick))
 
     def show_shell(self, key):
-        """A shell in a pod under the table, in its default container (as its logs pick one); the logs, or another
-        pod's shell, closed first."""
+        """A shell in a pod in a new tab of the dock, in its default container (as its logs pick one), of its running
+        ones (an init container's has ended)."""
         obj = self.pod_obj(key)
         if obj is None:
             return
-        pod = obj["raw"]
-        names = [name for name, _l, _w, init in kube_containers(pod, time.time()) if not init]
+        containers, default = self.pod_look(obj)
+        names = [name for name, _l, _w, init in containers if not init]
         if not names:
             self.set_note(wording.say("kube.no_containers", pod=obj['name']))
             return
-        default = (_km(pod).get("annotations") or {}).get("kubectl.kubernetes.io/default-container")
-        self.hide_logs()
-        self.hide_shell()
-        self.shell_containers = names
-        self.shell_pod = (self.context, obj["namespace"], obj["name"])
-        self.shell_title.set_label(f"{obj['name']} · {obj['namespace']}")
-        self.syncing = True
-        self.shell_container.set_model(Gtk.StringList.new(names))
-        self.shell_container.set_selected(names.index(default) if default in names else 0)
-        self.syncing = False
-        self.shell_box.set_visible(True)
         self.show_dock()
-        self.start_shell()
+        self.dock.add(ShellTab(self.dock, self.host, self.context, obj["namespace"], obj["name"], names,
+                               names.index(default) if default in names else 0))
 
-    def start_shell(self):
-        """kubectl exec -it in the container picked: bash if it has it, else sh. The one before is ended first."""
-        import multiplexterm
-        self.stop_shell()
-        i = self.shell_container.get_selected()
-        if self.shell_pod is None or not 0 <= i < len(self.shell_containers):
-            return
-        if (why := multiplexterm.available()) is not None:
-            self.shell_state.set_label(why)
-            return
-        context, ns, pod = self.shell_pod
-        argv = [kube_tool("kubectl"), "--context", context, "exec", "-it", "-n", ns, pod, "-c",
-                self.shell_containers[i], "--", "sh", "-c", "command -v bash >/dev/null 2>&1 && exec bash || exec sh"]
-        term = multiplexterm.Terminal(argv, title=f"{pod} · {ns} · {context}", on_exit=self._shell_end)
-        multiplexterm.Terminals.get(wire.HEAD_CLIENT).add(term)
-        self.shell_term = term
-        self.shell_slot.append(term)
-        self.shell_state.set_label("")
-        term.vte.grab_focus()
-
-    def _shell_end(self, term, status):
-        if term is self.shell_term:
-            code = os.waitstatus_to_exitcode(status) if status > 0 else status
-            self.shell_state.set_label(wording.say("kube.kubectl_exited", code=code))
-
-    def stop_shell(self):
-        if self.shell_term is not None:
-            import multiplexterm
-            self.shell_term.stop()
-            multiplexterm.Terminals.get().remove(self.shell_term)
-            self.shell_slot.remove(self.shell_term)
-            self.shell_term = None
+    def hide_logs(self):
+        """Every log's tab closed: kubectl, following them, is stopped (never left running)."""
+        self.dock.close_all(LogsTab)
 
     def hide_shell(self):
-        """Close the shell: kubectl, and the shell in the pod with it, ended (never left running)."""
-        self.stop_shell()
-        self.shell_pod = None
-        self.shell_box.set_visible(False)
-        self.dock.set_visible(self.logs_box.get_visible())
+        """Every shell's tab closed: kubectl, and the shell in the pod with it, ended (never left running)."""
+        self.dock.close_all(ShellTab)
 
-    def _log_text(self, tail, text):
-        if tail is not self.log_tail:
-            return
-        b = self.logs.buffer
-        before = b.get_line_count()
-        b.insert(b.get_end_iter(), text.replace("\r\n", "\n"))
-        if b.get_line_count() > KUBE_LOG_LINES * 1.1:  # (the oldest go, a tenth at a time)
-            b.delete(b.get_start_iter(), b.get_iter_at_line(b.get_line_count() - KUBE_LOG_LINES)[1])
-            if self.logs.search_bar.get_search_mode():  # (the matches' places moved)
-                self.logs.find(self.logs.search_entry.get_text(), scroll=False)
-        if len(str(b.get_line_count())) != len(str(before)):
-            self.logs.gutter.queue_resize()  # (wider line numbers)
+    def show_dock(self):
+        """The dock's place under the table, half the view's height as it opens."""
+        if not self.dock.get_visible():
+            self.dock.set_visible(True)
+            self.dock_split.set_position(max(160, self.dock_split.get_height() // 2))
 
-    def _log_end(self, tail, code):
-        if tail is not self.log_tail:
-            return
-        self.log_tail = None
-        if code:
-            self.logs_state.set_label(wording.say("kube.kubectl_exited", code=code))
-        elif not self.logs_previous.get_active():
-            self.logs_state.set_label(wording.say("kube.ended"))
+    @property
+    def logs(self):
+        """The log shown (the picked tab's, if it's a log's), or None."""
+        tab = self.dock.current()
+        return tab.logs if isinstance(tab, LogsTab) else None
 
-    def follow_logs(self, on):
-        """Keep to the newest line as lines come (on), or stay where you've scrolled to."""
-        self.log_following = on
-        was, self.syncing = self.syncing, True
-        self.logs_follow.set_active(on)
-        self.syncing = was
-        if on:
-            adj = self.logs.scroll.get_vadjustment()
-            adj.set_value(adj.get_upper() - adj.get_page_size())
-
-    def _logs_moved(self, adj):
-        """More lines, another size, the view moved: while following, back to the end (unless it's you dragging the
-        scrollbar away from it); not following, the end reached again follows again."""
-        end = adj.get_upper() - adj.get_page_size()
-        if adj.get_value() >= end - 2:
-            if not self.log_following:
-                self.follow_logs(True)
-        elif self.log_following:
-            if self.log_dragging:
-                self.follow_logs(False)
-            else:
-                adj.set_value(end)
+    @property
+    def shell_term(self):
+        """The terminal shown (the picked tab's, if it's a shell's), or None."""
+        tab = self.dock.current()
+        return tab.term if isinstance(tab, ShellTab) else None
 
     # ---- deleting a pod: the view's only writes, each confirmed first
     def ask_delete(self, key, force):
@@ -1477,11 +1396,14 @@ class KubeView(Gtk.Box):
         unless you say Delete."""
         ns, _, name = key.partition("/")
         context = self.context
-        server = next((c.get("server") for c in self.contexts if c["name"] == context), None)
+        picked = next((c for c in self.contexts if c["name"] == context), {})
         obj = self.pod_obj(key)
-        owners = (_km(obj["raw"]).get("ownerReferences") or []) if obj else []
+        if obj is not None and obj["raw"] is None:  # (read on another host: its controller, as it said it)
+            owners = [obj["owner"]] if obj["owner"] else []
+        else:
+            owners = (_km(obj["raw"]).get("ownerReferences") or []) if obj else []
         body = [wording.say("kube.in_namespace", namespace=ns, context=context)]
-        if not kube_local(server):
+        if not (picked.get("local") if "local" in picked else kube_local(picked.get("server"))):
             body.append(wording.say("kube.remote_cluster", context=context))
         if force:
             body.append(wording.say("kube.force_delete_body"))
@@ -1504,6 +1426,10 @@ class KubeView(Gtk.Box):
         read again."""
         self.set_note(wording.say("kube.force_deleting", name=name) if force else
                       wording.say("kube.deleting", name=name))
+        if not self.host.here:
+            return self.host.ask("kube", {"what": "delete", "context": context, "namespace": ns, "name": name,
+                                          "force": force},
+                                 lambda r: self._deleted(context, r.get("said") or r.get("error") or ""))
 
         def work():
             GLib.idle_add(self._deleted, context, kube_delete(context, ns, name, force))

@@ -457,6 +457,16 @@ def build(app, sc):
         T.pump(0.5)
         win.connect("destroy", lambda *_: kv.hide_shell())
         return win
+    if name == "kubernetes-dock":
+        win, kv = scenes_chat.kube_window(app)
+        T.pump(0.3)
+        kv.show_logs("jobs/worker-5c4b-klmno")
+        kv.show_shell("shop/api-6f7c-mnopq")
+        T.wait_for(lambda: kv.shell_term is not None and "/app#" in kv.shell_term.screen()["screen"], "its prompt")
+        kv.shell_term.type("ls\n")
+        T.pump(0.5)
+        win.connect("destroy", lambda *_: kv.dock.close_all())
+        return win
     if name == "bot-settings":
         win = open_chat(app, sc)
         title = fixture("sessions.json")["sessions"][0]["title"]

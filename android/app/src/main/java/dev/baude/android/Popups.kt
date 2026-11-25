@@ -2,6 +2,7 @@ package dev.baude.android
 
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -173,21 +174,38 @@ fun MenuChoice(label: String, on: Boolean, enabled: Boolean = true, textColor: C
     }
 }
 
-/** A tick for each of a list of things and one over them all, as the Kubernetes page's Namespaces and home's ⋮ →
- * Groups have them (Baude's pickers.CheckList): those ticked are shown, in the order ticked; none ticked is every one
- * (an empty list), the one over them ticked. Tapping that one shows every one again; it's never unticked. items: (key,
- * label); pick(the keys shown, empty for every one); onLongClick(key): one pressed and held. */
+/** A square check for each of a list of things and one over them all, as the Kubernetes page's Namespaces and home's ⋮
+ * → Groups have them (Baude's pickers.CheckList): those checked are shown, in the order checked; none checked is every
+ * one (an empty list), the one over them checked. Tapping that one shows every one again; it's never unchecked.
+ * items: (key, label); pick(the keys shown, empty for every one); onLongClick(key): one pressed and held; heading: the
+ * one over them reads as a section heading (the menu's "Group by"), its check kept. */
 @Composable
 fun MenuChecks(allLabel: String, items: List<Pair<String, String>>, shown: List<String>, pick: (List<String>) -> Unit,
-               onLongClick: ((String) -> Unit)? = null) {
-    MenuChoice(allLabel, shown.isEmpty()) { pick(emptyList()) }
+               onLongClick: ((String) -> Unit)? = null, heading: Boolean = false) {
+    MenuCheck(allLabel, shown.isEmpty(), heading = heading) { pick(emptyList()) }
     MenuDivider()
     Column(Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState())) {
         for ((key, label) in items) {
-            MenuChoice(label, key in shown, onLongClick = onLongClick?.let { { it(key) } }) {
+            MenuCheck(label, key in shown, onLongClick = onLongClick?.let { { it(key) } }) {
                 pick(shown.filter { it != key } + if (key in shown) emptyList() else listOf(key))
             }
         }
+    }
+}
+
+/** A row with a square check before its label (libadwaita's check button): the accent filled with a tick when on, an
+ * outline when off. heading: its label as MenuHeading's. */
+@Composable
+private fun MenuCheck(label: String, on: Boolean, heading: Boolean = false, onLongClick: (() -> Unit)? = null,
+                      onClick: () -> Unit) {
+    val c = LocalBaude.current
+    MenuLine(true, onLongClick, onClick) {
+        val box = Modifier.size(16.dp.icon).clip(RoundedCornerShape(3.dp))
+        if (on) Box(box.background(c.accentBg), contentAlignment = Alignment.Center) {
+            Icon(Adwaita.ObjectSelect, null, tint = c.accentFg, modifier = Modifier.size(14.dp.icon))
+        } else Box(box.border(1.dp, c.dim, RoundedCornerShape(3.dp)))
+        Text(label, style = if (heading) Type.folder else Type.body, color = if (heading) c.dim else c.fg, maxLines = 1,
+            overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
     }
 }
 

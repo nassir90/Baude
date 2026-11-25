@@ -724,14 +724,14 @@ private fun ViewMenu(snack: SnackbarHostState) {
             MenuChoice(Wording.Sidebar.created, HomePrefs.by.value == "created") { HomePrefs.by.value = "created"; HomePrefs.save() }
             MenuChoice(Wording.Sidebar.updated, HomePrefs.by.value == "updated") { HomePrefs.by.value = "updated"; HomePrefs.save() }
             MenuDivider()
-            // (Groups: a tick each and one over them all, as the Kubernetes page's Namespaces)
+            // (Groups: a square check each and one over them all, its label a heading, as the Kubernetes page's Namespaces)
             val names = Groups.names() + ""
             MenuChecks(Wording.Sidebar.groups, names.map { it to it.ifEmpty { Wording.Sidebar.noGroup } },
                 HomePrefs.groups.filter { it in names }, { next ->
                     HomePrefs.groups.clear()
                     if (next.toSet() != names.toSet()) HomePrefs.groups.addAll(next)
                     HomePrefs.save()
-                }) { g -> if (g.isNotEmpty()) held = g }
+                }, onLongClick = { g -> if (g.isNotEmpty()) held = g }, heading = true)
             MenuDivider()
             MenuChoice(Wording.Sidebar.newGroupEllipsis, false) { open = false; naming = true to "" }
         }

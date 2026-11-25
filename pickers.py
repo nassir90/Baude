@@ -68,13 +68,17 @@ class CheckList(Gtk.Box):
     sidebar's ⋮ → Groups have them: those checked are shown, in the order checked; none checked is every one ([]), the
     one over them checked. Checking that one shows every one again, and it can't be unchecked: something is always
     shown. changed(the keys shown, [] for every one) as they're picked; menu(key, check, x, y), x and y in the check's,
-    on a right-click on one."""
+    on a right-click on one. heading: the one over them all reads as a section heading (the popover's "Group by"), its
+    check kept."""
 
-    def __init__(self, all_label, changed, menu=None, max_height=420):
+    def __init__(self, all_label, changed, menu=None, max_height=420, heading=False):
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=4)
         self.changed, self.menu, self.items, self.shown, self.checks, self.syncing = changed, menu, None, [], {}, False
         self.all = Gtk.CheckButton(label=all_label)
         self.all.connect("toggled", lambda b: self.syncing or self.pick([]))
+        if heading and isinstance(label := self.all.get_last_child(), Gtk.Label):
+            label.add_css_class("heading")
+            label.add_css_class("dim-label")
         self.list = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         self.append(self.all)
         self.append(Gtk.Separator())

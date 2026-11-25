@@ -38,7 +38,7 @@
     },
     {
       "name": "Groups",
-      "shows": "Under a separator, the Groups checks: the same widget as the Kubernetes page's Namespaces menu (pickers.CheckList; the phone's MenuChecks, as its Namespaces). A check \"Groups\" over them all, a separator, then a check per group (Baude's own groups), alphabetical case-insensitively, then \"No group\" last; then, under a separator, \"New Group…\". Groups known: those made with New Group…, those chats are put in, and those hosts' sessions were started in.",
+      "shows": "Under a separator, the Groups checks: the same widget as the Kubernetes page's Namespaces menu (pickers.CheckList; the phone's MenuChecks, as its Namespaces). A check over them all, worded \"Groups\" and drawn as a section heading (as \"Group by\"), checked while every group is listed; a separator, then a check per group (Baude's own groups), alphabetical case-insensitively, then \"No group\" last; then, under a separator, \"New Group…\". Groups known: those made with New Group…, those chats are put in, and those hosts' sessions were started in.",
       "copy": [
         "sidebar.groups",
         "sidebar.no_group",
@@ -47,12 +47,7 @@
       "parts": [
         {
           "name": "Group checks",
-          "shows": "\"Groups\": checked while every group is listed (none picked). Then one square check per group with its name, checked while it's picked. Everything is listed until some are picked. Which groups are listed is remembered across restarts, and a group that has gone is neither shown nor counted out.",
-          "phone": {
-            "does": "As the phone's Namespaces menu: \"Groups\" and each group are menu rows with a tick where the desktop has a check",
-            "why": "The phone's Namespaces menu is ticks; the owner asked for the group menu to be the same as Namespaces",
-            "decided": "2026-11-25"
-          },
+          "shows": "\"Groups\", as a heading with a check: checked while every group is listed (none picked). Then one square check per group with its name, checked while it's picked. Everything is listed until some are picked. Which groups are listed is remembered across restarts, and a group that has gone is neither shown nor counted out.",
           "actions": [
             {
               "by": "click Groups",
@@ -127,6 +122,23 @@
     {
       "name": "no groups at all",
       "shows": "\"Groups\" checked, and just \"No group\" under it."
+    }
+  ],
+  "decisions": [
+    {
+      "said": "the groups in that menu get square checkboxes, the same as the one in Namespaces",
+      "rule": "The group list is the Namespaces picker on every app: a square checkbox per group and one over them all that lists every group again, never ticks, radio dots or a Show All row.",
+      "decided": "2026-11-25"
+    },
+    {
+      "said": "groups should still look a bit like a header",
+      "rule": "The check over all the groups is worded \"Groups\" and drawn as a section heading (like \"Group by\": small, bold, dim) while keeping its checkbox and behaviour. Kubernetes' \"All namespaces\" row stays an ordinary row.",
+      "decided": "2026-11-25"
+    },
+    {
+      "said": "Group by should offer Folder, Created and Updated",
+      "rule": "Group by has exactly Folder, Created (the day each chat was made, from its transcript's first record) and Updated (the day it was last used) on every app; arrowing through the choices only moves focus and never changes the grouping.",
+      "decided": "2026-11-25"
     }
   ],
   "scenes": [

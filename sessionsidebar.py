@@ -133,19 +133,15 @@ class SessionSidebar(SidebarMenu, Gtk.Box):
         view = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
         heading = Gtk.Label(label=wording.say("sidebar.group_by"), xalign=0, css_classes=["heading", "dim-label"])
         view.append(heading)
-        first = None
         for by_key, label in (("folder", "common.folder"), ("created", "sidebar.created"),
                               ("updated", "sidebar.updated")):
             choice = Gtk.CheckButton(label=wording.say(label), action_name="sb.group",
                                      action_target=GLib.Variant.new_string(by_key))
-            if first is None:
-                first = choice
-            else:
-                choice.set_group(first)
             view.append(choice)
         view.append(Gtk.Separator())
         self.group_list = CheckList(wording.say("sidebar.groups"),
-                                    lambda keys: self.filtered(sidebar_groups=keys or None), self.group_menu)
+                                    lambda keys: self.filtered(sidebar_groups=keys or None), self.group_menu,
+                                    heading=True)
         view.append(self.group_list)
         view.append(Gtk.Separator())
         new_group = Gtk.Button(label=wording.say("sidebar.new_group_ellipsis"), css_classes=["flat"])  # (no chat

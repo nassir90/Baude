@@ -416,6 +416,13 @@
       "decided": "2026-11-22"
     }
   ],
+  "decisions": [
+    {
+      "said": "an archived chat that is open shows under Today, and twice in the left bar",
+      "rule": "A chat that is open and already listed (archived included) is listed once, only where it already is, highlighted; it is never added again as a new unsaved chat.",
+      "decided": "2026-11-25"
+    }
+  ],
   "scenes": [
     "50-sessions-sidebar",
     "50b-sidebar-search",

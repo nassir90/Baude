@@ -31,6 +31,7 @@ gi.require_version("Gsk", "4.0")
 from gi.repository import Gdk, Gio, GLib, Gsk, Gtk  # noqa: E402
 
 import markdownview  # noqa: E402
+import widgets  # noqa: E402  (set_popover)
 from baudelib import wording  # noqa: E402
 
 SPELLING, GRAMMAR = "spelling", "grammar"
@@ -658,7 +659,7 @@ class SpellCheck:
         if self.menu is not None:
             self.menu.unparent()
         self.menu = Gtk.PopoverMenu(menu_model=menu, has_arrow=False, halign=Gtk.Align.START)
-        self.menu.set_parent(self.view)
+        widgets.set_popover(self.menu, self.view)
         rect = Gdk.Rectangle()
         rect.x, rect.y, rect.width, rect.height = int(x), int(y), 1, 1
         self.menu.set_pointing_to(rect)

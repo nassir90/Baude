@@ -138,8 +138,7 @@ def objc_send(obj, sel, *args, types=(), ret=None):
 
 
 DOCK_PX = 512  # (the Dock's tile at its largest, magnified: 256 points, 512 px on a Retina screen. Each tile set (the
-# accent changed) holds on to memory in AppKit, 16 of them at most: 8.7 MB each from 1024 px, 139 MB in all; 2.7 MB and
-# 42 MB from 512)
+# accent changed) holds on to memory in AppKit, none of it given back: 8.7 MB each from 1024 px, 2.6 MB from 512)
 
 
 def dock_image(png):

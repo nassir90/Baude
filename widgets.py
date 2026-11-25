@@ -205,7 +205,7 @@ class PickList:
         box.append(self.scroll)
         box.append(foot)
         self.pop.set_child(box)
-        self.pop.set_parent(parent)
+        set_popover(self.pop, parent)
         # (the pointer picks a row only once it's moved over the list: resting where the list came up as you typed, it
         # picked the row that came under it, and Enter took that, not the first)
         self.rest = None  # (where the pointer was as the list came up, in the window: the list moves as it's filled)
@@ -754,6 +754,9 @@ def _dispose_tree(widget):
             w.set_sort_func(None)
         if isinstance(w, Gtk.Picture):  # (a picture's dispose lets go of its paintable but keeps pointing at it: the
             Gtk.Picture.set_paintable(w, None)  # second, as it's freed, let go of it again, and crashed)
+        for c in [c for c in _children(w) if getattr(c, "set_on", None) is w]:
+            c.unparent()  # (a popover of ours on it, set_popover's: a text view's dispose takes out its children one
+            # by one, and one that isn't its own it can't, and tried again for ever. GTK's own popovers it sees to)
         w.run_dispose()
         # (its event controllers: a click's handler is the controller's, and dispose leaves those till the end. Taken
         # out after it: GTK's and libadwaita's own widgets use theirs in their dispose (a text view ends a selection's
@@ -765,6 +768,12 @@ def _dispose_tree(widget):
         for c in [c for c in walk(w) if isinstance(c, Gtk.Popover) and c.get_parent() is w]:
             c.unparent()  # (a menu set_parent'ed on it, which only its owner lets go of)
     return False
+
+
+def set_popover(pop, parent):
+    """pop set_parent'ed on parent, as ours: let go of before parent's disposed (_dispose_tree)."""
+    pop.set_parent(parent)
+    pop.set_on = parent
 
 
 def free_closed_windows(app):

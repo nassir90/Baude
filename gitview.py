@@ -595,6 +595,8 @@ class GitPage(Gtk.Stack):
         self.kept = {}  # chat -> (its folder, its page as it was left: keep), the one left longest ago first
         self.view_wanted = None  # (a chat's page come back to, or new: its card and scroll, once its log is read)
         self.scroll_wanted = None  # (where its log was scrolled: once the log's shown and laid out, scroll_back)
+        self.scrolling = None  # (scroll_back's timer: stopped as the page goes)
+        self.connect("unrealize", lambda *_: self._stop_scrolling())
         top = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
         head = Gtk.Box(spacing=6, margin_start=10, margin_end=8, margin_top=8)
         self.where = Gtk.Label(xalign=0, ellipsize=Pango.EllipsizeMode.START, hexpand=True)  # (the repository)
@@ -991,14 +993,21 @@ class GitPage(Gtk.Stack):
         def scroll(tries=[0]):
             tries[0] += 1
             if self.chat_key != chat or self.scroll_wanted is None:
+                self.scrolling = None
                 return False
             adj = self.list_scroll.get_vadjustment()
             if adj.get_upper() < self.scroll_wanted + adj.get_page_size() and tries[0] < 30:
                 return True  # (not laid out yet)
             adj.set_value(self.scroll_wanted)
-            self.scroll_wanted = None
+            self.scroll_wanted = self.scrolling = None
             return False
-        GLib.timeout_add(16, scroll)
+        self._stop_scrolling()
+        self.scrolling = GLib.timeout_add(16, scroll)
+
+    def _stop_scrolling(self):
+        if self.scrolling is not None:
+            GLib.source_remove(self.scrolling)
+            self.scrolling = None
 
     def highlight(self, sha):
         """A commit's row picked out and scrolled into the middle of the view (a link to it was clicked)."""

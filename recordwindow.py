@@ -216,6 +216,7 @@ class Window(RecordHosts, Adw.ApplicationWindow, feedback.FeedbackHost, viewers.
         self.notes_seen = {}  # (by host: its notebooks as last listed here, its info's notes: on_network)
         self.listed_at, self.list_later = {}, set()  # (by host: when it was last asked; hosts to ask in a moment)
         self.list_whole = set()  # (hosts to list whole next, not only what's changed: list_notes)
+        self.edits_seen = {}  # (by host: its info's edits as its edits were last asked for: fetch_edits)
         books.append(self.books_head)
         self.notebook_list = Gtk.ListBox()
         self.notebook_list.add_css_class("navigation-sidebar")
@@ -427,8 +428,8 @@ class Window(RecordHosts, Adw.ApplicationWindow, feedback.FeedbackHost, viewers.
         self.store.sender = self.send_notes
         self.host_dd.set_choices(self.note_hosts())
         self.host_dd.select(self.store.picked)
+        self.start_network()  # (this machine's host process too: the edits waiting on its notebooks' pages are its)
         if self.store.picked != HERE_HOST:  # (another host picked when it last closed: its notebooks, there or not)
-            self.start_network()
             self.show_host(self.store.picked)
         meshui.watch_github(self, Window.github_folders, Window._github_changed)
         update.watch_input(self)  # (what update.quiet reads: a new version waits while you're at it)
@@ -1290,10 +1291,11 @@ class Window(RecordHosts, Adw.ApplicationWindow, feedback.FeedbackHost, viewers.
             if r == "delete" and name in notebook["pages"]:
                 self.tabs.close(("note", name))
                 notebook["pages"].pop(name, None)
-                for p in self.chat.pending(notebook):  # (Meta's edits waiting on it: gone with it, said so)
+                self.store.save_now()  # (its host told it's gone first)
+                for p in self.chat.pending(notebook):  # (the edits waiting on it: gone with it, said so to its host)
                     if p["page"] == name:
                         p["status"] = "rejected"
-                self.store.save()
+                        self.decide_edit(p, False)
                 self.pages.fill()
                 self.chat.show_pending_bar()
                 self.chat.edit_cards_changed()

@@ -13,7 +13,7 @@
     },
     "action": {
       "type": "string",
-      "description": "write: changes made; edit: an agent's edit to a page (edit); else listed."
+      "description": "write: changes made; else listed."
     },
     "have": {
       "type": "object",
@@ -28,26 +28,6 @@
         "type": "object"
       },
       "description": "Changes to notebooks."
-    },
-    "edit": {
-      "type": "object",
-      "properties": {
-        "tool": {
-          "type": "string",
-          "enum": ["propose_edit", "list_edits", "revise_edit", "withdraw_edit"],
-          "description": "The edit tool called (baudelib/notebooktools.py)."
-        },
-        "args": {
-          "type": "object",
-          "description": "Its arguments, as the tool's MCP definition has them."
-        },
-        "by": {
-          "type": ["string", "null"],
-          "description": "Who's proposing: kept with the edit."
-        }
-      },
-      "required": ["tool", "args"],
-      "description": "An agent's edit tool's call, for action edit."
     }
   },
   "required": ["op"],

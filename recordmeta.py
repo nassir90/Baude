@@ -1,13 +1,13 @@
 """recordmeta — what Meta, in Record, is told and proposes: its prompt and tools (RECORD_PROMPT, RECORD_TOOLS),
 what a notebook, a page, an @-referenced thing or a quoted passage says to it, and its proposed edits as a page reads
-them (pending_edits; staged and place_change are baudelib.notebooktools').
+them (pending_edits: as the notebook's host keeps them; staged and place_change are baudelib.notebooktools').
 """
 import codecs
 import os
 import re
 
 from baudelib.notes import data_dir  # noqa: E402,F401
-from baudelib import notebooktools  # noqa: E402  (what a page's edits are: Meta's here, and an outside agent's)
+from baudelib import notebooktools  # noqa: E402  (what a page's edits are, as their notebook's host works them out)
 from baudelib.notebooktools import kept_at, place_change, staged, staged_at  # noqa: E402,F401
 import meta  # noqa: E402  (Meta, the helper in the right bar: Baude's too, beside this file)
 from recordstore import HOME, QUOTE_LIMIT, REF_RE, full_name, page_paths, plain_refs, short_page
@@ -62,10 +62,12 @@ that selection, exactly. Write in the page's Markdown and its voice, and only wh
 describe or sum up an edit: the user sees it. You'll be told whether they accepted it.
 
 Your edits stay pending, across turns and sessions, until the user accepts or rejects them: a draft over the page, \
-which they may keep writing in meanwhile. Work on that draft. list_edits shows what's pending; propose_edit's old_text \
-is found in the page as it reads with your pending edits applied, so a change to text one of them puts in revises \
-that edit, and one to text an edit replaces replaces it, rather than adding a second; revise_edit changes an edit \
-outright and withdraw_edit takes one back. The page's file has none of your pending edits in it.
+which they may keep writing in meanwhile. Work on that draft. Others may have edits waiting on a page too (another \
+agent's, named by who proposed it): list_edits shows every edit pending, each with who proposed it (by: you, or their \
+name); only yours are yours. propose_edit's old_text is found in the page as it reads with the pending edits applied, \
+so a change to text one of them puts in revises that edit (yours then), and one to text an edit replaces replaces \
+it, rather than adding a second; revise_edit changes an edit outright and withdraw_edit takes one back. The page's \
+file has none of the pending edits in it.
 
 The pages themselves you organise with add_page, delete_page and move_pages (under another page, or from one \
 notebook into another), and the notebooks with add_notebook, which makes one as add_page makes a page: each changes \
@@ -104,26 +106,26 @@ RECORD_TOOLS = [
      "description": "Propose a change to a page of the user's notes, in the notebook open. The user sees it on the "
      "page as a diff and accepts or rejects it; nothing is written until they accept. old_text is the text that "
      "new_text replaces, copied exactly (whitespace and Markdown too), and found once in the page as it reads with "
-     "your pending edits applied (list_edits): give more of what's around it if it's there more than once. Text one "
-     "of your pending edits puts in, or text it replaces: that edit is revised to take this in, not a second one made. "
+     "the pending edits applied (list_edits): give more of what's around it if it's there more than once. Text one "
+     "of the pending edits puts in, or text it replaces: that edit is revised to take this in, not a second one made. "
      "To fill in or change a passage the user selected, old_text is that selection. An empty old_text adds new_text "
      "at the page's end. Returns the edit's id, or why nothing was shown.",
      "inputSchema": {"type": "object", "required": ["page", "old_text", "new_text"], "properties": {
          "page": {"type": "string", "description": "the page's name (Spec, or Spec:Auth for a sub-page) or its file"},
          "old_text": {"type": "string"}, "new_text": {"type": "string"}}}},
     {"name": "list_edits",
-     "description": "Your edits still waiting for the user to accept or reject, in the notebook open (or on one "
-     "page), in page order: each one's id, page, old_text (what it replaces, as the page has it now) and new_text.",
+     "description": "The edits still waiting for the user to accept or reject, in the notebook open (or on one "
+     "page), in page order: each one's id, page, old_text (what it replaces, as the page has it now), new_text and by (who proposed it: you, or their name).",
      "inputSchema": {"type": "object", "properties": {
          "page": {"type": "string", "description": "only this page's (its name or its file)"}}}},
     {"name": "revise_edit",
-     "description": "Change one of your pending edits (list_edits): new_text is what it puts in now; old_text, if "
+     "description": "Change a pending edit (list_edits): new_text is what it puts in now; old_text, if "
      "given, what it replaces now (found once in the page, not in another pending edit's passage). It stays one "
      "edit, waiting for the user. new_text the same as what it replaces takes it back.",
      "inputSchema": {"type": "object", "required": ["id", "new_text"], "properties": {
          "id": {"type": "string"}, "new_text": {"type": "string"}, "old_text": {"type": "string"}}}},
     {"name": "withdraw_edit",
-     "description": "Take back one of your pending edits (list_edits): it goes from the page, the page as it is.",
+     "description": "Take back a pending edit (list_edits): it goes from the page, the page as it is.",
      "inputSchema": {"type": "object", "required": ["id"], "properties": {"id": {"type": "string"}}}},
     {"name": "add_page",
      "description": "Add a page to a notebook, with its text (Markdown). A sub-page's name is its parent's "
@@ -332,10 +334,13 @@ def page_named(notebook, name, store):
 
 
 def pending_edits(notebook, store, agent=None):
-    """The edits proposed to a notebook's pages that wait for you, in the order they were made (the reply still
-    coming's, agent's, last): notebooktools.pending_edits, with Meta's conversation's (store's)."""
-    return notebooktools.pending_edits(notebook, store.meta["messages"] if store is not None else (),
-                                       agent.turn["proposals"] if agent is not None and agent.turn is not None else ())
+    """The edits waiting on a notebook's pages, in the order they were made: as its host last listed them (Record's
+    Store.edits_for: Meta's, and anyone's); in a notebook kept with its own changes (a Bot's memory's), those kept with
+    its messages."""
+    if hasattr(store, "edits_for"):
+        return store.edits_for(notebook)
+    return [p for m in notebook.get("messages") or () for p in m.get("proposals") or ()
+            if p.get("status") == "pending"]
 
 
 def split_unknown(text):

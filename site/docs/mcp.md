@@ -1,6 +1,6 @@
 # Baude's MCP server and wire API
 
-Made by `baude-mcp docs` from the tools' definitions (`baudelib/meshtools.py`, `baudelib/notebooktools.py`) and `schema/`. Run it again after changing either.
+Made by `baude-mcp docs` from the tools' definitions (`baudelib/meshtools.py`, `baude_mcp.py`) and `schema/`. Run it again after changing either.
 
 ## baude-mcp
 
@@ -12,9 +12,9 @@ Installing Baude writes it to `~/.local/bin` with the other commands (`baude-hea
 claude mcp add baude -- ~/.local/bin/baude-mcp
 ```
 
-Options: `--socket PATH` reaches a host process listening on another socket; `--name NAME` is who its edits are from (its MCP client's name if not given).
+Options: `--socket PATH` reaches a host process listening on another socket; `--name NAME` is who it is: what it sends a chat (`message_chat`) is shown as from it, not from the chat's user, and the edits it proposes are said to be its (its MCP client's name if not given, else `baude-mcp`).
 
-An edit it proposes to a page is kept in Record's store on the notebook's host, and shown on the page in Record as Meta's edits are, for you to accept or reject. Nothing is written to the page until you accept.
+Each tool is one or two of the wire's requests, below: the notebook's host does the work. An edit it proposes to a page is kept on the notebook's host (`edit_propose`), and any Record showing that notebook, on that machine or another, shows it on its page with who proposed it, for you to accept or reject. Nothing is written to the page until you accept.
 
 ## Tools
 
@@ -97,7 +97,7 @@ A page's text, in Markdown ([[Page]] links to another page), and the edits waiti
 
 ### `propose_edit`
 
-Propose a change to a page: old_text (copied exactly from the page, there once) replaced with new_text; an empty old_text adds new_text at the page's end. The user sees it on the page in Record and accepts or rejects it: nothing's written until they accept. A change to text one of the edits waiting puts in or replaces revises that edit.
+Propose a change to a page: old_text (copied exactly from the page, there once) replaced with new_text; an empty old_text adds new_text at the page's end. It waits on the notebook's host for the user, who accepts or rejects it in Record: nothing's written until they accept. A change to text one of the edits waiting puts in or replaces revises that edit (it's yours then).
 
 | Field | Type | Required | What it is |
 |---|---|---|---|
@@ -109,7 +109,7 @@ Propose a change to a page: old_text (copied exactly from the page, there once) 
 
 ### `list_edits`
 
-The edits waiting for the user on a notebook's pages (yours, Meta's and other agents'), each as its page has its passage now; with all, those accepted, rejected or withdrawn too.
+The edits waiting for the user on a notebook's pages, each as its page has its passage now and with who proposed it (by: yours, Meta's, another agent's); with all, those accepted, rejected or withdrawn too.
 
 | Field | Type | Required | What it is |
 |---|---|---|---|
@@ -120,7 +120,7 @@ The edits waiting for the user on a notebook's pages (yours, Meta's and other ag
 
 ### `revise_edit`
 
-Change an edit that's waiting: its new_text, and the passage it replaces if old_text is given. It stays one edit.
+Change an edit that's waiting: its new_text, and the passage it replaces if old_text is given. It stays one edit, yours now.
 
 | Field | Type | Required | What it is |
 |---|---|---|---|
@@ -275,6 +275,60 @@ This connection detached from a session (an ephemeral one its head's done with d
 | Field | Type | Required | What it is |
 |---|---|---|---|
 | `session` | string | yes | The session's id. |
+
+#### `edit_decide` (EditDecide)
+
+A waiting edit accepted or rejected (the user's, in Record). Accepted: the one asking has put its new text in the page in its passage's place already (its own notes write, sent before this); the host keeps what became of it. Answered with edit.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `notebook` | string | yes | The notebook: its id, or its name (any case). |
+| `id` | string | yes | The edit's id. |
+| `accept` | boolean | yes | true: accepted; false: rejected. |
+
+#### `edit_propose` (EditPropose)
+
+An edit proposed to a page of a notebook here, for the user to accept or reject: old_text replaced with new_text, nothing written to the page. old_text is found once (or the one nearest near) in the page as it reads with the edits waiting on it applied; an empty one adds new_text at the page's end. Text one of those edits puts in or replaces: that edit is revised to take this in (any others it reaches taken back), and is by by now. Answered with edit.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `notebook` | string | yes | The notebook: its id, or its name (any case). |
+| `page` | string | yes | The page: its name (Parent:Child for one under another), any case, or its own name past its parents'. |
+| `old_text` | string |  | The text it replaces, as the page has it; empty or left out: added at the page's end. |
+| `new_text` | string | yes | What it puts in. |
+| `near` | integer |  | A place in the page's text: of old_text there more than once, the one nearest it (a passage selected, say). |
+| `by` | string | yes | Who's proposing it, by name (Meta, an agent's own name): kept with the edit, and shown with it. |
+
+#### `edit_revise` (EditRevise)
+
+A waiting edit changed: what it puts in, and what it replaces if old_text is given (found once in the page, not in another waiting edit's passage). It stays one edit, by by now; new_text the same as what it replaces takes it back. Answered with edit.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `notebook` | string | yes | The notebook: its id, or its name (any case). |
+| `id` | string | yes | The edit's id. |
+| `new_text` | string | yes | What it puts in now. |
+| `old_text` | string |  | What it replaces now; left out: as it was. |
+| `by` | string | yes | Who's proposing it, by name (Meta, an agent's own name): kept with the edit, and shown with it. |
+
+#### `edit_withdraw` (EditWithdraw)
+
+A waiting edit taken back. Answered with edit.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `notebook` | string | yes | The notebook: its id, or its name (any case). |
+| `id` | string | yes | The edit's id. |
+
+#### `edits` (Edits)
+
+The edits waiting on the pages of the notebooks here (one notebook's, one page's, if given), page by page, each as its page has its passage now. Answered with edits.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `notebook` | string |  | Only this notebook's: its id, or its name. |
+| `page` | string |  | Only this page's (with notebook). |
+| `all` | boolean |  | The decided ones kept here too (decided). |
 
 #### `emission` (Emission)
 
@@ -431,6 +485,7 @@ A stream-json message for the session's agent (started on it, with --resume, if 
 |---|---|---|---|
 | `session` | string | yes | The session's id. |
 | `msg` | object |  | The message. |
+| `as_agent` | string |  | From an agent outside the apps (baude-mcp), by its name, not the session's user: said as from a chat of that name, as as_meta is. |
 | `as_meta` | boolean |  | From a head's Meta (its mesh tools, which run in no chat), not the session's user: said as from a chat named Meta. |
 | `as` | string |  | The id of one of this host's chats whose mesh tools send it: it's from that chat, not the session's user (said_by, Senders). |
 
@@ -570,10 +625,9 @@ Record's notebooks here, for another machine's Record: listed, or changed.
 
 | Field | Type | Required | What it is |
 |---|---|---|---|
-| `action` | string |  | write: changes made; edit: an agent's edit to a page (edit); else listed. |
+| `action` | string |  | write: changes made; else listed. |
 | `have` | object |  | Those the asker has, {id: digest}: only those it hasn't as they are are sent. |
 | `changes` | array of object |  | Changes to notebooks. |
-| `edit` | object |  | An agent's edit tool's call, for action edit. |
 
 #### `ping` (Ping)
 
@@ -604,6 +658,7 @@ This connection, from now on, a tunnel to member to's host process (hello first,
 | Field | Type | Required | What it is |
 |---|---|---|---|
 | `to` | string |  | The member's id. |
+| `as_agent` | string |  | As input's as_agent: what's sent through it is from that agent. |
 | `as_meta` | boolean |  | As input's as_meta: what's sent through it is from Meta. |
 | `as` | string |  | The id of one of this host's chats whose mesh tools open it: what's sent through it is from that chat. |
 
@@ -949,6 +1004,25 @@ list_dir's answer: its entries, folders first (.git left out), DIR_LIMIT at most
 | `more` | boolean |  | There are more. |
 | `error` | string |  | Why it can't be read. |
 
+#### `edit` (EditReply)
+
+edit_propose's, edit_revise's, edit_withdraw's and edit_decide's answer: the edit as it is now.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `edit` | Edit | yes | The edit. |
+| `took_in` | array of string |  | The edits a proposal reached into, taken back as it was revised to take them in: their ids. |
+
+#### `edits` (EditsReply)
+
+edits's answer.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `edits` | array of Edit | yes | The edits waiting. |
+| `decided` | array of Edit |  | With all: those accepted, rejected or taken back, the last kept. |
+| `stamp` | string |  | The edits here as written last (info's edits). |
+
 #### `emission` (EmissionReply)
 
 The tool's answer.
@@ -1251,7 +1325,7 @@ The tool's answer.
 
 #### `notes` (NotesReply)
 
-notes's answer: listed {notebooks, ids}, written {done, by}, or an edit's {result}.
+notes's answer: listed {notebooks, ids}, or written {done, by}.
 
 | Field | Type | Required | What it is |
 |---|---|---|---|
@@ -1259,7 +1333,6 @@ notes's answer: listed {notebooks, ids}, written {done, by}, or an edit's {resul
 | `ids` | array of string |  | Every one's id, in order. |
 | `done` | array of string |  | The changes made. |
 | `by` | string |  | record: the Record running there made them. |
-| `result` | object |  | What an edit tool's call gave (action edit). |
 | `error` | string |  | What's wrong. |
 
 #### `quitting` (Quitting)
@@ -1727,6 +1800,23 @@ An entry in a folder.
 | `size` | integer |  | A file's size. |
 | `ignored` | boolean |  | git ignores it. |
 
+#### Edit
+
+An edit proposed to a page of a notebook, kept by the notebook's host (edits.json, beside records.json) until the user accepts or rejects it in Record.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `id` | string | yes | Its id. |
+| `notebook` | string | yes | Its notebook's id. |
+| `page` | string | yes | Its page's name. |
+| `old` | string | yes | What it replaces (empty: it adds at the page's end). |
+| `new` | string | yes | What it puts in. |
+| `start` | integer |  | Where what it replaces starts in the page's text. |
+| `status` | `pending` \| `accepted` \| `rejected` \| `withdrawn` | yes | pending: waiting for the user; accepted, rejected; withdrawn: taken back. |
+| `t` | number |  | When it was proposed, in seconds since the epoch. |
+| `by` | string |  | Who proposed it, or revised it last: Meta, an agent's own name. |
+| `gone` | boolean |  | (edits) What it replaces isn't on the page as it was any more. |
+
 #### FoundLink
 
 A link straight to a member learned of through others (mesh's Found).
@@ -1849,6 +1939,7 @@ What a host is, as its hello says (and sessions carries).
 | `providers` | array of Provider |  | This machine's model providers (with base_url). |
 | `mesh` | MeshView |  | The members it reaches and the links it's made. |
 | `notes` | string |  | Record's notebooks here, as written last (notes.stamp: "" for none). |
+| `edits` | string |  | The edits proposed to the pages of Record's notebooks here, as written last (notes.edits_stamp: "" for none). |
 | `phone` | boolean |  | A phone's host. |
 | `ops` | array of string |  | The ops it takes, given by a host that takes only part of the wire (a phone's), with what its sessions take besides (start's ephemeral; control requests: control, set_permission_mode, set_model). |
 

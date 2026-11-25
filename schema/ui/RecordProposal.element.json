@@ -1,7 +1,7 @@
 {
-  "description": "A change Meta proposes to a page's text, drawn on the page itself as tracked changes read: what it takes away struck through on red, what it puts in just after it on green, with Accept and Reject at the end of it. It is not the page's until accepted: it is not saved, not read back by Meta as the page, can't be typed into, and is in none of Undo.",
+  "description": "A change proposed to a page's text (by Meta, or by an agent outside the apps through baude-mcp), drawn on the page itself as tracked changes read: what it takes away struck through on red, what it puts in just after it on green, with Accept and Reject at the end of it. It is the notebook's, kept by the notebook's host, and shown by every Record showing that notebook, on that machine or another. It is not the page's until accepted: it is not saved, not read back by Meta as the page, can't be typed into, and is in none of Undo.",
   "apps": ["record"],
-  "code": ["diaryeditor.py:DiaryEditor.show_proposal", "diaryeditor.py:DiaryEditor.decide", "recordui.py:EditControls", "recordtools.py:RecordTools.propose"],
+  "code": ["diaryeditor.py:DiaryEditor.show_proposal", "diaryeditor.py:DiaryEditor.decide", "recordui.py:EditControls", "recordtools.py:RecordTools.propose", "recordhosts.py:RecordHosts.fetch_edits", "baudelib/notebooktools.py:Edits"],
   "copy": ["edit_review"],
   "parts": [
     {
@@ -14,11 +14,11 @@
     },
     {
       "name": "Accept and Reject",
-      "shows": "Two square buttons in the line where the green ends, as tall as the green: a tick on green and a cross on red. They do not take the focus.",
-      "copy": ["edit_review.accept_tip", "edit_review.reject_tip"],
+      "shows": "Two square buttons in the line where the green ends, as tall as the green: a tick on green and a cross on red. They do not take the focus. Their tooltips name who proposed it (\"Accept claude-code's edit (Tab)\").",
+      "copy": ["edit_review.accept_tip", "edit_review.reject_tip", "edit_review.accept_tip_by", "edit_review.reject_tip_by"],
       "actions": [
-        {"by": "click the tick", "does": "Puts the green into the page in the red's place, as one edit that Undo takes back."},
-        {"by": "click the cross", "does": "Takes the proposal away; the red is as it was."},
+        {"by": "click the tick", "does": "Puts the green into the page in the red's place, as one edit that Undo takes back. Its host is told it's accepted (edit_decide)."},
+        {"by": "click the cross", "does": "Takes the proposal away; the red is as it was. Its host is told it's rejected (edit_decide)."},
         {"by": "key Tab, caret inside the change", "does": "Accept (tooltip \"Accept (Tab)\")."},
         {"by": "key Esc, caret inside the change", "does": "Reject (tooltip \"Reject (Esc)\")."}
       ]
@@ -28,6 +28,18 @@
     {"name": "several", "shows": "Each shown in turn on its page; Meta's pending bar (RecordMeta) counts them and steps between them."},
     {"name": "passage selected", "shows": "A passage you had selected and asked about is let go once its change is shown in its place; the caret goes to the end of the change."},
     {"name": "page deleted meanwhile", "shows": "Its edits waiting are rejected."}
+  ],
+  "decisions": [
+    {
+      "said": "Fix meta misconception",
+      "rule": "Meta claims only its own edits: it's told only of its own edits' outcomes and counts only its own as 'yours'. Another agent's edit, wherever it's mentioned or shown, is named by who proposed it (on the edit's own Accept and Reject tooltips, no caption line); an edit another agent revised or merged into is theirs from then on.",
+      "decided": "2026-11-25"
+    },
+    {
+      "said": "Uhh sounds complicated make it more coherent",
+      "rule": "An edit belongs to its notebook, on the notebook's host. Every app showing that notebook, on that machine or another, shows its waiting edits as the host lists them, and accepting or rejecting one goes back to that host. No edit is visible to only one app.",
+      "decided": "2026-11-25"
+    }
   ],
   "scenes": []
 }

@@ -1,42 +1,15 @@
-"""Record's notebooks for an agent, with no GTK: their pages read, and edits to a page proposed for you to accept or
-reject (propose_edit, list_edits, revise_edit, withdraw_edit), as Meta proposes them in Record. Record's Meta works
-them out here (recordtools.RecordTools), and so does an agent outside the apps (baude_mcp, through a host process:
-notes.edit): its edits are kept with the notebook's own messages, in Record's store, shown on their pages as Meta's
-are."""
+"""Edits proposed to the pages of Record's notebooks, on the notebooks' host, with no GTK: proposed, revised, taken
+back, listed, and accepted or rejected (Edits), as the host process does them for its wire messages (edit_propose,
+edit_revise, edit_withdraw, edit_decide, edits: notes.edit_op). An edit belongs to its notebook, on its host: whoever
+proposes it (Record's Meta, an agent through baude-mcp) and whatever Record shows it (on that machine or another)
+asks the host. Nothing here writes a page: an edit is accepted by the one who puts its text in the page (Record)."""
 import re
 import time
 import uuid
 
 HOME = "Home"  # (recordstore.HOME: the page every notebook has)
-EDIT_TOOLS = ("propose_edit", "list_edits", "revise_edit", "withdraw_edit")
-
-NOTEBOOK = {"type": "string", "description": "A notebook's name (list_notebooks)"}
-HOST = {"type": "string", "description": "The host it's on, by its id or name (hosts); this one if none"}
-SCHEMAS = {
-    "list_notebooks": ("Record's notebooks on a host: each one's name and how many pages it has.", {"host": HOST}, []),
-    "list_pages": ("A notebook's pages, Home first: each one's name (a page under another is Parent:Child) and how many "
-                   "characters it has.", {"host": HOST, "notebook": NOTEBOOK}, ["notebook"]),
-    "read_page": ("A page's text, in Markdown ([[Page]] links to another page), and the edits waiting on it.",
-                  {"host": HOST, "notebook": NOTEBOOK,
-                   "page": {"type": "string", "description": "Its name (list_pages)"}}, ["notebook", "page"]),
-    "propose_edit": ("Propose a change to a page: old_text (copied exactly from the page, there once) replaced with "
-                     "new_text; an empty old_text adds new_text at the page's end. The user sees it on the page in "
-                     "Record and accepts or rejects it: nothing's written until they accept. A change to text one of "
-                     "the edits waiting puts in or replaces revises that edit.",
-                     {"host": HOST, "notebook": NOTEBOOK, "page": {"type": "string"},
-                      "old_text": {"type": "string"}, "new_text": {"type": "string"}},
-                     ["notebook", "page", "new_text"]),
-    "list_edits": ("The edits waiting for the user on a notebook's pages (yours, Meta's and other agents'), each as its "
-                   "page has its passage now; with all, those accepted, rejected or withdrawn too.",
-                   {"host": HOST, "notebook": NOTEBOOK, "page": {"type": "string"},
-                    "all": {"type": "boolean", "description": "Decided ones too"}}, ["notebook"]),
-    "revise_edit": ("Change an edit that's waiting: its new_text, and the passage it replaces if old_text is given. It "
-                    "stays one edit.",
-                    {"host": HOST, "notebook": NOTEBOOK, "id": {"type": "string", "description": "The edit's (list_edits)"},
-                     "new_text": {"type": "string"}, "old_text": {"type": "string"}}, ["notebook", "id", "new_text"]),
-    "withdraw_edit": ("Take back an edit that's waiting.",
-                      {"host": HOST, "notebook": NOTEBOOK, "id": {"type": "string"}}, ["notebook", "id"]),
-}
+STATUSES = ("pending", "accepted", "rejected", "withdrawn")
+DECIDED_KEPT = 200  # (decided edits kept on a host, the last made)
 
 
 def base_name(text):
@@ -79,17 +52,6 @@ def sorted_pages(pages):
 
 
 # ---- edits as a page reads them
-
-def pending_edits(notebook, messages=(), live=()):
-    """The edits proposed to a notebook's pages that wait for you, in the order they were made (live, a reply still
-    coming's, last): those kept with its own messages, and with messages (Meta's conversation's) whose notebook it
-    is."""
-    book_id = notebook.get("id")
-    said = [*(notebook.get("messages") or ()), *messages]
-    props = [p for m in said for p in m.get("proposals") or () if p.get("notebook", book_id) == book_id]
-    return [p for p in props + [p for p in live if p not in props and p.get("notebook") == book_id]
-            if p.get("status") == "pending"]
-
 
 def staged(text, edits):
     """A page's text as it reads with edits applied: (that text, its pieces). edits: [(start, old, new, edit)], in the
@@ -149,7 +111,7 @@ def place_change(text, old, near=None):
             return min(at, key=lambda i: abs(i - near)) if near is not None else at[0], want
         if len(at) > 1:
             return None, f"old_text is in the page {len(at)} times: give more of what's around it, so it's there once."
-    return None, "old_text isn't in the page as it is now: copy it exactly from the page (Read its file)."
+    return None, "old_text isn't in the page as it is now: copy it exactly from the page as it is now."
 
 
 def spans(text, pending, page, placed=None):
@@ -221,56 +183,34 @@ def plan_revise(p, args, text, spans_):
         if at is None:
             return {"error": old}
         if any(x[3] is not p and x[0] < at + len(old) and x[0] + len(x[1]) > at for x in spans_):
-            return {"error": "That's in the passage another of your pending edits replaces: revise that one."}
+            return {"error": "That's in the passage another pending edit replaces: revise that one."}
         fields = {"old": old, "start": at}
     return {"new": new, "fields": fields}
 
 
-def listed_edits(pending, pages, spans_of):
-    """list_edits' list: the edits of pending on pages, page by page, each as its page has its passage now
-    (spans_of(page): spans'); one whose passage isn't there any more, said so."""
-    listed = []
-    for page in pages:
-        sp = spans_of(page)
-        listed += [{"id": p["id"], "page": page, "old_text": old, "new_text": new, **_by(p)}
-                   for _at, old, new, p in sorted(sp, key=lambda x: x[0])]
-        placed = {id(x[3]) for x in sp}
-        listed += [{"id": p["id"], "page": page, "old_text": p["old"], "new_text": p["new"], **_by(p),
-                    "note": "what it replaces isn't on the page any more: revise its old_text, or withdraw it"}
-                   for p in pending if p["page"] == page and id(p) not in placed]
-    return listed
 
 
-def _outside(error):
-    """An error of place_change's as an agent outside Record reads it (its pages are no files to it)."""
-    return error.replace("(Read its file)", "(read_page)")
+# ---- a host's edits (the host process's, kept in edits.json beside records.json: notes.edit_op)
+
+def _text(msg, key):
+    """A field of a request that's text, or None if it's not given (or given as null)."""
+    v = msg.get(key)
+    return None if v is None else str(v)
 
 
-def _by(p):
-    return {"by": p["by"]} if p.get("by") else {}
+def _who(by):
+    return " ".join(str(by or "").split())[:80] or None
 
-
-# ---- the tools, on a host's notebooks (an agent outside the apps': notes.edit)
 
 class Edits:
-    """The edit tools on books (a host's notebooks: records.json's, or the Record running there's), with messages
-    (Meta's conversation's: its edits waiting too) and live (those of a reply of Meta's still coming). view(notebook,
-    page): (the page's text, placed) as a page open shows it, if one is (Record's); by: who's proposing."""
+    """The edits proposed to a host's notebooks (edits: its list, changed in place) on books (its notebooks as
+    records.json has them: id, name, pages). changed: whether edits was."""
 
-    def __init__(self, books, messages=(), live=(), view=None, by=None):
-        self.books, self.messages, self.live, self.view, self.by = books, messages, live, view, by
-        self.changed = set()  # (the notebooks changed: their ids)
+    def __init__(self, edits, books):
+        self.edits, self.books, self.changed = edits, books, False
 
-    def pending(self, nb):
-        return pending_edits(nb, self.messages, self.live)
-
-    def _text(self, nb, page):
-        got = self.view(nb, page) if self.view is not None else None
-        return got if got is not None else (nb["pages"].get(page, ""), None)
-
-    def _spans(self, nb, page):
-        text, placed = self._text(nb, page)
-        return text, spans(text, self.pending(nb), page, placed)
+    def _book(self, msg):
+        return notebook_named(self.books, msg.get("notebook"))
 
     def _page(self, nb, name):
         page = page_named(nb.get("pages") or {}, name)
@@ -279,100 +219,127 @@ class Edits:
                              f"{', '.join(sorted_pages(nb.get('pages') or {})[:40])}.")
         return page
 
-    def call(self, tool, args):
-        if tool not in EDIT_TOOLS:
-            raise ValueError(f"no tool {tool}")
-        nb = notebook_named(self.books, args.get("notebook"))
-        return getattr(self, tool)(nb, args)
+    def waiting(self, nb):
+        return [e for e in self.edits if e.get("notebook") == nb["id"] and e.get("status") == "pending"]
 
-    def propose_edit(self, nb, args):
-        page = self._page(nb, args.get("page"))
+    def _spans(self, nb, page):
+        text = (nb.get("pages") or {}).get(page, "")
+        return text, spans(text, self.waiting(nb), page)
+
+    def _waiting_named(self, nb, msg):
+        e = next((e for e in self.waiting(nb) if e["id"] == str(msg.get("id") or "")), None)
+        if e is None:
+            raise ValueError(f"No edit with the id {msg.get('id')!r} is waiting in {full_name(nb)}.")
+        return e
+
+    def _done(self, e, took_in=()):
+        """An edit made or changed: what edit_* answers ({edit, took_in?}); one that now puts back what's on the page,
+        taken back."""
+        self.changed = True
+        if e["status"] == "pending" and e["old"] == e["new"]:
+            e["status"] = "withdrawn"
+        self._prune()
+        return {"edit": dict(e), **({"took_in": list(took_in)} if took_in else {})}
+
+    def _prune(self):
+        decided = [e for e in self.edits if e.get("status") != "pending"]
+        for e in decided[:max(0, len(decided) - DECIDED_KEPT)]:
+            self.edits.remove(e)
+
+    def propose(self, msg):
+        """edit_propose: old_text replaced with new_text on a page, found once (or nearest near) in the page as it reads
+        with the edits waiting on it applied; text one of them puts in or replaces: that one revised to take this in
+        (the others it reaches taken back), by whoever proposed this; else a new edit."""
+        nb = self._book(msg)
+        page = self._page(nb, msg.get("page"))
         text, sp = self._spans(nb, page)
-        plan = plan_propose(text, sp, str(args.get("old_text") or ""), str(args.get("new_text") or ""))
+        near = msg.get("near") if isinstance(msg.get("near"), int) else None
+        plan = plan_propose(text, sp, _text(msg, "old_text") or "", _text(msg, "new_text") or "", near)
         if "error" in plan:
-            raise ValueError(_outside(plan["error"]))
-        self.changed.add(nb["id"])
+            raise ValueError(plan["error"])
+        by = _who(msg.get("by"))
         if "add" in plan:
             start, old, new = plan["add"]
-            p = {"id": uuid.uuid4().hex[:10], "notebook": nb["id"], "page": page, "old": old, "new": new,
-                 "start": start, "status": "pending", "t": time.time(), **({"by": self.by} if self.by else {})}
-            nb.setdefault("messages", []).append({"role": "assistant", "text": "", "t": p["t"], "proposals": [p],
-                                                  **({"by": self.by} if self.by else {})})
-            return {"id": p["id"], "page": page, "status": "pending",
-                    "text": f"Edit {p['id']} is shown on the page {page} in Record, for the user to accept or reject. "
-                            "Nothing is written until they accept; list_edits with all says which."}
+            e = {"id": uuid.uuid4().hex[:10], "notebook": nb["id"], "page": page, "old": old, "new": new,
+                 "start": start, "status": "pending", "t": time.time(), **({"by": by} if by else {})}
+            self.edits.append(e)
+            return self._done(e)
         edits, start, old, new = plan["merge"]
-        for p in edits[1:]:
-            p["status"] = "withdrawn"
+        for other in edits[1:]:
+            other["status"] = "withdrawn"
         first = edits[0]
         first.update(old=old, new=new, start=start)
-        if first["old"] == first["new"]:
-            first["status"] = "withdrawn"
-            return {"id": first["id"], "status": "withdrawn",
-                    "text": f"That puts back what's on the page: edit {first['id']} is taken back."}
-        joined = f" (and took in {', '.join(p['id'] for p in edits[1:])}, now taken back)" if edits[1:] else ""
-        return {"id": first["id"], "status": "pending",
-                "text": f"Revised the pending edit {first['id']}{joined}: it replaces {old!r} with {new!r} now, still "
-                        "waiting for the user."}
+        first.pop("by", None)  # (it's what this proposer made it now: theirs)
+        if by:
+            first["by"] = by
+        return self._done(first, [other["id"] for other in edits[1:]])
 
-    def list_edits(self, nb, args):
-        waiting = self.pending(nb)
-        pages = sorted({p["page"] for p in waiting})
-        if args.get("page"):
-            page = self._page(nb, args["page"])
-            pages = [page] if page in pages else []
-        out = {"notebook": full_name(nb), "waiting": listed_edits(waiting, pages, lambda pg: self._spans(nb, pg)[1])}
-        if args.get("all"):
-            said = [*(nb.get("messages") or ()), *self.messages]
-            out["decided"] = [{"id": p["id"], "page": p["page"], "status": p.get("status"), "old_text": p["old"],
-                               "new_text": p["new"], **_by(p)}
-                              for m in said for p in m.get("proposals") or ()
-                              if p.get("notebook", nb["id"]) == nb["id"] and p.get("status") != "pending" and
-                              (not args.get("page") or p["page"] == args["page"])][-50:]
-        return out
-
-    def _pending_named(self, nb, args):
-        p = next((p for p in self.pending(nb) if p["id"] == str(args.get("id") or "")), None)
-        if p is None:
-            raise ValueError(f"No edit with the id {args.get('id')!r} is waiting: list_edits shows those that are.")
-        return p
-
-    def revise_edit(self, nb, args):
-        p = self._pending_named(nb, args)
-        text, sp = self._spans(nb, p["page"])
-        plan = plan_revise(p, args, text, sp)
+    def revise(self, msg):
+        """edit_revise: a waiting edit's new text, and the passage it replaces if old_text's given; it stays one edit,
+        by whoever revised it."""
+        nb = self._book(msg)
+        e = self._waiting_named(nb, msg)
+        text, sp = self._spans(nb, e["page"])
+        args = {"new_text": _text(msg, "new_text") or ""}
+        if _text(msg, "old_text") is not None:
+            args["old_text"] = _text(msg, "old_text")
+        plan = plan_revise(e, args, text, sp)
         if "error" in plan:
-            raise ValueError(_outside(plan["error"]))
-        self.changed.add(nb["id"])
-        p.update(new=plan["new"], **plan["fields"])
-        if p["old"] == p["new"]:
-            p["status"] = "withdrawn"
-            return {"id": p["id"], "status": "withdrawn",
-                    "text": f"That puts back what's on the page: edit {p['id']} is taken back."}
-        return {"id": p["id"], "status": "pending", "text": f"Edit {p['id']} revised, still waiting for the user."}
+            raise ValueError(plan["error"])
+        e.update(new=plan["new"], **plan["fields"])
+        e.pop("by", None)
+        if by := _who(msg.get("by")):
+            e["by"] = by
+        return self._done(e)
 
-    def withdraw_edit(self, nb, args):
-        p = self._pending_named(nb, args)
-        self.changed.add(nb["id"])
-        p["status"] = "withdrawn"
-        return {"id": p["id"], "status": "withdrawn", "text": f"Edit {p['id']} taken back."}
+    def withdraw(self, msg):
+        """edit_withdraw: a waiting edit taken back."""
+        e = self._waiting_named(self._book(msg), msg)
+        e["status"] = "withdrawn"
+        return self._done(e)
+
+    def decide(self, msg):
+        """edit_decide: a waiting edit accepted (its text put in the page by whoever asks: their own notes write, before
+        this) or rejected."""
+        e = self._waiting_named(self._book(msg), msg)
+        e["status"] = "accepted" if msg.get("accept") else "rejected"
+        return self._done(e)
+
+    def listed(self, msg):
+        """edits: the edits waiting on a host's notebooks (one notebook's, one page's, if given), page by page, each as
+        its page has its passage now (gone: it isn't there as it was); with all, the decided ones kept too."""
+        books = [self._book(msg)] if msg.get("notebook") else [b for b in self.books if b.get("id")]
+        out, decided = [], []
+        for nb in books:
+            waiting = self.waiting(nb)
+            page = self._page(nb, msg["page"]) if msg.get("page") else None
+            for pg in sorted_pages({e["page"] for e in waiting if page is None or e["page"] == page}):
+                sp = self._spans(nb, pg)[1]
+                out += [{**p, "old": old, "start": at} for at, old, _new, p in sorted(sp, key=lambda x: x[0])]
+                placed = {id(x[3]) for x in sp}
+                out += [{**p, "gone": True} for p in waiting if p["page"] == pg and id(p) not in placed]
+            if msg.get("all"):
+                decided += [dict(e) for e in self.edits if e.get("notebook") == nb["id"] and
+                            e.get("status") != "pending" and (page is None or e["page"] == page)]
+        return {"edits": out, **({"decided": decided} if msg.get("all") else {})}
 
 
-# ---- reading, from a host's listing (notes.listing's notebooks: id, name, pages)
-
-def notebooks_listed(books):
-    return [{"name": full_name(t), "pages": len(t.get("pages") or {})} for t in books]
-
-
-def pages_listed(nb):
-    pages = nb.get("pages") or {}
-    return {"notebook": full_name(nb), "pages": [{"page": p, "chars": len(pages[p])} for p in sorted_pages(pages)]}
-
-
-def page_read(nb, name, waiting=()):
-    page = page_named(nb.get("pages") or {}, name)
-    if page is None:
-        raise ValueError(f"There's no page {name!r} in {full_name(nb)}: list_pages lists them.")
-    return {"notebook": full_name(nb), "page": page, "text": nb["pages"][page],
-            "edits_waiting": [{"id": e["id"], "old_text": e["old_text"], "new_text": e["new_text"], **_by(e)}
-                              for e in waiting if e["page"] == page]}
+def imported(saved):
+    """The edits waiting in records.json (saved: its JSON), from before they were the host's: those Meta kept with its
+    conversation and with a notebook's own messages, on this machine's notebooks; by Meta, if they say no one else."""
+    books = [t for t in saved.get("records") or () if isinstance(t, dict) and t.get("id")]
+    ids, out, seen = {t["id"] for t in books}, [], set()
+    meta = saved.get("meta") if isinstance(saved.get("meta"), dict) else {}
+    for nb_id, messages in [(t["id"], t.get("messages") or ()) for t in books] + [(None, meta.get("messages") or ())]:
+        for m in messages:
+            for p in (m.get("proposals") or ()) if isinstance(m, dict) else ():
+                if not isinstance(p, dict) or p.get("status") != "pending" or p.get("id") in seen:
+                    continue
+                book_id = p.get("notebook", nb_id)
+                if book_id not in ids or not isinstance(p.get("page"), str):
+                    continue
+                seen.add(p.get("id"))
+                out.append({"id": str(p["id"]), "notebook": book_id, "page": p["page"], "old": str(p.get("old") or ""),
+                            "new": str(p.get("new") or ""), "start": int(p.get("start") or 0), "status": "pending",
+                            "t": float(p.get("t") or time.time()), "by": _who(p.get("by")) or "Meta"})
+    return out

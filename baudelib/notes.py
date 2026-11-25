@@ -1,6 +1,7 @@
 """Record's notebooks on this machine, as the host process gives them to another's Record (op "notes"): listed from
 records.json, and changed through the Record running here, if one is (it keeps them, and saves over the file), else in
-the file itself. No GTK: the host process reads this, and so does record.py."""
+the file itself; and the edits proposed to their pages, which the host process keeps (edits.json: edit_op). No GTK: the
+host process reads this, and so does record.py."""
 import copy
 import difflib
 import hashlib
@@ -307,58 +308,64 @@ def write(changes):
     return {"done": done, "by": "file"}
 
 
-def edit_ok(call):
-    """Is call what edit takes: {tool: one of notebooktools.EDIT_TOOLS, args: {...}, by?: who's asking}?"""
-    return isinstance(call, dict) and call.get("tool") in notebooktools.EDIT_TOOLS and \
-        isinstance(call.get("args"), dict) and (call.get("by") is None or isinstance(call["by"], str))
+def edits_path():
+    """The edits proposed to the notebooks here (notebooktools.Edits): the host process's to write, and no one else's."""
+    return os.path.join(data_dir(), "edits.json")
 
 
-def edited(books, messages, call, live=(), view=None):
-    """An edit tool's call (edit_ok's) on books (a list of notebooks, changed in place), with messages (Meta's
-    conversation's) and live (a reply of Meta's still coming's) and view (notebooktools.Edits'): ({result} or {error},
-    the ids of the notebooks changed)."""
-    tools = notebooktools.Edits(books, messages, live, view, " ".join(str(call.get("by") or "").split())[:80] or None)
+def edits_stamp():
+    """edits.json as written last, in a word (info's edits: a Record showing the notebooks here asks for them again
+    once it's another)."""
     try:
-        return {"result": tools.call(call["tool"], call["args"])}, tools.changed
-    except ValueError as e:
-        return {"error": str(e)}, tools.changed
-
-
-def _hand_edit(call):
-    """The edit given to the Record running here, which makes it (record.App's edits): its answer, or None if none's
-    running."""
-    try:
-        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as c:
-            c.settimeout(5)
-            c.connect(socket_path())
-            c.sendall(json.dumps({"edits": call}).encode() + b"\n")
-            got = c.makefile("rb").readline()
+        st = os.stat(os.path.join(os.environ.get("RECORD_DATA") or own_data_dir("Record"), "edits.json"))
     except OSError:
-        return None
+        return ""
+    return f"{st.st_mtime_ns}:{st.st_size}"
+
+
+def _edits_read(saved):
+    """edits.json's edits; the first time, those waiting in records.json (saved) from before, written there."""
     try:
-        said = json.loads(got)
-    except ValueError:
-        said = None
-    return said if isinstance(said, dict) and ("result" in said or "error" in said) else \
-        {"error": wording.say("host_errors.changes_not_taken")}
+        with open(edits_path(), encoding="utf-8") as f:
+            got = json.load(f)
+        return [e for e in (got.get("edits") if isinstance(got, dict) else None) or () if isinstance(e, dict)]
+    except FileNotFoundError:
+        edits = notebooktools.imported(saved)
+        _edits_write(edits)
+        return edits
 
 
-def edit(call):
-    """An agent's edit tool (propose_edit, list_edits, revise_edit, withdraw_edit) on this machine's notebooks: by the
-    Record running here (the pages open there show it at once), else in records.json. {result} or {error}."""
-    if not edit_ok(call):
-        return {"error": "not an edit tool's call"}
-    if (handed := _hand_edit(call)) is not None:
-        return handed
+def _edits_write(edits):
+    path = edits_path()
+    with open(path + ".tmp", "w", encoding="utf-8") as f:
+        json.dump({"edits": edits}, f, indent=1, ensure_ascii=False)
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(path + ".tmp", path)
+
+
+EDIT_OPS = {"edit_propose": "propose", "edit_revise": "revise", "edit_withdraw": "withdraw", "edit_decide": "decide",
+            "edits": "listed"}
+
+
+def edit_op(msg):
+    """One of the edit ops (EDIT_OPS) on the notebooks here, as records.json has them: (its answer's op, its fields).
+    Run with the notes ops, in the order asked (Server._notes): a page written just before is read as written."""
     with _LOCK:
-        path = records_path()
         try:
             saved = _read()
+            edits = _edits_read(saved)
         except (OSError, ValueError) as e:
-            return {"error": f"records.json: {e}"}
-        books = saved.get("records") if isinstance(saved.get("records"), list) else []
-        meta = saved.get("meta") if isinstance(saved.get("meta"), dict) else {}
-        out, changed = edited(books, meta.get("messages") or [], call)
-        if changed and (error := _save(saved, path)) is not None:
-            return {"error": error}
-    return out
+            return "error", {"error": f"Record's store here: {e}"}
+        books = [t for t in saved.get("records") or () if isinstance(t, dict) and t.get("id")]
+        tools = notebooktools.Edits(edits, books)
+        try:
+            out = getattr(tools, EDIT_OPS[msg["op"]])(msg)
+        except ValueError as e:
+            return "error", {"error": str(e)}
+        if tools.changed:
+            try:
+                _edits_write(edits)
+            except OSError as e:
+                return "error", {"error": f"edits.json: {e}"}
+    return ("edits", {**out, "stamp": edits_stamp()}) if msg["op"] == "edits" else ("edit", out)

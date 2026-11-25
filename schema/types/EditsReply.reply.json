@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "edits's answer.",
+  "properties": {
+    "op": {
+      "const": "edits",
+      "description": "What it is."
+    },
+    "req": {
+      "type": ["integer", "null"],
+      "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "edits": {
+      "type": "array",
+      "items": {
+        "$ref": "Edit.json"
+      },
+      "description": "The edits waiting."
+    },
+    "decided": {
+      "type": "array",
+      "items": {
+        "$ref": "Edit.json"
+      },
+      "description": "With all: those accepted, rejected or taken back, the last kept."
+    },
+    "stamp": {
+      "type": "string",
+      "description": "The edits here as written last (info's edits)."
+    }
+  },
+  "required": ["op", "edits"],
+  "additionalProperties": false
+}

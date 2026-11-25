@@ -67,5 +67,12 @@
       "shows": "A message first drawn as yours turns into this look in place once the host's sender store arrives and says it's someone else's."
     }
   ],
+  "decisions": [
+    {
+      "said": "Sure fix (2)",
+      "rule": "A message an agent outside the apps (baude-mcp's message_chat) sends a chat carries its name as the sender (as_agent) and is drawn as from it, not as the user's, as Meta's are.",
+      "decided": "2026-11-25"
+    }
+  ],
   "scenes": []
 }

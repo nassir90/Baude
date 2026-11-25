@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
-  "description": "notes's answer: listed {notebooks, ids}, written {done, by}, or an edit's {result}.",
+  "description": "notes's answer: listed {notebooks, ids}, or written {done, by}.",
   "properties": {
     "op": {
       "const": "notes",
@@ -35,10 +35,6 @@
     "by": {
       "type": "string",
       "description": "record: the Record running there made them."
-    },
-    "result": {
-      "type": "object",
-      "description": "What an edit tool's call gave (action edit)."
     },
     "error": {
       "type": "string",

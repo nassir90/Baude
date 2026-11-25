@@ -398,6 +398,7 @@ class Store:
         self.books_width = None  # (the notebooks' column, dragged; None: as it comes)
         self.zoom = self.zoom_default = 1.0  # (Ctrl/⌘ + − 0: the notes', the chat's and the conversation's text)
         self.meta = {"messages": []}  # (Meta's conversation, the window's, whichever notebook's open: RecordChat)
+        self.edits = {}  # (by host: the edits proposed to its notebooks' pages, as it last listed them: take_edits)
         try:
             with open(self.path) as f:
                 saved = json.load(f)
@@ -523,6 +524,43 @@ class Store:
         if any(t is notebook for t in self.local):
             return HERE_HOST
         return next((h for h, books in self.remote.items() if any(t is notebook for t in books)), None)
+
+    def take_edits(self, host, listed):
+        """The edits a host's listed (op edits: those waiting, and the decided kept), taken in: one known here (shown on
+        a page, kept with a Meta turn's card) changed in place, so what has it has it as it is now."""
+        known = {e["id"]: e for e in self.edits.get(host) or ()}
+        for m in self.meta["messages"]:  # (Meta's own, kept with its turns: the same dicts)
+            for p in m.get("proposals") or ():
+                known.setdefault(p.get("id"), p)
+        out = []
+        for e in listed:
+            if not isinstance(e, dict) or not isinstance(e.get("id"), str):
+                continue
+            mine = known.get(e["id"])
+            if mine is None:
+                mine = dict(e)
+            else:
+                mine.pop("gone", None)
+                mine.update(e)
+                if "by" not in e:
+                    mine.pop("by", None)
+            out.append(mine)
+        self.edits[host] = out
+
+    def took_edit(self, host, e):
+        """An edit as its host answered an edit op with it (edit), taken in as take_edits does: the dict kept here."""
+        self.take_edits(host, [x for x in self.edits.get(host) or () if x.get("id") != e.get("id")] + [e])
+        return next(x for x in self.edits[host] if x.get("id") == e.get("id"))
+
+    def edits_for(self, notebook):
+        """The edits waiting on a notebook's pages, as its host last listed them, in the order they were made."""
+        host = self.host_of(notebook)
+        return sorted((e for e in self.edits.get(host) or () if e.get("notebook") == notebook.get("id")
+                       and e.get("status") == "pending"), key=lambda e: e.get("t", 0))
+
+    def edit_of(self, pid):
+        """An edit by its id, as a host last listed it (waiting or decided), or None."""
+        return next((e for books in self.edits.values() for e in books if e.get("id") == pid), None)
 
     def push(self, host=None):
         """A host's notebooks (the one shown's, if not said), if it's another: what's changed of them here since it

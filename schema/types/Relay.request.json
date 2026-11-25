@@ -15,6 +15,10 @@
       "type": "string",
       "description": "The member's id."
     },
+    "as_agent": {
+      "type": "string",
+      "description": "As input's as_agent: what's sent through it is from that agent."
+    },
     "as_meta": {
       "type": "boolean",
       "description": "As input's as_meta: what's sent through it is from Meta."

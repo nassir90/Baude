@@ -4,8 +4,6 @@ notebook / page, and page edits (propose_edit, list_edits, revise_edit, withdraw
 import copy
 import json
 import os
-import time
-import uuid
 
 import gi
 
@@ -24,7 +22,7 @@ import metalook  # noqa: E402
 from recordstore import (  # noqa: E402
     HERE_HOST, HOME, base_name, book, full_name, relinked_pages, remote_name, short_dir, short_page,
 )
-from baudelib import notebooktools  # noqa: E402  (its edits worked out with no GTK, as an outside agent's are)
+from baudelib import meshtools  # noqa: E402  (META: who Meta's edits are by)
 from recordmeta import REF_LIMIT, page_named, place_change  # noqa: E402
 from recordui import chat_names, chat_text  # noqa: E402
 from diaryeditor import DiaryEditor  # noqa: E402
@@ -52,7 +50,8 @@ class RecordTools:
             lines.append("its pages: " + ", ".join(pages[:40]) +
                          (f" (+{len(pages) - 40}: app_index pages)" if len(pages) > 40 else ""))
             if waiting := self.pending(nb):
-                lines.append(f"your edits waiting: {len(waiting)} (list_edits)")
+                mine = sum(1 for p in waiting if p.get("by") in (None, meshtools.META))
+                lines.append(f"edits waiting: {len(waiting)}, {mine} of them yours (list_edits)")
         else:
             lines.append("no notebook open")
         if others := [t for t in store.notebooks if t is not nb]:
@@ -587,65 +586,76 @@ class RecordTools:
             return None, {"error": f"There's no page {args.get('page')!r} in this notebook. Its pages: {names}."}
         return page, None
 
-    def _spans(self, page):
-        """A page's own text, and the edits waiting on it, where each is in that text now: [(start, old, new, edit)]
-        (one whose passage isn't on the page as it was: left out)."""
-        notebook, editor = self.notebook, self.win.tabs.get(("note", page))
-        text = editor.kept() if editor is not None else notebook["pages"].get(page, "")
-        return text, notebooktools.spans(text, self.pending(notebook), page,
-                                         editor.edit_start if editor is not None else None)
+    def _edit_op(self, turn, msg, then):
+        """An edit op (edit_propose, edit_revise, edit_withdraw, edits) on the notebook open, asked of its host (a Later:
+        the page as it is saved, or sent to its host, first); then(host, its answer) on the main loop."""
+        store, nb = self.win.store, self.notebook
+        key = store.host_of(nb) or store.host
+        store.save_now()
+        msg = {**msg, "notebook": nb["id"]}
 
-    def _edited(self, turn, p):
-        """A turn's edit to a page, made or changed: kept with the turn (said under its reply), shown on its page."""
-        if p["status"] != "pending":
+        def work():
+            return {"got": self.win.edit_call(key, msg)}
+
+        def done(out):
+            if "got" not in out:
+                return out
+            return then(key, out["got"])
+        return metaagent.Later(work, done)
+
+    def _edited(self, turn, key, got):
+        """An edit op's answer (edit): the edit taken in, kept with the turn (said under its reply), shown on its page;
+        the host's edits asked for again (those it took in). (The edit, as kept here; whose it was before: "your" for
+        Meta's, else its proposer's.)"""
+        store = self.win.store
+        known = store.edit_of(got["edit"]["id"])
+        by = known.get("by") if known is not None else meshtools.META
+        p = store.took_edit(key, got["edit"])
+        if known is None:
+            turn["proposals"].append(p)
+        elif p["status"] != "pending":
             if p["page"] not in turn.setdefault("withdrew", []):
                 turn["withdrew"].append(p["page"])
         elif p not in turn["proposals"] and p["page"] not in turn.setdefault("revised", []):
             turn["revised"].append(p["page"])
+        for other in got.get("took_in") or ():
+            if (x := store.edit_of(other)) is not None:
+                x["status"] = "withdrawn"
         self._status(self.agent, f"{'Edited' if p['status'] == 'pending' else 'Took back an edit to'} "
                                  f"{short_page(p['page'])}")
+        self.win.edits_changed()
         if p["status"] == "pending" and (editor := self.win.open_note(p["page"])) is not None:
             editor.show_proposal(p, scroll=True)
-        self.show_pending_bar()
-        self.edit_cards_changed()
-
-    def _restage(self, turn, p, **fields):
-        """A pending edit changed (old, new, start) or taken back (status): off its page, changed, and shown again."""
-        if (editor := self.win.tabs.get(("note", p["page"]))) is not None:
-            editor.unshow(p)
-        p.update(fields)
-        if p["status"] == "pending" and p["old"] == p["new"]:
-            p["status"] = "withdrawn"  # (what it puts in is what's there: no edit)
-        self._edited(turn, p)
+        self.win.fetch_edits(key)
+        return p, "your" if by in (None, meshtools.META) else f"{by}'s"
 
     def propose(self, turn, args):
-        """propose_edit: a change to a page of the notebook's, its old text found once (or where the selection was) in
-        the page as it reads with the agent's pending edits applied (staged). Text only in such an edit's new text, or
-        in what it replaces: that edit revised to take this in, one edit for the passage they all cover (the others in
-        it taken back); else a new one. Shown on the page (DiaryEditor.show_proposal) to accept or reject: nothing's
-        written here."""
+        """propose_edit: a change to a page of the notebook's, asked of its host (edit_propose), where the selection
+        was if it's on that page. Shown on the page (DiaryEditor.show_proposal) to accept or reject: nothing's written
+        here."""
         page, error = self._page(args)
         if error:
             return error
-        text, spans = self._spans(page)
         sel = turn.get("selection")
         near = sel["start"] if sel and sel["page"] == page and sel.get("start") is not None else None
-        plan = notebooktools.plan_propose(text, spans, str(args.get("old_text") or ""), str(args.get("new_text") or ""),
-                                          near)
-        if "error" in plan:
-            return plan
-        if "add" in plan:
-            return self._new_edit(turn, page, *plan["add"])
-        return self._merged(turn, *plan["merge"])
+        msg = {"op": "edit_propose", "page": page, "old_text": str(args.get("old_text") or ""),
+               "new_text": str(args.get("new_text") or ""), "by": meshtools.META,
+               **({"near": int(near)} if near is not None else {})}
 
-    def _new_edit(self, turn, page, start, old, new):
-        p = {"id": uuid.uuid4().hex[:10], "notebook": self.notebook.get("id"), "page": page, "old": old, "new": new,
-             "start": start, "status": "pending", "t": time.time()}
-        turn["proposals"].append(p)
-        self._on_card(turn, p)
-        self._edited(turn, p)
-        return {"text": f"Edit {p['id']} shown on the page {page} for the user to accept or reject. Nothing is written "
-                        "until they accept; you'll be told which."}
+        def then(key, got):
+            fresh = self.win.store.edit_of(got["edit"]["id"]) is None
+            p, whose = self._edited(turn, key, got)
+            self._on_card(turn, p)
+            if fresh:
+                return {"text": f"Edit {p['id']} shown on the page {page} for the user to accept or reject. Nothing is "
+                                "written until they accept; you'll be told which."}
+            if p["status"] == "withdrawn":
+                return {"text": f"That puts back what's on the page: {whose} edit {p['id']} is taken back."}
+            took = got.get("took_in") or ()
+            joined = f" (and took in {', '.join(took)}, now taken back)" if took else ""
+            return {"text": f"Revised {whose} pending edit {p['id']}{joined}: it replaces {p['old']!r} with "
+                            f"{p['new']!r} now, still waiting for the user."}
+        return self._edit_op(turn, msg, then)
 
     @staticmethod
     def _on_card(turn, p):
@@ -653,60 +663,44 @@ class RecordTools:
         if (item := turn.get("at")) is not None and item is not turn.get("nested"):
             item["edit"] = p["id"]
 
-    def _merged(self, turn, edits, start, old, new):
-        """Pending edits a change reaches into, as one: the first revised to replace old with new, the others taken
-        back."""
-        first = edits[0]
-        self._on_card(turn, first)
-        for p in edits[1:]:
-            self._restage(turn, p, status="withdrawn")
-        self._restage(turn, first, old=old, new=new, start=start)
-        if first["status"] == "withdrawn":
-            return {"text": f"That puts back what's on the page: your edit {first['id']} is taken back."}
-        joined = f" (and took in {', '.join(p['id'] for p in edits[1:])}, now taken back)" if edits[1:] else ""
-        return {"text": f"Revised your pending edit {first['id']}{joined}: it replaces {old!r} with {new!r} now, still "
-                        "waiting for the user."}
-
     def list_edits(self, turn, args):
-        """list_edits: the agent's edits waiting for the user, page by page, each as the page has its passage now."""
-        pages = sorted({p["page"] for p in self.pending(self.notebook)})
+        """list_edits: the edits waiting for the user, page by page, each as the page has its passage now, with who
+        proposed it (edits)."""
+        msg = {"op": "edits"}
         if args.get("page"):
             page, error = self._page(args)
             if error:
                 return error
-            pages = [page] if page in pages else []
-        listed = notebooktools.listed_edits(self.pending(self.notebook), pages, lambda page: self._spans(page)[1])
-        if not listed:
-            return {"text": "No edits of yours are waiting" + (f" on {pages[0] if pages else args['page']}."
-                                                               if args.get("page") else ".")}
-        return {"text": json.dumps(listed, ensure_ascii=False, indent=1)}
+            msg["page"] = page
 
-    def _pending_named(self, args):
-        p = next((p for p in self.pending(self.notebook) if p["id"] == str(args.get("id") or "")), None)
-        return p, None if p is not None else {"error": f"No edit of yours with the id {args.get('id')!r} is waiting: "
-                                                         "list_edits shows those that are."}
+        def then(_key, got):
+            listed = [{"id": e["id"], "page": e["page"], "old_text": e["old"], "new_text": e["new"],
+                       "by": "you" if e.get("by") in (None, meshtools.META) else e["by"],
+                       **({"note": "what it replaces isn't on the page any more: revise its old_text, or withdraw it"}
+                          if e.get("gone") else {})} for e in got.get("edits") or ()]
+            if not listed:
+                return {"text": "No edits are waiting" + (f" on {msg['page']}." if msg.get("page") else ".")}
+            return {"text": json.dumps(listed, ensure_ascii=False, indent=1)}
+        return self._edit_op(turn, msg, then)
 
     def revise_edit(self, turn, args):
-        """revise_edit: a pending edit's new text (and the passage it replaces, if given) changed; it stays one edit."""
-        p, error = self._pending_named(args)
-        if error:
-            return error
-        text, spans = self._spans(p["page"])
-        plan = notebooktools.plan_revise(p, args, text, spans)
-        if "error" in plan:
-            return {"error": plan["error"]}
-        new, fields = plan["new"], plan["fields"]
-        self._restage(turn, p, new=new, **fields)
-        if (item := turn.get("at")) is not None and item is not turn.get("nested"):
-            item["replaced"] = p["old"]  # (as it is now: its card's red, old_text being optional)
-        if p["status"] == "withdrawn":
-            return {"text": f"That puts back what's on the page: your edit {p['id']} is taken back."}
-        return {"text": f"Edit {p['id']} revised, still waiting for the user."}
+        """revise_edit: a pending edit's new text (and the passage it replaces, if given) changed; it stays one edit
+        (edit_revise)."""
+        msg = {"op": "edit_revise", "id": str(args.get("id") or ""), "new_text": str(args.get("new_text") or ""),
+               "by": meshtools.META, **({"old_text": str(args["old_text"])} if args.get("old_text") is not None else {})}
+
+        def then(key, got):
+            p, whose = self._edited(turn, key, got)
+            if (item := turn.get("at")) is not None and item is not turn.get("nested"):
+                item["replaced"] = p["old"]  # (as it is now: its card's red, old_text being optional)
+            if p["status"] == "withdrawn":
+                return {"text": f"That puts back what's on the page: {whose} edit {p['id']} is taken back."}
+            return {"text": f"Edit {p['id']} revised, still waiting for the user."}
+        return self._edit_op(turn, msg, then)
 
     def withdraw_edit(self, turn, args):
-        """withdraw_edit: a pending edit taken back, from its page."""
-        p, error = self._pending_named(args)
-        if error:
-            return error
-        self._restage(turn, p, status="withdrawn")
-        return {"text": f"Edit {p['id']} taken back."}
+        """withdraw_edit: a pending edit taken back, from its page (edit_withdraw)."""
+        def then(key, got):
+            p, _whose = self._edited(turn, key, got)
+            return {"text": f"Edit {p['id']} taken back."}
+        return self._edit_op(turn, {"op": "edit_withdraw", "id": str(args.get("id") or "")}, then)

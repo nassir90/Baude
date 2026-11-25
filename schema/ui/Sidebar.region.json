@@ -77,7 +77,8 @@
     },
     {
       "name": "New session's group rule",
-      "shows": "Not drawn; decides which group a new chat joins. If exactly one group is ticked in ⋮ → Groups, that one. Else, if the chats listed all belong to one group, that one. Else, if no groups are ticked-out (all listed), none. Else the open chat's group if it's ticked, else none. After starting, that group is ticked in ⋮ too if it wasn't, so the new chat is listed."
+      "shows": "Not drawn; decides which group a new chat joins. If exactly one group is ticked in ⋮ → Groups, that one. Else, if the chats listed all belong to one group, that one. Else, if no groups are ticked-out (all listed), none. Else the open chat's group if it's ticked, else none. After starting, that group is ticked in ⋮ too if it wasn't, so the new chat is listed.",
+      "decisions": [{"said": "With only one group visible, a new session should go into that group (paraphrased)", "rule": "In every app a new chat joins the group the sidebar shows: the one group ticked, else the one group the listed chats are in on that host, so it stays listed", "decided": "2026-11-19", "source": [{"issue": "BaudeInternal#171"}]}]
     },
     {
       "name": "Host picker (beside New session)",
@@ -101,7 +102,8 @@
           "by": "long-press",
           "does": "Touch's right-click: the same host menu, its list not opened."
         }
-      ]
+      ],
+      "decisions": [{"said": "On mobile, in the host dropdown, your phone should be `local` as it is on desktop... Not sure why it is different on mobile.", "rule": "Every app names the machine it runs on \"local\" in the host picker, first in the list (the phone's own host too); the mesh knows it by its name", "decided": "2026-11-22", "source": [{"session": "f24332de-9555-4279-8489-ffa7dbcf54c9", "message": "30af64bb-6804-4040-984b-d3fd2a444e53"}]}]
     },
     {
       "name": "Open folder button",
@@ -288,7 +290,11 @@
           "parts": [
             {
               "name": "Fork nesting",
-              "shows": "A fork sits under the session it came from, indented 18px per level, joined by a thin tree line: down from the foot of the parent's row (for a Bot, 1px under its picture, 5px in from its left edge) to its last child, then a corner across to that child. A fork named \"<parent's title> (…)\" shows only the \"…\" part, in a distinct fork style. A Claude Desktop side session or fork sits under the chat Claude Desktop says it came from, in that chat's group whatever its own folder. A chat an agent (Bot) started is under that agent. A chat an agent on another host started (its spawned_by a chat of another host, none of its own host's: an archived or gone-host chat counts, one whose agent is deleted doesn't), and any chat that one started in turn on its host, is listed only under that agent, never among its own host's chats: under it whichever host's chats are listed, if the agent is listed (not deleted here, or missed by a search), and nowhere otherwise. An archived agent's chats are under it in Archived, whatever host they're on. The phone's home list and This phone's agents follow the same rule. Forks are found within a folder, by date too."
+              "shows": "A fork sits under the session it came from, indented 18px per level, joined by a thin tree line: down from the foot of the parent's row (for a Bot, 1px under its picture, 5px in from its left edge) to its last child, then a corner across to that child. A fork named \"<parent's title> (…)\" shows only the \"…\" part, in a distinct fork style. A Claude Desktop side session or fork sits under the chat Claude Desktop says it came from, in that chat's group whatever its own folder. A chat a Bot started is under that agent. A chat an agent on another host started (its spawned_by a chat of another host, none of its own host's: an archived or gone-host chat counts, one whose agent is deleted doesn't), and any chat that one started in turn on its host, is listed only under that agent, never among its own host's chats: under it whichever host's chats are listed, if the agent is listed (not deleted here, or missed by a search), and nowhere otherwise. An archived agent's chats are under it in Archived, whatever host they're on. The phone's home list and This phone's agents follow the same rule. Forks are found within a folder, by date too.",
+              "decisions": [
+                {"said": "On phone, the rule where subagents started on another machine by a Bot are not visible... Is not followed.... Please make sure that rule is followed.", "rule": "Every app lists a chat a Bot on another host started (and any chat that one started in turn) only under that Bot, never among its own host's chats, and nowhere when the Bot isn't listed", "decided": "2026-11-22", "source": [{"session": "f24332de-9555-4279-8489-ffa7dbcf54c9", "message": "30af64bb-6804-4040-984b-d3fd2a444e53"}]},
+                {"said": "On the phone, the bars from a Bot to its subagent chats don't start near its icon; do as the desktop does (paraphrased)", "rule": "Every app starts the tree line from a Bot to the chats under it just under the Bot's picture (1px under it, 5px in from its left edge)", "decided": "2026-11-22", "source": [{"issue": "BaudeInternal#180"}]}
+              ]
             },
             {
               "name": "Desktop chats",
@@ -298,6 +304,11 @@
               "name": "Active elsewhere",
               "shows": "A session not open here but being run by another program (Claude Desktop, a terminal) or left mid-turn with its claude running in the background shows the working dot (grey, pulsing), or yellow if it asks something, while that goes on, then blue for a minute after, as file changes are watched with no polling. Opening it shows it read-only/live-tailing: see the chat's banner (not this area)."
             }
+          ],
+          "decisions": [
+            {"said": "Switching chats while the Ongoing Feedback tab is shown left it on the Feedback tab instead of opening the chat", "rule": "In every app, clicking a chat in the list while another main tab (Feedback, a file's code) is shown switches to the chat's tab and opens that chat.", "decided": "2026-11-14", "source": [{"issue": "BaudeInternal#95"}]},
+            {"said": "Increase row height of:\n\n* Trainscripts on the home page", "rule": "Every app draws its chat list's rows tall enough to tap where it's touched: on a touch screen a chat row is at least 48dp (the least touch target) with its title and dot centred, and a Bot row twice a chat's", "decided": "2026-11-22", "source": [{"session": "f24332de-9555-4279-8489-ffa7dbcf54c9", "message": "30af64bb-6804-4040-984b-d3fd2a444e53"}]},
+            {"said": "<dead> is shown when a connection ides. This is not needed, you should just use a cloud icon with a slash going through it (no connection) to indicate this on mobile and dsesktop.", "rule": "Every app marks a chat whose host is gone with the crossed-out cloud (schema/icons/baude/baude-no-connection-symbolic.svg, tooltip \"No connection\") and never with a \"dead\" word", "decided": "2026-11-22", "source": [{"session": "f24332de-9555-4279-8489-ffa7dbcf54c9", "message": "30af64bb-6804-4040-984b-d3fd2a444e53"}]}
           ]
         },
         {
@@ -350,7 +361,8 @@
           "by": "click",
           "does": "Restarts onto the new version now (asking first if that would stop something running)."
         }
-      ]
+      ],
+      "decisions": [{"said": "Asked for the Update Available button to be white and not bold.", "rule": "Every app's Update button is in the text's own colour (white on a dark bar), not bold, not the accent.", "decided": "2026-11-12", "source": [{"issue": "BaudeInternal#48"}]}]
     },
     {
       "name": "Sidebar toggle",
@@ -435,14 +447,72 @@
         "phone"
       ],
       "why": "A new chat is only made on its host once something's sent in it, so New session, a folder's + and Open folder… (after its folder step) open a blank chat at once; its model, effort and mode are the header's pickers",
-      "decided": "2026-11-22"
+      "decided": "2026-11-22",
+      "source": [
+        {
+          "issue": "BaudeInternal#144"
+        },
+        {
+          "session": "b3845b21-55ac-4aab-a769-fb8517403c51",
+          "message": "94fe8190-5ead-48a2-bfe8-83493bb7bbad"
+        },
+        {
+          "session": "b3845b21-55ac-4aab-a769-fb8517403c51",
+          "message": "751b7f5b-1334-4706-9f63-ff1cc661336e"
+        }
+      ]
+    },
+    {
+      "name": "Session tags (on network sessions: set in the start dialog, shown on sidebar rows, searched)",
+      "apps": [
+        "baude"
+      ],
+      "why": "The owner called network session tags a useless feature and asked for them to be dropped (paraphrased); groups stay.",
+      "decided": "2026-11-12",
+      "source": [
+        {
+          "issue": "BaudeInternal#8"
+        }
+      ]
+    },
+    {
+      "name": "Folder name at the right of a chat's sidebar row (grouped by day)",
+      "apps": [
+        "baude"
+      ],
+      "why": "The owner: it's nearly always truncated and the chat name says what's needed, so drop it (paraphrased).",
+      "decided": "2026-11-12",
+      "source": [
+        {
+          "issue": "BaudeInternal#43"
+        }
+      ]
+    },
+    {
+      "name": "worktree pill on a chat row",
+      "apps": [
+        "baude",
+        "phone"
+      ],
+      "why": "The owner doesn't care for pills naming a chat's worktree: if the agent is in a worktree it says so. The tooltip still names the worktree and search still finds it.",
+      "decided": "2026-11-12",
+      "source": [
+        {
+          "issue": "BaudeInternal#47"
+        }
+      ]
     }
   ],
   "decisions": [
     {
       "said": "an archived chat that is open shows under Today, and twice in the left bar",
       "rule": "A chat that is open and already listed (archived included) is listed once, only where it already is, highlighted; it is never added again as a new unsaved chat.",
-      "decided": "2026-11-25"
+      "decided": "2026-11-25",
+      "source": [
+        {
+          "issue": "BaudeInternal#214"
+        }
+      ]
     }
   ],
   "scenes": [

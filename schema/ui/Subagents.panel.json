@@ -20,7 +20,8 @@
           "copy": ["side_panel.subagent", "side_panel.tool_uses", "side_panel.tokens", "time.seconds"],
           "actions": [
             {"by": "click the row", "does": "opens its detail page (its row grows into the header)"}
-          ]
+          ],
+          "decisions": [{"said": "Drop the running / completed words in the Processes view: the check mark already says it (paraphrased)", "rule": "Every app's subagent rows write a status word only for endings the mark can't say (failed, killed); running and completed are shown by the mark alone.", "decided": "2026-11-12", "source": [{"issue": "BaudeInternal#9"}]}]
         },
         {
           "name": "nested row",
@@ -48,14 +49,16 @@
             {"by": "a nested subagent card's View", "does": "opens that nested subagent's detail (replaces this one; the first goes back to its box)"}
           ]
         }
-      ]
+      ],
+      "decisions": [{"said": "A subagent's chat in the panel should have the main chat's background, set into a cutout with the main area's vignette, with the back button and title above it (paraphrased)", "rule": "Every app shows a subagent's transcript set into the panel as the main chat is (its background, the same inset frame), with the back button and title above it on the panel.", "decided": "2026-11-12", "source": [{"issue": "BaudeInternal#34"}]}]
     },
     {
       "name": "chat card link",
       "shows": "In the main chat, a subagent's tool card has a View toggle button beside Prompt, where Output was; its Output is shown only for an error. Pressing View doesn't stay pressed; it opens this page.",
       "copy": ["common.view"],
       "text": ["Open this subagent in the side panel"],
-      "actions": [{"by": "click View (tooltip \"Open this subagent in the side panel\")", "does": "opens the panel on Subagents with this one open"}]
+      "actions": [{"by": "click View (tooltip \"Open this subagent in the side panel\")", "does": "opens the panel on Subagents with this one open"}],
+      "decisions": [{"said": "For the Agent tool show Prompt, but Output should be View, which opens the subagent panel directly (paraphrased)", "rule": "Every app's subagent card has Prompt and View; View opens that subagent in the side panel; Output appears only for an error.", "decided": "2026-11-12", "source": [{"issue": "BaudeInternal#35"}]}]
     }
   ],
   "states": [

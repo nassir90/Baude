@@ -27,7 +27,8 @@
       "copy": ["lookup.file", "lookup.commit", "lookup.branch", "lookup.pull_request", "lookup.env_var", "lookup.constant", "lookup.code_symbol", "lookup.config_key", "lookup.service", "lookup.kubernetes_object", "lookup.package", "common.command", "lookup.external_tool", "lookup.tool", "lookup.subagent_type", "lookup.skill", "lookup.http_route"],
       "actions": [
         {"by": "click a row (single click)", "does": "closes the dialog and opens that name"}
-      ]
+      ],
+      "decisions": [{"said": "The ⌘K / @ lists need a more sensible, time-aware default order (paraphrased)", "rule": "With nothing typed, every app's ⌘K and @ lists start with what was touched lately (a chat's last use, a file's last change, a branch's last commit, a pull request's or issue's last update), newest first; as you type, the match decides the order, an exact name first, and recency only breaks ties between equally good matches", "decided": "2026-11-16", "source": [{"issue": "BaudeInternal#136"}]}]
     },
     {
       "name": "what opening does",
@@ -37,7 +38,8 @@
     {
       "name": "footer",
       "shows": "At the left, working dots while more names are still coming in (the catalogue is made afresh if it's old, and the table fills in as parts arrive); at the right, a dim caption \"<matched> out of <total>\".",
-      "copy": ["glossary.count"]
+      "copy": ["glossary.count"],
+      "decisions": [{"said": "The loading dots asked for in the @ list for names still coming in weren't carried over to the Cmd/Ctrl+K screen", "rule": "Every app's ⌘K / Ctrl+K list shows working dots while its names are still coming in, as the @ list does.", "decided": "2026-11-14", "source": [{"issue": "BaudeInternal#93"}]}]
     }
   ],
   "states": [

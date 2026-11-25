@@ -45,6 +45,18 @@
           "by": "right-click a tab",
           "does": "Record only: the tab menu (see MainTabsMenu)."
         }
+      ],
+      "decisions": [
+        {
+          "said": "Scrolling sideways along the tabs is jittery, not as smooth as the rest of the app (paraphrased)",
+          "rule": "Every app's tab bar scrolls sideways smoothly with a touchpad, moving by the pixels scrolled rather than a wheel step per event.",
+          "decided": "2026-11-10",
+          "source": [
+            {
+              "issue": "BaudeInternal#3"
+            }
+          ]
+        }
       ]
     },
     {

@@ -114,6 +114,18 @@
             }
           ]
         }
+      ],
+      "decisions": [
+        {
+          "said": "The file viewer's top bar should be grey, not very dark, and its background the same as chats and notes (paraphrased)",
+          "rule": "Every app's code view has its bar on the window bars' grey, the code on the same background as a chat and notes, and sizes the code with Ctrl/⌘+, −, 0.",
+          "decided": "2026-11-12",
+          "source": [
+            {
+              "issue": "BaudeInternal#36"
+            }
+          ]
+        }
       ]
     },
     {
@@ -249,6 +261,22 @@
     {
       "name": "unreadable file on another host",
       "shows": "No tab; a note \"<path> on <host>: <why>\" (\"not text to read here\" for a binary)."
+    }
+  ],
+  "removed": [
+    {
+      "name": "File name and text-size buttons (−, size, +) in the code view's bar",
+      "apps": [
+        "baude",
+        "record"
+      ],
+      "why": "The owner: the file name is already in the tab, and font size buttons aren't standard in editors; ⌘+, ⌘− and ⌘0 are enough (paraphrased).",
+      "decided": "2026-11-12",
+      "source": [
+        {
+          "issue": "BaudeInternal#36"
+        }
+      ]
     }
   ],
   "scenes": [

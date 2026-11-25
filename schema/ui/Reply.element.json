@@ -84,6 +84,38 @@
           "by": "right-click a link",
           "does": "The label's own menu: Copy Link Address gives the path (with :line) or URL."
         }
+      ],
+      "decisions": [
+        {
+          "said": "PR numbers should be the same size as inline code; they're a bit too big (paraphrased)",
+          "rule": "Every app draws a pull request's pill (its number, logo and patch) at inline code's size, never larger than the text round it, though in the prose font",
+          "decided": "2026-11-17",
+          "source": [
+            {
+              "issue": "BaudeInternal#141"
+            }
+          ]
+        },
+        {
+          "said": "A pull request clicked should just open its link; no need to open it on the Signal tab (paraphrased)",
+          "rule": "In every app, clicking a pull request's link or pill opens its page on GitHub in the browser (an issue on Baude's own feedback repository opens on the Feedback tab), never a card on the Signal page",
+          "decided": "2026-11-17",
+          "source": [
+            {
+              "issue": "BaudeInternal#151"
+            }
+          ]
+        },
+        {
+          "said": "Copying the address of a file link gives a baude-open: link; it should be just the file's location (paraphrased)",
+          "rule": "In every app, copying a file link gives the file's own path (with :line when one was named), never an app-internal scheme; clicking it still opens the file in the app",
+          "decided": "2026-11-18",
+          "source": [
+            {
+              "issue": "BaudeInternal#165"
+            }
+          ]
+        }
       ]
     },
     {

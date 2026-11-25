@@ -35,7 +35,19 @@
     },
     {
       "name": "highlighting",
-      "shows": "Coloured as its language (a fence's tag, a tool's shell, a regex, or a file's extension when it's a file's contents), in the light or dark theme's colours, following the theme live. Only the first 20,000 characters (about 500 lines) are coloured; the rest is plain. A Read's output has each line's number dimmed and the line coloured as the file's code."
+      "shows": "Coloured as its language (a fence's tag, a tool's shell, a regex, or a file's extension when it's a file's contents), in the light or dark theme's colours, following the theme live. Only the first 20,000 characters (about 500 lines) are coloured; the rest is plain. A Read's output has each line's number dimmed and the line coloured as the file's code.",
+      "decisions": [
+        {
+          "said": "Add syntax highlighting for code in files, bash in tool calls and regexes in grep commands, the regexes shown verbatim (paraphrased)",
+          "rule": "Every app colours code by its language: a file's contents, a tool's shell commands, an edit's diff and fenced code; a grep pattern (Grep's, or grep/rg inside a command) is coloured as a regex and kept exactly as written.",
+          "decided": "2026-11-12",
+          "source": [
+            {
+              "issue": "BaudeInternal#31"
+            }
+          ]
+        }
+      ]
     },
     {
       "name": "sub-pane height limit",

@@ -237,7 +237,19 @@
     },
     {
       "name": "started again",
-      "shows": "A Bot's browser that starts again (gone unused for a while, Baude or its host restarted, or moved into Baude) opens the tabs it had, in their order, with the one in front in front again; with none, one blank tab."
+      "shows": "A Bot's browser that starts again (gone unused for a while, Baude or its host restarted, or moved into Baude) opens the tabs it had, in their order, with the one in front in front again; with none, one blank tab.",
+      "decisions": [
+        {
+          "said": "Emission should remember the last opened page like any other browser; it always opens about:blank (paraphrased)",
+          "rule": "Every app's browser that starts again opens the tabs it had, in their order, with the one in front in front again; each profile keeps its own tabs",
+          "decided": "2026-11-22",
+          "source": [
+            {
+              "issue": "BaudeInternal#179"
+            }
+          ]
+        }
+      ]
     },
     {
       "name": "Bot busy in its own Emission",

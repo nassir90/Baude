@@ -69,6 +69,19 @@
               "issue": "BaudeInternal#223"
             }
           ]
+        },
+        {
+          "said": "Down leaves the title for the text but Up can't get back into it; Up should land about directly above the caret, not at the end (paraphrased)",
+          "rule": "Up on the top row of a page's text moves into the title, the caret at the spot closest to straight above where it was (the title's start or end when the caret was left of or past its text); every app's note editor does this.",
+          "decided": "2026-11-10",
+          "source": [
+            {
+              "issue": "BaudeInternal#1"
+            },
+            {
+              "issue": "BaudeInternal#2"
+            }
+          ]
         }
       ],
       "actions": [
@@ -154,6 +167,38 @@
           "by": "key Ctrl+Plus / Ctrl+Minus / Ctrl+0 (Cmd on macOS)",
           "does": "Zooms the notes' text (and the chat read and Meta's conversation with it); 0 goes back to Settings' Global Scale."
         }
+      ],
+      "decisions": [
+        {
+          "said": "Record didn't follow the accent: its links were always blue.",
+          "rule": "Every app draws links in notes in the accent colour, changing as soon as the accent does; never a fixed blue.",
+          "decided": "2026-11-12",
+          "source": [
+            {
+              "issue": "BaudeInternal#49"
+            }
+          ]
+        },
+        {
+          "said": "Record needs a spell checker: red underlines for misspellings and blue squiggles for grammar",
+          "rule": "Every app's notes editor underlines misspellings with a red squiggle and grammar errors with a blue one (Settings → Check Spelling).",
+          "decided": "2026-11-16",
+          "source": [
+            {
+              "issue": "BaudeInternal#124"
+            }
+          ]
+        },
+        {
+          "said": "Selection shading stretched into the whitespace, worst on headings; it should shrinkwrap to a max text height, not jitter with the text's content",
+          "rule": "Every app's notes editor shades a selection on each wrapped line only as tall as that line's style (the text's, or a heading's at its scale), not into the space around it, and the same height along a line whatever characters it holds.",
+          "decided": "2026-11-16",
+          "source": [
+            {
+              "issue": "BaudeInternal#129"
+            }
+          ]
+        }
       ]
     },
     {
@@ -203,6 +248,18 @@
         {
           "by": "key Enter / Tab / click a row",
           "does": "Writes the link, as [[page]] (or [[+Name]] for a sub-page)."
+        }
+      ],
+      "decisions": [
+        {
+          "said": "Typing + to make a link should open an @-like list below the cursor",
+          "rule": "Every app's notes editor opens a list of pages under the caret when + is typed after a space or at a line start, as @ does.",
+          "decided": "2026-11-16",
+          "source": [
+            {
+              "issue": "BaudeInternal#131"
+            }
+          ]
         }
       ]
     },

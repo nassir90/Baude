@@ -141,17 +141,37 @@
     {
       "said": "the groups in that menu get square checkboxes, the same as the one in Namespaces",
       "rule": "The group list is the Namespaces picker on every app: a square checkbox per group and one over them all that lists every group again, never ticks, radio dots or a Show All row.",
-      "decided": "2026-11-25"
+      "decided": "2026-11-25",
+      "source": [
+        {
+          "issue": "BaudeInternal#220"
+        },
+        {
+          "session": "b3845b21-55ac-4aab-a769-fb8517403c51",
+          "message": "f6af2205-3261-4217-be82-4542a6810efc"
+        }
+      ]
     },
     {
-      "said": "groups should still look a bit like a header",
+      "said": "Ehh groups should still look a bit like a header....",
       "rule": "The check over all the groups is worded \"Groups\" and drawn as a section heading (like \"Group by\": small, bold, dim) while keeping its checkbox and behaviour. Kubernetes' \"All namespaces\" row stays an ordinary row.",
-      "decided": "2026-11-25"
+      "decided": "2026-11-25",
+      "source": [
+        {
+          "session": "b3845b21-55ac-4aab-a769-fb8517403c51",
+          "message": "faad4492-824f-4a81-96a6-6396ffb795e1"
+        }
+      ]
     },
     {
       "said": "Group by should offer Folder, Created and Updated",
       "rule": "Group by has exactly Folder, Created (the day each chat was made, from its transcript's first record) and Updated (the day it was last used) on every app; arrowing through the choices only moves focus and never changes the grouping.",
-      "decided": "2026-11-25"
+      "decided": "2026-11-25",
+      "source": [
+        {
+          "issue": "BaudeInternal#219"
+        }
+      ]
     }
   ],
   "scenes": [

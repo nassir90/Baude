@@ -24,7 +24,29 @@
     },
     {
       "name": "what Meta works on",
-      "shows": "Meta reads the open notebook's pages and folders, and what is @-referenced in what you ask (a page, a notebook, a file, a chat: its text goes with the message). Its first message of a session says which notebook is open, or which notebooks there are with none open; it is told again when another notebook is opened. It knows where you are as \"host / notebook / page\". Each of your messages remembers the notebook it was asked in (a restarted session's earlier conversation says \"[in {notebook}] \" or \"[no notebook open] \")."
+      "shows": "Meta reads the open notebook's pages and folders, and what is @-referenced in what you ask (a page, a notebook, a file, a chat: its text goes with the message). Its first message of a session says which notebook is open, or which notebooks there are with none open; it is told again when another notebook is opened. It knows where you are as \"host / notebook / page\". Each of your messages remembers the notebook it was asked in (a restarted session's earlier conversation says \"[in {notebook}] \" or \"[no notebook open] \").",
+      "decisions": [
+        {
+          "said": "Drop the hamstrung Record agent: it should be a regular agent; @ references (notebooks and pages too) in its box, the agent sees what is referenced, and it can propose diffs in Record (paraphrased)",
+          "rule": "Meta in every app that has notebooks takes @ references to notebooks, pages, files and chats in its box, sends their text with the message, and proposes changes to pages as tracked edits the user accepts or rejects.",
+          "decided": "2026-11-12",
+          "source": [
+            {
+              "issue": "BaudeInternal#26"
+            }
+          ]
+        },
+        {
+          "said": "Switching notebooks switched Meta agents, a holdover from the notebook-bound Record agent; Meta is window-bound, so remove the coupling.",
+          "rule": "Every app's Meta has one conversation per window, whichever notebook is open; opening another notebook tells it, and doesn't start another.",
+          "decided": "2026-11-14",
+          "source": [
+            {
+              "issue": "BaudeInternal#64"
+            }
+          ]
+        }
+      ]
     },
     {
       "name": "quote chip",
@@ -40,6 +62,18 @@
         {
           "by": "send with nothing typed",
           "does": "A quote alone can be sent (an empty question asks about the passage)."
+        }
+      ],
+      "decisions": [
+        {
+          "said": "The selected-text box in Record's Meta was ugly: it should look as it does once sent, above the prompt inside the box, bar in the accent cap colour, an X at its right, square corners.",
+          "rule": "Every app shows a quoted passage over the text inside the box, drawn as the sent message's quote is (a rule at its left, here in the accent), with a square × button at its right to drop it; the box grows to hold it.",
+          "decided": "2026-11-13",
+          "source": [
+            {
+              "issue": "BaudeInternal#60"
+            }
+          ]
         }
       ]
     },
@@ -82,6 +116,18 @@
         {
           "by": "click Open",
           "does": "Opens that notebook and shows the edit on its page, the caret in it."
+        }
+      ],
+      "decisions": [
+        {
+          "said": "Proposed and revised edits should look like diff hunks; they looked like generic tool calls.",
+          "rule": "Every app draws a proposed, revised or made edit to a page as a hunk: the text it replaces on red, what it puts in on green, under the page's name.",
+          "decided": "2026-11-13",
+          "source": [
+            {
+              "issue": "BaudeInternal#55"
+            }
+          ]
         }
       ]
     },
@@ -141,7 +187,19 @@
   "states": [
     {
       "name": "no notebook open",
-      "shows": "Meta works, but a tool that works on the open notebook says \"No notebook is open: add_page takes notebook, move_pages from_notebook and to_notebook, and add_notebook makes one.\""
+      "shows": "Meta works, but a tool that works on the open notebook says \"No notebook is open: add_page takes notebook, move_pages from_notebook and to_notebook, and add_notebook makes one.\"",
+      "decisions": [
+        {
+          "said": "Meta in Record should work with no notebook set up and be able to make notebooks; notebooks should behave more like pages, so pages can be moved into a new one.",
+          "rule": "Every app's Meta works with no notebook open, can make a notebook, and can move pages between notebooks as one change.",
+          "decided": "2026-11-13",
+          "source": [
+            {
+              "issue": "BaudeInternal#57"
+            }
+          ]
+        }
+      ]
     }
   ],
   "scenes": []

@@ -98,6 +98,18 @@
             "decided": "2026-11-21"
           }
         }
+      ],
+      "decisions": [
+        {
+          "said": "Baude's tabs and the chat under them make the middle an island; Record should use that style too",
+          "rule": "Every app draws its main tab bar and the page under it as one rounded island set into the window frame.",
+          "decided": "2026-11-14",
+          "source": [
+            {
+              "issue": "BaudeInternal#96"
+            }
+          ]
+        }
       ]
     },
     {
@@ -135,6 +147,21 @@
     {
       "name": "restarted",
       "shows": "After ☰ → Restart Record or an auto-update the window comes back as it was: the notebook, the tab, window size and place, right column width and page, what was typed in Meta's box with its caret and quote, the page's caret and an un-kept new title, and every open page, chat and Meta's own scroll position. A toast says it updated (\"Record updated\", with the count of new commits)."
+    }
+  ],
+  "removed": [
+    {
+      "name": "Attached folders (the right bar's Folders page, Attach / Detach, Detach all)",
+      "apps": [
+        "record"
+      ],
+      "why": "The owner: no longer needed; what they fed comes from the folder of the chat being read",
+      "decided": "2026-11-16",
+      "source": [
+        {
+          "issue": "BaudeInternal#125"
+        }
+      ]
     }
   ],
   "scenes": []

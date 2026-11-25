@@ -34,6 +34,18 @@
       "shows": "After Continue, until the turn starts: a spinner and dimmed \"Continuing…\".",
       "text": [
         "Continuing…"
+      ],
+      "decisions": [
+        {
+          "said": "After a restart, clicking Continue sometimes gives no sign that anything is happening (paraphrased)",
+          "rule": "In every app, Continue on a chat cut short turns its line into a spinner and \"Continuing…\" until the turn starts; if the chat can't be reached the line and its Continue come back",
+          "decided": "2026-11-18",
+          "source": [
+            {
+              "issue": "BaudeInternal#163"
+            }
+          ]
+        }
       ]
     },
     {

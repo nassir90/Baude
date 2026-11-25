@@ -35,7 +35,11 @@
         {"by": "right-click a row", "does": "popover menu with: Show as a gallery (folders only: that folder's gallery), Copy path (toasts \"Path copied\"), Open in your file manager"},
         {"by": "hover a row (tooltip)", "does": "the path (with ~); for pictures and other files with thumbnails, a larger thumbnail (about 240px) above the path"}
       ],
-      "copy": ["code_view.show_gallery", "code_view.copy_path", "code_view.path_copied", "code_view.open_file_manager"]
+      "copy": ["code_view.show_gallery", "code_view.copy_path", "code_view.path_copied", "code_view.open_file_manager"],
+      "decisions": [
+        {"said": "Baude needs proper integration with the system thumbnailer (paraphrased)", "rule": "Every app shows the system's own thumbnail for a picture, PDF or other file that has one (QuickLook on macOS, the freedesktop thumbnailer on Linux), in the Files tree, its gallery and attachment chips, made off the main thread", "decided": "2026-11-17", "source": [{"issue": "BaudeInternal#159"}]},
+        {"said": "File hierarchies should get the same lines as sub-threads and sub-pages (paraphrased)", "rule": "Every app's file tree draws the same tree lines as the sidebar's forks and Record's sub-pages: from under an open folder's icon down to its last row, at every level", "decided": "2026-11-18", "source": [{"issue": "BaudeInternal#170"}]}
+      ]
     },
     {
       "name": "gallery",
@@ -45,7 +49,8 @@
         {"by": "click a picture tile", "does": "opens the large viewer with all the pictures in the folder"},
         {"by": "click any other tile", "does": "opens it like a tree row (Code page, or its app)"},
         {"by": "hover a tile (tooltip)", "does": "the file's name"}
-      ]
+      ],
+      "decisions": [{"said": "The file manager needs a NoonTree-like gallery for folders full of images, to pan through (paraphrased)", "rule": "Every app's Files page can show a folder as a gallery: its sub-folders as buttons, then its pictures as rows of one height, each as wide as its shape, filling the width; a picture opens the large viewer over all of the folder's pictures", "decided": "2026-11-17", "source": [{"issue": "BaudeInternal#158"}]}]
     }
   ],
   "states": [
@@ -55,5 +60,6 @@
     {"name": "no folder yet", "shows": "Blank until a folder is known: the page loads the chat's folder when first opened (the repository's top if the chat is in a git folder)"},
     {"name": "folder unreadable", "shows": "No rows"}
   ],
+  "removed": [{"name": "expander arrow (caret) beside each folder in the tree", "apps": ["baude", "record"], "why": "The owner: the caret is redundant since clicking a folder opens it; show a closed / open folder icon instead (paraphrased)", "decided": "2026-11-18", "source": [{"issue": "BaudeInternal#164"}]}],
   "scenes": []
 }

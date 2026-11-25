@@ -24,5 +24,9 @@
   "states": [
     {"name": "per chat", "shows": "Each chat keeps its own two switches (the last 500 chats); a new chat starts with links shown and Signal off, and what is set before the chat has an id is kept once it has one"},
     {"name": "no folder", "shows": "With no folder known, Signal is off whatever the switches say"}
+  ],
+  "removed": [
+    {"name": "Use for new chats", "apps": ["baude"], "why": "The owner: Signal is off for every new chat, so the switch has nothing to do; the menu has only Show links and Activate Signal", "decided": "2026-11-16", "source": [{"issue": "BaudeInternal#132"}]},
+    {"name": "link to the Signal page", "apps": ["baude"], "why": "The owner: the menu should have only Show links and Activate Signal", "decided": "2026-11-16", "source": [{"issue": "BaudeInternal#132"}]}
   ]
 }

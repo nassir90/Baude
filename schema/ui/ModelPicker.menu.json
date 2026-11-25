@@ -19,7 +19,8 @@
         {"by": "key Down / Up", "does": "Moves the lit row one step among those shown (kept in view)"},
         {"by": "key Enter", "does": "Picks the lit row and closes"},
         {"by": "key Esc", "does": "Closes the popover"}
-      ]
+      ],
+      "decisions": [{"said": "Increase search row height a little, decrease individual model heigth a little (so that they are aligned)", "rule": "Every app's model picker draws its search field and each model row at one height, the field's search icon in line with the rows' logos", "decided": "2026-11-22", "source": [{"session": "f24332de-9555-4279-8489-ffa7dbcf54c9", "message": "30af64bb-6804-4040-984b-d3fd2a444e53"}]}]
     },
     {
       "name": "family heading",
@@ -31,6 +32,12 @@
       "shows": "One line: the family's monochrome logo (16 px, schema/icons/models, the family by schema/icons/models/families.json; blank space of the same width when the family has none), the model's name (one line, … past 40 characters; the full name as a tooltip when cut), and at the right a tick on the picked model only. Claude's rows are named as claude lists them (\"Opus 5.5\"); a provider's model is named alike across hosts and shows once however many hosts have it, told apart by provider/host name only where two models share a name.",
       "actions": [
         {"by": "click", "does": "Picks the model and closes the popover. Same model: nothing happens. Different: the chat switches (set_model on the running claude with a quiet note \"model → <name>\"); across programs (Claude to Apple/Codex, or another host) the chat restarts or becomes a new conversation (\"model → <name>: a new conversation\"); picked mid-turn for a program change, it waits until the turn is over"}
+      ],
+      "decisions": [
+        {"said": "All models in the mesh should be visible in the model picker, not only the chat's host's; a pick runs on the first provider that has it", "rule": "Every app's model picker lists every model in the mesh, each once, wherever it runs; picking one runs it on the first provider that has it (the chat's host's first, then the mesh's in order), and the provider picker beside it lists the other places it runs.", "decided": "2026-11-14", "source": [{"issue": "BaudeInternal#97"}]},
+        {"said": "Model names should be compared ignoring case but shown as cased (gpt-oss:20B and gpt-oss:20b were two); later: still two rows in the list though providers merged", "rule": "Every app compares models' names ignoring case (providers.same) and lists a model once however its hosts case its name, shown as one of them lists it.", "decided": "2026-11-14", "source": [{"issue": "BaudeInternal#102"}, {"issue": "BaudeInternal#105"}]},
+        {"said": "Both 'Opus 5.5' and 'claude-opus-5-5' can appear in the model list (paraphrased)", "rule": "Every app lists each model once: a chat's model recorded as an id (claude-opus-5-5) is shown as, and ticks, Claude's own row for it (\"Opus 5.5\"), never as a row of its own", "decided": "2026-11-18", "source": [{"issue": "BaudeInternal#161"}]},
+        {"said": "On mobile the model dropdown needs icons, Baude model icons need to be centralised like the great SVG centralisation", "rule": "Every app's model picker draws each model's family logo from schema/icons/models (the family by schema/icons/models/families.json), the same files on every app", "decided": "2026-11-22", "source": [{"session": "f24332de-9555-4279-8489-ffa7dbcf54c9", "message": "30af64bb-6804-4040-984b-d3fd2a444e53"}]}
       ]
     },
     {
@@ -42,6 +49,10 @@
   "states": [
     {"name": "opens on picked model", "shows": "The picked model's row is lit (Enter would re-pick it); typing starts from the first match"},
     {"name": "scrolling", "shows": "List grows to 420 px tall then scrolls, 280 px minimum wide, no horizontal scrollbar"}
+  ],
+  "decisions": [
+    {"said": "So many models it's confusing: the list should be like the Cmd+K menu, a search bar on top and monotone icons per family, rows the same height across the provider, model, effort and mode dropdowns", "rule": "Every app's model picker is a command palette: a search box on top, models under their family's heading with the family's monochrome logo, and its rows the same height as the provider, effort and mode pickers' rows.", "decided": "2026-11-14", "source": [{"issue": "BaudeInternal#100"}]},
+    {"said": "Model selector pane on mobile doesn't need to be so long (right now it expands to fill the full screen vertically). Have it just fill the part below the model name and the part above hte bottom bar", "rule": "Every app's model picker hangs under the model button and never fills the screen: it is no taller than the room it has below the button (on the phone, down to the top of the bottom bar, or the keyboard's top), at most 420 px on the desktop, scrolling past that", "decided": "2026-11-22", "source": [{"session": "f24332de-9555-4279-8489-ffa7dbcf54c9", "message": "30af64bb-6804-4040-984b-d3fd2a444e53"}]}
   ],
   "scenes": ["60n-models-mesh", "60m-models-any-case", "55h-network-models", "60-effort-unavailable"]
 }

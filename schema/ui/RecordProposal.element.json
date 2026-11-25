@@ -21,6 +21,11 @@
         {"by": "click the cross", "does": "Takes the proposal away; the red is as it was. Its host is told it's rejected (edit_decide)."},
         {"by": "key Tab, caret inside the change", "does": "Accept (tooltip \"Accept (Tab)\")."},
         {"by": "key Esc, caret inside the change", "does": "Reject (tooltip \"Reject (Esc)\")."}
+      ],
+      "decisions": [
+        {"said": "The tick and cross should be font height but not drawn in the text's font (emoji oddities): a tick button on green and one on red beside the text (paraphrased)", "rule": "Every app draws a proposed change's Accept and Reject as real buttons as tall as the line, beside the new text: a tick on green and a cross on red.", "decided": "2026-11-12", "source": [{"issue": "BaudeInternal#40"}]},
+        {"said": "The tick and X were smaller than the highlighted text and started above the line; they should be as tall as it, top and bottom aligned, with no border radius, keeping their vibrant colours.", "rule": "Every app draws a proposed edit's Accept and Reject as square buttons as tall as the highlighted text they follow, top and bottom level with it: a tick on green and a cross on red.", "decided": "2026-11-14", "source": [{"issue": "BaudeInternal#78"}]},
+        {"said": "Edits could be shown green and red with no button to approve or reject them", "rule": "Every app draws a proposed change's Accept and Reject wherever the change is drawn; a change is never shown without them.", "decided": "2026-11-16", "source": [{"issue": "BaudeInternal#130"}]}
       ]
     }
   ],
@@ -41,6 +46,16 @@
       "rule": "An edit belongs to its notebook, on the notebook's host. Every app showing that notebook, on that machine or another, shows its waiting edits as the host lists them, and accepting or rejecting one goes back to that host. No edit is visible to only one app.",
       "decided": "2026-11-25",
       "source": [{"issue": "BaudeInternal#200"}, {"session": "b3845b21-55ac-4aab-a769-fb8517403c51", "message": "868770b1-06c0-44a3-bdb9-c1851cf4b39a"}]
+    },
+    {
+      "said": "The agent should be able to recall and change its earlier edits, like a long-lived unapproved staging area on a page I keep editing (paraphrased)",
+      "rule": "In every app a proposed change stays on the page as a draft until accepted or rejected, the user can keep writing meanwhile, and the agent can revise or take back its own pending edits.",
+      "decided": "2026-11-12",
+      "source": [
+        {
+          "issue": "BaudeInternal#39"
+        }
+      ]
     }
   ],
   "scenes": []

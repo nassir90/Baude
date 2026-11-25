@@ -208,7 +208,8 @@
           "by": "click",
           "does": "Restarts this machine's host process (daemon) once no command is running on it; toast \"Restarting the daemon once N sessions finish running a command\" while it waits, \"Daemon restarted\" once it's back. With none running, starts one."
         }
-      ]
+      ],
+      "decisions": [{"said": "Baude needs a button to restart the daemon, next to Restart Baude / Record / Emission (paraphrased)", "rule": "Every desktop app's main menu has Restart Daemon right under its own Restart item", "decided": "2026-11-21", "source": [{"issue": "BaudeInternal#177"}]}]
     }
   ],
   "scenes": []

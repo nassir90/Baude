@@ -74,7 +74,7 @@
     {"name": "host session, deactivated", "shows": "As gone: Move to Group ▸, Delete."}
   ],
   "removed": [
-    {"name": "Give Mesh Tools / Remove Mesh Tools", "apps": ["baude", "phone"], "why": "Mesh tools are not handed to chats one by one: a Bot has them and Meta has them, always, and no other chat does", "decided": "2026-11-22"}
+    {"name": "Give Mesh Tools / Remove Mesh Tools", "apps": ["baude", "phone"], "why": "Mesh tools are not handed to chats one by one: a Bot has them and Meta has them, always, and no other chat does", "decided": "2026-11-22", "source": [{"session": "f24332de-9555-4279-8489-ffa7dbcf54c9", "message": "30af64bb-6804-4040-984b-d3fd2a444e53"}]}
   ],
   "scenes": ["53b-sidebar-menu", "55g-network-session-menu"]
 }

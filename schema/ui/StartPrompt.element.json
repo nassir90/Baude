@@ -35,7 +35,31 @@
   "states": [
     {
       "name": "chat started by a Bot on the mesh",
-      "shows": "Not used: the task it was given is drawn as an ordinary message instead."
+      "shows": "Not used: the task it was given is drawn as an ordinary message instead.",
+      "decisions": [
+        {
+          "said": "'Started with this prompt' isn't needed on cross-mesh subagent chats (paraphrased)",
+          "rule": "Every app draws the task a Bot started a chat with as an ordinary message, with no 'Started with this prompt' heading; chats started from outside in other ways keep it",
+          "decided": "2026-11-19",
+          "source": [
+            {
+              "issue": "BaudeInternal#172"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "decisions": [
+    {
+      "said": "A session started from outside with a prompt should show that prompt at the top of the transcript, as scrollable formatted text above a horizontal rule (paraphrased)",
+      "rule": "Every app shows the prompt a chat was started with from outside at the very top of its transcript, as markdown in its own scrolling box under a heading, with a rule beneath it",
+      "decided": "2026-11-17",
+      "source": [
+        {
+          "issue": "BaudeInternal#142"
+        }
+      ]
     }
   ],
   "scenes": []

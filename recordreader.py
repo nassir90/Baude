@@ -564,7 +564,7 @@ class Reader(Gtk.Box):
         self.space = None  # (the names its replies are linked with: show)
         self.chat, self.names, self.base_dir = None, None, None  # (its chat, and its names: show)
         self.nouns_wait = None
-        Adw.StyleManager.get_default().connect("notify::dark", lambda *_: self._relink_marked())  # (the theme's red)
+        widgets.watch_style(self, "notify::dark", Reader._relink_marked)  # (the theme's red)
 
     def show(self, chat, folders=()):
         """chat (its transcript: {path, title, cwd}) read, else nothing; its replies' names are folders' (the

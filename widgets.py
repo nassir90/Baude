@@ -780,6 +780,39 @@ def inside(widget, start=True, end=True, under_bar=False):
     return widget
 
 
+def watch_style(widget, signal, update):
+    """update(widget) as the shared style manager's signal ("notify::dark", "notify::accent-color") fires, while the
+    widget is realized (in a window): a closed window's widgets leave no handler on the app-wide manager, even when
+    something else keeps them alive. Realized again (moved to another window) after a change it missed, it's updated
+    then."""
+    manager = Adw.StyleManager.get_default()
+    prop = signal.split("::", 1)[1]
+    target = widget.weak_ref()
+    held, seen = [], [manager.get_property(prop)]
+
+    def changed(*_):
+        seen[0] = manager.get_property(prop)
+        if (current := target()) is not None:
+            update(current)
+
+    def realized(w):
+        if held:
+            return
+        held.append(manager.connect(signal, changed))
+        if manager.get_property(prop) != seen[0]:
+            changed()
+
+    def unrealized(*_):
+        while held:
+            manager.disconnect(held.pop())
+
+    widget.connect("realize", realized)
+    widget.connect("unrealize", unrealized)
+    if widget.get_realized():
+        realized(widget)
+    widget.weak_ref(unrealized)
+
+
 def themed_icon(name, fallback):
     """name if the current icon theme has it, else fallback (themes differ: Yaru vs Adwaita)."""
     ensure_icons()

@@ -130,6 +130,52 @@ class Glow(Gtk.Widget):
         snapshot.pop()
 
 
+class Clears:
+    """What a program writes, on its way to VTE, with its clears of the screen (Ctrl+L's and clear's: ESC[H ESC[2J,
+    either way round) done as iTerm2 does them: the rows down to the cursor's kept in the scrollback, no more. VTE's
+    own clear puts a whole screen of rows there each time, the blank ones too. Done instead: the rows under the
+    cursor erased, then a newline for each of the screen's rows (the first ones take the cursor to the bottom, the
+    rest scroll the rows down to it off the top), then the cursor sent home. Left as they are on the alternate
+    screen (a full-screen program's), which has no scrollback."""
+
+    SEEN = re.compile(rb"(\x1b\[(?:1;1)?H\x1b\[2J|\x1b\[2J\x1b\[(?:1;1)?H)|\x1b\[\?([0-9;]*)([hl])")
+    WHOLE = (b"\x1b[H\x1b[2J", b"\x1b[1;1H\x1b[2J", b"\x1b[2J\x1b[H", b"\x1b[2J\x1b[1;1H")
+    ALT = {b"47", b"1047", b"1049"}
+    PART = re.compile(rb"\x1b\[\?[0-9;]*")  # (a mode set or reset not yet ended)
+
+    def __init__(self):
+        self.held, self.alt = b"", False  # (held: the end of what came, which may start one: kept for what follows)
+
+    def take(self, data, rows):
+        """data as VTE is to be fed it, its screen rows high (what may start a clear or a mode change held back)."""
+        data, self.held = self.held + data, b""
+        last = 0
+        for m in self.SEEN.finditer(data):
+            last = m.end()
+        tail = data.find(b"\x1b", max(last, len(data) - 32))
+        while tail >= 0:
+            if any(w.startswith(data[tail:]) for w in self.WHOLE) or self.PART.fullmatch(data, tail):
+                self.held, data = data[tail:], data[:tail]
+                break
+            tail = data.find(b"\x1b", tail + 1)
+        return self.SEEN.sub(lambda m: self._done(m, rows), data)
+
+    def _done(self, m, rows):
+        if m.group(1) is None:
+            if self.ALT & set(m.group(2).split(b";")):
+                self.alt = m.group(3) == b"h"
+            return m.group(0)
+        return m.group(0) if self.alt else b"\x1b[J" + b"\n" * max(1, rows) + b"\x1b[H"
+
+    def flush(self, everything=False):
+        """What's held that does something on its own (the cursor sent home, the screen cleared: what followed it
+        didn't come soon), or everything, to be fed as it is."""
+        m = re.match(rb"\x1b\[(?:1;1)?H|\x1b\[2J", self.held)
+        upto = len(self.held) if everything else m.end() if m else 0
+        out, self.held = self.held[:upto], self.held[upto:]
+        return out
+
+
 def accent_rgba():
     """The accent: Baude's pick in Baude and Record (widgets'), the system's in Multiplex's own window."""
     if "widgets" in sys.modules:
@@ -158,7 +204,6 @@ class Terminal(Gtk.Overlay):
         self.vte.set_font(Pango.FontDescription.from_string(MONO_FONT))
         styled()
         self.vte.connect("contents-changed", self._changed)
-        self.vte.connect("child-exited", self._exited)
         for sig in ("window-title-changed", "notify::window-title"):
             try:
                 self.vte.connect(sig, lambda *_: self.on_title and self.on_title(self))
@@ -176,18 +221,44 @@ class Terminal(Gtk.Overlay):
         # (its program started once VTE's drawn at its size: what it writes before then is lost; one never shown is
         # started a moment on anyway)
         self.spawned = False
+        self.clears, self.flushing = Clears(), None
+        self.pty, self.fd, self.unsent, self.reading, self.writing, self.size = None, None, b"", None, None, (0, 0)
+        self.vte.connect("commit", lambda _v, text, _n: self.typed(text.encode() if isinstance(text, str) else text))
         self.vte.connect("map", lambda *_: GLib.idle_add(self.spawn, env))
         GLib.timeout_add(1500, self.spawn, env)
+        GLib.timeout_add(300, self._resized)
 
     def spawn(self, env=None):
+        """Its program started in a pty of its own, read here (not VTE's own: what it writes is fed to VTE through
+        Clears)."""
         if self.spawned:
             return False
         self.spawned = True
         envv = [f"{k}={v}" for k, v in {**os.environ, "TERM": "xterm-256color", "COLORTERM": "truecolor",
                                          "TERM_PROGRAM": "Multiplex", **(env or {})}.items()]
-        self.vte.spawn_async(Vte.PtyFlags.DEFAULT, self.cwd if os.path.isdir(self.cwd) else None, self.argv, envv,
-                             GLib.SpawnFlags.SEARCH_PATH, None, None, -1, None, self._spawned)
+        try:
+            self.pty = Vte.Pty.new_sync(Vte.PtyFlags.DEFAULT, None)
+        except GLib.Error as e:
+            self._spawned(None, -1, e)
+            return False
+        self.pty.spawn_async(self.cwd if os.path.isdir(self.cwd) else None, self.argv, envv,
+                             GLib.SpawnFlags.SEARCH_PATH, child_setup=None, timeout=-1, cancellable=None,
+                             callback=self._started)
         return False
+
+    def _started(self, pty, result):
+        try:
+            _ok, pid = pty.spawn_finish(result)
+        except GLib.Error as e:
+            return self._spawned(None, -1, e)
+        self.fd = pty.get_fd()
+        os.set_blocking(self.fd, False)
+        self._resized()  # (its size: once it's started, as macOS takes it only then)
+        self.reading = GLib.unix_fd_add_full(GLib.PRIORITY_DEFAULT, self.fd,
+                                             GLib.IOCondition.IN | GLib.IOCondition.HUP | GLib.IOCondition.ERR,
+                                             self._readable)
+        GLib.child_watch_add(GLib.PRIORITY_DEFAULT, pid, self._child_ended)
+        self._spawned(None, pid, None)
 
     def _spawned(self, _vte, pid, error, *_):
         if error is not None or pid in (None, -1):
@@ -198,6 +269,92 @@ class Terminal(Gtk.Overlay):
                 self.on_exit(self, -1)
             return
         self.pid = pid
+
+    def feed(self, data):
+        """What its program wrote, drawn (a clear's start held back a moment, for what follows it)."""
+        self.vte.feed(self.clears.take(data, self.vte.get_row_count()))
+        if self.clears.held and self.flushing is None:
+            self.flushing = GLib.timeout_add(50, self._flush)
+        return False
+
+    def _flush(self, everything=False):
+        self.flushing = None
+        if held := self.clears.flush(everything):
+            self.vte.feed(held)
+        return False
+
+    def _readable(self, fd, _cond):
+        try:
+            data = os.read(fd, 65536)
+        except BlockingIOError:
+            return True
+        except OSError:
+            data = b""
+        if data:
+            self.feed(data)
+            return True
+        self.reading = None
+        return False
+
+    def typed(self, data):
+        """Keys pressed in it (and VTE's answers to its program's questions), to its program."""
+        if self.fd is None or self.status is not None:
+            return
+        self.unsent += data
+        if self.writing is None:
+            self._write()
+
+    def _write(self, *_):
+        """As much of what's unsent as its pty takes now; the rest once it takes more."""
+        try:
+            self.unsent = self.unsent[os.write(self.fd, self.unsent):]
+        except BlockingIOError:
+            pass
+        except OSError:
+            self.unsent = b""
+        if not self.unsent:
+            self.writing = None
+            return False
+        if self.writing is None:
+            self.writing = GLib.unix_fd_add_full(GLib.PRIORITY_DEFAULT, self.fd, GLib.IOCondition.OUT, self._write)
+        return True
+
+    def _child_ended(self, _pid, status):
+        if self.fd is not None:  # (what it wrote last, read before it's said to have ended)
+            while True:
+                try:
+                    data = os.read(self.fd, 65536)
+                except OSError:
+                    break
+                if not data:
+                    break
+                self.feed(data)
+        self._flush(True)
+        for w in (self.reading, self.writing):
+            if w is not None:
+                GLib.source_remove(w)
+        self.reading = self.writing = self.fd = None
+        if self.pty is not None:
+            self.pty.close()
+        self._exited(self.vte, status)
+
+    def _resized(self):
+        if self.status is not None:
+            return False
+        now = (self.vte.get_column_count(), self.vte.get_row_count())
+        if now != self.size and self.resize(*now):
+            self.size = now
+        return True
+
+    def resize(self, columns, rows):
+        """Its program told its screen's size: whether it's been."""
+        if self.pty is None:
+            return False
+        try:
+            self.pty.set_size(rows, columns)
+        except GLib.Error:
+            return False
+        return True
 
     def _changed(self, *_):
         self.changed = time.monotonic()
@@ -306,7 +463,7 @@ class Terminal(Gtk.Overlay):
     def type(self, text):
         if self.status is not None:
             raise ValueError(f"{self.id}'s program has ended (exit status {self.status})")
-        self.vte.feed_child(text.replace("\r\n", "\r").replace("\n", "\r").encode())
+        self.typed(text.replace("\r\n", "\r").replace("\n", "\r").encode())
 
     def keys(self, keys):
         for k in keys.split():
@@ -326,7 +483,6 @@ class HostedTerminal(Terminal):
         self.argv = list(argv or [])  # (its host's login shell, if none)
         self.vte.connect("commit", lambda _v, text, _n: self.send({"op": "terminal_in", "data": _b64(
             text.encode() if isinstance(text, str) else text)}))
-        GLib.timeout_add(300, self._resized)
 
     def spawn(self, env=None):
         if self.spawned:
@@ -356,7 +512,7 @@ class HostedTerminal(Terminal):
             while (r := ch.reply()) is not None:
                 op = r.get("op")
                 if op == "terminal_out":
-                    GLib.idle_add(self.vte.feed, base64.b64decode(r.get("data") or ""))
+                    GLib.idle_add(self.feed, base64.b64decode(r.get("data") or ""))
                 elif op == "terminal_opened":
                     self.host_id = r.get("id")
                 elif op == "terminal_end":
@@ -385,13 +541,10 @@ class HostedTerminal(Terminal):
             self.on_exit(self, self.status)
         return False
 
-    def _resized(self):
-        if self.status is not None:
+    def resize(self, columns, rows):
+        if self.ch is None:
             return False
-        now = (self.vte.get_column_count(), self.vte.get_row_count())
-        if self.ch is not None and now != self.size:
-            self.size = now
-            self.send({"op": "terminal_resize", "columns": now[0], "rows": now[1]})
+        self.send({"op": "terminal_resize", "columns": columns, "rows": rows})
         return True
 
     def send(self, msg):

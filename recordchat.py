@@ -261,7 +261,8 @@ class RecordChat(RecordTools, metachat.MetaChat):
                 self.win.select(key)
             return
         book_id, _, page = key.partition("\n")
-        nb = next((t for t in self.win.store.every_book() if t.get("id") == book_id), None)
+        nb = self.notebook if (self.notebook or {}).get("id") == book_id else \
+            next((t for t in self.win.store.every_book() if t.get("id") == book_id), None)
         if kind != "page" or nb is None:
             return
         if how == "removed" and action["state"] == "done" and page not in nb["pages"]:
@@ -276,7 +277,7 @@ class RecordChat(RecordTools, metachat.MetaChat):
             box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
             set_zoom_class(box, zoom_class(self.win.store.zoom))
             margin = DiaryEditor.MARGIN
-            title = Gtk.Label(label=short_page(page), xalign=0, wrap=True, selectable=True, margin_start=margin,
+            title = Gtk.Label(label=short_page(page), xalign=0, wrap=True, margin_start=margin,
                               margin_end=margin, margin_top=8, margin_bottom=2, tooltip_text=page if ":" in page else None)
             title.add_css_class("diary-title")
             box.append(title)

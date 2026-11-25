@@ -15,6 +15,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
@@ -28,6 +30,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -40,6 +43,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import org.json.JSONArray
+import kotlinx.coroutines.launch
 import kotlin.math.cbrt
 import kotlin.math.max
 import kotlin.math.min
@@ -191,28 +195,30 @@ val Dp.icon: Dp get() = this * (Tokens.Font.body.value / BAUDE_TEXT_PX) * Settin
 private const val BAUDE_TEXT_PX = 12f
 
 /** ⋮ → Settings…, as Baude's Settings: its pages, General, Subscriptions (SubscriptionsPage), Dependencies (DepsPage)
- * and Telemetry (TelemetryPage), switched between
- * by the bar at its foot, as Baude's dialog's switcher is when it's narrow (page: the one it opens on). General's
+ * and Telemetry (TelemetryPage), swiped between (the chat's pages' pager) or switched between by the bar at its foot,
+ * as Baude's dialog's switcher is when it's narrow, which follows the swipe (page: the one it opens on). General's
  * groups in Baude's order: Meta's, Full-width text, Code Font, the accent and whether it's light or dark, how updates
  * download, notifications and the version; the sizes; Send Feedback…. */
 @Composable
 fun SettingsScreen(back: () -> Unit, feedback: () -> Unit, chat: List<String> = emptyList(), page: Int = 0) {
     val c = LocalBaude.current
-    var shown by remember { mutableStateOf(page) }
+    val pages = listOf(Page("general", Wording.Subscriptions.general, Adwaita.EmblemSystem),
+        Page("subscriptions", Wording.Subscriptions.title, Adwaita.SystemUsers),
+        Page("dependencies", Wording.Deps.title, Adwaita.PackageXGeneric),
+        Page("telemetry", Wording.Telemetry.title, Adwaita.DocumentOpenRecent))
+    val state = rememberPagerState(initialPage = page.coerceIn(0, pages.lastIndex)) { pages.size }
+    val scope = rememberCoroutineScope()
     Column(Modifier.fillMaxSize().background(c.frame)) {
         Bar(Wording.Window.settingsTitle, start = { IconButton(Adwaita.GoPrevious, Wording.Browser.back, onClick = back) })
-        Box(Modifier.weight(1f).fillMaxWidth()) {
-            when (shown) {
+        HorizontalPager(state, Modifier.weight(1f).fillMaxWidth(), key = { pages[it].key }) { i ->
+            when (i) {
                 1 -> SubscriptionsPage()
                 2 -> DepsPage()
                 3 -> TelemetryPage()
                 else -> GeneralPage(feedback, chat)
             }
         }
-        BottomBar(listOf(Page("general", Wording.Subscriptions.general, Adwaita.EmblemSystem),
-            Page("subscriptions", Wording.Subscriptions.title, Adwaita.SystemUsers),
-            Page("dependencies", Wording.Deps.title, Adwaita.PackageXGeneric),
-            Page("telemetry", Wording.Telemetry.title, Adwaita.DocumentOpenRecent)), shown) { shown = it }
+        BottomBar(pages, state.currentPage) { scope.launch { state.animateScrollToPage(it) } }
     }
 }
 

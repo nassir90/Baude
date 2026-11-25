@@ -74,6 +74,31 @@
           "by": "key F2 (on a focused sidebar row)",
           "does": "Rename that chat"
         }
+      ],
+      "decisions": [
+        {
+          "said": "Asked that Control+M bring up the Meta agent, and that pressing it while Meta is open close Meta.",
+          "rule": "Every app with a keyboard shows Meta with its box focused on Ctrl+M (Control on macOS too, since Cmd+M minimises), and closes it if it's already shown.",
+          "decided": "2026-11-13",
+          "source": [
+            {
+              "issue": "BaudeInternal#53"
+            },
+            {
+              "issue": "BaudeInternal#59"
+            }
+          ]
+        },
+        {
+          "said": "On macOS, Ctrl+F / Ctrl+B in a text box move the caret (Emacs keys) instead of Ctrl+B toggling the left sidebar (paraphrased)",
+          "rule": "In every app Ctrl+B (and F9) toggles the left sidebar wherever the focus is, a text box included: the window's own shortcuts take the key before a text box's Emacs-style caret keys on macOS",
+          "decided": "2026-11-16",
+          "source": [
+            {
+              "issue": "BaudeInternal#137"
+            }
+          ]
+        }
       ]
     },
     {

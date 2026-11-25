@@ -177,7 +177,8 @@
           "shows": "A choice row \"Accent Colour\": \"System\" or one of libadwaita's colours, each with a dot of its colour. Taken in every window as picked, and by Record's and Baude's logos (Settings' Accent Colour).",
           "copy": [
             "shared_settings.accent_colour"
-          ]
+          ],
+          "decisions": [{"said": "The Baude icon should take the selected accent on platforms that allow it (paraphrased)", "rule": "Every app whose platform lets it recolour its icon draws its logo in the accent picked (the Dock tile, the windows' icon, the launcher entry); with System it keeps its own colours", "decided": "2026-11-21", "source": [{"issue": "BaudeInternal#178"}]}]
         },
         {
           "name": "Theme",
@@ -247,7 +248,7 @@
         },
         {
           "name": "Show in Applications",
-          "decisions": [{"said": "The added to application menu path shouldn't go into the chat; it should be a toast", "rule": "Every app says what turning this on or off did in a toast, never as a note in the chat", "decided": "2026-11-22", "source": [{"issue": "BaudeInternal#191"}]}],
+          "decisions": [{"said": "The added to application menu path shouldn't go into the chat; it should be a toast", "rule": "Every app says what turning this on or off did in a toast, never as a note in the chat", "decided": "2026-11-22", "source": [{"issue": "BaudeInternal#191"}]}, {"said": "if \"Add apps in application register (on MAcos the command+search pane, on androdid the app list and such), we should make sure that all of: Record, Baude, Emission, Multiplex are all visible and vice versa for when it is removed", "rule": "Every app's Show in Applications setting adds Baude, Record, Emission and Multiplex to the platform's list of apps together and takes all four out together; it's one setting shared by every app", "decided": "2026-11-22", "source": [{"session": "b3845b21-55ac-4aab-a769-fb8517403c51", "message": "a7629583-162d-43b1-b7a1-f388a7e7fc1d"}]}],
           "shows": "A switch \"Show in Applications\" (macOS) or \"Show in application menu\" (Linux), no subtitle. The same one setting as Baude's Settings row: on when Baude, Record, Emission and Multiplex are all in the platform's list of apps, read again each time Settings opens. On: all four are added (per user), each with its logo (Baude's and Record's in the accent picked), each starting its command in ~/.local/bin, written with Baude's other commands; off: all four removed (the commands stay).",
           "copy": [
             "window.show_in",

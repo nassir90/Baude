@@ -151,6 +151,18 @@
       "shows": "A summary whose boundary isn't drawn yet shows on its own as the same disclosure as under a mark (\"Summary of the earlier conversation\", its tools line, its heading pinned while open), and moves under its mark when that is drawn."
     }
   ],
+  "decisions": [
+    {
+      "said": "Claude's compaction events need better visibility; research how claude -p surfaces them (paraphrased)",
+      "rule": "Every app shows a compaction as it runs (\"Compacting the conversation\" with working dots), then a mark where it happened with its summary folded under it, the same again when the chat is reopened",
+      "decided": "2026-11-18",
+      "source": [
+        {
+          "issue": "BaudeInternal#169"
+        }
+      ]
+    }
+  ],
   "scenes": [
     "chat-compact-tools",
     "chat-compact-pinned",

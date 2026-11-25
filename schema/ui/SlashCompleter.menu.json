@@ -8,7 +8,8 @@
     {
       "name": "list",
       "shows": "A popover above the box (a clear gap), its left edge on the /, as wide as the box up to a maximum. Each row: an icon (Claude's logo for Claude Code's built-in commands, a command-line icon for others), the command as \"/name\" and a dim line \"also /alias · <argument hint> · <first line of its description>\" (cut with …, the full description as a tooltip). Local commands first: /new (aliases /clear; \"Start a fresh session\"), /cd <path> (\"Move the conversation to another folder\"), /btw <question> (\"Ask a side question: answered from this conversation, without adding to it\"), /login [--console | --sso | --email <address>] (\"Sign in to your Anthropic account (claude auth login)\"), /logout (\"Sign out of your Anthropic account (claude auth logout)\"); then Claude's commands by name.",
-      "text": ["Start a fresh session", "Move the conversation to another folder", "Ask a side question: answered from this conversation, without adding to it", "Sign in to your Anthropic account (claude auth login)", "Sign out of your Anthropic account (claude auth logout)"]
+      "text": ["Start a fresh session", "Move the conversation to another folder", "Ask a side question: answered from this conversation, without adding to it", "Sign in to your Anthropic account (claude auth login)", "Sign out of your Anthropic account (claude auth logout)"],
+      "decisions": [{"said": "The slash command list always starts at the box's left edge; it should open near the / unless it would run off screen (paraphrased)", "rule": "Every app opens the / list (and an agent box's @ list) with its left edge on the / or @, shifted back only as far as needed to stay on screen.", "decided": "2026-11-12", "source": [{"issue": "BaudeInternal#41"}]}]
     },
     {
       "name": "matching",
@@ -28,7 +29,8 @@
     },
     {
       "name": "where it opens",
-      "shows": "Not for a / in a path (src/app) or a link (https://…), nor inside code (a fence or `span`), nor when the caret is not at the end of the word. Only the prompt's first word is a command to Claude Code; a later /word is words to Claude."
+      "shows": "Not for a / in a path (src/app) or a link (https://…), nor inside code (a fence or `span`), nor when the caret is not at the end of the word. Only the prompt's first word is a command to Claude Code; a later /word is words to Claude.",
+      "decisions": [{"said": "/ only activates at the start of a prompt but should work anywhere, like @ (paraphrased)", "rule": "Every app opens the command list for a / wherever a word starts, not only at the prompt's start; not inside a path, a link or code.", "decided": "2026-11-12", "source": [{"issue": "BaudeInternal#16"}]}]
     }
   ],
   "scenes": ["43-slash-completer", "44-completer-filter", "45-completer-picked"]

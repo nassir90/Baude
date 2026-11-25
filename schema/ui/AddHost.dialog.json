@@ -33,8 +33,8 @@
     }
   ],
   "removed": [
-    {"name": "command field in Add Host", "apps": ["baude", "phone"], "why": "Baude has no executable of its own to name: ssh always runs the one command baude-headless on a host (schema/variables/HOST_COMMAND.json)", "decided": "2026-11-22"},
-    {"name": "This phone's key (and New Key…) in Add Host", "apps": ["phone"], "why": "The phone's key lives on This phone, under Key Material; Add Host is just the endpoint", "decided": "2026-11-22"}
+    {"name": "command field in Add Host", "apps": ["baude", "phone"], "why": "Baude has no executable of its own to name: ssh always runs the one command baude-headless on a host (schema/variables/HOST_COMMAND.json)", "decided": "2026-11-22", "source": [{"session": "f24332de-9555-4279-8489-ffa7dbcf54c9", "message": "fb04da14-8f84-47fe-982e-925bd0e15867"}, {"session": "b3845b21-55ac-4aab-a769-fb8517403c51", "message": "94fe8190-5ead-48a2-bfe8-83493bb7bbad"}]},
+    {"name": "This phone's key (and New Key…) in Add Host", "apps": ["phone"], "why": "The phone's key lives on This phone, under Key Material; Add Host is just the endpoint", "decided": "2026-11-22", "source": [{"session": "f24332de-9555-4279-8489-ffa7dbcf54c9", "message": "fb04da14-8f84-47fe-982e-925bd0e15867"}, {"session": "b3845b21-55ac-4aab-a769-fb8517403c51", "message": "94fe8190-5ead-48a2-bfe8-83493bb7bbad"}]}
   ],
   "scenes": ["55k-network-add-server"]
 }

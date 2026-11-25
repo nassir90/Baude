@@ -35,6 +35,18 @@
       "copy": [
         "chat_notes.resumed",
         "chat_notes.resumed_from"
+      ],
+      "decisions": [
+        {
+          "said": "'The connection's gone. Send a message to carry on' was not useful; a session killed for inactivity should be resumed like any resumed chat, with nothing started before the first message.",
+          "rule": "Every app says nothing when a chat's agent has gone while idle; the next message starts it again (nothing is started before it) and the chat notes '— Resumed from <reason> —' above it, as for any resumed chat.",
+          "decided": "2026-11-14",
+          "source": [
+            {
+              "issue": "BaudeInternal#75"
+            }
+          ]
+        }
       ]
     },
     {
@@ -42,6 +54,28 @@
       "shows": "\"Interrupted\" once, after a turn you stopped (Esc / stop button), unless a tool card it cut short already says interrupted. Also from history for a stopped turn.",
       "copy": [
         "chat_notes.interrupted"
+      ],
+      "decisions": [
+        {
+          "said": "Pressing Esc said both an interrupt note and a turn-ended-with-error 'operation was aborted' note; the duplication is redundant",
+          "rule": "Every app says one 'Interrupted' note for a turn you stopped; the error the stop itself causes (operation aborted) is not said again as a turn error.",
+          "decided": "2026-11-15",
+          "source": [
+            {
+              "issue": "BaudeInternal#114"
+            }
+          ]
+        },
+        {
+          "said": "Stopping mid tool call or mid reply ends with 'error_during_execution'; interrupting mid-turn is expected and should be handled normally (paraphrased)",
+          "rule": "Every app ends a turn you stopped with one 'Interrupted' note, never an error line (Claude's error_during_execution, an abort message, Codex's interrupted status)",
+          "decided": "2026-11-17",
+          "source": [
+            {
+              "issue": "BaudeInternal#148"
+            }
+          ]
+        }
       ]
     },
     {
@@ -50,6 +84,18 @@
       "copy": [
         "interrupt.not_stopped",
         "interrupt.not_running"
+      ],
+      "decisions": [
+        {
+          "said": "A resumed chat's claude can ignore interrupts: each press only adds another 'interrupt requested' line (paraphrased)",
+          "rule": "In every app a stopped turn ends: if the program hasn't ended it 5 s after the interrupt, it is stopped and the chat takes a message again, with one line saying so; if nothing was running, the turn ends at once; pressing stop again meanwhile adds nothing",
+          "decided": "2026-11-17",
+          "source": [
+            {
+              "issue": "BaudeInternal#147"
+            }
+          ]
+        }
       ]
     },
     {
@@ -74,7 +120,32 @@
     },
     {
       "name": "other",
-      "shows": "Host and process notes (\"Starting <machine>'s host process…\", \"Failed to start Claude: …\", \"Couldn't reach <host>: …\", \"Signing out…\", \"Worktree <name> was removed: …\"), attach/paste failures (\"Can't attach <path>: not a file\", \"Paste failed: …\"), \"Stop requested for <task>\", \"Control error: …\", \"Stderr: <line>\"."
+      "shows": "Host and process notes (\"Starting <machine>'s host process…\", \"Failed to start Claude: …\", \"Couldn't reach <host>: …\", \"Signing out…\", \"Worktree <name> was removed: …\"), attach/paste failures (\"Can't attach <path>: not a file\", \"Paste failed: …\"), \"Stop requested for <task>\", \"Control error: …\", \"Stderr: <line>\".",
+      "decisions": [
+        {
+          "said": "The same couldn't-reach note was repeated over and over in the chat",
+          "rule": "Every app says each kind of failure to reach or open a chat once per chat, however often it's tried again; a chat its host has no session for is said as missing, not as a failure each try.",
+          "decided": "2026-11-15",
+          "source": [
+            {
+              "issue": "BaudeInternal#111"
+            }
+          ]
+        },
+        {
+          "said": "Codex's JSON log lines (an unknown-model warning, a telemetry 400) were shown raw in the chat and shouldn't surface",
+          "rule": "Every app drops Codex's tracing log from the chat: warnings and below, and its housekeeping (analytics, telemetry) at any level, are not shown; only the few lines the user can act on are, in the app's own words.",
+          "decided": "2026-11-15",
+          "source": [
+            {
+              "issue": "BaudeInternal#112"
+            },
+            {
+              "issue": "BaudeInternal#113"
+            }
+          ]
+        }
+      ]
     },
     {
       "name": "claude events",
@@ -118,6 +189,21 @@
               "issue": "BaudeInternal#225"
             }
           ]
+        }
+      ]
+    }
+  ],
+  "removed": [
+    {
+      "name": "\"a new session on <host>\" (and \"model → …: a new conversation on <host>\") note in the chat being left",
+      "apps": [
+        "baude"
+      ],
+      "why": "The owner: a new session's 'new session in <host>' line in the current chat is absurd; it shouldn't go anywhere at all (paraphrased)",
+      "decided": "2026-11-19",
+      "source": [
+        {
+          "issue": "BaudeInternal#173"
         }
       ]
     }

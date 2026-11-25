@@ -26,7 +26,8 @@
       "actions": [
         {"by": "pick a host", "does": "Closes the open notebook (what was typed is saved or sent to the host it is on), lists that host's notebooks and opens its first."},
         {"by": "right-click", "does": "Host menu (RecordHostMenu), only on another machine's host."}
-      ]
+      ],
+      "decisions": [{"said": "Record was left out of the mesh: add a host dropdown by the Notebooks one to reach notes on other machines, with Meta knowing the current host / notebook / page.", "rule": "Every app with notebooks lists the notebooks of a host picked beside the Notebooks header ('This machine' first), and its Meta knows where the user is as host / notebook / page.", "decided": "2026-11-14", "source": [{"issue": "BaudeInternal#79"}]}]
     },
     {
       "name": "notebook row",

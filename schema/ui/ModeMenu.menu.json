@@ -11,6 +11,10 @@
       "copy": ["mode_effort.manual", "mode_effort.accept_edits", "mode_effort.plan", "mode_effort.auto", "mode_effort.dont_ask", "mode_effort.bypass"],
       "actions": [
         {"by": "click", "does": "Switches the chat's permission mode (asked of claude; on success the quiet note \"permission mode → <label>\"). If claude refuses (for example Bypass when the chat wasn't started able to bypass), the picker returns to the mode it is still in and the chat notes \"couldn't switch to <mode>: <why> (still <was>)\" (or without the \"still\" part with no known earlier mode)"}
+      ],
+      "decisions": [
+        {"said": "Baude must handle claude refusing a switch to Bypass permissions and not leave the picker on Bypass (paraphrased)", "rule": "When claude refuses a permission-mode switch, every app puts the picker back on the mode claude is really in and notes why in the chat.", "decided": "2026-11-12", "source": [{"issue": "BaudeInternal#17"}]},
+        {"said": "Auto mode should be the default, not Plan.", "rule": "Every app starts a new Claude chat in Auto mode.", "decided": "2026-11-14", "source": [{"issue": "BaudeInternal#70"}]}
       ]
     },
     {

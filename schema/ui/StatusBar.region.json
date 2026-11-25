@@ -20,7 +20,7 @@
     },
     {
       "name": "folder and last turn",
-      "decisions": [{"said": "in and out before the token counts can be a down arrow and an up arrow", "rule": "Every app writes a turn's tokens as ↓ read and ↑ written", "decided": "2026-11-24", "source": [{"issue": "BaudeInternal#210"}]}],
+      "decisions": [{"said": "in and out before the token counts can be a down arrow and an up arrow", "rule": "Every app writes a turn's tokens as ↓ read and ↑ written", "decided": "2026-11-24", "source": [{"issue": "BaudeInternal#210"}]}, {"said": "A turn's in/out tokens should use the same k/M units as the context count, e.g. 3.9M not 3931407 (paraphrased)", "rule": "Every app writes token counts in k/M units (950, 12.4k, 3.9M), the same as the context count: under 1000 a plain number", "decided": "2026-11-17", "source": [{"issue": "BaudeInternal#154"}]}],
       "shows": "Takes the room left, one line, cut with … at the end. The chat's folder as people say it (home shown as ~, \"~/projects/x\"), plus \" (worktree <name>)\" when the chat works in a git worktree; for another host's chat, that folder as its host says it. After three spaces, the last turn's summary: \"<N> turns · <seconds>s · ↓ <tokens> / ↑ <tokens> tok\" (tokens as 950, 12.4k, 1.2M) after each finished turn; \"<N> tools\" right after claude starts; blank for a network chat just attached.",
       "text": ["{n} turns · {s}s · ↓ {tokens} / ↑ {tokens} tok", "{n} tools"],
       "actions": [{"by": "hover", "does": "Tooltip: the full folder path"}]
@@ -38,11 +38,12 @@
       "name": "cost",
       "shows": "Right-aligned label of what this chat has spent, \"$0.0125\" (four decimals), never cut short. For a model run on the user's own machines that adds nothing per turn, \"$0.00 (local)\" until something is spent. A resumed chat carries on from its recorded cost.",
       "text": ["What this chat has spent", "${cost}", "$0.00 (local)"],
-      "actions": [{"by": "hover", "does": "Tooltip \"What this chat has spent\""}]
+      "actions": [{"by": "hover", "does": "Tooltip \"What this chat has spent\""}],
+      "decisions": [{"said": "For local models (MLX or Ollama on the mesh) the dollar figure doesn't show up (paraphrased)", "rule": "Every app always shows what a chat has spent, never cut short by a long folder; for a model run on the user's own machines it reads \"$0.00 (local)\" until something is spent", "decided": "2026-11-17", "source": [{"issue": "BaudeInternal#155"}]}]
     },
     {
       "name": "context meter",
-      "decisions": [{"said": "No need for the word context left of the bar: the bar says what it is", "rule": "Every app draws the context meter as the bar alone, with no word before it", "decided": "2026-11-24", "source": [{"issue": "BaudeInternal#209"}]}],
+      "decisions": [{"said": "No need for the word context left of the bar: the bar says what it is", "rule": "Every app draws the context meter as the bar alone, with no word before it", "decided": "2026-11-24", "source": [{"issue": "BaudeInternal#209"}]}, {"said": "An MLX model didn't report its context filling as it read large amounts of text; propagate it where possible", "rule": "Every app's context meter fills as the turn runs for every model that reports its use (Claude's, and a provider's such as MLX through pi), not only at the turn's end.", "decided": "2026-11-15", "source": [{"issue": "BaudeInternal#116"}]}, {"said": "Draw the context count inside the bar, its colour flipping where the fill ends (dark over the fill, light after), and drop the percentage since the bar shows it (paraphrased)", "rule": "Every app draws the context count (\"24k / 200k\") inside the bar, in the background colour over the fill and the text colour past it, with no percentage beside it (the percentage is in the tooltip)", "decided": "2026-11-17", "source": [{"issue": "BaudeInternal#153"}]}],
       "shows": "A 110 px wide, 16 px high bar at the far right. The count \"24k / 200k\" is drawn inside the bar (small, tabular figures): in the window background colour over the filled part, in the text colour after it. The fill is the accent colour up to 60 %, amber (warning) past 60 %, red past 85 %. Past the window (\"12.4k / 8.2k\") the bar is full. After a turn ended with claude saying the prompt is too long, the bar is full too. Refreshed at most once a second during a turn, and when the model changes.",
       "copy": ["context_usage.tooltip", "context_usage.usage_percent", "context_usage.window_known", "context_usage.used_no_limit", "context_usage.unknown_no_limit"],
       "actions": [
@@ -51,11 +52,12 @@
     }
   ],
   "states": [
-    {"name": "new chat", "shows": "No dots, host \"local\", folder only, cost $0.0000, context shows \"— / <the model's window>\" (or \"—\" when its window isn't known yet)"},
+    {"name": "new chat", "shows": "No dots, host \"local\", folder only, cost $0.0000, context shows \"— / <the model's window>\" (or \"—\" when its window isn't known yet)", "decisions": [{"said": "As far as possible, a model's max context should be shown before its session starts", "rule": "Every app's context meter shows the model's window ('— / 200k') before the session has said what it uses, wherever the window is known.", "decided": "2026-11-16", "source": [{"issue": "BaudeInternal#128"}]}]},
     {"name": "working", "shows": "Dots stepping; tasks button when background tasks run"},
     {"name": "window without a limit", "shows": "Some models report use but no window: no bar; the label reads \"context: 24k\" (\"context —\" while unknown)"},
     {"name": "context high", "shows": "Bar amber past 60 %, red past 85 %; at full, \"Context Exhausted\" appears over the composer (see Composer)"},
     {"name": "another host's chat", "shows": "Host name and that host's folder path in place of local ones"}
   ],
+  "removed": [{"name": "model id (\"claude-opus-5-5\") beside the folder and cost", "apps": ["baude"], "why": "The owner: the model slug in the bottom bar is redundant, as the header already names the model (paraphrased)", "decided": "2026-11-17", "source": [{"issue": "BaudeInternal#160"}]}],
   "scenes": ["01-empty", "02-turn-complete", "03-working", "61-context-high", "70-background-running"]
 }

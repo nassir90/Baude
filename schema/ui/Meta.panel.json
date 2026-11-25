@@ -57,7 +57,8 @@
             {"by": "hover the row", "does": "a small round revert button (circular arrows) fades in just outside the bubble, level with its last line, and fades out when the pointer leaves; hover-only on desktop, so the phone needs another way to reach it (long-press or a message menu)"},
             {"by": "click revert", "does": "tentative revert: this message and everything after it disappear from the conversation, its text goes back into the box (and in Record the quote and selection come back); Esc puts everything back as it was (with the draft that was in the box); sending the box commits the revert (those messages are removed for good, the Claude sessions are stopped and the next message starts a new one told only what is left). The actions the removed replies took stay (kept or undone as any are). Not available while any Meta in the app is answering"}
           ],
-          "copy": ["chat_turns.revert"]
+          "copy": ["chat_turns.revert"],
+          "decisions": [{"said": "Revert needs adding to Meta and Side Questions if it isn't there already", "rule": "Every app's agent conversations (the chat, Meta, a side question's follow-ups) offer the same revert on your messages.", "decided": "2026-11-16", "source": [{"issue": "BaudeInternal#127"}]}]
         },
         {
           "name": "reply text",
@@ -94,7 +95,8 @@
           "actions": [
             {"by": "click an item", "does": "opens it (Baude: the chat, as the sidebar opens one; a deleted chat says by toast 'It's in Baude's trash: undo brings it back'; Record: the page or its notebook). Tooltip 'Open <name>'"},
             {"by": "hover the box", "does": "lights its items in the left bar"}
-          ]
+          ],
+          "decisions": [{"said": "Page moves plus the link fixes that go with them came out as a pile of separate edits; one goal should be one change, undone as one.", "rule": "Every app's Meta makes all it changes in the left bar in one turn (chats moved, renamed or archived; pages moved, added or deleted and the text fixes that go with them) one change: drawn once, at its first call, kept, undone and redone together.", "decided": "2026-11-12", "source": [{"issue": "BaudeInternal#51"}]}]
         },
         {
           "name": "setting box",
@@ -133,6 +135,10 @@
             {"by": "click the verb button", "does": "checks and submits; on a problem the red caption says it; on success the card says 'Done: ...' and Meta is told what was done"},
             {"by": "scroll past the form", "does": "an unsubmitted form whose place scrolls above the top of the conversation is pinned: it hovers 8 px under the top of the pane until its place is back in view; a gap its height stays where it was"},
             {"by": "right-click the form", "does": "a one-item popover: 'Unpin' while pinned (tooltip 'Right-click: Unpin'), 'Pin' to pin it again (tooltip 'Right-click: Pin'); only while the form is open"}
+          ],
+          "decisions": [
+            {"said": "Asked for Meta to summon an app's form inline (add a host, make a group, spawn an agent), filled and validated as it goes, unsubmitted forms pinned while scrolled past.", "rule": "Every app's Meta brings up the app's own form in its conversation (never a dialog), fills it with what it knows, checks it as it's filled, and only the user's click submits it; an unsubmitted form scrolled past is pinned over the top of the conversation.", "decided": "2026-11-12", "source": [{"issue": "BaudeInternal#46"}]},
+            {"said": "Why are Meta's forms modals? This is bizzare?", "rule": "Every app draws a form Meta brings up as a card in Meta's conversation, where Meta brought it up, never as a dialog", "decided": "2026-11-22", "source": [{"session": "b3845b21-55ac-4aab-a769-fb8517403c51", "message": "96b6b609-ce76-4e05-ac4f-d263c29199e9"}, {"session": "b3845b21-55ac-4aab-a769-fb8517403c51", "message": "e55e5b9e-05b7-4b92-94ca-d0229b45fb4f"}]}
           ]
         },
         {
@@ -153,7 +159,8 @@
           "shows": "A reply that ended in an error: the tools it had run before the error are drawn as above (their actions can still be undone) and the error text is drawn in red under them. Errors seen: 'Couldn't run <model> (<why>).' when the model's program cannot start, 'claude reported an error', 'Run `claude` in a terminal and /login, then ask again.', '<program> exited with <code>', 'apple-claude isn't built yet: swift build -c release, in apple-claude/', '<program>-claude isn't here', and the host/pi/provider notes of model_providers and agent_proxy (for example 'couldn't reach the host that runs this model (<host>): <why>').",
           "copy": ["meta.couldnt_run", "meta.claude_error", "meta.login_hint", "meta.exited", "meta.apple_not_built", "meta.runner_missing", "meta.ended_error", "model_providers", "agent_proxy"]
         }
-      ]
+      ],
+      "decisions": [{"said": "In Meta a selection couldn't go past your own message, though it works in the main chat; consolidate and fix", "rule": "Every app's agent conversations (the chat, Meta, side questions) let one selection span any number of messages, yours and the replies, the same way.", "decided": "2026-11-14", "source": [{"issue": "BaudeInternal#104"}]}]
     },
     {
       "name": "over the box: app bars",
@@ -208,12 +215,19 @@
       ],
       "states": [
         {"name": "context unknown for the model", "shows": "'context: <used>' with no bar when the model reports usage without a limit; 'context —' when not even that is known"}
+      ],
+      "decisions": [
+        {"said": "In Meta, the context used should be at the bottom right and the Clear button at the bottom left (paraphrased)", "rule": "Every app's Meta has a row under its box: Clear at the left, the context meter at the right.", "decided": "2026-11-12", "source": [{"issue": "BaudeInternal#45"}]},
+        {"said": "Thinking… in Meta is redundant and less honest than the three dots the chat uses, since it shows even when the model is stalled.", "rule": "Every app shows a running turn with the working dots (•, ••, •••), never a 'Thinking…' placeholder.", "decided": "2026-11-14", "source": [{"issue": "BaudeInternal#61"}]},
+        {"said": "After Clear, switching to a model with a smaller window still said Context Exhausted; clear didn't really clear, and other agent panes shouldn't have this", "rule": "In every app, clearing an agent's conversation (Meta's Clear, 'clear' or '/clear') starts afresh: nothing of the old context counts, so any model can be picked and sent to after it.", "decided": "2026-11-15", "source": [{"issue": "BaudeInternal#119"}]},
+        {"said": "There needs to be a way to copy transcripts with their model, tool and context-size information, for reporting issues, especially with Meta", "rule": "Every app's Meta has Copy, putting the conversation on the clipboard as text with a header block (app, model, mode, context) and its tool calls, ready to paste into an issue.", "decided": "2026-11-15", "source": [{"issue": "BaudeInternal#120"}]}
       ]
     },
     {
       "name": "what Meta can open and do",
       "shows": "Not drawn on its own; this is what its replies can bring up. Tools shared by both apps: app_index (opens a part of the app's index: settings, runtime, changelog, buttons, forms, plus the app's own parts), set_setting, show (a setting's row, chats, pages, the changelog, or a button), read_chat, rename_chat, undo, redo, open_form, fill_form; model setup tools: local_models, check_models (loads Ollama models one at a time), prune_models (asks first), add_mlx_model, add_endpoint (asks first), model_files, fetch_model (asks first), build_apple_adapter (asks first); theme tools, on this machine's host (themelook; Later, as the model-setup tools are, and separate in code mode as they are): create_theme (a theme's CSS and colours, made or replaced), install_theme (from a folder or .css file here), preview_theme (an installed theme drawn in this app's windows for a look, Settings left as it is; its Theme row shown under the reply), each undone as Meta's other actions are. The mesh's tools, always (code mode too; not on Apple's on-device models), never asked about: hosts, chats, read_chat, message_chat, start_subagent (baudelib.meshtools, as a Bot has them; on the phone, Meta's session on its host has them from that host). Claude Code's own: Read, Grep, Glob always; Bash, Edit, Write, WebFetch, WebSearch only on Claude's models with Run commands on (in Claude Code's Auto mode; anything it holds back is asked as a permission card). Code mode replaces the app's tools with one run_python tool (up to 10 lines of Python calling the app's tools; the model-setup and theme tools stay separate). Baude's own tools: highlight_chats, move_chats, make_group, rename_group, delete_group, show_groups (which groups the left bar lists), archive_chats, unarchive_chats, delete_chats (this machine's chats only, to Baude's trash, not the open chat nor ones used in the last 10 minutes; a host's session or a Claude Desktop chat gets a Move to Trash button instead). Record's own: propose_edit, list_edits, revise_edit, withdraw_edit, add_page, delete_page, move_pages, add_notebook, edit_page, highlight_pages. Baude settings it can change: group_by (folder, created or updated) plus the shared ones; Record's: markup visibility and backup_all plus the shared ones. The shared settings Meta can read and change: accent colour, theme, code font (takes effect from the next start), text scale, icon scale, global scale, full-width text, auto update, Meta's model (Intelligence), Effort. Run commands and Code mode are only shown, never changed by Meta (the user's to turn on or off).",
-      "copy": ["meta_settings"]
+      "copy": ["meta_settings"],
+      "decisions": [{"said": "Baude needs a way to get models from one machine of the mesh onto another; Meta should have tools to download them and say where model files are so a model can copy them over", "rule": "In every app Meta has model setup tools that fetch a model onto a host (fetch_model, asking first) and say where a model's files are (model_files), so it can be copied between machines by hand.", "decided": "2026-11-14", "source": [{"issue": "BaudeInternal#106"}]}]
     },
     {
       "name": "left bar marks",
@@ -255,5 +269,6 @@
     {"name": "reverting", "shows": "The reverted message and everything after it are hidden; its text is in the box; Esc brings them back."},
     {"name": "form pinned", "shows": "An open form hovering over the top of the conversation."}
   ],
+  "removed": [{"name": "Meta's Add a host form: its ssh blurb and the 'Done: looking for Baude on <host>' line", "apps": ["baude", "phone"], "why": "The owner called the 'reached over ssh with your keys, never a password, linked both ways' copy and the 'Done: looking for Baude on …' line under the submitted form useless and asked for both to go.", "decided": "2026-11-14", "source": [{"issue": "BaudeInternal#69"}]}],
   "scenes": ["55u-network-meta-host-button"]
 }

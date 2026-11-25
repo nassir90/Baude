@@ -8,7 +8,11 @@
     {
       "name": "list",
       "shows": "A popover above the box like the slash list, its left edge on the @. Each row: the kind's icon, the name (a chat's title; a Bot's name, never its chat's title), and a dim line \"<what it is> · <summary>\" with a time tip where it has a date. With nothing typed after the @, the chats come first. More rows arrive while the catalogue is still being read (the list shows it is waiting). A footer note says \"{n} found\" or \"Nothing found\".",
-      "copy": ["meta.found", "meta.nothing_found"]
+      "copy": ["meta.found", "meta.nothing_found"],
+      "decisions": [
+        {"said": "@ references should work over the wire, prefer the host's own, and not block on slow hosts: results flow in with loading dots at the bottom left and the count at the bottom right.", "rule": "Every app's @ list lists names as they arrive, never waiting on a slow host, with working dots at its foot's left while more are coming and the count ('{n} found' / 'Nothing found') at its right.", "decided": "2026-11-14", "source": [{"issue": "BaudeInternal#71"}]},
+        {"said": "The ⌘K / @ lists need a more sensible, time-aware default order (paraphrased)", "rule": "With nothing typed after the @, every app lists what was touched lately first, newest first (chats before other names); as you type, the match decides the order and recency only breaks ties", "decided": "2026-11-16", "source": [{"issue": "BaudeInternal#136"}]}
+      ]
     },
     {
       "name": "search",
@@ -25,5 +29,6 @@
       "name": "where it opens",
       "shows": "Not inside code (a decorator's @, an address's @), and not while the slash list is up."
     }
-  ]
+  ],
+  "decisions": [{"said": "@ references should work in ordinary chats, not only in Meta, with the agent told briefly what each thing is.", "rule": "Every app's chat box has the same @ list as Meta's box: chats and the names of the chat's folder (files, commits, pull requests, Kubernetes objects…), put in as @name.", "decided": "2026-11-13", "source": [{"issue": "BaudeInternal#58"}]}]
 }

@@ -87,6 +87,18 @@
       "shows": "The card ends as the tool reports it; no \"denied\" is added (it's \"not answered\"). With no card, a note \"not answered AskUserQuestion\"."
     }
   ],
+  "decisions": [
+    {
+      "said": "Baude needs to handle Claude's questions (AskUserQuestion) (paraphrased)",
+      "rule": "Every app shows Claude's AskUserQuestion as a form in the call's card (radio buttons for one pick, checkboxes for several, an Other to type into, Answer / Skip) and sends the answers back, never as an Allow / Deny prompt",
+      "decided": "2026-11-17",
+      "source": [
+        {
+          "issue": "BaudeInternal#145"
+        }
+      ]
+    }
+  ],
   "scenes": [
     "15-question-asking",
     "16-question-answered"

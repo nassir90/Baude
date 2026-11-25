@@ -76,6 +76,11 @@
               "by": "click View",
               "does": "Opens this subagent's own transcript on the side panel's Subagents page. Tooltip \"Open this subagent in the side panel\"."
             }
+          ],
+          "decisions": [
+            {"said": "Clicking Command or Output should push the text below it down and keep the button where it is, even at the very bottom of the chat (paraphrased)", "rule": "In every app, opening or closing a tool card's toggle (Command, Prompt, Diff, Input, Output) keeps the toggle where it is on screen and moves what is below it, including with the chat scrolled to its end (closing there leaves blank room under the chat).", "decided": "2026-11-12", "source": [{"issue": "BaudeInternal#7"}, {"issue": "BaudeInternal#14"}]},
+            {"said": "An Edit's output only says the file was updated successfully, which is useless; something like 'Diff' would be useful (paraphrased)", "rule": "Every app labels an Edit's input toggle \"Diff\", and an Edit/MultiEdit/Write whose whole result only says the file was updated or created has no Output button.", "decided": "2026-11-12", "source": [{"issue": "BaudeInternal#15"}]},
+            {"said": "A Skill call's output is redundant and useless; its input is mildly more interesting (paraphrased)", "rule": "Every app gives a Skill call whose result is only \"Launching skill: …\" no Output button; its Input (skill and args) stays.", "decided": "2026-11-12", "source": [{"issue": "BaudeInternal#24"}]}
           ]
         },
         {
@@ -213,7 +218,8 @@
     },
     {
       "name": "interrupted",
-      "shows": "The turn ended (Esc / stop, or a saved chat whose call never got a result) before the call did: red border and red content as for an error, no spinner, \"· interrupted\" dimmed after the summary. If its input never finished arriving, it has no Input button. A result that arrives later turns it back into done/error."
+      "shows": "The turn ended (Esc / stop, or a saved chat whose call never got a result) before the call did: red border and red content as for an error, no spinner, \"· interrupted\" dimmed after the summary. If its input never finished arriving, it has no Input button. A result that arrives later turns it back into done/error.",
+      "decisions": [{"said": "After Escape mid tool call the call spun forever; mark them red as cancelled, and leave out the command button when the command never got through.", "rule": "Every app marks a call still running when its turn ends as interrupted (red, no spinner, '· interrupted'), and one whose input never finished arriving has no Input button.", "decided": "2026-11-14", "source": [{"issue": "BaudeInternal#66"}]}]
     },
     {
       "name": "background",

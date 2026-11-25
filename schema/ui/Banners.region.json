@@ -42,6 +42,18 @@
           ],
           "text": [
             "Looking for daemon…"
+          ],
+          "decisions": [
+            {
+              "said": "'Can't connect to <host>' confused when it was the user's own host; say 'daemon' instead.",
+              "rule": "Every app calls its own machine's host the Daemon when it can't be reached ('Looking for daemon…'), and names another machine's host by name.",
+              "decided": "2026-11-14",
+              "source": [
+                {
+                  "issue": "BaudeInternal#87"
+                }
+              ]
+            }
           ]
         },
         {
@@ -54,6 +66,18 @@
             "host_status.restarting_left",
             "host_status.stopping_all_stopped",
             "host_status.restarting_all_stopped"
+          ],
+          "decisions": [
+            {
+              "said": "Quitting Baude's host process seems unresponsive; show how it's stopping, e.g. 'Daemon is restarting, X processes to kill' (paraphrased)",
+              "rule": "Every app shows a host's stop or restart from its first moment: \"<host> stopping…\" / \"restarting…\", then how many of its processes are still to stop, counting down",
+              "decided": "2026-11-17",
+              "source": [
+                {
+                  "issue": "BaudeInternal#157"
+                }
+              ]
+            }
           ]
         },
         {
@@ -132,6 +156,18 @@
               "by": "click button",
               "does": "Restarts Baude, the daemon (once no command is running on it; an idle model turn is cut short and offered Continue) or both; the Dismiss button just stops the message. A toast \"Restarting the daemon once N sessions finish running a command\" while it waits, \"Daemon restarted\" after"
             }
+          ],
+          "decisions": [
+            {
+              "said": "'Local's host process is older than Baude' was useless copy: say 'Daemon is older than client', 'Restart Daemon?', then 'Daemon restarted'.",
+              "rule": "Every app calls its own machine's host process the Daemon when the two run different code ('Daemon is older than <app>', button 'Restart Daemon', toast 'Daemon restarted'), never by the host's name.",
+              "decided": "2026-11-14",
+              "source": [
+                {
+                  "issue": "BaudeInternal#72"
+                }
+              ]
+            }
           ]
         }
       ]
@@ -174,6 +210,18 @@
         "hosts.deactivated",
         "host_status.stopping",
         "host_status.restarting"
+      ],
+      "decisions": [
+        {
+          "said": "The host's can't-connect message was a banner flush at the left and not at the right; it should be a rounded island like the empty states",
+          "rule": "Every app draws a host's can't-reach note over the chat list as a small outlined rounded island, text centred, never a banner flush with one edge.",
+          "decided": "2026-11-15",
+          "source": [
+            {
+              "issue": "BaudeInternal#110"
+            }
+          ]
+        }
       ]
     },
     {

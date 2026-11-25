@@ -21,5 +21,6 @@
   ],
   "states": [
     {"name": "a Bot switched away from, mid-turn", "shows": "Its notification, titled with the Bot's name, when its turn ends or it waits."}
-  ]
+  ],
+  "decisions": [{"said": "Replies that finish in the background should notify through the OS's notification system, not only the sidebar's dots", "rule": "Every app posts the platform's own notification when a chat finishes a turn or asks something while you're elsewhere (Settings → Notifications).", "decided": "2026-11-15", "source": [{"issue": "BaudeInternal#117"}]}]
 }

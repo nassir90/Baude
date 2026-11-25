@@ -141,6 +141,18 @@
             "decided": "2026-11-22"
           }
         }
+      ],
+      "decisions": [
+        {
+          "said": "Image quality is low; fine for previews, but zoomed in it should use the highest-quality image there is (paraphrased)",
+          "rule": "Every app's large image view opens at once with the copy it has, then swaps in the original file when it's a better copy (more pixels, or less compressed) without moving; previews can stay small",
+          "decided": "2026-11-17",
+          "source": [
+            {
+              "issue": "BaudeInternal#156"
+            }
+          ]
+        }
       ]
     },
     {
@@ -156,7 +168,20 @@
         "does": "nothing",
         "why": "A swipe steps through the images (the stage's drag)",
         "decided": "2026-11-22"
-      }
+      },
+      "decisions": [
+        {
+          "said": "On mobile, when I zoom into an image, I don't want the left / right buttons I want to be able to swipe through images  to go from left to righth",
+          "rule": "Every app pages through the viewer's images by a sideways swipe on a touch screen, the image following the finger, and draws no previous / next buttons there; zoomed in, the drag pans first, as far as the image's edge",
+          "decided": "2026-11-22",
+          "source": [
+            {
+              "session": "f24332de-9555-4279-8489-ffa7dbcf54c9",
+              "message": "30af64bb-6804-4040-984b-d3fd2a444e53"
+            }
+          ]
+        }
+      ]
     },
     {
       "name": "keys",

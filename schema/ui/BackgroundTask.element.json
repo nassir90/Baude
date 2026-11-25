@@ -52,6 +52,18 @@
           "by": "click the description (when its card is drawn later, higher up)",
           "does": "Scrolls back to the card, opening its group, and flashes it."
         }
+      ],
+      "decisions": [
+        {
+          "said": "A raw <task-notification> block in the chat needs better formatting (paraphrased)",
+          "rule": "Every app (Baude, Record's reader) draws a task notification as one ending line, never the raw XML it arrives in.",
+          "decided": "2026-11-12",
+          "source": [
+            {
+              "issue": "BaudeInternal#25"
+            }
+          ]
+        }
       ]
     }
   ],
@@ -62,7 +74,19 @@
     },
     {
       "name": "finished with card in chat",
-      "shows": "No separate line: the card says it ended. The CLI then often starts a turn by itself to report it, drawn as a normal reply."
+      "shows": "No separate line: the card says it ended. The CLI then often starts a turn by itself to report it, drawn as a normal reply.",
+      "decisions": [
+        {
+          "said": "Remote chats still show the old tick-plus-tool line that was supposed to be gone (paraphrased)",
+          "rule": "In every chat (local, another host's, another program's), a background task whose card is in the chat ends on that card, with no ticked line under it.",
+          "decided": "2026-11-12",
+          "source": [
+            {
+              "issue": "BaudeInternal#13"
+            }
+          ]
+        }
+      ]
     },
     {
       "name": "finished, card not drawn",

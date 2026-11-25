@@ -15,7 +15,19 @@
   "parts": [
     {
       "name": "line",
-      "shows": "The message's text in the theme's error colour, wrapping, selectable, 11px in from both sides (where a tool card's text starts). A leading \"API Error\" is bold, the rest regular: e.g. \"API Error: 529 Overloaded\"."
+      "shows": "The message's text in the theme's error colour, wrapping, selectable, 11px in from both sides (where a tool card's text starts). A leading \"API Error\" is bold, the rest regular: e.g. \"API Error: 529 Overloaded\".",
+      "decisions": [
+        {
+          "said": "API errors such as 'your computer went to sleep mid-response' should use the same pink as every error, start where a tool call starts, with 'API Error' in bold (paraphrased)",
+          "rule": "Every app draws an API error in the error colour, its text starting where a tool card's text does, a leading \"API Error\" in bold, in live replies and saved chats alike.",
+          "decided": "2026-11-11",
+          "source": [
+            {
+              "issue": "BaudeInternal#5"
+            }
+          ]
+        }
+      ]
     }
   ],
   "states": [

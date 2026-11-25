@@ -19,7 +19,8 @@
       "actions": [
         {"by": "click", "does": "Opens the page in a tab (shown if already open). A page Meta deleted (not yet kept or undone) opens read-only as it was, all of it struck through on red (RecordNotes, page deleted by Meta)."},
         {"by": "right-click", "does": "Page menu (RecordPageMenu)."}
-      ]
+      ],
+      "decisions": [{"said": "A page's name in the left bar should change live as it's renamed in the top bar (paraphrased)", "rule": "Every app shows a page's typed title in its pages-list row and its tab at once, a keystroke at a time; the row is re-sorted only once the name is kept, and Escape puts the old name back", "decided": "2026-11-17", "source": [{"issue": "BaudeInternal#150"}]}]
     }
   ],
   "states": [

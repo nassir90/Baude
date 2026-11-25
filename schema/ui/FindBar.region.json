@@ -43,5 +43,6 @@
   "states": [
     {"name": "closed", "shows": "No bar, no width or height taken"},
     {"name": "open, no matches", "shows": "Count reads \"No matches\" (or \"⏎ earlier\")"}
-  ]
+  ],
+  "decisions": [{"said": "Ctrl/Cmd+F should search the main chat, Meta and side questions alike, with highlighting and next/previous", "rule": "Every app's agent conversations (the chat, Meta, a side question, a subagent's transcript) open the same find bar on Ctrl+F / ⌘F, shading matches and stepping between them.", "decided": "2026-11-15", "source": [{"issue": "BaudeInternal#118"}]}]
 }

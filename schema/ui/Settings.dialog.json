@@ -95,7 +95,8 @@
               "by": "click anywhere on the row or the switch",
               "does": "toggles full-width text at once in the open chat and keeps it"
             }
-          ]
+          ],
+          "decisions": [{"said": "For new installations full-width text should be the default.", "rule": "Every app starts a fresh installation with Full-width text on.", "decided": "2026-11-14", "source": [{"issue": "BaudeInternal#65"}]}]
         },
         {
           "name": "Code Font",
@@ -132,6 +133,11 @@
               "by": "pick an accent",
               "does": "applies it in every open Baude and Record window at once and keeps it; System clears the choice. Baude's and Record's logos take it too: the logo's tile colour (schema/icons/apps) becomes the accent's, in the macOS Dock tile, the windows' icon elsewhere, and the launcher if the app is in the platform's list of apps; with System they keep their own colours"
             }
+          ],
+          "decisions": [
+            {"said": "Let me change Baude's accent colour in Settings; I want it orange (paraphrased)", "rule": "Every app's Settings has Accent Colour (System, or a named accent such as Orange), one setting shared by the apps, applied in every open window at once.", "decided": "2026-11-12", "source": [{"issue": "BaudeInternal#42"}]},
+            {"said": "Asked that Meta changing the theme go the same route as a click and get the same animation.", "rule": "Every app changes the accent the same way whoever changes it (picked in Settings or set by Meta): the window cross-fades into the new accent over 200 ms.", "decided": "2026-11-13", "source": [{"issue": "BaudeInternal#52"}]},
+            {"said": "The Baude icon should take the selected accent on platforms that allow it (paraphrased)", "rule": "Every app whose platform lets it recolour its icon draws its logo in the accent picked (the Dock tile, the windows' icon, the launcher entry); with System it keeps its own colours", "decided": "2026-11-21", "source": [{"issue": "BaudeInternal#178"}]}
           ]
         },
         {
@@ -213,7 +219,7 @@
         },
         {
           "name": "Show in launcher",
-          "decisions": [{"said": "The added to application menu path shouldn't go into the chat; it should be a toast", "rule": "Every app says what turning this on or off did in a toast, never as a note in the chat", "decided": "2026-11-22", "source": [{"issue": "BaudeInternal#191"}]}],
+          "decisions": [{"said": "The added to application menu path shouldn't go into the chat; it should be a toast", "rule": "Every app says what turning this on or off did in a toast, never as a note in the chat", "decided": "2026-11-22", "source": [{"issue": "BaudeInternal#191"}]}, {"said": "if \"Add apps in application register (on MAcos the command+search pane, on androdid the app list and such), we should make sure that all of: Record, Baude, Emission, Multiplex are all visible and vice versa for when it is removed", "rule": "Every app's Show in Applications setting adds Baude, Record, Emission and Multiplex to the platform's list of apps together and takes all four out together; it's one setting shared by every app", "decided": "2026-11-22", "source": [{"session": "b3845b21-55ac-4aab-a769-fb8517403c51", "message": "a7629583-162d-43b1-b7a1-f388a7e7fc1d"}]}],
           "shows": "A row titled \"Show in application menu\" on Linux or \"Show in Applications\" on macOS, with a switch and no subtitle. One setting for Baude, Record, Emission and Multiplex together, the same as Record's Settings row and every app's --install / --uninstall: on when all four are in the platform's list of apps, read again each time Settings opens. Turning it on also writes the commands in ~/.local/bin (baude, record, emission, multiplex, baude-headless, baude-oneshot), which the launchers start; turning it off leaves them, as other machines reach this one's host process through ~/.local/bin/baude-headless.",
           "copy": [
             "window.show_in",
@@ -371,7 +377,8 @@
     },
     {
       "name": "setting changed by the other app",
-      "shows": "The row for any shared setting (accent, code font, notifications, auto restart, scales) updates to the new value without running its own handler"
+      "shows": "The row for any shared setting (accent, code font, notifications, auto restart, scales) updates to the new value without running its own handler",
+      "decisions": [{"said": "Asked that settings shared by the apps (accent, font, auto update, text/global/icon scale, Meta's model) spread across the apps on the same host, not across the mesh.", "rule": "Every app on a machine shares its common settings (accent, code font, auto restart on update, text, icon and global scale, Meta's model and settings) and follows a change made in another at once; window zoom (Ctrl +/-/0) stays each window's, and nothing is shared across the mesh.", "decided": "2026-11-14", "source": [{"issue": "BaudeInternal#62"}]}]
     }
   ],
   "scenes": []

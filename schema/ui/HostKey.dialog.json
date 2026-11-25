@@ -71,5 +71,18 @@
       "shows": "Tapped outside: closed without an answer, asked again the next time that key is shown"
     }
   ],
+  "decisions": [
+    {
+      "said": "Make sure the trust key copytext and presentation is basicall similar to the one SSH gieves instead of inventing your own crap",
+      "rule": "Every app that asks whether to trust a host's key words and lays it out as OpenSSH does: the authenticity line, the SHA256 fingerprint, \"Are you sure you want to continue connecting?\", No / Yes",
+      "decided": "2026-11-22",
+      "source": [
+        {
+          "session": "b3845b21-55ac-4aab-a769-fb8517403c51",
+          "message": "94fe8190-5ead-48a2-bfe8-83493bb7bbad"
+        }
+      ]
+    }
+  ],
   "scenes": []
 }

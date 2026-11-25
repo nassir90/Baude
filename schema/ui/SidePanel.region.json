@@ -51,6 +51,18 @@
           "by": "header toggle button",
           "does": "toggles the panel; the button shows pressed while it is open"
         }
+      ],
+      "decisions": [
+        {
+          "said": "Past a certain width the side bar stretches over the chat and covers its text instead of reflowing it (paraphrased)",
+          "rule": "In every app the side bars (left and right) stop growing at the chat's least width; they never slide over the chat.",
+          "decided": "2026-11-12",
+          "source": [
+            {
+              "issue": "BaudeInternal#18"
+            }
+          ]
+        }
       ]
     },
     {
@@ -207,6 +219,19 @@
     {
       "name": "tasks running",
       "shows": "Status bar button \"⚙ N background processes · M subagents running\" (singular \"1 background process\", \"1 subagent\"), so the panel is one click away even when closed."
+    }
+  ],
+  "decisions": [
+    {
+      "said": "The keyboard goes all the way down and then the bottom bar comes up harshly It should be moreso like the keyboard drop lifts up the bottom slight border but not the bottom bar i.e.  it goes up past the bottom bar",
+      "rule": "Every app with an on-screen keyboard keeps its bottom bar laid out under the keyboard: the keyboard rises over it and, going down, uncovers it while the composer comes down with the keyboard till it rests on the bar; the bar never pops up after the keyboard has gone",
+      "decided": "2026-11-22",
+      "source": [
+        {
+          "session": "f24332de-9555-4279-8489-ffa7dbcf54c9",
+          "message": "30af64bb-6804-4040-984b-d3fd2a444e53"
+        }
+      ]
     }
   ],
   "scenes": [

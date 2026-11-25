@@ -63,7 +63,28 @@
         "does": "a Settings-style Name row, tapped to rename",
         "why": "The owner asked for a Name row like a Settings row, label left, name right, customisable",
         "decided": "2026-11-22"
-      }
+      },
+      "decisions": [
+        {
+          "said": "First pill just needs to be some Name: <PHone name on Mesh>, no need for the crap description.",
+          "rule": "Every app's page for its own host starts with one Name row, as a Settings row: \"Name\" at the start, the host's name in the mesh at the end, tapped to rename; no description under it",
+          "decided": "2026-11-22",
+          "source": [
+            {
+              "session": "f24332de-9555-4279-8489-ffa7dbcf54c9",
+              "message": "30af64bb-6804-4040-984b-d3fd2a444e53"
+            },
+            {
+              "session": "f24332de-9555-4279-8489-ffa7dbcf54c9",
+              "message": "fb04da14-8f84-47fe-982e-925bd0e15867"
+            },
+            {
+              "session": "b3845b21-55ac-4aab-a769-fb8517403c51",
+              "message": "94fe8190-5ead-48a2-bfe8-83493bb7bbad"
+            }
+          ]
+        }
+      ]
     },
     {
       "name": "Rename dialog",
@@ -112,7 +133,24 @@
         "does": "This phone holds the key; Add Host has none of it",
         "why": "The owner: the phone's key belongs on the phone's page, not in Add Host",
         "decided": "2026-11-22"
-      }
+      },
+      "decisions": [
+        {
+          "said": "Phone menu should still have key stuff, phone key tuff makes no sense in add host. [...] Below that \"Key Material\" section with the key placed there and \"Copy\" and \"New Key\" buttons below that.",
+          "rule": "Every app that holds its own key shows it on its own page under a \"Key Material\" heading, the key in the code font with Copy and New Key under it, never in Add Host",
+          "decided": "2026-11-22",
+          "source": [
+            {
+              "session": "f24332de-9555-4279-8489-ffa7dbcf54c9",
+              "message": "fb04da14-8f84-47fe-982e-925bd0e15867"
+            },
+            {
+              "session": "b3845b21-55ac-4aab-a769-fb8517403c51",
+              "message": "94fe8190-5ead-48a2-bfe8-83493bb7bbad"
+            }
+          ]
+        }
+      ]
     },
     {
       "name": "New Key dialog",
@@ -127,6 +165,23 @@
         {
           "by": "tap Make Key",
           "does": "makes a new key in place of the old one and tries each host again with it"
+        }
+      ],
+      "decisions": [
+        {
+          "said": "\"Make new key\" confirmaiton screen copytext should just be \"The old key can't be recovered. You will have to re-authenticate into your mesh\"",
+          "rule": "Every app's confirmation before making a new key says only \"The old key can't be recovered. You will have to re-authenticate into your mesh.\"",
+          "decided": "2026-11-22",
+          "source": [
+            {
+              "session": "f24332de-9555-4279-8489-ffa7dbcf54c9",
+              "message": "fb04da14-8f84-47fe-982e-925bd0e15867"
+            },
+            {
+              "session": "b3845b21-55ac-4aab-a769-fb8517403c51",
+              "message": "94fe8190-5ead-48a2-bfe8-83493bb7bbad"
+            }
+          ]
         }
       ]
     },
@@ -194,6 +249,19 @@
           "by": "tap Restore",
           "does": "restores its transcript, folder, picture and senders where they were and lists it again in Bots or Chats"
         }
+      ],
+      "decisions": [
+        {
+          "said": "\"Put Back\" -> \"Restore\" for trash",
+          "rule": "Every app's button that brings a chat back from trash reads \"Restore\"",
+          "decided": "2026-11-22",
+          "source": [
+            {
+              "session": "b3845b21-55ac-4aab-a769-fb8517403c51",
+              "message": "9d6ee5e7-5aa9-440f-9e7e-f041d0c9281d"
+            }
+          ]
+        }
       ]
     },
     {
@@ -234,6 +302,50 @@
     {
       "name": "nothing yet",
       "shows": "Only the bar, the Name row and Key Material: no Bots or chats and an empty trash"
+    }
+  ],
+  "removed": [
+    {
+      "name": "New agent (New Bot) and its +",
+      "apps": [
+        "phone"
+      ],
+      "why": "The owner: \"Drop \\\"New agent\\\" behaviour, that doesn't exist at all on dekstop, drop the \\\"+\\\" to add a new agent too.\" A chat on this phone is made as on any host, with New session and \"local\" picked beside it",
+      "decided": "2026-11-22",
+      "source": [
+        {
+          "session": "f24332de-9555-4279-8489-ffa7dbcf54c9",
+          "message": "30af64bb-6804-4040-984b-d3fd2a444e53"
+        }
+      ]
+    },
+    {
+      "name": "What they reach",
+      "apps": [
+        "phone"
+      ],
+      "why": "The owner: \"What they reach -- drop this shit I never asked for.\"",
+      "decided": "2026-11-22",
+      "source": [
+        {
+          "session": "f24332de-9555-4279-8489-ffa7dbcf54c9",
+          "message": "30af64bb-6804-4040-984b-d3fd2a444e53"
+        }
+      ]
+    },
+    {
+      "name": "Models",
+      "apps": [
+        "phone"
+      ],
+      "why": "The owner: \"\\\"Models\\\" -> drop this shit too, models are visible in the dropdown.\"",
+      "decided": "2026-11-22",
+      "source": [
+        {
+          "session": "f24332de-9555-4279-8489-ffa7dbcf54c9",
+          "message": "30af64bb-6804-4040-984b-d3fd2a444e53"
+        }
+      ]
     }
   ],
   "scenes": []

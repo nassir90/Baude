@@ -75,7 +75,8 @@
   "states": [
     {
       "name": "opened again",
-      "shows": "A chat opens where it was last left, measured from its end, there at once and held there while what's in it takes its size (pictures, code). One never opened, or left at its end, opens at its end and stays there as pictures and code take their sizes and as new things come (a line or two at once, more gliding in over 200ms). Scrolled up by the reader, it's left where it is. Where each chat was left is kept across the app being closed or restarted, on both apps; a place that can't be put back yet (the host not answering) is kept, and its end shown until the lines come."
+      "shows": "A chat opens where it was last left, measured from its end, there at once and held there while what's in it takes its size (pictures, code). One never opened, or left at its end, opens at its end and stays there as pictures and code take their sizes and as new things come (a line or two at once, more gliding in over 200ms). Scrolled up by the reader, it's left where it is. Where each chat was left is kept across the app being closed or restarted, on both apps; a place that can't be put back yet (the host not answering) is kept, and its end shown until the lines come.",
+      "decisions": [{"said": "Sometimes on mobile when you open an chat it opens like half a screen up from the bottom. It should default open to the last position or the end of the chat hasnt been opened.", "rule": "Every app opens a chat where it was last left, measured from its end, and holds it there while pictures and code take their sizes; a chat never opened, or left at its end, opens at its end and follows what comes", "decided": "2026-11-22", "source": [{"session": "f24332de-9555-4279-8489-ffa7dbcf54c9", "message": "30af64bb-6804-4040-984b-d3fd2a444e53"}]}]
     },
     {
       "name": "opened, not yet written to",

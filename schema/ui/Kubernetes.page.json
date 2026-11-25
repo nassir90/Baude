@@ -176,7 +176,8 @@
         "does": "A page of its own, the bar's ◂ from the table. A category's heading is the body's size, bold (the desktop's 0.85em), its row at least 30 high; a kind's row at least 23 high (the desktop's 26)",
         "why": "The owner: on the phone the categories' headings should be a bit bigger and their rows a bit narrower",
         "decided": "2026-11-22"
-      }
+      },
+      "decisions": [{"said": "On the phone, the category headings should be a bit bigger and the rows under them a bit narrower (paraphrased)", "rule": "Every app draws a category's heading row bolder and taller than the kind rows under it, its name at the body's size, and keeps the kind rows compact", "decided": "2026-11-22", "source": [{"issue": "BaudeInternal#181"}]}]
     },
     {
       "name": "table",

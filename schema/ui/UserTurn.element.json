@@ -89,6 +89,48 @@
               "issue": "BaudeInternal#221"
             }
           ]
+        },
+        {
+          "said": "Asked for a revert icon (like refresh) to appear by a message's last line while the pointer is on its row; clicking it undoes that message and everything after and puts it back in the box.",
+          "rule": "Every app offers, by a sent message's last line while the pointer is on its row, a round revert button that takes back that message and all after it and puts its text in the box; chats whose agent can't rewind get none.",
+          "decided": "2026-11-14",
+          "source": [
+            {
+              "issue": "BaudeInternal#80"
+            }
+          ]
+        },
+        {
+          "said": "The revert icon should fade in when the pointer is over your message and fade out as it leaves",
+          "rule": "Every app's revert button on a message fades in (150 ms) while the pointer is anywhere on the message's row and fades out as it leaves, never appearing or vanishing at once.",
+          "decided": "2026-11-14",
+          "source": [
+            {
+              "issue": "BaudeInternal#91"
+            }
+          ]
+        },
+        {
+          "said": "On mobile a single click of a user message should reveal the revert, send now .etc buttons",
+          "rule": "Every app shows a message's buttons without hover where there is none: on a touch screen a single tap on the message shows them (a long press too) and another tap hides them; with a pointer, hovering its row shows them",
+          "decided": "2026-11-22",
+          "source": [
+            {
+              "session": "f24332de-9555-4279-8489-ffa7dbcf54c9",
+              "message": "30af64bb-6804-4040-984b-d3fd2a444e53"
+            }
+          ]
+        },
+        {
+          "said": "Said buttons must be center aligned with the text on the last line of the message it is not so at the moment",
+          "rule": "Every app centres a message's buttons on the middle of the bubble's last line of text, at any text size",
+          "decided": "2026-11-22",
+          "source": [
+            {
+              "session": "f24332de-9555-4279-8489-ffa7dbcf54c9",
+              "message": "30af64bb-6804-4040-984b-d3fd2a444e53"
+            }
+          ]
         }
       ]
     }
@@ -96,7 +138,19 @@
   "states": [
     {
       "name": "revert pending",
-      "shows": "The message and everything after it are hidden; the composer holds its text. A permission asked meanwhile is shown again so it can be answered."
+      "shows": "The message and everything after it are hidden; the composer holds its text. A permission asked meanwhile is shown again so it can be answered.",
+      "decisions": [
+        {
+          "said": "Pressing Escape while reverting should undo the revert: a revert should be tentative until the first message, like opening a chat or picking a model.",
+          "rule": "Every app keeps a revert tentative until something is sent: Esc shows everything again and gives the box back its draft.",
+          "decided": "2026-11-14",
+          "source": [
+            {
+              "issue": "BaudeInternal#82"
+            }
+          ]
+        }
+      ]
     },
     {
       "name": "revert refused",
@@ -105,6 +159,18 @@
     {
       "name": "Record's reader",
       "shows": "Record draws your messages as markdown in a right-aligned box filled with the raised colour (baude.raised), not the accent; no attachments row and no revert; text past 1200 characters is cut with \"…\"."
+    }
+  ],
+  "decisions": [
+    {
+      "said": "Messages the user sends don't always show in every Baude instance (paraphrased)",
+      "rule": "Every app shows a message sent to the open chat from elsewhere (another window, the phone, another machine, a Bot's routine) as the chat's agent is given it",
+      "decided": "2026-11-19",
+      "source": [
+        {
+          "issue": "BaudeInternal#175"
+        }
+      ]
     }
   ],
   "scenes": [

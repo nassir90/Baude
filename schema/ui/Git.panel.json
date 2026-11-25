@@ -17,7 +17,8 @@
       "actions": [
         {"by": "click the list toggle (tooltip \"Show every branch\")", "does": "when on, shows every branch, remote branch and tag in one log (merge commits shown as ordinary rows)"},
         {"by": "click refresh (tooltip \"Fetch, and read the history again (and ask GitHub)\")", "does": "git fetch, then re-reads the history, branch list and pull request states from GitHub; the icon turns while reading. If the fetch failed: toast \"Couldn't fetch: the remotes' branches are as last fetched\""}
-      ]
+      ],
+      "decisions": [{"said": "Refresh in the Git pane should run a git fetch so the origin references update (paraphrased)", "rule": "Every app's Git refresh fetches (never asking for a password) before reading the history again, so remote branches and the tracking line are current.", "decided": "2026-11-12", "source": [{"issue": "BaudeInternal#19"}]}]
     },
     {
       "name": "branch picker",
@@ -33,9 +34,15 @@
             {"by": "Shift+click or Ctrl/⌘+click a row", "does": "adds it to, or takes it out of, the shown set; several branches' histories show together"},
             {"by": "arrow keys, Shift+arrows, Ctrl+Space", "does": "move and pick like a file manager"},
             {"by": "Enter, double-click, Esc, click outside", "does": "close the list; the branches chosen are shown (none chosen: unchanged)"}
+          ],
+          "decisions": [
+            {"said": "The branch dropdown should start with the branches the chat touched (e.g. origin/main, then branches made off them), then a rule, then every other branch (paraphrased)", "rule": "Every app's Git branch list starts with the branches this chat touched, each base before the branches made from it, then a rule, then every other branch.", "decided": "2026-11-12", "source": [{"issue": "BaudeInternal#12"}]},
+            {"said": "File-like picking in the branch list: a click picks one, more can be added; Shift and Ctrl should both do what Ctrl does (paraphrased)", "rule": "In every app's Git branch list a click picks that branch alone, and Shift+click or Ctrl/⌘+click adds it to the branches shown or takes it out; Escape closes the list and shows them.", "decided": "2026-11-12", "source": [{"issue": "BaudeInternal#12"}, {"issue": "BaudeInternal#23"}]},
+            {"said": "Git branch dropdown caret on mobile is not right aligned and the dropdown that comes down itself should be the same width as the pill above it, right now it is not aligned in any meanignful sense and is of odd width.", "rule": "Every app puts the branch picker's dropdown arrow at the picker's end, and opens the branch list exactly as wide as the picker, its edges under the picker's", "decided": "2026-11-22", "source": [{"session": "b3845b21-55ac-4aab-a769-fb8517403c51", "message": "a638b09c-3bf9-41e8-8a27-ade2faa9d9e1"}]}
           ]
         }
-      ]
+      ],
+      "decisions": [{"said": "Opening the Git pane for the first time forces a massively wide right bar; it came down to the branch name's width (paraphrased)", "rule": "Every app's Git branch picker cuts a long branch name in the middle with … so it never widens the panel.", "decided": "2026-11-12", "source": [{"issue": "BaudeInternal#10"}, {"issue": "BaudeInternal#12"}]}]
     },
     {
       "name": "branch info",
@@ -59,11 +66,17 @@
       "actions": [
         {"by": "click a row", "does": "opens the pull request in the browser"},
         {"by": "hover a row (tooltip)", "does": "the pull request's title with its repository and number, and its URL"}
+      ],
+      "decisions": [
+        {"said": "Replace the graph with a list of the chat's PRs as links, coloured by state (grey draft, green open, red blocking feedback); merged PRs showed orange instead of purple (paraphrased)", "rule": "Every app's Git page lists the pull requests the chat touches as clickable rows, each with a pill coloured by state: green open, grey draft or closed, red changes requested, purple merged.", "decided": "2026-11-12", "source": [{"issue": "BaudeInternal#21"}, {"issue": "BaudeInternal#32"}]},
+        {"said": "PR names should be able to spill onto a second line, like commits (paraphrased)", "rule": "Every app's Git page shows a pull request's title on up to two lines, then ….", "decided": "2026-11-12", "source": [{"issue": "BaudeInternal#30"}]},
+        {"said": "In the right pane the PR pill isn't centred with the text after it (paraphrased)", "rule": "Every app's Git pull request list centres each pill on the first line of its title.", "decided": "2026-11-12", "source": [{"issue": "BaudeInternal#33"}]},
+        {"said": "The right pane's open pull requests should scroll; it just said '11 more'", "rule": "Every app lists all of a chat's pull requests in a list that scrolls past 8 rows, never cut to a count of the rest.", "decided": "2026-11-16", "source": [{"issue": "BaudeInternal#126"}]}
       ]
     },
     {
       "name": "log",
-      "decisions": [{"said": "The picture's top sits slightly above the text's real top; fix it across fonts", "rule": "Every app puts an author's picture top on the top of what's drawn on the subject's first line: the higher of its letters' inked tops and the tops of its chips', pills' and logos' drawn patches, measured from the text's layout, not the font's ascent or a chip's place; the dot stays at the picture's centre", "decided": "2026-11-22", "source": [{"issue": "BaudeInternal#193"}]}],
+      "decisions": [{"said": "The picture's top sits slightly above the text's real top; fix it across fonts", "rule": "Every app puts an author's picture top on the top of what's drawn on the subject's first line: the higher of its letters' inked tops and the tops of its chips', pills' and logos' drawn patches, measured from the text's layout, not the font's ascent or a chip's place; the dot stays at the picture's centre", "decided": "2026-11-22", "source": [{"issue": "BaudeInternal#193"}]}, {"said": "Commit and PR subjects can run over two lines and then end in an ellipsis in the Git view (paraphrased)", "rule": "Every app's Git log shows a commit's subject (its ref chips and pills leading the same text) on up to two lines, then …, without widening the panel.", "decided": "2026-11-12", "source": [{"issue": "BaudeInternal#20"}]}, {"said": "Give profiles should be aligend with the first text line of the MR / commit name, right now it's center aligned and looks odd. Git dots need not be equidistant, e..g a one line PR / commit interspersed with two-lines ones will result in non-equidistancy.", "rule": "Every app puts an author's picture's top level with the top of the subject's first line (not centred on the row) and the graph's dot level with the picture's centre, so the dots follow the rows' first lines rather than being evenly spaced", "decided": "2026-11-22", "source": [{"session": "b3845b21-55ac-4aab-a769-fb8517403c51", "message": "a638b09c-3bf9-41e8-8a27-ade2faa9d9e1"}, {"session": "b3845b21-55ac-4aab-a769-fb8517403c51", "message": "7bf46905-fdba-4fa2-954b-93becb9413a1"}]}],
       "shows": "The commits, newest first, 50 at a time. Each row: a graph slice (coloured lanes with a dot; up to 10 lanes; a violet dot for a commit this chat made; dimmed lanes for commits not on the branch itself), the author's round picture (GitHub avatar, else initials on a colour; either set into the page: see README's A picture is set into the page), and two lines of text. The picture's top is level with the top of what's drawn on the subject's first line (the higher of its letters' inked tops and its chips', pills' and logos' drawn tops, not the font's ascent), not centred on the row, and the graph's dot is level with the picture's centre, so the dots are as far apart as the rows' first lines (not evenly spaced where some subjects take one line and some two); the lanes still run dot to dot. The text: first the subject (up to two lines, ellipsised) preceded by chips for the refs at that commit (HEAD, local branch, remote branch, tag, each a small coloured chip, names over 24 characters cut in the middle with …), a pull request pill before its branch's chip, and a \"this chat\" chip for commits the chat made; second a caption: relative time, \" · author\", then \" · +12 −3 in 2 files\" (additions green, deletions red; left out for a commit that changed nothing). When one branch is shown and it has a parent branch, the commits only on this branch have slightly heavier text and the commits it inherited from the parent are dimmed (about 55%, graph lanes lighter too). A merge commit in a branch's own history (first parent only) has a ▸ button at the end of its row.",
       "copy": ["git.this_chat", "git.added", "git.removed", "git.in_files", "git.hide_merged", "git.show_merged", "git.made_by_chat"],
       "actions": [
@@ -106,8 +119,9 @@
     {"name": "gh signed out or missing", "shows": "No pull request line, no pull requests on commit cards, no profile links; commits' remote links still work for pushed commits; nothing offers sign-in"},
     {"name": "several branches picked", "shows": "Picker says first name + \" + N more\"; their histories merged into one log"},
     {"name": "every branch", "shows": "All refs in one log; merge commits not folded"},
-    {"name": "another chat", "shows": "Switching chats brings back that chat's branches, merges opened, commit card and log scroll; a new chat starts on the branches it touched at the top of the log"},
+    {"name": "another chat", "shows": "Switching chats brings back that chat's branches, merges opened, commit card and log scroll; a new chat starts on the branches it touched at the top of the log", "decisions": [{"said": "In Git the default selection should be the branches the current chat touched, those above the rule (paraphrased)", "rule": "Every app's Git page, on a chat seen for the first time, shows every branch above the rule (the ones this chat touched) picked.", "decided": "2026-11-12", "source": [{"issue": "BaudeInternal#37"}]}, {"said": "The Git pane is about one chat, so it shouldn't carry over as I go from chat to chat; keep it per chat (paraphrased)", "rule": "Every app keeps each chat's Git page (branches shown, merges opened, commit card, scroll) and brings it back when that chat is shown again.", "decided": "2026-11-12", "source": [{"issue": "BaudeInternal#38"}]}]},
     {"name": "stale", "shows": "Reads again about 0.8 s after the chat goes on (new commits, pushes) while the page is shown; on show if it changed while hidden"}
   ],
+  "removed": [{"name": "Commit frequency chart at the top of the Git page", "apps": ["baude", "record"], "why": "The owner asked to drop the git frequency graph and put the list of pull requests the chat touches in its place (paraphrased).", "decided": "2026-11-12", "source": [{"issue": "BaudeInternal#21"}]}],
   "scenes": ["38f-git", "38g-git-commit", "38h-git-signed-in", "38i-git-signed-out", "38j-git-autofix"]
 }

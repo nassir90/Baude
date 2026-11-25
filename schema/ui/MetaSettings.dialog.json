@@ -41,7 +41,8 @@
             {"by": "key Esc", "does": "closes the popover"}
           ]
         }
-      ]
+      ],
+      "decisions": [{"said": "Asked to be able to change the model Meta runs with, any model runnable where the app is bound.", "rule": "Every app lets the user pick the model Meta thinks with (Settings → Meta → Intelligence), from every model its host can run, with where it runs (Provider) and how hard it thinks (Effort).", "decided": "2026-11-13", "source": [{"issue": "BaudeInternal#56"}]}]
     },
     {
       "name": "Provider",
@@ -50,6 +51,10 @@
       "states": [
         {"name": "one provider", "shows": "Greyed out, not changeable"},
         {"name": "Claude model", "shows": "Row not shown"}
+      ],
+      "decisions": [
+        {"said": "It should be 'Mac / MLX', not 'Mac * MLX', and with MLX in the provider the '(MLX)' in the model name is redundant.", "rule": "Every app names a provider '<host> / <provider>' and doesn't repeat the provider in the model's name.", "decided": "2026-11-14", "source": [{"issue": "BaudeInternal#68"}]},
+        {"said": "Switching providers didn't switch at once: it kept running on the old one, an Ollama start showing with MLX picked.", "rule": "Every app moves to the picked provider's copy of the model as soon as a provider is picked, from the next message, as picking a model does.", "decided": "2026-11-14", "source": [{"issue": "BaudeInternal#81"}]}
       ]
     },
     {
@@ -67,7 +72,8 @@
       "states": [
         {"name": "model only reads", "shows": "Greyed, off, subtitle '<model> only reads: Claude's models run commands'"},
         {"name": "not started in Auto mode", "shows": "Subtitle 'Claude Code didn't start <model> in Auto mode here: Meta asks before each command'"}
-      ]
+      ],
+      "decisions": [{"said": "Meta on Haiku was unhelpful; Claude's models should be able to run shell commands in Auto mode, smaller models maybe not", "rule": "In every app, Meta on Claude's models may run shell commands, edit files and fetch pages in Auto mode (Run commands, on by default), asking Allow or Deny for what Auto mode holds back; other models only read.", "decided": "2026-11-14", "source": [{"issue": "BaudeInternal#99"}]}]
     },
     {
       "name": "Code mode",

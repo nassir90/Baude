@@ -159,7 +159,8 @@
           "by": "click",
           "does": "Opens the Changelog dialog"
         }
-      ]
+      ],
+      "decisions": [{"said": "The changelog is checked so often it should be in the hamburger menu directly, not inside Settings", "rule": "Every app's main menu has Changelog as its own row, opening the Changelog dialog directly.", "decided": "2026-11-15", "source": [{"issue": "BaudeInternal#109"}]}]
     },
     {
       "name": "Mesh",
@@ -240,7 +241,8 @@
           "by": "click",
           "does": "Restarts this machine's host process (daemon) once no command is running on it (a model turn going on is cut short and offered Continue); toast \"Restarting the daemon once N sessions finish running a command\" while it waits, \"Daemon restarted\" once it's back. With none running, starts one. No confirmation"
         }
-      ]
+      ],
+      "decisions": [{"said": "Baude needs a button to restart the daemon, next to Restart Baude / Record / Emission (paraphrased)", "rule": "Every desktop app's main menu has Restart Daemon right under its own Restart item", "decided": "2026-11-21", "source": [{"issue": "BaudeInternal#177"}]}]
     }
   ],
   "scenes": [

@@ -73,6 +73,22 @@
       "shows": "Only the \"Image: <alt>\" link."
     }
   ],
+  "removed": [
+    {
+      "name": "open-file icon at an image's top left",
+      "apps": [
+        "baude",
+        "record"
+      ],
+      "why": "The owner: drop the icon and make the image's path a link that does what the icon did (the source line's click: Open with default app)",
+      "decided": "2026-11-14",
+      "source": [
+        {
+          "issue": "BaudeInternal#94"
+        }
+      ]
+    }
+  ],
   "scenes": [
     "31-markdown-image",
     "26-image-viewer"

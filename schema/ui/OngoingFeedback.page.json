@@ -78,5 +78,6 @@
     {"name": "refreshing", "shows": "The refresh icon turns, in full colour, while reading"},
     {"name": "restart", "shows": "The selection, the Ongoing/All choice and the typed reply are kept across a restart"}
   ],
+  "decisions": [{"said": "Changing the files of the saved issues on disk should change what Baude shows too, so Baude can be told to fix itself (paraphrased)", "rule": "While the Feedback tab is open, every app follows the saved feedback notes on disk (a note's files changed, a note added or removed) and redraws the list and detail from them.", "decided": "2026-11-12", "source": [{"issue": "BaudeInternal#11"}]}],
   "scenes": ["96-feedback-ready", "96b-feedback-open", "96c-feedback-working", "96d-feedback-all", "96e-feedback-merge", "96f-feedback-read-only", "96g-feedback-offline-note", "96h-feedback-note-on-issue", "96i-feedback-private", "96j-feedback-loading", "96k-feedback-first-open", "96l-feedback-opened-again"]
 }

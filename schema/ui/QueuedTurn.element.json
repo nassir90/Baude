@@ -45,6 +45,28 @@
               "issue": "BaudeInternal#221"
             }
           ]
+        },
+        {
+          "said": "On mobile a single click of a user message should reveal the revert, send now .etc buttons",
+          "rule": "Every app shows a message's buttons without hover where there is none: on a touch screen a single tap on the message shows them (a long press too) and another tap hides them; with a pointer, hovering its row shows them",
+          "decided": "2026-11-22",
+          "source": [
+            {
+              "session": "f24332de-9555-4279-8489-ffa7dbcf54c9",
+              "message": "30af64bb-6804-4040-984b-d3fd2a444e53"
+            }
+          ]
+        },
+        {
+          "said": "Said buttons must be center aligned with the text on the last line of the message it is not so at the moment",
+          "rule": "Every app centres a message's buttons on the middle of the bubble's last line of text, at any text size",
+          "decided": "2026-11-22",
+          "source": [
+            {
+              "session": "f24332de-9555-4279-8489-ffa7dbcf54c9",
+              "message": "30af64bb-6804-4040-984b-d3fd2a444e53"
+            }
+          ]
         }
       ],
       "copy": [
@@ -85,7 +107,8 @@
     },
     {
       "name": "another chat opened",
-      "shows": "The queue stays with the chat it was written in, kept beside that chat's draft (on disk on the phone, over a restart on the desktop), and is drawn under its conversation again, as it was, when the chat is opened again. A new chat's queue goes into its box instead."
+      "shows": "The queue stays with the chat it was written in, kept beside that chat's draft (on disk on the phone, over a restart on the desktop), and is drawn under its conversation again, as it was, when the chat is opened again. A new chat's queue goes into its box instead.",
+      "decisions": [{"said": "Going to another chat and back un-queues a queued message; queued messages should persist across chats (paraphrased)", "rule": "Every app keeps a chat's queued messages with that chat when another is opened, draws them again when it's opened, and sends them to it when its turn ends meanwhile", "decided": "2026-11-19", "source": [{"issue": "BaudeInternal#176"}]}]
     },
     {
       "name": "turn ends while another chat is open",

@@ -16,6 +16,11 @@
         {"by": "key Ctrl+Enter / ⌘Enter, or click send (tooltip \"Ask (Ctrl+Enter)\" with \"New line: Enter\" on a second line)", "does": "asks it: a new row at the top of the list, open under its line; the box is emptied. If the question couldn't be asked, the row is dropped, the text stays in the box and the window's note says \"the side question couldn't be asked: <why>\""},
         {"by": "key Enter", "does": "a new line (a list's next item inside a list; Shift+Enter a plain line break)"},
         {"by": "key Tab / Shift+Tab", "does": "indent or outdent a list item"}
+      ],
+      "decisions": [
+        {"said": "Try a text box at the top of Side questions instead of a +, in its own pill the size of the empty-state pill, with Enter doing nothing while it's empty.", "rule": "Every app asks a new side question from a box at the top of the list, a pill at least as tall as an empty list's placeholder, apart from the threads under it; sending does nothing while it's empty.", "decided": "2026-11-14", "source": [{"issue": "BaudeInternal#86"}]},
+        {"said": "The side question input was slightly shorter than the artifact and empty-state heights it should match", "rule": "Every app draws the side-question box at least as tall as the side panel's empty-list placeholders (Artifacts, Subagents, Processes), so the pages line up.", "decided": "2026-11-16", "source": [{"issue": "BaudeInternal#135"}]},
+        {"said": "The side questions' send button should be centred with the text and stay bottom-right as lines are added (paraphrased)", "rule": "In every app the side questions' send button sits level with the text's last line, moving down as lines are added and staying in the bottom-right corner once the box is full", "decided": "2026-11-18", "source": [{"issue": "BaudeInternal#167"}]}
       ]
     },
     {
@@ -71,6 +76,10 @@
     {"name": "stopped / ended", "shows": "Grey stop mark"},
     {"name": "couldn't start", "shows": "The row keeps its question in its own box to send again; its claude starts then. The window's note says why (e.g. claude missing or the chat's folder gone)."},
     {"name": "several at once", "shows": "Any number can run at the same time; each has its own row and spinner"}
+  ],
+  "removed": [
+    {"name": "'New side question' title on a question not yet asked", "apps": ["baude"], "why": "The owner asked to drop the 'New side question' copy.", "decided": "2026-11-14", "source": [{"issue": "BaudeInternal#84"}]},
+    {"name": "\"No side questions\" placeholder", "apps": ["baude"], "why": "The owner: not needed; the new-question box fills the empty space well enough (other empty states stay)", "decided": "2026-11-14", "source": [{"issue": "BaudeInternal#92"}]}
   ],
   "scenes": ["75-side-questions", "75b-side-question-new", "75c-side-questions-rows", "75d-side-question-full", "75e-side-questions-empty"]
 }

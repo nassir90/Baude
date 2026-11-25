@@ -102,7 +102,8 @@
       "name": "reader page (detail)",
       "shows": "Header: status mark, the model's name as a heading, up to two lines of what it's doing, and a back button ‹ (tooltip \"All names\") at the right end. Under it the reader's chat, set into the panel like a subagent's: Baude's own lines in a quiet style (each part given to it; what the checks kept: \"Linked <names> (kind), ... and N more\", \"Not in the code: ...\", \"Plain words: ...\", \"N rejected by the checks\"; a part done; a refused line in an error style; hover shows the time HH:MM:SS), the reader's words as markdown replies, and its tool calls (searches and lookups) as tool cards with their results. Keeps at its end while new lines come in; at most 400 entries kept.",
       "text": ["All names"],
-      "actions": [{"by": "click back", "does": "closes into the reader row"}]
+      "actions": [{"by": "click back", "does": "closes into the reader row"}],
+      "decisions": [{"said": "Signal is just an agent, so it should look like one, with its own dark pane like Meta, subagents and side questions", "rule": "Every app draws Signal's reader as an agent: its own chat set into the panel like a subagent's, with its words as replies and its lookups as tool cards.", "decided": "2026-11-16", "source": [{"issue": "BaudeInternal#133"}]}]
     }
   ],
   "states": [
@@ -114,5 +115,6 @@
     {"name": "reader stopped", "shows": "Grey stop mark on the reader row"},
     {"name": "page not shown", "shows": "The list is rebuilt when next shown, not on every change"}
   ],
+  "decisions": [{"said": "Linking names like Cloudflare, Vercel, Supabase, Shopify is next to useless link-noise", "rule": "Every app's Signal leaves well-known services and their products (Cloudflare, Vercel, Supabase, Shopify…) as plain words, not links.", "decided": "2026-11-16", "source": [{"issue": "BaudeInternal#134"}]}],
   "scenes": ["37-signal", "37b-signal-link-kinds", "38-signal-popover", "38d-tool-card"]
 }

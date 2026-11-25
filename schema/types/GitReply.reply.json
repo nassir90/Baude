@@ -292,6 +292,10 @@
     "ct": {
       "type": "integer",
       "description": "card: when committed, epoch seconds."
+    },
+    "missing": {
+      "$ref": "Dep.json",
+      "description": "git isn't on the host: the Git page shows this in its place."
     }
   },
   "required": [

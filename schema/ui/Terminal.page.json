@@ -54,16 +54,18 @@
     {
       "name": "terminal",
       "decisions": [{"said": "Terminal keys as iTerm2 and Terminal.app have them: Cmd+T, Cmd+W, Cmd+C, Cmd+V on a Mac; Ctrl+Shift on Linux", "rule": "Every desktop app's terminal takes Cmd+T/W/C/V on macOS and Ctrl+Shift+T/W/C/V on Linux for new tab, close tab, copy and paste", "decided": "2026-11-22", "source": [{"issue": "BaudeInternal#186"}]}, {"said": "Without VTE on macOS the error isn't clear; give proper guidance", "rule": "Every app without a terminal library says what to install, the command for its platform, and to restart", "decided": "2026-11-22", "source": [{"issue": "BaudeInternal#183"}]}, {"said": "In Multiplex, Ctrl+L to clear the window adds to the scrollback: it seems to insert a lot of empty lines, which it shouldn't do at all", "rule": "Every terminal (Multiplex's tabs, the Terminal view, a Kubernetes pod's shell, on any app and any viewer of a host's terminal) clears its screen (Ctrl+L, clear) as iTerm2 does: the rows down to the lowest one written go into the scrollback with no blank screen of rows after them, so clearing again and again adds only the prompt's row each time. The terminal library keeps its own spawning, typing, paste and resizing; the clear is rewritten in the bytes the program writes, before any viewer gets them. On the alternate screen or with a scroll region set, a clear is left as it is", "decided": "2026-11-25", "source": [{"issue": "BaudeInternal#195"}]}],
-      "shows": "The terminal (VTE), its edges glowing in the accent while a Bot is at its terminal tools there. What's typed goes to the program on its host. A host that can't be reached says why in it. Cmd+C and Cmd+V copy and paste, Cmd+T and Cmd+W open and close a tab (Ctrl+Shift with the same letters on Linux). Ctrl+L (or clear) clears the screen, keeping the rows written in the scrollback and no blank rows after them. Without VTE, ☰ → Terminal opens nothing and a toast says what to install for the platform and to restart.",
+      "shows": "The terminal (VTE), its edges glowing in the accent while a Bot is at its terminal tools there. What's typed goes to the program on its host. A host that can't be reached says why in it. Cmd+C and Cmd+V copy and paste, Cmd+T and Cmd+W open and close a tab (Ctrl+Shift with the same letters on Linux). Ctrl+L (or clear) clears the screen, keeping the rows written in the scrollback and no blank rows after them. Without VTE (see states: VTE missing).",
       "copy": [
         "multiplex.not_started",
-        "multiplex.host_gone",
-        "multiplex.vte_fix_mac",
-        "multiplex.vte_fix_linux"
+        "multiplex.host_gone"
       ]
     }
   ],
+  "states": [
+    {"name": "VTE missing", "shows": "VTE's GTK 4 build isn't in the app: ☰ → Terminal opens the view with the missing-dependency state in place of its tabs: a package icon, \"Terminal needs VTE\", this platform's install command with Copy (copying toasts \"Copied: run it in a terminal, then Restart\"), and Restart (the app's own library is loaded as it starts). Its new-tab and out-to-a-window buttons are greyed. Multiplex, started without it, says the same in a line on stderr.", "copy": ["deps.needs", "deps.copied_restart", "shared_settings.restart"], "decisions": [{"said": "Without VTE on macOS the error isn't clear; give proper guidance, and fold it into the general dependency guidance (paraphrased)", "rule": "Every app without a terminal library shows the missing-dependency state where the terminal would be (☰ → Terminal, a Kubernetes pod's shell), with the platform's install command and Restart; never only a toast", "decided": "2026-11-25", "source": [{"issue": "BaudeInternal#184"}, {"issue": "BaudeInternal#183"}]}]}
+  ],
   "scenes": [
+    "39c-missing-vte",
     "38f-terminal",
     "38f-terminal-window"
   ]

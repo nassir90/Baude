@@ -188,10 +188,15 @@ fun SettingsScreen(back: () -> Unit, feedback: () -> Unit, chat: List<String> = 
     Column(Modifier.fillMaxSize().background(c.frame)) {
         Bar(Wording.Window.settingsTitle, start = { IconButton(Adwaita.GoPrevious, Wording.Browser.back, onClick = back) })
         Box(Modifier.weight(1f).fillMaxWidth()) {
-            if (shown == 1) SubscriptionsPage() else GeneralPage(feedback, chat)
+            when (shown) {
+                1 -> SubscriptionsPage()
+                2 -> DepsPage()
+                else -> GeneralPage(feedback, chat)
+            }
         }
         BottomBar(listOf(Page("general", Wording.Subscriptions.general, Adwaita.EmblemSystem),
-            Page("subscriptions", Wording.Subscriptions.title, Adwaita.SystemUsers)), shown) { shown = it }
+            Page("subscriptions", Wording.Subscriptions.title, Adwaita.SystemUsers),
+            Page("dependencies", Wording.Deps.title, Adwaita.PackageXGeneric)), shown) { shown = it }
     }
 }
 

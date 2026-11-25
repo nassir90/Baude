@@ -68,6 +68,8 @@ fun DatabaseScreen(hostId: String, back: () -> Unit, table: String? = null, colu
     var namespace by remember { mutableStateOf("public") }
     var all by remember { mutableStateOf<Pair<List<Msg.DbTable>, List<Msg.DbLink>>?>(null) }
     var status by remember { mutableStateOf(Wording.Databases.lookingForServers) }
+    var lacks by remember { mutableStateOf<Msg.Dep?>(null) } // (Docker isn't on the host, and no server was found)
+    var tries by remember { mutableStateOf(0) } // (Try again's)
     var summary by remember { mutableStateOf("") }
     var faded by remember { mutableStateOf(true) }
     var find by remember { mutableStateOf("") }
@@ -132,11 +134,12 @@ fun DatabaseScreen(hostId: String, back: () -> Unit, table: String? = null, colu
         }
     }
 
-    LaunchedEffect(hostId) {
+    LaunchedEffect(hostId, tries) {
         status = Wording.Databases.lookingForServers
         Mesh.ask(hostId, Msg.Databases(what = "servers").json()) { r ->
             faded = false
             val g = Msg.DatabasesReply.from(r)
+            g.missing?.let { status = ""; lacks = it; return@ask }
             val list = g.servers.orEmpty()
             if (r.optString("op") == Op.ERROR || !g.error.isNullOrBlank() || list.isEmpty()) {
                 status = g.error ?: (if (r.optString("op") == Op.ERROR) Msg.Error.from(r).said else null) ?: Wording.Databases.noPostgres
@@ -249,7 +252,9 @@ fun DatabaseScreen(hostId: String, back: () -> Unit, table: String? = null, colu
             val shownRows = rowsOf != null
             Column(Modifier.fillMaxSize()) {
                 Box(Modifier.weight(1f).fillMaxWidth()) {
-                    Box(Modifier.fillMaxSize().alpha(if (faded) 0.4f else 1f)) { SchemaCanvas(diagram) { loadRows(it) } }
+                    val lacking = lacks
+                    if (lacking != null) MissingDep(lacking, Wording.Window.databaseSchemas) { lacks = null; tries++ }
+                    else Box(Modifier.fillMaxSize().alpha(if (faded) 0.4f else 1f)) { SchemaCanvas(diagram) { loadRows(it) } }
                     Text(status, style = Type.caption, color = c.dim, maxLines = 1, overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.align(Alignment.BottomStart).padding(start = 12.dp, bottom = 10.dp, end = 12.dp))
                 }

@@ -1,0 +1,17 @@
+{
+  "description": "GitHub's gh, which the Git page reads pull requests with and Send Feedback files issues with.",
+  "name": "GitHub CLI",
+  "where": "host",
+  "needed_by": ["lookup.pull_requests", "fixes.send_feedback"],
+  "detect": {
+    "macos": [{"env": "BAUDE_GH"}, {"which": "gh"}, {"glob": "/opt/homebrew/bin/gh"}, {"glob": "/usr/local/bin/gh"}],
+    "linux": [{"env": "BAUDE_GH"}, {"which": "gh"}, {"glob": "/opt/homebrew/bin/gh"}, {"glob": "/usr/local/bin/gh"}]
+  },
+  "install": {
+    "macos": "brew install gh",
+    "debian": "sudo apt install gh",
+    "fedora": "sudo dnf install gh",
+    "arch": "sudo pacman -S github-cli"
+  },
+  "link": "https://cli.github.com"
+}

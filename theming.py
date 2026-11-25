@@ -180,7 +180,7 @@ row.entry.focused, row.spin.focused, editablelabel:focus-within { outline: none;
 .file-thumb { border-radius: 3px; }
 .attach-chip.image { background: none; padding: 0; }
 .codeblock { background: @baude_raised; border-radius: {radius.code}; }
-.kube-error-fix { background: @baude_raised; border-radius: {radius.code}; padding: 2px 2px 2px 10px; }
+.kube-error-fix, .dep-fix { background: @baude_raised; border-radius: {radius.code}; padding: 2px 2px 2px 10px; }
 .codeblock .code-scroll > viewport > label, .codeblock .code-scroll > label { padding: 6px 8px; }
 .codeblock .code-scroll box { padding: 6px 0; }
 /* the tag and copy button sit over the code's first line: give them the block's own colour (opaque, feathered in

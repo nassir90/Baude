@@ -60,6 +60,10 @@
         "type": "object"
       },
       "description": "rows: the first rows, each {column: value}; objects and lists as JSON text."
+    },
+    "missing": {
+      "$ref": "Dep.json",
+      "description": "servers: no server was found and Docker isn't on the host: Database Schemas shows this in its place."
     }
   },
   "required": ["op"],

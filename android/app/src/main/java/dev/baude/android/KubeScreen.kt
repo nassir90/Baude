@@ -106,6 +106,7 @@ class KubeState(val hostId: String) {
     var progress by mutableStateOf<String?>(null)
     var loading by mutableStateOf(false)
     var fault by mutableStateOf<Msg.KubeFault?>(null)
+    var missing by mutableStateOf<Msg.Dep?>(null) // (kubectl isn't on the host: what the page shows instead)
     var live by mutableStateOf(false)
     var fade by mutableStateOf(false)
     var level by mutableStateOf("table") // (table, or categories)
@@ -127,7 +128,9 @@ class KubeState(val hostId: String) {
     fun served(p: Msg.KubePage) = allPages().firstOrNull { it.resource == p.resource }?.served != false
 
     fun open(context: String?, page: String?, search: String?, namespace: String?) {
+        missing = null
         kube(hostId, Msg.Kube(what = "contexts")) { r ->
+            r.missing?.let { return@kube lacks(it) }
             contexts = r.contexts.orEmpty()
             val names = contexts.mapNotNull { it.name }
             if (r.error != null || names.isEmpty()) {
@@ -175,6 +178,7 @@ class KubeState(val hostId: String) {
         val g = ++gen
         kube(hostId, Msg.Kube(what = "connect", context = name)) { r ->
             if (g != gen) return@kube
+            r.missing?.let { return@kube lacks(it) }
             val f = r.fault ?: r.error?.let { Msg.KubeFault(title = it, why = "", said = "") }
             if (f != null) return@kube failed(f)
             sections = r.sections.orEmpty()
@@ -184,6 +188,17 @@ class KubeState(val hostId: String) {
             else allPages().firstOrNull { it.resource == page.resource }?.let { page = it }
             load(switch = true)
         }
+    }
+
+    /** kubectl isn't on the host: what's missing and how it's installed, in the table's place. */
+    private fun lacks(dep: Msg.Dep) {
+        gen++
+        loading = false
+        progress = null
+        stopWatch()
+        rows = emptyList()
+        fade = false
+        missing = dep
     }
 
     private fun failed(f: Msg.KubeFault) {
@@ -207,6 +222,7 @@ class KubeState(val hostId: String) {
         if (!quiet) progress = Wording.Kube.reading(p.title.orEmpty().lowercase(), ctx)
         kube(hostId, Msg.Kube(what = "list", context = ctx, page = p.resource, crd = p.crd)) { r ->
             if (g != gen) return@kube
+            r.missing?.let { return@kube lacks(it) }
             val f = r.fault ?: r.error?.let { Msg.KubeFault(title = it, why = "", said = "") }
             if (f != null) return@kube failed(f)
             loaded(p, r.columns.orEmpty(), r.rows.orEmpty(), r.metrics, g)
@@ -484,6 +500,7 @@ class KubeState(val hostId: String) {
     /** The status line: the progress; else the note, how many are shown, the context, whether it's live, the metrics and
      * that it's read-only. */
     fun status(shown: Int): String {
+        if (missing != null) return ""
         nothing?.let { return it }
         progress?.let { return it }
         val ctx = context.orEmpty()
@@ -674,7 +691,9 @@ private fun Body(st: KubeState) {
                         kubeRows(st)
                     }
                     Box(Modifier.weight(1f).fillMaxWidth().alpha(if (st.fade) 0.4f else 1f)) {
-                        if (st.fault != null) ErrorState(st, st.fault!!) else if (st.tablePage != null) KubeTable(st, shown)
+                        val lacks = st.missing
+                        if (lacks != null) MissingDep(lacks, Wording.Window.kubernetes) { st.open(null, null, null, null) }
+                        else if (st.fault != null) ErrorState(st, st.fault!!) else if (st.tablePage != null) KubeTable(st, shown)
                     }
                     val status = st.status(shown.size)
                     if (status.isNotEmpty()) Text(status, style = Type.caption, color = c.dim, maxLines = 1,

@@ -3,7 +3,7 @@
   "apps": ["baude", "record"],
   "opens": [
     "☰ → Database Schemas",
-    "A table or column name in a reply (a Signal link): finds the running database that has it and opens the diagram there with that table selected (a popover says \"Finding it in the running databases…\" if it takes a moment, asks \"<n> running databases have it. Which one?\" when several do, and says so with its definition and Try again when none does)",
+    "A table or column name in a reply (a Signal link): finds the running database that has it and opens the diagram there with that table selected (a popover says \"Finding it in the running databases…\" if it takes a moment, asks \"<n> running databases have it. Which one?\" when several do, and says so with its definition and Try Again when none does)",
     "A Signal link's popover: a database icon button (Show it in its database's schema diagram), on a name that is a table or column",
     "⌘K / Ctrl+K glossary: a table in its database's diagram"
   ],
@@ -158,6 +158,7 @@
     }
   ],
   "states": [
+    {"name": "Docker missing", "shows": "No server was found and Docker isn't on the host (as its host says, or this machine): the diagram is replaced by the missing-dependency state: a package icon, \"Database Schemas needs Docker\", the host's install command with Copy, and Try Again, which looks for servers again. A server found in a local cluster without Docker is drawn as ever.", "copy": ["deps.needs", "common.try_again", "kube.copied_try_again"], "decisions": [{"said": "Think about guidance for installing what Baude depends on (claude, codex, vte3, kubectl, docker) and how Baude behaves when they aren't there (paraphrased)", "rule": "Every app's Database Schemas on a host without Docker (and no server found otherwise) shows the missing-dependency state with that host's install command", "decided": "2026-11-25", "source": [{"issue": "BaudeInternal#184"}]}]},
     {"name": "looking", "shows": "Status line \"Looking for Postgres servers…\" and the diagram faded, while servers and databases are discovered."},
     {"name": "no server", "shows": "No diagram; the status line says \"No Postgres server is running (in Docker, or in a local Kubernetes cluster).\" (or Docker's error, \"Docker isn't reachable: <why>\")."},
     {"name": "name not found", "shows": "The first database is drawn fitted, with the status line \"No database here has a table <table>.\" (or the column wording)."},
@@ -170,5 +171,5 @@
   "decisions": [
     {"said": "Kubernetes and Database Schemas should run on the host picked in the left pane, as Terminal does", "rule": "Every app's Kubernetes and database views read the clusters and databases of the host picked in the window's host picker (the host ☰ → Terminal opens new terminals on), through that host's host process, and their bar names that host", "decided": "2026-11-22", "source": [{"issue": "BaudeInternal#182"}]}
   ],
-  "scenes": ["38c-schema-diagram", "38c-schema-host"]
+  "scenes": ["38c-schema-diagram", "38c-schema-host", "39b-missing-docker"]
 }

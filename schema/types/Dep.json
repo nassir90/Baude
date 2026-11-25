@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "A program or library a feature needs (schema/deps), as a host or an app has it: whether it's there, and how it's installed on that machine.",
+  "properties": {
+    "dep": {
+      "type": "string",
+      "description": "Its key in schema/deps (vte, kubectl, docker, …)."
+    },
+    "name": {
+      "type": "string",
+      "description": "Its name, as it's shown."
+    },
+    "where": {
+      "enum": [
+        "app",
+        "host"
+      ],
+      "description": "What needs it: an app's own process, or the host process."
+    },
+    "present": {
+      "type": "boolean",
+      "description": "It's there."
+    },
+    "fix": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "The command that installs it on that machine, or null (another Linux: link)."
+    },
+    "link": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Its install page."
+    }
+  },
+  "required": [
+    "dep",
+    "name",
+    "present"
+  ],
+  "additionalProperties": false
+}

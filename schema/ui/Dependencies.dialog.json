@@ -1,0 +1,67 @@
+{
+  "description": "The Settings dialog's Dependencies page (Baude's, Record's and the phone's; on the phone the third page of Settings, switched to by the bar at its foot): the programs the host picked beside New session needs for its features, each Installed or the command that installs it on that host, as its deps request says (schema/deps lists them, how each is looked for on macOS and Linux, and its install command per platform); then the app's own (VTE, WebKitGTK on Linux, Node.js), looked for by the app.",
+  "apps": [
+    "baude",
+    "record",
+    "phone"
+  ],
+  "opens": [
+    "Settings… → Dependencies (the dialog's page switcher; the phone's: the bar at Settings' foot)"
+  ],
+  "code": [
+    "depsview.py:Page",
+    "depsview.py:row",
+    "depsview.py:ask",
+    "baudelib/deps.py:report",
+    "baudelib/serverrun.py:ServerRunning.handle",
+    "Deps.kt:DepsPage",
+    "Deps.kt:DepRow",
+    "Settings.kt:SettingsScreen"
+  ],
+  "copy": [
+    "deps",
+    "new_session",
+    "common"
+  ],
+  "parts": [
+    {
+      "name": "Host",
+      "shows": "Row \"Host\" with the picked host's name after it (a computer host: the phone runs none of these).",
+      "copy": [
+        "new_session.host"
+      ]
+    },
+    {
+      "name": "host's dependencies",
+      "shows": "A boxed list, a row each, in schema/deps' order: the program's name (its own spelling: kubectl), then \"Installed\" (dim), or the command that installs it on that host (monospace; the phone's wraps to two lines) with a Copy button, or, on a Linux host with no command for its distribution, an Install Page link. The host's error, if it can't be asked, in the list's place.",
+      "copy": [
+        "deps.installed",
+        "deps.install_page",
+        "common.copy"
+      ]
+    },
+    {
+      "name": "app's dependencies",
+      "apps": [
+        "baude",
+        "record"
+      ],
+      "shows": "A group titled with the app's name (Baude, Record): the libraries and programs the app itself needs, rows as above. The phone has none, so shows none."
+    }
+  ],
+  "decisions": [
+    {
+      "said": "Think about guidance for installing what Baude depends on (claude, codex, vte3, kubectl, docker) and how Baude behaves when they aren't there (paraphrased)",
+      "rule": "Every app lists, per host, what that host's features need and whether it's there, each missing one with the install command for that host's platform, from one table (schema/deps) every app and host reads",
+      "decided": "2026-11-25",
+      "source": [
+        {
+          "issue": "BaudeInternal#184"
+        }
+      ]
+    }
+  ],
+  "scenes": [
+    "39d-dependencies"
+  ]
+}

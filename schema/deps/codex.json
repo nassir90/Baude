@@ -1,0 +1,17 @@
+{
+  "description": "OpenAI's codex, which runs a host's Codex chats.",
+  "name": "Codex CLI",
+  "where": "host",
+  "needed_by": ["programs.codex"],
+  "detect": {
+    "macos": [{"env": "BAUDE_CODEX"}, {"which": "codex"}],
+    "linux": [{"env": "BAUDE_CODEX"}, {"which": "codex"}]
+  },
+  "install": {
+    "macos": "npm install -g @openai/codex",
+    "debian": "npm install -g @openai/codex",
+    "fedora": "npm install -g @openai/codex",
+    "arch": "npm install -g @openai/codex"
+  },
+  "link": "https://github.com/openai/codex"
+}

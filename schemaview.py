@@ -41,7 +41,7 @@ from widgets import (  # noqa: E402,F401
 )
 from imageviews import Fade  # noqa: E402,F401
 from pickers import ellipsize_dropdown  # noqa: E402,F401
-from baudelib import tokens, wording  # noqa: E402
+from baudelib import deps, tokens, wording  # noqa: E402
 import kubehost  # noqa: E402
 import viewwindow  # noqa: E402
 
@@ -635,6 +635,11 @@ class SchemaView(Gtk.Box):
         self.status = Gtk.Label(xalign=0, halign=Gtk.Align.START, valign=Gtk.Align.END, margin_start=12, margin_bottom=10)
         self.status.add_css_class("schema-status")
         stage.add_overlay(self.status)
+        import depsview
+        self.missing = depsview.Missing(again=self.look_again)  # (Docker isn't on the host: show_missing)
+        self.missing.set_visible(False)
+        self.missing.add_css_class("view")
+        stage.add_overlay(self.missing)
         self.split = Gtk.Paned(orientation=Gtk.Orientation.VERTICAL, start_child=stage, resize_start_child=True,
                                shrink_end_child=False, vexpand=True)
         self.rows_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, visible=False)
@@ -682,6 +687,13 @@ class SchemaView(Gtk.Box):
         if not self.out.present():
             self.set_visible(True)
             self.grab_focus()
+        self.look_again()
+
+    def look_again(self):
+        """The host's database servers looked for (there, by its host process, if it's another), the table wanted
+        found among them; without Docker there and none found, what's missing shown instead."""
+        host = self.host
+        self.missing.set_visible(False)
         self.say(wording.say("databases.looking_for_servers"))
         self.fade.hold()
         if host.here:
@@ -689,10 +701,22 @@ class SchemaView(Gtk.Box):
             return
 
         def got(r):  # (there, the first database read; a table wanted is found in it if it's there)
-            if host is self.host:
-                self._discovered(r.get("servers") or [], r.get("databases") or {}, None, r.get("error"),
-                                 searched=False)
+            if host is not self.host:
+                return
+            if r.get("missing"):
+                return self.show_missing(r["missing"])
+            self._discovered(r.get("servers") or [], r.get("databases") or {}, None, r.get("error"), searched=False)
         host.ask("databases", {"what": "servers"}, got)
+
+    def show_missing(self, dep):
+        """Docker (dep, a Dep) isn't on the host and no server was found: what's missing and how it's installed, in
+        the diagram's place."""
+        self.fade.done()
+        self.canvas.set_schema([], [])
+        self.say("")
+        self.missing.show(dep, "window.database_schemas")
+        self.missing.set_visible(True)
+        return False
 
     def close(self):
         self.set_visible(False)
@@ -708,6 +732,9 @@ class SchemaView(Gtk.Box):
     def _discover(self):
         try:
             servers = pg_servers_cached()
+            if not servers and (missing := deps.missing("docker")) is not None:  # (none found, and no Docker to look in)
+                GLib.idle_add(self.show_missing, missing)
+                return
             dbs = {s["container"]: pg_databases_cached(s) for s in servers}
             if getattr(self, "preset", None) and self.preset[0] in servers:
                 GLib.idle_add(self._discovered, servers, dbs, self.preset, None)
@@ -721,6 +748,9 @@ class SchemaView(Gtk.Box):
             found = self._find(servers, dbs) if (self.focus_name or self.focus_column) else None
             GLib.idle_add(self._discovered, servers, dbs, found, None)
         except RuntimeError as e:
+            if (missing := deps.missing("docker")) is not None:
+                GLib.idle_add(self.show_missing, missing)
+                return
             GLib.idle_add(self._discovered, [], {}, None, str(e))
 
     def _find(self, servers, dbs):

@@ -45,6 +45,9 @@ def lsp_dir():
 
 def lsp_node():
     """Node.js, which runs both servers: on PATH, else the newest one nvm installed (a launcher's PATH has no nvm)."""
+    from baudelib import deps
+    if "node" in deps.hidden():  # (fault injection: as if it weren't there)
+        return None
     if node := shutil.which("node"):
         return node
     import glob

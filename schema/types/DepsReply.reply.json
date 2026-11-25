@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "deps' answer: each of the host's dependencies on its platform.",
+  "properties": {
+    "op": {
+      "const": "deps",
+      "description": "What it is."
+    },
+    "req": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "deps": {
+      "type": "array",
+      "items": {
+        "$ref": "Dep.json"
+      },
+      "description": "Each one."
+    }
+  },
+  "required": [
+    "op"
+  ],
+  "additionalProperties": false
+}

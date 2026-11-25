@@ -46,7 +46,7 @@ from pickers import CheckList, ellipsize_dropdown  # noqa: E402,F401
 from codeview import (  # noqa: E402,F401
     CodeView,
 )
-from baudelib import tokens, wording  # noqa: E402
+from baudelib import deps, tokens, wording  # noqa: E402
 import kubehost  # noqa: E402
 from kubedock import KubeDock, LogsTab, ShellTab  # noqa: E402
 import viewwindow  # noqa: E402
@@ -389,6 +389,9 @@ class KubeView(Gtk.Box):
         self.table_stack = Gtk.Stack(vexpand=True, hexpand=True)  # (the table, or why it can't be read)
         self.table_stack.add_named(self.table_scroll, "table")
         self.table_stack.add_named(self.build_error(), "error")
+        import depsview
+        self.missing = depsview.Missing(again=self.read_contexts)  # (kubectl isn't on the host: show_missing)
+        self.table_stack.add_named(self.missing, "missing")
         table_box.append(self.table_stack)
         table_box.append(self.status)
         self.details = CodeView()
@@ -436,7 +439,7 @@ class KubeView(Gtk.Box):
 
     def build_error(self):
         """What's shown instead of the table when the cluster can't be read: what went wrong (kube_diagnose), the
-        command that fixes it (a sign-in, say) to copy, Try again, and all kubectl wrote, folded away."""
+        command that fixes it (a sign-in, say) to copy, Try Again, and all kubectl wrote, folded away."""
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10, valign=Gtk.Align.CENTER,
                       halign=Gtk.Align.CENTER, margin_start=24, margin_end=24, margin_top=24, margin_bottom=24)
         box.add_css_class("kube-error")
@@ -550,14 +553,39 @@ class KubeView(Gtk.Box):
         self.select_page_row(self.page)
         if self.timer is None:
             self.timer = GLib.timeout_add_seconds(KUBE_REFRESH_S, self.tick)
+        self.read_contexts(context, namespace)
+
+    def read_contexts(self, context=None, namespace=None):
+        """The host's kubeconfig contexts read (there, by its host process, if it's another), the one wanted then
+        picked and read; without kubectl there, what's missing shown instead."""
+        host = self.host
+        if self.table_stack.get_visible_child_name() == "missing":  # (a retry: the missing state is let go of first,
+            self.table_stack.set_visible_child_name("table")  # as the phone's KubeState.open does)
         if host.here:
+            if (missing := deps.missing("kubectl")) is not None:
+                return self.show_missing(missing)
             contexts = [c for c in kube_contexts() if not c.get("cluster_only")]
             where = ", ".join(pretty_path(p) for p in kubeconfig_paths()) or wording.say("kube.no_kubeconfig")
             self._contexts(host, contexts, where, context, namespace)
             return
         self.say(wording.say("kube.connecting", context=host.name))
-        host.ask("kube", {"what": "contexts"}, lambda r: self._contexts(
-            host, r.get("contexts") or [], r.get("where") or "", context, namespace, r.get("error")))
+        host.ask("kube", {"what": "contexts"}, lambda r: self.show_missing(r["missing"], host) if r.get("missing") else
+                 self._contexts(host, r.get("contexts") or [], r.get("where") or "", context, namespace, r.get("error")))
+
+    def show_missing(self, dep, host=None):
+        """kubectl (dep, a Dep) isn't on the host: what's missing and how it's installed, in the table's place."""
+        if host is not None and host is not self.host:
+            return
+        self.generation += 1  # (nothing read before this shown over it)
+        self.loading = False
+        self.refresh_btn.set_loading(False)
+        self.stop_watch()
+        if self.store is not None:
+            self.store.remove_all()
+        self.fade.done()
+        self.missing.show(dep, "window.kubernetes")
+        self.table_stack.set_visible_child_name("missing")
+        self.say("")
 
     def _contexts(self, host, contexts, where, context, namespace, error=None):
         """The host's kubeconfig contexts are in: the one wanted picked and read."""
@@ -660,6 +688,8 @@ class KubeView(Gtk.Box):
         gen = self.generation = self.generation + 1
         if not self.host.here:
             def connected(r):
+                if r.get("missing"):
+                    return gen == self.generation and self.show_missing(r["missing"])
                 if r.get("error") or r.get("fault"):
                     fault = r.get("fault") or {"title": r["error"], "why": "", "fix": None, "said": ""}
                     return self._failed(gen, fault, fault.get("said") or "")
@@ -889,6 +919,8 @@ class KubeView(Gtk.Box):
         """A page's objects, as another host read them: its rows made already, and whether its metrics were read."""
         if gen != self.generation:
             return
+        if r.get("missing"):
+            return self.show_missing(r["missing"])
         if r.get("error") or r.get("fault"):
             fault = r.get("fault") or {"title": r["error"], "why": "", "fix": None, "said": ""}
             return self._failed(gen, fault, fault.get("said") or "")

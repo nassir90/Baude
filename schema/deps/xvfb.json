@@ -1,0 +1,16 @@
+{
+  "description": "Xvfb's xvfb-run, which gives a Bot's browser and terminals a display of their own on a Linux host with no display. macOS and a host with a display need nothing.",
+  "name": "Xvfb",
+  "where": "host",
+  "no_display": true,
+  "needed_by": ["bot_browser.title", "multiplex.terminal_menu"],
+  "detect": {
+    "linux": [{"which": "xvfb-run"}]
+  },
+  "install": {
+    "debian": "sudo apt install xvfb",
+    "fedora": "sudo dnf install xorg-x11-server-Xvfb",
+    "arch": "sudo pacman -S xorg-server-xvfb"
+  },
+  "link": "https://www.x.org/releases/X11R7.7/doc/man/man1/Xvfb.1.xhtml"
+}

@@ -72,7 +72,7 @@ _PASSED_OVER = set()  # ((var, its value): a claude named that isn't there, said
 
 
 def claude_exe(var="BAUDE_CLAUDE"):
-    """The claude binary: var's (BAUDE_CLAUDE; Record's RECORD_CLAUDE), else claude on PATH, else (macOS) the newest
+    """The claude binary: var's (BAUDE_CLAUDE; Record's RECORD_CLAUDE), else claude on PATH, else ~/.local/bin/claude, else (macOS) the newest
     one the Claude desktop app keeps (claude-code/<version>/<build>/claude.app), as the desktop app puts none on PATH.
     Looked for again each time: a var naming one that's gone (an old desktop build, removed as the app updated) is
     passed over, not run."""
@@ -83,9 +83,12 @@ def claude_exe(var="BAUDE_CLAUDE"):
         _PASSED_OVER.add((var, exe))
         print(f"{var}={exe} isn't there to run: using the claude found without it", file=sys.stderr, flush=True)
     exe = shutil.which("claude")
-    if exe or sys.platform != "darwin":
-        return exe or "claude"
-    return desktop_claude() or "claude"
+    if exe:
+        return exe
+    own = os.path.expanduser("~/.local/bin/claude")  # (where its installer puts it, on a PATH that lacks it)
+    if os.access(own, os.X_OK):
+        return own
+    return (desktop_claude() if sys.platform == "darwin" else None) or "claude"
 
 
 def desktop_claude():

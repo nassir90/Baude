@@ -5,9 +5,11 @@ hostaccounts). A session's metadata carries only an account's id; what signs it 
 A Claude account is, where the host has claude, a config folder of its own (kind "folder"): claude runs with
 CLAUDE_CONFIG_DIR set to it and keeps the sign-in there itself (`claude auth login` run with that folder; on macOS in
 the Keychain under a service name suffixed with a hash of the folder's path, so each folder's is its own). Baude keeps
-only the folder's path. The folder's projects (and the user's shared settings, commands, agents, skills, plugins,
-hooks, CLAUDE.md) are links to the host's own Claude folder's, so its chats are where every other chat is, and set up
-the same. Where the host has no claude, a Claude account is a token from claude setup-token (kind "token"), given to
+only the folder's path. The folder's projects (and the user's commands, agents, skills, plugins, hooks, output styles,
+CLAUDE.md) are links to the host's own Claude folder's, so its chats are where every other chat is, and set up the
+same. Its settings.json and .claude.json are its own (claude won't write through a link): a folder made here starts
+with a copy of the host's settings.json and the host's user MCP servers (~/.claude.json's mcpServers), as a Codex
+account's CODEX_HOME has settings of its own. Where the host has no claude, a Claude account is a token from claude setup-token (kind "token"), given to
 its claude on a pipe (CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR), which claude reads once as it starts, so it's in no
 environment its tools inherit. A Codex account is a CODEX_HOME of its own (kind "profile"), with file-backed
 credentials Codex manages."""
@@ -27,7 +29,7 @@ _CLAUDE_KEYS = ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL
                 "CLAUDE_CODE_USE_FOUNDRY")
 _FOLDER_KEYS = ("CLAUDE_CONFIG_DIR", "CLAUDE_SECURESTORAGE_CONFIG_DIR")  # (another folder's, or its Keychain item's)
 # (what a folder account's folder shares with the host's own Claude folder: its chats, and how the user set Claude up)
-SHARED = ("projects", "settings.json", "CLAUDE.md", "commands", "agents", "skills", "plugins", "hooks", "output-styles")
+SHARED = ("projects", "CLAUDE.md", "commands", "agents", "skills", "plugins", "hooks", "output-styles")
 _CODEX_KEYS = ("OPENAI_API_KEY", "CODEX_API_KEY", "CODEX_ACCESS_TOKEN", "OPENAI_BASE_URL")
 _cache = {}  # (what listing needs, read again when the file changes: its mtime → (accounts by id, sessions' accounts))
 
@@ -178,14 +180,19 @@ def remove(profile, exe=None):
     if kind == "token" or Path(folder).parent != root():
         return
     if provider == "claude":
-        import subprocess
-        from baudelib.claude import claude_env, claude_exe
-        try:
-            subprocess.run([exe or claude_exe(), "auth", "logout"], env=folder_env(claude_env(), folder),
-                           stdin=subprocess.DEVNULL, capture_output=True, timeout=30)
-        except (OSError, subprocess.SubprocessError):
-            pass
+        sign_out(folder, exe)
     shutil.rmtree(folder, ignore_errors=True)
+
+
+def sign_out(folder, exe=None, env=None):
+    """claude auth logout run with a Claude folder (env: claude's, else claude_env's), so its Keychain item goes."""
+    import subprocess
+    from baudelib.claude import claude_env, claude_exe
+    try:
+        subprocess.run([exe or claude_exe(), "auth", "logout"], env=folder_env(env or claude_env(), folder),
+                       stdin=subprocess.DEVNULL, capture_output=True, timeout=30)
+    except (OSError, subprocess.SubprocessError):
+        pass
 
 
 def claude_folder(profile):
@@ -204,7 +211,44 @@ def new_claude_folder(profile):
     folder = root() / f"claude-{profile}"
     folder.mkdir(mode=0o700)
     share(str(folder))
+    _own_settings(str(folder))
     return str(folder)
+
+
+def _host_claude_json():
+    """The host's own Claude Code config file (where its user MCP servers are)."""
+    folder = os.environ.get("CLAUDE_CONFIG_DIR")
+    return os.path.join(folder, ".claude.json") if folder else os.path.expanduser("~/.claude.json")
+
+
+def _own_settings(folder):
+    """A folder made here given settings of its own to start with: a copy of the host's settings.json, and a
+    .claude.json with the host's user MCP servers. A settings.json that's a link is replaced by a copy."""
+    import json
+    from baudelib.transcripts import projects_dir
+    mine, theirs = os.path.join(folder, "settings.json"), os.path.join(os.path.dirname(projects_dir()), "settings.json")
+    if os.path.islink(mine):
+        os.unlink(mine)
+    if not os.path.lexists(mine) and os.path.isfile(theirs):
+        try:
+            shutil.copyfile(theirs, mine)
+            os.chmod(mine, 0o600)
+        except OSError:
+            pass
+    config = os.path.join(folder, ".claude.json")
+    if os.path.lexists(config):
+        return
+    try:
+        with open(_host_claude_json(), encoding="utf-8") as f:
+            servers = json.load(f).get("mcpServers")
+    except (OSError, ValueError, AttributeError):
+        return
+    if isinstance(servers, dict) and servers:
+        try:
+            with os.fdopen(os.open(config, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), "w", encoding="utf-8") as f:
+                json.dump({"mcpServers": servers}, f, indent=2)
+        except OSError:
+            pass
 
 
 def share(folder):
@@ -225,6 +269,8 @@ def share(folder):
             os.symlink(theirs, mine)
         except OSError:
             pass
+    if Path(folder).parent == root() and os.path.islink(os.path.join(folder, "settings.json")):
+        _own_settings(folder)
 
 
 def folder_env(env, folder):

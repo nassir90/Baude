@@ -17,7 +17,7 @@ import uuid
 
 from baudelib import accounts, models, wording
 from baudelib.claude import claude_env, claude_exe
-from baudelib.hostlogin import ESCAPES, auth_status, signed_in_as
+from baudelib.hostlogin import ESCAPES, NO_BROWSER, auth_status, signed_in_as
 
 PROMPT = "Paste code here if prompted > "  # (claude auth login's, with no line break after it)
 
@@ -147,7 +147,7 @@ def _claude_sign_in(server, conn, msg, reply, done):
     else:
         folder = accounts.claude_folder(profile)
         accounts.share(folder)
-    env = accounts.folder_env(claude_env() | (getattr(server, "env", None) or {}), folder)
+    env = accounts.folder_env(claude_env() | (getattr(server, "env", None) or {}), folder) | NO_BROWSER
     try:
         proc = subprocess.Popen([exe, "auth", "login"], env=env, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                 stderr=subprocess.STDOUT, text=True, bufsize=1, errors="replace")
@@ -171,7 +171,7 @@ def _claude_sign_in(server, conn, msg, reply, done):
         who = signed_in_as(auth_status(exe, env)) if code == 0 else None
         if who is None:
             if fresh:
-                shutil.rmtree(folder, ignore_errors=True)
+                discard()
             failed = next((x for x in reversed(lines) if x.lower().startswith(("login failed", "error"))), None)
             return done(error=failed or (lines[-1] if lines and code not in (-15, 130) else
                                          wording.say("subscriptions.claude_failed")))
@@ -179,9 +179,16 @@ def _claude_sign_in(server, conn, msg, reply, done):
             try:
                 accounts.add("claude", name, folder, kind="folder", profile=profile)
             except ValueError as e:
-                shutil.rmtree(folder, ignore_errors=True)
+                discard()
                 return done(error=str(e))
         done(signed_in=True, who=who)
+
+    def discard():
+        """A new account's folder that won't be kept: signed out of first if claude finished signing in to it (its
+        Keychain item would be left otherwise), then removed."""
+        if proc.returncode == 0:
+            accounts.sign_out(folder, exe, env)
+        shutil.rmtree(folder, ignore_errors=True)
 
     threading.Thread(target=read, daemon=True, name="claude-login").start()
     return None

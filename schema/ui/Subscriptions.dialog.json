@@ -1,5 +1,5 @@
 {
-  "description": "The Settings dialog's Subscriptions page (Baude's, Record's and the phone's; on the phone the second page of Settings, switched to by the bar at its foot as the desktop dialog's switcher is when narrow): the Claude and Codex subscription accounts kept on the host picked beside New session (as ☰ → Terminal, Kubernetes… and Database Schemas… use it; the phone itself when it's picked), changed there through its accounts request. Named Subscriptions, not Providers: Settings' Meta group and the model pickers already call inference providers (Ollama, MLX, an endpoint) Providers.",
+  "description": "The Settings dialog's Subscriptions page (Baude's, Record's and the phone's; on the phone the second page of Settings, switched to by the bar at its foot as the desktop dialog's switcher is when narrow): the Claude and Codex subscription accounts kept on the host picked beside New session (as ☰ → Terminal, Kubernetes… and Database Schemas… use it), changed there through its accounts request. Named Subscriptions, not Providers: Settings' Meta group and the model pickers already call inference providers (Ollama, MLX, an endpoint) Providers.",
   "apps": [
     "baude",
     "record",
@@ -39,7 +39,7 @@
       "decisions": [
         {
           "said": "Baude needs to be able to support running claude with different subscriptions, e.g. a team sub for work and an ultra sub for home that they absolutely need to keep separate (paraphrased)",
-          "rule": "Every app (Baude, Record, the phone) lets you keep several named Claude and Codex accounts on each host, changed on the host picked beside New session, and pick each provider's default; a chat runs under the account its host's default was when it was made (or first written in) and keeps it when resumed or forked; credentials never leave their host",
+          "rule": "Every app (Baude, Record, the phone) lets you keep several named Claude and Codex accounts on each host, changed on the host picked beside New session, and pick each provider's default; a chat runs under the account its host's default was when it was made (or first written in) and keeps it when resumed or forked; a chat started from another on the same host (a fork, a side question, a subagent it spawns) runs under that chat's accounts; credentials never leave their host",
           "decided": "2026-11-22",
           "source": [
             {
@@ -123,7 +123,7 @@
     },
     {
       "name": "Add Claude account dialog",
-      "shows": "On a host with claude: heading \"Add Claude account\"; \"Account name\"; \"Existing signed-in Claude folder (optional)\"; its button Sign in (Use signed-in folder once a folder is typed); Close. Sign in runs claude auth login on the host with a new folder of the account's own: \"Open the sign-in page to sign in.\" (a link to the page the host was given), then a box \"If the page shows a code, paste it here\" and Send, which passes the code to the login on the host; the dialog closes once it's signed in, and says why if it isn't. Close stops it. On a host without claude (the phone itself): \"Account name\", a password entry whose placeholder is \"Paste the token from claude setup-token\", Save account, Close.",
+      "shows": "On a host with claude: heading \"Add Claude account\"; \"Account name\"; \"Existing signed-in Claude folder (optional)\"; its button Sign in (Use signed-in folder once a folder is typed); Close. Sign in runs claude auth login on the host with a new folder of the account's own: \"Open the sign-in page to sign in.\" (a link to the page the host was given), then a box \"If the page shows a code, paste it here\" and Send, which passes the code to the login on the host; what claude says of a pasted code (\"Invalid code…\") replaces \"Checking the code…\"; the dialog closes once it's signed in, and says why if it isn't. Close stops it. On a host without claude: \"Account name\", a password entry whose placeholder is \"Paste the token from claude setup-token\", Save account, Close.",
       "copy": [
         "subscriptions.add_claude",
         "subscriptions.name_hint",
@@ -210,12 +210,16 @@
     {
       "name": "host unreachable",
       "shows": "Each group's list holds the error the reach gave."
+    },
+    {
+      "name": "phone as host",
+      "shows": "With the phone itself picked: the Host row only, no provider groups (the phone as a host answers the accounts request with \"unsupported operation\", so another app picking it shows that error in each group)."
     }
   ],
   "decisions": [
     {
       "said": "Baude needs to be able to support running claude with different subscriptions, e.g. a team sub for work and an ultra sub for home that they absolutely need to keep separate (paraphrased)",
-      "rule": "Every app (Baude, Record, the phone) lets you keep several named Claude and Codex accounts on each host, changed on the host picked beside New session, and pick each provider's default; a chat runs under the account its host's default was when it was made (or first written in) and keeps it when resumed or forked; credentials never leave their host",
+      "rule": "Every app (Baude, Record, the phone) lets you keep several named Claude and Codex accounts on each host, changed on the host picked beside New session, and pick each provider's default; a chat runs under the account its host's default was when it was made (or first written in) and keeps it when resumed or forked; a chat started from another on the same host (a fork, a side question, a subagent it spawns) runs under that chat's accounts; credentials never leave their host",
       "decided": "2026-11-22",
       "source": [
         {
@@ -239,7 +243,7 @@
     },
     {
       "said": "ChatGPT started work on a providers screen to separate work and personal accounts (the owner's request to finish it; review: a chat's account must be visible)",
-      "rule": "Every app shows the account a chat runs under: its status bar host tooltip (\"Account: <name>\"), Copy Transcript's header (\"Account\"), Meta's list of chats; a sign-in card in a chat under a Claude account replaces that account's token, never the CLI's own sign-in",
+      "rule": "Every app shows the account a chat runs under: its status bar host tooltip (\"Account: <name>\"), Copy Transcript's header (\"Account\"), Meta's list of chats; a sign-in card in a chat under a Claude account signs in to that account (a folder account's: claude auth login with its folder; a token account's: its token replaced), never the CLI's own sign-in; Meta's card signs in to the account Meta runs under",
       "decided": "2026-11-25",
       "source": [
         {
@@ -278,6 +282,26 @@
         {
           "session": "b3845b21-55ac-4aab-a769-fb8517403c51",
           "message": "7d38ce29-c6e4-4827-b56a-d688129471eb"
+        }
+      ]
+    },
+    {
+      "said": "(review of PR 423, the coordinator's decision) the phone-as-host token accounts are kept but no phone chat uses them, pending the owner's terms-of-use question: hide them so nothing looks like it works and doesn't",
+      "rule": "No app lists or adds accounts for the phone as a host until the owner decides whether its chats may use setup tokens: the phone's own Subscriptions page shows no provider groups for it, and the phone as a host answers the accounts request with \"unsupported operation\"",
+      "decided": "2026-11-25",
+      "source": [
+        {
+          "session": "b3845b21-55ac-4aab-a769-fb8517403c51"
+        }
+      ]
+    },
+    {
+      "said": "(review of PR 423, the coordinator's decision) claude won't write a user setting through a linked settings.json; the owner hates windows popping up",
+      "rule": "Every app's Claude folder account made on a host links the host's Claude folder's projects, CLAUDE.md, commands, agents, skills, plugins, hooks and output-styles into the account's folder, and copies, as the folder is made, the host's settings.json and its user MCP servers (~/.claude.json's mcpServers) into the folder's own settings.json and .claude.json (each account's settings are then its own, as a Codex account's are); claude auth login run by a host opens no browser there (BROWSER is a no-op): the app shows the page's link",
+      "decided": "2026-11-25",
+      "source": [
+        {
+          "session": "b3845b21-55ac-4aab-a769-fb8517403c51"
         }
       ]
     }

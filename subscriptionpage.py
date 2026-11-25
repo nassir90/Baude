@@ -272,7 +272,7 @@ class _ClaudeLogin:
 
     def __init__(self, page, dialog, form, status, submit, say, inputs):
         self.page, self.dialog, self.submit, self.say, self.inputs = page, dialog, submit, say, inputs
-        self.ask, self.lines = None, []
+        self.ask, self.lines, self.checking = None, [], False
         self.link = Gtk.Label(xalign=0, wrap=True, visible=False)
         self.row = Gtk.Box(spacing=6, visible=False)
         self.code = Gtk.Entry(hexpand=True, placeholder_text=wording.say("sign_in.code_hint"))
@@ -306,12 +306,16 @@ class _ClaudeLogin:
             self.code.grab_focus()
         elif not line.startswith("Opening browser"):
             self.lines.append(line)
+            if self.checking:  # (what claude says of a pasted code: "Invalid code…", and it asks again)
+                self.checking = False
+                self.say(line)
         return False
 
     def paste(self):
         code = self.code.get_text().strip()
         if code and self.ask is not None and self.ask.send({"what": "code", "code": code}):
             self.code.set_text("")
+            self.checking = True
             self.say(wording.say("sign_in.checking_code"))
 
     def answered(self, reply):

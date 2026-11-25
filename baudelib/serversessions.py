@@ -86,10 +86,12 @@ class ServerSessions:
                 "spawned_by": params.get("spawned_by") if wire.is_id(params.get("spawned_by") or "") else None,
                 "start_key": params.get("start_key") if wire.is_id(params.get("start_key") or "") else None,
                 "draft": bool(params.get("draft")) and not (params.get("prompt") or "").strip()}
-        meta["profiles"] = dict(origin.meta.get("profiles", {})) if origin else accounts.defaults()
         with self.lock:
             if self.stopped.is_set():
                 raise OSError("the host process is stopping")
+            # (its accounts: the chat's it's forked from or asked of, or that spawned it here; else the defaults)
+            parent = origin or (self.sessions.get(meta["spawned_by"]) if meta["spawned_by"] else None)
+            meta["profiles"] = dict(parent.meta.get("profiles", {})) if parent else accounts.defaults()
             s = Session(self, meta)
             if tools:
                 s.app_tools = agentproxy.AppTools(self, conn, s.id, tools)
@@ -342,7 +344,7 @@ class ServerSessions:
             s.meta.pop("cut", None)  # (carried on, or something else said: not cut any more)
             if s.meta.pop("draft", None) and not s.meta.get("prompt"):  # (written in: a session of its own from now on,
                 s.meta["prompt"] = _said(msg)                           # listed and kept, titled by what was said)
-                if s.proc is None and not s.meta.get("fork_from"):  # (its account: the default as it's first written in, picked since it was made too)
+                if s.proc is None and not s.meta.get("fork_from") and not s.meta.get("spawned_by"):  # (its account: the default as it's first written in, picked since it was made too)
                     s.meta["profiles"] = accounts.defaults()
             at_turn = s.busy
             self.ensure_proc(s).send(msg)
@@ -868,7 +870,7 @@ class ServerSessions:
         each would as it's first written in (take_input)."""
         with self.lock:
             for s in self.sessions.values():
-                if s.meta.get("draft") and s.proc is None and not s.meta.get("fork_from"):
+                if s.meta.get("draft") and s.proc is None and not s.meta.get("fork_from") and not s.meta.get("spawned_by"):
                     s.meta.setdefault("profiles", {})[provider] = profile
                     self.save(s)
         self.changed()

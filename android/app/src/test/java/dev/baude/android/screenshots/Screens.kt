@@ -159,8 +159,8 @@ abstract class Screens(private val theme: String) {
         screen("05e-subscriptions-remove")
     }
 
-    // (the phone as the host picked: its own Claude accounts, tokens from claude setup-token (it has no claude), and no
-    // Codex; then Add account's token form and an account's Replace Token…)
+    // (the phone as the host picked: no accounts listed; then, on a host without claude, Add account's token form and a
+    // token account's Replace Token…)
     @Test fun subscriptionsPhone() {
         phoneAccountsFixture()
         show { SettingsScreen({}, {}, page = 1) }
@@ -169,7 +169,7 @@ abstract class Screens(private val theme: String) {
     }
 
     @Test fun subscriptionsPhoneAdd() {
-        phoneAccountsFixture()
+        tokenAccountsFixture()
         show { SettingsScreen({}, {}, page = 1) }
         laidOut()
         tap("Add account")
@@ -177,7 +177,7 @@ abstract class Screens(private val theme: String) {
     }
 
     @Test fun subscriptionsToken() {
-        phoneAccountsFixture()
+        tokenAccountsFixture()
         show { SettingsScreen({}, {}, page = 1) }
         laidOut()
         tap("Change this account")
@@ -195,6 +195,16 @@ abstract class Screens(private val theme: String) {
                 .apply { if (m.optString("what") == "usage") put("usage", org.json.JSONArray(listOf(
                     org.json.JSONObject().put("name", "Five hour").put("percent", 25),
                     org.json.JSONObject().put("name", "Seven day").put("percent", 40)))) }
+        }
+    }
+
+    private fun tokenAccountsFixture() {
+        FixtureConnection.up(activity, Mesh.hosts.first()) { m ->
+            if (m.optString("op") != "accounts") null
+            else org.json.JSONObject().put("op", "accounts").put("req", m.opt("req")).put("what", m.optString("what"))
+                .put("accounts", org.json.JSONArray(listOf(
+                    org.json.JSONObject().put("id", "t1").put("provider", "claude").put("name", "Personal").put("kind", "token"))))
+                .put("defaults", org.json.JSONObject().put("claude", "t1").put("codex", "")).put("claude_cli", false)
         }
     }
 

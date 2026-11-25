@@ -342,7 +342,7 @@ class LoginCard(Gtk.Box):
         self.win, self.args, self.where, self.host, self.retry = win, list(args), where, host, retry
         self.account, self.account_where = account, account_where
         self.chat = (win.remote, win.session_id) if hasattr(win, "at_chat") else None  # (the chat it's in: signed in for)
-        self.proc, self.said = None, []
+        self.proc, self.said, self.checking = None, [], False
         self.title = sel_label("")
         self.body = sel_label("")
         self.append(self.title)
@@ -453,6 +453,9 @@ class LoginCard(Gtk.Box):
             self.body.set_visible(True)
         elif line and not line.startswith("Opening browser"):
             self.said.append(line)
+            if self.checking:  # (what claude says of a pasted code: "Invalid code…", and it asks again)
+                self.checking = False
+                self.body.set_markup(html.escape(line))
         return False
 
     def paste(self):
@@ -460,6 +463,7 @@ class LoginCard(Gtk.Box):
         if not code or self.proc is None or not self.proc.paste(code):
             return
         self.code.set_text("")
+        self.checking = True
         self.body.set_markup(f"<span alpha='60%'>{html.escape(wording.say('sign_in.checking_code'))}</span>")
 
     def stop(self):

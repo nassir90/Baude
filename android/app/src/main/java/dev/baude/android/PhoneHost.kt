@@ -259,7 +259,8 @@ object PhoneHost {
         if (op == Op.READ_FILE) return reply(Op.FILE, *readFile(msg))
         if (op == Op.LIST_DIR) return reply(Op.DIR, *listDir(Msg.ListDir.from(msg).path.orEmpty()))
         if (op == Op.CATALOGUE) return reply(Op.CATALOGUE, *catalogue(Msg.Catalogue.from(msg).cwd.orEmpty()))
-        if (op == Op.ACCOUNTS) return reply(Op.ACCOUNTS, *PhoneAccounts.answer(msg)) // (this phone's own: PhoneAccounts)
+        if (op == Op.ACCOUNTS) return if (PhoneAccounts.OFFERED) reply(Op.ACCOUNTS, *PhoneAccounts.answer(msg)) // (this phone's own)
+            else reply(Op.ERROR, "error" to "unsupported operation")
         val sid = when (op) { // (the session each of the rest is about)
             Op.ATTACH -> Msg.Attach.from(msg).session
             Op.DETACH -> Msg.Detach.from(msg).session

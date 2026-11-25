@@ -60,7 +60,7 @@ class HostAccounts(val hostId: String) {
     }
 
     /** Its providers, each with its name: the phone's own, Claude's only (it can't run Codex). */
-    val providers get() = if (hostId == "phone") PROVIDERS.take(1) else PROVIDERS
+    val providers get() = if (hostId != "phone") PROVIDERS else if (PhoneAccounts.OFFERED) PROVIDERS.take(1) else emptyList()
 
     companion object {
         val PROVIDERS = listOf("claude" to Wording.Report.claude, "codex" to Wording.Programs.codex)
@@ -78,7 +78,7 @@ fun SubscriptionsPage() {
     val host = remember(hostId) { hostId?.let { HostAccounts(it) } }
     var dialog by remember { mutableStateOf<Pair<String, Any?>?>(null) } // (which dialog, and its provider or account)
     LaunchedEffect(hostId) {
-        val h = host ?: return@LaunchedEffect
+        val h = host?.takeIf { it.providers.isNotEmpty() } ?: return@LaunchedEffect
         Mesh.ask(h.hostId, Msg.Accounts(what = "list").json()) { r -> h.took(r)?.let { e -> h.error.value = e } }
     }
     Column(Modifier.fillMaxSize().background(c.frame)) {
@@ -339,9 +339,11 @@ class ClaudeLogin(val host: HostAccounts, val id: String?) {
     val said = mutableStateOf<String?>(null)
     val busy = mutableStateOf(false)
     private var conn: Connection? = null
+    private var checking = false
 
     fun start(done: () -> Unit) {
         val lines = ArrayList<String>()
+        checking = false
         busy.value = true
         url.value = null
         said.value = Wording.SignIn.starting
@@ -357,7 +359,13 @@ class ClaudeLogin(val host: HostAccounts, val id: String?) {
                     if (found != null) {
                         url.value = found.value.trimEnd('.', ',', ')')
                         said.value = null
-                    } else if (!g.line.startsWith("Opening browser")) lines.add(g.line)
+                    } else if (!g.line.startsWith("Opening browser")) {
+                        lines.add(g.line)
+                        if (checking) { // (what claude says of a pasted code: "Invalid code…", and it asks again)
+                            checking = false
+                            said.value = g.line
+                        }
+                    }
                     return@post
                 }
                 conn = null
@@ -386,6 +394,7 @@ class ClaudeLogin(val host: HostAccounts, val id: String?) {
         val w = conn ?: return
         if (code.value.isNotBlank() && w.send(Msg.Accounts(req = REQ, what = "code", code = code.value.trim()).json())) {
             code.value = ""
+            checking = true
             said.value = Wording.SignIn.checkingCode
         }
     }

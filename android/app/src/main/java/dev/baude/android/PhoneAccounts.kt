@@ -10,6 +10,9 @@ import java.util.UUID
  * never sent anywhere else. Answers the accounts op: list, add, rename, token, remove, select, usage (null: a setup
  * token can't read usage). The phone has no Codex. */
 object PhoneAccounts {
+    /** Whether the phone as a host answers the accounts op and its Subscriptions page lists and adds accounts. */
+    const val OFFERED = false
+
     private val lock = Any()
 
     private fun file() = File(File(PhoneHost.ctx.filesDir, "phone"), "accounts.json")

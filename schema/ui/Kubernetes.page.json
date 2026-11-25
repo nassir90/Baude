@@ -357,6 +357,11 @@
           "does": "Closes it and stops what it runs (kubectl; the shell in the pod), never left running; the tab beside it is picked. The last one closed hides the dock. Switching context, another host, closing the view or Esc (the picked tab) do the same."
         }
       ],
+      "phone": {
+        "does": "The picked tab's controls (its container, Previous, Follow, Wrap) sit on a row of their own just under the strip, inside the picked tab, above its log or terminal: a phone's width holds only the tabs",
+        "why": "no room at the strip's end on a phone",
+        "decided": "2026-11-25"
+      },
       "decisions": [
         {
           "said": "The pod-name row under the Kubernetes table should be the shell's grey, and tab-like, holding several log tails and terminals at once, as Freelens does",
@@ -365,6 +370,17 @@
           "source": [
             {
               "issue": "BaudeInternal#189"
+            }
+          ]
+        },
+        {
+          "said": "Yeah that looks fine.",
+          "rule": "On the phone the Kubernetes dock's controls sit under the tab strip, inside the picked tab; elsewhere at the strip's end",
+          "decided": "2026-11-25",
+          "source": [
+            {
+              "session": "b3845b21-55ac-4aab-a769-fb8517403c51",
+              "message": "db222fe8-4a2e-4506-a536-bdef40c1c741"
             }
           ]
         }

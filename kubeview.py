@@ -42,7 +42,7 @@ from widgets import (  # noqa: E402,F401
     time_tip, toast, view_bar, _scales,
 )
 from imageviews import Fade, RefreshButton  # noqa: E402,F401
-from pickers import ellipsize_dropdown  # noqa: E402,F401
+from pickers import CheckList, ellipsize_dropdown  # noqa: E402,F401
 from codeview import (  # noqa: E402,F401
     CodeView,
 )
@@ -325,15 +325,9 @@ class KubeView(Gtk.Box):
         # the namespaces shown: a check each, any set of them at once (Freelens' multi-select), or all of them
         self.ns_label = Gtk.Label(label=wording.say("kube.all_namespaces"), ellipsize=Pango.EllipsizeMode.END,
                                   max_width_chars=24)
-        self.ns_all = Gtk.CheckButton(label=wording.say("kube.all_namespaces"))
-        self.ns_all.connect("toggled", lambda b: self.syncing or self.show_namespaces([]))
-        self.ns_list = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-        pick = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
-        pick.append(self.ns_all)
-        pick.append(Gtk.Separator())
-        pick.append(Gtk.ScrolledWindow(child=self.ns_list, hscrollbar_policy=Gtk.PolicyType.NEVER,
-                                       propagate_natural_height=True, propagate_natural_width=True,
-                                       max_content_height=420))
+        pick = self.ns_pick = CheckList(wording.say("kube.all_namespaces"), self.show_namespaces)  # (the sidebar's
+        # ⋮ → Groups too)
+        self.ns_all = pick.all
         self.ns_btn = Gtk.MenuButton(child=self.ns_label, always_show_arrow=True, popover=Gtk.Popover(child=pick),
                                      tooltip_text=wording.say("kube.namespaces_tip"))
         bar.append(self.ns_btn)
@@ -772,25 +766,12 @@ class KubeView(Gtk.Box):
     def fill_namespaces(self):
         """The namespace list: the cluster's namespaces, and any shown that it didn't list (one opened from a link),
         each a check; those shown checked, and named on the button."""
-        child = self.ns_list.get_first_child()
-        while child is not None:
-            self.ns_list.remove(child)
-            child = self.ns_list.get_first_child()
-        self.ns_checks = {}
-        for ns in sorted(set(self.namespaces) | set(self.ns_shown)):
-            check = self.ns_checks[ns] = Gtk.CheckButton(label=ns)
-            check.ns = ns
-            check.connect("toggled", lambda b: self.syncing or self.show_namespaces(
-                [n for n in self.ns_shown if n != b.ns] + [b.ns] * b.get_active()))
-            self.ns_list.append(check)
+        self.ns_pick.fill([(ns, ns) for ns in sorted(set(self.namespaces) | set(self.ns_shown))], self.ns_shown)
+        self.ns_checks = self.ns_pick.checks
         self.sync_namespaces()
 
     def sync_namespaces(self):
-        was, self.syncing = self.syncing, True
-        self.ns_all.set_active(not self.ns_shown)
-        for ns, check in self.ns_checks.items():
-            check.set_active(ns in self.ns_shown)
-        self.syncing = was
+        self.ns_pick.sync(self.ns_shown)
         self.ns_label.set_label(self.ns_summary())
         self.ns_btn.set_tooltip_text(", ".join(self.ns_shown) if len(self.ns_shown) > 2 else
                                      wording.say("kube.namespaces_tip"))

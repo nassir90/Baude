@@ -5,6 +5,7 @@ import html
 import os
 import re
 import weakref
+import sys
 import time
 import urllib.parse
 from baudelib.transcripts import find_session, history_items, ref_epoch
@@ -41,7 +42,7 @@ from signalrefs import db_prefetch, pg_forget, tool_dir  # noqa: E402
 from signalcode import REF_LSP_PACKAGES, lsp_dir  # noqa: E402
 from signalnames import Signal  # noqa: E402
 from toolcards import artifact_from_tool  # noqa: E402
-from sessionlist import network  # noqa: E402
+from sessionlist import bot_picture, network, remote_info  # noqa: E402
 from refpopovers import (  # noqa: E402
     LookupPopover, RefPopover, chat_checkout, in_chat, ref_busy, ref_column_table, ref_kind_label, ref_run_names,
     ref_status_text, ref_status_tip,
@@ -200,6 +201,9 @@ class WindowSignal:
         here = session_id == self.session_id
         if info is None and session_id and not session_id.startswith("new-") and not here:
             info = find_session(session_id)
+        if info is None and here and (r := getattr(self, "remote", None)) is not None \
+                and (listed := r.sessions.get(session_id)) is not None:
+            info = remote_info({**listed, "server": r})  # (the open chat's, as its host lists it: a Bot's, its picture)
         if title is None:
             title = self.title_label.get_text() if here else chat_name(info or {})
         me = weakref.ref(self)
@@ -215,7 +219,18 @@ class WindowSignal:
                     win.open_remote_soon(info)
                 else:
                     win.switch_to(lambda: win.resume_session(info))
-        widgets.desktop_notify(self.chat_key(session_id), title or wording.say("common.untitled"), body, clicked)
+        key, title = self.chat_key(session_id), title or wording.say("common.untitled")
+        if sys.platform == "darwin" or not (info or {}).get("bot"):  # (macOS's take no picture: desktop_notify)
+            widgets.desktop_notify(key, title, body, clicked)
+            return
+
+        def pictured(tex):
+            if (win := me()) is None or win.looking_at(session_id):  # (seen while its picture came)
+                return
+            png = tex.save_to_png_bytes().get_data() if tex is not None else None
+            widgets.desktop_notify(key, title, body, clicked, picture=png and widgets.notification_picture(
+                png, widgets.notify_logo()))
+        bot_picture(info, pictured)
 
     def seen_chat(self):
         """The open chat seen (this window's the one you're in, on its chat's tab, or the chat's just opened): its

@@ -373,6 +373,62 @@ def notify_as(svg):
     _identity["svg"] = svg
 
 
+NOTIFY_PICTURE_PX = tokens.px("notification.picture")  # (a Bot's picture as its notification shows it, square)
+NOTIFY_BADGE_PX = tokens.px("notification.badge")  # (the app's logo in its bottom-right corner)
+NOTIFY_BADGE_GAP = tokens.px("notification.badge-gap")
+
+
+def notification_picture(png, logo_svg):
+    """A Bot's picture (png: its texture's PNG) as its notifications show it: round, the app's logo (logo_svg: an SVG file)
+    in its bottom-right corner, cut out of it. A PNG file's path, in the cache (None: it couldn't be drawn)."""
+    import hashlib
+    import io
+    import cairo
+    from baudelib.applist import icon_png
+    try:
+        svg = open(logo_svg).read() if logo_svg else None
+    except OSError:
+        svg = None
+    name = hashlib.sha1(png + (svg or "").encode()).hexdigest()[:16]
+    path = os.path.join(GLib.get_user_cache_dir(), "baude", "notifications", f"{name}.png")
+    if os.path.exists(path):
+        return path
+    try:
+        pic = cairo.ImageSurface.create_from_png(io.BytesIO(png))
+        size, badge = NOTIFY_PICTURE_PX, NOTIFY_BADGE_PX
+        out = cairo.ImageSurface(cairo.FORMAT_ARGB32, size, size)
+        cr = cairo.Context(out)
+        cr.arc(size / 2, size / 2, size / 2, 0, 2 * math.pi)
+        cr.clip()
+        k = size / min(pic.get_width(), pic.get_height())  # (filling the circle, cropped to its middle)
+        cr.translate((size - pic.get_width() * k) / 2, (size - pic.get_height() * k) / 2)
+        cr.scale(k, k)
+        cr.set_source_surface(pic, 0, 0)
+        cr.get_source().set_filter(cairo.FILTER_GOOD)
+        cr.paint()
+        if svg:
+            cr = cairo.Context(out)
+            at = size - badge
+            cr.set_operator(cairo.OPERATOR_CLEAR)  # (a gap round the logo, whatever the banner's behind it)
+            cr.arc(at + badge / 2, at + badge / 2, badge / 2 + NOTIFY_BADGE_GAP, 0, 2 * math.pi)
+            cr.fill()
+            cr.set_operator(cairo.OPERATOR_OVER)
+            cr.set_source_surface(cairo.ImageSurface.create_from_png(io.BytesIO(icon_png(svg, badge, mac=False))),
+                                  at, at)
+            cr.paint()
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        out.write_to_png(path + ".part")
+        os.replace(path + ".part", path)
+    except (GLib.Error, cairo.Error, OSError, ValueError, MemoryError):
+        return None
+    return path
+
+
+def notify_logo():
+    """The logo notifications show (notify_as's SVG file; None: none set)."""
+    return _identity.get("svg")
+
+
 def notifications_on():
     return load_settings().get("notify") is not False
 
@@ -422,21 +478,27 @@ def _fdo_signal(signal, nid, action=None):
         fn()
 
 
-def desktop_notify(key, title, body="", clicked=None):
-    """A desktop notification, key's (one key, one notification: a newer one takes the older's place); clicked(), run
-    when it's clicked (Linux). Nothing when Notifications is off. On macOS osascript's, credited to Script Editor (the
-    apps run in Python's bundle, not one of their own): a click there opens Script Editor."""
+def macos_notification(title, body):
+    """The osascript that posts a notification on macOS: the chat's name its title, what happened its body (two lines
+    of it, with no subtitle above). osascript's takes no picture: its icon is the app it's credited to."""
+    quote = lambda t: '"' + t.replace("\\", "\\\\").replace('"', '\\"') + '"'  # noqa: E731
+    return f"display notification {quote(body)} with title {quote(title)}"
+
+
+def desktop_notify(key, title, body="", clicked=None, picture=None):
+    """A desktop notification, key's (one key, one notification: a newer one takes the older's place): title the
+    chat's name, body what happened; clicked(), run when it's clicked (Linux); picture, a Bot's
+    (notification_picture's file), its icon in place of the app's logo (Linux). Nothing when Notifications is off. On
+    macOS osascript's, credited to Script Editor (the apps run in Python's bundle, not one of their own): a click there
+    opens Script Editor."""
     if not notifications_on():
         return
     body = " ".join((body or "").split())
     body = body[:157] + "…" if len(body) > 160 else body
     if sys.platform == "darwin":
-        quote = lambda t: '"' + t.replace("\\", "\\\\").replace('"', '\\"') + '"'  # noqa: E731
-        script = f"display notification {quote(body)} with title {quote(GLib.get_application_name() or '')}" + \
-            f" subtitle {quote(title)}"
         try:
-            subprocess.Popen(["osascript", "-e", script], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                             stderr=subprocess.DEVNULL, start_new_session=True)
+            subprocess.Popen(["osascript", "-e", macos_notification(title, body)], stdin=subprocess.DEVNULL,
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
         except OSError:
             pass
         return
@@ -450,8 +512,8 @@ def desktop_notify(key, title, body="", clicked=None):
             act.connect("activate", lambda _a, v: (fn := _notified.pop(v.get_string(), None)) and fn())
             app.add_action(act)
         n = Gio.Notification.new(title)
-        if _identity.get("svg"):
-            n.set_icon(Gio.FileIcon.new(Gio.File.new_for_path(_identity["svg"])))
+        if picture or _identity.get("svg"):
+            n.set_icon(Gio.FileIcon.new(Gio.File.new_for_path(picture or _identity["svg"])))
         if body:
             n.set_body(body)
         n.set_default_action_and_target("app.notification-clicked", GLib.Variant.new_string(key))
@@ -465,6 +527,8 @@ def desktop_notify(key, title, body="", clicked=None):
             return
         _fdo["ids"][key], _fdo["keys"][nid] = nid, key
     hints = {"urgency": GLib.Variant.new_byte(1)}
+    if picture:  # (shown in place of app_icon, the logo)
+        hints["image-path"] = GLib.Variant.new_string(GLib.filename_to_uri(picture))
     if app.get_application_id():  # (the desktop entry, which servers take the app's name and icon from)
         hints["desktop-entry"] = GLib.Variant.new_string(app.get_application_id())
     _fdo_call("Notify", GLib.Variant("(susssasa{sv}i)", (

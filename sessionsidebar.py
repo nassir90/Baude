@@ -1,4 +1,4 @@
-"""sessionsidebar — the sessions sidebar (SessionSidebar): its status dots (StatusDot), filter (FilterList), the
+"""sessionsidebar — the sessions sidebar (SessionSidebar): its status dots (StatusDot), the
 sessions listed, their groups and rows.
 """
 import os
@@ -24,14 +24,14 @@ from pickers import ChoiceDropDown  # noqa: E402  (a dropdown over (value, label
 from widgets import (  # noqa: E402,F401
     discard, ensure_icons, load_settings, pretty_path, save_settings, time_ago, toast, walk,
 )
-from pickers import TreeList, sidebar_action, ellipsize_dropdown  # noqa: E402,F401
+from pickers import CheckList, TreeList, sidebar_action, ellipsize_dropdown  # noqa: E402,F401
 
 from startup import trace  # noqa: E402
 from baudelib.client import chat_name  # noqa: E402
 from sessionlist import (  # noqa: E402
     HERE_HOST, THIS_MACHINE, apply_desktop_index, bot_picture, chat_group, chat_groups, collapse_copies, date_group,
-    desktop_index, desktop_parents, fork_tree, host_key, last_used, list_sessions, made_groups, main_folder, network,
-    next_midnight, place_sessions, remote_info, remote_name, remote_path, save_info_cache, session_group,
+    desktop_index, desktop_parents, fork_tree, host_key, last_used, list_sessions, made_at, made_groups, main_folder,
+    network, next_midnight, place_sessions, remote_info, remote_name, remote_path, save_info_cache, session_group,
     short_group_label, started_elsewhere,
 )
 from sidebarmenu import SidebarMenu  # noqa: E402
@@ -74,136 +74,6 @@ class StatusDot(Gtk.Image):
         self.set_from_icon_name("baude-dot-symbolic")
         self.set_visible(state != "inactive")  # an inactive chat shows no dot at all
         self.set_tooltip_text(self.TIPS.get(state, state))
-
-
-class FilterList(Gtk.ListBox):
-    """The sidebar's ⋮ filter (Groups), a list in its menu: what's ticked is listed, and everything is
-    till some are picked. Picked as the Git page's branches are: a click, that one only; Shift or Ctrl (⌘) and a click,
-    one more or one fewer (none left: everything again). changed(the keys ticked, or None: all of them) as it's
-    picked; menu(row, x, y), x and y in the list's own, on a right-click on a row."""
-
-    def __init__(self, changed, menu=None):
-        super().__init__(selection_mode=Gtk.SelectionMode.MULTIPLE, activate_on_single_click=False,
-                         css_classes=["filter-list"])
-        self.changed, self.items, self.shown, self.filling, self.soon = changed, None, None, False, None
-        self.connect("selected-rows-changed", lambda *_: self.picked())
-        # (Shift and a click picks one more, or one fewer, as Ctrl (⌘) and a click does, and as on the Git page: not
-        # the run from the last one picked, as GTK's list has it. Ahead of the list's own click, which never sees it)
-        shift = Gtk.GestureClick(button=Gdk.BUTTON_PRIMARY, propagation_phase=Gtk.PropagationPhase.CAPTURE)
-        shift.connect("pressed", self.shift_click)
-        self.add_controller(shift)
-        keys = Gtk.EventControllerKey(propagation_phase=Gtk.PropagationPhase.CAPTURE)
-        keys.connect("key-pressed", self.on_key)
-        self.add_controller(keys)
-        if menu is not None:
-            right = Gtk.GestureClick(button=Gdk.BUTTON_SECONDARY)
-            right.connect("pressed", lambda _g, _n, x, y: (row := self.get_row_at_y(int(y))) is not None
-                          and menu(row, x, y))
-            self.add_controller(right)
-
-    def rows(self):
-        row = self.get_first_child()
-        while row is not None:
-            if isinstance(row, Gtk.ListBoxRow):
-                yield row
-            row = row.get_next_sibling()
-
-    def fill(self, items, shown):
-        """items: [(key, label, note)] or [(key, label, note, dim)], in order (note: a word, dim, after its name;
-        dim: its name grayed too); shown: the keys ticked, or None for all of them. Built again only when the items
-        change (a refill drops the keys' place in it)."""
-        if self.soon is not None:  # (a click not said yet: said first, which fills this again if it changed it)
-            GLib.source_remove(self.soon)
-            if self._picked():
-                return
-        if items != self.items:
-            self.filling = True
-            for row in list(self.rows()):  # (rows only: a right-click's menu on it is a child of the list too)
-                self.remove(row)
-            for key, label, note, *dim in items:
-                # (the tick where a menu's check items have theirs, its name where theirs is)
-                box = Gtk.Box(spacing=2)
-                tick = Gtk.Image(icon_name="object-select-symbolic", opacity=0)
-                box.append(tick)
-                name = Gtk.Label(label=label, xalign=0, hexpand=True, ellipsize=Pango.EllipsizeMode.END,
-                                 max_width_chars=24)
-                if dim and dim[0]:
-                    name.add_css_class("dim-label")
-                box.append(name)
-                if note:
-                    said = Gtk.Label(label=note)
-                    said.add_css_class("dim-label")
-                    box.append(said)
-                row = Gtk.ListBoxRow(child=box)
-                row.key, row.tick, row.label = key, tick, label
-                self.append(row)
-            self.items, self.shown, self.filling = items, (), False  # (ticked again, below)
-        if shown != self.shown:
-            self.choose(shown)
-
-    def choose(self, shown):
-        self.filling = True
-        for row in self.rows():
-            (self.select_row if shown is None or row.key in shown else self.unselect_row)(row)
-        self.filling, self.shown = False, shown
-        self.tick()
-
-    def tick(self):
-        for row in self.rows():
-            row.tick.set_opacity(1 if row.is_selected() else 0)
-
-    def shift_click(self, gesture, _n, _x, y):
-        """A Shift-click on a row (Ctrl (⌘) not held too): it's picked if it wasn't, and put back if it was."""
-        mods = gesture.get_current_event_state()
-        if not mods & Gdk.ModifierType.SHIFT_MASK or mods & (Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.META_MASK):
-            return
-        row = self.get_row_at_y(int(y))
-        if row is None:
-            return
-        gesture.set_state(Gtk.EventSequenceState.CLAIMED)
-        (self.unselect_row if row.is_selected() else self.select_row)(row)
-        row.grab_focus()
-
-    def picked(self):
-        """The rows chosen changed (a click: one taken away and others put back, one at a time): said once, after."""
-        self.tick()
-        if not self.filling and self.soon is None:
-            self.soon = GLib.idle_add(self._picked)
-
-    def _picked(self):
-        """(idle) Said, if it changed; True if so (and changed has filled the list again)."""
-        self.soon = None
-        rows = list(self.rows())
-        keys = {r.key for r in rows if r.is_selected()}
-        shown = None if not keys or len(keys) == len(rows) else keys
-        news = shown != self.shown
-        if not keys:  # (the last one taken away: everything, as at first)
-            self.choose(None)
-        self.shown = shown
-        if news:
-            self.changed(sorted(shown) if shown is not None else None)
-        return news
-
-    def on_key(self, _ctl, keyval, _code, state):
-        """The arrows move among the rows without picking (GTK's list, picking several, picks the one moved to alone:
-        a filter narrowed at every press); Space or Enter picks that one only, as a click does, and Ctrl (⌘) and
-        Space adds or takes it away, as GTK's does. At either end: out of the list, to the menu's items."""
-        moves = {Gdk.KEY_Up: -1, Gdk.KEY_KP_Up: -1, Gdk.KEY_Down: 1, Gdk.KEY_KP_Down: 1}
-        if keyval not in moves or state & (Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.SHIFT_MASK):
-            if keyval in (Gdk.KEY_space, Gdk.KEY_Return, Gdk.KEY_KP_Enter) and not state & (
-                    Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.META_MASK):
-                if (row := self.get_focus_child()) is not None:
-                    self.unselect_all()
-                    self.select_row(row)
-                    return True
-            return False
-        rows = list(self.rows())
-        at = rows.index(row) if (row := self.get_focus_child()) in rows else -1
-        to = at + moves[keyval]
-        if at < 0 or not 0 <= to < len(rows):
-            return False
-        rows[to].grab_focus()
-        return True
 
 
 class SessionSidebar(SidebarMenu, Gtk.Box):
@@ -257,26 +127,30 @@ class SessionSidebar(SidebarMenu, Gtk.Box):
         self.search = Gtk.SearchEntry(placeholder_text=wording.say("sidebar.search"), hexpand=True)
         self.search.connect("search-changed", lambda *_: self.fill())
         find_row.append(self.search)
-        view, by = Gio.Menu(), Gio.Menu()
-        by.append(wording.say("common.folder"), "sb.group::folder")
-        by.append(wording.say("sidebar.date"), "sb.group::date")
-        view.append_section(wording.say("sidebar.group_by"), by)
-        # (Groups: which sessions are listed, a list of its own in the menu (FilterList), filled by fill_filters; a
-        # right-click on a group: Rename Group…, Delete Group. Which host's: New session's dropdown, host_filter)
-        groups = Gio.Menu()
-        item = Gio.MenuItem.new(None, None)
-        item.set_attribute_value("custom", GLib.Variant.new_string("groups"))
-        groups.append_item(item)
-        item = Gio.MenuItem.new(wording.say("sidebar.new_group_ellipsis"), None)  # (no chat moved to it: ask_new_group)
-        item.set_action_and_target_value("sb.new_group", GLib.Variant.new_string(""))
-        groups.append_item(item)
-        every = Gio.MenuItem.new(wording.say("sidebar.show_all"), "sb.show_all")  # (only while something's left out)
-        every.set_attribute_value("hidden-when", GLib.Variant.new_string("action-disabled"))
-        groups.append_item(every)
-        view.append_section(wording.say("sidebar.groups"), groups)
-        pop = Gtk.PopoverMenu.new_from_model(view)
-        self.group_list = FilterList(lambda keys: self.filtered(sidebar_groups=keys), self.group_menu)
-        pop.add_child(self.group_list, "groups")
+        # (⋮: Group by, a choice of three; then Groups, which sessions are listed, a check each and one over them all,
+        # as the Kubernetes page's Namespaces (pickers.CheckList), filled by fill_filters; a right-click on a group:
+        # Rename Group…, Delete Group. Which host's: New session's dropdown, host_filter)
+        view = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        heading = Gtk.Label(label=wording.say("sidebar.group_by"), xalign=0, css_classes=["heading", "dim-label"])
+        view.append(heading)
+        for by_key, label in (("folder", "common.folder"), ("created", "sidebar.created"),
+                              ("updated", "sidebar.updated")):
+            choice = Gtk.CheckButton(label=wording.say(label), action_name="sb.group",
+                                     action_target=GLib.Variant.new_string(by_key))
+            view.append(choice)
+        view.append(Gtk.Separator())
+        self.group_list = CheckList(wording.say("sidebar.groups"),
+                                    lambda keys: self.filtered(sidebar_groups=keys or None), self.group_menu,
+                                    heading=True)
+        view.append(self.group_list)
+        view.append(Gtk.Separator())
+        new_group = Gtk.Button(label=wording.say("sidebar.new_group_ellipsis"), css_classes=["flat"])  # (no chat
+        # moved to it: ask_new_group)
+        new_group.get_child().set_xalign(0)
+        new_group.get_child().add_css_class("body")
+        new_group.connect("clicked", lambda *_: (pop.popdown(), self.ask_new_group(None)))
+        view.append(new_group)
+        pop = Gtk.Popover(child=view)
         self.view_btn = Gtk.MenuButton(icon_name="view-more-symbolic", popover=pop, valign=Gtk.Align.CENTER,
                                        tooltip_text=wording.say("sidebar.group_by_tip"))
         self.view_btn.add_css_class("flat")
@@ -308,12 +182,9 @@ class SessionSidebar(SidebarMenu, Gtk.Box):
             act.connect("activate", lambda _a, v, fn=fn: fn(self.find_info(v.get_string())))
             actions.add_action(act)
         group = Gio.SimpleAction.new_stateful("group", GLib.VariantType.new("s"),
-                                              GLib.Variant.new_string("date" if self.by_date() else "folder"))
+                                              GLib.Variant.new_string(self.grouping()))
         group.connect("change-state", self.on_group_changed)
         actions.add_action(group)
-        every = Gio.SimpleAction.new("show_all", None)
-        every.connect("activate", lambda *_: self.filtered(sidebar_groups=None))
-        actions.add_action(every)
         add_server = Gio.SimpleAction.new("add_server", None)
         add_server.connect("activate", lambda *_: self.win.ask_add_host())
         actions.add_action(add_server)
@@ -392,15 +263,21 @@ class SessionSidebar(SidebarMenu, Gtk.Box):
         return set(st.get("archived", [])) | {i["id"] for i in self.sessions
                                               if i.get("desktop_archived") and i["id"] not in unarchived}
 
+    def grouping(self):
+        """How the list is grouped (⋮ → Group by): "folder", "created" (by the day each chat was made) or "updated"
+        (by the day it was last used; "date", from before, is that)."""
+        by = load_settings().get("sidebar_group")
+        return "updated" if by == "date" else by if by in ("created", "updated") else "folder"
+
     def by_date(self):
-        """Grouped by day (⋮ → Group by → Date), not by folder."""
-        return load_settings().get("sidebar_group") == "date"
+        """Grouped by day: "created" or "updated" (grouping), None by folder."""
+        return by if (by := self.grouping()) != "folder" else None
 
     # ---- Which sessions are listed: one host's, New session's (the dropdown beside it), and ⋮ → Groups. A host is a
     # machine: this one (THIS_MACHINE: Claude Code's and Claude Desktop's chats, as ever, and those of a server on it),
     # or another a server's on (baudelib.server). A group is Baude's own, a list of chats of its own, whatever host
     # they're on (chat_group); any chat can be moved to another (Move to Group, move_to_group). Every group's listed
-    # till some are picked (FilterList)
+    # till some are picked (pickers.CheckList)
     def known_hosts(self):
         """[(key, name, note)]: this machine, then each other host a server's on, by name (note: "deactivated", for
         one that is; "gone", for one that is; "through" the member of the mesh it's reached through, for one this
@@ -459,9 +336,8 @@ class SessionSidebar(SidebarMenu, Gtk.Box):
             save_settings(sidebar_network=None, sidebar_groups=[old] if old else None)
         self.fill_new_hosts()
         self.show_host_state()
-        self.group_list.fill(self.known_groups(), self.group_filter())
-        self.actions.lookup_action("show_all").set_enabled(self.group_filter() is not None)  # (after the fill: it can
-        # change what's picked)
+        self.group_list.fill([(key, label) for key, label, _note in self.known_groups()],
+                             sorted(self.group_filter() or ()))
 
     def host_menu(self, x, y):
         """Right-click New session's host: Add Host…, always; and for another machine's, Deactivate, or Activate for one
@@ -484,17 +360,17 @@ class SessionSidebar(SidebarMenu, Gtk.Box):
             network().deactivate(r, off)
             toast(self, wording.say("hosts.now_deactivated" if off else "hosts.now_activated", host=remote_name(r)))
 
-    def group_menu(self, row, x, y):
+    def group_menu(self, key, check, x, y):
         """Right-click a group (⋮ → Groups): Rename Group…, Delete Group. No group has none."""
-        if not row.key:
+        if not key:
             return
         menu = Gio.Menu()
         for label, action in ((wording.say("sidebar.rename_group_ellipsis"), "rename_group"),
                               (wording.say("sidebar.delete_group"), "delete_group")):
             item = Gio.MenuItem.new(label, None)
-            item.set_action_and_target_value(f"sb.{action}", GLib.Variant.new_string(row.key))
+            item.set_action_and_target_value(f"sb.{action}", GLib.Variant.new_string(key))
             menu.append_item(item)
-        self.group_menu_shown = self.menu_at(menu, self.group_list, x, y)
+        self.group_menu_shown = self.menu_at(menu, check, x, y)
 
     def menu_at(self, menu, parent, x, y):
         """A right-click's menu, shown at x, y in parent (gone once it's closed)."""
@@ -700,7 +576,9 @@ class SessionSidebar(SidebarMenu, Gtk.Box):
         place_sessions; a Desktop chat is in the group of the one it came from; a session of a server on another host
         in that host's folder: "remote:<server>:<folder>"); or by day (date_group), newest first, where a session and
         those under it (its forks, a Desktop chat's side sessions) go together, by the latest activity of any of them,
-        as Claude Desktop's sidebar has them: a fork used today brings the session it came from into today, with it.
+        as Claude Desktop's sidebar has them: a fork used today brings the session it came from into today, with it;
+        or by the day each was made (made_at), a session and those under it by the day the session was made. The open
+        chat is listed where it is (archived, say), and only a new one not saved yet is added at the top of its folder.
         Only the hosts and groups picked in ⋮ (host_filter, group_filter; a chat's group: chat_group, the open one not
         saved yet's too); a server's sessions deleted here (hide_remote): not listed till they show up again."""
         q = self.search.get_text().strip().lower()
@@ -773,10 +651,12 @@ class SessionSidebar(SidebarMenu, Gtk.Box):
                 self.remote_keys[key] = r
             groups.setdefault(key, [label, folder, []])[2].append(info)
         # the open session may not be saved yet: shown once it's something (typed into, sent), never while it's blank
+        # (one that's listed already, archived or not, is listed there only)
         sid = self.win.session_id
         if mine and not q and self.win.chat_begun() and (self.win.remote is None or self.win.remote.mine) and \
-                (picked is None or self.open_group(assigned) in picked) and \
-                not any(i["id"] == sid for g in groups.values() for i in g[2]):
+                (picked is None or self.open_group(assigned) in picked) and sid not in archived and \
+                not any(sid in (i["id"], i.get("cli_id"))
+                        for i in [*gone, *(i for g in groups.values() for i in g[2])]):
             key, label = session_group(self.win.cwd)
             groups.setdefault(key, [label, self.win.cwd, []])[2].insert(0, {
                 "id": sid, "title": getattr(self.win, "session_title", None) or wording.say("sidebar.new_session"),
@@ -816,17 +696,20 @@ class SessionSidebar(SidebarMenu, Gtk.Box):
                         trees.append([])
                     trees[-1].append(row)
             # (the open, unsaved one first, then the newest; a sort keeps sessions' order where it's the same. Nothing
-            # listed, a search that finds nothing say, leaves the one empty tree, which has no first session)
-            newest = lambda rows: max(last_used(info) for info, _depth, _last in rows)  # noqa: E731
+            # listed, a search that finds nothing say, leaves the one empty tree, which has no first session. Made:
+            # the day the top one was made)
+            newest = (lambda rows: made_at(rows[0][0])) if by_date == "created" else \
+                (lambda rows: max(last_used(info) for info, _depth, _last in rows))  # noqa: E731
             trees = sorted(filter(None, trees), key=lambda t: (not t[0][0].get("unsaved"), -newest(t)))
             groups = {}
             for rows in trees:
                 key, label = date_group(newest(rows), now)
                 groups.setdefault(key, [label, None, []])[2].extend(rows)
-        # (days don't overlap: by day the latest activity of any session in them puts them in order, by folder a
-        # top-level session's)
+        # (days don't overlap: by day the latest activity of any session in them puts them in order (made: when its
+        # top-level sessions were made), by folder a top-level session's)
+        when = made_at if by_date == "created" else last_used
         order = sorted(groups.items(), key=lambda kv: (kv[0] != here, -max(
-            last_used(i) for i, depth, _ in kv[1][2] if by_date or not depth)))
+            when(i) for i, depth, _ in kv[1][2] if by_date == "updated" or not depth)))
         out = [(k, label, folder, rows) for k, (label, folder, rows) in order]
         bots = []  # (by folder, Bots first, each with what's under it: its forks, its threads, whatever host they're
         for k, label, folder, rows in ([] if by_date else out):  # on; by date, they're among the chats by their time)

@@ -21,7 +21,10 @@
     "chatfind.py:ChatFind.wrap",
     "baudelib/transcripts.py:summary_tools",
     "CompactMark.kt:SummaryPin",
-    "CompactMark.kt:summaryTools"
+    "CompactMark.kt:summaryTools",
+    "chatparts.py:LoneSummary",
+    "chatparts.py:summary_fold",
+    "CompactMark.kt:LoneSummary"
   ],
   "copy": [
     "compaction",
@@ -37,7 +40,7 @@
     },
     {
       "name": "summary",
-      "shows": "Under the line, once known: a disclosure \"Summary of the earlier conversation\" (small, dimmed), folded. Opened, 18px in, 6px under it: when the summary carries Claude Code's list of the tools used before it (<tools-used-before-summary>, in a <system-reminder> or not), one quiet line \"Tools used before: <N>\" (small, dimmed, selectable; tooltip: the tools' names, comma-separated), then the summary as markdown with that list and its reminder tags taken out. No reminder tag or raw tool list is ever drawn.",
+      "shows": "Under the line, once known: a disclosure \"Summary of the earlier conversation\" (small, dimmed), folded. Opened, 18px in, 6px under it: when the summary carries Claude Code's list of the tools used before it (<tools-used-before-summary>, in a <system-reminder> or not), one quiet line \"Tools used before: <N>\" (small, dimmed, selectable; tooltip: the tools' names, comma-separated), then the summary as markdown with only that list taken out (a reminder that also holds other text keeps that text and its tags). No reminder tag or raw tool list is ever drawn. A summary with no mark yet (below) is drawn the same, and gets the pinned heading too.",
       "copy": [
         "compaction.summary",
         "compaction.tools_before"
@@ -52,6 +55,16 @@
         {
           "said": "The <tools-used-before-summary> system reminder shown after a compaction is far too long; it should be much shorter",
           "rule": "Every app shows a compaction summary without Claude Code's tool list and its <system-reminder> tags; how many tools were used is said in one quiet line at the summary's top, the names only on hover (desktop)",
+          "decided": "2026-11-25",
+          "source": [
+            {
+              "issue": "BaudeInternal#216"
+            }
+          ]
+        },
+        {
+          "said": "The compaction summary should be shorter than the raw tool list Claude Code puts in it (reported on the issue for a summary drawn before its mark)",
+          "rule": "Every app draws a summary with no mark of its own yet exactly as one under its mark: without Claude Code's tool list, the tools said as one quiet line, the heading pinned while it's read. Only the <tools-used-before-summary> block is taken out of a <system-reminder>; the reminder's other text stays",
           "decided": "2026-11-25",
           "source": [
             {
@@ -135,11 +148,13 @@
     },
     {
       "name": "summary without its mark (history)",
-      "shows": "A summary whose boundary isn't drawn yet shows on its own as a small dimmed \"Summary of the earlier conversation\" disclosure, and moves under its mark when that is drawn."
+      "shows": "A summary whose boundary isn't drawn yet shows on its own as the same disclosure as under a mark (\"Summary of the earlier conversation\", its tools line, its heading pinned while open), and moves under its mark when that is drawn."
     }
   ],
   "scenes": [
     "chat-compact-tools",
-    "chat-compact-pinned"
+    "chat-compact-pinned",
+    "chat-compact-lone",
+    "chat-compact-lone-pinned"
   ]
 }

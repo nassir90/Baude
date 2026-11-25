@@ -354,24 +354,47 @@ class CompactMark(Gtk.Box):
         is said as how many, in a quiet line at its top."""
         if not text or self.fold is not None:
             return
-        text, tools = summary_tools(text)
-        head = Gtk.Label(label=wording.say("compaction.summary"))
-        head.add_css_class("sysnote")
-        body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, margin_start=18, margin_bottom=6)
-        if tools:
-            used = Gtk.Label(label=wording.say("compaction.tools_before", count=len(tools)), xalign=0, selectable=True,
-                             tooltip_text=", ".join(tools))
-            used.add_css_class("sysnote")
-            body.append(used)
-        body.append(MarkdownView(text))
-        self.fold = Gtk.Expander(label_widget=head, child=body)
-        self.fold.connect("notify::expanded", self._opened)
+        self.fold = summary_fold(text, self)
         self.append(self.fold)
 
-    def _opened(self, fold, _p):
-        (CompactMark.opened.add if fold.get_expanded() else CompactMark.opened.discard)(self)
+def summary_fold(text, owner):
+    """A compaction summary's fold (the heading "Summary of the earlier conversation", closed): the list of tools the
+    conversation had used that Claude Code puts in it said as how many, in a quiet line at its top, then the summary.
+    owner: the widget SummaryPin looks for while the fold's open (a CompactMark; a LoneSummary)."""
+    text, tools = summary_tools(text)
+    head = Gtk.Label(label=wording.say("compaction.summary"))
+    head.add_css_class("sysnote")
+    body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, margin_start=18, margin_bottom=6)
+    if tools:
+        used = Gtk.Label(label=wording.say("compaction.tools_before", count=len(tools)), xalign=0, selectable=True,
+                         tooltip_text=", ".join(tools))
+        used.add_css_class("sysnote")
+        body.append(used)
+    body.append(MarkdownView(text))
+    fold = Gtk.Expander(label_widget=head, child=body)
+
+    def opened(fold, _p):
+        (CompactMark.opened.add if fold.get_expanded() else CompactMark.opened.discard)(owner)
         for pin in list(SummaryPin.live):
             pin.look()
+    fold.connect("notify::expanded", opened)
+    return fold
+
+
+class LoneSummary(Gtk.Box):
+    """A compaction's summary drawn before its mark is (its boundary in a chunk of history not drawn yet, or further
+    off than the mark's looked for it): folded as it is under the mark, its heading pinned as that one's; adopted
+    by the mark once that's drawn (adopt_summary)."""
+
+    def __init__(self, text):
+        super().__init__(orientation=Gtk.Orientation.VERTICAL)
+        self.compact_summary = text
+        self.fold = summary_fold(text, self)
+        self.append(self.fold)
+
+    def dispose_fold(self):
+        """Gone from the chat (a mark adopted its summary): no longer one SummaryPin looks among."""
+        CompactMark.opened.discard(self)
 
 
 class SummaryPin(Gtk.Expander):

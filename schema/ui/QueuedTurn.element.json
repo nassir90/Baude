@@ -68,7 +68,7 @@
     },
     {
       "name": "turn stopped (Esc / stop button)",
-      "decisions": [{"said": "Queued messages wait while the agent sits interrupted; once a turn is interrupted they should be sent", "rule": "Every app sends the queue when a turn ends, whether it ended by itself or was interrupted", "decided": "2026-11-24"}],
+      "decisions": [{"said": "You can get into a state where messages are queued, but the agent is not currently owrking / it is interrupted. Once interrupted, queued messsges should automatically be sent into te model.", "rule": "Every app sends the queue when a turn ends, whether it ended by itself or was interrupted", "decided": "2026-11-24", "source": [{"issue": "BaudeInternal#208"}]}],
       "shows": "Once the stopped turn ends, the queue is sent as when a turn ends by itself (all of it as one message, or up to the one whose ↑ was pressed)."
     },
     {

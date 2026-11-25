@@ -1,5 +1,5 @@
 {
-  "decisions": [{"said": "Switching to a chat sometimes shows its latest message twice", "rule": "Every app draws each transcript record once: the live tail follows on from the last whole record the history read", "decided": "2026-11-24"}],
+  "decisions": [{"said": "There's a really weird edge case where at the monent you swtich to a new chat the latest text message gets duplicated.", "rule": "Every app draws each transcript record once: the live tail follows on from the last whole record the history read", "decided": "2026-11-24", "source": [{"issue": "BaudeInternal#212"}]}],
   "description": "How an opened past or remote session's transcript is drawn, where it differs from a live chat: drawn from the transcript file in chunks, newest first, with a Show earlier messages button at the top; things only a transcript has (CI events, artifact records, summaries) get their own looks.",
   "apps": [
     "baude"
@@ -31,7 +31,7 @@
   "parts": [
     {
       "name": "Show earlier messages",
-      "decisions": [{"said": "On the phone, long chats don't show anywhere near their full transcript", "rule": "Every app opens a long chat on its newest part and reads further back, to the transcript's first record, as it's scrolled up to the top (the desktop's Show earlier messages, the phone's scrolling)", "decided": "2026-11-22"}],
+      "decisions": [{"said": "On mobile baude, I don't seem to get anywhere near the full transcript for long threads.", "rule": "Every app opens a long chat on its newest part and reads further back, to the transcript's first record, as it's scrolled up to the top (the desktop's Show earlier messages, the phone's scrolling)", "decided": "2026-11-22", "source": [{"issue": "BaudeInternal#199"}]}],
       "shows": "A button centred at the top of the chat while earlier parts aren't drawn: \"Show earlier messages (N more)\" (or without the count). Earlier chunks (60 items each) also draw by themselves as you scroll near them; the chat is about its full height from the start so the scrollbar doesn't jump.",
       "text": [
         "Show earlier messages",

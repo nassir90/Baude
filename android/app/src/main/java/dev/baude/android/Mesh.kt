@@ -852,6 +852,7 @@ object Mesh {
         val begin = if (from == 0L) 0L else if (nl < 0) until else from + nl + 1
         if (begin >= until && from > 0) return readEarlier(chat, window * 4) // (a line longer than it: more of it)
         val part = Chat(chat.hostId, chat.sid)
+        part.start = begin // (its own results and rewinds that go back before it kept, as the chat's are)
         take(part, parse(String(bytes, Charsets.UTF_8), cutFirst = from > 0))
         if (chat.rewound.isNotEmpty()) { // (a rewind after it back into it, or before it: what's after its record goes)
             val found = chat.rewound.mapNotNull { part.ends[it] }
@@ -863,9 +864,13 @@ object Mesh {
         for (o in chat.orphans.toList()) {
             val id = try { JSONObject(o.text).optString("id") } catch (_: Exception) { "" }
             if (part.calls.byId[id] == null) continue
+            noted(part, o)
             took(part.calls, part.lines, o)
+            tasksFrom(part, o)
             chat.orphans.remove(o)
         }
+        chat.rewound.addAll(part.rewound) // (what's still waiting, settled by the parts before it)
+        chat.orphans.addAll(part.orphans)
         settle(part.calls, session(chat.hostId, chat.sid)?.state)
         val before = itemIndex(chat, chat.lines.size - 1) + 1
         val n = part.lines.size
@@ -875,6 +880,10 @@ object Mesh {
         chat.lines.addAll(0, part.lines)
         for (a in part.agents) if (chat.agents.none { it.toolUseId == a.toolUseId }) chat.agents.add(a) // (newest first)
         for (a in part.artifacts) if (chat.artifacts.none { it.url == a.url }) chat.artifacts.add(a)
+        val heard = part.chrome.taskOrder.filter { it !in chat.chrome.tasks } // (its background tasks, heard first)
+        for (id in heard) chat.chrome.tasks[id] = part.chrome.tasks[id]!!
+        chat.chrome.taskOrder.addAll(0, heard)
+        if (heard.isNotEmpty()) settleTasks(chat)
         chat.start = begin
         chat.earlier.value = begin > 0
         chat.prepended?.invoke(itemIndex(chat, chat.lines.size - 1) + 1 - before)

@@ -18,6 +18,6 @@
     "failed": "Sign-in didn't finish",
     "cancelled": "Sign-in cancelled",
     "send_again": "Send again",
-    "signs_out_there": "{$host}'s claude signs out there: run claude auth logout on it"
+    "signs_out_there": "{$host}'s Claude signs out there: run claude auth logout on it"
   }
 }

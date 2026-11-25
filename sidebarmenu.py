@@ -326,9 +326,9 @@ class SidebarMenu:
                 os.makedirs(keep, exist_ok=True)
                 try:
                     shutil.move(path, os.path.join(keep, os.path.basename(path)))
-                    self.win.note(f"no trash here; moved {os.path.basename(path)} to {keep}")
+                    self.win.note(wording.say("chat_notes.no_trash", name=os.path.basename(path), folder=keep))
                 except OSError as e:
-                    self.win.note(f"couldn't move {os.path.basename(path)} away: {e}")
+                    self.win.note(wording.say("chat_notes.couldnt_move", name=os.path.basename(path), why=str(e)))
         self.win.carry_on(info["id"])
         self.refresh()
 

@@ -1,8 +1,7 @@
 {
   "description": "What runs a chat's model, as a note names it.",
   "messages": {
-    "claude": "claude",
-    "pi": "pi",
+    "pi": "Pi",
     "apple": "Apple's model",
     "codex": "Codex"
   }

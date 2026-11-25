@@ -203,13 +203,13 @@ class WindowProc:
             if path and os.path.isfile(path):
                 self.add_attachment(Attachment.from_path(path))
             elif path:
-                self.note(f"can't attach {path}: not a file")
+                self.note(wording.say("chat_notes.cant_attach_file", path=path))
 
     def attach_texture(self, texture):
         try:
             self.add_attachment(Attachment.from_texture(texture))
         except (GLib.Error, ValueError) as e:
-            self.note(f"can't attach image: {e}")
+            self.note(wording.say("chat_notes.cant_attach_image", why=str(e)))
 
     def on_pick_attachments(self, *_):
         dlg = Gtk.FileDialog(title="Attach files", modal=True)
@@ -264,7 +264,7 @@ class WindowProc:
             try:
                 self.attach_texture(c.read_texture_finish(res))
             except GLib.Error as e:
-                self.note(f"paste failed: {e.message}")
+                self.note(wording.say("chat_notes.paste_failed", why=e.message))
 
         def got_text(c, res):
             try:
@@ -272,7 +272,7 @@ class WindowProc:
             except GLib.Error as e:
                 text = None
                 if not image:
-                    self.note(f"paste failed: {e.message}")
+                    self.note(wording.say("chat_notes.paste_failed", why=e.message))
             if image and (not text or self.IMAGE_NAME.fullmatch(text.strip())):
                 c.read_texture_async(None, got_texture)  # (the image's own name or address: the image's meant)
             elif text:
@@ -294,7 +294,7 @@ class WindowProc:
                 try:
                     paths = [f.get_path() for f in c.read_value_finish(res).get_files()]
                 except GLib.Error as e:
-                    self.note(f"paste failed: {e.message}")
+                    self.note(wording.say("chat_notes.paste_failed", why=e.message))
                     return
                 if paths and all(paths):
                     self.attach_paths(paths)
@@ -402,11 +402,11 @@ class WindowProc:
             self.proc.resumed = resume
             if self.resume_reason and self.resume_reason[0] == self.session_id:  # (its last claude here exited: on_exit)
                 if run["resume"]:  # (Apple's model starts afresh: nothing resumed)
-                    self.note(f"— resumed from {self.resume_reason[1]} —")
+                    self.note(wording.say("chat_notes.resumed_from", reason=self.resume_reason[1]))
                 self.resume_reason = None
             self.pending.clear()
         except OSError as e:
-            self.note(f"failed to start claude: {e}")
+            self.note(wording.say("chat_notes.failed_to_start", why=str(e)))
             self.proc = None
         self.update_status()
 
@@ -435,7 +435,7 @@ class WindowProc:
                 # (dropped: said under the chat already. Each kind of failure said once a chat, however often it's
                 # tried again)
                 if self.drop_running is None and self.attach_said != (self.session_id, kind):
-                    self.note(f"{name} wouldn't open this chat: {e}" if refused else f"couldn't reach {name}: {e}")
+                    self.note(f"{name} wouldn't open this chat: {e}" if refused else wording.say("chat_notes.couldnt_reach", host=name, why=str(e)))
                     self.attach_said = (self.session_id, kind)
         if self.proc is not None:
             self.attach_said = self.missing_session = self.missing_reason = self.retaken = None

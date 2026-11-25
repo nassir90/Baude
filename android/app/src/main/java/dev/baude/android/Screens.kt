@@ -805,18 +805,19 @@ private fun SaidLine(line: Line, revert: RevertOffer? = null) {
 }
 
 /** A note that the repository changed (repositoryChanged), as the others are, with Show in Git: the Git page, at the
- * branch it names. */
+ * branch it names, in the folder it names (another repository's or worktree's), if any. */
 @Composable
 private fun GitNote(json: String) {
     val c = LocalBaude.current
     val o = try { JSONObject(json) } catch (_: Exception) { return }
     val branch = o.optString("branch").ifBlank { null }
+    val folder = o.optString("folder").ifBlank { null }
     val text = buildAnnotatedString {
         append(o.optString("text"))
         append("  ")
         withLink(LinkAnnotation.Clickable("git", TextLinkStyles(SpanStyle(color = c.accent,
             textDecoration = TextDecoration.Underline))) {
-            GitPages.focus(SignalLinks.hostId, SignalLinks.sid, branch, null)
+            GitPages.focus(SignalLinks.hostId, SignalLinks.sid, branch, null, folder)
         }) { append(Wording.Signal.showInGit) }
     }
     Text(text, style = Type.caption, color = c.dim, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())

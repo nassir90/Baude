@@ -389,13 +389,17 @@ def interrupted():
 
 
 def events(n):
-    """Claude Code's own events in a turn, as claude 2.1 sends them: a commit and a push it saw (vcs_state_changed),
-    background agents stopped, a notification, and events a chat says nothing of (one no app knows)."""
+    """Claude Code's own events in a turn, as claude 2.1 sends them: a commit and a push it saw (vcs_state_changed), a
+    commit in another folder, background agents stopped, a notification, a warning, and events a chat says nothing of
+    (a warning with no message, an info, one no app knows)."""
     system("vcs_state_changed", kind="commit", branch="fix/login-timeout", cwd=os.getcwd())
     system("vcs_state_changed", kind="push", branch="fix/login-timeout", cwd=os.getcwd())
+    system("vcs_state_changed", kind="commit", branch="docs/readme", cwd=os.path.join(os.getcwd(), "docs-tree"))
     system("agents_killed")
     system("notification", key="fast-mode", text="Fast mode is off until 5pm", priority="high", color="warning")
-    system("hook_progress")
+    system("permission_retry", content="Retrying Bash with the permission you gave", level="warning")
+    system("instruction_size_warning", content="", level="warning")
+    system("hook_progress", content="Running the pre-commit hook", level="info")
     system("made_up_event")
     say("Committed the fix and pushed the branch.", f"ev{n}")
     result("events")

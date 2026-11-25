@@ -84,6 +84,12 @@ An entry or a part may carry:
     (the phone's `popup.row` is 34, a bar button's side, for a finger), modelbutton's 12 px sides (the phone's
     `popup.inset` too), a toggle's check before its text, and
     Adw.AlertDialog's own width (the phone's follows the chat).
+- **Every piece of text starts with a capital letter.** Whatever an app puts on screen starts with a capital: notes and
+  messages (a chat's SystemNote, an error, a status line) in sentence case ("Interrupted", "Model → Opus", "Committed on
+  main", "Claude couldn't save this chat: the disk is full"), buttons, menu items and links in Title Case ("Show in
+  Git"). "Claude" as a word in a note is "Claude"; a command, path or name put in keeps its own spelling. The words come
+  from schema/copy, so every app says them alike. The owner: "Casing should be consistent mate" (source: session
+  b3845b21-55ac-4aab-a769-fb8517403c51, message e824fbc9-b33f-4a3a-8e0c-8ebf94acd120).
 - **Apps are thin clients; the logic is in the wire.** What an app or an agent's tool does to shared things (a
   notebook's pages and the edits proposed to them, a chat, the mesh) is the host's to work out, through typed wire
   messages in schema/types; an app or an MCP server asks the host and shows its answer. An agent's interface (an MCP

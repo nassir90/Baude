@@ -1255,7 +1255,7 @@ class WindowView:
             if stopped:  # (stopped: said once, as the live chat says it, h_result; not if a call it stopped says so)
                 if not stop_said and not any(self.tool_cards[t].state in ("running", "interrupted")
                                              and t not in self.orphan_results for t in turn_calls):
-                    self.note(wording.say("meta.interrupted"))
+                    self.note(wording.say("chat_notes.interrupted"))
                 stop_said = True
             elif kind == "tool_results":
                 self.render_tool_results(content, from_file=True)

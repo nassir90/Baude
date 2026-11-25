@@ -15,7 +15,10 @@
     "markdownview.py:on_label_link"
   ],
   "copy": [
-    "meta",
+    "chat_notes",
+    "chat_header",
+    "tool_calls",
+    "interrupt",
     "asks",
     "claude_events"
   ],
@@ -28,53 +31,54 @@
   "states": [
     {
       "name": "resumed",
-      "shows": "\"— resumed —\" where you first wrote to a past session you opened (not on opening it), above your message; \"— resumed from network error —\" / \"— resumed from claude binary error —\" when the chat's claude had gone and was started again.",
-      "text": [
-        "— resumed —",
-        "— resumed from network error —",
-        "— resumed from claude binary error —"
+      "shows": "\"— Resumed —\" where you first wrote to a past session you opened (not on opening it), above your message; \"— Resumed from network error —\" / \"— Resumed from claude binary error —\" when the chat's claude had gone and was started again.",
+      "copy": [
+        "chat_notes.resumed",
+        "chat_notes.resumed_from"
       ]
     },
     {
       "name": "interrupted",
-      "shows": "\"interrupted\" once, after a turn you stopped (Esc / stop button), unless a tool card it cut short already says interrupted. Also from history for a stopped turn.",
+      "shows": "\"Interrupted\" once, after a turn you stopped (Esc / stop button), unless a tool card it cut short already says interrupted. Also from history for a stopped turn.",
       "copy": [
-        "meta.interrupted"
+        "chat_notes.interrupted"
       ]
     },
     {
       "name": "stop didn't take",
-      "shows": "\"claude hadn't stopped after 5s: ended it\" or \"claude wasn't running: turn ended\" (\"pi\", \"Apple's model\", \"Codex\" in place of claude for those).",
-      "text": [
-        "hadn't stopped after 5s: ended it",
-        "wasn't running: turn ended"
+      "shows": "\"Claude hadn't stopped after 5s: ended it\" or \"Claude wasn't running: turn ended\" (\"Pi\", \"Apple's model\", \"Codex\" in place of Claude for those).",
+      "copy": [
+        "interrupt.not_stopped",
+        "interrupt.not_running"
       ]
     },
     {
       "name": "turn error",
-      "shows": "\"turn ended with error: <what claude said>\" (unless the reply already showed that error as an API error line). For a chat whose folder is gone on another host: \"<why>: start a new chat in <folder> on <host> to carry on\".",
-      "text": [
-        "turn ended with error: "
+      "shows": "\"Turn ended with error: <what claude said>\" (unless the reply already showed that error as an API error line). For a chat whose folder is gone on another host: \"Turn ended with error: <why>: start a new chat in <folder> on <host> to carry on\".",
+      "copy": [
+        "chat_notes.turn_error"
       ]
     },
     {
       "name": "denied without a card",
-      "shows": "\"denied <tool>\" / \"not answered AskUserQuestion\"; \"<tool> isn't always allowed: <why>\".",
+      "shows": "\"Denied <tool>\" / \"Not answered AskUserQuestion\"; \"<tool> isn't always allowed: <why>\".",
       "copy": [
+        "tool_calls.denied_tool",
+        "tool_calls.not_answered_tool",
         "asks.not_always_allowed"
       ]
     },
     {
       "name": "settings changed",
-      "shows": "\"model → <model>\" (\": a new conversation\" when it had to start afresh), \"thinking effort → <level>\", \"permission mode → <mode>\", \"folder → <path>\" (\" (conversation continues)\"), \"claude is running in <path>\"."
+      "shows": "\"Model → <model>\" (\": a new conversation\" when it had to start afresh), \"Thinking effort → <level>\", \"Permission mode → <mode>\", \"Folder → <path>\" (\" (conversation continues)\"), \"Folder not changed: …\", \"Not a folder: <path>\", \"Claude is running in <path>\"."
     },
     {
       "name": "other",
-      "shows": "Host and process notes (\"Starting <machine>'s host process…\", \"failed to start claude: …\", \"couldn't reach <host>: …\"), attach/paste failures (\"can't attach <path>: not a file\", \"paste failed: …\"), \"stop requested for <task>\", \"control error: …\", \"stderr: <line>\"."
+      "shows": "Host and process notes (\"Starting <machine>'s host process…\", \"Failed to start Claude: …\", \"Couldn't reach <host>: …\", \"Signing out…\", \"Worktree <name> was removed: …\"), attach/paste failures (\"Can't attach <path>: not a file\", \"Paste failed: …\"), \"Stop requested for <task>\", \"Control error: …\", \"Stderr: <line>\"."
     },
     {
       "name": "claude events",
-      "shows": "Claude Code's own events (its system messages) as notes in the app's own words, from claude_events.said by subtype: \"background agents stopped\" (agents_killed); a notification's, an informational message's, a model fallback's, a slash command's output or a scheduled task's own text; \"claude couldn't save this chat: the disk is full\". Every other subtype, known or not, shows nothing: never a raw event name.",
+      "shows": "Claude Code's own events (its system messages) as notes in the app's own words, from claude_events.said by subtype and level: \"Background agents stopped\" (agents_killed); a notification's, an informational message's, a model fallback's, a slash command's output or a scheduled task's own text; \"Claude couldn't save this chat: the disk is full\". Any other subtype whose level is warning or error (a model consent or refusal fallback, a permission retry, an instruction size warning, missing attachments, a mirror error) shows its own message (content) when it has one. Every other event, known or not, shows nothing: never a raw event name.",
       "copy": [
         "claude_events.said"
       ],
@@ -93,7 +97,7 @@
     },
     {
       "name": "repository changed",
-      "shows": "claude committed, pushed, merged or rebased (vcs_state_changed): \"committed on <branch>\", \"pushed <branch>\", \"merged a branch\", \"rebased a branch\" (claude_events.repository), then a Show in Git link that opens the side panel's Git page on that branch (the chat's own branches when it names none). The Git page reads the history again.",
+      "shows": "Claude committed, pushed, merged or rebased (vcs_state_changed): \"Committed on <branch>\", \"Pushed <branch>\", \"Merged a branch\", \"Rebased a branch\", \"The repository changed\" (claude_events.repository), then a Show in Git link that opens the side panel's Git page on that branch (the chat's own branches when it names none), in the folder the event names (its cwd: a worktree or another repository) when that isn't the chat's own. The Git page reads the history again.",
       "copy": [
         "claude_events.repository",
         "signal.show_in_git"
@@ -101,7 +105,7 @@
       "actions": [
         {
           "by": "click",
-          "does": "Show in Git: the side panel's Git page, the branch the note names picked"
+          "does": "Show in Git: the side panel's Git page, the branch the note names picked, in the folder the event happened in when it isn't the chat's"
         }
       ],
       "decisions": [
@@ -121,5 +125,18 @@
   "scenes": [
     "51b-resumed-after-writing",
     "51c-claude-events"
+  ],
+  "decisions": [
+    {
+      "said": "Casing should be consistent mate",
+      "rule": "Every note in every app starts with a capital letter and is in sentence case (\"Interrupted\", \"Model → Opus\", \"Committed on main\"); a word naming Claude is \"Claude\". The notes' wording is in schema/copy (chat_notes and the groups the states name), never a literal in an app.",
+      "decided": "2026-11-25",
+      "source": [
+        {
+          "session": "b3845b21-55ac-4aab-a769-fb8517403c51",
+          "message": "e824fbc9-b33f-4a3a-8e0c-8ebf94acd120"
+        }
+      ]
+    }
   ]
 }

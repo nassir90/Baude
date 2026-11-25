@@ -547,7 +547,7 @@ object MetaTools {
                             "you", "bot", "note", "error" -> "[${it.kind}] ${it.text}"
                             "call" -> "[tool] " + toolLine(JSONObject(it.text))
                             "task" -> "[note] " + taskSaid(JSONObject(it.text))
-                            "stopped" -> "[note] " + Wording.Meta.interrupted
+                            "stopped" -> "[note] " + Wording.ChatNotes.interrupted
                             else -> null
                         }
                     }.joinToString("\n").takeLast(20_000).ifEmpty { "(nothing said yet)" }

@@ -18,7 +18,7 @@
     "failed": ", {$n} failed",
     "interrupted": ", {$n} interrupted",
     "view_tip": "Open this subagent in the side panel",
-    "denied_tool": "denied {$tool}",
-    "not_answered_tool": "not answered {$tool}"
+    "denied_tool": "Denied {$tool}",
+    "not_answered_tool": "Not answered {$tool}"
   }
 }

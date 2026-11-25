@@ -162,7 +162,7 @@ def open_in_editor(path, line=None, widget=None):
         Gtk.FileLauncher(file=Gio.File.new_for_path(path)).launch(widget.get_root() if widget else None, None, None)
 
 
-GIT_SCHEME = "baude-git:"  # (a note's link to the Git page: baude-git:<branch>, or none)
+GIT_SCHEME = "baude-git:"  # (a note's link to the Git page: baude-git:<branch>, or none; ?<folder>: another one's)
 
 
 def on_label_link(label, uri):
@@ -171,7 +171,8 @@ def on_label_link(label, uri):
     if uri.startswith(GIT_SCHEME):  # (a note's Show in Git: the Git page, on the branch it names, if any)
         win = label.get_root()
         if hasattr(win, "show_git"):
-            win.show_git(rev=urllib.parse.unquote(uri[len(GIT_SCHEME):]) or None)
+            rev, _, folder = uri[len(GIT_SCHEME):].partition("?")
+            win.show_git(rev=urllib.parse.unquote(rev) or None, folder=urllib.parse.unquote(folder) or None)
         return True
     if uri.startswith(REF_SCHEME):
         win = label.get_root()

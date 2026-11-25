@@ -65,6 +65,7 @@ private const val STALE_DELAY_MS = 800L
 class GitState(val hostId: String, val sid: String) {
     var follow by mutableStateOf(true)
     var revs by mutableStateOf<List<String>?>(null)
+    var pinned by mutableStateOf<String?>(null) // (another folder's history, from a link: GitPage.pinned)
     var every by mutableStateOf(false)
     var page by mutableStateOf<Msg.GitReply?>(null)
     val commits = mutableStateListOf<Msg.Commit>()
@@ -186,10 +187,11 @@ object GitPages {
     }
 
     /** The page at a branch or commit named elsewhere (a link in the chat): that branch alone, the commit's card open
-     * once it's read. */
-    fun focus(hostId: String, sid: String, rev: String?, sha: String?) {
+     * once it's read; folder: another repository's or worktree's (a commit the chat made there). */
+    fun focus(hostId: String, sid: String, rev: String?, sha: String?, folder: String? = null) {
         val s = of(hostId, sid)
         s.follow = false
+        s.pinned = folder
         s.revs = rev?.let(::listOf)
         s.then = sha
         s.card = null
@@ -280,8 +282,8 @@ private fun shownRows(page: Msg.GitReply, commits: List<Msg.Commit>, opened: Map
 @Composable
 fun GitPage(hostId: String, sid: String, here: Boolean, openPage: (String) -> Unit) {
     val c = LocalBaude.current
-    val cwd = Mesh.session(hostId, sid)?.cwd?.ifBlank { null }
     val state = remember(hostId, sid) { GitPages.of(hostId, sid) }
+    val cwd = state.pinned ?: Mesh.session(hostId, sid)?.cwd?.ifBlank { null }
     val chat = remember(hostId, sid) { Mesh.openChat(hostId, sid) }
     val lines = chat.lines.size
     LaunchedEffect(here, cwd) { if (here && cwd != null && state.seen != lines) state.load(cwd, lines) }
@@ -293,6 +295,7 @@ fun GitPage(hostId: String, sid: String, here: Boolean, openPage: (String) -> Un
     }
     LaunchedEffect(GitLinks.want.value) { // (a commit named in the chat: its card)
         val sha = GitLinks.want.value ?: return@LaunchedEffect
+        state.pinned = null
         state.card = sha
         GitLinks.want.value = null
     }

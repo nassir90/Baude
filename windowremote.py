@@ -798,8 +798,8 @@ class WindowRemote:
                 self.set_cwd(folder)  # (a worktree that's gone: its repository, till it's made again)
             if worktreelib.restorable(cwd):  # (removed, as Claude Desktop does as it archives a chat: made again from
                 self.gone_tree = (info["id"], cwd, info.get("path"))  # its branch as it's written in, as Desktop does)
-                self.note(f"worktree {os.path.basename(main_folder(cwd)[1] or cwd)} was removed: "
-                          "it's made again from its branch when you write")
+                self.note(wording.say("chat_notes.worktree_removed",
+                                      name=os.path.basename(main_folder(cwd)[1] or cwd)))
             else:
                 self.note(f"{pretty_path(cwd)} no longer exists; resuming in {self.short_cwd()}")
         self.reset_stream_state()
@@ -1000,9 +1000,9 @@ class WindowRemote:
         self.update_banner()
         reason = self.resume_reason[1] if self.resume_reason and self.resume_reason[0] == self.session_id else None
         if reason:  # (its claude gone meanwhile, and started again now: drop, on_exit)
-            self.note(f"— resumed from {reason} —")
+            self.note(wording.say("chat_notes.resumed_from", reason=reason))
         elif self.resumed_note:
-            self.note("— resumed —")
+            self.note(wording.say("chat_notes.resumed"))
         self.resumed_note, self.resume_reason = False, None
         if (left := self.take_background(self.session_id)) is not None:  # (left mid-turn in a window, still at it)
             self.attach_proc(left)
@@ -1030,7 +1030,7 @@ class WindowRemote:
             self.proc.stop_asked = False
         if msg.get("is_error") and stop_asked and ended_by_stop(msg):
             if stop_asked is True and self.send_after_result is None and not cut:  # (said already, stop_stuck; one
-                self.note(wording.say("meta.interrupted"))  # a revert stopped: gone from the chat; a call it
+                self.note(wording.say("chat_notes.interrupted"))  # a revert stopped: gone from the chat; a call it
                 # stopped: its card says so)
         elif msg.get("is_error"):
             shown = msg.get("result")
@@ -1038,7 +1038,7 @@ class WindowRemote:
                 shown = f"{gone.get('why')}: start a new chat " + (f"in {gone['folder']} " if gone.get("folder") else "") \
                     + f"on {remote_name(self.remote)} to carry on"
             if (msg.get("result") or "").strip().removeprefix("⚠").strip() != said and self.login_ask(msg) is None:
-                self.note(f"turn ended with error: {shown or msg.get('subtype')}")
+                self.note(wording.say("chat_notes.turn_error", why=str(shown or msg.get("subtype"))))
             if meta.OVERFLOW_RE.search(msg.get("result") or ""):
                 self.outgrown = True
             if (why := self.login_ask(msg)) is not None and not getattr(self, "login_asked", False):
@@ -1108,7 +1108,7 @@ class WindowRemote:
         elif r.get("subtype") == "error" and refused:
             refused(r.get("error") or "")
         elif r.get("subtype") == "error" and not callback:
-            self.note(f"control error: {r.get('error')}")
+            self.note(wording.say("chat_notes.control_error", why=str(r.get("error"))))
 
     def h_control_request(self, msg):
         rid, req = msg["request_id"], msg.get("request", {})
@@ -1174,17 +1174,17 @@ class WindowRemote:
 
     def sign_out(self):
         """/logout: claude auth logout, said in the chat; the chat's claude started again (signed out, as it is)."""
-        self.note("signing out…")
+        self.note(wording.say("chat_notes.signing_out"))
 
         def run():
             try:
                 r = subprocess.run([claude_exe(), "auth", "logout"], capture_output=True, text=True, timeout=60,
                                    stdin=subprocess.DEVNULL, env=claude_env())
                 said = _AUTH_ESCAPES.sub("", (r.stdout + r.stderr)).strip().splitlines()
-                text = "signed out of Claude" if r.returncode == 0 else \
-                    f"sign-out failed: {said[-1] if said else r.returncode}"
+                text = wording.say("chat_notes.signed_out") if r.returncode == 0 else \
+                    wording.say("chat_notes.sign_out_failed", why=str(said[-1] if said else r.returncode))
             except (OSError, subprocess.SubprocessError) as e:
-                text = f"sign-out failed: {e}"
+                text = wording.say("chat_notes.sign_out_failed", why=str(e))
             GLib.idle_add(lambda: (self.note(text), self.signed_in()) and False)
         threading.Thread(target=run, daemon=True).start()
 

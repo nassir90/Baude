@@ -2150,7 +2150,7 @@ def test_resume_is_read_only_and_tails(app):
             "only viewing: no claude for it till it's written in"
         assert hashlib.sha256(open(path, "rb").read()).hexdigest() == digest, "the file is untouched"
         assert not win.banner.get_revealed() and win.composer.get_visible(), "quiet: no banner, you can write"
-        assert "resumed" not in labels_text(win.transcript), "no '— resumed —' until you write"
+        assert "Resumed" not in labels_text(win.transcript), "no '— resumed —' until you write"
         assert win.session_id == "f1f1f1f1-0000-4000-8000-000000000001", "the chat's own id"
         # someone else (Desktop, a terminal) carries on: it shows up live
         with open(path, "a") as f:
@@ -2186,7 +2186,7 @@ def test_resume_is_read_only_and_tails(app):
                  [l for l in fake_log() if l.startswith("START")][-1], "resumed on the first message")
         wait_for(lambda: user_messages() and user_messages()[-1]["message"]["content"] == "my turn", "sent")
         texts = labels_text(win.transcript)
-        assert texts.index("— resumed —") > texts.index("All built."), "marked where you took it up"
+        assert texts.index("— Resumed —") > texts.index("All built."), "marked where you took it up"
         assert not win.banner.get_revealed() and not win.resume_pending
     finally:
         close(win)

@@ -20,6 +20,6 @@
     "hide_output": "Hide this process's output",
     "open_process": "Open this process in the whole panel",
     "all_processes": "All processes",
-    "stop_requested": "stop requested for {$task}"
+    "stop_requested": "Stop requested for {$task}"
   }
 }

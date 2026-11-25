@@ -24,7 +24,8 @@ import metalook  # noqa: E402
 from recordstore import (  # noqa: E402
     HERE_HOST, HOME, base_name, book, full_name, relinked_pages, remote_name, short_dir, short_page,
 )
-from recordmeta import REF_LIMIT, kept_at, page_named, place_change, staged, staged_at  # noqa: E402
+from baudelib import notebooktools  # noqa: E402  (its edits worked out with no GTK, as an outside agent's are)
+from recordmeta import REF_LIMIT, page_named, place_change  # noqa: E402
 from recordui import chat_names, chat_text  # noqa: E402
 from diaryeditor import DiaryEditor  # noqa: E402
 from recordreader import Reader, page_key, page_name  # noqa: E402
@@ -591,19 +592,8 @@ class RecordTools:
         (one whose passage isn't on the page as it was: left out)."""
         notebook, editor = self.notebook, self.win.tabs.get(("note", page))
         text = editor.kept() if editor is not None else notebook["pages"].get(page, "")
-        out = []
-        for p in self.pending(notebook):
-            if p["page"] != page:
-                continue
-            at = editor.edit_start(p) if editor is not None else None
-            if at is None and not p["old"]:
-                at = len(text)
-            elif at is None:
-                at = p.get("start", 0) if text[p.get("start", 0):p.get("start", 0) + len(p["old"])] == p["old"] else \
-                    place_change(text, p["old"], p.get("start"))[0]
-            if at is not None:
-                out.append((at, p["old"], p["new"], p))
-        return text, out
+        return text, notebooktools.spans(text, self.pending(notebook), page,
+                                         editor.edit_start if editor is not None else None)
 
     def _edited(self, turn, p):
         """A turn's edit to a page, made or changed: kept with the turn (said under its reply), shown on its page."""
@@ -637,40 +627,16 @@ class RecordTools:
         page, error = self._page(args)
         if error:
             return error
-        old, new = str(args.get("old_text") or ""), str(args.get("new_text") or "")
-        if old == new:
-            return {"error": "new_text is old_text: that changes nothing."}
         text, spans = self._spans(page)
         sel = turn.get("selection")
         near = sel["start"] if sel and sel["page"] == page and sel.get("start") is not None else None
-        view, pieces = staged(text, spans)
-        if not old:
-            if view and not view.endswith("\n") and not new.startswith("\n"):
-                new = "\n" + new  # (added at the end, after what's there and what's waiting: on a line of its own)
-            return self._new_edit(turn, page, len(text), "", new)
-        at, found = place_change(view, old, staged_at(pieces, near) if near is not None else None)
-        if at is None and any(want and want in view for want in (old, old.strip())):
-            return {"error": found}  # (in the page as the edits have it, more than once)
-        if at is None:  # (not in the page as the edits have it: text one of them replaces, perhaps)
-            k, kept_found = place_change(text, old, near)
-            if k is None:
-                return {"error": found}
-            end = k + len(kept_found)
-            hit = [x for x in spans if x[0] < end and x[0] + len(x[1]) > k]
-            if not hit:
-                return self._new_edit(turn, page, k, kept_found, new)
-            k0, k1 = min(k, hit[0][0]), max(end, max(x[0] + len(x[1]) for x in hit))
-            return self._merged(turn, [x[3] for x in hit], k0, text[k0:k1], text[k0:k] + new + text[end:k1])
-        end = at + len(found)
-        hit = [piece for piece in pieces if piece[4] is not None and
-               (piece[0] < end and piece[1] > at or piece[0] == piece[1] and at < piece[0] < end)]
-        if not hit:  # (none of a pending edit's passage in it: one of its own)
-            k0, k1 = kept_at(pieces, at, max), kept_at(pieces, end, min)
-            return self._new_edit(turn, page, k0, text[k0:k1], new)
-        s0, s1 = min(at, hit[0][0]), max(end, hit[-1][1])  # (all of theirs in it, and none of another's)
-        k0 = hit[0][2] if s0 == hit[0][0] else kept_at(pieces, at, max)
-        k1 = hit[-1][3] if s1 == hit[-1][1] else kept_at(pieces, end, min)
-        return self._merged(turn, [piece[4] for piece in hit], k0, text[k0:k1], view[s0:at] + new + view[end:s1])
+        plan = notebooktools.plan_propose(text, spans, str(args.get("old_text") or ""), str(args.get("new_text") or ""),
+                                          near)
+        if "error" in plan:
+            return plan
+        if "add" in plan:
+            return self._new_edit(turn, page, *plan["add"])
+        return self._merged(turn, *plan["merge"])
 
     def _new_edit(self, turn, page, start, old, new):
         p = {"id": uuid.uuid4().hex[:10], "notebook": self.notebook.get("id"), "page": page, "old": old, "new": new,
@@ -709,15 +675,7 @@ class RecordTools:
             if error:
                 return error
             pages = [page] if page in pages else []
-        listed = []
-        for page in pages:
-            spans = self._spans(page)[1]
-            listed += [{"id": p["id"], "page": page, "old_text": old, "new_text": new}
-                       for _at, old, new, p in sorted(spans, key=lambda x: x[0])]
-            placed = {id(x[3]) for x in spans}
-            listed += [{"id": p["id"], "page": page, "old_text": p["old"], "new_text": p["new"],
-                        "note": "what it replaces isn't on the page any more: revise its old_text, or withdraw it"}
-                       for p in self.pending(self.notebook) if p["page"] == page and id(p) not in placed]
+        listed = notebooktools.listed_edits(self.pending(self.notebook), pages, lambda page: self._spans(page)[1])
         if not listed:
             return {"text": "No edits of yours are waiting" + (f" on {pages[0] if pages else args['page']}."
                                                                if args.get("page") else ".")}
@@ -733,21 +691,11 @@ class RecordTools:
         p, error = self._pending_named(args)
         if error:
             return error
-        new, fields = str(args.get("new_text") or ""), {}
-        if not p["old"] and not ("old_text" in args and args["old_text"]) and not new.startswith("\n"):
-            text, spans = self._spans(p["page"])  # (an addition: after what's there and what's waiting before it)
-            before = staged(text, [x for x in spans if x[3] is not p and (x[1] or x[3].get("t", 0) < p.get("t", 0))])[0]
-            if before and not before.endswith("\n"):
-                new = "\n" + new
-        if "old_text" in args and str(args["old_text"]) != p["old"]:
-            text, spans = self._spans(p["page"])
-            near = next((x[0] for x in spans if x[3] is p), p.get("start"))
-            at, old = place_change(text, str(args["old_text"]), near)
-            if at is None:
-                return {"error": old}
-            if any(x[3] is not p and x[0] < at + len(old) and x[0] + len(x[1]) > at for x in spans):
-                return {"error": "That's in the passage another of your pending edits replaces: revise that one."}
-            fields = {"old": old, "start": at}
+        text, spans = self._spans(p["page"])
+        plan = notebooktools.plan_revise(p, args, text, spans)
+        if "error" in plan:
+            return {"error": plan["error"]}
+        new, fields = plan["new"], plan["fields"]
         self._restage(turn, p, new=new, **fields)
         if (item := turn.get("at")) is not None and item is not turn.get("nested"):
             item["replaced"] = p["old"]  # (as it is now: its card's red, old_text being optional)

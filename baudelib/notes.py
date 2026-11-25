@@ -11,7 +11,7 @@ import sys
 import threading
 import time
 
-from baudelib import wording
+from baudelib import notebooktools, wording
 
 LIMIT = 8 * 1024 * 1024  # (a listing's text, at most: past it, the pages' text isn't sent, said as too big)
 _LOCK = threading.Lock()  # (one write to the file at a time, here)
@@ -263,6 +263,21 @@ def backup(path):
         print("notes: no backup of records.json:", e, file=sys.stderr)
 
 
+def _save(saved, path):
+    """saved written to records.json (path), a copy of it kept first in backups/: an error, or None."""
+    backup(path)
+    try:
+        saved.setdefault("notes", "markdown")
+        with open(path + ".host.tmp", "w", encoding="utf-8") as f:
+            json.dump(saved, f, indent=1)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(path + ".host.tmp", path)
+    except OSError as e:
+        return f"records.json: {e}"
+    return None
+
+
 def write(changes):
     """changes made to this machine's notebooks: by the Record running here, else in records.json (a copy of it kept
     first in backups/, as Record keeps one). {done: [ids]} or {error}."""
@@ -287,14 +302,63 @@ def write(changes):
         done = apply(books, changes)
         if books == before:
             return {"done": done}
-        backup(path)
-        try:
-            saved.setdefault("notes", "markdown")
-            with open(path + ".host.tmp", "w", encoding="utf-8") as f:
-                json.dump(saved, f, indent=1)
-                f.flush()
-                os.fsync(f.fileno())
-            os.replace(path + ".host.tmp", path)
-        except OSError as e:
-            return {"error": f"records.json: {e}"}
+        if (error := _save(saved, path)) is not None:
+            return {"error": error}
     return {"done": done, "by": "file"}
+
+
+def edit_ok(call):
+    """Is call what edit takes: {tool: one of notebooktools.EDIT_TOOLS, args: {...}, by?: who's asking}?"""
+    return isinstance(call, dict) and call.get("tool") in notebooktools.EDIT_TOOLS and \
+        isinstance(call.get("args"), dict) and (call.get("by") is None or isinstance(call["by"], str))
+
+
+def edited(books, messages, call, live=(), view=None):
+    """An edit tool's call (edit_ok's) on books (a list of notebooks, changed in place), with messages (Meta's
+    conversation's) and live (a reply of Meta's still coming's) and view (notebooktools.Edits'): ({result} or {error},
+    the ids of the notebooks changed)."""
+    tools = notebooktools.Edits(books, messages, live, view, " ".join(str(call.get("by") or "").split())[:80] or None)
+    try:
+        return {"result": tools.call(call["tool"], call["args"])}, tools.changed
+    except ValueError as e:
+        return {"error": str(e)}, tools.changed
+
+
+def _hand_edit(call):
+    """The edit given to the Record running here, which makes it (record.App's edits): its answer, or None if none's
+    running."""
+    try:
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as c:
+            c.settimeout(5)
+            c.connect(socket_path())
+            c.sendall(json.dumps({"edits": call}).encode() + b"\n")
+            got = c.makefile("rb").readline()
+    except OSError:
+        return None
+    try:
+        said = json.loads(got)
+    except ValueError:
+        said = None
+    return said if isinstance(said, dict) and ("result" in said or "error" in said) else \
+        {"error": wording.say("host_errors.changes_not_taken")}
+
+
+def edit(call):
+    """An agent's edit tool (propose_edit, list_edits, revise_edit, withdraw_edit) on this machine's notebooks: by the
+    Record running here (the pages open there show it at once), else in records.json. {result} or {error}."""
+    if not edit_ok(call):
+        return {"error": "not an edit tool's call"}
+    if (handed := _hand_edit(call)) is not None:
+        return handed
+    with _LOCK:
+        path = records_path()
+        try:
+            saved = _read()
+        except (OSError, ValueError) as e:
+            return {"error": f"records.json: {e}"}
+        books = saved.get("records") if isinstance(saved.get("records"), list) else []
+        meta = saved.get("meta") if isinstance(saved.get("meta"), dict) else {}
+        out, changed = edited(books, meta.get("messages") or [], call)
+        if changed and (error := _save(saved, path)) is not None:
+            return {"error": error}
+    return out

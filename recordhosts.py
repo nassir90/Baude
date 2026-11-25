@@ -366,6 +366,28 @@ class RecordHosts:
             self.notes_changed()
         return True
 
+    def edits_here(self, call):
+        """An agent's edit to a page of this machine's notebooks (notes.edit, through record.listen): made with what's
+        shown (a page open: where it has the edits waiting), kept, and shown on the pages open. Its answer."""
+        chat = getattr(self, "chat", None)
+        agent = getattr(chat, "agent", None)
+
+        def view(notebook, page):
+            editor = self.tabs.get(("note", page)) if notebook is self.current else None
+            return (editor.kept(), editor.edit_start) if editor is not None else None
+        out, changed = notes.edited(self.store.local, self.store.meta["messages"], call,
+                                    agent.turn["proposals"] if agent is not None and agent.turn is not None else (), view)
+        if changed:
+            self.store.save_now()
+            if self.current is not None and self.current.get("id") in changed and self.store.host == HERE_HOST:
+                for child in self.tabs.children():
+                    if isinstance(child, DiaryEditor) and child.notebook is self.current:
+                        child.show_pending()
+                if chat is not None:
+                    chat.show_pending_bar()
+                    chat.edit_cards_changed()
+        return out
+
     def notes_changed(self, fresh=False):
         """The notebooks listed changed under the window (another host's listed, or changed from elsewhere): rows added
         and gone, the open one's pages listed and shown again, its gone pages' tabs closed (fresh: the first listing,

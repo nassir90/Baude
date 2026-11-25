@@ -200,6 +200,14 @@ def listen(on_request):
                     request = json.loads(conn.makefile().readline() or "{}")
                     if not isinstance(request, dict):
                         continue
+                    if "edits" in request:  # (an agent's edit to a page here, notes.edit: made, and its answer sent)
+                        made, ready = [], threading.Event()
+                        if notes.edit_ok(request["edits"]):
+                            GLib.idle_add(lambda r=request: (made.append(on_request(r)), ready.set()) and False)
+                        ready.wait(4)
+                        conn.sendall(json.dumps(made[0] if made and isinstance(made[0], dict) else
+                                                {"error": "Record didn't take it"}).encode() + b"\n")
+                        continue
                     if "notes" in request:
                         made, ready = [], threading.Event()
                         if notes.changes_ok(request["notes"]):
@@ -310,6 +318,8 @@ class App(Adw.Application):
             return False
         if "notes" in r:
             return self.win.notes_here(r["notes"])
+        if "edits" in r:
+            return self.win.edits_here(r["edits"])
         if r.get("chat"):
             self.win.open_chat(r["chat"])
         else:

@@ -13,7 +13,7 @@ import uuid
 
 from baudelib import (
     agentproxy, emissionlink, emissiontools, hostdb, hostfiles, hostfixes, hostkube, hostlogin, mesh, meshtools,
-    hostterminal, multiplexlink, routines, wire, wording, worktree,
+    hostterminal, multiplexlink, notes, routines, wire, wording, worktree,
 )
 from baudelib.serverstate import (
     APPS, BOT_PICTURE_MAX, Conn, FRAME_KEYS, _mtime, _write_json, _write_text, bot_dir, clean_env,
@@ -412,6 +412,14 @@ class ServerRunning:
             return reply("file", **self.read_file(msg.get("path"), msg.get("limit")))
         if op == "task_output":
             return reply("file", **self.task_output(msg.get("session"), msg.get("path"), msg.get("limit")))
+        if op == "notes" and msg.get("action") == "edit":  # (an agent's edit to a page here, proposed, revised or
+            def edit():  # taken back: by the Record running here, else in records.json; on a thread of its own)
+                try:
+                    reply("notes", **notes.edit(msg.get("edit")))
+                except Exception as e:  # noqa: BLE001 (said to the agent that asked)
+                    reply("error", error=f"{type(e).__name__}: {e}")
+            threading.Thread(target=edit, daemon=True, name="notes-edit").start()
+            return None
         if op == "notes":  # (Record's notebooks here, for another machine's Record: listed, or changed; one at a time,
             self.notes_ops.put((msg, reply))  # in the order asked, on a thread of their own: _notes)
             return None

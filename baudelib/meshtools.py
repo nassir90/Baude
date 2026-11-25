@@ -526,27 +526,35 @@ def cut(parts):
     return text if len(text) <= TEXT_MAX else text[:TEXT_MAX] + f"\n(… {len(text) - TEXT_MAX} more characters)"
 
 
-def listed():
+def listed(schemas=None):
     return [{"name": n, "description": d, "inputSchema": {"type": "object", "properties": props, "required": req}}
-            for n, (d, props, req) in SCHEMAS.items()]
+            for n, (d, props, req) in (schemas or SCHEMAS).items()]
 
 
 def serve(me=None, rfile=None, wfile=None, socket=None, meta=False):
     """The MCP server: a message a line on rfile (stdin), its answers on wfile (stdout), till rfile ends; each call on
     a thread of its own (a subagent's answer can take a while: another call meanwhile is answered)."""
-    rfile, wfile = rfile or sys.stdin, wfile or sys.stdout
-    mesh, lock = Mesh(me, socket, meta), threading.Lock()
+    mesh = Mesh(me, socket, meta)
+    serve_tools(NAME, SCHEMAS, lambda name, args: mesh.hosts() if name == "hosts" else getattr(mesh, name)(args),
+                rfile, wfile)
+
+
+def serve_tools(name, schemas, call, rfile=None, wfile=None, started=None):
+    """An MCP server of tools (schemas: {name: (description, properties, required)}, each called as call(name, args),
+    its answer given as JSON): a message a line on rfile (stdin), its answers on wfile (stdout), till rfile ends; each
+    call on a thread of its own. started(params): initialize's params (the client's clientInfo), as it's asked."""
+    rfile, wfile, lock = rfile or sys.stdin, wfile or sys.stdout, threading.Lock()
 
     def send(msg):
         with lock:
             wfile.write(json.dumps(msg) + "\n")
             wfile.flush()
 
-    def call(mid, name, args):
+    def run(mid, tool, args):
         try:
-            if name not in SCHEMAS:
-                raise ValueError(f"no tool {name}")
-            got = mesh.hosts() if name == "hosts" else getattr(mesh, name)(args)
+            if tool not in schemas:
+                raise ValueError(f"no tool {tool}")
+            got = call(tool, args)
             result = {"content": [{"type": "text", "text": json.dumps(got, indent=1, ensure_ascii=False)}]}
         except Exception as e:  # (said to the model, which may try again)
             result = {"content": [{"type": "text", "text": f"{type(e).__name__}: {e}"}], "isError": True}
@@ -560,14 +568,16 @@ def serve(me=None, rfile=None, wfile=None, socket=None, meta=False):
         if mid is None:
             continue
         if method == "initialize":
+            if started is not None:
+                started(msg.get("params") or {})
             send({"jsonrpc": "2.0", "id": mid, "result": {
                 "protocolVersion": (msg.get("params") or {}).get("protocolVersion") or "2025-06-18",
-                "capabilities": {"tools": {}}, "serverInfo": {"name": NAME, "version": "1"}}})
+                "capabilities": {"tools": {}}, "serverInfo": {"name": name, "version": "1"}}})
         elif method == "tools/list":
-            send({"jsonrpc": "2.0", "id": mid, "result": {"tools": listed()}})
+            send({"jsonrpc": "2.0", "id": mid, "result": {"tools": listed(schemas)}})
         elif method == "tools/call":
             p = msg.get("params") or {}
-            threading.Thread(target=call, args=(mid, p.get("name"), p.get("arguments") or {}), daemon=True).start()
+            threading.Thread(target=run, args=(mid, p.get("name"), p.get("arguments") or {}), daemon=True).start()
         else:
             send({"jsonrpc": "2.0", "id": mid, "error": {"code": -32601, "message": "unknown method"}})
 

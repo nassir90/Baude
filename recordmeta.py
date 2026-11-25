@@ -1,12 +1,14 @@
 """recordmeta — what Meta, in Record, is told and proposes: its prompt and tools (RECORD_PROMPT, RECORD_TOOLS),
 what a notebook, a page, an @-referenced thing or a quoted passage says to it, and its proposed edits as a page reads
-them (pending_edits, staged, place_change).
+them (pending_edits; staged and place_change are baudelib.notebooktools').
 """
 import codecs
 import os
 import re
 
 from baudelib.notes import data_dir  # noqa: E402,F401
+from baudelib import notebooktools  # noqa: E402  (what a page's edits are: Meta's here, and an outside agent's)
+from baudelib.notebooktools import kept_at, place_change, staged, staged_at  # noqa: E402,F401
 import meta  # noqa: E402  (Meta, the helper in the right bar: Baude's too, beside this file)
 from recordstore import HOME, QUOTE_LIMIT, REF_RE, full_name, page_paths, plain_refs, short_page
 from recordui import chat_text
@@ -320,13 +322,8 @@ def page_named(notebook, name, store):
     """The page of notebook a name means (the agent's: its name, any case, its own name past its parents', or its file),
     or None."""
     name = name.strip()
-    pages = notebook["pages"]
-    if name in pages:
-        return name
-    for test in (lambda p: p.lower() == name.lower(), lambda p: short_page(p).lower() == name.lower()):
-        found = [p for p in pages if test(p)]
-        if len(found) == 1:
-            return found[0]
+    if (page := notebooktools.page_named(notebook["pages"], name)) is not None:
+        return page
     files = {os.path.join(pages_root(), path): page for (book, page), path in page_paths(store.notebooks).items()
              if book == notebook.get("id")}
     path = os.path.realpath(os.path.join(pages_root(), name)) if name else ""
@@ -335,76 +332,10 @@ def page_named(notebook, name, store):
 
 
 def pending_edits(notebook, store, agent=None):
-    """The edits the agent's proposed to a notebook's pages that wait for you, in the order it made them (the reply
-    still coming's, agent's, last): each one's notebook its "notebook" (one in a notebook's own conversation, from
-    when each had one: that notebook)."""
-    book_id = notebook.get("id")
-    said = [*(notebook.get("messages") or ()), *(store.meta["messages"] if store is not None else ())]
-    live = agent.turn["proposals"] if agent is not None and agent.turn is not None else ()
-    props = [p for m in said for p in m.get("proposals") or () if p.get("notebook", book_id) == book_id]
-    return [p for p in props + [p for p in live if p not in props and p.get("notebook") == book_id]
-            if p.get("status") == "pending"]
-
-
-def staged(text, edits):
-    """A page's text as it reads with edits applied: (that text, its pieces). edits: [(start, old, new, edit)], in the
-    page's own places; one that overlaps one before it is left out. At one place an insertion (old empty) comes before
-    a replacement, and edits otherwise in the order they were made. A piece: (its start and end in the staged text,
-    its start and end in the page's, the edit it's of or None)."""
-    out, pieces, at, pos = [], [], 0, 0
-    order = lambda x: (x[0], bool(x[1]), x[3].get("t", 0) if isinstance(x[3], dict) else 0)  # noqa: E731
-    for start, old, new, edit in sorted(edits, key=order):
-        if start < at:
-            continue
-        if start > at:
-            out.append(text[at:start])
-            pieces.append((pos, pos + start - at, at, start, None))
-            pos += start - at
-        out.append(new)
-        pieces.append((pos, pos + len(new), start, start + len(old), edit))
-        pos, at = pos + len(new), start + len(old)
-    out.append(text[at:])
-    pieces.append((pos, pos + len(text) - at, at, len(text), None))
-    return "".join(out), pieces
-
-
-def staged_at(pieces, at):
-    """A place in the page's own text as one in its staged text (in a passage an edit replaces: that edit's start)."""
-    for ss, se, ks, ke, edit in pieces:
-        if ks <= at <= ke:
-            return ss + (at - ks) if edit is None else ss
-    return at
-
-
-def kept_at(pieces, at, pick=min):
-    """A place in the staged text as one in the page's own (where an edit's new text starts or ends: its passage's
-    start or end). Where it's more than one (an edit that puts nothing in is all of its passage at one place): pick's
-    of them, min the first, max the last."""
-    places = []
-    for ss, se, ks, ke, edit in pieces:
-        if edit is None and ss <= at <= se:
-            places.append(ks + (at - ss))
-        elif edit is not None and at in (ss, se):
-            places += [ks] if at == ss else []
-            places += [ke] if at == se else []
-    return pick(places) if places else None
-
-
-def place_change(text, old, near=None):
-    """Where a proposed change goes in a page's text: (offset, the text it replaces), or (None, why not). old there once,
-    or, if more than once, the one nearest near (where the selection was); with its spaces either side left out, if it's
-    there so and not as given. An empty old: the page's end."""
-    if not old:
-        return len(text), ""
-    for want in dict.fromkeys((old, old.strip())):
-        if not want:
-            continue
-        at = [m.start() for m in re.finditer(re.escape(want), text)]
-        if len(at) == 1 or at and near is not None:
-            return min(at, key=lambda i: abs(i - near)) if near is not None else at[0], want
-        if len(at) > 1:
-            return None, f"old_text is in the page {len(at)} times: give more of what's around it, so it's there once."
-    return None, "old_text isn't in the page as it is now: copy it exactly from the page (Read its file)."
+    """The edits proposed to a notebook's pages that wait for you, in the order they were made (the reply still
+    coming's, agent's, last): notebooktools.pending_edits, with Meta's conversation's (store's)."""
+    return notebooktools.pending_edits(notebook, store.meta["messages"] if store is not None else (),
+                                       agent.turn["proposals"] if agent is not None and agent.turn is not None else ())
 
 
 def split_unknown(text):

@@ -1,20 +1,23 @@
 """chatparts — a chat's bars and turns: Update at a sidebar's foot (UpdateBar), what's in a host's way (HostState),
 a background task's end line, the context meter and its usage (ContextMeter, ContextUsage), a compaction's mark
-(CompactMark), your turns (UserTurn; queued, sent by another, held: QueuedTurn, SenderTurn, HeldTurn), a chat
-past its window (Exhausted) and the find bar (FindBar).
+(CompactMark; its summary's heading pinned over the chat while the summary's read: SummaryPin), your turns (UserTurn;
+queued, sent by another, held: QueuedTurn, SenderTurn, HeldTurn), a chat past its window (Exhausted) and the find bar
+(FindBar).
 """
 import html
 import math
 import re
+import weakref
 
 import gi
 
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 gi.require_version("Graphene", "1.0")
-from gi.repository import Adw, Graphene, Gtk, Pango  # noqa: E402,F401
+from gi.repository import Adw, Gdk, Graphene, Gtk, Pango  # noqa: E402,F401
 
 from baudelib import wording  # noqa: E402
+from baudelib.transcripts import summary_tools  # noqa: E402
 from widgets import WorkingDots, empty_label  # noqa: E402
 from markdownview import MarkdownView  # noqa: E402
 
@@ -344,16 +347,100 @@ class CompactMark(Gtk.Box):
                             wording.say("compaction.failed"))
         self.label.add_css_class("error")
 
+    opened = weakref.WeakSet()  # (every chat's marks with their summary open: what SummaryPin looks among)
+
     def set_summary(self, text):
+        """The summary under the mark, folded. The list of tools the conversation had used that Claude Code puts in it
+        is said as how many, in a quiet line at its top."""
         if not text or self.fold is not None:
             return
+        text, tools = summary_tools(text)
         head = Gtk.Label(label=wording.say("compaction.summary"))
         head.add_css_class("sysnote")
-        body = MarkdownView(text)
-        body.set_margin_start(18)
-        body.set_margin_bottom(6)
+        body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, margin_start=18, margin_bottom=6)
+        if tools:
+            used = Gtk.Label(label=wording.say("compaction.tools_before", count=len(tools)), xalign=0, selectable=True,
+                             tooltip_text=", ".join(tools))
+            used.add_css_class("sysnote")
+            body.append(used)
+        body.append(MarkdownView(text))
         self.fold = Gtk.Expander(label_widget=head, child=body)
+        self.fold.connect("notify::expanded", self._opened)
         self.append(self.fold)
+
+    def _opened(self, fold, _p):
+        (CompactMark.opened.add if fold.get_expanded() else CompactMark.opened.discard)(self)
+        for pin in list(SummaryPin.live):
+            pin.look()
+
+
+class SummaryPin(Gtk.Expander):
+    """An open compaction summary's heading, pinned at the top of the chat it's in while the heading's scrolled above
+    the top and the summary's still in view (a summary runs to many screens): the same heading, opened; clicked, the
+    summary folds and the chat's scrolled back to its mark. Laid over the chat's scroller (an overlay's), and looked
+    for only as the chat scrolls or a summary's opened or folded: nothing's done while none is open."""
+
+    live = weakref.WeakSet()
+
+    def __init__(self, scroller):
+        head = Gtk.Label(label=wording.say("compaction.summary"))
+        head.add_css_class("sysnote")
+        super().__init__(label_widget=head, expanded=True, visible=False, valign=Gtk.Align.START,
+                         halign=Gtk.Align.START)
+        self.add_css_class("summary-pin")
+        self.scroller, self.mark = scroller, None
+        adj = scroller.get_vadjustment()
+        for change in ("value-changed", "changed"):  # (scrolled; laid out again)
+            adj.connect(change, lambda *_: self.look())
+        self.connect("notify::expanded", self._fold)
+        SummaryPin.live.add(self)
+
+    after = None  # (the frame clock's after-paint handler, while a look's waiting for the frame)
+
+    def look(self):
+        """Looked at again once the next frame's laid out (a scroll moves what's in the chat only as the frame's
+        allocated): nothing, while no summary's open."""
+        clock = self.scroller.get_frame_clock()
+        if (not CompactMark.opened and not self.get_visible()) or self.after is not None or clock is None:
+            return
+
+        def drawn(c):
+            c.disconnect(self.after)
+            self.after = None
+            self._place()
+        self.after = clock.connect("after-paint", drawn)
+        clock.request_phase(Gdk.FrameClockPhase.AFTER_PAINT)
+
+    def _place(self):
+        """Shown over the open summary whose heading's above the chat's top, the rest of it in view, if one is."""
+        found = None
+        for mark in list(CompactMark.opened):
+            fold = mark.fold
+            if not mark.get_mapped() or not fold.is_ancestor(self.scroller):
+                continue
+            ok, top = fold.compute_point(self.scroller, Graphene.Point())
+            if ok and top.y < 0 and top.y + fold.get_height() > max(self.get_height(), 1):
+                found = (mark, top.x, fold.get_width())
+                break
+        self.mark = found and found[0]
+        if found:
+            self.set_margin_start(max(0, round(found[1])))
+            self.set_size_request(found[2], -1)
+        self.set_visible(found is not None)
+
+    def _fold(self, *_):
+        if self.get_expanded():
+            return
+        self.set_expanded(True)  # (this one stays as the heading of an open summary; the summary itself folds)
+        mark, self.mark = self.mark, None
+        self.set_visible(False)
+        if mark is None or mark.fold is None:
+            return
+        ok, top = mark.compute_point(self.scroller, Graphene.Point())
+        mark.fold.set_expanded(False)
+        if ok:  # (back to its mark, at the chat's top)
+            adj = self.scroller.get_vadjustment()
+            adj.set_value(max(0.0, adj.get_value() + top.y))
 
 
 class UserTurn(Gtk.Box):
@@ -365,6 +452,7 @@ class UserTurn(Gtk.Box):
     def __init__(self, win, bubble, text, uuid):
         super().__init__(spacing=6, hexpand=True)
         self.win, self.bubble, self.text, self.uuid = win, bubble, text, uuid
+        bubble.set_hexpand(False)  # (a list in it, which fills its width, doesn't take the row: the button's place)
         self.revert = Gtk.Button(child=Gtk.Image(icon_name="view-refresh-symbolic", pixel_size=12),
                                  tooltip_text=wording.say("chat_turns.revert"), hexpand=True, halign=Gtk.Align.END,
                                  valign=Gtk.Align.END, opacity=0, can_target=False)
@@ -410,6 +498,7 @@ class QueuedTurn(Gtk.Box):
     def __init__(self, win, bubble, text, atts, said=None):
         super().__init__(spacing=6, hexpand=True)
         self.win, self.bubble, self.text, self.atts, self.said = win, bubble, text, atts, said
+        bubble.set_hexpand(False)  # (as UserTurn's: its buttons beside it whatever's in it)
         bubble.add_css_class("queued-bubble")
         self.buttons = Gtk.Box(spacing=2, hexpand=True, halign=Gtk.Align.END, valign=Gtk.Align.END, opacity=0,
                                can_target=False)
@@ -462,6 +551,7 @@ class HeldTurn(Gtk.Box):
     def __init__(self, win, bubble, held):
         super().__init__(spacing=6, hexpand=True)
         self.win, self.bubble, self.held, self.sending = win, bubble, held, None
+        bubble.set_hexpand(False)
         bubble.add_css_class("queued-bubble")
         self.buttons = Gtk.Box(spacing=2, hexpand=True, halign=Gtk.Align.END, valign=Gtk.Align.END, opacity=0,
                                can_target=False)

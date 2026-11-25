@@ -44,6 +44,18 @@
           "by": "click ↑",
           "does": "Sends it to the chat now: it disappears from the held list and appears in the chat as a SenderTurn while the turn starts. Tooltip \"Send it to the chat: it was held, not sent, as this chat's host restarted while it waited for it\"."
         }
+      ],
+      "decisions": [
+        {
+          "said": "A bullet or numbered list on a message's last line pushes the Send now / Revert buttons well out of place",
+          "rule": "Every app keeps a message's buttons just beside its bubble, level with its last line, whatever the message ends with (a list, a numbered list, a code block): what's inside a bubble never widens the bubble's share of the row",
+          "decided": "2026-11-25",
+          "source": [
+            {
+              "issue": "BaudeInternal#221"
+            }
+          ]
+        }
       ]
     }
   ],

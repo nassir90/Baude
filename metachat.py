@@ -75,6 +75,7 @@ class MetaChat(MetaCards, MetaTools, Gtk.Box):
         over = Gtk.Overlay(child=self.scroll, vexpand=True)
         self.chat_find = chatfind.ChatFind(self.box, self.scroll, pane=self)  # (⌘F / Ctrl+F in Meta: its bar over the
         over.add_overlay(self.chat_find.marks)                              # conversation, its matches under the forms)
+        over.add_overlay(chatparts.SummaryPin(self.scroll))  # (an open compaction summary's heading, scrolled past)
         over.add_overlay(self.pins)
         for change in ("value-changed", "changed"):  # (scrolled; laid out again, the conversation's height changed)
             self.scroll.get_vadjustment().connect(change, lambda *_: self._pin_soon())

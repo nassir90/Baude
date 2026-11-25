@@ -487,6 +487,7 @@ abstract class Parity(private val theme: String, private val scene: String) {
                     settle()
                 }
                 if ((sc.optBoolean("open") || sc.optBoolean("lightbox")) && !sc.has("meta")) toEnd()
+                if (sc.has("into")) intoSummary(sc.getDouble("into").toFloat())
                 if (sc.has("ask")) {
                     ask(sc.getString("ask"))
                     toEnd()
@@ -669,6 +670,19 @@ abstract class Parity(private val theme: String, private val scene: String) {
             list.config[SemanticsActions.ScrollBy].action?.invoke(0f, 2500f)
             settle()
         }
+    }
+
+    /** The chat's list scrolled to the first open compaction summary's heading: by px above the list's top. */
+    private fun intoSummary(by: Float) {
+        val nodes = roots().flatMap { all(it.semanticsOwner.rootSemanticsNode) }
+        val list = nodes.firstOrNull { n ->
+            n.config.contains(SemanticsProperties.CollectionInfo) && n.config.contains(SemanticsActions.ScrollBy)
+        } ?: return
+        val head = nodes.firstOrNull { said(it) == dev.baude.android.Wording.Compaction.summary } ?: return
+        list.config[SemanticsActions.ScrollBy].action?.invoke(0f, head.positionInWindow.y - list.positionInWindow.y + by)
+        settle()
+        flush(true)
+        settle()
     }
 
     private fun transcript(file: String, lines: Int): String {

@@ -55,6 +55,7 @@ gi.require_version("Gsk", "4.0")
 from gi.repository import Adw, Gdk, Gio, GLib, Gtk  # noqa: E402
 import pointers  # noqa: E402  (the pointer's shape: beside this file)
 import widgets  # noqa: E402  (what Record draws as Baude does: the links' logos; beside this file)
+import memreport  # noqa: E402  (kill -USR2: what it holds, in a debug report)
 import pickers  # noqa: E402
 import theming  # noqa: E402
 from baudelib import wording  # noqa: E402  (its words, Baude's: schema/copy)
@@ -115,18 +116,13 @@ def macos_app_name():
 
 
 def macos_dock_image(svg=None):
-    """The logo as an NSImage. No GTK and no main-thread AppKit call: it runs on a worker thread."""
-    import ctypes
-    png = icon_png(svg=svg)
-    data = objc_send(b"NSData", b"dataWithBytes:length:", png, len(png), types=(ctypes.c_char_p, ctypes.c_ulong))
-    return objc_send(objc_send(b"NSImage", b"alloc"), b"initWithData:", data, types=(ctypes.c_void_p,))
+    """The logo as an NSImage (macos.dock_image). No GTK and no main-thread AppKit call: it runs on a worker thread."""
+    return macos.dock_image(icon_png(macos.DOCK_PX, svg=svg))
 
 
 def set_dock_image(image):
-    """The Dock's tile an NSImage, on the main thread."""
-    import ctypes
-    objc_send(objc_send(b"NSApplication", b"sharedApplication"), b"setApplicationIconImage:", image,
-              types=(ctypes.c_void_p,))
+    """The Dock's tile an NSImage, on the main thread (macos.set_dock_image)."""
+    macos.set_dock_image(image)
 
 
 def macos_dock_icon():
@@ -226,6 +222,9 @@ class App(Adw.Application):
         Adw.Application.do_startup(self)
         self.do_startup_look()
         widgets.ensure_icons()
+        widgets.free_closed_windows(self)
+        memreport.listen(os.path.join(os.environ.get("XDG_CACHE_HOME") or os.path.expanduser("~/.cache"), "baude",
+                                      f"record-debug-{os.getpid()}.txt"), "Record")  # (kill -USR2 <pid>)
         pointers.start()
         pickers.press_opens_dropdowns()  # (a dropdown's list open as the mouse goes down on it)
         theming.theme_css(CSS)  # (whose stylesheet Baude's look is drawn over: libadwaita's, or a GTK_THEME's)

@@ -137,6 +137,29 @@ def objc_send(obj, sel, *args, types=(), ret=None):
     return f(obj, rt.sel_registerName(sel), *args)
 
 
+DOCK_PX = 512  # (the Dock's tile at its largest, magnified: 256 points, 512 px on a Retina screen. Each tile set (the
+# accent changed) holds on to memory in AppKit, none of it given back: 8.7 MB each from 1024 px, 2.6 MB from 512)
+
+
+def dock_image(png):
+    """A PNG (bytes, DOCK_PX square) as an NSImage, for set_dock_image. No main-thread AppKit call: it can be made on a
+    worker thread (nothing's left there for an autorelease pool, which a worker hasn't got)."""
+    import ctypes
+    data = objc_send(objc_send(b"NSData", b"alloc"), b"initWithBytes:length:", png, len(png),
+                     types=(ctypes.c_char_p, ctypes.c_ulong))
+    image = objc_send(objc_send(b"NSImage", b"alloc"), b"initWithData:", data, types=(ctypes.c_void_p,))
+    objc_send(data, b"release")  # (the image keeps what it needs of it)
+    return image
+
+
+def set_dock_image(image):
+    """The Dock's tile an NSImage (dock_image's), on the main thread. (Not let go of after: AppKit reads the one it had
+    as the next is set, and crashed on one let go of.)"""
+    import ctypes
+    objc_send(objc_send(b"NSApplication", b"sharedApplication"), b"setApplicationIconImage:", image,
+              types=(ctypes.c_void_p,))
+
+
 def ns_string(text):
     import ctypes
     return objc_send(b"NSString", b"stringWithUTF8String:", text.encode(), types=(ctypes.c_char_p,))

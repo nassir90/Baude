@@ -436,7 +436,7 @@ class BaudeWindow(WindowView, WindowProc, WindowDrafts, WindowSignal, WindowRemo
         # the main area's tabs (panels.MainTabs, Record's too): the chat, pinned first, and code clicked in it, each
         # file a tab of its own (show_code); the tabs' bar only while there's code open
         # (⌥⌘← ⌥⌘→: back and forward through them)
-        self.tabs = panels.MainTabs(shown_alone=False, reopen=self.reopen_tab, closed=BaudeWindow.tab_closed)
+        self.tabs = panels.MainTabs(shown_alone=False, reopen=self.reopen_tab)
         self.tabs.prepend(self.tabs.bar)
         self.tabs.open("chat", lambda: root, wording.say("chats.chat"), icon="baude-claude-symbolic",
                        pinned=True)  # (Claude's logo)

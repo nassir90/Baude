@@ -557,6 +557,15 @@ def _(app):
     return win
 
 
+@scene("51c-claude-events", "Claude Code's own events in a turn: a commit and a push (each with Show in Git), "
+                           "background agents stopped, a notification; the rest say nothing, never a raw name")
+def _(app):
+    win = app.window(opts())
+    T.type_and_send(win, "SYSTEM EVENTS")
+    T.wait_for(lambda: not win.busy, "turn end")
+    return win
+
+
 @scene("54-task-notifications", "Background tasks that ended while Claude worked: one quiet line each, "
                                 "✓ or ✗, the tool and its description (a link back to its card), not the raw "
                                 "command or the XML they arrive in")

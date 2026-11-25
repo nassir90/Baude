@@ -119,6 +119,9 @@ private fun heard(chat: Chat, m: JSONObject) {
             "status" -> if (top) CompactMarks.heard(chat, m)
             "commands_changed" -> SlashCommands.changed(chat, m.optJSONArray("commands"))
             "api_retry" -> if (top) c.retrying.value = m
+            "vcs_state_changed" -> repositoryChanged(chat, m)
+            else -> Wording.ClaudeEvents.said(event = sub, text = m.str("content") ?: m.str("text") ?: "")
+                .takeIf { it.isNotEmpty() }?.let { chat.lines.add(Line("note", it)) } // (claude_events: nothing, for the rest)
         }
         "assistant", "user" -> {
             if (type == "assistant" && !c.loginAsked) loginAsk(chat, m)?.let { c.loginAsked = true; Logins.ask(chat, it) }
@@ -126,6 +129,14 @@ private fun heard(chat: Chat, m: JSONObject) {
         }
     }
     if (top && type in setOf("stream_event", "assistant")) c.retrying.value = null
+}
+
+/** claude committed, pushed, merged or rebased (vcs_state_changed, WindowDrafts.repository_changed): said in the
+ * chat, with Show in Git (the branch, if it said one); the Git page reads the history again as the chat goes on. */
+private fun repositoryChanged(chat: Chat, m: JSONObject) {
+    val branch = m.str("branch").orEmpty()
+    val said = Wording.ClaudeEvents.repository(kind = m.optString("kind"), branch = branch)
+    chat.lines.add(Line("gitnote", JSONObject().put("text", said).put("branch", branch).toString()))
 }
 
 private fun carriesResult(m: JSONObject) = m.optJSONObject("message")?.optJSONArray("content").list()

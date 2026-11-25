@@ -153,8 +153,12 @@ class WindowView:
             return False
         GLib.timeout_add(160, scroll)  # after the group's slide-down has laid out
 
-    def note(self, text, parent_tool=None):
-        return self.add(sel_label(html.escape(text), css="sysnote"), parent_tool)
+    def note(self, text, parent_tool=None, link=None):
+        """A quiet line in the chat (SystemNote); link: (its uri, its words), a link after it."""
+        markup = html.escape(text)
+        if link is not None:
+            markup += f'  <a href="{html.escape(link[0])}">{html.escape(link[1])}</a>'
+        return self.add(sel_label(markup, css="sysnote"), parent_tool)
 
     def on_scrolled(self, _adj):
         # (the scrollbar or the keys moved it: the reader; ScrollGlide says so itself. Not GTK clamping it, the view

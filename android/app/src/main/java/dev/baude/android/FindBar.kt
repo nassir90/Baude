@@ -52,6 +52,7 @@ class Match(val line: Line, val lineIndex: Int)
 
 private fun texts(chat: Chat, line: Line): List<String> = when (line.kind) {
     "you", "bot", "note", "error" -> listOf(line.text)
+    "gitnote" -> listOf(runCatching { org.json.JSONObject(line.text).optString("text") }.getOrDefault(""))
     "call" -> chat.calls.byId[line.text]?.let { call ->
         (if (call.inputOpen) listOf(call.input.toString()) else emptyList()) + (if (call.outputOpen) call.outputs.map { it.text } else emptyList())
     }.orEmpty()

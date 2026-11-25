@@ -1,18 +1,23 @@
 {
   "description": "A quiet one-line note Baude adds to the chat about what happened around the conversation (resumed, interrupted, a turn's error, the model or folder changed, a denied call…): small, dimmed, left-aligned, selectable, in order with the messages.",
   "apps": [
-    "baude"
+    "baude",
+    "phone"
   ],
   "code": [
     "windowview.py:WindowView.note",
     "windowremote.py:WindowRemote.h_result",
     "windowremote.py:WindowRemote.begin_resume",
     "windowdrafts.py:WindowDrafts.stop_stuck",
-    "windowview.py:WindowView.render_history"
+    "windowview.py:WindowView.render_history",
+    "windowdrafts.py:WindowDrafts.h_system",
+    "windowdrafts.py:WindowDrafts.repository_changed",
+    "markdownview.py:on_label_link"
   ],
   "copy": [
     "meta",
-    "asks"
+    "asks",
+    "claude_events"
   ],
   "parts": [
     {
@@ -65,10 +70,56 @@
     },
     {
       "name": "other",
-      "shows": "Host and process notes (\"Starting <machine>'s host process…\", \"failed to start claude: …\", \"couldn't reach <host>: …\"), attach/paste failures (\"can't attach <path>: not a file\", \"paste failed: …\"), \"stop requested for <task>\", \"control error: …\", \"stderr: <line>\", and unknown system events as \"[system:<subtype>]\"."
+      "shows": "Host and process notes (\"Starting <machine>'s host process…\", \"failed to start claude: …\", \"couldn't reach <host>: …\"), attach/paste failures (\"can't attach <path>: not a file\", \"paste failed: …\"), \"stop requested for <task>\", \"control error: …\", \"stderr: <line>\"."
+    },
+    {
+      "name": "claude events",
+      "shows": "Claude Code's own events (its system messages) as notes in the app's own words, from claude_events.said by subtype: \"background agents stopped\" (agents_killed); a notification's, an informational message's, a model fallback's, a slash command's output or a scheduled task's own text; \"claude couldn't save this chat: the disk is full\". Every other subtype, known or not, shows nothing: never a raw event name.",
+      "copy": [
+        "claude_events.said"
+      ],
+      "decisions": [
+        {
+          "said": "Claude's system messages such as [system:vcs_state_changed] are shown raw in the chat; handle them better, maybe with links to the Git pane (paraphrased)",
+          "rule": "Every app shows Claude Code's events through the one shared mapping in schema/copy/claude_events.json (a note in the app's words, or nothing) and never shows a raw event or subtype name",
+          "decided": "2026-11-25",
+          "source": [
+            {
+              "issue": "BaudeInternal#225"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "repository changed",
+      "shows": "claude committed, pushed, merged or rebased (vcs_state_changed): \"committed on <branch>\", \"pushed <branch>\", \"merged a branch\", \"rebased a branch\" (claude_events.repository), then a Show in Git link that opens the side panel's Git page on that branch (the chat's own branches when it names none). The Git page reads the history again.",
+      "copy": [
+        "claude_events.repository",
+        "signal.show_in_git"
+      ],
+      "actions": [
+        {
+          "by": "click",
+          "does": "Show in Git: the side panel's Git page, the branch the note names picked"
+        }
+      ],
+      "decisions": [
+        {
+          "said": "Repository changes claude makes should link to the Git pane rather than show as a raw event (paraphrased)",
+          "rule": "In every app a commit, push, merge or rebase claude makes is one note with a Show in Git link to the Git page at that branch, and the Git page refreshes",
+          "decided": "2026-11-25",
+          "source": [
+            {
+              "issue": "BaudeInternal#225"
+            }
+          ]
+        }
+      ]
     }
   ],
   "scenes": [
-    "51b-resumed-after-writing"
+    "51b-resumed-after-writing",
+    "51c-claude-events"
   ]
 }

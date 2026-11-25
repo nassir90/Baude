@@ -388,6 +388,19 @@ def interrupted():
                                                                                     "output_tokens": 5}})
 
 
+def events(n):
+    """Claude Code's own events in a turn, as claude 2.1 sends them: a commit and a push it saw (vcs_state_changed),
+    background agents stopped, a notification, and events a chat says nothing of (one no app knows)."""
+    system("vcs_state_changed", kind="commit", branch="fix/login-timeout", cwd=os.getcwd())
+    system("vcs_state_changed", kind="push", branch="fix/login-timeout", cwd=os.getcwd())
+    system("agents_killed")
+    system("notification", key="fast-mode", text="Fast mode is off until 5pm", priority="high", color="warning")
+    system("hook_progress")
+    system("made_up_event")
+    say("Committed the fix and pushed the branch.", f"ev{n}")
+    result("events")
+
+
 def subagent(n, delay, open_turn=False):
     """An Agent call: runs as a background task, forwards its own messages, then reports. open_turn ("OPEN"): the
     turn goes on after it (no result) until it's interrupted."""
@@ -654,6 +667,8 @@ def main():
                 background_command(turns, delay)
             elif "QUESTION" in text or "QUESTION" in json.dumps(msg["message"]["content"]):
                 ask_question(turns)
+            elif "SYSTEM EVENTS" in text:
+                events(turns)
             elif "NESTED" in text:
                 nested_subagent(turns, "HOLD" in text)
             elif "SUBAGENT" in text:

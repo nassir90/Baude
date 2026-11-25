@@ -1,0 +1,7 @@
+{
+  "description": "What a chat says of Claude Code's own events (its system messages, by subtype): one note each, or nothing for the rest. Every app reads its notes from here and shows no raw event names.",
+  "messages": {
+    "said": ".input {$event :string} .match $event agents_killed {{background agents stopped}} session_writes_lost {{claude couldn't save this chat: the disk is full}} informational {{{$text}}} notification {{{$text}}} model_fallback {{{$text}}} model_refusal_fallback {{{$text}}} local_command_output {{{$text}}} scheduled_task_fire {{{$text}}} * {{}}",
+    "repository": ".input {$kind :string} .input {$branch :string} .match $kind $branch commit || {{committed}} commit * {{committed on {$branch}}} push || {{pushed}} push * {{pushed {$branch}}} merge * {{merged a branch}} rebase * {{rebased a branch}} * * {{the repository changed}}"
+  }
+}

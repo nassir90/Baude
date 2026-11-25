@@ -3,6 +3,7 @@ providers, the stream-json protocol, compaction, its title, background tasks and
 """
 import json
 import os
+import urllib.parse
 import uuid
 from baudelib.claude import EFFORT_LABELS, MODELS, MODES
 from baudelib.transcripts import history_item, session_file, transcript_model
@@ -23,7 +24,7 @@ import meta  # noqa: E402  (Meta, the helper in the side panel: Record's too; se
 import widgets  # noqa: E402  (what Record draws as Baude does: the links' logos; see widgets.py)
 from chatparts import SenderTurn, UserTurn  # noqa: E402
 from widgets import discard, load_settings, save_settings  # noqa: E402,F401
-from markdownview import ARTIFACT_TITLES, MarkdownView  # noqa: E402,F401
+from markdownview import ARTIFACT_TITLES, GIT_SCHEME, MarkdownView  # noqa: E402,F401
 from codeview import CodePage  # noqa: E402,F401
 from startup import LAUNCHER  # noqa: E402
 from signalrefs import TOOL_NAMES  # noqa: E402
@@ -1159,9 +1160,22 @@ class WindowDrafts:
             self.on_tasks_changed(msg.get("tasks") or [])
         elif st == "commands_changed":
             self.completer.set_commands(msg.get("commands") or [])
-        elif st not in ("hook_started", "hook_response", "thinking_tokens", "task_summary",
-                        "post_turn_summary", "rate_limit_event"):
-            self.note(f"[system:{st}]")
+        elif st == "vcs_state_changed":
+            self.repository_changed(msg)
+        elif st == "code_change_published":
+            self.panel.git_page.chat_changed()  # (its pull request, on the Git page)
+        elif said := wording.say("claude_events.said", event=str(st),
+                                 text=str(msg.get("content") or msg.get("text") or "")):
+            self.note(said)  # (claude_events: what's said of its other events; nothing, for the rest)
+
+    def repository_changed(self, msg):
+        """claude committed, pushed, merged or rebased (vcs_state_changed): said in the chat, with a link to the Git
+        page (the branch, if it said one), which reads the history again."""
+        branch = msg.get("branch") if isinstance(msg.get("branch"), str) else ""
+        said = wording.say("claude_events.repository", kind=str(msg.get("kind")), branch=branch)
+        link = GIT_SCHEME + urllib.parse.quote(branch)
+        self.note(said, link=(link, wording.say("signal.show_in_git")))
+        self.panel.git_page.chat_changed()
 
     # ---- compaction (CompactMarks): marked in the chat, at its end
     def compact_add(self, mark):

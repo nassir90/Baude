@@ -674,15 +674,42 @@ abstract class Parity(private val theme: String, private val scene: String) {
 
     /** The chat's list scrolled to the first open compaction summary's heading: by px above the list's top. */
     private fun intoSummary(by: Float) {
-        val nodes = roots().flatMap { all(it.semanticsOwner.rootSemanticsNode) }
-        val list = nodes.firstOrNull { n ->
+        fun nodes() = roots().flatMap { all(it.semanticsOwner.rootSemanticsNode) }
+        fun list() = nodes().firstOrNull { n ->
             n.config.contains(SemanticsProperties.CollectionInfo) && n.config.contains(SemanticsActions.ScrollBy)
-        } ?: return
-        val head = nodes.firstOrNull { said(it) == dev.baude.android.Wording.Compaction.summary } ?: return
-        list.config[SemanticsActions.ScrollBy].action?.invoke(0f, head.positionInWindow.y - list.positionInWindow.y + by)
+        }
+        val box = list() ?: return
+        val x = box.positionInWindow.x + box.size.width / 2f
+        val mid = box.positionInWindow.y + box.size.height / 2f
+        repeat(6) { drag(x, mid - box.size.height / 3f, mid + box.size.height / 3f) } // (a finger's: to the chat's start)
+        flush(true)
+        val list = list() ?: return
+        val head = nodes().firstOrNull { said(it) == dev.baude.android.Wording.Compaction.summary } ?: return
+        val dy = head.positionInWindow.y - list.positionInWindow.y + by
+        if (dy > 0) drag(x, mid + dy / 2f, mid - dy / 2f)
         settle()
         flush(true)
         settle()
+    }
+
+    /** A finger put down at (x, y), moved to toY in steps a frame apart, held still a moment (no fling), then lifted. */
+    private fun drag(x: Float, y: Float, toY: Float) {
+        val v = activity.window.decorView
+        val down = android.os.SystemClock.uptimeMillis()
+        fun send(action: Int, at: Float) {
+            val e = android.view.MotionEvent.obtain(down, android.os.SystemClock.uptimeMillis(), action, x, at, 0)
+            e.source = android.view.InputDevice.SOURCE_TOUCHSCREEN
+            v.dispatchTouchEvent(e)
+            e.recycle()
+            org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idleFor(Duration.ofMillis(16))
+        }
+        send(android.view.MotionEvent.ACTION_DOWN, y)
+        val steps = 24
+        for (i in 1..steps) send(android.view.MotionEvent.ACTION_MOVE, y + (toY - y) * i / steps)
+        repeat(12) { send(android.view.MotionEvent.ACTION_MOVE, toY) }
+        send(android.view.MotionEvent.ACTION_UP, toY)
+        androidx.compose.runtime.snapshots.Snapshot.sendApplyNotifications()
+        org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idleFor(Duration.ofMillis(300))
     }
 
     private fun transcript(file: String, lines: Int): String {

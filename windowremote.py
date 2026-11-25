@@ -375,6 +375,8 @@ class WindowRemote:
         if self.remote is None:
             return
         self.sync_senders()
+        if (git := getattr(getattr(self, "panel", None), "git_page", None)) is not None:
+            git.show_autofix()  # (Auto-fix turned on or off elsewhere: its agent, the phone)
         listed = self.remote.sessions.get(self.session_id)
         if listed and (listed.get("title") or getattr(self, "session_title", None)) and \
                 (self.bot_name() or listed.get("title") or self.session_title) != self.title_label.get_text():

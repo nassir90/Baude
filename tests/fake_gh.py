@@ -2,7 +2,10 @@
 """A stand-in for the gh CLI, for the Feedback tab and its fixer: GitHub's issues and pull requests, in a JSON file
 (FAKE_GH_STATE: {viewer, issues, prs, calls, issues_on: {owner/name: the issues of a private repository it shows you}}).
 What's changed is what `gh` would change; every call's kept in calls.
-And `gh api`, as lookupgit.GITHUB asks it (rest): {rest: {owner/name: [issues as GitHub's REST API says them]}}."""
+And `gh api`, as lookupgit.GITHUB asks it (rest): {rest: {owner/name: [issues as GitHub's REST API says them]}}.
+For Auto-fix (baudelib.autofix): pr list --head (and --state open) picks; pr view N --json gives a pr's fields
+(statusCheckRollup, mergeable, comments, reviews, baseRefName as gh has them); pr comment N --body adds a comment; gh api
+repos/o/r/pulls/N/comments gives line_comments {N: [as GitHub's REST API has them]}."""
 import fcntl
 import hashlib
 import json
@@ -111,7 +114,24 @@ def run(state, args):
         if os.environ.get("FAKE_GH_SIGNED_IN", "1") != "1":  # (signed out, as the real one: it asks no one, exits 4)
             print("To get started with GitHub CLI, please run:  gh auth login", file=sys.stderr)
             return 4
-        print(json.dumps(state["prs"]))
+        prs = [p for p in state["prs"] if opt(args, "--head") in (None, p.get("headRefName"))
+               and (opt(args, "--state") != "open" or p.get("state") == "OPEN")]
+        print(json.dumps(prs))
+    elif what == ["pr", "view"]:
+        p = pr(state, args[2])
+        fields = (opt(args, "--json") or "").split(",")
+        print(json.dumps({k: p.get(k, [] if k in ("comments", "reviews", "statusCheckRollup") else None)
+                          for k in fields if k}))
+    elif what == ["pr", "comment"]:
+        p = pr(state, args[2])
+        p.setdefault("comments", []).append({"id": f"IC_{len(p['comments']) + 1}", "author": {"login": state.get("login", "you")},
+                                             "body": opt(args, "--body") or sys.stdin.read(), "createdAt": now(),
+                                             "url": f"{p.get('url', '')}#issuecomment-{len(p['comments']) + 1}"})
+    elif args[:1] == ["api"] and re.fullmatch(r"repos/[^/]+/[^/]+/pulls/\d+/comments", args[1].split("?")[0]):
+        number = args[1].split("?")[0].split("/")[-2]
+        print(json.dumps(list(reversed(state.get("line_comments", {}).get(number, [])))))
+    elif args[:2] == ["api", "user"]:
+        print(json.dumps({"login": state.get("login", "you")}))
     elif what == ["issue", "comment"]:
         comment(state, args[2], sys.stdin.read())
     elif what == ["issue", "close"]:

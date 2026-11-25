@@ -6,6 +6,8 @@ import base64
 import json
 import os
 import shutil
+import subprocess
+import sys
 import time
 
 import test_baude as T  # noqa: E402  (sets up the throwaway env: fake claude, temp config dirs)
@@ -891,20 +893,21 @@ def _(app):
 def git_github(app, name, signed_in):
     """The Git page on a GitHub repository, with a faked gh: signed in (the branch's pull request shows) or signed
     out (nothing about GitHub shows)."""
-    orig = baude.gh_state, baude._gh_json
+    import gitview
+    orig = gitview.gh_state, gitview._gh_json
     pr = {"number": 7, "title": "The feature", "state": "OPEN", "url": "https://github.com/acme/widgets/pull/7"}
-    baude.gh_state = lambda refresh=False: ("signed_in", "ada") if signed_in else ("signed_out", None)
-    baude._gh_json = lambda *a, timeout=20: ([pr] if a[:2] == ("pr", "list") else [
+    gitview.gh_state = lambda refresh=False: ("signed_in", "ada") if signed_in else ("signed_out", None)
+    gitview._gh_json = lambda *a, timeout=20: ([pr] if a[:2] == ("pr", "list") else [
         {"number": 7, "title": "The feature", "state": "open", "html_url": pr["url"]}]
         if a[0] == "api" and a[1].endswith("/pulls") else None) if signed_in else None
     win, r = git_window(app, name)
-    win.connect("destroy", lambda *_: (setattr(baude, "gh_state", orig[0]), setattr(baude, "_gh_json", orig[1])))
+    win.connect("destroy", lambda *_: (setattr(gitview, "gh_state", orig[0]), setattr(gitview, "_gh_json", orig[1])))
     r["git"]("remote", "set-url", "origin", "https://github.com/acme/widgets.git")
     page = win.panel.git_page
+    page.follow, page.revs = False, ["feature"]  # (the chat's branch alone: its pull request is the branch's)
     page.load()
     T.wait_for(lambda: page.state.get("repo") == "acme/widgets", "GitHub")
-    T.wait_for(lambda: page.state.get("gh", ("",))[0] == ("signed_in" if signed_in else "signed_out") and
-               (not signed_in or "Pull request #7" in page.info.get_text()), "the log")
+    T.wait_for(lambda: not signed_in or "Pull request #7" in page.info.get_text(), "the pull request")
     return win
 
 
@@ -918,6 +921,35 @@ def _(app):
        size=(1150 + SIDEBAR, H))
 def _(app):
     return git_github(app, "git-signed-out", False)
+
+
+@scene("38j-git-autofix", "Auto-fix, end to end with a stand-in gh: the chat's agent turns it on with its tool, the "
+                         "host finds the pull request's check failing and sends the chat a message from Auto-fix after "
+                         "the turn, and the agent fixes it; the Git page's toggle is on", size=(1150 + SIDEBAR, H))
+def _(app):
+    state = os.path.join(T.TMP, "autofix-gh.json")
+    with open(state, "w") as f:
+        json.dump({"login": "ada", "issues": [], "line_comments": {}, "prs": [{
+            "number": 7, "title": "The feature", "state": "OPEN", "headRefName": "feature", "baseRefName": "main",
+            "url": "https://github.com/acme/widgets/pull/7", "mergeable": "MERGEABLE", "comments": [], "reviews": [],
+            "statusCheckRollup": [{"name": "tests", "status": "COMPLETED", "conclusion": "FAILURE",
+                                   "detailsUrl": "https://github.com/acme/widgets/actions/runs/1"}]}]}, f)
+    gh = os.path.join(T.TMP, "autofix-gh")
+    with open(gh, "w") as f:
+        f.write(f"#!/bin/sh\nexec {sys.executable} {os.path.join(T.HERE, 'fake_gh.py')} \"$@\"\n")
+    os.chmod(gh, 0o755)
+    os.environ.update(BAUDE_GH=gh, FAKE_GH_STATE=state, GIT_ALLOW_PROTOCOL="file")  # (the host's gh: never GitHub)
+    win = git_github(app, "git-autofix", True)
+    wt = win.panel.git_page.top
+    origin = os.path.join(os.path.dirname(wt), "origin.git")
+    subprocess.run(["git", "-C", wt, "config", f"url.{origin}.pushInsteadOf", "https://github.com/acme/widgets.git"],
+                   check=True)
+    T.type_and_send(win, "AUTOFIX ON")
+    T.wait_for(lambda: "Fixed it and pushed" in T.labels_text(win.transcript), "Auto-fix's message, fixed", 40)
+    page = win.panel.git_page
+    T.wait_for(lambda: page.autofix.get_visible() and page.autofix_switch.get_active(), "the toggle on", 10)
+    T.pump(0.5)
+    return win
 
 
 @scene("31-markdown-image", "Markdown images: a local file (file button) and a web image (globe button); "

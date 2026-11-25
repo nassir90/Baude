@@ -7,14 +7,16 @@
     "A Bot, another chat or a subagent messages this chat over the mesh",
     "A held message sent with its ↑ (HeldTurn)",
     "Opening a chat whose host's sender store says a message is someone else's",
-    "A message from a Bot, another chat or a host sent to the open chat: appears as its agent is given it, as theirs from the start (the host says who it's from with it), placed as a message of yours sent from elsewhere is (UserTurn), mid-turn included. The phone shows it in the same place"
+    "A message from a Bot, another chat or a host sent to the open chat: appears as its agent is given it, as theirs from the start (the host says who it's from with it), placed as a message of yours sent from elsewhere is (UserTurn), mid-turn included. The phone shows it in the same place",
+    "Auto-fix, the chat's host following the pull request of its branch (Git.panel's Auto-fix), sends what needs fixing on it: from \"Auto-fix\" (a host's kind of sender, by its name)"
   ],
   "code": [
     "chatparts.py:SenderTurn",
     "windowdrafts.py:WindowDrafts.sender_turn",
     "windowdrafts.py:WindowDrafts.sender_bubble",
     "windowdrafts.py:WindowDrafts.senders_came",
-    "baudelib/wire.py:sender_name"
+    "baudelib/wire.py:sender_name",
+    "baudelib/autofix.py:send"
   ],
   "copy": [
     "senders",

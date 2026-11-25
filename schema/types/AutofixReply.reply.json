@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "autofix's answer: the chat's Auto-fix as it is now.",
+  "properties": {
+    "op": {
+      "const": "autofix",
+      "description": "What it is."
+    },
+    "req": {
+      "type": ["integer", "null"],
+      "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "session": {
+      "type": "string",
+      "description": "The session's id."
+    },
+    "autofix": {
+      "anyOf": [
+        {
+          "$ref": "AutofixPull.json"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The pull request it follows; null while it's off."
+    }
+  },
+  "required": ["op", "session"],
+  "additionalProperties": false
+}

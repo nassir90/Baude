@@ -11,7 +11,7 @@ import time
 import uuid
 
 from baudelib import (
-    accounts, agentproxy, claude, codex, emissiontools, meshtools, models, multiplextools, notes, transcripts, wire, wording,
+    accounts, agentproxy, autofix, chattools, claude, codex, emissiontools, meshtools, models, multiplextools, notes, transcripts, wire, wording,
     deps, desktopchats, worktree,
 )
 from baudelib.serverstate import (
@@ -240,8 +240,14 @@ class ServerSessions:
                     extra[at:at] = rules
                 else:
                     extra += ["--allowedTools", *rules]
+        if run["program"] in ("claude", "pi") and not s.meta.get("ephemeral"):  # (its own tools: chattools, every
+            servers = {chattools.NAME: chattools.server(s.id, self.socket_path, sys.executable,  # chat's)
+                                                        agentproxy.HEADLESS)}
+            rules = [f"mcp__{chattools.NAME}__{t}" for t in chattools.SCHEMAS]
+        else:
+            servers, rules = {}, []
         if s.mesh_tools() and run["program"] in ("claude", "pi"):  # (the mesh's tools: baudelib.meshtools, here)
-            servers = {meshtools.NAME: {"command": sys.executable, "args": [agentproxy.HEADLESS, "mesh-tools",
+            servers |= {meshtools.NAME: {"command": sys.executable, "args": [agentproxy.HEADLESS, "mesh-tools",
                                                                             "--socket",
                                                                             os.path.abspath(self.socket_path)],
                                         "env": {"BAUDE_SESSION": s.id}}}
@@ -254,12 +260,13 @@ class ServerSessions:
                                                 "args": [agentproxy.HEADLESS, "multiplex-tools", "--socket",
                                                          os.path.abspath(self.socket_path)],
                                                 "env": {"BAUDE_SESSION": s.id}}
+            rules += [f"mcp__{meshtools.NAME}__{t}" for t in meshtools.SCHEMAS]  # (never asked about, a Bot's or
+            if s.meta.get("bot"):                                               # Meta's)
+                rules += [f"mcp__{emissiontools.NAME}__{t}" for t in emissiontools.SCHEMAS]
+                rules += [f"mcp__{multiplextools.NAME}__{t}" for t in multiplextools.SCHEMAS]
+        if servers:
             extra += ["--mcp-config", json.dumps({"mcpServers": servers})]
-            if run["program"] == "claude":  # (never asked about, a Bot's or Meta's)
-                rules = [f"mcp__{meshtools.NAME}__{t}" for t in meshtools.SCHEMAS]
-                if s.meta.get("bot"):
-                    rules += [f"mcp__{emissiontools.NAME}__{t}" for t in emissiontools.SCHEMAS]
-                    rules += [f"mcp__{multiplextools.NAME}__{t}" for t in multiplextools.SCHEMAS]
+            if run["program"] == "claude":  # (its tools never asked about)
                 if "--allowedTools" in extra:
                     at = extra.index("--allowedTools") + 1
                     extra[at:at] = rules
@@ -315,7 +322,7 @@ class ServerSessions:
             self.stamp(s, said, sender)
         s.proc.user(content, uuid=said)
         self.keep(s, "user", {"role": "user", "content": content}, said)
-        s.busy, s.used = True, time.time()
+        s.busy, s.used, s.turn_began = True, time.time(), time.time()
         s.meta["said"] = time.time()
         self.save(s)
 
@@ -359,6 +366,8 @@ class ServerSessions:
             else:
                 self.keep(s, "user", msg.get("message") or {}, msg.get("uuid"))
                 self.tell_said(s, msg.get("message") or {}, msg["uuid"], conn)
+            if not at_turn:
+                s.turn_began = time.time()
             s.busy, s.used, s.meta["said"] = True, time.time(), time.time()
             self.save(s)
             self.changed()
@@ -574,6 +583,9 @@ class ServerSessions:
                     self.keep(s, "user", message, said)
                 told, s.queued = s.queued, []
                 s.busy, s.used, s.acting = False, time.time(), False
+                autofix.turn_over(s, s.turn_began, time.time())  # (its own comments on the pull request: not sent it)
+                if s.meta.get("autofix", {}).get("waiting"):
+                    self.woken.set()  # (what Auto-fix found meanwhile: sent now)
                 s.note_written()  # (its own turn's lines: not another writer's, desktopchats.elsewhere)
                 s.routines_out.clear()
                 s.asks.clear()
@@ -909,6 +921,8 @@ class ServerSessions:
                 waits = [s.used + self.idle_s - time.time() for s in running if self.stoppable(s)]
                 waits.append(checked + CHECK_SOCKET_S - time.monotonic())
                 if (soon := self.routines_due()) is not None:
+                    waits.append(min(soon, 60))
+                if (soon := autofix.due(self)) is not None:
                     waits.append(min(soon, 60))  # (looked at again each minute: a machine asleep meanwhile isn't
                     # counted by the clock it waits on)
                 if not running and self.exit_s:
@@ -921,7 +935,8 @@ class ServerSessions:
                 with self.lock:
                     now_running = any(s.proc is not None for s in self.sessions.values())
                 if not now_running and self.exit_s and time.monotonic() - quiet >= self.exit_s and not self.conns \
-                        and not self.mesh.links and not self.mesh.outs and self.routines_due() is None:  # (linked,
+                        and not self.mesh.links and not self.mesh.outs and self.routines_due() is None \
+                        and autofix.due(self) is None:  # (linked,
                     # or making links: the mesh's members may want it; a routine to run: it's to be here for it)
                     self.log(f"nothing running and nobody here for {self.exit_s / 3600:g} h: going")
                     threading.Thread(target=self.shutdown, daemon=True, name="exit").start()
@@ -930,6 +945,7 @@ class ServerSessions:
                 return
             if attached:
                 self.routines_due()
+                autofix.due(self)
             if time.monotonic() - checked > (10 if attached else CHECK_SOCKET_S - 1):
                 checked = time.monotonic()
                 self.still_bound()

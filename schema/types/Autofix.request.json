@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "A chat's Auto-fix: on, its branch's open pull request found (gh) and followed; off; or as it is, on left out. Refused, saying why, if the branch has no open pull request or gh can't ask GitHub.",
+  "properties": {
+    "op": {
+      "const": "autofix",
+      "description": "What it is."
+    },
+    "req": {
+      "type": ["integer", "null"],
+      "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "session": {
+      "type": "string",
+      "description": "The session's id."
+    },
+    "on": {
+      "type": "boolean",
+      "description": "On or off."
+    }
+  },
+  "required": ["op", "session"],
+  "additionalProperties": false
+}

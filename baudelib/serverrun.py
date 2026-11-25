@@ -12,7 +12,7 @@ import time
 import uuid
 
 from baudelib import (
-    agentproxy, deps, desktopchats, emissionlink, emissiontools, hostaccounts, hostdb, hostfiles, hostfixes, hostkube,
+    agentproxy, autofix, deps, desktopchats, emissionlink, emissiontools, hostaccounts, hostdb, hostfiles, hostfixes, hostkube,
     hostlogin, mesh, meshtools, hostterminal, multiplexlink, notes, routines, wire, wording, worktree,
 )
 from baudelib.serverstate import (
@@ -442,6 +442,18 @@ class ServerRunning:
                 except Exception as e:  # noqa: BLE001 (anything else gone wrong: still answered)
                     reply("error", error=f"{type(e).__name__}: {e}")
             threading.Thread(target=read, daemon=True, name=op).start()
+            return None
+        if op == "autofix":  # (a chat's Auto-fix turned on or off, or as it is: on a thread of its own, as git and
+            def turn():      # gh take a while)
+                try:
+                    reply("autofix", session=msg.get("session"), autofix=autofix.request(self, msg))
+                except deps.Missing as e:
+                    reply("error", error=str(e), plain=True, missing=e.dep)
+                except (ValueError, OSError) as e:
+                    reply("error", error=str(e), plain=True)
+                except Exception as e:  # noqa: BLE001 (anything else gone wrong: still answered)
+                    reply("error", error=f"{type(e).__name__}: {e}")
+            threading.Thread(target=turn, daemon=True, name="autofix").start()
             return None
         if op == "deps":  # (what this host's features need, each there or not: Settings → Dependencies)
             return reply("deps", deps=deps.report("host"))

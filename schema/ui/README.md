@@ -82,3 +82,11 @@ An entry or a part may carry:
     (the phone's `popup.row` is 34, a bar button's side, for a finger), modelbutton's 12 px sides (the phone's
     `popup.inset` too), a toggle's check before its text, and
     Adw.AlertDialog's own width (the phone's follows the chat).
+- **Apps are thin clients; the logic is in the wire.** What an app or an agent's tool does to shared things (a
+  notebook's pages and the edits proposed to them, a chat, the mesh) is the host's to work out, through typed wire
+  messages in schema/types; an app or an MCP server asks the host and shows its answer. An agent's interface (an MCP
+  tool) can be shaped for agents rather than be the wire itself, but stays a thin client of it. The owner: "Well the
+  external interface need not be the wire but I think most of the operational logic should be in hte wire. protocol.
+  Agent MCP requirements are different to that of the wire (which can be as detailed as we want). They still are
+  basically thin clients." (source: BaudeInternal#200; session b3845b21-55ac-4aab-a769-fb8517403c51, message
+  868770b1-06c0-44a3-bdb9-c1851cf4b39a)

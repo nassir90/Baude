@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "The edits waiting on the pages of the notebooks here (one notebook's, one page's, if given), page by page, each as its page has its passage now. Answered with edits.",
+  "properties": {
+    "op": {
+      "const": "edits",
+      "description": "What it is."
+    },
+    "req": {
+      "type": ["integer", "null"],
+      "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "notebook": {
+      "type": "string",
+      "description": "Only this notebook's: its id, or its name."
+    },
+    "page": {
+      "type": "string",
+      "description": "Only this page's (with notebook)."
+    },
+    "all": {
+      "type": "boolean",
+      "description": "The decided ones kept here too (decided)."
+    }
+  },
+  "required": ["op"],
+  "additionalProperties": false
+}

@@ -32,6 +32,10 @@ from diaryeditor import DiaryEditor  # noqa: E402
 from recordreader import Reader  # noqa: E402
 
 
+class Unreached(ValueError):
+    """An edit op's host wasn't reached (edit_call): what was asked is kept to ask again."""
+
+
 class RecordHosts:
     """Window's hosts (another machine's notebooks, through its host process), and its notebooks, names and
     cards, viewers and Meta's column."""
@@ -111,6 +115,13 @@ class RecordHosts:
             if up and (not self.host_up.get(key) or (r.info.get("notes") or "") != self.notes_seen.get(key)):
                 self.list_notes(key)  # (back, or its notebooks written since they were listed: listed again; what
             self.host_up[key] = up  # it didn't take sent first)
+        for key in {HERE_HOST, store.host}:  # (the edits waiting on the pages shown, and this machine's: as they change)
+            r = self.edits_remote(key)
+            if r is not None and (key not in self.edits_seen or r.info.get("edits") != self.edits_seen[key]):
+                self.fetch_edits(key)
+        for key in {d["host"] for d in store.decisions} | ({HERE_HOST} if store.moves.get(HERE_HOST) else set()):
+            if self.edits_remote(key) is not None:  # (there again: what it wasn't told, told it)
+                self.send_unsent(key)
         self.show_host_state()
 
     def restart_host(self, then=None, waited=0, joining=0):
@@ -161,13 +172,16 @@ class RecordHosts:
     def rekey_host(self, old, new):
         store = self.store
         for d in (store.remote, store.remote_base, store.unsent, self.sends, self.sent, self.host_up, self.notes_seen,
-                  self.listed_at):
+                  self.listed_at, store.edits, store.moves, store.moving, self.edits_seen):
             if old in d:
                 d[new] = d.pop(old)
         for s in (store.loading, self.asked, self.list_again, self.list_later):
             if old in s:
                 s.discard(old)
                 s.add(new)
+        for d in store.decisions:
+            if d["host"] == old:
+                d["host"] = new
         if store.host == old:
             store.host = new
         if store.picked == old:
@@ -258,6 +272,7 @@ class RecordHosts:
         if key != HERE_HOST:
             self.host_up[key] = self.reachable(self.host_remote(key))
             self.list_notes(key)
+        self.fetch_edits(key)
         self.open_first()
         self.host_dd.select(key)
         self.show_host_state()
@@ -330,19 +345,31 @@ class RecordHosts:
                 self.list_notes(key)
         r.request({"op": "notes", "have": have}, got)
 
-    def send_notes(self, key, changes):
-        """Changes to a host's notebooks, sent it (Store.push). Those it doesn't take (it's gone, or says no): kept to
-        send again (Store.failed), with the next change or once it's back."""
-        r, store = self.host_remote(key), self.store
+    def send_notes(self, key, changes, moved=None):
+        """Changes to a host's notebooks, sent it (Store.push), with its pages moved here (moved: the edits waiting on
+        them moved there too; this machine's host is sent only these). Those it doesn't take (it's gone, or says no):
+        kept to send again (Store.failed, Store.moves_sent), with the next change or once it's back."""
+        r, store = local_remote() if key == HERE_HOST else self.host_remote(key), self.store
+        if key == HERE_HOST:
+            def moved_done(reply):
+                store.moves_sent(key, moved, reply.get("op") == "notes" and not reply.get("error"))
+                store.save()
+            if not self.reachable(r):
+                return moved_done({})
+            return r.request({"op": "notes", "action": "write", "changes": [], "moved": moved}, moved_done)
         self.sent[key] = seq = self.sent.get(key, 0) + 1
         if not self.reachable(r):
             store.failed(key, changes)
+            if moved:
+                store.moves_sent(key, moved, False)
             store.unsent[key] = seq
             return
         self.sends[key] = self.sends.get(key, 0) + 1
 
         def done(reply):
             self.sends[key] -= 1
+            if moved:
+                store.moves_sent(key, moved, reply.get("op") == "notes" and not reply.get("error"))
             if reply.get("op") != "notes" or reply.get("error"):
                 if store.unsent.get(key) is None:
                     self.toast(f"{remote_name(r)} didn't save the change: "
@@ -355,7 +382,7 @@ class RecordHosts:
             if not self.sends[key] and key in self.list_again:
                 self.list_again.discard(key)
                 self.list_notes(key)
-        r.request({"op": "notes", "action": "write", "changes": changes}, done)
+        r.request({"op": "notes", "action": "write", "changes": changes, **({"moved": moved} if moved else {})}, done)
 
     def notes_here(self, changes):
         """Changes another machine's Record made to this one's notebooks (record.listen): made, and shown."""
@@ -365,6 +392,151 @@ class RecordHosts:
         if self.store.host == HERE_HOST:
             self.notes_changed()
         return True
+
+    # ---- the edits proposed to a host's notebooks' pages: kept by that host (wire: edits, edit_*), shown here
+    def edits_remote(self, key):
+        """The Remote the edits of a host's notebooks are asked of (this machine's host process for this machine's),
+        or None if it isn't there now."""
+        r = local_remote() if key == HERE_HOST else self.host_remote(key)
+        return r if self.reachable(r) else None
+
+    def fetch_edits(self, key):
+        """A host's edits asked for (op edits, the decided too), and shown once it answers (edits_changed)."""
+        if (r := self.edits_remote(key)) is None:
+            return
+        self.edits_seen[key] = r.info.get("edits")
+
+        def got(reply):
+            if reply.get("op") == "edits":
+                listed = [*(reply.get("edits") or ()), *(reply.get("decided") or ())]
+                self.store.take_edits(key, listed)
+                self.edits_changed()
+                self.hand_edits(key, {e.get("id") for e in listed if isinstance(e, dict)})
+                self.send_unsent(key)
+        r.request({"op": "edits", "all": True}, got)
+
+    def hand_edits(self, key, have):
+        """The first time a host's edits are fetched here: Meta's edits waiting on its notebooks that this Record kept
+        (in records.json, from before edits were their host's) and it hasn't (have: the ids it listed), handed to it
+        (edit_adopt), with their own ids; each marked handed once it answers, so it's never handed again (one decided
+        there since, and no longer kept there, isn't made to wait again)."""
+        store = self.store
+        if key in self.handed or (r := self.edits_remote(key)) is None:
+            return
+        self.handed.add(key)
+        books = {t["id"]: t for t in store.every_book() if t.get("id") and store.host_of(t) == key}
+        kept = [(p, p.get("notebook", t["id"] if t is not None else None))
+                for t, messages in [(None, store.meta["messages"])] +
+                [(t, t.get("messages") or ()) for t in books.values()]
+                for m in messages if isinstance(m, dict) for p in m.get("proposals") or ()
+                if isinstance(p, dict) and p.get("status") == "pending" and not p.get("handed")]
+        kept = [(p, nb) for p, nb in kept if nb in books and isinstance(p.get("id"), str)
+                and isinstance(p.get("page"), str)]
+        for p, _nb in kept:
+            if p["id"] in have:  # (it has it: never handed again)
+                p["handed"] = True
+        hand = [(p, nb) for p, nb in kept if p["id"] not in have]
+        if not hand:
+            return store.save() if kept else None
+
+        def done(reply):
+            if reply.get("op") != "edits":
+                self.handed.discard(key)  # (handed again next time it's fetched)
+                return
+            for p, _nb in hand:
+                p["handed"] = True
+            store.save()
+            self.fetch_edits(key)
+        r.request({"op": "edit_adopt", "edits": [
+            {"id": p["id"], "notebook": nb, "page": p["page"], "old": str(p.get("old") or ""),
+             "new": str(p.get("new") or ""), "start": int(p.get("start") or 0), "status": "pending",
+             "t": float(p.get("t") or time.time()), "by": str(p.get("by") or "Meta")} for p, nb in hand]}, done)
+
+    def edits_changed(self):
+        """The edits as the hosts last listed them, shown: on the pages open, in Meta's bar and its cards."""
+        for child in self.tabs.children():
+            if isinstance(child, DiaryEditor) and child.notebook is self.current:
+                child.show_pending()
+        if (chat := getattr(self, "chat", None)) is not None:
+            chat.show_pending_bar()
+            chat.edit_cards_changed()
+
+    def edit_call(self, key, msg):
+        """An edit op asked of a host, waited for (not on the main loop: a Later's work): its answer, or ValueError.
+        This machine's host process started first if it isn't running."""
+        r = local_remote() if key == HERE_HOST else self.host_remote(key)
+        if key == HERE_HOST and not self.reachable(r):
+            if not baudelib.hosts.start_here():
+                raise Unreached(f"The daemon here isn't running: {baudelib.hosts.log_path()} may say why.")
+            network().here()
+            end = time.monotonic() + 15
+            while not self.reachable(r := local_remote()) and time.monotonic() < end:
+                time.sleep(0.2)
+        if not self.reachable(r):
+            raise Unreached(self.host_state(key) or "its host isn't there")
+        got = r.call(msg, timeout=30)
+        if (got.get("op") == "error" or got.get("error")) and "req" not in got:  # (not the host's: no way to it)
+            raise Unreached(baudelib.client.wire.said(got) or "no answer")
+        if got.get("op") == "error" or got.get("error"):
+            raise ValueError(baudelib.client.wire.said(got) or "no answer")
+        return got
+
+    def start_host_here(self):
+        """This machine's host process, started as Record opens if it isn't running (the edits waiting on its notebooks'
+        pages are its), off the main loop: they're fetched once it's there (on_network)."""
+        def start():
+            if baudelib.hosts.start_here():
+                network().here()
+        if local_remote() is None:
+            threading.Thread(target=start, daemon=True, name="start-host").start()
+
+    def decide_edit(self, p, accept):
+        """An edit accepted (its text put in its page here: saved, or sent to its host, first) or rejected: kept so here
+        (Store.decisions, saved) till its notebook's host has it (edit_decide: send_unsent), now or once it's back;
+        till then the host's listing it waiting doesn't make it wait here again (Store.take_edits)."""
+        store = self.store
+        nb = next((t for t in store.every_book() if t.get("id") == p.get("notebook")), None)
+        key = store.host_of(nb) if nb is not None else None
+        if key is None:
+            return
+        store.decisions = [d for d in store.decisions if d["id"] != p["id"]] + [
+            {"host": key, "notebook": p["notebook"], "id": p["id"], "accept": bool(accept)}]
+        store.save_now()  # (the page as accepted: written, or sent to its host, before it's told; the decision kept)
+        self.send_unsent(key)
+
+    def send_unsent(self, key):
+        """What a host wasn't told yet, told it: its pages moved here (this machine's: Store.moves; another's go with
+        its notes writes), and the edits decided here (edit_decide, through edit_call: this machine's host started if
+        it isn't running). A decision it takes, or refuses (the edit's not waiting there: decided or taken back
+        elsewhere), is done with, and its edits asked for again; one it wasn't reached for is kept, and sent once it's
+        back (on_network)."""
+        store = self.store
+        if key == HERE_HOST and store.moves.get(key) and self.edits_remote(key) is not None:
+            self.send_notes(key, [], store.take_moves(key))
+
+        def done(msg, how, said):
+            self.deciding.discard(msg["id"])
+            if how == "unreached":
+                return
+            if how == "refused":
+                self.toast(f"{dict(self.note_hosts()).get(key, key)} wasn't told: {said}")
+            store.decisions = [d for d in store.decisions if d["id"] != msg["id"]]
+            store.save()
+            self.fetch_edits(key)
+
+        for d in [d for d in store.decisions if d["host"] == key and d["id"] not in self.deciding]:
+            self.deciding.add(d["id"])
+            msg = {"op": "edit_decide", "notebook": d["notebook"], "id": d["id"], "accept": bool(d["accept"])}
+
+            def work(msg=msg):
+                try:
+                    out = ("done", self.edit_call(key, msg))
+                except Unreached:
+                    out = ("unreached", None)
+                except ValueError as e:
+                    out = ("refused", str(e))
+                GLib.idle_add(lambda: done(msg, *out) and False)
+            threading.Thread(target=work, daemon=True, name="edit-decide").start()
 
     def notes_changed(self, fresh=False):
         """The notebooks listed changed under the window (another host's listed, or changed from elsewhere): rows added

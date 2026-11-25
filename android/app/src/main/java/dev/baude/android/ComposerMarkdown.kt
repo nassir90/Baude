@@ -12,6 +12,7 @@ import androidx.compose.ui.input.key.isMetaPressed
 import androidx.compose.ui.input.key.isShiftPressed
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.ParagraphStyle
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextRange
@@ -21,6 +22,7 @@ import androidx.compose.ui.text.input.OffsetMapping
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.input.TransformedText
 import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.text.style.TextIndent
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.TextUnit
 
@@ -397,15 +399,16 @@ fun composerKey(e: KeyEvent, v: TextFieldValue, st: ComposerState): TextFieldVal
 // ------------------------------------------------------------------------------------------------------ the look --
 
 /** The text styled as it will read (ComposerMarkdown._restyle_tags): headings at the chat's sizes, bullets, "> " quotes
- * (italic, in by their marks' width), bold, italic and `code`, fenced code shaded; the marks (#, **, `) shown dim on the
- * caret's line and hidden on the rest (a quote's unseen); the @names the box knows, and the @ being searched, in their
- * colour. */
+ * (a sent quote's rule, its text set in past it and faded), bold, italic and `code`, fenced code shaded; the marks
+ * (#, **, `) shown dim on the caret's line and hidden on the rest (a quote's unseen); the @names the box knows, and the
+ * @ being searched, in their colour. */
 class ComposerLook(
     private val caretLine: Int, private val known: (String) -> Boolean, private val atSearch: IntRange?,
     private val fg: Color, private val ref: Color, private val refTint: Color,
-    private val h1: TextUnit, private val h2: TextUnit, private val mono: SpanStyle,
+    private val h1: TextUnit, private val h2: TextUnit, private val mono: SpanStyle, private val quoteIndent: TextUnit,
 ) : VisualTransformation {
-    private class Built(val text: AnnotatedString, val removed: List<IntArray>, val blocks: List<IntRange>)
+    private class Built(val text: AnnotatedString, val removed: List<IntArray>, val blocks: List<IntRange>,
+                        val quotes: List<IntRange>)
 
     private var built: Built? = null
 
@@ -443,6 +446,7 @@ class ComposerLook(
         var o = 0
         for (i in lines.indices) { starts[i] = o; o += lines[i].length + 1 }
         val removed = ArrayList<IntArray>()
+        val quotes = ArrayList<IntRange>()
         val styles = ArrayList<Triple<SpanStyle, Int, Int>>()
         val dim = SpanStyle(color = fg.copy(alpha = fg.alpha * 0.4f))
         val bold = SpanStyle(fontWeight = FontWeight.Bold)
@@ -460,9 +464,9 @@ class ComposerLook(
                 styles.add(Triple(bold.copy(fontSize = when (level) { 1 -> h1; 2 -> h2; else -> TextUnit.Unspecified }), s, e))
                 hide(s, s + h.range.last + 1)
             } else if (line.startsWith(">")) {
-                styles.add(Triple(SpanStyle(fontStyle = FontStyle.Italic), s, e))
-                val mark = s + if (line.startsWith("> ")) 2 else 1 // (kept, unseen off the caret's line: the quote's indent)
-                styles.add(Triple(if (caretLine == n) dim else SpanStyle(color = Color.Transparent), s, mark))
+                styles.add(Triple(SpanStyle(color = fg.copy(alpha = fg.alpha * Tokens.Markdown.quoteOpacity.toFloat())), s, e))
+                quotes.add(if (quotes.isNotEmpty() && quotes.last().last == s - 1) quotes.removeAt(quotes.lastIndex).first..e else s..e)
+                hide(s, s + if (line.startsWith("> ")) 2 else 1)
             } else {
                 val m = ITEM.find(line)
                 if (m != null) {
@@ -496,14 +500,20 @@ class ComposerLook(
         for (r in merged) { sb.append(text, at, r[0]); at = r[1] }
         sb.append(text, at, text.length)
         fun move(off: Int): Int { var x = off; for (r in merged) if (r[1] <= off) x -= r[1] - r[0] else if (r[0] < off) x -= off - r[0] else break; return x }
+        // (a run of quoted lines is a paragraph of its own, set in as a sent quote's text; a paragraph starts a line, so
+        // the line breaks either side of it are drawn as nothing (U+200B), each kept at its place so offsets don't move)
+        for (r in quotes) for (at in listOf(move(r.first) - 1, move(r.last))) if (at in sb.indices && sb[at] == '\n') sb.setCharAt(at, '\u200B')
         val out = AnnotatedString.Builder(sb.toString())
+        for (r in quotes) out.addStyle(ParagraphStyle(textIndent = TextIndent(quoteIndent, quoteIndent)), move(r.first),
+            minOf(move(r.last) + 1, sb.length))
         for ((style, a, z) in styles) { val ta = move(a); val tz = move(z); if (tz > ta) out.addStyle(style, ta, tz) }
         val blocks = fenceSpans(lines, tildes = false, typing = setOf(caretLine)).map { (a, z, _) -> starts[a]..(starts[z] + lines[z].length) }
-        return Built(out.toAnnotatedString(), merged, blocks)
+        return Built(out.toAnnotatedString(), merged, blocks, quotes)
     }
 
-    /** One rounded shade behind each code block, from the text's lines. */
-    fun drawBlocks(scope: DrawScope, layout: TextLayoutResult?, color: Color, radius: Dp, inset: Dp) {
+    /** One rounded shade behind each code block, and a rule at the text's left (left) beside each run of quoted lines,
+     * from the text's lines. */
+    fun drawBlocks(scope: DrawScope, layout: TextLayoutResult?, color: Color, radius: Dp, inset: Dp, rule: Color, left: Dp) {
         val l = layout ?: return
         val b = built ?: return
         if (l.layoutInput.text.length != b.text.length) return
@@ -515,6 +525,11 @@ class ComposerLook(
                 val bottom = l.getLineBottom(l.getLineForOffset(z))
                 drawRoundRect(color, Offset(inset.toPx(), top), Size(size.width - 2 * inset.toPx(), bottom - top),
                     androidx.compose.ui.geometry.CornerRadius(radius.toPx()))
+            }
+            for (r in b.quotes) {
+                val top = l.getLineTop(l.getLineForOffset(toT(r.first).coerceIn(0, b.text.length)))
+                val bottom = l.getLineBottom(l.getLineForOffset(toT(r.last).coerceIn(0, b.text.length)))
+                drawRect(rule, Offset(left.toPx(), top), Size(Tokens.Markdown.quoteRule.toPx(), bottom - top))
             }
         }
     }

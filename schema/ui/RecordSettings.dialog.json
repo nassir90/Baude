@@ -176,7 +176,7 @@
         },
         {
           "name": "Show in Applications",
-          "decisions": [{"said": "The added to application menu path shouldn't go into the chat; it should be a toast", "rule": "Every app says what turning this on or off did in a toast, never as a note in the chat", "decided": "2026-11-22"}],
+          "decisions": [{"said": "The added to application menu path shouldn't go into the chat; it should be a toast", "rule": "Every app says what turning this on or off did in a toast, never as a note in the chat", "decided": "2026-11-22", "source": [{"issue": "BaudeInternal#191"}]}],
           "shows": "A switch \"Show in Applications\" (macOS) or \"Show in application menu\" (Linux), no subtitle. The same one setting as Baude's Settings row: on when Baude, Record, Emission and Multiplex are all in the platform's list of apps, read again each time Settings opens. On: all four are added (per user), each with its logo (Baude's and Record's in the accent picked), each starting its command in ~/.local/bin, written with Baude's other commands; off: all four removed (the commands stay).",
           "copy": [
             "window.show_in",

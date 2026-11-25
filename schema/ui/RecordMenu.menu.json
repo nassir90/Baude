@@ -79,7 +79,7 @@
     },
     {
       "name": "Kubernetes",
-      "decisions": [{"said": "Drop the ellipses from Kubernetes and Database Schemas", "rule": "Every app names the Kubernetes and Database Schemas items without an ellipsis: they open a view, not a dialog that asks for more", "decided": "2026-11-22"}],
+      "decisions": [{"said": "Drop the ellipses from Kubernetes and Database Schemas", "rule": "Every app names the Kubernetes and Database Schemas items without an ellipsis: they open a view, not a dialog that asks for more", "decided": "2026-11-22", "source": [{"issue": "BaudeInternal#187"}]}],
       "shows": "\"Kubernetes\" (section with Database Schemas).",
       "copy": [
         "window.kubernetes"

@@ -224,12 +224,17 @@ fun caption(c: Msg.Commit): AnnotatedString = buildAnnotatedString {
 
 // ----------------------------------------------------------------------------------------------- the rows --
 
-/** How far down a text its first line's ink is, px: the top of the tallest glyph or chip on it (gitview.first_line_top),
- * else the line's top. */
+/** How far down a text its first line's ink is, px (gitview.first_line_top): the higher of its glyphs' tops and the
+ * drawn tops of its chips' and pills' patches (their places' tops) and its logos (0.78 of their places, centred), else the
+ * line's top. */
 fun inkTop(l: TextLayoutResult): Float {
     val end = l.getLineEnd(0, visibleEnd = true)
+    val text = l.layoutInput.text
+    val places = l.layoutInput.placeholders
     var top = Float.MAX_VALUE
-    val glyphs = l.layoutInput.text.text.substring(0, end).filter { it != '\uFFFD' && !it.isWhitespace() }
+    val glyphs = text.text.substring(0, end).filterIndexed { i, ch ->
+        ch != '\uFFFD' && !ch.isWhitespace() && places.none { i >= it.start && i < it.end }
+    }
     if (glyphs.isNotEmpty()) {
         val paint = android.graphics.Paint().apply {
             textSize = with(l.layoutInput.density) { l.layoutInput.style.fontSize.toPx() }
@@ -239,7 +244,11 @@ fun inkTop(l: TextLayoutResult): Float {
         paint.getTextBounds(glyphs, 0, glyphs.length, bounds)
         if (!bounds.isEmpty) top = l.getLineBaseline(0) + bounds.top
     }
-    for (r in l.placeholderRects) if (r != null && r.top < l.getLineBottom(0)) top = minOf(top, r.top)
+    for ((place, r) in places.zip(l.placeholderRects)) {
+        if (r == null || place.start >= end) continue
+        val logo = text.getStringAnnotations(place.start, place.end).any { it.item.startsWith("ref-icon-") }
+        top = minOf(top, if (logo) r.top + r.height * (1 - 0.78f) / 2 else r.top)
+    }
     return if (top == Float.MAX_VALUE) l.getLineTop(0) else top
 }
 

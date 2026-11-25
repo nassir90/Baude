@@ -499,9 +499,13 @@ class LinkLabel(WrapLabel):
             else:  # (a start: a chip's, name its kind; a pill's, its logo's place too, name where it stands)
                 width = self.CHIP_PAD if kind == "chip" else self.PILL_IN + self.pill_px() + self.GAP
                 opened = (kind, at, name)
-            r = Pango.Rectangle()
+            r, ink = Pango.Rectangle(), Pango.Rectangle()
             r.x, r.y, r.width, r.height = 0, -ascent, width * Pango.SCALE, ascent + descent
-            a = Pango.attr_shape_new(r, r)
+            # (its ink: what's drawn there, a logo or a patch, so the line's ink top is the top of what's drawn on it)
+            top, tall = (((descent - ascent) / Pango.SCALE - px / 2, px) if kind == "icon" else
+                         self.patch_box(kind))
+            ink.x, ink.y, ink.width, ink.height = 0, round(top * Pango.SCALE), r.width, round(tall * Pango.SCALE)
+            a = Pango.attr_shape_new(ink, r)
             a.start_index, a.end_index = at, at + 3  # (U+2063: 3 bytes)
             attrs.insert(a)
         self.icons, self.chips, self.pills = icons, chips, pills
@@ -543,19 +547,27 @@ class LinkLabel(WrapLabel):
             y = pixel(oy + (r.y + r.height / 2) / Pango.SCALE + lower - size / scale / 2, by)
             draw_ref_icon(snapshot, icon, x, y, size / scale, color)
 
+    def patch_box(self, kind):
+        """(top, height) of a chip's patch (kind "chip") or a pill's, px from the baseline: a chip's as tall as its
+        name's smaller text and a pixel more each way; a pill's the line's height less a little (a chip's, at a chip's
+        size)."""
+        ascent, descent, _px = self.text_px()
+        ascent, descent = ascent / Pango.SCALE, descent / Pango.SCALE
+
+        def chip_box(scale):
+            return -(ascent * scale + 1), (ascent + descent) * scale + 2
+        if kind == "chip":
+            return chip_box(self.CHIP_SCALE)
+        tall = round((ascent + descent) * 0.86)
+        return chip_box(self.pill_ratio()) if self.pill_ratio() < 1 else (-(ascent - descent) / 2 - tall / 2, tall)
+
     def draw_patches(self, snapshot):
         """The chips' and pills' patches, behind the text, their corners rounded as .git-ref's. A chip's as tall as
         its name's smaller text and a pixel more each way, in its kind's colour; a pill's the line's height less a
         little (a chip's, at a chip's size), in the colour of where its pull request stands, faint."""
         layout, (ox, oy) = self.get_layout(), self.get_layout_offsets()
-        ascent, descent, _px = self.text_px()
-        ascent, descent, fg = ascent / Pango.SCALE, descent / Pango.SCALE, self.get_color()
-
-        def chip_box(scale):  # (top, height) of a patch, from the baseline
-            return -(ascent * scale + 1), (ascent + descent) * scale + 2
-        tall = round((ascent + descent) * 0.86)
-        pill_box = chip_box(self.pill_ratio()) if self.pill_ratio() < 1 else (-(ascent - descent) / 2 - tall / 2, tall)
-        patches = [(s, e, chip_colors(kind, fg)[1], chip_box(self.CHIP_SCALE)) for s, e, kind in self.chips]
+        fg, pill_box = self.get_color(), self.patch_box("pill")
+        patches = [(s, e, chip_colors(kind, fg)[1], self.patch_box("chip")) for s, e, kind in self.chips]
         for s, e, state in self.pills:
             color = pr_rgba(state, fg)
             color.alpha = 0.09 if state in ("closed", "unknown") else 0.16

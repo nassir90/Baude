@@ -43,7 +43,7 @@
     {
       "name": "header line",
       "phone": {"does": "two rows: the name at the left with the toggles and status at the right, then the description under them, in full", "why": "The owner asked for it: a phone has no room for one line", "decided": "2026-11-22"},
-      "decisions": [{"said": "On the phone tool calls should take two rows for lack of space: name left with the reveal toggles right, then the description", "rule": "The phone draws the header on two rows: the name at the left and the toggles and status at the right, then the description in full under them", "decided": "2026-11-22"}],
+      "decisions": [{"said": "On the phone tool calls should take two rows for lack of space: name left with the reveal toggles right, then the description", "rule": "The phone draws the header on two rows: the name at the left and the toggles and status at the right, then the description in full under them", "decided": "2026-11-22", "source": [{"issue": "BaudeInternal#198"}]}],
       "shows": "One line, items 8px apart, in this order: name, toggles, summary, status. It never wraps: the summary is cut with … at the end.",
       "parts": [
         {
@@ -133,7 +133,7 @@
         },
         {
           "name": "Write",
-          "decisions": [{"said": "Opening a Write card's input repeats the path in the description line", "rule": "Every app shows a Write card's path once, in its header; the opened input starts with its line count", "decided": "2026-11-22"}],
+          "decisions": [{"said": "Opening a Write card's input repeats the path in the description line", "rule": "Every app shows a Write card's path once, in its header; the opened input starts with its line count", "decided": "2026-11-22", "source": [{"issue": "BaudeInternal#197"}]}],
           "shows": "\"N lines\" (the path is in the header, not repeated); then the whole file in a code block highlighted by its extension (tag \"python\", \"bash\", …), scrolling inside itself past two thirds of the chat's height. Past 2,000 lines it ends with \"… N more lines\".",
           "copy": [
             "tool_calls.line_count",

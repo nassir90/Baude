@@ -474,8 +474,9 @@ def first_line_middle(label):
 
 
 def first_line_top(label):
-    """How far down a label its first line's ink is, px: the top of its tallest glyph or chip, not the font's ascent
-    (from its layout alone, as first_line_middle)."""
+    """How far down a label its first line's ink is, px: the higher of its glyphs' tops and its chips', pills' and
+    logos' drawn tops (LinkLabel gives their places those as ink), not the font's ascent (from its layout alone, as
+    first_line_middle)."""
     ink, logical = label.get_layout().get_iter().get_line_extents()
     return (ink.y if ink.height else logical.y) / Pango.SCALE
 

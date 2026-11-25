@@ -54,7 +54,7 @@
   "parts": [
     {
       "name": "New session button",
-      "decisions": [{"said": "Clicking New Session should put the caret in the message box, ready to type", "rule": "Every app puts the focus in the new chat's message box when New session opens it", "decided": "2026-11-23"}],
+      "decisions": [{"said": "Clicking New Session should put the caret in the message box, ready to type", "rule": "Every app puts the focus in the new chat's message box when New session opens it", "decided": "2026-11-23", "source": [{"issue": "BaudeInternal#202"}]}],
       "shows": "A flat button with a new-document icon and the words \"New session\", filling the row, left of the host picker. Tooltip \"Ctrl+N\".",
       "copy": [
         "sidebar.new_session"

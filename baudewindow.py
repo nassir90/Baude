@@ -642,9 +642,11 @@ class BaudeWindow(WindowView, WindowProc, WindowDrafts, WindowSignal, WindowRemo
         """What a note sent from here says it came from (feedback.save_feedback)."""
         return [f"- session: {self.session_id or '-'} ({getattr(self, 'session_title', None) or 'untitled'})",
                 wording.say("report.folder_line", folder=self.cwd),
-                f"- Baude: {os.path.join(os.path.dirname(os.path.realpath(__file__)), 'baude.py')}",
-                *feedback.report_lines([(wording.say("report.the_chat"), self.report),
-                                        ("Meta", self.panel.meta.report)])]
+                f"- Baude: {os.path.join(os.path.dirname(os.path.realpath(__file__)), 'baude.py')}"]
+
+    def feedback_transcripts(self):
+        return feedback.report_lines([(wording.say("report.the_chat"), self.report),
+                                        ("Meta", self.panel.meta.report)])
 
     def capture_areas(self):
         """The window's parts, by name, for the text a capture records."""

@@ -70,9 +70,22 @@
     },
     {
       "name": "Note box",
-      "shows": "A rounded card like the chat's composer, a multi-line text box, 140 px tall growing to 280 then scrolling, words wrapping, text kept clear of the + at its bottom right corner. Has the focus when the dialog opens, cursor after any text already written. Text selection is not drag-dropped away.",
+      "shows": "A rounded card like the chat's composer, a multi-line text box, 140 px tall growing to 280 then scrolling, words wrapping, text kept clear of the + at its bottom right corner. Has the focus when the dialog opens, cursor after any text already written. Text selection is not drag-dropped away. Markdown shows as it is written, as in the chat's box (headings, lists, bold, italic, code), and the note keeps the markdown.",
       "text": [
         "(no placeholder text)"
+      ]
+    },
+    {
+      "name": "Attach transcripts check box",
+      "shows": "Under the note box, a check box \"Attach open chat transcripts\", off for a new note and kept with a draft. Shown only where there is an open chat (Baude, Record).",
+      "copy": [
+        "feedback.attach_transcripts"
+      ],
+      "actions": [
+        {
+          "by": "toggle",
+          "does": "on: the note carries the open chat's and Meta's transcripts under Context; off: only the session, folder and app lines"
+        }
       ]
     },
     {
@@ -174,7 +187,7 @@
     },
     {
       "name": "context in the note",
-      "shows": "The note carries, under Context: the session id and title, the folder, the app's path, and the open chat's and Meta's transcripts in code fences (as Copy Transcript copies them, shared out of a budget so the issue body stays under GitHub's limit)",
+      "shows": "The note carries, under Context: the session id and title, the folder, the app's path, and, when Attach open chat transcripts is checked, the open chat's and Meta's transcripts in code fences (as Copy Transcript copies them, shared out of a budget so the issue body stays under GitHub's limit)",
       "copy": [
         "report.folder_line",
         "report.the_chat"

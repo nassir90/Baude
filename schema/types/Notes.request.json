@@ -28,6 +28,16 @@
         "type": "object"
       },
       "description": "Changes to notebooks."
+    },
+    "moved": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": {
+          "type": "string"
+        }
+      },
+      "description": "With write: pages moved or renamed, {notebook id: {old name: new name}}; the edits waiting on them are moved with them, in the same op."
     }
   },
   "required": ["op"],

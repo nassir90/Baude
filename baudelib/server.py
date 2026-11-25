@@ -95,6 +95,7 @@ class Server(ServerRunning, ServerSessions):
         self.dirty = False  # (subscribers have yet to hear of a change: _watch)
         self.notes_file, self.notes_seen = notes.file_key(), notes.stamp()  # (records.json here as last looked at:
         # info's notes, _look)
+        self.edits_seen = notes.edits_stamp()  # (edits.json, as this wrote it last: info's edits)
         self.notes_ops = queue.Queue()  # (notes ops, in the order they came: _notes)
         threading.Thread(target=self._notes, daemon=True, name="notes").start()
         self.socket_path = socket_path or wire.socket_path()
@@ -240,7 +241,8 @@ class Server(ServerRunning, ServerSessions):
                 "init": self.me.get("init") or None, "commit": self.commit, "made": self.made,
                 **self.mesh.here_behind(), "update": self.update,
                 "providers": self.mesh.providers_here(), "mesh": self.mesh.view(),
-                "notes": self.notes_seen}  # (Record's notebooks here, as written last: notes.stamp)
+                "notes": self.notes_seen,  # (Record's notebooks here, as written last: notes.stamp)
+                "edits": self.edits_seen}  # (the edits proposed to their pages, as written last: notes.edits_stamp)
 
     def made_of(self, commit):
         """When commit was made, in seconds, as git here has it (None: it hasn't it), kept once asked."""

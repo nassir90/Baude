@@ -832,7 +832,8 @@ class WindowRemote:
         self.update_status()
         self.load_history(path, live=live)
         self.resume_pending, self.view_path = True, path
-        self.tail.start(path, st.st_size if st else 0)
+        self.tail.start(path, self.history.loaded_end)
+        self.tail.read()
         if st is not None and st.st_mtime <= self.own_mtimes.get(path, -1) + 1:
             self.tail.last_written, self.tail.turn_open = 0.0, False  # baude's own writes, not another program's
         self.update_banner()
@@ -1008,9 +1009,6 @@ class WindowRemote:
 
     def h_result(self, msg):
         self.compact_ended()
-        if self.queued and self.send_after_result is None and not getattr(self.proc, "stop_asked", False) and \
-                self.queue_upto is None:
-            self.queue_upto = "all"  # (a turn that ended on its own: what was queued sent, once it's over)
         if self.send_after_result is not None:  # (the turn a revert stopped, ended: what's in the box sent, after this)
             GLib.idle_add(self.send_reverted)
         GLib.idle_add(lambda: self.follow_checkout() and False)  # (the turn may have moved into a worktree)
@@ -1053,6 +1051,8 @@ class WindowRemote:
         """A turn's over (its result; or stopped here, stop_stuck: proc, the claude it ran in): the chat not busy, and
         what waited for its end done."""
         proc = self.proc if proc is None else proc
+        if self.queued and self.send_after_result is None and self.queue_upto is None:
+            self.queue_upto = "all"
         self.set_busy(False)
         self.login_asked, self.turn_sent = False, None  # (login_prompt's, send_text's: the next turn's own)
         self.keep_chat_model()

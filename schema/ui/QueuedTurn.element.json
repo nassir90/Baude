@@ -68,7 +68,8 @@
     },
     {
       "name": "turn stopped (Esc / stop button)",
-      "shows": "The queue stays as it is; nothing is sent."
+      "decisions": [{"said": "You can get into a state where messages are queued, but the agent is not currently owrking / it is interrupted. Once interrupted, queued messsges should automatically be sent into te model.", "rule": "Every app sends the queue when a turn ends, whether it ended by itself or was interrupted", "decided": "2026-11-24", "source": [{"issue": "BaudeInternal#208"}]}],
+      "shows": "Once the stopped turn ends, the queue is sent as when a turn ends by itself (all of it as one message, or up to the one whose ↑ was pressed)."
     },
     {
       "name": "another chat opened",
@@ -76,7 +77,7 @@
     },
     {
       "name": "turn ends while another chat is open",
-      "shows": "The left chat's queue is sent to it as its turn ends by itself, as if it were open: all of it as one message, or up to the one whose ↑ stopped the turn; a turn stopped otherwise leaves it. The sent message is in that chat's conversation when it is opened. Only a turn's end the app sees sends it; one sent whose host may not have taken it goes back to the front of the queue and is sent again by the same uuid, which its host takes once."
+      "shows": "The left chat's queue is sent to it as its turn ends, by itself or stopped, as if it were open: all of it as one message, or up to the one whose ↑ stopped the turn. The sent message is in that chat's conversation when it is opened. Only a turn's end the app sees sends it; one sent whose host may not have taken it goes back to the front of the queue and is sent again by the same uuid, which its host takes once."
     },
     {
       "name": "in history",

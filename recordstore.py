@@ -370,6 +370,21 @@ def host_key(r):
     return HERE_HOST if baudelib.client.is_here(r.info) else r.key
 
 
+def _compose(first, then):
+    """Pages moved ({notebook id: {old: new}}) and then moved again: as one move each from where it was first."""
+    out = {nb: dict(m) for nb, m in first.items()}
+    for nb, m in then.items():
+        cur = out.setdefault(nb, {})
+        targets = set(cur.values())
+        for old, new in list(cur.items()):
+            cur[old] = m.get(new, new)
+        for old, new in m.items():
+            if old not in targets:
+                cur.setdefault(old, new)
+        out[nb] = {old: new for old, new in cur.items() if old != new}
+    return {nb: m for nb, m in out.items() if m}
+
+
 class Store:
     """Record's notebooks (records.json), and another host's while one's picked (Window.pick_host): notebooks is the
     picked host's, so all that reads and changes them works on those; a change to another's is sent to it as it's
@@ -384,7 +399,7 @@ class Store:
         self.local, self.remote, self.remote_base = [], {}, {}  # (this machine's; another's, by its key; as it has them)
         self.loading = set()  # (hosts whose notebooks are asked for, not listed yet)
         self.unsent = {}  # (host: a change to it wasn't taken: Window.send_notes's count then; sent again with the next)
-        self.sender = None  # (fn(host, changes): a change sent to a host, Window.send_notes)
+        self.sender = None  # (fn(host, changes, moved): a change sent to a host, Window.send_notes)
         self.notebooks, saved_notes = [], None
         self.full_width = not os.path.exists(self.path)  # (☰ → Full-width text, as Baude's: on for a new installation)
         self.page_files, self.mirrored = {}, {}  # (each page's file, and what's been written in them: mirror_pages)
@@ -398,6 +413,11 @@ class Store:
         self.books_width = None  # (the notebooks' column, dragged; None: as it comes)
         self.zoom = self.zoom_default = 1.0  # (Ctrl/⌘ + − 0: the notes', the chat's and the conversation's text)
         self.meta = {"messages": []}  # (Meta's conversation, the window's, whichever notebook's open: RecordChat)
+        self.edits = {}  # (by host: the edits proposed to its notebooks' pages, as it last listed them: take_edits)
+        self.decisions = []  # (edits accepted or rejected here, their host not yet told so: [{host, notebook, id,
+        # accept}], kept till it answers: RecordHosts.send_unsent)
+        self.moves, self.moving = {}, {}  # (by host: its notebooks' pages moved here, {notebook id: {old: new}}, not
+        # yet sent it; and those sent, not yet answered: [moved]. Their edits move with them there: notes' moved)
         try:
             with open(self.path) as f:
                 saved = json.load(f)
@@ -419,6 +439,10 @@ class Store:
                 self.markup = saved.get("markup") if saved.get("markup") in MARKUP_MODES else "line"
                 if isinstance(saved.get("meta"), dict):
                     self.meta = {**saved["meta"], "messages": list(saved["meta"].get("messages") or [])}
+                self.decisions = [d for d in saved.get("edit_decisions") or () if isinstance(d, dict)
+                                  and isinstance(d.get("host"), str) and isinstance(d.get("id"), str)]
+                self.moves = {h: m for h, m in (saved.get("edit_moves") or {}).items()
+                              if isinstance(m, dict) and notes.moved_ok(m)}
                 chosen = saved.get("agent_model")  # (the model chosen for Record's own agent: Meta's, if it has none)
                 if chosen in dict(MODELS) and chosen != meta.MODEL and "meta_model" not in widgets.load_settings():
                     widgets.save_settings(meta_model=chosen)
@@ -524,6 +548,101 @@ class Store:
             return HERE_HOST
         return next((h for h, books in self.remote.items() if any(t is notebook for t in books)), None)
 
+    def decided_here(self, eid):
+        """An edit accepted or rejected here whose host hasn't said it has that yet: its decision, or None."""
+        return next((d for d in self.decisions if d["id"] == eid), None)
+
+    def moved_pages(self, notebook, moved):
+        """A notebook's pages moved here ({old name: new}): its host told with the next save (notes' moved), so the
+        edits waiting on them move there too."""
+        if (host := self.host_of(notebook)) is not None and notebook.get("id") and moved:
+            self.moves[host] = _compose(self.moves.get(host) or {}, {notebook["id"]: dict(moved)})
+
+    def take_moves(self, host):
+        """A host's moves not yet sent it, now being sent: {notebook id: {old: new}}, or None."""
+        if not (moved := self.moves.pop(host, None)):
+            return None
+        self.moving.setdefault(host, []).append(moved)
+        return moved
+
+    def moves_sent(self, host, moved, ok):
+        """Moves sent a host, answered: it has them (ok), else they're sent again with the next (and those made since
+        on top of them)."""
+        sent = self.moving.get(host) or []
+        if any(m is moved for m in sent):
+            sent.remove(next(m for m in sent if m is moved))
+        if not ok:
+            self.moves[host] = _compose(moved, self.moves.get(host) or {})
+
+    def _moved_page(self, host, e):
+        """An edit's page as it is here: moved here since its host was told, or still being told."""
+        page = e["page"]
+        for m in [*(self.moving.get(host) or ()), self.moves.get(host) or {}]:
+            page = (m.get(e.get("notebook")) or {}).get(page, page)
+        return page
+
+    def take_edits(self, host, listed, full=True):
+        """The edits a host's listed (op edits: those waiting, and the decided kept), taken in: one known here (shown on
+        a page, kept with a Meta turn's card) changed in place, so what has it has it as it is now; but as decided
+        here, and on its page as moved here, till the host's been told so. A decision here the host has an answer to
+        (the edit's decided there, or gone) is done with. full: listed is all the host listed (not took_edit's)."""
+        known = {e["id"]: e for e in self.edits.get(host) or ()}
+        for m in self.meta["messages"]:  # (Meta's own, kept with its turns: the same dicts)
+            for p in m.get("proposals") or ():
+                known.setdefault(p.get("id"), p)
+        out = []
+        for e in listed:
+            if not isinstance(e, dict) or not isinstance(e.get("id"), str):
+                continue
+            mine = known.get(e["id"])
+            if mine is None:
+                mine = dict(e)
+            else:
+                mine.pop("gone", None)
+                mine.update(e)
+                if "by" not in e:
+                    mine.pop("by", None)
+            if (page := self._moved_page(host, mine)) != mine["page"]:
+                mine["page"] = page
+                mine.pop("gone", None)
+            if (d := self.decided_here(e["id"])) is not None and e.get("status") == "pending":
+                mine["status"] = "accepted" if d["accept"] else "rejected"
+            out.append(mine)
+        listed_ids = {e["id"] for e in out}
+        settled = [d for d in self.decisions if full and d["host"] == host and
+                   (d["id"] not in listed_ids or next(e for e in listed if isinstance(e, dict) and e.get("id") == d["id"])
+                    .get("status") != "pending")]
+        if settled:
+            self.decisions = [d for d in self.decisions if d not in settled]
+            self.save()
+        self.edits[host] = out
+
+    def took_edit(self, host, e):
+        """An edit as its host answered an edit op with it (edit), taken in as take_edits does: the dict kept here."""
+        self.take_edits(host, [x for x in self.edits.get(host) or () if x.get("id") != e.get("id")] + [e], full=False)
+        return next(x for x in self.edits[host] if x.get("id") == e.get("id"))
+
+    def edits_for(self, notebook):
+        """The edits waiting on a notebook's pages, as its host last listed them, in the order they were made."""
+        host = self.host_of(notebook)
+        return sorted((e for e in self.edits.get(host) or () if e.get("notebook") == notebook.get("id")
+                       and e.get("status") == "pending"), key=lambda e: e.get("t", 0))
+
+    def edit_of(self, pid):
+        """An edit by its id, as a host last listed it (waiting or decided), or None."""
+        return next((e for books in self.edits.values() for e in books if e.get("id") == pid), None)
+
+    def _moves_kept(self):
+        """The moves not yet answered, as kept in records.json (sent again next time)."""
+        out = {}
+        for host in set(self.moves) | set(self.moving):
+            m = {}
+            for x in [*(self.moving.get(host) or ()), self.moves.get(host) or {}]:
+                m = _compose(m, x)
+            if m:
+                out[host] = m
+        return out
+
     def push(self, host=None):
         """A host's notebooks (the one shown's, if not said), if it's another: what's changed of them here since it
         last had them (or wasn't sent after all: failed), sent to it (sender): a notebook made, dropped, renamed, its
@@ -554,7 +673,8 @@ class Store:
         changes += [{"id": i, "drop": True} for i in base if i not in now]
         if changes:
             self.remote_base[host] = copy.deepcopy(now)
-            self.sender(host, changes)
+        if changes or self.moves.get(host):  # (with the pages moved: the edits waiting on them moved there too)
+            self.sender(host, changes, self.take_moves(host))
         return bool(changes)
 
     def failed(self, host, changes):
@@ -712,7 +832,8 @@ class Store:
                        "zoom_default": self.zoom_default, "reading": self.reading, "chats": self.chats,
                        "pages_folded": self.pages_folded, "books_folded": self.books_folded,
                        "markup": self.markup, "books_width": self.books_width, "backup_all": self.backup_all,
-                       "spell_check": self.spell_check, "meta": self.meta},
+                       "spell_check": self.spell_check, "meta": self.meta, "edit_decisions": self.decisions,
+                       "edit_moves": self._moves_kept()},
                       f, indent=1)
             f.flush()
             os.fsync(f.fileno())  # (on the disk before it takes the file's place)
@@ -721,6 +842,8 @@ class Store:
         self.mirror_pages()
         for host in list(self.remote):  # (each host's, changed here: Meta's tools change any host's)
             self.push(host)
+        if self.moves.get(HERE_HOST) and self.sender is not None:  # (this machine's pages moved: its host told, so the
+            self.sender(HERE_HOST, [], self.take_moves(HERE_HOST))  # edits waiting on them move there too)
         for fn in self.on_saved:
             fn(False)
         return False

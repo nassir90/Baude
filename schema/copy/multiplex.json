@@ -2,7 +2,9 @@
   "description": "Multiplex, Baude's terminal: what a terminal says when it can't be, and the phone's Terminal page and the keys it adds.",
   "messages": {
     "ended": "ended",
-    "no_vte": "Terminals need VTE's GTK 4 build (package {$package})",
+    "no_vte": "Terminal unavailable. {$fix} Restart the app after installation.",
+    "vte_fix_mac": "Run brew install vte3.",
+    "vte_fix_linux": "Install GTK 4 VTE bindings (gir1.2-vte-3.91 on Debian and Ubuntu).",
     "not_started": "Couldn't start: {$error}",
     "host_gone": "The host went",
     "terminal_menu": "Terminal",

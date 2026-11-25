@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "edit_propose's, edit_revise's, edit_withdraw's and edit_decide's answer: the edit as it is now.",
+  "properties": {
+    "op": {
+      "const": "edit",
+      "description": "What it is."
+    },
+    "req": {
+      "type": ["integer", "null"],
+      "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "edit": {
+      "$ref": "Edit.json",
+      "description": "The edit."
+    },
+    "took_in": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "The edits a proposal reached into, taken back as it was revised to take them in: their ids."
+    }
+  },
+  "required": ["op", "edit"],
+  "additionalProperties": false
+}

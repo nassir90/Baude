@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "Edits waiting on this host's notebooks that another machine's Record kept (Meta's, from before edits were the notebook host's), handed to the host once, each with its own id, by and t. One whose id the host has (waiting or decided), or whose notebook it hasn't, is left out. Answered with edits: those taken in.",
+  "properties": {
+    "op": {
+      "const": "edit_adopt",
+      "description": "What it is."
+    },
+    "req": {
+      "type": ["integer", "null"],
+      "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "edits": {
+      "type": "array",
+      "items": {
+        "$ref": "Edit.json"
+      },
+      "description": "The edits, each pending."
+    }
+  },
+  "required": ["op", "edits"],
+  "additionalProperties": false
+}

@@ -13,6 +13,7 @@ from gi.repository import GLib, Gtk, Pango  # noqa: E402
 import pointers  # noqa: E402  (the pointer's shape: beside this file)
 import theming  # noqa: E402
 from baudelib import wording  # noqa: E402  (its words, Baude's: schema/copy)
+from baudelib import meshtools  # noqa: E402  (META: who Meta's edits are by)
 import meta  # noqa: E402  (Meta, the helper in the right bar: Baude's too, beside this file)
 import metalook  # noqa: E402
 import metachat  # noqa: E402
@@ -318,6 +319,8 @@ class RecordChat(RecordTools, metachat.MetaChat):
 
     def _proposal(self, pid):
         """An edit the agent proposed to the notebook's pages, by its id, whatever's become of it; or None."""
+        if (p := self.win.store.edit_of(pid)) is not None:  # (as its host last listed it)
+            return p
         live = self.agent.turn["proposals"] if self.agent is not None and self.agent.turn is not None else ()
         return next((p for m in self.messages() for p in m.get("proposals") or () if p["id"] == pid),
                     next((p for p in live if p["id"] == pid), None))
@@ -404,6 +407,8 @@ class RecordChat(RecordTools, metachat.MetaChat):
          hunks.remove_css_class)("dim-label")
 
     def _edit_button(self, p, accept, tip):
+        if p.get("by") not in (None, meshtools.META):  # (another's now: revised by them since)
+            tip = wording.say("edit_review.accept_tip_by" if accept else "edit_review.reject_tip_by", by=p["by"])
         btn = Gtk.Button(tooltip_text=tip, valign=Gtk.Align.CENTER)
         btn.set_child(Gtk.Image(icon_name="object-select-symbolic" if accept else "window-close-symbolic",
                                 pixel_size=12))
@@ -440,7 +445,7 @@ class RecordChat(RecordTools, metachat.MetaChat):
         if p["page"] not in self.notebook["pages"]:
             if not accept:
                 p["status"] = "rejected"
-                self.decided(p)
+                self.decided(p, accept)
             return self.edit_cards_changed()
         if (editor := self.win.open_note(p["page"])) is not None and editor.notebook is self.notebook:
             editor.show_proposal(p, scroll=True)
@@ -550,18 +555,27 @@ class RecordChat(RecordTools, metachat.MetaChat):
             parts.append(f"(Open: {place})")
             agent.seen_place = place
         books = {t.get("id"): t for t in store.notebooks}
-        for m in [*self.messages(), *(notebook["messages"] if notebook is not None else ())]:
+        for m in self.messages():  # (Meta's own edits, kept with its turns, decided since: by Meta still, its own)
             for p in m.get("proposals") or ():
                 if p.get("status") in ("accepted", "rejected") and not p.get("told"):
-                    if not agent.fresh:
+                    if not agent.fresh and p.get("by") in (None, meshtools.META):
                         nb = books.get(p.get("notebook")) or notebook
                         where = f" in {full_name(nb)}" if nb is not None and nb is not notebook else ""
                         parts.append(f"(The change you proposed to {p['page']}{where} was {p['status']} by the user.)")
                     p["told"] = True
         if notebook is not None and (waiting := self.pending(notebook)):
-            pages = list(dict.fromkeys(p["page"] for p in waiting))
-            parts.append(f"(Your edits still waiting for the user: {len(waiting)}, on {', '.join(pages)}. list_edits "
-                         "shows them.)")
+            mine = [p for p in waiting if p.get("by") in (None, meshtools.META)]
+            others = {}
+            for p in waiting:
+                if p not in mine:
+                    others.setdefault(p["by"], []).append(p["page"])
+            if mine:
+                pages = list(dict.fromkeys(p["page"] for p in mine))
+                parts.append(f"(Your edits still waiting for the user: {len(mine)}, on {', '.join(pages)}. list_edits "
+                             "shows them.)")
+            for by, pages in others.items():
+                parts.append(f"({by}'s edits waiting for the user: {len(pages)}, on "
+                             f"{', '.join(dict.fromkeys(pages))}. list_edits shows them.)")
         left, said = REFS_LIMIT, []
         for item in self.referenced(msg["text"]):
             text, paths = ref_said(item, store, space, min(REF_LIMIT, max(2000, left)))
@@ -697,9 +711,10 @@ class RecordChat(RecordTools, metachat.MetaChat):
             editor.show_proposal(p, scroll=True, caret=True)
             editor.view.grab_focus()
 
-    def decided(self, p):
-        """A proposed edit accepted or rejected on its page: kept so, and told the agent with the next message."""
-        self.win.store.save()
+    def decided(self, p, accept=None):
+        """A proposed edit accepted or rejected on its page: said to its notebook's host (Window.decide_edit), and, if
+        it's Meta's, told it with the next message."""
+        self.win.decide_edit(p, p.get("status") == "accepted" if accept is None else accept)
         self.show_pending_bar()
         self.edit_cards_changed()
 

@@ -266,6 +266,15 @@ fun ChatPage(chat: Chat, name: String, attach: Boolean = true, stop: (() -> Unit
         follow = false
         list.animateScrollToItem(found.first)
     }
+    LaunchedEffect(chat) { // (scrolled up to its first lines: what's before them read and put above, readEarlier)
+        androidx.compose.runtime.snapshotFlow {
+            if (chat.loaded.value && placed && chat.earlier.value && list.firstVisibleItemIndex < 3) chat.lines.size else -1
+        }.collect { if (it >= 0) Mesh.readEarlier(chat) }
+    }
+    androidx.compose.runtime.DisposableEffect(chat) { // (what's read before put above: what's on screen stays there)
+        chat.prepended = { n -> if (n > 0) list.requestScrollToItem(list.firstVisibleItemIndex + n, list.firstVisibleItemScrollOffset) }
+        onDispose { chat.prepended = null }
+    }
     Mesh.tick.value
     val density = androidx.compose.ui.platform.LocalDensity.current
     val openImage = remember(chat) { { key: String -> Viewer.openFrom(chat, key) } }

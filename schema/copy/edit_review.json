@@ -1,7 +1,9 @@
 {
-  "description": "A proposed edit's controls where it's shown waiting, on a page of notes and in a Bot's memory: accept it or reject it.",
+  "description": "A proposed edit's controls where it's shown waiting, on a page of notes and in a Bot's memory: accept it or reject it, and who proposed it.",
   "messages": {
     "accept_tip": "Accept (Tab)",
-    "reject_tip": "Reject (Esc)"
+    "reject_tip": "Reject (Esc)",
+    "accept_tip_by": "Accept {$by}'s edit (Tab)",
+    "reject_tip_by": "Reject {$by}'s edit (Esc)"
   }
 }

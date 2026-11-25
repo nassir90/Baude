@@ -52,7 +52,8 @@ An entry or a part may carry:
 
 ## Rules every entry follows
 
-- **One word-wrap icon.** Every wrap toggle (code views, Kubernetes logs, on every app) draws `baude-wrap-symbolic` from schema/icons; the owner asked that all of them come from one place, with a clearer icon (2026-11-24; source: BaudeInternal#207).
+- **One word-wrap icon.** Every wrap toggle (code views, Kubernetes logs, on every app) draws `baude-wrap-symbolic` from schema/icons; the owner asked that all of them come from one place, with a clearer icon (2026-11-24). Source: `[{"issue": "BaudeInternal#207"}]`.
+- **A closed window leaves nothing listening.** Anything an entry draws that follows the theme (dark or light, the accent) stops following it when its window closes; the owner found Baude and Record growing in memory the longer they run (2026-11-24). Source: `[{"issue": "BaudeInternal#213"}]`.
 - **A Bot has only its Name.** Wherever an app lists or shows a Bot (a sidebar or home row, the open chat's header and
   window title, a notification, the macOS menu bar item, This phone, a share target, the @ and ⌘K lists, Meta's lists, captions and trash button, a sender), it shows the Bot's name and
   nothing of the chat under it: no chat title, no second line. The name is set when the chat is made a Bot
@@ -82,3 +83,11 @@ An entry or a part may carry:
     (the phone's `popup.row` is 34, a bar button's side, for a finger), modelbutton's 12 px sides (the phone's
     `popup.inset` too), a toggle's check before its text, and
     Adw.AlertDialog's own width (the phone's follows the chat).
+- **Apps are thin clients; the logic is in the wire.** What an app or an agent's tool does to shared things (a
+  notebook's pages and the edits proposed to them, a chat, the mesh) is the host's to work out, through typed wire
+  messages in schema/types; an app or an MCP server asks the host and shows its answer. An agent's interface (an MCP
+  tool) can be shaped for agents rather than be the wire itself, but stays a thin client of it. The owner: "Well the
+  external interface need not be the wire but I think most of the operational logic should be in hte wire. protocol.
+  Agent MCP requirements are different to that of the wire (which can be as detailed as we want). They still are
+  basically thin clients." (source: BaudeInternal#200; session b3845b21-55ac-4aab-a769-fb8517403c51, message
+  868770b1-06c0-44a3-bdb9-c1851cf4b39a)

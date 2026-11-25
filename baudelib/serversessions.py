@@ -676,12 +676,12 @@ class ServerSessions:
             f.write(json.dumps(rec, separators=(",", ":"), ensure_ascii=False) + "\n")
 
     # ---- who a session's messages are from, if not its user (wire's Senders): kept by their uuids beside it
-    def chat_sender(self, sid, meta=False):
+    def chat_sender(self, sid, meta=False, agent=None):
         """(lock held) One of this host's chats as a message from it is from: a Bot by its name, else by its title, on
         this host; None if there's no such chat here. meta: a head's Meta's, which is no chat here: a chat named Meta,
-        as a phone's Meta is."""
-        if meta:
-            return wire.clean_sender({"kind": "chat", "name": meshtools.META, "host": self.me["id"],
+        as a phone's Meta is; agent: an agent outside the apps (baude-mcp's), by its name, said as Meta is."""
+        if meta or (isinstance(agent, str) and agent.strip() and not sid):
+            return wire.clean_sender({"kind": "chat", "name": meshtools.META if meta else agent, "host": self.me["id"],
                                       "host_name": self.me["name"]})
         s = self.sessions.get(sid) if wire.is_id(sid or "") else None
         if s is None:
@@ -702,7 +702,7 @@ class ServerSessions:
             name = self.mesh.name_of(conn.origin)
             return wire.clean_sender({**said, "host": conn.origin,
                                       "host_name": said.get("host_name") if name == conn.origin[:8] else name})
-        return self.chat_sender(msg.get("as"), msg.get("as_meta"))
+        return self.chat_sender(msg.get("as"), msg.get("as_meta"), msg.get("as_agent"))
 
     def senders_path(self, sid):
         return os.path.join(self.state_dir, "senders", f"{sid}.json")
@@ -921,8 +921,15 @@ class ServerSessions:
         while True:
             msg, reply = self.notes_ops.get()
             try:
-                reply("notes", **(notes.write(msg.get("changes")) if msg.get("action") == "write"
-                                  else notes.listing(msg.get("have"))))
+                if msg.get("op") in notes.EDIT_OPS:  # (an edit to a page here)
+                    kind, out = notes.edit_op(msg)
+                else:  # (a write's moved pages: their edits moved too)
+                    kind, out = "notes", (notes.write(msg.get("changes"), msg.get("moved"))
+                                          if msg.get("action") == "write" else notes.listing(msg.get("have")))
+                if (seen := notes.edits_stamp()) != self.edits_seen:  # (the info's edits said anew, if they changed)
+                    with self.lock:
+                        self.edits_seen, self.dirty = seen, True
+                reply(kind, **out)
             except Exception as e:  # noqa: BLE001 (said to the Record that asked)
                 reply("error", error=f"{type(e).__name__}: {e}")
 

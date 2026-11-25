@@ -1340,8 +1340,10 @@ class EditControls(Gtk.Box):
         self.set_layout_manager(self.layout)
         self.buttons = []
         for icon, tip, css, accept in (
-                ("object-select-symbolic", wording.say("edit_review.accept_tip"), "edit-accept", True),
-                ("window-close-symbolic", wording.say("edit_review.reject_tip"), "edit-reject", False)):
+                ("object-select-symbolic", wording.say("edit_review.accept_tip_by", by=p["by"]) if p.get("by") else
+                 wording.say("edit_review.accept_tip"), "edit-accept", True),
+                ("window-close-symbolic", wording.say("edit_review.reject_tip_by", by=p["by"]) if p.get("by") else
+                 wording.say("edit_review.reject_tip"), "edit-reject", False)):  # (who proposed it, if it says)
             btn = Gtk.Button(tooltip_text=tip, focus_on_click=False, can_focus=False)
             btn.set_child(Gtk.Image(icon_name=icon))
             btn.add_css_class("edit-control")

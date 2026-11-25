@@ -198,17 +198,15 @@ class WindowDrafts:
     def left_turn_ended(cls, key, send):
         """The turn of a chat left with a queue (key's draft's) over: the queue sent as the open chat's would be
         (flush_queue), with send(content, uuid, done): all of it as one message, or up to the one whose ↑ stopped the
-        turn; a turn stopped otherwise leaves it. Sent by a uuid kept with it, so its host takes it once if it's sent
+        turn. Sent by a uuid kept with it, so its host takes it once if it's sent
         again; put back at the queue's front if it isn't taken (in its window's queue, if it's open in one by then).
         True if something was sent."""
         draft = cls.DRAFTS.get(key) or {}
         queue = draft.get("queue")
         if not queue:
             return False
-        upto, hold = queue.get("upto"), queue.get("hold")
+        upto = queue.get("upto")
         queue["upto"], queue["hold"] = None, False
-        if upto is None and hold:
-            return False
         turns = queue["turns"][:upto + 1 if upto is not None else None]
         del queue["turns"][:len(turns)]
         if not queue["turns"]:

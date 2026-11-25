@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "An edit proposed to a page of a notebook here, for the user to accept or reject: old_text replaced with new_text, nothing written to the page. old_text is found once (or the one nearest near) in the page as it reads with the edits waiting on it applied; an empty one adds new_text at the page's end. Text one of those edits puts in or replaces: that edit is revised to take this in (any others it reaches taken back), and is by by now. Answered with edit.",
+  "properties": {
+    "op": {
+      "const": "edit_propose",
+      "description": "What it is."
+    },
+    "req": {
+      "type": ["integer", "null"],
+      "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "notebook": {
+      "type": "string",
+      "description": "The notebook: its id, or its name (any case)."
+    },
+    "page": {
+      "type": "string",
+      "description": "The page: its name (Parent:Child for one under another), any case, or its own name past its parents'."
+    },
+    "old_text": {
+      "type": "string",
+      "description": "The text it replaces, as the page has it; empty or left out: added at the page's end."
+    },
+    "new_text": {
+      "type": "string",
+      "description": "What it puts in."
+    },
+    "near": {
+      "type": "integer",
+      "description": "A place in the page's text: of old_text there more than once, the one nearest it (a passage selected, say)."
+    },
+    "by": {
+      "type": "string",
+      "description": "Who's proposing it, by name (Meta, an agent's own name): kept with the edit, and shown with it."
+    }
+  },
+  "required": ["op", "notebook", "page", "new_text", "by"],
+  "additionalProperties": false
+}

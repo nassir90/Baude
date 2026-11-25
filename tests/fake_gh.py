@@ -3,7 +3,8 @@
 (FAKE_GH_STATE: {viewer, issues, prs, calls, issues_on: {owner/name: the issues of a private repository it shows you}}).
 What's changed is what `gh` would change; every call's kept in calls.
 And `gh api`, as lookupgit.GITHUB asks it (rest): {rest: {owner/name: [issues as GitHub's REST API says them]}}.
-For Auto-fix (baudelib.autofix): pr list --head (and --state open) picks; pr view N --json gives a pr's fields
+For Auto-fix (baudelib.autofix): pr list --head (and --state open) picks, each from --repo's
+owner unless it has a headRepositoryOwner; pr view N --json gives a pr's fields
 (statusCheckRollup, mergeable, comments, reviews, baseRefName as gh has them); pr comment N --body adds a comment; gh api
 repos/o/r/pulls/N/comments gives line_comments {N: [as GitHub's REST API has them]}."""
 import fcntl
@@ -114,8 +115,8 @@ def run(state, args):
         if os.environ.get("FAKE_GH_SIGNED_IN", "1") != "1":  # (signed out, as the real one: it asks no one, exits 4)
             print("To get started with GitHub CLI, please run:  gh auth login", file=sys.stderr)
             return 4
-        prs = [p for p in state["prs"] if opt(args, "--head") in (None, p.get("headRefName"))
-               and (opt(args, "--state") != "open" or p.get("state") == "OPEN")]
+        prs = [{"headRepositoryOwner": {"login": (opt(args, "--repo") or "you/").split("/")[0]}, **p} for p in state["prs"]
+               if opt(args, "--head") in (None, p.get("headRefName")) and (opt(args, "--state") != "open" or p.get("state") == "OPEN")]
         print(json.dumps(prs))
     elif what == ["pr", "view"]:
         p = pr(state, args[2])
@@ -125,6 +126,7 @@ def run(state, args):
     elif what == ["pr", "comment"]:
         p = pr(state, args[2])
         p.setdefault("comments", []).append({"id": f"IC_{len(p['comments']) + 1}", "author": {"login": state.get("login", "you")},
+                                             "authorAssociation": "OWNER",
                                              "body": opt(args, "--body") or sys.stdin.read(), "createdAt": now(),
                                              "url": f"{p.get('url', '')}#issuecomment-{len(p['comments']) + 1}"})
     elif args[:1] == ["api"] and re.fullmatch(r"repos/[^/]+/[^/]+/pulls/\d+/comments", args[1].split("?")[0]):

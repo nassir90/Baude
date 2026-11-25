@@ -554,7 +554,7 @@ class ServerSessions:
                 s.meta.pop("path", None)
                 self.save(s)
             if kind in ("stream_event", "assistant") and not msg.get("parent_tool_use_id") and not s.busy:
-                s.busy = True  # (a turn claude started itself: a background task's end, say)
+                s.busy, s.turn_began = True, time.time()  # (a turn claude started itself: a background task's end, say)
                 if self.stopped.is_set():  # (one more, started as it's stopped: cut short)
                     self.cut(s)
                     self.cutting.add(s.id)
@@ -584,7 +584,7 @@ class ServerSessions:
                 told, s.queued = s.queued, []
                 s.busy, s.used, s.acting = False, time.time(), False
                 autofix.turn_over(s, s.turn_began, time.time())  # (its own comments on the pull request: not sent it)
-                if s.meta.get("autofix", {}).get("waiting"):
+                if (s.meta.get("autofix") or {}).get("waiting"):
                     self.woken.set()  # (what Auto-fix found meanwhile: sent now)
                 s.note_written()  # (its own turn's lines: not another writer's, desktopchats.elsewhere)
                 s.routines_out.clear()
@@ -922,7 +922,7 @@ class ServerSessions:
                 waits.append(checked + CHECK_SOCKET_S - time.monotonic())
                 if (soon := self.routines_due()) is not None:
                     waits.append(min(soon, 60))
-                if (soon := autofix.due(self)) is not None:
+                if (soon := self.autofix_due()) is not None:
                     waits.append(min(soon, 60))  # (looked at again each minute: a machine asleep meanwhile isn't
                     # counted by the clock it waits on)
                 if not running and self.exit_s:
@@ -936,7 +936,7 @@ class ServerSessions:
                     now_running = any(s.proc is not None for s in self.sessions.values())
                 if not now_running and self.exit_s and time.monotonic() - quiet >= self.exit_s and not self.conns \
                         and not self.mesh.links and not self.mesh.outs and self.routines_due() is None \
-                        and autofix.due(self) is None:  # (linked,
+                        and self.autofix_due() is None:  # (linked,
                     # or making links: the mesh's members may want it; a routine to run: it's to be here for it)
                     self.log(f"nothing running and nobody here for {self.exit_s / 3600:g} h: going")
                     threading.Thread(target=self.shutdown, daemon=True, name="exit").start()
@@ -945,14 +945,23 @@ class ServerSessions:
                 return
             if attached:
                 self.routines_due()
-                autofix.due(self)
             if time.monotonic() - checked > (10 if attached else CHECK_SOCKET_S - 1):
                 checked = time.monotonic()
                 self.still_bound()
             try:
+                if attached:
+                    autofix.due(self)
                 pinged = self._look(pinged)
             except Exception as e:  # (whatever it was, it's looked at again next time)
                 self.log(f"watching: {type(e).__name__}: {e}")
+
+    def autofix_due(self):
+        """autofix.due, for the watch while nobody's attached: whatever goes wrong with it said, not the watch's end."""
+        try:
+            return autofix.due(self)
+        except Exception as e:  # noqa: BLE001 (looked at again next time)
+            self.log(f"auto-fix: {type(e).__name__}: {e}")
+            return 60
 
     def stoppable(self, s):
         """(lock held) Would an idle look stop a session's claude, once it's idle long enough (_look)? Not one at a

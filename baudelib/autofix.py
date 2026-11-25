@@ -2,8 +2,9 @@
 or by the chat's agent: mcp__chat__autofix), the host finds the open pull request of the branch checked out in the
 chat's folder (gh pr list --head), and every EVERY seconds while it's on reads where it stands (gh pr view, and the
 review comments on its lines: gh api). A check newly failing, a merge conflict, or a comment, review or review comment
-made since (not one made while the chat was at a turn: its own agent's, through gh) is sent the chat, from the sender
-Auto-fix, between its turns: one message at a time, what's found while one waits added to it. It goes off by itself
+made since (not one made by the host's gh login during one of the chat's turns: its own agent's, through gh) is sent
+the chat, from the sender Auto-fix, between its turns (the words of those only the repository's owner, members and
+collaborators write: anyone else's only that they commented): one message at a time, what's found while one waits added to it. It goes off by itself
 once the pull request is merged or closed. Kept in the chat's meta on its host ("autofix"), so it goes on across the
 host's restarts with nobody attached; listed (Session's autofix) so every head shows it."""
 import calendar
@@ -18,13 +19,15 @@ from baudelib import deps, wire, wording
 
 EVERY = int(os.environ.get("BAUDE_AUTOFIX_EVERY") or 5 * 60)  # (seconds: how often a pull request is read;
 # BAUDE_AUTOFIX_EVERY: sooner, to try it)
-AGAIN = 60  # (seconds: one that couldn't be read, read again this soon)
+AGAIN = 60  # (seconds: one that couldn't be read, read again this soon, then twice as long after each that couldn't)
+AGAIN_MAX = 60 * 60  # (seconds: the longest it waits after one that couldn't be read)
 PAD = 2  # (seconds: a comment this near a turn of the chat's is the chat's own, GitHub's clock and this one's apart)
 TURNS_KEPT = 50  # (the chat's turns kept, to tell its own comments by)
 SEEN_KEPT = 500  # (the comments' ids kept as seen)
 BODY_MAX = 4000  # (characters of a comment put in the message)
+TRUSTED = {"OWNER", "MEMBER", "COLLABORATOR"}  # (whose words are sent the chat; anyone else's, only that they commented)
 FAILED = {"FAILURE", "ERROR", "TIMED_OUT", "CANCELLED", "ACTION_REQUIRED", "STARTUP_FAILURE"}
-VIEW = "number,title,url,state,mergeable,baseRefName,statusCheckRollup,comments,reviews"
+VIEW = "number,title,url,state,mergeable,baseRefName,headRefOid,statusCheckRollup,comments,reviews"
 
 
 def sender(me):
@@ -45,11 +48,26 @@ def gh(*args, timeout=30):
         raise ValueError(f"gh {args[0]} {args[1]} took over {timeout} s") from None
     if p.returncode != 0:
         said = [line.strip() for line in (p.stderr or p.stdout or "").splitlines() if line.strip()]
+        if p.returncode == 4 or any("gh auth login" in line for line in said):
+            raise ValueError(wording.say("autofix.signed_out"))
         raise ValueError(said[-1] if said else f"gh exited with {p.returncode}")
     try:
         return json.loads(p.stdout)
     except ValueError:
         raise ValueError("gh's answer isn't JSON") from None
+
+
+_login = []  # (the host's gh login, read once: login)
+
+
+def login():
+    """Who the host's gh is signed in as (gh api user), read once."""
+    if not _login:
+        got = gh("api", "user")
+        if not isinstance(got, dict) or not got.get("login"):
+            raise ValueError("gh didn't say who it's signed in as")
+        _login.append(str(got["login"]))
+    return _login[0]
 
 
 def find(cwd):
@@ -66,11 +84,14 @@ def find(cwd):
     branch = (lookupgit._git(top, "symbolic-ref", "--short", "-q", "HEAD") or "").strip()
     if not branch:
         raise ValueError(wording.say("autofix.no_branch"))
-    got = gh("pr", "list", "--repo", repo, "--head", branch, "--state", "open", "--limit", "1",
-             "--json", "number,title,url")
-    if not isinstance(got, list) or not got or not isinstance(got[0], dict):
+    got = gh("pr", "list", "--repo", repo, "--head", branch, "--state", "open", "--limit", "30",
+             "--json", "number,title,url,headRepositoryOwner")
+    owner = repo.split("/")[0].lower()
+    p = next((p for p in got if isinstance(p, dict) and
+              str((p.get("headRepositoryOwner") or {}).get("login") or "").lower() == owner), None) \
+        if isinstance(got, list) else None  # (not a fork's branch of the same name)
+    if p is None:
         raise ValueError(wording.say("autofix.no_pr", branch=branch))
-    p = got[0]
     return {"repo": repo, "number": int(p["number"]), "url": str(p.get("url") or ""),
             "title": str(p.get("title") or "")[:300], "branch": branch}
 
@@ -115,10 +136,12 @@ def _mine(at, turns):
     return at is not None and any(a - PAD <= at <= b + PAD for a, b in turns)
 
 
-def look(af, view, lines, now):
-    """af after a read of its pull request (view, lines: read's): (af as it's kept now, or None once the pull request
-    is merged or closed; what's new on it, each {kind: check, name, url} or {kind: conflict, base} or {kind: comment,
-    who, body, url, path?, state?})."""
+def look(af, view, lines, now, me=None, began=None):
+    """af after a read of its pull request (view, lines: read's; me: the host's gh login; began: when the chat's turn
+    going on began, None while it's between turns): (af as it's kept now, or None once the pull request is merged or
+    closed; what's new on it, each {kind: check, name, url} or {kind: conflict, base} or {kind: comment, id, who, url,
+    body?, path?, state?, outside?}). A comment's id is kept as seen once it's sent (send) or it's the chat's agent's:
+    me's, made during one of the chat's turns."""
     if str(view.get("state") or "").upper() in ("MERGED", "CLOSED"):
         return None, []
     found = []
@@ -126,14 +149,18 @@ def look(af, view, lines, now):
     for c in view.get("statusCheckRollup") or []:
         if isinstance(c, dict):
             name, failed, url = _check(c)
-            if failed and name not in failing:
-                failing.append(name)
-                if name not in af["failing"]:
+            key = f"{name} {view.get('headRefOid') or url}"  # (failing again after a push: new)
+            if failed and key not in failing:
+                failing.append(key)
+                if key not in af["failing"]:
                     found.append({"kind": "check", "name": name, "url": url})
     conflict = str(view.get("mergeable") or "").upper() == "CONFLICTING"
     if conflict and not af["conflict"]:
         found.append({"kind": "conflict", "base": view.get("baseRefName") or ""})
     seen, said = set(af["seen"]), []
+    waiting = list(af.get("waiting") or [])
+    held = {f.get("id") for f in waiting}
+    turns = list(af["turns"]) + ([[began, now + 60]] if began is not None else [])
     comments = [("comment", c, c.get("createdAt"), c.get("url")) for c in view.get("comments") or []] + \
         [("review", c, c.get("submittedAt"), c.get("url")) for c in view.get("reviews") or []] + \
         [("line", c, c.get("created_at"), c.get("html_url")) for c in lines]
@@ -142,53 +169,58 @@ def look(af, view, lines, now):
             continue
         cid = f"{kind}:{c['id']}"
         at = _when(stamp)
-        if cid in seen or at is None or at < af["since"] - PAD:
+        if cid in seen or cid in held or at is None or at < af["since"] - PAD:
             continue
-        seen.add(cid)
-        said.append(cid)
         body = (c.get("body") or "").strip()
         state = str(c.get("state") or "").upper()
         if kind == "review" and not body and state != "CHANGES_REQUESTED":
             continue  # (a review that's only its line comments: those are said each)
-        if _mine(at, af["turns"]):
-            continue
         who = ((c.get("author") or c.get("user") or {}).get("login")) or "?"
-        item = {"kind": "comment", "who": who, "body": body[:BODY_MAX], "url": url or ""}
-        if kind == "line" and c.get("path"):
-            item["path"] = c["path"]
-        if kind == "review":
-            item["state"] = state.lower().replace("_", " ")
+        if me and who == me and _mine(at, turns):
+            seen.add(cid)
+            said.append(cid)
+            continue
+        item = {"kind": "comment", "id": cid, "who": who, "url": url or ""}
+        if str(c.get("authorAssociation") or c.get("author_association") or "").upper() in TRUSTED:
+            item["body"] = body[:BODY_MAX]
+            if kind == "line" and c.get("path"):
+                item["path"] = c["path"]
+            if kind == "review":
+                item["state"] = state.lower().replace("_", " ")
+        else:
+            item["outside"] = True
         found.append(item)
     kept = {**af, "failing": failing, "conflict": conflict, "seen": (af["seen"] + said)[-SEEN_KEPT:],
             "title": str(view.get("title") or af.get("title") or "")[:300], "url": view.get("url") or af.get("url"),
-            "error": None, "next": now + EVERY}
+            "error": None, "fails": 0, "next": now + EVERY}
     if found:
-        waiting = list(af.get("waiting") or [])
-        for f in found:
-            if f not in waiting:
-                waiting.append(f)
-        kept["waiting"] = waiting
+        kept["waiting"] = waiting + found
     return kept, found
 
 
 def told(af, found):
-    """The message the chat's sent: what needs fixing on its pull request."""
-    lines = [wording.say("autofix.intro", number=af["number"], repo=af["repo"]), ""]
+    """The message the chat's sent: what needs fixing on its pull request (and who else commented, only that)."""
+    asks = [f for f in found if not f.get("outside")]
+    lines = [wording.say("autofix.intro" if asks else "autofix.about", number=af["number"], repo=af["repo"]), ""]
     for f in found:
         if f["kind"] == "check":
             lines.append("- " + (wording.say("autofix.failing_at", name=f["name"], url=f["url"]) if f["url"] else
                                  wording.say("autofix.failing", name=f["name"])))
         elif f["kind"] == "conflict":
             lines.append("- " + wording.say("autofix.conflict", base=f["base"] or "main"))
-    for f in found:
+    for f in asks:
         if f["kind"] != "comment":
             continue
         head = wording.say("autofix.review", who=f["who"], state=f["state"]) if f.get("state") else \
             wording.say("autofix.comment_on", who=f["who"], path=f["path"]) if f.get("path") else \
             wording.say("autofix.comment", who=f["who"])
         lines += ["", head + (f" {f['url']}" if f.get("url") else "")]
-        lines += ["> " + line for line in (f["body"] or "").splitlines()] or []
-    lines += ["", wording.say("autofix.ask")]
+        lines += ["> " + line for line in (f.get("body") or "").splitlines()] or []
+    outside = [f for f in found if f.get("outside")]
+    if outside:
+        lines += [""] * bool(lines[-1]) + ["- " + wording.say("autofix.outside", who=f["who"]) for f in outside]
+    if asks:
+        lines += ["", wording.say("autofix.ask")]
     return "\n".join(lines)
 
 
@@ -209,8 +241,10 @@ def request(server, msg):
         s = server.sessions.get(sid)
         if s is None:
             raise ValueError(f"no session {sid}")
+        on = msg.get("on")
+        if on is not False and (s.meta.get("desktop") or sid in server.desktop.chats):
+            raise ValueError(wording.say("autofix.not_desktop"))
         cwd = s.meta.get("cwd")
-    on = msg.get("on")
     pr = None
     if on is True:
         pr = find(cwd)  # (not under the lock: git and gh)
@@ -239,7 +273,7 @@ def due(server):
             return None
         for s in list(server.sessions.values()):
             af = s.meta.get("autofix")
-            if not af or s.deleting or s.meta.get("archived"):
+            if not af or s.deleting or s.meta.get("archived") or s.meta.get("desktop"):
                 continue
             if af.get("waiting") and not s.busy and af.get("retry", 0) <= now:
                 send(server, s)
@@ -260,10 +294,11 @@ def due(server):
 def _read(server, s, af):
     """A chat's pull request read, and what's new on it kept to send (sent at once, if the chat's between turns)."""
     try:
+        me = login()
         view, lines = read(af)
         error = None
-    except Exception as e:  # noqa: BLE001 (said on the Git page's toggle, and read again soon)
-        view, lines, error = None, None, str(e)
+    except Exception as e:  # noqa: BLE001 (said on the Git page's toggle, and read again later each time)
+        me, view, lines, error = None, None, None, str(e)
     with server.lock:
         server.autofix_reading.discard(s.id)
         now = time.time()
@@ -272,11 +307,16 @@ def _read(server, s, af):
                 (have["repo"], have["number"]) != (af["repo"], af["number"]):
             return  # (gone, or turned off or onto another meanwhile)
         if error is not None:
-            s.meta["autofix"] = {**have, "error": error, "next": now + AGAIN}
+            fails = (have.get("fails") or 0) + 1  # (gh signed out, rate limited, offline: tried less and less often)
+            s.meta["autofix"] = {**have, "error": error, "fails": fails,
+                                 "next": now + min(AGAIN * 2 ** (fails - 1), AGAIN_MAX)}
             server.log(f"auto-fix of {s.id}: {error}")
         else:
-            kept, found = look(have, view, lines, now)
-            s.meta["autofix"] = kept
+            kept, found = look(have, view, lines, now, me, s.turn_began if s.busy else None)
+            if kept is None:
+                s.meta.pop("autofix", None)
+            else:
+                s.meta["autofix"] = kept
             if kept is None:
                 server.log(f"auto-fix of {s.id}: #{af['number']} is {str(view.get('state')).lower()}, off")
             elif found:
@@ -304,6 +344,7 @@ def send(server, s):
         af["error"], af["retry"] = str(e), time.time() + AGAIN
         server.log(f"auto-fix of {s.id} couldn't be sent: {type(e).__name__}: {e}")
         return
+    af["seen"] = ((af.get("seen") or []) + [f["id"] for f in found if f.get("id")])[-SEEN_KEPT:]  # (sent: seen)
     af["waiting"], af["retry"] = [], 0
     server.save(s)
 

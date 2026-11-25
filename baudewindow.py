@@ -109,6 +109,8 @@ class SettingsDialog(Adw.PreferencesDialog):
         self.add(page)
         import subscriptionpage
         self.add(subscriptionpage.Page(win))
+        import depsview
+        self.add(depsview.Page(win, "Baude"))
 
     switch = staticmethod(settings_switch)  # (widgets': Record's Settings has them too)
     size_row = staticmethod(settings_size)

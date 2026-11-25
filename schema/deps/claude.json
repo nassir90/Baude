@@ -1,0 +1,17 @@
+{
+  "description": "Claude Code's claude, which runs a host's Claude chats. On macOS the one the Claude desktop app keeps counts too.",
+  "name": "Claude Code",
+  "where": "host",
+  "needed_by": ["report.claude"],
+  "detect": {
+    "macos": [{"env": "BAUDE_CLAUDE"}, {"which": "claude"}, {"glob": "~/Library/Application Support/Claude/claude-code/*/*/claude.app/Contents/MacOS/claude"}],
+    "linux": [{"env": "BAUDE_CLAUDE"}, {"which": "claude"}]
+  },
+  "install": {
+    "macos": "curl -fsSL https://claude.ai/install.sh | bash",
+    "debian": "curl -fsSL https://claude.ai/install.sh | bash",
+    "fedora": "curl -fsSL https://claude.ai/install.sh | bash",
+    "arch": "curl -fsSL https://claude.ai/install.sh | bash"
+  },
+  "link": "https://docs.claude.com/en/docs/claude-code/setup"
+}

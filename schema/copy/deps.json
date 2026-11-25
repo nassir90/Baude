@@ -1,0 +1,14 @@
+{
+  "description": "Dependencies (schema/deps): what a feature shows in its place when a program or library it needs isn't there (every app alike, a host's reported by its host), and Settings → Dependencies.",
+  "messages": {
+    "title": "Dependencies",
+    "needs": "{$feature} needs {$dep}",
+    "not_installed": "{$dep} isn't installed",
+    "needs_fix": "{$feature} needs {$dep}. Install it with {$fix}",
+    "needs_link": "{$feature} needs {$dep}. Install it from {$link}",
+    "not_installed_fix": "{$dep} isn't installed. Install it with {$fix}",
+    "installed": "Installed",
+    "install_page": "Install Page",
+    "copied_restart": "Copied: run it in a terminal, then Restart"
+  }
+}

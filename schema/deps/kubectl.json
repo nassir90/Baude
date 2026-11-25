@@ -1,0 +1,17 @@
+{
+  "description": "kubectl, which the Kubernetes view reads a host's clusters with and opens a pod's logs and shell through.",
+  "name": "kubectl",
+  "where": "host",
+  "needed_by": ["window.kubernetes"],
+  "detect": {
+    "macos": [{"env": "BAUDE_KUBECTL"}, {"which": "kubectl"}],
+    "linux": [{"env": "BAUDE_KUBECTL"}, {"which": "kubectl"}]
+  },
+  "install": {
+    "macos": "brew install kubectl",
+    "debian": "sudo snap install kubectl --classic",
+    "fedora": "sudo dnf install kubectl",
+    "arch": "sudo pacman -S kubectl"
+  },
+  "link": "https://kubernetes.io/docs/tasks/tools/"
+}

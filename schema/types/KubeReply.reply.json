@@ -104,6 +104,10 @@
     "said": {
       "type": "string",
       "description": "delete: what kubectl said."
+    },
+    "missing": {
+      "$ref": "Dep.json",
+      "description": "kubectl isn't on the host: the Kubernetes view shows this in its place."
     }
   },
   "required": ["op"],

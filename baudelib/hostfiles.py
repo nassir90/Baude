@@ -10,7 +10,7 @@ import sqlite3
 import subprocess
 import threading
 
-from baudelib import wording
+from baudelib import deps, wording
 
 DIR_LIMIT = 2000      # the most entries a folder's listing has
 LOG_LIMIT = 200       # the most commits a log has at once
@@ -266,6 +266,8 @@ def git(server, msg):
     if what == "pulls":
         return _pulls(server, msg)
     cwd = _inside(server, msg.get("cwd"), checkout=what == "log")
+    if (missing := deps.missing("git")) is not None:  # (nothing read: what the page shows instead)
+        return {"what": what, **({"folder": cwd} if what == "page" else {}), "missing": missing}
     if what == "page":
         return _page(server, msg, cwd)
     top, err = _git(cwd, "rev-parse", "--show-toplevel")

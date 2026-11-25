@@ -132,6 +132,8 @@ class Settings(Adw.PreferencesDialog):
         self.add(page)
         import subscriptionpage
         self.add(subscriptionpage.Page(win))
+        import depsview
+        self.add(depsview.Page(win, "Record"))
         copies, stop = json.loads(json.dumps([notebooks for _title, _action, notebooks in exports])), threading.Event()
         self.connect("closed", lambda *_: stop.set())  # (nothing to say them to: no more reading large chats)
         threading.Thread(target=Settings._work_out_sizes, args=([self], copies, stop), daemon=True).start()

@@ -12,7 +12,7 @@ import time
 import uuid
 
 from baudelib import (
-    agentproxy, desktopchats, emissionlink, emissiontools, hostaccounts, hostdb, hostfiles, hostfixes, hostkube,
+    agentproxy, deps, desktopchats, emissionlink, emissiontools, hostaccounts, hostdb, hostfiles, hostfixes, hostkube,
     hostlogin, mesh, meshtools, hostterminal, multiplexlink, notes, routines, wire, wording, worktree,
 )
 from baudelib.serverstate import (
@@ -226,6 +226,8 @@ class ServerRunning:
                 except worktree.Gone as e:  # (a chat's folder gone: what to do, said as it is)
                     conn.send({"op": "error", "req": msg.get("req"), "error": str(e), "plain": True,
                                "gone": {"why": e.why, "folder": e.folder}})
+                except deps.Missing as e:  # (a program a chat runs isn't here: what to install, said as it is)
+                    conn.send({"op": "error", "req": msg.get("req"), "error": str(e), "plain": True, "missing": e.dep})
                 except Exception as e:  # (one bad request doesn't end the connection)
                     conn.send({"op": "error", "req": msg.get("req"), "error": f"{type(e).__name__}: {e}"})
         finally:
@@ -441,6 +443,8 @@ class ServerRunning:
                     reply("error", error=f"{type(e).__name__}: {e}")
             threading.Thread(target=read, daemon=True, name=op).start()
             return None
+        if op == "deps":  # (what this host's features need, each there or not: Settings → Dependencies)
+            return reply("deps", deps=deps.report("host"))
         if op in ("kube", "databases"):  # (the clusters and databases here, read for a head elsewhere: hostkube, hostdb)
             def read():
                 try:

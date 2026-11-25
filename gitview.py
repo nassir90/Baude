@@ -45,7 +45,7 @@ from markdownview import on_label_link, sel_label  # noqa: E402,F401
 from widgets import empty_label  # noqa: E402
 import pointers  # noqa: E402
 from baudelib import tokens  # noqa: E402  (a diff's green and red: schema/tokens)
-from baudelib import wording  # noqa: E402
+from baudelib import deps, wording  # noqa: E402
 import gitread  # noqa: E402
 from gitread import (  # noqa: E402,F401  (what's read, with no GTK: a host answers with it too)
     AVATAR_ASK, GIT_FIND_LIMIT, GIT_LOG_LIMIT, GIT_MERGE_LIMIT, _CHAT_GIT, _CHAT_PR_CODE, _CHAT_PR_NAMED, _CHAT_PR_URL,
@@ -686,6 +686,9 @@ class GitPage(Gtk.Stack):
                                    margin_bottom=12)
         detail.append(Gtk.ScrolledWindow(child=self.detail_body, vexpand=True, hscrollbar_policy=Gtk.PolicyType.NEVER))
         self.add_named(detail, "detail")
+        import depsview
+        self.missing = depsview.Missing(again=self.load)  # (git isn't here: what the page shows instead)
+        self.add_named(self.missing, "missing")
 
     # ---- what to show
     def chat_folder(self):
@@ -900,6 +903,8 @@ class GitPage(Gtk.Stack):
     @staticmethod
     def gather(folder, transcript, picked, follow, every, then=None, gh=False, limit=GIT_LOG_LIMIT):
         """gitread.gather, and the authors' pictures looked for in what it read."""
+        if (missing := deps.missing("git")) is not None:  # (nothing read: what the page shows instead)
+            return {"top": None, "folder": folder, "missing": missing}
         res = gitread.gather(folder, transcript, picked, follow, every, then, gh, limit)
         if res["top"]:
             AVATARS.recall(res["commits"], res["repo"])
@@ -915,6 +920,12 @@ class GitPage(Gtk.Stack):
         while (row := self.list.get_first_child()) is not None:
             self.list.remove(row)
             discard(row)
+        if not self.top and res.get("missing"):
+            self.missing.show(res["missing"], "git.title")
+            self.set_visible_child_name("missing")
+            return False
+        if self.get_visible_child_name() == "missing":  # (git's here now)
+            self.set_visible_child_name("list")
         if not self.top:
             self.where.set_label(pretty_path(res["folder"] or ""))
             self.info.set_label(wording.say("host_errors.not_a_repo"))

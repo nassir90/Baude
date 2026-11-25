@@ -207,8 +207,12 @@ class ShellTab(DockTab):
         i = self.container.get_selected()
         if not 0 <= i < len(self.containers):
             return
-        if (why := multiplexterm.available()) is not None:
-            self.state.set_label(why)
+        if (dep := multiplexterm.missing()) is not None:  # (what the shell shows instead: VTE, and how it's installed)
+            import depsview
+            if self.slot.get_first_child() is None:
+                missing = depsview.Missing()
+                missing.show(dep, "multiplex.terminal_menu")
+                self.slot.append(missing)
             return
         context, ns, pod = self.pod_key
         args = ["--context", context, "exec", "-it", "-n", ns, pod, "-c", self.containers[i], "--", *SHELL]

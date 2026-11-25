@@ -19,7 +19,7 @@ if ROOT not in sys.path:  # (as server.catalogue has it: the modules at the root
 import kubedata as kd  # noqa: E402
 import lookup  # noqa: E402
 import lookupkube  # noqa: E402
-from baudelib import wording  # noqa: E402
+from baudelib import deps, wording  # noqa: E402
 
 PAGES = {p["resource"]: p for _title, pages in kd.KUBE_SECTIONS for p in pages}
 _CUSTOM = {}  # (context, definition) -> the page its objects have
@@ -182,6 +182,8 @@ def answer(server, msg):
     what, context = msg.get("what"), msg.get("context")
     if (bad := _unsafe(msg)) is not None:
         return {"what": what, "error": f"{bad} can't start with -"}
+    if (missing := deps.missing("kubectl")) is not None:  # (nothing kubectl reads is read: what the view shows instead)
+        return {"what": what, "missing": missing}
     try:
         if what == "contexts":
             return {"what": what, **_contexts()}

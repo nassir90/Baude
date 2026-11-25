@@ -718,7 +718,8 @@ class SignalTools:
         if not lsp_node():
             if "no node" not in self.lsp_said:
                 self.lsp_said.add("no node")
-                self._tell(entry="Language servers need Node.js, which isn't installed: code names are found by search")
+                from baudelib import deps
+                self._tell(entry=deps.say(deps.info("node", here=False), "side_panel.signal"))
         elif on is None and "asked" not in self.lsp_said:
             self.lsp_said.add("asked")
             GLib.idle_add(self._ask_lsp)

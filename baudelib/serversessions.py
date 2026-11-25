@@ -12,7 +12,7 @@ import uuid
 
 from baudelib import (
     accounts, agentproxy, claude, codex, emissiontools, meshtools, models, multiplextools, notes, transcripts, wire, wording,
-    desktopchats, worktree,
+    deps, desktopchats, worktree,
 )
 from baudelib.serverstate import (
     AGENT_TOOLS, CATALOGUE_LIMIT, CATALOGUE_WAIT_S, CHECK_SOCKET_S, CLAUDE_OPTIONS, COMMAND_TOOLS, FILE_LIMIT,
@@ -208,6 +208,9 @@ class ServerSessions:
         resumed = s.transcript() is not None
         run = models.launch(s.meta.get("model"), s.meta.get("mode"), s.meta.get("effort"),
                             s.meta.get("cli_id") or s.id, resumed=resumed)
+        program = models.model_program(s.meta.get("model"))
+        if program in ("claude", "codex") and (missing := deps.missing(program)) is not None:  # (its program isn't
+            raise deps.Missing(missing, "report.claude" if program == "claude" else "programs.codex")  # here at all)
         if not self.can_run(s.meta.get("model")):
             raise OSError(wording.say("host_errors.cant_run", host=self.me["name"], model=s.meta.get("model")))
         extra = list(run["extra"])

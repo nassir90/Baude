@@ -39,13 +39,15 @@ def engine():
             return None, ("Emission needs macOS 14 or later: that's where WebKit keeps a profile's cookies and logins "
                           "apart from the others'.")
         return MacWeb, None
+    from baudelib import deps
     try:
+        if "webkit" in deps.hidden():  # (fault injection: as if it weren't there)
+            raise ImportError("webkit")
         gi.require_version("WebKit", "6.0")
         from gi.repository import WebKit  # noqa: F401
         return GtkWeb, None
     except (ValueError, ImportError):
-        return None, ("Emission draws pages with WebKitGTK 6.0, which isn't installed here: its package is "
-                      "gir1.2-webkit-6.0 on Debian and Ubuntu, webkitgtk-6.0 on Arch and Fedora.")
+        return None, deps.say(deps.info("webkit", here=False), "bot_browser.title")
 
 
 class Window(Adw.ApplicationWindow):
@@ -77,6 +79,8 @@ class Window(Adw.ApplicationWindow):
             self.note = pending_note(profile_id(profile) or "")
             self.reopened = pending_note(profile_id(profile) or "", slot="reopen")
         self.Engine, why = engine()
+        from baudelib import deps  # (WebKitGTK missing, on Linux: shown as every app shows a missing dependency)
+        self.lacks = deps.missing("webkit", here=self.Engine is not None) if sys.platform != "darwin" else None
         self.profile, self.profile_id, self.tabs = profile, profile_id(profile) or add_profile(profile), {}
         self.agent, self.control, self.waiting, self.downloads = agent, Control(self), {}, []
         self.used = GLib.get_monotonic_time()
@@ -433,10 +437,16 @@ class Window(Adw.ApplicationWindow):
             if self.status is None:
                 if self.view.get_parent() is not None:
                     self.body.remove(self.view)
-                self.status = Adw.StatusPage(icon_name="web-browser-symbolic", title="Can't show pages",
-                                             vexpand=True)
+                if self.lacks is not None:
+                    import depsview
+                    self.status = depsview.Missing()
+                    self.status.show(self.lacks, "bot_browser.title")
+                else:
+                    self.status = Adw.StatusPage(icon_name="web-browser-symbolic", title="Can't show pages",
+                                                 vexpand=True)
                 self.body.append(self.status)
-            self.status.set_description(why)
+            if isinstance(self.status, Adw.StatusPage):
+                self.status.set_description(why)
         elif self.status is not None or self.view.get_parent() is None:
             if self.status is not None:
                 self.body.remove(self.status)

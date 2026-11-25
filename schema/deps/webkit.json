@@ -1,0 +1,15 @@
+{
+  "description": "WebKitGTK 6.0, which draws Emission's pages on Linux (the Browser page, a Bot's browser). macOS's own WebKit draws them there, so macOS needs nothing.",
+  "name": "WebKitGTK",
+  "where": "app",
+  "needed_by": ["bot_browser.title", "mesh_versions.emission"],
+  "detect": {
+    "linux": [{"gi": "WebKit", "version": "6.0"}]
+  },
+  "install": {
+    "debian": "sudo apt install gir1.2-webkit-6.0",
+    "fedora": "sudo dnf install webkitgtk6.0",
+    "arch": "sudo pacman -S webkitgtk-6.0"
+  },
+  "link": "https://webkitgtk.org"
+}

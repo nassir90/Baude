@@ -21,7 +21,7 @@ try:
 except (ValueError, ImportError):
     Vte = None
 from gi.repository import Adw, Gdk, GLib, Graphene, Gtk, Pango  # noqa: E402
-from baudelib import clearrelay, multiplexlink, tokens, wording  # noqa: E402
+from baudelib import clearrelay, deps, multiplexlink, tokens, wording  # noqa: E402
 
 SCROLLBACK = 10000  # (lines kept above the screen)
 SETTLE_S = 0.4  # (no output this long: what was typed has had its answer, as far as a Bot's told)
@@ -37,12 +37,15 @@ KEYS = {"enter": "\r", "return": "\r", "tab": "\t", "escape": "\x1b", "esc": "\x
         "f7": "\x1b[18~", "f8": "\x1b[19~", "f9": "\x1b[20~", "f10": "\x1b[21~", "f11": "\x1b[23~", "f12": "\x1b[24~"}
 
 
+def missing():
+    """VTE (a Dep: baudelib.deps'), if its GTK 4 build isn't here to draw terminals with; else None."""
+    return deps.missing("vte", here=Vte is not None)
+
+
 def available():
-    """Why there are no terminals here (VTE's GTK 4 build isn't installed), or None."""
-    if Vte is not None:
-        return None
-    fix = wording.say("multiplex.vte_fix_mac" if sys.platform == "darwin" else "multiplex.vte_fix_linux")
-    return wording.say("multiplex.no_vte", fix=fix)
+    """Why there are no terminals here, in a line (Multiplex's, on stderr), or None."""
+    dep = missing()
+    return None if dep is None else deps.say(dep, "multiplex.terminal_menu")
 
 
 def shortcuts(widget, actions):

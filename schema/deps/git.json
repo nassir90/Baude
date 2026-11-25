@@ -1,0 +1,17 @@
+{
+  "description": "git, which the Git page reads a chat's folder with, and worktrees are made with. On macOS /usr/bin/git only asks for the Command Line Tools until they're installed, so it counts only once they are.",
+  "name": "Git",
+  "where": "host",
+  "needed_by": ["git.title"],
+  "detect": {
+    "macos": [{"which": "git", "not": "/usr/bin/git"}, {"run": ["xcode-select", "-p"]}],
+    "linux": [{"which": "git"}]
+  },
+  "install": {
+    "macos": "xcode-select --install",
+    "debian": "sudo apt install git",
+    "fedora": "sudo dnf install git",
+    "arch": "sudo pacman -S git"
+  },
+  "link": "https://git-scm.com/downloads"
+}

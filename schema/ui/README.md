@@ -84,6 +84,17 @@ An entry or a part may carry:
     (the phone's `popup.row` is 34, a bar button's side, for a finger), modelbutton's 12 px sides (the phone's
     `popup.inset` too), a toggle's check before its text, and
     Adw.AlertDialog's own width (the phone's follows the chat).
+- **A missing dependency is shown one way.** Where a feature needs a program or library that isn't there
+  (schema/deps: VTE, WebKitGTK, kubectl, Docker, Claude Code, Codex CLI, Git, GitHub CLI, Node.js, Xvfb), every app
+  shows the same thing in the feature's place, never a toast alone, a raw error or nothing: a package icon
+  (`package-x-generic-symbolic`), "<Feature> needs <dependency>" ("Git isn't installed" where they share a name), the
+  command that installs it on that machine in monospace with Copy (else its install page), and Try again, or Restart
+  for the app's own library (loaded as it starts). A host's are the host's to say (its deps request, a reply's
+  `missing`), so the phone and another machine's apps show what that host lacks with that host's command; where only a
+  line fits (a chat's note, stderr, Signal's note) it's that sentence with the command. Settings → Dependencies lists
+  them all (Dependencies.dialog.json). `BAUDE_HIDE_DEPS=kubectl,…` makes any of them missing, to see each case. The
+  owner asked for proper guidance for installing what Baude depends on and for how it behaves without it (2026-11-22).
+  Source: `[{"issue": "BaudeInternal#184"}, {"issue": "BaudeInternal#183"}, {"session": "f1afb37a-90af-47d8-8693-d537464b4022", "message": "a1bc42a8-97d0-4dad-98b0-d3a42bfa155e"}]`.
 - **Every piece of text starts with a capital letter.** Whatever an app puts on screen starts with a capital: notes and
   messages (a chat's SystemNote, an error, a status line) in sentence case ("Interrupted", "Model → Opus", "Committed on
   main", "Claude couldn't save this chat: the disk is full"), buttons, menu items and links in Title Case ("Show in

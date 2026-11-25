@@ -308,6 +308,7 @@ fun GitPage(hostId: String, sid: String, here: Boolean, openPage: (String) -> Un
     }
     state.card?.let { sha -> return CommitCard(state, hostId, sid, cwd.orEmpty(), sha, openPage) }
     val page = state.page
+    page?.missing?.let { dep -> return MissingDep(dep, Wording.Git.title) { cwd?.let { state.load(it, lines) } } }
     val repo = page != null && page.error.isNullOrBlank() && !page.top.isNullOrBlank()
     PullStates.version.intValue
     val prs = if (repo) PullStates.of(hostId, page!!.repo)?.prs else null

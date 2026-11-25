@@ -119,7 +119,8 @@ class TerminalView(Gtk.Box):
         new.connect("clicked", lambda *_: self.pane.open())
         out = Gtk.Button(icon_name="window-new-symbolic", tooltip_text=OUT_TIP)
         out.connect("clicked", lambda *_: self.put_out())
-        for b in (new, out):
+        self.buttons, self.missing = (new, out), None  # (missing: what's shown without VTE: show_missing)
+        for b in self.buttons:
             b.add_css_class("flat")
             bar.append(b)
         close = Gtk.Button(icon_name="window-close-symbolic", tooltip_text=wording.say("images.close"))
@@ -156,8 +157,8 @@ class TerminalView(Gtk.Box):
     def open(self):
         """Shown, with a terminal on the host picked if it has none; or, out, its window brought up."""
         import multiplexterm
-        if why := multiplexterm.available():
-            widgets.toast(self.win, why)
+        if (dep := multiplexterm.missing()) is not None:  # (no terminals: what's missing shown in their place)
+            self.show_missing(dep)
             return
         if self.window is not None:
             self.window.present()
@@ -169,6 +170,18 @@ class TerminalView(Gtk.Box):
             self.pane.open()
         else:
             self.pane._focus()
+
+    def show_missing(self, dep):
+        """VTE isn't here: the view shown with what to install in place of its tabs, and nothing to open."""
+        import depsview
+        if self.missing is None:
+            self.missing = depsview.Missing()
+            self.body.remove(self.pane)
+            self.body.append(self.missing)
+            for b in self.buttons:
+                b.set_sensitive(False)
+        self.missing.show(dep, "multiplex.terminal_menu")
+        self.set_visible(True)
 
     def close(self):
         self.set_visible(False)

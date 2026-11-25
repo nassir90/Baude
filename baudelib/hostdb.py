@@ -12,7 +12,7 @@ if ROOT not in sys.path:  # (as server.catalogue has it: the modules at the root
 
 import lookupkube  # noqa: E402
 import schemadata  # noqa: E402
-from baudelib import wording  # noqa: E402
+from baudelib import deps, wording  # noqa: E402
 
 
 def _server(container):
@@ -25,12 +25,16 @@ def _server(container):
 def _servers():
     try:
         servers = lookupkube.pg_servers_cached()
+        if not servers and (missing := deps.missing("docker")) is not None:  # (none found, and no Docker to look in)
+            return {"missing": missing}
         if not servers:
             return {"error": wording.say("databases.no_postgres")}
         return {"servers": [{"container": s["container"], "engine": s.get("engine") or "postgres",
                              "version": s.get("version") or ""} for s in servers],
                 "databases": {s["container"]: lookupkube.pg_databases_cached(s) for s in servers}}
     except RuntimeError as e:
+        if (missing := deps.missing("docker")) is not None:
+            return {"missing": missing}
         return {"error": wording.say("databases.docker_unreachable", why=str(e))}
 
 

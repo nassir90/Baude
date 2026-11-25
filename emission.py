@@ -15,7 +15,6 @@ emissionwindow.py (the window). Here: its logo, the launchers, the app.
 import argparse
 import ctypes
 import os
-import shutil
 import sys
 
 import macos  # noqa: E402  (no GTK: before it's loaded)
@@ -127,8 +126,9 @@ def with_display(own=False):
     if sys.platform == "darwin" or os.environ.get("EMISSION_VIRTUAL_DISPLAY") or not own and (
             os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")):
         return None
-    if shutil.which("xvfb-run") is None:
-        return "There's no display here, and xvfb-run (package xvfb) isn't installed to make one."
+    from baudelib import deps
+    if (missing := deps.missing("xvfb")) is not None:  # (no display here, and nothing to make one with)
+        return deps.say(missing, "bot_browser.title")
     env = {**os.environ, "EMISSION_VIRTUAL_DISPLAY": "1", "GDK_BACKEND": "x11"}
     os.execvpe("xvfb-run", ["xvfb-run", "--auto-servernum", f"--server-args=-screen 0 {SCREEN[0]}x{SCREEN[1]}x24", sys.executable,
                             os.path.abspath(__file__), *sys.argv[1:]], env)

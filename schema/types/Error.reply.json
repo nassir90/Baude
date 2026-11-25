@@ -31,6 +31,10 @@
       "$ref": "GoneFolder.json",
       "description": "A session's folder gone and not made again."
     },
+    "missing": {
+      "$ref": "Dep.json",
+      "description": "What a chat's program needs that the host hasn't (claude, codex): error says what to install."
+    },
     "session": {
       "type": "string",
       "description": "memory's refusal: the session."

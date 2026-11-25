@@ -168,6 +168,49 @@ abstract class Screens(private val theme: String) {
         screen("05c-subscriptions-token")
     }
 
+    // (a host without kubectl or Docker, its own commands for them (a Debian host's): what Kubernetes and Database
+    // Schemas show in their place, and Settings → Dependencies, the host's list)
+    @Test fun missingKubectl() {
+        missingFixture()
+        show { dev.baude.android.KubeScreen(Mesh.hosts.first().id, {}) }
+        laidOut()
+        screen("40a-missing-kubectl")
+    }
+
+    @Test fun missingDocker() {
+        missingFixture()
+        show { dev.baude.android.DatabaseScreen(Mesh.hosts.first().id, {}) }
+        laidOut()
+        screen("40b-missing-docker")
+    }
+
+    @Test fun dependencies() {
+        missingFixture()
+        show { SettingsScreen({}, {}, page = 2) }
+        laidOut()
+        screen("40c-dependencies")
+    }
+
+    private fun missingFixture() {
+        fun dep(key: String, name: String, present: Boolean, fix: String) = org.json.JSONObject().put("dep", key)
+            .put("name", name).put("where", "host").put("present", present).put("fix", fix)
+        val kubectl = dep("kubectl", "kubectl", false, "sudo snap install kubectl --classic")
+        val docker = dep("docker", "Docker", false, "sudo apt install docker.io")
+        FixtureConnection.up(activity, Mesh.hosts.first()) { m ->
+            val r = org.json.JSONObject().put("op", m.optString("op")).put("req", m.opt("req"))
+            when (m.optString("op")) {
+                "kube" -> r.put("what", m.optString("what")).put("missing", kubectl)
+                "databases" -> r.put("what", m.optString("what")).put("missing", docker)
+                "deps" -> r.put("deps", org.json.JSONArray(listOf(
+                    dep("claude", "Claude Code", true, "curl -fsSL https://claude.ai/install.sh | bash"),
+                    dep("codex", "Codex CLI", false, "npm install -g @openai/codex"), docker,
+                    dep("gh", "GitHub CLI", true, "sudo apt install gh"), dep("git", "Git", true, "sudo apt install git"),
+                    kubectl, dep("xvfb", "Xvfb", true, "sudo apt install xvfb"))))
+                else -> null
+            }
+        }
+    }
+
     private fun accountsFixture() {
         FixtureConnection.up(activity, Mesh.hosts.first()) { m ->
             if (m.optString("op") != "accounts") null

@@ -1,0 +1,17 @@
+{
+  "description": "Node.js, which runs the language servers Signal finds code names with (without it, names are found by search).",
+  "name": "Node.js",
+  "where": "app",
+  "needed_by": ["side_panel.signal"],
+  "detect": {
+    "macos": [{"which": "node"}, {"glob": "~/.nvm/versions/node/v*/bin/node"}],
+    "linux": [{"which": "node"}, {"glob": "~/.nvm/versions/node/v*/bin/node"}]
+  },
+  "install": {
+    "macos": "brew install node",
+    "debian": "sudo apt install nodejs npm",
+    "fedora": "sudo dnf install nodejs npm",
+    "arch": "sudo pacman -S nodejs npm"
+  },
+  "link": "https://nodejs.org/en/download"
+}

@@ -1,0 +1,17 @@
+{
+  "description": "VTE's GTK 4 build, which draws every terminal in Baude and Record: ☰ → Terminal, a Kubernetes pod's shell, Multiplex.",
+  "name": "VTE",
+  "where": "app",
+  "needed_by": ["multiplex.terminal_menu", "window.kubernetes"],
+  "detect": {
+    "macos": [{"gi": "Vte", "version": "3.91"}],
+    "linux": [{"gi": "Vte", "version": "3.91"}]
+  },
+  "install": {
+    "macos": "brew install vte3",
+    "debian": "sudo apt install gir1.2-vte-3.91",
+    "fedora": "sudo dnf install vte291-gtk4",
+    "arch": "sudo pacman -S vte4"
+  },
+  "link": "https://gitlab.gnome.org/GNOME/vte"
+}

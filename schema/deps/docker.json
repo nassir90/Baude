@@ -1,0 +1,17 @@
+{
+  "description": "Docker, which Database Schemas finds a host's running Postgres and ArangoDB servers in.",
+  "name": "Docker",
+  "where": "host",
+  "needed_by": ["window.database_schemas"],
+  "detect": {
+    "macos": [{"which": "docker"}],
+    "linux": [{"which": "docker"}]
+  },
+  "install": {
+    "macos": "brew install --cask docker",
+    "debian": "sudo apt install docker.io",
+    "fedora": "sudo dnf install moby-engine",
+    "arch": "sudo pacman -S docker"
+  },
+  "link": "https://docs.docker.com/get-started/get-docker/"
+}

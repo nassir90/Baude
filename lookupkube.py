@@ -435,6 +435,9 @@ def at_once(fn, items, workers=8):
 
 def _docker(*args, stdin=None, timeout=30):
     """docker's output, or raise RuntimeError with what it said."""
+    from baudelib import deps
+    if "docker" in deps.hidden():  # (fault injection: as if it weren't there)
+        raise RuntimeError("docker: not found")
     try:
         p = subprocess.run(["docker", *args], input=stdin, capture_output=True, text=True, timeout=timeout)
     except (OSError, subprocess.TimeoutExpired) as e:

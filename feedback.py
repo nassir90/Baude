@@ -23,7 +23,8 @@ import pointers  # noqa: E402
 from widgets import FEEDBACK_KEY, ZOOM_MODS, discard, fit_size, scaled_texture, screen_scale, walk  # noqa: E402,F401
 from imageviews import FixedPicture  # noqa: E402,F401
 from chatparts import ShutBar  # noqa: E402,F401
-from composerview import no_text_drag  # noqa: E402,F401
+import composerview  # noqa: E402
+from composerview import ComposerMarkdown, no_text_drag  # noqa: E402,F401
 from pickers import _data_home  # noqa: E402,F401
 
 
@@ -741,15 +742,17 @@ class FeedbackDraft:
 
     def __init__(self):
         self.text, self.captures = "", []
+        self.send_transcript = False
 
     def state(self):
         """As a restart keeps it, if there's anything in it."""
-        return {"text": self.text, "captures": [c.state() for c in self.captures]} \
+        return {"text": self.text, "send_transcript": self.send_transcript, "captures": [c.state() for c in self.captures]} \
             if self.text.strip() or self.captures else None
 
     @classmethod
     def from_state(cls, state):
         draft = cls()
+        draft.send_transcript = state.get("send_transcript", False)
         draft.text, draft.captures = state["text"], [Capture.from_state(c) for c in state["captures"]]
         return draft
 
@@ -781,9 +784,13 @@ class FeedbackDialog(Adw.Dialog):
         body.append(self.strip)
         # (the text's right margin keeps it from running under the +)
         self.text = Gtk.TextView(wrap_mode=Gtk.WrapMode.WORD_CHAR, top_margin=10, bottom_margin=10,
-                                 left_margin=10, right_margin=58)
+                                 left_margin=10, right_margin=58, accepts_tab=False)
         self.text.add_css_class("feedback-text")
         no_text_drag(self.text)  # (a selection isn't dragged away: a press in it places the caret)
+        self.markdown = ComposerMarkdown(self.text)
+        keys = Gtk.EventControllerKey()
+        keys.connect("key-pressed", self._note_key)
+        self.text.add_controller(keys)
         self.text.get_buffer().set_text(draft.text)
         self.text.get_buffer().connect("changed", lambda *_: self.sync())
         frame = Gtk.ScrolledWindow(child=self.text, min_content_height=140, max_content_height=280,
@@ -802,6 +809,10 @@ class FeedbackDialog(Adw.Dialog):
         actions.append(self.add_btn)
         self.box.add_overlay(actions)
         body.append(self.box)
+        if hasattr(win, "report"):
+            include = Gtk.CheckButton(label=wording.say("feedback.attach_transcripts"), active=draft.send_transcript)
+            include.connect("toggled", lambda button: setattr(draft, "send_transcript", button.get_active()))
+            body.append(include)
         tv.set_content(body)
         self.set_child(tv)
         self.repo = None
@@ -819,12 +830,21 @@ class FeedbackDialog(Adw.Dialog):
                 lambda *_: (self.save() if self.save_btn.get_sensitive() else None) or True)))
         self.add_controller(keys)
 
+    def _note_key(self, _c, keyval, _code, state):
+        """Enter in the note is a new line (a list's next item), Tab a list item in a level, as in the chat's box;
+        Ctrl+Enter (⌘Enter) is left to Save."""
+        if composerview.tab_key(self.markdown, keyval, state):
+            return True
+        if keyval in (Gdk.KEY_Return, Gdk.KEY_KP_Enter) and not composerview.sends(state):
+            return composerview.newline_key(self.markdown, state)
+        return False
+
     def found_repo(self, repo):
         self.repo = repo
 
     def sync(self):
         buf = self.text.get_buffer()
-        self.draft.text = buf.get_text(buf.get_start_iter(), buf.get_end_iter(), False)
+        self.draft.text = self.markdown.to_markdown(buf.get_text(buf.get_start_iter(), buf.get_end_iter(), True))
         self.save_btn.set_sensitive(bool(self.draft.text.strip() or self.draft.captures))
 
     def fill(self):
@@ -922,6 +942,8 @@ def save_feedback(draft, renderer, win=None):
     lines = [f"# Feedback {time.strftime('%Y-%m-%d %H:%M')}", "", draft.text.strip() or "(no text)", ""]
     # (- session: … (title), - folder: …, the app's path)
     context = win.feedback_context() if win is not None and hasattr(win, "feedback_context") else []
+    if draft.send_transcript and hasattr(win, "feedback_transcripts"):
+        context += win.feedback_transcripts()
     if context or any(cap.regions for cap in draft.captures):
         lines += ["## Context", "", *context, ""]
     for n, cap in enumerate(draft.captures, 1):

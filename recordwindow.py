@@ -715,8 +715,10 @@ class Window(RecordHosts, Adw.ApplicationWindow, feedback.FeedbackHost, viewers.
         return [f"- session: {os.path.splitext(os.path.basename(chat.get('path') or '-'))[0]} "
                 f"({book()} {full_name(t) if t else '-'})",
                 wording.say("report.folder_line", folder=folders[0] if folders else '-'),
-                f"- Record: {os.path.join(os.path.dirname(os.path.realpath(__file__)), 'record.py')}",
-                *feedback.report_lines([(wording.say("report.the_chat"), self.report), ("Meta", self.chat.report)])]
+                f"- Record: {os.path.join(os.path.dirname(os.path.realpath(__file__)), 'record.py')}"]
+
+    def feedback_transcripts(self):
+        return feedback.report_lines([(wording.say("report.the_chat"), self.report), ("Meta", self.chat.report)])
 
     def report(self, most=None):
         """The chat open as text for an issue (Copy Transcript for an Issue; a note sent with Send Feedback): its model

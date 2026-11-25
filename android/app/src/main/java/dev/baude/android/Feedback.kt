@@ -33,10 +33,15 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 import org.json.JSONArray
 import org.json.JSONObject
@@ -115,6 +120,15 @@ fun FeedbackScreen(context: List<String>, back: () -> Unit) {
     val c = LocalBaude.current
     val ctx = LocalContext.current
     var text by rememberSaveable { mutableStateOf("") }
+    var field by remember { mutableStateOf(TextFieldValue(text, TextRange(text.length))) }
+    val composer = remember { ComposerState() }
+    var layout by remember { mutableStateOf<androidx.compose.ui.text.TextLayoutResult?>(null) }
+    val caretLine = field.text.substring(0, field.selection.end.coerceIn(0, field.text.length)).count { it == '\n' }
+    val look = remember(field.text, caretLine, c) {
+        ComposerLook(caretLine, { false }, null, c.fg, Tokens.Color.reference, Tokens.Color.referenceTint,
+            Type.body.fontSize * Tokens.Markdown.h1.toFloat(), Type.body.fontSize * Tokens.Markdown.h2.toFloat(),
+            SpanStyle(fontFamily = CodeFont.family, fontSize = Tokens.Font.mono))
+    }
     val id = rememberSaveable { "android-" + UUID.randomUUID().toString().replace("-", "").take(16) }
     Mesh.tick.value
     val up = Mesh.reached("feedback").filter { (h, _) -> Mesh.hosts.any { it.id == h } } // (a host of yours that files it)
@@ -133,7 +147,7 @@ fun FeedbackScreen(context: List<String>, back: () -> Unit) {
         val app = Mesh.app
         val h = host
         val repo = target
-        Outbox.keep(id, text, full, h ?: "")
+        Outbox.keep(id, toMarkdown(text), full, h ?: "")
         back()
         Toast.makeText(app, if (h != null) Wording.Feedback.savedFiling else Wording.Feedback.saved, Toast.LENGTH_LONG).show()
         if (h != null) Outbox.send(id, h) { r ->
@@ -153,9 +167,13 @@ fun FeedbackScreen(context: List<String>, back: () -> Unit) {
             // what should change: a card as the composer is (Baude's Feedback window's one text box)
             Box(Modifier.fillMaxWidth().heightIn(min = 140.dp, max = 280.dp).clip(RoundedCornerShape(Gap.composerRadius))
                 .background(c.inside).border(1.dp, c.rule, RoundedCornerShape(Gap.composerRadius)).padding(12.dp)) {
-                BasicTextField(text, { text = it }, textStyle = Type.body.copy(color = c.fg),
-                    cursorBrush = SolidColor(c.accentBg), modifier = Modifier.fillMaxWidth().heightIn(min = 116.dp)
-                        .focusRequester(focus))
+                BasicTextField(field, { v -> field = composerEdit(field, v, composer); text = field.text },
+                    textStyle = Type.body.copy(color = c.fg), cursorBrush = SolidColor(c.accentBg),
+                    visualTransformation = look, onTextLayout = { layout = it },
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 116.dp)
+                        .drawBehind { look.drawBlocks(this, layout, c.fg.copy(alpha = c.fg.alpha * 0.07f), Tokens.Radius.code, 2.dp) }
+                        .focusRequester(focus)
+                        .onPreviewKeyEvent { e -> composerKey(e, field, composer)?.let { field = it; text = it.text; true } ?: false })
             }
         }
     }

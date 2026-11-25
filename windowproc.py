@@ -367,8 +367,13 @@ class WindowProc:
     def runs_here(self):
         """Is the chat's claude this process's own (ClaudeProc)? A Claude Desktop chat's (desktop_chat, however it's
         opened: is_desktop). Else every chat of Baude's, new or on this machine already, runs in the host process
-        (take_up), as a host's session does, so a restart or an update of Baude's never stops it."""
-        return self.remote is None and (self.desktop_chat or is_desktop(self.session_id))
+        (take_up), as a host's session does, so a restart or an update of Baude's never stops it. Not a Desktop chat this
+        machine's host has taken up (for another machine's head): that host's claude is its one writer here."""
+        return self.remote is None and (self.desktop_chat or is_desktop(self.session_id)) and not self.host_took_up()
+
+    def host_took_up(self):
+        """Has this machine's host taken up the viewed chat (it's one of its sessions, not one it only lists)?"""
+        return bool(self.session_id) and (r := local_host()) is not None and self.session_id in r.sessions
 
     def start_proc(self):
         if self.remote is not None:

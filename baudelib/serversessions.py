@@ -325,6 +325,7 @@ class ServerSessions:
         and kept (tell_said). again: one taken already, held for the turn going on (codex_queue)."""
         kind = msg.get("type")
         if kind == "user" and not again:
+            desktopchats.refuse_or_resync(s)  # (a Desktop chat someone else is writing: Elsewhere, said)
             if wire.is_id(msg.get("uuid") or ""):
                 taken = s.meta.setdefault("taken", [])
                 if msg["uuid"] in taken:
@@ -567,6 +568,7 @@ class ServerSessions:
                     self.keep(s, "user", message, said)
                 told, s.queued = s.queued, []
                 s.busy, s.used, s.acting = False, time.time(), False
+                s.note_written()  # (its own turn's lines: not another writer's, desktopchats.elsewhere)
                 s.routines_out.clear()
                 s.asks.clear()
                 if s.meta.get("context_usage") is not None:

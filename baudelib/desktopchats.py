@@ -190,14 +190,14 @@ class DesktopChats:
             kind, up = desktop_link(e)
             created = e.get("createdAt") / 1000 if isinstance(e.get("createdAt"), (int, float)) else None
             meta = {"id": cli, "cwd": e.get("cwd") if isinstance(e.get("cwd"), str) else None, "path": path,
-                    "title": e.get("title") or e.get("worktreeName") or None, "model": None, "prompt": "",
+                    "title": e.get("title") or e.get("worktreeName") or None, "prompt": "",
                     "created": created, "said": desktop_used(e) or created, "archived": e["_archived"],
                     "fork_from": local.get(up) if up else None, "desktop": True, "listed_only": True,
                     "init": self.server.me.get("init") or {}}
             s = self.chats.get(cli)
             if s is None:
-                s = Session(self.server, meta)
-            else:
+                s = Session(self.server, {**meta, "model": None})
+            else:  # (its model, mode and effort as picked here before it's taken up: take_up's)
                 s.meta.update(meta)
             try:
                 st = os.stat(path)
@@ -210,7 +210,7 @@ class DesktopChats:
                 kept.viewers |= s.viewers
                 kept.live |= s.live
         self.chats = chats
-        seen = sorted((s.id, s.meta.get("title"), s.meta.get("archived"), s.meta.get("said"), s.stat, elsewhere(s))
+        seen = sorted((s.id, s.meta.get("title"), s.meta.get("archived"), s.meta.get("said"), elsewhere(s))
                       for s in [*chats.values(), *(s for s in self.server.sessions.values() if s.meta.get("desktop"))])
         changed, self.seen = seen != self.seen, seen
         return changed
@@ -227,8 +227,9 @@ class DesktopChats:
         if d is None:
             return None
         s = self.server.adopt({"adopt": sid, "cwd": d.meta.get("cwd") or "~", "title": d.meta.get("title"),
-                               "group": ""})
+                               "group": "", **{k: d.meta[k] for k in ("model", "mode", "effort") if d.meta.get(k)}})
         s.meta["desktop"] = True
+        s.note_written()  # (as Desktop left it: what's written after it is the host's own, or another's: elsewhere)
         if d.meta.get("archived"):  # (archived in Desktop: archived here too)
             s.meta["archived"] = True
         s.viewers |= d.viewers
@@ -239,6 +240,33 @@ class DesktopChats:
         self.server.save(s)
         self.server.changed()
         return s
+
+
+class Elsewhere(ValueError):
+    """A message for a Desktop chat refused: someone else is writing it now (elsewhere)."""
+
+
+def restat(s):
+    """(lock held) A Desktop chat's transcript's (size, mtime) as it is now, for elsewhere, not as last looked at."""
+    try:
+        st = os.stat(s.transcript() or "")
+        s.stat = (st.st_size, st.st_mtime)
+    except OSError:
+        pass
+
+
+def refuse_or_resync(s):
+    """(lock held) Before a message is given a Desktop chat's agent: refused (Elsewhere, said) while someone else is
+    writing it (elsewhere); and the host's own claude, idle, let go of if its transcript's grown since it last left it
+    (written), so the next one --resumes it as it is now, not over what it doesn't know of."""
+    if not s.meta.get("desktop"):
+        return
+    restat(s)
+    if elsewhere(s):
+        raise Elsewhere(wording.say("host_errors.active_elsewhere"))
+    written = s.meta.get("written")
+    if s.proc is not None and not s.busy and s.stat and written is not None and s.stat[0] > written:
+        s.proc.stopping = s.proc.restarting = True  # (ensure_proc starts it again: those attached not told it went)
 
 
 def elsewhere(s):

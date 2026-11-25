@@ -368,6 +368,10 @@ class WindowRemote:
         for card in self.mesh_cards:  # (the chats they started or messaged: as their hosts list them now)
             card.refresh_header()
         self.show_held()
+        if self.remote is None and self.proc is not None and not self.busy \
+                and (self.desktop_chat or is_desktop(self.session_id)) and self.host_took_up():
+            self.restart_proc()  # (a Desktop chat this machine's host took up: its own claude let go, written in
+            # through the host from now on: runs_here)
         if self.remote is None:
             return
         self.sync_senders()

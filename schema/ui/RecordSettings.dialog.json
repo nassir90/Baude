@@ -28,6 +28,10 @@
   ],
   "parts": [
     {
+      "name": "Providers page",
+      "shows": "A Claude and a Codex account picker, with Add account for each provider. Claude also has a Subscription usage row."
+    },
+    {
       "name": "title",
       "shows": "\"Settings\"",
       "copy": [

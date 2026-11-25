@@ -104,7 +104,11 @@ class SettingsDialog(Adw.PreferencesDialog):
         self.feedback_row.connect("activated", lambda row: (row.get_ancestor(Adw.Dialog).close(), win.open_feedback()))
         group.add(self.feedback_row)
         page.add(group)
+        page.set_title("General")
+        page.set_icon_name("emblem-system-symbolic")
         self.add(page)
+        from providerpage import page as providers_page
+        self.add(providers_page())
 
     switch = staticmethod(settings_switch)  # (widgets': Record's Settings has them too)
     size_row = staticmethod(settings_size)

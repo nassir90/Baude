@@ -1,0 +1,25 @@
+{
+  "description": "Auto-fix: a chat's host following the pull request of the chat's branch and sending the chat what needs fixing (a failing check, a merge conflict, a new comment). Its toggle on the Git page (Baude's and the Android app's), its sender's name, the message it sends and why it can't be turned on.",
+  "messages": {
+    "title": "Auto-fix",
+    "tip": "Follow this pull request: a failing check, a merge conflict or a new comment is sent to this chat",
+    "intro": "Pull request #{$number} ({$repo}) needs fixing.",
+    "about": "Pull request #{$number} ({$repo}):",
+    "failing": "Check failing: {$name}",
+    "failing_at": "Check failing: {$name} ({$url})",
+    "conflict": "It conflicts with {$base}.",
+    "comment": "Comment from {$who}:",
+    "comment_on": "Comment from {$who} on {$path}:",
+    "review": "Review from {$who}, {$state}:",
+    "outside": "{$who} commented",
+    "ask": "Fix what it asks for, push the fix, and answer the comments that need an answer.",
+    "no_branch": "This chat's folder isn't on a branch",
+    "not_github": "This chat's folder isn't a GitHub repository",
+    "no_pr": "Branch {$branch} has no open pull request",
+    "couldnt": "Couldn't turn on Auto-fix: {$why}",
+    "couldnt_off": "Couldn't turn off Auto-fix: {$why}",
+    "signed_out": "gh isn't signed in",
+    "not_desktop": "Auto-fix isn't offered for Claude Desktop chats",
+    "stopped": "Auto-fix stopped: {$why}"
+  }
+}

@@ -437,6 +437,46 @@ abstract class Screens(private val theme: String) {
         activity.window.decorView.captureRoboImage("build/screenshots/$theme/47-pictures-git.png")
     }
 
+    /** The Git page on the chat's own branch, its pull request open (gh signed in): Auto-fix's toggle under it, off,
+     * then on as its host lists it. */
+    @Test fun gitAutofixOff() = gitAutofix("48-git-autofix-off", false)
+    @Test fun gitAutofixOn() = gitAutofix("49-git-autofix-on", true)
+
+    private fun gitAutofix(name: String, on: Boolean) {
+        val fixtures = java.io.File("../../tests/parity/fixtures")
+        val home = org.json.JSONObject(java.io.File(fixtures, "sessions.json").readText()).getJSONObject("host").getString("home")
+        val answers = org.json.JSONObject(java.io.File(fixtures, "git-answers.json").readText()).getJSONObject("answers")
+        val branch = "fix/upload-retry"
+        FixtureConnection.up(activity, Mesh.hosts.first(), home) { msg ->
+            val reply = org.json.JSONObject().put("op", "git").put("req", msg.opt("req")).put("what", msg.optString("what"))
+            if (msg.optString("op") != "git") null else when (msg.optString("what")) {
+                "page" -> org.json.JSONObject(answers.getJSONObject("page").toString().replace("@HOME@", home))
+                    .put("op", "git").put("req", msg.opt("req")).put("picked", org.json.JSONArray().put(branch))
+                    .put("branch", org.json.JSONObject().put("name", branch).put("upstream", "origin/$branch")
+                        .put("ahead", 0).put("behind", 0).put("gone", false))
+                "pulls" -> reply.put("repo", "garden-dev/garden").put("prs", org.json.JSONArray()).put("gh", true)
+                    .put("signed_in", true).put("pr", org.json.JSONObject().put("number", 42).put("title", "Retry uploads that time out")
+                        .put("state", "open").put("url", "https://github.com/garden-dev/garden/pull/42").put("head", org.json.JSONObject.NULL))
+                "log" -> reply.put("commits", org.json.JSONArray()).put("skip", 0).put("more", false)
+                else -> null
+            }
+        }
+        val now = System.currentTimeMillis() / 1000.0
+        Mesh.sessions["h1"] = listOf(Msg.Session(id = "a", title = "Tidy the release notes", cwd = "$home/garden",
+            updated = now - 60, said = now - 60, created = now - 660, state = "idle", model = "opus", effort = "high", mode = "default",
+            autofix = if (on) Msg.AutofixPull(repo = "garden-dev/garden", number = 42, url = "https://github.com/garden-dev/garden/pull/42",
+                title = "Retry uploads that time out") else null))
+        dev.baude.android.GitPages.prepare("h1", "a", listOf(branch), false)
+        show { ChatShell("h1", "a", back = {}, open = { _, _ -> }, feedback = {}, first = "git") }
+        val st = dev.baude.android.GitPages.of("h1", "a")
+        repeat(20) { if (st.commits.isEmpty() || st.pr == null) settle() }
+        repeat(3) {
+            androidx.compose.runtime.snapshots.Snapshot.sendApplyNotifications()
+            settle()
+        }
+        screen(name)
+    }
+
     /** The phone's two Bots: Juniper's picture a portrait on a dark ground, Fern with none (initials). */
     private fun botPictures() {
         Mesh.pictures["phone/p-a/null"] = Pictures.portrait(0xFF1D1D20.toInt(), 0xFFE0B48A.toInt(), 0xFF3A3A40.toInt(), 0xFF141414.toInt())

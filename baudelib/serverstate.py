@@ -14,7 +14,7 @@ import threading
 import time
 import urllib.parse
 
-from baudelib import accounts, desktopchats, models, transcripts, wire
+from baudelib import accounts, autofix, desktopchats, models, transcripts, wire
 
 
 IDLE_S = 30 * 60
@@ -222,6 +222,7 @@ class Session:
         self.viewers, self.live = set(), set()  # attached Conns; those that see what claude says as it says it
         self.asks = {}            # claude's request id -> a can_use_tool it sent, not answered yet
         self.busy = False         # at a turn
+        self.turn_began = None    # (when its turn going on began: autofix.turn_over's)
         self.acting = False       # at a turn's tools: a tool call begun, no text begun since (turn_acting)
         self.streamed = False     # (its agent's said what it writes as it writes it: stream_event)
         self.routines_out = set()  # (its routines sent at a turn, not yet over: not sent again till it is)
@@ -400,6 +401,7 @@ class Session:
                 "written": self.meta.get("written"),
                 "subagents": max((m for _size, m in (self.agents or {}).values()), default=0),
                 "commands": self.commands(), "cut": self.meta.get("cut"), "bot": self.bot_listing(),
+                "autofix": autofix.listing(self.meta.get("autofix")),
                 "acting": self.acting and self.busy and not self.asks,
                 "on_phone": self.server.phones.phone(self.id) is not None,
                 "fork_from": self.meta.get("fork_from"), "spawned_by": self.meta.get("spawned_by"),

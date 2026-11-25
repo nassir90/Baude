@@ -45,7 +45,7 @@ from markdownview import on_label_link, sel_label  # noqa: E402,F401
 from widgets import empty_label  # noqa: E402
 import pointers  # noqa: E402
 from baudelib import tokens  # noqa: E402  (a diff's green and red: schema/tokens)
-from baudelib import deps, wording  # noqa: E402
+from baudelib import deps, wire, wording  # noqa: E402
 import gitread  # noqa: E402
 from gitread import (  # noqa: E402,F401  (what's read, with no GTK: a host answers with it too)
     AVATAR_ASK, GIT_FIND_LIMIT, GIT_LOG_LIMIT, GIT_MERGE_LIMIT, _CHAT_GIT, _CHAT_PR_CODE, _CHAT_PR_NAMED, _CHAT_PR_URL,
@@ -647,6 +647,14 @@ class GitPage(Gtk.Stack):
         self.info = Gtk.Label(xalign=0, wrap=True, margin_start=12, margin_end=10, wrap_mode=Pango.WrapMode.WORD_CHAR)
         self.info.connect("activate-link", on_label_link)
         top.append(self.info)
+        # Auto-fix: the chat's host following its branch's pull request (baudelib.autofix), on or off, shown under the
+        # pull request's line while it's open, or while it's on
+        self.autofix = Gtk.Box(spacing=6, margin_start=12, margin_end=10, visible=False)
+        self.autofix.append(Gtk.Label(label=wording.say("autofix.title"), xalign=0, hexpand=True))
+        self.autofix_switch = Gtk.Switch(valign=Gtk.Align.CENTER)
+        self.autofix_set = self.autofix_switch.connect("notify::active", lambda *_: self.autofix_toggled())
+        self.autofix.append(self.autofix_switch)
+        top.append(self.autofix)
         # the pull requests this chat touches (git_touched_pulls), each a link to its page: nothing at all, not even a
         # gap, while there are none (no gh, or signed out, too)
         self.pulls, self.heads = None, {}  # (lookupgit.PULLS' of the repository shown; git_pull_heads')
@@ -929,6 +937,7 @@ class GitPage(Gtk.Stack):
         if not self.top:
             self.where.set_label(pretty_path(res["folder"] or ""))
             self.info.set_label(wording.say("host_errors.not_a_repo"))
+            self.autofix.set_visible(False)
             self.pulls_scroll.set_visible(False)
             self.picker.set_visible(False)
             self.more.set_visible(False)
@@ -944,6 +953,7 @@ class GitPage(Gtk.Stack):
         markup = self.info_markup(res)
         self.info.set_markup(markup)
         self.info.set_visible(bool(markup))
+        self.show_autofix()
         self.commits = res["commits"]
         self.pulls = lookupgit.PULLS.states(res["repo"], want=False)  # (as last read: GitHub's answer comes after)
         self.heads = git_pull_heads(self.pulls)
@@ -1175,7 +1185,53 @@ class GitPage(Gtk.Stack):
             markup = self.info_markup(self.state)
             self.info.set_markup(markup)
             self.info.set_visible(bool(markup))
+            self.show_autofix()
         return False
+
+    # ---- Auto-fix (the chat's host's: baudelib.autofix)
+    def autofix_chat(self):
+        """(the chat's host, its id) while the open chat is a host's and not Claude Desktop's, else None."""
+        remote, sid = getattr(self.win, "remote", None), getattr(self.win, "session_id", None)
+        if remote is None or not sid or self.pinned or getattr(self.win, "desktop_chat", False) or \
+                (remote.sessions.get(sid) or {}).get("desktop"):
+            return None
+        return remote, sid
+
+    def show_autofix(self):
+        """The Auto-fix toggle as the chat's host lists it: shown while it's on, or while the branch shown is the
+        chat's own and its pull request's open."""
+        chat, res = self.autofix_chat(), self.state
+        on = (chat[0].sessions.get(chat[1]) or {}).get("autofix") if chat else None
+        pr, b = res.get("pr"), res.get("branch")
+        open_pr = bool(pr and str(pr.get("state") or "").lower() == "open" and b and b.get("name") and
+                       b["name"] == res.get("mine"))
+        self.autofix.set_visible(bool(chat and self.top and (on or open_pr)))
+        if getattr(self, "autofix_asking", False):
+            return
+        with self.autofix_switch.handler_block(self.autofix_set):
+            self.autofix_switch.set_active(bool(on))
+        self.autofix_switch.set_tooltip_text(wording.say("autofix.tip"))
+
+    def autofix_toggled(self):
+        """The toggle switched: Auto-fix turned on or off on the chat's host, as it answers."""
+        chat = self.autofix_chat()
+        if chat is None:
+            return
+        remote, sid = chat
+        want = self.autofix_switch.get_active()
+        self.autofix_asking = True
+        self.autofix_switch.set_sensitive(False)
+
+        def done(r):
+            self.autofix_asking = False
+            self.autofix_switch.set_sensitive(True)
+            if r.get("op") == "error":
+                toast(self.win, wording.say("autofix.couldnt" if want else "autofix.couldnt_off", why=wire.said(r) or ""))
+            elif isinstance(listed := remote.sessions.get(sid), dict):
+                listed["autofix"] = r.get("autofix")  # (as it is now: the listing that says so comes after)
+            if self.autofix_chat() == chat:
+                self.show_autofix()
+        remote.request({"op": "autofix", "session": sid, "on": want}, done)
 
     def info_markup(self, res):
         """What the branch tracks and came from, and what GitHub can add."""

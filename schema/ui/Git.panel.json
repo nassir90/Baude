@@ -7,8 +7,8 @@
     "Signal page: a resolved commit or branch name's \"Show in Git\" button",
     "⌘K / Ctrl+K: a branch from the glossary"
   ],
-  "code": ["gitview.py:GitPage", "gitview.py:git_checkouts", "gitview.py:git_branch_list", "gitview.py:git_lanes", "gitview.py:git_commit_card", "gitview.py:gh_state", "gitview.py:GitAvatars", "windowsignal.py:WindowSignal.show_git"],
-  "copy": ["git", "host_errors.not_a_repo"],
+  "code": ["gitview.py:GitPage", "gitview.py:GitPage.show_autofix", "baudelib/autofix.py", "baudelib/chattools.py", "gitview.py:git_checkouts", "gitview.py:git_branch_list", "gitview.py:git_lanes", "gitview.py:git_commit_card", "gitview.py:gh_state", "gitview.py:GitAvatars", "windowsignal.py:WindowSignal.show_git"],
+  "copy": ["git", "autofix", "host_errors.not_a_repo"],
   "parts": [
     {
       "name": "top bar",
@@ -42,6 +42,16 @@
       "shows": "Up to four lines of text under the picker (hidden when none): (1) \"Every branch, remote branch and tag\" when the toggle is on; (2) \"Tracks <upstream>: <track>\" where track is \"up to date\", \"N commit(s) ahead\", \"N commit(s) behind\" (joined by comma) or \"gone from the remote\"; (3) \"From <parent branch> at <sha7>: <track>\" (the branch it came from, by a guess or what -b said); (4) with gh signed in only: \"Pull request #12 <title up to 60 chars> (<state>)\" where #12 is a link. With gh signed out or missing, the pull request line isn't shown and nothing says to sign in. Branch names in bold, shas in monospace.",
       "copy": ["git.every_branch", "git.tracks", "git.from_branch", "git.pull_request", "git.up_to_date", "git.gone_from_remote", "git.ahead", "git.behind"],
       "actions": [{"by": "click the #12 link", "does": "opens the pull request in the browser"}]
+    },
+    {
+      "name": "Auto-fix",
+      "shows": "Under the branch info, for a chat on a host that isn't Claude Desktop's (not another folder's history opened from a link), while Auto-fix is on for it or while the branch shown is the chat's own and its pull request (the info's line) is open: one row, \"Auto-fix\" at its start and a switch at its end, on while the chat's host lists Auto-fix on (Session's autofix), whoever turned it on. Nothing else in the row: no line saying why a read didn't work. Tooltip: \"Follow this pull request: a failing check, a merge conflict or a new comment is sent to this chat\". It goes off by itself once the pull request is merged or closed. The chat's agent turns the same switch with its tool mcp__chat__autofix (on), which every chat's agent has; a Claude Desktop chat's host refuses it.",
+      "copy": ["autofix.title", "autofix.tip", "autofix.couldnt", "autofix.couldnt_off", "autofix.stopped", "autofix.signed_out"],
+      "actions": [
+        {"by": "switch it on", "does": "the chat's host finds the open pull request of the branch checked out in the chat's folder, from the repository's own owner (not a fork's branch of the same name) (the autofix request), and follows it: at once, then every 5 minutes (after a read that didn't work, rate limited or offline, again in a minute, then twice as long each time, up to an hour, saying nothing; after 3 reads in a row with gh signed out, Auto-fix turns off and the chat gets the note (SystemNote) \"Auto-fix stopped: gh isn't signed in\"), it reads the pull request's checks, whether it conflicts with its base, and its comments, reviews and review comments. A check failing that wasn't failing at the same head commit, a new conflict, or a comment made since is sent to the chat as a message from Auto-fix (SenderTurn) saying what needs fixing, between the chat's turns, one at a time, what's found while one waits added to it. Not sent: a comment by the host's gh login made during one of the chat's turns (the one going on too), its agent's through gh; everyone else's is, whenever it was made. A comment's words are sent only when its author is the repository's owner, a member or a collaborator; anyone else's is sent as \"<login> commented\" only. Refused (no open pull request, not a GitHub repository, gh missing or signed out, a Claude Desktop chat): toast \"Couldn't turn on Auto-fix: <why>\" and the switch goes back"},
+        {"by": "switch it off", "does": "the host stops following the pull request; refused: toast \"Couldn't turn off Auto-fix: <why>\" and the switch goes back"}
+      ],
+      "decisions": [{"said": "Add an auto-fix to Baude, tried out on a failing pull request, and give Baude's agents a tool to turn it on and off (paraphrased)", "rule": "Every app's Git page has an Auto-fix switch for the chat's own branch's open pull request, and every chat's agent has a tool (mcp__chat__autofix) that turns the same switch; following the pull request, reading it and sending the chat what needs fixing are the chat's host's, through the wire (the autofix request, Session's autofix), so every app and every agent shows and controls one thing, with nobody's app open", "decided": "2026-11-25", "source": [{"issue": "BaudeInternal#211"}]}, {"said": "Auto-fix sends the chat what others write on its pull request, and anyone on GitHub can comment on a public repository's (paraphrased)", "rule": "Only comments and reviews by the repository's owner, members and collaborators (authorAssociation OWNER, MEMBER, COLLABORATOR) are sent to the chat with their words; anyone else's are sent as \"<login> commented\" with no text and nothing asking the agent to act on it; the pull request followed is one whose head is in the repository's own owner's (headRepositoryOwner), never a fork's branch of the same name", "decided": "2026-11-25", "source": [{"issue": "BaudeInternal#211"}]}, {"said": "no subtitles/captions/secondary lines unless 100% necessary", "rule": "Auto-fix's row has no line saying why a read failed; a read that fails for a while is waited out silently, and gh signed out (for the user to fix) turns Auto-fix off with one chat note, \"Auto-fix stopped: gh isn't signed in\"", "decided": "2026-11-25", "source": [{"issue": "BaudeInternal#211"}]}]
     },
     {
       "name": "pull requests list",
@@ -99,5 +109,5 @@
     {"name": "another chat", "shows": "Switching chats brings back that chat's branches, merges opened, commit card and log scroll; a new chat starts on the branches it touched at the top of the log"},
     {"name": "stale", "shows": "Reads again about 0.8 s after the chat goes on (new commits, pushes) while the page is shown; on show if it changed while hidden"}
   ],
-  "scenes": ["38f-git", "38g-git-commit", "38h-git-signed-in", "38i-git-signed-out"]
+  "scenes": ["38f-git", "38g-git-commit", "38h-git-signed-in", "38i-git-signed-out", "38j-git-autofix"]
 }

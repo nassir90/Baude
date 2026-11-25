@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "A chat's Auto-fix while it's on: the pull request of the chat's branch its host follows, every five minutes, sending the chat a failing check, a merge conflict or a new comment.",
+  "properties": {
+    "repo": {
+      "type": "string",
+      "description": "Its repository, owner/name."
+    },
+    "number": {
+      "type": "integer",
+      "description": "The pull request's number."
+    },
+    "url": {
+      "type": "string",
+      "description": "Its page."
+    },
+    "title": {
+      "type": "string",
+      "description": "Its title."
+    },
+    "error": {
+      "type": ["string", "null"],
+      "description": "Why its last read or message didn't work (gh signed out, offline, ...), till one does; null if it did."
+    }
+  },
+  "required": ["repo", "number"],
+  "additionalProperties": false
+}

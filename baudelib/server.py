@@ -125,6 +125,7 @@ class Server(ServerRunning, ServerSessions):
         # for the menu bar's item to say; None while it isn't
         self.quitting = None
         self.cutting = set()  # (sessions halt cut at a turn that was only generating: not cut if it ends as it stops)
+        self.autofix_reading = set()  # (chats whose pull request Auto-fix is reading now: autofix.due)
         self.following = set()  # ((session, the one it waits on): waits of its agent's answered for it, answer_wait)
         self.mesh = mesh.Mesh(self)  # (the hosts it's linked to, and those they reach: mesh.py)
 

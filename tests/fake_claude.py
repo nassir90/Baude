@@ -554,6 +554,62 @@ def mcp(method, params=None):
     return result
 
 
+def chat_tool(name, args):
+    """A call to the chat's own tools (baudelib.chattools), through the server --mcp-config names (inline JSON, as the
+    host gives it), started for the call, as Claude Code would."""
+    cfg = arg("--mcp-config") or "{}"
+    server = json.loads(cfg if cfg.lstrip().startswith("{") else open(cfg).read())["mcpServers"]["chat"]
+    p = subprocess.Popen([server["command"], *server["args"]], stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True,
+                         env={**os.environ, **(server.get("env") or {})})
+    calls = [("initialize", {"protocolVersion": "2025-06-18", "capabilities": {}}),
+             ("tools/call", {"name": name, "arguments": args})]
+    for i, (method, params) in enumerate(calls, 1):
+        p.stdin.write(json.dumps({"jsonrpc": "2.0", "id": i, "method": method, "params": params}) + "\n")
+        p.stdin.flush()
+        got = json.loads(p.stdout.readline())
+    p.stdin.close()
+    p.wait(10)
+    return got["result"]["content"][0]["text"]
+
+
+def autofix(n, text):
+    """"AUTOFIX ON" / "AUTOFIX OFF": Auto-fix turned on or off with the chat's tool (mcp__chat__autofix); a message
+    from Auto-fix (a pull request that "needs fixing"): fixed as an agent would: a commit pushed and a comment on the
+    pull request (gh: $BAUDE_GH, a stand-in)."""
+    tid = f"toolu_autofix{n}"
+    if "needs fixing" not in text:
+        on = "AUTOFIX ON" in text
+        out({"type": "assistant", "parent_tool_use_id": None, "session_id": SESSION, "message": {
+            "id": f"msg{n}t", "model": "fake", "role": "assistant", "content": [
+                {"type": "tool_use", "id": tid, "name": "mcp__chat__autofix", "input": {"on": on}}]}})
+        said = chat_tool("autofix", {"on": on})
+        record(f"AUTOFIX tool {said}")
+        out({"type": "user", "parent_tool_use_id": None, "session_id": SESSION, "message": {"role": "user", "content": [
+            {"type": "tool_result", "tool_use_id": tid, "content": said}]}})
+        say("Auto-fix is on for this branch's pull request." if on else "Auto-fix is off.", f"msg{n}b")
+        result("autofix")
+        return
+    number = re.search(r"#(\d+)", text).group(1)
+    with open("fix.txt", "a") as f:
+        f.write(f"fix {n}\n")
+    command = "git add fix.txt && git commit -qm 'Fix the failing check' && git push -q origin HEAD"
+    who = {"GIT_AUTHOR_NAME": "Ada", "GIT_AUTHOR_EMAIL": "ada@example.com", "GIT_COMMITTER_NAME": "Ada",
+           "GIT_COMMITTER_EMAIL": "ada@example.com"}  # (a fixture's name, never the machine's)
+    out({"type": "assistant", "parent_tool_use_id": None, "session_id": SESSION, "message": {
+        "id": f"msg{n}t", "model": "fake", "role": "assistant", "content": [
+            {"type": "tool_use", "id": tid, "name": "Bash", "input": {"command": command,
+                                                                       "description": "Commit and push the fix"}}]}})
+    done = subprocess.run(command, shell=True, capture_output=True, text=True, env={**os.environ, **who})
+    gh = os.environ.get("BAUDE_GH")
+    if gh:
+        subprocess.run([gh, "pr", "comment", number, "--body", "Fixed the failing check."], capture_output=True)
+    record(f"AUTOFIX fixed #{number} push={done.returncode} {done.stderr.strip()}")
+    out({"type": "user", "parent_tool_use_id": None, "session_id": SESSION, "message": {"role": "user", "content": [
+        {"type": "tool_result", "tool_use_id": tid, "content": (done.stdout + done.stderr).strip() or "(no output)"}]}})
+    say(f"Fixed it and pushed: #{number}'s check should pass now.", f"msg{n}b")
+    result("fixed")
+
+
 def reader(text):
     """Signal's reader: what it was given (logged), the tools it calls, the decisions it makes."""
     READER["n"] += 1
@@ -665,7 +721,9 @@ def main():
                     f" to: {question}", f"btw{turns}")
                 result("side answer")
                 continue
-            if "EXPIRED" in text:
+            if "AUTOFIX" in text or "needs fixing" in text:
+                autofix(turns, text)
+            elif "EXPIRED" in text:
                 expired(turns)
             elif "BACKGROUND" in text:
                 background_command(turns, delay)

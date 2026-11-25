@@ -101,6 +101,17 @@
       ],
       "description": "A Bot's; null for a chat."
     },
+    "autofix": {
+      "anyOf": [
+        {
+          "$ref": "AutofixPull.json"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Its Auto-fix: the pull request its host follows for it; null while it's off."
+    },
     "acting": {
       "type": "boolean",
       "description": "Whether its turn is at its tools: from a tool call's start till text starts after it, the turn ends or its agent goes; only while it's working, not asking."

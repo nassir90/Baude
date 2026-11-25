@@ -22,6 +22,8 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Icon
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -391,6 +393,13 @@ fun GitPage(hostId: String, sid: String, here: Boolean, openPage: (String) -> Un
         val info = buildInfo(page, state.pr.takeIf { state.signedIn })
         if (info != null) Text(marked(info.first, info.second, c.accent), style = Type.body, color = c.fg,
             modifier = Modifier.padding(start = 12.dp, end = 10.dp))
+        // Auto-fix: shown while it's on, or while the branch shown is the chat's own and its pull request's open
+        val listed = Mesh.session(hostId, sid)
+        val autofix = listed?.autofix
+        val openPr = state.signedIn && state.pr?.state?.lowercase() == "open" && page.branch?.name != null &&
+            page.branch?.name == page.mine
+        if (state.pinned == null && listed?.desktop != true && (autofix != null || openPr))
+            AutofixRow(hostId, sid, autofix != null)
         // pull requests
         val rows = shownRows(page, state.commits, state.opened)
         val lanes = remember(rows.map { it.drawn.sha to it.drawn.parents }) { gitLanes(rows.map { it.drawn }) }
@@ -425,6 +434,28 @@ fun GitPage(hostId: String, sid: String, here: Boolean, openPage: (String) -> Un
                 }
             }
         }
+    }
+}
+
+/** The Auto-fix toggle (baudelib/autofix.py, on the chat's host): switched, it's turned on or off there, as it
+ * answers; on: as the host lists it. */
+@Composable
+private fun AutofixRow(hostId: String, sid: String, on: Boolean) {
+    val c = LocalBaude.current
+    var asked by remember(hostId, sid) { mutableStateOf<Boolean?>(null) }
+    LaunchedEffect(on) { asked = null }
+    Row(Modifier.fillMaxWidth().padding(start = 12.dp, end = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text(Wording.Autofix.title, style = Type.body, color = c.fg, modifier = Modifier.weight(1f))
+        Switch(asked ?: on, { want ->
+            asked = want
+            Mesh.ask(hostId, Msg.Autofix(session = sid, on = want).json()) { r ->
+                if (r.optString("op") == Op.ERROR) {
+                    asked = null
+                    val why = Msg.Error.from(r).said.orEmpty()
+                    toast(if (want) Wording.Autofix.couldnt(why = why) else Wording.Autofix.couldntOff(why = why))
+                }
+            }
+        }, colors = SwitchDefaults.colors(checkedTrackColor = c.accentBg, checkedThumbColor = c.accentFg))
     }
 }
 

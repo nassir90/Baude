@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "The host's Claude and Codex subscription accounts (hostaccounts): list them; add one (Claude: name and token; Codex: name and an existing signed-in home); rename one (id, name); replace a Claude account's token (id, token); remove one (id); select a provider's default for new chats (provider, id; \"\" for the CLI's own sign-in); read a subscription's usage (id; \"\" for the CLI's own sign-in); sign in to Codex with a device code (sign_in: name for a new account, or id to sign in to one again: its lines come as they're written, then its end; the connection's going stops it). Each is answered with accounts.",
+  "properties": {
+    "op": {
+      "const": "accounts",
+      "description": "What it is."
+    },
+    "req": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "what": {
+      "enum": [
+        "list",
+        "add",
+        "rename",
+        "token",
+        "remove",
+        "select",
+        "usage",
+        "sign_in"
+      ],
+      "description": "What to do."
+    },
+    "provider": {
+      "enum": [
+        "claude",
+        "codex"
+      ],
+      "description": "add, select: whose."
+    },
+    "id": {
+      "type": "string",
+      "description": "rename, token, remove, select, usage, sign_in: the account (\"\" for the CLI's own sign-in, select and usage only)."
+    },
+    "name": {
+      "type": "string",
+      "description": "add, rename, sign_in (a new account): its name."
+    },
+    "token": {
+      "type": "string",
+      "description": "add (Claude), token: a token from claude setup-token."
+    },
+    "home": {
+      "type": "string",
+      "description": "add (Codex): an existing CODEX_HOME on the host, signed in with ChatGPT and keeping its credentials in a file."
+    }
+  },
+  "required": [
+    "op",
+    "what"
+  ],
+  "additionalProperties": false
+}

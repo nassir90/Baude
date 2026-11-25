@@ -12,7 +12,7 @@ import time
 import uuid
 
 from baudelib import (
-    agentproxy, emissionlink, emissiontools, hostdb, hostfiles, hostfixes, hostkube, hostlogin, mesh, meshtools,
+    agentproxy, emissionlink, emissiontools, hostaccounts, hostdb, hostfiles, hostfixes, hostkube, hostlogin, mesh, meshtools,
     hostterminal, multiplexlink, routines, wire, wording, worktree,
 )
 from baudelib.serverstate import (
@@ -240,6 +240,7 @@ class ServerRunning:
             hostkube.stop(conn)  # (its pod logs and watches: kubectl ended with it)
             hostterminal.gone(conn)  # (its terminal: left running a while, to be attached to again)
             hostlogin.stop(conn)  # (a sign-in it ran: stopped)
+            hostaccounts.stop(conn)  # (a Codex sign-in it ran: stopped)
             if getattr(conn, "emission_watch", None) is not None:  # (its pane gone: Emission's watcher with it)
                 try:
                     conn.emission_watch.shutdown(socket.SHUT_RDWR)  # (its recv woken, Emission told)
@@ -511,6 +512,8 @@ class ServerRunning:
                     reply("error", error=str(e))
             threading.Thread(target=terminal, daemon=True, name="multiplex").start()
             return None
+        if op == "accounts":  # (this host's subscription accounts, for a head anywhere: hostaccounts)
+            return hostaccounts.answer(self, conn, msg, reply)
         if op == "login":  # (claude auth login run here for a head elsewhere, on this connection: hostlogin)
             return hostlogin.start(self, conn, msg)
         if op == "login_code":

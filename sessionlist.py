@@ -667,7 +667,8 @@ def remote_info(s):
             "group": s.get("group"), "model": s.get("model"), "effort": s.get("effort"), "mode": s.get("mode"),
             "archived": bool(s.get("archived")), "bot": s.get("bot"),
             "fork_from": s.get("fork_from"), "cli_id": s.get("cli_id"), "spawned_by": s.get("spawned_by"),
-            "held": len(s.get("held") or [])}  # (messages its host holds for it, to send or drop: HeldTurn)
+            "held": len(s.get("held") or []),  # (messages its host holds for it, to send or drop: HeldTurn)
+            "account": (s.get("account") or {}).get("name") if isinstance(s.get("account"), dict) else None}
 
 
 def started_elsewhere(sessions):

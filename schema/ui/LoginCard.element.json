@@ -27,8 +27,10 @@
   ],
   "copy": [
     "sign_in",
-    "common"
+    "common",
+    "subscriptions"
   ],
+  "decisions": [{"said": "(review of PR 420, the coordinator's decision) a profile chat's sign-in must replace that profile's token, not the CLI default's", "rule": "Every app's sign-in card, in a chat under a Claude account (Session.account kind token), shows \"Replace the token for <name>\", why the turn failed, a password entry (the setup-token placeholder) and Save, which replaces that account's token on the chat's host and starts its claude again on it (\"Token replaced\"); claude auth login is never run for it", "decided": "2026-11-25", "source": [{"session": "b3845b21-55ac-4aab-a769-fb8517403c51", "message": "ac03d59c-4c08-4acd-87a6-78a79a1e0dc9"}]}],
   "parts": [
     {
       "name": "card",

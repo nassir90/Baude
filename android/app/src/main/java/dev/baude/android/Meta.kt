@@ -126,7 +126,8 @@ object Meta {
                 lines.add("  ${s.id.orEmpty().take(8)} " + listOfNotNull(
                     (chatName(s) ?: "(untitled)").let { "\"$it\"" }, shortPath(id, s.cwd.orEmpty()),
                     s.state.orEmpty(), groupOf(id, s).ifEmpty { null }?.let { "group $it" },
-                    if (s.archived == true) "archived" else null, s.model?.ifBlank { null }).joinToString(" · "))
+                    if (s.archived == true) "archived" else null, s.model?.ifBlank { null },
+                    s.account?.name?.let { "account $it" }).joinToString(" · "))
             }
         }
         Mesh.open?.let { lines.add("open: ${it.sid.take(8)} on ${Mesh.label(it.hostId)}") }

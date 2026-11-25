@@ -310,12 +310,15 @@ class LoginCard(Gtk.Box):
     in the box; Cancel stops it. Once it's done, who's signed in, and the chat's claude started again on it
     (win.signed_in); retry: what the failed turn sent from here (its text and attachments), Send again to send it again
     (win.send_again); the chat it's in is the one started again, whichever's open when it's done.
-    args: claude auth login's (--console, --sso, --email …)."""
+    args: claude auth login's (--console, --sso, --email …). account: the chat's Claude account (Account's fields),
+    for a chat run under one: a token from claude setup-token pasted in place of claude auth login, replacing that
+    account's on its host (account_where), not the CLI's own sign-in."""
 
-    def __init__(self, win, args=(), where=None, host=None, ask=None, retry=None):
+    def __init__(self, win, args=(), where=None, host=None, ask=None, retry=None, account=None, account_where=None):
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=6)
         self.add_css_class("perm-card")
         self.win, self.args, self.where, self.host, self.retry = win, list(args), where, host, retry
+        self.account, self.account_where = account, account_where
         self.chat = (win.remote, win.session_id) if hasattr(win, "at_chat") else None  # (the chat it's in: signed in for)
         self.proc, self.said = None, []
         self.title = sel_label("")
@@ -340,6 +343,8 @@ class LoginCard(Gtk.Box):
         self.resend.add_css_class("suggested-action")
         self.resend.connect("clicked", lambda *_: self.send_again())
         self.append(self.resend)
+        if account is not None:
+            return self.token_box(ask)
         if ask is None:
             self.start()
             return
@@ -347,6 +352,41 @@ class LoginCard(Gtk.Box):
                  hostlogin.reason(ask), dim=True)
         self.again.set_label(wording.say("sign_in.sign_in"))
         self.again.set_visible(True)
+
+    def token_box(self, ask):
+        """A chat under a Claude account: its token box (the account's name, why it failed if it did), Save replacing
+        the account's token on the chat's host, then the chat's claude started again on it as a sign-in's is."""
+        self.say(wording.say("subscriptions.replace_heading", name=self.account["name"]),
+                 hostlogin.reason(ask) if ask else "", dim=True)
+        row = Gtk.Box(spacing=6)
+        token = Gtk.PasswordEntry(hexpand=True, show_peek_icon=True,
+                                  placeholder_text=wording.say("subscriptions.token_hint"))
+        save = Gtk.Button(label=wording.say("common.save"))
+        save.add_css_class("suggested-action")
+        row.append(token)
+        row.append(save)
+        self.append(row)
+
+        def saved(error):
+            save.set_sensitive(True)
+            token.set_sensitive(True)
+            if error:
+                self.say(wording.say("sign_in.failed"), error, dim=True)
+                return
+            row.set_visible(False)
+            self.say(wording.say("subscriptions.token_saved"), self.account["name"])
+            self.resend.set_visible(bool(self.retry) and (self.chat is None or self.win.at_chat(self.chat)))
+            self.win.signed_in(self.chat) if self.chat is not None else self.win.signed_in()
+
+        def send(*_):
+            if not token.get_text().strip():
+                return
+            save.set_sensitive(False)
+            token.set_sensitive(False)
+            import subscriptionpage
+            subscriptionpage.replace_token(self.account_where, self.account["id"], token.get_text().strip(), saved)
+        save.connect("clicked", send)
+        token.connect("activate", send)
 
     def say(self, title, body="", dim=False, markup=False):
         self.title.set_markup(f"<b>{html.escape(title)}</b>")

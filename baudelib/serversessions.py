@@ -86,8 +86,7 @@ class ServerSessions:
                 "spawned_by": params.get("spawned_by") if wire.is_id(params.get("spawned_by") or "") else None,
                 "start_key": params.get("start_key") if wire.is_id(params.get("start_key") or "") else None,
                 "draft": bool(params.get("draft")) and not (params.get("prompt") or "").strip()}
-        meta["profiles"] = (dict(origin.meta.get("profiles", {})) if origin else
-                            {p: accounts.selected(p) for p in ("claude", "codex")})
+        meta["profiles"] = dict(origin.meta.get("profiles", {})) if origin else accounts.defaults()
         with self.lock:
             if self.stopped.is_set():
                 raise OSError("the host process is stopping")
@@ -343,6 +342,8 @@ class ServerSessions:
             s.meta.pop("cut", None)  # (carried on, or something else said: not cut any more)
             if s.meta.pop("draft", None) and not s.meta.get("prompt"):  # (written in: a session of its own from now on,
                 s.meta["prompt"] = _said(msg)                           # listed and kept, titled by what was said)
+                if s.proc is None and not s.meta.get("fork_from"):  # (its account: the default as it's first written in, picked since it was made too)
+                    s.meta["profiles"] = accounts.defaults()
             at_turn = s.busy
             self.ensure_proc(s).send(msg)
             if at_turn and s.kept():  # (taken after the turn it's sent in: kept after it too)
@@ -861,6 +862,16 @@ class ServerSessions:
             threading.Timer(RENAME_S, unanswered).start()
             return
         write(False)
+
+    def default_changed(self, provider, profile):
+        """A provider's default account picked: the new chats not written in yet, with no agent running, take it, as
+        each would as it's first written in (take_input)."""
+        with self.lock:
+            for s in self.sessions.values():
+                if s.meta.get("draft") and s.proc is None and not s.meta.get("fork_from"):
+                    s.meta.setdefault("profiles", {})[provider] = profile
+                    self.save(s)
+        self.changed()
 
     def changed(self):
         """(lock held) Every subscriber gets the sessions as they are now (soon: a burst of changes is one), and

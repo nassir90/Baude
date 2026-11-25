@@ -178,9 +178,10 @@ val Dp.icon: Dp get() = this * (Tokens.Font.body.value / BAUDE_TEXT_PX) * Settin
 private const val BAUDE_TEXT_PX = 12f
 
 /** ⋮ → Settings…, as Baude's Settings, its groups in its order: Meta's, Full-width text, Code Font, the accent and
- * whether it's light or dark, how updates download, notifications and the version; the sizes; Send Feedback…. */
+ * whether it's light or dark, how updates download, notifications and the version; the sizes; Subscriptions (the
+ * desktop's second page); Send Feedback…. */
 @Composable
-fun SettingsScreen(back: () -> Unit, feedback: () -> Unit, chat: List<String> = emptyList()) {
+fun SettingsScreen(back: () -> Unit, feedback: () -> Unit, chat: List<String> = emptyList(), subscriptions: () -> Unit = {}) {
     val c = LocalBaude.current
     val ctx = LocalContext.current
     val save = { Settings.save(ctx) }
@@ -216,6 +217,11 @@ fun SettingsScreen(back: () -> Unit, feedback: () -> Unit, chat: List<String> = 
                 { ScaleRow("icon_scale") },
                 { ScaleRow("global_scale") },
             ), "") { it() }
+            BoxedList(listOf<@Composable () -> Unit>({
+                ActionRow(Wording.Subscriptions.title, null, onClick = subscriptions, suffix = {
+                    Icon(Adwaita.GoNext, null, tint = c.dim, modifier = Modifier.size(16.dp.icon))
+                })
+            }), "") { it() }
             BoxedList(listOf<@Composable () -> Unit>({ ButtonRow(Wording.Fixes.sendFeedback, Adwaita.GoNext, onClick = feedback) }), "") { it() }
         }
     }

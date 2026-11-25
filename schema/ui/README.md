@@ -33,7 +33,7 @@ Plain JSON, two-space indent, no `x-` keys. Fields, in this order, each left out
 - `states`: distinct looks: empty, loading, error, working, asking, signed out, host gone.
 - `removed`: parts taken out on purpose, so no app brings them back: each `{name, apps, why, decided}`, `apps` naming
   every app it's gone from (`baude`, `record`, `phone`).
-- `decisions`: the owner's complaints and corrections an entry or part answers, so no app repeats the mistake: each `{said, rule, decided}`, `rule` written to hold for every app.
+- `decisions`: the owner's complaints and corrections an entry or part answers, so no app repeats the mistake: each `{said, rule, decided, source}`, `rule` written to hold for every app, `source` what it can be audited by: `{"issue": "BaudeInternal#N"}` or `{"session": …, "message": <the owner's message's uuid>}`.
 - `scenes`: `tests/screenshots.py` scenes that show it.
 
 ## Overrides: where the phone differs on purpose

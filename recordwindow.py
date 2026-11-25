@@ -127,11 +127,11 @@ class Settings(Adw.PreferencesDialog):
             row.connect("activated", go, action)
             group.add(row)
         page.add(group)
-        page.set_title("General")
+        page.set_title(wording.say("subscriptions.general"))
         page.set_icon_name("emblem-system-symbolic")
         self.add(page)
-        from providerpage import page as providers_page
-        self.add(providers_page())
+        import subscriptionpage
+        self.add(subscriptionpage.Page(win))
         copies, stop = json.loads(json.dumps([notebooks for _title, _action, notebooks in exports])), threading.Event()
         self.connect("closed", lambda *_: stop.set())  # (nothing to say them to: no more reading large chats)
         threading.Thread(target=Settings._work_out_sizes, args=([self], copies, stop), daemon=True).start()

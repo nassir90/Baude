@@ -14,7 +14,9 @@
       "name": "host",
       "shows": "The host the chat lives on, by name, in monospace: \"local\" for this machine, else the other host's name.",
       "text": ["local", "The host this chat lives on: its files, and its tools"],
-      "actions": [{"by": "hover", "does": "Tooltip \"The host this chat lives on: its files, and its tools\", with the host's address in brackets for another host"}]
+      "actions": [{"by": "hover", "does": "Tooltip \"The host this chat lives on: its files, and its tools\", with the host's address in brackets for another host; then, for a chat under a subscription account, a line \"Account: <name>\""}],
+      "copy": ["status_bar.host_tip", "status_bar.host_tip_at", "subscriptions.account_line"],
+      "decisions": [{"said": "ChatGPT started work on a providers screen to separate work and personal accounts (the owner's request to finish it; review: a chat's account must be visible)", "rule": "Every app shows the account a chat runs under: its status bar host tooltip (\"Account: <name>\"), Copy Transcript's header (\"Account\"), Meta's list of chats; a sign-in card in a chat under a Claude account replaces that account's token, never the CLI's own sign-in", "decided": "2026-11-25", "source": [{"session": "b3845b21-55ac-4aab-a769-fb8517403c51", "message": "ac03d59c-4c08-4acd-87a6-78a79a1e0dc9"}]}]
     },
     {
       "name": "folder and last turn",

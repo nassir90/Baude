@@ -1,5 +1,5 @@
 {
-  "description": "Baude's Settings dialog: a General page of settings and a Providers page for local subscriptions, each applied as it is changed and kept in settings.json (shared with Record, which has its own Settings dialog with the same rows). Title \"Settings\".",
+  "description": "Baude's Settings dialog: a General page of settings and a Subscriptions page (the Claude and Codex accounts of the host picked beside New session), each applied as it is changed and kept in settings.json (shared with Record, which has its own Settings dialog with the same rows). Title \"Settings\".",
   "apps": [
     "baude"
   ],
@@ -28,9 +28,10 @@
   ],
   "parts": [
     {
-      "name": "Providers page",
-      "decisions": [{"said": "A way to see Claude subscription usage in the app", "rule": "Every app with Providers shows the picked Claude account's subscription usage on request", "decided": "2026-11-24"}, {"said": "Run claude (and codex) under separate subscriptions, e.g. a team plan for work and a personal one at home, kept apart", "rule": "Every app that starts chats lets you name several Claude and Codex accounts per host and pick one per provider; a new chat uses the picked account and keeps it when resumed or forked; credentials never leave their host", "decided": "2026-11-22"}],
-      "shows": "A Claude and a Codex account picker, with Add account for each provider. Claude also has a Subscription usage row."
+      "name": "Subscriptions page",
+      "shows": "The dialog's second page, after General (the existing rows): the Claude and Codex accounts of the host picked beside New session. Described in Subscriptions.dialog.json.",
+      "copy": ["subscriptions.general", "subscriptions.title"],
+      "decisions": [{"said": "Baude needs to be able to support running claude with different subscriptions (paraphrased)", "rule": "Every app's Settings has the Subscriptions page (the phone: a row opening it)", "decided": "2026-11-22", "source": [{"issue": "BaudeInternal#190"}, {"session": "b3845b21-55ac-4aab-a769-fb8517403c51", "message": "ac03d59c-4c08-4acd-87a6-78a79a1e0dc9"}]}, {"said": "There needs to be a way of seeing claude sub usage in the app", "rule": "Subscription usage is on that page in every app", "decided": "2026-11-24", "source": [{"issue": "BaudeInternal#204"}]}]
     },
     {
       "name": "Meta group",

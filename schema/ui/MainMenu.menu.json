@@ -53,6 +53,7 @@
     {
       "name": "Copy Transcript for an Issue",
       "shows": "Row \"Copy Transcript for an Issue\".",
+      "decisions": [{"said": "(review of PR 420) a chat's account must be visible", "rule": "Every app's copied transcript has an \"Account\" line in its header: the chat's subscription account, or \"CLI default\"", "decided": "2026-11-25", "source": [{"session": "b3845b21-55ac-4aab-a769-fb8517403c51", "message": "ac03d59c-4c08-4acd-87a6-78a79a1e0dc9"}]}],
       "copy": [
         "window.copy_transcript",
         "window.transcript_copied"

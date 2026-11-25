@@ -172,11 +172,15 @@ class ClaudeProc:
         if models.model_program(model) == "claude":
             self.profile = accounts.claude_session_profile(resume) if profile is None else profile
             self.remember_profile = bool(self.profile and "--no-session-persistence" not in args)
-            child_env = accounts.environment("claude", child_env, self.profile)
-        self.p = subprocess.Popen(args, cwd=cwd, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                                  stderr=subprocess.PIPE, text=True, bufsize=1, start_new_session=True,  # (a
-                                  # group of its own: what it runs, killed with it, kill_hard)
-                                  env=child_env)
+        child_env, token_fd = accounts.claude_launch(child_env, self.profile)
+        try:
+            self.p = subprocess.Popen(args, cwd=cwd, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                      stderr=subprocess.PIPE, text=True, bufsize=1, start_new_session=True,  # (a
+                                      # group of its own: what it runs, killed with it, kill_hard)
+                                      env=child_env, pass_fds=() if token_fd is None else (token_fd,))
+        finally:
+            if token_fd is not None:  # (the child's copy is its own: the token read from it once, as it starts)
+                os.close(token_fd)
         threading.Thread(target=self._read, args=(self.p.stdout, False), daemon=True).start()
         threading.Thread(target=self._read, args=(self.p.stderr, True), daemon=True).start()
         self.init_rid = self.control({"subtype": "initialize", "hooks": None})

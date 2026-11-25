@@ -230,7 +230,8 @@ fun StatusBar(chat: Chat, openPage: (String) -> Unit) {
         Box(Modifier.layoutId("host")) {
             Text(Mesh.label(at), style = Type.mono.copy(fontSize = Type.caption.fontSize), color = text, maxLines = 1,
                 modifier = Modifier.clip(RoundedCornerShape(4.dp)).background(c.fg.copy(alpha = 0.10f)).padding(horizontal = 5.dp)
-                    .tip(if (address != null) Wording.StatusBar.hostTipAt(address = address) else Wording.StatusBar.hostTip))
+                    .tip((if (address != null) Wording.StatusBar.hostTipAt(address = address) else Wording.StatusBar.hostTip) +
+                        (session?.account?.name?.let { "\n" + Wording.Subscriptions.accountLine(name = it) } ?: "")))
         }
         val cwd = session?.cwd.orEmpty()
         Box(Modifier.layoutId("folder")) {

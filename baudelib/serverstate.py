@@ -14,7 +14,7 @@ import threading
 import time
 import urllib.parse
 
-from baudelib import models, transcripts, wire
+from baudelib import accounts, models, transcripts, wire
 
 
 IDLE_S = 30 * 60
@@ -377,6 +377,14 @@ class Session:
         born = transcripts.ref_epoch((self.info or {}).get("born"))
         return min((t for t in (self.meta.get("created"), born) if t), default=None)
 
+    def account(self):
+        """The subscription account its agent runs under here (Account's fields), or None: the CLI's own sign-in, a
+        model that isn't Claude's or Codex's, or an account since removed."""
+        program = models.model_program(self.meta.get("model"))
+        if program not in accounts.PROVIDERS:
+            return None
+        return accounts.account((self.meta.get("profiles") or {}).get(program, ""))
+
     def listing(self):
         info = self.info or {}
         size, mtime = self.stat or (0, None)
@@ -395,7 +403,7 @@ class Session:
                 "acting": self.acting and self.busy and not self.asks,
                 "on_phone": self.server.phones.phone(self.id) is not None,
                 "fork_from": self.meta.get("fork_from"), "spawned_by": self.meta.get("spawned_by"),
-                "start_key": self.meta.get("start_key"),
+                "start_key": self.meta.get("start_key"), "account": self.account(),
                 "held": [{"id": h["id"], "text": h["text"], "shown": h.get("shown"), "sender": h.get("sender"),
                           "at": h.get("at")} for h in self.meta.get("held") or []],
                 "senders": self.meta.get("senders") or 0,

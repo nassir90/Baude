@@ -34,6 +34,7 @@ fun copyReport(ctx: Context, hostId: String, sid: String) {
         Wording.MetaSettings.effort to (s?.effort?.ifBlank { null } ?: "default"),
         Wording.Report.mode to s?.mode.orEmpty(),
         Wording.NewSession.host to Mesh.label(hostId) + (host?.let { " (${it.address})" } ?: ""),
+        Wording.Subscriptions.account to (s?.account?.name ?: Wording.Subscriptions.cliDefault),
         Wording.Common.folder to s?.cwd.orEmpty(),
         Wording.Report.context to Wording.Report.notSaidYet,
         Wording.Report.copied to SimpleDateFormat("yyyy-MM-dd HH:mm:ss Z", Locale.ENGLISH).format(Date()))

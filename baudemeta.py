@@ -784,7 +784,7 @@ class BaudeMeta(metachat.MetaChat):
                      "host": remote_name(i["remote"]) if i.get("remote") and host_key(i["remote"]) != HERE_HOST else
                      THIS_MACHINE, "ago": time_ago(last_used(i)),
                      "state": i.get("remote_state") if i.get("remote") is not None else sidebar.file_state(i),
-                     "archived": i["id"] in archived or bool(i.get("archived"))}
+                     "archived": i["id"] in archived or bool(i.get("archived")), "account": i.get("account")}
                     for i in sorted(self.all_infos(), key=last_used, reverse=True)]
 
         def groups(_f):
@@ -798,6 +798,7 @@ class BaudeMeta(metachat.MetaChat):
         return {
             "chats": (chats, lambda r: f"{r['id']} {json.dumps(r['title'])} · {r['folder']} · " +
                       (f"group {r['group']} · " if r["group"] else "") + f"{r['host']} · {r['ago']}" +
+                      (f" · account {r['account']}" if r["account"] else "") +
                       (f" · {r['state']}" if r["state"] not in (None, "inactive") else "") +
                       (" · archived" if r["archived"] else "")),
             "groups": (groups, lambda r: r["name"] + (" · listed" if r["listed"] else "")),

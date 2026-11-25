@@ -731,28 +731,92 @@ def discard(widget):
 
 def _dispose_tree(widget):
     def parts(w):  # (parents first: a container's dispose lets go of its children. Not a scrollbar's insides: none
-        yield w      # are ours, and its scrolled window asks them for its adjustment as it goes)
-        c = w.get_first_child()
-        while c is not None:
+        if isinstance(w, Adw.ComboRow):  # are ours, and its scrolled window asks them for its adjustment as it goes.
+            return  # Nor a combo row: its dispose, run again as it's freed, uses its list, freed the first time. Nor
+        if type(w).__module__ != "__gi__":  # GTK's and libadwaita's own private parts (a tab, a switcher's button):
+            yield w  # what they're part of disposes them, and disposed again after that, they corrupted memory;
+        c = w.get_first_child()  # what's ours in them is, once they've let go of it. Those left out are freed once
+        while c is not None:     # nothing holds them)
             if not isinstance(c, Gtk.Scrollbar):
                 yield from parts(c)
             c = c.get_next_sibling()
     for w in list(parts(widget)):
         if w is not widget and w.get_parent() is not None:
             continue  # (a part its parent still holds: it goes with it)
-        controllers = w.observe_controllers()
-        # (not a tab view's: they're libadwaita's own, which its dispose takes out itself, and complains of not finding)
-        for ctl in [controllers.get_item(i) for i in range(controllers.get_n_items())
-                    if not isinstance(w, Adw.TabView)]:
-            w.remove_controller(ctl)  # (a click's handler is the controller's: dispose leaves those till the end)
         if isinstance(w, Gtk.MenuButton):  # (its dispose frees what makes its menu, set_create_popup_func's, each
             w.set_create_popup_func(None)   # time it's run, and it's run again as it's freed: let go of first)
+        if isinstance(w, Gtk.Scrollable):  # (its adjustments, which its scrolled window's handlers are on: kept till
+            w.set_hadjustment(None)          # it's freed, and those handlers usually reach back to its owner)
+            w.set_vadjustment(None)
+        if isinstance(w, Gtk.ListBox):  # (its rows' filter, headers and order: kept till it's freed, and they're
+            w.set_filter_func(None)        # usually its owner's methods)
+            w.set_header_func(None)
+            w.set_sort_func(None)
         if isinstance(w, Gtk.Picture):  # (a picture's dispose lets go of its paintable but keeps pointing at it: the
             Gtk.Picture.set_paintable(w, None)  # second, as it's freed, let go of it again, and crashed)
         w.run_dispose()
+        # (its event controllers: a click's handler is the controller's, and dispose leaves those till the end. Taken
+        # out after it: GTK's and libadwaita's own widgets use theirs in their dispose (a text view ends a selection's
+        # drag with its drag gesture, a tab view's or navigation view's swipe takes its own out), and freed before, they
+        # were used freed, or not found)
+        controllers = w.observe_controllers()
+        for ctl in [controllers.get_item(i) for i in range(controllers.get_n_items())]:
+            w.remove_controller(ctl)
         for c in [c for c in walk(w) if isinstance(c, Gtk.Popover) and c.get_parent() is w]:
             c.unparent()  # (a menu set_parent'ed on it, which only its owner lets go of)
     return False
+
+
+def free_closed_windows(app):
+    """Each of app's windows freed once it's closed, as discard frees a widget, and each dialog shown in one once it's
+    closed: closing one lets go of it, but what in it has handlers reaching back to it kept it all alive (GTK disposes
+    a closed window only once nothing holds it), and with it whatever it held on to (a browser pane's timer, its
+    chat's pictures), a window's worth each time. A window only taken out of the app, not closed, is left as it is."""
+    def added(_app, window):
+        if isinstance(window, (Adw.ApplicationWindow, Adw.Window)):
+            window.connect("notify::visible-dialog", dialog_shown)
+
+    def dialog_shown(window, _pspec):
+        dialog = window.get_visible_dialog()
+        if dialog is not None and not getattr(dialog, "freed_when_closed", False):
+            dialog.freed_when_closed = True
+            dialog.connect("closed", discard)
+
+    def removed(_app, window):
+        GLib.idle_add(closed, window)
+
+    def closed(window):
+        if any(w is window for w in Gtk.Window.list_toplevels()):
+            return False
+        adw = isinstance(window, (Adw.ApplicationWindow, Adw.Window))
+        # (what's ours in it, taken out and disposed: not the window's own insides, which its dispose sees to)
+        parts = [window.get_content() if adw else window.get_child(), window.get_titlebar(),
+                 *[c for c in _children(window) if isinstance(c, Gtk.Popover)]]
+        (window.set_content if adw else window.set_child)(None)
+        window.set_titlebar(None)
+        for w in parts:
+            if w is not None:
+                if w.get_parent() is not None:
+                    w.unparent()
+                _dispose_tree(w)
+        if isinstance(window, Gio.ActionMap):  # (its ☰'s actions: their handlers are mostly its own methods)
+            for name in window.list_actions():
+                window.remove_action(name)
+        window.run_dispose()
+        controllers = window.observe_controllers()
+        for ctl in [controllers.get_item(i) for i in range(controllers.get_n_items())]:
+            window.remove_controller(ctl)
+        return False
+
+    app.connect("window-added", added)
+    app.connect("window-removed", removed)
+
+
+def _children(widget):
+    c = widget.get_first_child()
+    while c is not None:
+        yield c
+        c = c.get_next_sibling()
 
 
 # Back, forward and up through what's been shown (MainTabs.back, forward; a window's up): ⌥⌘ and an arrow on macOS

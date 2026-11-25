@@ -777,11 +777,6 @@ class WindowSignal:
         self.tabs.remember()  # (shown at another line: a step back and forward go through)
         return True
 
-    @staticmethod
-    def tab_closed(_key, child):
-        if isinstance(child, fixview.FixesPage):
-            discard(child)  # (its images, and all that holds it)
-
     def image_source(self):
         """What the large image view goes through with ← and →: the Feedback tab's images, or the chat's."""
         page = self.tabs.current()

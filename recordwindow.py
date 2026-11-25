@@ -1253,8 +1253,6 @@ class Window(RecordHosts, Adw.ApplicationWindow, feedback.FeedbackHost, viewers.
         self.shown_order = [c for c in self.shown_order if c is not child]
         if hasattr(child, "stop"):
             child.stop()
-        if isinstance(child, fixview.FixesPage):
-            widgets.discard(child)  # (its images, and all that holds it)
         if self.switching:  # (another notebook's: what was open is kept as it was)
             return
         if isinstance(child, DiaryEditor):

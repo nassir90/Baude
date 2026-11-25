@@ -8,7 +8,7 @@ import os
 import sys
 import time
 
-from macos import objc_send
+import macos  # (the Dock's tile: dock_image, set_dock_image)
 from baudelib import wording  # noqa: E402  (the words Baude shows: schema/copy, Record's and the Android app's too)
 
 import gi
@@ -123,19 +123,14 @@ def macos_icon_png(size=1024, svg=None):
 
 
 def macos_dock_image(svg=None):
-    """The logo drawn at 1024 px (macos_icon_png) as an NSImage, through the Objective-C runtime, as there's no PyObjC.
-    No GTK and no main-thread AppKit call: it runs on a worker thread."""
-    import ctypes
-    png = macos_icon_png(svg=svg)
-    data = objc_send(b"NSData", b"dataWithBytes:length:", png, len(png), types=(ctypes.c_char_p, ctypes.c_ulong))
-    return objc_send(objc_send(b"NSImage", b"alloc"), b"initWithData:", data, types=(ctypes.c_void_p,))
+    """The logo drawn at the Dock's largest (macos.DOCK_PX) as an NSImage (macos.dock_image), through the Objective-C
+    runtime, as there's no PyObjC. No GTK and no main-thread AppKit call: it runs on a worker thread."""
+    return macos.dock_image(macos_icon_png(macos.DOCK_PX, svg=svg))
 
 
 def set_dock_image(image):
-    """The Dock's tile an NSImage (-[NSApplication setApplicationIconImage:]), on the main thread."""
-    import ctypes
-    objc_send(objc_send(b"NSApplication", b"sharedApplication"), b"setApplicationIconImage:", image,
-              types=(ctypes.c_void_p,))
+    """The Dock's tile an NSImage (macos.set_dock_image), on the main thread."""
+    macos.set_dock_image(image)
 
 
 def macos_dock_icon():

@@ -371,13 +371,19 @@ class Session:
         return {"name": bot.get("name") or "Bot", "since": bot.get("since"),
                 "picture": os.path.getmtime(pic) if os.path.exists(pic) else None}
 
+    def made(self):
+        """When it was made: the earlier of when Baude took it up and its transcript's first record (a chat Baude adopted
+        was made when it was begun, not when it was adopted)."""
+        born = transcripts.ref_epoch((self.info or {}).get("born"))
+        return min((t for t in (self.meta.get("created"), born) if t), default=None)
+
     def listing(self):
         info = self.info or {}
         size, mtime = self.stat or (0, None)
         prompt = " ".join((self.meta.get("prompt") or "").split())
         return {"id": self.id, "title": self.meta.get("title") or info.get("title") or prompt[:90] or None,
                 "cwd": self.meta.get("cwd"), "model": self.meta.get("model"), "effort": self.meta.get("effort"),
-                "mode": self.meta.get("mode"), "group": self.meta.get("group"), "created": self.meta.get("created"),
+                "mode": self.meta.get("mode"), "group": self.meta.get("group"), "created": self.made(),
                 "said": max(info.get("said") or 0, self.meta.get("said") or 0) or self.meta.get("created"),
                 "updated": mtime or self.meta.get("created"), "size": size, "state": self.state(),
                 "prompts": info.get("prompts") or 0, "cli_id": self.meta.get("cli_id"),

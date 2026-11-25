@@ -2,7 +2,8 @@
   "description": "Where Claude Code compacted the conversation (summarised what came before to free its context window): a quiet centred line between two horizontal rules, saying what it did, with the summary it wrote folded under it.",
   "apps": [
     "baude",
-    "record"
+    "record",
+    "phone"
   ],
   "opens": [
     "/compact, or an automatic compaction (live)",
@@ -15,7 +16,12 @@
     "sidequestion.py:CompactMarks.on_compaction",
     "sidequestion.py:CompactMarks.compact_ended",
     "windowview.py:WindowView.adopt_summary",
-    "recordreader.py:Reader._add"
+    "recordreader.py:Reader._add",
+    "chatparts.py:SummaryPin",
+    "chatfind.py:ChatFind.wrap",
+    "baudelib/transcripts.py:summary_tools",
+    "CompactMark.kt:SummaryPin",
+    "CompactMark.kt:summaryTools"
   ],
   "copy": [
     "compaction",
@@ -31,14 +37,57 @@
     },
     {
       "name": "summary",
-      "shows": "Under the line, once known: a disclosure \"Summary of the earlier conversation\" (small, dimmed), folded. Opened, the summary as markdown, 18px in, 6px under it.",
+      "shows": "Under the line, once known: a disclosure \"Summary of the earlier conversation\" (small, dimmed), folded. Opened, 18px in, 6px under it: when the summary carries Claude Code's list of the tools used before it (<tools-used-before-summary>, in a <system-reminder> or not), one quiet line \"Tools used before: <N>\" (small, dimmed, selectable; tooltip: the tools' names, comma-separated), then the summary as markdown with that list and its reminder tags taken out. No reminder tag or raw tool list is ever drawn.",
       "copy": [
-        "compaction.summary"
+        "compaction.summary",
+        "compaction.tools_before"
       ],
       "actions": [
         {
           "by": "click the disclosure",
           "does": "Opens or folds the summary."
+        }
+      ],
+      "decisions": [
+        {
+          "said": "The <tools-used-before-summary> system reminder shown after a compaction is far too long; it should be much shorter",
+          "rule": "Every app shows a compaction summary without Claude Code's tool list and its <system-reminder> tags; how many tools were used is said in one quiet line at the summary's top, the names only on hover (desktop)",
+          "decided": "2026-11-25",
+          "source": [
+            {
+              "issue": "BaudeInternal#216"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "pinned heading",
+      "shows": "While an opened summary's own heading is scrolled above the top of the chat and the rest of the summary is still in view, the same heading (the open arrow and \"Summary of the earlier conversation\", small, dimmed) is pinned at the chat's top, at the summary's left edge and as wide as it, on the chat's background with a 1px rule under it. It goes as soon as the heading scrolls back into view or the summary scrolls out above. Worked out only when the chat scrolls or a summary is opened or folded, after that frame is laid out, and not at all while no summary is open.",
+      "copy": [
+        "compaction.summary"
+      ],
+      "actions": [
+        {
+          "by": "click the pinned heading",
+          "does": "Folds that summary and scrolls the chat back so its mark is at the top."
+        }
+      ],
+      "phone": {
+        "does": "The same, pinned over the chat list's top; a tap folds it and scrolls back to the mark",
+        "why": "Same feature; a tap stands for a click",
+        "decided": "2026-11-25"
+      },
+      "decisions": [
+        {
+          "said": "An opened post-compaction summary is so long that closing it means scrolling all the way back up; keep its close sticky at the top",
+          "rule": "Every app keeps an open compaction summary's heading pinned at the top of the chat while the summary is being read below it; clicking it folds the summary and returns to its mark. It costs nothing while no summary is open",
+          "decided": "2026-11-25",
+          "source": [
+            {
+              "issue": "BaudeInternal#217"
+            }
+          ]
         }
       ]
     }
@@ -89,5 +138,8 @@
       "shows": "A summary whose boundary isn't drawn yet shows on its own as a small dimmed \"Summary of the earlier conversation\" disclosure, and moves under its mark when that is drawn."
     }
   ],
-  "scenes": []
+  "scenes": [
+    "chat-compact-tools",
+    "chat-compact-pinned"
+  ]
 }

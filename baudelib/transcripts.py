@@ -80,6 +80,21 @@ def strip_reminders(text):
     return _LEADING_REMINDERS.sub("", text) if text.lstrip().startswith("<system-reminder>") else text
 
 
+_TOOLS_BEFORE = re.compile(r"\s*(?:<system-reminder>\s*)?<tools-used-before-summary>(.*?)</tools-used-before-summary>"
+                           r"(?:\s*</system-reminder>)?\s*", re.S)
+
+
+def summary_tools(text):
+    """A compaction's summary as it's read: (its text without the list of tools the conversation had used that Claude
+    Code puts in it, <tools-used-before-summary>, in a <system-reminder> or not; those tools' names)."""
+    names = []
+
+    def took(m):
+        names.extend(n.strip() for n in m.group(1).split(",") if n.strip())
+        return "\n\n"
+    return _TOOLS_BEFORE.sub(took, text or "").strip(), names
+
+
 def _prompt_texts(content):
     """The parts of a user message the person actually wrote (clients prepend reminders, and
     Claude Code sends task notifications as user messages)."""

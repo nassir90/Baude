@@ -172,6 +172,7 @@ row.entry.focused, row.spin.focused, editablelabel:focus-within { outline: none;
 .statusbar .chat-host { padding: 0 5px; border-radius: 4px; background: alpha(currentColor, 0.1); }
 .sysnote { font-size: {font.small}em; opacity: 0.6; }
 .compact-mark label.error { opacity: 1; }
+.summary-pin { background-color: @baude_inside; padding: 2px 0 4px; border-bottom: 1px solid @baude_rule; }  /* (over the chat's text as it scrolls under) */
 .composer-actions button { min-width: {composer.button}; min-height: {composer.button}; padding: 0; }
 .feedback-actions button { min-width: 34px; min-height: 34px; padding: 0; }
 .attach-chip { background: @baude_raised; border-radius: {radius.card}; padding: 2px 2px 2px 4px; }

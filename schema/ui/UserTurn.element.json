@@ -78,6 +78,18 @@
           "by": "send (Enter) while a revert is pending",
           "does": "Makes the revert: the agent rewinds the conversation to before that message (stopping a running turn), the message and all after it leave the chat, then what's in the composer is sent as a new message."
         }
+      ],
+      "decisions": [
+        {
+          "said": "A bullet or numbered list on a message's last line pushes the Send now / Revert buttons well out of place",
+          "rule": "Every app keeps a message's buttons just beside its bubble, level with its last line, whatever the message ends with (a list, a numbered list, a code block): what's inside a bubble never widens the bubble's share of the row",
+          "decided": "2026-11-25",
+          "source": [
+            {
+              "issue": "BaudeInternal#221"
+            }
+          ]
+        }
       ]
     }
   ],

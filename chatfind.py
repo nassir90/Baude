@@ -15,7 +15,7 @@ from gi.repository import Adw, Gdk, Gio, GLib, Graphene, Gtk, Pango  # noqa: E40
 
 from baudelib import wording  # noqa: E402
 from widgets import accent_rgba, focus_shown, walk, watch_style  # noqa: E402
-from chatparts import FindBar  # noqa: E402
+from chatparts import FindBar, SummaryPin  # noqa: E402
 
 
 def layout_origin(label):
@@ -519,9 +519,11 @@ class ChatFind:
             adj.connect("value-changed", lambda *_: self.matches and self.marks.queue_draw())
 
     def wrap(self):
-        """The bar over the scroller, the shading laid over that, for its pane to show in the scroller's place."""
+        """The bar over the scroller, the shading laid over that, for its pane to show in the scroller's place (an open
+        compaction summary's heading pinned at its top too: SummaryPin)."""
         over = Gtk.Overlay(child=self.scroller, vexpand=True)
         over.add_overlay(self.marks)
+        over.add_overlay(SummaryPin(self.scroller))
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         box.append(self.bar)
         box.append(over)

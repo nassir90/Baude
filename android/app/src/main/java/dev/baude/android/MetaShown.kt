@@ -134,13 +134,14 @@ object MetaSet {
         }, { "on|off" }, onOff("meta_commands"), { v -> saved { Settings.metaCommands.value = v as Boolean } },
             "on Claude's models, Meta runs shell commands and edits files, from its next message; the user's to turn on or off",
             metaSets = false, row = { f, x -> RunCommandsRow(f, x) }),
-        "group_by" to MetaSetting("group_by", { Wording.Sidebar.groupBy }, { HomePrefs.by.value }, { "folder|date" },
-            oneOf("group_by") { listOf("folder", "date") }, { v ->
+        "group_by" to MetaSetting("group_by", { Wording.Sidebar.groupBy }, { HomePrefs.by.value }, { "folder|created|updated" },
+            oneOf("group_by") { listOf("folder", "created", "updated") }, { v ->
                 HomePrefs.by.value = v as String
                 HomePrefs.save()
-            }, "the left bar's chats, under their folders or their days", row = { f, x ->
-                Choice(Wording.Sidebar.groupBy, listOf("folder", "date"), HomePrefs.by.value,
-                    { if (it == "date") Wording.Sidebar.date else Wording.Common.folder }, subtitle = f, extra = x) {
+            }, "the left bar's chats, under their folders, the days they were made, or the days they were last used", row = { f, x ->
+                Choice(Wording.Sidebar.groupBy, listOf("folder", "created", "updated"), HomePrefs.by.value,
+                    { when (it) { "created" -> Wording.Sidebar.created; "updated" -> Wording.Sidebar.updated; else -> Wording.Common.folder } },
+                    subtitle = f, extra = x) {
                     HomePrefs.by.value = it
                     HomePrefs.save()
                 }

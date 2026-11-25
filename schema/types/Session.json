@@ -33,7 +33,7 @@
     },
     "created": {
       "type": ["number", "null"],
-      "description": "When it was made, epoch seconds."
+      "description": "When it was made, epoch seconds: the earlier of when the host took it up and its transcript's first record."
     },
     "said": {
       "type": ["number", "null"],

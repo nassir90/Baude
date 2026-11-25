@@ -52,7 +52,8 @@ in a group (made if it's new; "" for none, whatever host they're on); make_group
 the groups. highlight_chats highlights chats in the list without changing them: use it to show which you mean before a \
 change the user should check. archive_chats and unarchive_chats; delete_chats moves chats of this machine's own (not \
 a host's sessions) to Baude's trash, where undo finds them; a host's session you don't delete: show button:trash. How \
-the list is grouped (by folder or by day) is the setting group_by."""
+the list is grouped (by folder, by the day each chat was made, or by the day it was last used) is the setting \
+group_by."""
 
 BAUDE_TOOLS = [
     {"name": "highlight_chats", "description": "Highlight chats in the left bar, changing nothing, to show the user "
@@ -337,7 +338,7 @@ class BaudeMeta(metachat.MetaChat):
     def make_settings(self):
         win = self.win
         out = meta.shared_settings(win, self, "Baude", lambda: win.zoom_default)
-        by = ["folder", "date"]
+        by = ["folder", "created", "updated"]
 
         def group_by(v):
             if (sidebar := getattr(win, "sidebar", None)) is not None:
@@ -347,13 +348,16 @@ class BaudeMeta(metachat.MetaChat):
 
         def row():
             r = Adw.ComboRow(title=wording.say("sidebar.group_by"),
-                             model=Gtk.StringList.new([wording.say("common.folder"), wording.say("sidebar.date")]),
+                             model=Gtk.StringList.new([wording.say("common.folder"), wording.say("sidebar.created"),
+                                                       wording.say("sidebar.updated")]),
                              selected=by.index(now()))
             r.connect("notify::selected", lambda r, _p: group_by(by[r.get_selected()]))
             return r
-        now = lambda: "date" if load_settings().get("sidebar_group") == "date" else "folder"  # noqa: E731
+        now = lambda: "updated" if (b := load_settings().get("sidebar_group")) == "date" else b if b in by \
+            else "folder"  # noqa: E731
         out["group_by"] = meta.Setting("group_by", wording.say("sidebar.group_by"), now, group_by, row, by,
-                                       note="the left bar's chats, under their folders or their days")
+                                       note="the left bar's chats, under their folders, the days they were made, or "
+                                            "the days they were last used")
 
         return out
 
@@ -744,9 +748,10 @@ class BaudeMeta(metachat.MetaChat):
                                            sidebar.known_hosts()) +
                      f" · listed: {', '.join(n for k, n, _n in sidebar.known_hosts() if k in hosts)}")
         lines.append("groups: " + ", ".join(f"{label} {counts.get(k, 0)}" for k, label, _n in sidebar.known_groups()) +
-                     f" · listed: {'all' if groups is None else ', '.join(g or 'No group' for g in sorted(groups))}")
+                     " · listed: " + ("all" if groups is None else
+                                      ", ".join(g or "No group" for g in sorted(groups)) or "none"))
         lines.append(f"chats: {len(infos)}, {sum(i['id'] in archived or bool(i.get('archived')) for i in infos)} "
-                     f"archived; grouped by {'date' if sidebar.by_date() else 'folder'} (app_index chats, filter by a "
+                     f"archived; grouped by {sidebar.grouping()} (app_index chats, filter by a "
                      "word, a folder or a group)")
         return lines
 

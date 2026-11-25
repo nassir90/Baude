@@ -1,10 +1,14 @@
 """Settings → Subscriptions (Baude's and Record's; the phone's SubscriptionsScreen the same): the Claude and Codex
 subscription accounts kept on the host picked beside New session (win.terminal_host, as ☰ → Terminal, Kubernetes and
 Database Schemas are), changed there through its accounts op (hostaccounts): each provider's Account picker (the
-default a new chat takes), its accounts with Rename…, Replace Token… (Claude) or Sign In Again… (Codex) and Remove…,
-Subscription usage (Claude) and Add account. Also the chat's Sign in card's token box for a chat under a Claude
-account (replace_token)."""
+default a new chat takes), its accounts with Rename…, Sign In Again… (Replace Token… for a token account) and
+Remove…, Subscription usage (Claude) and Add account. A Claude account is signed in to with claude auth login run on
+the host with the account's own folder: the page to open shown as a link, and a box for the code it shows. Where the
+host has no claude, it's a token from claude setup-token. Also the chat's Sign in card's token box for a chat under a
+token account (replace_token)."""
+import html
 import os
+import re
 import threading
 
 from gi.repository import Adw, Gio, GLib, Gtk
@@ -17,7 +21,8 @@ PROVIDERS = (("claude", "report.claude", "claude"), ("codex", "programs.codex", 
 class Ask:
     """One accounts request to a host (where), on a connection of its own (through the mesh, if that's how it's
     reached): answered(reply) once its answer comes (an error's too, as {"error": …}); heard(line) for each line a
-    Codex sign-in writes. stop() lets go of the connection, which stops a sign-in there. On the main thread."""
+    sign-in writes; send(msg) another accounts message on it (a sign-in's code). stop() lets go of the connection,
+    which stops a sign-in there. On the main thread."""
 
     def __init__(self, where, msg, answered, heard=None):
         self.ch, self.stopped = None, False
@@ -55,6 +60,9 @@ class Ask:
         if not self.stopped:
             GLib.idle_add(answered, reply)
 
+    def send(self, msg):
+        return self.ch is not None and not self.stopped and self.ch.send({"op": "accounts", "req": 1, **msg})
+
     def stop(self):
         self.stopped = True
         if self.ch is not None:
@@ -72,7 +80,7 @@ class Page(Adw.PreferencesPage):
                 clamp.set_maximum_size(100_000)
                 clamp.set_tightening_threshold(100_000)
         self.where, self.host = win.terminal_host()
-        self.accounts, self.defaults, self.lists, self.filling = [], {}, {}, False
+        self.accounts, self.defaults, self.lists, self.filling, self.claude_cli = [], {}, {}, False, True
         top = Adw.PreferencesGroup()
         host = Adw.ActionRow(title=wording.say("new_session.host"))
         host.add_suffix(Gtk.Label(label=self.host, css_classes=["dim-label"]))
@@ -102,8 +110,7 @@ class Page(Adw.PreferencesPage):
         """msg to the host; the page filled again from what it answers, then(reply) after, and its error said."""
         def answered(reply):
             if "accounts" in reply:
-                self.accounts, self.defaults = reply["accounts"], reply.get("defaults") or {}
-                self.fill()
+                self.took(reply)
             elif msg.get("what") == "list":
                 self.fill(reply.get("error"))
             if then is not None:
@@ -112,6 +119,12 @@ class Page(Adw.PreferencesPage):
                 self.toast(reply["error"])
             return False
         return Ask(self.where, msg, answered)
+
+    def took(self, reply):
+        """An answer's accounts, defaults and whether the host has claude, kept and shown."""
+        self.accounts, self.defaults = reply["accounts"], reply.get("defaults") or {}
+        self.claude_cli = reply.get("claude_cli", self.claude_cli)
+        self.fill()
 
     def toast(self, text):
         dialog = self.get_ancestor(Adw.PreferencesDialog)
@@ -224,6 +237,100 @@ def _send(page, dialog, submit, say, msg, inputs=()):
 
 
 def add_claude(page):
+    """Add account (Claude): signed in with claude auth login run on the host with a folder of the account's own (or
+    an existing signed-in folder there); a token from claude setup-token where the host has no claude."""
+    if not page.claude_cli:
+        return add_claude_token(page)
+    dialog, form, status, submit, say = _form(page, wording.say("subscriptions.add_claude"),
+                                              wording.say("sign_in.sign_in"))
+    name = Gtk.Entry(placeholder_text=wording.say("subscriptions.name_hint"))
+    folder = Gtk.Entry(placeholder_text=wording.say("subscriptions.claude_folder_hint"))
+    folder.connect("changed", lambda e: submit.set_label(wording.say("subscriptions.use_folder") if e.get_text().strip()
+                                                         else wording.say("sign_in.sign_in")))
+    for w in (name, folder):
+        form.append(w)
+    login = _ClaudeLogin(page, dialog, form, status, submit, say, (name, folder))
+
+    def save(*_):
+        label = name.get_text().strip()
+        if not label:
+            return name.grab_focus()
+        if folder.get_text().strip():
+            return _send(page, dialog, submit, say, {"what": "add", "provider": "claude", "name": label,
+                                                     "folder": folder.get_text().strip()}, (name, folder))
+        login.start({"what": "sign_in", "provider": "claude", "name": label})
+    submit.connect("clicked", save)
+    name.connect("activate", save)
+    dialog.present(page)
+    return dialog
+
+
+class _ClaudeLogin:
+    """claude auth login run on the host with an account's folder, in a dialog's form: the page to open shown as a
+    link, a box for the code the page may show (sent to it on the same connection), what went wrong if it didn't
+    finish; the dialog closed once it's signed in, and Close stops it."""
+
+    def __init__(self, page, dialog, form, status, submit, say, inputs):
+        self.page, self.dialog, self.submit, self.say, self.inputs = page, dialog, submit, say, inputs
+        self.ask, self.lines = None, []
+        self.link = Gtk.Label(xalign=0, wrap=True, visible=False)
+        self.row = Gtk.Box(spacing=6, visible=False)
+        self.code = Gtk.Entry(hexpand=True, placeholder_text=wording.say("sign_in.code_hint"))
+        send = Gtk.Button(label=wording.say("common.send"))
+        self.code.connect("activate", lambda *_: self.paste())
+        send.connect("clicked", lambda *_: self.paste())
+        self.row.append(self.code)
+        self.row.append(send)
+        form.append(self.link)
+        form.append(self.row)
+        form.append(status)
+        form.append(submit)
+        dialog.connect("response", lambda *_: self.ask is not None and self.ask.stop())
+
+    def start(self, msg):
+        self.submit.set_sensitive(False)
+        for w in self.inputs:
+            w.set_sensitive(False)
+        self.lines = []
+        self.say(wording.say("sign_in.starting"))
+        self.ask = Ask(self.page.where, msg, self.answered, self.heard)
+
+    def heard(self, line):
+        if m := re.search(r"https://\S+", line):
+            url = html.escape(m.group(0).rstrip(".,)"))
+            link = f"<a href=\"{url}\">{html.escape(wording.say('sign_in.open_page_there'))}</a>"
+            self.link.set_markup(html.escape(wording.say("sign_in.page_there", link="\x00")).replace("\x00", link))
+            self.link.set_visible(True)
+            self.row.set_visible(True)
+            self.say("")
+            self.code.grab_focus()
+        elif not line.startswith("Opening browser"):
+            self.lines.append(line)
+        return False
+
+    def paste(self):
+        code = self.code.get_text().strip()
+        if code and self.ask is not None and self.ask.send({"what": "code", "code": code}):
+            self.code.set_text("")
+            self.say(wording.say("sign_in.checking_code"))
+
+    def answered(self, reply):
+        self.ask = None
+        if "accounts" in reply:
+            self.page.took(reply)
+        if reply.get("error"):
+            self.link.set_visible(False)
+            self.row.set_visible(False)
+            self.say(reply["error"])
+            self.submit.set_sensitive(True)
+            for w in self.inputs:
+                w.set_sensitive(True)
+        else:
+            self.dialog.close()
+        return False
+
+
+def add_claude_token(page):
     dialog, form, status, submit, say = _form(page, wording.say("subscriptions.add_claude"),
                                               wording.say("subscriptions.save_account"))
     name = Gtk.Entry(placeholder_text=wording.say("subscriptions.name_hint"))
@@ -283,8 +390,7 @@ def _device_sign_in(page, dialog, submit, say, msg, inputs):
 
     def answered(reply):
         if "accounts" in reply:
-            page.accounts, page.defaults = reply["accounts"], reply.get("defaults") or {}
-            page.fill()
+            page.took(reply)
         if reply.get("error"):
             say(reply["error"])
             submit.set_sensitive(True)
@@ -326,6 +432,13 @@ def sign_in_again(page, account):
                   (token,))
         submit.connect("clicked", save)
         token.connect("activate", save)
+        dialog.present(page)
+        return dialog
+    if account["provider"] == "claude":
+        dialog, form, status, submit, say = _form(page, wording.say("subscriptions.sign_in_heading",
+                                                                    name=account["name"]), wording.say("sign_in.sign_in"))
+        login = _ClaudeLogin(page, dialog, form, status, submit, say, ())
+        submit.connect("clicked", lambda *_: login.start({"what": "sign_in", "id": account["id"]}))
         dialog.present(page)
         return dialog
     dialog, form, status, submit, say = _form(page, wording.say("subscriptions.sign_in_heading", name=account["name"]),

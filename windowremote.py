@@ -1131,11 +1131,11 @@ class WindowRemote:
         """/login (or a turn that failed for want of it: ask, its error): claude auth login on the machine the chat runs
         on, as a card (LoginCard): this one's here; another's by its host process there."""
         elsewhere = self.remote is not None and not self.remote.local
-        account = self.chat_account_info()  # (a chat under a Claude account: its token replaced there instead)
+        account = self.chat_account_info()  # (a chat under a Claude account: that account signed in to there instead)
         self.add(LoginCard(self, args, where=self.remote.where if elsewhere else None,
                            host=remote_name(self.remote) if elsewhere else None, ask=ask,
                            retry=getattr(self, "turn_sent", None) if ask is not None else None,
-                           account=account if (account or {}).get("kind") == "token" else None,
+                           account=account if (account or {}).get("kind") in ("token", "folder") else None,
                            account_where=self.remote.where if self.remote is not None else {"via": "local"}))
         self.stick_bottom = True
 

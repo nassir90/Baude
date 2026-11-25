@@ -1,5 +1,5 @@
 {
-  "description": "Settings → Subscriptions (Baude's, Record's and the phone's): the Claude and Codex accounts kept on the host picked beside New session, the dialogs that change them, their usage, and what a host says of them.",
+  "description": "Settings → Subscriptions (Baude's, Record's and the phone's): the Claude and Codex accounts kept on a host (the one picked beside New session, or the phone itself), the dialogs that change them and sign in to them, their usage, and what a host says of them.",
   "messages": {
     "title": "Subscriptions",
     "general": "General",
@@ -17,9 +17,11 @@
     "name_hint": "Account name",
     "token_hint": "Paste the token from claude setup-token",
     "codex_home_hint": "Existing signed-in CODEX_HOME (optional)",
+    "claude_folder_hint": "Existing signed-in Claude folder (optional)",
     "save_account": "Save account",
     "device_code": "Sign in with device code",
     "use_profile": "Use signed-in profile",
+    "use_folder": "Use signed-in folder",
     "requesting_code": "Requesting a device code…",
     "rename_heading": "Rename {$name}",
     "replace_token": "Replace Token…",
@@ -36,6 +38,9 @@
     "codex_signed_out": "Sign in to this Codex profile again",
     "not_chatgpt": "Choose a file-backed Codex profile signed in with ChatGPT",
     "codex_failed": "The Codex CLI did not complete sign-in",
+    "claude_failed": "Claude Code did not complete sign-in",
+    "no_claude": "Claude Code isn't installed on this host",
+    "not_signed_in_folder": "That folder isn't signed in to Claude",
     "token_saved": "Token replaced"
   }
 }

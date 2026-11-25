@@ -343,7 +343,6 @@ class WindowProc:
             except (OSError, sqlite3.Error):
                 return None
         return None
-        return None
 
     def cost_said(self):
         """What the chat's spent, as the status bar says it: claude's figure ($0.0125); on a model run on your own

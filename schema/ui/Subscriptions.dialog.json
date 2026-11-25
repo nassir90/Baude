@@ -1,32 +1,30 @@
 {
-  "description": "The Settings dialog's Subscriptions page (Baude's and Record's; the phone's Settings → Subscriptions): the Claude and Codex subscription accounts kept on the host picked beside New session (as ☰ → Terminal, Kubernetes… and Database Schemas… use it), changed there through its accounts request. Named Subscriptions, not Providers: Settings' Meta group and the model pickers already call inference providers (Ollama, MLX, an endpoint) Providers.",
+  "description": "The Settings dialog's Subscriptions page (Baude's, Record's and the phone's; on the phone the second page of Settings, switched to by the bar at its foot as the desktop dialog's switcher is when narrow): the Claude and Codex subscription accounts kept on the host picked beside New session (as ☰ → Terminal, Kubernetes… and Database Schemas… use it; the phone itself when it's picked), changed there through its accounts request. Named Subscriptions, not Providers: Settings' Meta group and the model pickers already call inference providers (Ollama, MLX, an endpoint) Providers.",
   "apps": [
     "baude",
     "record",
     "phone"
   ],
   "opens": [
-    "Settings… → Subscriptions (the dialog's page switcher)",
-    "phone: ⋮ → Settings… → Subscriptions (a row after the sizes)"
+    "Settings… → Subscriptions (the dialog's page switcher; the phone's: the bar at Settings' foot)"
   ],
   "code": [
     "subscriptionpage.py:Page",
     "subscriptionpage.py:Ask",
     "baudelib/hostaccounts.py:answer",
     "baudelib/accounts.py",
-    "Subscriptions.kt:SubscriptionsScreen",
-    "Subscriptions.kt:HostAccounts"
+    "Subscriptions.kt:HostAccounts",
+    "Subscriptions.kt:SubscriptionsPage",
+    "Subscriptions.kt:ClaudeLogin",
+    "PhoneAccounts.kt",
+    "Settings.kt:SettingsScreen"
   ],
   "copy": [
     "subscriptions",
     "common",
-    "new_session"
+    "new_session",
+    "sign_in"
   ],
-  "phone": {
-    "does": "A row \"Subscriptions\" at the end of Settings (before Send Feedback…) opens the page as a screen of its own",
-    "why": "the phone's Settings is one scrolling screen with no page switcher; proposed in PR 423",
-    "decided": "2026-11-25"
-  },
   "parts": [
     {
       "name": "Host",
@@ -75,7 +73,7 @@
           "actions": [
             {
               "by": "click ⋮",
-              "does": "Menu: Rename…, Replace Token… (Claude) or Sign In Again… (Codex), Remove…"
+              "does": "Menu: Rename…, Sign In Again… (Replace Token… for a token account), Remove…"
             }
           ],
           "copy": [
@@ -93,7 +91,7 @@
             "record",
             "phone"
           ],
-          "shows": "Claude's only: row \"Subscription usage\" with a refresh icon; once read, its limits after its name (\"Five hour 25% · Seven day 40%\"), or \"Usage unavailable for this sign-in\".",
+          "shows": "Claude's only: row \"Subscription usage\" with a refresh icon; once read, the default account's limits after its name (\"Five hour 25% · Seven day 40%\"), or \"Usage unavailable for this sign-in\" (a token account's: a setup token can't read them).",
           "copy": [
             "subscriptions.usage",
             "subscriptions.usage_limit",
@@ -125,13 +123,38 @@
     },
     {
       "name": "Add Claude account dialog",
-      "shows": "Heading \"Add Claude account\"; an entry \"Account name\"; a password entry whose placeholder is \"Paste the token from claude setup-token\" (no line under or over it); Save account; Close. Why it wasn't saved is said under the entries.",
+      "shows": "On a host with claude: heading \"Add Claude account\"; \"Account name\"; \"Existing signed-in Claude folder (optional)\"; its button Sign in (Use signed-in folder once a folder is typed); Close. Sign in runs claude auth login on the host with a new folder of the account's own: \"Open the sign-in page to sign in.\" (a link to the page the host was given), then a box \"If the page shows a code, paste it here\" and Send, which passes the code to the login on the host; the dialog closes once it's signed in, and says why if it isn't. Close stops it. On a host without claude (the phone itself): \"Account name\", a password entry whose placeholder is \"Paste the token from claude setup-token\", Save account, Close.",
       "copy": [
         "subscriptions.add_claude",
         "subscriptions.name_hint",
         "subscriptions.token_hint",
         "subscriptions.save_account",
-        "common.close"
+        "common.close",
+        "subscriptions.claude_folder_hint",
+        "subscriptions.use_folder",
+        "sign_in.sign_in",
+        "sign_in.page_there",
+        "sign_in.open_page_there",
+        "sign_in.code_hint",
+        "sign_in.checking_code",
+        "sign_in.starting",
+        "common.send",
+        "subscriptions.claude_failed",
+        "subscriptions.no_claude",
+        "subscriptions.not_signed_in_folder"
+      ],
+      "decisions": [
+        {
+          "said": "claude auth login with a profile dir should pre preferred over oauth. similar to how we fall back to agent forwarding if we can't do provider forwarding (or vice versa). oauth token login should be used for things such as mobile where we can't guarantee the claude code binary.",
+          "rule": "Every app adds a Claude account on a host that has claude as a config folder of its own there (CLAUDE_CONFIG_DIR), signed in to with claude auth login run by that host with the folder: the host passes the sign-in page's link to the app (any device opens it) and the code the page shows is pasted back in the app and fed to the login; the host keeps only the folder, no token, and the account's chats run claude with CLAUDE_CONFIG_DIR set to it. An existing signed-in folder on the host can be used instead. A token from claude setup-token is the fallback, used only where claude can't be guaranteed: a host without claude, and the phone as a host",
+          "decided": "2026-11-25",
+          "source": [
+            {
+              "session": "b3845b21-55ac-4aab-a769-fb8517403c51",
+              "message": "7d38ce29-c6e4-4827-b56a-d688129471eb"
+            }
+          ]
+        }
       ]
     },
     {
@@ -155,7 +178,7 @@
     },
     {
       "name": "Replace Token dialog",
-      "shows": "Heading \"Replace the token for <name>\", the token's password entry (its placeholder the setup-token line), Save, Close.",
+      "shows": "A token account's: heading \"Replace the token for <name>\", the token's password entry (its placeholder the setup-token line), Save, Close.",
       "copy": [
         "subscriptions.replace_heading",
         "common.save"
@@ -163,7 +186,7 @@
     },
     {
       "name": "Sign In Again dialog",
-      "shows": "Codex's: heading \"Sign in to <name> again\", Sign in with device code (its output in the dialog as it comes), Close.",
+      "shows": "Heading \"Sign in to <name> again\". A Claude folder account's: Sign in, then the sign-in page's link and the code box, as Add Claude account's. Codex's: Sign in with device code (its output in the dialog as it comes). Close.",
       "copy": [
         "subscriptions.sign_in_heading"
       ]
@@ -233,6 +256,28 @@
         {
           "session": "b3845b21-55ac-4aab-a769-fb8517403c51",
           "message": "ac03d59c-4c08-4acd-87a6-78a79a1e0dc9"
+        }
+      ]
+    },
+    {
+      "said": "claude auth login with a profile dir should pre preferred over oauth. similar to how we fall back to agent forwarding if we can't do provider forwarding (or vice versa). oauth token login should be used for things such as mobile where we can't guarantee the claude code binary.",
+      "rule": "Every app adds a Claude account on a host that has claude as a config folder of its own there (CLAUDE_CONFIG_DIR), signed in to with claude auth login run by that host with the folder: the host passes the sign-in page's link to the app (any device opens it) and the code the page shows is pasted back in the app and fed to the login; the host keeps only the folder, no token, and the account's chats run claude with CLAUDE_CONFIG_DIR set to it. An existing signed-in folder on the host can be used instead. A token from claude setup-token is the fallback, used only where claude can't be guaranteed: a host without claude, and the phone as a host",
+      "decided": "2026-11-25",
+      "source": [
+        {
+          "session": "b3845b21-55ac-4aab-a769-fb8517403c51",
+          "message": "7d38ce29-c6e4-4827-b56a-d688129471eb"
+        }
+      ]
+    },
+    {
+      "said": "(coordinator, from the owner's rule that only the owner decides overrides) the phone's Settings row in place of the page switcher was an agent's override",
+      "rule": "Every app reaches Subscriptions as Settings' second page through the same page switcher (General, Subscriptions; on a narrow screen, the bar at the foot); no app opens it from a row",
+      "decided": "2026-11-25",
+      "source": [
+        {
+          "session": "b3845b21-55ac-4aab-a769-fb8517403c51",
+          "message": "7d38ce29-c6e4-4827-b56a-d688129471eb"
         }
       ]
     }

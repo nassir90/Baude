@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
-  "description": "accounts' answer: the accounts and defaults as they are after it (with error, if it couldn't be done); usage's, the limits; sign_in's, each line Codex writes (line alone), then its end.",
+  "description": "accounts' answer: the accounts and defaults as they are after it, and whether the host has claude (with error, if it couldn't be done); usage's, the limits; sign_in's, each line the sign-in writes (line alone), then its end.",
   "properties": {
     "op": {
       "const": "accounts",
@@ -56,11 +56,22 @@
     },
     "line": {
       "type": "string",
-      "description": "sign_in: a line Codex wrote (the device code and the page to enter it at among them)."
+      "description": "sign_in: a line the sign-in wrote (the page to open, or Codex's device code, among them)."
     },
     "signed_in": {
       "type": "boolean",
       "description": "sign_in: its end, signed in."
+    },
+    "claude_cli": {
+      "type": "boolean",
+      "description": "Whether the host has claude: a Claude account there is a folder signed in to with claude auth login; without it, a token from claude setup-token."
+    },
+    "who": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "sign_in (Claude's), signed in: who as, as claude auth status says."
     }
   },
   "required": [

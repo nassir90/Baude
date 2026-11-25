@@ -6,9 +6,9 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
@@ -23,16 +23,24 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.LinkAnnotation
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextLinkStyles
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.text.withLink
 import androidx.compose.ui.unit.dp
 import org.json.JSONObject
 
-/** The accounts a host keeps, as its accounts answer last said them (hostaccounts): Compose state. */
+/** The accounts a host keeps, as its accounts answer last said them (hostaccounts; this phone's, PhoneAccounts):
+ * Compose state. */
 class HostAccounts(val hostId: String) {
     val accounts = mutableStateOf<List<Msg.Account>>(emptyList())
     val defaults = mutableStateOf<Map<String, String>>(emptyMap())
     val error = mutableStateOf<String?>(null)
     val loaded = mutableStateOf(false)
     val usage = mutableStateOf<String?>(null)
+    val claudeCli = mutableStateOf(true) // (whether the host has claude: without it, a Claude account is a token)
 
     /** An accounts request (what, and its fields): the page filled again from what it answers; then(error or null). */
     fun ask(msg: Msg.Accounts, then: (String?) -> Unit = { e -> if (e != null) toast(e) }) {
@@ -45,23 +53,28 @@ class HostAccounts(val hostId: String) {
         val g = Msg.AccountsReply.from(r)
         g.accounts?.let { accounts.value = it }
         g.defaults?.let { d -> defaults.value = d.keys().asSequence().associateWith { d.optString(it) } }
+        g.claudeCli?.let { claudeCli.value = it }
         loaded.value = true
         error.value = null
         return g.error?.ifBlank { null }
     }
+
+    /** Its providers, each with its name: the phone's own, Claude's only (it can't run Codex). */
+    val providers get() = if (hostId == "phone") PROVIDERS.take(1) else PROVIDERS
 
     companion object {
         val PROVIDERS = listOf("claude" to Wording.Report.claude, "codex" to Wording.Programs.codex)
     }
 }
 
-/** Settings → Subscriptions (subscriptionpage.Page): the Claude and Codex accounts kept on the host picked beside New
- * session, changed there: its name; each provider's Account picker (the default a new chat takes), its accounts each
- * with ⋮ (Rename…, Replace Token… or Sign In Again…, Remove…), Subscription usage (Claude) and Add account. */
+/** Settings → Subscriptions (subscriptionpage.Page), Settings' second page: the Claude and Codex accounts kept on the
+ * host picked beside New session (this phone's own, PhoneAccounts, when it's the phone), changed there: its name; each
+ * provider's Account picker (the default a new chat takes), its accounts each with ⋮ (Rename…, Sign In Again… or
+ * Replace Token…, Remove…), Subscription usage (Claude) and Add account. */
 @Composable
-fun SubscriptionsScreen(back: () -> Unit) {
+fun SubscriptionsPage() {
     val c = LocalBaude.current
-    val hostId = picked()?.takeIf { it != "phone" }
+    val hostId = picked()
     val host = remember(hostId) { hostId?.let { HostAccounts(it) } }
     var dialog by remember { mutableStateOf<Pair<String, Any?>?>(null) } // (which dialog, and its provider or account)
     LaunchedEffect(hostId) {
@@ -69,14 +82,13 @@ fun SubscriptionsScreen(back: () -> Unit) {
         Mesh.ask(h.hostId, Msg.Accounts(what = "list").json()) { r -> h.took(r)?.let { e -> h.error.value = e } }
     }
     Column(Modifier.fillMaxSize().background(c.frame)) {
-        Bar(Wording.Subscriptions.title, start = { IconButton(Adwaita.GoPrevious, Wording.Browser.back, onClick = back) })
-        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).navigationBarsPadding()) {
+        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
             BoxedList(listOf(Unit), "") {
                 ActionRow(Wording.NewSession.host, null, suffix = {
                     Text(hostId?.let { Mesh.label(it) } ?: "", style = Type.body, color = c.dim)
                 })
             }
-            if (host != null) for ((provider, title) in HostAccounts.PROVIDERS) {
+            if (host != null) for ((provider, title) in host.providers) {
                 Row(Modifier.padding(start = 14.dp, end = 14.dp, top = 6.dp), verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     modelLogo(if (provider == "claude") "claude" else "gpt", title)?.let {
@@ -117,6 +129,7 @@ fun SubscriptionsScreen(back: () -> Unit) {
         a == null -> close()
         kind == "rename" -> RenameAccount(host, a, close)
         kind == "again" && a.kind == "token" -> ReplaceToken(host, a, close)
+        kind == "again" && a.provider == "claude" -> ClaudeSignIn(host, a.id.orEmpty(), close)
         kind == "again" -> CodexSignIn(host, a.id.orEmpty(), null, close)
         kind == "remove" -> RemoveAccount(host, a, close)
     }
@@ -159,7 +172,8 @@ private fun UsageRow(host: HostAccounts) {
             } ?: Wording.Subscriptions.usageUnavailable
         }
     }), suffix = {
-        host.usage.value?.let { Text(it, style = Type.body, color = c.dim, maxLines = 2) }
+        // (at most half the row: the row's name stays whole, the limits wrap under each other)
+        host.usage.value?.let { Text(it, style = Type.body, color = c.dim, maxLines = 3, modifier = Modifier.widthIn(max = 110.dp)) }
         Icon(Adwaita.ViewRefresh, null, tint = c.dim, modifier = Modifier.size(16.dp.icon))
     })
 }
@@ -196,6 +210,7 @@ private fun send(host: HostAccounts, msg: Msg.Accounts, busy: (Boolean) -> Unit,
 @Composable
 private fun AddAccount(host: HostAccounts, provider: String, done: () -> Unit) {
     if (provider == "codex") return CodexSignIn(host, null, "", done)
+    if (host.claudeCli.value) return ClaudeSignIn(host, null, done)
     var name by remember { mutableStateOf("") }
     var token by remember { mutableStateOf("") }
     var said by remember { mutableStateOf<String?>(null) }
@@ -308,6 +323,118 @@ private fun CodexSignIn(host: HostAccounts, id: String?, name: String?, done: ()
         if (fresh) {
             NameField(label, { label = it }, Wording.Subscriptions.nameHint, go)
             NameField(home, { home = it }, Wording.Subscriptions.codexHomeHint, go, focus = false)
+        }
+    }
+}
+
+/** claude auth login run on a host with a Claude account's own folder (hostaccounts' sign_in), on a connection of its
+ * own: a new account's (id null: named name, added once it's signed in) or an account's (id). The page to open (url)
+ * as the host passes it on, a code that page shows sent to it on the same connection (paste), what to say (said);
+ * stop() lets go of the connection, which stops it there. Compose state, changed on the main thread. */
+class ClaudeLogin(val host: HostAccounts, val id: String?) {
+    val name = mutableStateOf("")
+    val folder = mutableStateOf("")
+    val code = mutableStateOf("")
+    val url = mutableStateOf<String?>(null)
+    val said = mutableStateOf<String?>(null)
+    val busy = mutableStateOf(false)
+    private var conn: Connection? = null
+
+    fun start(done: () -> Unit) {
+        val lines = ArrayList<String>()
+        busy.value = true
+        url.value = null
+        said.value = Wording.SignIn.starting
+        conn?.stop()
+        val fresh = id == null
+        conn = Mesh.watch(host.hostId, { w, m ->
+            if (m.optInt("req", -1) != REQ) return@watch
+            Mesh.post {
+                if (w !== conn) return@post
+                val g = Msg.AccountsReply.from(m)
+                if (m.optString("op") == Op.ACCOUNTS && g.line != null && g.accounts == null) {
+                    val found = Regex("https://\\S+").find(g.line)
+                    if (found != null) {
+                        url.value = found.value.trimEnd('.', ',', ')')
+                        said.value = null
+                    } else if (!g.line.startsWith("Opening browser")) lines.add(g.line)
+                    return@post
+                }
+                conn = null
+                w.stop()
+                busy.value = false
+                url.value = null
+                val e = host.took(m)
+                if (e != null) said.value = e else done()
+            }
+        }) { w ->
+            if (w !== conn) return@watch
+            if (w.state == "up") w.send(Msg.Accounts(req = REQ, what = "sign_in", provider = "claude".takeIf { fresh }, id = id,
+                name = name.value.trim().takeIf { fresh }).json())
+            else if (w.state == "down") end(Wording.HostStatus.connectionDropped)
+        }
+        if (conn == null) end(Wording.HostStatus.hostAbsent)
+    }
+
+    private fun end(why: String) {
+        busy.value = false
+        url.value = null
+        said.value = why
+    }
+
+    fun paste() {
+        val w = conn ?: return
+        if (code.value.isNotBlank() && w.send(Msg.Accounts(req = REQ, what = "code", code = code.value.trim()).json())) {
+            code.value = ""
+            said.value = Wording.SignIn.checkingCode
+        }
+    }
+
+    fun stop() {
+        conn?.stop()
+        conn = null
+    }
+}
+
+/** Add account (Claude, on a host with claude) and Sign In Again… (a folder account, id): an existing signed-in Claude
+ * folder on the host (a new account's only), or claude auth login run there with the account's own folder
+ * (ClaudeLogin): the page to open shown as a link, a box for the code that page may show; Close stops it. */
+@Composable
+internal fun ClaudeSignIn(host: HostAccounts, id: String?, done: () -> Unit, login: ClaudeLogin = remember { ClaudeLogin(host, id) }) {
+    val c = LocalBaude.current
+    DisposableEffect(login) { onDispose { login.stop() } }
+    val fresh = id == null
+    var name by login.name
+    var folder by login.folder
+    var code by login.code
+    val go = {
+        when {
+            fresh && name.isBlank() -> Unit
+            fresh && folder.isNotBlank() -> send(host, Msg.Accounts(what = "add", provider = "claude", name = name.trim(),
+                folder = folder.trim()), { login.busy.value = it }, { login.said.value = it }, done)
+            else -> login.start(done)
+        }
+    }
+    val heading = if (fresh) Wording.Subscriptions.addClaude
+        else Wording.Subscriptions.signInHeading(name = host.accounts.value.firstOrNull { it.id == id }?.name.orEmpty())
+    Form(heading, if (fresh && folder.isNotBlank()) Wording.Subscriptions.useFolder else Wording.SignIn.signIn,
+        { login.stop(); done() }, login.said.value, login.busy.value, go) {
+        if (fresh) {
+            NameField(name, { name = it }, Wording.Subscriptions.nameHint, go)
+            NameField(folder, { folder = it }, Wording.Subscriptions.claudeFolderHint, go, focus = false)
+        }
+        login.url.value?.let { link ->
+            Text(buildAnnotatedString {
+                val (before, after) = Wording.SignIn.pageThere(link = "\u0000").split("\u0000", limit = 2).let {
+                    it[0] to it.getOrElse(1) { "" }
+                }
+                append(before)
+                withLink(LinkAnnotation.Url(link, TextLinkStyles(SpanStyle(color = c.accent,
+                    textDecoration = TextDecoration.Underline)))) { append(Wording.SignIn.openPageThere) }
+                append(after)
+            }, style = Type.body, color = c.fg)
+            NameField(code, { code = it }, Wording.SignIn.codeHint, login::paste, focus = false)
+            Button(Wording.Common.send, onClick = login::paste)
         }
     }
 }

@@ -302,6 +302,27 @@ class _HostLogin:
             self.ch.close()
 
 
+class _AccountLogin:
+    """claude auth login run with a Claude account's own folder, by its host process (hostaccounts' sign_in there),
+    for LoginCard as _HereLogin is: its lines heard, a pasted code passed on (code), stop() lets go of the connection,
+    which stops it there."""
+
+    def __init__(self, where, profile, heard, done):
+        import subscriptionpage
+
+        def answered(reply):
+            done(self, reply.get("error"), 0 if reply.get("signed_in") else 1, reply.get("who"))
+            return False
+        self.ask = subscriptionpage.Ask(where, {"what": "sign_in", "id": profile}, answered,
+                                        lambda line: heard(self, line + "\n"))
+
+    def paste(self, code):
+        return self.ask.send({"what": "code", "code": code})
+
+    def stop(self):
+        self.ask.stop()
+
+
 class LoginCard(Gtk.Box):
     """Signing in to Claude in the chat, on the machine the chat runs on: claude auth login run there (this one's here;
     another machine's by its host process: where, its wire.reach place, and host, its name). /login starts it at once;
@@ -311,8 +332,9 @@ class LoginCard(Gtk.Box):
     (win.signed_in); retry: what the failed turn sent from here (its text and attachments), Send again to send it again
     (win.send_again); the chat it's in is the one started again, whichever's open when it's done.
     args: claude auth login's (--console, --sso, --email …). account: the chat's Claude account (Account's fields),
-    for a chat run under one: a token from claude setup-token pasted in place of claude auth login, replacing that
-    account's on its host (account_where), not the CLI's own sign-in."""
+    for a chat run under one, signed in to in place of the CLI's own sign-in, on its host (account_where): a folder
+    account's by claude auth login with its folder (_AccountLogin), a token account's by a token from claude
+    setup-token pasted in place of it, replacing that account's."""
 
     def __init__(self, win, args=(), where=None, host=None, ask=None, retry=None, account=None, account_where=None):
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=6)
@@ -343,12 +365,13 @@ class LoginCard(Gtk.Box):
         self.resend.add_css_class("suggested-action")
         self.resend.connect("clicked", lambda *_: self.send_again())
         self.append(self.resend)
-        if account is not None:
+        if account is not None and account.get("kind") == "token":
             return self.token_box(ask)
         if ask is None:
             self.start()
             return
-        self.say(wording.say("sign_in.not_signed_in_on", host=host) if host else wording.say("sign_in.not_signed_in"),
+        self.say(wording.say("subscriptions.sign_in_heading", name=account["name"]) if account is not None else
+                 wording.say("sign_in.not_signed_in_on", host=host) if host else wording.say("sign_in.not_signed_in"),
                  hostlogin.reason(ask), dim=True)
         self.again.set_label(wording.say("sign_in.sign_in"))
         self.again.set_visible(True)
@@ -401,8 +424,12 @@ class LoginCard(Gtk.Box):
         self.again.set_label(wording.say("common.try_again"))
         self.said = []
         try:
-            self.proc = _HostLogin(self.where, self.args, self.heard, self.done) if self.where is not None else \
-                _HereLogin(self.args, self.heard, self.done)
+            if self.account is not None:
+                self.proc = _AccountLogin(self.account_where, self.account["id"], self.heard, self.done)
+            elif self.where is not None:
+                self.proc = _HostLogin(self.where, self.args, self.heard, self.done)
+            else:
+                self.proc = _HereLogin(self.args, self.heard, self.done)
         except OSError as e:
             self.proc = None
             self.done(None, f"couldn't start claude: {e}")

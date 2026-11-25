@@ -31,7 +31,7 @@
       "name": "Subscriptions page",
       "shows": "The dialog's second page, after General (the existing rows): the Claude and Codex accounts of the host picked beside New session. Described in Subscriptions.dialog.json.",
       "copy": ["subscriptions.general", "subscriptions.title"],
-      "decisions": [{"said": "Baude needs to be able to support running claude with different subscriptions (paraphrased)", "rule": "Every app's Settings has the Subscriptions page (the phone: a row opening it)", "decided": "2026-11-22", "source": [{"issue": "BaudeInternal#190"}, {"session": "b3845b21-55ac-4aab-a769-fb8517403c51", "message": "ac03d59c-4c08-4acd-87a6-78a79a1e0dc9"}]}, {"said": "There needs to be a way of seeing claude sub usage in the app", "rule": "Subscription usage is on that page in every app", "decided": "2026-11-24", "source": [{"issue": "BaudeInternal#204"}]}]
+      "decisions": [{"said": "Baude needs to be able to support running claude with different subscriptions (paraphrased)", "rule": "Every app's Settings has the Subscriptions page after General, switched to by the dialog's page switcher (on a narrow screen, the phone's included, the bar at its foot)", "decided": "2026-11-22", "source": [{"issue": "BaudeInternal#190"}, {"session": "b3845b21-55ac-4aab-a769-fb8517403c51", "message": "ac03d59c-4c08-4acd-87a6-78a79a1e0dc9"}, {"session": "b3845b21-55ac-4aab-a769-fb8517403c51", "message": "7d38ce29-c6e4-4827-b56a-d688129471eb"}]}, {"said": "There needs to be a way of seeing claude sub usage in the app", "rule": "Subscription usage is on that page in every app", "decided": "2026-11-24", "source": [{"issue": "BaudeInternal#204"}]}]
     },
     {
       "name": "title",

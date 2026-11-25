@@ -11,8 +11,8 @@ import threading
 import time
 
 from baudelib import claude as claudelib  # (its ClaudeProc: Baude's is it, on the GTK main loop)
-from baudelib.transcripts import _pack_keys, _scan_line, _scan_state, _unpack_keys, projects_dir, ref_epoch, \
-    scan_session
+from baudelib.transcripts import _pack_keys, _scan_line, _scan_state, _unpack_keys, projects_dir, projects_dirs, \
+    ref_epoch, scan_session
 import baudelib.client  # noqa: E402  (servers on the network and their sessions: see baudelib/client.py)
 import baudelib.hosts  # noqa: E402  (this machine's host process, started when it's wanted: see baudelib/hosts.py)
 from baudelib import models as modelslib  # noqa: E402  (what runs a model: claude, apple-claude or pi-claude)
@@ -315,13 +315,14 @@ def apply_desktop_index(sessions, index, keep=()):
 def list_sessions(progress=None):
     """All resumable sessions, newest first. Files are read newest first, and progress(so_far) is
     called (soon, then every 1.5 s) while unread ones remain: the first ever start reads hundreds of MB."""
-    root = projects_dir()
     paths = []
-    try:
-        folders = os.listdir(root)
-    except OSError:
-        return []
-    for folder in folders:
+    folders = []
+    for root in projects_dirs():
+        try:
+            folders += [(root, f) for f in os.listdir(root)]
+        except OSError:
+            pass
+    for root, folder in folders:
         try:
             names = os.listdir(os.path.join(root, folder))
         except OSError:

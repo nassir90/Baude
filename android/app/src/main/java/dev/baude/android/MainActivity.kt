@@ -16,8 +16,7 @@ class MainActivity : ComponentActivity() {
     private val screen = mutableStateOf<List<String>>(listOf("contacts"))
 
     /** The screens laid over a chat, opened with its host and session: back goes to the chat. */
-    private val OVER = setOf("feedback", "settings", "changelog", "mesh", "fixes", "databases", "kubernetes", "terminal",
-        "subscriptions")
+    private val OVER = setOf("feedback", "settings", "changelog", "mesh", "fixes", "databases", "kubernetes", "terminal")
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -56,8 +55,7 @@ class MainActivity : ComponentActivity() {
                     "feedback" -> FeedbackScreen(feedbackContext(now), ::back)
                     "settings" -> SettingsScreen(::back, feedback = {
                         go(if (now.size == 3) listOf("feedback", now[1], now[2]) else listOf("feedback"))
-                    }, chat = now.drop(1), subscriptions = { go(listOf("subscriptions") + now.drop(1)) })
-                    "subscriptions" -> SubscriptionsScreen(::back)
+                    }, chat = now.drop(1))
                     "changelog" -> ChangelogScreen(null, ::back)
                     "mesh" -> MeshScreen(::back)
                     "databases" -> DatabaseScreen(now[1], ::back)
@@ -122,10 +120,6 @@ class MainActivity : ComponentActivity() {
             Shares.returns = false
             screen.value = listOf("contacts")
             moveTaskToBack(true) // (back to the app it was shared from, as a messaging app goes)
-            return
-        }
-        if (now[0] == "subscriptions") { // (back to Settings, which it's opened from)
-            screen.value = listOf("settings") + now.drop(1)
             return
         }
         if (now[0] in OVER && now.size == 3) { // (back to the chat it was opened from)

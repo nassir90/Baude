@@ -1,9 +1,16 @@
 """Claude and Codex subscription accounts kept on this host (Settings → Subscriptions, through the accounts op:
-hostaccounts). A session's metadata carries only an account's id; the credential stays here, in an owner-only file
-(0600) in an owner-only folder (0700), as Claude Code keeps its own sign-in in a file on Linux. A Claude account is a
-token from claude setup-token, given to its claude on a pipe (CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR), which claude
-reads once as it starts, so it's in no environment its tools inherit; a Codex account is a CODEX_HOME of its own,
-with file-backed credentials Codex manages."""
+hostaccounts). A session's metadata carries only an account's id; what signs it in stays here, in an owner-only file
+(0600) in an owner-only folder (0700).
+
+A Claude account is, where the host has claude, a config folder of its own (kind "folder"): claude runs with
+CLAUDE_CONFIG_DIR set to it and keeps the sign-in there itself (`claude auth login` run with that folder; on macOS in
+the Keychain under a service name suffixed with a hash of the folder's path, so each folder's is its own). Baude keeps
+only the folder's path. The folder's projects (and the user's shared settings, commands, agents, skills, plugins,
+hooks, CLAUDE.md) are links to the host's own Claude folder's, so its chats are where every other chat is, and set up
+the same. Where the host has no claude, a Claude account is a token from claude setup-token (kind "token"), given to
+its claude on a pipe (CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR), which claude reads once as it starts, so it's in no
+environment its tools inherit. A Codex account is a CODEX_HOME of its own (kind "profile"), with file-backed
+credentials Codex manages."""
 import os
 import shutil
 import sqlite3
@@ -18,6 +25,9 @@ PROVIDERS = ("claude", "codex")
 _CLAUDE_KEYS = ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL", "CLAUDE_CODE_OAUTH_TOKEN",
                 "CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR", "CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX",
                 "CLAUDE_CODE_USE_FOUNDRY")
+_FOLDER_KEYS = ("CLAUDE_CONFIG_DIR", "CLAUDE_SECURESTORAGE_CONFIG_DIR")  # (another folder's, or its Keychain item's)
+# (what a folder account's folder shares with the host's own Claude folder: its chats, and how the user set Claude up)
+SHARED = ("projects", "settings.json", "CLAUDE.md", "commands", "agents", "skills", "plugins", "hooks", "output-styles")
 _CODEX_KEYS = ("OPENAI_API_KEY", "CODEX_API_KEY", "CODEX_ACCESS_TOKEN", "OPENAI_BASE_URL")
 _cache = {}  # (what listing needs, read again when the file changes: its mtime → (accounts by id, sessions' accounts))
 
@@ -41,8 +51,8 @@ def database():
     db = sqlite3.connect(path)
     try:
         with db:
-            db.execute("CREATE TABLE IF NOT EXISTS profiles "
-                       "(id TEXT PRIMARY KEY, provider TEXT, name TEXT, credential TEXT, UNIQUE(provider, name))")
+            db.execute("CREATE TABLE IF NOT EXISTS profiles (id TEXT PRIMARY KEY, provider TEXT, name TEXT, "
+                       "credential TEXT, kind TEXT, UNIQUE(provider, name))")
             db.execute("CREATE TABLE IF NOT EXISTS defaults (provider TEXT PRIMARY KEY, profile TEXT)")
             db.execute("CREATE TABLE IF NOT EXISTS sessions (session TEXT PRIMARY KEY, profile TEXT)")
             yield db
@@ -50,23 +60,21 @@ def database():
         db.close()
 
 
-def _kind(provider):
-    return "token" if provider == "claude" else "profile"
-
-
 def _known():
-    """(accounts by id: {id, provider, name, kind}, sessions' accounts by session id), from the file as it is now."""
+    """(accounts by id: {id, provider, name, kind}, sessions' accounts by session id, folder accounts' folders by id),
+    from the file as it is now."""
     try:
         mtime = _path().stat().st_mtime_ns
     except OSError:
-        return {}, {}
+        return {}, {}, {}
     if _cache.get("mtime") != mtime:
         with database() as db:
-            accounts = {i: {"id": i, "provider": p, "name": n, "kind": _kind(p)}
-                        for i, p, n in db.execute("SELECT id,provider,name FROM profiles")}
+            rows = list(db.execute("SELECT id,provider,name,kind,credential FROM profiles"))
             sessions = dict(db.execute("SELECT session,profile FROM sessions"))
-        _cache.update(mtime=mtime, accounts=accounts, sessions=sessions)
-    return _cache["accounts"], _cache["sessions"]
+        _cache.update(mtime=mtime, sessions=sessions,
+                      accounts={i: {"id": i, "provider": p, "name": n, "kind": k} for i, p, n, k, _c in rows},
+                      folders={i: c for i, _p, _n, k, c in rows if k == "folder"})
+    return _cache["accounts"], _cache["sessions"], _cache["folders"]
 
 
 def listing():
@@ -107,16 +115,29 @@ def check_token(token):
     return token
 
 
-def add(provider, name, credential):
+def check_name(provider, name):
+    """A new account's name, trimmed; ValueError if it's empty or taken."""
+    name = (name or "").strip()
+    if provider not in PROVIDERS or not name:
+        raise ValueError(wording.say("subscriptions.enter_name"))
+    if any(a["provider"] == provider and a["name"] == name for a in listing()):
+        raise ValueError(wording.say("subscriptions.name_in_use"))
+    return name
+
+
+def add(provider, name, credential, kind=None, profile=None):
+    """A new account (kind: "token" or "folder" for Claude, "profile" for Codex; profile: its id, if it's picked
+    already, as a folder made for it is named by it): its id."""
     name = (name or "").strip()
     if provider not in PROVIDERS or not name:
         raise ValueError(wording.say("subscriptions.enter_name"))
     if not credential:
         raise ValueError(wording.say("subscriptions.enter_token"))
-    profile = uuid.uuid4().hex
+    kind = kind or ("token" if provider == "claude" else "profile")
+    profile = profile or uuid.uuid4().hex
     with database() as db:
         try:
-            db.execute("INSERT INTO profiles VALUES (?,?,?,?)", (profile, provider, name, credential))
+            db.execute("INSERT INTO profiles VALUES (?,?,?,?,?)", (profile, provider, name, credential, kind))
         except sqlite3.IntegrityError:
             raise ValueError(wording.say("subscriptions.name_in_use")) from None
     return profile
@@ -138,21 +159,87 @@ def replace_token(profile, token):
     """A Claude account's token replaced (signed in to it again)."""
     token = check_token(token)
     with database() as db:
-        if not db.execute("UPDATE profiles SET credential=? WHERE id=? AND provider='claude'", (token, profile)).rowcount:
+        if not db.execute("UPDATE profiles SET credential=? WHERE id=? AND provider='claude' AND kind='token'",
+                          (token, profile)).rowcount:
             raise ValueError(wording.say("subscriptions.gone"))
 
 
-def remove(profile):
-    """An account gone: no longer anyone's default, and a Codex profile folder made here removed with it. Chats made
-    under it say so as they start (environment's OSError)."""
+def remove(profile, exe=None):
+    """An account gone: no longer anyone's default, and a folder made here for it removed with it (a Claude one's
+    sign-in first signed out of, with its folder, so its Keychain item goes too; exe: claude's). A folder that was the
+    user's before it was added is left as it is. Chats made under it say so as they start (_credential's OSError)."""
     with database() as db:
-        row = db.execute("SELECT provider,credential FROM profiles WHERE id=?", (profile,)).fetchone()
+        row = db.execute("SELECT provider,credential,kind FROM profiles WHERE id=?", (profile,)).fetchone()
         if row is None:
             raise ValueError(wording.say("subscriptions.gone"))
         db.execute("DELETE FROM profiles WHERE id=?", (profile,))
         db.execute("DELETE FROM defaults WHERE profile=?", (profile,))
-    if row[0] == "codex" and Path(row[1]).parent == root():
-        shutil.rmtree(row[1], ignore_errors=True)
+    provider, folder, kind = row
+    if kind == "token" or Path(folder).parent != root():
+        return
+    if provider == "claude":
+        import subprocess
+        from baudelib.claude import claude_env, claude_exe
+        try:
+            subprocess.run([exe or claude_exe(), "auth", "logout"], env=folder_env(claude_env(), folder),
+                           stdin=subprocess.DEVNULL, capture_output=True, timeout=30)
+        except (OSError, subprocess.SubprocessError):
+            pass
+    shutil.rmtree(folder, ignore_errors=True)
+
+
+def claude_folder(profile):
+    """A folder account's folder (signing in to it again writes there)."""
+    with database() as db:
+        row = db.execute("SELECT credential FROM profiles WHERE id=? AND provider='claude' AND kind='folder'",
+                         (profile,)).fetchone()
+    if row is None:
+        raise ValueError(wording.say("subscriptions.gone"))
+    return row[0]
+
+
+def new_claude_folder(profile):
+    """The folder a new folder account (by its id) signs in to: made here, owner-only, set up as folder_env does."""
+    root().mkdir(mode=0o700, parents=True, exist_ok=True)
+    folder = root() / f"claude-{profile}"
+    folder.mkdir(mode=0o700)
+    share(str(folder))
+    return str(folder)
+
+
+def share(folder):
+    """A folder account's folder given links to what it shares with the host's own Claude folder (SHARED), where it
+    has none of its own: its projects always (made if need be: where Baude finds chats), the rest where the host's has
+    them."""
+    from baudelib.transcripts import projects_dir
+    home = os.path.dirname(projects_dir())
+    for name in SHARED:
+        mine, theirs = os.path.join(folder, name), os.path.join(home, name)
+        if os.path.lexists(mine) or os.path.realpath(theirs) == os.path.realpath(mine):
+            continue
+        if name == "projects":
+            os.makedirs(theirs, exist_ok=True)
+        elif not os.path.lexists(theirs):
+            continue
+        try:
+            os.symlink(theirs, mine)
+        except OSError:
+            pass
+
+
+def folder_env(env, folder):
+    """env for a claude run with a folder account's folder: CLAUDE_CONFIG_DIR, and nothing that would sign it in
+    otherwise (an API key, a token, another folder's Keychain item)."""
+    env = {k: v for k, v in env.items() if k not in _CLAUDE_KEYS + _FOLDER_KEYS}
+    env["CLAUDE_CONFIG_DIR"] = folder
+    return env
+
+
+def claude_folders():
+    """Folder accounts' folders that keep chats of their own (a folder the user had before, with its own projects): its
+    projects folders, where Baude finds chats too (transcripts.projects_dirs)."""
+    return [p for f in _known()[2].values() if os.path.isdir(p := os.path.join(f, "projects"))
+            and not os.path.islink(p)]
 
 
 def codex_home(profile):
@@ -187,13 +274,17 @@ def environment(provider, env, profile=None):
 
 
 def claude_launch(env, profile):
-    """(env, fd) for a claude run under a Claude account (profile; "": the CLI's own sign-in, env as it is, fd None):
-    nothing in env that would sign it in otherwise, and its token on a pipe whose reading end, fd, the child is given
-    (subprocess's pass_fds) and the caller closes once it's started. Read once, the pipe's empty: nothing the agent
-    runs can read the token from it, nor from its environment."""
+    """(env, fd) for a claude run under a Claude account (profile; "": the CLI's own sign-in, env as it is, fd None).
+    A folder account's: its folder as CLAUDE_CONFIG_DIR (folder_env), fd None. A token account's: nothing in env that
+    would sign it in otherwise, and its token on a pipe whose reading end, fd, the child is given (subprocess's
+    pass_fds) and the caller closes once it's started. Read once, the pipe's empty: nothing the agent runs can read the
+    token from it, nor from its environment."""
     if not profile:
         return env, None
     token = _credential("claude", profile)
+    if (account(profile) or {}).get("kind") == "folder":
+        share(token)
+        return folder_env(env, token), None
     env = {k: v for k, v in env.items() if k not in _CLAUDE_KEYS}
     read, write = os.pipe()
     try:
@@ -204,23 +295,24 @@ def claude_launch(env, profile):
     return env, read
 
 
-def plan_usage(profile):
+def plan_usage(profile, exe=None):
     """The subscription's limits, [(name, percent)], as Claude Code's get_usage says them without sending a chat turn;
     None where it can't say: a setup token's account (it has the inference scope only, and the usage endpoint needs the
-    profile scope) or a CLI sign-in that isn't a claude.ai subscription's."""
+    profile scope) or a sign-in that isn't a claude.ai subscription's. A folder account's are read with its folder."""
     import json
     import subprocess
     import tempfile
     from baudelib.claude import claude_env, claude_exe
 
-    if profile:
+    if profile and (account(profile) or {}).get("kind") != "folder":
         return None
+    env, _fd = claude_launch(claude_env(), profile)
     request = {"type": "control_request", "request_id": "usage",
                "request": {"subtype": "get_usage", "skip_behaviors": True}}
     with tempfile.TemporaryDirectory() as cwd:
-        result = subprocess.run([claude_exe(), "-p", "--input-format", "stream-json", "--output-format",
+        result = subprocess.run([exe or claude_exe(), "-p", "--input-format", "stream-json", "--output-format",
                                  "stream-json", "--verbose", "--no-session-persistence", "--strict-mcp-config",
-                                 "--setting-sources", ""], cwd=cwd, env=claude_env(),
+                                 "--setting-sources", ""], cwd=cwd, env=env,
                                 input=json.dumps(request) + "\n", capture_output=True, text=True, timeout=25)
     for line in result.stdout.splitlines():
         try:
@@ -238,11 +330,20 @@ def plan_usage(profile):
 
 def claude_session_profile(session):
     """The Claude account a chat run by claude here (not by its host process: Meta's, a side question's) is under:
-    the one it was first run under, else (a new one, or one from before accounts) the default for a new one and the
-    CLI's own sign-in for an old one."""
+    the one it was first run under, else (a new one, or one from before accounts) the default for a new one; for an old
+    one, the folder account whose own folder keeps its transcript, else the CLI's own sign-in."""
     if not session:
         return selected("claude")
-    return _known()[1].get(session, "")
+    _accounts, sessions, folders = _known()
+    if session in sessions:
+        return sessions[session]
+    for profile, folder in folders.items():
+        projects = os.path.join(folder, "projects")
+        if not os.path.islink(projects) and any(
+                os.path.exists(os.path.join(projects, d, session + ".jsonl"))
+                for d in (os.listdir(projects) if os.path.isdir(projects) else [])):
+            return profile
+    return ""
 
 
 def remember_claude_session(session, profile):

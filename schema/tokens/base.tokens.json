@@ -546,6 +546,13 @@
     "margin": {"$description": "A compaction's mark: above and below it.", "$value": {"value": 6, "unit": "px"}},
     "indent": {"$description": "Its summary's text: in from its heading.", "$value": {"value": 18, "unit": "px"}}
   },
+  "notification": {
+    "$type": "dimension",
+    "$description": "A Bot's notification's picture (ChatNotification): the Bot's, round, the app's logo in its bottom-right corner cut out of it.",
+    "picture": {"$description": "The picture's side.", "$value": {"value": 128, "unit": "px"}},
+    "badge": {"$description": "The logo's side, in its corner.", "$value": {"value": 52, "unit": "px"}},
+    "badge-gap": {"$description": "The gap cut round the logo.", "$value": {"value": 4, "unit": "px"}}
+  },
   "lightbox": {
     "fly": {"$type": "duration", "$description": "A picture opened into the large view, and closed back (Lightbox.FLY_MS).", "$value": {"value": 240, "unit": "ms"}},
     "zoom": {"$type": "duration", "$description": "A double-click's zoom in the large view.", "$value": {"value": 160, "unit": "ms"}},

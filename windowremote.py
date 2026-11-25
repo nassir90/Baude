@@ -312,6 +312,8 @@ class WindowRemote:
         self.apply_read_only()
         self.update_status()  # (its host, and its folder there)
         self.sidebar.fill()
+        if (r.sessions.get(info["id"]) or {}).get("draft") and self.composer.get_mapped():
+            self.input.grab_focus()
 
     def sync_remote(self, r, sid, then=None):
         """Fetch what a network session's transcript has that its mirror here hasn't, on a thread; then() after (its

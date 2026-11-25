@@ -39,6 +39,7 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
@@ -124,10 +125,11 @@ fun FeedbackScreen(context: List<String>, back: () -> Unit) {
     val composer = remember { ComposerState() }
     var layout by remember { mutableStateOf<androidx.compose.ui.text.TextLayoutResult?>(null) }
     val caretLine = field.text.substring(0, field.selection.end.coerceIn(0, field.text.length)).count { it == '\n' }
-    val look = remember(field.text, caretLine, c) {
+    val quoteIndent = with(LocalDensity.current) { Tokens.Markdown.quotePad.toSp() }
+    val look = remember(field.text, caretLine, c, quoteIndent) {
         ComposerLook(caretLine, { false }, null, c.fg, Tokens.Color.reference, Tokens.Color.referenceTint,
             Type.body.fontSize * Tokens.Markdown.h1.toFloat(), Type.body.fontSize * Tokens.Markdown.h2.toFloat(),
-            SpanStyle(fontFamily = CodeFont.family, fontSize = Tokens.Font.mono))
+            SpanStyle(fontFamily = CodeFont.family, fontSize = Tokens.Font.mono), quoteIndent)
     }
     val id = rememberSaveable { "android-" + UUID.randomUUID().toString().replace("-", "").take(16) }
     Mesh.tick.value
@@ -171,7 +173,8 @@ fun FeedbackScreen(context: List<String>, back: () -> Unit) {
                     textStyle = Type.body.copy(color = c.fg), cursorBrush = SolidColor(c.accentBg),
                     visualTransformation = look, onTextLayout = { layout = it },
                     modifier = Modifier.fillMaxWidth().heightIn(min = 116.dp)
-                        .drawBehind { look.drawBlocks(this, layout, c.fg.copy(alpha = c.fg.alpha * 0.07f), Tokens.Radius.code, 2.dp) }
+                        .drawBehind { look.drawBlocks(this, layout, c.fg.copy(alpha = c.fg.alpha * 0.07f), Tokens.Radius.code, 2.dp,
+                            c.fg.copy(alpha = c.fg.alpha * Tokens.Markdown.quoteRuleOpacity.toFloat()), 0.dp) }
                         .focusRequester(focus)
                         .onPreviewKeyEvent { e -> composerKey(e, field, composer)?.let { field = it; text = it.text; true } ?: false })
             }

@@ -24,7 +24,7 @@ from widgets import FEEDBACK_KEY, ZOOM_MODS, discard, fit_size, scaled_texture, 
 from imageviews import FixedPicture  # noqa: E402,F401
 from chatparts import ShutBar  # noqa: E402,F401
 import composerview  # noqa: E402
-from composerview import ComposerMarkdown, no_text_drag  # noqa: E402,F401
+from composerview import ComposerMarkdown, ComposerView, no_text_drag  # noqa: E402,F401
 from pickers import _data_home  # noqa: E402,F401
 
 
@@ -783,7 +783,7 @@ class FeedbackDialog(Adw.Dialog):
                                         vscrollbar_policy=Gtk.PolicyType.NEVER, propagate_natural_height=True)
         body.append(self.strip)
         # (the text's right margin keeps it from running under the +)
-        self.text = Gtk.TextView(wrap_mode=Gtk.WrapMode.WORD_CHAR, top_margin=10, bottom_margin=10,
+        self.text = ComposerView(wrap_mode=Gtk.WrapMode.WORD_CHAR, top_margin=10, bottom_margin=10,
                                  left_margin=10, right_margin=58, accepts_tab=False)
         self.text.add_css_class("feedback-text")
         no_text_drag(self.text)  # (a selection isn't dragged away: a press in it places the caret)

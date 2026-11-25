@@ -164,10 +164,12 @@ fun ChatPage(chat: Chat, name: String, attach: Boolean = true, stop: (() -> Unit
     val mentionShown = if (mention != null && found!!.first.isEmpty() && " " in mention.second) { marks.at = -1; null } else mention
     val caretLine = field.text.substring(0, field.selection.end.coerceIn(0, field.text.length)).count { it == '\n' }
     val atRange = mentionShown?.let { it.first until field.selection.end }
-    val look = remember(field.text, caretLine, atRange, refs.size, c) {
+    val quoteIndent = with(LocalDensity.current) { Tokens.Markdown.quotePad.toSp() }
+    val look = remember(field.text, caretLine, atRange, refs.size, c, quoteIndent) {
         ComposerLook(caretLine, MentionList.known(refs), atRange, c.fg, Tokens.Color.reference, Tokens.Color.referenceTint,
             Type.body.fontSize * Tokens.Markdown.h1.toFloat(), Type.body.fontSize * Tokens.Markdown.h2.toFloat(),
-            androidx.compose.ui.text.SpanStyle(fontFamily = CodeFont.family, fontSize = Tokens.Font.mono))
+            androidx.compose.ui.text.SpanStyle(fontFamily = CodeFont.family, fontSize = Tokens.Font.mono),
+            quoteIndent)
     }
     var layout by remember { mutableStateOf<androidx.compose.ui.text.TextLayoutResult?>(null) }
     var fieldX by remember { mutableStateOf(0f) }
@@ -462,7 +464,8 @@ fun ChatPage(chat: Chat, name: String, attach: Boolean = true, stop: (() -> Unit
                         }, textStyle = Type.body.copy(color = c.fg), cursorBrush = SolidColor(c.accentBg),
                             visualTransformation = look, onTextLayout = { layout = it },
                             modifier = Modifier.fillMaxWidth().heightIn(min = line)
-                                .drawBehind { look.drawBlocks(this, layout, c.fg.copy(alpha = c.fg.alpha * 0.07f), Tokens.Radius.code, 2.dp) }
+                                .drawBehind { look.drawBlocks(this, layout, c.fg.copy(alpha = c.fg.alpha * 0.07f), Tokens.Radius.code, 2.dp,
+                                    c.fg.copy(alpha = c.fg.alpha * Tokens.Markdown.quoteRuleOpacity.toFloat()), 6.dp) }
                                 .padding(horizontal = 6.dp)
                                 .onGloballyPositioned { fieldX = it.positionInRoot().x }
                                 .focusRequester(focus)

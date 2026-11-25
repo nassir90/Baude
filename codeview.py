@@ -40,7 +40,7 @@ import pickers  # noqa: E402
 from lookupgit import _git, git_exe  # noqa: E402,F401  (⌘K's engine: what a folder has)
 from widgets import (  # noqa: E402,F401
     IMAGE_POOL, WorkerPool, ZOOM_MAX, ZOOM_MIN, ZOOM_STEP, discard, load_settings, pretty_path, save_settings,
-    themed_icon, toast,
+    toast,
 )
 from codespans import code_spans, code_style  # noqa: E402,F401
 from markdownview import open_code, open_in_editor  # noqa: E402,F401
@@ -493,7 +493,7 @@ class CodePage(Gtk.Box):
         self.find_btn.add_css_class("flat")
         self.find_btn.connect("clicked", lambda *_: self.code.open_search())
         head.append(self.find_btn)
-        self.wrap_btn = Gtk.ToggleButton(icon_name=themed_icon("text-wrap-symbolic", "format-justify-fill-symbolic"),
+        self.wrap_btn = Gtk.ToggleButton(icon_name="baude-wrap-symbolic",
                                          tooltip_text=wording.say("code_view.wrap"),
                                          active=bool(load_settings().get("code_wrap")))
         self.wrap_btn.add_css_class("flat")
@@ -909,8 +909,7 @@ class FilesPage(Gtk.Box):
         return self.modes.get_visible_child_name() == "gallery"
 
     def show_gallery(self, on, folder=None, save=True):
-        """The gallery (of folder, or the folder picked in the tree, or the one the picked file's in, else the tree's
-        own), or the tree again. Which one it is stays (settings' "files_gallery"), for the next folder too."""
+        """The gallery (of folder, or the current tree root), or the tree again. Which one it is stays (settings' "files_gallery"), for the next folder too."""
         if self.mode_btn.get_active() != on:
             self.gallery_asked = folder, save
             self.mode_btn.set_active(on)  # (toggled: here again, with what was asked)
@@ -920,9 +919,7 @@ class FilesPage(Gtk.Box):
         if save:
             save_settings(files_gallery=on)
         if on and self.root is not None:
-            picked = self.selected()
-            self.set_gallery(folder or (picked if picked and os.path.isdir(picked) else
-                                        os.path.dirname(picked) if picked else self.root))
+            self.set_gallery(folder or self.root)
         else:
             self.modes.set_visible_child_name("tree")
             self.up_btn.set_visible(False)

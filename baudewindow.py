@@ -244,7 +244,7 @@ class BaudeWindow(WindowView, WindowProc, WindowDrafts, WindowSignal, WindowRemo
         view.append(wording.say("meta_settings.full_width"), "win.fullwidth")
         menu.append_section(None, view)
         tools = Gio.Menu()
-        tools.append(wording.say("window.kubernetes_menu"), "win.kube")
+        tools.append(wording.say("window.kubernetes"), "win.kube")
         tools.append(wording.say("window.database_schemas"), "win.dbschema")
         tools.append(wording.say("multiplex.terminal_menu"), "win.terminal")
         menu.append_section(None, tools)

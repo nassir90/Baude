@@ -272,6 +272,9 @@ def swap_list_item(lines, at, by):
     return second + first, one, three, moved
 
 
+QUOTE_RULE, QUOTE_PAD = tokens.px("markdown.quote-rule"), tokens.px("markdown.quote-pad")  # (.md-quote's)
+
+
 class ComposerView(Gtk.TextView):
     """The input TextView. Code blocks get one rounded background drawn behind the text:
     GTK doesn't paint a paragraph background on empty lines, so per-line backgrounds made
@@ -280,13 +283,19 @@ class ComposerView(Gtk.TextView):
     def __init__(self, **kw):
         super().__init__(**kw)
         self.code_blocks = []  # (first line, last line) of each code block, fences included
-        self.block_rgba = Gdk.RGBA()
+        self.quotes = []  # (first line, last line) of each run of "> " lines
+        self.block_rgba, self.rule_rgba = Gdk.RGBA(), Gdk.RGBA()
 
     def do_snapshot_layer(self, layer, snapshot):
-        if layer != Gtk.TextViewLayer.BELOW_TEXT or not self.code_blocks:
+        if layer != Gtk.TextViewLayer.BELOW_TEXT or not (self.code_blocks or self.quotes):
             return
         buf = self.get_buffer()
         visible = self.get_visible_rect()
+        for first, last in self.quotes:  # (a quote's rule at the text's left, as the chat's .md-quote has it)
+            y0, _ = self.get_line_yrange(buf.get_iter_at_line(first)[1])
+            y1, h1 = self.get_line_yrange(buf.get_iter_at_line(last)[1])
+            snapshot.append_color(self.rule_rgba, Graphene.Rect().init(self.get_left_margin(), y0, QUOTE_RULE,
+                                                                       y1 + h1 - y0))
         x = self.get_left_margin() + 2
         width = max(0, visible.x + visible.width - self.get_right_margin() + 8 - x)
         for first, last in self.code_blocks:
@@ -313,6 +322,7 @@ class ComposerMarkdown:
         left = view.get_left_margin()
         t("code", family="monospace", scale=code_scale(), left_margin=left + 8)
         t("fence", family="monospace", scale=code_scale(), left_margin=left + 8)
+        t("quote", left_margin=left + QUOTE_RULE + QUOTE_PAD)
         t("inline", family="monospace", scale=code_scale())
         t("bold", weight=Pango.Weight.BOLD)
         t("italic", style=Pango.Style.ITALIC)
@@ -341,6 +351,8 @@ class ComposerMarkdown:
         tags = self.buf.get_tag_table()
         if isinstance(self.view, ComposerView):
             self.view.block_rgba = tone(0.07)  # same shade as the chat's code blocks
+            self.view.rule_rgba = tone(fg.alpha * tokens.number("markdown.quote-rule-opacity"))
+        tags.lookup("quote").set_property("foreground-rgba", tone(fg.alpha * tokens.number("markdown.quote-opacity")))
         tags.lookup("fence").set_property("foreground-rgba", tone(0.45))
         tags.lookup("inline").set_property("background-rgba", tone(0.10))
         tags.lookup("marker").set_property("foreground-rgba", tone(0.7))
@@ -494,8 +506,15 @@ class ComposerMarkdown:
         self.cursor_line = buf.get_iter_at_mark(buf.get_insert()).get_line()
         text = buf.get_text(buf.get_start_iter(), buf.get_end_iter(), True)
         blocks = [(first, last) for first, last, _closed in self._spans(text)]
+        quotes = []
+        for n, line, in_code, fence in self._lines(text):
+            if line.startswith(">") and not (in_code or fence):
+                if quotes and quotes[-1][1] == n - 1:
+                    quotes[-1] = (quotes[-1][0], n)
+                else:
+                    quotes.append((n, n))
         if isinstance(self.view, ComposerView):
-            self.view.code_blocks = blocks
+            self.view.code_blocks, self.view.quotes = blocks, quotes
             self.view.queue_draw()
         for n, line, in_code, fence in self._lines(text):
             hide = "syntax" if n == self.cursor_line else "hidden"
@@ -505,6 +524,9 @@ class ComposerMarkdown:
             if h := re.match(r"^(#{1,6})\s+", line):
                 self._tag_line(f"h{min(len(h.group(1)), 3)}", n)
                 self._tag(hide, n, 0, h.end())
+            elif line.startswith(">"):
+                self._tag_line("quote", n)
+                self._tag(hide, n, 0, 2 if line.startswith("> ") else 1)
             elif m := _ITEM.match(line):
                 depth = min(5, len(m.group(1).expandtabs(4)) // 2)
                 self._tag_line(f"item{depth}", n)

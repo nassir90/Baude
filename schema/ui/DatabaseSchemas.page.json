@@ -2,7 +2,7 @@
   "description": "A full-window view over the chat that draws the tables of the running databases (Postgres, and ArangoDB, in Docker containers or a local Kubernetes cluster's pods) as a diagram like Supabase's schema visualizer: a card per table, a curve per foreign key, a minimap, and a table's first rows in a pane below. Read-only.",
   "apps": ["baude", "record"],
   "opens": [
-    "☰ → Database Schemas…",
+    "☰ → Database Schemas",
     "A table or column name in a reply (a Signal link): finds the running database that has it and opens the diagram there with that table selected (a popover says \"Finding it in the running databases…\" if it takes a moment, asks \"<n> running databases have it. Which one?\" when several do, and says so with its definition and Try again when none does)",
     "A Signal link's popover: a database icon button (Show it in its database's schema diagram), on a name that is a table or column",
     "⌘K / Ctrl+K glossary: a table in its database's diagram"

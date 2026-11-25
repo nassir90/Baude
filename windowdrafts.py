@@ -987,12 +987,12 @@ class WindowDrafts:
     def on_launcher_toggled(self, action, value):
         try:
             if value.get_boolean():
-                self.note(f"added to {LAUNCHER.where}: {LAUNCHER.install()}")
+                widgets.toast(self, f"added to {LAUNCHER.where}: {LAUNCHER.install()}")
             else:
                 removed = LAUNCHER.uninstall()
-                self.note(f"removed from {LAUNCHER.where}" if removed else "launcher was not installed")
+                widgets.toast(self, f"removed from {LAUNCHER.where}" if removed else "launcher was not installed")
         except (OSError, GLib.Error) as e:
-            self.note(f"launcher: {e}")
+            widgets.toast(self, f"launcher: {e}")
         action.set_state(GLib.Variant.new_boolean(LAUNCHER.installed()))
 
     @staticmethod

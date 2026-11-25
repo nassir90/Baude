@@ -126,7 +126,7 @@
     },
     {
       "name": "page",
-      "shows": "The Bot's selected tab drawn to fill the page area (kept in proportion, centred), set into the panel's dark inside like the other panes. A streamed page is asked for at the area's size (frames at device pixels) and re-requested a quarter second after the size settles; the Bot's page is laid out at the panel's shape while you are driving it. A hosted (native) page is drawn by Baude itself. While the Bot acts, a glow in the accent colour frames the page and the Bot's pointer (an arrow with a soft shadow, click rings, scroll chevrons) is drawn over it moving as the Bot moves it; these never take a click. Nothing but the page is shown when the page is out in its own window (see 'Its own window').",
+      "shows": "The Bot's selected tab drawn to fill the page area (kept in proportion, centred), set into the panel's dark inside like the other panes. A streamed page is asked for at the area's size (frames at device pixels) and re-requested a quarter second after the size settles; the Bot's page is laid out at the panel's shape while you are driving it. A hosted (native) page is drawn by Baude itself, always over the window's own drawing: moving, resizing, maximizing or un-maximizing the window (dragging it out of maximized by its title bar included) never hides or reloads it. While the Bot acts, a glow in the accent colour frames the page and the Bot's pointer (an arrow with a soft shadow, click rings, scroll chevrons) is drawn over it moving as the Bot moves it; these never take a click. Nothing but the page is shown when the page is out in its own window (see 'Its own window').",
       "actions": [
         {
           "by": "click on the page",
@@ -147,6 +147,18 @@
         {
           "by": "hover (pointer still for 300 ms)",
           "does": "hovers there in the Bot's page, only when nothing else is waiting; hover-only on desktop, a phone has no hover"
+        }
+      ],
+      "decisions": [
+        {
+          "said": "On macOS, grabbing Baude's title bar while a site is open in Emission kills the site; resizing Emission in its own window also seems to kill and restart it.",
+          "rule": "Every app that embeds a native web view in its own window keeps the page drawn above the window's own drawing at all times: moving, resizing, maximizing or un-maximizing the window, by any means, never hides the page, reloads it or restarts it. This holds for the Browser page in the side panel, the browser in its own window, and Emission's own window.",
+          "decided": "2026-11-25",
+          "source": [
+            {
+              "issue": "BaudeInternal#194"
+            }
+          ]
         }
       ]
     },

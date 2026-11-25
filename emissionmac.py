@@ -653,6 +653,7 @@ class MacWeb:
         if not self.attach():
             return
         send, R = macos.objc_send, macos._rect()
+        self.on_top()
         ok, b = self.place.compute_bounds(root)
         if not ok:
             return
@@ -671,6 +672,17 @@ class MacWeb:
             send(self.blocker, b"setFrame:", frame, types=(R,))
         if hosted and not hidden:
             self.draw_over()
+
+    ON_TOP = 1000.0
+
+    def on_top(self):
+        """Its page drawn over GTK's own picture of the window. GTK draws the window as tiles, layers beside the page's
+        in the content view's layer, and adds new ones at the top whenever it lays them out again (the window resized,
+        maximized, or dragged out of maximized by its bar), which would hide the page under them though it's there and
+        running. Raised above all of them, whatever order they're in (zPosition)."""
+        layer = macos.objc_send(self.view, b"layer")
+        if layer and macos.objc_send(layer, b"zPosition", ret=ctypes.c_double) != self.ON_TOP:
+            macos.objc_send(layer, b"setZPosition:", self.ON_TOP, types=(ctypes.c_double,))
 
     def draw_over(self):
         """The Bot's pointer and the glow drawn over the page (its window's BotPointer), as they are now."""

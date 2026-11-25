@@ -14,7 +14,7 @@ gi.require_version("Graphene", "1.0")
 from gi.repository import Adw, Gdk, Gio, GLib, Graphene, Gtk, Pango  # noqa: E402,F401
 
 from baudelib import wording  # noqa: E402
-from widgets import accent_rgba, focus_shown, walk  # noqa: E402
+from widgets import accent_rgba, focus_shown, walk, watch_style  # noqa: E402
 from chatparts import FindBar  # noqa: E402
 
 
@@ -507,8 +507,7 @@ class ChatFind:
         keys.connect("key-pressed", lambda _c, kv, _k, state: (self.step(-1), True)[1]
                      if kv in (Gdk.KEY_Return, Gdk.KEY_KP_Enter) and state & Gdk.ModifierType.SHIFT_MASK else False)
         self.entry.add_controller(keys)
-        marks = weakref.ref(self.marks)  # (the theme's for the app's life: not keeping this one)
-        Adw.StyleManager.get_default().connect("notify::dark", lambda *_: (m := marks()) is not None and m.queue_draw())
+        watch_style(self.marks, "notify::dark", lambda marks: marks.queue_draw())
         self.heard = []  # (the adjustments a scroll's heard on, to draw again: the chat's, and the one it's in: open)
         self._hear(scroller)
         ChatFind.live.add(self)

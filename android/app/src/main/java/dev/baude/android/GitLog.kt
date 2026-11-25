@@ -43,6 +43,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.withStyle
@@ -223,6 +224,25 @@ fun caption(c: Msg.Commit): AnnotatedString = buildAnnotatedString {
 
 // ----------------------------------------------------------------------------------------------- the rows --
 
+/** How far down a text its first line's ink is, px: the top of the tallest glyph or chip on it (gitview.first_line_top),
+ * else the line's top. */
+fun inkTop(l: TextLayoutResult): Float {
+    val end = l.getLineEnd(0, visibleEnd = true)
+    var top = Float.MAX_VALUE
+    val glyphs = l.layoutInput.text.text.substring(0, end).filter { it != '\uFFFD' && !it.isWhitespace() }
+    if (glyphs.isNotEmpty()) {
+        val paint = android.graphics.Paint().apply {
+            textSize = with(l.layoutInput.density) { l.layoutInput.style.fontSize.toPx() }
+            typeface = android.graphics.Typeface.DEFAULT
+        }
+        val bounds = android.graphics.Rect()
+        paint.getTextBounds(glyphs, 0, glyphs.length, bounds)
+        if (!bounds.isEmpty) top = l.getLineBaseline(0) + bounds.top
+    }
+    for (r in l.placeholderRects) if (r != null && r.top < l.getLineBottom(0)) top = minOf(top, r.top)
+    return if (top == Float.MAX_VALUE) l.getLineTop(0) else top
+}
+
 /** One log row: its graph's lanes, the author's picture, the line and the caption, and a merge's ▸. */
 @Composable
 fun LogRow(c: Msg.Commit, lane: LaneRow, cols: Int, dim: Boolean, own: Boolean, made: Boolean, found: Boolean,
@@ -230,7 +250,7 @@ fun LogRow(c: Msg.Commit, lane: LaneRow, cols: Int, dim: Boolean, own: Boolean, 
     val colors = LocalBaude.current
     GitAvatars.version.intValue
     val density = LocalDensity.current
-    var lineTop by remember { mutableStateOf<Float?>(null) } // (px down the title, its first line's top)
+    var lineTop by remember { mutableStateOf<Float?>(null) } // (px down the title, its first line's ink top)
     val pad = Tokens.Git.rowPad
     Row(Modifier.fillMaxWidth().drawBehind {
         if (found) {
@@ -251,7 +271,7 @@ fun LogRow(c: Msg.Commit, lane: LaneRow, cols: Int, dim: Boolean, own: Boolean, 
         Column(Modifier.weight(1f).padding(vertical = pad).alpha(if (dim) Tokens.Git.rowDim.toFloat() else 1f)) {
             PillText(lineText(c, made, heads), style = Type.body.copy(fontWeight = if (own) Tokens.Git.ownWeight else null),
                 color = colors.fg, maxLines = 2, overflow = TextOverflow.Ellipsis,
-                onTextLayout = { lineTop = it.getLineTop(0) })
+                onTextLayout = { lineTop = inkTop(it) })
             Text(caption(c), style = Type.caption, color = colors.fg.copy(alpha = colors.fg.alpha * Tokens.Git.captionOpacity.toFloat()),
                 maxLines = 1, overflow = TextOverflow.Ellipsis)
         }

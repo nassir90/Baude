@@ -313,6 +313,7 @@ class ComposerMarkdown:
         left = view.get_left_margin()
         t("code", family="monospace", scale=code_scale(), left_margin=left + 8)
         t("fence", family="monospace", scale=code_scale(), left_margin=left + 8)
+        t("quote", left_margin=left + 12, style=Pango.Style.ITALIC)
         t("inline", family="monospace", scale=code_scale())
         t("bold", weight=Pango.Weight.BOLD)
         t("italic", style=Pango.Style.ITALIC)
@@ -505,6 +506,9 @@ class ComposerMarkdown:
             if h := re.match(r"^(#{1,6})\s+", line):
                 self._tag_line(f"h{min(len(h.group(1)), 3)}", n)
                 self._tag(hide, n, 0, h.end())
+            elif line.startswith(">"):
+                self._tag_line("quote", n)
+                self._tag(hide, n, 0, 2 if line.startswith("> ") else 1)
             elif m := _ITEM.match(line):
                 depth = min(5, len(m.group(1).expandtabs(4)) // 2)
                 self._tag_line(f"item{depth}", n)

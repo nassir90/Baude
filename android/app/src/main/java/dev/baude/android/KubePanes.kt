@@ -109,7 +109,7 @@ fun LogsPane(st: KubeState, l: LogsShown, height: Dp, room: Dp, set: (Dp) -> Uni
             IconButton(Adwaita.GoBottom, Wording.Kube.followTip, background = if (l.follow) c.fg.copy(alpha = 0.10f) else null) {
                 l.follow = !l.follow
             }
-            IconButton(Adwaita.FormatJustifyFill, Wording.CodeView.wrap, background = if (st.wrap) c.fg.copy(alpha = 0.10f) else null) {
+            IconButton(Adwaita.Wrap, Wording.CodeView.wrap, background = if (st.wrap) c.fg.copy(alpha = 0.10f) else null) {
                 st.wrap = !st.wrap
                 Mesh.app.getSharedPreferences("settings", android.content.Context.MODE_PRIVATE).edit().putBoolean("kube_log_wrap", st.wrap).apply()
             }

@@ -1,5 +1,5 @@
 {
-  "description": "The ☰ menu at the right end of the Baude main window's header bar, in sections with a rule between them as Record's: the chat's (Open in Record…, Copy Transcript for an Issue, Read-only session), the view's (Full-width text), the views over the window (Kubernetes…, Database Schemas…, Terminal), the app's (Settings…, Changelog, Mesh, Send Feedback…, Ongoing Feedback, Restart Baude, Restart Daemon). Items beside a check mark are toggles.",
+  "description": "The ☰ menu at the right end of the Baude main window's header bar, in sections with a rule between them as Record's: the chat's (Open in Record…, Copy Transcript for an Issue, Read-only session), the view's (Full-width text), the views over the window (Kubernetes, Database Schemas, Terminal), the app's (Settings…, Changelog, Mesh, Send Feedback…, Ongoing Feedback, Restart Baude, Restart Daemon). Items beside a check mark are toggles.",
   "apps": [
     "baude"
   ],
@@ -91,10 +91,11 @@
       ]
     },
     {
-      "name": "Kubernetes…",
-      "shows": "Row \"Kubernetes…\".",
+      "name": "Kubernetes",
+      "decisions": [{"said": "Drop the ellipses from Kubernetes and Database Schemas", "rule": "Every app names the Kubernetes and Database Schemas items without an ellipsis: they open a view, not a dialog that asks for more", "decided": "2026-11-22"}],
+      "shows": "Row \"Kubernetes\".",
       "copy": [
-        "window.kubernetes_menu"
+        "window.kubernetes"
       ],
       "actions": [
         {
@@ -104,8 +105,8 @@
       ]
     },
     {
-      "name": "Database Schemas…",
-      "shows": "Row \"Database Schemas…\".",
+      "name": "Database Schemas",
+      "shows": "Row \"Database Schemas\".",
       "copy": [
         "window.database_schemas"
       ],

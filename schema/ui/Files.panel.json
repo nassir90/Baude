@@ -16,8 +16,8 @@
         {"name": "Up", "shows": "Up-arrow icon, tooltip \"Up a folder\"; visible only in gallery view; greyed at the tree's root.", "copy": ["code_view.up_folder"],
          "actions": [{"by": "click", "does": "the gallery shows the parent folder (never above the root)"}]},
         {"name": "title and where", "shows": "Tree view: the root folder's name and its parent's path. Gallery: the folder shown now and its parent's path."},
-        {"name": "gallery toggle", "shows": "A toggle with a grid icon in tree view (tooltip \"Show as a gallery\"), a list icon in gallery view (tooltip \"Show as a tree\"). Which view is on is remembered and used for the next folder too.", "copy": ["code_view.show_gallery", "code_view.show_tree"],
-         "actions": [{"by": "click", "does": "switches view with a cross-fade; the gallery shows the selected folder, or the folder the selected file is in, else the root"}]},
+        {"name": "gallery toggle", "decisions": [{"said": "Clicking gallery with a folder hovered opened that folder; it should switch the current folder to the gallery", "rule": "Every app's gallery toggle shows the gallery of the folder the page is at (the tree's root); only a folder row's own Show as a gallery opens that folder's", "decided": "2026-11-24"}], "shows": "A toggle with a grid icon in tree view (tooltip \"Show as a gallery\"), a list icon in gallery view (tooltip \"Show as a tree\"). Which view is on is remembered and used for the next folder too.", "copy": ["code_view.show_gallery", "code_view.show_tree"],
+         "actions": [{"by": "click", "does": "switches view with a cross-fade; the gallery shows the folder the page is at (the tree's root), whatever is selected or hovered"}]},
         {"name": "refresh", "shows": "Refresh icon, tooltip \"Read the folders again\"", "copy": ["code_view.read_folders_again"],
          "actions": [{"by": "click", "does": "re-reads the folders keeping open folders open and the selection (gallery: keeps its scroll place)"}]},
         {"name": "open in file manager", "shows": "Folder-open icon, tooltip \"Open in your file manager\"", "copy": ["code_view.open_file_manager"],
@@ -32,7 +32,7 @@
         {"by": "click a text file", "does": "opens it on the Code page, a tab beside the chat"},
         {"by": "click a picture", "does": "opens the large image viewer with the folder's other pictures to go through (by name)"},
         {"by": "click a file that isn't text, or is very big", "does": "opens it in its own app or the editor"},
-        {"by": "right-click a row", "does": "popover menu with: Show as a gallery (folders only), Copy path (toasts \"Path copied\"), Open in your file manager"},
+        {"by": "right-click a row", "does": "popover menu with: Show as a gallery (folders only: that folder's gallery), Copy path (toasts \"Path copied\"), Open in your file manager"},
         {"by": "hover a row (tooltip)", "does": "the path (with ~); for pictures and other files with thumbnails, a larger thumbnail (about 240px) above the path"}
       ],
       "copy": ["code_view.show_gallery", "code_view.copy_path", "code_view.path_copied", "code_view.open_file_manager"]

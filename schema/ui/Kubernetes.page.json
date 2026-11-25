@@ -5,7 +5,7 @@
     "record"
   ],
   "opens": [
-    "☰ → Kubernetes…",
+    "☰ → Kubernetes",
     "A running workload in a Signal link's popover (Running section): opens its context, on its kind's page, filtered to its name, in its namespace",
     "A Kubernetes cluster's icon button in a Signal link's popover (Open this cluster in the Kubernetes view): opens that context",
     "⌘K / Ctrl+K glossary: a running workload or a cluster context"

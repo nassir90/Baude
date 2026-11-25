@@ -54,6 +54,7 @@
   "parts": [
     {
       "name": "New session button",
+      "decisions": [{"said": "Clicking New Session should put the caret in the message box, ready to type", "rule": "Every app puts the focus in the new chat's message box when New session opens it", "decided": "2026-11-23"}],
       "shows": "A flat button with a new-document icon and the words \"New session\", filling the row, left of the host picker. Tooltip \"Ctrl+N\".",
       "copy": [
         "sidebar.new_session"
@@ -64,7 +65,7 @@
       "actions": [
         {
           "by": "click",
-          "does": "Opens a new, blank chat at once on the host picked beside it, in the group chosen by the rule below (switching away from the open chat first), with the header's model, effort and mode pickers to set before it's written in (see EmptyChat). This machine: in the window's folder. Another host: in the folder last used there, else that host's home. The chat is a draft on its host: it isn't listed or kept till something is sent in it, and one left empty leaves nothing behind. If that host is gone, deactivated or not known, nothing starts and a toast says why (its banner text)."
+          "does": "Opens a new, blank chat at once, with the focus in its message box, on the host picked beside it, in the group chosen by the rule below (switching away from the open chat first), with the header's model, effort and mode pickers to set before it's written in (see EmptyChat). This machine: in the window's folder. Another host: in the folder last used there, else that host's home. The chat is a draft on its host: it isn't listed or kept till something is sent in it, and one left empty leaves nothing behind. If that host is gone, deactivated or not known, nothing starts and a toast says why (its banner text)."
         },
         {
           "by": "key Ctrl+N",

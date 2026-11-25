@@ -396,9 +396,10 @@ fun composerKey(e: KeyEvent, v: TextFieldValue, st: ComposerState): TextFieldVal
 
 // ------------------------------------------------------------------------------------------------------ the look --
 
-/** The text styled as it will read (ComposerMarkdown._restyle_tags): headings at the chat's sizes, bullets, bold, italic
- * and `code`, fenced code shaded; the marks (#, **, `) shown dim on the caret's line and hidden on the rest; the @names
- * the box knows, and the @ being searched, in their colour. */
+/** The text styled as it will read (ComposerMarkdown._restyle_tags): headings at the chat's sizes, bullets, "> " quotes
+ * (italic, in by their marks' width), bold, italic and `code`, fenced code shaded; the marks (#, **, `) shown dim on the
+ * caret's line and hidden on the rest (a quote's unseen); the @names the box knows, and the @ being searched, in their
+ * colour. */
 class ComposerLook(
     private val caretLine: Int, private val known: (String) -> Boolean, private val atSearch: IntRange?,
     private val fg: Color, private val ref: Color, private val refTint: Color,
@@ -458,6 +459,10 @@ class ComposerLook(
                 val level = minOf(h.groupValues[1].length, 3)
                 styles.add(Triple(bold.copy(fontSize = when (level) { 1 -> h1; 2 -> h2; else -> TextUnit.Unspecified }), s, e))
                 hide(s, s + h.range.last + 1)
+            } else if (line.startsWith(">")) {
+                styles.add(Triple(SpanStyle(fontStyle = FontStyle.Italic), s, e))
+                val mark = s + if (line.startsWith("> ")) 2 else 1 // (kept, unseen off the caret's line: the quote's indent)
+                styles.add(Triple(if (caretLine == n) dim else SpanStyle(color = Color.Transparent), s, mark))
             } else {
                 val m = ITEM.find(line)
                 if (m != null) {

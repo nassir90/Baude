@@ -200,8 +200,8 @@
     },
     {
       "name": "foot",
-      "shows": "A row under the box: at the left a flat 'Clear' button, a flat 'Copy' button, and the working dots (•, ••, ••• cycling, only while a turn runs, tooltip 'Working'); at the right a context meter: the word 'context' and a small bar with text like '24k / 200k' inside, amber past 60%, red past 85%. Before a session has said what it has used the bar says '— / <window>'; its tooltip then gives the model's window; afterwards 'Context window usage: <n>%' plus a line per category with its tokens.",
-      "copy": ["common.clear", "common.copy", "meta.clear_tip", "meta.copy_tip", "meta.copied", "context_usage.tooltip", "context_usage.label", "context_usage.usage_percent", "context_usage.window_known", "common.working"],
+      "shows": "A row under the box: at the left a flat 'Clear' button, a flat 'Copy' button, and the working dots (•, ••, ••• cycling, only while a turn runs, tooltip 'Working'); at the right a context meter: a small bar with text like '24k / 200k' inside, amber past 60%, red past 85%. Before a session has said what it has used the bar says '— / <window>'; its tooltip then gives the model's window; afterwards 'Context window usage: <n>%' plus a line per category with its tokens.",
+      "copy": ["common.clear", "common.copy", "meta.clear_tip", "meta.copy_tip", "meta.copied", "context_usage.tooltip", "context_usage.usage_percent", "context_usage.window_known", "common.working"],
       "actions": [
         {"by": "click Clear", "does": "clears the whole conversation (and stops the Claude session; any pending revert is cancelled first); tooltip 'Clear the conversation (or ask clear, /clear)'"},
         {"by": "click Copy", "does": "puts the conversation on the clipboard as text for pasting into an issue, with a header block (App, Model with its value, Next message's model if another was picked since, Runs on, Effort, Code mode, Runs commands, mode, Context, Tools, copied-at time) and each message and tool call; toast 'Conversation copied'. Tooltip: 'Copy the conversation, with its model, tools and context, to paste into an issue'"}

@@ -3,7 +3,7 @@ Telemetry.kt the same): Recorder, one an app, adding up the time each place is o
 its windows is in front and input came in the last IDLE_S) and the uses of each Gio action (the window's and the
 app's, however they're activated: a menu item, a button with an action name, a shortcut), told to this machine's
 host about once a minute and as the app quits. Nothing is sent anywhere else. watch(win, app) is the one hook a
-window needs. Page is Settings → Telemetry: the host picked beside New session's, added up over a period."""
+window needs. Only an action with a menu item is counted (by the item's words), as the phone counts ☰ items. Page is Settings → Telemetry: the host picked beside New session's, added up over a period."""
 import os
 import threading
 import time
@@ -16,6 +16,7 @@ from baudelib import telemetry, wire, wording
 TICK_S = 5  # (how often the place on screen is looked at)
 IDLE_S = 60  # (no input this long: nobody's looking, and nothing's counted)
 TELL_S = 60  # (how often what's added up is told to the host)
+QUIT_S = 1  # (the longest the host is waited for as the app quits)
 OVERLAYS = (("lightbox", "images.untitled"), ("terminal", "multiplex.terminal_menu"), ("kube", "window.kubernetes"),
             ("schema", "window.database_schemas"))  # (views over the whole window, the topmost first)
 TABS = {"chat": "chats.chat", "note": "telemetry.notes", "gone": "telemetry.notes", "code": "meta.code",
@@ -47,8 +48,11 @@ def places(win):
     return out
 
 
-def _labels(model, out):
-    """Each action a menu model's items name, its item's words (the first one's, for an action with targets)."""
+def _labels(model, out, changed=None):
+    """Each action a menu model's items name, its item's words (the first one's, for an action with targets);
+    changed (if given) is told when a model walked changes."""
+    if changed is not None:
+        changed(model)
     for i in range(model.get_n_items()):
         action = model.get_item_attribute_value(i, "action", None)
         label = model.get_item_attribute_value(i, "label", None)
@@ -56,7 +60,7 @@ def _labels(model, out):
             out.setdefault(action.get_string(), label.get_string())
         for link in ("section", "submenu"):
             if (inner := model.get_item_link(i, link)) is not None:
-                _labels(inner, out)
+                _labels(inner, out, changed)
 
 
 class Recorder:
@@ -66,7 +70,8 @@ class Recorder:
         self.app, self.name = app, name
         self.windows = weakref.WeakSet()
         self.hooked = weakref.WeakKeyDictionary()  # (an action group: the names of its actions counted)
-        self.seconds, self.uses = {}, {}
+        self.seconds, self.uses, self.held = {}, {}, {}  # (uses by action's name; held: told, not kept, by key)
+        self.nomenu, self.labels, self.stale, self.watched = set(), {}, True, weakref.WeakSet()  # (action name: its item's words)
         self.input_at, self.ticked, self.told = 0.0, time.monotonic(), time.monotonic()
         self.hook(app, "app")
         app.connect("shutdown", lambda *_: self.tell(wait=True))
@@ -78,21 +83,42 @@ class Recorder:
         seen.connect("event", self.heard)
         win.add_controller(seen)
         self.hook(win, "win")
+        self.stale = True
 
     def heard(self, _controller, _event):
         self.input_at = time.monotonic()
         return False
 
     def hook(self, group, prefix):
-        """group's actions (an app's, a window's) counted as they're activated, those added since too."""
+        """group's actions (an app's, a window's) counted as they're used, those added since too: a stateless one as
+        it's activated, a stateful one (a toggle) as its state changes (anything connected to its activate would stop
+        GIO changing the state)."""
         names = self.hooked.setdefault(group, set())
         for name in group.list_actions():
             if name not in names and isinstance(action := group.lookup_action(name), Gio.SimpleAction):
                 names.add(name)
-                action.connect("activate", self.used, f"{prefix}.{name}")
+                action.connect("activate" if action.get_state_type() is None else "notify::state", self.used,
+                               f"{prefix}.{name}")
 
-    def used(self, _action, _param, name):
+    def used(self, _action, _arg, name):
         self.uses[name] = self.uses.get(name, 0) + 1
+
+    def menus_changed(self, model):
+        if model not in self.watched:
+            self.watched.add(model)
+            model.connect("items-changed", lambda *_: setattr(self, "stale", True))
+
+    def walk_menus(self):
+        """labels read again from the menus on screen (and the app's bar)."""
+        from widgets import walk
+        labels = {}
+        for win in list(self.windows):
+            for w in walk(win):
+                if isinstance(w, (Gtk.MenuButton, Gtk.PopoverMenu)) and (model := w.get_menu_model()) is not None:
+                    _labels(model, labels, self.menus_changed)
+        if (bar := self.app.get_menubar()) is not None:
+            _labels(bar, labels, self.menus_changed)
+        self.labels, self.stale = labels, False
 
     def tick(self):
         now = time.monotonic()
@@ -109,20 +135,15 @@ class Recorder:
         return True
 
     def names(self):
-        """uses, each by its menu item's schema/copy key where it has one, else its action's name."""
-        labels = {}
-        if self.uses:
-            for win in list(self.windows):
-                from widgets import walk
-                for w in walk(win):
-                    if isinstance(w, (Gtk.MenuButton, Gtk.PopoverMenu)) and (model := w.get_menu_model()) is not None:
-                        _labels(model, labels)
-            if (bar := self.app.get_menubar()) is not None:
-                _labels(bar, labels)
-        out = {}
+        """uses, each by its menu item's schema/copy key; one with no menu item (or words that aren't a key) isn't
+        counted. The menus are walked only when they've changed or an action not seen in them was used."""
+        if self.uses and (self.stale or any(n not in self.labels and n not in self.nomenu for n in self.uses)):
+            self.walk_menus()
+            self.nomenu = {n for n in self.uses if n not in self.labels}
+        out = dict(self.held)
         for name, n in self.uses.items():
-            key = wording.key_of(labels.get(name, "")) or name
-            out[key] = out.get(key, 0) + n
+            if key := wording.key_of(self.labels.get(name, "")):
+                out[key] = out.get(key, 0) + n
         return out
 
     def tell(self, wait=False):
@@ -133,19 +154,19 @@ class Recorder:
         uses = self.names()
         if not seconds and not uses:
             return
-        self.seconds, self.uses = {}, {}
+        self.seconds, self.uses, self.held = {}, {}, {}
         msg = {"op": "telemetry", "app": self.name, "seconds": seconds, "uses": uses}
         if wait:
-            return self.send(msg)
+            return self.send(msg, QUIT_S)  # (the quit isn't held up for a host that isn't answering)
         threading.Thread(target=self.send, args=(msg,), daemon=True, name="telemetry").start()
 
-    def send(self, msg):
+    def send(self, msg, timeout=5):
         kept = False
         try:
             if os.path.exists(wire.socket_path()):  # (not started for this: told once it's there)
-                ch, _info = wire.reach({"via": "local"}, timeout=5)
+                ch, _info = wire.reach({"via": "local"}, timeout=timeout)
                 try:
-                    ch.sock.settimeout(5)
+                    ch.sock.settimeout(timeout)
                     ch.send({**msg, "req": 1})
                     kept = next((m.get("op") == "telemetry_kept" for m in ch if m.get("req") == 1), False)
                 finally:
@@ -160,7 +181,7 @@ class Recorder:
         for p, s in msg["seconds"].items():
             self.seconds[p] = self.seconds.get(p, 0) + s
         for n, c in msg["uses"].items():
-            self.uses[n] = self.uses.get(n, 0) + c
+            self.held[n] = self.held.get(n, 0) + c
         return False
 
 

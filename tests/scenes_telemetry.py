@@ -24,7 +24,7 @@ def _(app):
     for msg in [{"op": "telemetry", "app": "baude", "seconds": {"chats.chat": 3000}}] * 3 + [
                 {"op": "telemetry", "app": "baude", "seconds": {"chats.chat": 420, "git.title": 1310,
                                                                "meta_settings.title": 640, "window.kubernetes": 95},
-                 "uses": {"window.settings": 4, "meta_settings.full_width": 2, "window.kubernetes": 3, "win.restart": 1}},
+                 "uses": {"window.settings": 4, "meta_settings.full_width": 2, "window.kubernetes": 3}},
                 {"op": "telemetry", "app": "record", "seconds": {"telemetry.notes": 5120, "chats.chat": 700},
                  "uses": {"window.ongoing_feedback": 1}}]:
         assert tell(msg).get("op") == "telemetry_kept", msg

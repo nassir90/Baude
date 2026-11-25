@@ -31,6 +31,7 @@ object Telemetry {
     private const val IDLE_MS = 60_000L
     private const val TELL_MS = 60_000L
     private val main = Handler(Looper.getMainLooper())
+    private val ticker = Runnable { tick() }
     private val seconds = HashMap<String, Double>()
     private val uses = HashMap<String, Int>()
     private var inputAt = 0L
@@ -63,7 +64,7 @@ object Telemetry {
      * aren't counted). */
     fun used(label: String) {
         val key = Wording.keyOf(label) ?: return
-        main.post { uses[key] = (uses[key] ?: 0) + 1 }
+        uses[key] = (uses[key] ?: 0) + 1
     }
 
     /** In front (MainActivity's onResume): counted from now. */
@@ -72,14 +73,14 @@ object Telemetry {
         running = true
         ticked = System.currentTimeMillis()
         told = ticked
-        main.postDelayed(::tick, TICK_MS)
+        main.postDelayed(ticker, TICK_MS)
     }
 
     /** Gone to the background (onPause): what's been added up told now. */
     fun paused() {
         tick()
         running = false
-        main.removeCallbacksAndMessages(null)
+        main.removeCallbacks(ticker)
         tell()
     }
 
@@ -90,8 +91,8 @@ object Telemetry {
         if (running && now - inputAt < IDLE_MS) for (p in places()) seconds[p] = (seconds[p] ?: 0.0) + step
         if (now - told >= TELL_MS) tell()
         if (running) {
-            main.removeCallbacksAndMessages(null)
-            main.postDelayed(::tick, TICK_MS)
+            main.removeCallbacks(ticker)
+            main.postDelayed(ticker, TICK_MS)
         }
     }
 
@@ -114,7 +115,7 @@ object Telemetry {
 /** This phone's host's telemetry (baudelib/telemetry.py, the same): kept in the app's folder, phone/telemetry, a file
  * a day (YYYY-MM-DD.jsonl, this phone's time), a line a telling; added up for telemetry_read. */
 object TelemetryStore {
-    private const val SECONDS_MAX = 3600.0
+    private const val SECONDS_MAX = 7 * 86400.0
     private const val USES_MAX = 10_000
     private val APPS = setOf("baude", "record", "phone")
 

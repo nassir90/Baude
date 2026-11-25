@@ -16,7 +16,7 @@ from baudelib import wire
 
 PLACES = tuple(wire.DEFS["Telemetry"]["properties"]["seconds"]["propertyNames"]["enum"])
 APPS = tuple(wire.DEFS["Telemetry"]["properties"]["app"]["enum"])
-SECONDS_MAX = 3600  # (a place's seconds in one telling, at most: an app tells about once a minute)
+SECONDS_MAX = 7 * 86400  # (a place's seconds in one telling, at most: a week, as long as an app keeps them for a host that's down)
 USES_MAX = 10_000
 NAME_MAX = 120
 _LOCK = threading.Lock()

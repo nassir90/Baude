@@ -1447,12 +1447,7 @@ abstract class WireSchema : DefaultTask() {
                     else if (s.opt("additionalProperties") == false) out.add(at + "." + k + ": no such field")
                 }
             } else s.optJSONObject("additionalProperties")?.let { each ->
-                val names = s.optJSONObject("propertyNames") // (a map's keys, as it lists them)
-                for (k in v.keys()) {
-                    if (names != null) valid(names, k, at + "[" + k + "]", out)
-                    valid(each, v.opt(k), at + "[" + k + "]", out)
-                }
-            }
+                for (k in v.keys()) valid(each, v.opt(k), at + "[" + k + "]", out) }
         }
         if (v is JSONArray) s.optJSONObject("items")?.let { each ->
             for (i in 0 until v.length()) valid(each, v.opt(i), at + "[" + i + "]", out) }

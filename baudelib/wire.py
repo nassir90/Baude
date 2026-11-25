@@ -594,8 +594,6 @@ def _validate(schema, value, where, out):
                 out.append(f"{where}.{f}: no such field")
     elif isinstance(value, dict) and isinstance(schema.get("additionalProperties"), dict):
         for k, v in value.items():
-            if "propertyNames" in schema:  # (a map's keys, as it lists them)
-                _validate(schema["propertyNames"], k, f"{where}[{k!r}]", out)
             _validate(schema["additionalProperties"], v, f"{where}[{k!r}]", out)
     if isinstance(value, list) and "items" in schema:
         for i, v in enumerate(value):

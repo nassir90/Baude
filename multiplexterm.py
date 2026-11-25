@@ -41,7 +41,17 @@ def available():
     """Why there are no terminals here (VTE's GTK 4 build isn't installed), or None."""
     if Vte is not None:
         return None
-    return wording.say("multiplex.no_vte", package="vte3" if sys.platform == "darwin" else "gir1.2-vte-3.91")
+    fix = wording.say("multiplex.vte_fix_mac" if sys.platform == "darwin" else "multiplex.vte_fix_linux")
+    return wording.say("multiplex.no_vte", fix=fix)
+
+
+def shortcuts(widget, actions):
+    prefix = "<Meta>" if sys.platform == "darwin" else "<Control><Shift>"
+    keys = Gtk.ShortcutController(propagation_phase=Gtk.PropagationPhase.CAPTURE)
+    for key, action in actions.items():
+        keys.add_shortcut(Gtk.Shortcut.new(Gtk.ShortcutTrigger.parse_string(prefix + key),
+                                           Gtk.CallbackAction.new(lambda *_, action=action: (action(), True)[1])))
+    widget.add_controller(keys)
 
 
 def key_bytes(name):
@@ -144,6 +154,7 @@ class Terminal(Gtk.Overlay):
         self.bot = None  # (the Bot at its tools here last: {id, name})
         self.vte = Vte.Terminal(hexpand=True, vexpand=True, scrollback_lines=SCROLLBACK, scroll_on_output=False,
                                 scroll_on_keystroke=True, pointer_autohide=True, allow_hyperlink=True)
+        shortcuts(self, {"c": lambda: self.vte.copy_clipboard_format(Vte.Format.TEXT), "v": self.vte.paste_clipboard})
         self.vte.set_font(Pango.FontDescription.from_string(MONO_FONT))
         styled()
         self.vte.connect("contents-changed", self._changed)

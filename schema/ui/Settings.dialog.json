@@ -109,6 +109,7 @@
         },
         {
           "name": "Show in launcher",
+          "decisions": [{"said": "The added to application menu path shouldn't go into the chat; it should be a toast", "rule": "Every app says what turning this on or off did in a toast, never as a note in the chat", "decided": "2026-11-22", "source": [{"issue": "BaudeInternal#191"}]}],
           "shows": "A row titled \"Show in application menu\" on Linux or \"Show in Applications\" on macOS, with a switch and no subtitle. One setting for Baude, Record, Emission and Multiplex together, the same as Record's Settings row and every app's --install / --uninstall: on when all four are in the platform's list of apps, read again each time Settings opens. Turning it on also writes the commands in ~/.local/bin (baude, record, emission, multiplex, baude-headless, baude-oneshot), which the launchers start; turning it off leaves them, as other machines reach this one's host process through ~/.local/bin/baude-headless.",
           "copy": [
             "window.show_in",

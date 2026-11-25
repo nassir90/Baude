@@ -164,10 +164,12 @@ fun ChatPage(chat: Chat, name: String, attach: Boolean = true, stop: (() -> Unit
     val mentionShown = if (mention != null && found!!.first.isEmpty() && " " in mention.second) { marks.at = -1; null } else mention
     val caretLine = field.text.substring(0, field.selection.end.coerceIn(0, field.text.length)).count { it == '\n' }
     val atRange = mentionShown?.let { it.first until field.selection.end }
-    val look = remember(field.text, caretLine, atRange, refs.size, c) {
+    val quoteIndent = with(LocalDensity.current) { Tokens.Markdown.quotePad.toSp() }
+    val look = remember(field.text, caretLine, atRange, refs.size, c, quoteIndent) {
         ComposerLook(caretLine, MentionList.known(refs), atRange, c.fg, Tokens.Color.reference, Tokens.Color.referenceTint,
             Type.body.fontSize * Tokens.Markdown.h1.toFloat(), Type.body.fontSize * Tokens.Markdown.h2.toFloat(),
-            androidx.compose.ui.text.SpanStyle(fontFamily = CodeFont.family, fontSize = Tokens.Font.mono))
+            androidx.compose.ui.text.SpanStyle(fontFamily = CodeFont.family, fontSize = Tokens.Font.mono),
+            quoteIndent)
     }
     var layout by remember { mutableStateOf<androidx.compose.ui.text.TextLayoutResult?>(null) }
     var fieldX by remember { mutableStateOf(0f) }
@@ -264,6 +266,15 @@ fun ChatPage(chat: Chat, name: String, attach: Boolean = true, stop: (() -> Unit
         follow = false
         list.animateScrollToItem(found.first)
     }
+    LaunchedEffect(chat) { // (scrolled up to its first lines: what's before them read and put above, readEarlier)
+        androidx.compose.runtime.snapshotFlow {
+            if (chat.loaded.value && placed && chat.earlier.value && list.firstVisibleItemIndex < 3) chat.lines.size else -1
+        }.collect { if (it >= 0) Mesh.readEarlier(chat) }
+    }
+    androidx.compose.runtime.DisposableEffect(chat) { // (what's read before put above: what's on screen stays there)
+        chat.prepended = { n -> if (n > 0) list.requestScrollToItem(list.firstVisibleItemIndex + n, list.firstVisibleItemScrollOffset) }
+        onDispose { chat.prepended = null }
+    }
     Mesh.tick.value
     val density = androidx.compose.ui.platform.LocalDensity.current
     val openImage = remember(chat) { { key: String -> Viewer.openFrom(chat, key) } }
@@ -317,6 +328,7 @@ fun ChatPage(chat: Chat, name: String, attach: Boolean = true, stop: (() -> Unit
             items(chat.queued.toList(), key = { "queued:" + System.identityHashCode(it) }) { QueuedRow(chat, it, isWorking(chat)) }
             if (session?.cut != null && chat.sender == null) item(key = "cut-short") { CutShortLine(chat) }
         }
+        SummaryPin(list, Gap.chatH + side, Modifier.align(Alignment.TopStart))
         over?.invoke(this, list, Gap.chatH + side)
         if (finding) FindBar(chat, matches, Modifier.align(Alignment.TopCenter).onSizeChanged { findBarHeight = with(density) { it.height.toDp() } })
         // the / list or the @ list over the box: its left side on the / or @ that started it, a gap above the box
@@ -453,7 +465,8 @@ fun ChatPage(chat: Chat, name: String, attach: Boolean = true, stop: (() -> Unit
                         }, textStyle = Type.body.copy(color = c.fg), cursorBrush = SolidColor(c.accentBg),
                             visualTransformation = look, onTextLayout = { layout = it },
                             modifier = Modifier.fillMaxWidth().heightIn(min = line)
-                                .drawBehind { look.drawBlocks(this, layout, c.fg.copy(alpha = c.fg.alpha * 0.07f), Tokens.Radius.code, 2.dp) }
+                                .drawBehind { look.drawBlocks(this, layout, c.fg.copy(alpha = c.fg.alpha * 0.07f), Tokens.Radius.code, 2.dp,
+                                    c.fg.copy(alpha = c.fg.alpha * Tokens.Markdown.quoteRuleOpacity.toFloat()), 6.dp) }
                                 .padding(horizontal = 6.dp)
                                 .onGloballyPositioned { fieldX = it.positionInRoot().x }
                                 .focusRequester(focus)

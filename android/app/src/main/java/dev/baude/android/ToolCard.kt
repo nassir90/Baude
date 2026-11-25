@@ -98,8 +98,9 @@ fun ToolCard(call: Call, ask: Ask?, answer: @Composable (Ask) -> Unit, view: ((C
     CompositionLocalProvider(LocalBaude provides c) {
         Column(Modifier.fillMaxWidth().border(1.dp, if (asking) c.warning else if (bad) c.destructive else c.rule,
             RoundedCornerShape(Gap.cardRadius)).padding(horizontal = Gap.cardH, vertical = Gap.cardV)) {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text(toolDisplay(call.name).first, style = Type.body.copy(fontWeight = Tokens.Font.bold), color = c.fg, maxLines = 1)
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text(toolDisplay(call.name).first, Modifier.weight(1f), style = Type.body.copy(fontWeight = Tokens.Font.bold),
+                    color = c.fg, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 if (inputShown || outputShown || call.subagent) Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                     if (inputShown) Toggle(when (call.base) {
                         "Bash", "BashOutput", "PowerShell" -> Wording.Common.command
@@ -112,10 +113,11 @@ fun ToolCard(call: Call, ask: Ask?, answer: @Composable (Ask) -> Unit, view: ((C
                         call.outputOpen = !call.outputOpen
                     }
                 }
-                SelectionContainer(Modifier.weight(1f)) {
-                    Text(header(call, c), style = Type.body, color = c.fg, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                }
                 if (!asking && (state == "running" || state == "background")) Spinner()
+            }
+            val detail = header(call, c)
+            if (detail.isNotEmpty()) SelectionContainer {
+                Text(detail, style = Type.body, color = c.fg)
             }
             AnimatedVisibility(inputOpen, enter = expandVertically(slide), exit = shrinkVertically(slide)) {
                 SelectionContainer {
@@ -251,7 +253,7 @@ fun InputView(name: String, input: JSONObject) {
                     lines.size to lines.take(2000).joinToString("\n") +
                         if (lines.size > 2000) "\n" + Wording.ToolCalls.moreLines(n = lines.size - 2000) else ""
                 }
-                PathLabel(path, Wording.ToolCalls.lineCount(n = count))
+                Text(Wording.ToolCalls.lineCount(n = count), style = Type.caption, color = LocalBaude.current.fg)
                 CodeBlock(shown, LANG_BY_EXT[path.substringAfterLast('.', "").let { if (it.isEmpty()) "" else ".$it" }].orEmpty(), path = path)
             }
             base == "Read" && input.has("file_path") -> {
@@ -479,11 +481,12 @@ fun TaskNoteLine(json: String) {
 fun LazyListScope.drawn(lines: List<Line>, calls: ChatCalls, asking: (Call) -> Ask? = { null }, answer: @Composable (Ask) -> Unit = {},
                         view: ((Call) -> Unit)? = null, line: @Composable (Line) -> Unit) {
     var i = 0
+    val keyed = HashSet<String>()
     while (i < lines.size) {
         val l = lines[i]
         val call = if (l.kind == "call") calls.byId[l.text] else null
         if (call == null) {
-            item { line(l) }
+            item(key = summaryKey(l)?.takeIf { keyed.add(it) }) { line(l) } // (a summary keyed, once: SummaryPin)
             i++
             continue
         }

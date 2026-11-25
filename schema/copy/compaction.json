@@ -1,5 +1,5 @@
 {
-  "description": "Where Claude Code compacted a conversation, in a chat: the marker's line while it runs, once done or failed, its tooltip and the summary's heading.",
+  "description": "Where Claude Code compacted a conversation, in a chat: the marker's line while it runs, once done or failed, its tooltip, the summary's heading and how many tools were used before it.",
   "messages": {
     "compacted": "Conversation compacted",
     "compacted_auto": "Conversation compacted automatically",
@@ -12,6 +12,7 @@
     "unfinished": "Compaction didn't finish",
     "failed": "Compaction failed",
     "failed_because": "Compaction failed: {$error}",
-    "summary": "Summary of the earlier conversation"
+    "summary": "Summary of the earlier conversation",
+    "tools_before": "Tools used before: {$count :number}"
   }
 }

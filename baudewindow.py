@@ -244,7 +244,7 @@ class BaudeWindow(WindowView, WindowProc, WindowDrafts, WindowSignal, WindowRemo
         view.append(wording.say("meta_settings.full_width"), "win.fullwidth")
         menu.append_section(None, view)
         tools = Gio.Menu()
-        tools.append(wording.say("window.kubernetes_menu"), "win.kube")
+        tools.append(wording.say("window.kubernetes"), "win.kube")
         tools.append(wording.say("window.database_schemas"), "win.dbschema")
         tools.append(wording.say("multiplex.terminal_menu"), "win.terminal")
         menu.append_section(None, tools)
@@ -642,9 +642,11 @@ class BaudeWindow(WindowView, WindowProc, WindowDrafts, WindowSignal, WindowRemo
         """What a note sent from here says it came from (feedback.save_feedback)."""
         return [f"- session: {self.session_id or '-'} ({getattr(self, 'session_title', None) or 'untitled'})",
                 wording.say("report.folder_line", folder=self.cwd),
-                f"- Baude: {os.path.join(os.path.dirname(os.path.realpath(__file__)), 'baude.py')}",
-                *feedback.report_lines([(wording.say("report.the_chat"), self.report),
-                                        ("Meta", self.panel.meta.report)])]
+                f"- Baude: {os.path.join(os.path.dirname(os.path.realpath(__file__)), 'baude.py')}"]
+
+    def feedback_transcripts(self):
+        return feedback.report_lines([(wording.say("report.the_chat"), self.report),
+                                        ("Meta", self.panel.meta.report)])
 
     def capture_areas(self):
         """The window's parts, by name, for the text a capture records."""

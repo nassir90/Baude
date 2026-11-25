@@ -1,6 +1,18 @@
 package dev.baude.android
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.layout.onPlaced
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.layout.positionInParent
+import kotlinx.coroutines.launch
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -22,10 +34,31 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import org.json.JSONObject
 
-/** Which compaction marks have their summary opened, by the mark's uuid (chatparts.CompactMark's fold). */
+/** Which compaction marks have their summary opened, by the mark's uuid (chatparts.CompactMark's fold), and where each
+ * one's heading is in its item, in px (SummaryPin). */
 object CompactFolds {
     val open = mutableStateMapOf<String, Boolean>()
+    val headTop = HashMap<String, Float>()
 }
+
+private val TOOLS_BEFORE = Regex("""\s*(?:<system-reminder>\s*)?<tools-used-before-summary>(.*?)</tools-used-before-summary>(?:\s*</system-reminder>)?\s*""",
+    RegexOption.DOT_MATCHES_ALL)
+
+/** A compaction's summary as it's read (transcripts.summary_tools): its text without the list of tools the
+ * conversation had used that Claude Code puts in it, and those tools' names. */
+fun summaryTools(text: String): Pair<String, List<String>> {
+    val names = ArrayList<String>()
+    val rest = TOOLS_BEFORE.replace(text) { m ->
+        names.addAll(m.groupValues[1].split(",").map { it.trim() }.filter { it.isNotEmpty() })
+        "\n\n"
+    }
+    return rest.trim() to names
+}
+
+/** The lazy item key of a line whose summary can be opened (drawn keys it so SummaryPin finds it), or null. */
+fun summaryKey(line: Line): String? = line.uuid?.takeIf {
+    line.kind == "compactsum" || (line.kind == "compact" && line.text.contains("\"summary\""))
+}?.let { "summary:$it" }
 
 /** The compaction marks in a chat's lines: a "compact" line's JSON is {meta, summary?} once its transcript says it, or
  * {live: true, state: running | done | failed | unfinished, ...} while claude's stream does
@@ -146,11 +179,56 @@ fun LoneSummary(line: Line) {
 private fun SummaryFold(summary: String, key: String) {
     val c = LocalBaude.current
     val open = CompactFolds.open[key] == true
-    Column(Modifier.fillMaxWidth()) {
-        Row(Modifier.clickable { CompactFolds.open[key] = !open }, verticalAlignment = Alignment.CenterVertically) {
-            Icon(if (open) Adwaita.PanDown else Adwaita.PanEnd, null, tint = c.dim, modifier = Modifier.size(16.dp.icon))
-            Text(Wording.Compaction.summary, style = Type.caption, color = c.dim)
+    Column(Modifier.fillMaxWidth().onPlaced { CompactFolds.headTop[key] = it.positionInParent().y }) {
+        SummaryHeading(open) { CompactFolds.open[key] = !open }
+        if (open) {
+            val (text, tools) = remember(summary) { summaryTools(summary) }
+            Column(Modifier.padding(start = Tokens.Compact.indent, bottom = 6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                if (tools.isNotEmpty()) SelectionContainer {
+                    Text(Wording.Compaction.toolsBefore(count = tools.size), style = Type.caption, color = c.dim)
+                }
+                Prose(text)
+            }
         }
-        if (open) Column(Modifier.padding(start = Tokens.Compact.indent, bottom = 6.dp)) { Prose(summary) }
+    }
+}
+
+/** A summary's heading (Gtk.Expander's): its arrow and "Summary of the earlier conversation". */
+@Composable
+private fun SummaryHeading(open: Boolean, modifier: Modifier = Modifier, toggle: () -> Unit) {
+    val c = LocalBaude.current
+    Row(modifier.clickable { toggle() }, verticalAlignment = Alignment.CenterVertically) {
+        Icon(if (open) Adwaita.PanDown else Adwaita.PanEnd, null, tint = c.dim, modifier = Modifier.size(16.dp.icon))
+        Text(Wording.Compaction.summary, style = Type.caption, color = c.dim)
+    }
+}
+
+/** An open summary's heading pinned at the top of the chat (chatparts.SummaryPin) while its own heading's scrolled
+ * above the top and the summary's still in view; tapped, the summary folds and the chat's scrolled back to its mark.
+ * start: the chat's side padding, where its lines start. */
+@Composable
+fun SummaryPin(list: LazyListState, start: androidx.compose.ui.unit.Dp, modifier: Modifier = Modifier) {
+    val c = LocalBaude.current
+    val scope = rememberCoroutineScope()
+    var height by remember { mutableStateOf(0) }
+    val pinned by remember(list) {
+        derivedStateOf {
+            val info = list.layoutInfo
+            info.visibleItemsInfo.firstNotNullOfOrNull { item ->
+                val uuid = (item.key as? String)?.removePrefix("summary:")?.takeIf { it != item.key } ?: return@firstNotNullOfOrNull null
+                if (CompactFolds.open[uuid] != true) return@firstNotNullOfOrNull null
+                val top = item.offset + info.beforeContentPadding // (where the item's drawn in the list)
+                val head = top + (CompactFolds.headTop[uuid] ?: 0f)
+                if (head < 0 && top + item.size > maxOf(height, 1)) uuid to item.index else null
+            }
+        }
+    }
+    val (uuid, index) = pinned ?: return
+    Column(modifier.fillMaxWidth().background(c.inside).onSizeChanged { height = it.height }) {
+        SummaryHeading(true, Modifier.padding(start = start, top = 2.dp, bottom = 4.dp)) {
+            CompactFolds.open[uuid] = false
+            scope.launch { list.scrollToItem(index) } // (back to its mark, at the chat's top)
+        }
+        HorizontalDivider(color = c.rule)
     }
 }

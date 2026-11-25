@@ -1,12 +1,14 @@
 """recordmeta — what Meta, in Record, is told and proposes: its prompt and tools (RECORD_PROMPT, RECORD_TOOLS),
 what a notebook, a page, an @-referenced thing or a quoted passage says to it, and its proposed edits as a page reads
-them (pending_edits, staged, place_change).
+them (pending_edits: as the notebook's host keeps them; staged and place_change are baudelib.notebooktools').
 """
 import codecs
 import os
 import re
 
 from baudelib.notes import data_dir  # noqa: E402,F401
+from baudelib import notebooktools  # noqa: E402  (what a page's edits are, as their notebook's host works them out)
+from baudelib.notebooktools import kept_at, place_change, staged, staged_at  # noqa: E402,F401
 import meta  # noqa: E402  (Meta, the helper in the right bar: Baude's too, beside this file)
 from recordstore import HOME, QUOTE_LIMIT, REF_RE, full_name, page_paths, plain_refs, short_page
 from recordui import chat_text
@@ -60,10 +62,12 @@ that selection, exactly. Write in the page's Markdown and its voice, and only wh
 describe or sum up an edit: the user sees it. You'll be told whether they accepted it.
 
 Your edits stay pending, across turns and sessions, until the user accepts or rejects them: a draft over the page, \
-which they may keep writing in meanwhile. Work on that draft. list_edits shows what's pending; propose_edit's old_text \
-is found in the page as it reads with your pending edits applied, so a change to text one of them puts in revises \
-that edit, and one to text an edit replaces replaces it, rather than adding a second; revise_edit changes an edit \
-outright and withdraw_edit takes one back. The page's file has none of your pending edits in it.
+which they may keep writing in meanwhile. Work on that draft. Others may have edits waiting on a page too (another \
+agent's, named by who proposed it): list_edits shows every edit pending, each with who proposed it (by: you, or their \
+name); only yours are yours. propose_edit's old_text is found in the page as it reads with the pending edits applied, \
+so a change to text one of them puts in revises that edit (yours then), and one to text an edit replaces replaces \
+it, rather than adding a second; revise_edit changes an edit outright and withdraw_edit takes one back. The page's \
+file has none of the pending edits in it.
 
 The pages themselves you organise with add_page, delete_page and move_pages (under another page, or from one \
 notebook into another), and the notebooks with add_notebook, which makes one as add_page makes a page: each changes \
@@ -102,26 +106,26 @@ RECORD_TOOLS = [
      "description": "Propose a change to a page of the user's notes, in the notebook open. The user sees it on the "
      "page as a diff and accepts or rejects it; nothing is written until they accept. old_text is the text that "
      "new_text replaces, copied exactly (whitespace and Markdown too), and found once in the page as it reads with "
-     "your pending edits applied (list_edits): give more of what's around it if it's there more than once. Text one "
-     "of your pending edits puts in, or text it replaces: that edit is revised to take this in, not a second one made. "
+     "the pending edits applied (list_edits): give more of what's around it if it's there more than once. Text one "
+     "of the pending edits puts in, or text it replaces: that edit is revised to take this in, not a second one made. "
      "To fill in or change a passage the user selected, old_text is that selection. An empty old_text adds new_text "
      "at the page's end. Returns the edit's id, or why nothing was shown.",
      "inputSchema": {"type": "object", "required": ["page", "old_text", "new_text"], "properties": {
          "page": {"type": "string", "description": "the page's name (Spec, or Spec:Auth for a sub-page) or its file"},
          "old_text": {"type": "string"}, "new_text": {"type": "string"}}}},
     {"name": "list_edits",
-     "description": "Your edits still waiting for the user to accept or reject, in the notebook open (or on one "
-     "page), in page order: each one's id, page, old_text (what it replaces, as the page has it now) and new_text.",
+     "description": "The edits still waiting for the user to accept or reject, in the notebook open (or on one "
+     "page), in page order: each one's id, page, old_text (what it replaces, as the page has it now), new_text and by (who proposed it: you, or their name).",
      "inputSchema": {"type": "object", "properties": {
          "page": {"type": "string", "description": "only this page's (its name or its file)"}}}},
     {"name": "revise_edit",
-     "description": "Change one of your pending edits (list_edits): new_text is what it puts in now; old_text, if "
+     "description": "Change a pending edit (list_edits): new_text is what it puts in now; old_text, if "
      "given, what it replaces now (found once in the page, not in another pending edit's passage). It stays one "
      "edit, waiting for the user. new_text the same as what it replaces takes it back.",
      "inputSchema": {"type": "object", "required": ["id", "new_text"], "properties": {
          "id": {"type": "string"}, "new_text": {"type": "string"}, "old_text": {"type": "string"}}}},
     {"name": "withdraw_edit",
-     "description": "Take back one of your pending edits (list_edits): it goes from the page, the page as it is.",
+     "description": "Take back a pending edit (list_edits): it goes from the page, the page as it is.",
      "inputSchema": {"type": "object", "required": ["id"], "properties": {"id": {"type": "string"}}}},
     {"name": "add_page",
      "description": "Add a page to a notebook, with its text (Markdown). A sub-page's name is its parent's "
@@ -320,13 +324,8 @@ def page_named(notebook, name, store):
     """The page of notebook a name means (the agent's: its name, any case, its own name past its parents', or its file),
     or None."""
     name = name.strip()
-    pages = notebook["pages"]
-    if name in pages:
-        return name
-    for test in (lambda p: p.lower() == name.lower(), lambda p: short_page(p).lower() == name.lower()):
-        found = [p for p in pages if test(p)]
-        if len(found) == 1:
-            return found[0]
+    if (page := notebooktools.page_named(notebook["pages"], name)) is not None:
+        return page
     files = {os.path.join(pages_root(), path): page for (book, page), path in page_paths(store.notebooks).items()
              if book == notebook.get("id")}
     path = os.path.realpath(os.path.join(pages_root(), name)) if name else ""
@@ -335,76 +334,13 @@ def page_named(notebook, name, store):
 
 
 def pending_edits(notebook, store, agent=None):
-    """The edits the agent's proposed to a notebook's pages that wait for you, in the order it made them (the reply
-    still coming's, agent's, last): each one's notebook its "notebook" (one in a notebook's own conversation, from
-    when each had one: that notebook)."""
-    book_id = notebook.get("id")
-    said = [*(notebook.get("messages") or ()), *(store.meta["messages"] if store is not None else ())]
-    live = agent.turn["proposals"] if agent is not None and agent.turn is not None else ()
-    props = [p for m in said for p in m.get("proposals") or () if p.get("notebook", book_id) == book_id]
-    return [p for p in props + [p for p in live if p not in props and p.get("notebook") == book_id]
+    """The edits waiting on a notebook's pages, in the order they were made: as its host last listed them (Record's
+    Store.edits_for: Meta's, and anyone's); in a notebook kept with its own changes (a Bot's memory's), those kept with
+    its messages."""
+    if hasattr(store, "edits_for"):
+        return store.edits_for(notebook)
+    return [p for m in notebook.get("messages") or () for p in m.get("proposals") or ()
             if p.get("status") == "pending"]
-
-
-def staged(text, edits):
-    """A page's text as it reads with edits applied: (that text, its pieces). edits: [(start, old, new, edit)], in the
-    page's own places; one that overlaps one before it is left out. At one place an insertion (old empty) comes before
-    a replacement, and edits otherwise in the order they were made. A piece: (its start and end in the staged text,
-    its start and end in the page's, the edit it's of or None)."""
-    out, pieces, at, pos = [], [], 0, 0
-    order = lambda x: (x[0], bool(x[1]), x[3].get("t", 0) if isinstance(x[3], dict) else 0)  # noqa: E731
-    for start, old, new, edit in sorted(edits, key=order):
-        if start < at:
-            continue
-        if start > at:
-            out.append(text[at:start])
-            pieces.append((pos, pos + start - at, at, start, None))
-            pos += start - at
-        out.append(new)
-        pieces.append((pos, pos + len(new), start, start + len(old), edit))
-        pos, at = pos + len(new), start + len(old)
-    out.append(text[at:])
-    pieces.append((pos, pos + len(text) - at, at, len(text), None))
-    return "".join(out), pieces
-
-
-def staged_at(pieces, at):
-    """A place in the page's own text as one in its staged text (in a passage an edit replaces: that edit's start)."""
-    for ss, se, ks, ke, edit in pieces:
-        if ks <= at <= ke:
-            return ss + (at - ks) if edit is None else ss
-    return at
-
-
-def kept_at(pieces, at, pick=min):
-    """A place in the staged text as one in the page's own (where an edit's new text starts or ends: its passage's
-    start or end). Where it's more than one (an edit that puts nothing in is all of its passage at one place): pick's
-    of them, min the first, max the last."""
-    places = []
-    for ss, se, ks, ke, edit in pieces:
-        if edit is None and ss <= at <= se:
-            places.append(ks + (at - ss))
-        elif edit is not None and at in (ss, se):
-            places += [ks] if at == ss else []
-            places += [ke] if at == se else []
-    return pick(places) if places else None
-
-
-def place_change(text, old, near=None):
-    """Where a proposed change goes in a page's text: (offset, the text it replaces), or (None, why not). old there once,
-    or, if more than once, the one nearest near (where the selection was); with its spaces either side left out, if it's
-    there so and not as given. An empty old: the page's end."""
-    if not old:
-        return len(text), ""
-    for want in dict.fromkeys((old, old.strip())):
-        if not want:
-            continue
-        at = [m.start() for m in re.finditer(re.escape(want), text)]
-        if len(at) == 1 or at and near is not None:
-            return min(at, key=lambda i: abs(i - near)) if near is not None else at[0], want
-        if len(at) > 1:
-            return None, f"old_text is in the page {len(at)} times: give more of what's around it, so it's there once."
-    return None, "old_text isn't in the page as it is now: copy it exactly from the page (Read its file)."
 
 
 def split_unknown(text):

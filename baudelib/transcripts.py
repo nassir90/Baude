@@ -80,6 +80,21 @@ def strip_reminders(text):
     return _LEADING_REMINDERS.sub("", text) if text.lstrip().startswith("<system-reminder>") else text
 
 
+_TOOLS_BEFORE = re.compile(r"\s*(?:<system-reminder>\s*)?<tools-used-before-summary>(.*?)</tools-used-before-summary>"
+                           r"(?:\s*</system-reminder>)?\s*", re.S)
+
+
+def summary_tools(text):
+    """A compaction's summary as it's read: (its text without the list of tools the conversation had used that Claude
+    Code puts in it, <tools-used-before-summary>, in a <system-reminder> or not; those tools' names)."""
+    names = []
+
+    def took(m):
+        names.extend(n.strip() for n in m.group(1).split(",") if n.strip())
+        return "\n\n"
+    return _TOOLS_BEFORE.sub(took, text or "").strip(), names
+
+
 def _prompt_texts(content):
     """The parts of a user message the person actually wrote (clients prepend reminders, and
     Claude Code sends task notifications as user messages)."""
@@ -575,6 +590,7 @@ class HistoryIndex:
         self.sums = array.array("q")    # its line's _line_sum,
         self.replies = bytearray()      # and 1 if it's a reply of Claude's (what Signal reads)
         self.oldest = None              # the _line_sum of the oldest item drawn
+        self.loaded_end = 0             # byte after the last complete record read by load
         self.shown = 0                  # items drawn (those tailed in since too)
         self.todo = None                # [from, to]: the start of the file, not indexed yet (index_some)
         self.later = None               # (the items indexed on opening, after that part: they go after it)
@@ -632,6 +648,11 @@ class HistoryIndex:
                     f.seek(begin)
                     at = first = begin + (len(f.readline()) if begin else 0)  # (a line cut in two: the part before's)
                     for raw in f:
+                        if not raw.endswith(b"\n"):
+                            try:
+                                json.loads(raw)
+                            except (ValueError, UnicodeError):
+                                break  # tailed when the writer finishes this record
                         line = raw.decode("utf-8", "replace")
                         if (item := history_item(line, first=self.first)) is not None:
                             starts.append(at)
@@ -642,6 +663,7 @@ class HistoryIndex:
                             for _ in range(min(gone, len(newest))):
                                 newest.pop()
                         at += len(raw)
+                    self.loaded_end = at
             except OSError:
                 return []
             if len(starts) >= keep or not begin:  # (a revert's cut items: enough indexed, those it popped read below)

@@ -98,6 +98,10 @@
       "type": "string",
       "description": "Record's notebooks here, as written last (notes.stamp: \"\" for none)."
     },
+    "edits": {
+      "type": "string",
+      "description": "The edits proposed to the pages of Record's notebooks here, as written last (notes.edits_stamp: \"\" for none)."
+    },
     "phone": {
       "type": "boolean",
       "description": "A phone's host."

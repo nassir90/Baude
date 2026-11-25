@@ -60,17 +60,18 @@ SCHEMAS = {
 }
 
 
-def _channel(where, timeout=10, as_=None, meta=False):
-    ch, info = wire.reach(where, timeout=timeout, as_=as_, meta=meta)
+def _channel(where, timeout=10, as_=None, meta=False, agent=None):
+    ch, info = wire.reach(where, timeout=timeout, as_=as_, meta=meta, agent=agent)
     return ch, info or {}
 
 
 class Mesh:
     """The mesh as this host's process has it (this chat's: me, its session id, or meta: a head's Meta's, in no chat;
-    socket: that host process's, if it isn't this user's usual one)."""
+    socket: that host process's, if it isn't this user's usual one; agent: an agent outside the apps', by its name:
+    baude-mcp's)."""
 
-    def __init__(self, me=None, socket=None, meta=False):
-        self.me, self.meta = me, meta
+    def __init__(self, me=None, socket=None, meta=False, agent=None):
+        self.me, self.meta, self.agent = me, meta, agent
         self.local = {"via": "unix", "path": socket} if socket else {"via": "local"}
         self.relay = {"path": socket} if socket else {}  # (a member reached through that host process)
 
@@ -178,7 +179,7 @@ class Mesh:
 
     def channel(self, where, timeout=10):
         """(channel, info) for where, as from this chat (relay's as): what's sent on it is from this chat."""
-        return _channel(where, timeout, self.me, self.meta)
+        return _channel(where, timeout, self.me, self.meta, self.agent)
 
     def ask(self, where, session, text, wait=True, timeout_s=WAIT_S, title=None):
         """text sent to a session, from this chat (input's as); its answer (the turn's result) waited for, unless not
@@ -193,7 +194,7 @@ class Mesh:
             busy = (got.get("session") or {}).get("state") == "working"  # (it's at a turn: this one's answer's next)
             offset = self.request(where, {"op": "transcript", "session": session, "offset": 0, "limit": 1})["size"] \
                 if wait else 0  # (its chat as far as it's written before this: what's said to it is after)
-            sent = said_to(session, text, self.me, self.meta)
+            sent = said_to(session, text, self.me, self.meta, self.agent)
             ch.send(sent)
         except BaseException:
             ch.close()
@@ -246,7 +247,7 @@ class Mesh:
                             return {"session": session, "answer": cut([chat["answer"]]), "error": False}
                         skip, said = 0, []
                     elif stopped and text is not None:  # (its host stopped before its claude had it: sent again)
-                        req, skip, said = again or said_to(session, text, self.me, self.meta), 0, []
+                        req, skip, said = again or said_to(session, text, self.me, self.meta, self.agent), 0, []
                         ch.send(req)
                     else:  # (not written yet: the turn it's at is another's, or it's next)
                         skip, said = (1 if working else 0), []
@@ -473,10 +474,12 @@ class Mesh:
                            title=s.get("title")), **named}
 
 
-def said_to(session, text, me=None, meta=False):
-    """The input that says text to a session: from chat me (input's as), if it's a chat's, or from Meta (as_meta)."""
+def said_to(session, text, me=None, meta=False, agent=None):
+    """The input that says text to a session: from chat me (input's as), if it's a chat's, from Meta (as_meta), or from
+    an agent outside the apps, by its name (as_agent)."""
     return {"op": "input", "session": session, "req": 2, **({"as": me} if me else {}),
-            **({"as_meta": True} if meta else {}), "msg": {
+            **({"as_meta": True} if meta else {}), **({"as_agent": agent} if agent and not me and not meta else {}),
+            "msg": {
         "type": "user", "message": {"role": "user", "content": [{"type": "text", "text": text}]}}}
 
 
@@ -526,27 +529,35 @@ def cut(parts):
     return text if len(text) <= TEXT_MAX else text[:TEXT_MAX] + f"\n(… {len(text) - TEXT_MAX} more characters)"
 
 
-def listed():
+def listed(schemas=None):
     return [{"name": n, "description": d, "inputSchema": {"type": "object", "properties": props, "required": req}}
-            for n, (d, props, req) in SCHEMAS.items()]
+            for n, (d, props, req) in (schemas or SCHEMAS).items()]
 
 
 def serve(me=None, rfile=None, wfile=None, socket=None, meta=False):
     """The MCP server: a message a line on rfile (stdin), its answers on wfile (stdout), till rfile ends; each call on
     a thread of its own (a subagent's answer can take a while: another call meanwhile is answered)."""
-    rfile, wfile = rfile or sys.stdin, wfile or sys.stdout
-    mesh, lock = Mesh(me, socket, meta), threading.Lock()
+    mesh = Mesh(me, socket, meta)
+    serve_tools(NAME, SCHEMAS, lambda name, args: mesh.hosts() if name == "hosts" else getattr(mesh, name)(args),
+                rfile, wfile)
+
+
+def serve_tools(name, schemas, call, rfile=None, wfile=None, started=None):
+    """An MCP server of tools (schemas: {name: (description, properties, required)}, each called as call(name, args),
+    its answer given as JSON): a message a line on rfile (stdin), its answers on wfile (stdout), till rfile ends; each
+    call on a thread of its own. started(params): initialize's params (the client's clientInfo), as it's asked."""
+    rfile, wfile, lock = rfile or sys.stdin, wfile or sys.stdout, threading.Lock()
 
     def send(msg):
         with lock:
             wfile.write(json.dumps(msg) + "\n")
             wfile.flush()
 
-    def call(mid, name, args):
+    def run(mid, tool, args):
         try:
-            if name not in SCHEMAS:
-                raise ValueError(f"no tool {name}")
-            got = mesh.hosts() if name == "hosts" else getattr(mesh, name)(args)
+            if tool not in schemas:
+                raise ValueError(f"no tool {tool}")
+            got = call(tool, args)
             result = {"content": [{"type": "text", "text": json.dumps(got, indent=1, ensure_ascii=False)}]}
         except Exception as e:  # (said to the model, which may try again)
             result = {"content": [{"type": "text", "text": f"{type(e).__name__}: {e}"}], "isError": True}
@@ -560,14 +571,16 @@ def serve(me=None, rfile=None, wfile=None, socket=None, meta=False):
         if mid is None:
             continue
         if method == "initialize":
+            if started is not None:
+                started(msg.get("params") or {})
             send({"jsonrpc": "2.0", "id": mid, "result": {
                 "protocolVersion": (msg.get("params") or {}).get("protocolVersion") or "2025-06-18",
-                "capabilities": {"tools": {}}, "serverInfo": {"name": NAME, "version": "1"}}})
+                "capabilities": {"tools": {}}, "serverInfo": {"name": name, "version": "1"}}})
         elif method == "tools/list":
-            send({"jsonrpc": "2.0", "id": mid, "result": {"tools": listed()}})
+            send({"jsonrpc": "2.0", "id": mid, "result": {"tools": listed(schemas)}})
         elif method == "tools/call":
             p = msg.get("params") or {}
-            threading.Thread(target=call, args=(mid, p.get("name"), p.get("arguments") or {}), daemon=True).start()
+            threading.Thread(target=run, args=(mid, p.get("name"), p.get("arguments") or {}), daemon=True).start()
         else:
             send({"jsonrpc": "2.0", "id": mid, "error": {"code": -32601, "message": "unknown method"}})
 

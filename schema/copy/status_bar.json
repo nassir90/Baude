@@ -3,7 +3,7 @@
   "messages": {
     "host_tip": "The host this chat lives on: its files, and its tools",
     "host_tip_at": "The host this chat lives on: its files, and its tools ({$address})",
-    "last_turn": "{$turns} turns · {$seconds}s · in {$used} / out {$written} tok",
+    "last_turn": "{$turns} turns · {$seconds}s · ↓ {$used} / ↑ {$written} tok",
     "tasks": "Background tasks",
     "processes": ".input {$n :number} .match $n one {{{$n} background process}} * {{{$n} background processes}}",
     "subagents": ".input {$n :number} .match $n one {{{$n} subagent}} * {{{$n} subagents}}",

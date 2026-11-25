@@ -1,6 +1,7 @@
 """Record's notebooks on this machine, as the host process gives them to another's Record (op "notes"): listed from
 records.json, and changed through the Record running here, if one is (it keeps them, and saves over the file), else in
-the file itself. No GTK: the host process reads this, and so does record.py."""
+the file itself; and the edits proposed to their pages, which the host process keeps (edits.json: edit_op). No GTK: the
+host process reads this, and so does record.py."""
 import copy
 import difflib
 import hashlib
@@ -11,7 +12,7 @@ import sys
 import threading
 import time
 
-from baudelib import wording
+from baudelib import notebooktools, wording
 
 LIMIT = 8 * 1024 * 1024  # (a listing's text, at most: past it, the pages' text isn't sent, said as too big)
 _LOCK = threading.Lock()  # (one write to the file at a time, here)
@@ -263,11 +264,41 @@ def backup(path):
         print("notes: no backup of records.json:", e, file=sys.stderr)
 
 
-def write(changes):
+def _save(saved, path):
+    """saved written to records.json (path), a copy of it kept first in backups/: an error, or None."""
+    backup(path)
+    try:
+        saved.setdefault("notes", "markdown")
+        with open(path + ".host.tmp", "w", encoding="utf-8") as f:
+            json.dump(saved, f, indent=1)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(path + ".host.tmp", path)
+    except OSError as e:
+        return f"records.json: {e}"
+    return None
+
+
+def moved_ok(moved):
+    """Is moved what write takes: {notebook id: {a page's old name: its new}}?"""
+    return moved is None or isinstance(moved, dict) and all(
+        isinstance(i, str) and isinstance(m, dict) and all(isinstance(k, str) and isinstance(v, str)
+                                                           for k, v in m.items()) for i, m in moved.items())
+
+
+def write(changes, moved=None):
     """changes made to this machine's notebooks: by the Record running here, else in records.json (a copy of it kept
-    first in backups/, as Record keeps one). {done: [ids]} or {error}."""
-    if not changes_ok(changes):
+    first in backups/, as Record keeps one); moved ({notebook id: {old page name: new}}): the edits waiting on those
+    pages moved with them (edits.json). {done: [ids]} or {error}."""
+    if not changes_ok(changes) or not moved_ok(moved):
         return {"error": "not changes to notebooks"}
+    out = _write(changes)
+    if moved and "error" not in out and (error := _edits_moved(moved)) is not None:
+        return {"error": error}
+    return out
+
+
+def _write(changes):
     if not changes:
         return {"done": []}
     handed = _hand_over(changes)
@@ -287,14 +318,89 @@ def write(changes):
         done = apply(books, changes)
         if books == before:
             return {"done": done}
-        backup(path)
-        try:
-            saved.setdefault("notes", "markdown")
-            with open(path + ".host.tmp", "w", encoding="utf-8") as f:
-                json.dump(saved, f, indent=1)
-                f.flush()
-                os.fsync(f.fileno())
-            os.replace(path + ".host.tmp", path)
-        except OSError as e:
-            return {"error": f"records.json: {e}"}
+        if (error := _save(saved, path)) is not None:
+            return {"error": error}
     return {"done": done, "by": "file"}
+
+
+def edits_path():
+    """The edits proposed to the notebooks here (notebooktools.Edits): the host process's to write, and no one else's."""
+    return os.path.join(data_dir(), "edits.json")
+
+
+def edits_stamp():
+    """edits.json as written last, in a word (info's edits: a Record showing the notebooks here asks for them again
+    once it's another)."""
+    try:
+        st = os.stat(os.path.join(os.environ.get("RECORD_DATA") or own_data_dir("Record"), "edits.json"))
+    except OSError:
+        return ""
+    return f"{st.st_mtime_ns}:{st.st_size}"
+
+
+def _edits_read(saved):
+    """edits.json's edits; the first time, those waiting in records.json (saved) from before, written there."""
+    try:
+        with open(edits_path(), encoding="utf-8") as f:
+            got = json.load(f)
+        return [e for e in (got.get("edits") if isinstance(got, dict) else None) or () if isinstance(e, dict)]
+    except FileNotFoundError:
+        edits = notebooktools.imported(saved)
+        _edits_write(edits)
+        return edits
+
+
+def _edits_write(edits):
+    path = edits_path()
+    with open(path + ".tmp", "w", encoding="utf-8") as f:
+        json.dump({"edits": edits}, f, indent=1, ensure_ascii=False)
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(path + ".tmp", path)
+
+
+def _edits_moved(moved):
+    """The edits waiting on pages moved ({notebook id: {old name: new}}) moved with them: an error, or None."""
+    with _LOCK:
+        try:
+            edits = _edits_read(_read())
+        except (OSError, ValueError) as e:
+            return f"Record's store here: {e}"
+        changed = False
+        for e in edits:
+            to = (moved.get(e.get("notebook")) or {}).get(e.get("page"))
+            if e.get("status") == "pending" and to is not None and to != e["page"]:
+                e["page"], changed = to, True
+        if changed:
+            try:
+                _edits_write(edits)
+            except OSError as e:
+                return f"edits.json: {e}"
+    return None
+
+
+EDIT_OPS = {"edit_propose": "propose", "edit_revise": "revise", "edit_withdraw": "withdraw", "edit_decide": "decide",
+            "edit_adopt": "adopt", "edits": "listed"}
+
+
+def edit_op(msg):
+    """One of the edit ops (EDIT_OPS) on the notebooks here, as records.json has them: (its answer's op, its fields).
+    Run with the notes ops, in the order asked (Server._notes): a page written just before is read as written."""
+    with _LOCK:
+        try:
+            saved = _read()
+            edits = _edits_read(saved)
+        except (OSError, ValueError) as e:
+            return "error", {"error": f"Record's store here: {e}"}
+        books = [t for t in saved.get("records") or () if isinstance(t, dict) and t.get("id")]
+        tools = notebooktools.Edits(edits, books)
+        try:
+            out = getattr(tools, EDIT_OPS[msg["op"]])(msg)
+        except ValueError as e:
+            return "error", {"error": str(e)}
+        if tools.changed:
+            try:
+                _edits_write(edits)
+            except OSError as e:
+                return "error", {"error": f"edits.json: {e}"}
+    return ("edits", {**out, "stamp": edits_stamp()}) if msg["op"] in ("edits", "edit_adopt") else ("edit", out)

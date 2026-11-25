@@ -937,12 +937,13 @@ def connect_ssh(dest, strict=False, timeout=25.0):
         raise OSError("; ".join(s for s in said if s) or str(e)) from None
 
 
-def through(ch, host, timeout=5.0, as_=None, meta=False):
+def through(ch, host, timeout=5.0, as_=None, meta=False, agent=None):
     """(channel, info) past hello for member host of the mesh, on a channel to a host process in it: relay, then
-    hello through the tunnel (as_: relay's as; meta: its as_meta). OSError if there's no way to it."""
+    hello through the tunnel (as_: relay's as; meta: its as_meta; agent: its as_agent). OSError if there's no way to
+    it."""
     ch.sock.settimeout(max(timeout, OPEN_S + 5))  # (the host process's own wait, OPEN_S, ends first, and says why)
     ch.send({"op": "relay", "to": host, "req": 0, **({"as": as_} if as_ else {}),
-             **({"as_meta": True} if meta else {})})
+             **({"as_meta": True} if meta else {}), **({"as_agent": agent} if agent and not as_ and not meta else {})})
     reply = ch.reply()
     if not reply or reply.get("op") != "relayed":
         ch.close()
@@ -950,9 +951,9 @@ def through(ch, host, timeout=5.0, as_=None, meta=False):
     return _hello(ch, max(timeout, 10.0), host)
 
 
-def connect_mesh(host, path=None, timeout=5.0, as_=None, meta=False):
+def connect_mesh(host, path=None, timeout=5.0, as_=None, meta=False, agent=None):
     """A Channel to member host of the mesh, through this machine's host process (socket_path(), or the one at
-    path); as_, meta: relay's as, as_meta."""
+    path); as_, meta, agent: relay's as, as_meta, as_agent."""
     path = path or socket_path()
     own_socket(path)
     sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
@@ -962,12 +963,12 @@ def connect_mesh(host, path=None, timeout=5.0, as_=None, meta=False):
     except OSError:
         sock.close()
         raise
-    return through(Channel.over(sock), host, timeout, as_, meta)
+    return through(Channel.over(sock), host, timeout, as_, meta, agent)
 
 
-def reach(where, timeout=5.0, as_=None, meta=False):
-    """(channel, info) for a host process wherever it is (where: see this module's docstring); as_: through the
-    mesh, relay's as and as_meta (on this machine, a request's own says it)."""
+def reach(where, timeout=5.0, as_=None, meta=False, agent=None):
+    """(channel, info) for a host process wherever it is (where: see this module's docstring); as_, meta, agent:
+    through the mesh, relay's as, as_meta and as_agent (on this machine, a request's own says it)."""
     via = (where or {}).get("via")
     if via == "local":
         return connect_local(None, timeout)
@@ -976,7 +977,7 @@ def reach(where, timeout=5.0, as_=None, meta=False):
     if via == "ssh":
         return connect_ssh(where["dest"], bool(where.get("strict")), max(timeout, 3.0))
     if via == "mesh":
-        return connect_mesh(where["host"], where.get("path"), timeout, as_, meta)
+        return connect_mesh(where["host"], where.get("path"), timeout, as_, meta, agent)
     raise OSError(f"nowhere to reach: {where!r}")
 
 

@@ -170,7 +170,7 @@ private fun runsFree(model: String?): Boolean {
 fun ContextMeter(shown: ContextShown, full: Boolean, text: Color) {
     val c = LocalBaude.current
     Row(Modifier.tip(shown.tip), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-        Text(shown.label, style = Type.caption, color = text, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        if (shown.text == null) Text(shown.label, style = Type.caption, color = text, maxLines = 1, overflow = TextOverflow.Ellipsis)
         val count = shown.text ?: return@Row
         val value = if (full) 1f else shown.value
         val fill = when {

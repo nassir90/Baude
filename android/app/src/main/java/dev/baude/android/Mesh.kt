@@ -104,6 +104,12 @@ class Chat(hostId: String, sid: String) {
     val btw = mutableStateListOf<SideQuestion>()   // (its side questions, newest first, while it's open)
     val uses = HashMap<String, JSONObject>()       // (an Artifact or Agent call's id: the call, till its result's read)
     var offset = -1L
+    var start = -1L                          // (where what's read of its transcript starts: what's before is read as
+    val earlier = mutableStateOf(false)      // it's scrolled up to, readEarlier; earlier: there's some)
+    var readingEarlier = false
+    val rewound = HashSet<String>()          // (records a rewind went back to, before what's read: cut there once read)
+    val orphans = ArrayList<Line>()          // (results whose calls are before what's read: given them once read)
+    var prepended: ((Int) -> Unit)? = null   // (items drawn before the first: its list kept where it was)
     var reading = false
     val loaded = mutableStateOf(false) // (its transcript read to its end once: where it was left can be found)
     var again = false
@@ -733,7 +739,8 @@ object Mesh {
         }
     }
 
-    /** More of the chat's transcript read (its last part, the first time: a long one isn't all fetched). */
+    /** More of the chat's transcript read (its last part, the first time: a long one isn't all fetched; what's before
+     * it is read as it's scrolled up to, readEarlier). */
     fun read(chat: Chat) {
         if (chat.reading) {
             chat.again = true
@@ -747,42 +754,20 @@ object Mesh {
         c.request(Msg.Transcript(session = chat.sid, offset = from).json()) { r ->
             val got = Msg.TranscriptReply.from(r)
             val data = got.data.orEmpty()
-            val text = if (data.isEmpty()) "" else String(Base64.getDecoder().decode(data), Charsets.UTF_8)
+            val bytes = if (data.isEmpty()) ByteArray(0) else Base64.getDecoder().decode(data)
+            val text = String(bytes, Charsets.UTF_8)
             val next = got.next?.toLong() ?: from
             val more = next < (got.size?.toLong() ?: next)
             val lines = parse(text, cutFirst = chat.offset < 0 && from > 0)
+            val first = if (from == 0L) 0L else bytes.indexOf('\n'.code.toByte()).let { if (it < 0) next else from + it + 1 }
             main.post {
                 if (r.optString("op") == Op.TRANSCRIPT) {
-                    chat.offset = next
-                    for (line in lines) {
-                        when (line.kind) {
-                            "cost" -> line.text.toDoubleOrNull()?.let { chat.chrome.cost.value = it; chat.chrome.costSeen = it }
-                            "call", "stopped" -> took(chat.calls, chat.lines, line)
-                            "result", "task" -> {
-                                noted(chat, line)
-                                took(chat.calls, chat.lines, line)
-                                tasksFrom(chat, line)
-                            }
-                            "use", "link" -> noted(chat, line)
-                            "compact" -> {
-                                CompactMarks.dropLive(chat)
-                                chat.lines.add(line)
-                            }
-                            "compactsum" -> CompactMarks.addSummary(chat, line)
-                            "record" -> line.uuid?.let { chat.ends[it] = chat.lines.size }
-                            "rewind" -> { // (what's after the record it keeps last dropped: all of what's read, if
-                                val keep = line.uuid?.let { chat.ends[it] } ?: 0 // that's before it)
-                                while (chat.lines.size > keep) chat.lines.removeAt(chat.lines.size - 1)
-                                chat.ends.values.removeAll { it > keep }
-                            }
-                            else -> {
-                                if (line.kind == "you") chat.sent.removeAll { it.id == line.uuid }
-                                if (line.kind == "error" && chat.chrome.loginStandsIn && needsLogin(line.text))
-                                    chat.chrome.loginStandsIn = false // (its sign-in card's in its place already)
-                                else chat.lines.add(line)
-                            }
-                        }
+                    if (chat.start < 0) {
+                        chat.start = first
+                        chat.earlier.value = first > 0
                     }
+                    chat.offset = next
+                    take(chat, lines)
                 }
                 chat.reading = false
                 if (more || chat.again) {
@@ -795,6 +780,105 @@ object Mesh {
                 }
             }
         }
+    }
+
+    /** Lines of the chat's transcript, in order, taken into what it shows and keeps. */
+    private fun take(chat: Chat, lines: List<Line>) {
+        for (line in lines) {
+            when (line.kind) {
+                "cost" -> line.text.toDoubleOrNull()?.let { chat.chrome.cost.value = it; chat.chrome.costSeen = it }
+                "call", "stopped" -> took(chat.calls, chat.lines, line)
+                "result", "task" -> {
+                    if (line.kind == "result" && chat.start > 0) { // (its call before what's read: kept for it)
+                        val id = try { JSONObject(line.text).optString("id") } catch (_: Exception) { "" }
+                        if (id.isNotEmpty() && chat.calls.byId[id] == null) chat.orphans.add(line)
+                    }
+                    noted(chat, line)
+                    took(chat.calls, chat.lines, line)
+                    tasksFrom(chat, line)
+                }
+                "use", "link" -> noted(chat, line)
+                "compact" -> {
+                    CompactMarks.dropLive(chat)
+                    chat.lines.add(line)
+                }
+                "compactsum" -> CompactMarks.addSummary(chat, line)
+                "record" -> line.uuid?.let { chat.ends[it] = chat.lines.size }
+                "rewind" -> { // (what's after the record it keeps last dropped: all of what's read, if
+                    val keep = line.uuid?.let { chat.ends[it] } ?: 0 // that's before it)
+                    if (chat.start > 0) line.uuid?.let { if (chat.ends[it] == null) chat.rewound.add(it) }
+                    while (chat.lines.size > keep) chat.lines.removeAt(chat.lines.size - 1)
+                    chat.ends.values.removeAll { it > keep }
+                }
+                else -> {
+                    if (line.kind == "you") chat.sent.removeAll { it.id == line.uuid }
+                    if (line.kind == "error" && chat.chrome.loginStandsIn && needsLogin(line.text))
+                        chat.chrome.loginStandsIn = false // (its sign-in card's in its place already)
+                    else chat.lines.add(line)
+                }
+            }
+        }
+    }
+
+    /** The part of the chat's transcript before what's read (up to window of it), read and put before its lines, as
+     * the desktop's history reads further back as it's scrolled up (transcripts.HistoryIndex). */
+    fun readEarlier(chat: Chat, window: Long = TAIL) {
+        if (chat.readingEarlier || chat.start <= 0) return
+        val c = conns[chat.hostId] ?: return
+        chat.readingEarlier = true
+        val until = chat.start
+        val from = (until - window).coerceAtLeast(0)
+        val got = java.io.ByteArrayOutputStream()
+        fun step(at: Long) {
+            c.request(Msg.Transcript(session = chat.sid, offset = at, limit = until - at).json()) { r ->
+                val ok = r.optString("op") == Op.TRANSCRIPT
+                val reply = Msg.TranscriptReply.from(r)
+                val data = reply.data.orEmpty()
+                val bytes = if (!ok || data.isEmpty()) ByteArray(0) else Base64.getDecoder().decode(data)
+                val next = reply.next?.toLong() ?: at
+                got.write(bytes, 0, minOf(bytes.size.toLong(), until - at).toInt())
+                if (ok && next in (at + 1) until until) step(next)
+                else main.post { if (ok) earlierRead(chat, from, until, window, got.toByteArray()) else chat.readingEarlier = false }
+            }
+        }
+        step(from)
+    }
+
+    /** What's before the chat's lines, read (readEarlier): taken as a chat of its own would take it, then put before
+     * them, with what was waiting on it (a rewind's cut, a result's call) settled. */
+    private fun earlierRead(chat: Chat, from: Long, until: Long, window: Long, bytes: ByteArray) {
+        chat.readingEarlier = false
+        val nl = bytes.indexOf('\n'.code.toByte())
+        val begin = if (from == 0L) 0L else if (nl < 0) until else from + nl + 1
+        if (begin >= until && from > 0) return readEarlier(chat, window * 4) // (a line longer than it: more of it)
+        val part = Chat(chat.hostId, chat.sid)
+        take(part, parse(String(bytes, Charsets.UTF_8), cutFirst = from > 0))
+        if (chat.rewound.isNotEmpty()) { // (a rewind after it back into it, or before it: what's after its record goes)
+            val found = chat.rewound.mapNotNull { part.ends[it] }
+            val keep = if (found.size < chat.rewound.size) 0 else found.min()
+            chat.rewound.removeAll { it in part.ends }
+            while (part.lines.size > keep) part.lines.removeAt(part.lines.size - 1)
+            part.ends.values.removeAll { it > keep }
+        }
+        for (o in chat.orphans.toList()) {
+            val id = try { JSONObject(o.text).optString("id") } catch (_: Exception) { "" }
+            if (part.calls.byId[id] == null) continue
+            took(part.calls, part.lines, o)
+            chat.orphans.remove(o)
+        }
+        settle(part.calls, session(chat.hostId, chat.sid)?.state)
+        val before = itemIndex(chat, chat.lines.size - 1) + 1
+        val n = part.lines.size
+        chat.calls.byId.putAll(part.calls.byId)
+        chat.ends.replaceAll { _, v -> v + n }
+        chat.ends.putAll(part.ends)
+        chat.lines.addAll(0, part.lines)
+        for (a in part.agents) if (chat.agents.none { it.toolUseId == a.toolUseId }) chat.agents.add(a) // (newest first)
+        for (a in part.artifacts) if (chat.artifacts.none { it.url == a.url }) chat.artifacts.add(a)
+        chat.start = begin
+        chat.earlier.value = begin > 0
+        chat.prepended?.invoke(itemIndex(chat, chat.lines.size - 1) + 1 - before)
+        if (n == 0 && begin > 0) readEarlier(chat) // (nothing shown from it: on to the part before)
     }
 
     /** A line the pages note, not the chat (parse's use, result, task and link): an artifact published, a subagent

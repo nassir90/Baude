@@ -54,13 +54,12 @@ object Queue {
         if (chat.sender == null && working) chat.queued.add(Queued(text.trim(), files)) else chat.send(text, files)
     }
 
-    /** The queue sent as one message when a turn ends by itself (up to the one ↑ was pressed on, if one was); kept
-     * when it was stopped. */
+    /** The queue sent as one message when a turn ends, including interruption (up to the one ↑ was pressed on, if one was). */
     fun flush(chat: Chat) {
-        val upto = chat.queueUpto ?: (if (chat.stopAsked) null else ALL)
+        val upto = chat.queueUpto ?: ALL
         chat.stopAsked = false
         chat.queueUpto = null
-        if (upto == null || chat.queued.isEmpty()) return
+        if (chat.queued.isEmpty()) return
         val turns = if (upto === ALL) chat.queued.toList() else chat.queued.take(chat.queued.indexOf(upto) + 1)
         chat.queued.removeAll(turns.toSet())
         val text = turns.map { it.text }.filter { it.isNotBlank() }.joinToString("\n\n")
@@ -158,7 +157,7 @@ object Queue {
 
     /** (a host's sessions listed) A chat not open that was left with a queue (its draft's), whose turn that host lists
      * over now, where it was at one before: what's queued sent to it, as the open chat's is as its turn ends (flush):
-     * all of it, or up to the one ↑ was pressed on; a turn stopped otherwise leaves it. */
+     * all of it, or up to the one ↑ was pressed on. */
     fun sendLeft(hostId: String, before: List<Msg.Session>?, now: List<Msg.Session>) {
         if (before == null) return
         fun working(sid: String, l: List<Msg.Session>) = l.firstOrNull { it.id == sid }?.state.let { it == "working" || it == "waiting" }
@@ -166,10 +165,6 @@ object Queue {
             val sid = key.substringAfterLast('/')
             if (d.queue.isEmpty() || key != "$hostId/$sid" || Mesh.open?.let { it.hostId == hostId && it.sid == sid } == true) continue
             if (!working(sid, before) || working(sid, now)) continue
-            if (d.upto == null && d.hold) {
-                setDraft(key, Mesh.Draft(d.text, d.files, d.queue))
-                continue
-            }
             val turns = if (d.upto != null) d.queue.take(d.upto + 1) else d.queue
             setDraft(key, Mesh.Draft(d.text, d.files, d.queue.drop(turns.size)))
             Mesh.sendQueued(hostId, sid, turns.singleOrNull() ?: Queued(turns.map { it.text }.filter { it.isNotBlank() }

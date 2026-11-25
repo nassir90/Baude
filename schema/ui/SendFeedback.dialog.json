@@ -2,7 +2,8 @@
   "description": "Send Feedback: a small dialog (560 px wide, title \"Feedback\") for writing a note, an issue or a suggestion, optionally with screen captures of the app window; with the Capture bar at the bottom of the window while a capture is pending, and the Mark regions dialog over a capture. Baude's and Record's. Saved notes are listed in Ongoing Feedback and, when GitHub is signed in, filed as an issue.",
   "apps": [
     "baude",
-    "record"
+    "record",
+    "phone"
   ],
   "opens": [
     "☰ → Send Feedback…",
@@ -70,15 +71,16 @@
     },
     {
       "name": "Note box",
-      "decisions": [{"said": "The feedback box should be formatted as Record's are, since it becomes markdown anyway", "rule": "Every app's feedback box formats markdown as the chat's box does and the note keeps the markdown", "decided": "2026-11-22"}],
-      "shows": "A rounded card like the chat's composer, a multi-line text box, 140 px tall growing to 280 then scrolling, words wrapping, text kept clear of the + at its bottom right corner. Has the focus when the dialog opens, cursor after any text already written. Text selection is not drag-dropped away. Markdown shows as it is written, as in the chat's box (headings, lists, bold, italic, code), and the note keeps the markdown.",
+      "decisions": [{"said": "The feedback text modal should have the same formatting as Record, after all it's just going to be turned into markdown.", "rule": "Every app's feedback box formats markdown as the chat's box does (headings, lists, quotes, bold, italic, code) and edits it as the chat's box does (Enter continues a list, Tab and Shift+Tab move a list item in or out a level), and the note keeps the markdown", "decided": "2026-11-22", "source": [{"issue": "BaudeInternal#185"}]}],
+      "shows": "A rounded card like the chat's composer, a multi-line text box, 140 px tall growing to 280 then scrolling, words wrapping, text kept clear of the + at its bottom right corner. Has the focus when the dialog opens, cursor after any text already written. Text selection is not drag-dropped away. Markdown shows as it is written, as in the chat's box (headings, lists, quotes, bold, italic, code), and the note keeps the markdown. Enter in a list starts the next item and Tab moves an item in a level, as in the chat's box; Ctrl+Enter / ⌘Enter still saves. The phone's box looks and edits the same as its chat's box.",
       "text": [
         "(no placeholder text)"
       ]
     },
     {
       "name": "Attach transcripts check box",
-      "decisions": [{"said": "Send Feedback sends far too much: chat transcripts with every issue; make sending the transcript a toggle", "rule": "Every app attaches chat transcripts to feedback only when asked, off by default", "decided": "2026-11-22"}],
+      "decisions": [{"said": "\"Send Feedback\" is sending way too fucking much. It's sending chat transcirpts with every single issue. ... make \"Send Transcript\" a tolgle ind the send feedback modal.", "rule": "Every app that sends a chat's transcript with feedback attaches it only when asked, off by default", "decided": "2026-11-22", "source": [{"issue": "BaudeInternal#196"}]}],
+      "phone": {"does": "has no check box: the phone sends no transcript with its note", "why": "the phone's note carries the phone line only, so there is no transcript to attach", "decided": "2026-11-25"},
       "shows": "Under the note box, a check box \"Attach open chat transcripts\", off for a new note and kept with a draft. Shown only where there is an open chat (Baude, Record).",
       "copy": [
         "feedback.attach_transcripts"

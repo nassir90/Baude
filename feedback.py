@@ -23,6 +23,7 @@ import pointers  # noqa: E402
 from widgets import FEEDBACK_KEY, ZOOM_MODS, discard, fit_size, scaled_texture, screen_scale, walk  # noqa: E402,F401
 from imageviews import FixedPicture  # noqa: E402,F401
 from chatparts import ShutBar  # noqa: E402,F401
+import composerview  # noqa: E402
 from composerview import ComposerMarkdown, no_text_drag  # noqa: E402,F401
 from pickers import _data_home  # noqa: E402,F401
 
@@ -783,10 +784,13 @@ class FeedbackDialog(Adw.Dialog):
         body.append(self.strip)
         # (the text's right margin keeps it from running under the +)
         self.text = Gtk.TextView(wrap_mode=Gtk.WrapMode.WORD_CHAR, top_margin=10, bottom_margin=10,
-                                 left_margin=10, right_margin=58)
+                                 left_margin=10, right_margin=58, accepts_tab=False)
         self.text.add_css_class("feedback-text")
         no_text_drag(self.text)  # (a selection isn't dragged away: a press in it places the caret)
         self.markdown = ComposerMarkdown(self.text)
+        keys = Gtk.EventControllerKey()
+        keys.connect("key-pressed", self._note_key)
+        self.text.add_controller(keys)
         self.text.get_buffer().set_text(draft.text)
         self.text.get_buffer().connect("changed", lambda *_: self.sync())
         frame = Gtk.ScrolledWindow(child=self.text, min_content_height=140, max_content_height=280,
@@ -825,6 +829,15 @@ class FeedbackDialog(Adw.Dialog):
             keys.add_shortcut(Gtk.Shortcut.new(Gtk.ShortcutTrigger.parse_string(t), Gtk.CallbackAction.new(
                 lambda *_: (self.save() if self.save_btn.get_sensitive() else None) or True)))
         self.add_controller(keys)
+
+    def _note_key(self, _c, keyval, _code, state):
+        """Enter in the note is a new line (a list's next item), Tab a list item in a level, as in the chat's box;
+        Ctrl+Enter (⌘Enter) is left to Save."""
+        if composerview.tab_key(self.markdown, keyval, state):
+            return True
+        if keyval in (Gdk.KEY_Return, Gdk.KEY_KP_Enter) and not composerview.sends(state):
+            return composerview.newline_key(self.markdown, state)
+        return False
 
     def found_repo(self, repo):
         self.repo = repo

@@ -38,7 +38,7 @@
       "shows": "\"Archive\" for a normal session, \"Unarchive\" for one that is already archived (here, in Claude Desktop, or on its host). For a session on a host that is at a turn (working or waiting), Archive is left out (Stop is offered instead). For a session of this machine's own: archived only in Baude's settings, listed under Archived. On a host: archived there, for every app.",
       "copy": ["sidebar.archive", "sidebar.unarchive"],
       "actions": [
-        {"by": "click", "does": "Moves it to the Archived group (or back). A host that refuses says \"<host> didn't archive it: <why>\" / \"…didn't unarchive it: <why>\" in a toast."}
+        {"by": "click", "does": "Moves it to the Archived group (or back). An archived chat is read-only, its text box gone, until it's unarchived (MenuActions, Read-only session). A host that refuses says \"<host> didn't archive it: <why>\" / \"…didn't unarchive it: <why>\" in a toast."}
       ]
     },
     {

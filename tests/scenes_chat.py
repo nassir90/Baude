@@ -1149,6 +1149,21 @@ def _(app):
     return win
 
 
+@scene("53c-archived-read-only", "An archived chat opened: no text box, and ☰ → Read-only session checked and greyed")
+def _(app):
+    proj = os.path.join(T.TMP, "sessions-proj")
+    sidebar_sessions(proj)
+    win = app.window(opts(cwd=proj))
+    T.wait_for(lambda: sidebar_row(win, "Login bug") is not None, "rows")
+    info = sidebar_row(win, "Login bug").info
+    win.sidebar.archive(info)
+    win.resume_session(info)
+    T.wait_for(lambda: win.session_id == info["id"], "the chat")
+    T.pump(1)
+    T.find(win, Gtk.MenuButton, lambda b: b.get_icon_name() == "open-menu-symbolic")[0].popup()
+    return win
+
+
 def queued_then_left(app):
     """A chat at a long turn (the fake's LINGER) with two messages queued under it, then another chat opened: the
     window, and the left chat's id. Its transcript's kept as claude keeps it (FAKE_CLAUDE_TRANSCRIPTS), to be drawn as

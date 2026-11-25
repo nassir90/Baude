@@ -830,6 +830,8 @@ class SessionSidebar(SidebarMenu, Gtk.Box):
             self.win.panel.bot_changed(self.find_info(self.win.session_id) if self.win.session_id else None)
         if current is not None:
             self.list.select_row(current)
+        if self.win.chat_archived() != self.win.archived:  # (the open chat archived or unarchived: read-only or not)
+            self.win.apply_read_only()
         self.watch_rows()
 
         def restore(*_):

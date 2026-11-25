@@ -18,6 +18,7 @@
     "baude.py:BaudeApp.update_now",
     "windowproc.py:WindowProc.set_read_only",
     "windowproc.py:WindowProc.apply_read_only",
+    "windowproc.py:WindowProc.chat_archived",
     "windowproc.py:WindowProc.show_composer",
     "baudewindow.py:BaudeWindow.open_record"
   ],
@@ -121,7 +122,8 @@
     },
     {
       "name": "Read-only session",
-      "shows": "A checkable menu item \"Read-only session\" (a check mark when on; Baude only). On: the chat has no text box at all (not a greyed one, and the attach row goes with it) — for a chat you only watch; the status line with the context it uses stays. Remembered per session id once the session has one, and applied again whenever that session is opened. A session another program has live is read-only too, while it does, without the item being on (and the text box is likewise gone); focus leaves the input to the chat when it hides.",
+      "shows": "A checkable menu item \"Read-only session\" (a check mark when on; Baude and the phone, as Record's ☰ has no chat). On: the chat has no text box at all (not a greyed one, and the attach row goes with it) — for a chat you only watch; the status line with the context it uses stays. Remembered per session id once the session has one, and applied again whenever that session is opened. An archived chat (archived here, in Claude Desktop or on its host) is read-only whatever was chosen: the item is checked and greyed, and can't be picked, until the chat is unarchived (from the sidebar's or home's row menu), when the text box and the item come back as they were. Archiving the open chat takes its text box away at once. A session another program has live is read-only too, while it does, without the item being on (and the text box is likewise gone); focus leaves the input to the chat when it hides.",
+      "decisions": [{"said": "Archived chats should be read-only by default; keep the read-only option in the menu but greyed out; to write to one, unarchive it; no new copy, just the behaviour (paraphrased)", "rule": "Every app shows an archived chat with no text box, its Read-only session item checked and greyed, until the chat is unarchived; no new words are shown for it", "decided": "2026-11-25", "source": [{"issue": "BaudeInternal#215"}]}],
       "text": [
         "Read-only session"
       ],
@@ -164,9 +166,13 @@
       "shows": "No text box; the ☰ item checked"
     },
     {
+      "name": "archived",
+      "shows": "No text box; the ☰ item checked and greyed"
+    },
+    {
       "name": "no transcript yet",
       "shows": "Copy Transcript copies only \"(nothing said yet)\""
     }
   ],
-  "scenes": []
+  "scenes": ["53c-archived-read-only"]
 }

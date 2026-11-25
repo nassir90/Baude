@@ -797,6 +797,8 @@ def free_closed_windows(app):
     def closed(window):
         if any(w is window for w in Gtk.Window.list_toplevels()):
             return False
+        window.freeing = True  # (what its parts say as they're disposed (a list's row unselected, a tab view's page
+        # gone) isn't acted on: getattr(win, "freeing"))
         adw = isinstance(window, (Adw.ApplicationWindow, Adw.Window))
         # (what's ours in it, taken out and disposed: not the window's own insides, which its dispose sees to)
         parts = [window.get_content() if adw else window.get_child(), window.get_titlebar(),

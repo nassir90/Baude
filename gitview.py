@@ -596,7 +596,7 @@ class GitPage(Gtk.Stack):
         self.view_wanted = None  # (a chat's page come back to, or new: its card and scroll, once its log is read)
         self.scroll_wanted = None  # (where its log was scrolled: once the log's shown and laid out, scroll_back)
         self.scrolling = None  # (scroll_back's timer: stopped as the page goes)
-        self.connect("unrealize", lambda *_: self._stop_scrolling())
+        self.connect("unrealize", lambda *_: self._stop_timers())
         top = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
         head = Gtk.Box(spacing=6, margin_start=10, margin_end=8, margin_top=8)
         self.where = Gtk.Label(xalign=0, ellipsize=Pango.EllipsizeMode.START, hexpand=True)  # (the repository)
@@ -704,6 +704,8 @@ class GitPage(Gtk.Stack):
 
     def _check_soon(self):
         self.checking = None
+        if self.get_root() is None:  # (its window gone)
+            return False
         if self.chat_check() and self.shown_here():
             self.ensure()  # (another chat: its own history at once)
         elif self.soon is None and self.shown_here():
@@ -712,6 +714,8 @@ class GitPage(Gtk.Stack):
 
     def _changed_soon(self):
         self.soon = None
+        if self.get_root() is None:
+            return False
         self.ensure()
         return False
 
@@ -744,7 +748,8 @@ class GitPage(Gtk.Stack):
     def keep(self):
         """The page as it is now, to bring back when its chat's shown again (bring_back): the branches shown, every
         branch or not, the merges opened, the card open and where the log's scrolled. Nothing's read for it."""
-        scroll = self.list_scroll.get_vadjustment().get_value() if self.scroll_wanted is None else self.scroll_wanted
+        adj = self.list_scroll.get_vadjustment() if self.list_scroll.get_root() is not None else None
+        scroll = self.scroll_wanted if self.scroll_wanted is not None else adj.get_value() if adj is not None else 0
         view = self.view_wanted or {"card": self.current, "count": len(self.commits), "scroll": scroll}
         return {"follow": self.follow, "revs": self.revs, "pinned": self.pinned, "every": self.all_btn.get_active(),
                 "opened": {sha: c for sha, c in self.opened.items() if c is not None},
@@ -1001,13 +1006,16 @@ class GitPage(Gtk.Stack):
             adj.set_value(self.scroll_wanted)
             self.scroll_wanted = self.scrolling = None
             return False
-        self._stop_scrolling()
-        self.scrolling = GLib.timeout_add(16, scroll)
-
-    def _stop_scrolling(self):
         if self.scrolling is not None:
             GLib.source_remove(self.scrolling)
-            self.scrolling = None
+        self.scrolling = GLib.timeout_add(16, scroll)
+
+    def _stop_timers(self):
+        """The page gone (its window closed): its scroll back, and its history's read soon, stopped."""
+        for name in ("scrolling", "checking", "soon"):
+            if (source := getattr(self, name)) is not None:
+                GLib.source_remove(source)
+                setattr(self, name, None)
 
     def highlight(self, sha):
         """A commit's row picked out and scrolled into the middle of the view (a link to it was clicked)."""

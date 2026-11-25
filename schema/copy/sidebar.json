@@ -39,6 +39,7 @@
     "group_deleted": "Group “{$name}” deleted",
     "rename_session": "Rename session",
     "rename_bot": "Rename Bot",
-    "host_didnt_rename": "{$host} didn't rename it: {$why}"
+    "host_didnt_rename": "{$host} didn't rename it: {$why}",
+    "desktop_group": "Desktop"
   }
 }

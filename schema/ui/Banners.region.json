@@ -73,9 +73,24 @@
         },
         {
           "name": "active elsewhere",
-          "shows": "\"This session is currently active elsewhere\", no button. Shown for a Claude Desktop chat that Claude Desktop is writing to now; the composer is hidden meanwhile and what Desktop writes appears live in the transcript with a spinner while it works. Goes when its transcript has been quiet. Other chats (host's, other windows', terminals') never show this.",
+          "shows": "\"This session is currently active elsewhere\", no button. Shown for a Claude Desktop chat that Claude Desktop is writing to now: one on this machine, or a host's (its host says so: elsewhere), on every app; the composer is hidden meanwhile and what Desktop writes appears live in the transcript with a spinner while it works. Goes when its transcript has been quiet. Other chats (host's, other windows', terminals') never show this.",
           "text": [
             "This session is currently active elsewhere"
+          ],
+          "copy": [
+            "chat_banner.active_elsewhere"
+          ],
+          "decisions": [
+            {
+              "said": "Claude Desktop's chats are shared over the mesh so other hosts can see them and carry them on",
+              "rule": "Every app keeps a host's Claude Desktop chat read-only, with this banner and no text box, while its host says Claude Desktop is writing it (elsewhere); otherwise writing in it takes it up on its host.",
+              "decided": "2026-11-25",
+              "source": [
+                {
+                  "issue": "BaudeInternal#203"
+                }
+              ]
+            }
           ]
         },
         {
@@ -196,6 +211,7 @@
     "55r-network-host-gone",
     "55r2-network-host-unknown",
     "55t-network-host-deactivated",
-    "55c-network-session-asking"
+    "55c-network-session-asking",
+    "55x2-network-desktop-elsewhere"
   ]
 }

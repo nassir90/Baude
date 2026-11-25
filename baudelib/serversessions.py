@@ -12,7 +12,7 @@ import uuid
 
 from baudelib import (
     accounts, agentproxy, claude, codex, emissiontools, meshtools, models, multiplextools, notes, transcripts, wire, wording,
-    worktree,
+    desktopchats, worktree,
 )
 from baudelib.serverstate import (
     AGENT_TOOLS, CATALOGUE_LIMIT, CATALOGUE_WAIT_S, CHECK_SOCKET_S, CLAUDE_OPTIONS, COMMAND_TOOLS, FILE_LIMIT,
@@ -164,6 +164,8 @@ class ServerSessions:
                                    "group": self.group_of(params), "title": params.get("title") or None,
                                    "prompt": "", "created": time.time(), "options": {}, "path": path,
                                    "said": os.path.getmtime(path), "ask_default": "deny", "adopted": True})
+                if sid in desktopchats.desktop_index():  # (Claude Desktop's: listed in Desktop still, wherever it runs)
+                    s.meta["desktop"] = True
                 self.sessions[sid] = s
                 self.save(s)
                 self.log(f"took up {sid} in {cwd}")
@@ -974,10 +976,12 @@ class ServerSessions:
                     s.proc.close_stdin()
                     threading.Timer(10, s.proc.kill).start()
                     s.used = time.time()
+            if self.conns:  # (Claude Desktop's list read again, for its heads: every desktopchats.LOOK_S)
+                self.dirty |= self.desktop.look()
             send, self.dirty = self.dirty, False
             conns = list(self.conns)
         if send:
-            every, info = self.listing(archived=True), self.info()
+            every, info = self.heads_listing(archived=True), self.info()
             shown = [x for x in every if not x["archived"]]
             for c in conns:
                 if c.subscribed:

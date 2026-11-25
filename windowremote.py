@@ -902,7 +902,7 @@ class WindowRemote:
             text = wording.say("hosts.down", host=name) if self.remote.state == "dead" else \
                 "Looking for daemon…" if self.remote.mine else wording.say("hosts.looking", host=name)
         elif kind == "live":
-            text = "This session is currently active elsewhere"
+            text = wording.say("chat_banner.active_elsewhere")
         elif kind == "missing":  # (its host there, but with no such session: session_missing)
             name = "Daemon" if self.remote.mine else remote_name(self.remote)
             text = wording.say("chat_banner.missing_because", name=name, reason=self.missing_reason) \

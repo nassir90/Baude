@@ -12,8 +12,8 @@ import time
 import uuid
 
 from baudelib import (
-    agentproxy, emissionlink, emissiontools, hostaccounts, hostdb, hostfiles, hostfixes, hostkube, hostlogin, mesh,
-    meshtools, hostterminal, multiplexlink, notes, routines, wire, wording, worktree,
+    agentproxy, desktopchats, emissionlink, emissiontools, hostaccounts, hostdb, hostfiles, hostfixes, hostkube,
+    hostlogin, mesh, meshtools, hostterminal, multiplexlink, notes, routines, wire, wording, worktree,
 )
 from baudelib.serverstate import (
     APPS, BOT_PICTURE_MAX, Conn, FRAME_KEYS, _mtime, _write_json, _write_text, bot_dir, clean_env,
@@ -395,7 +395,8 @@ class ServerRunning:
             with self.lock:  # (as they are now: nothing's been read while nobody was attached)
                 for s in self.sessions.values():
                     self.rescan(s)
-            return reply("sessions", sessions=self.listing(conn.archived), server=self.info())
+                self.desktop.look(force=True)
+            return reply("sessions", sessions=self.heads_listing(conn.archived), server=self.info())
         if op == "quit":  # (the host process itself: its claudes stopped, its sessions kept for next time; a turn
             # going on cut short, and marked so)
             with self.lock:  # (if_idle, a head's restart of it: not while a command's running, which it would end)
@@ -557,13 +558,20 @@ class ServerRunning:
             where = msg.get("where") if wire.is_where(msg.get("where")) else None
             done = (self.mesh.deactivate if op == "deactivate" else self.mesh.activate)(msg.get("id"), where)
             return reply(op + "d", any=done)
+        with self.lock:  # (a Claude Desktop chat only listed, written in: taken up first, its folder made again below)
+            if msg.get("session") in self.desktop.chats and desktopchats.takes_up(msg):
+                try:
+                    self.desktop.take_up(msg["session"])
+                except (OSError, ValueError) as e:
+                    return reply("error", error=str(e))
         if op == "input" and self.makes_folder(msg.get("msg") or {}) or op == "held" and msg.get("send"):
             self.restore_folder(conn, msg.get("session"))  # (its worktree removed: made again first, not under the
             # lock, which git would hold up)
         with self.lock:
             if self.stopped.is_set():  # (it stopped as this waited for the lock: halt's)
                 return reply("error", error="the host process is stopping")
-            s = self.sessions.get(msg.get("session"))
+            # (or a Claude Desktop chat only listed, read as it is: desktopchats.READS)
+            s = self.sessions.get(msg.get("session")) or self.desktop.chats.get(msg.get("session"))
             if s is None:
                 return reply("error", error=f"no session {msg.get('session')}")
             if s.deleting:

@@ -922,8 +922,11 @@ class BaudeWindow(WindowView, WindowProc, WindowDrafts, WindowSignal, WindowRemo
         No other chat is: a host's session (this machine's or another's), one this machine's host hasn't taken up yet,
         one another window or a terminal's claude has open too. Several writers at once is how those are used, and
         what's sent mid-turn waits for the turn's end. Not Baude's own claude at a turn in a Desktop chat left
-        mid-turn, which writing here takes over (begin_resume)."""
-        if not self.resume_pending or self.remote is not None:
+        mid-turn, which writing here takes over (begin_resume). A host's Desktop chat (another machine's, or one this
+        machine's host has taken up): while its host says Desktop's writing it (elsewhere)."""
+        if self.remote is not None:
+            return bool((self.remote.sessions.get(self.session_id) or {}).get("elsewhere"))
+        if not self.resume_pending:
             return False
         if not (self.desktop_chat or is_desktop(self.session_id)):
             return False

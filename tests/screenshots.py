@@ -108,6 +108,8 @@ def reset_state():
                         hidden_remote=None)
     os.environ["BAUDE_GH"] = ""  # (a Feedback tab's fake GitHub is that scene's, its notes too)
     shutil.rmtree(baude.feedback_dir(), ignore_errors=True)
+    shutil.rmtree(os.path.join(os.environ["XDG_CONFIG_HOME"], "Claude", "claude-code-sessions"),  # (a scene's Claude
+                  ignore_errors=True)                                                             # Desktop chats)
     T.feedback._gh_seen.update(at=None, repo=None)
 
 

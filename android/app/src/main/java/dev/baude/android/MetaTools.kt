@@ -170,6 +170,11 @@ object MetaTools {
     fun groupNames(): List<String> = (Mesh.sessions.keys.flatMap { id ->
         Mesh.conn(id)?.info?.groups.orEmpty() - (Mesh.conn(id)?.info?.let { it.group.orEmpty() } ?: "")
     } + HomePrefs.made + HomePrefs.chatGroups.values).filter { it.isNotBlank() }.distinct().sortedBy { it.lowercase() }
+        .let { names -> // (Desktop first, while a host lists Claude Desktop chats: Baude's known_groups)
+            val desktop = Wording.Sidebar.desktopGroup
+            if (Mesh.sessions.values.any { list -> list.any { it.desktop == true } } || desktop in names) listOf(desktop) + (names - desktop)
+            else names
+        }
 
     private fun key(h: String, s: Msg.Session) = "$h/${s.id.orEmpty()}"
 

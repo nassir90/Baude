@@ -502,6 +502,41 @@ abstract class Screens(private val theme: String) {
         render("09b-home-host-down") { HomeScreen() }
     }
 
+    // (Claude Desktop's chats on workshop, as its host lists them (desktop): the Desktop group, apart and first; its
+    // ⋮, Desktop first among the groups; one open while Desktop's writing it: said, and no text box)
+    private fun desktopChats() {
+        val now = System.currentTimeMillis() / 1000.0
+        fun d(id: String, title: String, cwd: String, ago: Double, fork: String? = null) = Msg.Session.from(
+            Msg.Session(id = id, title = title, cwd = cwd, updated = now - ago, said = now - ago, created = now - ago - 600,
+                state = "stopped", forkFrom = fork).json().put("desktop", true).put("taken_up", false))
+        Mesh.sessions["h1"] = Mesh.sessions["h1"].orEmpty() + listOf(
+            d("k1", "Plan the onboarding flow", "/home/dev/garden", 1_800.0),
+            d("k2", "Onboarding, shorter", "/home/dev/garden", 2_400.0, fork = "k1"),
+            d("k3", "Review the pricing page", "/home/dev/lantern", 90_000.0),
+        )
+    }
+
+    @Test fun homeDesktop() {
+        desktopChats()
+        render("01d-home-desktop") { HomeScreen() }
+    }
+
+    @Test fun homeDesktopGroups() {
+        desktopChats()
+        show { HomeScreen() }
+        tap(dev.baude.android.Wording.Sidebar.groupByTip)
+        layOut()
+        screen("01e-home-desktop-groups")
+    }
+
+    @Test fun chatDesktopElsewhere() {
+        Mesh.sessions["h1"] = Mesh.sessions["h1"].orEmpty().map {
+            if (it.id == "a") Msg.Session.from(it.json().put("desktop", true).put("elsewhere", true).put("state", "stopped")) else it
+        }
+        fill(Mesh.openChat("h1", "a"))
+        render("10e-chat-desktop-elsewhere") { ChatShell("h1", "a", back = {}, open = { _, _ -> }, feedback = {}, first = "chat") }
+    }
+
     @Test fun homeSessionMenu() { // (a chat's long-press menu, on a host that's up)
         show { HomeScreen() }
         tap("Why the build is slow", long = true)

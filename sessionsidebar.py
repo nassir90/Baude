@@ -35,6 +35,7 @@ from sessionlist import (  # noqa: E402
     short_group_label, started_elsewhere,
 )
 from sidebarmenu import SidebarMenu  # noqa: E402
+from baudelib.desktopchats import group as desktop_group  # noqa: E402  (Claude Desktop's chats' group: Desktop)
 
 
 # ------------------------------------------------------- sessions dialog --
@@ -291,12 +292,17 @@ class SessionSidebar(SidebarMenu, Gtk.Box):
         return out
 
     def known_groups(self):
-        """[(name, label, note)]: each group, by name (those made, those chats are put in, and those hosts' sessions
-        are in as they were started: chat_group), then No group ("")."""
+        """[(name, label, note)]: Desktop first, while there are Claude Desktop chats here or on a host (chat_group);
+        then each group, by name (those made, those chats are put in, and those hosts' sessions are in as they were
+        started: chat_group), then No group ("")."""
         st = load_settings()
         assigned = chat_groups(st)
         names = set(made_groups(st)) | set(assigned.values()) | {chat_group(s, assigned) for s in network().sessions()}
-        return [(g, g, "") for g in sorted(names - {""}, key=str.lower)] + [("", wording.say("sidebar.no_group"), "")]
+        if any(i.get("desktop") for i in self.sessions):
+            names.add(desktop_group())
+        first = [(g, g, "") for g in [desktop_group()] if g in names]
+        return first + [(g, g, "") for g in sorted(names - {"", desktop_group()}, key=str.lower)] + \
+            [("", wording.say("sidebar.no_group"), "")]
 
     def picked(self, name, known):
         """The groups picked (settings' sidebar_groups) that are still there, or None: all of them (none of those picked
@@ -361,8 +367,9 @@ class SessionSidebar(SidebarMenu, Gtk.Box):
             toast(self, wording.say("hosts.now_deactivated" if off else "hosts.now_activated", host=remote_name(r)))
 
     def group_menu(self, key, check, x, y):
-        """Right-click a group (⋮ → Groups): Rename Group…, Delete Group. No group has none."""
-        if not key:
+        """Right-click a group (⋮ → Groups): Rename Group…, Delete Group. No group and Desktop (Claude Desktop's chats,
+        put there by what they are) have none."""
+        if not key or key == desktop_group():
             return
         menu = Gio.Menu()
         for label, action in ((wording.say("sidebar.rename_group_ellipsis"), "rename_group"),
@@ -577,7 +584,9 @@ class SessionSidebar(SidebarMenu, Gtk.Box):
         in that host's folder: "remote:<server>:<folder>"); or by day (date_group), newest first, where a session and
         those under it (its forks, a Desktop chat's side sessions) go together, by the latest activity of any of them,
         as Claude Desktop's sidebar has them: a fork used today brings the session it came from into today, with it;
-        or by the day each was made (made_at), a session and those under it by the day the session was made. The open
+        or by the day each was made (made_at), a session and those under it by the day the session was made. Claude
+        Desktop's chats (the Desktop group, this machine's and the host's picked) apart, first after the Bots, by folder
+        or by day alike, nested as Desktop nests them (section_of). The open
         chat is listed where it is (archived, say), and only a new one not saved yet is added at the top of its folder.
         Only the hosts and groups picked in ⋮ (host_filter, group_filter; a chat's group: chat_group, the open one not
         saved yet's too); a server's sessions deleted here (hide_remote): not listed till they show up again."""
@@ -598,7 +607,7 @@ class SessionSidebar(SidebarMenu, Gtk.Box):
                     info["id"] not in marks:  # first)
                 continue
             folder = info.get("folder", info.get("cwd"))
-            key, label = session_group(folder)
+            key, label = self.section_of(info, folder, assigned)
             tree = os.path.basename(info.get("worktree") or "")
             if q and q not in f"{info.get('title') or ''} {label} {tree} {(info.get('bot') or {}).get('name') or ''}" \
                     .lower():
@@ -616,7 +625,7 @@ class SessionSidebar(SidebarMenu, Gtk.Box):
                 seen.add(top)
                 top = up
             _info, key, label, folder = by_id[info["id"] if top in seen else top]  # (a loop: where it is)
-            groups.setdefault(key, [label, folder if key != "scratch" else None, []])[2].append(info)
+            groups.setdefault(key, [label, folder if key not in ("scratch", "desktop") else None, []])[2].append(info)
         # a server's sessions: one on this machine's in its folder's group, with this machine's chats there; another
         # host's in a group of its own for each folder there, its name with it
         self.remote_keys = {}
@@ -643,13 +652,15 @@ class SessionSidebar(SidebarMenu, Gtk.Box):
             if info["id"] in hidden:
                 continue
             folder = info.get("cwd") or "?"
-            if host_key(r) == HERE_HOST:
+            if chat_group(info, assigned) == desktop_group():
+                key, label = self.section_of(info, folder, assigned)
+            elif host_key(r) == HERE_HOST:
                 key, label = session_group(folder)
             else:
                 key = f"remote:{r.key}:{folder}"
                 label = wording.say("sidebar.folder_on_host", folder=remote_path(folder, r), host=remote_name(r))
                 self.remote_keys[key] = r
-            groups.setdefault(key, [label, folder, []])[2].append(info)
+            groups.setdefault(key, [label, folder if key != "desktop" else None, []])[2].append(info)
         # the open session may not be saved yet: shown once it's something (typed into, sent), never while it's blank
         # (one that's listed already, archived or not, is listed there only)
         sid = self.win.session_id
@@ -688,6 +699,7 @@ class SessionSidebar(SidebarMenu, Gtk.Box):
         groups = {k: g for k, g in groups.items() if g[2]}
         order_of = lambda items: sorted(items, key=lambda i: (not i.get("unsaved"), -last_used(i)))  # noqa: E731
         groups = {k: [label, folder, fork_tree(order_of(items))] for k, (label, folder, items) in groups.items()}
+        desktop = groups.pop("desktop", None)  # (Claude Desktop's chats: apart, first, by folder or by day alike)
         if by_date:
             trees = [[]]
             for _label, _folder, rows in groups.values():
@@ -722,12 +734,21 @@ class SessionSidebar(SidebarMenu, Gtk.Box):
                 (bots[-1] if under else keep).append(row)
             rows[:] = keep
         out = [g for g in out if g[3]]
+        if desktop is not None:
+            out.insert(0, ("desktop", *desktop))
         if bots:  # (the last used first)
             out.insert(0, ("bots", wording.say("common.bots"), None,
                            [row for tree in sorted(bots, key=lambda t: -last_used(t[0][0])) for row in tree]))
         if gone:
             out.append(("archived", wording.say("sidebar.archived"), None, fork_tree(gone)))
         return out
+
+    def section_of(self, info, folder, assigned):
+        """(key, label) of the section a chat's listed in: Desktop ("desktop"), for a chat in the Desktop group (Claude
+        Desktop's, here or a host's: chat_group), apart from the rest; else its folder's (session_group)."""
+        if chat_group(info, assigned) == desktop_group():
+            return "desktop", desktop_group()
+        return session_group(folder)
 
     # ---- view
     def collapsed(self):

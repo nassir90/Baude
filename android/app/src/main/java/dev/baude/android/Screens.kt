@@ -104,7 +104,8 @@ fun ChatPage(chat: Chat, name: String, attach: Boolean = true, stop: (() -> Unit
     val at = chat.hostId // (where it's reached now: a member's chat moves to a host of yours that's its machine)
     val session = Mesh.session(at, sid)
     val working = isWorking(chat)
-    val readOnly = Settings.isReadOnly(sid) || isArchived(at, sid) // (archived: till it's unarchived)
+    val readOnly = Settings.isReadOnly(sid) || isArchived(at, sid) || // (archived: till it's unarchived)
+        session?.elsewhere == true // (Claude Desktop's, Desktop writing it now: till it's done, ChatBanner says so)
     var text by androidx.compose.runtime.saveable.rememberSaveable(at, sid) { mutableStateOf("") }
     val files = chat.files
     val pick = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->

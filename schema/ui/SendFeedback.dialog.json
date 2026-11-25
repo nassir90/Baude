@@ -70,6 +70,7 @@
     },
     {
       "name": "Note box",
+      "decisions": [{"said": "The feedback box should be formatted as Record's are, since it becomes markdown anyway", "rule": "Every app's feedback box formats markdown as the chat's box does and the note keeps the markdown", "decided": "2026-11-22"}],
       "shows": "A rounded card like the chat's composer, a multi-line text box, 140 px tall growing to 280 then scrolling, words wrapping, text kept clear of the + at its bottom right corner. Has the focus when the dialog opens, cursor after any text already written. Text selection is not drag-dropped away. Markdown shows as it is written, as in the chat's box (headings, lists, bold, italic, code), and the note keeps the markdown.",
       "text": [
         "(no placeholder text)"
@@ -77,6 +78,7 @@
     },
     {
       "name": "Attach transcripts check box",
+      "decisions": [{"said": "Send Feedback sends far too much: chat transcripts with every issue; make sending the transcript a toggle", "rule": "Every app attaches chat transcripts to feedback only when asked, off by default", "decided": "2026-11-22"}],
       "shows": "Under the note box, a check box \"Attach open chat transcripts\", off for a new note and kept with a draft. Shown only where there is an open chat (Baude, Record).",
       "copy": [
         "feedback.attach_transcripts"

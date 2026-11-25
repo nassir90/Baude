@@ -604,15 +604,8 @@ private fun Namespaces(st: KubeState) {
             Icon(Adwaita.PanDown, tip, tint = c.fg, modifier = Modifier.size(18.dp.icon))
         }
         Popover(open, { open = false }, ticks = Ticks.START) {
-            MenuChoice(Wording.Kube.allNamespaces, st.nsShown.isEmpty()) { st.showNamespaces(emptyList()) }
-            MenuDivider()
-            Column(Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState())) {
-                for (ns in (st.namespaces + st.nsShown).distinct().sorted()) {
-                    MenuChoice(ns, ns in st.nsShown) {
-                        st.showNamespaces(st.nsShown.filter { it != ns } + if (ns in st.nsShown) emptyList() else listOf(ns))
-                    }
-                }
-            }
+            MenuChecks(Wording.Kube.allNamespaces, (st.namespaces + st.nsShown).distinct().sorted().map { it to it },
+                st.nsShown, st::showNamespaces)
         }
     }
 }

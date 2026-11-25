@@ -273,14 +273,14 @@ def open_chat(app, sc):
             buf.insert_at_cursor(ch)
         T.pump(0.6)
     if sc.get("open"):
-        for m in T.find(win, baude.chatparts.CompactMark):
+        for m in T.find(win, (baude.chatparts.CompactMark, baude.chatparts.LoneSummary)):
             if m.fold is not None:
                 m.fold.set_expanded(True)
     vadj = win.scroller.get_vadjustment()
     vadj.set_value(vadj.get_upper())  # (at its end, as a chat opens)
     T.pump(0.4)
     if "into" in sc:  # (scrolled to the open summary's heading: that many px above the chat's top)
-        fold = next(m.fold for m in T.find(win, baude.chatparts.CompactMark) if m.fold is not None)
+        fold = next(m.fold for m in T.find(win, (baude.chatparts.CompactMark, baude.chatparts.LoneSummary)) if m.fold is not None)
         ok, at = fold.compute_point(win.scroller, baude.Graphene.Point())
         win.hold_value(vadj.get_value() + at.y + sc["into"])
         T.pump(0.6)

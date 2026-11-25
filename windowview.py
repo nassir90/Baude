@@ -1231,6 +1231,7 @@ class WindowView:
                 return
             if getattr(node, "compact_summary", None) is not None:
                 mark.set_summary(node.compact_summary)
+                node.dispose_fold()
                 node.get_parent().remove(node)
                 return
             node, seen = node.get_next_sibling(), seen + 1
@@ -1272,10 +1273,7 @@ class WindowView:
             elif kind == "compact_summary" and (mark := self.last_compact_mark()) is not None:
                 mark.set_summary(content)  # (what it wrote for itself on compacting: folded under its marker)
             elif kind == "compact_summary":  # (its boundary not drawn yet, or none: on its own till it is, adopt_summary)
-                fold = Gtk.Expander(label=wording.say("compaction.summary"), child=MarkdownView(content))
-                fold.add_css_class("sysnote")
-                fold.compact_summary = content
-                self.add(fold)
+                self.add(chatparts.LoneSummary(content))
             elif kind == "ci_event":  # (what the desktop app says of a pull request it's watching: folded)
                 fold = Gtk.Expander(label=content["title"], child=MarkdownView(content["text"]))
                 fold.add_css_class("sysnote")

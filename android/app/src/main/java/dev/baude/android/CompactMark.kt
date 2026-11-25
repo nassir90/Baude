@@ -41,18 +41,19 @@ object CompactFolds {
     val headTop = HashMap<String, Float>()
 }
 
-private val TOOLS_BEFORE = Regex("""\s*(?:<system-reminder>\s*)?<tools-used-before-summary>(.*?)</tools-used-before-summary>(?:\s*</system-reminder>)?\s*""",
-    RegexOption.DOT_MATCHES_ALL)
+private val TOOLS_BEFORE = Regex("""<tools-used-before-summary>(.*?)</tools-used-before-summary>""", RegexOption.DOT_MATCHES_ALL)
+private val EMPTY_REMINDER = Regex("""<system-reminder>\s*</system-reminder>""")
+private val BLANKS = Regex("""\n{3,}""")
 
 /** A compaction's summary as it's read (transcripts.summary_tools): its text without the list of tools the
- * conversation had used that Claude Code puts in it, and those tools' names. */
+ * conversation had used that Claude Code puts in it (only that block, out of its system-reminder), and those tools' names. */
 fun summaryTools(text: String): Pair<String, List<String>> {
     val names = ArrayList<String>()
     val rest = TOOLS_BEFORE.replace(text) { m ->
         names.addAll(m.groupValues[1].split(",").map { it.trim() }.filter { it.isNotEmpty() })
-        "\n\n"
+        ""
     }
-    return rest.trim() to names
+    return BLANKS.replace(EMPTY_REMINDER.replace(rest, ""), "\n\n").trim() to names
 }
 
 /** The lazy item key of a line whose summary can be opened (drawn keys it so SummaryPin finds it), or null. */

@@ -69,6 +69,8 @@
     {"name": "chat-compact-open", "what": "The same, its summary opened", "transcript": "chat-extras.jsonl", "lines": 4, "open": true, "inventory": ["CompactMark.element"]},
     {"name": "chat-compact-tools", "what": "A compaction whose summary names the tools used before it, opened", "transcript": "compaction.jsonl", "open": true, "into": -200, "inventory": ["CompactMark.element"]},
     {"name": "chat-compact-pinned", "what": "The same, scrolled into the summary: its heading pinned at the chat's top", "transcript": "compaction.jsonl", "open": true, "into": 300, "inventory": ["CompactMark.element"]},
+    {"name": "chat-compact-lone", "what": "A summary whose boundary isn't drawn, opened (its reminder holds other text too)", "transcript": "compaction-lone.jsonl", "open": true, "into": -200, "inventory": ["CompactMark.element"]},
+    {"name": "chat-compact-lone-pinned", "what": "The same, scrolled into the summary: its heading pinned at the chat's top", "transcript": "compaction-lone.jsonl", "open": true, "into": 300, "inventory": ["CompactMark.element"]},
     {"name": "chat-question", "what": "AskUserQuestion asking: two questions, one multi-select", "transcript": "chat-extras.jsonl", "state": "waiting", "ask": "q1", "inventory": ["QuestionForm.element", "ToolCall.element"]},
     {"name": "chat-cut", "what": "A chat whose last turn a restart cut short", "lines": 3, "cut": true, "inventory": ["CutShort.element"]},
     {"name": "chat-image-viewer", "what": "The image a Read returned, opened in the large view", "transcript": "tool-states.jsonl", "lightbox": true, "inventory": ["ImageViewer.page"]},

@@ -1031,8 +1031,10 @@ def view_bar(spacing=6, margin_start=12, margin_end=10, margin_top=6, margin_bot
     double-clicked)"""
     bar = Gtk.Box(spacing=spacing, margin_start=margin_start, margin_end=margin_end, margin_top=margin_top,
                   margin_bottom=margin_bottom)
+    bar.gap = None  # (the traffic lights' room: hidden while the view's out in a window with its own)
     if sys.platform == "darwin":
-        bar.append(Gtk.Box(width_request=80))
+        bar.gap = Gtk.Box(width_request=80)
+        bar.append(bar.gap)
     return bar
 
 

@@ -15,7 +15,7 @@ import threading
 import time
 import uuid
 
-from baudelib import wire
+from baudelib import clearrelay, wire
 
 KEEP_S = wire.CONSTANTS["TERMINAL_KEEP_S"]
 KEPT = wire.CONSTANTS["TERMINAL_KEPT_BYTES"]
@@ -34,17 +34,21 @@ class HostTerminal:
     def __init__(self, argv, cwd, title, columns, rows):
         self.id = uuid.uuid4().hex[:12]
         self.argv = argv or [os.environ.get("SHELL") or "/bin/sh", "-l"]
+        if self.argv[0] in ("kubectl", "helm"):  # (the one this host is configured to use: $BAUDE_KUBECTL, else PATH's)
+            import lookupkube
+            self.argv = [lookupkube.kube_tool(self.argv[0]), *self.argv[1:]]
         self.cwd = cwd if cwd and os.path.isdir(os.path.expanduser(cwd)) else os.path.expanduser("~")
         self.title = title or os.path.basename(self.argv[0])
         self.columns, self.rows = columns or 80, rows or 24
         self.kept, self.viewers, self.status, self.left = bytearray(), {}, None, time.monotonic()
         self.lock = threading.Lock()
         env = {**os.environ, "TERM": "xterm-256color", "COLORTERM": "truecolor", "TERM_PROGRAM": "Multiplex"}
+        run = clearrelay.relayed(self.argv, env.get("PATH"))  # (its clears done without blank rows: clearrelay's)
         pid, fd = pty.fork()
         if pid == 0:  # (the child: its folder, then the program; never back into Python's host)
             try:
                 os.chdir(os.path.expanduser(self.cwd))
-                os.execvpe(self.argv[0], self.argv, env)
+                os.execvpe(run[0], run, env)
             except OSError as e:
                 os.write(2, f"{self.argv[0]}: {e.strerror}\r\n".encode())
             os._exit(127)

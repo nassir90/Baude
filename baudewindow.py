@@ -629,6 +629,10 @@ class BaudeWindow(WindowView, WindowProc, WindowDrafts, WindowSignal, WindowRemo
             return {"via": "local"}, THIS_MACHINE
         return r.where, remote_name(r)
 
+    def view_remote(self):
+        """The host picked's Remote (None: this machine), for the Kubernetes and database views (kubehost.picked)."""
+        return self.sidebar.shown_remote()
+
     def open_record(self):
         """Record (record.py, beside this file) reading this chat, on its Read tab in whichever notebook's open. One
         running already is handed the chat."""

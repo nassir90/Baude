@@ -42,6 +42,8 @@ from widgets import (  # noqa: E402,F401
 from imageviews import Fade  # noqa: E402,F401
 from pickers import ellipsize_dropdown  # noqa: E402,F401
 from baudelib import tokens, wording  # noqa: E402
+import kubehost  # noqa: E402
+import viewwindow  # noqa: E402
 
 
 # --------------------------------------------------------- database schemas --
@@ -575,10 +577,13 @@ class SchemaView(Gtk.Box):
         self.server = self.database = self.focus_name = self.focus_column = self.code_link = None
         self.dbs, self.namespace, self.hint, self.syncing = {}, "public", "", False
         self.generation = self.rows_generation = 0  # (the last schema and rows asked for: older ones aren't shown)
+        self.host = kubehost.Host(None, {"via": "local"}, wording.say("senders.local"))  # (where it reads: open)
         bar = view_bar()
         title = Gtk.Label(label=wording.say("databases.title"))
         title.add_css_class("heading")
         bar.append(title)
+        self.host_label = viewwindow.host_label()
+        bar.append(self.host_label)
         self.server_dd = ellipsize_dropdown(Gtk.DropDown.new_from_strings([]), 34)
         self.db_dd = ellipsize_dropdown(Gtk.DropDown.new_from_strings([]), 26)
         self.ns_dd = ellipsize_dropdown(Gtk.DropDown.new_from_strings([]), 18)
@@ -595,7 +600,7 @@ class SchemaView(Gtk.Box):
         self.find.connect("activate", lambda e: self.next_match(1))
         self.find.connect("next-match", lambda e: self.next_match(1))
         self.find.connect("previous-match", lambda e: self.next_match(-1))
-        self.find.connect("stop-search", lambda e: e.set_text("") if e.get_text() else self.close())
+        self.find.connect("stop-search", lambda e: e.set_text("") if e.get_text() else self.escape())
         shift_enter = Gtk.EventControllerKey()
         shift_enter.connect("key-pressed", lambda _c, kv, _k, state: (self.next_match(-1), True)[1]
                             if kv in (Gdk.KEY_Return, Gdk.KEY_KP_Enter) and state & Gdk.ModifierType.SHIFT_MASK
@@ -620,10 +625,8 @@ class SchemaView(Gtk.Box):
             btn.add_css_class("flat")
             btn.connect("clicked", lambda *_, fn=fn: fn())
             bar.append(btn)
-        close = Gtk.Button(icon_name="window-close-symbolic", tooltip_text=wording.say("images.close"))
-        close.add_css_class("circular")
-        close.connect("clicked", lambda *_: self.close())
-        bar.append(close)
+        self.out = viewwindow.Out(self, bar, wording.say("databases.title"), self.find, zoom=self.zoom)  # (out to a
+        # window of its own, as ☰ → Terminal's goes; its close)
         self.append(Gtk.WindowHandle(child=bar))  # (dragged, it moves the window; double-clicked, maximizes)
         stage = Gtk.Overlay(vexpand=True)
         self.canvas = SchemaCanvas(on_rows=self.load_rows, on_select=self.on_select)
@@ -652,27 +655,52 @@ class SchemaView(Gtk.Box):
         paned_grip(self.split)
         self.append(inside(self.split))
         keys = Gtk.EventControllerKey()
-        keys.connect("key-pressed", lambda _c, kv, _k, _s: (self.close(), True)[1] if kv == Gdk.KEY_Escape else False)
+        keys.connect("key-pressed", lambda _c, kv, _k, _s: (self.escape(), True)[1] if kv == Gdk.KEY_Escape else False)
         self.add_controller(keys)
 
     # ---- opening
     def open(self, table=None, column=None, hint=None, code=None, found=None):
         """Show the schemas; with table (or a column name), find the database that has it (hint: a path that
         names it, like a migration's) and select it there, or at found: (server, database, schema, table), where
-        db_locate found it. code: (path, line) of its definition."""
+        db_locate found it. code: (path, line) of its definition. They're the databases of the host picked in the
+        window's host dropdown (as ☰ → Terminal's new tabs are); out in a window of its own, that window's brought up."""
+        host = kubehost.picked(self.win)
+        same_host = host.key() == self.host.key()
+        if same_host and table is column is hint is code is found is None and self.out.present():
+            return
+        if not same_host:  # (another host's: nothing of the last one's shown)
+            self.servers, self.dbs, self.schema, self.server, self.database = [], {}, None, None, None
+            self.generation += 1
+            self.rows_box.set_visible(False)
+            self.canvas.set_schema([], [])
+        self.host = host
+        self.host_label.set_label(host.name)
         self.focus_name, self.focus_column, self.hint, self.code_link = table, column, hint or "", code
-        self.preset = found
+        self.preset = found if host.here else None
         self.canvas.mark_column = column
         self.code_btn.set_visible(code is not None)
-        self.set_visible(True)
-        self.grab_focus()
+        if not self.out.present():
+            self.set_visible(True)
+            self.grab_focus()
         self.say(wording.say("databases.looking_for_servers"))
         self.fade.hold()
-        DB_POOL.submit(self._discover)
+        if host.here:
+            DB_POOL.submit(self._discover)
+            return
+
+        def got(r):  # (there, the first database read; a table wanted is found in it if it's there)
+            if host is self.host:
+                self._discovered(r.get("servers") or [], r.get("databases") or {}, None, r.get("error"),
+                                 searched=False)
+        host.ask("databases", {"what": "servers"}, got)
 
     def close(self):
         self.set_visible(False)
         self.win.input.grab_focus()
+
+    def escape(self):
+        if self.out.window is None:  # (out in a window of its own: that window's to close)
+            self.close()
 
     def say(self, text):
         self.status.set_label(text)
@@ -705,7 +733,7 @@ class SchemaView(Gtk.Box):
                                         any(h[1] in part for part in re.split(r"[/_.-]", self.hint.lower()) if part),
                                         h[2] == "public"))
 
-    def _discovered(self, servers, dbs, found, error):
+    def _discovered(self, servers, dbs, found, error, searched=True):
         if error or not servers:
             self.say(error or wording.say("databases.no_postgres"))
             self.fade.done()
@@ -721,7 +749,7 @@ class SchemaView(Gtk.Box):
             s, db, ns, name = found
             self.load(s, db, ns, name)
         else:
-            if self.focus_name or self.focus_column:
+            if searched and (self.focus_name or self.focus_column):
                 self.say(wording.say("databases.no_table_here", table=self.focus_name) if self.focus_name else
                          wording.say("databases.no_column_here", column=self.focus_column))
             s = servers[0]
@@ -751,6 +779,11 @@ class SchemaView(Gtk.Box):
         if not quiet:
             self.say(wording.say("databases.reading", database=db_label(database)))
         t0 = time.monotonic()
+        if not self.host.here:
+            return self.host.ask("databases", {"what": "schema", "container": server["container"], "database": database},
+                                 lambda r: self._loaded(gen, database, None if r.get("error") else kubehost.schema(r),
+                                                        namespace, table, r.get("took") or time.monotonic() - t0,
+                                                        r.get("error")))
 
         def work():
             try:
@@ -892,15 +925,17 @@ class SchemaView(Gtk.Box):
     def on_top(self):
         """Whether it's open and on top (the Kubernetes or Terminal view isn't over it): Ctrl+scroll and Ctrl +/−/0 are its
         diagram's then, not the chat's under it."""
-        return self.get_visible() and not self.win.kube.get_visible() and not self.win.terminal.get_visible()
+        return self.out.here() and not self.win.kube.out.here() and not self.win.terminal.get_visible()
 
     def on_select(self, table):
         self.rows_btn.set_sensitive(table is not None)
 
     def show_definition(self):
         if self.code_link:
-            self.close()
+            if self.out.window is None:
+                self.close()
             self.win.show_code(*self.code_link)
+            self.win.present()
 
     # ---- rows
     def load_rows(self, table):
@@ -912,6 +947,10 @@ class SchemaView(Gtk.Box):
         self.rows_box.set_visible(True)
         if self.split.get_position() <= 0 or self.split.get_position() > (self.get_height() or 800) - 120:
             self.split.set_position(int((self.get_height() or 800) * 0.6))
+        if not self.host.here:
+            return self.host.ask("databases", {"what": "rows", "container": server["container"], "database": database,
+                                               "schema": table["schema"], "table": table["name"]},
+                                 lambda r: self._rows(table, r.get("rows") or [], r.get("error"), gen))
 
         def work():
             try:

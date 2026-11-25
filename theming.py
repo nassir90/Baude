@@ -408,6 +408,12 @@ list.navigation-sidebar.kube-side > row { min-height: 26px; padding-top: 1px; pa
 /* a category's gap above it is outside its row, so its hover tint sits evenly around its icon and name */
 list.navigation-sidebar.kube-side > row.kube-side-head-row { margin-top: 9px; }
 .kube-status-line { padding: 4px 12px; font-size: 0.9em; opacity: 0.8; }
+/* the Kubernetes view's dock: its tabs on the frame, its grey, as the bars and the sidebar are */
+.kube-dock-bar { padding-top: 4px; }
+.kube-dock-tab { border-radius: {radius.code} {radius.code} 0 0; padding: 2px 2px 2px 4px; }
+.kube-dock-tab.picked { background-color: @baude_inside; box-shadow: inset 1px 1px @baude_rule, inset -1px 0 @baude_rule; }
+.kube-dock-tab > button { min-height: 0; padding: 2px 6px; }
+.kube-dock-tab > button.circular { min-width: 22px; min-height: 22px; padding: 0; }
 .kube-link { padding: 0 4px; min-height: 0; font-weight: normal; }
 .kube-ok { color: @success_color; }
 .kube-warn { color: @warning_color; }

@@ -177,7 +177,8 @@ val Dp.icon: Dp get() = this * (Tokens.Font.body.value / BAUDE_TEXT_PX) * Settin
 
 private const val BAUDE_TEXT_PX = 12f
 
-/** ⋮ → Settings…, as Baude's Settings: its two pages, General and Subscriptions (SubscriptionsPage), switched between
+/** ⋮ → Settings…, as Baude's Settings: its pages, General, Subscriptions (SubscriptionsPage), Dependencies (DepsPage)
+ * and Telemetry (TelemetryPage), switched between
  * by the bar at its foot, as Baude's dialog's switcher is when it's narrow (page: the one it opens on). General's
  * groups in Baude's order: Meta's, Full-width text, Code Font, the accent and whether it's light or dark, how updates
  * download, notifications and the version; the sizes; Send Feedback…. */
@@ -191,12 +192,14 @@ fun SettingsScreen(back: () -> Unit, feedback: () -> Unit, chat: List<String> = 
             when (shown) {
                 1 -> SubscriptionsPage()
                 2 -> DepsPage()
+                3 -> TelemetryPage()
                 else -> GeneralPage(feedback, chat)
             }
         }
         BottomBar(listOf(Page("general", Wording.Subscriptions.general, Adwaita.EmblemSystem),
             Page("subscriptions", Wording.Subscriptions.title, Adwaita.SystemUsers),
-            Page("dependencies", Wording.Deps.title, Adwaita.PackageXGeneric)), shown) { shown = it }
+            Page("dependencies", Wording.Deps.title, Adwaita.PackageXGeneric),
+            Page("telemetry", Wording.Telemetry.title, Adwaita.DocumentOpenRecent)), shown) { shown = it }
     }
 }
 

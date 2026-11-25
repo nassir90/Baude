@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "A menu item's or action's uses in an app, added up.",
+  "properties": {
+    "app": {
+      "enum": [
+        "baude",
+        "record",
+        "phone"
+      ],
+      "description": "The app it's of: Baude, Record, or the phone's app."
+    },
+    "name": {
+      "type": "string",
+      "description": "Its schema/copy key, else its action's name (as telemetry's uses)."
+    },
+    "count": {
+      "type": "integer",
+      "description": "Times used."
+    }
+  },
+  "required": [
+    "app",
+    "name",
+    "count"
+  ],
+  "additionalProperties": false
+}

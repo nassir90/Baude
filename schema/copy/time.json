@@ -9,6 +9,7 @@
     "months_ago": "{$n}mo ago",
     "years_ago": "{$n}y ago",
     "day_of_month": ".input {$day :number} .match $day 1 {{{$day}st}} 2 {{{$day}nd}} 3 {{{$day}rd}} 21 {{{$day}st}} 22 {{{$day}nd}} 23 {{{$day}rd}} 31 {{{$day}st}} * {{{$day}th}}",
+    "hours_minutes": "{$hours}h {$minutes}m",
     "minutes_seconds": "{$minutes}m {$seconds}s",
     "seconds": "{$seconds}s"
   }

@@ -1,0 +1,100 @@
+{
+  "description": "The Settings dialog's Telemetry page (Baude's, Record's and the phone's; on the phone the fourth page of Settings, switched to by the bar at its foot): what the apps on the machine of the host picked beside New session were used for, as that host adds it up (its telemetry_read request): the time each place was on screen and the uses of each menu item, per app, over a period.",
+  "apps": [
+    "baude",
+    "record",
+    "phone"
+  ],
+  "opens": [
+    "Settings… → Telemetry (the dialog's page switcher; the phone's: the bar at Settings' foot)"
+  ],
+  "code": [
+    "telemetryview.py:Page",
+    "telemetryview.py:Recorder",
+    "telemetryview.py:places",
+    "baudelib/telemetry.py:keep",
+    "baudelib/telemetry.py:read",
+    "baudelib/serverrun.py:ServerRunning.handle",
+    "Telemetry.kt:TelemetryPage",
+    "Telemetry.kt:Telemetry",
+    "Telemetry.kt:TelemetryStore",
+    "PhoneHost.kt:PhoneHost"
+  ],
+  "copy": [
+    "telemetry",
+    "time",
+    "new_session",
+    "sidebar"
+  ],
+  "parts": [
+    {
+      "name": "Host",
+      "shows": "Row \"Host\" with the picked host's name after it (dim). On the phone, This phone's own host when it's the one picked.",
+      "copy": [
+        "new_session.host"
+      ]
+    },
+    {
+      "name": "Period",
+      "shows": "Row \"Period\" with a picker: Today, Last 7 Days (the one picked as it opens), Last 30 Days.",
+      "copy": [
+        "telemetry.period",
+        "sidebar.today",
+        "telemetry.last_7_days",
+        "telemetry.last_30_days"
+      ],
+      "actions": [
+        {
+          "by": "click",
+          "does": "Picks the period; the lists below are asked for again"
+        }
+      ]
+    },
+    {
+      "name": "Screen Time in <app>",
+      "shows": "For each app that told that host something in the period (Baude, Record; the phone's app is Baude): a heading \"Screen Time in Baude\", then a boxed list, a row each place, the longest first: its name (the place's own words: Chat, Git, Meta, Notes, Kubernetes, Settings, Home screen …) and its time on screen after it, dim (40s, 21m 50s, 2h 37m).",
+      "copy": [
+        "telemetry.screen_time",
+        "time.seconds",
+        "time.minutes_seconds",
+        "time.hours_minutes"
+      ]
+    },
+    {
+      "name": "Used in <app>",
+      "shows": "After each app's screen time, \"Used in Baude\" and a boxed list, a row each menu item or action used, the most first: the item's words (Settings…, Full-width text, Kubernetes …), or an action's own name where it has no menu item (win.restart), and the times it was used after it, dim.",
+      "copy": [
+        "telemetry.used"
+      ]
+    }
+  ],
+  "states": [
+    "empty: one dim row \"Nothing recorded\" in the lists' place",
+    "error: the host's error in one dim row in the lists' place"
+  ],
+  "decisions": [
+    {
+      "said": "Baude needs telemetry: screen time per place in the UI, and some sign of which features are used (paraphrased)",
+      "rule": "Every app records the time each place is on screen (only while its window or screen is in front and was touched or typed on in the last minute) and the uses of each menu item, and sends it to its own machine's host only; the phone's app keeps its own on the phone's host. Nothing of it leaves the user's machines",
+      "decided": "2026-11-25",
+      "source": [
+        {
+          "issue": "BaudeInternal#205"
+        }
+      ]
+    },
+    {
+      "said": "Baude needs telemetry: screen time per place in the UI, and some sign of which features are used (paraphrased)",
+      "rule": "Every app shows it in Settings → Telemetry, for the host picked beside New session, by app, the most first",
+      "decided": "2026-11-25",
+      "source": [
+        {
+          "issue": "BaudeInternal#205"
+        }
+      ]
+    }
+  ],
+  "scenes": [
+    "39g-telemetry"
+  ]
+}

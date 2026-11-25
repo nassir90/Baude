@@ -191,6 +191,25 @@ abstract class Screens(private val theme: String) {
         screen("40c-dependencies")
     }
 
+    // (Settings → Telemetry on a host: its machine's apps' time in each place and uses of each ☰ item, as it adds
+    // them up)
+    @Test fun telemetry() {
+        FixtureConnection.up(activity, Mesh.hosts.first()) { m ->
+            fun time(app: String, place: String, s: Int) = org.json.JSONObject().put("app", app).put("place", place).put("seconds", s)
+            fun use(app: String, name: String, n: Int) = org.json.JSONObject().put("app", app).put("name", name).put("count", n)
+            if (m.optString("op") != "telemetry_read") null
+            else org.json.JSONObject().put("op", "telemetry_read").put("req", m.opt("req"))
+                .put("times", org.json.JSONArray(listOf(time("record", "telemetry.notes", 6900), time("baude", "chats.chat", 9420),
+                    time("baude", "git.title", 1310), time("record", "chats.chat", 1500), time("baude", "meta_settings.title", 640),
+                    time("baude", "window.kubernetes", 95))))
+                .put("uses", org.json.JSONArray(listOf(use("baude", "window.settings", 4), use("baude", "window.kubernetes", 3),
+                    use("record", "window.ongoing_feedback", 2), use("baude", "meta_settings.full_width", 2))))
+        }
+        show { SettingsScreen({}, {}, page = 3) }
+        laidOut()
+        screen("40d-telemetry")
+    }
+
     private fun missingFixture() {
         fun dep(key: String, name: String, present: Boolean, fix: String) = org.json.JSONObject().put("dep", key)
             .put("name", name).put("where", "host").put("present", present).put("fix", fix)

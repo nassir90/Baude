@@ -95,6 +95,13 @@ An entry or a part may carry:
   them all (Dependencies.dialog.json). `BAUDE_HIDE_DEPS=kubectl,…` makes any of them missing, to see each case. The
   owner asked for proper guidance for installing what Baude depends on and for how it behaves without it (2026-11-22).
   Source: `[{"issue": "BaudeInternal#184"}, {"issue": "BaudeInternal#183"}, {"session": "f1afb37a-90af-47d8-8693-d537464b4022", "message": "a1bc42a8-97d0-4dad-98b0-d3a42bfa155e"}]`.
+- **What an app records of its use stays on the user's machines.** Every app counts the time each place is on screen
+  (a main tab, a side panel page, a view over the window, a dialog, a phone screen or page), only while it's in front and
+  was used in the last minute, and the uses of each menu item, named by schema/copy keys so every app's add up alike
+  (Telemetry.request.json lists the places). It tells its own machine's host only (the phone's app its own host), about
+  once a minute; the host keeps it in its state folder, and Settings → Telemetry (Telemetry.dialog.json) reads it from
+  the host picked. Nothing is sent outside the mesh. The owner asked for telemetry of screen time per place and of
+  feature use (2026-11-24). Source: `[{"issue": "BaudeInternal#205"}]`.
 - **Every piece of text starts with a capital letter.** Whatever an app puts on screen starts with a capital: notes and
   messages (a chat's SystemNote, an error, a status line) in sentence case ("Interrupted", "Model → Opus", "Committed on
   main", "Claude couldn't save this chat: the disk is full"), buttons, menu items and links in Title Case ("Show in

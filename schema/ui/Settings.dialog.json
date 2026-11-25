@@ -1,5 +1,5 @@
 {
-  "description": "Baude's Settings dialog: a General page of settings, a Subscriptions page (the Claude and Codex accounts of the host picked beside New session) and a Dependencies page (what that host and the app need, each there or not), each applied as it is changed and kept in settings.json (shared with Record, which has its own Settings dialog with the same rows). Title \"Settings\".",
+  "description": "Baude's Settings dialog: a General page of settings, a Subscriptions page (the Claude and Codex accounts of the host picked beside New session), a Dependencies page (what that host and the app need, each there or not) and a Telemetry page (what that host's machine's apps were used for), each applied as it is changed and kept in settings.json (shared with Record, which has its own Settings dialog with the same rows). Title \"Settings\".",
   "apps": [
     "baude"
   ],
@@ -47,6 +47,25 @@
           "source": [
             {
               "issue": "BaudeInternal#184"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Telemetry page",
+      "shows": "The dialog's fourth page, after Dependencies: what the host picked beside New session says its machine's apps were used for. Described in Telemetry.dialog.json.",
+      "copy": [
+        "telemetry.title"
+      ],
+      "decisions": [
+        {
+          "said": "Baude needs telemetry: screen time per place in the UI, and some sign of which features are used (paraphrased)",
+          "rule": "Every app's Settings has a Telemetry page after Dependencies, switched to by the dialog's page switcher (the phone's bar at its foot)",
+          "decided": "2026-11-25",
+          "source": [
+            {
+              "issue": "BaudeInternal#205"
             }
           ]
         }

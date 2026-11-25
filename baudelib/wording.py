@@ -15,6 +15,7 @@ import re
 FOLDER = os.path.join(os.path.dirname(os.path.dirname(os.path.realpath(__file__))), "schema", "copy")
 _NAME = re.compile(r"[a-z][a-z0-9_]*")
 _messages = {}  # ("group.key": its message, parsed)
+_plain = {}  # (a message given nothing, its text: its "group.key", each text being there once)
 
 
 class CopyError(Exception):
@@ -238,6 +239,18 @@ def _load():
                 _messages[f"{group}.{key}"] = parse(text)
             except ValueError as e:
                 raise CopyError(f"{path}: {key}: {e}") from None
+            if not params(_messages[f"{group}.{key}"]):
+                _plain[say(f"{group}.{key}")] = f"{group}.{key}"
+
+
+def has(key):
+    """Is key ("group.key") a message, given nothing?"""
+    return key in _messages and not params(_messages[key])
+
+
+def key_of(text):
+    """The key of the message given nothing that says text, or None: each wording is there once."""
+    return _plain.get(text)
 
 
 def say(key, /, **args):

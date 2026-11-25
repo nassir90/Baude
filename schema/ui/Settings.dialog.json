@@ -29,6 +29,7 @@
   "parts": [
     {
       "name": "Providers page",
+      "decisions": [{"said": "A way to see Claude subscription usage in the app", "rule": "Every app with Providers shows the picked Claude account's subscription usage on request", "decided": "2026-11-24"}, {"said": "Run claude (and codex) under separate subscriptions, e.g. a team plan for work and a personal one at home, kept apart", "rule": "Every app that starts chats lets you name several Claude and Codex accounts per host and pick one per provider; a new chat uses the picked account and keeps it when resumed or forked; credentials never leave their host", "decided": "2026-11-22"}],
       "shows": "A Claude and a Codex account picker, with Add account for each provider. Claude also has a Subscription usage row."
     },
     {

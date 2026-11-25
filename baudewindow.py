@@ -111,6 +111,8 @@ class SettingsDialog(Adw.PreferencesDialog):
         self.add(subscriptionpage.Page(win))
         import depsview
         self.add(depsview.Page(win, "Baude"))
+        import telemetryview
+        self.add(telemetryview.Page(win))
 
     switch = staticmethod(settings_switch)  # (widgets': Record's Settings has them too)
     size_row = staticmethod(settings_size)
@@ -568,6 +570,8 @@ class BaudeWindow(WindowView, WindowProc, WindowDrafts, WindowSignal, WindowRemo
                                   (" ".join(m + "f" for m in widgets.ZOOM_MODS),
                                    lambda: find_in_focus(self) or self.kube.find() or self.schema.start_find() or
                                    self.find_in_chat())))
+        import telemetryview
+        telemetryview.watch(self, "baude")  # (its places on screen and its actions' uses, told to this machine's host)
         ctrl_scroll = Gtk.EventControllerScroll(flags=Gtk.EventControllerScrollFlags.VERTICAL)
         ctrl_scroll.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
         ctrl_scroll.connect("scroll", self.on_ctrl_scroll)

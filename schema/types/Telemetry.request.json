@@ -1,0 +1,76 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "What an app on this machine was used for since it last said (about a minute): kept by its host, on that machine only (its state folder's telemetry/, a file a day), for Settings → Telemetry. Sent by an app to its own machine's host only (the phone's to its own host), never on to another.",
+  "properties": {
+    "op": {
+      "const": "telemetry",
+      "description": "What it is."
+    },
+    "req": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "app": {
+      "enum": [
+        "baude",
+        "record",
+        "phone"
+      ],
+      "description": "The app it's of: Baude, Record, or the phone's app."
+    },
+    "seconds": {
+      "type": "object",
+      "propertyNames": {
+        "enum": [
+          "chats.chat",
+          "meta.code",
+          "telemetry.notes",
+          "window.ongoing_feedback",
+          "window.kubernetes",
+          "window.database_schemas",
+          "multiplex.terminal_menu",
+          "images.untitled",
+          "window.settings_title",
+          "changelog.title",
+          "mesh_versions.title",
+          "fixes.send_feedback",
+          "telemetry.home_screen",
+          "this_phone.title",
+          "meta_settings.title",
+          "bot_memory.title",
+          "bot_browser.title",
+          "routines.title",
+          "side_panel.subagents",
+          "side_panel.processes",
+          "side_panel.side_questions",
+          "side_panel.artifacts",
+          "lookup.files",
+          "git.title",
+          "side_panel.signal"
+        ]
+      },
+      "additionalProperties": {
+        "type": "number",
+        "minimum": 0
+      },
+      "description": "Seconds each place was on screen in a window in front, with input in the last minute: by place, the schema/copy key that names it (a main view, a side panel page, a view over the window, a dialog; one of each may be on screen at once)."
+    },
+    "uses": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "integer",
+        "minimum": 0
+      },
+      "description": "Times each menu item or action was used: by the schema/copy key of the menu item's words where it has one (window.settings, …), else its action's name (win.export)."
+    }
+  },
+  "required": [
+    "op",
+    "app"
+  ],
+  "additionalProperties": false
+}

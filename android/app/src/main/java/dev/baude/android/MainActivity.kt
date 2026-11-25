@@ -8,6 +8,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.mutableStateOf
 
 /** The app: the home screen (Baude's sidebar: your chats and Bots on every host), a chat with its pages, your hosts,
@@ -43,6 +44,7 @@ class MainActivity : ComponentActivity() {
         setContent {
             BaudeTheme {
                 val now = screen.value
+                SideEffect { Telemetry.screen = now } // (the place on screen, for Telemetry: this screen's, a chat's pages')
                 // (Hosts too: back to the home screen; something shared, not sent: back to the app it's from)
                 BackHandler(now[0] != "contacts" || Shares.pending.value != null) { back() }
                 when (now[0]) {
@@ -161,10 +163,22 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         Mesh.shown = true
+        Telemetry.resumed()
     }
 
     override fun onPause() {
         super.onPause()
         Mesh.shown = false
+        Telemetry.paused()
+    }
+
+    override fun dispatchTouchEvent(ev: android.view.MotionEvent): Boolean {
+        Telemetry.touched() // (someone's here: the screen's time counted)
+        return super.dispatchTouchEvent(ev)
+    }
+
+    override fun dispatchKeyEvent(event: android.view.KeyEvent): Boolean {
+        Telemetry.touched()
+        return super.dispatchKeyEvent(event)
     }
 }

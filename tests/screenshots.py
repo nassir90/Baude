@@ -11,7 +11,7 @@ Writes <scene>-light.png / <scene>-dark.png, an index.html gallery (one theme at
 with a Light / Dark switch) and matrix-light.png / matrix-dark.png contact sheets. Scenes drive a real BaudeWindow against tests/fake_claude.py, the same
 way the UI tests do, so the pictures always match the current code.
 
-The scenes are in tests/scenes_chat.py, tests/scenes_panels.py and tests/scenes_deps.py, registered (tests/scenelib.py's SCENES) as this
+The scenes are in tests/scenes_chat.py, tests/scenes_panels.py, tests/scenes_deps.py and tests/scenes_telemetry.py, registered (tests/scenelib.py's SCENES) as this
 file imports them.
 """
 import argparse
@@ -32,6 +32,7 @@ from scenelib import HERE, SCENES  # noqa: E402
 import scenes_chat  # noqa: E402,F401  (their scenes, registered in SCENES as they're imported: these first)
 import scenes_panels  # noqa: E402,F401
 import scenes_deps  # noqa: E402,F401
+import scenes_telemetry  # noqa: E402,F401
 
 
 # --------------------------------------------------------------- capture --

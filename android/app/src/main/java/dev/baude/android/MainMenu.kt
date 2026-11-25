@@ -24,7 +24,11 @@ fun MainMenu(sections: List<List<MenuItem>>) {
         Popover(open, { open = false }, ticks = if (shown.flatten().any { it.checked != null }) Ticks.START else Ticks.NONE) {
             shown.forEachIndexed { i, items ->
                 if (i > 0) MenuDivider()
-                for (item in items) MenuChoice(item.label, item.checked == true, enabled = item.enabled) { open = false; item.go() }
+                for (item in items) MenuChoice(item.label, item.checked == true, enabled = item.enabled) {
+                    open = false
+                    Telemetry.used(item.label) // (its uses counted, by its words' key)
+                    item.go()
+                }
             }
         }
     }

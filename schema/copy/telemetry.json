@@ -1,0 +1,14 @@
+{
+  "description": "Telemetry: what each app records of its own use (the time on screen of each place, the uses of each menu item), kept on its own machine's host, and Settings → Telemetry, which shows it.",
+  "messages": {
+    "title": "Telemetry",
+    "notes": "Notes",
+    "home_screen": "Home screen",
+    "period": "Period",
+    "last_7_days": "Last 7 Days",
+    "last_30_days": "Last 30 Days",
+    "screen_time": "Screen Time in {$app}",
+    "used": "Used in {$app}",
+    "nothing": "Nothing recorded"
+  }
+}

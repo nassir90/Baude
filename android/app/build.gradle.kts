@@ -586,6 +586,7 @@ abstract class BaudeCopy : DefaultTask() {
         out.append("    fun category(n: Number) = if (n.toDouble() == 1.0) \"one\" else \"other\"\n")
         val seen = HashMap<String, String>()
         val objects = HashSet<String>()
+        val plain = ArrayList<Pair<String, String>>() // (each message given nothing: its key, its Kotlin name)
         val files = copy.get().asFile.listFiles { f -> f.name.endsWith(".json") && !f.name.startsWith(".") }!!
             .sortedBy { it.name }
         for (f in files) {
@@ -625,6 +626,7 @@ abstract class BaudeCopy : DefaultTask() {
                 out.append("        /** ${comment(text)} */\n")
                 if (types.isEmpty()) {
                     out.append("        const val ${camel(key)} = ${say(m.variants.single().second)}\n")
+                    plain.add("$group.$key" to "${pascal(group)}.${camel(key)}")
                     continue
                 }
                 val args = types.entries.joinToString(", ") { (v, t) -> "${camel(v)}: $t" }
@@ -660,6 +662,13 @@ abstract class BaudeCopy : DefaultTask() {
             }
             out.append("    }\n")
         }
+        out.append("\n    /** Each message given nothing, by its key (\"group.key\", as baudelib/wording.py's say takes it). */\n")
+        out.append("    val byKey: Map<String, String> by lazy {\n        mapOf(\n")
+        for ((k, name) in plain) out.append("            \"$k\" to $name,\n")
+        out.append("        )\n    }\n")
+        out.append("    private val keys: Map<String, String> by lazy { byKey.entries.associate { it.value to it.key } }\n\n")
+        out.append("    /** The key of the message given nothing that says text (each says what no other does), or null. */\n")
+        out.append("    fun keyOf(text: String): String? = keys[text]\n")
         out.append("}\n")
         val dir = outputDir.get().asFile.resolve("dev/baude/android")
         dir.mkdirs()

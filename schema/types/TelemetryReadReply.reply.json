@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "telemetry_read's answer: the time on each place and the uses of each item, by app, the most first.",
+  "properties": {
+    "op": {
+      "const": "telemetry_read",
+      "description": "What it is."
+    },
+    "req": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "times": {
+      "type": "array",
+      "items": {
+        "$ref": "TelemetryTime.json"
+      },
+      "description": "Each app's places, the longest first."
+    },
+    "uses": {
+      "type": "array",
+      "items": {
+        "$ref": "TelemetryUse.json"
+      },
+      "description": "Each app's items, the most used first."
+    }
+  },
+  "required": [
+    "op",
+    "times",
+    "uses"
+  ],
+  "additionalProperties": false
+}

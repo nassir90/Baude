@@ -13,7 +13,7 @@ import uuid
 
 from baudelib import (
     agentproxy, autofix, deps, desktopchats, emissionlink, emissiontools, hostaccounts, hostdb, hostfiles, hostfixes, hostkube,
-    hostlogin, mesh, meshtools, hostterminal, multiplexlink, notes, routines, wire, wording, worktree,
+    hostlogin, mesh, meshtools, hostterminal, multiplexlink, notes, routines, telemetry, wire, wording, worktree,
 )
 from baudelib.serverstate import (
     APPS, BOT_PICTURE_MAX, Conn, FRAME_KEYS, _mtime, _write_json, _write_text, bot_dir, clean_env,
@@ -457,6 +457,20 @@ class ServerRunning:
             return None
         if op == "deps":  # (what this host's features need, each there or not: Settings → Dependencies)
             return reply("deps", deps=deps.report("host"))
+        if op == "telemetry":  # (an app of this machine's: what it was used for since it last said, kept here)
+            try:
+                telemetry.keep(self.state_dir, msg)
+            except OSError as e:
+                return reply("error", error=str(e))
+            return reply("telemetry_kept")
+        if op == "telemetry_read":  # (Settings → Telemetry: this machine's apps' use, added up; on a thread of its own)
+            def tell():
+                try:
+                    reply("telemetry_read", **telemetry.read(self.state_dir, msg.get("days")))
+                except Exception as e:  # noqa: BLE001 (anything gone wrong: still answered)
+                    reply("error", error=f"{type(e).__name__}: {e}")
+            threading.Thread(target=tell, daemon=True, name="telemetry").start()
+            return None
         if op in ("kube", "databases"):  # (the clusters and databases here, read for a head elsewhere: hostkube, hostdb)
             def read():
                 try:

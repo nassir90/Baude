@@ -70,8 +70,11 @@ class Missing(Gtk.ScrolledWindow):
             self.again()
 
 
-def ask(where, done):
-    """The host there's dependencies (its deps op): done(reply) on the main thread, an error's as {"error": why}."""
+def ask(where, done, msg=None):
+    """The host there's dependencies (its deps op; or msg, another request it answers with one reply of its op):
+    done(reply) on the main thread, an error's as {"error": why}."""
+    msg = msg or {"op": "deps"}
+
     def run():
         from baudelib import hosts
         reply = None
@@ -81,17 +84,17 @@ def ask(where, done):
             ch, _info = wire.reach(where, timeout=10)
             try:
                 ch.sock.settimeout(wire.SILENT_S)
-                ch.send({"op": "deps", "req": 1})
+                ch.send({**msg, "req": 1})
                 for m in ch:
                     if m.get("req") == 1:
-                        reply = m if m.get("op") == "deps" else {"error": wire.said(m)}
+                        reply = m if m.get("op") == msg["op"] else {"error": wire.said(m)}
                         break
             finally:
                 ch.close()
         except (OSError, ValueError) as e:
             reply = {"error": str(e) or wording.say("host_status.no_answer")}
         GLib.idle_add(done, reply or {"error": wording.say("host_status.connection_dropped")})
-    threading.Thread(target=run, daemon=True, name="deps").start()
+    threading.Thread(target=run, daemon=True, name=msg["op"]).start()
 
 
 def copy_fix(widget, dep):

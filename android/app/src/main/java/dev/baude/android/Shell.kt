@@ -157,6 +157,9 @@ fun ChatShell(hostId: String, sid: String, back: () -> Unit, open: (String, Stri
         chat.showAgent.value = null
     }
     LaunchedEffect(pager.currentPage, all.size) { all.getOrNull(pager.currentPage)?.let { shown = it.key } }
+    androidx.compose.runtime.SideEffect { // (its pages on screen, for Telemetry: the one swiped to; side by side, both)
+        Telemetry.pages = (if (split) listOf("chat", side) else listOf(shown)).mapNotNull { k -> all.firstOrNull { it.key == k }?.title }
+    }
     LaunchedEffect(all.size) { // (a Bot no more: its pages gone, Meta shown if one of them was, as Baude does)
         if (sideAll.none { it.key == side }) side = "meta"
         val i = all.indexOfFirst { it.key == shown }

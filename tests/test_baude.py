@@ -8764,7 +8764,7 @@ def test_kube_pod_actions(app):
                      b.get_menu_model().get_item_attribute_value(0, "target").get_string() == key))
 
     def tail():
-        t = kv.log_tail
+        t = kv.dock.current() and kv.dock.current().tail
         if t is not None and t not in tails:
             tails.append(t)
         return t
@@ -8833,37 +8833,37 @@ def test_kube_pod_actions(app):
         logs.emit("clicked")
         wait_for(lambda: "starting api in pod api-6f7c-mnopq" in text(), "api's log")
         api = tail()
-        model = kv.logs_container.get_model()
+        model = kv.dock.current().container.get_model()
         assert [model.get_string(i) for i in range(model.get_n_items())] == ["migrate (init)", "api", "proxy"]
-        assert kv.logs_container.get_selected() == 1 and kv.logs_box.get_visible()
-        assert kv.logs_title.get_label() == "api-6f7c-mnopq · shop" and kv.logs_state.get_label() == "following"
+        assert kv.dock.current().container.get_selected() == 1 and kv.dock.get_visible()
+        assert kv.dock.current().title() == "api-6f7c-mnopq · shop" and kv.dock.current().state.get_label() == "following"
         assert calls("logs") == [["fake_kubectl.py", "--context", "k3d-dev", "logs", "-f", "--tail=500", "-n", "shop",
                                   "api-6f7c-mnopq", "-c", "api"]]
         # followed: lines come in batches, and the newest stays in sight
         adj = kv.logs.scroll.get_vadjustment()
         wait_for(lambda: adj.get_upper() > adj.get_page_size() * 2, "more lines than fit")
         pump(0.3)
-        assert adj.get_value() >= adj.get_upper() - adj.get_page_size() - 2 and kv.logs_follow.get_active()
-        kv.log_wheel.emit("scroll", 0.0, -1.0)  # (scrolled up: not followed; it stays where it is as lines come)
+        assert adj.get_value() >= adj.get_upper() - adj.get_page_size() - 2 and kv.dock.current().follow.get_active()
+        kv.dock.current().wheel.emit("scroll", 0.0, -1.0)  # (scrolled up: not followed; it stays where it is as lines come)
         adj.set_value(0)
-        assert not kv.log_following and not kv.logs_follow.get_active()
+        assert not kv.dock.current().following and not kv.dock.current().follow.get_active()
         n = kv.logs.buffer.get_line_count()
         wait_for(lambda: kv.logs.buffer.get_line_count() > n + 10, "more lines")
         pump(0.2)
         assert adj.get_value() == 0
         adj.set_value(adj.get_upper() - adj.get_page_size())  # (the end again: followed again)
-        assert kv.log_following and kv.logs_follow.get_active()
+        assert kv.dock.current().following and kv.dock.current().follow.get_active()
         n = kv.logs.buffer.get_line_count()
         wait_for(lambda: kv.logs.buffer.get_line_count() > n + 10, "more lines")
         pump(0.3)
         assert adj.get_value() >= adj.get_upper() - adj.get_page_size() - 2, "the newest in sight"
         # another container: its log from the start; the one before's kubectl stopped
-        kv.logs_container.set_selected(2)
+        kv.dock.current().container.set_selected(2)
         wait_for(lambda: "starting proxy in pod api-6f7c-mnopq" in text(), "proxy's log")
         assert "starting api" not in text() and calls("logs")[-1][-2:] == ["-c", "proxy"]
         wait_for(lambda: api.proc.poll() is not None, "api's kubectl stopped")
         proxy = tail()
-        kv.logs_container.set_selected(0)
+        kv.dock.current().container.set_selected(0)
         wait_for(lambda: "starting migrate" in text(), "the init container's")
         wait_for(lambda: proxy.proc.poll() is not None, "proxy's kubectl stopped")
         tail()
@@ -8875,48 +8875,48 @@ def test_kube_pod_actions(app):
         kv.logs.search_entry.set_text("starting migrate")
         wait_for(lambda: kv.logs.search_count.get_label() == "1 of 1", "found")
         kv.logs.close_search()
-        wrap = next(b for b in find(kv.logs_box, Gtk.ToggleButton) if b.get_tooltip_text() == "Wrap long lines")
+        wrap = next(b for b in find(kv.dock.current().controls, Gtk.ToggleButton) if b.get_tooltip_text() == "Wrap long lines")
         wrap.set_active(True)
         assert kv.logs.view.get_wrap_mode() == Gtk.WrapMode.WORD_CHAR
-        # another pod: the one before's stopped; a crashed container's previous run, which has ended
+        # another pod: a tab of its own (the one before's goes on); a crashed container's previous run, which has ended
         before = tail()
         logs, _more = buttons("jobs/worker-5c4b-klmno")
         logs.emit("clicked")
         wait_for(lambda: "starting main in pod worker-5c4b-klmno" in text(), "worker's log")
-        wait_for(lambda: before.proc.poll() is not None, "the other pod's kubectl stopped")
-        assert kv.logs_container.get_selected() == 0 and not kv.logs_previous.get_active()
+        assert before.proc.poll() is None and len(kv.dock.all()) == 2, "the other pod's tab still followed"
+        assert kv.dock.current().container.get_selected() == 0 and not kv.dock.current().previous.get_active()
         tail()
-        kv.logs_previous.set_active(True)
+        kv.dock.current().previous.set_active(True)
         crashed = tail()
         wait_for(lambda: "FATAL giving up" in text(), "its previous run's")
         assert calls("logs")[-1] == ["fake_kubectl.py", "--context", "k3d-dev", "logs", "--previous", "--tail=500",
                                      "-n", "jobs", "worker-5c4b-klmno", "-c", "main"]
-        wait_for(lambda: crashed.proc.poll() is not None and kv.log_tail is None, "it ended by itself")
-        assert kv.logs_state.get_label() == "its previous run" and "starting main in pod worker-5c4b-klmno" in text()
+        wait_for(lambda: crashed.proc.poll() is not None and (kv.dock.current() and kv.dock.current().tail) is None, "it ended by itself")
+        assert kv.dock.current().state.get_label() == "its previous run" and "starting main in pod worker-5c4b-klmno" in text()
         logs, _more = buttons("shop/web-7d9f-abcde")  # (no previous run: kubectl says so)
         logs.emit("clicked")
-        assert not kv.logs_previous.get_active(), "another pod: this run's again"
-        kv.logs_previous.set_active(True)
+        assert not kv.dock.current().previous.get_active(), "another pod: this run's again"
+        kv.dock.current().previous.set_active(True)
         tail()
-        wait_for(lambda: "previous terminated container" in text() and kv.log_tail is None, "kubectl's error")
-        assert kv.logs_state.get_label() == "kubectl exited with 1"
-        kv.logs_previous.set_active(False)
+        wait_for(lambda: "previous terminated container" in text() and (kv.dock.current() and kv.dock.current().tail) is None, "kubectl's error")
+        assert kv.dock.current().state.get_label() == "kubectl exited with 1"
+        kv.dock.current().previous.set_active(False)
         wait_for(lambda: "starting main in pod web-7d9f-abcde" in text(), "this run's")
-        # Esc: the logs first (their kubectl stopped), the view stays
+        # Esc: the picked tab first (its kubectl stopped), the view stays
         following = tail()
         kv.escape()
-        assert not kv.logs_box.get_visible() and kv.get_visible()
-        wait_for(lambda: following.proc.poll() is not None, "stopped with the logs")
+        assert len(kv.dock.all()) == 2 and kv.get_visible()
+        wait_for(lambda: following.proc.poll() is not None, "stopped with its tab")
         # the view closed while they're open: stopped too
         logs, _more = buttons("shop/web-7d9f-abcde")
         logs.emit("clicked")
-        wait_for(lambda: kv.log_tail is not None and "starting main in pod web-7d9f-abcde" in text(), "the logs again")
+        wait_for(lambda: (kv.dock.current() and kv.dock.current().tail) is not None and "starting main in pod web-7d9f-abcde" in text(), "the logs again")
         following = tail()
         kv.close()
         wait_for(lambda: following.proc.poll() is not None, "stopped with the view")
         kv.open()
         wait_for(lambda: kv.store.get_n_items() == 7 and not kv.loading, "the pods again")
-        assert not kv.logs_box.get_visible()
+        assert not kv.dock.get_visible()
         assert "read-only but for the deletes you confirm" in kv.status.get_label()
         # Delete: asked first, naming it, its namespace and context; Cancel runs nothing
         dlg = ask("jobs/worker-5c4b-klmno", "kube.delete")

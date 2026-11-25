@@ -14,7 +14,7 @@ from gi.repository import Adw, Gdk, Gtk, Pango  # noqa: E402
 from baudelib import wire, wording  # noqa: E402
 import widgets  # noqa: E402
 
-OUT_TIP = "Move to Its Own Window"  # (as a Bot's browser's button says it)
+OUT_TIP = wording.say("common.move_out")  # (as a Bot's browser's button says it)
 
 
 class TerminalPane(Gtk.Box):

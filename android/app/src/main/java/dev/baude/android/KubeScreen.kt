@@ -30,6 +30,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -77,7 +78,7 @@ class YamlShown(val uid: String, val title: String, val version: String, val tex
                 val refs: List<Msg.KubeRef> = emptyList(), val loading: Boolean = true)
 
 /** The state of the Kubernetes view (kubeview.KubeView's): the cluster read through a host, the page shown, what's
- * filtered, sorted and selected, the object's YAML, the pod's logs. */
+ * filtered, sorted and selected, the object's YAML, the dock's tabs (pods' logs, shells in pods). */
 class KubeState(val hostId: String) {
     var contexts by mutableStateOf<List<Msg.KubeContext>>(emptyList())
     var context by mutableStateOf<String?>(null)
@@ -97,8 +98,9 @@ class KubeState(val hostId: String) {
     var sortDesc by mutableStateOf(false)
     var selected by mutableStateOf<String?>(null)
     var yaml by mutableStateOf<YamlShown?>(null)
-    var logs by mutableStateOf<LogsShown?>(null)
-    var shell by mutableStateOf<ShellShown?>(parked.remove(hostId)) // (one the page had before it was turned)
+    val docks = mutableStateListOf<Any>().apply { addAll(parked.remove(hostId).orEmpty()) } // (LogsShown, ShellShown:
+    // a tab each; the shells the page had before it was turned)
+    var picked by mutableStateOf(docks.lastOrNull())
     var deleting by mutableStateOf<Pair<Msg.KubeRow, Boolean>?>(null)
     var note by mutableStateOf<Pair<String, Long>?>(null)
     var progress by mutableStateOf<String?>(null)
@@ -142,18 +144,17 @@ class KubeState(val hostId: String) {
         }
     }
 
-    /** Let go of everything running: the logs, the shell, the watch, and whatever's still to be heard. */
+    /** Let go of everything running: the logs, the shells, the watch, and whatever's still to be heard. */
     fun stop() {
         gen++
-        stopLogs()
-        closeShell()
+        closeAll()
         stopWatch()
     }
 
-    /** The page made again (the phone turned): everything let go of but the shell, kept for the page that follows. */
+    /** The page made again (the phone turned): everything let go of but the shells, kept for the page that follows. */
     fun park() {
-        shell?.let { parked[hostId] = it }
-        shell = null
+        parked[hostId] = docks.filterIsInstance<ShellShown>()
+        docks.removeAll { it is ShellShown }
         stop()
     }
 
@@ -167,8 +168,7 @@ class KubeState(val hostId: String) {
         prefs().edit().putString("kube_context.$hostId", name).apply()
         progress = Wording.Kube.connecting(name)
         hideYaml()
-        closeLogs()
-        closeShell()
+        closeAll()
         stopWatch()
         fade = true
         loading = true
@@ -403,10 +403,10 @@ class KubeState(val hostId: String) {
         val cs = row.containers.orEmpty().map { it.name.orEmpty() to (it.init == true) }
         if (cs.isEmpty()) return setNote(Wording.Kube.noContainers(row.name.orEmpty()))
         val names = cs.map { it.first }
+        docks.filterIsInstance<LogsShown>().firstOrNull { it.context == ctx && it.namespace == row.namespace.orEmpty() &&
+            it.pod == row.name.orEmpty() }?.let { picked = it; return }
         val pick = row.default?.takeIf { it in names } ?: cs.firstOrNull { !it.second }?.first ?: names.first()
-        stopLogs()
-        closeShell()
-        logs = LogsShown(ctx, row.namespace.orEmpty(), row.name.orEmpty(), cs, pick).also { tail(it) }
+        LogsShown(ctx, row.namespace.orEmpty(), row.name.orEmpty(), cs, pick).also { docks.add(it); picked = it; tail(it) }
     }
 
     /** The container's log from the start: this run's followed, or with Previous its last run's. */
@@ -429,14 +429,20 @@ class KubeState(val hostId: String) {
         if (!f.start()) { l.tail = null; l.state = Wording.Kube.kubectlError(Connection.NOT_CONNECTED) }
     }
 
-    private fun stopLogs() {
-        logs?.tail?.stop()
-        logs?.tail = null
+    /** A tab of the dock closed: what it ran stopped (kubectl; the shell in the pod); the one beside it picked. */
+    fun close(tab: Any) {
+        val at = docks.indexOf(tab)
+        if (at < 0) return
+        when (tab) {
+            is LogsShown -> { tab.tail?.stop(); tab.tail = null }
+            is ShellShown -> tab.term?.close()
+        }
+        docks.removeAt(at)
+        if (picked === tab) picked = docks.getOrNull(minOf(at, docks.size - 1))
     }
 
-    fun closeLogs() {
-        stopLogs()
-        logs = null
+    fun closeAll() {
+        for (t in docks.toList()) close(t)
     }
 
     // ---- a shell in a pod (Multiplex's terminal: kubectl exec -it, run on the host by the terminal op)
@@ -446,10 +452,8 @@ class KubeState(val hostId: String) {
         val ctx = context ?: return
         val names = row.containers.orEmpty().filter { it.init != true }.mapNotNull { it.name }
         if (names.isEmpty()) return setNote(Wording.Kube.noContainers(row.name.orEmpty()))
-        closeLogs()
-        closeShell()
-        shell = ShellShown(ctx, row.namespace.orEmpty(), row.name.orEmpty(), names,
-            row.default?.takeIf { it in names } ?: names.first()).also { startShell(it) }
+        ShellShown(ctx, row.namespace.orEmpty(), row.name.orEmpty(), names,
+            row.default?.takeIf { it in names } ?: names.first()).also { docks.add(it); picked = it; startShell(it) }
     }
 
     /** kubectl exec -it in the container picked: bash if it has it, else sh. The one before is ended first. */
@@ -464,11 +468,6 @@ class KubeState(val hostId: String) {
         }
     }
 
-    /** Close the shell: kubectl, and the shell in the pod with it, ended (never left running). */
-    fun closeShell() {
-        shell?.term?.close()
-        shell = null
-    }
 
     // ---- deleting a pod: the view's only writes, each confirmed first
     fun delete(row: Msg.KubeRow, force: Boolean) {
@@ -513,8 +512,8 @@ class KubeState(val hostId: String) {
         private val CLIMB = mapOf("ReplicaSet" to "replicasets", "Job" to "jobs")
 
         private fun prefs() = Mesh.app.getSharedPreferences("settings", Context.MODE_PRIVATE)
-        /** A host's shell, kept while its page is made again. */
-        private val parked = mutableMapOf<String, ShellShown>()
+        /** A host's shells, kept while its page is made again. */
+        private val parked = mutableMapOf<String, List<ShellShown>>()
 
         /** The resource kubectl calls a kind by: Ingress, ingresses (kubedata.kube_resource). */
         fun resourceOf(kind: String): String {
@@ -535,7 +534,8 @@ fun kubeColours() = if (LocalBaude.current.window == DarkBaude.window) Tokens.da
 
 /** ☰ → Kubernetes… (kubeview.KubeView): a cluster's objects as Freelens lists them, read through the host. The title bar
  * and under it the context, the namespaces and the filter; the table of the kind shown (back: the categories to pick
- * from); a row's YAML in the table's place; a pod's logs docked under. Back closes the logs, then the YAML, then goes
+ * from); a row's YAML in the table's place; pods' logs and shells docked under, a tab each. Back closes the picked tab,
+ * then the YAML, then goes
  * to the categories, then leaves. */
 @Composable
 fun KubeScreen(hostId: String, back: () -> Unit, context: String? = null, page: String? = null, search: String? = null,
@@ -554,8 +554,7 @@ fun KubeScreen(hostId: String, back: () -> Unit, context: String? = null, page: 
     val leave = { st.stop(); back() }
     val up = {
         when {
-            st.logs != null -> st.closeLogs()
-            st.shell != null -> st.closeShell()
+            st.picked != null -> st.close(st.picked!!)
             st.yaml != null -> st.hideYaml()
             st.level == "table" -> st.level = "categories"
             else -> leave()
@@ -571,7 +570,7 @@ fun KubeScreen(hostId: String, back: () -> Unit, context: String? = null, page: 
         })
         if (st.level == "categories") Categories(st) else {
             Controls(st)
-            Box(Modifier.weight(1f).navigationBarsPadding().imePadding().inside(c)) { Body(st) }
+            Box(Modifier.weight(1f).navigationBarsPadding().imePadding()) { Body(st) }
         }
     }
 }
@@ -658,16 +657,16 @@ private fun Categories(st: KubeState) {
 }
 
 /** What's inside the frame at the table level: the table (or why it can't be read, or an object's YAML), its status
- * line, and the pod's logs docked under. */
+ * line; under it, on the frame, the dock (pods' logs and shells, a tab each). */
 @Composable
 private fun Body(st: KubeState) {
     val c = LocalBaude.current
     val k = kubeColours()
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val full = maxHeight
-        var logsHeight by remember(st.logs?.pod, st.shell?.pod) { mutableStateOf(maxOf(full / 2, k.logsMin)) }
+        var dockHeight by remember(st.docks.isEmpty()) { mutableStateOf(maxOf(full / 2, k.logsMin)) }
         Column(Modifier.fillMaxSize()) {
-            Column(Modifier.weight(1f).fillMaxWidth()) {
+            Column(Modifier.weight(1f).fillMaxWidth().inside(c)) {
                 val y = st.yaml
                 if (y != null) YamlLevel(st, y)
                 else {
@@ -682,12 +681,7 @@ private fun Body(st: KubeState) {
                         overflow = TextOverflow.Ellipsis, modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp))
                 }
             }
-            st.logs?.let { l ->
-                LogsPane(st, l, logsHeight, full) { logsHeight = it }
-            }
-            st.shell?.let { s ->
-                ShellPane(st, s, logsHeight.coerceAtMost(maxOf(k.logsMin, full - 80.dp)), full) { logsHeight = it }
-            }
+            if (st.docks.isNotEmpty()) Dock(st, dockHeight.coerceAtMost(maxOf(k.logsMin, full - 80.dp)), full) { dockHeight = it }
         }
     }
 }

@@ -653,6 +653,110 @@ def _(app):
     return win
 
 
+@scene("38e-kubernetes-dock", "Kubernetes: the dock under the table, a tab each (on the frame's grey strip) for two "
+                              "pods' logs and a shell in one, the picked tab's controls at the strip's end",
+       size=(1200 + SIDEBAR, H))
+def _(app):
+    win, kv = kube_window(app)
+    T.pump(0.3)
+    kv.show_logs("jobs/worker-5c4b-klmno")
+    kv.show_shell("shop/api-6f7c-mnopq")
+    T.wait_for(lambda: kv.shell_term is not None and "/app#" in kv.shell_term.screen()["screen"], "its prompt")
+    kv.show_logs("shop/api-6f7c-mnopq")
+    T.wait_for(lambda: "GET /healthz 200 0.9ms" in kv.logs.buffer.get_property("text"), "its log")
+    win.connect("destroy", lambda *_: kv.dock.close_all())
+    return win
+
+
+class HostThere:
+    """Another host, picked in the window's host dropdown, for the Kubernetes and database views: the tests' own host
+    process (in this one, so the fakes here are its too), reached by its socket, under a fixture name."""
+    NAME = "build-box"
+
+    def __init__(self):
+        from baudelib import hosts, wire
+        assert hosts.start_here()
+        self.where = {"via": "unix", "path": wire.socket_path()}
+
+    def request(self, msg, done):
+        import threading
+        from gi.repository import GLib
+        from baudelib import wire
+
+        def ask():
+            ch, _info = wire.reach(self.where, timeout=10)
+            ch.send({**msg, "req": 7})
+            for r in ch:
+                if r.get("req") == 7:
+                    GLib.idle_add(lambda: done(r) and False)
+                    break
+            ch.close()
+        threading.Thread(target=ask, daemon=True).start()
+
+    def pick(self, win):
+        win.view_remote = lambda: self
+        win.terminal_host = lambda: (self.where, self.NAME)
+        return win
+
+
+@scene("38e-kubernetes-host", "Kubernetes on the host picked in the window's host dropdown (another host, named in "
+                              "the bar): its kubeconfig's clusters read by its host process, a pod's logs followed "
+                              "there", size=(1200 + SIDEBAR, H))
+def _(app):
+    import kube_fixture as kf
+    os.environ.update(KUBECONFIG=kf.make_kubeconfig(os.path.join(T.TMP, "shot-kubeconfig")),
+                      BAUDE_KUBECTL=os.path.join(HERE, "fake_kubectl.py"), BAUDE_HELM=os.path.join(HERE, "fake_kubectl.py"))
+    for k in ("FAKE_KUBECTL_PG", "FAKE_KUBECTL_FOLLOW", "FAKE_KUBECTL_STATE"):
+        os.environ.pop(k, None)
+    win = HostThere().pick(app.window(opts()))
+    kv = win.kube
+    kv.open()
+    T.wait_for(lambda: kv.store is not None and kv.store.get_n_items() == 7 and not kv.loading, "the pods", 30)
+    kv.show_logs("shop/api-6f7c-mnopq")
+    T.wait_for(lambda: kv.logs is not None and "GET /healthz 200 0.9ms" in kv.logs.buffer.get_property("text"),
+               "its log", 30)
+    win.connect("destroy", lambda *_: kv.close())
+    return win
+
+
+@scene("38e-kubernetes-window", "Kubernetes moved out to a window of its own (the window button in its bar), its "
+                                "cluster, its logs and shells as they were: closed, it's put back over the window",
+       size=(1200, 700))
+def _(app):
+    win, kv = kube_window(app)
+    T.pump(0.3)
+    kv.show_logs("shop/api-6f7c-mnopq")
+    T.wait_for(lambda: "GET /healthz 200 0.9ms" in kv.logs.buffer.get_property("text"), "its log")
+    kv.out.out()
+    out = kv.out.window
+    out.set_default_size(1200, 700)
+    T.pump(0.5)
+    win.connect("destroy", lambda *_: kv.close())
+    return out
+
+
+@scene("38c-schema-host", "Database schemas on the host picked in the window's host dropdown (another host, named "
+                          "in the bar), read by its host process, moved out to a window of its own",
+       size=(1200, 700))
+def _(app):
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("parity_host", os.path.join(HERE, "parity", "host.py"))
+    ph = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(ph)
+    ph.databases({"what": "servers"})  # (its fakes, the host's: the fixture database)
+    win = HostThere().pick(app.window(opts()))
+    sv = win.schema
+    sv.open()
+    T.wait_for(lambda: sv.canvas.cards and sv.canvas.get_width() > 0, "the diagram", 30)
+    sv.out.out()
+    out = sv.out.window
+    out.set_default_size(1200, 700)
+    T.pump(0.5)
+    sv.canvas.fit()
+    sv.canvas.select(next(i for i, c in enumerate(sv.canvas.cards) if c["table"]["name"] == "jobs"))
+    return out
+
+
 def terminal_home():
     """A HOME of fixtures for a scene's terminals (the shell's prompt and folder: nobody's real ones)."""
     home = os.path.join(T.TMP, "terminal-home", "shop")

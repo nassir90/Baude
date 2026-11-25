@@ -58,7 +58,19 @@
     },
     {
       "name": "title",
-      "shows": "A frameless text entry at the top, large, bold, in the page's own short name (Plans for Work:Plans; the full name is its tooltip when it has a parent). Home's is not editable. As you type, the Pages list and the tab show the typed name at once; it is kept when you leave the box or press Enter.",
+      "shows": "A frameless text entry at the top, large, bold, in the page's own short name (Plans for Work:Plans; the full name is its tooltip when it has a parent). Home's is not editable. As you type, the Pages list and the tab show the typed name at once; it is kept when you leave the box or press Enter. While Meta's change to the page is not kept or undone, the title's text is highlighted exactly as the page's row in the Pages list is (green added, blue moved, the edited colour, the accent highlighted), lit more with it while the pointer is over the change's card; the find bar's matches are shaded over it.",
+      "decisions": [
+        {
+          "said": "When a page is added or deleted, its title should take the highlight its row has in the left bar",
+          "rule": "Every app highlights a page's title as the page's row in the pages list is highlighted, in the same colour, strike and brightness, for as long as the row is",
+          "decided": "2026-11-25",
+          "source": [
+            {
+              "issue": "BaudeInternal#223"
+            }
+          ]
+        }
+      ],
       "actions": [
         {
           "by": "key Enter",
@@ -214,7 +226,19 @@
     },
     {
       "name": "page deleted by Meta",
-      "shows": "Listed struck through in the Pages list; clicking it opens a read-only tab titled \"{page} (deleted)\" (trash icon, tooltip \"{page}: deleted by Meta; undo brings it back\") with its text as it was, struck through on red, until the change is kept or undone."
+      "shows": "Listed struck through in the Pages list; clicking its row there, or the page on the change's card, opens a read-only tab titled \"{page} (deleted)\" (trash icon, tooltip \"{page}: deleted by Meta; undo brings it back\"), laid out as a page is: its title and its text as they were, all of it struck through on red as its row is, until the change is kept or undone (then the tab closes).",
+      "decisions": [
+        {
+          "said": "Going into a deleted page's content, the whole of it should be highlighted in red",
+          "rule": "Every app opens a page deleted but not yet kept from its row in the pages list as well as from the change's card, and shows all of it, title and text, highlighted red and struck through as its row is",
+          "decided": "2026-11-25",
+          "source": [
+            {
+              "issue": "BaudeInternal#224"
+            }
+          ]
+        }
+      ]
     }
   ],
   "scenes": []

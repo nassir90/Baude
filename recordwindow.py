@@ -80,6 +80,8 @@ class Settings(Adw.PreferencesDialog):
         group.add(markup_row(win))
         group.add(theming.settings_code_font(win, "Record"))  # (Baude's too, and the same setting)
         group.add(theming.settings_accent())  # (Baude's too, and the same setting)
+        import themelook
+        group.add(themelook.settings_row())  # (Baude's too, and the same setting)
         group.add(update.settings_row())  # (Baude's too: the one setting)
         group.add(theming.notifications_row())  # (Baude's too)
         self.version_row = update.version_row()

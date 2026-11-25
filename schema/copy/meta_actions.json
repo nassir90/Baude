@@ -12,6 +12,8 @@
     "renamed_note": "renamed",
     "added_mlx": "MLX: added {$model}",
     "added_server": "Server: added {$name}",
+    "theme_saved": "Theme: saved {$name}",
+    "theme_previewed": "Theme: showing {$name}",
     "couldnt_undo": "Couldn't undo {$failed}",
     "couldnt_redo": "Couldn't redo {$action}: {$why}"
   }

@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "A theme taken away (the undo of one made).",
+  "properties": {
+    "op": {
+      "const": "theme_remove",
+      "description": "What it is."
+    },
+    "req": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "name": {
+      "type": "string",
+      "description": "Its name."
+    }
+  },
+  "required": [
+    "op",
+    "name"
+  ],
+  "additionalProperties": false
+}

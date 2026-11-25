@@ -13,7 +13,7 @@ import uuid
 
 from baudelib import (
     agentproxy, autofix, deps, desktopchats, emissionlink, emissiontools, hostaccounts, hostdb, hostfiles, hostfixes, hostkube,
-    hostlogin, mesh, meshtools, hostterminal, multiplexlink, notes, routines, telemetry, wire, wording, worktree,
+    hostlogin, mesh, meshtools, hostterminal, multiplexlink, notes, routines, telemetry, themes, wire, wording, worktree,
 )
 from baudelib.serverstate import (
     APPS, BOT_PICTURE_MAX, Conn, FRAME_KEYS, _mtime, _write_json, _write_text, bot_dir, clean_env,
@@ -457,6 +457,16 @@ class ServerRunning:
             return None
         if op == "deps":  # (what this host's features need, each there or not: Settings → Dependencies)
             return reply("deps", deps=deps.report("host"))
+        if op == "themes":  # (the themes kept here, each worked out: Settings → Theme, on every app)
+            return reply("themes", themes=themes.listing())
+        if op in ("theme_save", "theme_remove"):  # (Meta's create_theme and install_theme, and their undo)
+            try:
+                if op == "theme_remove":
+                    return reply(op, before=themes.remove(themes.check_name(msg.get("name"))))
+                before = themes.save(msg.get("name"), msg.get("css"), msg.get("tokens"))
+            except (OSError, ValueError) as e:
+                return reply("error", error=str(e))
+            return reply(op, theme=themes.theme(msg["name"]), before=before)
         if op == "telemetry":  # (an app of this machine's: what it was used for since it last said, kept here)
             try:
                 telemetry.keep(self.state_dir, msg)

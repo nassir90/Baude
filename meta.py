@@ -50,6 +50,7 @@ import widgets  # noqa: E402
 import chatparts  # noqa: E402
 import pickers  # noqa: E402
 import theming  # noqa: E402
+import themelook  # noqa: E402
 from baudelib import codex, wire, wording  # noqa: E402
 from baudelib import models as modelslib  # noqa: E402
 from baudelib import providers as providerslib  # noqa: E402
@@ -1091,6 +1092,9 @@ def shared_settings(win, chat, app, zoom_default):
     out = [
         Setting("accent", wording.say("shared_settings.accent_colour"), lambda: widgets.load_settings().get("accent") or "system",
                 accent, theming.settings_accent, ["system", *widgets.ACCENTS]),
+        Setting("theme", wording.say("shared_settings.theme"), lambda: themelook.picked() or themelook.DEFAULT,
+                lambda v: themelook.pick(None if v == themelook.DEFAULT else v), themelook.settings_row,
+                lambda: [themelook.DEFAULT, *themelook.listed()]),
         Setting("code_font", wording.say("shared_settings.code_font"), fontsetup.code_font,
                 lambda v: widgets.save_settings(code_font=v),
                 lambda: theming.settings_code_font(win, app), fonts(),

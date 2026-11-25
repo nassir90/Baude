@@ -14,6 +14,7 @@
     "meta.py:settings_group",
     "theming.py:settings_code_font",
     "theming.py:settings_accent",
+    "themelook.py:settings_row",
     "theming.py:follow_accent",
     "theming.py:settings_size",
     "update.py:settings_row",
@@ -176,6 +177,32 @@
           "shows": "A choice row \"Accent Colour\": \"System\" or one of libadwaita's colours, each with a dot of its colour. Taken in every window as picked, and by Record's and Baude's logos (Settings' Accent Colour).",
           "copy": [
             "shared_settings.accent_colour"
+          ]
+        },
+        {
+          "name": "Theme",
+          "shows": "A choice row \"Theme\", the same setting and row as Baude's Settings' Theme (Settings.dialog.json): Default, then this machine's host's themes.",
+          "copy": [
+            "shared_settings.theme",
+            "meta_settings.effort_default"
+          ],
+          "actions": [
+            {
+              "by": "pick a theme",
+              "does": "draws it in every Record and Baude window here at once and keeps it in settings.json (theme; Default clears it); the theme's files changing on disk (Meta's create_theme) are drawn again as they change"
+            }
+          ],
+          "decisions": [
+            {
+              "said": "Look at what Claude Mods does for the Claude app's themes: give Baude a way, from the inside, for Meta to create, install and preview themes in Settings, as generic as it can be while staying fast (paraphrased)",
+              "rule": "Every app's Settings has a Theme row after Accent Colour: Default, then the themes of a host (the desktop's own machine's; the phone's, the host picked beside New session). A theme is its host's, worked out there for every app alike, so one theme draws the same colours on every app, light and dark",
+              "decided": "2026-11-25",
+              "source": [
+                {
+                  "issue": "BaudeInternal#218"
+                }
+              ]
+            }
           ]
         },
         {

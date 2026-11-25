@@ -2,6 +2,7 @@
 the index Meta reads the app through, setting models up (SETUP_TOOLS) and the tools every app shares.
 """
 import contextlib
+import json
 import os
 import re
 import sys
@@ -15,6 +16,7 @@ import gi
 gi.require_version("Gtk", "4.0")
 from gi.repository import GLib, Gtk  # noqa: E402
 
+import themelook  # noqa: E402
 import update  # noqa: E402
 import widgets  # noqa: E402
 from baudelib import modelfiles, wording  # noqa: E402
@@ -53,7 +55,8 @@ class MetaTools:
                 "local_models": self.local_models, "check_models": self.check_models,
                 "prune_models": self.prune_models, "add_mlx_model": self.add_mlx_model,
                 "add_endpoint": self.add_endpoint, "model_files": self.model_files, "fetch_model": self.fetch_model,
-                "build_apple_adapter": self.build_apple_adapter,
+                "build_apple_adapter": self.build_apple_adapter, "create_theme": self.create_theme,
+                "install_theme": self.install_theme, "preview_theme": self.preview_theme,
                 **self.app_handlers()}
 
     def run_tool(self, turn, tool, args):
@@ -134,6 +137,15 @@ class MetaTools:
                    if isinstance(x, dict) and x.get(field) != entry[field]]
             widgets.save_settings(**{data["key"]: now + [entry] if data["present"] else now})
             providerslib.found(max_age=0)
+        elif kind == "theme":  # (a theme's files, on this machine's host: put back, or the theme taken away)
+            files = data["files"]
+            msg = {"op": "theme_remove", "name": data["name"]} if files is None else \
+                {"op": "theme_save", "name": data["name"], "css": files.get("css"), "tokens": files.get("tokens")}
+            if "error" in (r := themelook.ask_host(msg)):
+                raise ValueError(r["error"])
+            themelook.apply()
+        elif kind == "theme_preview":
+            themelook.preview(data["name"])
         elif kind == "rename_chat":
             chat = self.find_chat(data["chat"])
             if chat is None:
@@ -478,6 +490,88 @@ class MetaTools:
             listed = ", ".join(found["models"][:12]) or "none yet"
             return {"text": f"Added {name} at {found['url']} (action {a['id']}); its models: {listed}. It's a "
                     "provider in the pickers now."}
+        return Later(work, done)
+
+    # ---- themes: made or installed on this machine's host (every app's), shown for a look (themelook)
+    def create_theme(self, turn, args):
+        tokens = args.get("tokens")
+        if tokens is not None and not isinstance(tokens, dict):
+            raise ValueError("tokens is a resolver document (an object), as schema/tokens/baude.resolver.json is.")
+        return self._save_theme(turn, str(args.get("name") or "").strip(), args.get("css"), tokens)
+
+    def install_theme(self, turn, args):
+        path = os.path.expanduser(str(args.get("path") or "").strip())
+        css = tokens = None
+        if os.path.isdir(path):
+            for f in ("theme.css", "tokens.json"):
+                try:
+                    with open(os.path.join(path, f), encoding="utf-8") as fh:
+                        text = fh.read()
+                except FileNotFoundError:
+                    continue
+                except OSError as e:
+                    raise ValueError(f"{f}: {e.strerror}") from None
+                if f == "theme.css":
+                    css = text
+                else:
+                    try:
+                        tokens = json.loads(text)
+                    except ValueError as e:
+                        raise ValueError(f"tokens.json isn't JSON: {e}") from None
+            if css is None and tokens is None:
+                raise ValueError(f"{path} has no theme.css or tokens.json.")
+        elif path.endswith(".css") and os.path.isfile(path):
+            with open(path, encoding="utf-8") as fh:
+                css = fh.read()
+        else:
+            raise ValueError("path is a theme's folder (its theme.css, tokens.json or both) or a .css file here.")
+        name = str(args.get("name") or "").strip() or \
+            os.path.basename(path.rstrip(os.sep)).removesuffix(".css")
+        return self._save_theme(turn, name, css, tokens)
+
+    def _save_theme(self, turn, name, css, tokens):
+        msg = {"op": "theme_save", "name": name, "css": css, "tokens": tokens}
+
+        def work():
+            if "error" in (r := themelook.ask_host(msg)):
+                raise ValueError(r["error"])
+            return r
+
+        def done(r):
+            if "error" in r:
+                return r
+            themelook.apply()
+            a = self.act(turn, wording.say("meta_actions.theme_saved", name=name), "theme",
+                         {"name": name, "files": r.get("before")}, {"name": name, "files": {"css": css, "tokens": tokens}})
+            t = r.get("theme") or {}
+            return {"text": f"Saved the theme {name} (action {a['id']}): {len(t.get('light') or {})} colours of "
+                    f"Baude's changed light, {len(t.get('dark') or {})} dark" + (", and its CSS" if css else "") +
+                    ". preview_theme shows it."}
+        return Later(work, done)
+
+    def preview_theme(self, turn, args):
+        name = str(args.get("name") or "").strip() or None
+
+        def work():
+            if "error" in (r := themelook.ask_host({"op": "themes"})):
+                raise ValueError(r["error"])
+            names = [t["name"] for t in r.get("themes") or []]
+            if name is not None and name not in names:
+                raise ValueError(f"There's no theme {name}: they're {', '.join(names) or 'none yet'}.")
+            return {}
+
+        def done(_r):
+            if "error" in _r:
+                return _r
+            before = themelook.shown_name() if themelook.shown_name() != themelook.picked() else None
+            themelook.preview(name)
+            self._show(turn, {"kind": "setting", "name": "theme"})
+            a = self.act(turn, wording.say("meta_actions.theme_previewed", name=themelook.said(themelook.shown_name())),
+                         "theme_preview", {"name": before}, {"name": name})
+            bad = themelook.errors()
+            return {"text": f"Showing {themelook.said(themelook.shown_name())} (action {a['id']}); Settings still has "
+                    f"{themelook.said(themelook.picked())}. Its row is under your reply." +
+                    (f" GTK couldn't read some of its CSS: {'; '.join(bad[:8])}." if bad else "")}
         return Later(work, done)
 
     def model_files(self, turn, args):

@@ -58,6 +58,9 @@ undone). add_mlx_model and add_endpoint add one; build_apple_adapter builds Appl
 copies a model another host in the mesh has (asked first); model_files says where a model's files are, here or there, \
 for copying them some other way. Nothing is installed or downloaded that the user didn't ask for: say what they'd run.
 
+Themes: create_theme makes one (its CSS for the desktop apps, its colours for every app), install_theme adds one from \
+a folder here, preview_theme shows one for a look; the Theme setting picks the one every app here draws.
+
 Mesh: your mesh tools (mcp__mesh__*), if you have them, list the mesh's hosts and their models and the chats on \
 each, read a chat, message one, and start a subagent on any host with any of its models. What they start or say isn't \
 an action: it has no undo.
@@ -162,6 +165,29 @@ SETUP_TOOLS = [
     {"name": "build_apple_adapter", "description": "Build apple-claude, which runs Apple's on-device model (macOS 26.4 "
      "or later, with swift). The user's asked first; it builds in the background (local_models: how it went).",
      "inputSchema": {"type": "object", "properties": {}}},
+]
+
+# themes: made or installed (on this machine's host: every app's, the phone's too) and shown for a look (themelook).
+# They ask the host, so they answer later (Later), and are Meta's own tools in code mode too
+SETUP_TOOLS += [
+    {"name": "create_theme", "description": "Make a theme, or replace one's files (it's undone as your other actions "
+     "are). css: GTK CSS drawn over all of the desktop apps' (libadwaita's named colours, @window_bg_color, and "
+     "Baude's: @baude_frame, the bars and side lists; @baude_inside, where chats and pages are read; @baude_rule, "
+     "edges; @baude_raised, code blocks). tokens: colours over Baude's for every app, the phone's too: a resolver "
+     "document as schema/tokens/baude.resolver.json is, its sources written in it, setting tokens of the libadwaita "
+     "and baude groups only, e.g. {\"modifiers\": {\"theme\": {\"contexts\": {\"light\": [{\"libadwaita\": "
+     "{\"view_bg_color\": {\"$value\": {\"hex\": \"#fdf6e3\"}}}}], \"dark\": [...]}}}}. preview_theme shows it.",
+     "inputSchema": {"type": "object", "required": ["name"], "properties": {
+         "name": {"type": "string"}, "css": {"type": "string"}, "tokens": {"type": "object"}}}},
+    {"name": "install_theme", "description": "Install a theme from a folder on this machine (its theme.css, its "
+     "tokens.json or both) or a .css file; name: as it's listed (the folder's or file's, if not given). Undone as "
+     "your other actions are.",
+     "inputSchema": {"type": "object", "required": ["path"], "properties": {
+         "path": {"type": "string"}, "name": {"type": "string"}}}},
+    {"name": "preview_theme", "description": "Show an installed theme in this app's windows for the user to look at, "
+     "Settings left as it is (no name: Settings' theme again); the Theme row shows under your reply for them to keep "
+     "it. Says what GTK couldn't read of its CSS.",
+     "inputSchema": {"type": "object", "properties": {"name": {"type": "string"}}}},
 ]
 SETUP_NAMES = {t["name"] for t in SETUP_TOOLS}
 CONFIRM_WAIT = 600  # (s a question to the user waits for an answer, then it's a no: well inside pi's MCP timeout)

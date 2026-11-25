@@ -12,6 +12,8 @@
     "baudewindow.py:BaudeWindow.open_settings",
     "theming.py:settings_code_font",
     "theming.py:settings_accent",
+    "themelook.py:settings_row",
+    "themelook.py:apply",
     "theming.py:follow_accent",
     "theming.py:settings_switch",
     "theming.py:settings_size",
@@ -80,7 +82,7 @@
     },
     {
       "name": "General group (no title)",
-      "shows": "One group of six rows, in this order.",
+      "shows": "One group of seven rows, in this order.",
       "parts": [
         {
           "name": "Full-width text",
@@ -129,6 +131,36 @@
             {
               "by": "pick an accent",
               "does": "applies it in every open Baude and Record window at once and keeps it; System clears the choice. Baude's and Record's logos take it too: the logo's tile colour (schema/icons/apps) becomes the accent's, in the macOS Dock tile, the windows' icon elsewhere, and the launcher if the app is in the platform's list of apps; with System they keep their own colours"
+            }
+          ]
+        },
+        {
+          "name": "Theme",
+          "shows": "A row titled \"Theme\" with a drop-down: \"Default\" (Baude's own look) first, then the themes this machine's host keeps (its themes request), by name. Before the host answers it lists Default and the theme picked. A theme is a folder on its host, themes/<name>/ in its data folder, of theme.css (GTK CSS, drawn over all of the desktop apps' own, at USER priority) and tokens.json (colours over schema/tokens', light and dark: a resolver document as baude.resolver.json is, setting libadwaita's and baude's colours only); the host works out each colour it makes (Theme.json), and every app draws those. A theme's accent_bg_color is drawn over the Accent Colour picked.",
+          "copy": [
+            "shared_settings.theme",
+            "meta_settings.effort_default"
+          ],
+          "actions": [
+            {
+              "by": "pick a theme",
+              "does": "draws it in every Baude, Record, Emission and Multiplex window here at once (and the other apps here, which follow the setting) and keeps it in settings.json (theme; Default clears it); the theme's files changing on disk (Meta's create_theme) are drawn again as they change"
+            },
+            {
+              "by": "on the phone",
+              "does": "draws it in the app at once and keeps it, with its colours as the host gave them, so it draws from the next start before the host is reached; the theme picked is taken again whenever the host lists it"
+            }
+          ],
+          "decisions": [
+            {
+              "said": "Look at what Claude Mods does for the Claude app's themes: give Baude a way, from the inside, for Meta to create, install and preview themes in Settings, as generic as it can be while staying fast (paraphrased)",
+              "rule": "Every app's Settings has a Theme row after Accent Colour: Default, then the themes of a host (the desktop's own machine's; the phone's, the host picked beside New session). A theme is its host's, worked out there for every app alike, so one theme draws the same colours on every app, light and dark",
+              "decided": "2026-11-25",
+              "source": [
+                {
+                  "issue": "BaudeInternal#218"
+                }
+              ]
             }
           ]
         },

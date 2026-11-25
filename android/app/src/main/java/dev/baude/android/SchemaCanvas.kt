@@ -44,7 +44,7 @@ import kotlin.math.sqrt
 
 /** The tokens of the theme being drawn (the card, head, border and badge colours differ light and dark). */
 @Composable
-fun themeTokens(): ThemeTokens = if (LocalBaude.current.window == DarkBaude.window) Tokens.dark else Tokens.light
+fun themeTokens(): ThemeTokens = if (LocalBaude.current.dark) Tokens.dark else Tokens.light
 
 /** Positions for table cards (schemadata.schema_layout): linked tables in columns, each one column right of the tables it
  * references; tables with no links in a grid beside them. sizes: (w, h) each; links: (child, parent). */
@@ -341,7 +341,7 @@ fun SchemaCanvas(d: SchemaDiagram, modifier: Modifier = Modifier, onRows: (Msg.D
     d.cardPad = pad
     val fg = c.fg
     val dim = fg.a(0.55f)
-    val dark = c.window == DarkBaude.window
+    val dark = c.dark
     var lastTap by remember { mutableStateOf<Pair<Long, Int?>>(0L to null) }
     Canvas(modifier.fillMaxSize().onSizeChanged {
         d.width = it.width.toFloat()

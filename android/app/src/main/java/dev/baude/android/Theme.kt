@@ -39,6 +39,7 @@ data class BaudeColors(
     val dialog: Color,     // (dialog_bg_color)
     val removed: Color,    // (diff.removed: a diff's line taken out, red)
     val added: Color,      // (diff.added: one put in, green)
+    val dark: Boolean,     // (drawn for dark: Tokens.dark's)
 ) {
     val dim: Color get() = fg.copy(alpha = fg.alpha * 0.6f)        // (.sysnote, .dim-label: 0.55–0.6)
     val bubble: Color get() = accentBg.copy(alpha = 0.15f)          // (.user-bubble)
@@ -47,18 +48,47 @@ data class BaudeColors(
     val rowSelected: Color get() = fg.copy(alpha = 0.10f)           // (a navigation sidebar's selected row)
 }
 
-private fun baudeColors(t: ThemeTokens) = with(t.libadwaita) {
+private fun baudeColors(t: ThemeTokens, dark: Boolean) = with(t.libadwaita) {
     BaudeColors(
         frame = t.baude.frame, inside = t.baude.inside, window = windowBgColor, fg = windowFgColor, rule = t.baude.rule,
         raised = t.baude.raised, card = cardBgColor, accentBg = accentBgColor, accentFg = accentFgColor,
         accent = accentColor, destructive = destructiveColor, error = errorColor, warning = warningColor, success = successColor,
-        dialog = dialogBgColor, removed = t.diff.removed, added = t.diff.added,
+        dialog = dialogBgColor, removed = t.diff.removed, added = t.diff.added, dark = dark,
     )
 }
 
-val LightBaude = baudeColors(Tokens.light)
+val LightBaude = baudeColors(Tokens.light, false)
 
-val DarkBaude = baudeColors(Tokens.dark)
+val DarkBaude = baudeColors(Tokens.dark, true)
+
+/** These colours with a theme's over them (Settings → Theme: its host's, worked out there: Theme.json's light or
+ * dark, each of schema/tokens' libadwaita and baude colours that isn't Baude's own, by its token's path). A theme's
+ * accent_bg_color is taken over the accent picked, as the desktop's is, and accent_color is made of it if the theme
+ * doesn't give one. */
+fun BaudeColors.themed(theme: Msg.Theme?): BaudeColors {
+    val over = (if (dark) theme?.dark else theme?.light).orEmpty()
+    if (over.isEmpty()) return this
+    fun c(path: String, was: Color) = over[path]?.let(::hexColor) ?: was
+    val accentBg = c("libadwaita.accent_bg_color", accentBg)
+    return copy(
+        frame = c("baude.frame", frame), inside = c("baude.inside", inside), window = c("libadwaita.window_bg_color", window),
+        fg = c("libadwaita.window_fg_color", fg), rule = c("baude.rule", rule), raised = c("baude.raised", raised),
+        card = c("libadwaita.card_bg_color", card), accentBg = accentBg, accentFg = c("libadwaita.accent_fg_color", accentFg),
+        accent = over["libadwaita.accent_color"]?.let(::hexColor)
+            ?: if ("libadwaita.accent_bg_color" in over) Settings.standalone(accentBg, dark) else accent,
+        destructive = c("libadwaita.destructive_color", destructive), error = c("libadwaita.error_color", error),
+        warning = c("libadwaita.warning_color", warning), success = c("libadwaita.success_color", success),
+        dialog = c("libadwaita.dialog_bg_color", dialog),
+    )
+}
+
+/** #rrggbb or #rrggbbaa as a Color; null if it isn't one. */
+fun hexColor(hex: String): Color? {
+    if (!Regex("#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?").matches(hex)) return null
+    val rgb = hex.substring(1, 7).toLong(16)
+    val a = if (hex.length == 9) hex.substring(7, 9).toLong(16) else 0xFF
+    return Color((a shl 24 or rgb).toInt())
+}
 
 /** Baude's measures (theming.CSS and baude.py's margins: schema/tokens'), in dp. */
 object Gap {
@@ -106,7 +136,7 @@ object Type {
 }
 
 /** The app's look as Settings has it: light or dark (Appearance: the system's, or one of them), the accent (Accent
- * Colour: accent_bg_color, and accent_color made of it), and the sizes (Text Scale: the text's, Global Scale:
+ * Colour: accent_bg_color, and accent_color made of it), the theme's colours over them (Theme), and the sizes (Text Scale: the text's, Global Scale:
  * everything's, as the density's). */
 @Composable
 fun BaudeTheme(content: @Composable () -> Unit) {
@@ -119,6 +149,7 @@ fun BaudeTheme(content: @Composable () -> Unit) {
     }
     val accent = Settings.accentBg(ctx)
     val c = (if (dark) DarkBaude else LightBaude).copy(accentBg = accent, accent = Settings.standalone(accent, dark))
+        .themed(Settings.themeColours.value)
     val scheme = (if (dark) darkColorScheme() else lightColorScheme()).copy(
         primary = c.accentBg, onPrimary = c.accentFg, background = c.inside, onBackground = c.fg,
         surface = c.inside, onSurface = c.fg, surfaceVariant = c.frame, onSurfaceVariant = c.dim,

@@ -1,5 +1,5 @@
 """theming — how the apps look: their CSS, the shaders warmed before they're needed, the theme (load_css,
-theme_css), the window's corners and title bar, popovers, the accent (apply_accent, AccentFade, AccentDot) and the
+theme_css; a Baude theme over it, themelook), the window's corners and title bar, popovers, the accent (apply_accent, AccentFade, AccentDot) and the
 logo in it (follow_accent, theme_logo), Settings' shared rows, and shared settings shown again as another app here
 changes them (follow_setting, watch_settings).
 """
@@ -100,6 +100,9 @@ def _settings_read():
     if keys:
         if "accent" in keys and (display := Gdk.Display.get_default()) is not None:
             apply_accent(display)
+        if "theme" in keys:
+            import themelook
+            themelook.apply()
         for row in list(_following):
             if row.setting_key in keys:
                 row.syncing = True
@@ -634,6 +637,8 @@ def theme_css(*app_css):
     css.load_from_string(UNDER_GTK_THEME_CSS if themed else OVER_ADWAITA_CSS)
     Gtk.StyleContext.add_provider_for_display(display, css, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
     display.baude_theme_css = css
+    import themelook
+    themelook.apply(display)  # (Settings → Theme's: over all of the above)
     if themed:
         below = Gtk.CssProvider()
         below.load_from_string(BELOW_GTK_THEME_CSS)

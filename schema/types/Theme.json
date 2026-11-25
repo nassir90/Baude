@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "A theme as its host has it (its themes folder's <name>/: theme.css and tokens.json), worked out by the host for every app alike: the desktop apps draw its CSS over theirs and its colours, the phone its colours.",
+  "properties": {
+    "name": {
+      "type": "string",
+      "description": "Its name: its folder's."
+    },
+    "css": {
+      "type": "string",
+      "description": "Its theme.css (GTK CSS, the desktop apps': drawn over all of theirs), empty if it has none."
+    },
+    "light": {
+      "type": "object",
+      "propertyNames": {
+        "pattern": "^(libadwaita|baude)\\.[a-z_]+$"
+      },
+      "additionalProperties": {
+        "type": "string",
+        "pattern": "^#[0-9a-f]{6}([0-9a-f]{2})?$"
+      },
+      "description": "Each colour of schema/tokens' libadwaita and baude groups the theme makes other than Baude's own in light, by its token's path: #rrggbb, or #rrggbbaa where it's see-through. A colour made of another (baude.rule of libadwaita.borders) is here when that one's set."
+    },
+    "dark": {
+      "type": "object",
+      "propertyNames": {
+        "pattern": "^(libadwaita|baude)\\.[a-z_]+$"
+      },
+      "additionalProperties": {
+        "type": "string",
+        "pattern": "^#[0-9a-f]{6}([0-9a-f]{2})?$"
+      },
+      "description": "Each colour of schema/tokens' libadwaita and baude groups the theme makes other than Baude's own in dark, by its token's path: #rrggbb, or #rrggbbaa where it's see-through. A colour made of another (baude.rule of libadwaita.borders) is here when that one's set."
+    },
+    "error": {
+      "type": "string",
+      "description": "Why its files can't be used, in place of the rest."
+    }
+  },
+  "required": [
+    "name"
+  ],
+  "additionalProperties": false
+}

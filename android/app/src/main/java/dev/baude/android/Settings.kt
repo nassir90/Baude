@@ -23,6 +23,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
@@ -54,6 +55,8 @@ import kotlin.math.roundToInt
 object Settings {
     val accent = mutableStateOf<String?>(null)
     val appearance = mutableStateOf("system") // ("system", "light", "dark")
+    val theme = mutableStateOf<String?>(null)  // (Settings → Theme's, a host's: null, Baude's own look)
+    val themeColours = mutableStateOf<Msg.Theme?>(null) // (it as its host worked it out, kept for the next start)
     val textScale = mutableStateOf(1f)
     val iconScale = mutableStateOf(1f)
     val globalScale = mutableStateOf(1f)
@@ -87,6 +90,12 @@ object Settings {
         val p = ctx.applicationContext.getSharedPreferences("settings", Context.MODE_PRIVATE)
         accent.value = p.getString("accent", null)?.takeIf { it in ACCENTS }
         appearance.value = p.getString("appearance", "system")!!
+        theme.value = p.getString("theme", null)
+        themeColours.value = try {
+            p.getString("theme_colours", null)?.let { Msg.Theme.from(org.json.JSONObject(it)) }
+        } catch (_: Exception) {
+            null
+        }
         textScale.value = p.getFloat("text_scale", 1f)
         iconScale.value = p.getFloat("icon_scale", 1f)
         globalScale.value = p.getFloat("global_scale", 1f)
@@ -113,6 +122,7 @@ object Settings {
     fun save(ctx: Context) {
         ctx.applicationContext.getSharedPreferences("settings", Context.MODE_PRIVATE).edit()
             .putString("accent", accent.value).putString("appearance", appearance.value)
+            .putString("theme", theme.value).putString("theme_colours", themeColours.value?.json()?.toString())
             .putFloat("text_scale", textScale.value).putFloat("icon_scale", iconScale.value)
             .putFloat("global_scale", globalScale.value).putBoolean("full_width", fullWidth.value)
             .putString("read_only_sessions", JSONArray(readOnly.toList()).toString())
@@ -214,6 +224,7 @@ private fun GeneralPage(feedback: () -> Unit, chat: List<String>) {
             { FullWidthRow() },
             { CodeFontRow(chat) },
             { AccentRow() },
+            { ThemeRow() },
             {
                 val looks = linkedMapOf("system" to Wording.PhoneSettings.followSystem, "light" to Wording.PhoneSettings.light,
                     "dark" to Wording.PhoneSettings.dark)
@@ -279,6 +290,40 @@ fun AccentRow(fallback: String? = null, extra: (@Composable () -> Unit)? = null)
         Settings.save(ctx)
     }
 }
+
+/** Settings' Theme row: Default (Baude's own look), then the themes of the host picked beside New session (else
+ * your first), as it works them out (its themes request). Picking one draws it at once and keeps it, with its colours
+ * as that host gave them; the theme picked is taken again as the host lists it. */
+@Composable
+fun ThemeRow(fallback: String? = null, extra: (@Composable () -> Unit)? = null) {
+    val ctx = LocalContext.current
+    val hostId = picked()?.takeIf { it != "phone" } ?: Mesh.hosts.firstOrNull()?.id
+    var listed by remember(hostId) { mutableStateOf<List<Msg.Theme>>(emptyList()) }
+    LaunchedEffect(hostId) {
+        val h = hostId ?: return@LaunchedEffect
+        Mesh.ask(h, Msg.Themes().json()) { r ->
+            if (r.optString("op") != Op.ERROR) listed = Msg.ThemesReply.from(r).themes.orEmpty().filter { it.error == null }
+            val now = listed.firstOrNull { it.name == Settings.theme.value }
+            if (now != null && now.json().toString() != Settings.themeColours.value?.json()?.toString()) {
+                Settings.themeColours.value = now
+                Settings.save(ctx)
+            }
+        }
+    }
+    val names = listOf(DEFAULT_THEME) + listed.mapNotNull { it.name } +
+        listOfNotNull(Settings.theme.value?.takeIf { n -> listed.none { it.name == n } })
+    Choice(Wording.SharedSettings.theme, names, Settings.theme.value ?: DEFAULT_THEME,
+        { if (it == DEFAULT_THEME) Wording.MetaSettings.effortDefault else it }, subtitle = fallback, extra = extra) { name ->
+        val t = listed.firstOrNull { it.name == name }
+        if (name == DEFAULT_THEME || t != null) {
+            Settings.theme.value = t?.name
+            Settings.themeColours.value = t
+            Settings.save(ctx)
+        }
+    }
+}
+
+private const val DEFAULT_THEME = "default"
 
 /** Settings' Update on metered connections row. */
 @Composable

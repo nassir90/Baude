@@ -108,6 +108,16 @@ An entry or a part may carry:
   Git"). "Claude" as a word in a note is "Claude"; a command, path or name put in keeps its own spelling. The words come
   from schema/copy, so every app says them alike. The owner: "Casing should be consistent mate" (source: session
   b3845b21-55ac-4aab-a769-fb8517403c51, message e824fbc9-b33f-4a3a-8e0c-8ebf94acd120).
+- **A theme is one for every app.** A theme is its host's (a folder in its data folder, themes/<name>/: theme.css,
+  GTK CSS drawn over all of the desktop apps' own; tokens.json, colours over schema/tokens', light and dark, of the
+  libadwaita and baude groups only), and the host works out what it comes to for every app alike (the themes request,
+  Theme.json: each colour it makes, a colour made of another included). Every app draws those colours (the phone's
+  BaudeColors, the desktop's named colours and their CSS variables), and the desktop apps its CSS too; its accent is
+  drawn over the Accent Colour picked. Settings → Theme picks one on every app; Meta makes, installs and previews them
+  (create_theme, install_theme, preview_theme), undone as its other actions are. A theme sets colours, not sizes: the
+  phone's measures are made as it's built. The owner asked for a way, from inside the app, for Meta to create, install
+  and preview themes in Settings, as generic as it can be while staying fast (2026-11-24). Source:
+  `[{"issue": "BaudeInternal#218"}]`.
 - **Apps are thin clients; the logic is in the wire.** What an app or an agent's tool does to shared things (a
   notebook's pages and the edits proposed to them, a chat, the mesh) is the host's to work out, through typed wire
   messages in schema/types; an app or an MCP server asks the host and shows its answer. An agent's interface (an MCP

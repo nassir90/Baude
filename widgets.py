@@ -351,7 +351,7 @@ def save_settings(**changes):
 # and the Global Scale, Auto restart on update and the code font (each read where it's used, the font at the next
 # start), Meta's model, effort, Code mode and Run commands, and Notifications. A window's own zoom (Ctrl/⌘ + − 0) stays
 # its own.
-SHARED_SETTINGS = ("accent", "text_scale", "icon_scale", "zoom_default", "auto_update", "code_font",
+SHARED_SETTINGS = ("accent", "theme", "text_scale", "icon_scale", "zoom_default", "auto_update", "code_font",
                    "meta_model", "meta_effort", "meta_code_mode", "meta_commands", "notify")
 SETTINGS_WAIT_MS = 100  # (a write's events, and the file read once they've stopped)
 _watch = {"monitor": None, "seen": None, "listeners": [], "wait": None}
@@ -1199,14 +1199,30 @@ def logo(app):
     return icons.logo(app, load_settings().get("accent"))
 
 
+THEMED = {"light": {}, "dark": {}}  # (the theme drawn's colours, light and dark, by token's path: themelook's)
+
+
+def _themed(path):
+    """The theme drawn's colour for a token (libadwaita.accent_bg_color), light or dark as it's now; None if it has
+    none."""
+    hex_ = THEMED["dark" if Adw.StyleManager.get_default().get_dark() else "light"].get(path)
+    rgba = Gdk.RGBA()
+    return rgba if hex_ and rgba.parse(hex_) else None
+
+
 def accent_rgba():
-    """The accent's colour as @accent_bg_color has it: a patch's, a selection's."""
-    return Adw.AccentColor.to_rgba(accent())
+    """The accent's colour as @accent_bg_color has it: a patch's, a selection's (a theme's, if it has one)."""
+    return _themed("libadwaita.accent_bg_color") or Adw.AccentColor.to_rgba(accent())
 
 
 def accent_text_rgba():
     """The accent's colour as @accent_color has it, for text on the window's background: light or dark, as it's now."""
-    return Adw.AccentColor.to_standalone_rgba(accent(), Adw.StyleManager.get_default().get_dark())
+    dark = Adw.StyleManager.get_default().get_dark()
+    if (rgba := _themed("libadwaita.accent_color")) is not None:
+        return rgba
+    if (bg := _themed("libadwaita.accent_bg_color")) is not None:
+        return Adw.rgba_to_standalone(bg, dark)
+    return Adw.AccentColor.to_standalone_rgba(accent(), dark)
 
 
 # ---------------------------------------------------------------- a tool call's card

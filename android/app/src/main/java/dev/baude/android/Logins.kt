@@ -34,7 +34,12 @@ import org.json.JSONObject
  * failed, cancelled. Compose state, changed on the main thread. */
 class Login(val hostId: String, val sid: String, val why: String?, val retry: Pair<String, List<Picked>>?, private val args: List<String>) {
     val key = java.util.UUID.randomUUID().toString()
-    val stage = mutableStateOf(if (why != null) "ask" else "starting")
+    /** The chat's Claude account, for a chat run under one, signed in to in place of the CLI's own sign-in, on its
+     * host: a folder account's by claude auth login run there with its folder (hostaccounts' sign_in), a token
+     * account's by a token from claude setup-token pasted in place of it, replacing that account's (saveToken). */
+    val account = Mesh.session(hostId, sid)?.account?.takeIf { it.provider == "claude" && it.kind in listOf("token", "folder") }
+    val token = account?.takeIf { it.kind == "token" }
+    val stage = mutableStateOf(if (why != null || token != null) "ask" else "starting")
     val url = mutableStateOf<String?>(null)
     val said = mutableStateOf<String?>(null) // (failed: why; signed: who as)
     val resent = mutableStateOf(false)
@@ -49,7 +54,8 @@ class Login(val hostId: String, val sid: String, val why: String?, val retry: Pa
         stage.value = "starting"
         conn = Mesh.watch(hostId, { c, m -> heard(c, m) }) { c ->
             if (c !== conn) return@watch
-            if (c.state == "up") c.send(Msg.Login(req = REQ, args = args).json())
+            if (c.state == "up") c.send(if (account != null) Msg.Accounts(req = REQ, what = "sign_in", id = account.id).json()
+                else Msg.Login(req = REQ, args = args).json())
             else if (c.state == "down") end(null, Wording.HostStatus.connectionDropped)
         }
         if (conn == null) end(null, Wording.HostStatus.hostAbsent)
@@ -64,6 +70,13 @@ class Login(val hostId: String, val sid: String, val why: String?, val retry: Pa
                 Op.LOGIN_SAID -> line(Msg.LoginSaid.from(m).line.orEmpty())
                 Op.LOGIN_END -> Msg.LoginEnd.from(m).let { e ->
                     if (e.code?.toInt() == 0) signed(e.who) else end(e.code?.toInt(), e.why)
+                }
+                Op.ACCOUNTS -> Msg.AccountsReply.from(m).let { r ->
+                    when {
+                        r.line != null && r.accounts == null -> line(r.line)
+                        r.signedIn == true -> signed(r.who)
+                        else -> end(null, r.error)
+                    }
                 }
                 Op.ERROR -> end(null, Msg.Error.from(m).said.orEmpty())
             }
@@ -83,7 +96,10 @@ class Login(val hostId: String, val sid: String, val why: String?, val retry: Pa
 
     fun paste(code: String) {
         val c = conn ?: return
-        if (code.isBlank() || !c.send(Msg.LoginCode(code = code.trim()).json())) return
+        if (code.isBlank()) return
+        val msg = if (account != null) Msg.Accounts(req = REQ, what = "code", code = code.trim()).json()
+            else Msg.LoginCode(code = code.trim()).json()
+        if (!c.send(msg)) return
         stage.value = "checking"
     }
 
@@ -117,6 +133,20 @@ class Login(val hostId: String, val sid: String, val why: String?, val retry: Pa
         val chat = Mesh.open?.takeIf { it.hostId == hostId && it.sid == sid }
         if (chat != null && isWorking(chat)) chat.chrome.restartAfterTurn = true
         else Mesh.ask(hostId, Msg.Stop(session = sid, restart = true).json()) {}
+    }
+
+    /** A chat under a Claude account: its token replaced on its host, then its claude started again on it. */
+    fun saveToken(token: String) {
+        val a = this.token ?: return
+        if (token.isBlank()) return
+        stage.value = "checking"
+        Mesh.ask(hostId, Msg.Accounts(what = "token", id = a.id.orEmpty(), token = token.trim()).json()) { r ->
+            val e = if (r.optString("op") == Op.ERROR) Msg.Error.from(r).said else Msg.AccountsReply.from(r).error
+            if (!e.isNullOrBlank()) {
+                stage.value = "failed"
+                said.value = e
+            } else signed(a.name)
+        }
     }
 
     /** Send again: what this phone sent for the failed turn, its text and its files, sent again. */
@@ -155,7 +185,7 @@ object Logins {
         val login = Login(chat.hostId, chat.sid, null, null, args)
         all[login.key] = login
         chat.lines.add(Line("login", login.key))
-        login.start()
+        if (login.token == null) login.start()
     }
 }
 
@@ -169,8 +199,14 @@ fun LoginCard(login: Login) {
     val chat = Mesh.open?.takeIf { it.sid == login.sid }
     Column(Modifier.fillMaxWidth().border(1.dp, c.warning, RoundedCornerShape(Gap.cardRadius))
         .padding(horizontal = 12.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        val title = when (stage) {
-            "ask" -> Wording.SignIn.notSignedInOn(host = Mesh.label(login.hostId))
+        val account = login.token
+        val title = when {
+            account != null && stage == "signed" -> Wording.Subscriptions.tokenSaved
+            account != null && stage != "failed" -> Wording.Subscriptions.replaceHeading(name = account.name.orEmpty())
+            else -> null
+        } ?: when (stage) {
+            "ask" -> login.account?.let { Wording.Subscriptions.signInHeading(name = it.name.orEmpty()) }
+                ?: Wording.SignIn.notSignedInOn(host = Mesh.label(login.hostId))
             "signed" -> Wording.SignIn.signedIn
             "failed" -> Wording.SignIn.failed
             "cancelled" -> Wording.SignIn.cancelled
@@ -191,7 +227,9 @@ fun LoginCard(login: Login) {
                     textDecoration = TextDecoration.Underline)))) { append(link) }
                 append(after)
             }, style = Type.body, color = c.fg)
-            stage == "checking" -> Text(Wording.SignIn.checkingCode, style = Type.body, color = dim)
+            stage == "checking" -> Text(if (account != null) Wording.Subscriptions.checking else Wording.SignIn.checkingCode,
+                style = Type.body, color = dim)
+            account != null && stage == "signed" -> Text(account.name.orEmpty(), style = Type.body, color = c.fg)
             stage == "signed" -> login.said.value.let { who ->
                 SelectionContainer {
                     Text(if (who != null) Wording.SignIn.asWho(who = who) else Wording.SignIn.whoUnknown,
@@ -200,7 +238,11 @@ fun LoginCard(login: Login) {
             }
             stage == "failed" -> login.said.value?.let { SelectionContainer { Text(it, style = Type.body, color = dim) } }
         }
-        if (stage == "starting" || stage == "page") {
+        if (account != null && (stage == "ask" || stage == "failed")) {
+            var token by remember(login) { mutableStateOf("") }
+            SecretField(token, { token = it }, Wording.Subscriptions.tokenHint) { login.saveToken(token) }
+            Button(Wording.Common.save, suggested = true) { login.saveToken(token) }
+        } else if (stage == "starting" || stage == "page") {
             var code by remember(login) { mutableStateOf("") }
             // (the field a row of its own, the buttons under it: beside them, a phone's width leaves it too narrow)
             NameField(code, { code = it }, Wording.SignIn.codeHint, { login.paste(code); code = "" }, focus = false)
@@ -210,6 +252,7 @@ fun LoginCard(login: Login) {
             }
         }
         when {
+            account != null && stage != "signed" -> Unit
             stage == "ask" -> Button(Wording.SignIn.signIn, suggested = true) { login.start() }
             stage == "failed" || stage == "cancelled" -> Button(Wording.Common.tryAgain, suggested = true) { login.start() }
             stage == "signed" && login.retry != null && !login.resent.value && chat != null ->

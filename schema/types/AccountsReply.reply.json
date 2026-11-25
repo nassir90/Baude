@@ -1,0 +1,81 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "accounts' answer: the accounts and defaults as they are after it, and whether the host has claude (with error, if it couldn't be done); usage's, the limits; sign_in's, each line the sign-in writes (line alone), then its end.",
+  "properties": {
+    "op": {
+      "const": "accounts",
+      "description": "What it is."
+    },
+    "req": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "what": {
+      "type": "string",
+      "description": "What was asked."
+    },
+    "error": {
+      "type": "string",
+      "description": "Why it couldn't be done, for the user as it is."
+    },
+    "accounts": {
+      "type": "array",
+      "items": {
+        "$ref": "Account.json"
+      },
+      "description": "The host's accounts, by provider then name."
+    },
+    "defaults": {
+      "type": "object",
+      "properties": {
+        "claude": {
+          "type": "string",
+          "description": "Claude's default account's id, \"\" for the CLI's own sign-in."
+        },
+        "codex": {
+          "type": "string",
+          "description": "Codex's."
+        }
+      },
+      "additionalProperties": false,
+      "description": "Each provider's default for new chats."
+    },
+    "usage": {
+      "type": [
+        "array",
+        "null"
+      ],
+      "items": {
+        "$ref": "UsageLimit.json"
+      },
+      "description": "usage: the subscription's limits; null where they can't be read for its sign-in (a setup token's, an API key's)."
+    },
+    "line": {
+      "type": "string",
+      "description": "sign_in: a line the sign-in wrote (the page to open, or Codex's device code, among them)."
+    },
+    "signed_in": {
+      "type": "boolean",
+      "description": "sign_in: its end, signed in."
+    },
+    "claude_cli": {
+      "type": "boolean",
+      "description": "Whether the host has claude: a Claude account there is a folder signed in to with claude auth login; without it, a token from claude setup-token."
+    },
+    "who": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "sign_in (Claude's), signed in: who as, as claude auth status says."
+    }
+  },
+  "required": [
+    "op"
+  ],
+  "additionalProperties": false
+}

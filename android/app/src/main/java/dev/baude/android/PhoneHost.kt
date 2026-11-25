@@ -59,7 +59,7 @@ object PhoneHost {
      * wire.takes). */
     val OPS = listOf("hello", "ping", "subscribe", "start", "attach", "detach", "input", "stop", "transcript",
         "subagents", "rename", "archive", "unarchive", "delete", "always_allow", "bot", "bot_picture", "memory",
-        "read_file", "catalogue", "list_dir", "senders", "ephemeral", "control", "set_permission_mode", "set_model")
+        "read_file", "catalogue", "list_dir", "senders", "accounts", "ephemeral", "control", "set_permission_mode", "set_model")
     private val CONTROLS = setOf("control", "set_permission_mode", "set_model", "ephemeral") // (OPS' that aren't ops: the
     // control requests its agents take (control: any a claude takes, answered as a host answers them between turns), and
     // start's ephemeral)
@@ -259,6 +259,8 @@ object PhoneHost {
         if (op == Op.READ_FILE) return reply(Op.FILE, *readFile(msg))
         if (op == Op.LIST_DIR) return reply(Op.DIR, *listDir(Msg.ListDir.from(msg).path.orEmpty()))
         if (op == Op.CATALOGUE) return reply(Op.CATALOGUE, *catalogue(Msg.Catalogue.from(msg).cwd.orEmpty()))
+        if (op == Op.ACCOUNTS) return if (PhoneAccounts.OFFERED) reply(Op.ACCOUNTS, *PhoneAccounts.answer(msg)) // (this phone's own)
+            else reply(Op.ERROR, "error" to "unsupported operation")
         val sid = when (op) { // (the session each of the rest is about)
             Op.ATTACH -> Msg.Attach.from(msg).session
             Op.DETACH -> Msg.Detach.from(msg).session

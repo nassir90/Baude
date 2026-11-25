@@ -91,6 +91,7 @@ class WindowProc:
                 (wording.say("meta_settings.effort"), self.effort or "default"),
                 (wording.say("report.mode"), self.mode),
                 (wording.say("new_session.host"), THIS_MACHINE if here else f"{remote_name(self.remote)} ({self.remote.host})"),
+                (wording.say("subscriptions.account"), self.chat_account() or wording.say("subscriptions.cli_default")),
                 (wording.say("common.folder"), self.cwd or ""), (wording.say("report.claude_code"), init.get("claude_code_version") or ""),
                 (wording.say("report.context"),
                  (shown + (f" ({', '.join(tip)})" if tip else "")) if (shown := ctx.label.get_text()
@@ -317,8 +318,31 @@ class WindowProc:
         self.cost_label.set_text(self.cost_said())
         self.status.set_tooltip_text(there or ("" if not here else self.run_cwd))
         self.host_label.set_text(THIS_MACHINE if here else remote_name(self.remote))
-        self.host_label.set_tooltip_text(wording.say("status_bar.host_tip") if here else
-                                         wording.say("status_bar.host_tip_at", address=self.remote.host))
+        tip = wording.say("status_bar.host_tip") if here else wording.say("status_bar.host_tip_at",
+                                                                         address=self.remote.host)
+        account = self.chat_account()
+        self.host_label.set_tooltip_text(tip + ("\n" + wording.say("subscriptions.account_line", name=account)
+                                                if account else ""))
+
+    def chat_account(self):
+        """The name of the subscription account the chat's agent runs under on its host, or None: the CLI's own
+        sign-in."""
+        return (self.chat_account_info() or {}).get("name")
+
+    def chat_account_info(self):
+        """The subscription account the chat's agent runs under on its host (Account's fields: its listing's; a chat
+        this process runs claude for itself: as this machine keeps it), or None: the CLI's own sign-in."""
+        if self.remote is not None and self.session_id:
+            account = (self.remote.sessions.get(self.session_id) or {}).get("account")
+            return account if isinstance(account, dict) else None
+        if self.remote is None and model_program(self.model) == "claude":
+            import sqlite3
+            from baudelib import accounts
+            try:
+                return accounts.account(accounts.claude_session_profile(self.session_id))
+            except (OSError, sqlite3.Error):
+                return None
+        return None
 
     def cost_said(self):
         """What the chat's spent, as the status bar says it: claude's figure ($0.0125); on a model run on your own

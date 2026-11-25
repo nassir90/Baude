@@ -1044,7 +1044,8 @@ def session_path(session):
     """The transcript of a chat by its id, on this machine, whichever project it's in: None if there's none."""
     if not re.fullmatch(r"[\w-]+", session or ""):
         return None
-    return next(iter(glob.glob(os.path.join(glob.escape(projects_dir()), "*", session + ".jsonl"))), None)
+    return next(iter(p for root in projects_dirs()
+                     for p in glob.glob(os.path.join(glob.escape(root), "*", session + ".jsonl"))), None)
 
 
 def session_info(path):
@@ -1094,6 +1095,12 @@ def projects_dir():
     return os.path.join(os.environ.get("CLAUDE_CONFIG_DIR") or os.path.expanduser("~/.claude"), "projects")
 
 
+def projects_dirs():
+    """projects_dir, then the folders of chats Claude accounts here keep of their own (transcripts.projects_dirs)."""
+    from baudelib import transcripts
+    return [projects_dir(), *transcripts.projects_dirs()[1:]]
+
+
 def desktop_sessions_dir():
     """Where the Claude desktop app keeps its Code tab's chats: a JSON file each (local_*.json), under its account's
     folders."""
@@ -1132,7 +1139,7 @@ def chat_transcripts():
     """Claude Code's transcripts (*.jsonl in its projects' folders), but those the desktop app has left behind
     (replaced_transcripts)."""
     gone = replaced_transcripts()
-    return [p for p in glob.glob(os.path.join(projects_dir(), "*", "*.jsonl"))
+    return [p for root in projects_dirs() for p in glob.glob(os.path.join(glob.escape(root), "*", "*.jsonl"))
             if os.path.basename(p)[:-len(".jsonl")] not in gone]
 
 

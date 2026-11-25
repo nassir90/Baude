@@ -483,10 +483,24 @@ class MetaChat(MetaCards, MetaTools, Gtk.Box):
         if card is None:
             said = self.messages()
             asked = next((u["text"] for u in reversed(said[:said.index(m)]) if u["role"] == "user"), None)
-            card = self.logins[id(m)] = LoginCard(self, ask=m.get("text"), retry=(asked, []) if asked else None)
+            account = self.claude_account()
+            card = self.logins[id(m)] = LoginCard(self, ask=m.get("text"), retry=(asked, []) if asked else None,
+                                                  account=account, account_where={"via": "local"} if account else None)
         if card.get_parent() is not None:
             card.get_parent().remove(card)
         return card
+
+    @staticmethod
+    def claude_account():
+        """The Claude account Meta's claude runs under here (this machine's default: Account's fields), or None: the
+        CLI's own sign-in."""
+        import sqlite3
+        from baudelib import accounts
+        try:
+            account = accounts.account(accounts.selected("claude"))
+        except (OSError, sqlite3.Error):
+            return None
+        return account if (account or {}).get("kind") in ("token", "folder") else None
 
     def signed_in(self):
         """A LoginCard's: signed in afresh, its session started again on it (after its turn, if one's running)."""

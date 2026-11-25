@@ -121,6 +121,17 @@
       "type": ["string", "null"],
       "description": "Its start's start_key, if it was given one."
     },
+    "account": {
+      "anyOf": [
+        {
+          "$ref": "Account.json"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The subscription account its agent runs under on its host, fixed as it's made (the host's default for its provider then, or as it's first written in); null for the CLI's own sign-in."
+    },
     "held": {
       "type": "array",
       "items": {

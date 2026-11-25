@@ -24,7 +24,7 @@ import threading
 import time
 import uuid
 
-from baudelib import codex, emissionlink, mesh, phonebrowser, models, notes, providers, selfupdate, wire, wording
+from baudelib import accounts, codex, emissionlink, mesh, phonebrowser, models, notes, providers, selfupdate, wire, wording
 from baudelib.serverstate import (
     AlreadyRunning, DRAFT_S, EMISSIONS_S, EPHEMERAL_S, EXIT_S, IDLE_S, Session, _read_json, _write_json, bot_dir,
     kept_sessions, lock_path, state_home, trash,
@@ -69,9 +69,9 @@ class Server(ServerRunning, ServerSessions):
         os.write(self.lock_file, str(os.getpid()).encode())
         self.lock = threading.RLock()
         self.rids = itertools.count(1)
-        self.codex_catalog = ()
-        self.codex_refresh_at = 0.0
-        self.codex_refreshing = False
+        self.codex_catalogs = {}
+        self.codex_refresh_at = {}
+        self.codex_refreshing = set()
         me = os.path.join(self.state_dir, "server.json")
         try:
             with open(me, encoding="utf-8") as f:
@@ -184,31 +184,32 @@ class Server(ServerRunning, ServerSessions):
         codex_models = self.codex_models()
         return (claudes or self.me.get("claude_models") or []) + codex_models + models.runnable_models()
 
-    def codex_models(self):
+    def codex_models(self, profile=None):
         exe = models.codex_exe()
         if not exe:
             return []
+        profile = accounts.selected("codex") if profile is None else profile
         with self.lock:
-            if not self.codex_refreshing and time.monotonic() >= self.codex_refresh_at:
-                self.codex_refreshing = True
-                threading.Thread(target=self.refresh_codex_models, args=(exe,), daemon=True).start()
-            return self.codex_catalog or [models.CODEX_DEFAULT]
+            if profile not in self.codex_refreshing and time.monotonic() >= self.codex_refresh_at.get(profile, 0):
+                self.codex_refreshing.add(profile)
+                threading.Thread(target=self.refresh_codex_models, args=(exe, profile), daemon=True).start()
+            return self.codex_catalogs.get(profile) or [models.CODEX_DEFAULT]
 
-    def refresh_codex_models(self, exe):
+    def refresh_codex_models(self, exe, profile):
         choices, retry = None, 60
         try:
-            choices = models.codex_choices(codex.list_models(exe, self.env))
+            choices = models.codex_choices(codex.list_models(exe, self.env, profile=profile))
             retry = 300
         except (OSError, RuntimeError) as exc:
             self.log(f"Codex model discovery: {exc}")
         finally:
             with self.lock:
-                self.codex_refresh_at = time.monotonic() + retry
-                self.codex_refreshing = False
-                if choices is not None and choices != self.codex_catalog:
-                    self.codex_catalog = choices
+                self.codex_refresh_at[profile] = time.monotonic() + retry
+                self.codex_refreshing.discard(profile)
+                if choices is not None and choices != self.codex_catalogs.get(profile):
+                    self.codex_catalogs[profile] = choices
                     for session in self.sessions.values():
-                        if isinstance(session.proc, codex.CodexProc):
+                        if isinstance(session.proc, codex.CodexProc) and session.proc.profile == profile:
                             session.proc.update_catalog(choices)
                     self.changed()
 

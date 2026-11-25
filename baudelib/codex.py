@@ -7,7 +7,7 @@ import subprocess
 import threading
 from collections import deque
 
-from baudelib import wording
+from baudelib import accounts, wording
 from baudelib.claude import ClaudeProc
 from baudelib.models import CODEX_MODE_VALUES, codex_effort, codex_mode
 
@@ -131,14 +131,16 @@ def tool(item):
 class AppServer(ClaudeProc):
     """A stdio JSON-RPC connection to one Codex App Server subprocess."""
 
-    def __init__(self, exe, cwd, env, on_exit, stderr):
+    def __init__(self, exe, cwd, env, on_exit, stderr, profile=None):
         self.on_exit, self.stderr = on_exit, stderr
         self.lock = threading.RLock()
         self.ids, self.requests = itertools.count(1), {}
         self.said, self.said_lock = {}, threading.Lock()  # (notes shown: text → kind)
-        self.p = subprocess.Popen([exe, "app-server", "--listen", "stdio://"], cwd=cwd,
+        self.profile = accounts.selected("codex") if profile is None else profile
+        auth = ["-c", 'cli_auth_credentials_store="file"'] if self.profile else []
+        self.p = subprocess.Popen([exe, *auth, "app-server", "--listen", "stdio://"], cwd=cwd,
                                   stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                  text=True, bufsize=1, env=os.environ | (env or {}),
+                                  text=True, bufsize=1, env=accounts.environment("codex", os.environ | (env or {}), self.profile),
                                   start_new_session=True)  # (a group of its own: what it runs, killed with it, kill_hard)
 
     def initialize(self, done, failed):
@@ -219,7 +221,7 @@ class AppServer(ClaudeProc):
         self.write({"id": rid, "error": {"code": -32601, "message": message}})
 
 
-def list_models(exe, env=None, timeout=15):
+def list_models(exe, env=None, timeout=15, profile=None):
     """Get the visible model catalog without creating a Codex thread."""
     from queue import Empty, Queue
 
@@ -240,7 +242,7 @@ def list_models(exe, env=None, timeout=15):
             cursors.add(cursor)
             app.rpc("model/list", {"cursor": cursor}, page, failed)
 
-    app = AppServer(exe, None, env, lambda code: failed(f"App Server exited ({code})"), lambda _: None)
+    app = AppServer(exe, None, env, lambda code: failed(f"App Server exited ({code})"), lambda _: None, profile)
     try:
         app.initialize(lambda: app.rpc("model/list", {}, page, failed), failed)
         try:
@@ -264,7 +266,7 @@ class CodexProc(AppServer):
 
     def __init__(self, on_msg, on_exit, cwd, model, resume=None, effort=None, env=None, exe=None, ephemeral=False,
                  catalog=(), mode="default", meta_system=None, meta_servers=None, dispatch=None,
-                 recover_empty=False):
+                 recover_empty=False, profile=None):
         self.on_msg = on_msg
         self.dispatch = dispatch or (lambda fn, *args: fn(*args))
         self.req_ids = itertools.count(1)
@@ -283,7 +285,7 @@ class CodexProc(AppServer):
         self.last_text = ""
         self.starting = self.interrupting = False
         super().__init__(exe, cwd, env, lambda code: self.dispatch(on_exit, code),
-                         lambda line: self.emit("_stderr", text=line))
+                         lambda line: self.emit("_stderr", text=line), profile)
         params = {"cwd": cwd, **permission_params(self.mode, read_only=self.read_only)}
         if model != "codex/default":
             params["model"] = model.removeprefix("codex/")

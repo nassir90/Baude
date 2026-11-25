@@ -12,7 +12,7 @@ import subprocess
 import sys
 import threading
 
-from baudelib import wording
+from baudelib import accounts, wording
 
 # what a claude started from inside another one inherits (from a Claude Desktop or terminal session) and must not:
 # claude_env leaves it out (fixes.py's claude runs too)
@@ -148,7 +148,7 @@ class ClaudeProc:
     dispatch = staticmethod(lambda fn: fn())
     env_of = None  # (a subclass's own environment for claude, in place of claude_env's: Record's, its child_env)
 
-    def __init__(self, on_msg, on_exit, cwd, model, mode, resume=None, effort=None, extra=(), env=None, exe=None):
+    def __init__(self, on_msg, on_exit, cwd, model, mode, resume=None, effort=None, extra=(), env=None, exe=None, profile=None):
         self.on_msg, self.on_exit = on_msg, on_exit
         self.req_ids = itertools.count(1)
         self.asks = {}  # request id -> a permission it asked for and hasn't been answered (BaudeWindow.detach_proc)
@@ -165,10 +165,22 @@ class ClaudeProc:
         if effort:
             args += ["--effort", effort]
         args += list(extra)
-        self.p = subprocess.Popen(args, cwd=cwd, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                                  stderr=subprocess.PIPE, text=True, bufsize=1, start_new_session=True,  # (a
-                                  # group of its own: what it runs, killed with it, kill_hard)
-                                  env=(self.env_of() if self.env_of is not None else claude_env()) | (env or {}))
+        from baudelib import models
+        child_env = (self.env_of() if self.env_of is not None else claude_env()) | (env or {})
+        self.profile = ""
+        self.remember_profile = False
+        if models.model_program(model) == "claude":
+            self.profile = accounts.claude_session_profile(resume) if profile is None else profile
+            self.remember_profile = bool(self.profile and "--no-session-persistence" not in args)
+        child_env, token_fd = accounts.claude_launch(child_env, self.profile)
+        try:
+            self.p = subprocess.Popen(args, cwd=cwd, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                      stderr=subprocess.PIPE, text=True, bufsize=1, start_new_session=True,  # (a
+                                      # group of its own: what it runs, killed with it, kill_hard)
+                                      env=child_env, pass_fds=() if token_fd is None else (token_fd,))
+        finally:
+            if token_fd is not None:  # (the child's copy is its own: the token read from it once, as it starts)
+                os.close(token_fd)
         threading.Thread(target=self._read, args=(self.p.stdout, False), daemon=True).start()
         threading.Thread(target=self._read, args=(self.p.stderr, True), daemon=True).start()
         self.init_rid = self.control({"subtype": "initialize", "hooks": None})
@@ -185,6 +197,9 @@ class ClaudeProc:
                 msg = json.loads(line)
             except json.JSONDecodeError:
                 msg = {"type": "_stderr", "text": line}
+            if self.remember_profile and msg.get("type") == "system" and msg.get("subtype") == "init" and msg.get("session_id"):
+                accounts.remember_claude_session(msg["session_id"], self.profile)
+                self.remember_profile = False
             # (its handler looked up as it's delivered, not as it's read: a chat left mid-turn, or opened again, in between
             # gets what's after from its new one, BaudeWindow.detach_proc and attach_proc)
             self.dispatch(lambda m=msg: self.on_msg(self, m))

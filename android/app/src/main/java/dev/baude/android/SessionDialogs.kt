@@ -34,9 +34,11 @@ fun toast(text: String) {
 /** A name with its spaces tidied (Baude's " ".join(text.split())). */
 fun tidy(text: String): String = text.split(Regex("\\s+")).filter { it.isNotEmpty() }.joinToString(" ")
 
-/** A text entry that takes focus when it opens, and confirms on Done (Baude's Gtk.Entry with activates_default). */
+/** A text entry that takes focus when it opens, and confirms on Done (Baude's Gtk.Entry with activates_default);
+ * secret: what's typed shown as dots (Gtk.PasswordEntry). */
 @Composable
-fun NameField(value: String, set: (String) -> Unit, hint: String, onDone: () -> Unit, focus: Boolean = true) {
+fun NameField(value: String, set: (String) -> Unit, hint: String, onDone: () -> Unit, focus: Boolean = true,
+              secret: Boolean = false) {
     val c = LocalBaude.current
     val focusing = remember { FocusRequester() }
     LaunchedEffect(Unit) { if (focus) focusing.requestFocus() }
@@ -45,7 +47,9 @@ fun NameField(value: String, set: (String) -> Unit, hint: String, onDone: () -> 
         if (value.isEmpty()) Text(hint, style = Type.body, color = c.dim)
         BasicTextField(value, set, singleLine = true, textStyle = Type.body.copy(color = c.fg),
             cursorBrush = SolidColor(c.accentBg), keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-            keyboardActions = KeyboardActions(onDone = { onDone() }), modifier = Modifier.fillMaxWidth().focusRequester(focusing))
+            keyboardActions = KeyboardActions(onDone = { onDone() }), modifier = Modifier.fillMaxWidth().focusRequester(focusing),
+            visualTransformation = if (secret) androidx.compose.ui.text.input.PasswordVisualTransformation()
+                else androidx.compose.ui.text.input.VisualTransformation.None)
     }
 }
 

@@ -73,6 +73,7 @@ abstract class Screens(private val theme: String) {
 
     @After fun down() {
         PhoneHost.id = ""
+        dev.baude.android.HomePrefs.host.value = ""
         dev.baude.android.Meta.load(org.json.JSONObject())
         FixtureConnection.down()
         Mesh.hosts.clear()
@@ -104,6 +105,119 @@ abstract class Screens(private val theme: String) {
     }
 
     @Test fun settings() = render("05-settings") { SettingsScreen({}, {}) }
+
+    // (Settings → Subscriptions on workshop, the host picked, which has claude: Claude's Work and Home, folders signed
+    // in to with claude auth login, Work the default; Codex's Personal; then its usage, an account's ⋮, Add account
+    // (the sign-in, its page's link and the code box) and Remove…)
+    @Test fun subscriptions() {
+        accountsFixture()
+        show { SettingsScreen({}, {}, page = 1) }
+        laidOut()
+        screen("05a-subscriptions")
+    }
+
+    @Test fun subscriptionsUsage() {
+        accountsFixture()
+        show { SettingsScreen({}, {}, page = 1) }
+        laidOut()
+        tap("Subscription usage")
+        laidOut()
+        screen("05f-subscriptions-usage")
+    }
+
+    @Test fun subscriptionsMenu() {
+        accountsFixture()
+        show { SettingsScreen({}, {}, page = 1) }
+        laidOut()
+        tap("Change this account")
+        laidOut()
+        withMenus("05b-subscriptions-menu")
+    }
+
+    @Test fun subscriptionsSignIn() {
+        accountsFixture()
+        val host = dev.baude.android.HostAccounts(Mesh.hosts.first().id)
+        val login = dev.baude.android.ClaudeLogin(host, null).apply {
+            name.value = "Work"
+            url.value = "https://claude.ai/oauth/authorize?code=true&client_id=fixture&state=fixture"
+            busy.value = true
+        }
+        show {
+            SettingsScreen({}, {}, page = 1)
+            dev.baude.android.ClaudeSignIn(host, null, {}, login)
+        }
+        laidOut()
+        screen("05d-subscriptions-sign-in")
+    }
+
+    @Test fun subscriptionsRemove() {
+        accountsFixture()
+        show { SettingsScreen({}, {}, page = 1) }
+        laidOut()
+        tap("Change this account")
+        tap("Remove…")
+        screen("05e-subscriptions-remove")
+    }
+
+    // (the phone as the host picked: no accounts listed; then, on a host without claude, Add account's token form and a
+    // token account's Replace Token…)
+    @Test fun subscriptionsPhone() {
+        phoneAccountsFixture()
+        show { SettingsScreen({}, {}, page = 1) }
+        laidOut()
+        screen("05g-subscriptions-phone")
+    }
+
+    @Test fun subscriptionsPhoneAdd() {
+        tokenAccountsFixture()
+        show { SettingsScreen({}, {}, page = 1) }
+        laidOut()
+        tap("Add account")
+        screen("05h-subscriptions-phone-add")
+    }
+
+    @Test fun subscriptionsToken() {
+        tokenAccountsFixture()
+        show { SettingsScreen({}, {}, page = 1) }
+        laidOut()
+        tap("Change this account")
+        tap("Replace Token…")
+        screen("05c-subscriptions-token")
+    }
+
+    private fun accountsFixture() {
+        FixtureConnection.up(activity, Mesh.hosts.first()) { m ->
+            if (m.optString("op") != "accounts") null
+            else org.json.JSONObject().put("op", "accounts").put("req", m.opt("req")).put("what", m.optString("what"))
+                .put("accounts", org.json.JSONArray(listOf(HOME_ACCOUNT, WORK,
+                    org.json.JSONObject().put("id", "p1").put("provider", "codex").put("name", "Personal").put("kind", "profile"))))
+                .put("defaults", org.json.JSONObject().put("claude", "w1").put("codex", "")).put("claude_cli", true)
+                .apply { if (m.optString("what") == "usage") put("usage", org.json.JSONArray(listOf(
+                    org.json.JSONObject().put("name", "Five hour").put("percent", 25),
+                    org.json.JSONObject().put("name", "Seven day").put("percent", 40)))) }
+        }
+    }
+
+    private fun tokenAccountsFixture() {
+        FixtureConnection.up(activity, Mesh.hosts.first()) { m ->
+            if (m.optString("op") != "accounts") null
+            else org.json.JSONObject().put("op", "accounts").put("req", m.opt("req")).put("what", m.optString("what"))
+                .put("accounts", org.json.JSONArray(listOf(
+                    org.json.JSONObject().put("id", "t1").put("provider", "claude").put("name", "Personal").put("kind", "token"))))
+                .put("defaults", org.json.JSONObject().put("claude", "t1").put("codex", "")).put("claude_cli", false)
+        }
+    }
+
+    private fun phoneAccountsFixture() {
+        FixturePhone.up(activity, "pocket") { m ->
+            if (m.optString("op") != "accounts") null
+            else org.json.JSONObject().put("op", "accounts").put("req", m.opt("req")).put("what", m.optString("what"))
+                .put("accounts", org.json.JSONArray(listOf(
+                    org.json.JSONObject().put("id", "t1").put("provider", "claude").put("name", "Personal").put("kind", "token"))))
+                .put("defaults", org.json.JSONObject().put("claude", "t1").put("codex", "")).put("claude_cli", false)
+        }
+        dev.baude.android.HomePrefs.host.value = "phone"
+    }
 
     @Test fun mesh() {
         versionsFixture()
@@ -523,7 +637,15 @@ abstract class Screens(private val theme: String) {
         stage.value = "signed"; said.value = "ada@example.com (Example Org · team)"
     }
 
-    private fun loginAt(name: String, working: Boolean = false, then: dev.baude.android.Login.() -> Unit = {}) {
+    // (a chat under workshop's Claude account Work whose turn failed to sign in: Sign in, which signs in to Work's own
+    // folder there, not the CLI's own sign-in)
+    @Test fun chatLoginAccount() = loginAt("19e-chat-login-account", account = true)
+
+    private fun loginAt(name: String, working: Boolean = false, account: Boolean = false,
+                        then: dev.baude.android.Login.() -> Unit = {}) {
+        if (account) Mesh.sessions["h1"] = Mesh.sessions["h1"].orEmpty().map {
+            if (it.id == "b") Msg.Session.from(it.json().put("account", WORK)) else it
+        }
         val chat = Mesh.openChat("h1", "b")
         if (working) chat.thinking.value = true
         val asked = "Why is the release build twice as slow as last week's?"
@@ -1190,6 +1312,10 @@ abstract class Screens(private val theme: String) {
 /** A host's ed25519 key, as ssh sends it: string "ssh-ed25519", string its 32 bytes. */
 private val HOST_KEY = byteArrayOf(0, 0, 0, 11) + "ssh-ed25519".toByteArray() + byteArrayOf(0, 0, 0, 32) +
     ByteArray(32) { (it * 37 + 11).toByte() }
+
+/** Claude accounts on workshop (Settings → Subscriptions). */
+private val WORK = org.json.JSONObject().put("id", "w1").put("provider", "claude").put("name", "Work").put("kind", "folder")
+private val HOME_ACCOUNT = org.json.JSONObject().put("id", "h2").put("provider", "claude").put("name", "Home").put("kind", "folder")
 
 /** What claude says when its sign-in has run out and can't be renewed. */
 private const val EXPIRED = "Failed to authenticate: this login reached its time limit and cannot be renewed. Run " +

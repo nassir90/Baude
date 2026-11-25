@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "One of a subscription's limits, as Claude Code's get_usage says it.",
+  "properties": {
+    "name": {
+      "type": "string",
+      "description": "Which limit (Five hour, Seven day…)."
+    },
+    "percent": {
+      "type": "number",
+      "description": "How much of it is used, in percent."
+    }
+  },
+  "required": [
+    "name",
+    "percent"
+  ],
+  "additionalProperties": false
+}

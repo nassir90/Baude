@@ -11,7 +11,7 @@ import time
 import uuid
 
 from baudelib import (
-    agentproxy, claude, codex, emissiontools, meshtools, models, multiplextools, notes, transcripts, wire, wording,
+    accounts, agentproxy, claude, codex, emissiontools, meshtools, models, multiplextools, notes, transcripts, wire, wording,
     worktree,
 )
 from baudelib.serverstate import (
@@ -89,6 +89,9 @@ class ServerSessions:
         with self.lock:
             if self.stopped.is_set():
                 raise OSError("the host process is stopping")
+            # (its accounts: the chat's it's forked from or asked of, or that spawned it here; else the defaults)
+            parent = origin or (self.sessions.get(meta["spawned_by"]) if meta["spawned_by"] else None)
+            meta["profiles"] = dict(parent.meta.get("profiles", {})) if parent else accounts.defaults()
             s = Session(self, meta)
             if tools:
                 s.app_tools = agentproxy.AppTools(self, conn, s.id, tools)
@@ -155,7 +158,9 @@ class ServerSessions:
                 if not self.can_run(model):
                     raise ValueError(wording.say("host_errors.cant_run", host=self.me["name"], model=model))
                 run = models.launch(model, params.get("mode") or "default", params.get("effort") or None)
-                s = Session(self, {"id": sid, "cwd": cwd, "model": model, "effort": run["effort"], "mode": run["mode"],
+                s = Session(self, {"id": sid, "cwd": cwd, "model": model,
+                                   "profiles": {"claude": accounts.claude_session_profile(sid)},
+                                   "effort": run["effort"], "mode": run["mode"],
                                    "group": self.group_of(params), "title": params.get("title") or None,
                                    "prompt": "", "created": time.time(), "options": {}, "path": path,
                                    "said": os.path.getmtime(path), "ask_default": "deny", "adopted": True})
@@ -273,13 +278,15 @@ class ServerSessions:
         if kind is claude.ClaudeProc and run["program"] == "pi":  # (pi here writes its session itself: a run of it
             agentproxy.PiSession.release(agentproxy.pi_sessions(), s.meta.get("cli_id") or s.id)  # elsewhere no more)
         if run["program"] == "codex":
+            profile = s.meta.get("profiles", {}).get("codex", "")
             # The server keeps the display history. Codex resumes its own thread using its native ID.
             s.proc = codex.CodexProc(
                 lambda p, m: self.from_claude(s, p, m), lambda code: self.claude_exited(s, made, code),
                 s.meta["cwd"], s.meta["model"],
                 resume=None if s.meta.get("ephemeral") else s.meta.get("cli_id"),
                 effort=run["effort"], exe=run["exe"], ephemeral=s.meta.get("ephemeral", False),
-                env={**s.env, **(self.env or {})}, catalog=self.codex_models(), mode=run["mode"],
+                profile=profile,
+                env={**s.env, **(self.env or {})}, catalog=self.codex_models(profile), mode=run["mode"],
                 recover_empty=bool(s.meta.get("cli_id")) and self.codex_empty_thread(s))
         else:
             s.proc = kind(
@@ -287,6 +294,7 @@ class ServerSessions:
                 s.meta.get("model"), run["mode"], run["resume"], run["effort"], extra=extra,
                 env={**s.env, **(self.env or {})} or None,  # (a head's, as it gave it; the host's own extras over it)
                 exe=run["exe"] if run["program"] != "claude" else self.exe,
+                **({"profile": s.meta.get("profiles", {}).get("claude", "")} if run["program"] == "claude" else {}),
                 **({"path": self.socket_path} if kind is agentproxy.ProxiedProc else {}))
         made.append(s.proc)
         s.used, s.streamed, s.acting = time.time(), False, False  # (a new agent, its model's perhaps: how it says
@@ -336,6 +344,8 @@ class ServerSessions:
             s.meta.pop("cut", None)  # (carried on, or something else said: not cut any more)
             if s.meta.pop("draft", None) and not s.meta.get("prompt"):  # (written in: a session of its own from now on,
                 s.meta["prompt"] = _said(msg)                           # listed and kept, titled by what was said)
+                if s.proc is None and not s.meta.get("fork_from") and not s.meta.get("spawned_by"):  # (its account: the default as it's first written in, picked since it was made too)
+                    s.meta["profiles"] = accounts.defaults()
             at_turn = s.busy
             self.ensure_proc(s).send(msg)
             if at_turn and s.kept():  # (taken after the turn it's sent in: kept after it too)
@@ -396,7 +406,7 @@ class ServerSessions:
         elif sub == "apply_flag_settings" and "effortLevel" in (request.get("settings") or {}):
             s.meta["effort"] = request["settings"]["effortLevel"]
         if models.model_program(s.meta.get("model")) == "codex":
-            s.meta["effort"] = models.codex_effort(self.codex_models(), s.meta["model"], s.meta.get("effort"))
+            s.meta["effort"] = models.codex_effort(self.codex_models(s.meta.get("profiles", {}).get("codex", "")), s.meta["model"], s.meta.get("effort"))
         self.save(s)
         if (s.proc is None or getattr(s.proc, "stopping", False)) and sub != "rewind_conversation":
             self.changed()  # (stopped: answered from what's kept, for when it runs; only a message starts it, and a
@@ -854,6 +864,16 @@ class ServerSessions:
             threading.Timer(RENAME_S, unanswered).start()
             return
         write(False)
+
+    def default_changed(self, provider, profile):
+        """A provider's default account picked: the new chats not written in yet, with no agent running, take it, as
+        each would as it's first written in (take_input)."""
+        with self.lock:
+            for s in self.sessions.values():
+                if s.meta.get("draft") and s.proc is None and not s.meta.get("fork_from") and not s.meta.get("spawned_by"):
+                    s.meta.setdefault("profiles", {})[provider] = profile
+                    self.save(s)
+        self.changed()
 
     def changed(self):
         """(lock held) Every subscriber gets the sessions as they are now (soon: a burst of changes is one), and

@@ -65,6 +65,16 @@ def projects_dir():
     return os.path.join(os.environ.get("CLAUDE_CONFIG_DIR") or os.path.expanduser("~/.claude"), "projects")
 
 
+def projects_dirs():
+    """Every folder Claude Code's chats here are in: projects_dir, then those of Claude accounts whose folders keep
+    chats of their own (accounts.claude_folders)."""
+    from baudelib import accounts
+    try:
+        return [projects_dir(), *accounts.claude_folders()]
+    except (OSError, ValueError, ImportError):
+        return [projects_dir()]
+
+
 _INJECTED = ("<system-reminder", "<local-command", "Caveat:", "<ide_", "<pasted_content")
 
 
@@ -349,8 +359,8 @@ SESSION_SOURCES = {"cli": "Claude Code (terminal)", "claude-desktop": "Claude De
 
 def session_file(session_id):
     """A session's transcript, whichever project it's in: None if there's none."""
-    for path in [os.path.join(projects_dir(), d, f"{session_id}.jsonl")
-                 for d in (os.listdir(projects_dir()) if os.path.isdir(projects_dir()) else [])]:
+    for path in [os.path.join(root, d, f"{session_id}.jsonl") for root in projects_dirs()
+                 for d in (os.listdir(root) if os.path.isdir(root) else [])]:
         if os.path.exists(path):
             return path
     return None

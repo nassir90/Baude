@@ -1,0 +1,37 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "A Claude or Codex subscription account kept on a host (Settings → Subscriptions): what a head sees of it; its credential never leaves the host.",
+  "properties": {
+    "id": {
+      "type": "string",
+      "description": "Its id on its host (what a session's kept with)."
+    },
+    "provider": {
+      "enum": [
+        "claude",
+        "codex"
+      ],
+      "description": "Whose subscription it is."
+    },
+    "name": {
+      "type": "string",
+      "description": "Its name, the user's, unique for its provider on its host."
+    },
+    "kind": {
+      "enum": [
+        "folder",
+        "token",
+        "profile"
+      ],
+      "description": "folder: a Claude account that is a config folder of its own on its host (CLAUDE_CONFIG_DIR), signed in to with claude auth login run there with it (signed in again the same way); token: a Claude account signed in with a token from claude setup-token, where its host has no claude (signed in again by replacing it); profile: a Codex account, a CODEX_HOME of its own (signed in again with a device code)."
+    }
+  },
+  "required": [
+    "id",
+    "provider",
+    "name",
+    "kind"
+  ],
+  "additionalProperties": false
+}

@@ -23,6 +23,9 @@ NEEDS_LOGIN = re.compile(
     r"\b(?:login|sign-in|session|token|credentials?)\b[^.\n]{0,40}\b(?:expired|time limit|cannot be renewed|revoked)|"
     r"\b(?:log|sign) in again", re.I)
 ESCAPES = re.compile(r"\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b\[[0-9;?]*[A-Za-z]")  # (a link's, a colour's)
+# (claude auth login run by a host opens no browser on the host's screen: claude runs BROWSER with the page's address,
+# and `true` does nothing; the address is in what it writes, for the head to open)
+NO_BROWSER = {"BROWSER": "true"}
 
 
 def needs_login(text):
@@ -78,7 +81,7 @@ def start(server, conn, msg):
     req = msg.get("req")
     if (proc := getattr(conn, "login", None)) is not None and proc.poll() is None:
         return conn.send({"op": "error", "req": req, "error": "this connection runs a sign-in already"})
-    exe, env = server.exe or claude_exe(), claude_env() | (server.env or {})
+    exe, env = server.exe or claude_exe(), claude_env() | (server.env or {}) | NO_BROWSER
     try:
         proc = subprocess.Popen([exe, "auth", "login", *(msg.get("args") or [])], stdin=subprocess.PIPE,
                                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1, env=env)

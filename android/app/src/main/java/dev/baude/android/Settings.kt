@@ -177,47 +177,60 @@ val Dp.icon: Dp get() = this * (Tokens.Font.body.value / BAUDE_TEXT_PX) * Settin
 
 private const val BAUDE_TEXT_PX = 12f
 
-/** ⋮ → Settings…, as Baude's Settings, its groups in its order: Meta's, Full-width text, Code Font, the accent and
- * whether it's light or dark, how updates download, notifications and the version; the sizes; Send Feedback…. */
+/** ⋮ → Settings…, as Baude's Settings: its two pages, General and Subscriptions (SubscriptionsPage), switched between
+ * by the bar at its foot, as Baude's dialog's switcher is when it's narrow (page: the one it opens on). General's
+ * groups in Baude's order: Meta's, Full-width text, Code Font, the accent and whether it's light or dark, how updates
+ * download, notifications and the version; the sizes; Send Feedback…. */
 @Composable
-fun SettingsScreen(back: () -> Unit, feedback: () -> Unit, chat: List<String> = emptyList()) {
+fun SettingsScreen(back: () -> Unit, feedback: () -> Unit, chat: List<String> = emptyList(), page: Int = 0) {
     val c = LocalBaude.current
-    val ctx = LocalContext.current
-    val save = { Settings.save(ctx) }
+    var shown by remember { mutableStateOf(page) }
     Column(Modifier.fillMaxSize().background(c.frame)) {
         Bar(Wording.Window.settingsTitle, start = { IconButton(Adwaita.GoPrevious, Wording.Browser.back, onClick = back) })
-        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).navigationBarsPadding()) {
-            MetaSettingsGroup()
-            BoxedList(listOf<@Composable () -> Unit>(
-                { FullWidthRow() },
-                { CodeFontRow(chat) },
-                { AccentRow() },
-                {
-                    val looks = linkedMapOf("system" to Wording.PhoneSettings.followSystem, "light" to Wording.PhoneSettings.light,
-                        "dark" to Wording.PhoneSettings.dark)
-                    Choice(Wording.PhoneSettings.appearance, looks.keys.toList(), Settings.appearance.value, { looks.getValue(it) }) {
-                        Settings.appearance.value = it
-                        save()
-                    }
-                },
-                { MeteredRow() },
-                {
-                    SwitchRow(Wording.SharedSettings.notifications, Wording.SharedSettings.notificationsSubtitle,
-                        Settings.notify.value) {
-                        Settings.notify.value = it
-                        save()
-                    }
-                },
-                { VersionRow() },
-            ), "") { it() }
-            Heading(Wording.Window.size)
-            BoxedList(listOf<@Composable () -> Unit>(
-                { ScaleRow("text_scale") },
-                { ScaleRow("icon_scale") },
-                { ScaleRow("global_scale") },
-            ), "") { it() }
-            BoxedList(listOf<@Composable () -> Unit>({ ButtonRow(Wording.Fixes.sendFeedback, Adwaita.GoNext, onClick = feedback) }), "") { it() }
+        Box(Modifier.weight(1f).fillMaxWidth()) {
+            if (shown == 1) SubscriptionsPage() else GeneralPage(feedback, chat)
         }
+        BottomBar(listOf(Page("general", Wording.Subscriptions.general, Adwaita.EmblemSystem),
+            Page("subscriptions", Wording.Subscriptions.title, Adwaita.SystemUsers)), shown) { shown = it }
+    }
+}
+
+/** Settings' General page. */
+@Composable
+private fun GeneralPage(feedback: () -> Unit, chat: List<String>) {
+    val ctx = LocalContext.current
+    val save = { Settings.save(ctx) }
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
+        MetaSettingsGroup()
+        BoxedList(listOf<@Composable () -> Unit>(
+            { FullWidthRow() },
+            { CodeFontRow(chat) },
+            { AccentRow() },
+            {
+                val looks = linkedMapOf("system" to Wording.PhoneSettings.followSystem, "light" to Wording.PhoneSettings.light,
+                    "dark" to Wording.PhoneSettings.dark)
+                Choice(Wording.PhoneSettings.appearance, looks.keys.toList(), Settings.appearance.value, { looks.getValue(it) }) {
+                    Settings.appearance.value = it
+                    save()
+                }
+            },
+            { MeteredRow() },
+            {
+                SwitchRow(Wording.SharedSettings.notifications, Wording.SharedSettings.notificationsSubtitle,
+                    Settings.notify.value) {
+                    Settings.notify.value = it
+                    save()
+                }
+            },
+            { VersionRow() },
+        ), "") { it() }
+        Heading(Wording.Window.size)
+        BoxedList(listOf<@Composable () -> Unit>(
+            { ScaleRow("text_scale") },
+            { ScaleRow("icon_scale") },
+            { ScaleRow("global_scale") },
+        ), "") { it() }
+        BoxedList(listOf<@Composable () -> Unit>({ ButtonRow(Wording.Fixes.sendFeedback, Adwaita.GoNext, onClick = feedback) }), "") { it() }
     }
 }
 

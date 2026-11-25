@@ -1,0 +1,309 @@
+{
+  "description": "The Settings dialog's Subscriptions page (Baude's, Record's and the phone's; on the phone the second page of Settings, switched to by the bar at its foot as the desktop dialog's switcher is when narrow): the Claude and Codex subscription accounts kept on the host picked beside New session (as ☰ → Terminal, Kubernetes… and Database Schemas… use it), changed there through its accounts request. Named Subscriptions, not Providers: Settings' Meta group and the model pickers already call inference providers (Ollama, MLX, an endpoint) Providers.",
+  "apps": [
+    "baude",
+    "record",
+    "phone"
+  ],
+  "opens": [
+    "Settings… → Subscriptions (the dialog's page switcher; the phone's: the bar at Settings' foot)"
+  ],
+  "code": [
+    "subscriptionpage.py:Page",
+    "subscriptionpage.py:Ask",
+    "baudelib/hostaccounts.py:answer",
+    "baudelib/accounts.py",
+    "Subscriptions.kt:HostAccounts",
+    "Subscriptions.kt:SubscriptionsPage",
+    "Subscriptions.kt:ClaudeLogin",
+    "PhoneAccounts.kt",
+    "Settings.kt:SettingsScreen"
+  ],
+  "copy": [
+    "subscriptions",
+    "common",
+    "new_session",
+    "sign_in"
+  ],
+  "parts": [
+    {
+      "name": "Host",
+      "shows": "Row \"Host\" with the picked host's name after it.",
+      "copy": [
+        "new_session.host"
+      ]
+    },
+    {
+      "name": "provider group",
+      "shows": "For Claude, then Codex: a heading (the provider's logo and name), then a boxed list.",
+      "decisions": [
+        {
+          "said": "Baude needs to be able to support running claude with different subscriptions, e.g. a team sub for work and an ultra sub for home that they absolutely need to keep separate (paraphrased)",
+          "rule": "Every app (Baude, Record, the phone) lets you keep several named Claude and Codex accounts on each host, changed on the host picked beside New session, and pick each provider's default; a chat runs under the account its host's default was when it was made (or first written in) and keeps it when resumed or forked; a chat started from another on the same host (a fork, a side question, a subagent it spawns) runs under that chat's accounts; credentials never leave their host",
+          "decided": "2026-11-22",
+          "source": [
+            {
+              "issue": "BaudeInternal#190"
+            },
+            {
+              "session": "b3845b21-55ac-4aab-a769-fb8517403c51",
+              "message": "ac03d59c-4c08-4acd-87a6-78a79a1e0dc9"
+            }
+          ]
+        }
+      ],
+      "parts": [
+        {
+          "name": "Account",
+          "shows": "Picker: \"CLI default\" (the CLI's own sign-in) then each account by name; the one picked is the default a new chat on this host takes.",
+          "copy": [
+            "subscriptions.account",
+            "subscriptions.cli_default"
+          ],
+          "actions": [
+            {
+              "by": "pick",
+              "does": "select: the host's default for that provider; new chats not written in yet take it too"
+            }
+          ]
+        },
+        {
+          "name": "account row",
+          "shows": "One per account: its name, and ⋮.",
+          "actions": [
+            {
+              "by": "click ⋮",
+              "does": "Menu: Rename…, Sign In Again… (Replace Token… for a token account), Remove…"
+            }
+          ],
+          "copy": [
+            "common.rename_ellipsis",
+            "subscriptions.replace_token",
+            "subscriptions.sign_in_again",
+            "common.remove_ellipsis",
+            "subscriptions.more_tip"
+          ]
+        },
+        {
+          "name": "Subscription usage",
+          "apps": [
+            "baude",
+            "record",
+            "phone"
+          ],
+          "shows": "Claude's only: row \"Subscription usage\" with a refresh icon; once read, the default account's limits after its name (\"Five hour 25% · Seven day 40%\"), or \"Usage unavailable for this sign-in\" (a token account's: a setup token can't read them).",
+          "copy": [
+            "subscriptions.usage",
+            "subscriptions.usage_limit",
+            "subscriptions.checking",
+            "subscriptions.usage_unavailable",
+            "subscriptions.usage_failed"
+          ],
+          "decisions": [
+            {
+              "said": "There needs to be a way of seeing claude sub usage in the app",
+              "rule": "Every app's Subscriptions page reads the default Claude account's usage when asked, and says \"Usage unavailable for this sign-in\" where its sign-in can't be asked (a setup token's has no profile scope)",
+              "decided": "2026-11-24",
+              "source": [
+                {
+                  "issue": "BaudeInternal#204"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "Add account",
+          "shows": "Button row \"Add account\" with a plus.",
+          "copy": [
+            "subscriptions.add_account"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Add Claude account dialog",
+      "shows": "On a host with claude: heading \"Add Claude account\"; \"Account name\"; \"Existing signed-in Claude folder (optional)\"; its button Sign in (Use signed-in folder once a folder is typed); Close. Sign in runs claude auth login on the host with a new folder of the account's own: \"Open the sign-in page to sign in.\" (a link to the page the host was given), then a box \"If the page shows a code, paste it here\" and Send, which passes the code to the login on the host; what claude says of a pasted code (\"Invalid code…\") replaces \"Checking the code…\"; the dialog closes once it's signed in, and says why if it isn't. Close stops it. On a host without claude: \"Account name\", a password entry whose placeholder is \"Paste the token from claude setup-token\", Save account, Close.",
+      "copy": [
+        "subscriptions.add_claude",
+        "subscriptions.name_hint",
+        "subscriptions.token_hint",
+        "subscriptions.save_account",
+        "common.close",
+        "subscriptions.claude_folder_hint",
+        "subscriptions.use_folder",
+        "sign_in.sign_in",
+        "sign_in.page_there",
+        "sign_in.open_page_there",
+        "sign_in.code_hint",
+        "sign_in.checking_code",
+        "sign_in.starting",
+        "common.send",
+        "subscriptions.claude_failed",
+        "subscriptions.no_claude",
+        "subscriptions.not_signed_in_folder"
+      ],
+      "decisions": [
+        {
+          "said": "claude auth login with a profile dir should pre preferred over oauth. similar to how we fall back to agent forwarding if we can't do provider forwarding (or vice versa). oauth token login should be used for things such as mobile where we can't guarantee the claude code binary.",
+          "rule": "Every app adds a Claude account on a host that has claude as a config folder of its own there (CLAUDE_CONFIG_DIR), signed in to with claude auth login run by that host with the folder: the host passes the sign-in page's link to the app (any device opens it) and the code the page shows is pasted back in the app and fed to the login; the host keeps only the folder, no token, and the account's chats run claude with CLAUDE_CONFIG_DIR set to it. An existing signed-in folder on the host can be used instead. A token from claude setup-token is the fallback, used only where claude can't be guaranteed: a host without claude, and the phone as a host",
+          "decided": "2026-11-25",
+          "source": [
+            {
+              "session": "b3845b21-55ac-4aab-a769-fb8517403c51",
+              "message": "7d38ce29-c6e4-4827-b56a-d688129471eb"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Add Codex account dialog",
+      "shows": "Heading \"Add Codex account\"; \"Account name\"; \"Existing signed-in CODEX_HOME (optional)\"; its button Sign in with device code (Use signed-in profile once a folder is typed); Close. A device sign-in runs codex login --device-auth on the host and shows what it writes (the code and where to enter it) in the dialog; Close stops it.",
+      "copy": [
+        "subscriptions.add_codex",
+        "subscriptions.codex_home_hint",
+        "subscriptions.device_code",
+        "subscriptions.use_profile",
+        "subscriptions.requesting_code"
+      ]
+    },
+    {
+      "name": "Rename dialog",
+      "shows": "Heading \"Rename <name>\", the name to edit, Rename, Close.",
+      "copy": [
+        "subscriptions.rename_heading",
+        "common.rename"
+      ]
+    },
+    {
+      "name": "Replace Token dialog",
+      "shows": "A token account's: heading \"Replace the token for <name>\", the token's password entry (its placeholder the setup-token line), Save, Close.",
+      "copy": [
+        "subscriptions.replace_heading",
+        "common.save"
+      ]
+    },
+    {
+      "name": "Sign In Again dialog",
+      "shows": "Heading \"Sign in to <name> again\". A Claude folder account's: Sign in, then the sign-in page's link and the code box, as Add Claude account's. Codex's: Sign in with device code (its output in the dialog as it comes). Close.",
+      "copy": [
+        "subscriptions.sign_in_heading"
+      ]
+    },
+    {
+      "name": "Remove dialog",
+      "shows": "Heading \"Remove <name>?\", Cancel and Remove (destructive). Chats made under it say the account is gone when they next start.",
+      "copy": [
+        "subscriptions.remove_heading",
+        "common.remove",
+        "common.cancel",
+        "subscriptions.session_account_gone"
+      ]
+    }
+  ],
+  "states": [
+    {
+      "name": "loading",
+      "shows": "The groups' rows only once the host answers."
+    },
+    {
+      "name": "host unreachable",
+      "shows": "Each group's list holds the error the reach gave."
+    },
+    {
+      "name": "phone as host",
+      "shows": "With the phone itself picked: the Host row only, no provider groups (the phone as a host answers the accounts request with \"unsupported operation\", so another app picking it shows that error in each group)."
+    }
+  ],
+  "decisions": [
+    {
+      "said": "Baude needs to be able to support running claude with different subscriptions, e.g. a team sub for work and an ultra sub for home that they absolutely need to keep separate (paraphrased)",
+      "rule": "Every app (Baude, Record, the phone) lets you keep several named Claude and Codex accounts on each host, changed on the host picked beside New session, and pick each provider's default; a chat runs under the account its host's default was when it was made (or first written in) and keeps it when resumed or forked; a chat started from another on the same host (a fork, a side question, a subagent it spawns) runs under that chat's accounts; credentials never leave their host",
+      "decided": "2026-11-22",
+      "source": [
+        {
+          "issue": "BaudeInternal#190"
+        },
+        {
+          "session": "b3845b21-55ac-4aab-a769-fb8517403c51",
+          "message": "ac03d59c-4c08-4acd-87a6-78a79a1e0dc9"
+        }
+      ]
+    },
+    {
+      "said": "There needs to be a way of seeing claude sub usage in the app",
+      "rule": "Every app's Subscriptions page reads the default Claude account's usage when asked, and says \"Usage unavailable for this sign-in\" where its sign-in can't be asked (a setup token's has no profile scope)",
+      "decided": "2026-11-24",
+      "source": [
+        {
+          "issue": "BaudeInternal#204"
+        }
+      ]
+    },
+    {
+      "said": "ChatGPT started work on a providers screen to separate work and personal accounts (the owner's request to finish it; review: a chat's account must be visible)",
+      "rule": "Every app shows the account a chat runs under: its status bar host tooltip (\"Account: <name>\"), Copy Transcript's header (\"Account\"), Meta's list of chats; a sign-in card in a chat under a Claude account signs in to that account (a folder account's: claude auth login with its folder; a token account's: its token replaced), never the CLI's own sign-in; Meta's card signs in to the account Meta runs under",
+      "decided": "2026-11-25",
+      "source": [
+        {
+          "session": "b3845b21-55ac-4aab-a769-fb8517403c51",
+          "message": "ac03d59c-4c08-4acd-87a6-78a79a1e0dc9"
+        }
+      ]
+    },
+    {
+      "said": "(coordinator, from the review) put all copy in schema/copy; the setup-token line becomes the entry's placeholder; no subtext",
+      "rule": "Every app takes the page's wording from schema/copy/subscriptions.json; no row subtitles",
+      "decided": "2026-11-25",
+      "source": [
+        {
+          "session": "b3845b21-55ac-4aab-a769-fb8517403c51",
+          "message": "ac03d59c-4c08-4acd-87a6-78a79a1e0dc9"
+        }
+      ]
+    },
+    {
+      "said": "claude auth login with a profile dir should pre preferred over oauth. similar to how we fall back to agent forwarding if we can't do provider forwarding (or vice versa). oauth token login should be used for things such as mobile where we can't guarantee the claude code binary.",
+      "rule": "Every app adds a Claude account on a host that has claude as a config folder of its own there (CLAUDE_CONFIG_DIR), signed in to with claude auth login run by that host with the folder: the host passes the sign-in page's link to the app (any device opens it) and the code the page shows is pasted back in the app and fed to the login; the host keeps only the folder, no token, and the account's chats run claude with CLAUDE_CONFIG_DIR set to it. An existing signed-in folder on the host can be used instead. A token from claude setup-token is the fallback, used only where claude can't be guaranteed: a host without claude, and the phone as a host",
+      "decided": "2026-11-25",
+      "source": [
+        {
+          "session": "b3845b21-55ac-4aab-a769-fb8517403c51",
+          "message": "7d38ce29-c6e4-4827-b56a-d688129471eb"
+        }
+      ]
+    },
+    {
+      "said": "(coordinator, from the owner's rule that only the owner decides overrides) the phone's Settings row in place of the page switcher was an agent's override",
+      "rule": "Every app reaches Subscriptions as Settings' second page through the same page switcher (General, Subscriptions; on a narrow screen, the bar at the foot); no app opens it from a row",
+      "decided": "2026-11-25",
+      "source": [
+        {
+          "session": "b3845b21-55ac-4aab-a769-fb8517403c51",
+          "message": "7d38ce29-c6e4-4827-b56a-d688129471eb"
+        }
+      ]
+    },
+    {
+      "said": "(review of PR 423, the coordinator's decision) the phone-as-host token accounts are kept but no phone chat uses them, pending the owner's terms-of-use question: hide them so nothing looks like it works and doesn't",
+      "rule": "No app lists or adds accounts for the phone as a host until the owner decides whether its chats may use setup tokens: the phone's own Subscriptions page shows no provider groups for it, and the phone as a host answers the accounts request with \"unsupported operation\"",
+      "decided": "2026-11-25",
+      "source": [
+        {
+          "session": "b3845b21-55ac-4aab-a769-fb8517403c51"
+        }
+      ]
+    },
+    {
+      "said": "(review of PR 423, the coordinator's decision) claude won't write a user setting through a linked settings.json; the owner hates windows popping up",
+      "rule": "Every app's Claude folder account made on a host links the host's Claude folder's projects, CLAUDE.md, commands, agents, skills, plugins, hooks and output-styles into the account's folder, and copies, as the folder is made, the host's settings.json and its user MCP servers (~/.claude.json's mcpServers) into the folder's own settings.json and .claude.json (each account's settings are then its own, as a Codex account's are); claude auth login run by a host opens no browser there (BROWSER is a no-op): the app shows the page's link",
+      "decided": "2026-11-25",
+      "source": [
+        {
+          "session": "b3845b21-55ac-4aab-a769-fb8517403c51"
+        }
+      ]
+    }
+  ]
+}

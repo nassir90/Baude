@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "An edit proposed to a page of a notebook, kept by the notebook's host (edits.json, beside records.json) until the user accepts or rejects it in Record.",
+  "properties": {
+    "id": {
+      "type": "string",
+      "description": "Its id."
+    },
+    "notebook": {
+      "type": "string",
+      "description": "Its notebook's id."
+    },
+    "page": {
+      "type": "string",
+      "description": "Its page's name."
+    },
+    "old": {
+      "type": "string",
+      "description": "What it replaces (empty: it adds at the page's end)."
+    },
+    "new": {
+      "type": "string",
+      "description": "What it puts in."
+    },
+    "start": {
+      "type": "integer",
+      "description": "Where what it replaces starts in the page's text."
+    },
+    "status": {
+      "enum": ["pending", "accepted", "rejected", "withdrawn"],
+      "description": "pending: waiting for the user; accepted, rejected; withdrawn: taken back."
+    },
+    "t": {
+      "type": "number",
+      "description": "When it was proposed, in seconds since the epoch."
+    },
+    "by": {
+      "type": "string",
+      "description": "Who proposed it, or revised it last: Meta, an agent's own name."
+    },
+    "gone": {
+      "type": "boolean",
+      "description": "(edits) What it replaces isn't on the page as it was any more."
+    }
+  },
+  "required": ["id", "notebook", "page", "old", "new", "status"],
+  "additionalProperties": false
+}

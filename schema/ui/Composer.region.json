@@ -79,6 +79,7 @@
       "parts": [
         {
           "name": "markdown shown as typed",
+          "decisions": [{"said": "In every formatted input box, > shows as a quote as it does once sent", "rule": "Every app's formatted boxes (the chat's, Meta's, Send Feedback's) show a line starting with > as a quote while it's written, as a sent quote looks: a rule at its left, its text set in past it and faded, not italic, the > hidden off the caret's line", "decided": "2026-11-23", "source": [{"issue": "BaudeInternal#201"}]}],
           "shows": "The text is styled live like chat messages while still plain text: # headings at the chat's heading sizes, **bold**, *italic*, `inline code` (monospace, shaded), ``` fenced code blocks (one rounded shaded background behind all lines, fence lines dim, monospace), bullet lists with real bullets (- * + typed become • at the top level, ◦ one level in; sent back as -) with hanging indent, numbered lists, > quotes. Markdown symbols (#, **, `) are hidden except on the line the caret is on, where they show dim. @names the catalogue knows are coloured (green, bold, tinted background), and the @ search being typed too."
         }
       ]

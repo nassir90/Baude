@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "A waiting edit taken back. Answered with edit.",
+  "properties": {
+    "op": {
+      "const": "edit_withdraw",
+      "description": "What it is."
+    },
+    "req": {
+      "type": ["integer", "null"],
+      "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "notebook": {
+      "type": "string",
+      "description": "The notebook: its id, or its name (any case)."
+    },
+    "id": {
+      "type": "string",
+      "description": "The edit's id."
+    }
+  },
+  "required": ["op", "notebook", "id"],
+  "additionalProperties": false
+}

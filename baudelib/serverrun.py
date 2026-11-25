@@ -12,8 +12,8 @@ import time
 import uuid
 
 from baudelib import (
-    agentproxy, emissionlink, emissiontools, hostaccounts, hostdb, hostfiles, hostfixes, hostkube, hostlogin, mesh, meshtools,
-    hostterminal, multiplexlink, routines, wire, wording, worktree,
+    agentproxy, emissionlink, emissiontools, hostaccounts, hostdb, hostfiles, hostfixes, hostkube, hostlogin, mesh,
+    meshtools, hostterminal, multiplexlink, notes, routines, wire, wording, worktree,
 )
 from baudelib.serverstate import (
     APPS, BOT_PICTURE_MAX, Conn, FRAME_KEYS, _mtime, _write_json, _write_text, bot_dir, clean_env,
@@ -413,8 +413,9 @@ class ServerRunning:
             return reply("file", **self.read_file(msg.get("path"), msg.get("limit")))
         if op == "task_output":
             return reply("file", **self.task_output(msg.get("session"), msg.get("path"), msg.get("limit")))
-        if op == "notes":  # (Record's notebooks here, for another machine's Record: listed, or changed; one at a time,
-            self.notes_ops.put((msg, reply))  # in the order asked, on a thread of their own: _notes)
+        if op == "notes" or op in notes.EDIT_OPS:  # (Record's notebooks here, for another machine's Record: listed, or
+            self.notes_ops.put((msg, reply))  # changed; their pages' edits; one at a time, in the order asked, on a
+            # thread of their own: _notes)
             return None
         if op == "catalogue":  # (on a thread of its own: it waits for the catalogue to be made)
             def catalogue():

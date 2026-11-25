@@ -1,0 +1,37 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "A waiting edit changed: what it puts in, and what it replaces if old_text is given (found once in the page, not in another waiting edit's passage). It stays one edit, by by now; new_text the same as what it replaces takes it back. Answered with edit.",
+  "properties": {
+    "op": {
+      "const": "edit_revise",
+      "description": "What it is."
+    },
+    "req": {
+      "type": ["integer", "null"],
+      "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "notebook": {
+      "type": "string",
+      "description": "The notebook: its id, or its name (any case)."
+    },
+    "id": {
+      "type": "string",
+      "description": "The edit's id."
+    },
+    "new_text": {
+      "type": "string",
+      "description": "What it puts in now."
+    },
+    "old_text": {
+      "type": "string",
+      "description": "What it replaces now; left out: as it was."
+    },
+    "by": {
+      "type": "string",
+      "description": "Who's proposing it, by name (Meta, an agent's own name): kept with the edit, and shown with it."
+    }
+  },
+  "required": ["op", "notebook", "id", "new_text", "by"],
+  "additionalProperties": false
+}

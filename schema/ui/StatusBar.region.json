@@ -20,8 +20,9 @@
     },
     {
       "name": "folder and last turn",
-      "shows": "Takes the room left, one line, cut with … at the end. The chat's folder as people say it (home shown as ~, \"~/projects/x\"), plus \" (worktree <name>)\" when the chat works in a git worktree; for another host's chat, that folder as its host says it. After three spaces, the last turn's summary: \"<N> turns · <seconds>s · in <tokens> / out <tokens> tok\" (tokens as 950, 12.4k, 1.2M) after each finished turn; \"<N> tools\" right after claude starts; blank for a network chat just attached.",
-      "text": ["{n} turns · {s}s · in {tokens} / out {tokens} tok", "{n} tools"],
+      "decisions": [{"said": "in and out before the token counts can be a down arrow and an up arrow", "rule": "Every app writes a turn's tokens as ↓ read and ↑ written", "decided": "2026-11-24", "source": [{"issue": "BaudeInternal#210"}]}],
+      "shows": "Takes the room left, one line, cut with … at the end. The chat's folder as people say it (home shown as ~, \"~/projects/x\"), plus \" (worktree <name>)\" when the chat works in a git worktree; for another host's chat, that folder as its host says it. After three spaces, the last turn's summary: \"<N> turns · <seconds>s · ↓ <tokens> / ↑ <tokens> tok\" (tokens as 950, 12.4k, 1.2M) after each finished turn; \"<N> tools\" right after claude starts; blank for a network chat just attached.",
+      "text": ["{n} turns · {s}s · ↓ {tokens} / ↑ {tokens} tok", "{n} tools"],
       "actions": [{"by": "hover", "does": "Tooltip: the full folder path"}]
     },
     {
@@ -41,8 +42,9 @@
     },
     {
       "name": "context meter",
-      "shows": "The word \"context\" and a 110 px wide, 16 px high bar at the far right. The count \"24k / 200k\" is drawn inside the bar (small, tabular figures): in the window background colour over the filled part, in the text colour after it. The fill is the accent colour up to 60 %, amber (warning) past 60 %, red past 85 %. Past the window (\"12.4k / 8.2k\") the bar is full. After a turn ended with claude saying the prompt is too long, the bar is full too. Refreshed at most once a second during a turn, and when the model changes.",
-      "copy": ["context_usage.label", "context_usage.tooltip", "context_usage.usage_percent", "context_usage.window_known", "context_usage.used_no_limit", "context_usage.unknown_no_limit"],
+      "decisions": [{"said": "No need for the word context left of the bar: the bar says what it is", "rule": "Every app draws the context meter as the bar alone, with no word before it", "decided": "2026-11-24", "source": [{"issue": "BaudeInternal#209"}]}],
+      "shows": "A 110 px wide, 16 px high bar at the far right. The count \"24k / 200k\" is drawn inside the bar (small, tabular figures): in the window background colour over the filled part, in the text colour after it. The fill is the accent colour up to 60 %, amber (warning) past 60 %, red past 85 %. Past the window (\"12.4k / 8.2k\") the bar is full. After a turn ended with claude saying the prompt is too long, the bar is full too. Refreshed at most once a second during a turn, and when the model changes.",
+      "copy": ["context_usage.tooltip", "context_usage.usage_percent", "context_usage.window_known", "context_usage.used_no_limit", "context_usage.unknown_no_limit"],
       "actions": [
         {"by": "hover", "does": "Tooltip (it is a tooltip, there is no popover): \"Context window usage\" then the percentage and a line per category of what fills it (\"Messages: 160k\", categories with no tokens or deferred ones left out): \"Context window usage: 90%\" + categories. Before the session has said, \"Context window usage\", the model's window \"{n} tokens\" when known, and \"What's used is said once its session starts\""}
       ]

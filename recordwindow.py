@@ -220,6 +220,9 @@ class Window(RecordHosts, Adw.ApplicationWindow, feedback.FeedbackHost, viewers.
         self.notes_seen = {}  # (by host: its notebooks as last listed here, its info's notes: on_network)
         self.listed_at, self.list_later = {}, set()  # (by host: when it was last asked; hosts to ask in a moment)
         self.list_whole = set()  # (hosts to list whole next, not only what's changed: list_notes)
+        self.edits_seen = {}  # (by host: its info's edits as its edits were last asked for: fetch_edits)
+        self.handed = set()  # (hosts handed the edits this Record kept for them: hand_edits)
+        self.deciding = set()  # (edits whose decision's being sent their host: send_unsent)
         books.append(self.books_head)
         self.notebook_list = Gtk.ListBox()
         self.notebook_list.add_css_class("navigation-sidebar")
@@ -271,7 +274,7 @@ class Window(RecordHosts, Adw.ApplicationWindow, feedback.FeedbackHost, viewers.
         view.append(wording.say("meta_settings.full_width"), "win.fullwidth")
         menu.append_section(None, view)
         tools = Gio.Menu()  # (Baude's views over the window; Files and Git are in the right bar, code in tabs)
-        for title, page in ((wording.say("window.kubernetes_menu"), "kube"),
+        for title, page in ((wording.say("window.kubernetes"), "kube"),
                             (wording.say("window.database_schemas"), "db")):
             tools.append(title, f"win.viewer::{page}")
         tools.append(wording.say("multiplex.terminal_menu"), "win.viewer::terminal")
@@ -431,8 +434,9 @@ class Window(RecordHosts, Adw.ApplicationWindow, feedback.FeedbackHost, viewers.
         self.store.sender = self.send_notes
         self.host_dd.set_choices(self.note_hosts())
         self.host_dd.select(self.store.picked)
+        self.start_network()  # (this machine's host process too: the edits waiting on its notebooks' pages are its)
+        self.start_host_here()  # (started if it isn't running, and its edits fetched once it's there)
         if self.store.picked != HERE_HOST:  # (another host picked when it last closed: its notebooks, there or not)
-            self.start_network()
             self.show_host(self.store.picked)
         meshui.watch_github(self, Window.github_folders, Window._github_changed)
         update.watch_input(self)  # (what update.quiet reads: a new version waits while you're at it)
@@ -715,8 +719,10 @@ class Window(RecordHosts, Adw.ApplicationWindow, feedback.FeedbackHost, viewers.
         return [f"- session: {os.path.splitext(os.path.basename(chat.get('path') or '-'))[0]} "
                 f"({book()} {full_name(t) if t else '-'})",
                 wording.say("report.folder_line", folder=folders[0] if folders else '-'),
-                f"- Record: {os.path.join(os.path.dirname(os.path.realpath(__file__)), 'record.py')}",
-                *feedback.report_lines([(wording.say("report.the_chat"), self.report), ("Meta", self.chat.report)])]
+                f"- Record: {os.path.join(os.path.dirname(os.path.realpath(__file__)), 'record.py')}"]
+
+    def feedback_transcripts(self):
+        return feedback.report_lines([(wording.say("report.the_chat"), self.report), ("Meta", self.chat.report)])
 
     def report(self, most=None):
         """The chat open as text for an issue (Copy Transcript for an Issue; a note sent with Send Feedback): its model
@@ -1294,10 +1300,11 @@ class Window(RecordHosts, Adw.ApplicationWindow, feedback.FeedbackHost, viewers.
             if r == "delete" and name in notebook["pages"]:
                 self.tabs.close(("note", name))
                 notebook["pages"].pop(name, None)
-                for p in self.chat.pending(notebook):  # (Meta's edits waiting on it: gone with it, said so)
+                self.store.save_now()  # (its host told it's gone first)
+                for p in self.chat.pending(notebook):  # (the edits waiting on it: gone with it, said so to its host)
                     if p["page"] == name:
                         p["status"] = "rejected"
-                self.store.save()
+                        self.decide_edit(p, False)
                 self.pages.fill()
                 self.chat.show_pending_bar()
                 self.chat.edit_cards_changed()

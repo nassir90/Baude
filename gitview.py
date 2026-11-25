@@ -474,8 +474,11 @@ def first_line_middle(label):
 
 
 def first_line_top(label):
-    """How far down a label its first line's top is, px (from its layout alone, as first_line_middle)."""
-    return label.get_layout().get_iter().get_line_yrange()[0] / Pango.SCALE
+    """How far down a label its first line's ink is, px: the higher of its glyphs' tops and its chips', pills' and
+    logos' drawn tops (LinkLabel gives their places those as ink), not the font's ascent (from its layout alone, as
+    first_line_middle)."""
+    ink, logical = label.get_layout().get_iter().get_line_extents()
+    return (ink.y if ink.height else logical.y) / Pango.SCALE
 
 
 class GitGutter(Gtk.Widget):

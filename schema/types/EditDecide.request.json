@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "A waiting edit accepted or rejected (the user's, in Record). Accepted: the one asking has put its new text in the page in its passage's place already (its own notes write, sent before this); the host keeps what became of it. Answered with edit.",
+  "properties": {
+    "op": {
+      "const": "edit_decide",
+      "description": "What it is."
+    },
+    "req": {
+      "type": ["integer", "null"],
+      "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "notebook": {
+      "type": "string",
+      "description": "The notebook: its id, or its name (any case)."
+    },
+    "id": {
+      "type": "string",
+      "description": "The edit's id."
+    },
+    "accept": {
+      "type": "boolean",
+      "description": "true: accepted; false: rejected."
+    }
+  },
+  "required": ["op", "notebook", "id", "accept"],
+  "additionalProperties": false
+}

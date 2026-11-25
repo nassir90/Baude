@@ -125,10 +125,10 @@ class DiaryEditor(DiaryFind, Gtk.Box, FindInText):
                                                           lambda: self.win.store.spell_check, skip=("proposal-old",))
         self.view.restyled = self._heading_looks
         self._heading_looks()
-        Adw.StyleManager.get_default().connect("notify::dark", lambda *_: self.notebook is not None and self._highlight())
+        widgets.watch_style(self, "notify::dark", lambda editor: editor.notebook is not None and editor._highlight())
         self.accent_changed()
         for what in ("notify::dark", "notify::accent-color"):  # (the theme's shade of it; the system's accent)
-            Adw.StyleManager.get_default().connect(what, lambda *_: self.accent_changed())
+            widgets.watch_style(self, what, DiaryEditor.accent_changed)
         tags = self.buf.get_tag_table()  # (the @'s unseen, though "ref" colours the rest of its @name)
         tags.lookup("logo-at").set_priority(tags.get_size() - 1)
         self.buf.connect("changed", self._changed)

@@ -1,8 +1,9 @@
 """Baude's commands in ~/.local/bin: baude, record, emission and multiplex (the apps), baude-headless (the host process: what ssh
-runs on a host, wire.HOST_COMMAND) and baude-oneshot. Each is a small script that runs this checkout's entry point
-with the Python that wrote it. install writes them all (each app's --install, `baude_headless.py install`); refresh
-writes again the ones that have fallen behind as Baude, Record and the host process start (the host process: its own
-two), so they follow the checkout as it updates or moves. No GTK: a host may not have it."""
+runs on a host, wire.HOST_COMMAND), baude-oneshot and baude-mcp (the mesh and the notebooks as an MCP server). Each is
+a small script that runs this checkout's entry point with the Python that wrote it. install writes them all (each
+app's --install, `baude_headless.py install`); refresh writes again the ones that have fallen behind as Baude, Record
+and the host process start (the host process: its own three), so they follow the checkout as it updates or moves.
+No GTK: a host may not have it."""
 import os
 import re
 import shlex
@@ -13,8 +14,9 @@ ROOT = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))  # (the chec
 # startup.launch_command does, rather than running the file)
 NAMES = {"baude": ("baude", True), "record": ("record", False), "emission": ("emission", False),
          "multiplex": ("multiplex", False),
-         "baude-headless": ("baude_headless", False), "baude-oneshot": ("baude_oneshot", False)}
-HOST_NAMES = ("baude-headless", "baude-oneshot")
+         "baude-headless": ("baude_headless", False), "baude-oneshot": ("baude_oneshot", False),
+         "baude-mcp": ("baude_mcp", False)}
+HOST_NAMES = ("baude-headless", "baude-oneshot", "baude-mcp")
 _ROOT_LINE = re.compile(r"^root=(.+)$", re.M)
 
 

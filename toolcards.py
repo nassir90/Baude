@@ -258,7 +258,7 @@ def tool_input_view(name, inp):
     elif base == "Write" and "file_path" in inp:
         content = inp.get("content") or ""
         lines = content.splitlines()
-        add(_path_label(inp["file_path"], wording.say("tool_calls.line_count", n=len(lines))))
+        add(sel_label(wording.say("tool_calls.line_count", n=len(lines))))
         shown = "\n".join(lines[:2000]) + ("\n" + wording.say("tool_calls.more_lines", n=len(lines) - 2000) if len(lines) > 2000 else "")
         add(CodeBlock(shown, LANG_BY_EXT.get(os.path.splitext(inp["file_path"])[1], ""), path=inp["file_path"]))
         rest = None

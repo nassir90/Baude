@@ -30,6 +30,12 @@ class TerminalPane(Gtk.Box):
         self.tabs.set_shortcuts(Adw.TabViewShortcuts.NONE)  # (the window's own keys: its tabs', its chats')
         self.append(Adw.TabBar(view=self.tabs, autohide=True))
         self.append(self.tabs)
+        import multiplexterm
+        multiplexterm.shortcuts(self, {"t": self.open, "w": self.close_current})
+
+    def close_current(self):
+        if page := self.tabs.get_selected_page():
+            self.tabs.close_page(page)
 
     def open(self, where=None, name=None):
         """A new terminal on where (the host picked, if none): its login shell there."""
@@ -135,6 +141,10 @@ class TerminalView(Gtk.Box):
 
     def open(self):
         """Shown, with a terminal on the host picked if it has none; or, out, its window brought up."""
+        import multiplexterm
+        if why := multiplexterm.available():
+            widgets.toast(self.win, why)
+            return
         if self.window is not None:
             self.window.present()
             if self.pane.tabs.get_n_pages() == 0:

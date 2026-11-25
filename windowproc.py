@@ -852,6 +852,7 @@ class WindowProc:
         self.apply_read_only()
         self.sidebar.fill()
         self.panel.git_page.chat_changed()  # (its own Git page, in this folder too)
+        self.input.grab_focus()
 
     # ---- read-only sessions (☰ → Read-only session): no text box, for a chat you only watch (tailing one with
     # Signal on, say); the status line, with the context it uses, stays. Remembered per session. A session another

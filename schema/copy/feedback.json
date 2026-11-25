@@ -8,6 +8,7 @@
     "regions": ".input {$n :number} .match $n one {{{$n} region}} * {{{$n} regions}}",
     "click_to_mark": "click to mark regions",
     "remove_capture": "Remove this capture",
+    "attach_transcripts": "Attach open chat transcripts",
     "saved": "Feedback saved",
     "saved_filing": "Feedback saved, filing it…",
     "open_folder": "Open folder",

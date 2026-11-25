@@ -183,7 +183,9 @@ class ClaudeProc:
                 os.close(token_fd)
         threading.Thread(target=self._read, args=(self.p.stdout, False), daemon=True).start()
         threading.Thread(target=self._read, args=(self.p.stderr, True), daemon=True).start()
-        self.init_rid = self.control({"subtype": "initialize", "hooks": None})
+        self.init_rid = self.control({"subtype": "initialize", "hooks": None, "perTaskStopAffordance": True})
+        # (perTaskStopAffordance: every app has a stop of its own for each background task, stop_task, so claude's
+        # interrupt stops only the turn and its background subagents go on; not said, it kills them with the turn)
 
     def _read(self, stream, is_err):
         for line in stream:

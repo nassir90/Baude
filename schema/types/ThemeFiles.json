@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "A theme's files as they're written: what's kept to put one back (an undo).",
+  "properties": {
+    "css": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "theme.css's text, or null with none."
+    },
+    "tokens": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "description": "tokens.json's: a resolver document (schema/tokens/baude.resolver.json's format, its sources written in it) whose sets go over Baude's tokens, then its theme modifier's light or dark context over Baude's light or dark; colours of the libadwaita and baude groups only. null with none."
+    }
+  },
+  "additionalProperties": false
+}

@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "themes' answer: each theme, by name.",
+  "properties": {
+    "op": {
+      "const": "themes",
+      "description": "What it is."
+    },
+    "req": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "themes": {
+      "type": "array",
+      "items": {
+        "$ref": "Theme.json"
+      },
+      "description": "Each one, in order."
+    }
+  },
+  "required": [
+    "op"
+  ],
+  "additionalProperties": false
+}

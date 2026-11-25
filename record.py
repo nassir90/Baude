@@ -320,11 +320,15 @@ def main():
     import argparse
     ap = argparse.ArgumentParser(prog="record", description="Read AI prose with a peer who knows what you know.")
     ap.add_argument("--chat", help="a Claude Code transcript (.jsonl) to read")
+    ap.add_argument("--no-theme", action="store_true",
+                    help="start in Default's look, whatever theme Settings has (BAUDE_NO_THEME=1)")
     ap.add_argument("--install", action="store_true",
                     help=wording.say("install.install_help", where=apps_place()))
     ap.add_argument("--uninstall", action="store_true",
                     help=wording.say("install.uninstall_help", where=apps_place()))
     args = ap.parse_args()
+    if args.no_theme:
+        os.environ["BAUDE_NO_THEME"] = "1"
     if args.install:
         install()
         print("\n".join(wording.say("install.installed", path=p)

@@ -62,7 +62,7 @@ private fun keyBytes(t: HostTerm, key: String): String = when (key) {
 @Composable
 fun TerminalPane(t: HostTerm, modifier: Modifier = Modifier) {
     val c = LocalBaude.current
-    val dark = c.window == DarkBaude.window
+    val dark = c.dark
     val px = with(LocalDensity.current) { Type.mono.fontSize.toPx() }
     val view = remember(t) { arrayOfNulls<TermView>(1) }
     val activity = androidx.compose.ui.platform.LocalContext.current as? android.app.Activity

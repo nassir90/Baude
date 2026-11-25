@@ -100,6 +100,13 @@ object MetaSet {
             oneOf("accent") { listOf("system") + Settings.ACCENTS.keys },
             { v -> saved { Settings.accent.value = (v as String).takeIf { it in Settings.ACCENTS } } },
             row = { f, x -> AccentRow(f, x) }),
+        "theme" to MetaSetting("theme", { Wording.SharedSettings.theme }, { Settings.theme.value ?: Themes.DEFAULT },
+            {
+                Themes.ask(Mesh.app)
+                Themes.names().joinToString("|")
+            },
+            oneOf("theme") { Themes.names() }, { v -> saved { Themes.pick(Mesh.app, v as String) } },
+            row = { f, x -> ThemeRow(f, x) }),
         "code_font" to MetaSetting("code_font", { Wording.SharedSettings.codeFont },
             { Settings.codeFont.value?.takeIf { it in CodeFont.FONTS } ?: CodeFont.DEFAULT }, { CodeFont.FONTS.keys.joinToString("|") },
             oneOf("code_font") { CodeFont.FONTS.keys.toList() }, { v -> saved { Settings.codeFont.value = v as String } },

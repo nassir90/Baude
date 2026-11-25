@@ -214,12 +214,26 @@ class Terminal(Gtk.Overlay):
             self.on_exit(self, status)
 
     def colours(self):
-        """The window's own colours: its text, on its background (light or dark as it is)."""
+        """The window's own colours: its text, on its background (light or dark as it is); a theme's window colours,
+        while one's drawn (Settings → Theme)."""
         dark = Adw.StyleManager.get_default().get_dark()
         fg, bg = Gdk.RGBA(), Gdk.RGBA()
         fg.parse("#e8e6e3" if dark else "#1f1f1f")
         bg.parse("#1e1e1e" if dark else "#ffffff")
+        import themelook
+        if themelook.drawn() is not None:
+            style = self.get_style_context()
+            found_bg, theme_bg = style.lookup_color("window_bg_color")
+            found_fg, theme_fg = style.lookup_color("window_fg_color")
+            if found_bg and found_fg:
+                bg = theme_bg
+                bg.alpha = 1.0
+                a = theme_fg.alpha  # (its text as it's seen on that background: VTE's is opaque)
+                fg.red, fg.green, fg.blue = (getattr(theme_fg, c) * a + getattr(bg, c) * (1 - a)
+                                             for c in ("red", "green", "blue"))
         self.vte.set_colors(fg, bg, None)
+
+    accent_changed = colours  # (themelook's: a theme drawn, or Default again)
 
     def stop(self):
         """Its program ended (SIGHUP, as a terminal closed sends it)."""

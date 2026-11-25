@@ -12,6 +12,8 @@
     "baudewindow.py:BaudeWindow.open_settings",
     "theming.py:settings_code_font",
     "theming.py:settings_accent",
+    "themelook.py:settings_row",
+    "themelook.py:apply",
     "theming.py:follow_accent",
     "theming.py:settings_switch",
     "theming.py:settings_size",
@@ -80,7 +82,7 @@
     },
     {
       "name": "General group (no title)",
-      "shows": "One group of six rows, in this order.",
+      "shows": "One group of seven rows, in this order.",
       "parts": [
         {
           "name": "Full-width text",
@@ -116,7 +118,7 @@
         },
         {
           "name": "Accent Colour",
-          "shows": "A row titled \"Accent Colour\" with a drop-down. Its first entry is \"System\" (the platform's own accent), then libadwaita's accents: Blue, Teal, Green, Yellow, Orange, Red, Pink, Purple, Slate. Each entry, in the list and in the closed drop-down, is a 12 px round dot of that colour then the name (System's dot is the colour the system accent is now).",
+          "shows": "A row titled \"Accent Colour\" with a drop-down. Its first entry is \"System\" (the platform's own accent), then libadwaita's accents: Blue, Teal, Green, Yellow, Orange, Red, Pink, Purple, Slate. Each entry, in the list and in the closed drop-down, is a 12 px round dot of that colour then the name (System's dot is the colour the system accent is now, or the theme's accent while Settings → Theme has one that sets it).",
           "copy": [
             "shared_settings.accent_colour"
           ],
@@ -129,6 +131,64 @@
             {
               "by": "pick an accent",
               "does": "applies it in every open Baude and Record window at once and keeps it; System clears the choice. Baude's and Record's logos take it too: the logo's tile colour (schema/icons/apps) becomes the accent's, in the macOS Dock tile, the windows' icon elsewhere, and the launcher if the app is in the platform's list of apps; with System they keep their own colours"
+            }
+          ]
+        },
+        {
+          "name": "Theme",
+          "shows": "A row titled \"Theme\" with a drop-down: \"Default\" (Baude's own look) first, then the themes this machine's host keeps (its themes request), by name. Before the host answers it lists Default and the theme picked. A theme is a folder on its host, themes/<name>/ in its data folder, of theme.css (GTK CSS, drawn over all of the desktop apps' own, at USER priority) and tokens.json (colours over schema/tokens', light and dark: a resolver document as baude.resolver.json is, setting libadwaita's and baude's colours only); the host works out each colour it makes (Theme.json), and every app draws those. A theme's accent is drawn only while Accent Colour is System; an accent picked there is drawn over it everywhere (the window, the logo, the phone). Each time a theme is drawn it's tried on a probe first (a label and a button in a window no one sees, drawn by hand: their text's colour and size, and how it stands out from what's under it); if the text can't be seen, has no size or can't be told from its background, Default is drawn for this run and a toast in each window says so: \"Couldn't use the theme <name>: <why>. Showing Default.\" Started with BAUDE_NO_THEME=1 (or an app's --no-theme), an app draws Default whatever is picked, till a theme is picked again.",
+          "copy": [
+            "shared_settings.theme",
+            "meta_settings.effort_default",
+            "shared_settings.theme_refused",
+            "shared_settings.theme_no_size",
+            "shared_settings.theme_invisible",
+            "shared_settings.theme_faint"
+          ],
+          "actions": [
+            {
+              "by": "pick a theme",
+              "does": "draws it in every Baude, Record, Emission and Multiplex window here at once (and the other apps here, which follow the setting) and keeps it in settings.json (theme; Default clears it); the theme's files changing on disk (Meta's create_theme) are drawn again as they change"
+            },
+            {
+              "by": "on the phone",
+              "does": "draws it in the app at once and keeps it, with its colours as the host gave them, so it draws from the next start before the host is reached; the theme picked is taken again whenever the host lists it"
+            },
+            {
+              "by": "a theme whose probe's text can't be read (picked, previewed, or its files changed)",
+              "does": "draws Default for this run instead, and says why in a toast in each window here"
+            }
+          ],
+          "decisions": [
+            {
+              "said": "Look at what Claude Mods does for the Claude app's themes: give Baude a way, from the inside, for Meta to create, install and preview themes in Settings, as generic as it can be while staying fast (paraphrased)",
+              "rule": "Every app's Settings has a Theme row after Accent Colour: Default, then the themes of a host (the desktop's own machine's; the phone's, the host picked beside New session). A theme is its host's, worked out there for every app alike, so one theme draws the same colours on every app, light and dark",
+              "decided": "2026-11-25",
+              "source": [
+                {
+                  "issue": "BaudeInternal#218"
+                }
+              ]
+            },
+            {
+              "said": "A theme could make every app unreadable (its text transparent, or everything at opacity 0) with no way back from inside the apps (paraphrased)",
+              "rule": "Every app tries a theme on a probe before keeping it drawn, and draws Default, saying why, when the probe's text can't be read; every app can be started in Default whatever theme is picked (BAUDE_NO_THEME=1, --no-theme)",
+              "decided": "2026-11-25",
+              "source": [
+                {
+                  "issue": "BaudeInternal#218"
+                }
+              ]
+            },
+            {
+              "said": "Picking an Accent Colour did nothing while a theme set its own accent (paraphrased)",
+              "rule": "A theme's accent is drawn only while Accent Colour is System; an accent picked is drawn over it in every app (the window, the logo, the phone), and System's dot shows the theme's accent while it sets one",
+              "decided": "2026-11-25",
+              "source": [
+                {
+                  "issue": "BaudeInternal#218"
+                }
+              ]
             }
           ]
         },

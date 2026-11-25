@@ -1,0 +1,37 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "theme_save's answer: the theme as it is now, and what it had before.",
+  "properties": {
+    "op": {
+      "const": "theme_save",
+      "description": "What it is."
+    },
+    "req": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "theme": {
+      "$ref": "Theme.json",
+      "description": "It, worked out."
+    },
+    "before": {
+      "anyOf": [
+        {
+          "$ref": "ThemeFiles.json"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Its files before, or null if it's new."
+    }
+  },
+  "required": [
+    "op"
+  ],
+  "additionalProperties": false
+}

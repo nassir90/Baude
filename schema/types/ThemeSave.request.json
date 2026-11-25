@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "A theme made, or its files replaced, once its tokens are checked (Meta's create_theme and install_theme, and their undo).",
+  "properties": {
+    "op": {
+      "const": "theme_save",
+      "description": "What it is."
+    },
+    "req": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "name": {
+      "type": "string",
+      "description": "Its name: 1 to 40 letters, digits, spaces, - or _."
+    },
+    "css": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Its theme.css; null or left out: none."
+    },
+    "tokens": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "description": "Its tokens.json (ThemeFiles' tokens); null or left out: none."
+    }
+  },
+  "required": [
+    "op",
+    "name"
+  ],
+  "additionalProperties": false
+}

@@ -60,6 +60,9 @@ abstract class Screens(private val theme: String) {
         Mesh.app = activity.applicationContext
         Settings.load(activity)
         Settings.accent.value = null // (each screen from the settings a phone starts with)
+        Settings.theme.value = null
+        Settings.themeColours.value = null
+        dev.baude.android.Themes.listed.value = emptyList()
         Settings.appearance.value = "system"
         Settings.textScale.value = 1f
         Settings.globalScale.value = 1f
@@ -564,6 +567,60 @@ abstract class Screens(private val theme: String) {
         Settings.meteredUpdates.value = true
         Settings.textScale.value = 1.2f
         render("06-settings-green-larger") { SettingsScreen({}, {}) }
+    }
+
+    // (themes on workshop, as its host works them out (the desktop's scenes_themes.py's three): Settings → Theme
+    // under Sepia, its list open; Home under Midnight; a chat under Forest)
+    @Test fun themeSettings() {
+        themed("Sepia")
+        show { SettingsScreen({}, {}) }
+        laidOut()
+        tap(dev.baude.android.Wording.SharedSettings.theme)
+        laidOut()
+        screen("41a-theme-settings")
+    }
+
+    @Test fun themeHome() {
+        themed("Midnight")
+        render("41b-theme-midnight-home") { HomeScreen() }
+    }
+
+    @Test fun themeChat() {
+        themed("Forest")
+        fill(Mesh.openChat("h1", "a"))
+        render("41c-theme-forest-chat") { ChatShell("h1", "a", back = {}, open = { _, _ -> }, feedback = {}, first = "chat") }
+    }
+
+    // (Accent Colour under Sepia, whose accent is its own: at System, the theme's accent drawn and System's dot in it;
+    // at Red, Red drawn over it)
+    @Test fun themeAccentSystem() {
+        themed("Sepia")
+        show { SettingsScreen({}, {}) }
+        laidOut()
+        tap(dev.baude.android.Wording.SharedSettings.accentColour)
+        laidOut()
+        screen("41d-theme-accent-system")
+    }
+
+    @Test fun themeAccentPicked() {
+        themed("Sepia")
+        Settings.accent.value = "red"
+        show { SettingsScreen({}, {}) }
+        laidOut()
+        tap(dev.baude.android.Wording.SharedSettings.accentColour)
+        laidOut()
+        screen("41e-theme-accent-picked")
+    }
+
+    private fun themed(name: String) {
+        val listed = org.json.JSONArray(THEMES_JSON)
+        FixtureConnection.up(activity, Mesh.hosts.first()) { m ->
+            if (m.optString("op") != "themes") null
+            else org.json.JSONObject().put("op", "themes").put("req", m.opt("req")).put("themes", listed)
+        }
+        val picked = (0 until listed.length()).map { listed.getJSONObject(it) }.first { it.getString("name") == name }
+        Settings.theme.value = name
+        Settings.themeColours.value = Msg.Theme.from(picked)
     }
 
     @Test fun homeLarger() {
@@ -1461,6 +1518,9 @@ private val HOST_KEY = byteArrayOf(0, 0, 0, 11) + "ssh-ed25519".toByteArray() + 
 /** Claude accounts on workshop (Settings → Subscriptions). */
 private val WORK = org.json.JSONObject().put("id", "w1").put("provider", "claude").put("name", "Work").put("kind", "folder")
 private val HOME_ACCOUNT = org.json.JSONObject().put("id", "h2").put("provider", "claude").put("name", "Home").put("kind", "folder")
+
+/** The themes workshop's host lists (scenes_themes.py's, as baudelib/themes.py works them out). */
+private const val THEMES_JSON = """[{"name":"Forest","css":"","light":{"baude.frame":"#dde8d9","baude.inside":"#f6faf3","baude.raised":"#1f33200f","libadwaita.sidebar_bg_color":"#dde8d9","libadwaita.view_bg_color":"#f6faf3","libadwaita.window_bg_color":"#e7efe3","libadwaita.window_fg_color":"#1f3320","libadwaita.view_fg_color":"#1f3320","libadwaita.accent_bg_color":"#3a8a4a","libadwaita.dialog_bg_color":"#f6faf3"},"dark":{"baude.frame":"#1a2419","baude.inside":"#121a12","baude.raised":"#dbe9d60f","libadwaita.sidebar_bg_color":"#1a2419","libadwaita.view_bg_color":"#121a12","libadwaita.window_bg_color":"#162015","libadwaita.window_fg_color":"#dbe9d6","libadwaita.view_fg_color":"#dbe9d6","libadwaita.accent_bg_color":"#3f8f4f","libadwaita.dialog_bg_color":"#1a2419"}},{"name":"Midnight","css":".user-bubble { border-radius: 4px; }\n","light":{"baude.frame":"#dfe6f3","baude.inside":"#f5f8fd","baude.raised":"#1b25400f","libadwaita.sidebar_bg_color":"#dfe6f3","libadwaita.view_bg_color":"#f5f8fd","libadwaita.window_bg_color":"#e8eef8","libadwaita.window_fg_color":"#1b2540","libadwaita.view_fg_color":"#1b2540","libadwaita.accent_bg_color":"#2f6fdb","libadwaita.dialog_bg_color":"#f5f8fd"},"dark":{"baude.frame":"#141b2d","baude.inside":"#0d1220","baude.raised":"#dbe4f50f","libadwaita.sidebar_bg_color":"#141b2d","libadwaita.view_bg_color":"#0d1220","libadwaita.window_bg_color":"#111827","libadwaita.window_fg_color":"#dbe4f5","libadwaita.view_fg_color":"#dbe4f5","libadwaita.accent_bg_color":"#2a8fa6","libadwaita.dialog_bg_color":"#141b2d"}},{"name":"Sepia","css":"","light":{"baude.frame":"#ede3cf","baude.inside":"#fbf6ea","baude.raised":"#3b2f220f","libadwaita.sidebar_bg_color":"#ede3cf","libadwaita.view_bg_color":"#fbf6ea","libadwaita.window_bg_color":"#f3ead7","libadwaita.window_fg_color":"#3b2f22","libadwaita.view_fg_color":"#3b2f22","libadwaita.accent_bg_color":"#b5651d","libadwaita.dialog_bg_color":"#fbf6ea"},"dark":{"baude.frame":"#2b241c","baude.inside":"#1f1a14","baude.raised":"#efe3cc0f","libadwaita.sidebar_bg_color":"#2b241c","libadwaita.view_bg_color":"#1f1a14","libadwaita.window_bg_color":"#261f18","libadwaita.window_fg_color":"#efe3cc","libadwaita.view_fg_color":"#efe3cc","libadwaita.accent_bg_color":"#c07a30","libadwaita.dialog_bg_color":"#2b241c"}}]"""
 
 /** What claude says when its sign-in has run out and can't be renewed. */
 private const val EXPIRED = "Failed to authenticate: this login reached its time limit and cannot be renewed. Run " +

@@ -79,6 +79,8 @@ class SettingsDialog(Adw.PreferencesDialog):
         group.add(self.switch(wording.say("meta_settings.full_width"), None, "win.fullwidth"))
         group.add(theming.settings_code_font(win, "Baude"))
         group.add(theming.settings_accent())
+        import themelook
+        group.add(themelook.settings_row())  # (Record's too: the one setting)
         # (one setting for all four apps: what Record's Settings, or an --install, did since shown)
         win.lookup_action("launcher").set_state(GLib.Variant.new_boolean(LAUNCHER.installed()))
         group.add(self.switch(wording.say("window.show_in", where=LAUNCHER.where), None, "win.launcher"))

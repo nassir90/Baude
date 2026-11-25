@@ -547,7 +547,7 @@ class KubeState(val hostId: String) {
 
 /** The kind colours as the theme has them: ok, starting, bad. */
 @Composable
-fun kubeColours() = if (LocalBaude.current.window == DarkBaude.window) Tokens.dark.kube else Tokens.light.kube
+fun kubeColours() = if (LocalBaude.current.dark) Tokens.dark.kube else Tokens.light.kube
 
 /** ☰ → Kubernetes… (kubeview.KubeView): a cluster's objects as Freelens lists them, read through the host. The title bar
  * and under it the context, the namespaces and the filter; the table of the kind shown (back: the categories to pick

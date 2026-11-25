@@ -328,6 +328,7 @@ fun ChatPage(chat: Chat, name: String, attach: Boolean = true, stop: (() -> Unit
             items(chat.queued.toList(), key = { "queued:" + System.identityHashCode(it) }) { QueuedRow(chat, it, isWorking(chat)) }
             if (session?.cut != null && chat.sender == null) item(key = "cut-short") { CutShortLine(chat) }
         }
+        SummaryPin(list, Gap.chatH + side, Modifier.align(Alignment.TopStart))
         over?.invoke(this, list, Gap.chatH + side)
         if (finding) FindBar(chat, matches, Modifier.align(Alignment.TopCenter).onSizeChanged { findBarHeight = with(density) { it.height.toDp() } })
         // the / list or the @ list over the box: its left side on the / or @ that started it, a gap above the box

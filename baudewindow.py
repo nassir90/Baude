@@ -440,7 +440,7 @@ class BaudeWindow(WindowView, WindowProc, WindowDrafts, WindowSignal, WindowRemo
         # the main area's tabs (panels.MainTabs, Record's too): the chat, pinned first, and code clicked in it, each
         # file a tab of its own (show_code); the tabs' bar only while there's code open
         # (⌥⌘← ⌥⌘→: back and forward through them)
-        self.tabs = panels.MainTabs(shown_alone=False, reopen=self.reopen_tab, closed=BaudeWindow.tab_closed)
+        self.tabs = panels.MainTabs(shown_alone=False, reopen=self.reopen_tab)
         self.tabs.prepend(self.tabs.bar)
         self.tabs.open("chat", lambda: root, wording.say("chats.chat"), icon="baude-claude-symbolic",
                        pinned=True)  # (Claude's logo)
@@ -632,6 +632,10 @@ class BaudeWindow(WindowView, WindowProc, WindowDrafts, WindowSignal, WindowRemo
         if r is None:
             return {"via": "local"}, THIS_MACHINE
         return r.where, remote_name(r)
+
+    def view_remote(self):
+        """The host picked's Remote (None: this machine), for the Kubernetes and database views (kubehost.picked)."""
+        return self.sidebar.shown_remote()
 
     def open_record(self):
         """Record (record.py, beside this file) reading this chat, on its Read tab in whichever notebook's open. One

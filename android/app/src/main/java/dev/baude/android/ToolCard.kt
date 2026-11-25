@@ -481,11 +481,12 @@ fun TaskNoteLine(json: String) {
 fun LazyListScope.drawn(lines: List<Line>, calls: ChatCalls, asking: (Call) -> Ask? = { null }, answer: @Composable (Ask) -> Unit = {},
                         view: ((Call) -> Unit)? = null, line: @Composable (Line) -> Unit) {
     var i = 0
+    val keyed = HashSet<String>()
     while (i < lines.size) {
         val l = lines[i]
         val call = if (l.kind == "call") calls.byId[l.text] else null
         if (call == null) {
-            item { line(l) }
+            item(key = summaryKey(l)?.takeIf { keyed.add(it) }) { line(l) } // (a summary keyed, once: SummaryPin)
             i++
             continue
         }

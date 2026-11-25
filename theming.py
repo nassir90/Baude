@@ -172,6 +172,7 @@ row.entry.focused, row.spin.focused, editablelabel:focus-within { outline: none;
 .statusbar .chat-host { padding: 0 5px; border-radius: 4px; background: alpha(currentColor, 0.1); }
 .sysnote { font-size: {font.small}em; opacity: 0.6; }
 .compact-mark label.error { opacity: 1; }
+.summary-pin { background-color: @baude_inside; padding: 2px 0 4px; border-bottom: 1px solid @baude_rule; }  /* (over the chat's text as it scrolls under) */
 .composer-actions button { min-width: {composer.button}; min-height: {composer.button}; padding: 0; }
 .feedback-actions button { min-width: 34px; min-height: 34px; padding: 0; }
 .attach-chip { background: @baude_raised; border-radius: {radius.card}; padding: 2px 2px 2px 4px; }
@@ -407,6 +408,12 @@ list.navigation-sidebar.kube-side > row { min-height: 26px; padding-top: 1px; pa
 /* a category's gap above it is outside its row, so its hover tint sits evenly around its icon and name */
 list.navigation-sidebar.kube-side > row.kube-side-head-row { margin-top: 9px; }
 .kube-status-line { padding: 4px 12px; font-size: 0.9em; opacity: 0.8; }
+/* the Kubernetes view's dock: its tabs on the frame, its grey, as the bars and the sidebar are */
+.kube-dock-bar { padding-top: 4px; }
+.kube-dock-tab { border-radius: {radius.code} {radius.code} 0 0; padding: 2px 2px 2px 4px; }
+.kube-dock-tab.picked { background-color: @baude_inside; box-shadow: inset 1px 1px @baude_rule, inset -1px 0 @baude_rule; }
+.kube-dock-tab > button { min-height: 0; padding: 2px 6px; }
+.kube-dock-tab > button.circular { min-width: 22px; min-height: 22px; padding: 0; }
 .kube-link { padding: 0 4px; min-height: 0; font-weight: normal; }
 .kube-ok { color: @success_color; }
 .kube-warn { color: @warning_color; }

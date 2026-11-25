@@ -941,6 +941,8 @@ class Window(RecordHosts, Adw.ApplicationWindow, feedback.FeedbackHost, viewers.
             wording.say("window.rename_tip", thing=book().lower()) if self.current else None)
 
     def _selected(self, _lb, row):
+        if getattr(self, "freeing", False):  # (its list let go of as the closed window's freed: nothing's shown)
+            return
         self._show(row.notebook if row else None)
 
     def _show(self, notebook):
@@ -1240,6 +1242,8 @@ class Window(RecordHosts, Adw.ApplicationWindow, feedback.FeedbackHost, viewers.
     def _tab_shown(self):
         """A tab shown: what's in it the one shown (a chat's names put in place; a page remembered, lit in the list);
         nothing open, so said."""
+        if getattr(self, "freeing", False):  # (its tabs let go of as the closed window's freed)
+            return
         child = self.tabs.current()
         if child is not None:
             self.shown_order = [c for c in self.shown_order if c is not child][-40:] + [child]
@@ -1263,8 +1267,6 @@ class Window(RecordHosts, Adw.ApplicationWindow, feedback.FeedbackHost, viewers.
         self.shown_order = [c for c in self.shown_order if c is not child]
         if hasattr(child, "stop"):
             child.stop()
-        if isinstance(child, fixview.FixesPage):
-            widgets.discard(child)  # (its images, and all that holds it)
         if self.switching:  # (another notebook's: what was open is kept as it was)
             return
         if isinstance(child, DiaryEditor):

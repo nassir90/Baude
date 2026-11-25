@@ -1,5 +1,5 @@
 {
-  "description": "A full-window view over the chat that lays a kubeconfig cluster out as Freelens does: a top bar to pick the cluster context, namespaces and a filter, a sidebar of resource categories, a table of the chosen kind's objects with Freelens' columns, the selected object's YAML beside it, and a pod's followed logs or a shell in it under both. Read-only except for pod deletes, each asked first, and what's typed in a pod's shell.",
+  "description": "A full-window view over the chat that lays a kubeconfig cluster out as Freelens does: a top bar to pick the cluster context, namespaces and a filter, a sidebar of resource categories, a table of the chosen kind's objects with Freelens' columns, the selected object's YAML beside it, and pods' followed logs and shells in them under both, a tab each. Read-only except for pod deletes, each asked first, and what's typed in a pod's shell. It reads the clusters of the host picked in the window's host dropdown, through that host's host process, and can move out to a window of its own and back.",
   "apps": [
     "baude",
     "record"
@@ -17,19 +17,25 @@
     "kubeview.py:kube_diagnose",
     "baudewindow.py:BaudeWindow.__init__",
     "record.py:RecordWindow.open_viewer",
-    "kubeview.py:KubeView.build_shell",
     "kubeview.py:KubeView.show_shell",
-    "kubeview.py:KubeView.start_shell",
-    "multiplexterm.py:Terminal"
+    "multiplexterm.py:Terminal",
+    "kubedock.py:KubeDock",
+    "kubedock.py:LogsTab",
+    "kubedock.py:ShellTab",
+    "kubehost.py:Host",
+    "kubehost.py:Follow",
+    "viewwindow.py:Out",
+    "viewwindow.py:ViewWindow"
   ],
   "copy": [
     "kube",
-    "multiplex"
+    "multiplex",
+    "common"
   ],
   "parts": [
     {
       "name": "top bar",
-      "shows": "A bar as tall as a header bar (on macOS with room at the left for the window's traffic lights). From left: the title, a context picker, a namespaces button, a filter box, a gap, a refresh button, a close button. Dragging it moves the window; double-clicking it maximizes.",
+      "shows": "A bar as tall as a header bar (on macOS with room at the left for the window's traffic lights). From left: the title, the host's name, a context picker, a namespaces button, a filter box, a gap, a refresh button, Move to Its Own Window, a close button. Dragging it moves the window; double-clicking it maximizes.",
       "parts": [
         {
           "name": "title",
@@ -37,6 +43,10 @@
           "copy": [
             "window.kubernetes"
           ]
+        },
+        {
+          "name": "host",
+          "shows": "The host the view reads, by name, dim (as ☰ → Terminal's bar names its terminal's host): the one picked in the window's host dropdown when the view opened, this machine's when none is."
         },
         {
           "name": "context picker",
@@ -106,6 +116,31 @@
             {
               "by": "click",
               "does": "Reads the page again (the table fades while it does)."
+            }
+          ]
+        },
+        {
+          "name": "Move to Its Own Window",
+          "shows": "A flat window icon button, tooltip \"Move to Its Own Window\". Hidden while the view is out.",
+          "copy": [
+            "common.move_out"
+          ],
+          "actions": [
+            {
+              "by": "click",
+              "does": "The view moves to a window of its own titled as its heading, all of it as it was (its context, its watch, its dock's tabs); the window under it is left showing what the view covered. The window has a header bar of its own (its window controls, on macOS its traffic lights) over the view, whose bar leaves out the room for them. Opening the view again brings that window up, as it is: nothing is read again (the tabs, the watch and the diagram go on) unless another host is picked. Closing that window (its own close, or the view's ×) puts the view back over the window it came from, shown. Closing the window it came from closes it too."
+            }
+          ],
+          "decisions": [
+            {
+              "said": "Kubernetes and the Database viewer can detach to a window of their own, as Emission does",
+              "rule": "Every desktop app's Kubernetes and database views have Move to Its Own Window in their bar: the same view, still reading, moves to a window of its own; closing that window puts it back over the window it came from",
+              "decided": "2026-11-22",
+              "source": [
+                {
+                  "issue": "BaudeInternal#188"
+                }
+              ]
             }
           ]
         },
@@ -307,116 +342,131 @@
       ]
     },
     {
-      "name": "logs pane",
-      "shows": "Docks under the table and the YAML, the width of both, with a draggable divider (opens at about half the height, at least 140 px tall; the table keeps the rest). A header line: a logs icon, the title \"<pod> · <namespace>\" (heading, truncated in the middle), a small dim state text filling the space (\"following\", \"its previous run\", \"ended (its container stopped)\", \"kubectl exited with <code>\", or \"kubectl: <error>\"), a container picker, then flat buttons: Previous (toggle), Follow (toggle, a down-to-bottom icon, on by default), Wrap (toggle, a wrap icon; remembered across sessions), Find (a find icon), Close (×). Below, the log as read-only code with line numbers (the same code view: highlighted by its language guess, Ctrl+F finds in it, code zoom applies). A log starts at the pod's last 500 lines and keeps the newest 20,000 as it follows (the oldest are dropped a tenth at a time). Opening another pod's logs replaces the first's (and stops its kubectl).",
+      "name": "dock",
+      "shows": "Docks under the table and the YAML, the width of both, with a draggable divider (opens at about half the height, at least 140 px tall; the table keeps the rest), while it has a tab. A strip on the frame, its grey (the bars' and the sidebar's), of a tab per pod's logs or shell in a pod, any number of each, in the order opened: each tab its icon (logs, or a terminal), \"<pod> · <namespace>\" (truncated in the middle) and a small round × (tooltip \"Close\"); the picked tab drawn in the inside's colour, its top corners rounded, joined to what's under it. The picked tab's controls at the strip's end; under the strip, inside, its log or terminal.",
       "copy": [
-        "kube.container",
-        "kube.previous",
-        "kube.previous_tip",
-        "kube.follow_tip",
-        "code_view.wrap",
-        "code_view.find_tip",
-        "kube.close_logs",
-        "kube.following",
-        "kube.previous_run",
-        "kube.ended",
-        "kube.kubectl_exited",
-        "kube.kubectl_error"
-      ],
-      "parts": [
-        {
-          "name": "container picker",
-          "shows": "A drop-down (tooltip \"Container\") of the pod's containers, init containers first and marked \"<name> (init)\". Opens on the container named by the pod's kubectl.kubernetes.io/default-container annotation, else its first non-init container.",
-          "actions": [
-            {
-              "by": "pick one",
-              "does": "Stops the current kubectl and follows that container's log from the start (last 500 lines)."
-            }
-          ]
-        },
-        {
-          "name": "Previous",
-          "shows": "A toggle button labelled \"Previous\", tooltip \"Its previous run's log (one that crashed, say), instead of this one's\". Off whenever a pod is opened.",
-          "actions": [
-            {
-              "by": "toggle",
-              "does": "On: shows the container's previous run's log (not followed; the state text says \"its previous run\"). Off: this run's log, followed."
-            }
-          ]
-        },
-        {
-          "name": "Follow",
-          "shows": "A toggle button, tooltip \"Follow: keep to the newest line (scrolling up stops it, scrolling to the end again goes on)\". On while the log keeps to its newest line.",
-          "actions": [
-            {
-              "by": "toggle",
-              "does": "On: jumps to the end and keeps to the newest line. Off: stays where scrolled."
-            },
-            {
-              "by": "scroll up (wheel, scrollbar drag, or keys Up, Page Up, Home)",
-              "does": "Turns Follow off by itself."
-            },
-            {
-              "by": "scroll back to the end",
-              "does": "Turns Follow on again by itself."
-            }
-          ]
-        },
-        {
-          "name": "Wrap",
-          "shows": "A toggle button, tooltip \"Wrap long lines\", remembered across sessions",
-          "actions": [
-            {
-              "by": "toggle",
-              "does": "Wraps long lines at the pane's width, or scrolls sideways."
-            }
-          ]
-        },
-        {
-          "name": "Find",
-          "shows": "A flat find button, tooltip \"Find (Ctrl+F)\"",
-          "actions": [
-            {
-              "by": "click",
-              "does": "Opens the find bar over the log (see CodeView: find bar)."
-            }
-          ]
-        },
-        {
-          "name": "Close",
-          "shows": "A flat × button, tooltip \"Close the logs (stops following them)\"",
-          "actions": [
-            {
-              "by": "click",
-              "does": "Closes the pane and stops kubectl (it is never left running). Switching context, closing the view or Esc do the same."
-            }
-          ]
-        }
-      ]
-    },
-    {
-      "name": "shell pane",
-      "shows": "Docks where the logs do, instead of them (opening one closes the other), opening at about half the height. A header line: a terminal icon, the title \"<pod> · <namespace>\" (heading, truncated in the middle), a small dim state text filling the space (empty while it runs, \"kubectl exited with <code>\" once it ends, or why there are no terminals here: VTE's GTK 4 build missing), a container picker of the pod's running containers (not init containers), then a flat Close (×) button, tooltip \"Close the shell (ends it)\". Below, a Multiplex terminal running kubectl exec -it in the container: bash if the container has it, else sh. Its text in the window's light or dark colours. Its edges glow in the accent while a Bot is at its terminal tools there, as Emission's page does.",
-      "copy": [
-        "kube.shell",
-        "kube.container",
-        "kube.close_shell",
-        "kube.kubectl_exited",
-        "multiplex.no_vte",
-        "multiplex.not_started"
+        "common.close"
       ],
       "actions": [
         {
-          "by": "pick a container",
-          "does": "Ends the shell and starts one in that container."
+          "by": "click a tab",
+          "does": "Picks it: its log or terminal shown, its controls at the strip's end."
         },
         {
-          "by": "click ×",
-          "does": "Ends the shell (kubectl and the shell in the pod) and closes the pane."
+          "by": "click a tab's ×, or middle-click it",
+          "does": "Closes it and stops what it runs (kubectl; the shell in the pod), never left running; the tab beside it is picked. The last one closed hides the dock. Switching context, another host, closing the view or Esc (the picked tab) do the same."
+        }
+      ],
+      "decisions": [
+        {
+          "said": "The pod-name row under the Kubernetes table should be the shell's grey, and tab-like, holding several log tails and terminals at once, as Freelens does",
+          "rule": "Every app docks pods' logs and shells under the Kubernetes table as tabs on a strip in the frame's grey, any number at once; the picked tab is drawn in the inside's colour, joined to the log or terminal under it",
+          "decided": "2026-11-22",
+          "source": [
+            {
+              "issue": "BaudeInternal#189"
+            }
+          ]
+        }
+      ],
+      "parts": [
+        {
+          "name": "logs tab",
+          "shows": "A pod's logs (its row's logs button; the pod's tab picked again if it has one). Its controls at the strip's end: a small dim state text (\"following\", \"its previous run\", \"ended (its container stopped)\", \"kubectl exited with <code>\", or \"kubectl: <error>\"), a container picker, then flat buttons: Previous (toggle), Follow (toggle, a down-to-bottom icon, on by default), Wrap (toggle, a wrap icon; remembered across sessions, every log's at once), Find (a find icon). Inside under the strip, the log as read-only code with line numbers (the same code view: highlighted by its language guess, Ctrl+F finds in it, code zoom applies). A log starts at the pod's last 500 lines and keeps the newest 20,000 as it follows (the oldest are dropped a tenth at a time).",
+          "copy": [
+            "kube.container",
+            "kube.previous",
+            "kube.previous_tip",
+            "kube.follow_tip",
+            "code_view.wrap",
+            "code_view.find_tip",
+            "kube.following",
+            "kube.previous_run",
+            "kube.ended",
+            "kube.kubectl_exited",
+            "kube.kubectl_error"
+          ],
+          "parts": [
+            {
+              "name": "container picker",
+              "shows": "A drop-down (tooltip \"Container\") of the pod's containers, init containers first and marked \"<name> (init)\". Opens on the container named by the pod's kubectl.kubernetes.io/default-container annotation, else its first non-init container.",
+              "actions": [
+                {
+                  "by": "pick one",
+                  "does": "Stops the current kubectl and follows that container's log from the start (last 500 lines)."
+                }
+              ]
+            },
+            {
+              "name": "Previous",
+              "shows": "A toggle button labelled \"Previous\", tooltip \"Its previous run's log (one that crashed, say), instead of this one's\". Off whenever a pod is opened.",
+              "actions": [
+                {
+                  "by": "toggle",
+                  "does": "On: shows the container's previous run's log (not followed; the state text says \"its previous run\"). Off: this run's log, followed."
+                }
+              ]
+            },
+            {
+              "name": "Follow",
+              "shows": "A toggle button, tooltip \"Follow: keep to the newest line (scrolling up stops it, scrolling to the end again goes on)\". On while the log keeps to its newest line.",
+              "actions": [
+                {
+                  "by": "toggle",
+                  "does": "On: jumps to the end and keeps to the newest line. Off: stays where scrolled."
+                },
+                {
+                  "by": "scroll up (wheel, scrollbar drag, or keys Up, Page Up, Home)",
+                  "does": "Turns Follow off by itself."
+                },
+                {
+                  "by": "scroll back to the end",
+                  "does": "Turns Follow on again by itself."
+                }
+              ]
+            },
+            {
+              "name": "Wrap",
+              "shows": "A toggle button, tooltip \"Wrap long lines\", remembered across sessions",
+              "actions": [
+                {
+                  "by": "toggle",
+                  "does": "Wraps long lines at the pane's width, or scrolls sideways."
+                }
+              ]
+            },
+            {
+              "name": "Find",
+              "shows": "A flat find button, tooltip \"Find (Ctrl+F)\"",
+              "actions": [
+                {
+                  "by": "click",
+                  "does": "Opens the find bar over the log (see CodeView: find bar)."
+                }
+              ]
+            }
+          ]
         },
         {
-          "by": "type",
-          "does": "Goes to the shell in the pod, as in any terminal."
+          "name": "shell tab",
+          "shows": "A shell in a pod (its row's shell button; a new tab each time). Its controls at the strip's end: a small dim state text (empty while it runs, \"kubectl exited with <code>\" once it ends, or why there are no terminals here: VTE's GTK 4 build missing), a container picker of the pod's running containers (not init containers). Inside under the strip, a Multiplex terminal running kubectl exec -it in the container (on the host the view reads, run there by its host process when that's another host, with the kubectl that host is set to use): bash if the container has it, else sh. Its text in the window's light or dark colours. Its edges glow in the accent while a Bot is at its terminal tools there, as Emission's page does.",
+          "copy": [
+            "kube.shell",
+            "kube.container",
+            "kube.kubectl_exited",
+            "multiplex.no_vte",
+            "multiplex.not_started"
+          ],
+          "actions": [
+            {
+              "by": "pick a container",
+              "does": "Ends the shell and starts one in that container."
+            },
+            {
+              "by": "type",
+              "does": "Goes to the shell in the pod, as in any terminal."
+            }
+          ]
         }
       ]
     },
@@ -445,7 +495,7 @@
     },
     {
       "name": "keys",
-      "shows": "Esc closes in layers: the logs, then the YAML, then the view (a filter with text in it clears first). Ctrl+F focuses the filter. Ctrl +/−/0 and Ctrl+scroll over the YAML or logs change the code text size for every code view, not the chat's.",
+      "shows": "Esc closes in layers: the dock's picked tab, then the YAML, then the view (out in a window of its own: not the view) (a filter with text in it clears first). Ctrl+F focuses the filter. Ctrl +/−/0 and Ctrl+scroll over the YAML or logs change the code text size for every code view, not the chat's.",
       "phone": {
         "does": "nothing",
         "why": "Hardware-keyboard shortcuts; every action has a button too",
@@ -454,7 +504,7 @@
       "actions": [
         {
           "by": "key Esc",
-          "does": "Closes the logs, else the YAML, else the view."
+          "does": "Closes the dock's picked tab, else the YAML, else the view."
         },
         {
           "by": "key Ctrl+F",
@@ -522,11 +572,30 @@
     {
       "name": "empty table",
       "shows": "The column headings with no rows; the status line counts \"0 <kinds>\"."
+    },
+    {
+      "name": "another host",
+      "shows": "The bar names the host picked; its contexts, its clusters' objects, YAML, logs and shells are read and run there by its host process. A host that can't be reached says \"<host>: <why>\" in the status line."
+    }
+  ],
+  "decisions": [
+    {
+      "said": "Kubernetes and Database Schemas should run on the host picked in the left pane, as Terminal does",
+      "rule": "Every app's Kubernetes and database views read the clusters and databases of the host picked in the window's host picker (the host ☰ → Terminal opens new terminals on), through that host's host process, and their bar names that host",
+      "decided": "2026-11-22",
+      "source": [
+        {
+          "issue": "BaudeInternal#182"
+        }
+      ]
     }
   ],
   "scenes": [
     "38e-kubernetes",
     "38e-kubernetes-logs",
-    "38e-kubernetes-shell"
+    "38e-kubernetes-shell",
+    "38e-kubernetes-dock",
+    "38e-kubernetes-host",
+    "38e-kubernetes-window"
   ]
 }

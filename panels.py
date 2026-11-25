@@ -14,7 +14,7 @@ from gi.repository import Adw, Gdk, Gio, GLib, Graphene, Gsk, Gtk, Pango  # noqa
 
 from baudelib import tokens  # noqa: E402  (the measures and colours below: schema/tokens, the Android app's too)
 from baudelib import wording  # noqa: E402
-from widgets import ensure_icons, paned_rule, toast, walk  # noqa: E402
+from widgets import discard, ensure_icons, paned_rule, toast, walk  # noqa: E402
 from markdownview import CodeBlock  # noqa: E402
 
 
@@ -243,6 +243,8 @@ class MainTabs(Gtk.Box):
         view.close_page_finish(page, True)
         if self.closed is not None:
             self.closed(key, child)
+        child.unparent()  # (freed, with all it holds: a file's code, the Feedback tab's images. Opened again, it's made
+        discard(child)    # again)
         return True  # (handled: finished here)
 
 

@@ -279,6 +279,11 @@ def open_chat(app, sc):
     vadj = win.scroller.get_vadjustment()
     vadj.set_value(vadj.get_upper())  # (at its end, as a chat opens)
     T.pump(0.4)
+    if "into" in sc:  # (scrolled to the open summary's heading: that many px above the chat's top)
+        fold = next(m.fold for m in T.find(win, baude.chatparts.CompactMark) if m.fold is not None)
+        ok, at = fold.compute_point(win.scroller, baude.Graphene.Point())
+        win.hold_value(vadj.get_value() + at.y + sc["into"])
+        T.pump(0.6)
     if sc.get("ref"):  # (a tap on the Signal link in the reply that names it)
         label = next(w for w in T.find(win, Gtk.Label) if sc["ref"] in (w.get_label() or "") and w.get_mapped())
         ok, at = label.compute_point(win, baude.Graphene.Point().init(10, 10))
@@ -456,6 +461,16 @@ def build(app, sc):
         kv.shell_term.type("ls\n")
         T.pump(0.5)
         win.connect("destroy", lambda *_: kv.hide_shell())
+        return win
+    if name == "kubernetes-dock":
+        win, kv = scenes_chat.kube_window(app)
+        T.pump(0.3)
+        kv.show_logs("jobs/worker-5c4b-klmno")
+        kv.show_shell("shop/api-6f7c-mnopq")
+        T.wait_for(lambda: kv.shell_term is not None and "/app#" in kv.shell_term.screen()["screen"], "its prompt")
+        kv.shell_term.type("ls\n")
+        T.pump(0.5)
+        win.connect("destroy", lambda *_: kv.dock.close_all())
         return win
     if name == "bot-settings":
         win = open_chat(app, sc)

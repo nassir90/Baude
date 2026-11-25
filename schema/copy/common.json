@@ -44,6 +44,7 @@
     "from_who": "from {$author}",
     "agent": "Agent",
     "read_again": "Read it again",
-    "search": "Search"
+    "search": "Search",
+    "move_out": "Move to Its Own Window"
   }
 }

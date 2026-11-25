@@ -21,7 +21,7 @@ try:
 except (ValueError, ImportError):
     Vte = None
 from gi.repository import Adw, Gdk, GLib, Graphene, Gtk, Pango  # noqa: E402
-from baudelib import multiplexlink, tokens, wording  # noqa: E402
+from baudelib import clearrelay, multiplexlink, tokens, wording  # noqa: E402
 
 SCROLLBACK = 10000  # (lines kept above the screen)
 SETTLE_S = 0.4  # (no output this long: what was typed has had its answer, as far as a Bot's told)
@@ -183,10 +183,13 @@ class Terminal(Gtk.Overlay):
         if self.spawned:
             return False
         self.spawned = True
-        envv = [f"{k}={v}" for k, v in {**os.environ, "TERM": "xterm-256color", "COLORTERM": "truecolor",
-                                         "TERM_PROGRAM": "Multiplex", **(env or {})}.items()]
-        self.vte.spawn_async(Vte.PtyFlags.DEFAULT, self.cwd if os.path.isdir(self.cwd) else None, self.argv, envv,
-                             GLib.SpawnFlags.SEARCH_PATH, None, None, -1, None, self._spawned)
+        envs = {**os.environ, "TERM": "xterm-256color", "COLORTERM": "truecolor", "TERM_PROGRAM": "Multiplex",
+                **(env or {})}
+        envv = [f"{k}={v}" for k, v in envs.items()]
+        # (run through clearrelay, which does its clears without a screen of blank rows in the scrollback)
+        self.vte.spawn_async(Vte.PtyFlags.DEFAULT, self.cwd if os.path.isdir(self.cwd) else None,
+                             clearrelay.relayed(self.argv, envs.get("PATH")), envv, GLib.SpawnFlags.SEARCH_PATH,
+                             None, None, -1, None, self._spawned)
         return False
 
     def _spawned(self, _vte, pid, error, *_):
@@ -322,11 +325,12 @@ class HostedTerminal(Terminal):
                  on_close=None, host_name=None):
         self.host_where, self.wanted, self.wanted_cwd, self.attach_to = where, argv, cwd, attach
         self.host_name, self.ch, self.host_id, self.size = host_name, None, None, (0, 0)
+        self.stopped = False  # (closed here: what its host still sends isn't drawn)
         super().__init__(argv or ["sh"], cwd, title, on_exit=on_exit, on_title=on_title, on_close=on_close)
         self.argv = list(argv or [])  # (its host's login shell, if none)
         self.vte.connect("commit", lambda _v, text, _n: self.send({"op": "terminal_in", "data": _b64(
             text.encode() if isinstance(text, str) else text)}))
-        GLib.timeout_add(300, self._resized)
+        self.resizing = GLib.timeout_add(300, self._resized)
 
     def spawn(self, env=None):
         if self.spawned:
@@ -347,6 +351,8 @@ class HostedTerminal(Terminal):
             return GLib.idle_add(self._failed, str(e))
         ch.keep_alive()  # (the host takes SILENT_S without a word for gone: a terminal no one's typing in is still here)
         self.ch = ch
+        if self.stopped:  # (closed while its host was reached)
+            return ch.close()
         cols, rows = self.vte.get_column_count(), self.vte.get_row_count()
         self.size = (cols, rows)
         ch.send({"op": "terminal", "req": 1, "columns": cols, "rows": rows,
@@ -356,7 +362,7 @@ class HostedTerminal(Terminal):
             while (r := ch.reply()) is not None:
                 op = r.get("op")
                 if op == "terminal_out":
-                    GLib.idle_add(self.vte.feed, base64.b64decode(r.get("data") or ""))
+                    GLib.idle_add(self._out, base64.b64decode(r.get("data") or ""))
                 elif op == "terminal_opened":
                     self.host_id = r.get("id")
                 elif op == "terminal_end":
@@ -367,9 +373,15 @@ class HostedTerminal(Terminal):
             return GLib.idle_add(self._failed, str(e))
         GLib.idle_add(self._failed, wording.say("multiplex.host_gone"))
 
+    def _out(self, data):
+        if not self.stopped:
+            self.vte.feed(data)
+        return False
+
     def _failed(self, why):
         if self.status is None:
-            self.vte.feed(f"\r\n{wording.say('multiplex.not_started', error=why)}\r\n".encode())
+            if not self.stopped:
+                self.vte.feed(f"\r\n{wording.say('multiplex.not_started', error=why)}\r\n".encode())
             self._ended(-1, None)
         return False
 
@@ -377,7 +389,7 @@ class HostedTerminal(Terminal):
         if self.status is not None:
             return False
         self.status = status if status is not None else -1
-        if said:
+        if said and not self.stopped:
             self.vte.feed(f"\r\n{said}\r\n".encode())
         if self.ch is not None:
             self.ch.close()
@@ -386,7 +398,8 @@ class HostedTerminal(Terminal):
         return False
 
     def _resized(self):
-        if self.status is not None:
+        if self.status is not None or self.stopped:
+            self.resizing = None
             return False
         now = (self.vte.get_column_count(), self.vte.get_row_count())
         if self.ch is not None and now != self.size:
@@ -403,6 +416,12 @@ class HostedTerminal(Terminal):
 
     def stop(self):
         self.send({"op": "terminal_close"})
+        self.stopped = self.spawned = True  # (not started later on, if it wasn't yet)
+        if self.ch is not None:  # (its host ends it without a word back: its reader let go of now)
+            self.ch.close()
+        if self.resizing is not None:
+            GLib.source_remove(self.resizing)
+            self.resizing = None
 
     def type(self, text):
         if self.status is not None:

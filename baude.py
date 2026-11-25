@@ -73,6 +73,7 @@ import update  # noqa: E402  (a new version from git, restarted onto once idle: 
 baudelib.wire.HEAD_COMMIT = update.STARTED  # (said to the host processes it reaches: logged by one on other code)
 baudelib.wire.HEAD_CLIENT = "baude"  # (listed as Baude among the apps connected to a host)
 import widgets  # noqa: E402  (what Record draws as Baude does: the links' logos; see widgets.py)
+import memreport  # noqa: E402  (what it holds, in its debug report)
 import pickers  # noqa: E402
 import theming  # noqa: E402
 from widgets import ensure_icons  # noqa: E402,F401
@@ -117,6 +118,7 @@ class BaudeApp(Adw.Application):
         ensure_icons()
         pointers.start()
         install_debug_hooks(self)
+        widgets.free_closed_windows(self)
         pickers.press_opens_dropdowns()  # (a dropdown's list open as the mouse goes down on it)
         theming.theme_css()  # (whose stylesheet Baude's look is drawn over: libadwaita's, or a GTK_THEME's)
 
@@ -273,7 +275,9 @@ def install_debug_hooks(app):
     """Inspect a running Baude without a debugger (ptrace is usually off limits):
        kill -USR1 <pid>   every thread's Python stack, written from the signal handler itself, so it
                           comes even when the main thread is stuck
-       kill -USR2 <pid>   each window's state (session, lock, busy, claude, tasks), from the main loop
+       kill -USR2 <pid>   each window's state (session, lock, busy, claude, tasks), and what the process holds
+                          (memreport: its memory, Python's objects, and with PYTHONTRACEMALLOC=25 where they were
+                          allocated), from the main loop
     Both append to ~/.cache/baude/debug-<pid>.txt."""
     import faulthandler
     import signal
@@ -290,6 +294,7 @@ def install_debug_hooks(app):
         for win in app.get_windows():
             if isinstance(win, BaudeWindow):
                 report.write(json.dumps(window_state(win), indent=2, default=str) + "\n")
+        memreport.write(report, path)
         return True  # (keep listening)
     try:
         gi.require_version("GLibUnix", "2.0")

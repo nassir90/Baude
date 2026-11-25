@@ -14,7 +14,7 @@ from gi.repository import Adw, Gdk, Gtk, Pango  # noqa: E402
 from baudelib import wire, wording  # noqa: E402
 import widgets  # noqa: E402
 
-OUT_TIP = "Move to Its Own Window"  # (as a Bot's browser's button says it)
+OUT_TIP = wording.say("common.move_out")  # (as a Bot's browser's button says it)
 
 
 class TerminalPane(Gtk.Box):
@@ -83,6 +83,7 @@ class TerminalPane(Gtk.Box):
     def _closing(self, tabs, page):
         import multiplexterm
         term = page.get_child()
+        term.on_exit = term.on_title = term.on_close = None  # (gone from here: its end isn't this pane's)
         term.stop()
         multiplexterm.Terminals.get().remove(term)
         tabs.close_page_finish(page, True)
@@ -134,6 +135,19 @@ class TerminalView(Gtk.Box):
         keys = Gtk.EventControllerKey()  # (Esc that the terminal didn't take: none does, so only with it unfocused)
         keys.connect("key-pressed", lambda _c, kv, _k, _s: (self.close(), True)[1] if kv == Gdk.KEY_Escape else False)
         self.add_controller(keys)
+        win.connect("close-request", lambda *_: self.window_closing() or False)
+
+    def window_closing(self):
+        """Its window's closing: its terminals ended with it, or, out in a window of their own, they carry on there
+        and end as that's closed."""
+        pane = self.pane
+        pane.changed = pane.empty = None  # (this view's going)
+        if self.window is not None:
+            out, self.window = self.window, None
+            out.back = lambda p: (setattr(p, "empty", None), p.close_all())
+            pane.empty = out.close  # (its last tab closed: its window too)
+        else:
+            pane.close_all()
 
     def show_host(self):
         term = self.pane.current()

@@ -71,7 +71,7 @@ class HostAccounts(val hostId: String) {
 @Composable
 fun SubscriptionsPage() {
     val c = LocalBaude.current
-    val hostId = picked()
+    val hostId = picked()?.takeIf { it != "phone" } ?: Mesh.hosts.firstOrNull()?.id // (computer hosts only: the phone keeps no accounts)
     val host = remember(hostId) { hostId?.let { HostAccounts(it) } }
     var dialog by remember { mutableStateOf<Pair<String, Any?>?>(null) } // (which dialog, and its provider or account)
     LaunchedEffect(hostId) {
@@ -82,7 +82,7 @@ fun SubscriptionsPage() {
         Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
             BoxedList(listOf(Unit), "") {
                 ActionRow(Wording.NewSession.host, null, suffix = {
-                    Text(hostId?.let { Mesh.label(it) } ?: "", style = Type.body, color = c.dim)
+                    Text(hostId?.let { Mesh.label(it) } ?: Wording.MeshVersions.none, style = Type.body, color = c.dim)
                 })
             }
             if (host != null) for ((provider, title) in HostAccounts.PROVIDERS) {

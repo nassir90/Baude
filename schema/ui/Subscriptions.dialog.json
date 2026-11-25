@@ -209,6 +209,10 @@
     {
       "name": "host unreachable",
       "shows": "Each group's list holds the error the reach gave."
+    },
+    {
+      "name": "phone picked beside New session",
+      "shows": "Only computer hosts keep accounts: the page opens on the first computer host (the Host row names it), or, with none connected, the Host row reads \"Not connected to a host process\" with no groups."
     }
   ],
   "decisions": [

@@ -210,7 +210,7 @@ class PagesList(Gtk.Box):
         self.append(self.head)
         self.index = pickers.TreeList(selection_mode=Gtk.SelectionMode.SINGLE)
         self.index.add_css_class("navigation-sidebar")
-        self.index.connect("row-activated", lambda _l, row: not row.gone and self.win.open_note(row.page))
+        self.index.connect("row-activated", lambda _l, row: self.open_row(row))
         self.revealer = Gtk.Revealer(child=Gtk.ScrolledWindow(vexpand=True, hscrollbar_policy=Gtk.PolicyType.NEVER,
                                                               child=self.index),
                                      transition_type=Gtk.RevealerTransitionType.NONE,
@@ -302,7 +302,8 @@ class PagesList(Gtk.Box):
             row = rows[name] = Gtk.ListBoxRow(child=box, tooltip_text=name if depth else None)
             row.page, row.tree_anchor = name, lb  # (the line runs down from under its parent's name to its own)
             row.tree_parent = rows.get(name.rpartition(":")[0]) if depth else None
-            row.gone = name in gone  # (deleted: there's nothing to open)
+            row.gone = name in gone  # (deleted: opened as it was, read only: open_row)
+            row.mark = marks.get(name)
             if name in marks:
                 metalook.mark_row(row, ("page", own + name), marks[name], chat, lb, inline=False)  # (where it was:
                 # under the pointer)
@@ -313,6 +314,14 @@ class PagesList(Gtk.Box):
             self.index.append(row)
             if name == shown:
                 self.index.select_row(row)
+
+    def open_row(self, row):
+        """A page's row clicked: its page opened; one Meta's deleted (till that's kept or undone), its text as it was,
+        all of it highlighted as the row is, where nothing can be written (RecordChat.open_mark)."""
+        if not row.gone:
+            return self.win.open_note(row.page)
+        how, _note, action = row.mark
+        self.win.chat.open_mark("page", page_key(self.notebook, row.page), how, action)
 
     def shown_name(self, page):
         """A page's name in the list: what's typed in its title as it's typed (typed), while its page is open;

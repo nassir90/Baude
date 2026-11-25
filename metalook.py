@@ -107,15 +107,21 @@ def mark_rgba(how, lit=False):
     return rgba
 
 
-def paint_label(lb, how, lit=False):
-    """A label's text highlighted as a mark is (mark_rgba), square, behind its text only; struck through if gone."""
+def mark_attrs(how, lit=False):
+    """A text's look as a mark has it (mark_rgba), square, behind its text only; struck through if gone: a Pango.AttrList,
+    to add more to (a page's title: its find bar's matches over it)."""
     rgba = mark_rgba(how, lit)
     attrs = Pango.AttrList()
     attrs.insert(Pango.attr_background_new(*(round(c * 65535) for c in (rgba.red, rgba.green, rgba.blue))))
     attrs.insert(Pango.attr_background_alpha_new(round(rgba.alpha * 65535)))
     if how == "removed":
         attrs.insert(Pango.attr_strikethrough_new(True))
-    lb.set_attributes(attrs)
+    return attrs
+
+
+def paint_label(lb, how, lit=False):
+    """A label's text highlighted as a mark is (mark_attrs): a row's name in the left bar, a page's title."""
+    lb.set_attributes(mark_attrs(how, lit))
 
 
 def mark_row(row, key, mark, chat, name_label, inline=True):

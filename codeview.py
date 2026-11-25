@@ -147,7 +147,7 @@ class FindInText:
         self.match_tag = self.view.get_buffer().create_tag("search-match")
         self.current_tag = self.view.get_buffer().create_tag("search-current")
         self.matches, self.match_index = [], -1
-        Adw.StyleManager.get_default().connect("notify::dark", lambda *_: self.find_colours())
+        widgets.watch_style(self, "notify::dark", lambda view: view.find_colours())
         self.find_colours()
         return self.search_bar
 
@@ -304,8 +304,7 @@ class CodeView(Gtk.Box, FindInText):
         self.view.add_controller(hover)
         self.token_tags, self.generation, self.path, self.dark = {}, 0, "", None
         self.highlighted = 0  # spans tagged so far (tests and the status wait on it)
-        style = Adw.StyleManager.get_default()
-        style.connect("notify::dark", lambda *_: self.restyle())
+        widgets.watch_style(self, "notify::dark", CodeView.restyle)
         self.restyle()
         CodeView.live.add(self)
         CodeView.set_zoom(float(load_settings().get("code_zoom") or 1.0), save=False)  # (the size it was left at)

@@ -109,6 +109,19 @@ abstract class Screens(private val theme: String) {
 
     @Test fun settings() = render("05-settings") { SettingsScreen({}, {}) }
 
+    // (Settings swiped from General toward Subscriptions, the finger still down halfway, then let go: the page it
+    // settles on, the bar's raised page following)
+    @Test fun settingsSwipe() {
+        accountsFixture()
+        show { SettingsScreen({}, {}) }
+        laidOut()
+        val lift = swipe(0.9f, 0.3f)
+        screen("05g-settings-mid-swipe")
+        lift()
+        laidOut()
+        screen("05h-settings-swiped")
+    }
+
     // (Settings → Subscriptions on workshop, the host picked, which has claude: Claude's Work and Home, folders signed
     // in to with claude auth login, Work the default, each card's usage read as the page is shown; Codex's Personal;
     // then the pill's menu, an account's ⋮, Add account (the sign-in, its page's link and the code box) and Remove…)
@@ -1366,6 +1379,28 @@ abstract class Screens(private val theme: String) {
         root.dispatchTouchEvent(android.view.MotionEvent.obtain(t, android.os.SystemClock.uptimeMillis(),
             android.view.MotionEvent.ACTION_UP, x, root.height * to, 0))
         settle()
+    }
+
+    /** A finger dragged across the middle of the screen, from and to fractions of its width, and held there; what's
+     * given back lifts it. */
+    private fun swipe(from: Float, to: Float): () -> Unit {
+        val root = activity.window.decorView
+        val y = root.height / 2f
+        val t = android.os.SystemClock.uptimeMillis()
+        val looper = org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper())
+        root.dispatchTouchEvent(android.view.MotionEvent.obtain(t, t, android.view.MotionEvent.ACTION_DOWN, root.width * from, y, 0))
+        for (k in 1..20) {
+            looper.idleFor(java.time.Duration.ofMillis(16))
+            root.dispatchTouchEvent(android.view.MotionEvent.obtain(t, android.os.SystemClock.uptimeMillis(),
+                android.view.MotionEvent.ACTION_MOVE, root.width * (from + (to - from) * k / 20f), y, 0))
+        }
+        looper.idleFor(java.time.Duration.ofMillis(300))
+        laidOut()
+        return {
+            root.dispatchTouchEvent(android.view.MotionEvent.obtain(t, android.os.SystemClock.uptimeMillis(),
+                android.view.MotionEvent.ACTION_UP, root.width * to, y, 0))
+            settle()
+        }
     }
 
     @Composable

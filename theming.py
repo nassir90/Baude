@@ -243,6 +243,8 @@ levelbar.context-meter trough, levelbar.context-meter block { min-height: 16px; 
 .session-sidebar .bot-name { font-weight: {font.semibold}; }
 .session-sidebar .sidebar-action { min-height: 28px; padding-top: 0; padding-bottom: 0; font-weight: normal; }
 dropdown.choice > button, menubutton.choice > button { font-weight: normal; }
+/* Settings → Subscriptions: the pill over a provider's cards (subscriptionpage.Page), a pill a row high */
+menubutton.subscription-pill > button { padding: 4px 14px; min-height: 24px; }
 /* the top bar's pickers (provider, model, effort, mode): each list's rows the same height, a palette's as a menu's */
 dropdown.choice popover listview > row, menubutton.choice popover modelbutton, .model-palette row.model-row {
   min-height: 30px; padding-top: 0; padding-bottom: 0; }

@@ -10,6 +10,7 @@
   ],
   "code": [
     "subscriptionpage.py:Page",
+    "theming.py:CSS (menubutton.subscription-pill)",
     "subscriptionpage.py:Ask",
     "baudelib/hostaccounts.py:answer",
     "baudelib/accounts.py",
@@ -34,7 +35,7 @@
     },
     {
       "name": "provider group",
-      "shows": "For Claude, then Codex: a heading (the provider's logo and name), then a boxed list.",
+      "shows": "For Claude, then Codex: a heading (the provider's logo and name, and the pill at its end), then a card for each subscription stacked, then a boxed list with Add account.",
       "decisions": [
         {
           "said": "Baude needs to be able to support running claude with different subscriptions, e.g. a team sub for work and an ultra sub for home that they absolutely need to keep separate (paraphrased)",
@@ -49,51 +50,66 @@
               "message": "ac03d59c-4c08-4acd-87a6-78a79a1e0dc9"
             }
           ]
+        },
+        {
+          "said": "The subscriptions page is structured wrong: the account picker and the usage are lumped together. Each subscription should be its own card, stacked, with its usage as bars with percentages below its name, read again automatically every 30 seconds; over the cards a pill whose dropdown picks the subscription used; and rename and remove under the dots on each card (paraphrased)",
+          "rule": "Every app's Subscriptions page shows, for each provider, a heading with a pill (the subscription a new chat on the host takes; its dropdown picks another), then one card per subscription stacked under it; each account's card has ⋮ (Rename…, Sign In Again… or Replace Token…, Remove…); each Claude card shows its own usage as a bar per limit with its name and percentage, read as the page is shown and every 30 seconds while it is, with no button to read it",
+          "decided": "2026-11-25",
+          "source": [
+            {
+              "issue": "BaudeInternal#226"
+            }
+          ]
         }
       ],
       "parts": [
         {
-          "name": "Account",
-          "shows": "Picker: \"CLI default\" (the CLI's own sign-in) then each account by name; the one picked is the default a new chat on this host takes.",
+          "name": "pill",
+          "shows": "At the heading's end: a pill with the name of the subscription a new chat on this host takes (\"CLI default\" for the CLI's own sign-in) and a down arrow.",
           "copy": [
             "subscriptions.account",
             "subscriptions.cli_default"
           ],
           "actions": [
             {
-              "by": "pick",
-              "does": "select: the host's default for that provider; new chats not written in yet take it too"
+              "by": "click",
+              "does": "Menu: \"CLI default\" then each account by name, the one picked marked; picking one is select: the host's default for that provider; new chats not written in yet take it too"
+            }
+          ],
+          "decisions": [
+            {
+              "said": "The subscriptions page is structured wrong: the account picker and the usage are lumped together. Each subscription should be its own card, stacked, with its usage as bars with percentages below its name, read again automatically every 30 seconds; over the cards a pill whose dropdown picks the subscription used; and rename and remove under the dots on each card (paraphrased)",
+              "rule": "Every app's Subscriptions page shows, for each provider, a heading with a pill (the subscription a new chat on the host takes; its dropdown picks another), then one card per subscription stacked under it; each account's card has ⋮ (Rename…, Sign In Again… or Replace Token…, Remove…); each Claude card shows its own usage as a bar per limit with its name and percentage, read as the page is shown and every 30 seconds while it is, with no button to read it",
+              "decided": "2026-11-25",
+              "source": [
+                {
+                  "issue": "BaudeInternal#226"
+                }
+              ]
             }
           ]
         },
         {
-          "name": "account row",
-          "shows": "One per account: its name, and ⋮.",
+          "name": "subscription card",
+          "shows": "One card per subscription, stacked: Claude's CLI default first (where the host has claude), then each account. Its name, and ⋮ on an account's card (CLI default has none). A Claude card then has its usage: for each limit, its name with its percentage at the end (\"Five hour\" … \"25%\") and a bar under them filled that far; \"Checking…\" till it's first read; \"Usage unavailable for this sign-in\" for a token account (a setup token can't read them) or the error if reading failed. A Codex card has its name and ⋮ only.",
           "actions": [
             {
               "by": "click ⋮",
               "does": "Menu: Rename…, Sign In Again… (Replace Token… for a token account), Remove…"
+            },
+            {
+              "by": "(none)",
+              "does": "Each Claude card's usage is read from the host (accounts usage, its id; \"\" for CLI default) as the page is shown and every 30 seconds while it's shown, one read at a time per card, the bars drawn again in place"
             }
           ],
           "copy": [
+            "subscriptions.cli_default",
             "common.rename_ellipsis",
             "subscriptions.replace_token",
             "subscriptions.sign_in_again",
             "common.remove_ellipsis",
-            "subscriptions.more_tip"
-          ]
-        },
-        {
-          "name": "Subscription usage",
-          "apps": [
-            "baude",
-            "record",
-            "phone"
-          ],
-          "shows": "Claude's only: row \"Subscription usage\" with a refresh icon; once read, the default account's limits after its name (\"Five hour 25% · Seven day 40%\"), or \"Usage unavailable for this sign-in\" (a token account's: a setup token can't read them).",
-          "copy": [
-            "subscriptions.usage",
-            "subscriptions.usage_limit",
+            "subscriptions.more_tip",
+            "subscriptions.usage_percent",
             "subscriptions.checking",
             "subscriptions.usage_unavailable",
             "subscriptions.usage_failed"
@@ -106,6 +122,16 @@
               "source": [
                 {
                   "issue": "BaudeInternal#204"
+                }
+              ]
+            },
+            {
+              "said": "The subscriptions page is structured wrong: the account picker and the usage are lumped together. Each subscription should be its own card, stacked, with its usage as bars with percentages below its name, read again automatically every 30 seconds; over the cards a pill whose dropdown picks the subscription used; and rename and remove under the dots on each card (paraphrased)",
+              "rule": "Every app's Subscriptions page shows, for each provider, a heading with a pill (the subscription a new chat on the host takes; its dropdown picks another), then one card per subscription stacked under it; each account's card has ⋮ (Rename…, Sign In Again… or Replace Token…, Remove…); each Claude card shows its own usage as a bar per limit with its name and percentage, read as the page is shown and every 30 seconds while it is, with no button to read it",
+              "decided": "2026-11-25",
+              "source": [
+                {
+                  "issue": "BaudeInternal#226"
                 }
               ]
             }
@@ -204,11 +230,11 @@
   "states": [
     {
       "name": "loading",
-      "shows": "The groups' rows only once the host answers."
+      "shows": "The pills, cards and Add account only once the host answers."
     },
     {
       "name": "host unreachable",
-      "shows": "Each group's list holds the error the reach gave."
+      "shows": "Each group holds the error the reach gave, with no pill."
     },
     {
       "name": "phone picked beside New session",
@@ -232,7 +258,7 @@
     },
     {
       "said": "There needs to be a way of seeing claude sub usage in the app",
-      "rule": "Every app's Subscriptions page reads the default Claude account's usage when asked, and says \"Usage unavailable for this sign-in\" where its sign-in can't be asked (a setup token's has no profile scope)",
+      "rule": "Every app's Subscriptions page shows each Claude subscription's usage on its card, read by itself (see BaudeInternal#226's decision), and says \"Usage unavailable for this sign-in\" where its sign-in can't be asked (a setup token's has no profile scope)",
       "decided": "2026-11-24",
       "source": [
         {
@@ -291,6 +317,16 @@
       "source": [
         {
           "session": "b3845b21-55ac-4aab-a769-fb8517403c51"
+        }
+      ]
+    },
+    {
+      "said": "The subscriptions page is structured wrong: the account picker and the usage are lumped together. Each subscription should be its own card, stacked, with its usage as bars with percentages below its name, read again automatically every 30 seconds; over the cards a pill whose dropdown picks the subscription used; and rename and remove under the dots on each card (paraphrased)",
+      "rule": "Every app's Subscriptions page shows, for each provider, a heading with a pill (the subscription a new chat on the host takes; its dropdown picks another), then one card per subscription stacked under it; each account's card has ⋮ (Rename…, Sign In Again… or Replace Token…, Remove…); each Claude card shows its own usage as a bar per limit with its name and percentage, read as the page is shown and every 30 seconds while it is, with no button to read it",
+      "decided": "2026-11-25",
+      "source": [
+        {
+          "issue": "BaudeInternal#226"
         }
       ]
     }

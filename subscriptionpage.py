@@ -1,8 +1,9 @@
 """Settings → Subscriptions (Baude's and Record's; the phone's SubscriptionsScreen the same): the Claude and Codex
 subscription accounts kept on the host picked beside New session (win.terminal_host, as ☰ → Terminal, Kubernetes and
-Database Schemas are), changed there through its accounts op (hostaccounts): each provider's Account picker (the
-default a new chat takes), its accounts with Rename…, Sign In Again… (Replace Token… for a token account) and
-Remove…, Subscription usage (Claude) and Add account. A Claude account is signed in to with claude auth login run on
+Database Schemas are), changed there through its accounts op (hostaccounts): for each provider, a pill picking the
+subscription a new chat takes, a card per subscription (an account's with ⋮: Rename…, Sign In Again… or Replace
+Token…, Remove…; a Claude card with its usage as a bar per limit, read every USAGE_S while the page is shown), and Add
+account. A Claude account is signed in to with claude auth login run on
 the host with the account's own folder: the page to open shown as a link, and a box for the code it shows. Where the
 host has no claude, it's a token from claude setup-token. Also the chat's Sign in card's token box for a chat under a
 token account (replace_token)."""
@@ -16,6 +17,7 @@ from gi.repository import Adw, Gio, GLib, Gtk
 from baudelib import icons, wire, wording
 
 PROVIDERS = (("claude", "report.claude", "claude"), ("codex", "programs.codex", "openai"))
+USAGE_S = 30  # (how often a shown page reads its subscriptions' usage again)
 
 
 class Ask:
@@ -70,7 +72,9 @@ class Ask:
 
 
 class Page(Adw.PreferencesPage):
-    """The page: its host (where, name), its accounts as the host last said them."""
+    """The page: its host (where, name), its accounts as the host last said them, and each Claude subscription's usage
+    (usage: id → its limits [(name, percent)], or what to say instead), read as the page is shown and every
+    USAGE_S while it is."""
 
     def __init__(self, win):
         super().__init__(title=wording.say("subscriptions.title"), icon_name="system-users-symbolic")
@@ -80,7 +84,9 @@ class Page(Adw.PreferencesPage):
                 clamp.set_maximum_size(100_000)
                 clamp.set_tightening_threshold(100_000)
         self.where, self.host = win.terminal_host()
-        self.accounts, self.defaults, self.lists, self.filling, self.claude_cli = [], {}, {}, False, True
+        self.accounts, self.defaults, self.filling, self.claude_cli = [], {}, False, True
+        self.lists, self.pills, self.usage, self.bars, self.reading = {}, {}, {}, {}, set()
+        self.shown, self.timer = None, None
         top = Adw.PreferencesGroup()
         host = Adw.ActionRow(title=wording.say("new_session.host"))
         host.add_suffix(Gtk.Label(label=self.host, css_classes=["dim-label"]))
@@ -92,19 +98,23 @@ class Page(Adw.PreferencesPage):
             heading = Gtk.Box(spacing=8)
             heading.append(Gtk.Image.new_from_file(os.path.join(icons.folder("models"),
                                                                 f"baude-model-{logo}-symbolic.svg")))
-            label = Gtk.Label(label=wording.say(title))
+            label = Gtk.Label(label=wording.say(title), hexpand=True, xalign=0)
             label.add_css_class("heading")
             heading.append(label)
+            pill = Gtk.MenuButton(css_classes=["pill", "subscription-pill"], valign=Gtk.Align.CENTER,
+                                  always_show_arrow=True, tooltip_text=wording.say("subscriptions.account"))
+            heading.append(pill)
             box.append(heading)
-            rows = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE, css_classes=["boxed-list"])
-            box.append(rows)
+            cards = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+            box.append(cards)
             group.add(box)
             group.update_property([Gtk.AccessibleProperty.LABEL], [wording.say(title)])
             self.add(group)
-            self.lists[provider] = rows
-        self.usage_said = None
+            self.lists[provider], self.pills[provider] = cards, pill
         self.fill()
         self.ask({"what": "list"})
+        self.connect("map", self.shown_now)
+        self.connect("unmap", self.hidden)
 
     def ask(self, msg, then=None):
         """msg to the host; the page filled again from what it answers, then(reply) after, and its error said."""
@@ -121,46 +131,113 @@ class Page(Adw.PreferencesPage):
         return Ask(self.where, msg, answered)
 
     def took(self, reply):
-        """An answer's accounts, defaults and whether the host has claude, kept and shown."""
+        """An answer's accounts, defaults and whether the host has claude, kept and shown (drawn again only if they
+        changed); a Claude subscription not read yet, read."""
         self.accounts, self.defaults = reply["accounts"], reply.get("defaults") or {}
         self.claude_cli = reply.get("claude_cli", self.claude_cli)
-        self.fill()
+        if (self.accounts, self.defaults, self.claude_cli) != self.shown:
+            self.fill()
+        if self.get_mapped():
+            self.read_usage([p for p in self.claude_ids() if p not in self.usage])
 
     def toast(self, text):
         dialog = self.get_ancestor(Adw.PreferencesDialog)
         if dialog is not None:
             dialog.add_toast(Adw.Toast(title=text, timeout=3))
 
+    def claude_ids(self):
+        """The Claude subscriptions whose usage is read: the CLI's own sign-in (where the host has claude), then each
+        account."""
+        return [*([""] if self.claude_cli else []), *(a["id"] for a in self.accounts if a["provider"] == "claude")]
+
     def fill(self, error=None):
-        for provider, rows in self.lists.items():
-            rows.remove_all()
+        self.shown = None if error else (self.accounts, self.defaults, self.claude_cli)
+        self.bars = {}
+        for provider, cards in self.lists.items():
+            while (child := cards.get_first_child()) is not None:
+                cards.remove(child)
+            pill = self.pills[provider]
+            pill.set_visible(not error)
             if error:
+                rows = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE, css_classes=["boxed-list"])
                 rows.append(Adw.ActionRow(title=GLib.markup_escape_text(error), sensitive=False))
+                cards.append(rows)
                 continue
             mine = [a for a in self.accounts if a["provider"] == provider]
-            ids = ["", *(a["id"] for a in mine)]
-            chooser = Adw.ComboRow(title=wording.say("subscriptions.account"),
-                                   model=Gtk.StringList.new([wording.say("subscriptions.cli_default"),
-                                                             *(a["name"] for a in mine)]))
-            active = self.defaults.get(provider, "")
-            chooser.set_selected(ids.index(active) if active in ids else 0)
-            chooser.connect("notify::selected", self.picked, provider, ids)
-            rows.append(chooser)
+            self.fill_pill(provider, pill, mine)
+            if provider == "claude" and self.claude_cli:
+                cards.append(self.card(provider, None))
             for account in mine:
-                rows.append(self.account_row(account))
-            if provider == "claude":
-                usage = Adw.ActionRow(title=wording.say("subscriptions.usage"), activatable=True)
-                said = Gtk.Label(label=self.usage_said or "", css_classes=["dim-label"], ellipsize=3)
-                usage.add_suffix(said)
-                usage.add_suffix(Gtk.Image(icon_name="view-refresh-symbolic"))
-                usage.connect("activated", self.read_usage, said)
-                rows.append(usage)
+                cards.append(self.card(provider, account))
             add = Adw.ButtonRow(title=wording.say("subscriptions.add_account"), end_icon_name="list-add-symbolic")
             add.connect("activated", lambda _row, p=provider: (add_claude if p == "claude" else add_codex)(self))
+            rows = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE, css_classes=["boxed-list"])
             rows.append(add)
+            cards.append(rows)
 
-    def account_row(self, account):
-        row = Adw.ActionRow(title=GLib.markup_escape_text(account["name"]))
+    def fill_pill(self, provider, pill, mine):
+        """The pill over a provider's cards: the subscription a new chat on this host takes, and a menu of the others
+        to pick from."""
+        names = {"": wording.say("subscriptions.cli_default"), **{a["id"]: a["name"] for a in mine}}
+        active = self.defaults.get(provider, "")
+        active = active if active in names else ""
+        pill.set_label(names[active])
+        group = Gio.SimpleActionGroup()
+        pick = Gio.SimpleAction.new_stateful("pick", GLib.VariantType.new("s"), GLib.Variant("s", active))
+        pick.connect("change-state", self.picked, provider)
+        group.add_action(pick)
+        pill.insert_action_group("subs", group)
+        menu = Gio.Menu()
+        for profile, name in names.items():
+            item = Gio.MenuItem.new(name, None)
+            item.set_action_and_target_value("subs.pick", GLib.Variant("s", profile))
+            menu.append_item(item)
+        pill.set_menu_model(menu)
+
+    def card(self, provider, account):
+        """A subscription's card: its name and ⋮ (an account's: Rename…, Sign In Again… or Replace Token…, Remove…),
+        then, for Claude's, its usage: a bar for each limit with its percentage."""
+        card = Gtk.Box(css_classes=["card"])
+        inside = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8, hexpand=True, margin_top=6, margin_bottom=12,
+                         margin_start=12, margin_end=6)
+        card.append(inside)
+        top = Gtk.Box(spacing=8, height_request=34)  # (as high with ⋮ as without)
+        name = Gtk.Label(label=account["name"] if account else wording.say("subscriptions.cli_default"),
+                         xalign=0, hexpand=True, ellipsize=3)
+        top.append(name)
+        if account is not None:
+            top.append(self.account_menu(account))
+        inside.append(top)
+        if provider == "claude":
+            bars = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, margin_end=6)
+            inside.append(bars)
+            profile = account["id"] if account else ""
+            self.bars[profile] = bars
+            self.fill_bars(profile)
+        return card
+
+    def fill_bars(self, profile):
+        """A Claude card's usage as last read: a bar for each limit, its name and percentage over it; else what was
+        said instead (Checking… till it's first read)."""
+        bars = self.bars.get(profile)
+        if bars is None:
+            return
+        while (child := bars.get_first_child()) is not None:
+            bars.remove(child)
+        read = self.usage.get(profile)
+        if not isinstance(read, list):
+            bars.append(Gtk.Label(label=read or wording.say("subscriptions.checking"), xalign=0, wrap=True,
+                                  css_classes=["dim-label"]))
+            return
+        for name, percent in read:
+            line = Gtk.Box(spacing=8)
+            line.append(Gtk.Label(label=name, xalign=0, hexpand=True))
+            line.append(Gtk.Label(label=wording.say("subscriptions.usage_percent", percent=f"{percent:g}"),
+                                  css_classes=["dim-label", "numeric"]))
+            bars.append(line)
+            bars.append(Gtk.ProgressBar(fraction=max(0.0, min(1.0, percent / 100))))
+
+    def account_menu(self, account):
         actions = Gio.SimpleActionGroup()
         menu = Gio.Menu()
         items = [("rename", wording.say("common.rename_ellipsis"), rename),
@@ -172,35 +249,50 @@ class Page(Adw.PreferencesPage):
             act.connect("activate", lambda *_a, f=action: f(self, account))
             actions.add_action(act)
             menu.append(label, f"account.{name}")
-        row.insert_action_group("account", actions)
         more = Gtk.MenuButton(icon_name="view-more-symbolic", menu_model=menu, valign=Gtk.Align.CENTER,
                               tooltip_text=wording.say("subscriptions.more_tip"), css_classes=["flat"])
-        row.add_suffix(more)
-        return row
+        more.insert_action_group("account", actions)
+        return more
 
-    def picked(self, chooser, _pspec, provider, ids):
-        index = chooser.get_selected()
-        if index < len(ids) and ids[index] != self.defaults.get(provider, ""):
-            self.usage_said = None
-            self.ask({"what": "select", "provider": provider, "id": ids[index]})
+    def picked(self, action, value, provider):
+        profile = value.get_string()
+        if profile != self.defaults.get(provider, ""):
+            action.set_state(value)
+            self.ask({"what": "select", "provider": provider, "id": profile})
 
-    def read_usage(self, row, said):
-        row.set_sensitive(False)
-        said.set_label(wording.say("subscriptions.checking"))
+    def shown_now(self, *_):
+        """The page in front: its Claude subscriptions' usage read now and every USAGE_S till it isn't."""
+        self.read_usage(self.claude_ids())
+        if self.timer is None:
+            self.timer = GLib.timeout_add_seconds(USAGE_S, self.tick)
 
-        def done(reply):
-            row.set_sensitive(True)
-            if reply.get("error"):
-                self.usage_said = reply["error"]
-            elif reply.get("usage"):
-                self.usage_said = " · ".join(wording.say("subscriptions.usage_limit", name=u["name"],
-                                                         percent=f"{u['percent']:g}") for u in reply["usage"])
-            else:
-                self.usage_said = wording.say("subscriptions.usage_unavailable")
-            said.set_label(self.usage_said)
-            if "accounts" in reply:
-                self.fill()
-        self.ask({"what": "usage", "id": self.defaults.get("claude", "")}, done)
+    def hidden(self, *_):
+        if self.timer is not None:
+            GLib.source_remove(self.timer)
+            self.timer = None
+
+    def tick(self):
+        self.read_usage(self.claude_ids())
+        return True
+
+    def read_usage(self, profiles):
+        """Each subscription's (profile's) usage asked of the host, one ask at a time each; its card's bars drawn
+        again from the answer."""
+        for profile in profiles:
+            if profile in self.reading:
+                continue
+            self.reading.add(profile)
+
+            def done(reply, profile=profile):
+                self.reading.discard(profile)
+                if reply.get("error"):
+                    self.usage[profile] = reply["error"]
+                elif reply.get("usage"):
+                    self.usage[profile] = [(u["name"], u["percent"]) for u in reply["usage"]]
+                else:
+                    self.usage[profile] = wording.say("subscriptions.usage_unavailable")
+                self.fill_bars(profile)
+            self.ask({"what": "usage", "id": profile}, done)
 
 
 def _form(page, heading, submit_label):

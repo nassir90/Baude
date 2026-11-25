@@ -8,7 +8,7 @@ import re
 import gi
 
 gi.require_version("Gtk", "4.0")
-from gi.repository import GLib, Gtk, Pango  # noqa: E402
+from gi.repository import Adw, GLib, Gtk, Pango  # noqa: E402
 
 import pointers  # noqa: E402  (the pointer's shape: beside this file)
 import theming  # noqa: E402
@@ -25,7 +25,7 @@ from recordmeta import (  # noqa: E402
     RECORD_PROMPT, RECORD_TOOLS, REFS_LIMIT, REF_LIMIT, none_open_said, notebook_said, page_named, pages_root,
     passage_said, pending_edits, place_change, ref_said, selection_said, set_md, split_unknown, what_it_is,
 )
-from recordui import ZoomPlace, backup_zip, label, notes_first  # noqa: E402
+from recordui import ZoomPlace, backup_zip, label, notes_first, set_zoom_class, zoom_class  # noqa: E402
 from diaryeditor import DiaryEditor  # noqa: E402
 from recordreader import markup_row, on_name_hover, page_key  # noqa: E402
 from recordtools import RecordTools  # noqa: E402
@@ -174,14 +174,20 @@ class RecordChat(RecordTools, metachat.MetaChat):
             self.win.tabs.close(key)
 
     def tint(self, editor):
-        """A page open as Meta's marks have it: one it added, all its text green (metalook.mark_rgba, lit as its
-        change's box is under the pointer: light); else as it is."""
+        """A page open as Meta's marks have it: its title highlighted as its row in the pages' list is; one it added,
+        all its text green, one it edited, what it put in (metalook.mark_rgba, lit as its change's box is under the
+        pointer: light); else as it is."""
         key = page_key(editor.notebook, editor.page)
         mark = self.marks("page").get(key) if editor.notebook is self.notebook else None
         buf = editor.buf
         tag = buf.get_tag_table().lookup("meta-tint") or buf.create_tag("meta-tint")
         buf.remove_tag(tag, *buf.get_bounds())
         slots = self.painted.setdefault(("page", key), {})
+        editor.mark_title(mark and mark[0])
+        if mark is None:
+            slots.pop("title", None)
+        else:
+            slots["title"] = lambda lit=False, how=mark[0]: editor.mark_title(how, lit)
         if mark is None or mark[0] not in ("added", "edited"):
             slots.pop("text", None)
             return
@@ -264,20 +270,35 @@ class RecordChat(RecordTools, metachat.MetaChat):
             self.open_page(nb, page)
 
     def open_gone(self, key, page, text):
+        """A page Meta's deleted, till that's kept or undone: laid out as a page is (DiaryEditor), all of it, its title
+        too, highlighted as its row in the pages' list is (red, struck through), and nothing in it can be written."""
         def make():
-            view = Gtk.TextView(editable=False, cursor_visible=False, wrap_mode=Gtk.WrapMode.WORD_CHAR, left_margin=24,
-                                right_margin=24, top_margin=16, bottom_margin=16)
+            box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+            set_zoom_class(box, zoom_class(self.win.store.zoom))
+            margin = DiaryEditor.MARGIN
+            title = Gtk.Label(label=short_page(page), xalign=0, wrap=True, selectable=True, margin_start=margin,
+                              margin_end=margin, margin_top=8, margin_bottom=2, tooltip_text=page if ":" in page else None)
+            title.add_css_class("diary-title")
+            box.append(title)
+            view = Gtk.TextView(editable=False, cursor_visible=False, wrap_mode=Gtk.WrapMode.WORD_CHAR,
+                                left_margin=margin, right_margin=margin, top_margin=7, bottom_margin=40,
+                                pixels_above_lines=3)
             view.add_css_class("diary")
             buf = view.get_buffer()
             buf.set_text(text)
             tag = buf.create_tag("meta-tint", strikethrough=True)
 
             def paint(lit=False):
+                metalook.paint_label(title, "removed", lit)
                 tag.set_property("background-rgba", metalook.mark_rgba("removed", lit))
                 buf.apply_tag(tag, *buf.get_bounds())
             paint()
             self.painted.setdefault(("page", key), {})["text"] = paint
-            return Gtk.ScrolledWindow(child=view, vexpand=True, hscrollbar_policy=Gtk.PolicyType.NEVER)
+            wide = self.win.store.full_width
+            clamp = Adw.ClampScrollable(maximum_size=100_000 if wide else DiaryEditor.WIDTH,
+                                        tightening_threshold=100_000 if wide else 400, child=view)
+            box.append(Gtk.ScrolledWindow(child=clamp, vexpand=True, hscrollbar_policy=Gtk.PolicyType.NEVER))
+            return box
         self.win.tabs.open(("gone", key), make, f"{short_page(page)} (deleted)", icon="user-trash-symbolic",
                            tooltip=f"{page}: deleted by {meta.NAME}; undo brings it back")
 

@@ -32,7 +32,7 @@ import androidx.compose.ui.text.withLink
 import androidx.compose.ui.unit.dp
 import org.json.JSONObject
 
-/** The accounts a host keeps, as its accounts answer last said them (hostaccounts; this phone's, PhoneAccounts):
+/** The accounts a host keeps, as its accounts answer last said them (hostaccounts):
  * Compose state. */
 class HostAccounts(val hostId: String) {
     val accounts = mutableStateOf<List<Msg.Account>>(emptyList())
@@ -59,16 +59,13 @@ class HostAccounts(val hostId: String) {
         return g.error?.ifBlank { null }
     }
 
-    /** Its providers, each with its name: the phone's own, Claude's only (it can't run Codex). */
-    val providers get() = if (hostId != "phone") PROVIDERS else if (PhoneAccounts.OFFERED) PROVIDERS.take(1) else emptyList()
-
     companion object {
         val PROVIDERS = listOf("claude" to Wording.Report.claude, "codex" to Wording.Programs.codex)
     }
 }
 
 /** Settings → Subscriptions (subscriptionpage.Page), Settings' second page: the Claude and Codex accounts kept on the
- * host picked beside New session (this phone's own, PhoneAccounts, when it's the phone), changed there: its name; each
+ * host picked beside New session, changed there: its name; each
  * provider's Account picker (the default a new chat takes), its accounts each with ⋮ (Rename…, Sign In Again… or
  * Replace Token…, Remove…), Subscription usage (Claude) and Add account. */
 @Composable
@@ -78,7 +75,7 @@ fun SubscriptionsPage() {
     val host = remember(hostId) { hostId?.let { HostAccounts(it) } }
     var dialog by remember { mutableStateOf<Pair<String, Any?>?>(null) } // (which dialog, and its provider or account)
     LaunchedEffect(hostId) {
-        val h = host?.takeIf { it.providers.isNotEmpty() } ?: return@LaunchedEffect
+        val h = host ?: return@LaunchedEffect
         Mesh.ask(h.hostId, Msg.Accounts(what = "list").json()) { r -> h.took(r)?.let { e -> h.error.value = e } }
     }
     Column(Modifier.fillMaxSize().background(c.frame)) {
@@ -88,7 +85,7 @@ fun SubscriptionsPage() {
                     Text(hostId?.let { Mesh.label(it) } ?: "", style = Type.body, color = c.dim)
                 })
             }
-            if (host != null) for ((provider, title) in host.providers) {
+            if (host != null) for ((provider, title) in HostAccounts.PROVIDERS) {
                 Row(Modifier.padding(start = 14.dp, end = 14.dp, top = 6.dp), verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     modelLogo(if (provider == "claude") "claude" else "gpt", title)?.let {

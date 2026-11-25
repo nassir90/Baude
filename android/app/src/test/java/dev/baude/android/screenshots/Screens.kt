@@ -159,23 +159,6 @@ abstract class Screens(private val theme: String) {
         screen("05e-subscriptions-remove")
     }
 
-    // (the phone as the host picked: no accounts listed; then, on a host without claude, Add account's token form and a
-    // token account's Replace Token…)
-    @Test fun subscriptionsPhone() {
-        phoneAccountsFixture()
-        show { SettingsScreen({}, {}, page = 1) }
-        laidOut()
-        screen("05g-subscriptions-phone")
-    }
-
-    @Test fun subscriptionsPhoneAdd() {
-        tokenAccountsFixture()
-        show { SettingsScreen({}, {}, page = 1) }
-        laidOut()
-        tap("Add account")
-        screen("05h-subscriptions-phone-add")
-    }
-
     @Test fun subscriptionsToken() {
         tokenAccountsFixture()
         show { SettingsScreen({}, {}, page = 1) }
@@ -206,17 +189,6 @@ abstract class Screens(private val theme: String) {
                     org.json.JSONObject().put("id", "t1").put("provider", "claude").put("name", "Personal").put("kind", "token"))))
                 .put("defaults", org.json.JSONObject().put("claude", "t1").put("codex", "")).put("claude_cli", false)
         }
-    }
-
-    private fun phoneAccountsFixture() {
-        FixturePhone.up(activity, "pocket") { m ->
-            if (m.optString("op") != "accounts") null
-            else org.json.JSONObject().put("op", "accounts").put("req", m.opt("req")).put("what", m.optString("what"))
-                .put("accounts", org.json.JSONArray(listOf(
-                    org.json.JSONObject().put("id", "t1").put("provider", "claude").put("name", "Personal").put("kind", "token"))))
-                .put("defaults", org.json.JSONObject().put("claude", "t1").put("codex", "")).put("claude_cli", false)
-        }
-        dev.baude.android.HomePrefs.host.value = "phone"
     }
 
     @Test fun mesh() {

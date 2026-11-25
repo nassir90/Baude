@@ -71,7 +71,8 @@
     {
       "said": "Sure fix (2)",
       "rule": "A message an agent outside the apps (baude-mcp's message_chat) sends a chat carries its name as the sender (as_agent) and is drawn as from it, not as the user's, as Meta's are.",
-      "decided": "2026-11-25"
+      "decided": "2026-11-25",
+      "source": [{"issue": "BaudeInternal#200"}, {"session": "b3845b21-55ac-4aab-a769-fb8517403c51", "message": "868770b1-06c0-44a3-bdb9-c1851cf4b39a"}]
     }
   ],
   "scenes": []

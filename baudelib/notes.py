@@ -279,11 +279,26 @@ def _save(saved, path):
     return None
 
 
-def write(changes):
+def moved_ok(moved):
+    """Is moved what write takes: {notebook id: {a page's old name: its new}}?"""
+    return moved is None or isinstance(moved, dict) and all(
+        isinstance(i, str) and isinstance(m, dict) and all(isinstance(k, str) and isinstance(v, str)
+                                                           for k, v in m.items()) for i, m in moved.items())
+
+
+def write(changes, moved=None):
     """changes made to this machine's notebooks: by the Record running here, else in records.json (a copy of it kept
-    first in backups/, as Record keeps one). {done: [ids]} or {error}."""
-    if not changes_ok(changes):
+    first in backups/, as Record keeps one); moved ({notebook id: {old page name: new}}): the edits waiting on those
+    pages moved with them (edits.json). {done: [ids]} or {error}."""
+    if not changes_ok(changes) or not moved_ok(moved):
         return {"error": "not changes to notebooks"}
+    out = _write(changes)
+    if moved and "error" not in out and (error := _edits_moved(moved)) is not None:
+        return {"error": error}
+    return out
+
+
+def _write(changes):
     if not changes:
         return {"done": []}
     handed = _hand_over(changes)
@@ -344,8 +359,28 @@ def _edits_write(edits):
     os.replace(path + ".tmp", path)
 
 
+def _edits_moved(moved):
+    """The edits waiting on pages moved ({notebook id: {old name: new}}) moved with them: an error, or None."""
+    with _LOCK:
+        try:
+            edits = _edits_read(_read())
+        except (OSError, ValueError) as e:
+            return f"Record's store here: {e}"
+        changed = False
+        for e in edits:
+            to = (moved.get(e.get("notebook")) or {}).get(e.get("page"))
+            if e.get("status") == "pending" and to is not None and to != e["page"]:
+                e["page"], changed = to, True
+        if changed:
+            try:
+                _edits_write(edits)
+            except OSError as e:
+                return f"edits.json: {e}"
+    return None
+
+
 EDIT_OPS = {"edit_propose": "propose", "edit_revise": "revise", "edit_withdraw": "withdraw", "edit_decide": "decide",
-            "edits": "listed"}
+            "edit_adopt": "adopt", "edits": "listed"}
 
 
 def edit_op(msg):
@@ -368,4 +403,4 @@ def edit_op(msg):
                 _edits_write(edits)
             except OSError as e:
                 return "error", {"error": f"edits.json: {e}"}
-    return ("edits", {**out, "stamp": edits_stamp()}) if msg["op"] == "edits" else ("edit", out)
+    return ("edits", {**out, "stamp": edits_stamp()}) if msg["op"] in ("edits", "edit_adopt") else ("edit", out)

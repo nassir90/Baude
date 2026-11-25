@@ -921,15 +921,15 @@ class ServerSessions:
         while True:
             msg, reply = self.notes_ops.get()
             try:
-                if msg.get("op") in notes.EDIT_OPS:  # (an edit to a page here: the info's edits said anew, if it's changed)
+                if msg.get("op") in notes.EDIT_OPS:  # (an edit to a page here)
                     kind, out = notes.edit_op(msg)
-                    if (seen := notes.edits_stamp()) != self.edits_seen:
-                        with self.lock:
-                            self.edits_seen, self.dirty = seen, True
-                    reply(kind, **out)
-                    continue
-                reply("notes", **(notes.write(msg.get("changes")) if msg.get("action") == "write"
-                                  else notes.listing(msg.get("have"))))
+                else:  # (a write's moved pages: their edits moved too)
+                    kind, out = "notes", (notes.write(msg.get("changes"), msg.get("moved"))
+                                          if msg.get("action") == "write" else notes.listing(msg.get("have")))
+                if (seen := notes.edits_stamp()) != self.edits_seen:  # (the info's edits said anew, if they changed)
+                    with self.lock:
+                        self.edits_seen, self.dirty = seen, True
+                reply(kind, **out)
             except Exception as e:  # noqa: BLE001 (said to the Record that asked)
                 reply("error", error=f"{type(e).__name__}: {e}")
 

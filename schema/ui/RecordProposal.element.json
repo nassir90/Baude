@@ -33,12 +33,14 @@
     {
       "said": "Fix meta misconception",
       "rule": "Meta claims only its own edits: it's told only of its own edits' outcomes and counts only its own as 'yours'. Another agent's edit, wherever it's mentioned or shown, is named by who proposed it (on the edit's own Accept and Reject tooltips, no caption line); an edit another agent revised or merged into is theirs from then on.",
-      "decided": "2026-11-25"
+      "decided": "2026-11-25",
+      "source": [{"issue": "BaudeInternal#200"}, {"session": "b3845b21-55ac-4aab-a769-fb8517403c51", "message": "868770b1-06c0-44a3-bdb9-c1851cf4b39a"}]
     },
     {
       "said": "Uhh sounds complicated make it more coherent",
       "rule": "An edit belongs to its notebook, on the notebook's host. Every app showing that notebook, on that machine or another, shows its waiting edits as the host lists them, and accepting or rejecting one goes back to that host. No edit is visible to only one app.",
-      "decided": "2026-11-25"
+      "decided": "2026-11-25",
+      "source": [{"issue": "BaudeInternal#200"}, {"session": "b3845b21-55ac-4aab-a769-fb8517403c51", "message": "868770b1-06c0-44a3-bdb9-c1851cf4b39a"}]
     }
   ],
   "scenes": []

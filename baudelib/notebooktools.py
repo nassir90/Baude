@@ -269,8 +269,7 @@ class Edits:
             other["status"] = "withdrawn"
         first = edits[0]
         first.update(old=old, new=new, start=start)
-        first.pop("by", None)  # (it's what this proposer made it now: theirs)
-        if by:
+        if by:  # (it's what this proposer made it now: theirs; one who doesn't say who they are leaves it whose it was)
             first["by"] = by
         return self._done(first, [other["id"] for other in edits[1:]])
 
@@ -287,8 +286,7 @@ class Edits:
         if "error" in plan:
             raise ValueError(plan["error"])
         e.update(new=plan["new"], **plan["fields"])
-        e.pop("by", None)
-        if by := _who(msg.get("by")):
+        if by := _who(msg.get("by")):  # (theirs now; one who doesn't say who they are leaves it whose it was)
             e["by"] = by
         return self._done(e)
 
@@ -304,6 +302,25 @@ class Edits:
         e = self._waiting_named(self._book(msg), msg)
         e["status"] = "accepted" if msg.get("accept") else "rejected"
         return self._done(e)
+
+    def adopt(self, msg):
+        """edit_adopt: edits waiting that another machine's Record kept for this host's notebooks (Meta's, from before
+        they were the host's), taken in as they are, with their ids; one whose id is here already, or whose notebook
+        isn't, left out. {edits: those taken in}."""
+        have, ids, out = {e.get("id") for e in self.edits}, {b["id"] for b in self.books}, []
+        for e in msg.get("edits") or ():
+            if not isinstance(e, dict) or e.get("id") in have or e.get("notebook") not in ids or \
+                    not isinstance(e.get("page"), str) or e.get("status", "pending") != "pending":
+                continue
+            have.add(e["id"])
+            out.append({"id": str(e["id"]), "notebook": e["notebook"], "page": e["page"],
+                        "old": str(e.get("old") or ""), "new": str(e.get("new") or ""),
+                        "start": int(e.get("start") or 0), "status": "pending",
+                        "t": float(e.get("t") or time.time()), "by": _who(e.get("by")) or "Meta"})
+        if out:
+            self.edits += out
+            self.changed = True
+        return {"edits": [dict(e) for e in out]}
 
     def listed(self, msg):
         """edits: the edits waiting on a host's notebooks (one notebook's, one page's, if given), page by page, each as

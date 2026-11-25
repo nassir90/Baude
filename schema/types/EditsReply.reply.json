@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
-  "description": "edits's answer.",
+  "description": "edits's answer, and edit_adopt's (its edits: those taken in).",
   "properties": {
     "op": {
       "const": "edits",

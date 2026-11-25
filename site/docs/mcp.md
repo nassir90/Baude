@@ -276,6 +276,14 @@ This connection detached from a session (an ephemeral one its head's done with d
 |---|---|---|---|
 | `session` | string | yes | The session's id. |
 
+#### `edit_adopt` (EditAdopt)
+
+Edits waiting on this host's notebooks that another machine's Record kept (Meta's, from before edits were the notebook host's), handed to the host once, each with its own id, by and t. One whose id the host has (waiting or decided), or whose notebook it hasn't, is left out. Answered with edits: those taken in.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `edits` | array of Edit | yes | The edits, each pending. |
+
 #### `edit_decide` (EditDecide)
 
 A waiting edit accepted or rejected (the user's, in Record). Accepted: the one asking has put its new text in the page in its passage's place already (its own notes write, sent before this); the host keeps what became of it. Answered with edit.
@@ -628,6 +636,7 @@ Record's notebooks here, for another machine's Record: listed, or changed.
 | `action` | string |  | write: changes made; else listed. |
 | `have` | object |  | Those the asker has, {id: digest}: only those it hasn't as they are are sent. |
 | `changes` | array of object |  | Changes to notebooks. |
+| `moved` | object |  | With write: pages moved or renamed, {notebook id: {old name: new name}}; the edits waiting on them are moved with them, in the same op. |
 
 #### `ping` (Ping)
 
@@ -1015,7 +1024,7 @@ edit_propose's, edit_revise's, edit_withdraw's and edit_decide's answer: the edi
 
 #### `edits` (EditsReply)
 
-edits's answer.
+edits's answer, and edit_adopt's (its edits: those taken in).
 
 | Field | Type | Required | What it is |
 |---|---|---|---|

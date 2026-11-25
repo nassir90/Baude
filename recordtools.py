@@ -333,10 +333,12 @@ class RecordTools:
         win.pages.fill()
 
     def follow_moves(self, notebook, moved):
-        """A notebook's pages moved ({old name: new}): the edits waiting on them go with them."""
+        """A notebook's pages moved ({old name: new}): the edits waiting on them go with them, here and on its host
+        (told with the next save: Store.moved_pages)."""
         for p in self.pending(notebook):
             if p["page"] in moved:
                 p["page"] = moved[p["page"]]
+        self.win.store.moved_pages(notebook, moved)
 
     def _named_page(self, name, notebook=None):
         notebook = notebook or self.notebook
@@ -486,8 +488,8 @@ class RecordTools:
             raise ValueError(f"{full_name(src)}{self._on(from_key)} and {full_name(nb)}{self._on(to_key)} are copies "
                              "of one notebook (the same id): pages can't be moved between them here.")
         if src is not nb and (waiting := [p["page"] for p in self.pending(src) if p["page"] in moved]):
-            raise ValueError(f"{short_page(waiting[0])} has edits of yours waiting: they're accepted or rejected (or "
-                             "withdrawn) before it moves to another notebook.")
+            raise ValueError(f"{short_page(waiting[0])} has edits waiting: they're accepted or rejected (or withdrawn) "
+                             "before it moves to another notebook.")
         if clash := [to for to in moved.values() if to in nb["pages"] and (src is not nb or to not in moved)]:
             raise ValueError(f"There's a page {clash[0]} in {full_name(nb)}{self._on(to_key)} already.")
         where = under or "the top"

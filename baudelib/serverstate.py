@@ -14,7 +14,7 @@ import threading
 import time
 import urllib.parse
 
-from baudelib import accounts, models, transcripts, wire
+from baudelib import accounts, desktopchats, models, transcripts, wire
 
 
 IDLE_S = 30 * 60
@@ -403,6 +403,7 @@ class Session:
                 "acting": self.acting and self.busy and not self.asks,
                 "on_phone": self.server.phones.phone(self.id) is not None,
                 "fork_from": self.meta.get("fork_from"), "spawned_by": self.meta.get("spawned_by"),
+                "desktop": bool(self.meta.get("desktop")), "elsewhere": desktopchats.elsewhere(self),
                 "start_key": self.meta.get("start_key"), "account": self.account(),
                 "held": [{"id": h["id"], "text": h["text"], "shown": h.get("shown"), "sender": h.get("sender"),
                           "at": h.get("at")} for h in self.meta.get("held") or []],

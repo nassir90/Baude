@@ -12,8 +12,8 @@ import time
 import uuid
 
 from baudelib import (
-    agentproxy, emissionlink, emissiontools, hostaccounts, hostdb, hostfiles, hostfixes, hostkube, hostlogin, mesh,
-    meshtools, hostterminal, multiplexlink, notes, routines, wire, wording, worktree,
+    agentproxy, desktopchats, emissionlink, emissiontools, hostaccounts, hostdb, hostfiles, hostfixes, hostkube,
+    hostlogin, mesh, meshtools, hostterminal, multiplexlink, notes, routines, wire, wording, worktree,
 )
 from baudelib.serverstate import (
     APPS, BOT_PICTURE_MAX, Conn, FRAME_KEYS, _mtime, _write_json, _write_text, bot_dir, clean_env,
@@ -395,7 +395,8 @@ class ServerRunning:
             with self.lock:  # (as they are now: nothing's been read while nobody was attached)
                 for s in self.sessions.values():
                     self.rescan(s)
-            return reply("sessions", sessions=self.listing(conn.archived), server=self.info())
+                self.desktop.look(force=True)
+            return reply("sessions", sessions=self.heads_listing(conn.archived), server=self.info())
         if op == "quit":  # (the host process itself: its claudes stopped, its sessions kept for next time; a turn
             # going on cut short, and marked so)
             with self.lock:  # (if_idle, a head's restart of it: not while a command's running, which it would end)
@@ -557,13 +558,24 @@ class ServerRunning:
             where = msg.get("where") if wire.is_where(msg.get("where")) else None
             done = (self.mesh.deactivate if op == "deactivate" else self.mesh.activate)(msg.get("id"), where)
             return reply(op + "d", any=done)
+        with self.lock:  # (a Claude Desktop chat only listed, written in: taken up first, its folder made again below;
+            # not while Desktop's writing it)
+            if msg.get("session") in self.desktop.chats and desktopchats.takes_up(msg):
+                desktopchats.restat(d := self.desktop.chats[msg["session"]])
+                if desktopchats.elsewhere(d):
+                    return reply("error", error=wording.say("host_errors.active_elsewhere"), plain=True)
+                try:
+                    self.desktop.take_up(msg["session"])
+                except (OSError, ValueError) as e:
+                    return reply("error", error=str(e))
         if op == "input" and self.makes_folder(msg.get("msg") or {}) or op == "held" and msg.get("send"):
             self.restore_folder(conn, msg.get("session"))  # (its worktree removed: made again first, not under the
             # lock, which git would hold up)
         with self.lock:
             if self.stopped.is_set():  # (it stopped as this waited for the lock: halt's)
                 return reply("error", error="the host process is stopping")
-            s = self.sessions.get(msg.get("session"))
+            # (or a Claude Desktop chat only listed, read as it is: desktopchats.READS)
+            s = self.sessions.get(msg.get("session")) or self.desktop.chats.get(msg.get("session"))
             if s is None:
                 return reply("error", error=f"no session {msg.get('session')}")
             if s.deleting:
@@ -591,7 +603,10 @@ class ServerRunning:
                 self.drop_ephemeral(s, meant=True)
                 return None
             if op == "input":
-                self.take_input(conn, s, msg.get("msg") or {}, self.sent_by(conn, msg))
+                try:
+                    self.take_input(conn, s, msg.get("msg") or {}, self.sent_by(conn, msg))
+                except desktopchats.Elsewhere as e:
+                    return reply("error", error=str(e), plain=True)
                 return reply("accepted", session=s.id) if req is not None else None
             if op == "stop":  # (restart: started again with the next message, those attached not told it went)
                 if s.proc is not None:
@@ -651,9 +666,12 @@ class ServerRunning:
                 if h is None:
                     return reply("error", error=wording.say("host_errors.no_held"))
                 if msg.get("send"):
-                    self.take_input(conn, s, {"type": "user", "message": {"role": "user", "content": h["text"]}},
-                                    h.get("sender"), h["shown"] if isinstance(h.get("shown"), str) else
-                                    meshtools.shown_of_told(h.get("text") or ""))
+                    try:
+                        self.take_input(conn, s, {"type": "user", "message": {"role": "user", "content": h["text"]}},
+                                        h.get("sender"), h["shown"] if isinstance(h.get("shown"), str) else
+                                        meshtools.shown_of_told(h.get("text") or ""))
+                    except desktopchats.Elsewhere as e:  # (kept: sent once it's quiet)
+                        return reply("error", error=str(e), plain=True)
                 s.meta["held"] = [x for x in held if x is not h] or None
                 self.save(s)
                 self.changed()
@@ -722,10 +740,13 @@ class ServerRunning:
         if r["id"] in s.routines_out and s.busy:
             error = wording.say("host_errors.routine_skipped")
         else:
-            error = None
-            self.take_input(None, s, {"type": "user", "uuid": str(uuid.uuid4()),
-                                      "message": {"role": "user", "content": routines.said(r, now)}})
-            s.routines_out.add(r["id"])
+            try:
+                self.take_input(None, s, {"type": "user", "uuid": str(uuid.uuid4()),
+                                          "message": {"role": "user", "content": routines.said(r, now)}})
+                error = None
+                s.routines_out.add(r["id"])
+            except desktopchats.Elsewhere as e:
+                error = str(e)
         s.meta["routines"] = [(routines.ran(x, now, error) if schedule else {**x, "last": now})
                               if x["id"] == r["id"] else x for x in s.meta.get("routines") or []]
         self.save(s)

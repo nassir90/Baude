@@ -368,6 +368,10 @@ class WindowRemote:
         for card in self.mesh_cards:  # (the chats they started or messaged: as their hosts list them now)
             card.refresh_header()
         self.show_held()
+        if self.remote is None and self.proc is not None and not self.busy \
+                and (self.desktop_chat or is_desktop(self.session_id)) and self.host_took_up():
+            self.restart_proc()  # (a Desktop chat this machine's host took up: its own claude let go, written in
+            # through the host from now on: runs_here)
         if self.remote is None:
             return
         self.sync_senders()
@@ -902,7 +906,7 @@ class WindowRemote:
             text = wording.say("hosts.down", host=name) if self.remote.state == "dead" else \
                 "Looking for daemon…" if self.remote.mine else wording.say("hosts.looking", host=name)
         elif kind == "live":
-            text = "This session is currently active elsewhere"
+            text = wording.say("chat_banner.active_elsewhere")
         elif kind == "missing":  # (its host there, but with no such session: session_missing)
             name = "Daemon" if self.remote.mine else remote_name(self.remote)
             text = wording.say("chat_banner.missing_because", name=name, reason=self.missing_reason) \

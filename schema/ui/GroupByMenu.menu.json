@@ -38,11 +38,12 @@
     },
     {
       "name": "Groups",
-      "shows": "Under a separator, the Groups checks: the same widget as the Kubernetes page's Namespaces menu (pickers.CheckList; the phone's MenuChecks, as its Namespaces). A check over them all, worded \"Groups\" and drawn as a section heading (as \"Group by\"), checked while every group is listed; a separator, then a check per group (Baude's own groups), alphabetical case-insensitively, then \"No group\" last; then, under a separator, \"New Group…\". Groups known: those made with New Group…, those chats are put in, and those hosts' sessions were started in.",
+      "shows": "Under a separator, the Groups checks: the same widget as the Kubernetes page's Namespaces menu (pickers.CheckList; the phone's MenuChecks, as its Namespaces). A check over them all, worded \"Groups\" and drawn as a section heading (as \"Group by\"), checked while every group is listed; a separator, then a check per group (Baude's own groups): \"Desktop\" first while there are Claude Desktop chats here or on a host, then the rest alphabetical case-insensitively, then \"No group\" last; then, under a separator, \"New Group…\". Groups known: those made with New Group…, those chats are put in, and those hosts' sessions were started in.",
       "copy": [
         "sidebar.groups",
         "sidebar.no_group",
-        "sidebar.new_group_ellipsis"
+        "sidebar.new_group_ellipsis",
+        "sidebar.desktop_group"
       ],
       "parts": [
         {
@@ -100,6 +101,18 @@
             }
           ]
         }
+      ],
+      "decisions": [
+        {
+          "said": "Claude Desktop's chats go into a Desktop group automatically, kept apart from the rest",
+          "rule": "Every app lists Desktop first among the groups while there are Claude Desktop chats, and gives it no Rename Group… or Delete Group: its chats are in it because of what they are.",
+          "decided": "2026-11-25",
+          "source": [
+            {
+              "issue": "BaudeInternal#203"
+            }
+          ]
+        }
       ]
     },
     {
@@ -144,6 +157,7 @@
   "scenes": [
     "55-network-group-menu",
     "55l-network-hosts",
-    "55m-network-all"
+    "55m-network-all",
+    "53e2-desktop-group-menu"
   ]
 }

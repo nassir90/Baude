@@ -7,6 +7,7 @@
     "api_status": "The API returned {$status}",
     "api_silent": "The API didn't answer",
     "retrying": "{$what}: retrying",
-    "retrying_attempt": "{$what}: retrying, attempt {$attempt} of {$max}"
+    "retrying_attempt": "{$what}: retrying, attempt {$attempt} of {$max}",
+    "active_elsewhere": "This session is currently active elsewhere"
   }
 }

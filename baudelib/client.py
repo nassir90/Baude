@@ -238,8 +238,11 @@ class Remote:
             op = msg.get("op")
             if op == "sessions":
                 self.info = msg.get("server") or self.info
+                # (this machine's Claude Desktop chats its host only lists: Baude lists them itself, from Desktop's
+                # own list, as its own claude runs them; Record has no chats)
                 self.sessions = {s["id"]: s for s in msg.get("sessions") or []
-                                 if isinstance(s, dict) and wire.is_id(s.get("id"))}
+                                 if isinstance(s, dict) and wire.is_id(s.get("id"))
+                                 and not (self.mine and s.get("taken_up") is False)}
                 if self.state != "alive":
                     self.state = "alive"
                 if self.mine:

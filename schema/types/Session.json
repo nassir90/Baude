@@ -117,6 +117,18 @@
       "type": ["string", "null"],
       "description": "The chat whose mesh tools started it (start's spawned_by)."
     },
+    "desktop": {
+      "type": "boolean",
+      "description": "Claude Desktop's: a chat in Claude Desktop's own list on its host's machine. Every app lists it in the Desktop group."
+    },
+    "taken_up": {
+      "type": "boolean",
+      "description": "false for a Claude Desktop chat its host only lists: nothing of it runs on the host till it's written in, which takes it up (as adopt does). Missing for every other."
+    },
+    "elsewhere": {
+      "type": "boolean",
+      "description": "Claude Desktop is writing it now (written in the last minute, not by the host's own agent): every app keeps it read-only while it is."
+    },
     "start_key": {
       "type": ["string", "null"],
       "description": "Its start's start_key, if it was given one."

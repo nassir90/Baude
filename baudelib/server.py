@@ -24,7 +24,7 @@ import threading
 import time
 import uuid
 
-from baudelib import accounts, codex, emissionlink, mesh, phonebrowser, models, notes, providers, selfupdate, wire, wording
+from baudelib import accounts, codex, desktopchats, emissionlink, mesh, phonebrowser, models, notes, providers, selfupdate, wire, wording
 from baudelib.serverstate import (
     AlreadyRunning, DRAFT_S, EMISSIONS_S, EPHEMERAL_S, EXIT_S, IDLE_S, Session, _read_json, _write_json, bot_dir,
     kept_sessions, lock_path, state_home, trash,
@@ -91,6 +91,7 @@ class Server(ServerRunning, ServerSessions):
                 self.sessions[meta["id"]] = Session(self, meta)
             except (OSError, ValueError, KeyError, TypeError):
                 continue
+        self.desktop = desktopchats.DesktopChats(self)  # (this machine's Claude Desktop chats, listed to heads too)
         self.conns = set()
         self.dirty = False  # (subscribers have yet to hear of a change: _watch)
         self.notes_file, self.notes_seen = notes.file_key(), notes.stamp()  # (records.json here as last looked at:
@@ -389,8 +390,8 @@ class Server(ServerRunning, ServerSessions):
             self.changed()
 
     def save(self, s):
-        # (one deleted, a side question's, or a new chat's not written in yet: not kept)
-        if not s.deleted and not s.meta.get("ephemeral") and not s.meta.get("draft"):
+        # (one deleted, a side question's, a new chat's not written in yet, or a Desktop chat only listed: not kept)
+        if not s.deleted and not s.meta.get("ephemeral") and not s.meta.get("draft") and not s.meta.get("listed_only"):
             _write_json(os.path.join(self.state_dir, "sessions", f"{s.id}.json"), s.meta)
 
     def listing(self, archived=False):
@@ -400,3 +401,9 @@ class Server(ServerRunning, ServerSessions):
             return sorted((s.listing() for s in self.sessions.values()
                            if (archived or not s.meta.get("archived")) and not s.meta.get("ephemeral")),
                           key=lambda i: -(i["said"] or 0))
+
+    def heads_listing(self, archived=False):
+        """What a head is told the host has (sessions): its sessions (listing), then this machine's Claude Desktop chats
+        it hasn't taken up (desktopchats), as Desktop's list was last read."""
+        with self.lock:
+            return self.listing(archived) + sorted(self.desktop.listings(archived), key=lambda i: -(i["said"] or 0))

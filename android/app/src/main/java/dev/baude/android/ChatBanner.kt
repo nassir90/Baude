@@ -23,7 +23,8 @@ import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.delay
 
 /** What's in the way of a chat from outside it, said in a strip under its header while it is (Adw.Banner): its host
- * stopping or not there, its host not having the chat any more, claude retrying the model's API. Nothing, and no
+ * stopping or not there, its host not having the chat any more, Claude Desktop writing the chat (Baude's
+ * live_elsewhere), claude retrying the model's API. Nothing, and no
  * room, when nothing is. */
 @Composable
 fun ChatBanner(chat: Chat, open: (String, String) -> Unit) {
@@ -53,6 +54,7 @@ fun ChatBanner(chat: Chat, open: (String, String) -> Unit) {
             button = Wording.ChatBanner.newChat to { newChatOn(chat, open) }
             AnnotatedString(Wording.ChatBanner.missing(name = name))
         }
+        Mesh.session(at, chat.sid)?.elsewhere == true -> AnnotatedString(Wording.ChatBanner.activeElsewhere)
         retry != null -> {
             val status = retry.opt("error_status")?.takeIf { !retry.isNull("error_status") && it.toString().isNotBlank() }
             val what = if (status != null) Wording.ChatBanner.apiStatus(status = status) else Wording.ChatBanner.apiSilent

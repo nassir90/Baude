@@ -159,9 +159,11 @@ data class Item(val hostId: String, val s: Msg.Session, val depth: Int) {
 data class Section(val key: String, val label: String, val hostId: String?, val folder: String?, val rows: List<Item>,
                    val full: String = label)
 
-/** The group a session's in, as Baude's chat_group has it from a host: its group, unless it's the host's own. */
+/** The group a session's in, as Baude's chat_group has it from a host: Desktop for a Claude Desktop chat; else its
+ * group, unless it's the host's own. */
 fun groupOf(hostId: String, s: Msg.Session): String {
     HomePrefs.chatGroups["$hostId/${s.id.orEmpty()}"]?.let { return it } // (moved here: this phone's say)
+    if (s.desktop == true) return Wording.Sidebar.desktopGroup
     val g = s.group.orEmpty()
     return if (g == Mesh.conn(hostId)?.info?.let { it.group.orEmpty() }) "" else g
 }
@@ -228,8 +230,8 @@ fun startedElsewhere(): Set<String> {
     return Mesh.sessions.flatMap { (h, list) -> list.filter { far(h, it, emptySet()) }.map { "$h/${it.id.orEmpty()}" } }.toSet()
 }
 
-/** The sections, as Baude's sidebar makes them (groups()): the Bots first (by folder), then each folder by its newest
- * chat, or each day; a chat nested under the one that forked or started it; archived ones last. query: what's
+/** The sections, as Baude's sidebar makes them (groups()): the Bots first (by folder), then the Desktop group's chats
+ * (Claude Desktop's), then each folder by its newest chat, or each day; a chat nested under the one that forked or started it; archived ones last. query: what's
  * searched for (title, folder, host, Bot's name). */
 fun sections(query: String): List<Section> {
     val q = query.trim().lowercase()
@@ -298,11 +300,16 @@ fun sections(query: String): List<Section> {
         for (i in items) if (i.depth == 0 || r.isEmpty()) r.add(mutableListOf(i)) else r.last().add(i)
         return r
     }
+    // (the Desktop group's chats, Claude Desktop's: apart, first after the Bots, by folder or by day alike)
+    val (desktop, rest) = runs(live).partition { groupOf(it[0].hostId, it[0].s) == Wording.Sidebar.desktopGroup }
+    val desktopSection = if (desktop.isEmpty()) null
+        else Section("desktop", Wording.Sidebar.desktopGroup, null, null, desktop.sortedByDescending { said(it[0].s) }.flatten())
+    desktopSection?.let { out.add(it) }
     if (HomePrefs.by.value != "folder") {
         val today = LocalDate.now()
         // (Created: by the day the top one of each was made, the newest made first; Updated: by when it was last used)
         fun day(run: List<Item>) = if (HomePrefs.by.value == "created") run[0].s.created?.toDouble() ?: said(run[0].s) else said(run[0].s)
-        val days = runs(live).sortedByDescending { day(it) }.groupBy { run ->
+        val days = rest.sortedByDescending { day(it) }.groupBy { run ->
             val d = Instant.ofEpochMilli((day(run) * 1000).toLong()).atZone(ZoneId.systemDefault()).toLocalDate()
             ChronoUnit.DAYS.between(d, today).coerceAtLeast(0).let { if (it >= 7) 7L else it }
         }
@@ -316,8 +323,8 @@ fun sections(query: String): List<Section> {
             out.add(Section(if (n == 7L) "date:older" else "date:$n", label, null, null, group.flatten()))
         }
     } else {
-        val (bots, chats) = runs(live).partition { it[0].bot != null }
-        if (bots.isNotEmpty()) out.add(Section("bots", Wording.Common.bots, null, null, bots.sortedByDescending { said(it[0].s) }.flatten()))
+        val (bots, chats) = rest.partition { it[0].bot != null }
+        if (bots.isNotEmpty()) out.add(0, Section("bots", Wording.Common.bots, null, null, bots.sortedByDescending { said(it[0].s) }.flatten()))
         val folders = chats.groupBy { it[0].hostId to it[0].s.cwd.orEmpty() }
         for ((key, group) in folders.entries.sortedByDescending { e -> e.value.maxOf { said(it[0].s) } }) {
             val (hostId, cwd) = key
@@ -731,7 +738,8 @@ private fun ViewMenu(snack: SnackbarHostState) {
                     HomePrefs.groups.clear()
                     if (next.toSet() != names.toSet()) HomePrefs.groups.addAll(next)
                     HomePrefs.save()
-                }, onLongClick = { g -> if (g.isNotEmpty()) held = g }, heading = true)
+                }, onLongClick = { g -> if (g.isNotEmpty() && g != Wording.Sidebar.desktopGroup) held = g }, heading = true) // (No group's
+            // and Desktop's, Claude Desktop's chats put there by what they are: no menu)
             MenuDivider()
             MenuChoice(Wording.Sidebar.newGroupEllipsis, false) { open = false; naming = true to "" }
         }

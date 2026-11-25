@@ -14,6 +14,10 @@ from baudelib import claude as claudelib  # (its ClaudeProc: Baude's is it, on t
 from baudelib.transcripts import _pack_keys, _scan_line, _scan_state, _unpack_keys, projects_dir, projects_dirs, \
     ref_epoch, scan_session
 import baudelib.client  # noqa: E402  (servers on the network and their sessions: see baudelib/client.py)
+from baudelib import desktopchats  # noqa: E402  (Claude Desktop's own list of its chats: Baude's and a host's)
+from baudelib.desktopchats import (  # noqa: E402,F401
+    _DESKTOP_KEYS, _desktop_cache, claude_desktop_dir, desktop_link, desktop_parents, desktop_used,
+)
 import baudelib.hosts  # noqa: E402  (this machine's host process, started when it's wanted: see baudelib/hosts.py)
 from baudelib import models as modelslib  # noqa: E402  (what runs a model: claude, apple-claude or pi-claude)
 from baudelib import wording  # noqa: E402  (the words Baude shows: schema/copy, Record's and the Android app's too)
@@ -85,52 +89,6 @@ def fold_records(owner, copy):
     of a continued conversation's copy, or what a copy made since a compaction leaves out)."""
     own = owner.get("uuids") or frozenset()
     owner["more_uuids"] = frozenset().union(owner.get("more_uuids") or (), *(ids - own for ids in record_ids(copy)))
-
-
-def desktop_parents(info):
-    """The id of the session Claude Desktop shows a chat of its under, as a list ([] for none): the one that started it
-    as a side session (spawned_from), or the one it was forked from (fork_of); apply_desktop_index sets one at most,
-    as Desktop picks one (desktop_link). Where that one isn't listed, the chat is a top-level one."""
-    return [i for i in (info.get("spawned_from"), info.get("fork_of")) if i]
-
-
-_DESKTOP_LINKS = ("side_session", "hand_off", "suggested_task", "fork")
-
-
-def desktop_link(entry):
-    """(kind, local id) of the chat Claude Desktop nests one of its chats under, or (None, None), as its sidebar picks
-    it: none once it's detached from it (lineageDetached); else its lineage; else the chat that started it as a side
-    session (spawnedFrom, a side session's only); else the one it was forked from. kind is "fork" for a fork."""
-    if entry.get("lineageDetached"):
-        return None, None
-    lineage = entry.get("lineage")
-    if isinstance(lineage, dict) and isinstance(lineage.get("sessionId"), str) and lineage["sessionId"] \
-            and lineage.get("kind") in _DESKTOP_LINKS and lineage.get("initiator") in ("claude", "user"):
-        return lineage["kind"], lineage["sessionId"]
-    spawned = entry.get("spawnedFrom") if isinstance(entry.get("spawnedFrom"), dict) else {}
-    if spawned.get("sideSession") and isinstance(spawned.get("sessionId"), str):
-        return "side_session", spawned["sessionId"]
-    if isinstance(entry.get("forkedFromSessionId"), str):
-        return "fork", entry["forkedFromSessionId"]
-    return None, None
-
-
-def desktop_used(entry):
-    """When Claude Desktop says one of its chats was last used (what its sidebar's order and days go by), as a
-    timestamp, or None: the last turn's start or end (lastTurnEdgeAt), else its last activity, else its creation."""
-    ms = next((entry[k] for k in ("lastTurnEdgeAt", "lastActivityAt", "createdAt")
-               if isinstance(entry.get(k), (int, float)) and entry[k] > 0), None)
-    return ms / 1000 if ms is not None else None
-
-
-def claude_desktop_dir():
-    """The Claude desktop app's own folder: $XDG_CONFIG_HOME/Claude when that's set (Linux's way, and how the tests
-    point it elsewhere), else ~/Library/Application Support/Claude on a Mac (where Electron keeps it), ~/.config/Claude
-    elsewhere."""
-    if os.environ.get("XDG_CONFIG_HOME"):
-        return os.path.join(os.environ["XDG_CONFIG_HOME"], "Claude")
-    return os.path.join(os.path.expanduser("~/Library/Application Support" if sys.platform == "darwin" else "~/.config"),
-                        "Claude")
 
 
 _FORK_SUFFIX = re.compile(r"^(.*\S)\s+\(([^()]+)\)$")
@@ -213,60 +171,10 @@ def fork_tree(items):
 
 
 def desktop_index():
-    """Claude Desktop's own list of its chats ({cli session id: entry}), from claude-code-sessions/*/*/local_*.json in
-    its folder (claude_desktop_dir: on a Mac, in ~/Library/Application Support): title, archived, when it was last
-    used, which earlier transcripts are copies of it (priorCliSessionIds) and what it came from. Empty without
-    Desktop. Entries are cached by file mtime (they're small, but carry big tool lists)."""
-    base = os.path.join(claude_desktop_dir(), "claude-code-sessions")
+    """Claude Desktop's own list of its chats (desktopchats.desktop_index), its entries kept with the session index."""
     with _info_lock:
         _load_info_cache()
-    out, archived = {}, set()
-    try:
-        accounts = os.listdir(base)
-    except OSError:
-        return out
-    for acct in accounts:
-        for org in (os.listdir(os.path.join(base, acct)) if os.path.isdir(os.path.join(base, acct)) else []):
-            d = os.path.join(base, acct, org)
-            try:
-                names = os.listdir(d)
-            except OSError:
-                continue
-            for name in names:
-                path = os.path.join(d, name)
-                if name == "archived-sessions.idx":
-                    entry = _desktop_file(path)
-                    archived.update((entry or {}).get("archived") or [])
-                elif name.startswith("local_") and name.endswith(".json"):
-                    entry = _desktop_file(path)
-                    if entry and entry.get("cliSessionId"):
-                        out[entry["cliSessionId"]] = entry
-    for e in out.values():
-        e["_archived"] = bool(e.get("isArchived")) or e.get("sessionId") in archived
-    return out
-
-
-_desktop_cache = {}
-# what's kept of each Desktop chat's file
-_DESKTOP_KEYS = ("sessionId", "cliSessionId", "title", "worktreeName", "isArchived", "priorCliSessionIds",
-                 "forkedFromSessionId", "spawnedFrom", "lineage", "lineageDetached", "lastTurnEdgeAt", "lastActivityAt",
-                 "createdAt", "cwd", "archived")
-
-
-def _desktop_file(path):
-    try:
-        mtime = os.path.getmtime(path)
-        hit = _desktop_cache.get(path)
-        if hit and hit[0] == mtime:
-            return hit[1]
-        with open(path, encoding="utf-8") as f:
-            raw = json.load(f)
-    except (OSError, ValueError):
-        return None
-    entry = {k: raw[k] for k in _DESKTOP_KEYS if isinstance(raw, dict) and k in raw}
-    _desktop_cache[path] = (mtime, entry)
-    _info_dirty[0] = True  # (kept with the session index: these files are big, the entries small)
-    return entry
+    return desktopchats.desktop_index()
 
 
 def apply_desktop_index(sessions, index, keep=()):
@@ -467,10 +375,10 @@ def save_info_cache(force=False):
     if not force and time.monotonic() - _info_saved[0] < 30:
         return
     with _info_lock:
-        if not _info_dirty[0]:
+        if not _info_dirty[0] and not desktopchats.dirty[0]:
             return
         _load_info_cache()  # (a worktree learned before the index was read doesn't write over it)
-        _info_dirty[0] = False
+        _info_dirty[0] = desktopchats.dirty[0] = False
         _info_saved[0] = time.monotonic()
         files = {}
         for path, entry in _info_cache.items():
@@ -667,6 +575,7 @@ def remote_info(s):
             "dead": r.state == "dead" and not r.mine, "off": r.deactivated,  # (off: its host's deactivated)
             "group": s.get("group"), "model": s.get("model"), "effort": s.get("effort"), "mode": s.get("mode"),
             "archived": bool(s.get("archived")), "bot": s.get("bot"),
+            "desktop": bool(s.get("desktop")), "elsewhere": bool(s.get("elsewhere")),  # (Claude Desktop's; writing it now)
             "fork_from": s.get("fork_from"), "cli_id": s.get("cli_id"), "spawned_by": s.get("spawned_by"),
             "held": len(s.get("held") or []),  # (messages its host holds for it, to send or drop: HeldTurn)
             "account": (s.get("account") or {}).get("name") if isinstance(s.get("account"), dict) else None}
@@ -747,10 +656,13 @@ def made_groups(st=None):
 
 def chat_group(info, assigned=None):
     """A chat's group (⋮ → Groups), "" for none: Baude's own, whatever host the chat is on. The one it's been put in
-    (assigned: chat_groups, read if not given); else, for a host's session (remote_info's, or Network.sessions' own),
-    the one it was started in (baude_oneshot.py --group), unless that's only its host's own."""
+    (assigned: chat_groups, read if not given); else, for a Claude Desktop chat, on this machine or a host's, Desktop
+    (desktopchats.group); else, for a host's session (remote_info's, or Network.sessions' own), the one it was started
+    in (baude_oneshot.py --group), unless that's only its host's own."""
     if (put := (chat_groups() if assigned is None else assigned).get(info.get("id"))) is not None:
         return put
+    if info.get("desktop"):
+        return desktopchats.group()
     r = info.get("remote") or info.get("server")
     if r is None or not info.get("group") or info["group"] == r.info.get("group"):
         return ""

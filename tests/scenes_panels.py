@@ -68,7 +68,8 @@ def network_fixture():
             T.wait_for(lambda: s.state() == "idle", f"{params['prompt']}: done")
         time.sleep(0.05)  # (in order: each said a little after the one before)
     box, box_r = servers["build-box"]
-    T.wait_for(lambda: len(net.sessions()) == 6 and all(
+    T.wait_for(lambda: len([x for x in net.sessions() if not x["server"].mine]) == 6 and all(  # (this machine's:
+        # a draft an earlier scene's window left, say, not counted)
         x.get("size") for x in net.sessions() if x["server"] is box_r), "the network's sessions")
     for sid in box_r.sessions:
         box_r.sync(sid)  # (what Baude had of them, from before it went)
@@ -519,6 +520,74 @@ def _(app):
         if row is not None and getattr(row, "key", None) == "scratch":
             row.get_child().add_css_class("hover")
             break
+    return win
+
+
+DESKTOP = {"Plan the onboarding flow": "d5300000-0000-4000-8000-000000000001",
+           "Onboarding, shorter": "d5300000-0000-4000-8000-000000000002",
+           "Review the pricing page": "d5300000-0000-4000-8000-000000000003"}
+
+
+def desktop_chats():
+    """Claude Desktop's chats here, in its own list (its chats' files, as test_desktop_index writes them): two in
+    desk-app, one of them forked from the other, and one in desk-site; with two terminal chats in desk-app beside them.
+    Returns desk-app."""
+    app_dir, site = (os.path.join(T.TMP, name) for name in ("desk-app", "desk-site"))
+    for d in (app_dir, site):
+        os.makedirs(d, exist_ok=True)
+    now, entries = time.time(), []
+    for n, (title, folder, ago, fork) in enumerate((
+            ("Plan the onboarding flow", app_dir, 1800, None), ("Onboarding, shorter", app_dir, 2400, "local_0"),
+            ("Review the pricing page", site, 90000, None))):
+        age(T.write_session(folder, DESKTOP[title], title=title), ago)  # (DESKTOP's ids, the transcripts' too)
+        entries.append({"sessionId": f"local_{n}", "cliSessionId": DESKTOP[title], "title": title, "cwd": folder,
+                        "createdAt": (now - ago - 600) * 1000, "lastActivityAt": (now - ago) * 1000,
+                        **({"forkedFromSessionId": fork} if fork else {})})
+    for n, (title, ago) in enumerate((("Fix the login bug", 600), ("Tidy the changelog", 7200))):
+        age(T.write_session(app_dir, f"d5310000-0000-4000-8000-00000000000{n}", title=title), ago)
+    T.write_desktop_index(entries)
+    return app_dir
+
+
+@scene("53e-desktop-group", "Claude Desktop's chats in the Desktop group: apart from the folders, first, nested as "
+                            "Desktop nests them")
+def _(app):
+    win = app.window(opts(cwd=desktop_chats()))
+    T.wait_for(lambda: sidebar_row(win, "Review the pricing page") is not None, "Desktop's chats")
+    return win
+
+
+@scene("53e2-desktop-group-menu", "⋮: Desktop first among the groups, while there are Desktop chats")
+def _(app):
+    win = app.window(opts(cwd=desktop_chats()))
+    T.wait_for(lambda: sidebar_row(win, "Review the pricing page") is not None, "Desktop's chats")
+    win.sidebar.view_btn.popup()
+    return win
+
+
+@scene("55x-network-desktop", "lab-mac picked: its Claude Desktop chats, which it lists, in the Desktop group, apart "
+                              "and first")
+def _(app):
+    network_fixture()
+    desktop_chats()
+    win = network_window(app, None)
+    T.wait_for(lambda: sidebar_row(win, "Review the pricing page") is not None, "lab-mac's Desktop chats", 20)
+    return win
+
+
+@scene("55x2-network-desktop-elsewhere", "One of lab-mac's Desktop chats open while Claude Desktop writes it: said, "
+                                         "and no text box till it's done")
+def _(app):
+    network_fixture()
+    desktop_chats()
+    win = network_window(app, None)
+    T.wait_for(lambda: sidebar_row(win, "Plan the onboarding flow") is not None, "lab-mac's Desktop chats", 20)
+    win.sidebar.on_activate(win.sidebar.list, sidebar_row(win, "Plan the onboarding flow"))
+    T.wait_for(lambda: win.remote is not None and win.session_id == DESKTOP["Plan the onboarding flow"], "opened")
+    with open(T.baudelib.transcripts.find_session(DESKTOP["Plan the onboarding flow"])["path"], "a") as f:  # (Claude Desktop, writing it now)
+        f.write(json.dumps({"type": "assistant", "message": {"role": "assistant", "content": [
+            {"type": "text", "text": "Splitting the flow into three screens."}]}}) + "\n")
+    T.wait_for(lambda: getattr(win, "banner_kind", None) == "live", "said", 20)
     return win
 
 

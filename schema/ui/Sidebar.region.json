@@ -10,6 +10,8 @@
   "code": [
     "sessionsidebar.py:SessionSidebar",
     "sessionsidebar.py:SessionSidebar.groups",
+    "sessionsidebar.py:SessionSidebar.section_of",
+    "baudelib/desktopchats.py:DesktopChats",
     "sessionsidebar.py:SessionSidebar.fill",
     "sessionsidebar.py:SessionSidebar.session_row",
     "sessionsidebar.py:SessionSidebar.bot_row",
@@ -173,7 +175,7 @@
     },
     {
       "name": "Session list",
-      "shows": "A scrolling list (no horizontal scroll) of group headers, each followed by its session rows and, when cut short, a \"Show N more\" row. Scroll position and focus are kept when it is rebuilt. The open session's row is highlighted (selected). Order: Bots first (no header), then groups; by folder the folder of the open chat first then by latest activity; by Created or Updated newest day first; then the Archived group at the end.",
+      "shows": "A scrolling list (no horizontal scroll) of group headers, each followed by its session rows and, when cut short, a \"Show N more\" row. Scroll position and focus are kept when it is rebuilt. The open session's row is highlighted (selected). Order: Bots first (no header), then the Desktop group's chats, then groups; by folder the folder of the open chat first then by latest activity; by Created or Updated newest day first; then the Archived group at the end.",
       "parts": [
         {
           "name": "Group header (folder)",
@@ -198,6 +200,25 @@
             {
               "by": "click +",
               "does": "Opens a new, blank chat in that folder at once, as New session does (tooltip \"New session in <folder>\"). Only if the folder exists here. For a folder on another host: the blank chat is on that host, in that folder, which becomes the folder last used there (tooltip \"New session in <folder>, on <host>\"), shown only while that host is alive."
+            }
+          ]
+        },
+        {
+          "name": "Group header (Desktop)",
+          "shows": "\"Desktop\": Claude Desktop's chats, apart from every other chat and first after the Bots, whether the list is grouped by folder, Created or Updated. Its chats are those Claude Desktop lists on the host picked (this machine's own, read from Desktop's list; another host's, as that host lists them), nested as Desktop nests them, by latest activity. Same arrow and Show N more as a folder's (8 shown); no + button.",
+          "copy": [
+            "sidebar.desktop_group"
+          ],
+          "decisions": [
+            {
+              "said": "Claude Desktop's chats go into a Desktop group automatically, kept apart from the rest, and are shared over the mesh so other hosts can see them and carry them on",
+              "rule": "Every app puts each Claude Desktop chat in the Desktop group (unless it's been moved to another) and lists that group apart and first after the Bots, on every host. A host lists its machine's Desktop chats to the mesh with its sessions (desktop: true; taken_up: false till one is written in), so every app on every host sees them and reads them as any chat. Writing in one from another host or the phone takes it up on its host (claude --resume there). While Claude Desktop is writing one (elsewhere), every app shows it read-only, with no text box, as Baude's own Desktop chats are.",
+              "decided": "2026-11-25",
+              "source": [
+                {
+                  "issue": "BaudeInternal#203"
+                }
+              ]
             }
           ]
         },
@@ -426,6 +447,8 @@
   ],
   "scenes": [
     "50-sessions-sidebar",
+    "53e-desktop-group",
+    "55x-network-desktop",
     "50b-sidebar-search",
     "50c-dot-working",
     "50d-dot-waiting",

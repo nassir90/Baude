@@ -38,6 +38,7 @@
     "changes_not_taken": "the Record running there didn't take the changes",
     "another_phone": "another phone shows this Bot's browser now",
     "no_such_bot": "that's no Bot of this host's",
-    "not_task_output": "not a background task's output in that session"
+    "not_task_output": "not a background task's output in that session",
+    "active_elsewhere": "This session is currently active elsewhere: send it again once it's done"
   }
 }

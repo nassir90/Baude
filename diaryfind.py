@@ -13,6 +13,7 @@ import pointers  # noqa: E402  (the pointer's shape: beside this file)
 import widgets  # noqa: E402  (what Record draws as Baude does: the links' logos; beside this file)
 import markdownview  # noqa: E402
 import composerview  # noqa: E402
+import metalook  # noqa: E402  (Meta's marks: the title's, as its row's in the pages' list)
 from baudelib import wording  # noqa: E402  (its words, Baude's: schema/copy)
 from codeview import FindInText  # noqa: E402
 from recordstore import (  # noqa: E402
@@ -45,7 +46,7 @@ class DiaryFind:
     def clear_matches(self):
         FindInText.clear_matches(self)
         self.title_hits, self.on_title = [], None
-        self.title.set_attributes(Pango.AttrList())
+        self._paint_title()
 
     def find(self, text, scroll=True, near=None):
         """What's found in the text, and in the title, which comes before it: the title's the first if the page is at its
@@ -98,9 +99,11 @@ class DiaryFind:
                                         wording.say("find.match_of", at=at + 1, total=total))
 
     def _paint_title(self):
-        """The title's matches shaded as the text's are (it's an entry: no tags), the current one more."""
+        """The title's matches shaded as the text's are (it's an entry: no tags), the current one more; over Meta's
+        mark on it, if it has one (mark_title)."""
         match, current = self.find_tints()
-        text, attrs = self.title.get_text(), Pango.AttrList()
+        text = self.title.get_text()
+        attrs = metalook.mark_attrs(*self.title_mark) if self.title_mark else Pango.AttrList()
         for n, (a, b) in enumerate(self.title_hits):
             red, green, blue, alpha = current if n == self.on_title else match
             first, last = len(text[:a].encode()), len(text[:b].encode())

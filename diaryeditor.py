@@ -172,6 +172,7 @@ class DiaryEditor(DiaryFind, Gtk.Box, FindInText):
         self.clamp = Adw.ClampScrollable(maximum_size=self.WIDTH, child=self.view)
         self.scroll = Gtk.ScrolledWindow(vexpand=True, hscrollbar_policy=Gtk.PolicyType.NEVER, child=self.clamp)
         self.title_hits, self.on_title = [], None  # (the find bar's matches in the title, and the one it's on: find)
+        self.title_mark = None  # (Meta's mark on the page, as its row in the pages' list has it: mark_title)
         main.prepend(self.make_find_bar())  # (over all of the page, the title's in what it finds)
         self.search_bar.connect("notify::search-mode-enabled",  # (its close button too: back to writing)
                                 lambda *_: self.search_bar.get_search_mode() or self.view.grab_focus())
@@ -204,6 +205,12 @@ class DiaryEditor(DiaryFind, Gtk.Box, FindInText):
         self.title.set_tooltip_text(self.page if ":" in self.page else None)
         self.title.set_editable(self.page != HOME)
         self.show_pending()
+
+    def mark_title(self, how, lit=False):
+        """The title highlighted as the page's row in the pages' list is, while Meta's change to the page isn't kept
+        or undone (how: added, moved, edited, highlight; lit: its change's box under the pointer); None, as it is."""
+        self.title_mark = (how, lit) if how else None
+        self._paint_title()
 
     def open_page(self, name, push=True):
         """A page (a [[link]] followed): in a tab of its own (Window.open_note), shown. Returns its editor."""

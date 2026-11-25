@@ -948,10 +948,10 @@ class Window(RecordHosts, Adw.ApplicationWindow, feedback.FeedbackHost, viewers.
         self.show_title()
         if changed:
             self.git_page.chat_changed()  # (the Git page's state is the notebook's, git_chat; its folder's the same)
-        if changed:  # (the notebook left's pages' tabs closed: its own come in, as it had them open)
+        if changed:  # (the notebook left's pages' tabs, deleted ones too, closed: its own come in, as it had them open)
             self.switching = True
             try:
-                for key in [k for k in list(self.tabs.pages) if k[0] == "note"]:
+                for key in [k for k in list(self.tabs.pages) if k[0] in ("note", "gone")]:
                     self.tabs.close(key)
             finally:
                 self.switching = False

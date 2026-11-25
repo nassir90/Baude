@@ -1,7 +1,7 @@
 {
   "description": "The Pages section at the top of Record's left column: the open notebook's pages as an indented tree (a sub-page on its own line under its parent), above the notebooks.",
   "apps": ["record"],
-  "code": ["recordreader.py:PagesList", "recordwindow.py:Window.open_note", "recordwindow.py:Window.delete_page"],
+  "code": ["recordreader.py:PagesList", "recordchat.py:RecordChat.open_gone", "recordwindow.py:Window.open_note", "recordwindow.py:Window.delete_page"],
   "copy": ["common"],
   "parts": [
     {
@@ -15,9 +15,9 @@
     },
     {
       "name": "page row",
-      "shows": "One line per page, indented by depth (a page called Work:Plans shows as Plans under Work, with a tree line from its parent's name; hovering a sub-page shows its full name). Home is first, then the rest sorted by name, case-insensitively, each parent before its children. The page in the tab shown is selected. What is listed: pages with something written in them, every page a [[link]] anywhere goes to, Home, the pages open, and their parents. A page with nothing written yet is grey and italic. A page whose title is being typed in shows the typed name at once. Names too long fade out. Pages Meta added are marked green; deleted ones stay listed, struck through, until kept or undone (nothing opens from them); moved and highlighted ones are marked too.",
+      "shows": "One line per page, indented by depth (a page called Work:Plans shows as Plans under Work, with a tree line from its parent's name; hovering a sub-page shows its full name). Home is first, then the rest sorted by name, case-insensitively, each parent before its children. The page in the tab shown is selected. What is listed: pages with something written in them, every page a [[link]] anywhere goes to, Home, the pages open, and their parents. A page with nothing written yet is grey and italic. A page whose title is being typed in shows the typed name at once. Names too long fade out. Pages Meta added are marked green; deleted ones stay listed, struck through, until kept or undone; moved and highlighted ones are marked too. An open page's title takes its row's mark (RecordNotes).",
       "actions": [
-        {"by": "click", "does": "Opens the page in a tab (shown if already open)."},
+        {"by": "click", "does": "Opens the page in a tab (shown if already open). A page Meta deleted (not yet kept or undone) opens read-only as it was, all of it struck through on red (RecordNotes, page deleted by Meta)."},
         {"by": "right-click", "does": "Page menu (RecordPageMenu)."}
       ]
     }

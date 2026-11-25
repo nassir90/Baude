@@ -15,7 +15,7 @@ import threading
 import time
 import uuid
 
-from baudelib import wire
+from baudelib import clearrelay, wire
 
 KEEP_S = wire.CONSTANTS["TERMINAL_KEEP_S"]
 KEPT = wire.CONSTANTS["TERMINAL_KEPT_BYTES"]
@@ -40,11 +40,12 @@ class HostTerminal:
         self.kept, self.viewers, self.status, self.left = bytearray(), {}, None, time.monotonic()
         self.lock = threading.Lock()
         env = {**os.environ, "TERM": "xterm-256color", "COLORTERM": "truecolor", "TERM_PROGRAM": "Multiplex"}
+        run = clearrelay.relayed(self.argv, env.get("PATH"))  # (its clears done without blank rows: clearrelay's)
         pid, fd = pty.fork()
         if pid == 0:  # (the child: its folder, then the program; never back into Python's host)
             try:
                 os.chdir(os.path.expanduser(self.cwd))
-                os.execvpe(self.argv[0], self.argv, env)
+                os.execvpe(run[0], run, env)
             except OSError as e:
                 os.write(2, f"{self.argv[0]}: {e.strerror}\r\n".encode())
             os._exit(127)

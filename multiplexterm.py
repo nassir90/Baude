@@ -21,7 +21,7 @@ try:
 except (ValueError, ImportError):
     Vte = None
 from gi.repository import Adw, Gdk, GLib, Graphene, Gtk, Pango  # noqa: E402
-from baudelib import multiplexlink, tokens, wording  # noqa: E402
+from baudelib import clearrelay, multiplexlink, tokens, wording  # noqa: E402
 
 SCROLLBACK = 10000  # (lines kept above the screen)
 SETTLE_S = 0.4  # (no output this long: what was typed has had its answer, as far as a Bot's told)
@@ -183,10 +183,13 @@ class Terminal(Gtk.Overlay):
         if self.spawned:
             return False
         self.spawned = True
-        envv = [f"{k}={v}" for k, v in {**os.environ, "TERM": "xterm-256color", "COLORTERM": "truecolor",
-                                         "TERM_PROGRAM": "Multiplex", **(env or {})}.items()]
-        self.vte.spawn_async(Vte.PtyFlags.DEFAULT, self.cwd if os.path.isdir(self.cwd) else None, self.argv, envv,
-                             GLib.SpawnFlags.SEARCH_PATH, None, None, -1, None, self._spawned)
+        envs = {**os.environ, "TERM": "xterm-256color", "COLORTERM": "truecolor", "TERM_PROGRAM": "Multiplex",
+                **(env or {})}
+        envv = [f"{k}={v}" for k, v in envs.items()]
+        # (run through clearrelay, which does its clears without a screen of blank rows in the scrollback)
+        self.vte.spawn_async(Vte.PtyFlags.DEFAULT, self.cwd if os.path.isdir(self.cwd) else None,
+                             clearrelay.relayed(self.argv, envs.get("PATH")), envv, GLib.SpawnFlags.SEARCH_PATH,
+                             None, None, -1, None, self._spawned)
         return False
 
     def _spawned(self, _vte, pid, error, *_):

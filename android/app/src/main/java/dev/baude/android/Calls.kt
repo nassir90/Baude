@@ -171,7 +171,7 @@ fun took(calls: ChatCalls, lines: MutableList<Line>, line: Line) {
         "stopped" -> {
             val since = lines.takeLastWhile { it.kind != "you" }
             val cut = since.any { l -> l.kind == "call" && calls.byId[l.text]?.state.let { it == "running" || it == "interrupted" } }
-            if (!cut) lines.add(Line("note", Wording.Meta.interrupted, line.uuid))
+            if (!cut) lines.add(Line("note", Wording.ChatNotes.interrupted, line.uuid))
         }
     }
 }

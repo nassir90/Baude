@@ -1,0 +1,27 @@
+{
+  "description": "The quiet notes a chat shows of what happened to it (SystemNote): its folder, its process, a turn's end, what couldn't be attached or pasted. Each starts with a capital letter, in sentence case.",
+  "messages": {
+    "interrupted": "Interrupted",
+    "turn_error": "Turn ended with error: {$why}",
+    "control_error": "Control error: {$why}",
+    "signing_out": "Signing out…",
+    "signed_out": "Signed out of Claude",
+    "sign_out_failed": "Sign-out failed: {$why}",
+    "not_a_folder": "Not a folder: {$path}",
+    "folder_not_changed": "Folder not changed: {$why}",
+    "folder": "Folder → {$folder}",
+    "folder_kept": "Folder → {$folder} (conversation continues)",
+    "stderr": "Stderr: {$text}",
+    "running_in": "Claude is running in {$folder}",
+    "worktree_removed": "Worktree {$name} was removed: it's made again from its branch when you write",
+    "resumed": "— Resumed —",
+    "resumed_from": "— Resumed from {$reason} —",
+    "cant_attach_file": "Can't attach {$path}: not a file",
+    "cant_attach_image": "Can't attach image: {$why}",
+    "paste_failed": "Paste failed: {$why}",
+    "failed_to_start": "Failed to start Claude: {$why}",
+    "couldnt_reach": "Couldn't reach {$host}: {$why}",
+    "no_trash": "No trash here; moved {$name} to {$folder}",
+    "couldnt_move": "Couldn't move {$name} away: {$why}"
+  }
+}

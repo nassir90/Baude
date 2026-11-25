@@ -3,7 +3,7 @@
   "messages": {
     "all": "All side questions",
     "ask_tip": "Ask ({$key})\nNew line: Enter",
-    "not_asked": "the side question couldn't be asked: {$why}",
+    "not_asked": "The side question couldn't be asked: {$why}",
     "failed": "The side question failed."
   }
 }

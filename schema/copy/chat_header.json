@@ -8,11 +8,11 @@
     "this_model": "This model",
     "claude_said_no": "claude said no",
     "mode_refused": "couldn't switch to {$mode}: {$why}",
-    "mode_refused_still": "couldn't switch to {$mode}: {$why} (still {$was})",
+    "mode_refused_still": "Couldn't switch to {$mode}: {$why} (still {$was})",
     "menu": "Menu",
-    "model_note": "model → {$name}",
-    "model_note_new": "model → {$name}: a new conversation",
-    "effort_note": "thinking effort → {$label}",
-    "mode_note": "permission mode → {$mode}"
+    "model_note": "Model → {$name}",
+    "model_note_new": "Model → {$name}: a new conversation",
+    "effort_note": "Thinking effort → {$label}",
+    "mode_note": "Permission mode → {$mode}"
   }
 }

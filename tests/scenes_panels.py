@@ -11,6 +11,7 @@ import time
 import fixes_fixture  # noqa: E402
 import test_baude as T  # noqa: E402  (sets up the throwaway env: fake claude, temp config dirs)
 from test_baude import Gdk, GLib, Gtk, baude  # noqa: E402
+from baudelib import wording  # noqa: E402
 
 from scenelib import H, HERE, SIDEBAR, W, age, opts, scene, sidebar_row, sidebar_sessions
 
@@ -554,6 +555,19 @@ def _(app):
     T.pump(0.3)
     T.type_and_send(win, "and the logout bug?")
     T.wait_for(lambda: T.button(win, "Allow"), "the reply's permission prompt")
+    return win
+
+
+@scene("51c-claude-events", "Claude Code's own events in a turn: a commit and a push (each with Show in Git), "
+                           "a commit in another folder, background agents stopped, a notification, a warning; the "
+                           "rest say nothing, never a raw name; then notes the chat makes itself")
+def _(app):
+    win = app.window(opts())
+    T.type_and_send(win, "SYSTEM EVENTS")
+    T.wait_for(lambda: not win.busy, "turn end")
+    for note in (wording.say("chat_header.model_note", name="Opus 4.7"), wording.say("tool_calls.denied_tool", tool="Bash"),
+                 wording.say("chat_notes.interrupted")):
+        win.note(note)
     return win
 
 

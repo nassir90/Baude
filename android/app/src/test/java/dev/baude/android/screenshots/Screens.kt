@@ -630,6 +630,33 @@ abstract class Screens(private val theme: String) {
         render(name) { ChatShell("h1", "b", back = {}, open = { _, _ -> }, feedback = {}, first = "chat") }
     }
 
+    // (Claude's own events in a turn, as its host passes them on: a commit and a push it saw, a commit in another
+    // folder, its background agents stopped, a notification, a warning, and events a chat says nothing of; each said
+    // as claude_events has it, no raw names; then notes the chat makes itself)
+    @Test fun chatClaudeEvents() {
+        val chat = Mesh.openChat("h1", "b")
+        chat.lines.add(Line("you", "Fix the login timeout, commit it and push the branch."))
+        fun event(subtype: String, vararg fields: Pair<String, String>) {
+            val said = org.json.JSONObject().put("type", "system").put("subtype", subtype)
+            for ((k, v) in fields) said.put(k, v)
+            dev.baude.android.chrome(chat)("h1", org.json.JSONObject().put("op", "claude").put("session", "b").put("msg", said))
+        }
+        event("vcs_state_changed", "kind" to "commit", "branch" to "fix/login-timeout")
+        event("vcs_state_changed", "kind" to "push", "branch" to "fix/login-timeout")
+        event("vcs_state_changed", "kind" to "commit", "branch" to "docs/readme", "cwd" to "/work/docs-tree")
+        event("agents_killed")
+        event("notification", "text" to "Fast mode is off until 5pm")
+        event("permission_retry", "content" to "Retrying Bash with the permission you gave", "level" to "warning")
+        event("instruction_size_warning", "content" to "", "level" to "warning")
+        event("hook_progress", "content" to "Running the pre-commit hook", "level" to "info")
+        event("made_up_event")
+        chat.lines.add(Line("bot", "Committed the fix and pushed the branch."))
+        chat.lines.add(Line("note", dev.baude.android.Wording.ChatHeader.modelNote(name = "Opus 4.7")))
+        chat.lines.add(Line("note", dev.baude.android.Wording.ToolCalls.deniedTool(tool = "Bash")))
+        chat.lines.add(Line("note", dev.baude.android.Wording.ChatNotes.interrupted))
+        render("19f-chat-claude-events") { ChatShell("h1", "b", back = {}, open = { _, _ -> }, feedback = {}, first = "chat") }
+    }
+
     // (the chat's model button pressed: Claude's models, workshop's own Ollama models, and studio's, another member of
     // the mesh: its Ollama models, one of them workshop's too, its MLX model and its Apple model; more than fit)
     @Test fun chatModelPicker() {

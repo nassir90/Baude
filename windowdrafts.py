@@ -3,6 +3,7 @@ providers, the stream-json protocol, compaction, its title, background tasks and
 """
 import json
 import os
+import urllib.parse
 import uuid
 from baudelib.claude import EFFORT_LABELS, MODELS, MODES
 from baudelib.transcripts import history_item, session_file, transcript_model
@@ -23,7 +24,7 @@ import meta  # noqa: E402  (Meta, the helper in the side panel: Record's too; se
 import widgets  # noqa: E402  (what Record draws as Baude does: the links' logos; see widgets.py)
 from chatparts import SenderTurn, UserTurn  # noqa: E402
 from widgets import discard, load_settings, save_settings  # noqa: E402,F401
-from markdownview import ARTIFACT_TITLES, MarkdownView  # noqa: E402,F401
+from markdownview import ARTIFACT_TITLES, GIT_SCHEME, MarkdownView  # noqa: E402,F401
 from codeview import CodePage  # noqa: E402,F401
 from startup import LAUNCHER  # noqa: E402
 from signalrefs import TOOL_NAMES  # noqa: E402
@@ -339,9 +340,9 @@ class WindowDrafts:
         return login_error(msg) if model_program(self.model) == "claude" else None
 
     def program_name(self):
-        """What runs the chat's model, as a note names it: claude, pi, or Apple's model."""
+        """What runs the chat's model, as a note names it: Claude, Pi, Codex or Apple's model."""
         program = model_program(self.model)
-        return wording.say(f"programs.{program if program in ('pi', 'apple', 'codex') else 'claude'}")
+        return wording.say(f"programs.{program}" if program in ("pi", "apple", "codex") else "report.claude")
 
     def revert_to(self, turn):
         """A message of yours reverted (UserTurn's button), tentatively, as a model or a folder picked for a chat is till
@@ -1043,7 +1044,7 @@ class WindowDrafts:
         """A new chat in a folder (Open folder…, a folder's +): from a new chat not written in yet that was started
         in a group, in that group still; else in the group New session would put it in (new_group)."""
         if not os.path.isdir(path):
-            self.note(f"not a folder: {path}")
+            self.note(wording.say("chat_notes.not_a_folder", path=path))
             return
         draft = self.session_id is None or self.remote is not None and \
             (self.remote.sessions.get(self.session_id) or {}).get("draft")
@@ -1054,7 +1055,7 @@ class WindowDrafts:
     def change_cwd(self, path):
         path = self.norm_dir(os.path.join(self.run_cwd, path))  # relative to the folder claude runs in
         if not os.path.isdir(path):
-            self.note(f"not a directory: {path}")
+            self.note(wording.say("chat_notes.not_a_folder", path=path))
             return
         if self.busy:
             self.note(wording.say("slash_commands.cd_busy"))
@@ -1067,13 +1068,13 @@ class WindowDrafts:
         if self.remote is not None:  # (this machine's host process runs it: there, from its next message on)
             reply = self.remote.call({"op": "set_cwd", "session": self.session_id, "cwd": path}, timeout=10)
             if reply.get("op") != "cwd_set":
-                self.note(f"folder not changed: {baudelib.wire.said(reply)}")
+                self.note(wording.say("chat_notes.folder_not_changed", why=baudelib.wire.said(reply)))
                 return
             if self.session_id in self.remote.sessions:  # (as it's listed, before it next says so)
                 self.remote.sessions[self.session_id] = {**self.remote.sessions[self.session_id], "cwd": reply["cwd"]}
         self.set_cwd(path)
         keep = self.session_id is not None
-        self.note(f"folder → {self.short_cwd()}" + (" (conversation continues)" if keep else ""))
+        self.note(wording.say("chat_notes.folder_kept" if keep else "chat_notes.folder", folder=self.short_cwd()))
         self.restart_proc(resume=True)
 
     # ---- protocol
@@ -1104,7 +1105,7 @@ class WindowDrafts:
 
     def h_stderr(self, msg):
         own = model_program(self.model) != "claude"  # (apple-claude and pi-claude say things there for the chat)
-        self.note(("" if own else "stderr: ") + msg["text"])
+        self.note(msg["text"] if own else wording.say("chat_notes.stderr", text=msg["text"]))
 
     def h_system(self, msg):
         st = msg.get("subtype")
@@ -1131,7 +1132,7 @@ class WindowDrafts:
                     self.signal_pending = None
                 self.sidebar.fill()
             if msg.get("cwd") and self.norm_dir(msg["cwd"]) != self.run_cwd:
-                self.note(f"claude is running in {msg['cwd']}")
+                self.note(wording.say("chat_notes.running_in", folder=msg["cwd"]))
                 self.set_cwd(msg["cwd"])  # what claude really uses wins
             self.update_status(f"{len(msg.get('tools', []))} tools")
         elif st == "codex_turn_started":
@@ -1159,9 +1160,27 @@ class WindowDrafts:
             self.on_tasks_changed(msg.get("tasks") or [])
         elif st == "commands_changed":
             self.completer.set_commands(msg.get("commands") or [])
-        elif st not in ("hook_started", "hook_response", "thinking_tokens", "task_summary",
-                        "post_turn_summary", "rate_limit_event"):
-            self.note(f"[system:{st}]")
+        elif st == "vcs_state_changed":
+            self.repository_changed(msg)
+        elif st == "code_change_published":
+            self.panel.git_page.chat_changed()  # (its pull request, on the Git page)
+        elif said := wording.say("claude_events.said", event=str(st), level=str(msg.get("level") or ""),
+                                 text=next((t for t in (msg.get("content"), msg.get("text"))
+                                            if isinstance(t, str) and t.strip()), "")):
+            self.note(said)  # (claude_events: what's said of its other events, a warning or error's own message;
+            # nothing, for the rest)
+
+    def repository_changed(self, msg):
+        """claude committed, pushed, merged or rebased (vcs_state_changed): said in the chat, with a link to the Git
+        page (the branch, if it said one; the folder it was in, if not the chat's), which reads the history again."""
+        branch = msg.get("branch") if isinstance(msg.get("branch"), str) else ""
+        said = wording.say("claude_events.repository", kind=str(msg.get("kind")), branch=branch)
+        link = GIT_SCHEME + urllib.parse.quote(branch)
+        cwd = msg.get("cwd") if isinstance(msg.get("cwd"), str) and msg.get("cwd") else None
+        if cwd and self.norm_dir(cwd) not in (self.run_cwd, self.cwd, self.ref_checkout):
+            link += "?" + urllib.parse.quote(self.norm_dir(cwd), safe="")
+        self.note(said, link=(link, wording.say("signal.show_in_git")))
+        self.panel.git_page.chat_changed()
 
     # ---- compaction (CompactMarks): marked in the chat, at its end
     def compact_add(self, mark):

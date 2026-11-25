@@ -1,5 +1,6 @@
 package dev.baude.android
 
+import org.json.JSONObject
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
@@ -72,6 +73,12 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.text.LinkAnnotation
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextLinkStyles
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.text.withLink
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
@@ -792,8 +799,28 @@ private fun SaidLine(line: Line, revert: RevertOffer? = null) {
         "login" -> Logins.all[line.text]?.let { LoginCard(it) }
         "note", "error" -> Text(line.text, style = Type.caption, color = c.dim, textAlign = TextAlign.Center,
             modifier = Modifier.fillMaxWidth())  // (.sysnote: 0.85em, faded)
+        "gitnote" -> GitNote(line.text)
         else -> SelectionContainer { Prose(line.text) }
     }
+}
+
+/** A note that the repository changed (repositoryChanged), as the others are, with Show in Git: the Git page, at the
+ * branch it names, in the folder it names (another repository's or worktree's), if any. */
+@Composable
+private fun GitNote(json: String) {
+    val c = LocalBaude.current
+    val o = try { JSONObject(json) } catch (_: Exception) { return }
+    val branch = o.optString("branch").ifBlank { null }
+    val folder = o.optString("folder").ifBlank { null }
+    val text = buildAnnotatedString {
+        append(o.optString("text"))
+        append("  ")
+        withLink(LinkAnnotation.Clickable("git", TextLinkStyles(SpanStyle(color = c.accent,
+            textDecoration = TextDecoration.Underline))) {
+            GitPages.focus(SignalLinks.hostId, SignalLinks.sid, branch, null, folder)
+        }) { append(Wording.Signal.showInGit) }
+    }
+    Text(text, style = Type.caption, color = c.dim, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
 }
 
 /** A file picked, as it's sent (a picture as Baude makes one: prepare), or why it can't be. */

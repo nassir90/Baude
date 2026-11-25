@@ -160,7 +160,8 @@ class Terminal(Gtk.Overlay):
         self.glow = Glow()
         self.add_overlay(self.glow)
         self.connect("notify::root", lambda *_: self.colours())
-        Adw.StyleManager.get_default().connect("notify::dark", lambda *_: self.colours())
+        from widgets import watch_style
+        watch_style(self, "notify::dark", Terminal.colours)
         # (its program started once VTE's drawn at its size: what it writes before then is lost; one never shown is
         # started a moment on anyway)
         self.spawned = False

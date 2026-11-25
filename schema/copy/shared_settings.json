@@ -1,10 +1,14 @@
 {
-  "description": "Settings rows Baude and Record both have: notifications, accent colour, theme and code font.",
+  "description": "Settings rows Baude and Record both have: notifications, accent colour, theme (and why one couldn't be used) and code font.",
   "messages": {
     "notifications": "Notifications",
     "notifications_subtitle": "When a reply finishes, or asks you something, while you're elsewhere",
     "accent_colour": "Accent Colour",
     "theme": "Theme",
+    "theme_refused": "Couldn't use the theme {$name}: {$why}. Showing Default.",
+    "theme_no_size": "its text and buttons have no size",
+    "theme_invisible": "its text can't be seen",
+    "theme_faint": "its text can't be told from its background",
     "code_font": "Code Font",
     "restart": "Restart",
     "code_font_next_start": "{$font} from {$app}'s next start"

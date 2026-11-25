@@ -113,7 +113,9 @@ An entry or a part may carry:
   libadwaita and baude groups only), and the host works out what it comes to for every app alike (the themes request,
   Theme.json: each colour it makes, a colour made of another included). Every app draws those colours (the phone's
   BaudeColors, the desktop's named colours and their CSS variables), and the desktop apps its CSS too; its accent is
-  drawn over the Accent Colour picked. Settings → Theme picks one on every app; Meta makes, installs and previews them
+  drawn only while Accent Colour is System (one picked is drawn over it). A theme whose text can't be read on a probe
+  (a label and a button, drawn unseen) isn't drawn: Default is, for that run, with a toast saying why; BAUDE_NO_THEME=1
+  (an app's --no-theme) starts an app in Default whatever's picked. Settings → Theme picks one on every app; Meta makes, installs and previews them
   (create_theme, install_theme, preview_theme), undone as its other actions are. A theme sets colours, not sizes: the
   phone's measures are made as it's built. The owner asked for a way, from inside the app, for Meta to create, install
   and preview themes in Settings, as generic as it can be while staying fast (2026-11-24). Source:

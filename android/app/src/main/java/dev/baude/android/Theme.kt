@@ -63,10 +63,12 @@ val DarkBaude = baudeColors(Tokens.dark, true)
 
 /** These colours with a theme's over them (Settings → Theme: its host's, worked out there: Theme.json's light or
  * dark, each of schema/tokens' libadwaita and baude colours that isn't Baude's own, by its token's path). A theme's
- * accent_bg_color is taken over the accent picked, as the desktop's is, and accent_color is made of it if the theme
- * doesn't give one. */
+ * accent is taken only while Accent Colour is System, as the desktop's is (one picked is drawn over it), and
+ * accent_color is made of its accent_bg_color if the theme doesn't give one. */
 fun BaudeColors.themed(theme: Msg.Theme?): BaudeColors {
+    val accents = setOf("libadwaita.accent_bg_color", "libadwaita.accent_color", "libadwaita.accent_fg_color")
     val over = (if (dark) theme?.dark else theme?.light).orEmpty()
+        .filterKeys { Settings.accent.value == null || it !in accents }
     if (over.isEmpty()) return this
     fun c(path: String, was: Color) = over[path]?.let(::hexColor) ?: was
     val accentBg = c("libadwaita.accent_bg_color", accentBg)

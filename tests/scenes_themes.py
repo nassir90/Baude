@@ -73,3 +73,49 @@ def _(app):
     row.activate()
     T.pump(0.5)
     return win
+
+
+@scene("39l-theme-unreadable", "A theme whose text can't be seen (its labels transparent), picked: Default drawn "
+                               "instead, and the toast saying why")
+def _(app):
+    import themelook
+    r = themelook.ask_host({"op": "theme_save", "name": "Unreadable",
+                            "css": "label, text { color: transparent; }\n", "tokens": None})
+    assert "error" not in r, r
+    themelook.pick("Unreadable")
+    assert themelook.drawn() is None
+    win = app.window(opts())
+    T.type_and_send(win, "list the files")
+    T.wait_for(lambda: T.button(win, "Allow"), "permission")
+    T.button(win, "Allow").emit("clicked")
+    T.wait_for(lambda: not win.busy, "turn end")
+    T.pump(0.5)
+    return win
+
+
+def accent_settings(app, accent):
+    """Settings under Sepia (whose accent is its own, a brown), with Accent Colour's list open: accent picked (None:
+    System)."""
+    import widgets
+    from baudelib import wording
+    widgets.save_settings(accent=accent)
+    win = themed_turn(app, "Sepia")
+    dialog = win.open_settings()
+    row = next(r for r in T.find(dialog, T.Adw.ComboRow)
+               if r.get_title() == wording.say("shared_settings.accent_colour"))
+    T.pump(0.3)
+    row.activate()
+    T.pump(0.5)
+    return win
+
+
+@scene("39m-theme-accent-system", "Accent Colour at System under Sepia: the theme's accent drawn, and System's "
+                                  "dot in it", size=(1000 + SIDEBAR, H + 100))
+def _(app):
+    return accent_settings(app, None)
+
+
+@scene("39n-theme-accent-picked", "Accent Colour at Red under Sepia: Red drawn over the theme's accent",
+       size=(1000 + SIDEBAR, H + 100))
+def _(app):
+    return accent_settings(app, "red")

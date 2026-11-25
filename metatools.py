@@ -5,6 +5,7 @@ import contextlib
 import json
 import os
 import re
+import stat
 import sys
 import threading
 import time
@@ -19,7 +20,7 @@ from gi.repository import GLib, Gtk  # noqa: E402
 import themelook  # noqa: E402
 import update  # noqa: E402
 import widgets  # noqa: E402
-from baudelib import modelfiles, wording  # noqa: E402
+from baudelib import modelfiles, themes, wording  # noqa: E402
 from baudelib import models as modelslib  # noqa: E402
 from baudelib import providers as providerslib  # noqa: E402
 from meta import (  # noqa: E402
@@ -501,38 +502,68 @@ class MetaTools:
 
     def install_theme(self, turn, args):
         path = os.path.expanduser(str(args.get("path") or "").strip())
-        css = tokens = None
-        if os.path.isdir(path):
-            for f in ("theme.css", "tokens.json"):
-                try:
-                    with open(os.path.join(path, f), encoding="utf-8") as fh:
-                        text = fh.read()
-                except FileNotFoundError:
-                    continue
-                except OSError as e:
-                    raise ValueError(f"{f}: {e.strerror}") from None
-                if f == "theme.css":
-                    css = text
-                else:
+        name = str(args.get("name") or "").strip() or \
+            os.path.basename(path.rstrip(os.sep)).removesuffix(".css")
+
+        def read(file):
+            """A theme's file's text (None if it isn't there): a regular file of at most themes.SIZE_MAX, looked at
+            before it's read (a FIFO or a device would hold the read for good)."""
+            try:
+                fd = os.open(file, os.O_RDONLY | os.O_NONBLOCK)
+            except FileNotFoundError:
+                return None
+            except OSError as e:
+                raise ValueError(f"{file}: {e.strerror}") from None
+            try:
+                st = os.fstat(fd)
+                if not stat.S_ISREG(st.st_mode):
+                    raise ValueError(f"{file} isn't a file.")
+                if st.st_size > themes.SIZE_MAX:
+                    raise ValueError(f"{file} is over {themes.SIZE_MAX // 1024} KB.")
+                with os.fdopen(fd, encoding="utf-8") as fh:
+                    fd = None
+                    return fh.read(themes.SIZE_MAX + 1)
+            except OSError as e:
+                raise ValueError(f"{file}: {e.strerror}") from None
+            except UnicodeDecodeError:
+                raise ValueError(f"{file} isn't UTF-8 text.") from None
+            finally:
+                if fd is not None:
+                    os.close(fd)
+
+        def files():  # (off the main loop: the folder may be slow, or on a disk that's gone)
+            css = tokens = None
+            if os.path.isdir(path):
+                css, text = read(os.path.join(path, "theme.css")), read(os.path.join(path, "tokens.json"))
+                if text is not None:
                     try:
                         tokens = json.loads(text)
                     except ValueError as e:
                         raise ValueError(f"tokens.json isn't JSON: {e}") from None
-            if css is None and tokens is None:
-                raise ValueError(f"{path} has no theme.css or tokens.json.")
-        elif path.endswith(".css") and os.path.isfile(path):
-            with open(path, encoding="utf-8") as fh:
-                css = fh.read()
-        else:
-            raise ValueError("path is a theme's folder (its theme.css, tokens.json or both) or a .css file here.")
-        name = str(args.get("name") or "").strip() or \
-            os.path.basename(path.rstrip(os.sep)).removesuffix(".css")
-        return self._save_theme(turn, name, css, tokens)
+                if css is None and tokens is None:
+                    raise ValueError(f"{path} has no theme.css or tokens.json.")
+            elif path.endswith(".css") and (css := read(path)) is not None:
+                pass
+            else:
+                raise ValueError("path is a theme's folder (its theme.css, tokens.json or both) or a .css file here.")
+            return css, tokens
+        return self._save_theme(turn, name, files=files)
 
-    def _save_theme(self, turn, name, css, tokens):
-        msg = {"op": "theme_save", "name": name, "css": css, "tokens": tokens}
+    def _save_theme(self, turn, name, css=None, tokens=None, files=None):
+        """A theme saved on this machine's host: css and tokens, or what files() reads (off the main loop). Given
+        tokens alone, the theme's own CSS is kept."""
+        msg = {"op": "theme_save", "name": name}
 
         def work():
+            if files is not None:
+                msg["css"], msg["tokens"] = files()
+            else:
+                msg["css"], msg["tokens"] = css, tokens
+            if msg["css"] is None and msg["tokens"] is not None:  # (its tokens changed: its CSS, if it has one, kept)
+                if "error" in (r := themelook.ask_host({"op": "themes"})):
+                    raise ValueError(r["error"])
+                was = next((t for t in r.get("themes") or [] if t.get("name") == name), None)
+                msg["css"] = (was or {}).get("css") or None
             if "error" in (r := themelook.ask_host(msg)):
                 raise ValueError(r["error"])
             return r
@@ -542,7 +573,8 @@ class MetaTools:
                 return r
             themelook.apply()
             a = self.act(turn, wording.say("meta_actions.theme_saved", name=name), "theme",
-                         {"name": name, "files": r.get("before")}, {"name": name, "files": {"css": css, "tokens": tokens}})
+                         {"name": name, "files": r.get("before")},
+                         {"name": name, "files": {"css": msg["css"], "tokens": msg["tokens"]}})
             t = r.get("theme") or {}
             return {"text": f"Saved the theme {name} (action {a['id']}): {len(t.get('light') or {})} colours of "
                     f"Baude's changed light, {len(t.get('dark') or {})} dark" + (", and its CSS" if css else "") +

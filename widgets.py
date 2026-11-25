@@ -1200,18 +1200,32 @@ def logo(app):
 
 
 THEMED = {"light": {}, "dark": {}}  # (the theme drawn's colours, light and dark, by token's path: themelook's)
+ACCENT_TOKENS = ("libadwaita.accent_bg_color", "libadwaita.accent_color", "libadwaita.accent_fg_color")
 
 
-def _themed(path):
+def accent_picked():
+    """Whether Accent Colour has one picked (not System): then it's drawn over a theme's accent, everywhere."""
+    return _accent["name"] in ACCENTS
+
+
+def _themed(path, picked_too=False):
     """The theme drawn's colour for a token (libadwaita.accent_bg_color), light or dark as it's now; None if it has
-    none."""
+    none. A theme's accent is only while Accent Colour is System (picked_too: it, whatever's picked)."""
+    if path in ACCENT_TOKENS and accent_picked() and not picked_too:
+        return None
     hex_ = THEMED["dark" if Adw.StyleManager.get_default().get_dark() else "light"].get(path)
     rgba = Gdk.RGBA()
     return rgba if hex_ and rgba.parse(hex_) else None
 
 
+def theme_accent_rgba():
+    """The theme drawn's accent (its accent_bg_color), whatever Accent Colour has; None if it sets none."""
+    return _themed("libadwaita.accent_bg_color", picked_too=True)
+
+
 def accent_rgba():
-    """The accent's colour as @accent_bg_color has it: a patch's, a selection's (a theme's, if it has one)."""
+    """The accent's colour as @accent_bg_color has it: a patch's, a selection's (the one picked; else a theme's, if it
+    has one)."""
     return _themed("libadwaita.accent_bg_color") or Adw.AccentColor.to_rgba(accent())
 
 

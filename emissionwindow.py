@@ -123,7 +123,11 @@ class Window(Adw.ApplicationWindow):
             bar.set_visible(False)  # watcher's size is its page's, a phone's narrow one too)
             strip.set_visible(False)
             self.set_size_request(200, 200)
-        self.set_content(frame)
+        if agent or hosted:
+            self.set_content(frame)
+        else:  # (a theme that couldn't be used says so here: themelook's)
+            self.toasts = Adw.ToastOverlay(child=frame)
+            self.set_content(self.toasts)
         if self.Engine is None:
             self.who.set_sensitive(False)
             new_tab.set_sensitive(False)

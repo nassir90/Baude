@@ -137,7 +137,10 @@ object Settings {
 
     /** The accent's colour, as @accent_bg_color has it: the one picked, or the system's (Android 12's on: its
      * palette's accent; before it, Baude's blue). */
-    fun accentBg(ctx: Context): Color = ACCENTS[accent.value] ?: if (Build.VERSION.SDK_INT >= 31)
+    fun accentBg(ctx: Context): Color = ACCENTS[accent.value] ?: systemAccent(ctx)
+
+    /** The system's accent (Accent Colour's System, with no theme's). */
+    fun systemAccent(ctx: Context): Color = if (Build.VERSION.SDK_INT >= 31)
         Color(ctx.getColor(android.R.color.system_accent1_500)) else Tokens.Accent.blue
 
     /** An accent as text (@accent_color): libadwaita's adw_rgba_to_standalone, in Oklab, its lightness at most 0.5
@@ -284,8 +287,10 @@ fun CodeFontRow(chat: List<String> = emptyList(), fallback: String? = null, extr
 fun AccentRow(fallback: String? = null, extra: (@Composable () -> Unit)? = null) {
     val ctx = LocalContext.current
     val names = listOf("system") + Settings.ACCENTS.keys
+    val dark = LocalBaude.current.dark
     Choice(Wording.SharedSettings.accentColour, names, Settings.accent.value ?: "system", { it.replaceFirstChar(Char::uppercase) },
-        dot = { if (it == "system") Settings.accentBg(ctx) else Settings.ACCENTS.getValue(it) }, subtitle = fallback, extra = extra) {
+        dot = { if (it == "system") Themes.accent(dark) ?: Settings.systemAccent(ctx) else Settings.ACCENTS.getValue(it) },
+        subtitle = fallback, extra = extra) {
         Settings.accent.value = it.takeIf { n -> n in Settings.ACCENTS }
         Settings.save(ctx)
     }
@@ -297,33 +302,53 @@ fun AccentRow(fallback: String? = null, extra: (@Composable () -> Unit)? = null)
 @Composable
 fun ThemeRow(fallback: String? = null, extra: (@Composable () -> Unit)? = null) {
     val ctx = LocalContext.current
-    val hostId = picked()?.takeIf { it != "phone" } ?: Mesh.hosts.firstOrNull()?.id
-    var listed by remember(hostId) { mutableStateOf<List<Msg.Theme>>(emptyList()) }
-    LaunchedEffect(hostId) {
-        val h = hostId ?: return@LaunchedEffect
+    val hostId = Themes.host()
+    LaunchedEffect(hostId) { Themes.ask(ctx, hostId) }
+    val listed = Themes.listed.value
+    val names = Themes.names() + listOfNotNull(Settings.theme.value?.takeIf { n -> listed.none { it.name == n } })
+    Choice(Wording.SharedSettings.theme, names, Settings.theme.value ?: Themes.DEFAULT,
+        { if (it == Themes.DEFAULT) Wording.MetaSettings.effortDefault else it }, subtitle = fallback, extra = extra) { name ->
+        Themes.pick(ctx, name)
+    }
+}
+
+/** The themes of the host picked beside New session (else your first), as it works them out (its themes request):
+ * Settings → Theme's, and Meta's theme setting's. */
+object Themes {
+    const val DEFAULT = "default"
+    val listed = mutableStateOf<List<Msg.Theme>>(emptyList())
+
+    fun host(): String? = picked()?.takeIf { it != "phone" } ?: Mesh.hosts.firstOrNull()?.id
+
+    /** Its themes asked for: listed, and the theme picked's colours taken again as the host gives them. */
+    fun ask(ctx: Context, hostId: String? = host()) {
+        val h = hostId ?: return
         Mesh.ask(h, Msg.Themes().json()) { r ->
-            if (r.optString("op") != Op.ERROR) listed = Msg.ThemesReply.from(r).themes.orEmpty().filter { it.error == null }
-            val now = listed.firstOrNull { it.name == Settings.theme.value }
+            if (r.optString("op") != Op.ERROR) listed.value = Msg.ThemesReply.from(r).themes.orEmpty().filter { it.error == null }
+            val now = listed.value.firstOrNull { it.name == Settings.theme.value }
             if (now != null && now.json().toString() != Settings.themeColours.value?.json()?.toString()) {
                 Settings.themeColours.value = now
                 Settings.save(ctx)
             }
         }
     }
-    val names = listOf(DEFAULT_THEME) + listed.mapNotNull { it.name } +
-        listOfNotNull(Settings.theme.value?.takeIf { n -> listed.none { it.name == n } })
-    Choice(Wording.SharedSettings.theme, names, Settings.theme.value ?: DEFAULT_THEME,
-        { if (it == DEFAULT_THEME) Wording.MetaSettings.effortDefault else it }, subtitle = fallback, extra = extra) { name ->
-        val t = listed.firstOrNull { it.name == name }
-        if (name == DEFAULT_THEME || t != null) {
-            Settings.theme.value = t?.name
-            Settings.themeColours.value = t
-            Settings.save(ctx)
-        }
-    }
-}
 
-private const val DEFAULT_THEME = "default"
+    fun names(): List<String> = listOf(DEFAULT) + listed.value.mapNotNull { it.name }
+
+    /** name drawn and kept (DEFAULT: Baude's own look), with its colours as they're listed; false if it isn't. */
+    fun pick(ctx: Context, name: String): Boolean {
+        val t = listed.value.firstOrNull { it.name == name }
+        if (name != DEFAULT && t == null) return false
+        Settings.theme.value = t?.name
+        Settings.themeColours.value = t
+        Settings.save(ctx)
+        return true
+    }
+
+    /** The theme drawn's accent (its accent_bg_color), light or dark, whatever Accent Colour has; null if it sets none. */
+    fun accent(dark: Boolean): Color? = Settings.themeColours.value?.let { if (dark) it.dark else it.light }
+        ?.get("libadwaita.accent_bg_color")?.let(::hexColor)
+}
 
 /** Settings' Update on metered connections row. */
 @Composable

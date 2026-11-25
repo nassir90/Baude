@@ -92,7 +92,8 @@ class Window(Adw.ApplicationWindow):
         view.add_css_class("baude-frame")
         view.add_top_bar(head)
         view.add_top_bar(bar)
-        self.set_content(view)
+        self.toasts = Adw.ToastOverlay(child=view)  # (a theme that couldn't be used says so here: themelook's)
+        self.set_content(self.toasts)
         prefix = "<Meta>" if sys.platform == "darwin" else "<Control><Shift>"
         for name, keys, fn in (("new-tab", [prefix + "t"], lambda: self.open()),
                                ("close-tab", [prefix + "w"], self.close_tab)):
@@ -175,6 +176,8 @@ class App(Adw.Application):
         import theming
         theming.load_css()
         theming.theme_css()
+        theming.apply_accent(Gdk.Display.get_default())  # (Settings → Accent Colour, Baude's)
+        theming.watch_settings(lambda *_: None)  # (the accent and theme as they're changed in another app here)
         if sys.platform == "darwin":
             try:
                 dock_icon()
@@ -217,6 +220,8 @@ def main():
     p.add_argument("--cwd", help="the folder it starts in")
     p.add_argument("--title", help="its tab's title, till its program names it")
     p.add_argument("--empty", action="store_true", help="no tab yet (a Bot's open makes its first)")
+    p.add_argument("--no-theme", action="store_true",
+                   help="start in Default's look, whatever theme Settings has (BAUDE_NO_THEME=1)")
     inst = p.add_mutually_exclusive_group()
     where = wording.say("install.applications") if sys.platform == "darwin" else \
         wording.say("install.application_menu")
@@ -229,6 +234,8 @@ def main():
         at = argv.index("-ApplePersistenceIgnoreState")
         del argv[at:at + 2]
     a = p.parse_args(argv)
+    if a.no_theme:
+        os.environ["BAUDE_NO_THEME"] = "1"
     if a.install:
         print("\n".join(wording.say("install.installed", path=path) for path in install()))
         return 0

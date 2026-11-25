@@ -27,7 +27,8 @@ from baudelib import tokens  # noqa: E402  (the measures and colours below: sche
 from baudelib import wording  # noqa: E402
 from widgets import (  # noqa: E402
     ACCENTS, INSIDE_GAP, PR_COLORS, SCALE_MAX, SCALE_MIN, SETTINGS_WAIT_MS, SHARED_SETTINGS, ZOOM_STEP, _accent,
-    _settings_path, _watch, accent_rgba, accent_text_rgba, load_settings, notifications_on, save_settings, walk,
+    _settings_path, _watch, accent_rgba, accent_text_rgba, load_settings, notifications_on, save_settings,
+    theme_accent_rgba, walk,
 )
 from refkinds import LinkLabel  # noqa: E402
 from pickers import snapshot_faded  # noqa: E402
@@ -102,7 +103,7 @@ def _settings_read():
             apply_accent(display)
         if "theme" in keys:
             import themelook
-            themelook.apply()
+            themelook.setting_changed()
         for row in list(_following):
             if row.setting_key in keys:
                 row.syncing = True
@@ -966,9 +967,13 @@ def apply_accent(display):
     for win in Gtk.Window.list_toplevels() if again else ():
         if isinstance(win, AccentFade):
             win.fade_accent()
-    picked = again and name != _accent["name"]
+    renamed = name != _accent["name"]
+    picked = again and renamed
     _accent["name"], _accent["css"] = name, css
     _accent["provider"].load_from_string(css)
+    if renamed:  # (a theme's accent is drawn only while it's System: its CSS made again)
+        import themelook
+        themelook.accent_changed()
     for win in Gtk.Window.list_toplevels() if again else ():
         for widget in walk(win):
             if isinstance(widget, LinkLabel) and widget.chips:
@@ -1190,24 +1195,37 @@ class AccentDot(Gtk.Widget):
 
 def settings_accent():
     """Settings → Accent Colour: the system's, or one of libadwaita's (ACCENTS), each with its colour. Taken in every
-    window as it's picked (apply_accent) and kept in settings.json."""
+    window as it's picked (apply_accent) and kept in settings.json. One picked is drawn over a theme's accent; while
+    it's System, a theme's accent is drawn, and System's dot is in it."""
     names = ["system", *ACCENTS]
     picked = load_settings().get("accent")
     row = Adw.ComboRow(title=wording.say("shared_settings.accent_colour"), model=Gtk.StringList.new(names),
                        selected=names.index(picked) if picked in ACCENTS else 0)
+    dots = weakref.WeakSet()
+
+    def colour(dot):
+        if dot.name in ACCENTS:
+            dot.rgba = Adw.AccentColor.to_rgba(ACCENTS[dot.name])
+        else:
+            dot.rgba = theme_accent_rgba() or \
+                Adw.AccentColor.to_rgba(Adw.StyleManager.get_default().get_accent_color())
+        dot.queue_draw()
 
     def setup(_f, item):
         line = Gtk.Box(spacing=8)
-        line.append(AccentDot())
+        dot = AccentDot()
+        dots.add(dot)
+        line.append(dot)
         line.append(Gtk.Label(xalign=0))
         item.set_child(line)
 
     def bind(_f, item):
         name = item.get_item().get_string()
         dot, label = item.get_child().get_first_child(), item.get_child().get_last_child()
-        dot.rgba = Adw.AccentColor.to_rgba(ACCENTS.get(name, Adw.StyleManager.get_default().get_accent_color()))
-        dot.queue_draw()
+        dot.name = name
+        colour(dot)
         label.set_text(name.capitalize())
+    row.accent_changed = lambda: [colour(d) for d in list(dots) if getattr(d, "name", None) is not None]
 
     factory = Gtk.SignalListItemFactory()
     factory.connect("setup", setup)

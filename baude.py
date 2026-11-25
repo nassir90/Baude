@@ -311,12 +311,16 @@ def main():
     ap.add_argument("--model", help="alias (opus, sonnet, ...) or full model name; default: the CLI's")
     ap.add_argument("--resume", help="session id to resume")
     ap.add_argument("--restore", help=argparse.SUPPRESS)  # state left by "Restart Baude"
+    ap.add_argument("--no-theme", action="store_true",
+                    help="start in Default's look, whatever theme Settings has (BAUDE_NO_THEME=1)")
     inst = ap.add_mutually_exclusive_group()
     inst.add_argument("--install", action="store_true",
                       help=wording.say("install.install_help", where=LAUNCHER.where))
     inst.add_argument("--uninstall", action="store_true",
                       help=wording.say("install.uninstall_help", where=LAUNCHER.where))
     opts = ap.parse_args()
+    if opts.no_theme:
+        os.environ["BAUDE_NO_THEME"] = "1"
     if opts.install:
         LAUNCHER.install()
         print("\n".join(wording.say("install.installed", path=p)

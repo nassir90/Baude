@@ -108,6 +108,8 @@ class App(Adw.Application):
         import theming
         theming.load_css()  # (Baude's look: the frame, the inside set into it)
         theming.theme_css()  # (whose stylesheet that's drawn over: libadwaita's, or a GTK_THEME's)
+        theming.apply_accent(Gdk.Display.get_default())  # (Settings → Accent Colour, Baude's)
+        theming.watch_settings(lambda *_: None)  # (the accent and theme as they're changed in another app here)
         if sys.platform == "darwin":
             try:
                 dock_icon()
@@ -141,6 +143,8 @@ def main():
     p.add_argument("--bot", help="a Bot's chat id: its own profile (made if it has none)")
     p.add_argument("--name", help="the Bot's name, with --bot")
     p.add_argument("--agent", action="store_true", help="for the Bot's tools: out of sight, gone when idle")
+    p.add_argument("--no-theme", action="store_true",
+                   help="start in Default's look, whatever theme Settings has (BAUDE_NO_THEME=1)")
     inst = p.add_mutually_exclusive_group()
     where = wording.say("install.applications") if sys.platform == "darwin" else \
         wording.say("install.application_menu")
@@ -149,6 +153,8 @@ def main():
     inst.add_argument("--uninstall", action="store_true",
                       help=wording.say("install.uninstall_help", where=where))
     a = p.parse_args()
+    if a.no_theme:
+        os.environ["BAUDE_NO_THEME"] = "1"
     if a.install:
         print("\n".join(wording.say("install.installed", path=path) for path in install()))
         return 0

@@ -62,6 +62,7 @@ abstract class Screens(private val theme: String) {
         Settings.accent.value = null // (each screen from the settings a phone starts with)
         Settings.theme.value = null
         Settings.themeColours.value = null
+        dev.baude.android.Themes.listed.value = emptyList()
         Settings.appearance.value = "system"
         Settings.textScale.value = 1f
         Settings.globalScale.value = 1f
@@ -588,6 +589,27 @@ abstract class Screens(private val theme: String) {
         themed("Forest")
         fill(Mesh.openChat("h1", "a"))
         render("41c-theme-forest-chat") { ChatShell("h1", "a", back = {}, open = { _, _ -> }, feedback = {}, first = "chat") }
+    }
+
+    // (Accent Colour under Sepia, whose accent is its own: at System, the theme's accent drawn and System's dot in it;
+    // at Red, Red drawn over it)
+    @Test fun themeAccentSystem() {
+        themed("Sepia")
+        show { SettingsScreen({}, {}) }
+        laidOut()
+        tap(dev.baude.android.Wording.SharedSettings.accentColour)
+        laidOut()
+        screen("41d-theme-accent-system")
+    }
+
+    @Test fun themeAccentPicked() {
+        themed("Sepia")
+        Settings.accent.value = "red"
+        show { SettingsScreen({}, {}) }
+        laidOut()
+        tap(dev.baude.android.Wording.SharedSettings.accentColour)
+        laidOut()
+        screen("41e-theme-accent-picked")
     }
 
     private fun themed(name: String) {

@@ -4,6 +4,7 @@
   "where": "host",
   "no_display": true,
   "needed_by": ["bot_browser.title", "multiplex.terminal_menu"],
+  "group": "deps.multiplex",
   "detect": {
     "linux": [{"which": "xvfb-run"}]
   },

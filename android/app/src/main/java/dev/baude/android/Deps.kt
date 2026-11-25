@@ -60,8 +60,8 @@ fun MissingDep(dep: Msg.Dep, feature: String, again: () -> Unit) {
     }
 }
 
-/** A dependency's row (depsview.row): its name, then Installed, or the command that installs it with Copy (else its
- * install page). */
+/** A dependency's row (depsview.row): its name, then what's said of it while it's there (Installed, Signed in,
+ * Running, 3 models), or the command that installs or readies it with Copy (else its page: a check's Setup Page). */
 @Composable
 fun DepRow(dep: Msg.Dep) {
     val c = LocalBaude.current
@@ -70,7 +70,7 @@ fun DepRow(dep: Msg.Dep) {
     ActionRow(dep.name.orEmpty(), null, suffix = {
         val fix = dep.fix
         val link = dep.link
-        if (dep.present == true) Text(Wording.Deps.installed, style = Type.body, color = c.dim)
+        if (dep.present == true) Text(dep.ready ?: Wording.Deps.installed, style = Type.body, color = c.dim)
         else if (!fix.isNullOrBlank()) Row(verticalAlignment = Alignment.CenterVertically) {
             Text(fix, style = Type.mono, color = c.fg, maxLines = 2, overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.widthIn(max = 160.dp))
@@ -78,12 +78,15 @@ fun DepRow(dep: Msg.Dep) {
                 clip.setText(AnnotatedString(fix))
                 toast(Wording.Kube.copiedTryAgain)
             }
-        } else if (!link.isNullOrBlank()) Button(Wording.Deps.installPage) { try { uri.openUri(link) } catch (_: Exception) {} }
+        } else if (!link.isNullOrBlank()) Button(if (dep.check == true) Wording.Deps.setupPage else Wording.Deps.installPage) {
+            try { uri.openUri(link) } catch (_: Exception) {}
+        }
     })
 }
 
 /** Settings → Dependencies (depsview.Page), Settings' third page: the host picked beside New session (a computer host:
- * the phone runs none of them), what its features need and whether it's there, as its deps answer says. */
+ * the phone runs none of them), then what its features and its machine's apps need and whether it's there, under a
+ * heading for each thing that needs them (Providers, Git and GitHub, Kubernetes, …), as its deps answer says. */
 @Composable
 fun DepsPage() {
     val c = LocalBaude.current
@@ -106,6 +109,9 @@ fun DepsPage() {
         val e = error
         val l = listed
         if (e != null) BoxedList(listOf(e), "") { ActionRow(it, null) }
-        else if (l != null) BoxedList(l, "") { DepRow(it) }
+        else if (l != null) for ((group, deps) in l.groupBy { it.group.orEmpty() }) {
+            if (group.isNotEmpty()) Heading(Wording.byKey[group] ?: group)
+            BoxedList(deps, "") { DepRow(it) }
+        }
     }
 }

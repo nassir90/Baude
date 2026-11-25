@@ -1,5 +1,5 @@
 {
-  "description": "Dependencies (schema/deps): what a feature shows in its place when a program or library it needs isn't there (every app alike, a host's reported by its host), and Settings → Dependencies.",
+  "description": "Dependencies (schema/deps): what a feature shows in its place when a program or library it needs isn't there (every app alike, a host's reported by its host), and Settings → Dependencies, its groups and what it says of one that's there.",
   "messages": {
     "title": "Dependencies",
     "needs": "{$feature} needs {$dep}",
@@ -9,6 +9,14 @@
     "not_installed_fix": "{$dep} isn't installed. Install it with {$fix}",
     "installed": "Installed",
     "install_page": "Install Page",
-    "copied_restart": "Copied: run it in a terminal, then Restart"
+    "copied_restart": "Copied: run it in a terminal, then Restart",
+    "setup_page": "Setup Page",
+    "providers": "Providers",
+    "git_github": "Git and GitHub",
+    "multiplex": "Multiplex",
+    "signed_in": "Signed in",
+    "contexts": ".input {$n :number} .match $n one {{{$n} context}} * {{{$n} contexts}}",
+    "models": ".input {$n :number} .match $n one {{{$n} model}} * {{{$n} models}}",
+    "running_models": ".input {$n :number} .match $n one {{Running, {$n} model}} * {{Running, {$n} models}}"
   }
 }

@@ -69,18 +69,67 @@ def _(app):
     return win
 
 
-@scene("39d-dependencies", "Settings → Dependencies: the host picked beside New session (this machine's here), each "
-                           "program its features need, Installed or the command that installs it with Copy; then "
-                           "the app's own", size=(1200 + SIDEBAR, H))
+@scene("39d-dependencies", "Settings → Dependencies: the host picked beside New session (this machine's here), then "
+                           "what its features and its machine's apps need under what needs each (Providers, Git and "
+                           "GitHub, Kubernetes, …): Installed, Running with Ollama's models, or the command that "
+                           "installs or readies it with Copy (gh signed out), else its page (a kubeconfig with no "
+                           "context)", size=(1200 + SIDEBAR, H))
 def _(app):
-    win = hide(app, ["kubectl", "docker", "codex", "vte"])
+    return dependencies(app)[0]
+
+
+@scene("39g-dependencies-end", "Settings → Dependencies scrolled to its end: Kubernetes, Database Schemas, Multiplex, "
+                               "Emission and Signal", size=(1200 + SIDEBAR, H))
+def _(app):
+    win, page = dependencies(app)
+    from widgets import walk
+    from gi.repository import Gtk
+    scroller = next(w for w in walk(page) if isinstance(w, Gtk.ScrolledWindow))
+    adj = scroller.get_vadjustment()
+    adj.set_value(adj.get_upper())
+    T.pump(0.5)
+    return win
+
+
+def dependencies(app):
+    """39d's: Settings → Dependencies open, the host answered: (the window, the page)."""
+    import json
+    import threading
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+    class Ollama(BaseHTTPRequestHandler):  # (a stand-in Ollama with two models)
+        def do_GET(self):
+            body = json.dumps({"version": "0.12.0"} if self.path == "/api/version" else
+                              {"models": [{"name": "qwen3:4b"}, {"name": "gemma3:4b"}]}).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *_):
+            pass
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Ollama)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    empty = os.path.join(T.TMP, "empty-kubeconfig")
+    with open(empty, "w") as f:
+        f.write("apiVersion: v1\nkind: Config\ncontexts: []\nclusters: []\nusers: []\n")
+    gh = os.path.join(T.TMP, "fake-gh-signed-out")
+    with open(gh, "w") as f:
+        f.write(f'#!/bin/sh\nexec {T.sys.executable} {os.path.join(T.HERE, "fake_gh.py")} "$@"\n')
+    os.chmod(gh, 0o755)
+    with open(gh + ".json", "w") as f:
+        json.dump({"viewer": "ADMIN", "issues": [], "prs": []}, f)
+    win = hide(app, ["docker", "codex"], BAUDE_GH=gh, FAKE_GH_STATE=gh + ".json", FAKE_GH_SIGNED_IN="0", KUBECONFIG=empty,
+               BAUDE_KUBECTL=os.path.join(T.HERE, "fake_kubectl.py"), OLLAMA_HOST=f"127.0.0.1:{server.server_port}")
+    win.connect("destroy", lambda *_: server.shutdown())
     dialog = win.open_settings()
     import depsview
     page = next(p for p in T.find(dialog, depsview.Page))
     dialog.set_visible_page(page)
-    T.wait_for(lambda: page.host_rows.get_first_child() is not None, "the host's dependencies", 20)
+    T.wait_for(lambda: page.groups, "the host's dependencies", 20)
     T.pump(0.5)
-    return win
+    return win, page
 
 
 @scene("39e-missing-claude", "A Claude chat on a host without Claude Code: what's missing and the command that "

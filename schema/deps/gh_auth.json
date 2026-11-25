@@ -1,0 +1,20 @@
+{
+  "description": "gh signed in to GitHub (it keeps a token: gh auth token), which the Git page's pull requests and Send Feedback need. A check of gh: GitHub isn't asked.",
+  "name": "GitHub Account",
+  "where": "host",
+  "needed_by": ["lookup.pull_requests", "fixes.send_feedback"],
+  "group": "deps.git_github",
+  "of": "gh",
+  "ready": "deps.signed_in",
+  "detect": {
+    "macos": [{"probe": "gh_signed_in"}],
+    "linux": [{"probe": "gh_signed_in"}]
+  },
+  "install": {
+    "macos": "gh auth login",
+    "debian": "gh auth login",
+    "fedora": "gh auth login",
+    "arch": "gh auth login"
+  },
+  "link": "https://cli.github.com/manual/gh_auth_login"
+}

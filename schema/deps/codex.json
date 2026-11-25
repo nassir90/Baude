@@ -3,6 +3,7 @@
   "name": "Codex CLI",
   "where": "host",
   "needed_by": ["programs.codex"],
+  "group": "deps.providers",
   "detect": {
     "macos": [{"env": "BAUDE_CODEX"}, {"which": "codex"}],
     "linux": [{"env": "BAUDE_CODEX"}, {"which": "codex"}]

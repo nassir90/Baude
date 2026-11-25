@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
-  "description": "The programs and libraries this host's features need (schema/deps), each there or not.",
+  "description": "The programs and libraries this host's features and its machine's apps need (schema/deps), each there or not, with the checks of what's installed (a kubeconfig's contexts, gh signed in, Ollama running).",
   "properties": {
     "op": {
       "const": "deps",

@@ -650,10 +650,7 @@ class GitPage(Gtk.Stack):
         # Auto-fix: the chat's host following its branch's pull request (baudelib.autofix), on or off, shown under the
         # pull request's line while it's open, or while it's on
         self.autofix = Gtk.Box(spacing=6, margin_start=12, margin_end=10, visible=False)
-        self.autofix.append(Gtk.Label(label=wording.say("autofix.title"), xalign=0))
-        self.autofix_error = Gtk.Label(xalign=1, hexpand=True, ellipsize=Pango.EllipsizeMode.END)  # (why its last read
-        self.autofix_error.add_css_class("dim-label")  # didn't work: gh signed out, offline)
-        self.autofix.append(self.autofix_error)
+        self.autofix.append(Gtk.Label(label=wording.say("autofix.title"), xalign=0, hexpand=True))
         self.autofix_switch = Gtk.Switch(valign=Gtk.Align.CENTER)
         self.autofix_set = self.autofix_switch.connect("notify::active", lambda *_: self.autofix_toggled())
         self.autofix.append(self.autofix_switch)
@@ -1213,10 +1210,7 @@ class GitPage(Gtk.Stack):
             return
         with self.autofix_switch.handler_block(self.autofix_set):
             self.autofix_switch.set_active(bool(on))
-        error = (on or {}).get("error") or ""
-        self.autofix_error.set_label(error)
-        self.autofix_error.set_tooltip_text(error or None)
-        self.autofix_switch.set_tooltip_text(error or wording.say("autofix.tip"))
+        self.autofix_switch.set_tooltip_text(wording.say("autofix.tip"))
 
     def autofix_toggled(self):
         """The toggle switched: Auto-fix turned on or off on the chat's host, as it answers."""

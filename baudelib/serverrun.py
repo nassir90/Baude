@@ -608,6 +608,7 @@ class ServerRunning:
                 if isinstance(msg.get("env"), dict):  # (a head here: its claude's environment, from its next start)
                     s.env = clean_env(msg["env"])
                 s.viewers.add(conn)
+                autofix.held(self, s, conn)  # (Auto-fix stopped while nobody was here: said now)
                 if msg.get("live"):
                     s.live.add(conn)
                 if msg.get("app_tools") and s.app_tools is not None:  # (its head back: its tools carried to it again)

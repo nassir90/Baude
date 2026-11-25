@@ -19,6 +19,7 @@
     "couldnt": "Couldn't turn on Auto-fix: {$why}",
     "couldnt_off": "Couldn't turn off Auto-fix: {$why}",
     "signed_out": "gh isn't signed in",
-    "not_desktop": "Auto-fix isn't offered for Claude Desktop chats"
+    "not_desktop": "Auto-fix isn't offered for Claude Desktop chats",
+    "stopped": "Auto-fix stopped: {$why}"
   }
 }

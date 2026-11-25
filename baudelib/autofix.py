@@ -21,6 +21,7 @@ EVERY = int(os.environ.get("BAUDE_AUTOFIX_EVERY") or 5 * 60)  # (seconds: how of
 # BAUDE_AUTOFIX_EVERY: sooner, to try it)
 AGAIN = 60  # (seconds: one that couldn't be read, read again this soon, then twice as long after each that couldn't)
 AGAIN_MAX = 60 * 60  # (seconds: the longest it waits after one that couldn't be read)
+STOP_AFTER = 3  # (reads in a row that gh's signed out for: Auto-fix turned off, said in the chat)
 PAD = 2  # (seconds: a comment this near a turn of the chat's is the chat's own, GitHub's clock and this one's apart)
 TURNS_KEPT = 50  # (the chat's turns kept, to tell its own comments by)
 SEEN_KEPT = 500  # (the comments' ids kept as seen)
@@ -28,6 +29,10 @@ BODY_MAX = 4000  # (characters of a comment put in the message)
 TRUSTED = {"OWNER", "MEMBER", "COLLABORATOR"}  # (whose words are sent the chat; anyone else's, only that they commented)
 FAILED = {"FAILURE", "ERROR", "TIMED_OUT", "CANCELLED", "ACTION_REQUIRED", "STARTUP_FAILURE"}
 VIEW = "number,title,url,state,mergeable,baseRefName,headRefOid,statusCheckRollup,comments,reviews"
+
+
+class SignedOut(ValueError):
+    """gh isn't signed in: for its user to fix, not waited out."""
 
 
 def sender(me):
@@ -49,7 +54,7 @@ def gh(*args, timeout=30):
     if p.returncode != 0:
         said = [line.strip() for line in (p.stderr or p.stdout or "").splitlines() if line.strip()]
         if p.returncode == 4 or any("gh auth login" in line for line in said):
-            raise ValueError(wording.say("autofix.signed_out"))
+            raise SignedOut(wording.say("autofix.signed_out"))
         raise ValueError(said[-1] if said else f"gh exited with {p.returncode}")
     try:
         return json.loads(p.stdout)
@@ -192,7 +197,7 @@ def look(af, view, lines, now, me=None, began=None):
         found.append(item)
     kept = {**af, "failing": failing, "conflict": conflict, "seen": (af["seen"] + said)[-SEEN_KEPT:],
             "title": str(view.get("title") or af.get("title") or "")[:300], "url": view.get("url") or af.get("url"),
-            "error": None, "fails": 0, "next": now + EVERY}
+            "error": None, "fails": 0, "signed_out": 0, "next": now + EVERY}
     if found:
         kept["waiting"] = waiting + found
     return kept, found
@@ -298,7 +303,7 @@ def _read(server, s, af):
         view, lines = read(af)
         error = None
     except Exception as e:  # noqa: BLE001 (said on the Git page's toggle, and read again later each time)
-        me, view, lines, error = None, None, None, str(e)
+        me, view, lines, error = None, None, None, e
     with server.lock:
         server.autofix_reading.discard(s.id)
         now = time.time()
@@ -307,10 +312,15 @@ def _read(server, s, af):
                 (have["repo"], have["number"]) != (af["repo"], af["number"]):
             return  # (gone, or turned off or onto another meanwhile)
         if error is not None:
-            fails = (have.get("fails") or 0) + 1  # (gh signed out, rate limited, offline: tried less and less often)
-            s.meta["autofix"] = {**have, "error": error, "fails": fails,
-                                 "next": now + min(AGAIN * 2 ** (fails - 1), AGAIN_MAX)}
+            fails = (have.get("fails") or 0) + 1  # (rate limited, offline: tried less and less often)
+            signed_out = (have.get("signed_out") or 0) + 1 if isinstance(error, SignedOut) else 0
             server.log(f"auto-fix of {s.id}: {error}")
+            if signed_out >= STOP_AFTER:  # (for its user to fix: off, and the chat told)
+                s.meta.pop("autofix", None)
+                note(server, s, wording.say("autofix.stopped", why=str(error)))
+            else:
+                s.meta["autofix"] = {**have, "error": str(error), "fails": fails, "signed_out": signed_out,
+                                     "next": now + min(AGAIN * 2 ** (fails - 1), AGAIN_MAX)}
         else:
             kept, found = look(have, view, lines, now, me, s.turn_began if s.busy else None)
             if kept is None:
@@ -327,6 +337,31 @@ def _read(server, s, af):
         if listing(s.meta.get("autofix")) != listing(have):  # (heads told only of a change they show)
             server.changed()
         server.woken.set()
+
+
+def note(server, s, text):
+    """(lock held) A note in s's chat (a system message its apps show as one): to those viewing it now, else held for
+    the next to attach (held)."""
+    if s.viewers:
+        for conn in s.viewers:
+            conn.send({"op": "claude", "session": s.id, "msg": {"type": "system", "subtype": "informational",
+                                                                "content": text}})
+    else:
+        s.meta["autofix_note"] = text
+
+
+def held(server, s, conn):
+    """(lock held) A note held for s's chat (note) sent conn, just attached, once its attach is answered."""
+    text = s.meta.pop("autofix_note", None)
+    if not text:
+        return
+    server.save(s)
+
+    def later():
+        with server.lock:
+            conn.send({"op": "claude", "session": s.id, "msg": {"type": "system", "subtype": "informational",
+                                                                "content": text}})
+    threading.Timer(0.5, later).start()
 
 
 def send(server, s):

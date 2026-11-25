@@ -48,7 +48,6 @@ import androidx.compose.ui.text.TextLinkStyles
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withLink
 import androidx.compose.ui.text.withStyle
@@ -400,7 +399,7 @@ fun GitPage(hostId: String, sid: String, here: Boolean, openPage: (String) -> Un
         val openPr = state.signedIn && state.pr?.state?.lowercase() == "open" && page.branch?.name != null &&
             page.branch?.name == page.mine
         if (state.pinned == null && listed?.desktop != true && (autofix != null || openPr))
-            AutofixRow(hostId, sid, autofix != null, autofix?.error)
+            AutofixRow(hostId, sid, autofix != null)
         // pull requests
         val rows = shownRows(page, state.commits, state.opened)
         val lanes = remember(rows.map { it.drawn.sha to it.drawn.parents }) { gitLanes(rows.map { it.drawn }) }
@@ -441,15 +440,12 @@ fun GitPage(hostId: String, sid: String, here: Boolean, openPage: (String) -> Un
 /** The Auto-fix toggle (baudelib/autofix.py, on the chat's host): switched, it's turned on or off there, as it
  * answers; on: as the host lists it. */
 @Composable
-private fun AutofixRow(hostId: String, sid: String, on: Boolean, error: String?) {
+private fun AutofixRow(hostId: String, sid: String, on: Boolean) {
     val c = LocalBaude.current
     var asked by remember(hostId, sid) { mutableStateOf<Boolean?>(null) }
     LaunchedEffect(on) { asked = null }
     Row(Modifier.fillMaxWidth().padding(start = 12.dp, end = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-        Text(Wording.Autofix.title, style = Type.body, color = c.fg)
-        // why its last read didn't work (gh signed out, offline)
-        Text(error.orEmpty(), style = Type.body, color = c.dim, maxLines = 1, overflow = TextOverflow.Ellipsis,
-            textAlign = TextAlign.End, modifier = Modifier.weight(1f).padding(horizontal = 8.dp))
+        Text(Wording.Autofix.title, style = Type.body, color = c.fg, modifier = Modifier.weight(1f))
         Switch(asked ?: on, { want ->
             asked = want
             Mesh.ask(hostId, Msg.Autofix(session = sid, on = want).json()) { r ->

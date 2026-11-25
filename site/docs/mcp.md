@@ -2265,7 +2265,7 @@ A session as a host lists it.
 | `effort` | string/null |  | Its effort. |
 | `mode` | string/null |  | Its permission mode. |
 | `group` | string/null |  | Its group. |
-| `created` | number/null |  | When it was made, epoch seconds. |
+| `created` | number/null |  | When it was made, epoch seconds: the earlier of when the host took it up and its transcript's first record. |
 | `said` | number/null |  | When something was last said in it, epoch seconds. |
 | `updated` | number/null |  | Its transcript's mtime. |
 | `size` | integer |  | Its transcript's size. |

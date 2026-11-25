@@ -1,5 +1,5 @@
 {
-  "description": "Settings → Subscriptions (Baude's, Record's and the phone's): the Claude and Codex accounts kept on a host (the one picked beside New session, or the phone itself), the dialogs that change them and sign in to them, their usage, and what a host says of them.",
+  "description": "Settings → Subscriptions (Baude's, Record's and the phone's): the Claude and Codex accounts kept on a host (the one picked beside New session), the dialogs that change them and sign in to them, their usage, and what a host says of them.",
   "messages": {
     "title": "Subscriptions",
     "general": "General",

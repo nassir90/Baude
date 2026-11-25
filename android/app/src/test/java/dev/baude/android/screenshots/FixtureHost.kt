@@ -57,10 +57,9 @@ class FixtureConnection(ctx: Context, host: Host, home: String = "/home/dev", pr
     }
 }
 
-/** This phone's own host's connection as the rig has it: up, named name, nothing sent, a request answered as answer
- * says (none, by default). */
-class FixturePhone(ctx: Context, name: String, private val answer: (JSONObject) -> JSONObject? = { null }) :
-    Connection(ctx, Place.Phone, identify = { _, _ -> }, route = { null }, heard = { _, _ -> }, changed = {}) {
+/** This phone's own host's connection as the rig has it: up, named name, nothing sent or answered. */
+class FixturePhone(ctx: Context, name: String) : Connection(ctx, Place.Phone, identify = { _, _ -> }, route = { null },
+    heard = { _, _ -> }, changed = {}) {
     init {
         state = "up"
         info = Msg.Info(id = "p1", name = name, home = "")
@@ -69,15 +68,13 @@ class FixturePhone(ctx: Context, name: String, private val answer: (JSONObject) 
     override fun start() {}
     override fun stop() {}
     override fun send(msg: JSONObject) = true
-    override fun request(msg: JSONObject, then: (JSONObject) -> Unit) {
-        answer(msg)?.let(then)
-    }
+    override fun request(msg: JSONObject, then: (JSONObject) -> Unit) {}
 
     companion object {
-        fun up(ctx: Context, name: String, answer: (JSONObject) -> JSONObject? = { null }) {
+        fun up(ctx: Context, name: String) {
             @Suppress("UNCHECKED_CAST")
             val conns = Mesh::class.java.getDeclaredField("conns").apply { isAccessible = true }.get(Mesh) as HashMap<String, Connection>
-            val c = FixturePhone(ctx, name, answer)
+            val c = FixturePhone(ctx, name)
             conns["phone"] = c
             Mesh.states["phone"] = c
         }

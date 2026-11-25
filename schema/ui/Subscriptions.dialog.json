@@ -16,7 +16,6 @@
     "Subscriptions.kt:HostAccounts",
     "Subscriptions.kt:SubscriptionsPage",
     "Subscriptions.kt:ClaudeLogin",
-    "PhoneAccounts.kt",
     "Settings.kt:SettingsScreen"
   ],
   "copy": [
@@ -212,8 +211,8 @@
       "shows": "Each group's list holds the error the reach gave."
     },
     {
-      "name": "phone as host",
-      "shows": "With the phone itself picked: the Host row only, no provider groups (the phone as a host answers the accounts request with \"unsupported operation\", so another app picking it shows that error in each group)."
+      "name": "phone picked beside New session",
+      "shows": "Only computer hosts keep accounts: the page opens on the first computer host (the Host row names it), or, with none connected, the Host row reads \"Not connected to a host process\" with no groups."
     }
   ],
   "decisions": [
@@ -282,16 +281,6 @@
         {
           "session": "b3845b21-55ac-4aab-a769-fb8517403c51",
           "message": "7d38ce29-c6e4-4827-b56a-d688129471eb"
-        }
-      ]
-    },
-    {
-      "said": "(review of PR 423, the coordinator's decision) the phone-as-host token accounts are kept but no phone chat uses them, pending the owner's terms-of-use question: hide them so nothing looks like it works and doesn't",
-      "rule": "No app lists or adds accounts for the phone as a host until the owner decides whether its chats may use setup tokens: the phone's own Subscriptions page shows no provider groups for it, and the phone as a host answers the accounts request with \"unsupported operation\"",
-      "decided": "2026-11-25",
-      "source": [
-        {
-          "session": "b3845b21-55ac-4aab-a769-fb8517403c51"
         }
       ]
     },

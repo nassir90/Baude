@@ -665,7 +665,10 @@ class SchemaView(Gtk.Box):
         db_locate found it. code: (path, line) of its definition. They're the databases of the host picked in the
         window's host dropdown (as ☰ → Terminal's new tabs are); out in a window of its own, that window's brought up."""
         host = kubehost.picked(self.win)
-        if host.key() != self.host.key():  # (another host's: nothing of the last one's shown)
+        same_host = host.key() == self.host.key()
+        if same_host and table is column is hint is code is found is None and self.out.present():
+            return
+        if not same_host:  # (another host's: nothing of the last one's shown)
             self.servers, self.dbs, self.schema, self.server, self.database = [], {}, None, None, None
             self.generation += 1
             self.rows_box.set_visible(False)

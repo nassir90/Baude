@@ -90,7 +90,7 @@
           "shows": "A flat window icon button, tooltip \"Move to Its Own Window\". Hidden while the view is out.",
           "copy": ["common.move_out"],
           "actions": [
-            {"by": "click", "does": "The view moves to a window of its own titled as its heading, all of it as it was (its server, database, schema and diagram); Ctrl+F (⌘F) and Ctrl +/−/0 work in it as over the window. Opening the view again brings that window up. Closing that window (its own close, or the view's ×) puts the view back over the window it came from, shown. Closing the window it came from closes it too."}
+            {"by": "click", "does": "The view moves to a window of its own titled as its heading, all of it as it was (its server, database, schema and diagram); Ctrl+F (⌘F) and Ctrl +/−/0 work in it as over the window. The window has a header bar of its own (its window controls, on macOS its traffic lights) over the view, whose bar leaves out the room for them. Opening the view again brings that window up, as it is: nothing is read again (the tabs, the watch and the diagram go on) unless another host is picked. Closing that window (its own close, or the view's ×) puts the view back over the window it came from, shown. Closing the window it came from closes it too."}
           ],
           "decisions": [
             {"said": "Kubernetes and the Database viewer can detach to a window of their own, as Emission does", "rule": "Every desktop app's Kubernetes and database views have Move to Its Own Window in their bar: the same view, still reading, moves to a window of its own; closing that window puts it back over the window it came from", "decided": "2026-11-22", "source": [{"issue": "BaudeInternal#188"}]}

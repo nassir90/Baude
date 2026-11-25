@@ -34,6 +34,9 @@ class HostTerminal:
     def __init__(self, argv, cwd, title, columns, rows):
         self.id = uuid.uuid4().hex[:12]
         self.argv = argv or [os.environ.get("SHELL") or "/bin/sh", "-l"]
+        if self.argv[0] in ("kubectl", "helm"):  # (the one this host is configured to use: $BAUDE_KUBECTL, else PATH's)
+            import lookupkube
+            self.argv = [lookupkube.kube_tool(self.argv[0]), *self.argv[1:]]
         self.cwd = cwd if cwd and os.path.isdir(os.path.expanduser(cwd)) else os.path.expanduser("~")
         self.title = title or os.path.basename(self.argv[0])
         self.columns, self.rows = columns or 80, rows or 24

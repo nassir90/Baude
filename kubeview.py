@@ -532,11 +532,15 @@ class KubeView(Gtk.Box):
         (Pods by default), filtered by search, in namespace (else the namespaces shown in that context last). Out in a
         window of its own: that window brought up."""
         host = kubehost.picked(self.win)
-        if host.key() != self.host.key():  # (another host's clusters: nothing of the last one's shown)
+        same_host = host.key() == self.host.key()
+        if not same_host:  # (another host's clusters: nothing of the last one's shown)
             self.leave_host()
         self.host = host
         self.host_label.set_label(host.name)
-        if not self.out.present():
+        if self.out.present():
+            if same_host and context is page is search is namespace is None:
+                return
+        else:
             self.set_visible(True)
             self.grab_focus()
         if search is not None:

@@ -26,6 +26,7 @@ class Out:
     def __init__(self, view, bar, title, search, zoom=None):
         self.view, self.title, self.search, self.zoom = view, title, search, zoom
         self.window = self.home = None
+        self.gap = getattr(bar, "gap", None)
         self.button = Gtk.Button(icon_name="window-new-symbolic", tooltip_text=wording.say("common.move_out"))
         self.button.add_css_class("flat")
         self.button.connect("clicked", lambda *_: self.out())
@@ -45,6 +46,8 @@ class Out:
         self.home.remove_overlay(view)
         self.window = ViewWindow(view.win, view, self.title, self.search, self.back, self.zoom)
         self.button.set_visible(False)
+        if self.gap is not None:
+            self.gap.set_visible(False)
         view.set_visible(True)
         view.win.input.grab_focus()
         self.window.present()
@@ -53,6 +56,8 @@ class Out:
         """Its window's closed: the view over the window it came from, shown (that window closing: closed too)."""
         view, self.window = self.view, None
         self.button.set_visible(True)
+        if self.gap is not None:
+            self.gap.set_visible(True)
         if closing_home:
             view.close()
         self.home.add_overlay(view)
@@ -76,7 +81,10 @@ class ViewWindow(Adw.ApplicationWindow):
     def __init__(self, main, view, title, search, back, zoom=None):
         super().__init__(application=main.get_application(), title=title, default_width=1200, default_height=780)
         self.view, self.back, self.main = view, back, main
-        self.set_content(view)
+        frame = Adw.ToolbarView(content=view)  # (a header bar of its own, as Multiplex's window has: the window's controls)
+        frame.add_css_class("baude-frame")
+        frame.add_top_bar(Adw.HeaderBar(show_title=False))
+        self.set_content(frame)
         keys = Gtk.ShortcutController()
         keys.add_shortcut(Gtk.Shortcut.new(Gtk.ShortcutTrigger.parse_string("<Meta>f|<Control>f"),
                                            Gtk.CallbackAction.new(lambda *_: (search.grab_focus(),
@@ -87,7 +95,7 @@ class ViewWindow(Adw.ApplicationWindow):
                 keys.add_shortcut(Gtk.Shortcut.new(Gtk.ShortcutTrigger.parse_string(accel), Gtk.CallbackAction.new(
                     lambda *_, n=steps: (zoom(n), True)[1])))
         self.add_controller(keys)
-        self.connect("close-request", lambda *_: self._closed(False) or False)
+        self.connect("close-request", lambda *_: (self._closed(False), False)[1])  # (False: the window goes)
         self.gone_id = main.get_application().connect("window-removed",
                                                       lambda _a, w: w is main and self._closed(True) and self.destroy())
 
@@ -96,6 +104,7 @@ class ViewWindow(Adw.ApplicationWindow):
             return True
         back, self.back = self.back, None
         self.get_application().disconnect(self.gone_id)
+        self.get_content().set_content(None)
         self.set_content(None)
         back(closing_home)
         return True

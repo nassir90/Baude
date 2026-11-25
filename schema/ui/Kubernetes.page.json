@@ -128,7 +128,7 @@
           "actions": [
             {
               "by": "click",
-              "does": "The view moves to a window of its own titled as its heading, all of it as it was (its context, its watch, its dock's tabs); the window under it is left showing what the view covered. Opening the view again brings that window up. Closing that window (its own close, or the view's ×) puts the view back over the window it came from, shown. Closing the window it came from closes it too."
+              "does": "The view moves to a window of its own titled as its heading, all of it as it was (its context, its watch, its dock's tabs); the window under it is left showing what the view covered. The window has a header bar of its own (its window controls, on macOS its traffic lights) over the view, whose bar leaves out the room for them. Opening the view again brings that window up, as it is: nothing is read again (the tabs, the watch and the diagram go on) unless another host is picked. Closing that window (its own close, or the view's ×) puts the view back over the window it came from, shown. Closing the window it came from closes it too."
             }
           ],
           "decisions": [
@@ -449,7 +449,7 @@
         },
         {
           "name": "shell tab",
-          "shows": "A shell in a pod (its row's shell button; a new tab each time). Its controls at the strip's end: a small dim state text (empty while it runs, \"kubectl exited with <code>\" once it ends, or why there are no terminals here: VTE's GTK 4 build missing), a container picker of the pod's running containers (not init containers). Inside under the strip, a Multiplex terminal running kubectl exec -it in the container (on the host the view reads, run there by its host process when that's another host): bash if the container has it, else sh. Its text in the window's light or dark colours. Its edges glow in the accent while a Bot is at its terminal tools there, as Emission's page does.",
+          "shows": "A shell in a pod (its row's shell button; a new tab each time). Its controls at the strip's end: a small dim state text (empty while it runs, \"kubectl exited with <code>\" once it ends, or why there are no terminals here: VTE's GTK 4 build missing), a container picker of the pod's running containers (not init containers). Inside under the strip, a Multiplex terminal running kubectl exec -it in the container (on the host the view reads, run there by its host process when that's another host, with the kubectl that host is set to use): bash if the container has it, else sh. Its text in the window's light or dark colours. Its edges glow in the accent while a Bot is at its terminal tools there, as Emission's page does.",
           "copy": [
             "kube.shell",
             "kube.container",

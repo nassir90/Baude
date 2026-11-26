@@ -132,8 +132,8 @@ class RecordHosts:
 
     def restart_host(self, then=None, joining=0, now=False):
         """This machine's host process stopped and started again, as Baude's Restart Daemon does: kept by it as its
-        restart (restart free) till nothing's running there, or now (now); said at the notebooks' foot while it's
-        pending (show_restart), and once it's back, or that it isn't. then: what's done once it's back (Record
+        restart (restart free) till nothing's running there, or now (now); toasted while it's pending
+        (show_restart), and once it's back, or that it isn't. then: what's done once it's back (Record
         restarted too). One that's running but not yet connected to (the app's hosts are looked at when first
         wanted) is waited for, up to 15 s, before it's asked; one on older code asked as it was then
         (meshui.ask_restart)."""
@@ -165,18 +165,21 @@ class RecordHosts:
         GLib.timeout_add(250, gone)
 
     def show_restart(self):
-        """Each host's pending daemon restart (this machine's, and those of the hosts reached), said at the notebooks'
-        foot (meshui.restart_lines)."""
-        if getattr(self, "update_bar", None) is None:
+        """Each host's pending daemon restart (this machine's, and those of the hosts reached), toasted
+        (meshui.RestartToasts)."""
+        if getattr(self, "restart_toasts", None) is None:
             return
         here = local_remote()
         hosts = network().alive() if _NETWORK else [here] if here is not None else []
-        self.update_bar.say_restart(meshui.restart_lines(hosts, remote_name))
+        self.restart_toasts.say(meshui.restart_lines(hosts, remote_name))
 
     def show_restart_blockers(self, key=None):
-        """A line at the foot clicked (key: its host's): what that restart waits for (meshui.restart_dialog), the
-        restart held meanwhile; See Thread on one shows it (see_blocker)."""
-        r = next((r for r in network().alive() if r.key == key), None) if key is not None else local_remote()
+        """Details on a pending restart's toast (key: its host's): what that restart waits for (meshui.restart_dialog),
+        the restart held meanwhile; See Thread on one shows it (see_blocker), the toast back saying it's paused
+        (RestartToasts.hold)."""
+        here = local_remote()
+        r = here if key is None or here is not None and here.key == key else \
+            next((r for r in network().alive() if r.key == key), None)
         if r is None or not r.info.get("restart"):
             return
 
@@ -184,7 +187,7 @@ class RecordHosts:
             if r.mine:
                 return self.restart_host(now=now)
             meshui.ask_restart(r, now, self.toast)
-        meshui.restart_dialog(r, self, ask, lambda b: self.see_blocker(r, b))
+        meshui.restart_dialog(r, self, ask, lambda b: self.see_blocker(r, b), lambda: self.restart_toasts.hold(r.key))
 
     def see_blocker(self, r, b):
         """What r's restart waits for, shown (See Thread): a terminal, ☰ → Terminal on it; a chat (a task's Bot's, an

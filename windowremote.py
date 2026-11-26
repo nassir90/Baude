@@ -660,7 +660,7 @@ class WindowRemote:
     def restart_host(self, then=None, now=False):
         """This Mac's host process stopped and started again (a newer one, after an update): kept by it as its restart
         (restart free) till nothing it runs blocks it (meshui.restart_dialog says what), as stopping it would stop
-        that; now: at once, those stopped. Every head shows it pending at its list's foot (meshui.restart_lines). A
+        that; now: at once, those stopped. Every head toasts it pending (meshui.RestartToasts). A
         turn that's only the model writing is cut short, said so (cut), and carried on with Continue. Its claudes
         stop, their transcripts kept, and each of its sessions resumes as it's next written to (the windows on them
         reattach as it's back). then: what's done once it's gone, in place of waiting for it back (Baude restarted
@@ -695,8 +695,9 @@ class WindowRemote:
         GLib.timeout_add(250, gone)
 
     def show_restart_blockers(self, key=None):
-        """A line at the sidebar's foot clicked (key: its host's): what that daemon's restart waits for
-        (meshui.restart_dialog), the restart held meanwhile; See Thread on one shows it (see_blocker)."""
+        """Details on a pending restart's toast (key: its host's): what that daemon's restart waits for
+        (meshui.restart_dialog), the restart held meanwhile; See Thread on one shows it (see_blocker), the toast back
+        saying it's paused (RestartToasts.hold)."""
         r = next((r for r in network().alive() if r.key == key), None) if key is not None else local_host()
         if r is None or not r.info.get("restart"):
             return
@@ -705,7 +706,8 @@ class WindowRemote:
             if r.mine:
                 return self.restart_host(now=now)
             meshui.ask_restart(r, now, lambda text: toast(self.sidebar, text))
-        meshui.restart_dialog(r, self, ask, lambda b: self.see_blocker(r, b))
+        meshui.restart_dialog(r, self, ask, lambda b: self.see_blocker(r, b),
+                              lambda: self.sidebar.restart_toasts.hold(r.key))
 
     def see_blocker(self, r, b):
         """What r's restart waits for, shown (See Thread): a chat, opened (an agent run's: the chat on its host it's

@@ -87,7 +87,8 @@ class Way {
     }
 }
 
-/** A host process as the lab has it: one session ("a"), its transcript, what it's been sent (each input once by its
+/** A host process as the lab has it: one session ("a"), its transcript (its size listed LAG_MS late, as a host's
+ * listing lags its file), what it's been sent (each input once by its
  * uuid, as serversessions.take_input has it), a ping every second; reached only while refuse is null (refuse: why
  * ssh can't, as the phone's network is cut off in Doze); kill() drops its channel as the OS drops a phone's socket. */
 class LabHost {
@@ -96,6 +97,7 @@ class LabHost {
     @Volatile var state = "idle"
     var title = "Tidy the release notes"
     val transcript = java.io.ByteArrayOutputStream()
+    private val sizes = ArrayList<Pair<Long, Int>>() // (its transcript's size as it grew, and when)
     val inputs = ArrayList<String>() // (each input's text, as it came: twice if it was taken twice)
     private val taken = HashSet<String>()
     @Volatile var dropOnInput = false // (the link goes as the next input's taken, before it's answered)
@@ -105,6 +107,13 @@ class LabHost {
 
     @Synchronized fun record(o: JSONObject) {
         transcript.write((o.toString() + "\n").toByteArray())
+        sizes.add(System.currentTimeMillis() to transcript.size())
+    }
+
+    /** Its transcript's size as its listing says it: as it was LAG_MS ago. */
+    @Synchronized private fun listedSize(): Int {
+        val then = System.currentTimeMillis() - LAG_MS
+        return sizes.lastOrNull { it.first <= then }?.second ?: 0
     }
 
     fun said(text: String, uuid: String = java.util.UUID.randomUUID().toString()) = record(JSONObject().put("type", "user")
@@ -117,7 +126,7 @@ class LabHost {
         val now = System.currentTimeMillis() / 1000.0
         return JSONObject().put("id", "a").put("title", title).put("cwd", "/home/dev/garden").put("updated", now)
             .put("said", now).put("created", now - 600).put("state", state).put("model", "opus").put("effort", "high")
-            .put("mode", "default").put("size", synchronized(this) { transcript.size() })
+            .put("mode", "default").put("size", listedSize())
     }
 
     private fun send(to: Way, o: JSONObject) {
@@ -158,7 +167,8 @@ class LabHost {
                         "attach" -> reply(JSONObject().put("op", "attached").put("session", m.optString("session")).put("asks", JSONArray()))
                         "transcript" -> {
                             val all = synchronized(this) { transcript.toByteArray() }
-                            val from = m.optLong("offset").toInt().coerceIn(0, all.size)
+                            val from = m.optLong("offset").let { if (it > all.size) 0 else it.toInt() } // (past its end:
+                            // from its start, as serversessions.read_lines has it)
                             reply(JSONObject().put("op", "transcript").put("session", "a").put("offset", from).put("next", all.size)
                                 .put("size", all.size).put("data", Base64.getEncoder().encodeToString(all.copyOfRange(from, all.size))))
                         }
@@ -218,6 +228,8 @@ class LabHost {
 
 /** A connection to the lab's host: Connection as the app runs it (its loop, its retries, its pings), its channel the
  * lab's instead of ssh's. */
+const val LAG_MS = 600L
+
 class LabConnection(ctx: android.content.Context, host: Host, private val lab: LabHost, heard: (Connection, JSONObject) -> Unit,
                     changed: (Connection) -> Unit) : Connection(ctx, Place.Direct(host), identify = { _, _ -> }, route = { null },
     heard = heard, changed = changed) {
@@ -378,6 +390,27 @@ abstract class LinkLab(private val theme: String) {
         shot("link-10-turn-ended-away")
     }
 
+    /** An ordinary turn with the chat open, the host's listing a moment behind its transcript: the chat reads on as
+     * the turn goes, never from nothing. */
+    @Test fun liveTurn() = scene("live-turn") {
+        connect()
+        chat()
+        typeIn("Also bump the version")
+        send()
+        lab.state = "working"
+        lab.told()
+        pump(800)
+        lab.answered("Bumped to 0.9.1 in `build.gradle.kts`, and `CHANGELOG.md` has it at the top.")
+        lab.told()
+        pump(300)
+        lab.answered("Anything else for the release?")
+        lab.state = "idle"
+        lab.told()
+        pump(1_500)
+        shot("link-15-live-turn")
+        note("the host took: ${lab.inputs}")
+    }
+
     /** The app's process killed while it was put away (Android does, to free memory), then opened again on the chat,
      * the host not reached yet. */
     @Test fun coldStart() = scene("cold-start") {
@@ -483,6 +516,12 @@ abstract class LinkLab(private val theme: String) {
 
     private fun chat() {
         show { ChatShell("h1", "a", back = {}, open = { _, _ -> }, feedback = {}, first = "chat") }
+        var had = 0
+        watchers.add {
+            val n = Mesh.open?.lines?.size ?: 0
+            if (had > 0 && n == 0) note("chat read again from nothing: its $had lines let go of")
+            had = n
+        }
         pump(1_000)
     }
 

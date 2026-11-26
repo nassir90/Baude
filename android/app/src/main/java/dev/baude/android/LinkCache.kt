@@ -10,7 +10,7 @@ import java.io.File
  * and its connections while it's put away; this is what's on screen as it comes back, till its hosts are reached again. */
 object LinkCache {
     private const val CHATS = 12          // (the chats kept: those last open)
-    private const val MOST = 4_000_000    // (a chat's transcript kept: its last this many bytes at most)
+    const val MOST = 4_000_000            // (a chat's transcript kept: its last this many bytes at most)
     private val io = java.util.concurrent.Executors.newSingleThreadExecutor()
     private val later = java.util.concurrent.Executors.newSingleThreadScheduledExecutor()
     private var latest: Map<String, List<Msg.Session>> = emptyMap()
@@ -59,18 +59,68 @@ object LinkCache {
         }, 2, java.util.concurrent.TimeUnit.SECONDS)
     }
 
-    /** A chat's transcript as it was kept: where it starts in the transcript, and its bytes from there (null: none). */
-    fun chat(hostId: String, sid: String): Pair<Long, ByteArray>? {
-        val dir = File(root ?: return null, "chats")
-        val f = File(dir, name("$hostId/$sid"))
-        return try {
-            val bytes = f.readBytes()
-            val nl = bytes.indexOf('\n'.code.toByte())
-            val head = JSONObject(String(bytes, 0, nl, Charsets.UTF_8))
-            if (head.optString("key") != "$hostId/$sid") return null
-            head.getLong("start") to bytes.copyOfRange(nl + 1, bytes.size)
-        } catch (_: Exception) {
-            null
+    private fun file(key: String): File? = root?.let { File(File(it, "chats"), name(key)) }
+
+    /** Whether a chat's transcript is kept. */
+    fun has(hostId: String, sid: String) = file("$hostId/$sid")?.exists() == true
+
+    /** A chat's transcript as it was kept, its last most bytes of it at most, from a line's start: where that starts in
+     * the transcript, and its bytes from there (null: none), told off the main thread. */
+    fun chat(hostId: String, sid: String, most: Long, then: (Pair<Long, ByteArray>?) -> Unit) {
+        val key = "$hostId/$sid"
+        val f = file(key) ?: return then(null)
+        io.execute {
+            then(try {
+                java.io.RandomAccessFile(f, "r").use { r ->
+                    val head = JSONObject(String((r.readLine() ?: "").toByteArray(Charsets.ISO_8859_1), Charsets.UTF_8))
+                    if (head.optString("key") != key) null
+                    else {
+                        val body = r.filePointer
+                        val from = maxOf(body, r.length() - most - 1) // (and the byte before it: is a line's start there?)
+                        val got = ByteArray((r.length() - from).toInt())
+                        r.seek(from)
+                        r.readFully(got)
+                        val cut = if (from == body) 0 else got.indexOf('\n'.code.toByte()).let { if (it < 0) got.size else it + 1 }
+                        head.getLong("start") + (from + cut - body) to got.copyOfRange(cut, got.size)
+                    }
+                }
+            } catch (_: Exception) {
+                null
+            })
+        }
+    }
+
+    /** A chat's transcript as it's been read, cut to its last MOST bytes (from a line's start) once it's grown well past
+     * them: what's kept of it, and what's held of it meanwhile. */
+    fun trim(chat: Chat) {
+        if (chat.raw.size() <= MOST + MOST / 4) return
+        val bytes = chat.raw.toByteArray()
+        var cut = bytes.size - MOST
+        while (cut < bytes.size && bytes[cut - 1] != '\n'.code.toByte()) cut++
+        chat.raw.reset()
+        chat.raw.write(bytes, cut, bytes.size - cut)
+        chat.rawFrom += cut
+    }
+
+    /** A host removed: what's kept of it let go of, its sessions and its chats' transcripts. */
+    fun forget(hostId: String) {
+        val dir = File(root ?: return, "chats")
+        synchronized(this) { latest = latest - hostId }
+        io.execute {
+            try {
+                val f = File(root, "sessions.json")
+                val o = JSONObject(f.readText())
+                if (o.has(hostId)) {
+                    o.remove(hostId)
+                    write(f, o.toString().toByteArray())
+                }
+            } catch (_: Exception) {
+            }
+            for (f in dir.listFiles().orEmpty()) try {
+                val key = f.bufferedReader().use { JSONObject(it.readLine() ?: "").optString("key") }
+                if (key.startsWith("$hostId/")) f.delete()
+            } catch (_: Exception) {
+            }
         }
     }
 

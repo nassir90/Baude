@@ -182,8 +182,9 @@ open class Connection(
         end()
     }
 
-    /** (SystemClock.elapsedRealtime) Since when it's been without its host: since it last went, or since the app was
-     * last brought back (resume) if that's later; 0 while it's up. */
+    /** (SystemClock.elapsedRealtime) Since when it's been without its host: since it first went (tries that fail
+     * meanwhile, and the network coming and going, don't count it again), or since the app was last brought back
+     * (resume, fresh) if that's later; 0 while it's up. */
     @Volatile var awaySince = SystemClock.elapsedRealtime()
         private set
 
@@ -201,7 +202,7 @@ open class Connection(
             var reached = false
             try {
                 reached = run()
-                if (!stopped) set("down", said.ifBlank { if (reached) "the host went" else "the host's Baude didn't start" })
+                if (!stopped) set("down", said.ifBlank { if (reached) "the host went" else "the link closed before the host answered" })
             } catch (e: Exception) {
                 if (stopped) break
                 val repo = lastRepo
@@ -239,13 +240,13 @@ open class Connection(
         if (state == "down") wake.offer(Unit)
     }
 
-    /** The app brought back, or the network given back after Doze: down, tried again now; up, given CHECK_MS to be
-     * heard from (its silence while the phone slept isn't held against it, and a socket the OS closed meanwhile is
-     * found out in seconds, not SILENT_MS). The time it's been away counted from now. */
-    fun resume() {
+    /** The app brought back (fresh), or the network given back after Doze: down, tried again now; up, given CHECK_MS
+     * to be heard from (its silence while the phone slept isn't held against it, and a socket the OS closed meanwhile
+     * is found out in seconds, not SILENT_MS). The app brought back: the time it's been away counted from now. */
+    fun resume(fresh: Boolean) {
         val now = SystemClock.elapsedRealtime()
         if (state == "up") heardAt = maxOf(heardAt, now - SILENT_MS + CHECK_MS)
-        else awaySince = now
+        else if (fresh) awaySince = now
         kick()
     }
 

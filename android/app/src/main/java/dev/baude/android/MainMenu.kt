@@ -44,7 +44,7 @@ private fun fullWidth(): MenuItem {
 }
 
 /** A chat's ☰ (baudewindow.BaudeWindow's menu, in its sections): Find, Copy Transcript for an Issue, Read-only
- * session (checked and greyed while the chat's archived: read-only till it's unarchived); Full-width text; Kubernetes…, Docker, Database Schemas…, Terminal (a host that takes them); Settings…, Changelog, Mesh, Send
+ * session (checked and greyed while the chat's archived: read-only till it's unarchived); Full-width text; Kubernetes…, Docker, Databases…, Terminal (a host that takes them); Settings…, Changelog, Mesh, Send
  * Feedback…, Ongoing Feedback. screen opens one of "settings", "changelog", "mesh", "fixes", "databases", "kubernetes",
  * "docker" and "terminal" over the chat. */
 @Composable
@@ -77,7 +77,7 @@ fun ChatMenu(hostId: String, sid: String, feedback: () -> Unit, screen: (String)
     ))
 }
 
-/** The home screen's ☰: the items that don't need a chat open, and Kubernetes…, Database Schemas…, Terminal on the
+/** The home screen's ☰: the items that don't need a chat open, and Kubernetes…, Databases…, Terminal on the
  * host picked beside New session (a host that takes them), as Baude's ☰ opens them on its window's host. tool opens
  * one of "kubernetes", "docker", "databases" and "terminal" on a host. */
 @Composable

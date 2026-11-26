@@ -79,8 +79,8 @@
     },
     {
       "name": "Kubernetes",
-      "decisions": [{"said": "Drop the ellipses from Kubernetes and Database Schemas", "rule": "Every app names the Kubernetes and Database Schemas items without an ellipsis: they open a view, not a dialog that asks for more", "decided": "2026-11-22", "source": [{"issue": "BaudeInternal#187"}]}],
-      "shows": "\"Kubernetes\" (section with Database Schemas).",
+      "decisions": [{"said": "Drop the ellipses from Kubernetes and Database Schemas", "rule": "Every app names the Kubernetes and Databases items without an ellipsis: they open a view, not a dialog that asks for more", "decided": "2026-11-22", "source": [{"issue": "BaudeInternal#187"}]}],
+      "shows": "\"Kubernetes\" (section with Databases).",
       "copy": [
         "window.kubernetes"
       ],
@@ -92,8 +92,8 @@
       ]
     },
     {
-      "name": "Database Schemas",
-      "shows": "\"Database Schemas\"",
+      "name": "Databases",
+      "shows": "\"Databases\"",
       "copy": [
         "window.database_schemas"
       ],
@@ -106,7 +106,7 @@
     },
     {
       "name": "Terminal",
-      "shows": "\"Terminal\" (in the section with Kubernetes and Database Schemas).",
+      "shows": "\"Terminal\" (in the section with Kubernetes and Databases).",
       "copy": [
         "multiplex.terminal_menu"
       ],

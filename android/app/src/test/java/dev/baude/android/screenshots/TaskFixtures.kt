@@ -28,8 +28,11 @@ def deploy(inputs):
     if inputs["notify"]:
         task.say("published")"""
 
-    private val form = listOf(Msg.TaskField(name = "branch", type = "text", default = "main"),
-        Msg.TaskField(name = "notify", type = "bool", default = true))
+    private val form = listOf(
+        Msg.TaskField(name = "force", label = "Rebuild and redeploy even when staging has nothing new", type = "bool", default = false),
+        Msg.TaskField(name = "notify", label = "Tell the channel once it's published", type = "bool", default = true),
+        Msg.TaskField(name = "branch", label = "Branch", type = "text", default = "main"),
+        Msg.TaskField(name = "target", label = "Target", type = "choice", choices = listOf("staging", "local", "preview"), default = "local"))
     private val triggers = listOf(
         Msg.TaskTrigger(id = "g1", kind = "git_push", repo = "~/projects/site", branch = "main", pollS = 60, fills = mapOf("branch" to "branch")),
         Msg.TaskTrigger(id = "s1", kind = "schedule", at = "09:00", days = listOf(0, 1, 2, 3, 4)))

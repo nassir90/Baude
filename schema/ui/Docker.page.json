@@ -103,7 +103,7 @@
     },
     {
       "name": "table",
-      "shows": "The page's objects, a column each as the host says them (containers: Name, Image, Status, Ports, Project, Age; images: Repository, Tag, ID, Size, Age; volumes: Name, Driver, Project, Mountpoint; networks: Name, Driver, Scope, ID, Age; Compose projects: Name, Status, Config Files); a status coloured green running, orange restarting or starting, red failed; an age's tooltip its time in full. Click a column to sort by it. Under it, a status line: how many are shown, the context, and what was last done.",
+      "shows": "The page's objects, a column each as the host says them (containers: Name, Image, Status, Ports, Project, Age; images: Repository, Tag, ID, Size, Age; volumes: Name, Driver, Project, Mountpoint; networks: Name, Driver, Scope, ID, Age; Compose projects: Name, Status, Config Files); a container's Status its state, capitalised, with its health in parentheses when it has one and an exited one's exit code (Running, Running (healthy), Exited (1)), never docker's own text, which repeats the Age column; a status coloured green running, orange restarting or starting, red failed; an age's tooltip its time in full. Click a column to sort by it. Under it, a status line: how many are shown, the context, and what was last done.",
       "parts": [
         {
           "name": "row's end",
@@ -125,7 +125,7 @@
         },
         {
           "name": "column filter",
-          "shows": "On a column whose values are words (not a name, age or containers column; one that sorts by its text, not a number, size or time; each value with a letter in it and at most 40 characters), with 30 or fewer different values and some value shared by more than one row (any number for a status column), hovering its heading shows a funnel button at the heading's right end. While the column filters, the funnel stays, in the accent. A value hidden but not in the list now stays hidden, listed with a count of 0; a value with a count of 0 is greyed (dim) but can still be ticked. A container's Status is filtered by its state (Running, Restarting, Exited…), not its text, which says for how long.",
+          "shows": "On a column whose values are words (not a name, age or containers column; one that sorts by its text, not a number, size or time; each value with a letter in it and at most 40 characters), with 30 or fewer different values and some value shared by more than one row (any number for a status column), hovering its heading shows a funnel button at the heading's right end. While the column filters, the funnel stays, in the accent. A value hidden but not in the list now stays hidden, listed with a count of 0; a value with a count of 0 is greyed (dim) but can still be ticked. A container's Status is filtered by its state (Running, Restarting, Exited…), not its whole text (Running (healthy) is filtered as Running, Exited (1) as Exited).",
           "copy": [
             "kube.filter_column",
             "kube.value_count",
@@ -164,6 +164,18 @@
                   "message": "d58d44a8-1c67-40ed-9a24-27be89804cb4"
                 }
               ]
+            }
+          ]
+        }
+      ],
+      "decisions": [
+        {
+          "said": "In the docker view the status column reads \"Up <TIME> (healthy)\"; that is bizarre, and Age already says how long: use the actual value (paraphrased)",
+          "rule": "Every app's Docker containers table shows a container's Status as its state (Running, Exited, Restarting, Paused, Created, Dead), then its health in parentheses when it has one, and an exited container's exit code: Running (healthy), Exited (1). It never shows docker's own text (Up 2 hours), which repeats the Age column.",
+          "decided": "2026-11-26",
+          "source": [
+            {
+              "issue": "BaudeInternal#256"
             }
           ]
         }

@@ -1,5 +1,5 @@
 {
- "description": "A small app's database for the parity rig's Database Schemas scene: its server, its database and its schema as PG_SCHEMA_SQL returns it (before pg_normalize), nothing read from a real server.",
+ "description": "A small app's database for the parity rig's Databases scene: its server, its database and its schema as PG_SCHEMA_SQL returns it (before pg_normalize), nothing read from a real server.",
  "server": {
   "container": "builds-postgres-1",
   "user": "postgres",

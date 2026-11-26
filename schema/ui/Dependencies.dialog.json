@@ -38,7 +38,7 @@
     },
     {
       "name": "groups",
-      "shows": "A heading and a boxed list for each thing that needs them, in this order, a group shown only when it has a row on that host: Providers (Claude Code, Codex CLI, MLX on macOS, Ollama), Git and GitHub (Git, GitHub CLI, GitHub Account), Kubernetes (kubectl, kubeconfig), Database Schemas (Docker), Multiplex (VTE; Xvfb on a Linux host with no display), Emission (WebKitGTK on Linux, WebKit on macOS), Signal (Node.js), Telemetry (line_profiler). In a group, rows go by name, a check (kubeconfig, GitHub Account) right after its program, and left out while its program isn't installed. The host's error, if it can't be asked, in the groups' place.",
+      "shows": "A heading and a boxed list for each thing that needs them, in this order, a group shown only when it has a row on that host: Providers (Claude Code, Codex CLI, MLX on macOS, Ollama), Git and GitHub (Git, GitHub CLI, GitHub Account), Kubernetes (kubectl, kubeconfig), Databases (Docker), Multiplex (VTE; Xvfb on a Linux host with no display), Emission (WebKitGTK on Linux, WebKit on macOS), Signal (Node.js), Telemetry (line_profiler). In a group, rows go by name, a check (kubeconfig, GitHub Account) right after its program, and left out while its program isn't installed. The host's error, if it can't be asked, in the groups' place.",
       "copy": [
         "deps.providers",
         "deps.git_github",
@@ -79,7 +79,7 @@
     },
     {
       "said": "Dependencies should say more than installed: whether a kubeconfig is set up and gh is signed in; VTE belongs under Multiplex, Emission needs its own section, Claude Code and Codex go under Providers with MLX's and Ollama's status (paraphrased)",
-      "rule": "Every app groups Settings → Dependencies by what needs each dependency (Providers, Git and GitHub, Kubernetes, Database Schemas, Multiplex, Emission, Signal), lists readiness checks beside installs (a kubeconfig with a context, gh signed in, Ollama running with its model count, MLX's model count), each not ready with its fix shown as a missing install's is, and reads all of it from the host",
+      "rule": "Every app groups Settings → Dependencies by what needs each dependency (Providers, Git and GitHub, Kubernetes, Databases, Multiplex, Emission, Signal), lists readiness checks beside installs (a kubeconfig with a context, gh signed in, Ollama running with its model count, MLX's model count), each not ready with its fix shown as a missing install's is, and reads all of it from the host",
       "decided": "2026-11-25",
       "source": [
         {

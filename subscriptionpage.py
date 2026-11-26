@@ -1,6 +1,6 @@
 """Settings → Subscriptions (Baude's and Record's; the phone's SubscriptionsScreen the same): the Claude and Codex
 subscription accounts kept on the host picked beside New session (win.terminal_host, as ☰ → Terminal, Kubernetes and
-Database Schemas are), changed there through its accounts op (hostaccounts): for each provider, a Current Subscription row
+Databases are), changed there through its accounts op (hostaccounts): for each provider, a Current Subscription row
 picking the subscription a new chat takes, a card per subscription (an account's with ⋮: Rename…, Sign In Again… or Replace
 Token…, Remove…; a Claude card with its usage as a bar per limit, read every USAGE_S while the page is shown in the window in front), and Add
 account (where the host lacks the provider's program, what Settings → Dependencies says of it instead: depsview.row).

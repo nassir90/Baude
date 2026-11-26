@@ -1,4 +1,4 @@
-"""hostdb — the running databases here, read for a head elsewhere (the phone's Database Schemas): the servers Docker (and
+"""hostdb — the running databases here, read for a head elsewhere (the phone's Databases): the servers Docker (and
 a local cluster) has and their databases (servers), a database's tables and foreign keys (schema), a table's first rows
 (rows). The desktop's own functions (schemadata), read-only, a secret-looking column's values masked there. No GTK."""
 import json

@@ -647,14 +647,17 @@ An agent's program stopped.
 
 #### `kube` (Kube)
 
-A cluster's objects as Freelens lists them, read through the host's kubeconfig and kubectl: its contexts (contexts), one connected to (connect), a kind's objects (list), an object's YAML (yaml), what controls an object (owner), a pod deleted (delete). Secrets' values are never read.
+A cluster's objects as Freelens lists them, read through the host's kubeconfig and kubectl: its contexts (contexts), whether a context is still there as the head knows it (check: answered removed, or with nothing else; kubectl isn't run), one connected to (connect), a kind's objects (list), an object's YAML (yaml), what controls an object (owner), a pod deleted (delete), the whole stack's CPU and memory (summary, a read as list is). Secrets' values are never read.
 
 | Field | Type | Required | What it is |
 |---|---|---|---|
-| `what` | `contexts` \| `connect` \| `list` \| `yaml` \| `owner` \| `delete` |  | What to do. |
+| `what` | `contexts` \| `check` \| `connect` \| `list` \| `yaml` \| `owner` \| `summary` \| `delete` |  | What to do. |
 | `context` | string |  | The kubeconfig context. |
+| `server` | string |  | The context's server as the head knows it (KubeContext's): a context of that name with another server is another cluster, and the request is answered removed. |
 | `page` | string |  | list, yaml: the kind's page, by its resource. |
 | `crd` | string |  | list, yaml: a custom resource's definition (plural.group) for a kind that isn't listed. |
+| `namespaces` | array of string |  | summary: the namespaces it's the totals of (every one when it's left out; none when it's empty). |
+| `since` | number |  | summary: the newest history sample the head has (its at): only later ones are sent (every one when it's left out). |
 | `namespace` | string |  | yaml, owner, delete: the object's namespace. |
 | `name` | string |  | yaml, owner, delete: the object's name. |
 | `kind` | string |  | owner: the object's kind. |
@@ -662,12 +665,13 @@ A cluster's objects as Freelens lists them, read through the host's kubeconfig a
 
 #### `kube_follow` (KubeFollow)
 
-A pod's log followed (logs), or a kind's list watched (watch): one a connection, the answers kube_text and kube_rows till the connection goes (kubectl is stopped then).
+The kubeconfig's contexts followed (contexts: kube_contexts, sent again whenever tools add or delete clusters), a pod's log followed (logs), or a kind's list watched (watch): one a connection, the answers kube_contexts, kube_text and kube_rows till the connection goes (kubectl is stopped then), or till the context goes from the kubeconfig (kube_end, removed).
 
 | Field | Type | Required | What it is |
 |---|---|---|---|
-| `what` | `logs` \| `watch` |  | What to follow. |
+| `what` | `contexts` \| `logs` \| `watch` |  | What to follow: the kubeconfig's contexts (kube_contexts, as they change), a pod's log, or a kind's list. |
 | `context` | string |  | The kubeconfig context. |
+| `server` | string |  | The context's server as the head knows it (KubeContext's): a context of that name with another server is another cluster, and the request is answered removed. |
 | `page` | string |  | watch: the kind's page, by its resource. |
 | `crd` | string |  | watch: a custom resource's definition. |
 | `namespace` | string |  | logs: the pod's namespace. |
@@ -1288,7 +1292,7 @@ databases' answer: servers {servers, databases}; schema {tables, links, took}; r
 | `links` | array of DbLink |  | schema: their foreign keys. |
 | `took` | number |  | schema: seconds it took to read, 0 when it was kept from a read before. |
 | `rows` | array of object |  | rows: the first rows, each {column: value}; objects and lists as JSON text. |
-| `missing` | Dep |  | servers: no server was found and Docker isn't on the host: Database Schemas shows this in its place. |
+| `missing` | Dep |  | servers: no server was found and Docker isn't on the host: Databases shows this in its place. |
 
 #### `deactivated` (Deactivated)
 
@@ -1585,13 +1589,14 @@ join's answer.
 
 #### `kube` (KubeReply)
 
-kube's answer: contexts {contexts, where}; connect {sections, namespaces, nodes}; list {columns, rows, metrics, page}; yaml {text, file, refs}; owner {kind, name, resource}; delete {said}; fault when a cluster can't be read.
+kube's answer: contexts {contexts, where}; connect {sections, namespaces, nodes}; list {columns, rows, metrics, page}; yaml {text, file, refs}; owner {kind, name, resource}; summary {summary}; delete {said}; fault when a cluster can't be read; removed when its context has gone from the kubeconfig.
 
 | Field | Type | Required | What it is |
 |---|---|---|---|
 | `what` | string |  | What was done. |
 | `error` | string |  | What's wrong with the request. |
 | `fault` | KubeFault |  | The cluster can't be read: why. |
+| `removed` | boolean |  | The context isn't in the kubeconfig (any more): nothing was read. |
 | `contexts` | array of KubeContext |  | contexts: the kubeconfig's. |
 | `where` | string |  | contexts: the kubeconfig files, or what stands for none. |
 | `sections` | array of KubeSection |  | connect: the sidebar's categories, each kind with whether the cluster serves it. |
@@ -1607,8 +1612,18 @@ kube's answer: contexts {contexts, where}; connect {sections, namespaces, nodes}
 | `kind` | string |  | owner: the controlling kind, climbed up from a ReplicaSet or a Job. |
 | `name` | string |  | owner: its name. |
 | `resource` | string |  | owner: its kind's resource. |
+| `summary` | KubeSummary |  | summary: the stack's CPU and memory. |
 | `said` | string |  | delete: what kubectl said. |
 | `missing` | Dep |  | kubectl isn't on the host: the Kubernetes view shows this in its place. |
+
+#### `kube_contexts` (KubeContexts)
+
+kube_follow contexts' answer: the kubeconfig's contexts, as the follow starts and each time they change.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `contexts` | array of KubeContext |  | The kubeconfig's contexts. |
+| `where` | string |  | The kubeconfig files, or what stands for none. |
 
 #### `kube_end` (KubeEnd)
 
@@ -1619,6 +1634,7 @@ kube_follow's last answer: kubectl ended.
 | `code` | integer |  | Its exit code. |
 | `said` | string |  | What it wrote, for a failure. |
 | `fault` | KubeFault |  | Why, when the cluster can't be read. |
+| `removed` | boolean |  | Its context went from the kubeconfig (its cluster was deleted, or made again under the same name). |
 
 #### `kube_rows` (KubeRows)
 
@@ -2452,6 +2468,7 @@ An object's row.
 | `keys` | array of any |  | Each column's sort key: a number or text. |
 | `tones` | array of string |  | Each column's tone (ok, warn, bad), or empty. |
 | `tips` | array of string |  | Each column's tooltip, or empty (an age's: its time in full). |
+| `filters` | array of string |  | What each column's filter goes by, where it isn't the column's text, else empty (a container's Status: its state, Running or Exited, where the text says for how long). |
 | `actions` | array of string |  | What can be done to it as it is: start, stop, restart, remove. |
 | `logs` | boolean |  | It has a log to follow (docker_follow). |
 | `shell` | array of string |  | A running container's: the command that opens a shell in it (bash if it has it, else sh), for a terminal on the host; else empty. |
@@ -2639,6 +2656,7 @@ A context of the host's kubeconfig.
 | Field | Type | Required | What it is |
 |---|---|---|---|
 | `name` | string | yes | Its name. |
+| `server` | string |  | Its cluster's API server (no credentials): with its name, which cluster it is. A context deleted and made again under the same name is another cluster. |
 | `current` | boolean |  | The kubeconfig's current context. |
 | `local` | boolean |  | Its API server is on the host itself. |
 
@@ -2699,6 +2717,18 @@ An object's row.
 | `containers` | array of KubeContainer |  | A pod's containers, init ones first. |
 | `default` | string |  | A pod's default container (its annotation), or empty. |
 
+#### KubeSample
+
+The stack's totals at one time, in the namespaces asked for.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `at` | number |  | When (seconds since 1970). |
+| `cpu_requests` | number |  | Cores asked for. |
+| `cpu_used` | number/null |  | Cores used, or null without metrics. |
+| `memory_requests` | number |  | Bytes asked for. |
+| `memory_used` | number/null |  | Bytes used, or null without metrics. |
+
 #### KubeSection
 
 A category of the Kubernetes view's sidebar.
@@ -2708,6 +2738,47 @@ A category of the Kubernetes view's sidebar.
 | `title` | string | yes | Its name. |
 | `icon` | string |  | Its icon's name, or empty. |
 | `pages` | array of KubePage |  | Its kinds. |
+
+#### KubeShare
+
+A namespace's or a node's part of the stack's totals, a row of its table.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `name` | string |  | The namespace or node. |
+| `cells` | array of string |  | Each column's text. |
+
+#### KubeSummary
+
+Home: the whole stack's CPU and memory, in the namespaces asked for: the pods that hold on to a node (not those that finished), added up, by namespace and by node, and how the totals went.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `cpu` | KubeUse |  | CPU, in cores. |
+| `memory` | KubeUse |  | Memory, in bytes. |
+| `metrics` | boolean |  | Whether the cluster has a metrics API (else nothing is used). |
+| `pods` | integer |  | How many pods are added up. |
+| `namespace_columns` | array of string |  | The namespaces table's column titles. |
+| `namespaces` | array of KubeShare |  | Each namespace's part. |
+| `node_columns` | array of string |  | The nodes table's column titles. |
+| `nodes` | array of KubeShare |  | Each node's part (against its own allocatable). |
+| `history` | array of KubeSample |  | The totals every `every` seconds from the first time Home was read for the context, oldest first, kept in the host's memory: those after the request's since (every one without). |
+| `every` | integer |  | How often the host samples them (and a head reads them), in seconds. |
+| `minutes` | integer |  | How far back the history goes, in minutes. |
+
+#### KubeUse
+
+One resource's totals (CPU in cores, memory in bytes): what the pods ask for, use and are held to, and what the nodes can give them.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `title` | string |  | Its name: CPU, Memory. |
+| `requests` | number |  | What the pods ask for (their containers' requests). |
+| `used` | number/null |  | What they use now (the metrics API's), or null without one. |
+| `limits` | number/null |  | What they're held to (the limits their containers set), or null when none sets one. |
+| `allocatable` | number/null |  | What the nodes can give pods, or null when the nodes can't be listed. |
+| `cells` | array of string |  | requests, used, limits and allocatable as they're shown. |
+| `shares` | array of string |  | requests, used and limits as shares of allocatable (28%), or empty. |
 
 #### Member
 

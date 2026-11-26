@@ -590,7 +590,7 @@ def schema_sample():
         return baude.pg_normalize(json.load(f)["raw"])
 
 
-@scene("38c-schema-diagram", "Database schemas (☰ → Database Schemas…, or a table name in a reply): every reachable "
+@scene("38c-schema-diagram", "Database schemas (☰ → Databases…, or a table name in a reply): every reachable "
                              "Postgres, its tables and foreign keys, like Supabase's visualizer; the selected table's "
                              "links light up", size=(1300 + SIDEBAR, H))
 def _(app):

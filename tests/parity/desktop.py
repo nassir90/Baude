@@ -486,6 +486,33 @@ def build(app, sc):
         T.pump(0.5)
         win.connect("destroy", lambda *_: kv.dock.close_all())
         return win
+    if name in ("kubernetes-contexts", "kubernetes-removed"):
+        win, kv = scenes_chat.kube_window(app)
+        T.pump(0.3)
+        text = open(os.environ["KUBECONFIG"]).read()
+        if name == "kubernetes-contexts":  # (a tool's test clusters: the fixture's two contexts, and slices of k3d-dev)
+            extra = ["staging"] + [f"slice-{i}" for i in range(1, 19)] + [f"pr-{n}-preview" for n in (412, 418, 431, 455)] + \
+                ["kind-ci"]
+            text = text.replace("contexts:\n", "contexts:\n" + "".join(
+                f"- context:\n    cluster: k3d-dev\n    user: admin@k3d-dev\n  name: {n}\n" for n in extra), 1)
+            with open(os.environ["KUBECONFIG"] + ".new", "w") as f:
+                f.write(text)
+            os.replace(os.environ["KUBECONFIG"] + ".new", os.environ["KUBECONFIG"])
+            T.wait_for(lambda: len(kv.context_pick.names()) == 2 + len(extra), "the slices, in the picker", 10)
+            kv.context_pick.popup()
+            return win
+        kv.show_logs("jobs/worker-5c4b-klmno")
+        kv.show_shell("shop/api-6f7c-mnopq")
+        T.wait_for(lambda: kv.shell_term is not None and "/app#" in kv.shell_term.screen()["screen"], "its prompt")
+        start = text.index("- context:\n    cluster: k3d-dev")  # (k3d-dev's context deleted: its cluster too)
+        text = text[:start] + text[text.index("  name: k3d-dev\n", start) + len("  name: k3d-dev\n"):]
+        with open(os.environ["KUBECONFIG"] + ".new", "w") as f:
+            f.write(text)
+        os.replace(os.environ["KUBECONFIG"] + ".new", os.environ["KUBECONFIG"])
+        T.wait_for(lambda: kv.table_stack.get_visible_child_name() == "removed", "removed", 10)
+        T.pump(0.5)
+        win.connect("destroy", lambda *_: kv.dock.close_all())
+        return win
     if name == "bot-settings":
         win = open_chat(app, sc)
         title = fixture("sessions.json")["sessions"][0]["title"]

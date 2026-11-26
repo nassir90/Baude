@@ -312,8 +312,9 @@ fun SceneRoom(model: SceneModel, modifier: Modifier = Modifier, time: Float? = n
             }
             if (bright > threshold) { // (bloom: a halo the size of what glows)
                 val c = project(m, floatArrayOf(0f, 0f, 0f))
-                val s = project(m, floatArrayOf(.5f, .5f, 0f))
-                val radius = 2.2f * sqrt((s[0] - c[0]).pow(2) + (s[1] - c[1]).pow(2)) + (bloom?.optDouble("radius", 4.0)?.toFloat() ?: 4f) * density * 4
+                fun half(p: FloatArray) = project(m, p).let { s -> sqrt((s[0] - c[0]).pow(2) + (s[1] - c[1]).pow(2)) }
+                // (as wide as what glows is across its narrower side: a long strip's halo hugs it, not a disc its length)
+                val radius = 3.1f * min(half(floatArrayOf(.5f, 0f, 0f)), half(floatArrayOf(0f, .5f, 0f))) + (bloom?.optDouble("radius", 4.0)?.toFloat() ?: 4f) * density * 4
                 val tint = rgb(mat.optString("emissive", mat.optString("color", "#ffffff")))
                 halos.add(Triple(Offset(c[0], c[1]), radius, Color(tint[0], tint[1], tint[2], ((bright - threshold) * (bloom?.optDouble("strength", 0.6)?.toFloat() ?: 0.6f)).coerceIn(0f, 0.8f))))
             }

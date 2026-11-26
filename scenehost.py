@@ -434,6 +434,22 @@ def _vec(m, x, y, z, w=1.0):
     return v.get_x(), v.get_y(), v.get_z(), v.get_w()
 
 
+def look_at(eye, target):
+    """The view from eye towards target, +y up, as Graphene's matrices are (a row vector times it), as
+    android.opengl.Matrix.setLookAtM's. (Graphene's own init_look_at turns the other way, and doesn't move the eye to
+    the origin first, so a camera above or beside its target didn't look at it.)"""
+    f = [t - e for t, e in zip(target, eye)]
+    ln = math.sqrt(sum(c * c for c in f)) or 1
+    f = [c / ln for c in f]
+    s = [f[1] * 0 - f[2] * 1, f[2] * 0 - f[0] * 0, f[0] * 1 - f[1] * 0]  # (f × up)
+    ln = math.sqrt(sum(c * c for c in s)) or 1
+    s = [c / ln for c in s]
+    u = [s[1] * f[2] - s[2] * f[1], s[2] * f[0] - s[0] * f[2], s[0] * f[1] - s[1] * f[0]]
+    dot = lambda a, b: sum(x * y for x, y in zip(a, b))  # noqa: E731
+    return Graphene.Matrix().init_from_float([s[0], u[0], -f[0], 0, s[1], u[1], -f[1], 0, s[2], u[2], -f[2], 0,
+                                              -dot(s, eye), -dot(u, eye), dot(f, eye), 1])
+
+
 def _inverse(m):
     """m's inverse as 16 floats, row by row (a point's a row times it), or None if it has none."""
     ok, inv = m.inverse()
@@ -816,8 +832,7 @@ class SceneView(Gtk.Widget):
         """view, projection, and the projection's clip → the view's px (y down)."""
         cam = self.scene["camera"]
         e = self.eye()
-        view = Graphene.Matrix().init_look_at(Graphene.Vec3().init(*e), Graphene.Vec3().init(*cam["target"]),
-                                              Graphene.Vec3.y_axis())
+        view = look_at(e, cam["target"])
         fov = cam.get("fov", 45)  # (vertical where the view's wider than tall, else across)
         if w < h:
             fov = math.degrees(2 * math.atan(math.tan(math.radians(fov / 2)) * h / max(w, 1)))

@@ -71,13 +71,14 @@ import java.time.temporal.ChronoUnit
 import java.util.Locale
 
 /** How the home screen lists (Baude's sidebar settings, kept on this phone): grouped by folder or by date, the
- * sections folded, the groups shown (none picked: every one), the host shown (none kept: picked()); the sessions
+ * sections folded, the groups shown (none picked: every one, unless noGroups: none), the host shown (none kept: picked()); the sessions
  * deleted from the list (hidden, as Baude's unhide_remote brings them back); and the groups
  * as this phone has them (Baude's group_names and chat_groups): those made here, and each chat moved to one. */
 object HomePrefs {
     val by = mutableStateOf("folder")
     val collapsed = mutableStateListOf<String>()
     val groups = mutableStateListOf<String>()
+    val noGroups = mutableStateOf(false) // (every group unchecked: none listed)
     val host = mutableStateOf("") // (the host kept: its connection id; "" or "all" from before: none)
     val hostName = mutableStateOf("") // (its name as it was last said, for when it's no longer listed)
     val hidden = androidx.compose.runtime.mutableStateMapOf<String, JSONObject>() // ("host/session": {updated, dead, at} when it was deleted)
@@ -93,6 +94,7 @@ object HomePrefs {
         // before: by when they were last used)
         collapsed.addAll(p.getStringSet("collapsed", setOf("archived")).orEmpty())
         groups.addAll(p.getStringSet("groups", emptySet()).orEmpty())
+        noGroups.value = groups.isEmpty() && p.getBoolean("no_groups", false)
         host.value = p.getString("host", "") ?: ""
         hostName.value = p.getString("host_name", "") ?: ""
         val gone = JSONObject(p.getString("hidden", "{}") ?: "{}")
@@ -104,7 +106,7 @@ object HomePrefs {
 
     fun save() {
         ctx?.getSharedPreferences("home", Context.MODE_PRIVATE)?.edit()?.putString("by", by.value)
-            ?.putStringSet("collapsed", collapsed.toSet())?.putStringSet("groups", groups.toSet())
+            ?.putStringSet("collapsed", collapsed.toSet())?.putStringSet("groups", groups.toSet())?.putBoolean("no_groups", noGroups.value)
             ?.putString("host", host.value)?.putString("host_name", hostName.value)
             ?.putString("hidden", JSONObject(hidden.toMap()).toString())?.putStringSet("made", made.toSet())
             ?.putString("chat_groups", org.json.JSONObject(chatGroups.toMap()).toString())?.apply()
@@ -254,7 +256,7 @@ fun sections(query: String): List<Section> {
     }
     fun agent(h: String, s: Msg.Session) = s.spawnedBy?.ifBlank { null }?.let { p -> byKey["$h/$p"] ?: byId[p] }?.takeIf { it.second !== s }
     val far = startedElsewhere() // (only ever under the agent on another host that started it)
-    val listedKeys = everywhere.filter { (h, s) -> h in shown && (groups.isEmpty() || groupOf(h, s) in groups) && key(h, s) !in far }
+    val listedKeys = everywhere.filter { (h, s) -> h in shown && (if (groups.isEmpty()) !HomePrefs.noGroups.value else groupOf(h, s) in groups) && key(h, s) !in far }
         .map { (h, s) -> key(h, s) }.toMutableSet()
     val pulled = HashSet<String>()
     while (true) {
@@ -734,9 +736,10 @@ private fun ViewMenu(snack: SnackbarHostState) {
             // (Groups: a square check each and one over them all, its label a heading, as the Kubernetes page's Namespaces)
             val names = Groups.names() + ""
             MenuChecks(Wording.Sidebar.groups, names.map { it to it.ifEmpty { Wording.Sidebar.noGroup } },
-                HomePrefs.groups.filter { it in names }, { next ->
+                if (HomePrefs.noGroups.value) emptyList() else HomePrefs.groups.filter { it in names }.ifEmpty { null }, { next ->
                     HomePrefs.groups.clear()
-                    if (next.toSet() != names.toSet()) HomePrefs.groups.addAll(next)
+                    if (next != null) HomePrefs.groups.addAll(next)
+                    HomePrefs.noGroups.value = next?.isEmpty() == true
                     HomePrefs.save()
                 }, onLongClick = { g -> if (g.isNotEmpty() && g != Wording.Sidebar.desktopGroup) held = g }, heading = true) // (No group's
             // and Desktop's, Claude Desktop's chats put there by what they are: no menu)

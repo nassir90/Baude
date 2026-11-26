@@ -79,6 +79,8 @@ abstract class Screens(private val theme: String) {
     @After fun down() {
         PhoneHost.id = ""
         dev.baude.android.HomePrefs.host.value = ""
+        dev.baude.android.HomePrefs.groups.clear()
+        dev.baude.android.HomePrefs.noGroups.value = false
         dev.baude.android.Meta.load(org.json.JSONObject())
         FixtureConnection.down()
         Mesh.hosts.clear()
@@ -788,6 +790,24 @@ abstract class Screens(private val theme: String) {
         tap(dev.baude.android.Wording.Sidebar.groupByTip)
         layOut()
         screen("01e-home-desktop-groups")
+    }
+
+    @Test fun homeGroupsClicked() {
+        desktopChats()
+        show { HomeScreen() }
+        tap(dev.baude.android.Wording.Sidebar.groupByTip)
+        layOut()
+        screen("01f-home-groups-all")
+        tap(dev.baude.android.Wording.Sidebar.desktopGroup, nth = 1) // (a group's check, every one listed; the first is
+        // the list's Desktop heading)
+        layOut()
+        screen("01f-home-groups-one-clicked")
+        tap(dev.baude.android.Wording.Sidebar.groups)
+        layOut()
+        screen("01f-home-groups-groups-clicked")
+        tap(dev.baude.android.Wording.Sidebar.groups) // (again, every one listed)
+        layOut()
+        screen("01f-home-groups-groups-again")
     }
 
     @Test fun chatDesktopElsewhere() {

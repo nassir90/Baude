@@ -339,6 +339,7 @@ object MetaTools {
             "show_groups" -> {
                 val l = d.optJSONArray(if (undo) "from" else "to").strings()
                 HomePrefs.groups.clear(); HomePrefs.groups.addAll(l)
+                HomePrefs.noGroups.value = undo && d.optBoolean("from_none")
                 finish(null)
             }
             "archive" -> {
@@ -661,7 +662,8 @@ object MetaTools {
                 if (unknown.isNotEmpty()) return no("No group ${unknown.joinToString(", ") { "'$it'" }}: app_index groups lists them.")
                 val a = act(if (given.isEmpty()) Wording.MetaChats.listedEvery(what = "group")
                     else Wording.MetaChats.listed(names = given.joinToString(", ") { it.ifEmpty { "No group" } }),
-                    "show_groups", JSONObject().put("from", JSONArray(HomePrefs.groups.toList())).put("to", JSONArray(given)), at = at)
+                    "show_groups", JSONObject().put("from", JSONArray(HomePrefs.groups.toList())).put("from_none", HomePrefs.noGroups.value)
+                        .put("to", JSONArray(given)), at = at)
                 applyNew(a) { ok("Shown (action ${a.id}).") }
             }
             "archive_chats", "unarchive_chats" -> {

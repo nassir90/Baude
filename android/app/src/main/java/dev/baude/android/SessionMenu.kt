@@ -71,8 +71,9 @@ object Groups {
 
     /** A group listed, if groups are picked (Baude's put_in): a chat made in g is shown. */
     fun putIn(g: String) {
-        if (HomePrefs.groups.isNotEmpty() && g !in HomePrefs.groups) {
+        if ((HomePrefs.groups.isNotEmpty() || HomePrefs.noGroups.value) && g !in HomePrefs.groups) {
             HomePrefs.groups.add(g)
+            HomePrefs.noGroups.value = false
             HomePrefs.save()
         }
     }

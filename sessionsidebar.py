@@ -141,7 +141,7 @@ class SessionSidebar(SidebarMenu, Gtk.Box):
             view.append(choice)
         view.append(Gtk.Separator())
         self.group_list = CheckList(wording.say("sidebar.groups"),
-                                    lambda keys: self.filtered(sidebar_groups=keys or None), self.group_menu,
+                                    lambda keys: self.filtered(sidebar_groups=keys), self.group_menu,
                                     heading=True)
         view.append(self.group_list)
         view.append(Gtk.Separator())
@@ -278,7 +278,7 @@ class SessionSidebar(SidebarMenu, Gtk.Box):
     # machine: this one (THIS_MACHINE: Claude Code's and Claude Desktop's chats, as ever, and those of a server on it),
     # or another a server's on (baudelib.server). A group is Baude's own, a list of chats of its own, whatever host
     # they're on (chat_group); any chat can be moved to another (Move to Group, move_to_group). Every group's listed
-    # till some are picked (pickers.CheckList)
+    # and checked till some are unchecked (pickers.CheckList)
     def known_hosts(self):
         """[(key, name, note)]: this machine, then each other host a server's on, by name (note: "deactivated", for
         one that is; "gone", for one that is; "through" the member of the mesh it's reached through, for one this
@@ -305,11 +305,13 @@ class SessionSidebar(SidebarMenu, Gtk.Box):
             [("", wording.say("sidebar.no_group"), "")]
 
     def picked(self, name, known):
-        """The groups picked (settings' sidebar_groups) that are still there, or None: all of them (none of those picked
-        there, or every one there picked)."""
+        """The groups picked (settings' sidebar_groups) that are still there (an empty set: none picked), or None: all
+        of them (none of those picked there, or every one there picked)."""
         shown = load_settings().get(name)
         if not isinstance(shown, list):
             return None
+        if not shown:
+            return set()
         keys = {key for key, *_ in known}
         shown = set(shown) & keys
         return shown if shown and shown != keys else None
@@ -328,9 +330,9 @@ class SessionSidebar(SidebarMenu, Gtk.Box):
             (groups is None or chat_group(s, assigned) in groups)
 
     def filtered(self, **picked):
-        """Groups picked (sidebar_groups=[names]; None: all of them, as is every one there): listed."""
+        """Groups picked (sidebar_groups=[names], [] for none; None: all of them, as is every one there): listed."""
         known = {"sidebar_groups": self.known_groups}
-        save_settings(**{name: None if keys is None or set(keys) >= {k for k, *_ in known[name]()} else keys
+        save_settings(**{name: None if keys is None or keys and set(keys) >= {k for k, *_ in known[name]()} else keys
                          for name, keys in picked.items()})
         self.fill_filters()
         self.fill()
@@ -343,7 +345,7 @@ class SessionSidebar(SidebarMenu, Gtk.Box):
         self.fill_new_hosts()
         self.show_host_state()
         self.group_list.fill([(key, label) for key, label, _note in self.known_groups()],
-                             sorted(self.group_filter() or ()))
+                             None if (picked := self.group_filter()) is None else sorted(picked))
 
     def host_menu(self, x, y):
         """Right-click New session's host: Add Host…, always; and for another machine's, Deactivate, or Activate for one
@@ -492,7 +494,8 @@ class SessionSidebar(SidebarMenu, Gtk.Box):
         state = self.group_state(ids)
         save_settings(chat_groups={**assigned, **dict.fromkeys(ids, "")} or None,
                       group_names=[g for g in made_groups(st) if g != name] or None,
-                      sidebar_groups=sorted(set(picked) - {name}) or None if isinstance(picked, list) else picked)
+                      sidebar_groups=sorted(set(picked) - {name}) or None
+                      if isinstance(picked, list) and name in picked else picked)
         self.groups_changed()
         return state
 

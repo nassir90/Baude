@@ -175,19 +175,22 @@ fun MenuChoice(label: String, on: Boolean, enabled: Boolean = true, textColor: C
 }
 
 /** A square check for each of a list of things and one over them all, as the Kubernetes page's Namespaces and home's ⋮
- * → Groups have them (Baude's pickers.CheckList): those checked are shown, in the order checked; none checked is every
- * one (an empty list), the one over them checked. Tapping that one shows every one again; it's never unchecked.
- * items: (key, label); pick(the keys shown, empty for every one); onLongClick(key): one pressed and held; heading: the
- * one over them reads as a section heading (the menu's "Group by"), its check kept. */
+ * → Groups have them (Baude's pickers.CheckList): those checked are shown, in the order checked. Every one shown is
+ * every one checked (null), the one over them checked too; tapping that one checks every one, or unchecks every one
+ * (an empty list) while they all are. items: (key, label); pick(the keys shown, null for every one); onLongClick(key):
+ * one pressed and held; heading: the one over them reads as a section heading (the menu's "Group by"), its check kept. */
 @Composable
-fun MenuChecks(allLabel: String, items: List<Pair<String, String>>, shown: List<String>, pick: (List<String>) -> Unit,
+fun MenuChecks(allLabel: String, items: List<Pair<String, String>>, shown: List<String>?, pick: (List<String>?) -> Unit,
                onLongClick: ((String) -> Unit)? = null, heading: Boolean = false) {
-    MenuCheck(allLabel, shown.isEmpty(), heading = heading) { pick(emptyList()) }
+    val keys = items.map { it.first }
+    MenuCheck(allLabel, shown == null, heading = heading) { pick(if (shown == null) emptyList() else null) }
     MenuDivider()
     Column(Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState())) {
         for ((key, label) in items) {
-            MenuCheck(label, key in shown, onLongClick = onLongClick?.let { { it(key) } }) {
-                pick(shown.filter { it != key } + if (key in shown) emptyList() else listOf(key))
+            val on = shown == null || key in shown
+            MenuCheck(label, on, onLongClick = onLongClick?.let { { it(key) } }) {
+                val next = (shown ?: keys).filter { it != key } + if (on) emptyList() else listOf(key)
+                pick(if (next.isNotEmpty() && next.toSet().containsAll(keys)) null else next)
             }
         }
     }

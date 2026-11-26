@@ -8200,27 +8200,28 @@ def test_kube_view(app):
         assert kv.ns_label.get_label() == "jobs" and "3 pods of 7 in jobs" in kv.status.get_label()
         assert kv.ns_checks["jobs"].get_active() and not kv.ns_all.get_active()
         assert list(kv.ns_checks) == ["default", "jobs", "shop"], "every namespace the cluster has, a check each"
-        # more namespaces at once, toggled in the list: named on its button, up to two; then counted
+        # more namespaces at once, toggled in the list: named on its button, up to two; every one checked is all of them
         kv.ns_checks["shop"].set_active(True)
         wait_for(lambda: len(rows()) == 7, "jobs' and shop's pods")
         assert kv.ns_label.get_label() == "jobs, shop" and "7 pods in jobs, shop" in kv.status.get_label()
         kv.ns_checks["default"].set_active(True)
-        assert kv.ns_label.get_label() == "3 namespaces" and kv.ns_shown == ["jobs", "shop", "default"]
+        assert kv.ns_label.get_label() == "All namespaces" and kv.ns_shown is None and kv.ns_all.get_active()
         kv.ns_checks["jobs"].set_active(False)
         wait_for(lambda: sorted(r.obj["name"] for r in rows()) == ["api-6f7c-mnopq", "old-web-pqrst", "web-7d9f-abcde",
                                                                    "web-7d9f-fghij"], "shop's (default has none)")
-        assert kv.ns_label.get_label() == "shop, default" and "4 pods of 7 in shop, default" in kv.status.get_label()
+        assert kv.ns_label.get_label() == "default, shop" and "4 pods of 7 in default, shop" in kv.status.get_label()
         # a pod's namespace, clicked: only that one again, whatever was shown
         pump(0.3)
         links = [b for b in find(kv.table, Gtk.Button) if b.has_css_class("kube-link") and b.ns == "shop"]
         links[0].emit("clicked")
         wait_for(lambda: kv.ns_shown == ["shop"] and len(rows()) == 4, "only shop's")
         assert kv.ns_label.get_label() == "shop" and not kv.ns_checks["default"].get_active()
-        kv.ns_all.set_active(True)  # (All namespaces: the list unchecked)
+        kv.ns_all.set_active(True)  # (All namespaces: every one checked)
         wait_for(lambda: len(rows()) == 7, "every namespace's pods")
-        assert kv.ns_label.get_label() == "All namespaces" and not any(c.get_active() for c in kv.ns_checks.values())
-        kv.ns_all.set_active(False)  # (it can't be unchecked: something is always shown)
-        assert kv.ns_all.get_active() and kv.ns_shown == []
+        assert kv.ns_label.get_label() == "All namespaces" and all(c.get_active() for c in kv.ns_checks.values())
+        kv.ns_all.set_active(False)  # (unchecked: every one unchecked, none shown)
+        wait_for(lambda: len(rows()) == 0, "no namespace's pods")
+        assert kv.ns_shown == [] and not any(c.get_active() for c in kv.ns_checks.values())
         links = [b for b in find(kv.table, Gtk.Button) if b.has_css_class("kube-link") and b.ns == "jobs"]
         links[0].emit("clicked")
         wait_for(lambda: len(rows()) == 3, "only jobs' pods")

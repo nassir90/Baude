@@ -92,7 +92,7 @@ class KubeState(val hostId: String) {
     var columns by mutableStateOf<List<Msg.KubeColumn>>(emptyList())
     var rows by mutableStateOf<List<Msg.KubeRow>>(emptyList())
     var metrics by mutableStateOf<Boolean?>(null)
-    var nsShown by mutableStateOf<List<String>>(emptyList())
+    var nsShown by mutableStateOf<List<String>?>(null) // (null: every namespace's)
     var filter by mutableStateOf("")
     var sortCol by mutableStateOf(0)
     var sortDesc by mutableStateOf(false)
@@ -166,7 +166,7 @@ class KubeState(val hostId: String) {
         sections = emptyList()
         namespaces = emptyList()
         note = null
-        nsShown = spaces ?: nsByContext["$hostId/$name"] ?: emptyList()
+        nsShown = spaces ?: nsByContext["$hostId/$name"]
         nsByContext["$hostId/$name"] = nsShown
         prefs().edit().putString("kube_context.$hostId", name).apply()
         progress = Wording.Kube.connecting(name)
@@ -318,8 +318,9 @@ class KubeState(val hostId: String) {
         prefs().edit().putStringSet("kube_folded", folded).apply()
     }
 
-    fun showNamespaces(names: List<String>) {
-        nsShown = names.distinct()
+    /** Show these namespaces' objects (in the order picked; empty for none), or every namespace's (null). */
+    fun showNamespaces(names: List<String>?) {
+        nsShown = names?.distinct()
         context?.let { nsByContext["$hostId/$it"] = nsShown }
         fade = true
         Mesh.later(150) { fade = false }
@@ -327,8 +328,8 @@ class KubeState(val hostId: String) {
 
     /** Show only ns's objects (a pod's namespace tapped, a namespace opened); null: every namespace's. */
     fun setNamespace(ns: String?) {
-        if (page.namespaced == true) return showNamespaces(listOfNotNull(ns))
-        nsShown = listOfNotNull(ns)
+        if (page.namespaced == true) return showNamespaces(ns?.let { listOf(it) })
+        nsShown = ns?.let { listOf(it) }
         context?.let { nsByContext["$hostId/$it"] = nsShown }
         page = allPages().firstOrNull { it.resource == "pods" } ?: PODS
         hideYaml()
@@ -388,7 +389,7 @@ class KubeState(val hostId: String) {
         progress = null
         val p = allPages().firstOrNull { it.resource.orEmpty().split(".")[0] == resource && (it.optional != true || it.served == true) }
         if (p == null) return setNote(Wording.Kube.noPage(kind, name))
-        if (ns.isNotEmpty() && p.namespaced == true && nsShown.isNotEmpty() && ns !in nsShown) showNamespaces(nsShown + ns)
+        nsShown?.let { if (ns.isNotEmpty() && p.namespaced == true && ns !in it) showNamespaces(it + ns) }
         filter = ""
         pending = name to (if (p.namespaced == true) ns else "")
         page = p
@@ -508,7 +509,7 @@ class KubeState(val hostId: String) {
         val p = tablePage ?: return ""
         val what = p.title.orEmpty().lowercase()
         var count = if (shown != rows.size) Wording.Kube.countOf(shown, what, rows.size) else Wording.Kube.count(shown, what)
-        if (nsShown.isNotEmpty() && p.namespaced == true) count = Wording.Kube.inNamespaces(count, nsSummary())
+        if (nsShown != null && p.namespaced == true) count = Wording.Kube.inNamespaces(count, nsSummary())
         val fresh = note?.takeIf { it.second > SystemClock.elapsedRealtime() }?.first
         val m = if (p.resource == "pods" || p.resource == "nodes") {
             if (metrics == true) Wording.Kube.metrics(KUBE_REFRESH_S) else Wording.Kube.noMetrics
@@ -517,15 +518,17 @@ class KubeState(val hostId: String) {
             .filter { it.isNotEmpty() }.joinToString(" · ")
     }
 
-    /** The namespaces shown, in a few words: All namespaces; shop; shop, jobs; 3 namespaces. */
-    fun nsSummary(): String = when {
-        nsShown.isEmpty() -> Wording.Kube.allNamespaces
-        nsShown.size <= 2 -> nsShown.joinToString(", ")
-        else -> Wording.Kube.nNamespaces(nsShown.size)
+    /** The namespaces shown, in a few words: All namespaces; shop; shop, jobs; 3 namespaces; 0 namespaces. */
+    fun nsSummary(): String = nsShown.let { n ->
+        when {
+            n == null -> Wording.Kube.allNamespaces
+            n.size in 1..2 -> n.joinToString(", ")
+            else -> Wording.Kube.nNamespaces(n.size)
+        }
     }
 
     companion object {
-        private val nsByContext = HashMap<String, List<String>>() // (memory only, as the desktop's)
+        private val nsByContext = HashMap<String, List<String>?>() // (memory only, as the desktop's)
         private val CLIMB = mapOf("ReplicaSet" to "replicasets", "Job" to "jobs")
 
         private fun prefs() = Mesh.app.getSharedPreferences("settings", Context.MODE_PRIVATE)
@@ -611,7 +614,7 @@ private fun Controls(st: KubeState) {
 private fun Namespaces(st: KubeState) {
     val c = LocalBaude.current
     var open by remember { mutableStateOf(false) }
-    val tip = if (st.nsShown.size > 2) st.nsShown.joinToString(", ") else Wording.Kube.namespacesTip
+    val tip = st.nsShown?.takeIf { it.size > 2 }?.joinToString(", ") ?: Wording.Kube.namespacesTip
     Box {
         Row(Modifier.clip(RoundedCornerShape(6.dp)).clickable { open = true }.padding(start = 8.dp, end = 4.dp, top = 6.dp, bottom = 6.dp),
             verticalAlignment = Alignment.CenterVertically) {
@@ -620,7 +623,7 @@ private fun Namespaces(st: KubeState) {
             Icon(Adwaita.PanDown, tip, tint = c.fg, modifier = Modifier.size(18.dp.icon))
         }
         Popover(open, { open = false }, ticks = Ticks.START) {
-            MenuChecks(Wording.Kube.allNamespaces, (st.namespaces + st.nsShown).distinct().sorted().map { it to it },
+            MenuChecks(Wording.Kube.allNamespaces, (st.namespaces + st.nsShown.orEmpty()).distinct().sorted().map { it to it },
                 st.nsShown, st::showNamespaces)
         }
     }

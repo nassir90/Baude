@@ -465,7 +465,7 @@ class WindowView:
             self.drop_interrupting()  # (the turn's over: no interrupt's waited on)
             if getattr(self, "panel", None) is not None and self.panel.memory_page.get_visible():
                 self.panel.memory.refresh()  # (a Bot's turn over: what it kept in its memory, shown)
-                self.panel.routines.refresh()  # (its routines' last and next, as they are now)
+                self.panel.tasks.refresh()  # (its tasks' runs, as they are now)
             if getattr(self, "queue_upto", None) is not None:  # (queued messages to send now it's over)
                 GLib.idle_add(self.flush_queue)
         if busy and getattr(self, "exhausted", None) is not None and self.exhausted.on:

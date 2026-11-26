@@ -59,7 +59,7 @@ import kotlinx.coroutines.launch
 /** One of the bottom bar's pages (Baude's side panel's, the chat's own first). */
 data class Page(val key: String, val title: String, val icon: ImageVector)
 
-/** The pages a chat has, in Baude's side panel's order: a Bot's memory, browser and routines only while it's a Bot;
+/** The pages a chat has, in Baude's side panel's order: a Bot's memory, browser and tasks only while it's a Bot;
  * each only where its host takes what it asks of it (takes). */
 fun pages(bot: Boolean, hostId: String): List<Page> {
     fun has(op: String) = takes(hostId, op)
@@ -68,7 +68,7 @@ fun pages(bot: Boolean, hostId: String): List<Page> {
         Page("meta", "Meta", Adwaita.Meta),
         if (bot && has("memory")) Page("memory", Wording.BotMemory.title, Adwaita.DocumentEdit) else null,
         if (bot && has("emission_watch")) Page("browser", Wording.BotBrowser.title, Adwaita.WebBrowser) else null,
-        if (bot && has("routines")) Page("routines", Wording.Routines.title, Adwaita.Alarm) else null,
+        if (bot && has("tasks")) Page("tasks", Wording.Tasks.title, Adwaita.Alarm) else null,
         Page("agents", Wording.SidePanel.subagents, Adwaita.SystemUsers),
         Page("processes", Wording.SidePanel.processes, Adwaita.UtilitiesTerminal),
         if (has("ephemeral")) Page("btw", Wording.SidePanel.sideQuestions, Adwaita.DialogQuestion) else null,
@@ -187,7 +187,7 @@ fun ChatShell(hostId: String, sid: String, back: () -> Unit, open: (String, Stri
             }
             "memory" -> MemoryPage(at, sid, here)
             "browser" -> BrowserPage(at, sid, bot?.name.orEmpty(), here)
-            "routines" -> RoutinesPage(at, sid, here)
+            "tasks" -> TasksPage(at, sid, here)
             "agents" -> SubagentsPage(chat)
             "processes" -> ProcessesPage(chat, here)
             "artifacts" -> ArtifactsPage(chat)

@@ -25,7 +25,7 @@
     },
     "manage": {
       "$ref": "AccessRule.json",
-      "description": "Its chats as they are: listed, read, written in, stopped, renamed, archived, deleted, a Bot's routines and memory. A chat's own rule (Access's chat) goes before this."
+      "description": "Its chats as they are: listed, read, written in, stopped, renamed, archived, deleted, a Bot's tasks and memory. A chat's own rule (Access's chat) goes before this."
     },
     "kube": {
       "$ref": "AccessRule.json",

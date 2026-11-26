@@ -52,8 +52,8 @@ from baudelib.server import Server  # noqa: E402
 # (ops that'd start something of the machine's own, or change the host itself, if they were let through: a shell, a
 # browser, a claude, a link, the host stopped; sent only where they're refused)
 STARTS = {"terminal", "terminal_in", "multiplex", "emission", "emission_watch", "start", "agent", "kube_follow", "infer",
-          "files", "emission_serve", "input", "delete", "stop", "archive", "unarchive", "set_cwd", "run_routine",
-          "autofix", "held", "memory", "routines", "rename", "bot", "always_allow", "waits_on", "attach",
+          "files", "emission_serve", "input", "delete", "stop", "archive", "unarchive", "set_cwd", "run_task", "task_stop",
+          "autofix", "held", "memory", "tasks", "rename", "bot", "always_allow", "waits_on", "attach",
           "emission_watch_say", "emission_answer", "terminal_resize", "terminal_close", "detach", "quit", "link",
           "unlink", "deactivate", "activate", "accounts", "login", "login_code", "telemetry_set", "theme_save",
           "theme_remove", "feedback"}
@@ -95,7 +95,7 @@ def expected(op, cap, msg, lets, chat_let):
     """Would the rules let a member send msg (op's, its capability cap's; chat: one of a chat's, its manage rule's)?"""
     if cap != "chat":
         return lets[cap] and (op != "start" or "fork_from" not in msg or chat_let)
-    extra = {"always_allow": lets["shell"], "waits_on": False,  # (waits_on: the chat's own agent's tools' only)
+    extra = {"always_allow": lets["shell"], "run_task": lets["shell"], "waits_on": False,  # (waits_on: its agent's only)
              "bot": msg.get("bot") is None or lets["shell"] and lets["browser"]}
     return chat_let and extra.get(op, True)
 

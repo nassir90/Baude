@@ -23,6 +23,7 @@ BACK_S = 120  # (a host gone from the mesh, restarting say, as a subagent's star
 # for this long to come back, and tried again)
 AGAIN_S = 2  # (tried again this often meanwhile)
 
+BOT = {"type": "string", "description": "A Bot's session id (yours if none's given)"}
 SCHEMAS = {
     "hosts": ("The mesh's hosts (this one first): each one's id, name, whether it's reachable now, and the models it "
               "can run (their values are what start_subagent's model takes).", {}, []),
@@ -57,7 +58,44 @@ SCHEMAS = {
                       "host": {"type": "string", "description": "Its host's id or name; looked for if none"},
                       "wait": {"type": "boolean", "description": "Wait for its answer (default true)"},
                       "timeout_s": {"type": "integer"}}, ["session", "text"]),
+    "tasks": ("Your tasks (a Bot's; another Bot's, by its session): scripts your host runs, by hand or as a trigger "
+              "fires (a schedule; a git push to a branch of a repo on the host), each one's triggers, form, last run "
+              "and version. Their scripts call you mid-run (import baudetask: ask, fallback) when they can't decide "
+              "or fail: see task for one's script.", {"session": BOT}, []),
+    "task": ("One of your tasks: its script, triggers and form, and its latest runs (when, what started each, how "
+             "long, how it ended, the version it ran).", {"session": BOT, "id": {"type": "string"}}, ["id"]),
+    "set_task": ("Make one of your tasks, or change one (by its id; a field left out kept as it was, but triggers and "
+                 "form, given, are given whole). A Python script imports baudetask: baudetask.inputs (its form, "
+                 "filled), baudetask.payload (its trigger's event), say(text) (a line in its log), ask(text, "
+                 "form=None) (asks you: your answer, or the form's values), fallback(error), and @baudetask.main (an "
+                 "exception handed to you). A shell script gets its inputs as $BAUDE_IN_<FIELD>. A trigger's payload "
+                 "fills a field of the same name, or the one fills maps it to. Saving a new script makes a new "
+                 "version; run it dry first (run_task's dry) to check it.",
+                 {"session": BOT, "id": {"type": "string", "description": "A task's id, to change it"},
+                  "name": {"type": "string"},
+                  "runtime": {"type": "string", "enum": ["python", "shell", "bot"],
+                              "description": "bot: the script is a prompt you're given as a turn"},
+                  "script": {"type": "string"},
+                  "form": {"type": "array", "description": "Fields: {name, label?, type: text|number|bool|choice, "
+                                                           "choices?, default?, required?}", "items": {"type": "object"}},
+                  "triggers": {"type": "array", "description": "{kind: schedule, every (minutes) or at (HH:MM) and "
+                                                               "days (0 Monday … 6 Sunday)} or {kind: git_push, repo (a "
+                                                               "folder on the host), branch, poll_s}; each may have "
+                                                               "fills: {field: payload key}. A git push's payload: repo, "
+                                                               "branch, before, after, commit, message, author",
+                               "items": {"type": "object"}},
+                  "fallback": {"type": "boolean", "description": "A failed run is handed to you (default true)"},
+                  "timeout_s": {"type": "integer"}, "paused": {"type": "boolean"},
+                  "delete": {"type": "boolean", "description": "Delete the task (id)"}}, []),
+    "run_task": ("Run one of your tasks now, its form filled with inputs (the rest by default). dry: its asks answered "
+                 "by a dummy agent (each field's default, first choice, 0, false or \"\"), its failure not handed to "
+                 "you: to test a workflow and check its format. Waits for the run to end (wait false: at once) and "
+                 "gives its record and log.",
+                 {"session": BOT, "id": {"type": "string"}, "inputs": {"type": "object"}, "dry": {"type": "boolean"},
+                  "wait": {"type": "boolean"}}, ["id"]),
+    "task_run": ("One run of one of your tasks, and its log.", {"session": BOT, "run": {"type": "string"}}, ["run"]),
 }
+ASKED = ("set_task", "run_task")  # (run code on the host: asked about as Bash is, by the chat's permission mode)
 
 
 def _channel(where, timeout=10, as_=None, meta=False, agent=None):
@@ -389,6 +427,49 @@ class Mesh:
         except (OSError, ValueError):
             return None
         return next((s["id"] for s in listed if s.get("start_key") == key), None)
+
+    def _bot(self, a):
+        sid = a.get("session") or self.me
+        if not sid:
+            raise ValueError("which Bot's? (session)")
+        return sid
+
+    def tasks(self, a):
+        return self.request(self.local, {"op": "tasks", "session": self._bot(a)})["tasks"]
+
+    def task(self, a):
+        got = self.request(self.local, {"op": "task", "session": self._bot(a), "id": a["id"]})
+        return {"task": got["task"], "runs": got.get("runs") or []}
+
+    def set_task(self, a):
+        sid = self._bot(a)
+        if a.get("delete"):
+            self.request(self.local, {"op": "tasks", "session": sid, "delete": a.get("id") or ""})
+            return {"deleted": a.get("id")}
+        task = {k: a[k] for k in ("id", "name", "runtime", "script", "form", "triggers", "fallback", "timeout_s",
+                                  "paused") if k in a}
+        if a.get("id"):  # (fields left out: as they were)
+            old = self.request(self.local, {"op": "task", "session": sid, "id": a["id"]})["task"]
+            task = {**{k: old.get(k) for k in ("name", "runtime", "form", "triggers", "fallback", "timeout_s",
+                                               "paused")}, **task}
+        got = self.request(self.local, {"op": "tasks", "session": sid, "set": task})
+        return next(t for t in got["tasks"] if t["id"] == got.get("saved"))
+
+    def run_task(self, a):
+        sid = self._bot(a)
+        run = self.request(self.local, {"op": "run_task", "session": sid, "id": a["id"],
+                                        "inputs": a.get("inputs") or {}, "dry": bool(a.get("dry"))})["run"]
+        end = time.monotonic() + WAIT_MAX_S
+        while a.get("wait", True) is not False and time.monotonic() < end:
+            got = self.task_run({"session": sid, "run": run["id"]})
+            if got["run"]["status"] not in ("running", "asking"):
+                return got
+            time.sleep(1)
+        return self.task_run({"session": sid, "run": run["id"]})
+
+    def task_run(self, a):
+        got = self.request(self.local, {"op": "task_run", "session": self._bot(a), "run": a["run"]})
+        return {"run": got["run"], "log": got.get("log") or []}
 
     def chats(self, a):
         out = []

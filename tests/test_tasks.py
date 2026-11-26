@@ -1,0 +1,244 @@
+#!/usr/bin/env python3
+"""A Bot's tasks over the wire, fuzzed: a host process (on a Unix socket of the run's own, its Bot the fake claude),
+a head on its socket. Each round makes a task (Python, shell, or the Bot's own prompt) with a random form and runs it:
+by hand, its form filled at random; dry (its asks answered by the dummy agent); failing (handed to its Bot); as a git
+push to a repo of the run's own fires it (the payload filling its form); as its schedule comes due; stopped midway.
+Each run must end, its record and log must be as the schema has them, and the host must still answer after. Then a
+Bot's routines, kept as they were, are moved to tasks, and the script library is run outside a task. No GTK.
+
+    python3 tests/test_tasks.py [--rounds N] [--seed S]
+"""
+import argparse
+import json
+import os
+import random
+import shlex
+import subprocess
+import sys
+import tempfile
+import threading
+import time
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.dirname(HERE))
+TMP = os.path.realpath(tempfile.mkdtemp(prefix="baude-tasks-"))
+for var, sub in (("HOME", "home"), ("XDG_DATA_HOME", "xdg-data"), ("XDG_CONFIG_HOME", "xdg-config"),
+                 ("XDG_CACHE_HOME", "xdg-cache"), ("XDG_STATE_HOME", "xdg-state"), ("CLAUDE_CONFIG_DIR", "claude"),
+                 ("BAUDE_LAUNCHERS", "Applications"), ("BAUDE_BINS", "bin")):
+    os.environ[var] = os.path.join(TMP, sub)
+    os.makedirs(os.environ[var], exist_ok=True)
+os.environ["KUBECONFIG"] = os.path.join(TMP, "no-kubeconfig")
+os.environ["DOCKER_HOST"] = "unix://" + os.path.join(TMP, "no-docker.sock")
+os.environ["BAUDE_RUNTIME_DIR"] = tempfile.mkdtemp(prefix="bdt-", dir="/tmp")
+os.environ.update(BAUDE_SSH="false", BAUDE_MENU_BAR="0", BAUDE_UPDATE="0", BAUDE_GH="", FAKE_CLAUDE_SESSION_IDS="1",
+                  GIT_AUTHOR_NAME="Ada", GIT_AUTHOR_EMAIL="ada@example.com", GIT_COMMITTER_NAME="Ada",
+                  GIT_COMMITTER_EMAIL="ada@example.com")
+os.environ["PATH"] = os.pathsep.join(p for p in os.environ.get("PATH", "").split(os.pathsep)
+                                     if not os.path.exists(os.path.join(p, "claude")))
+FAKE = os.path.join(TMP, "fake-claude")
+with open(FAKE, "w") as f:
+    f.write(f'#!/bin/sh\nexec {shlex.quote(sys.executable)} {shlex.quote(os.path.join(HERE, "fake_claude.py"))} "$@"\n')
+os.chmod(FAKE, 0o755)
+os.environ["BAUDE_CLAUDE"] = FAKE
+
+from baudelib import tasks, wire  # noqa: E402
+from baudelib.server import Server  # noqa: E402
+
+PY = '''import json
+import baudetask as task
+task.say("inputs", task.inputs)
+task.say("payload", task.payload)
+form = json.loads(%(form)r)
+if form:
+    got = task.ask("Fill this in.", form=form)
+    assert set(got) == {f["name"] for f in form}, got
+    task.say("got", got)
+print("plain output")
+if %(fail)r:
+    raise RuntimeError("it went wrong on purpose")
+if %(slow)r:
+    import time
+    time.sleep(30)
+'''
+SH = '''echo "branch=$BAUDE_IN_BRANCH"
+echo "to stderr" >&2
+%(fail)s
+%(slow)s
+'''
+
+
+class Head:
+    """A head on the host's socket: one request at a time, events set aside."""
+
+    def __init__(self, path):
+        self.ch, _ = wire.connect_local(path)
+        self.req = 0
+        self.lock = threading.Lock()
+
+    def ask(self, msg, timeout=30):
+        with self.lock:
+            self.req += 1
+            self.ch.sock.settimeout(timeout)
+            self.ch.send({**msg, "req": self.req})
+            while (r := self.ch.reply()) is not None:
+                if r.get("req") == self.req:
+                    return r
+        raise AssertionError(f"no answer to {msg['op']}")
+
+
+def wait(cond, what, timeout=40):
+    end = time.monotonic() + timeout
+    while time.monotonic() < end:
+        if (got := cond()):
+            return got
+        time.sleep(0.1)
+    raise AssertionError(f"timed out waiting for {what}")
+
+
+def fits(name, value):
+    out = []
+    wire._validate(wire.DEFS[name], value, name, out)
+    assert not out, (name, out, value)
+
+
+def field(rng, i):
+    kind = rng.choice(("text", "number", "bool", "choice"))
+    f = {"name": f"f{i}", "type": kind}
+    if kind == "choice":
+        f["choices"] = rng.sample(["red", "green", "blue", "plain \"quoted\""], rng.randint(1, 3))
+    if rng.random() < 0.4:
+        f["default"] = {"text": "x", "number": 3, "bool": True, "choice": (f.get("choices") or [""])[0]}[kind]
+    return f
+
+
+def given(rng, form):
+    return {f["name"]: {"text": rng.choice(["", "hello", "ü 💡"]), "number": rng.randint(-5, 5),
+                        "bool": rng.random() < 0.5, "choice": rng.choice(f.get("choices") or [""])}[f["type"]]
+            for f in form if rng.random() < 0.7}
+
+
+def ended(head, sid, rid):
+    def done():
+        r = head.ask({"op": "task_run", "session": sid, "run": rid})
+        assert r["op"] == "task_run", r
+        return r if r["run"]["status"] not in ("running", "asking") else None
+    got = wait(done, f"run {rid}")
+    fits("TaskRun", got["run"])
+    for line in got.get("log") or []:
+        fits("TaskLogLine", line)
+    return got
+
+
+def git(repo, *args):
+    subprocess.run(["git", "-C", repo, *args], check=True, capture_output=True)
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--rounds", type=int, default=6)
+    ap.add_argument("--seed", type=int, default=None)
+    args = ap.parse_args()
+    seed = args.seed if args.seed is not None else random.randrange(1 << 30)
+    print(f"seed {seed}", flush=True)
+    rng = random.Random(seed)
+    srv = Server(state_dir=os.path.join(TMP, "state"), name="tasks-host", log=lambda _t: None,
+                 socket_path=os.path.join(os.environ["BAUDE_RUNTIME_DIR"], "h.sock"))
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    head = Head(srv.socket_path)
+    folder = os.path.join(TMP, "bot")
+    os.makedirs(folder)
+    started = head.ask({"op": "start", "prompt": "", "cwd": folder, "draft": True})
+    sid = started["session"]["id"]
+    assert head.ask({"op": "bot", "session": sid, "bot": {"name": "Ada"}})["op"] != "error"
+    repo = os.path.join(TMP, "repo")
+    os.makedirs(repo)
+    git(repo, "init", "-q", "-b", "main")
+    git(repo, "commit", "-q", "--allow-empty", "-m", "first")
+    runs = 0
+    for n in range(args.rounds):
+        runtime = rng.choice(("python", "python", "shell", "bot"))
+        form = [field(rng, i) for i in range(rng.randint(0, 3))]
+        if runtime == "shell" or rng.random() < 0.5:
+            form.append({"name": "branch", "type": "text", "default": "main"})
+        fail, slow = rng.random() < 0.3, rng.random() < 0.15
+        script = PY % {"form": json.dumps(form), "fail": fail, "slow": slow} if runtime == "python" else \
+            SH % {"fail": "exit 4" if fail else "", "slow": "sleep 30" if slow else ""} if runtime == "shell" else \
+            f"Round {n}: say hello."
+        trigger = rng.choice((None, "git_push", "schedule"))
+        triggers = [{"kind": "git_push", "repo": repo, "branch": "main", "poll_s": 10}] if trigger == "git_push" else \
+            [{"kind": "schedule", "every": rng.choice((5, 60, 1440))}] if trigger == "schedule" else []
+        set_ = head.ask({"op": "tasks", "session": sid, "set": {"name": f"Round {n}", "runtime": runtime,
+                                                                 "script": script, "form": form,
+                                                                 "triggers": triggers, "timeout_s": 20,
+                                                                 "fallback": rng.random() < 0.7}})
+        assert set_["op"] == "tasks", set_
+        fits("TasksReply", set_)
+        tid = set_["saved"]
+        got = head.ask({"op": "task", "session": sid, "id": tid})
+        assert got["op"] == "task" and got["task"]["script"] == script, got
+        assert got["task"]["version"] == tasks.version_of(script)
+        fits("TaskReply", got)
+        how = rng.choice(("hand", "dry", "trigger", "stop"))
+        if how == "trigger" and trigger == "git_push":
+            srv.tasks.polled.clear()
+            srv.tasks.due()  # (its first look: the head seen, nothing fired)
+            git(repo, "commit", "-q", "--allow-empty", "-m", f"push {n}")
+            srv.tasks.polled.clear()
+            srv.tasks.due()
+            run = wait(lambda: next((r for r in head.ask({"op": "task", "session": sid, "id": tid})["runs"]
+                                     if r["kind"] == "git_push"), None), "a push's run")
+            assert run["payload"]["message"] == f"push {n}" and run["inputs"].get("branch", "main") == "main", run
+        elif how == "trigger" and trigger == "schedule":
+            with srv.lock:
+                st = srv.tasks.store(srv.sessions[sid])
+                st.find(tid)["triggers"][0]["next"] = time.time() - 1
+            srv.tasks.due()
+            run = wait(lambda: next((r for r in head.ask({"op": "task", "session": sid, "id": tid})["runs"]
+                                     if r["kind"] == "schedule"), None), "a schedule's run")
+        else:
+            r = head.ask({"op": "run_task", "session": sid, "id": tid, "inputs": given(rng, form),
+                          "dry": how == "dry"})
+            assert r["op"] == "task_started", r
+            fits("TaskStarted", r)
+            run = r["run"]
+            if how == "stop":
+                time.sleep(rng.random())
+                head.ask({"op": "task_stop", "session": sid, "run": run["id"]})
+        got = ended(head, sid, run["id"])
+        runs += 1
+        status = got["run"]["status"]
+        print(f"round {n}: {runtime} {how} {trigger or ''} -> {status}"
+              f"{' (handed)' if got['run'].get('handed') else ''}", flush=True)
+        kinds = {x["kind"] for x in got["log"]}
+        if runtime == "python" and form and how != "stop" and not slow:
+            assert {"ask", "answer"} <= kinds, got["log"]
+        assert status in ("done", "failed", "stopped"), got["run"]
+        if not slow and how != "stop":
+            assert (status == "failed") == (fail and runtime != "bot"), got["run"]
+        assert head.ask({"op": "tasks", "session": sid})["op"] == "tasks"  # (the host still answering)
+        if rng.random() < 0.3:
+            assert head.ask({"op": "tasks", "session": sid, "delete": tid})["op"] == "tasks"
+    # a script's ops, refused without the run's token
+    bad = head.ask({"op": "task_report", "run": "nope", "token": "nope", "say": "hi"})
+    assert bad["op"] == "error", bad
+    # a Bot's routines (as they were kept) moved to tasks
+    with srv.lock:
+        srv.sessions[sid].meta["routines"] = [{"id": "r1", "name": "Old", "prompt": "Do the old thing", "every": 60,
+                                               "paused": False, "last": None, "next": time.time() + 600}]
+        srv.tasks.stores.pop(sid, None)
+    listed = head.ask({"op": "tasks", "session": sid})
+    old = next(t for t in listed["tasks"] if t["name"] == "Old")
+    assert old["runtime"] == "bot" and old["triggers"][0]["every"] == 60, old
+    assert "routines" not in srv.sessions[sid].meta
+    # the library outside a task: a dummy agent's answers
+    out = subprocess.run([sys.executable, "-c", "import baudetask as t; print(t.ask('x', form=[{'name': 'a', "
+                          "'type': 'choice', 'choices': ['p', 'q']}]))"], capture_output=True, text=True,
+                         env={k: v for k, v in os.environ.items() if not k.startswith("BAUDE_TASK")} |
+                         {"PYTHONPATH": tasks.SCRIPT_DIR})
+    assert "{'a': 'p'}" in out.stdout, out
+    srv.shutdown()
+    print(f"ok: {runs} runs", flush=True)
+
+
+if __name__ == "__main__":
+    main()

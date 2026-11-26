@@ -294,6 +294,22 @@ def result(text):
          "total_cost_usd": 0.001, "num_turns": 1, "duration_ms": 300, "usage": {"input_tokens": 10, "output_tokens": 5}})
 
 
+def task_answer(n, text):
+    """A task's script asking its Bot (baudelib/tasks.py): a form's fields filled (the last of a choice's choices, 7,
+    true, "filled"), as JSON; else a line saying it looked."""
+    if "JSON object" in text:
+        values = {}
+        for m in re.finditer(r"^- ([A-Za-z_][A-Za-z0-9_]*): (.*)$", text, re.M):
+            kind = m[2]
+            values[m[1]] = json.loads(re.findall(r'"(?:[^"\\]|\\.)*"', kind)[-1]) if kind.startswith("one of") \
+                else 7 if kind.startswith("a number") else True if kind.startswith("true") else "filled"
+        answer = json.dumps(values)
+    else:
+        answer = "Looked into it: the script's fine, the input wasn't."
+    say(answer, f"task{n}")
+    result(answer)
+
+
 def linger(n, slow):
     """"LINGER": a turn that takes a while (FAKE_LINGER_S seconds, 6 by default), and its session's plain messages
     after it each answered at once in a line."""
@@ -721,7 +737,9 @@ def main():
                     f" to: {question}", f"btw{turns}")
                 result("side answer")
                 continue
-            if "AUTOFIX" in text or "needs fixing" in text:
+            if "Your task's run" in text:
+                task_answer(turns, text)
+            elif "AUTOFIX" in text or "needs fixing" in text:
                 autofix(turns, text)
             elif "EXPIRED" in text:
                 expired(turns)

@@ -34,7 +34,7 @@ from panels import natural_height  # noqa: E402,F401
 from pickers import TreeList  # noqa: E402,F401
 import botmemory  # noqa: E402  (a Bot's memory, the side panel's Memory page: beside this file)
 import browserpane  # noqa: E402  (a Bot's browser, the side panel's Browser page: beside this file)
-import routinespage  # noqa: E402  (a Bot's routines, the side panel's Routines page: beside this file)
+import taskspage  # noqa: E402  (a Bot's tasks, the side panel's Tasks page: beside this file)
 from codeview import FilesPage  # noqa: E402,F401
 from gitview import GitPage  # noqa: E402,F401
 
@@ -81,11 +81,11 @@ class SidePanel(Gtk.Box):
         self.browser_page = self.stack.add_titled(self.browser, "browser", browserpane.PAGE)
         self.browser_page.set_icon_name("web-browser-symbolic")
         self.browser_page.set_visible(False)
-        # a Bot's routines (routinespage.RoutinesPage): work it's given on a schedule, while the open chat's a Bot
-        self.routines = routinespage.RoutinesPage(win)
-        self.routines_page = self.stack.add_titled(self.routines, "routines", routinespage.PAGE)
-        self.routines_page.set_icon_name("alarm-symbolic")
-        self.routines_page.set_visible(False)
+        # a Bot's tasks (taskspage.TasksPage): scripts its host runs, by hand or as triggers fire, while it's a Bot
+        self.tasks = taskspage.TasksPage(win)
+        self.tasks_page = self.stack.add_titled(self.tasks, "tasks", taskspage.PAGE)
+        self.tasks_page.set_icon_name("alarm-symbolic")
+        self.tasks_page.set_visible(False)
 
         # subagents: list -> detail, a subagent's opening out of its row (its title the header, the row the square its
         # chat's in) and closing back into it
@@ -410,12 +410,12 @@ class SidePanel(Gtk.Box):
     def bot_changed(self, info):
         """The open chat (info: the sidebar's, or None) a Bot or not: its Memory page shown, and read, or hidden."""
         bot = bool(info and info.get("bot"))
-        if not bot and self.stack.get_visible_child_name() in ("memory", "browser", "routines"):
+        if not bot and self.stack.get_visible_child_name() in ("memory", "browser", "tasks"):
             self.stack.set_visible_child_name("meta")
         self.memory_page.set_visible(bot)
         self.browser_page.set_visible(bot)
-        self.routines_page.set_visible(bot)
-        self.routines.show(info)
+        self.tasks_page.set_visible(bot)
+        self.tasks.show(info)
         self.browser.show(info)
         self.memory.show(info)  # (a Bot's memory read; the same chat made a chat again: its memory as last saved)
 

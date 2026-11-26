@@ -1,0 +1,811 @@
+"""A Bot's tasks (docs/tasks-design.md): scripts its host keeps and runs, by hand or as one of their triggers fires (a
+schedule; a git push to a branch of a repo on the host, seen by polling its head), each run given its form filled
+(by hand, or from the trigger's payload), its Bot asked over the wire when the script can't decide or fails
+(baudelib/script/baudetask.py: task_ask), and kept with its log: when it started, what started it, how long it took,
+how it ended, the version of the script it ran.
+
+Kept in the Bot's folder on its host (serverstate.bot_dir), tasks/: tasks.json (the tasks, each script by its version),
+scripts/<version>.<ext> (every version of each script, by the first 12 hex of its SHA-256), runs/<id>.json and
+runs/<id>.log (JSON lines: TaskLogLine), the latest RUNS_KEPT of them. A Bot's routines (what tasks were) are moved
+over as its tasks are first read: each a bot task, its prompt the script, its schedule a trigger. No GTK."""
+import datetime
+import hashlib
+import json
+import os
+import re
+import secrets
+import signal
+import subprocess
+import sys
+import threading
+import time
+import uuid
+
+from baudelib import wire, wording
+
+RUNTIMES = tuple(wire.DEFS["Task"]["properties"]["runtime"]["enum"])
+KINDS = tuple(wire.DEFS["TaskTrigger"]["properties"]["kind"]["enum"])
+TYPES = tuple(wire.DEFS["TaskField"]["properties"]["type"]["enum"])
+TASKS_MAX, FIELDS_MAX, TRIGGERS_MAX = 50, 30, 10
+SCRIPT_MAX = 256 * 1024
+RUNS_KEPT, RUNS_SHOWN, LOG_SHOWN = 100, 50, 2000
+LOG_MAX = 4 * 1024 * 1024  # (a run's log, at most: what's written after, dropped)
+TIMEOUT_S, TIMEOUT_MAX = 3600, 24 * 3600
+ASK_S = 3600  # (an ask of its Bot waited for this long, at most)
+MIN_EVERY, MAX_EVERY = 5, 60 * 24 * 31  # (a schedule's minutes: no more often than 5, no less often than a month)
+POLL_S, POLL_MIN, POLL_MAX = 30, 10, 3600  # (a git push trigger's looks at its branch)
+DAYS = (0, 1, 2, 3, 4, 5, 6)
+EXT = {"python": "py", "shell": "sh", "bot": "md"}
+SCRIPT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "script")  # (baudetask, on a script's path)
+DUMMY = "(a dummy agent's answer)"
+_FIELD = re.compile(r"[A-Za-z_][A-Za-z0-9_]{0,39}")
+_BRANCH = re.compile(r"[A-Za-z0-9._/-]{1,200}")
+
+
+def version_of(script):
+    return hashlib.sha256(script.encode()).hexdigest()[:12]
+
+
+def _id(given=None):
+    return given if isinstance(given, str) and wire.is_id(given) else uuid.uuid4().hex[:12]
+
+
+def clean_field(f):
+    if not isinstance(f, dict) or not isinstance(f.get("name"), str) or not _FIELD.fullmatch(f["name"]):
+        raise ValueError("a form field needs a name (letters, digits, _)")
+    kind = f.get("type") if f.get("type") in TYPES else "text"
+    out = {"name": f["name"], "type": kind}
+    if isinstance(f.get("label"), str) and f["label"].strip():
+        out["label"] = " ".join(f["label"].split())[:80]
+    if kind == "choice":
+        choices = [str(c)[:80] for c in f.get("choices") or [] if isinstance(c, (str, int, float))][:50]
+        if not choices:
+            raise ValueError(f"{f['name']}: a choice needs its choices")
+        out["choices"] = choices
+    if f.get("default") is not None:
+        out["default"] = coerce(out, f["default"])
+    if f.get("required"):
+        out["required"] = True
+    return out
+
+
+def coerce(field, value):
+    """value as field takes it, or ValueError."""
+    kind = field.get("type")
+    if kind == "number":
+        if isinstance(value, bool):
+            raise ValueError(f"{field['name']} is a number")
+        try:
+            n = float(value)
+        except (TypeError, ValueError):
+            raise ValueError(f"{field['name']} is a number") from None
+        return int(n) if n.is_integer() else n
+    if kind == "bool":
+        if isinstance(value, bool):
+            return value
+        if str(value).lower() in ("true", "yes", "1", "on"):
+            return True
+        if str(value).lower() in ("false", "no", "0", "off", ""):
+            return False
+        raise ValueError(f"{field['name']} is true or false")
+    value = "" if value is None else value if isinstance(value, str) else json.dumps(value) \
+        if isinstance(value, (dict, list)) else str(value)
+    if kind == "choice" and value not in field.get("choices", ()):
+        raise ValueError(f"{field['name']} is one of " + ", ".join(field.get("choices", ())))
+    return value[:20000]
+
+
+def next_run(t, after):
+    """When a schedule t fires next after after (seconds since the epoch): every's from after; at's the next time of
+    day it's on (local)."""
+    if t.get("every"):
+        return after + t["every"] * 60
+    hour, minute = (int(x) for x in t["at"].split(":"))
+    day = datetime.datetime.fromtimestamp(after)
+    for ahead in range(8):
+        when = (day + datetime.timedelta(days=ahead)).replace(hour=hour, minute=minute, second=0, microsecond=0)
+        if when.weekday() in t["days"] and when.timestamp() > after:
+            return when.timestamp()
+    return after + 86400
+
+
+def clock():
+    """The host's clock, as its times of day are: its zone's name and how far ahead of UTC it is now (seconds)."""
+    now = datetime.datetime.now().astimezone()
+    return {"zone": now.tzname(), "offset": int(now.utcoffset().total_seconds())}
+
+
+def clean_trigger(t, old=None, fields=()):
+    """A trigger as it's given made one to keep (old: the same one as it was: when it fires next, what it saw), or
+    ValueError."""
+    if not isinstance(t, dict) or t.get("kind") not in KINDS:
+        raise ValueError("a trigger is a schedule or a git push")
+    old = old if old is not None and old.get("kind") == t["kind"] else None
+    out = {"id": (old or {}).get("id") or _id(t.get("id")), "kind": t["kind"]}
+    if t["kind"] == "schedule":
+        if t.get("every") not in (None, ""):
+            every = int(t["every"])
+            if not MIN_EVERY <= every <= MAX_EVERY:
+                raise ValueError(f"every is in minutes, {MIN_EVERY} at least and a month at most")
+            out["every"] = every
+        elif t.get("at"):
+            if not re.fullmatch(r"([01]?\d|2[0-3]):[0-5]\d", str(t["at"])):
+                raise ValueError("at is a time of day, HH:MM")
+            days = sorted({int(d) for d in (t.get("days") if t.get("days") is not None else DAYS) if int(d) in DAYS})
+            if not days:
+                raise ValueError("at needs a day to be on")
+            h, m = str(t["at"]).split(":")
+            out["at"], out["days"] = "%02d:%s" % (int(h), m), days
+        else:
+            raise ValueError("a schedule runs every so many minutes (every), or at a time of day (at)")
+        same = old is not None and all(old.get(k) == out.get(k) for k in ("every", "at", "days"))
+        out["next"] = old["next"] if same and old.get("next") else next_run(out, time.time())
+    else:
+        repo = os.path.expanduser(str(t.get("repo") or "").strip())
+        if not repo or not os.path.isabs(repo):
+            raise ValueError("a git push trigger needs a repo: a folder on the host")
+        branch = str(t.get("branch") or "main").strip()
+        if not _BRANCH.fullmatch(branch) or ".." in branch:
+            raise ValueError("not a branch's name")
+        out["repo"], out["branch"] = repo, branch
+        out["poll_s"] = max(POLL_MIN, min(POLL_MAX, int(t.get("poll_s") or POLL_S)))
+        if old is not None and old.get("repo") == repo and old.get("branch") == branch and old.get("seen"):
+            out["seen"] = old["seen"]
+    fills = t.get("fills") if isinstance(t.get("fills"), dict) else {}
+    fills = {k: str(v)[:80] for k, v in fills.items() if k in fields and isinstance(v, str) and v}
+    if fills:
+        out["fills"] = fills
+    if old is not None and old.get("fired"):
+        out["fired"] = old["fired"]
+    return out
+
+
+def clean(task, old=None):
+    """(task as it's kept, its script if one was given) for a task as it's given (old: the same one as it was), or
+    ValueError saying what's wrong with it."""
+    if not isinstance(task, dict):
+        raise ValueError("a task is {name, runtime, script}")
+    runtime = task.get("runtime") or (old or {}).get("runtime") or "python"
+    if runtime not in RUNTIMES:
+        raise ValueError("a task's runtime is python, shell or bot")
+    script = task.get("script")
+    if script is not None:
+        if not isinstance(script, str) or not script.strip():
+            raise ValueError("a task needs a script")
+        if len(script.encode()) > SCRIPT_MAX:
+            raise ValueError("its script is too long")
+    elif old is None:
+        raise ValueError("a task needs a script")
+    form = [clean_field(f) for f in (task.get("form") or [])[:FIELDS_MAX]]
+    if len({f["name"] for f in form}) != len(form):
+        raise ValueError("two form fields have one name")
+    olds = {t["id"]: t for t in (old or {}).get("triggers") or []}
+    triggers = [clean_trigger(t, olds.get(t.get("id")) if isinstance(t, dict) else None, {f["name"] for f in form})
+                for t in (task.get("triggers") or [])[:TRIGGERS_MAX]]
+    name = " ".join(str(task.get("name") or "").split())[:80] or (
+        (script or "").strip().splitlines()[0][:40] if script else (old or {}).get("name")) or "Task"
+    out = {"id": (old or {}).get("id") or _id(task.get("id")), "name": name, "runtime": runtime,
+           "version": version_of(script) if script is not None else old["version"], "form": form,
+           "triggers": triggers, "fallback": bool(task.get("fallback", (old or {}).get("fallback", True))),
+           "timeout_s": max(10, min(TIMEOUT_MAX, int(task.get("timeout_s") or (old or {}).get("timeout_s")
+                                                     or TIMEOUT_S))),
+           "paused": bool(task.get("paused"))}
+    if old is not None and old.get("paused") and not out["paused"]:  # (woken: its schedules from now)
+        for t in out["triggers"]:
+            if t["kind"] == "schedule":
+                t["next"] = next_run(t, time.time())
+    return out, script
+
+
+def fill(task, payload=None, fills=None, given=None):
+    """(inputs, what's missing) for a run of task: each field from given (by hand), else from the trigger's payload
+    (by fills, or its own name), else its default; a required one with nothing, missing. ValueError: one given that
+    isn't as its field takes."""
+    payload, fills, given = payload or {}, fills or {}, given or {}
+    out, missing = {}, []
+    for f in task.get("form") or []:
+        name = f["name"]
+        if name in given:
+            out[name] = coerce(f, given[name])
+        elif fills.get(name) in payload:
+            out[name] = coerce(f, payload[fills[name]])
+        elif name in payload:
+            out[name] = coerce(f, payload[name])
+        elif "default" in f:
+            out[name] = f["default"]
+        elif f.get("required"):
+            missing.append(f.get("label") or name)
+        else:
+            out[name] = False if f["type"] == "bool" else ""
+    return out, missing
+
+
+def dummy(form):
+    """What a dummy agent fills form with: each field's default, else its first choice, 0, false or ""."""
+    return {f["name"]: f["default"] if "default" in f else (f.get("choices") or [""])[0] if f["type"] == "choice"
+            else 0 if f["type"] == "number" else False if f["type"] == "bool" else "" for f in form}
+
+
+def answered(text, form):
+    """(values, None) from a Bot's answer to an ask with a form (a JSON object in it), or (None, what's wrong)."""
+    start, end = (text or "").find("{"), (text or "").rfind("}")
+    try:
+        got = json.loads(text[start:end + 1]) if 0 <= start < end else None
+    except ValueError:
+        got = None
+    if not isinstance(got, dict):
+        return None, "the answer has no JSON object"
+    values, wrong = {}, []
+    for f in form:
+        if f["name"] not in got:
+            if f.get("required"):
+                wrong.append(f"{f['name']} is missing")
+            continue
+        try:
+            values[f["name"]] = coerce(f, got[f["name"]])
+        except ValueError as e:
+            wrong.append(str(e))
+    return (None, "; ".join(wrong)) if wrong else (values, None)
+
+
+def form_said(form):
+    """How a form's asked for, of a Bot."""
+    def one(f):
+        kind = {"choice": "one of " + ", ".join(json.dumps(c) for c in f.get("choices", ())), "number": "a number",
+                "bool": "true or false", "text": "text"}[f["type"]]
+        return f"- {f['name']}: {kind}" + (f" ({f['label']})" if f.get("label") else "") + \
+            (" (required)" if f.get("required") else "")
+    return "Answer with only a JSON object with these fields:\n" + "\n".join(one(f) for f in form)
+
+
+def from_routine(r):
+    """(a task, its script) for a routine as it was kept (a Bot's prompt on a schedule)."""
+    trigger = {"id": _id(), "kind": "schedule", "next": r.get("next")}
+    if r.get("every"):
+        trigger["every"] = r["every"]
+    else:
+        trigger["at"], trigger["days"] = r.get("at") or "09:00", r.get("days") or list(DAYS)
+    if trigger["next"] is None:
+        trigger["next"] = next_run(trigger, time.time())
+    prompt = str(r.get("prompt") or "")
+    return {"id": _id(r.get("id")), "name": r.get("name") or "Task", "runtime": "bot", "version": version_of(prompt),
+            "form": [], "triggers": [trigger], "fallback": False, "timeout_s": TIMEOUT_S,
+            "paused": bool(r.get("paused"))}, prompt
+
+
+def git(repo, *args, timeout=10):
+    p = subprocess.run(["git", "-C", repo, *args], capture_output=True, text=True, timeout=timeout,
+                       env={**os.environ, "GIT_TERMINAL_PROMPT": "0"})
+    if p.returncode:
+        raise OSError((p.stderr or p.stdout).strip().splitlines()[-1] if (p.stderr or p.stdout).strip()
+                      else f"git {args[0]} failed")
+    return p.stdout.strip()
+
+
+def pushed(t):
+    """(a git push trigger's) (the branch's head now, its payload if it's moved since it was seen, else None)."""
+    head = git(t["repo"], "rev-parse", "--verify", "--quiet", f"refs/heads/{t['branch']}^{{commit}}")
+    if not t.get("seen") or head == t["seen"]:
+        return head, None
+    said = git(t["repo"], "log", "-1", "--format=%an%x00%s", head).split("\0", 1)
+    return head, {"repo": t["repo"], "branch": t["branch"], "before": t["seen"], "after": head, "commit": head,
+                  "author": said[0], "message": said[1] if len(said) > 1 else ""}
+
+
+class Store:
+    """One Bot's tasks, as they're kept in its folder (folder: <bot_dir>/tasks)."""
+
+    def __init__(self, folder):
+        from baudelib.serverstate import _read_json
+        self.folder = folder
+        kept = _read_json(os.path.join(folder, "tasks.json"))
+        self.tasks = [t for t in (kept or {}).get("tasks") or [] if isinstance(t, dict) and t.get("id")]
+        self.runs = {}
+        runs = os.path.join(folder, "runs")
+        for n in sorted(os.listdir(runs)) if os.path.isdir(runs) else ():
+            if n.endswith(".json") and isinstance(r := _read_json(os.path.join(runs, n)), dict) and r.get("id"):
+                if r.get("status") in ("running", "asking"):  # (its host stopped as it ran)
+                    r.update(status="stopped", ended=r.get("ended") or r["started"],
+                             error=r.get("error") or wording.say("tasks.host_stopped"))
+                self.runs[r["id"]] = r
+
+    def save(self):
+        from baudelib.serverstate import _write_json
+        _write_json(os.path.join(self.folder, "tasks.json"), {"tasks": self.tasks})
+
+    def find(self, tid):
+        return next((t for t in self.tasks if t["id"] == tid), None)
+
+    def script_path(self, task):
+        return os.path.join(self.folder, "scripts", f"{task['version']}.{EXT[task['runtime']]}")
+
+    def put_script(self, task, script):
+        path = self.script_path(task)
+        if not os.path.exists(path):
+            os.makedirs(os.path.dirname(path), mode=0o700, exist_ok=True)
+            with open(path + ".tmp", "w", encoding="utf-8") as f:
+                f.write(script)
+            os.replace(path + ".tmp", path)
+
+    def script(self, task):
+        try:
+            with open(self.script_path(task), encoding="utf-8") as f:
+                return f.read()
+        except OSError:
+            return ""
+
+    def latest(self, tid=None, limit=RUNS_SHOWN):
+        runs = sorted((r for r in self.runs.values() if tid is None or r["task"] == tid),
+                      key=lambda r: r["started"], reverse=True)
+        return runs[:limit]
+
+    def put_run(self, run):
+        from baudelib.serverstate import _write_json
+        self.runs[run["id"]] = run
+        _write_json(os.path.join(self.folder, "runs", f"{run['id']}.json"), run)
+        if len(self.runs) > RUNS_KEPT:  # (the oldest that are over, gone)
+            for old in sorted(self.runs.values(), key=lambda r: r["started"])[:len(self.runs) - RUNS_KEPT]:
+                if old["status"] in ("running", "asking"):
+                    continue
+                self.runs.pop(old["id"], None)
+                for ext in ("json", "log"):
+                    try:
+                        os.unlink(os.path.join(self.folder, "runs", f"{old['id']}.{ext}"))
+                    except OSError:
+                        pass
+
+    def log(self, rid, kind, text, **more):
+        path = os.path.join(self.folder, "runs", f"{rid}.log")
+        try:
+            if os.path.getsize(path) > LOG_MAX:
+                return
+        except OSError:
+            pass
+        line = {"at": round(time.time(), 3), "kind": kind, "text": str(text)[:20000],
+                **{k: v for k, v in more.items() if v is not None}}
+        os.makedirs(os.path.dirname(path), mode=0o700, exist_ok=True)
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(json.dumps(line, ensure_ascii=False) + "\n")
+
+    def read_log(self, rid, limit=LOG_SHOWN):
+        try:
+            with open(os.path.join(self.folder, "runs", f"{rid}.log"), encoding="utf-8") as f:
+                lines = f.readlines()[-limit:]
+        except OSError:
+            return []
+        out = []
+        for line in lines:
+            try:
+                out.append(json.loads(line))
+            except ValueError:
+                continue
+        return out
+
+
+class Tasks:
+    """Every Bot's tasks on a host (server: its Server): read and set over the wire, run as they're asked for or due,
+    their scripts' asks carried to their Bots and answered at their turns' ends."""
+
+    def __init__(self, server):
+        self.server = server
+        self.lock = threading.RLock()  # (taken after the server's lock, never before)
+        self.stores = {}  # (a Bot's session id: its Store)
+        self.running = {}  # (a run's id: {sid, task, proc, token, stop})
+        self.waiting = {}  # (a Bot's session id: its asks waiting on its turn's end, in the order sent)
+        self.polled = {}  # ((sid, trigger id): when it was last looked at)
+        self.turns = {}  # (a Bot's session id: held while one of its runs' asks waits on its turn: one at a time)
+
+    # ---- kept
+    def store(self, s):
+        """(server's lock held) s's Store, its routines moved over first if it has any."""
+        from baudelib.serverstate import bot_dir
+        with self.lock:
+            st = self.stores.get(s.id)
+            if st is None:
+                st = self.stores[s.id] = Store(os.path.join(bot_dir(self.server.state_dir, s.id), "tasks"))
+            if s.meta.get("routines"):
+                for r in s.meta["routines"]:
+                    if isinstance(r, dict) and len(st.tasks) < TASKS_MAX:
+                        task, prompt = from_routine(r)
+                        st.put_script(task, prompt)
+                        st.tasks.append(task)
+                st.save()
+                s.meta.pop("routines", None)
+                self.server.save(s)
+                self.server.log(f"routines of {s.id} moved to tasks")
+            return st
+
+    def shown(self, st, task, script=False):
+        """A task as the wire has it: its latest run, its next schedule (and its script)."""
+        last = st.latest(task["id"], 1)
+        nexts = [t["next"] for t in task["triggers"] if t["kind"] == "schedule" and t.get("next")]
+        return {**task, "last": last[0] if last else None, "next": None if task.get("paused") or not nexts
+                else min(nexts), **({"script": st.script(task)} if script else {})}
+
+    def listing(self, s, saved=None):
+        st = self.store(s)
+        with self.lock:
+            return {"session": s.id, "tasks": [self.shown(st, t) for t in st.tasks], "clock": clock(),
+                    **({"saved": saved} if saved else {})}
+
+    def op(self, s, msg):
+        """(server's lock held) tasks, task, run_task, task_run, task_stop for the Bot s: (the answer's op, its fields),
+        or ValueError, what's wrong."""
+        op = msg["op"]
+        if not s.meta.get("bot"):
+            raise ValueError(wording.say("host_errors.tasks_bot_only"))
+        st = self.store(s)
+        if op == "tasks":
+            saved = None
+            if "set" in msg or "delete" in msg:
+                with self.lock:
+                    if "delete" in msg:
+                        st.tasks = [t for t in st.tasks if t["id"] != msg["delete"]]
+                    else:
+                        given = msg["set"] if isinstance(msg["set"], dict) else None
+                        old = st.find(given.get("id")) if given else None
+                        if given is None or old is None and len(st.tasks) >= TASKS_MAX:
+                            raise ValueError(wording.say("host_errors.task_limit"))
+                        task, script = clean(given, old)
+                        if script is not None:
+                            st.put_script(task, script)
+                        st.tasks = [task if t["id"] == task["id"] else t for t in st.tasks] if old else \
+                            st.tasks + [task]
+                        saved = task["id"]
+                    st.save()
+                self.server.changed()
+                self.server.woken.set()  # (a schedule may be sooner, a branch to look at: the watch told)
+            return "tasks", self.listing(s, saved)
+        if op == "task":
+            with self.lock:
+                task = st.find(msg.get("id"))
+                if task is None:
+                    raise ValueError(wording.say("host_errors.no_task"))
+                return "task", {"session": s.id, "task": self.shown(st, task, script=True),
+                                "runs": st.latest(task["id"]), "clock": clock()}
+        if op == "run_task":
+            with self.lock:
+                task = st.find(msg.get("id"))
+                if task is None or s.meta.get("archived"):
+                    raise ValueError(wording.say("host_errors.no_task"))
+            inputs = msg.get("inputs") if isinstance(msg.get("inputs"), dict) else {}
+            run = self.start(s, task, None, "manual", {}, inputs, dry=bool(msg.get("dry")))
+            return "task_started", {"session": s.id, "run": run}
+        with self.lock:
+            run = st.runs.get(msg.get("run"))
+            if run is None:
+                raise ValueError(wording.say("host_errors.no_run"))
+            if op == "task_stop":
+                self.stop(run["id"], wording.say("task_notes.stopped"))
+            return "task_run", {"session": s.id, "run": dict(st.runs[run["id"]]), "log": st.read_log(run["id"]),
+                                "bot": (s.meta.get("bot") or {}).get("name")}
+
+    # ---- run
+    def start(self, s, task, trigger, kind, payload, given=None, dry=False):
+        """(server's lock held) A run of task begun (or, one of it running already, kept as skipped): its record.
+        ValueError: its form can't be filled."""
+        st = self.store(s)
+        fills = (trigger or {}).get("fills")
+        inputs, missing = fill(task, payload, fills, given)
+        if missing:
+            raise ValueError(wording.say("tasks.missing", fields=", ".join(missing)))
+        now = time.time()
+        run = {"id": uuid.uuid4().hex[:16], "task": task["id"], "name": task["name"], "version": task["version"],
+               "trigger": (trigger or {}).get("id"), "kind": kind, "payload": payload or None, "inputs": inputs,
+               "dry": dry or None, "status": "running", "started": now, "asks": 0}
+        with self.lock:
+            if any(r["sid"] == s.id and r["task"] == task["id"] for r in self.running.values()):
+                run.update(status="skipped", ended=now, seconds=0, error=wording.say("tasks.still_running"))
+                st.put_run(run)
+                return run
+            st.put_run(run)
+            token = secrets.token_hex(16)
+            self.running[run["id"]] = {"sid": s.id, "task": task["id"], "proc": None, "token": token, "stop": None,
+                                       "dry": dry}
+        st.log(run["id"], "status", wording.say("tasks.started_by", kind=kind, version=task["version"]))
+        cwd = s.meta.get("cwd") if isinstance(s.meta.get("cwd"), str) and os.path.isdir(s.meta["cwd"]) else st.folder
+        threading.Thread(target=self._run, args=(s.id, st, dict(task), run, token, cwd), daemon=True,
+                         name=f"task-{run['id']}").start()
+        self.server.changed()
+        return dict(run)
+
+    def _run(self, sid, st, task, run, token, cwd):
+        error, code = None, None
+        try:
+            if task["runtime"] == "bot" and run.get("dry"):  # (what it'd be given, and the dummy's answer)
+                st.log(run["id"], "ask", st.script(task))
+                st.log(run["id"], "answer", DUMMY)
+            elif task["runtime"] == "bot":
+                text, failed = self.ask(run["id"], st.script(task), task["name"])
+                error = wording.say("tasks.bot_failed") if failed else None
+            else:
+                code, error = self._script(st, task, run, token, cwd)
+        except Exception as e:  # noqa: BLE001 (said in its run, and on the page)
+            error = f"{type(e).__name__}: {e}"
+        with self.lock:
+            held = self.running.get(run["id"]) or {}
+            stopped = held.get("stop")
+        if error and not stopped and task.get("fallback") and task["runtime"] != "bot" and not held.get("dry") \
+                and not st.runs[run["id"]].get("handed"):
+            tail = "\n".join(f"{x['kind']}: {x['text']}" for x in st.read_log(run["id"], 40))
+            self._update(st, run["id"], handed=True)
+            try:
+                self.ask(run["id"], wording.say("tasks.handed", error=error, version=task["version"],
+                                                path=st.script_path(task), log=tail), task["name"], error=True)
+            except Exception as e:  # noqa: BLE001
+                st.log(run["id"], "status", f"{type(e).__name__}: {e}")
+        ended = time.time()
+        status = "stopped" if stopped else "failed" if error else "done"
+        self._update(st, run["id"], status=status, ended=ended, seconds=round(ended - run["started"], 3), exit=code,
+                     error=stopped or error)
+        st.log(run["id"], "status", stopped or error or wording.say("tasks.finished"))
+        with self.lock:
+            self.running.pop(run["id"], None)
+        self.server.log(f"task {task['name']!r} of {sid}: {status}" + (f" ({error})" if error else ""))
+        self.server.changed()
+
+    def _update(self, st, rid, **fields):
+        with self.lock:
+            run = {**st.runs[rid], **{k: v for k, v in fields.items() if v is not None or k == "exit"}}
+            st.put_run(run)
+            return run
+
+    def _script(self, st, task, run, token, cwd):
+        """A python or shell task's script run: (its exit code, why it failed or None)."""
+        path = st.script_path(task)
+        argv = [sys.executable, "-u", path] if task["runtime"] == "python" else ["/bin/sh", path]
+        env = {**os.environ, "BAUDE_SOCKET": os.path.abspath(self.server.socket_path), "BAUDE_TASK_RUN": run["id"],
+               "BAUDE_TASK_TOKEN": token, "BAUDE_TASK_INPUTS": json.dumps(run["inputs"]),
+               "BAUDE_TASK_PAYLOAD": json.dumps(run["payload"] or {}), "BAUDE_TASK_NAME": task["name"],
+               "BAUDE_WIRE_VERSION": str(wire.VERSION),
+               "PYTHONPATH": os.pathsep.join(p for p in (SCRIPT_DIR, os.environ.get("PYTHONPATH")) if p)}
+        if run.get("dry"):
+            env["BAUDE_TASK_DRY"] = "1"
+        for k, v in run["inputs"].items():
+            env[f"BAUDE_IN_{k.upper()}"] = v if isinstance(v, str) else json.dumps(v)
+        p = subprocess.Popen(argv, cwd=cwd, env=env, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                             stderr=subprocess.PIPE, start_new_session=True)
+        with self.lock:
+            if run["id"] in self.running:
+                self.running[run["id"]]["proc"] = p
+
+        def read(pipe, kind):
+            for line in iter(pipe.readline, b""):
+                st.log(run["id"], kind, line.decode("utf-8", "replace").rstrip("\n"))
+        readers = [threading.Thread(target=read, args=(p.stdout, "out"), daemon=True),
+                   threading.Thread(target=read, args=(p.stderr, "err"), daemon=True)]
+        for t in readers:
+            t.start()
+        try:
+            code = p.wait(timeout=task["timeout_s"])
+            error = None if code == 0 else wording.say("tasks.exited", code=code)
+        except subprocess.TimeoutExpired:
+            self._kill(p)
+            code, error = p.wait(), wording.say("tasks.timed_out", seconds=task["timeout_s"])
+        for t in readers:
+            t.join(timeout=5)
+        return code, error
+
+    @staticmethod
+    def _kill(p):
+        try:
+            os.killpg(p.pid, signal.SIGTERM)
+            p.wait(timeout=5)
+        except (OSError, subprocess.TimeoutExpired):
+            try:
+                os.killpg(p.pid, signal.SIGKILL)
+            except OSError:
+                pass
+
+    def stop(self, rid, why):
+        """A run stopped (why: said in it)."""
+        with self.lock:
+            held = self.running.get(rid)
+            if held is None:
+                return
+            held["stop"] = why
+            p = held["proc"]
+            for w in self.waiting.get(held["sid"], []):  # (an ask it waits on: let go of)
+                if w["run"] == rid:
+                    w["text"], w["failed"] = why, True
+                    w["done"].set()
+        if p is not None:
+            threading.Thread(target=self._kill, args=(p,), daemon=True).start()
+
+    def stop_all(self):
+        """Every run stopped: the host's going."""
+        with self.lock:
+            rids = list(self.running)
+        for rid in rids:
+            self.stop(rid, wording.say("tasks.host_stopped"))
+
+    def busy(self):
+        """[{session, what}] for each run going (what a restart waits for)."""
+        with self.lock:
+            return [{"session": r["sid"], "what": wording.say("tasks.task_running")} for r in self.running.values()]
+
+    # ---- a script's
+    def held(self, msg):
+        """(the run a script names, as it's held, its store) if its token is right, else None."""
+        with self.lock:
+            held = self.running.get(msg.get("run"))
+            if held is None or not secrets.compare_digest(str(msg.get("token") or ""), held["token"]):
+                return None
+            return held, self.stores.get(held["sid"])
+
+    def report(self, msg):
+        got = self.held(msg)
+        if got is None:
+            raise ValueError(wording.say("host_errors.no_run"))
+        got[1].log(msg["run"], "say", msg.get("say") or "")
+
+    def script_ask(self, msg):
+        """task_ask's answer (text, values), once its Bot's turn ends: ValueError if it can't be."""
+        got = self.held(msg)
+        if got is None:
+            raise ValueError(wording.say("host_errors.no_run"))
+        held, st = got
+        form = [clean_field(f) for f in msg.get("form") or []] if isinstance(msg.get("form"), list) else []
+        text = str(msg.get("text") or "")
+        with self.lock:
+            task = st.find(held["task"]) or {"name": "Task"}
+        if msg.get("error"):  # (the script's handed its failure over: the host doesn't again)
+            self._update(st, msg["run"], handed=True)
+        if held["dry"]:
+            st.log(msg["run"], "ask", text, error=bool(msg.get("error")) or None)
+            values = dummy(form) if form else None
+            st.log(msg["run"], "answer", DUMMY, values=values)
+            return DUMMY, values
+        said, failed = self.ask(msg["run"], text, task["name"], form=form, error=bool(msg.get("error")))
+        if failed:
+            raise ValueError(said or wording.say("tasks.bot_failed"))
+        if not form:
+            return said, None
+        values, wrong = answered(said, form)
+        if wrong:  # (once more, told what was wrong with it)
+            said, failed = self.ask(msg["run"], wording.say("tasks.not_as_asked", wrong=wrong) + "\n\n" +
+                                    form_said(form), task["name"])
+            values, wrong = (None, said) if failed else answered(said, form)
+            if wrong:
+                raise ValueError(wording.say("tasks.not_as_asked", wrong=wrong))
+        st.log(msg["run"], "answer", json.dumps(values), values=values)
+        return said, values
+
+    def ask(self, rid, text, name, form=None, error=False):
+        """(what the Bot said, failed) for text given a run's Bot as a turn, from its task (name), waited for till the
+        turn ends; the ask and its answer in the run's log. One run's ask of a Bot at a time: each turn answers one."""
+        with self.lock:
+            held = self.running.get(rid)
+            turn = self.turns.setdefault(held["sid"], threading.Lock()) if held else None
+        if held is None:
+            return wording.say("host_errors.no_run"), True
+        with turn:
+            return self._ask(rid, held, text, name, form, error)
+
+    def _ask(self, rid, held, text, name, form, error):
+        with self.lock:
+            st = self.stores.get(held["sid"])
+            if rid not in self.running or st is None or held.get("stop"):
+                return held.get("stop") or wording.say("host_errors.no_run"), True
+        sid = held["sid"]
+        st.log(rid, "ask", text, error=error or None)
+        self._update(st, rid, status="asking", asks=(st.runs[rid].get("asks") or 0) + 1)
+        wait = {"run": rid, "done": threading.Event(), "text": None, "failed": False, "skip": 0}
+        said = wording.say("tasks.asked", run=rid, error="error" if error else "ask") + "\n\n" + text + \
+            ("\n\n" + form_said(form) if form else "")
+        srv = self.server
+        with srv.lock:
+            s = srv.sessions.get(sid)
+            if s is None or s.deleting or s.meta.get("archived"):
+                return wording.say("host_errors.no_task"), True
+            before = len(s.codex_queue)
+            with self.lock:
+                self.waiting.setdefault(sid, []).append(wait)
+            try:
+                srv.take_input(None, s, {"type": "user", "uuid": str(uuid.uuid4()),
+                                         "message": {"role": "user", "content": said}},
+                               {"kind": "host", "name": wording.say("tasks.sender", name=name)})
+            except Exception as e:  # noqa: BLE001 (Elsewhere, or its agent not started)
+                with self.lock:
+                    self.waiting[sid].remove(wait)
+                st.log(rid, "answer", str(e))
+                return str(e), True
+            wait["skip"] = len(s.codex_queue) - before  # (held for the turn going on: answered by the one after)
+        wait["done"].wait(ASK_S)
+        with self.lock:
+            if wait in self.waiting.get(sid, []):
+                self.waiting[sid].remove(wait)
+        if not wait["done"].is_set():
+            wait["text"], wait["failed"] = wording.say("tasks.no_answer"), True
+        if not form or wait["failed"]:
+            st.log(rid, "answer", wait["text"] or "", error=wait["failed"] or None)
+        if rid in self.running:
+            self._update(st, rid, status="running")
+        return wait["text"] or "", wait["failed"]
+
+    def turn_over(self, s, msg):
+        """(server's lock held) s's turn ended (its result, msg): the asks it took, answered with what it said."""
+        with self.lock:
+            for w in list(self.waiting.get(s.id, [])):
+                if w["skip"]:
+                    w["skip"] -= 1
+                    continue
+                w["text"], w["failed"] = str(msg.get("result") or ""), bool(msg.get("is_error"))
+                w["done"].set()
+                self.waiting[s.id].remove(w)
+                break
+
+    # ---- due
+    def due(self):
+        """Triggers due now fired (each Bot's whose tasks aren't paused, not archived, not being deleted, the host
+        not stopping): schedules come due, branches pushed to. When the next one's due (seconds from now), or None
+        if there's none."""
+        srv, now, soonest, looks = self.server, time.time(), None, []
+        with srv.lock:
+            if srv.stopped.is_set():
+                return None
+            for s in list(srv.sessions.values()):
+                if not s.meta.get("bot") or s.meta.get("archived") or s.deleting:
+                    continue
+                st = self.store(s)
+                with self.lock:
+                    changed = False
+                    for task in st.tasks:
+                        if task.get("paused"):
+                            continue
+                        for t in task["triggers"]:
+                            if t["kind"] == "schedule" and t.get("next") is not None:
+                                if t["next"] <= now:
+                                    payload = {"time": datetime.datetime.fromtimestamp(now).isoformat(
+                                        timespec="minutes")}
+                                    t["fired"], t["next"] = now, next_run(t, now)  # (one missed: run once)
+                                    changed = True
+                                    try:
+                                        self.start(s, task, t, "schedule", payload)
+                                        t.pop("error", None)
+                                    except ValueError as e:
+                                        t["error"] = str(e)
+                                wait = t["next"] - now
+                            elif t["kind"] == "git_push":
+                                at = self.polled.get((s.id, t["id"]), 0) + t.get("poll_s", POLL_S)
+                                if at <= now:
+                                    looks.append((s.id, task["id"], t["id"], dict(t)))
+                                    at = now + t.get("poll_s", POLL_S)
+                                wait = at - now
+                            else:
+                                continue
+                            soonest = wait if soonest is None else min(soonest, wait)
+                    if changed:
+                        st.save()
+        for sid, tid, trid, t in looks:  # (not under the lock: git)
+            self.polled[(sid, trid)] = time.time()
+            try:
+                head, payload = pushed(t)
+                error = None
+            except (OSError, subprocess.SubprocessError) as e:
+                head, payload, error = t.get("seen"), None, str(e)[:300]
+            with srv.lock:
+                s = srv.sessions.get(sid)
+                if s is None or srv.stopped.is_set():
+                    continue
+                st = self.store(s)
+                with self.lock:
+                    task = st.find(tid)
+                    trig = next((x for x in (task or {}).get("triggers") or [] if x["id"] == trid), None)
+                    if trig is None:
+                        continue
+                    if trig.get("seen") != head or trig.get("error") != error:
+                        trig["seen"] = head
+                        if error:
+                            trig["error"] = error
+                        else:
+                            trig.pop("error", None)
+                        if payload is not None:
+                            trig["fired"] = time.time()
+                            try:
+                                self.start(s, task, trig, "git_push", payload)
+                            except ValueError as e:
+                                trig["error"] = str(e)
+                        st.save()
+                        srv.changed()
+        return soonest

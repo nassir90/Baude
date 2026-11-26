@@ -1,29 +1,32 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
-  "description": "A Bot's routines: set, one made or changed (by its id); delete, one gone (its id).",
+  "description": "run_task's answer: the run started.",
   "properties": {
     "op": {
-      "const": "routines",
+      "const": "task_started",
       "description": "What it is."
     },
     "req": {
-      "type": ["integer", "null"],
+      "type": [
+        "integer",
+        "null"
+      ],
       "description": "The request's number, the client's pick: its answers carry it back."
     },
     "session": {
       "type": "string",
       "description": "The session's id."
     },
-    "set": {
-      "type": "object",
-      "description": "A routine (as Routine, its next worked out here)."
-    },
-    "delete": {
-      "type": "string",
-      "description": "A routine's id."
+    "run": {
+      "$ref": "TaskRun.json",
+      "description": "The run."
     }
   },
-  "required": ["op", "session"],
+  "required": [
+    "op",
+    "session",
+    "run"
+  ],
   "additionalProperties": false
 }

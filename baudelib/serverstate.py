@@ -228,7 +228,6 @@ class Session:
         self.turn_began = None    # (when its turn going on began: autofix.turn_over's)
         self.acting = False       # at a turn's tools: a tool call begun, no text begun since (turn_acting)
         self.streamed = False     # (its agent's said what it writes as it writes it: stream_event)
-        self.routines_out = set()  # (its routines sent at a turn, not yet over: not sent again till it is)
         self.waiting_init = []    # (conn, its request id): initialize asked before claude answered its own
         self.queued = []          # (message, uuid, conn that sent it) sent at a turn, kept once it's over (Server.keep)
         self.codex_queue = []     # (msg, conn that sent it): Codex runs each follow-up as a separate turn.

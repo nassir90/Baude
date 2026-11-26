@@ -5,7 +5,7 @@
     "Ctrl+M (Control on macOS too) from anywhere in the window: shows the side panel (Record: right bar) on Meta with the focus in Meta's box; pressed again while Meta is shown it closes the panel and puts the focus back where it was",
     "the Meta tab (icon, name) in the side panel's switcher",
     "a desktop notification for a reply or question while Meta is out of sight: clicking it brings the window up with Meta shown",
-    "Baude: Meta is the first page of the side panel; it stays when a Bot chat adds Memory, Browser and Routines pages, and the panel falls back to Meta when a chat that is not a Bot is opened while one of those is shown"
+    "Baude: Meta is the first page of the side panel; it stays when a Bot chat adds Memory, Browser and Tasks pages, and the panel falls back to Meta when a chat that is not a Bot is opened while one of those is shown"
   ],
   "code": [
     "metachat.py:MetaChat",

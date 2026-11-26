@@ -68,6 +68,62 @@ Send a message to another chat or Bot on a host, as its user would, and unless w
 | `wait` | boolean |  | Wait for its answer (default true) |
 | `timeout_s` | integer |  |  |
 
+### `tasks`
+
+Your tasks (a Bot's; another Bot's, by its session): scripts your host runs, by hand or as a trigger fires (a schedule; a git push to a branch of a repo on the host), each one's triggers, form, last run and version. Their scripts call you mid-run (import baudetask: ask, fallback) when they can't decide or fail: see task for one's script.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `session` | string |  | A Bot's session id (yours if none's given) |
+
+### `task`
+
+One of your tasks: its script, triggers and form, and its latest runs (when, what started each, how long, how it ended, the version it ran).
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `session` | string |  | A Bot's session id (yours if none's given) |
+| `id` | string | yes |  |
+
+### `set_task`
+
+Make one of your tasks, or change one (by its id; a field left out kept as it was, but triggers and form, given, are given whole). A Python script imports baudetask: baudetask.inputs (its form, filled), baudetask.payload (its trigger's event), say(text) (a line in its log), ask(text, form=None) (asks you: your answer, or the form's values), fallback(error), and @baudetask.main (an exception handed to you). A shell script gets its inputs as $BAUDE_IN_<FIELD>. A trigger's payload fills a field of the same name, or the one fills maps it to. Saving a new script makes a new version; run it dry first (run_task's dry) to check it.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `session` | string |  | A Bot's session id (yours if none's given) |
+| `id` | string |  | A task's id, to change it |
+| `name` | string |  |  |
+| `runtime` | `python` \| `shell` \| `bot` |  | bot: the script is a prompt you're given as a turn |
+| `script` | string |  |  |
+| `form` | array of object |  | Fields: {name, label?, type: text\|number\|bool\|choice, choices?, default?, required?} |
+| `triggers` | array of object |  | {kind: schedule, every (minutes) or at (HH:MM) and days (0 Monday … 6 Sunday)} or {kind: git_push, repo (a folder on the host), branch, poll_s}; each may have fills: {field: payload key}. A git push's payload: repo, branch, before, after, commit, message, author |
+| `fallback` | boolean |  | A failed run is handed to you (default true) |
+| `timeout_s` | integer |  |  |
+| `paused` | boolean |  |  |
+| `delete` | boolean |  | Delete the task (id) |
+
+### `run_task`
+
+Run one of your tasks now, its form filled with inputs (the rest by default). dry: its asks answered by a dummy agent (each field's default, first choice, 0, false or ""), its failure not handed to you: to test a workflow and check its format. Waits for the run to end (wait false: at once) and gives its record and log.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `session` | string |  | A Bot's session id (yours if none's given) |
+| `id` | string | yes |  |
+| `inputs` | object |  |  |
+| `dry` | boolean |  |  |
+| `wait` | boolean |  |  |
+
+### `task_run`
+
+One run of one of your tasks, and its log.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `session` | string |  | A Bot's session id (yours if none's given) |
+| `run` | string | yes |  |
+
 ### `list_notebooks`
 
 Record's notebooks on a host: each one's name and how many pages it has.
@@ -146,6 +202,40 @@ Baude's apps, `baude-mcp` and the phone talk to a host process in JSON, one obje
 
 ### Requests
 
+#### `access` (Access)
+
+A host's access rules, and a chat's own if session's given.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `session` | string/null |  | A chat of the host's: its own rule for managing it too. |
+
+#### `access_set` (AccessSet)
+
+One of a host's access rules set (capability), or a chat's own rule for managing it (session; rule null: the host's again). Refused (access_denied) from a member the access rule doesn't allow.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `capability` | any |  | The capability whose rule it is. |
+| `session` | string/null |  | A chat of the host's: its own rule. |
+| `rule` | AccessRule? |  | The rule (null, for a chat: the host's). |
+
+#### `accounts` (Accounts)
+
+The host's Claude and Codex subscription accounts (hostaccounts): list them; add one (Claude: name and an existing signed-in config folder, or name and token where the host has no claude; Codex: name and an existing signed-in home); rename one (id, name); replace a token account's token (id, token); remove one (id); select a provider's default for new chats (provider, id; "" for the CLI's own sign-in); use another for a chat (session, id; "" for the CLI's own sign-in: its agent started again under it, resuming the chat, once its turn's over); read a subscription's usage (id; "" for the CLI's own sign-in); sign in (sign_in: provider and name for a new account, or id to sign in to one again; Claude's runs claude auth login with the account's own folder, Codex's a device-code login; its lines come as they're written, the page to open among them, then its end; the connection's going stops it); pass a code the sign-in page showed to the sign-in this connection runs (code: no answer of its own). Each other is answered with accounts.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `what` | `list` \| `add` \| `rename` \| `token` \| `remove` \| `select` \| `use` \| `usage` \| `sign_in` \| `code` | yes | What to do. |
+| `provider` | `claude` \| `codex` |  | add, select, sign_in (a new account): whose. |
+| `id` | string |  | rename, token, remove, select, use, usage, sign_in: the account ("" for the CLI's own sign-in, select, use and usage only). |
+| `session` | string |  | use: the chat whose account it is, one of the host's sessions whose model is the account's provider's. |
+| `name` | string |  | add, rename, sign_in (a new account): its name. |
+| `token` | string |  | add (Claude), token: a token from claude setup-token. |
+| `home` | string |  | add (Codex): an existing CODEX_HOME on the host, signed in with ChatGPT and keeping its credentials in a file. |
+| `folder` | string |  | add (Claude): an existing Claude config folder on the host, signed in (claude auth status says so, run with it). |
+| `code` | string |  | code: what the sign-in page showed, pasted. |
+
 #### `activate` (Activate)
 
 A member taken up again.
@@ -203,6 +293,15 @@ This connection attached to a session.
 | `always_allow` | array of string |  | Tools added to those allowed whenever it asks. |
 | `env` | object |  | As start's. |
 
+#### `autofix` (Autofix)
+
+A chat's Auto-fix: on, its branch's open pull request found (gh) and followed; off; or as it is, on left out. Refused, saying why, if the branch has no open pull request or gh can't ask GitHub.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `session` | string | yes | The session's id. |
+| `on` | boolean |  | On or off. |
+
 #### `bot` (Bot)
 
 A session made a Bot, or its name or picture changed; bot null, a chat again (its memory and picture kept). Its agent's told who it is from its next start.
@@ -228,6 +327,14 @@ What @ lists for one of its sessions' folders, made there (lookup.items: its fil
 |---|---|---|---|
 | `cwd` | string |  | The folder. |
 | `wait` | boolean |  | Wait for it. |
+
+#### `chat_size` (ChatSize)
+
+How big a chat is, worked out by its host from its transcript as it is now (never kept with telemetry).
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `session` | string | yes | The session's id. |
 
 #### `close` (Close)
 
@@ -267,6 +374,10 @@ A session gone: its agent stopped and waited for, its transcript and the folder 
 | Field | Type | Required | What it is |
 |---|---|---|---|
 | `session` | string | yes | The session's id. |
+
+#### `deps` (Deps)
+
+The programs and libraries this host's features and its machine's apps need (schema/deps), each there or not, with the checks of what's installed (a kubeconfig's contexts, gh signed in, Ollama running).
 
 #### `detach` (Detach)
 
@@ -464,6 +575,7 @@ Who's connecting: the first line, always.
 | `version` | integer |  | The wire version it speaks. |
 | `commit` | string |  | The commit its code is (said in the host's log if it's another than the host's). |
 | `here` | boolean |  | true: it's on the host's own machine, connected by its socket (an app there is listed among the host's heads; one elsewhere isn't). |
+| `as` | string |  | A chat on the host it's from (its own tools, on its host's socket): judged by the access rules as the member that started it, if one did. |
 
 #### `in` (In)
 
@@ -680,24 +792,16 @@ A session renamed (by its agent if it's running; else as it would).
 | `session` | string | yes | The session's id. |
 | `title` | string |  | Its title. |
 
-#### `routines` (Routines)
+#### `run_task` (RunTask)
 
-A Bot's routines: set, one made or changed (by its id); delete, one gone (its id).
-
-| Field | Type | Required | What it is |
-|---|---|---|---|
-| `session` | string | yes | The session's id. |
-| `set` | object |  | A routine (as Routine, its next worked out here). |
-| `delete` | string |  | A routine's id. |
-
-#### `run_routine` (RunRoutine)
-
-One of a Bot's routines run now (routines answers).
+One of a Bot's tasks run now, by hand.
 
 | Field | Type | Required | What it is |
 |---|---|---|---|
 | `session` | string | yes | The session's id. |
-| `id` | string |  | The routine's id. |
+| `id` | string | yes | The task's id. |
+| `inputs` | object |  | Its form, filled. |
+| `dry` | boolean |  | A dry run: its asks answered by a dummy agent, its failure not handed over. |
 
 #### `senders` (SendersOp)
 
@@ -787,6 +891,27 @@ The host's sessions, now and on every change, and ping; turn_ended as each of it
 |---|---|---|---|
 | `archived` | boolean |  | Those archived listed too, and their turns' ends (default: not). |
 
+#### `task` (TaskGet)
+
+One of a Bot's tasks, its script and latest runs.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `session` | string | yes | The session's id. |
+| `id` | string | yes | The task's id. |
+
+#### `task_ask` (TaskAsk)
+
+A running script asks its Bot (on the host's own socket, with its run's token): something it can't decide, or (error) a failure handed over. Answered once the Bot's turn ends (a dry run's: by a dummy agent, at once).
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `run` | string | yes | Its run's id. |
+| `token` | string | yes | Its run's token. |
+| `text` | string | yes | What's asked. |
+| `form` | array of TaskField |  | Fields the Bot's to fill: its answer's values. |
+| `error` | boolean |  | It's an error handed over. |
+
 #### `task_output` (TaskOutput)
 
 The last part of a background task's output file, one a session's transcript names. Answered as file.
@@ -796,6 +921,77 @@ The last part of a background task's output file, one a session's transcript nam
 | `session` | string | yes | The session whose task it is. |
 | `path` | string | yes | The output file a task's start or end named. |
 | `limit` | integer |  | Its last this many bytes (4000 if absent). |
+
+#### `task_report` (TaskReport)
+
+A running script's line in its run's log (on the host's own socket, with its run's token).
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `run` | string | yes | Its run's id (BAUDE_TASK_RUN). |
+| `token` | string | yes | Its run's token (BAUDE_TASK_TOKEN). |
+| `say` | string | yes | The line. |
+
+#### `task_run` (TaskRunGet)
+
+One of a Bot's tasks' runs and its log.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `session` | string | yes | The session's id. |
+| `run` | string | yes | The run's id. |
+
+#### `task_stop` (TaskStop)
+
+A run of one of a Bot's tasks stopped.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `session` | string | yes | The session's id. |
+| `run` | string | yes | The run's id. |
+
+#### `tasks` (Tasks)
+
+A Bot's tasks: set, one made or changed (by its id, with its script); delete, one gone (its id).
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `session` | string | yes | The session's id. |
+| `set` | object |  | A task (as Task). |
+| `delete` | string |  | A task's id. |
+
+#### `telemetry` (Telemetry)
+
+An app's telemetry, told to its own machine's host as it happens (the phone's app to its own host), never on to another: what was done in chats, and what it profiled. Kept on that machine only (its state folder's telemetry/), while the host's telemetry is on. Its process id is how the host samples it.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `app` | `baude` \| `record` \| `phone` | yes | The app it's of: Baude, Record, or the phone's app. |
+| `pid` | integer | yes | The app's process id. |
+| `events` | array of TelemetryEvent |  | What happened since it last told (each at its own time). |
+| `profile` | TelemetryProfile? |  | What it profiled since it last told, if it's profiling. |
+| `profile_error` | string/null |  | Why it isn't profiling what it's told to, if it isn't. |
+
+#### `telemetry_read` (TelemetryRead)
+
+A host's telemetry over a stretch: its chat events, its samples, its line profiles, and its turns added up; its telemetry state with it. Any member of the mesh may ask any other: one machine pulls every host's and puts them together by their times.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `from` | number | yes | From, in seconds since the epoch. |
+| `to` | number/null |  | To (null: now). |
+| `what` | array of `events` \| `metrics` \| `profiles` \| `usage` |  | What's wanted (none: only the state). |
+| `limit` | integer/null |  | The most events, samples and profiles each (the latest kept; default 5000). |
+
+#### `telemetry_set` (TelemetrySet)
+
+A host's telemetry switched on or off, or what a process on its machine profiles set, at run time: kept by the host, and told to its machine's apps (Info's telemetry).
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `on` | boolean/null |  | Telemetry on or off (null: as it is). |
+| `app` | any |  | The process whose profiling is set: the host's, Baude's or Record's (null: none). |
+| `functions` | array/null of string |  | What it profiles: functions and modules by their dotted names; empty: off. |
 
 #### `terminal` (Terminal)
 
@@ -834,6 +1030,28 @@ This connection's terminal is now this size.
 #### `terminals` (Terminals)
 
 The terminals running on this host, to attach to.
+
+#### `theme_remove` (ThemeRemove)
+
+A theme taken away (the undo of one made).
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `name` | string | yes | Its name. |
+
+#### `theme_save` (ThemeSave)
+
+A theme made, or its files replaced, once its tokens are checked (Meta's create_theme and install_theme, and their undo).
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `name` | string | yes | Its name: 1 to 40 letters, digits, spaces, - or _. |
+| `css` | string/null |  | Its theme.css; null or left out: none. |
+| `tokens` | object/null |  | Its tokens.json (ThemeFiles' tokens); null or left out: none. |
+
+#### `themes` (Themes)
+
+The themes this host keeps, each worked out (Settings → Theme, on every app).
 
 #### `transcript` (Transcript)
 
@@ -882,6 +1100,45 @@ input's answer, given a req.
 |---|---|---|---|
 | `session` | string | yes | The session's id. |
 
+#### `access` (AccessReply)
+
+access's answer.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `state` | AccessState | yes | The host's rules now. |
+| `session` | string/null |  | The chat asked about. |
+| `chat` | AccessRule? |  | That chat's own rule for managing it (null: the host's manage rule). |
+
+#### `access_set` (AccessSetReply)
+
+access_set's answer: the rules as they are now.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `state` | AccessState | yes | The host's rules now. |
+| `session` | string/null |  | The chat asked about. |
+| `chat` | AccessRule? |  | That chat's own rule for managing it (null: the host's manage rule). |
+
+#### `accounts` (AccountsReply)
+
+accounts' answer: the accounts and defaults as they are after it, and whether the host has claude and what it lacks of each provider's program (with error, if it couldn't be done); usage's, the limits; sign_in's, each line the sign-in writes (line alone), then its end.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `what` | string |  | What was asked. |
+| `error` | string |  | Why it couldn't be done, for the user as it is. |
+| `accounts` | array of Account |  | The host's accounts, by provider then name. |
+| `defaults` | object |  | Each provider's default for new chats. |
+| `defaults.claude` | string |  | Claude's default account's id, "" for the CLI's own sign-in. |
+| `defaults.codex` | string |  | Codex's. |
+| `usage` | array/null of UsageLimit |  | usage: the subscription's limits; null where they can't be read for its sign-in (a setup token's, an API key's). |
+| `line` | string |  | sign_in: a line the sign-in wrote (the page to open, or Codex's device code, among them). |
+| `signed_in` | boolean |  | sign_in: its end, signed in. |
+| `claude_cli` | boolean |  | Whether the host has claude: a Claude account there is a folder signed in to with claude auth login; without it, a token from claude setup-token. |
+| `missing` | object |  | What the host lacks of a provider's program, by provider (codex: its Codex CLI, as deps says it); a provider that's there isn't in it. Shown in place of Add account. |
+| `who` | string/null |  | sign_in (Claude's), signed in: who as, as claude auth status says. |
+
 #### `activated` (Activated)
 
 activate's answer.
@@ -924,6 +1181,15 @@ attach's answer.
 | `session` | Session |  | The session, as it's listed now. |
 | `asks` | array of object |  | What it's asking, not answered yet: its agent's control requests (can_use_tool) as they came. |
 
+#### `autofix` (AutofixReply)
+
+autofix's answer: the chat's Auto-fix as it is now.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `session` | string | yes | The session's id. |
+| `autofix` | AutofixPull? |  | The pull request it follows; null while it's off. |
+
 #### `bot_picture` (BotPictureReply)
 
 A Bot's picture.
@@ -961,6 +1227,17 @@ catalogue's answer.
 | `busy` | boolean |  | There's more to come (ask again, with wait). |
 | `error` | string |  | What's wrong. |
 
+#### `chat_size` (ChatSizeReply)
+
+chat_size's answer.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `session` | string | yes | The session's id. |
+| `bytes` | integer | yes | Its transcript's size. |
+| `messages` | integer | yes | Its messages: each prompt sent and each reply, a tool's result not counted. |
+| `images` | integer | yes | The images in it. |
+
 #### `cwd_set` (CwdSet)
 
 set_cwd's answer.
@@ -984,6 +1261,7 @@ databases' answer: servers {servers, databases}; schema {tables, links, took}; r
 | `links` | array of DbLink |  | schema: their foreign keys. |
 | `took` | number |  | schema: seconds it took to read, 0 when it was kept from a read before. |
 | `rows` | array of object |  | rows: the first rows, each {column: value}; objects and lists as JSON text. |
+| `missing` | Dep |  | servers: no server was found and Docker isn't on the host: Database Schemas shows this in its place. |
 
 #### `deactivated` (Deactivated)
 
@@ -1001,6 +1279,14 @@ delete's answer (and an event to those attached: nothing to carry on).
 |---|---|---|---|
 | `session` | string | yes | The session's id. |
 | `trashed` | array of string |  | What was moved to the trash. |
+
+#### `deps` (DepsReply)
+
+deps' answer: each of the host's dependencies on its platform.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `deps` | array of Dep |  | Each one. |
 
 #### `dir` (Dir)
 
@@ -1075,15 +1361,17 @@ emission_watch's answer: it's watched: emission_frame follows, many, till emissi
 
 #### `error` (Error)
 
-Anything wrong, with the request's req. A request whose op the host doesn't take is answered with code unsupported_operation (error "unsupported operation"), and one whose fields aren't as the schema has them with code invalid_data_type (error "invalid data type"): the same from every host, what was wrong in detail.
+Anything wrong, with the request's req. A request whose op the host doesn't take is answered with code unsupported_operation (error "unsupported operation"), and one whose fields aren't as the schema has them with code invalid_data_type (error "invalid data type"): the same from every host, what was wrong in detail. One a host's access rules refuse is answered with code access_denied (error "access denied"), denied naming the capability.
 
 | Field | Type | Required | What it is |
 |---|---|---|---|
 | `error` | string | yes | What's wrong. |
-| `code` | `unsupported_operation` \| `invalid_data_type` |  | One of the schema's own refusals. |
+| `code` | `unsupported_operation` \| `invalid_data_type` \| `access_denied` |  | One of the schema's own refusals. |
 | `detail` | string |  | A refusal's: what was wrong (the op, or the field and why), for a person to read; code, not this, says which refusal it is. |
+| `denied` | `shell` \| `browser` \| `providers` \| `model_files` \| `spawn` \| `manage` \| `kube` \| `databases` \| `access` |  | access_denied's: the capability refused. |
 | `plain` | boolean |  | Said for the user as it is. |
 | `gone` | GoneFolder |  | A session's folder gone and not made again. |
+| `missing` | Dep |  | What a chat's program needs that the host hasn't (claude, codex): error says what to install. |
 | `session` | string |  | memory's refusal: the session. |
 | `text` | string |  | memory's refusal: the memory as the Bot left it. |
 | `seen` | string/null |  | memory's refusal: what the user's accepted of it. |
@@ -1186,6 +1474,7 @@ git's answer: log {top, branch, commits, skip, more}; card {sha, parents, author
 | `url` | string/null |  | card: its page on GitHub. |
 | `login` | string/null |  | card: its author's GitHub login. |
 | `ct` | integer |  | card: when committed, epoch seconds. |
+| `missing` | Dep |  | git isn't on the host: the Git page shows this in its place. |
 
 #### `held` (HeldReply)
 
@@ -1257,6 +1546,7 @@ kube's answer: contexts {contexts, where}; connect {sections, namespaces, nodes}
 | `name` | string |  | owner: its name. |
 | `resource` | string |  | owner: its kind's resource. |
 | `said` | string |  | delete: what kubectl said. |
+| `missing` | Dep |  | kubectl isn't on the host: the Kubernetes view shows this in its place. |
 
 #### `kube_end` (KubeEnd)
 
@@ -1368,16 +1658,6 @@ rename's answer.
 |---|---|---|---|
 | `session` | Session |  | The session, as it's listed now. |
 
-#### `routines` (RoutinesReply)
-
-routines' and run_routine's answer: a Bot's routines.
-
-| Field | Type | Required | What it is |
-|---|---|---|---|
-| `session` | string | yes | The session's id. |
-| `routines` | array of Routine |  | Its routines. |
-| `clock` | Clock |  | The host's clock. |
-
 #### `senders` (SendersReply)
 
 Its sender store.
@@ -1426,6 +1706,86 @@ Each one's transcript from where have says the client's copy is, in whole lines;
 | `files` | array of SubagentFile |  | The files. |
 | `more` | boolean |  | There's more, past limit; those it didn't reach aren't listed. |
 
+#### `task` (TaskReply)
+
+task's answer.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `session` | string | yes | The session's id. |
+| `task` | Task |  | The task, with its script. |
+| `runs` | array of TaskRun |  | Its latest runs, newest first. |
+| `clock` | Clock |  | The host's clock. |
+
+#### `task_answer` (TaskAnswer)
+
+task_ask's answer: the Bot's.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `text` | string | yes | What it said. |
+| `values` | object/null |  | A form's values, as the Bot filled them. |
+
+#### `task_reported` (TaskReported)
+
+task_report's answer.
+
+#### `task_run` (TaskRunReply)
+
+task_run's and task_stop's answer.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `session` | string | yes | The session's id. |
+| `run` | TaskRun | yes | The run. |
+| `log` | array of TaskLogLine |  | Its log (its last 2000 lines). |
+| `bot` | string/null |  | Its Bot's name. |
+
+#### `task_started` (TaskStarted)
+
+run_task's answer: the run started.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `session` | string | yes | The session's id. |
+| `run` | TaskRun | yes | The run. |
+
+#### `tasks` (TasksReply)
+
+tasks' answer: a Bot's tasks (their scripts left out).
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `session` | string | yes | The session's id. |
+| `tasks` | array of Task |  | Its tasks. |
+| `clock` | Clock |  | The host's clock. |
+| `saved` | string/null |  | The id of the task set, if one was. |
+
+#### `telemetry_kept` (TelemetryKept)
+
+telemetry's answer: kept.
+
+#### `telemetry_read` (TelemetryReadReply)
+
+telemetry_read's answer, each list the earliest first.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `host` | string | yes | The host's id. |
+| `state` | TelemetryState | yes | Its telemetry state. |
+| `events` | array of TelemetryEvent |  | Its chat events. |
+| `metrics` | array of TelemetrySample |  | Its samples. |
+| `profiles` | array of TelemetryProfile |  | Its line profiles. |
+| `usage` | TelemetryUsage? |  | Its turns added up. |
+
+#### `telemetry_set` (TelemetrySetReply)
+
+telemetry_set's answer: the host's telemetry state now.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `state` | TelemetryState | yes | Its telemetry state. |
+
 #### `terminal_end` (TerminalEnd)
 
 The terminal's program has ended (or never started: said).
@@ -1461,6 +1821,31 @@ The terminals running on this host.
 | Field | Type | Required | What it is |
 |---|---|---|---|
 | `terminals` | array of TerminalInfo |  | Each one. |
+
+#### `theme_remove` (ThemeRemoved)
+
+theme_remove's answer: what it had.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `before` | ThemeFiles? |  | Its files, or null if it wasn't there. |
+
+#### `theme_save` (ThemeSaved)
+
+theme_save's answer: the theme as it is now, and what it had before.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `theme` | Theme |  | It, worked out. |
+| `before` | ThemeFiles? |  | Its files before, or null if it's new. |
+
+#### `themes` (ThemesReply)
+
+themes' answer: each theme, by name.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `themes` | array of Theme |  | Each one, in order. |
 
 #### `transcript` (TranscriptReply)
 
@@ -1635,7 +2020,7 @@ Members' records, on a link.
 
 #### `open` (Open)
 
-A tunnel to member to: passed on to the next host on the way (ttl hosts at most), and at to a connection to its host process, served as if a head had connected to its socket.
+A tunnel to member to: passed on to the next host on the way (ttl hosts at most), as it came, and at to a connection to its host process, served as if a head had connected to its socket, from the member that signed it; closed there if it has no from, or isn't signed as from's key, now and once.
 
 | Field | Type | Required | What it is |
 |---|---|---|---|
@@ -1644,6 +2029,8 @@ A tunnel to member to: passed on to the next host on the way (ttl hosts at most)
 | `ttl` | integer |  | Hosts it may pass through. |
 | `from` | string |  | The member that opened it. |
 | `sender` | Sender |  | Who what's sent through it is from (relay's as). |
+| `signed` | string |  | JSON of {to, from, time (in seconds), nonce, sender}, as the member that opened it signed it: what's taken of who it's from where it's opened to. |
+| `sig` | string |  | signed's Ed25519 signature, by from's key, in base64. |
 
 #### `opened` (Opened)
 
@@ -1656,6 +2043,62 @@ A tunnel's there.
 
 ### Entities
 
+#### AccessMember
+
+A member a rule can name: one the host reaches, has lately, or a rule names.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `id` | string | yes | Its id. |
+| `name` | string | yes | Its name. |
+
+#### AccessRule
+
+Who in the mesh may use one of a host's capabilities: every member, none, or those chosen. A head on the host's own machine, or one over ssh, is never refused.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `who` | `everybody` \| `nobody` \| `chosen` | yes | Every member, none, or those in members. |
+| `members` | array of string |  | chosen's: the members' ids. |
+
+#### AccessRules
+
+A host's rule for each of its capabilities, by name: everybody's where none's set.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `shell` | AccessRule | yes | A shell on its machine: its terminals (terminal ops) and Multiplex's, through a Bot's terminal tools (multiplex). |
+| `browser` | AccessRule | yes | Its Bots' Emission browsers: their tools' calls (emission), watching one (emission_watch) and a phone showing one (emission_serve). |
+| `providers` | AccessRule | yes | Its inference providers' models, run through the mesh (infer). |
+| `model_files` | AccessRule | yes | Its models' files, read through the mesh (files). |
+| `spawn` | AccessRule | yes | New chats and agents started on it (start, agent). |
+| `manage` | AccessRule | yes | Its chats as they are: listed, read, written in, stopped, renamed, archived, deleted, a Bot's tasks and memory. A chat's own rule (Access's chat) goes before this. |
+| `kube` | AccessRule | yes | Its machine's Kubernetes clusters (kube, kube_follow). |
+| `databases` | AccessRule | yes | Its machine's databases (databases). |
+| `access` | AccessRule | yes | These rules changed (access_set). A head on its own machine, or one over ssh, may always. |
+
+#### AccessState
+
+A host's access rules, as access and access_set answer them.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `host` | string | yes | The host's name. |
+| `rules` | AccessRules | yes | Each capability's. |
+| `members` | array of AccessMember | yes | The members its rules can name, by name. |
+| `editable` | boolean | yes | The connection asking may change them (access_set): a head on its machine or over ssh, else a member the access rule allows. |
+
+#### Account
+
+A Claude or Codex subscription account kept on a host (Settings → Subscriptions): what a head sees of it; its credential never leaves the host.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `id` | string | yes | Its id on its host (what a session's kept with). |
+| `provider` | `claude` \| `codex` | yes | Whose subscription it is. |
+| `name` | string | yes | Its name, the user's, unique for its provider on its host. |
+| `kind` | `folder` \| `token` \| `profile` | yes | folder: a Claude account that is a config folder of its own on its host (CLAUDE_CONFIG_DIR), signed in to with claude auth login run there with it (signed in again the same way); token: a Claude account signed in with a token from claude setup-token, where its host has no claude (signed in again by replacing it); profile: a Codex account, a CODEX_HOME of its own (signed in again with a device code). |
+
 #### Ask
 
 A permission its agent's asking for, not answered yet. Answered with input: a control_response for its request_id, as claude's stream-json has it.
@@ -1665,6 +2108,18 @@ A permission its agent's asking for, not answered yet. Answered with input: a co
 | `request_id` | string | yes | The control request's id. |
 | `tool` | string/null |  | The tool it asks to use. |
 | `input` | object/null |  | The tool's input (long strings in it cut short). |
+
+#### AutofixPull
+
+A chat's Auto-fix while it's on: the pull request of the chat's branch its host follows, every five minutes, sending the chat a failing check, a merge conflict or a new comment.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `repo` | string | yes | Its repository, owner/name. |
+| `number` | integer | yes | The pull request's number. |
+| `url` | string |  | Its page. |
+| `title` | string |  | Its title. |
+| `error` | string/null |  | Why its last read or message didn't work (gh signed out, offline, ...), till one does; null if it did. |
 
 #### BotFields
 
@@ -1798,6 +2253,22 @@ A table (or view, or collection) and its columns.
 | `rows` | integer |  | About how many rows it has. |
 | `columns` | array of DbColumn |  | Its columns, in order. |
 
+#### Dep
+
+A program or library a feature needs (schema/deps), as a host or an app has it: whether it's there, and how it's installed on that machine.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `dep` | string | yes | Its key in schema/deps (vte, kubectl, docker, …). |
+| `name` | string | yes | Its name, as it's shown. |
+| `where` | `app` \| `host` |  | What needs it: an app's own process, or the host process. |
+| `present` | boolean | yes | It's there. |
+| `fix` | string/null |  | The command that installs it on that machine (a check's: readies it; Ollama installed and not running: starts it), or null (another Linux: link). |
+| `link` | string/null |  | Its install page (none for a check). |
+| `group` | string/null |  | The schema/copy key of what Settings → Dependencies lists it under (deps.providers, window.kubernetes, …). |
+| `check` | boolean |  | It's a check of an installed program (kubeconfig, GitHub Account): it has no page of its own. |
+| `ready` | string/null |  | What's said of it while it's there (Installed, Signed in, Running, 3 models), as its host says it; "Couldn't check" when looking raised; null when it isn't there. |
+
 #### DirEntry
 
 An entry in a folder.
@@ -1922,6 +2393,7 @@ A host process as it says it is on a link (mesh._hello_of).
 | `version` | integer |  | Its wire version. |
 | `bonjour` | string |  | Its name on the local network, if it said one. |
 | `dial` | boolean |  | false: it can't be linked to, only from (a phone, with no sshd). |
+| `key` | string |  | Its key (Ed25519's public half, in base64): what signs the tunnels it opens. |
 
 #### Info
 
@@ -1951,6 +2423,7 @@ What a host is, as its hello says (and sessions carries).
 | `edits` | string |  | The edits proposed to the pages of Record's notebooks here, as written last (notes.edits_stamp: "" for none). |
 | `phone` | boolean |  | A phone's host. |
 | `ops` | array of string |  | The ops it takes, given by a host that takes only part of the wire (a phone's), with what its sessions take besides (start's ephemeral; control requests: control, set_permission_mode, set_model). |
+| `telemetry` | TelemetryState |  | Its telemetry state: the apps on its machine tell it telemetry only while it's on, and profile what it says. |
 
 #### KubeColumn
 
@@ -2062,6 +2535,7 @@ A member of the mesh, as info's mesh lists it.
 | `version` | integer |  | Its wire version. |
 | `bonjour` | string |  | Its name on the local network. |
 | `dial` | boolean |  | false: it can't be linked to, only from (a phone, with no sshd). |
+| `key` | string |  | Its key (Ed25519's public half, in base64): what signs the tunnels it opens. |
 | `providers` | array of Provider |  | Its model providers. |
 | `hops` | integer |  | Links away. |
 | `through` | string/null |  | The member it's reached through, by name; null for one linked to here. |
@@ -2083,6 +2557,7 @@ Who a member is, in its record.
 | `version` | integer |  | Its wire version. |
 | `bonjour` | string |  | Its name on the local network. |
 | `dial` | boolean |  | false: it can't be linked to, only from (a phone, with no sshd). |
+| `key` | string |  | Its key (Ed25519's public half, in base64): what signs the tunnels it opens. |
 | `providers` | array of Provider |  | Its model providers. |
 | `commit` | string/null |  | The commit its code is (null: not a checkout, or it didn't say). |
 | `made` | integer/null |  | When that commit was made, in seconds (null: not known). |
@@ -2223,23 +2698,6 @@ A member's record: who it is and the members it's linked to. A host sends its ow
 | `info` | MemberInfo |  | Who it is. |
 | `links` | array of string |  | The members it's linked to. |
 
-#### Routine
-
-A Bot's routine (baudelib.routines): work it's given on a schedule.
-
-| Field | Type | Required | What it is |
-|---|---|---|---|
-| `id` | string | yes | Its id. |
-| `name` | string |  | Its name. |
-| `prompt` | string |  | What it's to do. |
-| `paused` | boolean |  | Paused. |
-| `last` | number/null |  | When it last ran. |
-| `every` | integer |  | Minutes between runs. |
-| `at` | string |  | The host's local time it runs at, HH:MM. |
-| `days` | array of integer |  | The days it runs at at, 0 Monday to 6 Sunday. |
-| `next` | number/null |  | When it runs next. |
-| `error` | string/null |  | Why its last run didn't. |
-
 #### Running
 
 A command a session's agent is running, as quit's busy and info's update list them.
@@ -2289,11 +2747,17 @@ A session as a host lists it.
 | `commands` | array of Command |  | What its agent is running; none once its agent's gone. |
 | `cut` | number/null |  | When the host process stopped its agent at a turn or asking (shutting down, a quit, a restart), so a head can offer to carry it on; null once a user message is sent to it. |
 | `bot` | BotListing? |  | A Bot's; null for a chat. |
+| `autofix` | AutofixPull? |  | Its Auto-fix: the pull request its host follows for it; null while it's off. |
 | `acting` | boolean |  | Whether its turn is at its tools: from a tool call's start till text starts after it, the turn ends or its agent goes; only while it's working, not asking. |
 | `on_phone` | boolean |  | A Bot's browser is on a phone now. |
 | `fork_from` | string/null |  | The session it was forked from. |
 | `spawned_by` | string/null |  | The chat whose mesh tools started it (start's spawned_by). |
+| `desktop` | boolean |  | Claude Desktop's: a chat in Claude Desktop's own list on its host's machine. Every app lists it in the Desktop group. |
+| `taken_up` | boolean |  | false for a Claude Desktop chat its host only lists: nothing of it runs on the host till it's written in, which takes it up (as adopt does). Missing for every other. |
+| `elsewhere` | boolean |  | Claude Desktop is writing it now (written in the last minute, not by the host's own agent): every app keeps it read-only while it is. |
 | `start_key` | string/null |  | Its start's start_key, if it was given one. |
+| `account` | Account? |  | The subscription account its agent runs under on its host, fixed as it's made (the host's default for its provider then, or as it's first written in), or the one picked for it since (accounts' use), from the moment it's picked; null for the CLI's own sign-in, or an account since removed (account_gone). |
+| `account_gone` | boolean |  | Its subscription account was removed from its host after it was picked for it: its agent can't start till another is picked. |
 | `held` | array of HeldMessage |  | Messages held for it, oldest first. |
 | `senders` | integer |  | Its sender store's revision (0 for none): what a head's copy is checked against. |
 | `always_allow` | array of string |  | The tools allowed whenever it asks for them, sorted. |
@@ -2353,6 +2817,214 @@ A tab of a Bot's browser.
 | `selected` | boolean |  | In front. |
 | `prompts` | array of object |  | What it's waiting on an answer to. |
 
+#### Task
+
+One of a Bot's tasks (baudelib.tasks): a script its host runs, by hand or as a trigger fires, its form filled, its Bot asked when it can't decide or fails.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `id` | string | yes | Its id. |
+| `name` | string | yes | Its name. |
+| `runtime` | `python` \| `shell` \| `bot` | yes | How its script's run: Python 3, /bin/sh, or given to its Bot as a turn (a prompt). |
+| `script` | string/null |  | Its script (task's answer, and a set's; tasks' listing leaves it out). |
+| `version` | string/null |  | Its script's version: the first 12 hex of its SHA-256. |
+| `form` | array/null of TaskField |  | Its form's fields. |
+| `triggers` | array/null of TaskTrigger |  | What starts it. |
+| `fallback` | boolean/null |  | A run that fails is handed to its Bot, with its log. |
+| `timeout_s` | integer/null |  | The longest a run may take; it's stopped after. |
+| `paused` | boolean/null |  | Its triggers don't fire (it can still be run by hand). |
+| `last` | TaskRun? |  | Its latest run. |
+| `next` | number/null |  | When a schedule of its fires next. |
+
+#### TaskField
+
+A field of a task's form: filled by hand, by a trigger's payload, or by its Bot.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `name` | string | yes | Its name, as the script reads it (letters, digits, _). |
+| `label` | string/null |  | What it's called on the form (its name, if none). |
+| `type` | `text` \| `number` \| `bool` \| `choice` | yes | What it takes. |
+| `choices` | array/null of string |  | A choice's choices. |
+| `default` | any |  | Its value when nothing fills it. |
+| `required` | boolean/null |  | It must be filled for a run to start. |
+
+#### TaskLogLine
+
+A line of a run's log.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `at` | number | yes | When. |
+| `kind` | `out` \| `err` \| `say` \| `ask` \| `answer` \| `status` | yes | What it is: the script's output or errors, a line it said, an ask of its Bot, the Bot's answer, or the run's state changing. |
+| `text` | string | yes | What it says. |
+| `values` | object/null |  | An answer's values, from a form. |
+| `error` | boolean/null |  | An ask's: it was an error handed over. |
+
+#### TaskRun
+
+A task's run: what started it, what it was given, how it went (a run's record is its telemetry).
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `id` | string | yes | Its id. |
+| `task` | string | yes | The task's id. |
+| `name` | string/null |  | The task's name as it ran. |
+| `version` | string/null |  | The script's version it ran. |
+| `trigger` | string/null |  | The trigger that fired it (its id), or null: run by hand. |
+| `kind` | `manual` \| `schedule` \| `git_push` | yes | What started it. |
+| `payload` | object/null |  | The trigger's event. |
+| `inputs` | object/null |  | Its form as filled. |
+| `dry` | boolean/null |  | A dry run: its asks answered by a dummy agent, not its Bot. |
+| `status` | `running` \| `asking` \| `done` \| `failed` \| `stopped` \| `skipped` | yes | How it is, or ended. |
+| `started` | number | yes | When it started. |
+| `ended` | number/null |  | When it ended. |
+| `seconds` | number/null |  | How long it took. |
+| `exit` | integer/null |  | Its script's exit code. |
+| `error` | string/null |  | Why it failed or was skipped. |
+| `asks` | integer/null |  | How many times it asked its Bot. |
+| `handed` | boolean/null |  | Its failure was handed to its Bot. |
+
+#### TaskTrigger
+
+What starts a task (besides a run by hand): a schedule, or a git push to a branch of a repo on the host, seen by polling its head. Its events' payloads fill the task's form (fills).
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `id` | string | yes | Its id. |
+| `kind` | `schedule` \| `git_push` | yes | What it is. |
+| `every` | integer/null |  | A schedule's: minutes between runs. |
+| `at` | string/null |  | A schedule's: the host's local time it runs at, HH:MM. |
+| `days` | array/null of integer |  | A schedule's at's days, 0 Monday to 6 Sunday. |
+| `next` | number/null |  | A schedule's: when it fires next. |
+| `repo` | string/null |  | A git push's: the repo's folder on the host. |
+| `branch` | string/null |  | A git push's: the branch watched. |
+| `poll_s` | integer/null |  | A git push's: seconds between looks at the branch. |
+| `seen` | string/null |  | A git push's: the branch's head as last seen. |
+| `fills` | object/null |  | A form field's name: the payload's key that fills it (a field not named takes the payload's key of its own name). |
+| `fired` | number/null |  | When it last fired. |
+| `error` | string/null |  | Why it couldn't look or fire, last time. |
+
+#### TelemetryDay
+
+A day's tokens, from the turns that ended in it.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `day` | string | yes | The day, YYYY-MM-DD, the host's time. |
+| `tokens` | integer | yes | Tokens read and written. |
+| `turns` | integer | yes | Turns that ended. |
+
+#### TelemetryEvent
+
+Something done in a chat, as an app saw it happen: kept by its machine's host as it's told (telemetry), read back with telemetry_read. A chat is named by its host's id and its session's id, so what every host keeps can be put together.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `at` | number | yes | When, in seconds since the epoch (to the millisecond). |
+| `app` | `host` \| `baude` \| `record` \| `phone` |  | What saw it: Baude, Record, the phone's app, or the chat's host itself (a turn's end, as it ran there: what tokens are added up from). |
+| `kind` | `chat_opened` \| `chat_front` \| `chat_left` \| `turn_sent` \| `turn_ended` | yes | What happened: a chat opened in a window or screen; a chat came in front (its window or screen in front, showing it); it stopped being in front; a turn sent in it; a turn of it ended. |
+| `host` | string | yes | The id of the host the chat is on. |
+| `session` | string | yes | The chat's session id. |
+| `seconds` | number/null |  | A turn_ended's: how long the turn took. |
+| `turn` | string/null |  | A turn_ended's: the id of the turn's result, so a turn two apps saw end is counted once. |
+| `model` | string/null |  | A turn_ended's: the model it ran on. |
+| `effort` | string/null |  | A turn_ended's: the effort it ran at. |
+| `tokens_in` | integer/null |  | A turn_ended's: the tokens it read (input, cache reads and writes). |
+| `tokens_out` | integer/null |  | A turn_ended's: the tokens it wrote. |
+
+#### TelemetryLine
+
+A line of code line_profiler timed.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `file` | string | yes | Its file: under the checkout, relative to it. |
+| `line` | integer | yes | Its line number. |
+| `function` | string | yes | The function it's in. |
+| `code` | string/null |  | The line's text, stripped. |
+| `hits` | integer | yes | Times it ran. |
+| `seconds` | number | yes | Time spent on it. |
+
+#### TelemetryModel
+
+A model's turns, or a model and effort's.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `model` | string | yes | The model. |
+| `effort` | string/null |  | The effort (null: a model's turns at any effort). |
+| `turns` | integer | yes | Turns that ended on it. |
+| `tokens` | integer | yes | Their tokens, read and written. |
+
+#### TelemetryProc
+
+A process's use of its machine, in one sample.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `app` | `host` \| `baude` \| `record` \| `phone` | yes | Which: the host process, Baude, Record, or the phone's app (its host too). |
+| `pid` | integer | yes | Its process id. |
+| `cpu` | number/null |  | Its CPU since the sample before, in percent of one core (null in its first sample). |
+| `rss` | integer/null |  | Its resident memory, in bytes. |
+
+#### TelemetryProfile
+
+What line_profiler timed in a process over a stretch (saved every 30 seconds while profiling, and as it's switched off).
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `at` | number | yes | When the stretch ended, in seconds since the epoch. |
+| `from` | number | yes | When it began. |
+| `app` | `host` \| `baude` \| `record` | yes | The process profiled: the host's, Baude's or Record's. |
+| `lines` | array of TelemetryLine | yes | Its lines that ran, the most time first (at most 200). |
+
+#### TelemetryProfiling
+
+What a process is told to profile.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `app` | `host` \| `baude` \| `record` | yes | The process: the host's, Baude's or Record's. |
+| `functions` | array of string | yes | What's profiled: functions (module.function, module.Class.method) and modules (every function in it); none: off. |
+| `error` | string/null |  | Why it isn't profiling what it's told to (a name not found; line_profiler not installed). |
+
+#### TelemetrySample
+
+A host's machine and its processes, sampled every few seconds while telemetry is on.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `at` | number | yes | When, in seconds since the epoch. |
+| `load` | array/null of number |  | The machine's load average over 1, 5 and 15 minutes (null where it has none: a phone). |
+| `memory_total` | integer/null |  | The machine's memory, in bytes. |
+| `memory_used` | integer/null |  | Its memory in use, in bytes (macOS: Activity Monitor's Memory Used, app memory, wired and compressed; Linux and a phone: the total less what's available to start new work without swapping). |
+| `swap_total` | integer/null |  | Its swap, in bytes (macOS grows it as it's needed; a phone's is zram); 0 or null where it has none. |
+| `swap_used` | integer/null |  | Its swap in use, in bytes. |
+| `memory_pressure` | string/null |  | How pressed for memory the system says it is: "normal", "warning" or "critical" (macOS's memory pressure level; a phone's low memory: critical, else normal); null where it has no level (Linux). |
+| `memory_stall` | number/null |  | The share of the last 10 seconds, in percent, some task stalled waiting on memory (Linux's pressure stall information, some avg10); null where it has none. |
+| `procs` | array of TelemetryProc | yes | The host process and each app on its machine that told it telemetry. |
+
+#### TelemetryState
+
+A host's telemetry: on or off, and what each process on its machine profiles.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `on` | boolean | yes | Events kept and the machine sampled. |
+| `line_profiler` | boolean | yes | line_profiler is installed for the host's Python. |
+| `profiling` | array of TelemetryProfiling | yes | Each process's: the host's, Baude's, Record's. |
+
+#### TelemetryUsage
+
+The turns that ended in a stretch (turn_ended events, each turn once), added up by the host.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `days` | array of TelemetryDay | yes | Each day with a turn, the earliest first. |
+| `models` | array of TelemetryModel | yes | Each model, the most turns first. |
+| `combos` | array of TelemetryModel | yes | Each model and effort together, the most turns first. |
+
 #### TerminalInfo
 
 A terminal running on a host.
@@ -2368,6 +3040,27 @@ A terminal running on a host.
 | `viewers` | integer |  | Connections attached to it now. |
 | `running` | boolean |  | Whether its program is still running. |
 
+#### Theme
+
+A theme as its host has it (its themes folder's <name>/: theme.css and tokens.json), worked out by the host for every app alike: the desktop apps draw its CSS over theirs and its colours, the phone its colours.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `name` | string | yes | Its name: its folder's. |
+| `css` | string |  | Its theme.css (GTK CSS, the desktop apps': drawn over all of theirs), empty if it has none. |
+| `light` | object |  | Each colour of schema/tokens' libadwaita and baude groups the theme makes other than Baude's own in light, by its token's path: #rrggbb, or #rrggbbaa where it's see-through. A colour made of another (baude.rule of libadwaita.borders) is here when that one's set. |
+| `dark` | object |  | Each colour of schema/tokens' libadwaita and baude groups the theme makes other than Baude's own in dark, by its token's path: #rrggbb, or #rrggbbaa where it's see-through. A colour made of another (baude.rule of libadwaita.borders) is here when that one's set. |
+| `error` | string |  | Why its files can't be used, in place of the rest. |
+
+#### ThemeFiles
+
+A theme's files as they're written: what's kept to put one back (an undo).
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `css` | string/null |  | theme.css's text, or null with none. |
+| `tokens` | object/null |  | tokens.json's: a resolver document (schema/tokens/baude.resolver.json's format, its sources written in it) whose sets go over Baude's tokens, then its theme modifier's light or dark context over Baude's light or dark; colours of the libadwaita and baude groups only. null with none. |
+
 #### Update
 
 Its own updater has a newer version ready, and waits for those commands to end before it restarts onto it.
@@ -2376,6 +3069,17 @@ Its own updater has a newer version ready, and waits for those commands to end b
 |---|---|---|---|
 | `to` | string |  | The commit it'll restart onto. |
 | `waiting` | array of Running |  | The commands it waits for. |
+
+#### UsageLimit
+
+One of a subscription's limits, as Claude Code's get_usage says it.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `name` | string | yes | Which limit (Five hour, Seven day…). |
+| `key` | string |  | The limit's own name in Claude Code's usage (five_hour, seven_day…). |
+| `resets` | number |  | When it resets, in seconds since 1970 (left out where the usage doesn't say). |
+| `percent` | number | yes | How much of it is used, in percent. |
 
 #### WaitTarget
 
@@ -2451,10 +3155,11 @@ Somewhere wire.reach can go: this machine's host process, one listening on anoth
 | `PING_S` | `5` | A connection's ends each say something at least this often (ping), in seconds. |
 | `SHOT_MAX` | `1024` | A browser screenshot's longest side, in pixels. |
 | `SHOT_QUALITY` | `82` | A browser screenshot's JPEG quality. |
+| `SIGNED_S` | `300` | A tunnel's open: signed this near now, in seconds, either way, or it's closed where it's opened to. |
 | `SILENT_S` | `16` | Silent this long, in seconds, the other end's taken for gone. |
 | `TERMINAL_KEEP_S` | `600` | A terminal (terminal op) no connection is attached to now: its program kept running this long to be attached to again, in seconds. |
 | `TERMINAL_KEPT_BYTES` | `262144` | What a terminal (terminal op) wrote lately, kept to show again on attach: this many bytes at most. |
 | `TTL` | `16` | A tunnel's passed through at most this many hosts (open's ttl). |
-| `VERSION` | `19` | The wire's version, as a host's hello says it. |
+| `VERSION` | `20` | The wire's version, as a host's hello says it. |
 | `ZOOM_MAX` | `1568` | A browser zoom's longest side, in pixels. |
 | `ZOOM_QUALITY` | `90` | A browser zoom's JPEG quality. |

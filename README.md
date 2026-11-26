@@ -60,11 +60,13 @@ from anywhere in the window, shows it and puts the focus in its box; pressed aga
 
 A chat on a host made a Bot (right-click → Make Bot…) gets a name and a picture, and is listed at the top of the
 sidebar. Its agent is given its name and its memory each time it starts; the Memory page shows the Bot's changes to
-its memory, to accept or reject. Routines start it on a schedule, and it has a browser of its own (see Emission).
+its memory, to accept or reject. Its tasks are scripts its host runs, by hand or as a schedule or a git push fires
+them, asking the Bot when they can't decide or fail (docs/tasks-design.md); and it has a browser of its own (see
+Emission).
 
 | | |
 |---|---|
-| ![Bots](docs/screenshots/bots-memory-light.png)<br>Bots, and a Bot's memory | ![Routines](docs/screenshots/bot-routines-light.png)<br>A Bot's routines |
+| ![Bots](docs/screenshots/bots-memory-light.png)<br>Bots, and a Bot's memory | ![Tasks](docs/screenshots/bot-tasks-light.png)<br>A Bot's tasks |
 
 ## Codex backend (draft)
 

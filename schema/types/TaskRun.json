@@ -1,0 +1,130 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "A task's run: what started it, what it was given, how it went (a run's record is its telemetry).",
+  "properties": {
+    "id": {
+      "type": "string",
+      "description": "Its id."
+    },
+    "task": {
+      "type": "string",
+      "description": "The task's id."
+    },
+    "name": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "The task's name as it ran."
+    },
+    "version": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "The script's version it ran."
+    },
+    "trigger": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "The trigger that fired it (its id), or null: run by hand."
+    },
+    "kind": {
+      "enum": [
+        "manual",
+        "schedule",
+        "git_push"
+      ],
+      "description": "What started it."
+    },
+    "payload": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "description": "The trigger's event."
+    },
+    "inputs": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "description": "Its form as filled."
+    },
+    "dry": {
+      "type": [
+        "boolean",
+        "null"
+      ],
+      "description": "A dry run: its asks answered by a dummy agent, not its Bot."
+    },
+    "status": {
+      "enum": [
+        "running",
+        "asking",
+        "done",
+        "failed",
+        "stopped",
+        "skipped"
+      ],
+      "description": "How it is, or ended."
+    },
+    "started": {
+      "type": "number",
+      "description": "When it started."
+    },
+    "ended": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "description": "When it ended."
+    },
+    "seconds": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "description": "How long it took."
+    },
+    "exit": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "description": "Its script's exit code."
+    },
+    "error": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Why it failed or was skipped."
+    },
+    "asks": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "description": "How many times it asked its Bot."
+    },
+    "handed": {
+      "type": [
+        "boolean",
+        "null"
+      ],
+      "description": "Its failure was handed to its Bot."
+    }
+  },
+  "required": [
+    "id",
+    "task",
+    "kind",
+    "status",
+    "started"
+  ],
+  "additionalProperties": false
+}

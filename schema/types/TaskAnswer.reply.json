@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "task_ask's answer: the Bot's.",
+  "properties": {
+    "op": {
+      "const": "task_answer",
+      "description": "What it is."
+    },
+    "req": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "text": {
+      "type": "string",
+      "description": "What it said."
+    },
+    "values": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "description": "A form's values, as the Bot filled them."
+    }
+  },
+  "required": [
+    "op",
+    "text"
+  ],
+  "additionalProperties": false
+}

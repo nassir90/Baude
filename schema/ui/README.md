@@ -201,3 +201,9 @@ An entry or a part may carry:
   own terms (the Agent tool, subagents) keep the word. The owner: "They are not \"Agents\" the y are \"Bots\" I have no
   idea what an \"Agent\" is" (2026-11-22). Source: `[{"session": "b3845b21-55ac-4aab-a769-fb8517403c51", "message":
   "5d9296b7-3bd3-4521-ba9f-f69dbe09d930"}]`.
+- **Missing programs are the dependency store's to say.** Before any app or host runs a program that may not be
+  installed (claude, codex, gh, git, kubectl, Docker, …), it asks baudelib/deps (schema/deps, what Settings →
+  Dependencies lists) whether it's there; where it isn't, the feature shows what the store says of it (its Missing
+  state, its Dependencies row, or the same in a line: "Codex CLI isn't installed: npm install -g @openai/codex"),
+  never the run's OS error ("No such file or directory"). The owner found Subscriptions showing that raw error while
+  Dependencies already knew codex wasn't installed (2026-11-26). Source: `[{"issue": "BaudeInternal#234"}]`.

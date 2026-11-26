@@ -65,14 +65,14 @@ fun <T> BoxedList(rows: List<T>, empty: String, row: @Composable (T) -> Unit) {
 /** A row of a boxed list (Adw.ActionRow): what's before it, its title and subtitle, what's after. */
 @Composable
 fun ActionRow(title: String, subtitle: String?, onClick: (() -> Unit)? = null, prefix: (@Composable () -> Unit)? = null,
-              suffix: (@Composable () -> Unit)? = null) {
+              suffix: (@Composable () -> Unit)? = null, titleLines: Int = 1) {
     val c = LocalBaude.current
     Row(Modifier.fillMaxWidth().heightIn(min = 50.dp).then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
         .padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp)) {
         prefix?.invoke()
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            Text(title, style = Type.body, color = c.fg, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(title, style = Type.body, color = c.fg, maxLines = titleLines, overflow = TextOverflow.Ellipsis)
             if (!subtitle.isNullOrBlank()) Text(subtitle, style = Type.caption, color = c.dim, maxLines = 2,
                 overflow = TextOverflow.Ellipsis)
         }

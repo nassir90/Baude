@@ -628,7 +628,7 @@ def found_issue(folder, repo):
     it's only what an issue quotes): {url, number}, or None. Raises RuntimeError if gh can't say."""
     mark = note_mark(folder)
     ok, out = gh("issue", "list", "--repo", repo, "--state", "all", "--limit", "5", "--search", f'"{mark}" in:body',
-                 "--json", "number,url,body")
+                 "--json", "number,url,body", feature="fixes.send_feedback")
     if not ok:
         raise RuntimeError(out or wording.say("host_errors.gh_list_failed"))
     last = f"{_SENT_FROM} `{mark}`"
@@ -656,7 +656,7 @@ def _file_claimed(folder, repo, again):
     text = md.split("\n", 1)[1].split("\n## ", 1)[0].strip() if "\n" in md else ""
     captures = sum(re.fullmatch(r"capture-\d+\.png", n) is not None for n in os.listdir(folder))
     ok, out = gh("issue", "create", "--repo", repo, "--title", issue_title("" if text == "(no text)" else text, captures),
-                 "--body-file", "-", body=issue_body(md, folder))
+                 "--body-file", "-", body=issue_body(md, folder), feature="fixes.send_feedback")
     url = next((l for l in out.splitlines() if l.startswith("https://")), None) if ok else None
     if url is None:
         raise RuntimeError(out or wording.say("host_errors.gh_create_failed"))

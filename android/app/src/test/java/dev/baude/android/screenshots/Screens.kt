@@ -179,6 +179,16 @@ abstract class Screens(private val theme: String) {
         screen("05e-subscriptions-remove")
     }
 
+    // (Settings → Subscriptions on a host without codex: Codex's section scrolled to, its Dependencies row in Add account's place)
+    @Test fun subscriptionsNoCodex() {
+        noCodexFixture()
+        show { SettingsScreen({}, {}, page = 1) }
+        laidOut()
+        scrollUnder("Personal")
+        laidOut()
+        screen("05i-subscriptions-no-codex")
+    }
+
     @Test fun subscriptionsToken() {
         tokenAccountsFixture()
         show { SettingsScreen({}, {}, page = 1) }
@@ -264,6 +274,26 @@ abstract class Screens(private val theme: String) {
         show { dev.baude.android.ChatAccess(Item("h1", Mesh.sessions.getValue("h1")[1], 0)) {} }
         laidOut()
         screen("40h-chat-access")
+    }
+
+    // (a capability's members opened: a check each, Everybody over them)
+    @Test fun accessOpen() {
+        accessFixture()
+        show { SettingsScreen({}, {}, page = 4) }
+        laidOut()
+        tap(dev.baude.android.PhoneAccess.named("model_files"))
+        layOut()
+        screen("40g-access-open")
+    }
+
+    // (a chat's members opened: Same as Host over them)
+    @Test fun chatAccessOpen() {
+        accessFixture()
+        show { dev.baude.android.ChatAccess(Item("h1", Mesh.sessions.getValue("h1")[1], 0)) {} }
+        laidOut()
+        tap("studio")
+        layOut()
+        screen("40h-chat-access-open")
     }
 
     // (Meta's row for a capability of the host it runs on, as show setting:access_providers draws it under a reply)
@@ -394,6 +424,19 @@ abstract class Screens(private val theme: String) {
                                 .put("resets", System.currentTimeMillis() / 1000 + 3 * 86400 + 5 * 3600))))
                     }
                 }
+        }
+    }
+
+    private fun noCodexFixture() {
+        FixtureConnection.up(activity, Mesh.hosts.first()) { m ->
+            if (m.optString("op") != "accounts") null
+            else org.json.JSONObject().put("op", "accounts").put("req", m.opt("req")).put("what", m.optString("what"))
+                .put("accounts", org.json.JSONArray(listOf(HOME_ACCOUNT, WORK,
+                    org.json.JSONObject().put("id", "p1").put("provider", "codex").put("name", "Personal").put("kind", "profile"))))
+                .put("defaults", org.json.JSONObject().put("claude", "w1").put("codex", "")).put("claude_cli", true)
+                .put("missing", org.json.JSONObject().put("codex", org.json.JSONObject().put("dep", "codex").put("name", "Codex CLI")
+                    .put("where", "host").put("present", false).put("fix", "npm install -g @openai/codex").put("group", "deps.providers")
+                    .put("link", "https://github.com/openai/codex").put("check", false).put("ready", org.json.JSONObject.NULL)))
         }
     }
 

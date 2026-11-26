@@ -185,8 +185,9 @@ fun picked(): String? = HomePrefs.host.value.takeIf { it != "" && it != "all" } 
 /** The host's deactivated (Deactivate): not reached, its chats as last seen. */
 fun off(id: String): Boolean = id in Mesh.deactivated
 
-/** The host's gone: it has no connection that's up or being made (and isn't switched off). */
-fun dead(id: String): Boolean = !off(id) && Mesh.conn(id)?.state.let { it != "up" && it != "connecting" }
+/** The host's gone: it has no connection that's up or being made (and isn't switched off), and hasn't for a while
+ * (Mesh.reach: one only away a moment is listed as it was). */
+fun dead(id: String): Boolean = !off(id) && Mesh.conn(id)?.state.let { it != "up" && it != "connecting" } && Mesh.reach(id) == "gone"
 
 /** What's said over a host's chats while it isn't reached (Baude's host_state), or null while it is. */
 fun hostState(id: String?): String? {
@@ -409,7 +410,8 @@ fun Home(open: (String, String) -> Unit, feedback: () -> Unit, phone: () -> Unit
             }
         }
         val said = hostState(picked())
-        AnimatedVisibility(said != null, enter = expandVertically()) { HostBanner(said.orEmpty()) }
+        val away = picked()?.let { !off(it) && Mesh.reach(it) == "away" } == true && said != null
+        AnimatedVisibility(said != null, enter = expandVertically()) { if (away) Away() else HostBanner(said.orEmpty()) }
         val all = sections(query)
         val update = Update.state.value != ""
         if (all.isEmpty()) {

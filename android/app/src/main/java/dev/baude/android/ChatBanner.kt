@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -23,7 +24,7 @@ import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.delay
 
 /** What's in the way of a chat from outside it, said in a strip under its header while it is (Adw.Banner): its host
- * stopping or not there, its host not having the chat any more, Claude Desktop writing the chat (Baude's
+ * stopping or gone (Mesh.reach: while it's only away, a cloud and Reconnecting…, Away, instead), its host not having the chat any more, Claude Desktop writing the chat (Baude's
  * live_elsewhere), claude retrying the model's API. Nothing, and no
  * room, when nothing is. */
 @Composable
@@ -46,8 +47,10 @@ fun ChatBanner(chat: Chat, open: (String, String) -> Unit) {
     val stopping = Stopping.line(at)
     val dots = if (stopping == null && conn?.state == "up" && !chat.chrome.missing.value && retry != null) dotStep() else 0
     var button: Pair<String, () -> Unit>? = null
+    val reach = Mesh.reach(at)
     val title: AnnotatedString? = when {
         stopping != null -> AnnotatedString(stopping)
+        reach == "away" -> return Away()
         conn == null || conn.state != "up" -> AnnotatedString(if (conn?.state == "connecting") Wording.Hosts.looking(host = name)
             else conn?.why?.let { Wording.Hosts.downBecause(host = name, why = it) } ?: Wording.Hosts.down(host = name))
         chat.chrome.missing.value -> {
@@ -75,5 +78,18 @@ fun ChatBanner(chat: Chat, open: (String, String) -> Unit) {
         Text(title, style = Type.body, color = c.fg, maxLines = 1, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center,
             modifier = Modifier.weight(1f))
         button?.let { (label, go) -> Button(label, onClick = go) }
+    }
+}
+
+/** A host away for a moment (Mesh.reach): a link Android closed being made again. A cloud and Reconnecting…, quiet,
+ * over the chat in place of its banner; what's written meanwhile waits in its queue. */
+@Composable
+fun Away(modifier: Modifier = Modifier) {
+    val c = LocalBaude.current
+    Row(modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.CenterHorizontally)) {
+        androidx.compose.material3.Icon(Adwaita.WeatherOvercast, null, tint = c.dim,
+            modifier = Modifier.size(16.dp.icon))
+        Text(Wording.Hosts.reconnecting, style = Type.caption, color = c.dim, maxLines = 1)
     }
 }

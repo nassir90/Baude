@@ -1,11 +1,12 @@
 {
-  "description": "A message written while the agent is busy with a turn: not sent yet, it waits in the queue just under the conversation (above the composer), drawn as your bubble but grey. Hovering its row shows delete, send-now and edit buttons beside it.",
+  "description": "A message written while the agent is busy with a turn: not sent yet, it waits in the queue just under the conversation (above the composer), drawn as your bubble but grey. Hovering its row shows delete, send-now and edit buttons beside it. On the phone, a message is also queued when it's sent while the chat's host isn't reached, with a small dim cloud left of its bubble till the host is back. A message sent while the host wasn't reached stays in the queue, on disk, till the host says it took it; one the host says no to stays there with a warning in place of the cloud, saying why, and goes again only by its send-now button.",
   "apps": [
     "baude",
     "phone"
   ],
   "opens": [
-    "Enter in the composer (with text or attachments) while a turn runs"
+    "Enter in the composer (with text or attachments) while a turn runs",
+    "Sending while the chat's host isn't reached (the phone)"
   ],
   "code": [
     "chatparts.py:QueuedTurn",
@@ -22,10 +23,16 @@
     "windowdrafts.py:WindowDrafts.left_turn_ended",
     "Queue.kt:QueuedRow",
     "Queue.kt:Queue.sendLeft",
-    "Mesh.kt:Mesh.sendQueued"
+    "Mesh.kt:Mesh.sendQueued",
+    "Queue.kt:Queue.resend",
+    "Queue.kt:Queue.putBackTried",
+    "Queue.kt:Queue.taken",
+    "Queue.kt:Queue.refused"
   ],
   "copy": [
-    "chat_turns"
+    "chat_turns",
+    "hosts.waits_for",
+    "held_send.not_sent"
   ],
   "parts": [
     {
@@ -102,13 +109,35 @@
     },
     {
       "name": "turn stopped (Esc / stop button)",
-      "decisions": [{"said": "You can get into a state where messages are queued, but the agent is not currently owrking / it is interrupted. Once interrupted, queued messsges should automatically be sent into te model.", "rule": "Every app sends the queue when a turn ends, whether it ended by itself or was interrupted", "decided": "2026-11-24", "source": [{"issue": "BaudeInternal#208"}]}],
+      "decisions": [
+        {
+          "said": "You can get into a state where messages are queued, but the agent is not currently owrking / it is interrupted. Once interrupted, queued messsges should automatically be sent into te model.",
+          "rule": "Every app sends the queue when a turn ends, whether it ended by itself or was interrupted",
+          "decided": "2026-11-24",
+          "source": [
+            {
+              "issue": "BaudeInternal#208"
+            }
+          ]
+        }
+      ],
       "shows": "Once the stopped turn ends, the queue is sent as when a turn ends by itself (all of it as one message, or up to the one whose ↑ was pressed)."
     },
     {
       "name": "another chat opened",
       "shows": "The queue stays with the chat it was written in, kept beside that chat's draft (on disk on the phone, over a restart on the desktop), and is drawn under its conversation again, as it was, when the chat is opened again. A new chat's queue goes into its box instead.",
-      "decisions": [{"said": "Going to another chat and back un-queues a queued message; queued messages should persist across chats (paraphrased)", "rule": "Every app keeps a chat's queued messages with that chat when another is opened, draws them again when it's opened, and sends them to it when its turn ends meanwhile", "decided": "2026-11-19", "source": [{"issue": "BaudeInternal#176"}]}]
+      "decisions": [
+        {
+          "said": "Going to another chat and back un-queues a queued message; queued messages should persist across chats (paraphrased)",
+          "rule": "Every app keeps a chat's queued messages with that chat when another is opened, draws them again when it's opened, and sends them to it when its turn ends meanwhile",
+          "decided": "2026-11-19",
+          "source": [
+            {
+              "issue": "BaudeInternal#176"
+            }
+          ]
+        }
+      ]
     },
     {
       "name": "turn ends while another chat is open",
@@ -122,5 +151,17 @@
   "scenes": [
     "46-queue-kept",
     "46b-queue-sent-elsewhere"
+  ],
+  "decisions": [
+    {
+      "said": "Nearly all of the phone's disconnects come from the screen turning off or the app being put away: design for Android closing connections, cache more, and instead of a red box show a cloud, with leeway and messages queued while the connection is down (paraphrased)",
+      "rule": "Every app that queues while its host isn't reached gives each queued message its own uuid as it's written, sends each by that uuid once the host is back and the chat's transcript has been read up to date (so one the host already took is seen and not sent), and puts a message whose link went before the host answered back in the queue by the same uuid, never in the box with a not-sent line: a host takes a message once, whatever the link did.",
+      "decided": "2026-11-26",
+      "source": [
+        {
+          "issue": "BaudeInternal#243"
+        }
+      ]
+    }
   ]
 }

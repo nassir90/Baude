@@ -12,6 +12,8 @@
     "now_deactivated": "{$host} deactivated",
     "now_activated": "{$host} activated",
     "looking_for_baude": "Looking for Baude on {$dest}",
-    "no_commands": "{$host} has no Baude commands yet: run `python3 baude_headless.py install` in its Baude checkout there"
+    "no_commands": "{$host} has no Baude commands yet: run `python3 baude_headless.py install` in its Baude checkout there",
+    "reconnecting": "Reconnecting…",
+    "waits_for": "Sent once {$host} is back"
   }
 }

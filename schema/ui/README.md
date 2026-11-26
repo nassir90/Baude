@@ -202,6 +202,12 @@ An entry or a part may carry:
   own terms (the Agent tool, subagents) keep the word. The owner: "They are not \"Agents\" the y are \"Bots\" I have no
   idea what an \"Agent\" is" (2026-11-22). Source: `[{"session": "b3845b21-55ac-4aab-a769-fb8517403c51", "message":
   "5d9296b7-3bd3-4521-ba9f-f69dbe09d930"}]`.
+- **What the hosts said is kept.** An app whose process or link the OS ends while it's put away (the phone; a web
+  version's tab) keeps on disk each host's sessions as last listed and the transcripts of the chats last open, and
+  shows them at once when it comes back or starts again, reading on from where the kept part ends once its host is
+  reached; a turn that ended meanwhile is read in, and what waited in a queue is sent then. The owner asked the phone to
+  be designed for Android closing its connections, with more caching (2026-11-26). Source: `[{"issue":
+  "BaudeInternal#243"}]`.
 - **Missing programs are the dependency store's to say.** Before any app or host runs a program that may not be
   installed (claude, codex, gh, git, kubectl, Docker, …), it asks baudelib/deps (schema/deps, what Settings →
   Dependencies lists) whether it's there; where it isn't, the feature shows what the store says of it (its Missing

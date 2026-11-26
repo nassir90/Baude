@@ -400,8 +400,8 @@ fun ChatPage(chat: Chat, name: String, attach: Boolean = true, stop: (() -> Unit
             val pad = ((Gap.composerButton - line) / 2).coerceAtLeast(0.dp)
             val lift = ((line - Gap.composerButton) / 2).coerceAtLeast(0.dp)
             val busy = isWorking(chat)
-            val conn = Mesh.conn(chat.hostId)
-            val gone = chat.sender == null && (conn?.state != "up" || Stopping.line(chat.hostId) != null)
+            val gone = chat.sender == null && Stopping.line(chat.hostId) != null // (its host not reached: what's sent waits
+                                                                                  // in its queue till it is)
             val ready = !chat.busy.value && chat.preparing.value == 0 && !gone && !chat.chrome.missing.value &&
                 !(chat.sender == null && exhausted(chat)) && reverting?.asked != true
             val sendable = ready || (chat.sender == null && isLocal(text))

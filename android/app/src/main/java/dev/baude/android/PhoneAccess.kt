@@ -12,7 +12,8 @@ import java.io.File
  * in by an everybody rule only. Kept in phone/access.json. Of the capabilities, the phone host has new agents
  * (start: spawn) and its agents as they are (manage); a member a rule refuses is answered access_denied. */
 object PhoneAccess {
-    val CAPABILITIES = listOf("shell", "browser", "providers", "model_files", "spawn", "manage", "kube", "databases", "access")
+    val CAPABILITIES = listOf("shell", "browser", "providers", "model_files", "spawn", "manage", "kube", "databases",
+        "subscriptions", "access")
     val WHO = listOf("everybody", "nobody", "chosen")
     private val rules = HashMap<String, JSONObject>()
     private var file: File? = null
@@ -53,7 +54,8 @@ object PhoneAccess {
 
     /** cap as every app names it (accessview's). */
     fun named(cap: String): String = Wording.byKey[COPY[cap] ?: "access.$cap"] ?: cap
-    private val COPY = mapOf("shell" to "kube.shell", "providers" to "deps.providers", "kube" to "window.kubernetes")
+    private val COPY = mapOf("shell" to "kube.shell", "providers" to "deps.providers", "kube" to "window.kubernetes",
+        "subscriptions" to "subscriptions.title")
 
     /** cap's rule set and kept: false if it isn't one. */
     @Synchronized fun set(cap: String, rule: JSONObject?): Boolean {

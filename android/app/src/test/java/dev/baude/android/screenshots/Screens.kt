@@ -314,7 +314,7 @@ abstract class Screens(private val theme: String) {
         val rules = org.json.JSONObject().put("shell", rule("nobody")).put("browser", rule("chosen", studio))
             .put("providers", rule("everybody")).put("model_files", rule("chosen", studio, pixel)).put("spawn", rule("everybody"))
             .put("manage", rule("everybody")).put("kube", rule("nobody")).put("databases", rule("everybody"))
-            .put("access", rule("nobody"))
+            .put("subscriptions", rule("everybody")).put("access", rule("nobody"))
         val state = org.json.JSONObject().put("host", "workshop").put("rules", rules).put("editable", true)
             .put("members", org.json.JSONArray(listOf(org.json.JSONObject().put("id", pixel).put("name", "pixel-9"),
                 org.json.JSONObject().put("id", studio).put("name", "studio"))))

@@ -35,9 +35,13 @@
       "$ref": "AccessRule.json",
       "description": "Its machine's databases (databases)."
     },
+    "subscriptions": {
+      "$ref": "AccessRule.json",
+      "description": "Its subscription accounts: listed, added, renamed, removed (signed out), each provider's default picked, a chat moved to one (with the chat's manage rule too), their usage read, and signed in to (accounts, login, login_code)."
+    },
     "access": {
       "$ref": "AccessRule.json",
-      "description": "These rules changed (access_set). A head on its own machine, or one over ssh, may always."
+      "description": "These rules changed (access_set), and the host itself: stopped, linked and unlinked, deactivated, its telemetry, themes and feedback (quit, link, unlink, deactivate, activate, telemetry_set, theme_save, theme_remove, feedback). A head on its own machine, or one over ssh, may always."
     }
   },
   "required": [
@@ -49,6 +53,7 @@
     "manage",
     "kube",
     "databases",
+    "subscriptions",
     "access"
   ],
   "additionalProperties": false

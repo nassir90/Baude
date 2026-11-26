@@ -9,6 +9,8 @@ hosts must still answer after. The same ops from a head on the host's own socket
   - relays borrowed: a member's tunnel, or a chat a member started, asking to be passed on: refused;
   - ops whose chat or folder is optional (git, signal_names, read_file, catalogue, list_dir), and a chat moved to
     another subscription (accounts' use): a member's only where it may manage;
+  - the host's subscriptions (accounts' list, and use) by Subscriptions alone, never Access Rules: some rounds let a
+    member manage subscriptions while refusing it the rules, and its access_set is refused all the same;
   - the chat's Bash asked about: approved by the member only with Shell too, and its turn's end (turn_ended) told it
     only if it may manage the chat.
 No GTK.
@@ -210,6 +212,9 @@ def main():
             who = rng.choice(access.WHO)
             rules[cap] = {"who": who, **({"members": rng.sample([other.me["id"], STRANGER], rng.randint(0, 2))}
                                          if who == "chosen" else {})}
+        if rng.random() < 0.3:  # (subscriptions a member's, the rules not)
+            rules["subscriptions"] = rng.choice([{"who": "everybody"}, {"who": "chosen", "members": [other.me["id"]]}])
+            rules["access"] = rng.choice([{"who": "nobody"}, {"who": "chosen", "members": [STRANGER]}])
         if rng.random() < 0.5:  # (the rules set as a member would, where access lets it; else as a head here)
             for cap, rule in rules.items():
                 req += 1
@@ -254,7 +259,11 @@ def main():
                     ({"op": "catalogue", "cwd": folder}, chat_let),
                     ({"op": "read_file", "path": os.path.join(HERE, "test_access.py")}, False),
                     ({"op": "list_dir", "path": TMP}, lets["manage"]),
-                    ({"op": "accounts", "what": "use", "session": chat.id, "id": ""}, lets["access"] and chat_let)]
+                    ({"op": "accounts", "what": "use", "session": chat.id, "id": ""},
+                     lets["subscriptions"] and chat_let),
+                    ({"op": "accounts", "what": "list"}, lets["subscriptions"]),
+                    ({"op": "access_set", "capability": "subscriptions", "rule": asked.access.rule("subscriptions")},
+                     lets["access"])]
         for msg, allowed in rng.sample(optional, len(optional)):
             req += 1
             got = ask(member, msg, req)

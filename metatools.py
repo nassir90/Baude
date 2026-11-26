@@ -703,6 +703,13 @@ class MetaTools:
             raise ValueError(f"No setting {name!r}: they're {', '.join(self.settings)}.")
         if not s.meta_sets:
             raise ValueError(f"{name} is the user's to change: show setting:{name} for them to.")
+        if getattr(s, "later", False):  # (set on another host: off the main loop, and not undone, as only the user
+            value = s.coerce(args.get("value"))  # widens what it narrows)
+
+            def done(out):
+                self._show(turn, {"kind": "setting", "name": name})
+                return {"text": f"{name} is {out['now']} now. Its row is under your reply."}
+            return Later(lambda: {"now": s.put(value)}, done)
         before = s.value()
         now = s.set(args.get("value"))
         self._show(turn, {"kind": "setting", "name": name, "set": now})

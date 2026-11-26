@@ -12,12 +12,17 @@ import time
 import uuid
 
 from baudelib import (
-    agentproxy, autofix, deps, desktopchats, emissionlink, emissiontools, hostaccounts, hostdb, hostfiles, hostfixes, hostkube,
+    access, agentproxy, autofix, deps, desktopchats, emissionlink, emissiontools, hostaccounts, hostdb, hostfiles, hostfixes, hostkube,
     hostlogin, mesh, meshtools, hostterminal, multiplexlink, notes, routines, telemetry, themes, wire, wording, worktree,
 )
 from baudelib.serverstate import (
     APPS, BOT_PICTURE_MAX, Conn, FRAME_KEYS, _mtime, _write_json, _write_text, bot_dir, clean_env,
 )
+
+
+def catalogued_kube(item):
+    """Is a catalogue's item of a cluster's (a Kubernetes object, a context, a workload)?"""
+    return item.get("kind") == "k8s" or item.get("icon") == "k8s"
 
 
 class ServerRunning:
@@ -200,13 +205,13 @@ class ServerRunning:
         os.close(self.lock_file)
         self.closed.set()
 
-    def serve(self, sock, origin=None, sender=None):
+    def serve(self, sock, origin=None, sender=None, verified=True):
         """A connection served (a tunnel's through the mesh: origin, the member it came from; sender, who what's sent
-        through it is from, as that member said: Conn's)."""
+        through it is from, as that member said; verified, whether its open was signed by origin's key: Conn's)."""
         sock.settimeout(wire.SILENT_S)  # (a client that's said nothing for this long is gone: they ping)
         ch = wire.Channel.over(sock)
         ch.serving = True
-        conn = Conn(ch, origin, sender)
+        conn = Conn(ch, origin, sender, verified)
         with self.lock:
             self.conns.add(conn)
         self.woken.set()  # (someone's here: watched for them)
@@ -217,6 +222,11 @@ class ServerRunning:
                     # aren't as the schema has them refused, as any request is)
                     if (refused := wire.refusal(msg)) is not None:
                         conn.send(refused)
+                        continue
+                    if conn.member is not None or msg["op"] == "relay" and self.started_by(msg.get("as")):  # (a
+                        # member's, or a chat a member started: what's relayed from here is this host's, and a join is
+                        # a host's own; neither borrowed)
+                        conn.send(wire.refused(wire.DENIED, msg.get("req"), wording.say("access.not_passed_on")))
                         continue
                     with self.lock:
                         self.conns.discard(conn)
@@ -381,6 +391,24 @@ class ServerRunning:
             if self.quitting is not None:  # (its connections kept till its claudes have stopped, to say how far along:
                 return None  # nothing answered, as an answer would be taken for the turn's end; theirs, as it closes)
             return reply("error", error="the host process is stopping")
+        if op == "hello" and conn.origin is None and wire.is_id(msg.get("as") or ""):  # (a chat's own tools: judged
+            conn.acting = msg["as"]                                                       # as the member that started it)
+            if (by := self.started_by(msg["as"])) is not None:
+                conn.member, conn.verified = by
+        if (cap := access.OPS.get(op)) is not None and not self.access.allowed(conn, cap):
+            return conn.send(self.access.refused(req, cap))
+        if op in ("start", "task_output", "autofix", "git", "signal_names") and not self.may_manage(conn, msg):  # (a
+            return conn.send(self.access.refused(req, "manage"))  # chat named: forked, adopted, read, its Auto-fix)
+        if op in ("read_file", "git", "signal_names", "catalogue") and conn.member is not None and \
+                not self.managed_folder(conn, msg.get("path") if op == "read_file" else msg.get("cwd")):
+            return conn.send(self.access.refused(req, "manage"))  # (a member's: in the folder of a chat it manages)
+        if op == "start":
+            with self.lock:
+                src = self.sessions.get(msg.get("fork_from")) if isinstance(msg.get("fork_from"), str) else None
+            if (cap := self.access.needs(conn, msg, src)) is not None:
+                return conn.send(self.access.refused(req, cap))
+        if op in ("access", "access_set"):
+            return self.access_op(conn, msg, reply)
         if op == "hello":
             head = msg.get("commit")  # (the head's code: one on other code than this, said in the log, once each)
             if isinstance(head, str) and self.commit and head != self.commit and head not in self.heads_apart:
@@ -400,7 +428,8 @@ class ServerRunning:
                 for s in self.sessions.values():
                     self.rescan(s)
                 self.desktop.look(force=True)
-            return reply("sessions", sessions=self.heads_listing(conn.archived), server=self.info())
+                listing = self.shown_to(conn, self.heads_listing(conn.archived))
+            return reply("sessions", sessions=listing, server=self.info())
         if op == "quit":  # (the host process itself: its claudes stopped, its sessions kept for next time; a turn
             # going on cut short, and marked so)
             with self.lock:  # (if_idle, a head's restart of it: not while a command's running, which it would end)
@@ -425,7 +454,11 @@ class ServerRunning:
         if op == "catalogue":  # (on a thread of its own: it waits for the catalogue to be made)
             def catalogue():
                 try:
-                    reply("catalogue", **self.catalogue(msg.get("cwd"), bool(msg.get("wait"))))
+                    got = self.catalogue(msg.get("cwd"), bool(msg.get("wait")))
+                    kube, dbs = self.access.allowed(conn, "kube"), self.access.allowed(conn, "databases")
+                    got["items"] = [it for it in got["items"] if (kube or not catalogued_kube(it)) and
+                                    (dbs or it.get("icon") != "db")]  # (its clusters' and databases' parts: theirs)
+                    reply("catalogue", **got)
                 except Exception as e:  # noqa: BLE001 (git or kubectl gone wrong: said, and asked again later)
                     reply("error", error=f"{type(e).__name__}: {e}")
             threading.Thread(target=catalogue, daemon=True, name="catalogue").start()
@@ -437,8 +470,9 @@ class ServerRunning:
                         reply("dir", **hostfiles.list_dir(self, msg.get("path")))
                     elif op == "fixes":
                         reply(op, **hostfixes.answer(self, msg))
-                    else:
-                        reply(op, **(hostfiles.git if op == "git" else hostfiles.signal_names)(self, msg))
+                    else:  # (a member's git: the repository its folder's, not one named, read with this host's gh)
+                        asked = {k: v for k, v in msg.items() if k != "repo"} if conn.member is not None else msg
+                        reply(op, **(hostfiles.git if op == "git" else hostfiles.signal_names)(self, asked))
                 except (ValueError, OSError) as e:
                     reply("error", error=str(e))
                 except Exception as e:  # noqa: BLE001 (anything else gone wrong: still answered)
@@ -609,6 +643,8 @@ class ServerRunning:
             where = msg.get("where") if wire.is_where(msg.get("where")) else None
             done = (self.mesh.deactivate if op == "deactivate" else self.mesh.activate)(msg.get("id"), where)
             return reply(op + "d", any=done)
+        if not self.may_manage(conn, msg):  # (every op from here on is a chat's: refused before it's touched)
+            return conn.send(self.access.refused(req, "manage"))
         with self.lock:  # (a Claude Desktop chat only listed, written in: taken up first, its folder made again below;
             # not while Desktop's writing it)
             if msg.get("session") in self.desktop.chats and desktopchats.takes_up(msg):
@@ -631,6 +667,10 @@ class ServerRunning:
                 return reply("error", error=f"no session {msg.get('session')}")
             if s.deleting:
                 return reply("error", error=wording.say("host_errors.being_deleted", session=s.id))
+            if (cap := self.access.needs(conn, msg, s)) is not None:  # (commands run, or a Bot driven, through it)
+                return conn.send(self.access.refused(req, cap))
+            if op == "waits_on" and conn.member is not None and conn.acting != s.id:  # (its own agent's tools' only)
+                return conn.send(self.access.refused(req, "manage"))
             if op == "attach":
                 conn.answers = msg.get("answers", True) is not False  # (false: it won't answer what's asked)
                 s.attached_once = True
@@ -793,6 +833,70 @@ class ServerRunning:
                 return reply("memory", session=s.id, **mem)
         self.log(f"refused: no op {op!r} here")  # (one the schema has that no host takes here: a reply's, say)
         return conn.send(wire.refused(wire.UNSUPPORTED, req, f"no op {op!r} here"))
+
+    def started_by(self, sid):
+        """(member, verified) that started the chat sid here (its meta's started_by), or None: a head here did."""
+        with self.lock:
+            s = self.sessions.get(sid) if isinstance(sid, str) else None
+            by = s.meta.get("started_by") if s is not None else None
+        return (by["id"], by.get("verified") is not False) if isinstance(by, dict) and wire.is_id(by.get("id") or "") \
+            else None
+
+    def managed_folder(self, conn, path):
+        """Is path (absolute) in the folder of a chat here conn may manage?"""
+        if not isinstance(path, str) or not os.path.isabs(os.path.expanduser(path)):
+            return False
+        real = os.path.realpath(os.path.expanduser(path))
+        with self.lock:
+            chats = list(self.sessions.values()) + list(self.desktop.chats.values())
+        folders = {os.path.realpath(c.meta["cwd"]) for c in chats
+                   if isinstance(c.meta.get("cwd"), str) and self.access.allowed(conn, "manage", c)}
+        return any(real == f or real.startswith(f.rstrip(os.sep) + os.sep) for f in folders)
+
+    def may_manage(self, conn, msg):
+        """May conn manage the chat msg names (session; a start's fork_from or adopt), as access has it?"""
+        if conn.member is None:
+            return True
+        for key in ("session", "fork_from", "adopt"):
+            if isinstance(sid := msg.get(key), str) and sid:
+                with self.lock:
+                    s = self.sessions.get(sid) or self.desktop.chats.get(sid)
+                if not self.access.allowed(conn, "manage", s):
+                    return False
+        return True
+
+    def access_op(self, conn, msg, reply):
+        """access and access_set: the host's rules, a chat's own (session) too; set from where access allows it."""
+        op, sid = msg["op"], msg.get("session")
+        with self.lock:
+            s = self.sessions.get(sid) if isinstance(sid, str) else None
+            listed = sid in self.desktop.chats
+        if sid is not None and listed and s is None:  # (a Claude Desktop chat only listed: its rule's the host's)
+            return reply("error", error=wording.say("access.desktop_listed"), plain=True)
+        if sid is not None and (s is None or not self.access.allowed(conn, "manage", s)):
+            return reply("error", error=f"no session {sid}")
+        if op == "access_set":
+            if not self.access.allowed(conn, "access"):
+                return conn.send(self.access.refused(msg.get("req"), "access"))
+            try:
+                if s is not None:
+                    rule = access.clean(msg["rule"]) if msg.get("rule") is not None else None
+                    with self.lock:
+                        if rule is None:
+                            s.meta.pop("access", None)
+                        else:
+                            s.meta["access"] = rule
+                        self.save(s)
+                elif msg.get("capability") is not None and msg.get("rule") is not None:
+                    self.access.set(msg["capability"], msg["rule"])
+                else:
+                    raise ValueError(wording.say("access.bad_rule"))
+            except (OSError, ValueError) as e:
+                return reply("error", error=str(e))
+            self.log(f"access: {sid or msg['capability']} set by {conn.member or 'a head here'}")
+        own = dict(s.meta["access"]) if s is not None and s.meta.get("access") else None
+        return reply(op, state=self.access.state(conn, (own or {}).get("members") or ()),
+                     session=sid if s is not None else None, chat=own)
 
     def run_routine(self, s, r, schedule=True):
         """(under the lock) A routine's run: its Bot given a turn with what to do, as if it were said (one asked for

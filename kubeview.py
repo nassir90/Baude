@@ -306,7 +306,7 @@ class KubeView(Gtk.Box):
         self.add_css_class("baude-frame")  # (the bar and the sidebar: theming.CSS; the rest the inside, set into it)
         ensure_icons()
         self.win, self.contexts, self.context = win, [], None
-        self.ns_shown, self.ns_by_context, self.ns_checks = [], {}, {}  # (none shown: all of them)
+        self.ns_shown, self.ns_by_context, self.ns_checks = None, {}, {}  # (None: all of them)
         self.page, self.table_page, self.resources, self.namespaces = KUBE_PODS, None, None, []
         self.generation, self.loading, self.timer, self.syncing = 0, False, None, False
         self.store = self.filter = self.selection = self.table = self.table_cols = None
@@ -672,8 +672,9 @@ class KubeView(Gtk.Box):
         """Read a context's namespaces and the resources it serves, then the page; the table fades meanwhile (the
         other cluster's object isn't shown beside it). It shows namespaces, else those it showed last time."""
         self.context, self.resources, self.namespaces, self.note = name, None, [], None
-        self.ns_shown = list(namespaces) if namespaces is not None else list(self.ns_by_context.get(name, []))
-        self.ns_by_context[name] = list(self.ns_shown)
+        self.ns_shown = namespaces if namespaces is not None else self.ns_by_context.get(name)
+        self.ns_shown = None if self.ns_shown is None else list(self.ns_shown)
+        self.ns_by_context[name] = self.ns_shown and list(self.ns_shown)
         self.fill_namespaces()
         if self.host.here:
             save_settings(kube_context=name)
@@ -787,29 +788,30 @@ class KubeView(Gtk.Box):
     def fill_namespaces(self):
         """The namespace list: the cluster's namespaces, and any shown that it didn't list (one opened from a link),
         each a check; those shown checked, and named on the button."""
-        self.ns_pick.fill([(ns, ns) for ns in sorted(set(self.namespaces) | set(self.ns_shown))], self.ns_shown)
+        self.ns_pick.fill([(ns, ns) for ns in sorted(set(self.namespaces) | set(self.ns_shown or ()))], self.ns_shown)
         self.ns_checks = self.ns_pick.checks
         self.sync_namespaces()
 
     def sync_namespaces(self):
         self.ns_pick.sync(self.ns_shown)
         self.ns_label.set_label(self.ns_summary())
-        self.ns_btn.set_tooltip_text(", ".join(self.ns_shown) if len(self.ns_shown) > 2 else
+        self.ns_btn.set_tooltip_text(", ".join(self.ns_shown) if len(self.ns_shown or ()) > 2 else
                                      wording.say("kube.namespaces_tip"))
 
     def ns_summary(self):
-        """The namespaces shown, in a few words: All namespaces; shop; shop, jobs; 3 namespaces."""
+        """The namespaces shown, in a few words: All namespaces; shop; shop, jobs; 3 namespaces; 0 namespaces."""
         n = self.ns_shown
-        return wording.say("kube.all_namespaces") if not n else ", ".join(n) if len(n) <= 2 else \
+        return wording.say("kube.all_namespaces") if n is None else ", ".join(n) if 0 < len(n) <= 2 else \
             wording.say("kube.n_namespaces", n=len(n))
 
     def show_namespaces(self, names):
-        """Show these namespaces' objects (in the order picked), or every namespace's ([]): picked from the list, a
-        pod's namespace clicked. The list is every namespace's already: only the table fades, to be filtered."""
-        self.ns_shown = list(dict.fromkeys(names))
+        """Show these namespaces' objects (in the order picked; [] for none), or every namespace's (None): picked from
+        the list, a pod's namespace clicked. The list is every namespace's already: only the table fades, to be
+        filtered."""
+        self.ns_shown = None if names is None else list(dict.fromkeys(names))
         if self.context:
-            self.ns_by_context[self.context] = list(self.ns_shown)
-        if any(ns not in self.ns_checks for ns in self.ns_shown):
+            self.ns_by_context[self.context] = self.ns_shown and list(self.ns_shown)
+        if any(ns not in self.ns_checks for ns in self.ns_shown or ()):
             self.fill_namespaces()
         else:
             self.sync_namespaces()
@@ -818,11 +820,11 @@ class KubeView(Gtk.Box):
     def set_namespace(self, ns):
         """Show only ns's objects (a pod's namespace clicked, a namespace opened); None: every namespace's."""
         if self.page["namespaced"]:
-            self.show_namespaces([ns] if ns else [])
+            self.show_namespaces([ns] if ns else None)
             return
-        self.ns_shown = [ns] if ns else []  # (from the Namespaces page: its pods)
+        self.ns_shown = [ns] if ns else None  # (from the Namespaces page: its pods)
         if self.context:
-            self.ns_by_context[self.context] = list(self.ns_shown)
+            self.ns_by_context[self.context] = self.ns_shown and list(self.ns_shown)
         self.fill_namespaces()
         self.page = KUBE_PODS
         self.select_page_row(KUBE_PODS)
@@ -863,7 +865,7 @@ class KubeView(Gtk.Box):
             self.update_status()
             self.set_note(wording.say("kube.no_page", kind=kind, name=name))
             return False
-        if ns and row.page["namespaced"] and self.ns_shown and ns not in self.ns_shown:
+        if ns and row.page["namespaced"] and self.ns_shown is not None and ns not in self.ns_shown:
             self.show_namespaces(self.ns_shown + [ns])
         self.search.set_text("")
         self.pending_pick = (name, ns if row.page["namespaced"] else "")
@@ -1199,7 +1201,7 @@ class KubeView(Gtk.Box):
         return Gtk.ColumnViewColumn(title="", factory=f, resizable=False)
 
     def row_visible(self, row, _data=None):
-        if self.ns_shown and self.table_page is not None and self.table_page["namespaced"] and \
+        if self.ns_shown is not None and self.table_page is not None and self.table_page["namespaced"] and \
                 row.obj["namespace"] not in self.ns_shown:
             return False
         text = self.search.get_text().strip().lower()
@@ -1225,7 +1227,7 @@ class KubeView(Gtk.Box):
         what = self.table_page["title"].lower()
         shown = wording.say("kube.count_of", n=n, what=what, total=total) if n != total else \
             wording.say("kube.count", n=n, what=what)
-        if self.ns_shown and self.table_page["namespaced"]:
+        if self.ns_shown is not None and self.table_page["namespaced"]:
             shown = wording.say("kube.in_namespaces", shown=shown, namespaces=self.ns_summary())
         bits = [self.note and self.note[1] > time.monotonic() and self.note[0], shown,
                 self.context, self.watch is not None and wording.say("kube.live"), self.metrics_note,

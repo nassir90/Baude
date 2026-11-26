@@ -1,0 +1,55 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "A host's rule for each of its capabilities, by name: everybody's where none's set.",
+  "properties": {
+    "shell": {
+      "$ref": "AccessRule.json",
+      "description": "A shell on its machine: its terminals (terminal ops) and Multiplex's, through a Bot's terminal tools (multiplex)."
+    },
+    "browser": {
+      "$ref": "AccessRule.json",
+      "description": "Its Bots' Emission browsers: their tools' calls (emission), watching one (emission_watch) and a phone showing one (emission_serve)."
+    },
+    "providers": {
+      "$ref": "AccessRule.json",
+      "description": "Its inference providers' models, run through the mesh (infer)."
+    },
+    "model_files": {
+      "$ref": "AccessRule.json",
+      "description": "Its models' files, read through the mesh (files)."
+    },
+    "spawn": {
+      "$ref": "AccessRule.json",
+      "description": "New chats and agents started on it (start, agent)."
+    },
+    "manage": {
+      "$ref": "AccessRule.json",
+      "description": "Its chats as they are: listed, read, written in, stopped, renamed, archived, deleted, a Bot's routines and memory. A chat's own rule (Access's chat) goes before this."
+    },
+    "kube": {
+      "$ref": "AccessRule.json",
+      "description": "Its machine's Kubernetes clusters (kube, kube_follow)."
+    },
+    "databases": {
+      "$ref": "AccessRule.json",
+      "description": "Its machine's databases (databases)."
+    },
+    "access": {
+      "$ref": "AccessRule.json",
+      "description": "These rules changed (access_set). A head on its own machine, or one over ssh, may always."
+    }
+  },
+  "required": [
+    "shell",
+    "browser",
+    "providers",
+    "model_files",
+    "spawn",
+    "manage",
+    "kube",
+    "databases",
+    "access"
+  ],
+  "additionalProperties": false
+}

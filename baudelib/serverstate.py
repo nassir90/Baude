@@ -189,11 +189,14 @@ def _read_json(path):
 class Conn:
     """A client's connection: what it's sent goes out on a thread of its own, so a slow one holds nobody up."""
 
-    def __init__(self, channel, origin=None, sender=None):
+    def __init__(self, channel, origin=None, sender=None, verified=True):
         self.channel, self.out = channel, queue.Queue()
         self.subscribed, self.answers = False, True  # (answers: what its sessions ask, if it's attached to them)
         self.origin, self.sender = origin, sender  # (a tunnel's: the member it came from; the chat there its relay
         # named, as that member has it: what's sent through it is from)
+        self.member, self.verified = origin, verified  # (who the access rules judge it as: a tunnel's origin, or the
+        # member that started the chat whose own tools it is (hello's as); verified: by its key, mesh.Mesh.opener)
+        self.acting = None  # (the chat here whose own tools it is, as its hello said)
         self.archived = False  # (subscribed to archived sessions too)
         self.writer = threading.Thread(target=self._write, daemon=True, name="client-out")
         self.writer.start()

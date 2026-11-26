@@ -1,0 +1,61 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "One of a host's access rules set (capability), or a chat's own rule for managing it (session; rule null: the host's again). Refused (access_denied) from a member the access rule doesn't allow.",
+  "properties": {
+    "op": {
+      "const": "access_set",
+      "description": "What it is."
+    },
+    "req": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "capability": {
+      "anyOf": [
+        {
+          "enum": [
+            "shell",
+            "browser",
+            "providers",
+            "model_files",
+            "spawn",
+            "manage",
+            "kube",
+            "databases",
+            "access"
+          ]
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The capability whose rule it is."
+    },
+    "session": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "A chat of the host's: its own rule."
+    },
+    "rule": {
+      "anyOf": [
+        {
+          "$ref": "AccessRule.json"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The rule (null, for a chat: the host's)."
+    }
+  },
+  "required": [
+    "op"
+  ],
+  "additionalProperties": false
+}

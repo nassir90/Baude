@@ -194,8 +194,8 @@ val Dp.icon: Dp get() = this * (Tokens.Font.body.value / BAUDE_TEXT_PX) * Settin
 
 private const val BAUDE_TEXT_PX = 12f
 
-/** ⋮ → Settings…, as Baude's Settings: its pages, General, Subscriptions (SubscriptionsPage), Dependencies (DepsPage)
- * and Telemetry (TelemetryPage), swiped between (the chat's pages' pager) or switched between by the bar at its foot,
+/** ⋮ → Settings…, as Baude's Settings: its pages, General, Subscriptions (SubscriptionsPage), Dependencies (DepsPage),
+ * Telemetry (TelemetryPage) and Access (AccessPage), swiped between (the chat's pages' pager) or switched between by the bar at its foot,
  * as Baude's dialog's switcher is when it's narrow, which follows the swipe (page: the one it opens on). General's
  * groups in Baude's order: Meta's, Full-width text, Code Font, the accent and whether it's light or dark, how updates
  * download, notifications and the version; the sizes; Send Feedback…. */
@@ -205,7 +205,8 @@ fun SettingsScreen(back: () -> Unit, feedback: () -> Unit, chat: List<String> = 
     val pages = listOf(Page("general", Wording.Subscriptions.general, Adwaita.EmblemSystem),
         Page("subscriptions", Wording.Subscriptions.title, Adwaita.SystemUsers),
         Page("dependencies", Wording.Deps.title, Adwaita.PackageXGeneric),
-        Page("telemetry", Wording.Telemetry.title, Adwaita.DocumentOpenRecent))
+        Page("telemetry", Wording.Telemetry.title, Adwaita.DocumentOpenRecent),
+        Page("access", Wording.Access.title, Adwaita.DialogPassword))
     val state = rememberPagerState(initialPage = page.coerceIn(0, pages.lastIndex)) { pages.size }
     val scope = rememberCoroutineScope()
     Column(Modifier.fillMaxSize().background(c.frame)) {
@@ -215,6 +216,7 @@ fun SettingsScreen(back: () -> Unit, feedback: () -> Unit, chat: List<String> = 
                 1 -> SubscriptionsPage()
                 2 -> DepsPage()
                 3 -> TelemetryPage()
+                4 -> AccessPage()
                 else -> GeneralPage(feedback, chat)
             }
         }

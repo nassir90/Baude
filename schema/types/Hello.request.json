@@ -26,6 +26,10 @@
     "here": {
       "type": "boolean",
       "description": "true: it's on the host's own machine, connected by its socket (an app there is listed among the host's heads; one elsewhere isn't)."
+    },
+    "as": {
+      "type": "string",
+      "description": "A chat on the host it's from (its own tools, on its host's socket): judged by the access rules as the member that started it, if one did."
     }
   },
   "required": ["op"],

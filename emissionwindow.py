@@ -283,7 +283,7 @@ class Window(Adw.ApplicationWindow):
             self.take(pid, [u for u in msg.get("urls") or [] if isinstance(u, str)])
             return answer({"ok": True})
         if op == "info":  # (hosted: not an agent's to be asked to go; its pages opened there instead: open)
-            return answer({"agent": self.agent, "hosted": self.hosted, "profile": self.profile,
+            return answer({"agent": self.agent, "hosted": self.hosted, "profile": self.profile, "pid": os.getpid(),
                            "tabs": len(self.tabs), "idle_s": idle_s, "commit": STARTED})
         if op == "memory":  # (tests/bench_emission.py's: what this process holds now, counted after a collection)
             return answer(self.memory())

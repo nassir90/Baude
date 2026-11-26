@@ -271,8 +271,8 @@ abstract class Screens(private val theme: String) {
         screen("40c2-dependencies-end")
     }
 
-    // (Settings → Telemetry on a host: its turns' tokens by day over a year, the models used, its machine now, its chats'
-    // latest activity and line profiling, as it answers telemetry_read; made-up numbers, the same every run)
+    // (Settings → Telemetry on a host: its turns' tokens by day over a year, the models used, its machine and its
+    // processes now and line profiling, as it answers telemetry_read; made-up numbers, the same every run)
     @Test fun telemetry() {
         telemetryFixture()
         show { SettingsScreen({}, {}, page = 3) }
@@ -280,7 +280,7 @@ abstract class Screens(private val theme: String) {
         screen("40d-telemetry")
     }
 
-    // (the same page's foot: its machine now, its chats' latest activity, line profiling and its top lines)
+    // (the same page's foot: its machine and its processes now, line profiling and its top lines)
     @Test fun telemetryFoot() {
         telemetryFixture()
         show {
@@ -459,7 +459,9 @@ abstract class Screens(private val theme: String) {
                     .put("memory_stall", org.json.JSONObject.NULL).put("procs", org.json.JSONArray(listOf(
                         org.json.JSONObject().put("app", "host").put("pid", 101).put("cpu", 1.4).put("rss", 148_897_792L),
                         org.json.JSONObject().put("app", "baude").put("pid", 102).put("cpu", 6.2).put("rss", 642_777_088L),
-                        org.json.JSONObject().put("app", "record").put("pid", 103).put("cpu", 0.3).put("rss", 231_735_296L)))))))
+                        org.json.JSONObject().put("app", "record").put("pid", 103).put("cpu", 0.3).put("rss", 231_735_296L),
+                        org.json.JSONObject().put("app", "emission").put("pid", 104).put("cpu", 3.8).put("rss", 412_090_368L),
+                        org.json.JSONObject().put("app", "multiplex").put("pid", 105).put("cpu", 0.6).put("rss", 98_566_144L)))))))
                 "profiles" -> out.put("profiles", org.json.JSONArray(listOf(org.json.JSONObject().put("at", now - 30)
                     .put("from", now - 60).put("app", "host").put("lines", org.json.JSONArray(listOf(
                         org.json.JSONObject().put("file", "baudelib/telemetry.py").put("line", 271).put("function", "sample")

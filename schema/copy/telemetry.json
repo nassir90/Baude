@@ -1,5 +1,5 @@
 {
-  "description": "Telemetry: what each app keeps of what's done in chats, what each host samples of its machine, line profiles, and Settings → Telemetry, which shows them for the host picked.",
+  "description": "Telemetry: what each app keeps of what's done in chats, what each host samples of its machine and its processes, line profiles, and Settings → Telemetry, which shows them for the host picked.",
   "messages": {
     "title": "Telemetry",
     "collect": "Collect Telemetry",
@@ -9,13 +9,6 @@
     "most_used": "Most Used",
     "model_effort": "{$model} · {$effort}",
     "turns_tokens": ".input {$turns :number} .match $turns one {{{$turns} Turn · {$tokens}}} * {{{$turns} Turns · {$tokens}}}",
-    "chat_activity": "Chat Activity",
-    "chat_opened": "Chat Opened",
-    "chat_front": "Chat in Front",
-    "chat_left": "Chat Left",
-    "turn_sent": "Turn Sent",
-    "turn_ended": "Turn Ended",
-    "turn_ended_in": "Turn Ended in {$time}",
     "machine": "Machine",
     "load": "Load",
     "memory_of": "{$used} of {$total}",
@@ -35,7 +28,6 @@
     "hits_seconds": "{$hits} Hits · {$seconds}s",
     "off": "Telemetry is off",
     "no_profiling": "Line profiling isn't on this phone",
-    "not_found": "{$name} isn't a module or function here",
-    "nothing": "Nothing recorded"
+    "not_found": "{$name} isn't a module or function here"
   }
 }

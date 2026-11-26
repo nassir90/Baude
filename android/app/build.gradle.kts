@@ -692,7 +692,8 @@ androidComponents {
  * links (a link's logo, drawn in the text's colour) as dev.baude.android.LinkLogos, each logo's shapes, filled or
  * stroked, and what its mask cuts from them; models (each model family's logo, Adwaita.Model<Name>) with
  * models/families.json as dev.baude.android.ModelFamilies, the families the model pickers head and draw models by;
- * and apps/baude-notification.svg as the notification's icon (drawable ic_baude). The SVG they use: path, rect, circle
+ * apps (each app's logo in its colours, as dev.baude.android.AppLogos) and apps/baude-notification.svg as the
+ * notification's icon (drawable ic_baude). The SVG they use: path, rect, circle
  * and ellipse, filled or stroked, in groups that scale, translate or rotate, with opacity, a fill rule said on them or
  * on what they're in, a drawing on another square than 16 (models' 24) scaled to 16, and a mask (white shows, black
  * cuts) for a cut-out. */
@@ -964,6 +965,63 @@ abstract class BaudeIcons : DefaultTask() {
         return out.append("    )\n}\n").toString()
     }
 
+    /** AppLogos: schema/icons/apps' logos in their colours (the Telemetry page's processes', as the desktop draws them),
+     * by their files' names: each shape a path (a rect's or an ellipse's as one), filled or stroked (what it's in says
+     * its stroke, its width, caps and joins), and for a masked one what its mask's black cuts from it. */
+    private fun appLogos(dir: File): String {
+        val out = StringBuilder()
+        out.append("// Made from schema/icons/apps as the app's built (build.gradle.kts's baudeIcons): never edited, never kept.\n")
+        out.append("package dev.baude.android\n\n")
+        out.append("/** The apps' logos (schema/icons/apps), in their colours, on a 128 square. */\n")
+        out.append("object AppLogos {\n")
+        out.append("    /** A shape: its path, its fill or its stroke (#AARRGGBB), the stroke's width and whether its caps and joins are\n")
+        out.append("     * round, its opacity, and what's cut from it (a mask's black). */\n")
+        out.append("    class Shape(val d: String, val fill: Long? = null, val stroke: Long? = null, val width: Float = 1f,\n")
+        out.append("                val round: Boolean = false, val alpha: Float = 1f, val cut: List<Shape> = emptyList())\n\n")
+        out.append("    /** A logo: its tile's colour (its first rect's: what an accent recolours) and its shapes, in order. */\n")
+        out.append("    class Logo(val tile: Long, val shapes: List<Shape>)\n\n")
+        out.append("    /** Each logo, by its file's name. */\n")
+        out.append("    val all: Map<String, Logo> = mapOf(\n")
+        for (f in dir.listFiles { f -> f.name.endsWith(".svg") && f.name != "baude-notification.svg" }!!.sortedBy { it.name }) {
+            val where = "apps/${f.name}"
+            val svg = read(f)
+            val masks = svg.getElementsByTagName("mask").let { m -> (0 until m.length).map { m.item(it) as org.w3c.dom.Element } }
+            fun hex(c: String?): String? = c?.takeIf { it != "none" }?.let { "0x" + argb(it, where).removePrefix("#") }
+            fun flat(e: org.w3c.dom.Element, said: Map<String, String>, into: MutableList<String>, keep: (Map<String, String>) -> Boolean) {
+                val mine = HashMap(said)
+                for (k in listOf("fill", "stroke", "stroke-width", "stroke-linecap", "stroke-linejoin", "opacity"))
+                    e.attr(k)?.let { mine[k] = it }
+                if (e.tagName == "g") { e.kids().forEach { flat(it, mine, into, keep) }; return }
+                if (!keep(mine)) return
+                val d = when (e.tagName) {
+                    "path" -> spaced(e.getAttribute("d")); "rect" -> rectD(e); "ellipse" -> ellipseD(e); "circle" -> circleD(e)
+                    else -> throw GradleException("schema/icons/$where: <${e.tagName}> isn't drawn here")
+                }
+                val args = arrayListOf("\"$d\"")
+                hex(mine["fill"] ?: if (mine["stroke"] == null) "#000" else null)?.let { args.add("fill = $it") }
+                hex(mine["stroke"])?.let { args.add("stroke = $it"); args.add("width = ${num(mine["stroke-width"] ?: "1")}f") }
+                if (mine["stroke-linecap"] == "round" || mine["stroke-linejoin"] == "round") args.add("round = true")
+                mine["opacity"]?.let { args.add("alpha = ${num(it)}f") }
+                val ref = e.attr("mask")
+                if (ref != null) {
+                    val mask = masks.firstOrNull { "url(#${it.getAttribute("id")})" == ref }
+                        ?: throw GradleException("schema/icons/$where: no mask $ref")
+                    val cut = ArrayList<String>()
+                    mask.kids().forEach { flat(it, emptyMap(), cut) { m -> (m["stroke"] ?: m["fill"])?.lowercase() in setOf("#000", "#000000", "black") } }
+                    args.add("cut = listOf(${cut.joinToString(", ")})")
+                }
+                into.add("Shape(${args.joinToString(", ")})")
+            }
+            val shapes = ArrayList<String>()
+            for (e in svg.kids()) if (e.tagName !in setOf("mask", "defs")) flat(e, emptyMap(), shapes) { true }
+            val tile = svg.kids().firstOrNull { it.tagName == "rect" } ?: throw GradleException("schema/icons/$where: no tile")
+            out.append("        \"${f.name.removeSuffix(".svg")}\" to Logo(${hex(tile.attr("fill"))}, listOf(\n")
+            shapes.forEach { out.append("            $it,\n") }
+            out.append("        )),\n")
+        }
+        return out.append("    )\n}\n").toString()
+    }
+
     /** A Kotlin string literal of s. */
     private fun quoted(s: String) = "\"" + s.replace("\\", "\\\\").replace("\"", "\\\"").replace("$", "\\$") + "\""
 
@@ -1062,6 +1120,7 @@ abstract class BaudeIcons : DefaultTask() {
             |    }
             |""".trimMargin() + blocks + "}\n")
         dir.resolve("LinkLogos.kt").writeText(linkLogos(root.resolve("links")))
+        dir.resolve("AppLogos.kt").writeText(appLogos(root.resolve("apps")))
         dir.resolve("ModelFamilies.kt").writeText(modelFamilies(root.resolve("models"), seen))
         val res = resDir.get().asFile.resolve("drawable")
         res.mkdirs()

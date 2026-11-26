@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
@@ -33,17 +34,21 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.BlendMode
+import androidx.compose.ui.graphics.Paint
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.scale
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.delay
 import org.json.JSONObject
-import java.time.Instant
 import java.time.LocalDate
-import java.time.ZoneId
-import java.time.format.DateTimeFormatter
 import java.util.Locale
 
 /** What this app tells its own host (this phone's: PhoneHost, the telemetry op) of chats as it happens
@@ -151,17 +156,14 @@ object Telemetry {
     }
 }
 
-private val APP_NAMES = mapOf("phone" to { Wording.MeshVersions.baude }, "baude" to { Wording.MeshVersions.baude },
-    "record" to { Wording.MeshVersions.record }, "host" to { Wording.Telemetry.hostProcess })
+private val APP_NAMES = linkedMapOf("host" to { Wording.Telemetry.hostProcess }, "baude" to { Wording.MeshVersions.baude },
+    "record" to { Wording.MeshVersions.record }, "emission" to { Wording.MeshVersions.emission },
+    "multiplex" to { Wording.Deps.multiplex }, "phone" to { Wording.MeshVersions.baude })
+/** Each process's app's logo (AppLogos: schema/icons/apps), as telemetryview.APP_LOGOS. */
+private val APP_LOGOS = mapOf("host" to "baude", "baude" to "baude", "record" to "record", "emission" to "emission-16",
+    "multiplex" to "multiplex-16", "phone" to "baude")
 private val PROFILED = listOf("host", "baude", "record")
 private const val WEEKS = 53
-
-/** A time, said short (telemetryview.said_time). */
-fun saidSeconds(seconds: Long): String = when {
-    seconds < 60 -> Wording.Time.seconds(seconds = seconds)
-    seconds < 3600 -> Wording.Time.minutesSeconds(minutes = seconds / 60, seconds = seconds % 60)
-    else -> Wording.Time.hoursMinutes(hours = seconds / 3600, minutes = seconds % 3600 / 60)
-}
 
 private fun saidSize(n: Long?): String = when {
     n == null -> "–"
@@ -176,23 +178,6 @@ private fun pressureSaid(s: Msg.TelemetrySample): String? =
 private fun tokens(n: Long) = fmtTokens(n.coerceAtMost(Int.MAX_VALUE.toLong()).toInt())
 
 private fun effortSaid(e: String?) = e?.let { Wording.byKey["mode_effort.effort_$it"] ?: it } ?: "–"
-
-private fun eventSaid(e: Msg.TelemetryEvent): String = when (e.kind) {
-    "turn_ended" -> e.seconds?.let { Wording.Telemetry.turnEndedIn(time = saidSeconds(Math.round(it.toDouble()))) }
-        ?: Wording.Telemetry.turnEnded
-    "chat_opened" -> Wording.Telemetry.chatOpened
-    "chat_front" -> Wording.Telemetry.chatFront
-    "chat_left" -> Wording.Telemetry.chatLeft
-    else -> Wording.Telemetry.turnSent
-}
-
-/** The latest first, a turn's end once (telemetryview.shown_events). */
-private fun shownEvents(events: List<Msg.TelemetryEvent>): List<Msg.TelemetryEvent> {
-    val seen = events.filter { it.app != "host" }
-    val host = events.filter { e -> e.app == "host" && seen.none { x -> x.kind == e.kind && x.session == e.session &&
-        Math.abs((x.at?.toDouble() ?: 0.0) - (e.at?.toDouble() ?: 0.0)) < 10 } }
-    return (seen + host).sortedByDescending { it.at?.toDouble() ?: 0.0 }.take(12)
-}
 
 /** Each day's level in the grid, 0 to 4 (telemetryview.levels). */
 private fun levels(days: List<Msg.TelemetryDay>): Map<String, Int> {
@@ -233,17 +218,55 @@ private fun valueRow(title: String, value: String?, slug: String? = null): @Comp
     }
 }
 
+private val logoPaths = HashMap<String, androidx.compose.ui.graphics.Path>()
+private fun logoPath(d: String) = logoPaths.getOrPut(d) { androidx.compose.ui.graphics.vector.PathParser().parsePathString(d).toPath() }
+
+/** An app's logo (AppLogos), size square: Baude's and Record's tile in the accent picked, as telemetryview.logo. */
+@Composable
+private fun AppLogo(name: String, size: androidx.compose.ui.unit.Dp) {
+    val logo = AppLogos.all[name] ?: return
+    val accent = Settings.ACCENTS[Settings.accent.value]?.takeIf { name == "baude" || name == "record" }
+    fun colour(argb: Long) = if (accent != null && argb == logo.tile) accent else androidx.compose.ui.graphics.Color(argb)
+    Canvas(Modifier.size(size)) {
+        scale(this.size.width / 128f, Offset.Zero) {
+            fun draw(sh: AppLogos.Shape, clear: Boolean = false) {
+                val mode = if (clear) BlendMode.Clear else BlendMode.SrcOver
+                sh.fill?.let { drawPath(logoPath(sh.d), colour(it), sh.alpha, blendMode = mode) }
+                sh.stroke?.let { drawPath(logoPath(sh.d), colour(it), sh.alpha, Stroke(sh.width,
+                    cap = if (sh.round) StrokeCap.Round else StrokeCap.Butt,
+                    join = if (sh.round) StrokeJoin.Round else StrokeJoin.Miter), blendMode = mode) }
+            }
+            for (sh in logo.shapes) {
+                if (sh.cut.isEmpty()) { draw(sh); continue }
+                drawContext.canvas.saveLayer(Rect(Offset.Zero, Size(128f, 128f)), Paint()) // (its cuts show what's under it)
+                draw(sh)
+                sh.cut.forEach { draw(it, clear = true) }
+                drawContext.canvas.restore()
+            }
+        }
+    }
+}
+
+/** A process's row (telemetryview.proc_row): its app's logo, its name, its CPU and memory after them. */
+@Composable
+private fun ProcessRow(p: Msg.TelemetryProc) {
+    val c = LocalBaude.current
+    ActionRow(APP_NAMES[p.app]?.invoke() ?: p.app.orEmpty(), null,
+        prefix = { AppLogo(APP_LOGOS[p.app] ?: "baude", 16.dp.icon) },
+        suffix = { Text(Wording.Telemetry.cpuRss(cpu = p.cpu?.let { String.format(Locale.ROOT, "%.1f", it.toDouble()) } ?: "–",
+            rss = saidSize(p.rss?.toLong())), style = Type.body, color = c.dim, maxLines = 1) })
+}
+
 /** Settings → Telemetry (telemetryview.Page), Settings' fourth page: the host picked beside New session (this phone's
  * own, if it's picked), Collect Telemetry, then what that host keeps: its tokens by day over a year with the most
- * used model and effort and each model's, its machine now, its chats' latest activity, and (a computer's) line
- * profiling with its top lines. */
+ * used model and effort and each model's, its machine now, its processes now, and (a computer's) line profiling with
+ * its top lines. */
 @Composable
 fun TelemetryPage() {
     val c = LocalBaude.current
     val hostId = picked() ?: "phone"
     var asked by remember { mutableStateOf(0) }
     var usage by remember(hostId, asked) { mutableStateOf<JSONObject?>(null) }
-    var events by remember(hostId, asked) { mutableStateOf<JSONObject?>(null) }
     var metrics by remember(hostId) { mutableStateOf<JSONObject?>(null) }
     var profiles by remember(hostId, asked) { mutableStateOf<JSONObject?>(null) }
     var deps by remember(hostId) { mutableStateOf<Msg.Dep?>(null) }
@@ -253,7 +276,6 @@ fun TelemetryPage() {
     LaunchedEffect(hostId, asked) {
         val now = System.currentTimeMillis() / 1000.0
         read(now - (WEEKS * 7 + 7) * 86400.0, "usage", null) { usage = it }
-        read(now - 86400, "events", 48) { events = it }
         read(now - 3600, "profiles", 500) { profiles = it }
     }
     LaunchedEffect(hostId) {
@@ -263,7 +285,7 @@ fun TelemetryPage() {
             delay(5_000)
         }
     }
-    val replies = listOfNotNull(usage, events, metrics, profiles)
+    val replies = listOfNotNull(usage, metrics, profiles)
     val error = replies.firstOrNull { it.optString("op") == Op.ERROR }
     val state = replies.firstOrNull { it.optString("op") == Op.TELEMETRY_READ }?.let { Msg.TelemetryReadReply.from(it).state }
     fun set(msg: Msg.TelemetrySet) = Mesh.ask(hostId, msg.json()) { asked++ }
@@ -315,22 +337,13 @@ fun TelemetryPage() {
             s.swapTotal?.takeIf { it.toLong() > 0 }?.let { t -> rows.add(valueRow(Wording.Telemetry.swap,
                 Wording.Telemetry.memoryOf(used = saidSize(s.swapUsed?.toLong()), total = saidSize(t.toLong())))) }
             pressureSaid(s)?.let { rows.add(valueRow(Wording.Telemetry.memoryPressure, it)) }
-            for (p in s.procs.orEmpty().sortedBy { PROFILED.indexOf(it.app).let { i -> if (i < 0) 3 else i } })
-                rows.add(valueRow(APP_NAMES[p.app]?.invoke() ?: p.app.orEmpty(), Wording.Telemetry.cpuRss(
-                    cpu = p.cpu?.let { String.format(Locale.ROOT, "%.1f", it.toDouble()) } ?: "–", rss = saidSize(p.rss?.toLong()))))
             BoxedList(rows, "") { it() }
-        }
-        events?.let { Msg.TelemetryReadReply.from(it).events }?.let { all ->
-            Heading(Wording.Telemetry.chatActivity)
-            val shown = shownEvents(all)
-            if (shown.isEmpty()) BoxedList(listOf(Wording.Telemetry.nothing), "") { ActionRow(it, null) }
-            else BoxedList(shown, "") { e ->
-                val title = Mesh.session(if (e.host == PhoneHost.id) "phone" else e.host.orEmpty(), e.session.orEmpty())?.title
-                val at = Instant.ofEpochMilli(((e.at?.toDouble() ?: 0.0) * 1000).toLong()).atZone(ZoneId.systemDefault())
-                ActionRow(title ?: e.session.orEmpty().take(8), null, suffix = {
-                    Text(eventSaid(e) + "  " + at.format(DateTimeFormatter.ofPattern("HH:mm:ss")), style = Type.body,
-                        color = c.dim, maxLines = 1)
-                })
+            val order = APP_NAMES.keys.toList()
+            val procs = s.procs.orEmpty().filter { it.app in APP_NAMES }
+                .sortedWith(compareBy({ order.indexOf(it.app) }, { it.pid?.toLong() ?: 0L }))
+            if (procs.isNotEmpty()) {
+                Heading(Wording.SidePanel.processes)
+                BoxedList(procs, "") { ProcessRow(it) }
             }
         }
         if (hostId != "phone" && state != null) Profiling(state, profiles, deps, app, { app = it }, { asked++ }) { set(it) }

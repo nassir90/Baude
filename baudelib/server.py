@@ -25,8 +25,8 @@ import time
 import uuid
 
 from baudelib import (
-    access, accounts, codex, desktopchats, emissionlink, mesh, phonebrowser, models, notes, providers, selfupdate, tasks,
-    telemetry, toolnames, wire,
+    access, accounts, codex, desktopchats, emissionlink, mesh, multiplexlink, phonebrowser, models, notes, providers,
+    selfupdate, tasks, telemetry, toolnames, wire,
     wording,
 )
 from baudelib.serverstate import (
@@ -135,8 +135,10 @@ class Server(ServerRunning, ServerSessions):
         self.autofix_reading = set()  # (chats whose pull request Auto-fix is reading now: autofix.due)
         self.following = set()  # ((session, the one it waits on): waits of its agent's answered for it, answer_wait)
         self.mesh = mesh.Mesh(self)  # (the hosts it's linked to, and those they reach: mesh.py)
-        self.telemetry = telemetry.Telemetry(self.state_dir, self.me["id"], changed=self.changed, log=self.log)  # (its machine's
-        # chat events, samples and line profiles: baudelib/telemetry.py)
+        self.emission_pids = set()  # (the processes of this machine's Emissions, as they last said: sampled too)
+        self.telemetry = telemetry.Telemetry(self.state_dir, self.me["id"], changed=self.changed, log=self.log,
+                                             found=self.found_procs)  # (its machine's chat events, samples and line
+        # profiles: baudelib/telemetry.py)
         self.access = access.Access(self)  # (who in the mesh may use what of its: baudelib/access.py)
         self.tasks = tasks.Tasks(self)  # (its Bots' tasks: baudelib/tasks.py)
 
@@ -291,10 +293,22 @@ class Server(ServerRunning, ServerSessions):
         """This machine's Emissions, and the code each runs, asked every EMISSIONS_S (they're no heads: the host
         process reaches them, emissionlink)."""
         while not self.stopped.wait(EMISSIONS_S):
-            found = [{"client": "emission", "commit": c} for c in emissionlink.running_commits()]
+            infos = emissionlink.running()
+            self.emission_pids = {i["pid"] for i in infos if isinstance(i.get("pid"), int) and i["pid"] > 0}
+            found = [{"client": "emission", "commit": i["commit"] if isinstance(i.get("commit"), str) else None}
+                     for i in infos]
             if found != self.emissions:
                 self.emissions = found
                 self.heads_look()
+
+    def found_procs(self):
+        """{pid: app} of this machine's processes that tell it no telemetry of their own, for its samples: its
+        Emissions' (as they last said) and Multiplex's windows' (multiplexlink's sockets)."""
+        out = dict.fromkeys(self.emission_pids, "emission")
+        for _path, info in multiplexlink.processes(timeout=1):
+            if info.get("app") == "multiplex" and isinstance(info.get("pid"), int) and info["pid"] > 0:
+                out[info["pid"]] = "multiplex"
+        return out
 
     def mesh_changed(self):
         """The mesh changed (a member came or went, a link's state, a provider): heads hear, with its info. (Never with

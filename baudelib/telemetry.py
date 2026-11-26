@@ -1,6 +1,6 @@
 """telemetry — a host's: what the apps on its machine saw done in chats (the telemetry op's events, each kept as it's
 told, at its own time), samples of its machine every SAMPLE_S (load, memory, swap, memory pressure, its own and each
-app's CPU and memory), and line profiles (lineprofile: its own, and those its apps send), while it's on; all read
+app's on it CPU and memory: Baude's, Record's, Emission's, Multiplex's), and line profiles (lineprofile: its own, and those its apps send), while it's on; all read
 back over a stretch by telemetry_read, from any member of the mesh, and switched by telemetry_set (Settings →
 Telemetry, any head). Kept in the host's state folder only, telemetry/<events|metrics|profiles>/YYYY-MM-DD.jsonl (the
 day of each line's time, this machine's), and telemetry/state.json (on, and what each process profiles). Nothing here
@@ -26,6 +26,7 @@ KEEP_DAYS = {"events": 400, "metrics": 7, "profiles": 30}  # (events back a year
 LIMIT = 5000  # (telemetry_read's most of each, the latest kept)
 EVENTS_MAX = 1000  # (one telling's)
 APPS = tuple(wire.DEFS["Telemetry"]["properties"]["app"]["enum"])
+PROCS = tuple(wire.DEFS["TelemetryProc"]["properties"]["app"]["enum"])
 KINDS = tuple(wire.DEFS["TelemetryEvent"]["properties"]["kind"]["enum"])
 PROFILED = tuple(wire.DEFS["TelemetryProfiling"]["properties"]["app"]["enum"])
 WHAT = tuple(wire.DEFS["TelemetryRead"]["properties"]["what"]["items"]["enum"])
@@ -212,10 +213,11 @@ def memory():
 
 class Telemetry:
     """A host's telemetry (its server's: server.telemetry). changed() is told when its state changes (Info's
-    telemetry, which its machine's apps follow)."""
+    telemetry, which its machine's apps follow); found() is {pid: app} of the processes on its machine that tell it
+    nothing but are sampled too (Emission's, Multiplex's), asked each sample."""
 
-    def __init__(self, state_dir, host_id, changed=lambda: None, log=lambda _line: None):
-        self.dir, self.host_id, self.changed, self.log = folder(state_dir), host_id, changed, log
+    def __init__(self, state_dir, host_id, changed=lambda: None, log=lambda _line: None, found=dict):
+        self.dir, self.host_id, self.changed, self.log, self.found = folder(state_dir), host_id, changed, log, found
         self.lock, self.wake = threading.Lock(), threading.Event()
         self.pids = {os.getpid(): "host"}  # (the processes sampled: the host's, and each app's that's told it)
         self.cpu = {}  # (pid: (when, CPU seconds), the sample before's)
@@ -357,8 +359,13 @@ class Telemetry:
     def sample(self, now=None):
         """One sample of the machine and its processes (a TelemetrySample)."""
         now = time.time() if now is None else now
+        try:
+            found = {pid: app for pid, app in self.found().items() if app in PROCS}
+        except Exception as e:  # noqa: BLE001 (what couldn't be found: sampled without it)
+            self.log(f"telemetry: {type(e).__name__}: {e}")
+            found = {}
         with self.lock:
-            pids = dict(self.pids)
+            pids = {**found, **self.pids}
         stats = proc_stats(sorted(pids))
         procs = []
         for pid, app in pids.items():

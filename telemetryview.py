@@ -17,11 +17,13 @@ from baudelib import lineprofile, providers, wording
 
 PROFILE_S = 30  # (how often what's profiled here is told)
 QUEUE_MAX = 1000  # (events kept for a host that isn't there yet)
-APP_NAMES = {"baude": "mesh_versions.baude", "record": "mesh_versions.record", "phone": "mesh_versions.baude",
-             "host": "telemetry.host_process"}
+APP_NAMES = {"host": "telemetry.host_process", "baude": "mesh_versions.baude", "record": "mesh_versions.record",
+             "emission": "mesh_versions.emission", "multiplex": "deps.multiplex", "phone": "mesh_versions.baude"}
+APP_LOGOS = {"host": "baude", "baude": "baude", "record": "record", "emission": "emission-16",
+             "multiplex": "multiplex-16", "phone": "baude"}  # (schema/icons/apps: each process's app's logo)
+LOGO_PX = 16  # (as big as a model's logo)
 PROFILED = ("host", "baude", "record")
 WEEKS = 53  # (the tokens' grid: a year, a column a week)
-EVENTS_SHOWN = 12
 LINES_SHOWN = 10
 REFRESH_S = 5  # (the machine's rows asked for again while the page is shown)
 _RECORDER = []
@@ -271,15 +273,6 @@ def turn_ended(win, msg, model=None, effort=None):
 
 
 # ---- Settings → Telemetry
-def said_time(seconds):
-    s = int(round(seconds))
-    if s < 60:
-        return wording.say("time.seconds", seconds=s)
-    if s < 3600:
-        return wording.say("time.minutes_seconds", minutes=s // 60, seconds=s % 60)
-    return wording.say("time.hours_minutes", hours=s // 3600, minutes=s % 3600 // 60)
-
-
 def said_size(n):
     if n is None:
         return "–"
@@ -293,12 +286,6 @@ def said_pressure(s):
         key = f"telemetry.pressure_{s['memory_pressure']}"
         return wording.say(key) if wording.has(key) else str(s["memory_pressure"])
     return wording.say("telemetry.stalled", percent=f"{s['memory_stall']:.1f}")
-
-
-def said_event(e):
-    if e.get("kind") == "turn_ended" and isinstance(e.get("seconds"), (int, float)):
-        return wording.say("telemetry.turn_ended_in", time=said_time(e["seconds"]))
-    return wording.say(f"telemetry.{e.get('kind')}")
 
 
 def tokens(n):
@@ -385,6 +372,31 @@ def model_row(value, models, *values):
     return r
 
 
+def logo(app):
+    """The logo of a process's app (APP_LOGOS), LOGO_PX square: Baude's and Record's in the accent picked, as their
+    launchers draw them."""
+    from baudelib import applist, icons
+    import widgets
+    name = APP_LOGOS[app]
+    svg = widgets.logo(name) if name in ("baude", "record") else icons.svg("apps", name)
+    key = (name, svg)
+    if key not in _LOGOS:
+        from gi.repository import Gdk
+        _LOGOS[key] = Gdk.Texture.new_from_bytes(GLib.Bytes.new(applist.icon_png(svg, LOGO_PX * 4, mac=False)))
+    return Gtk.Image(paintable=_LOGOS[key], pixel_size=LOGO_PX)
+
+
+_LOGOS = {}  # ((logo, its SVG): its texture, drawn once)
+
+
+def proc_row(p):
+    """A process's row: its app's logo, its name, and its CPU and memory after them."""
+    r = row(wording.say(APP_NAMES[p["app"]]), wording.say(
+        "telemetry.cpu_rss", cpu="–" if p.get("cpu") is None else f"{p['cpu']:.1f}", rss=said_size(p.get("rss"))))
+    r.add_prefix(logo(p["app"]))
+    return r
+
+
 def row(title, *values, sensitive=True, mono=False):
     r = Adw.ActionRow(title=GLib.markup_escape_text(title), sensitive=sensitive)
     if mono:
@@ -398,7 +410,8 @@ def row(title, *values, sensitive=True, mono=False):
 class Page(Adw.PreferencesPage):
     """Settings → Telemetry: the host picked beside New session (as Dependencies has it), Collect Telemetry, then what
     that host keeps: its tokens by day over a year with the most used model and effort and each model's, its machine
-    now, its chats' latest activity, and line profiling (which process, what's profiled, its top lines)."""
+    now, its processes now (each with its app's logo, its CPU and memory), and line profiling (which process, what's
+    profiled, its top lines)."""
 
     def __init__(self, win):
         super().__init__(title=wording.say("telemetry.title"), icon_name="document-open-recent-symbolic")
@@ -446,7 +459,6 @@ class Page(Adw.PreferencesPage):
     def ask(self):
         now = time.time()
         self.read({"from": now - (WEEKS * 7 + 7) * 86400, "what": ["usage"]}, self.took_usage)
-        self.read({"from": now - 86400, "what": ["events"], "limit": 4 * EVENTS_SHOWN}, self.took_events)
         self.read({"from": now - 60, "what": ["metrics"], "limit": 1}, self.took_metrics)
         self.read({"from": now - 3600, "what": ["profiles"], "limit": 500}, self.took_profiles)
 
@@ -460,12 +472,17 @@ class Page(Adw.PreferencesPage):
             g.add(r)
         self.groups[key] = g
         self.add(g)
-        order = ["error", "tokens", "models", "machine", "chats", "profiling", "lines"]
+        order = ["error", "tokens", "models", "machine", "processes", "profiling", "lines"]
         for k in order[order.index(key) + 1:]:  # (kept in their order however they're answered)
             if (later := self.groups.get(k)) is not None:
                 self.remove(later)
                 self.add(later)
         return g
+
+    def drop(self, key):
+        """The group key taken out, if it's there."""
+        if (g := self.groups.pop(key, None)) is not None:
+            self.remove(g)
 
     def failed(self, reply):
         if reply.get("error"):
@@ -483,6 +500,7 @@ class Page(Adw.PreferencesPage):
         self.taking = False
         if not self.state.get("on"):
             self.group("machine", None, [row(wording.say("telemetry.off"), sensitive=False)])
+            self.drop("processes")
         self.show_profiling()
         return False
 
@@ -553,25 +571,13 @@ class Page(Adw.PreferencesPage):
                 "telemetry.memory_of", used=said_size(s.get("swap_used")), total=said_size(s["swap_total"]))))
         if s.get("memory_pressure") or s.get("memory_stall") is not None:
             rows.append(row(wording.say("telemetry.memory_pressure"), said_pressure(s)))
-        for p in sorted(s.get("procs") or [], key=lambda p: (list(APP_NAMES).index(p["app"]) - 4) % 4):
-            rows.append(row(wording.say(APP_NAMES[p["app"]]), wording.say(
-                "telemetry.cpu_rss", cpu="–" if p.get("cpu") is None else f"{p['cpu']:.1f}", rss=said_size(p.get("rss")))))
         self.group("machine", wording.say("telemetry.machine"), rows)
-        return False
-
-    def took_events(self, reply):
-        if self.failed(reply):
-            return False
-        self.took_state(reply)
-        events = shown_events(reply.get("events") or [])
-        if not events:
-            self.group("chats", wording.say("telemetry.chat_activity"),
-                       [row(wording.say("telemetry.nothing"), sensitive=False)])
-            return False
-        titles = chat_titles(self.win)
-        self.group("chats", wording.say("telemetry.chat_activity"), [
-            row(titles.get((e["host"], e["session"])) or e["session"][:8], said_event(e),
-                datetime.datetime.fromtimestamp(e["at"]).strftime("%H:%M:%S")) for e in events])
+        procs = sorted((p for p in s.get("procs") or [] if p.get("app") in APP_NAMES),
+                       key=lambda p: (list(APP_NAMES).index(p["app"]), p.get("pid") or 0))
+        if procs:
+            self.group("processes", wording.say("side_panel.processes"), [proc_row(p) for p in procs])
+        else:
+            self.drop("processes")
         return False
 
     def took_profiles(self, reply):
@@ -669,14 +675,6 @@ class Page(Adw.PreferencesPage):
         self.ask()
 
 
-def shown_events(events):
-    """The latest first, a turn's end once: the host's own (it ran there) left out where an app saw it end too."""
-    seen = [e for e in events if e.get("app") != "host"]
-    out = seen + [e for e in events if e.get("app") == "host" and not any(
-        x["kind"] == e["kind"] and x["session"] == e["session"] and abs(x["at"] - e["at"]) < 10 for x in seen)]
-    return sorted(out, key=lambda e: -e["at"])[:EVENTS_SHOWN]
-
-
 def client_network(win):
     """The window's app's hosts (Baude's sessionlist.network, Record's recordstore.network)."""
     try:
@@ -687,13 +685,3 @@ def client_network(win):
         return recordstore.network()
     except (ImportError, AttributeError):
         return None
-
-
-def chat_titles(win):
-    """{(host id, session id): title} of every chat the window's app knows."""
-    net = client_network(win)
-    if net is None:
-        return {}
-    return {(r.info.get("id") or r.key, sid): s.get("title") for r in net.alive()
-            for sid, s in r.sessions.items() if isinstance(s, dict) and s.get("title")}
-

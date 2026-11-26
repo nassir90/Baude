@@ -40,7 +40,8 @@ import java.util.Locale
  * value, what a value must be, and its row. */
 class MetaSetting(val name: String, val title: () -> String, val get: () -> Any, val takes: () -> String,
                   val coerce: (Any?) -> Any, val put: (Any) -> Unit, val note: String? = null, val metaSets: Boolean = true,
-                  val row: @Composable (String?, (@Composable () -> Unit)?) -> Unit)
+                  val row: @Composable (String?, (@Composable () -> Unit)?) -> Unit,
+                  val changed: ((Any?) -> List<String>)? = null, val hostRows: (@Composable (List<String>) -> Unit)? = null)
 
 /** A number as Settings shows a scale: two places, the zeros after the point left off (widgets.fmt_scale). */
 fun fmtScale(v: Double): String = String.format(Locale.ROOT, "%.2f", v).trimEnd('0').let { if (it.endsWith(".")) it + "0" else it }
@@ -247,18 +248,41 @@ object MetaAccess {
                 if (was?.toString() != rule.toString()) send(h, cap, rule)
             }
         },
-        "who in the mesh may use it, on each host; Meta may narrow a rule, the user widens one on its row", row = { _, _ ->
-            Column {
-                for ((h, _) in hosts()) {
-                    androidx.compose.runtime.LaunchedEffect(h, cap) { ask(h) }
-                    val st = states[h] ?: continue
-                    AccessRule(cap, st.optJSONObject("rules")?.optJSONObject(cap), st,
-                        title = Wording.Access.setting(host = st.optString("host"), capability = PhoneAccess.named(cap))) { rule ->
-                        send(h, cap, rule)
-                    }
+        "who in the mesh may use it, on each host; Meta may narrow a rule, the user widens one on its row",
+        row = { _, _ -> Rows(cap, null) }, changed = { v -> changed(cap, v) }, hostRows = { only -> Rows(cap, only) })
+
+    /** The hosts whose rule value changes (all it names, where it changes none, unknown ones too). */
+    private fun changed(cap: String, value: Any?): List<String> {
+        val given = parse(cap, value)
+        return given.filter { (h, rule) -> states[h]?.optJSONObject("rules")?.optJSONObject(cap)?.toString() != rule.toString() }
+            .keys.toList().ifEmpty { given.keys.toList() }.ifEmpty { named(value) }
+    }
+
+    /** The hosts value names, by id, whatever their parts say (one with no host: Meta's own). */
+    private fun named(value: Any?): List<String> {
+        val hs = hosts()
+        return value?.toString().orEmpty().split(";").map { it.trim() }.filter { it.isNotEmpty() }.mapNotNull { part ->
+            val first = part.split(":", limit = 2)[0].trim()
+            if (first.lowercase() in PhoneAccess.WHO + "unknown") metaHost()
+            else hs.firstOrNull { it.second.equals(first, true) || it.first == first }?.first
+        }.distinct()
+    }
+
+    /** A row for each host (only: those hosts'), titled "<host> / <capability>". */
+    @Composable
+    private fun Rows(cap: String, only: List<String>?) {
+        Column {
+            for ((h, _) in hosts()) {
+                if (only != null && h !in only) continue
+                androidx.compose.runtime.LaunchedEffect(h, cap) { ask(h) }
+                val st = states[h] ?: continue
+                AccessRule(cap, st.optJSONObject("rules")?.optJSONObject(cap), st,
+                    title = Wording.Access.setting(host = st.optString("host"), capability = PhoneAccess.named(cap))) { rule ->
+                    send(h, cap, rule)
                 }
             }
-        })
+        }
+    }
 }
 
 /** Meta's look for what it shows (.meta-ui): rows in a tool card's outline, no fill, a rule between them. */

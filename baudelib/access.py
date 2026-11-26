@@ -1,8 +1,9 @@
 """Who in the mesh may use what of a host's (Settings → Access, on every app; the access and access_set ops): a rule
 for each of its capabilities (CAPABILITIES: a shell, its Bots' browsers, its providers' models, their files, new chats
-and agents, its chats as they are, its clusters, its databases, and these rules themselves), each everybody, nobody or
-the members chosen, by their ids, as the mesh has them (a tunnel's origin: Conn's). A chat may have a rule of its own
-for managing it, kept in its meta (access), which goes before the host's manage rule.
+and agents, its chats as they are, its clusters, its databases, its subscription accounts, and these rules themselves
+with the host's own admin), each everybody, nobody or the members chosen, by their ids, as the mesh has them (a
+tunnel's origin: Conn's). A chat may have a rule of its own for managing it, kept in its meta (access), which goes
+before the host's manage rule.
 
 Who's asking is Conn's member: a tunnel's origin, as its open was signed (mesh.Mesh.opener), or, for a connection a
 chat's own tools make on its host's socket (hello's as), the member that started that chat (its meta's started_by), so
@@ -32,14 +33,16 @@ OPS = {  # (the ops each capability's rule is checked for, before they're taken;
     **dict.fromkeys(("kube", "kube_follow"), "kube"),
     "databases": "databases",
     "list_dir": "manage",  # (any folder's entries: as much as a chat's, which could list them)
-    **dict.fromkeys(("quit", "link", "unlink", "deactivate", "activate", "accounts", "login", "login_code",
-                     "telemetry_set", "theme_save", "theme_remove", "feedback"), "access"),  # (the host's own)
+    **dict.fromkeys(("accounts", "login", "login_code"), "subscriptions"),  # (a chat moved to one: manage's too)
+    **dict.fromkeys(("quit", "link", "unlink", "deactivate", "activate", "telemetry_set", "theme_save", "theme_remove",
+                     "feedback"), "access"),  # (the host's own)
 }
 DEFAULTS = {"access": {"who": "nobody"}}  # (a rule not set, if it isn't everybody's)
 SAFE_MODES = (None, "default", "plan", "acceptEdits")  # (permission modes that ask before a command's run)
 SHELL_TOOLS = ("Bash", "PowerShell")  # (tools that run commands: approving one, or allowing it always, is a shell's worth)
 COPY = {cap: f"access.{cap}" for cap in CAPABILITIES} | {  # (each capability's name, as every app says it)
-    "shell": "kube.shell", "providers": "deps.providers", "kube": "window.kubernetes"}
+    "shell": "kube.shell", "providers": "deps.providers", "kube": "window.kubernetes",
+    "subscriptions": "subscriptions.title"}
 FILE = "access.json"
 MEMBERS_MAX = 256
 

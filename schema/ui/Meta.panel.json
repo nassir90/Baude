@@ -100,8 +100,9 @@
         },
         {
           "name": "setting box",
-          "shows": "For a setting Meta changed (set_setting) and for 'show setting:<name>': the setting's own row from Settings, drawn in Meta's look (outlined, transparent) so it can be adjusted right there. When Meta changed it, the row has a tooltip 'Meta: <Setting>: <before> → <after>', a subtitle 'Was <value>' (or 'Set to <value>, undone' once undone) if the row has no subtitle of its own, and the batch controls (Keep/Undo/Redo) as a suffix. If you adjust the row yourself, Meta is told with your next message ('The user set <name> to <value> with the row under your reply').",
-          "copy": ["meta_actions.was", "meta_actions.set_undone", "meta_actions.by_meta"]
+          "shows": "For a setting Meta changed (set_setting) and for 'show setting:<name>': the setting's own row from Settings, drawn in Meta's look (outlined, transparent) so it can be adjusted right there. When Meta changed it, the row has a tooltip 'Meta: <Setting>: <before> → <after>', a subtitle 'Was <value>' (or 'Set to <value>, undone' once undone) if the row has no subtitle of its own, and the batch controls (Keep/Undo/Redo) as a suffix. If you adjust the row yourself, Meta is told with your next message ('The user set <name> to <value> with the row under your reply'). A setting with a row per host of the mesh (access_<capability>) shows, for set_setting, only the row of each host whose rule it changed (each host it named, where it changed none); 'show setting:<name>' shows every host's.",
+          "copy": ["meta_actions.was", "meta_actions.set_undone", "meta_actions.by_meta"],
+          "decisions": [{"said": "Meta narrowed one host's Agent Spawn rule and its card showed every host's row; only the changed one was wanted.", "rule": "Every app's set_setting card for a setting with a row per host shows only the rows of the hosts the call changed, not the whole setting.", "decided": "2026-11-26", "source": [{"issue": "BaudeInternal#239"}]}]
         },
         {
           "name": "shown rows (show chats / pages)",

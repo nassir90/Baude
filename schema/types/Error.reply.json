@@ -24,7 +24,7 @@
       "description": "A refusal's: what was wrong (the op, or the field and why), for a person to read; code, not this, says which refusal it is."
     },
     "denied": {
-      "enum": ["shell", "browser", "providers", "model_files", "spawn", "manage", "kube", "databases", "access"],
+      "enum": ["shell", "browser", "providers", "model_files", "spawn", "manage", "kube", "databases", "subscriptions", "access"],
       "description": "access_denied's: the capability refused."
     },
     "plain": {

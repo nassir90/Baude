@@ -27,6 +27,7 @@ import time
 from macos import full_redraws, ns_string, objc_send
 from baudelib import claude as claudelib  # (its ClaudeProc: Baude's is it, on the GTK main loop)
 import baudelib.bins  # (the commands in ~/.local/bin, kept up to date as it starts: see baudelib/bins.py)
+import baudelib.notifier  # (its notifications on macOS, posted by an app of its own: see baudelib/notifier.py)
 import baudelib.client  # noqa: E402  (servers on the network and their sessions: see baudelib/client.py)
 import baudelib.hosts  # noqa: E402  (this machine's host process, started when it's wanted: see baudelib/hosts.py)
 from baudelib import wording  # noqa: E402  (the words Baude shows: schema/copy, Record's and the Android app's too)
@@ -112,6 +113,7 @@ class BaudeApp(Adw.Application):
                     fn()
                 except Exception as e:  # (Python's Dock tile isn't worth not starting over)
                     print(f"baude: {fn.__name__}:", e, file=sys.stderr)
+            widgets.notify_as(app="Baude", opened=self.open_notified)
         else:
             widgets.notify_as(logo_icon())
         follow_accent()  # (the logo in the accent as it's picked: Settings → Accent Colour)
@@ -160,6 +162,21 @@ class BaudeApp(Adw.Application):
     def windows(self):
         """Baude's windows, the one you were in last first."""
         return [w for w in self.get_windows() if isinstance(w, BaudeWindow)]
+
+    def open_notified(self, args):
+        """A click on a notification this process didn't post (one from before a restart, or another Baude's): the
+        window you were in last brought up with its chat open, from the arguments it was posted with (--resume)."""
+        from baudelib.transcripts import find_session
+        if not (wins := self.windows()):
+            return
+        win = wins[0]
+        win.present()
+        sid = args[args.index("--resume") + 1] if "--resume" in args[:-1] else None
+        if sid is None or sid == win.session_id or (info := find_session(sid)) is None:
+            win.show_chat()
+            return
+        win.opening_remote = None  # (as a click on its row in the sidebar opens it: Sidebar.on_activate)
+        win.switch_to(lambda: win.resume_session(info))
 
     def idle(self):
         """Every window idle (BaudeWindow.idle): a new version can be restarted onto."""
@@ -323,6 +340,7 @@ def main():
         os.environ["BAUDE_NO_THEME"] = "1"
     if opts.install:
         LAUNCHER.install()
+        baudelib.notifier.build_all(widgets.load_settings().get("accent"))  # (macOS, once it can be signed)
         print("\n".join(wording.say("install.installed", path=p)
                         for p in [*map(baudelib.bins.path, baudelib.bins.NAMES), *LAUNCHER.paths()]))
         return 0

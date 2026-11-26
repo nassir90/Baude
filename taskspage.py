@@ -115,16 +115,11 @@ def dropdown(pairs, picked):
     return dd, values
 
 
-def alert(win, heading, child, responses, done, below=None):
-    """An alert dialog: child, scrolled if it's tall, and below it, out of the scrolling, below; responses
-    [(id, label, suggested)]; done(id) for each but cancel."""
+def alert(win, heading, child, responses, done):
+    """An alert dialog: child, scrolled if it's tall; responses [(id, label, suggested)]; done(id) for each but
+    cancel."""
     fits = Gtk.ScrolledWindow(child=child, propagate_natural_height=True, max_content_height=520,
                               hscrollbar_policy=Gtk.PolicyType.NEVER)
-    if below is not None:
-        extra = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-        extra.append(fits)
-        extra.append(below)
-        fits = extra
     dlg = Adw.AlertDialog(heading=heading, extra_child=fits, close_response="cancel",
                           default_response=responses[-1][0])
     for rid, label, suggested in responses:
@@ -389,8 +384,7 @@ class TasksPage(Gtk.Box):
             lb = self.listbox(g)
             lb.connect("row-activated", lambda _l, row: self.open_run(row.run))
             for r in self.runs:
-                title = ran_at(r, self.clock, True) + (f" · {wording.say('tasks.dry_tag')}" if r.get("dry") else "")
-                row = Adw.ActionRow(title=GLib.markup_escape_text(title), activatable=True)
+                row = Adw.ActionRow(title=GLib.markup_escape_text(ran_at(r, self.clock, True)), activatable=True)
                 row.run = r
                 row.add_prefix(status_icon(r))
                 row.add_suffix(Gtk.Image(icon_name=kind_icon(r.get("kind"))))
@@ -428,8 +422,6 @@ class TasksPage(Gtk.Box):
                  wording.say(kind.get(r.get("kind"), "tasks.by_hand"))]
         if r.get("ended"):
             facts.append(took(r.get("seconds")))
-        if r.get("dry"):
-            facts.append(wording.say("tasks.dummy_answers"))
         facts.append(r.get("version") or "")
         line = Gtk.Box(spacing=6)
         line.append(status_icon(r))
@@ -545,8 +537,7 @@ class TasksPage(Gtk.Box):
         return row, read, valid, entry
 
     def run_form(self, t):
-        """Run t, its inputs filled here first, each a row as the settings have them: Run, or under them the lesser
-        Run with dummy answers."""
+        """Run t, its inputs filled here first, each a row as the settings have them."""
         group = Adw.PreferencesGroup()
         read, valid, entries = {}, [], []
         for f in t.get("form") or []:
@@ -555,27 +546,23 @@ class TasksPage(Gtk.Box):
             group.add(row)
             if entry is not None:
                 entries.append(entry)
-        dummy = Gtk.Button(label=wording.say("tasks.dry_run"), halign=Gtk.Align.CENTER, margin_top=12,
-                           css_classes=["flat"])
 
-        def run(dry):
-            self.ask({"op": "run_task", "session": self.sid, "id": t["id"], "dry": dry,
+        def run():
+            self.ask({"op": "run_task", "session": self.sid, "id": t["id"],
                       "inputs": {k: v for k, fn in read.items() if (v := fn()) is not None}})
         dlg = alert(self.win, wording.say("tasks.run_heading", name=t.get("name") or ""), group,
                     [("cancel", wording.say("common.cancel"), False), ("run", wording.say("tasks.run"), True)],
-                    lambda _r: run(False), below=dummy)
+                    lambda _r: run())
         dlg.set_size_request(420, -1)
 
         def filled(*_):
             ok = all(v() for v in valid)
             dlg.set_response_enabled("run", ok)
-            dummy.set_sensitive(ok)
             return ok
         for entry in entries:
             entry.connect("changed", filled)
-            entry.connect("activate", lambda _e: filled() and (dlg.close(), run(False)))
+            entry.connect("activate", lambda _e: filled() and (dlg.close(), run()))
         filled()
-        dummy.connect("clicked", lambda _b: (dlg.close(), run(True)))
         return dlg
 
     def add_trigger(self, t):

@@ -574,7 +574,7 @@ def server_label(s):
 
 
 class SchemaView(Gtk.Box):
-    """Full-window database schemas (☰ → Database Schemas…, or a table name in a reply): pick a server, a
+    """Full-window database schemas (☰ → Databases…, or a table name in a reply): pick a server, a
     database and a schema; the diagram; a table's first rows below it. Esc closes."""
 
     def __init__(self, win):
@@ -587,7 +587,7 @@ class SchemaView(Gtk.Box):
         self.host = kubehost.Host(None, {"via": "local"}, wording.say("senders.local"))  # (where it reads: open)
         self.following, self.clusters = None, None  # (the host's kubeconfig followed while open: its local clusters)
         bar = view_bar()
-        title = Gtk.Label(label=wording.say("databases.title"))
+        title = Gtk.Label(label=wording.say("window.database_schemas"))
         title.add_css_class("heading")
         bar.append(title)
         self.host_label = viewwindow.host_label()
@@ -633,7 +633,7 @@ class SchemaView(Gtk.Box):
             btn.add_css_class("flat")
             btn.connect("clicked", lambda *_, fn=fn: fn())
             bar.append(btn)
-        self.out = viewwindow.Out(self, bar, wording.say("databases.title"), self.find, zoom=self.zoom)  # (out to a
+        self.out = viewwindow.Out(self, bar, wording.say("window.database_schemas"), self.find, zoom=self.zoom)  # (out to a
         # window of its own, as ☰ → Terminal's goes; its close)
         self.append(Gtk.WindowHandle(child=bar))  # (dragged, it moves the window; double-clicked, maximizes)
         stage = Gtk.Overlay(vexpand=True)

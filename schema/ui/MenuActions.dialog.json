@@ -1,5 +1,5 @@
 {
-  "description": "The ☰ menu items that do something small instead of opening a view of their own, with the one confirmation dialog and the toasts that go with them: Copy Transcript for an Issue, Restart Baude, Restart Daemon, Read-only session, Open in Record…, and the Restart Now confirmation. These are dialogs/toasts/actions, grouped in one file as none is a dialog of its own (Settings, Changelog, Mesh, Send Feedback, Ongoing Feedback each have their own file; Kubernetes, Database Schemas and the menu itself are elsewhere).",
+  "description": "The ☰ menu items that do something small instead of opening a view of their own, with the one confirmation dialog and the toasts that go with them: Copy Transcript for an Issue, Restart Baude, Restart Daemon, Read-only session, Open in Record…, and the Restart Now confirmation. These are dialogs/toasts/actions, grouped in one file as none is a dialog of its own (Settings, Changelog, Mesh, Send Feedback, Ongoing Feedback each have their own file; Kubernetes, Databases and the menu itself are elsewhere).",
   "apps": [
     "baude",
     "record"

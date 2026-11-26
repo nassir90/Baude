@@ -49,7 +49,7 @@
         "access.model_files",
         "access.spawn",
         "access.manage",
-        "access.databases",
+        "window.database_schemas",
         "access.access",
         "kube.shell",
         "deps.providers",

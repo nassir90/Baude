@@ -1292,7 +1292,7 @@ databases' answer: servers {servers, databases}; schema {tables, links, took}; r
 | `links` | array of DbLink |  | schema: their foreign keys. |
 | `took` | number |  | schema: seconds it took to read, 0 when it was kept from a read before. |
 | `rows` | array of object |  | rows: the first rows, each {column: value}; objects and lists as JSON text. |
-| `missing` | Dep |  | servers: no server was found and Docker isn't on the host: Database Schemas shows this in its place. |
+| `missing` | Dep |  | servers: no server was found and Docker isn't on the host: Databases shows this in its place. |
 
 #### `deactivated` (Deactivated)
 

@@ -52,7 +52,7 @@ private fun cutMiddle(s: String, n: Int) = if (s.length > n) s.take((n - 1) / 2)
 /** The cut of a cell's text the rows grid shows. */
 private const val CELL_MAX = 120
 
-/** Database Schemas (schemaview.SchemaView): the running databases' tables as a diagram, read through the host: pick a
+/** Databases (schemaview.SchemaView): the running databases' tables as a diagram, read through the host: pick a
  * server, a database and a schema; a table's first rows under it. table and column (and hint, code) name what to find. */
 @Composable
 fun DatabaseScreen(hostId: String, back: () -> Unit, table: String? = null, column: String? = null, hint: String = "",
@@ -274,7 +274,7 @@ fun DatabaseScreen(hostId: String, back: () -> Unit, table: String? = null, colu
 
     BackHandler(rowsOf != null) { rowsOf = null }
     Column(Modifier.fillMaxSize().background(c.inside)) {
-        Bar(Wording.Databases.title, start = { IconButton(Adwaita.GoPrevious, Wording.Browser.back, onClick = back) },
+        Bar(Wording.Window.databaseSchemas, start = { IconButton(Adwaita.GoPrevious, Wording.Browser.back, onClick = back) },
             end = { IconButton(Adwaita.WindowClose, Wording.Images.close, onClick = back) })
         Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(6.dp), verticalAlignment = Alignment.CenterVertically) {
             fun engine(s: Msg.DbServer) = if (s.engine == "arango") "ArangoDB" else "Postgres"

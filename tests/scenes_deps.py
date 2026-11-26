@@ -91,7 +91,30 @@ def _(app):
     return win
 
 
-def dependencies(app):
+@scene("39h-docker-off-path", "Settings → Dependencies scrolled to Databases on a host whose PATH is only /usr/bin:/bin "
+                              "and whose Docker is in ~/.docker/bin: Docker Installed", size=(1200 + SIDEBAR, H))
+def _(app):
+    from widgets import walk
+    from gi.repository import Gtk
+    home = os.path.expanduser("~")
+    exe = os.path.join(home, ".docker", "bin", "docker")
+    os.makedirs(os.path.dirname(exe), exist_ok=True)
+    with open(exe, "w") as f:
+        f.write(f'#!/bin/sh\nexec {T.sys.executable} {os.path.join(T.HERE, "fake_docker.py")} "$@"\n')
+    os.chmod(exe, 0o755)
+    path = os.environ.get("PATH", "")
+    os.environ["PATH"] = "/usr/bin:/bin:/usr/sbin"  # (screencapture)
+    win, page = dependencies(app, ["codex"])
+    win.connect("destroy", lambda *_: os.environ.update(PATH=path))
+    T.wait_for(lambda: page.groups, "the host's dependencies", 20)
+    scroller = next(w for w in walk(page) if isinstance(w, Gtk.ScrolledWindow))
+    adj = scroller.get_vadjustment()
+    adj.set_value(adj.get_upper() * 0.55)
+    T.pump(0.5)
+    return win
+
+
+def dependencies(app, hidden=("docker", "codex"), **extra):
     """39d's: Settings → Dependencies open, the host answered: (the window, the page)."""
     import json
     import threading
@@ -120,8 +143,8 @@ def dependencies(app):
     os.chmod(gh, 0o755)
     with open(gh + ".json", "w") as f:
         json.dump({"viewer": "ADMIN", "issues": [], "prs": []}, f)
-    win = hide(app, ["docker", "codex"], BAUDE_GH=gh, FAKE_GH_STATE=gh + ".json", FAKE_GH_SIGNED_IN="0", KUBECONFIG=empty,
-               BAUDE_KUBECTL=os.path.join(T.HERE, "fake_kubectl.py"), OLLAMA_HOST=f"127.0.0.1:{server.server_port}")
+    win = hide(app, list(hidden), BAUDE_GH=gh, FAKE_GH_STATE=gh + ".json", FAKE_GH_SIGNED_IN="0", KUBECONFIG=empty,
+               BAUDE_KUBECTL=os.path.join(T.HERE, "fake_kubectl.py"), OLLAMA_HOST=f"127.0.0.1:{server.server_port}", **extra)
     win.connect("destroy", lambda *_: server.shutdown())
     dialog = win.open_settings()
     import depsview

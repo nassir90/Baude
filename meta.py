@@ -150,7 +150,7 @@ def models(live=False):
               if isinstance(m, dict) and isinstance(m.get("value"), str) and m["value"] != "default"]
     _CLAUDE_SAID.clear()
     _CLAUDE_SAID.update((m["value"], m) for m in listed)  # (for model_entry: no settings read for each it's asked)
-    out = [(m["value"], m.get("displayName") or m["value"],
+    out = [(m["value"], m.get("displayName") or providerslib.model_name(m["value"]),
             list(m.get("supportedEffortLevels") or []) if m.get("supportsEffort") else None, None) for m in listed] or \
         [(value, lbl, None, None) for value, lbl in MODELS_OFFERED]
     out += [(m["value"], m["displayName"], m.get("supportedEffortLevels") or None, None)

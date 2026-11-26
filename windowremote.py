@@ -151,6 +151,7 @@ class MeshCard(ToolCard):
         if self.base == "start_subagent":
             title = (listed or {}).get("title") or self.task_title() or "Subagent"
             model = self.input.get("model") or (listed or {}).get("model")
+            slug = providerslib.model_slug(model, r.info.get("models") or [] if r is not None else []) if model else None
             if model:
                 model = providerslib.model_name(model, r.info.get("models") or [] if r is not None else [])
             bits = [f"Subagent on {host}" if host else "Subagent"] + ([model] if model else [])
@@ -177,6 +178,7 @@ class MeshCard(ToolCard):
             bits.append("its host went before it answered")
         self.title.set_markup(f"<b>{html.escape(title)}</b>")
         self.sub.set_text(" · ".join(bits))
+        self.sub.set_tooltip_text(slug if self.base == "start_subagent" else None)
         self.head_tip(listed, host)
 
     def head_tip(self, listed, host):

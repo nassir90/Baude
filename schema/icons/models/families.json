@@ -3,11 +3,11 @@
   "families": [
     {"icon": "claude", "name": "Claude", "match": "claude|opus|sonnet|haiku|fable|^default$",
      "names": [
-      {"match": "(?:[a-z]+\\.)?(?:anthropic[./])?claude-(opus|sonnet|haiku|fable)-(\\d+)-(\\d{1,2})(?:-\\d{8})?(?:-v\\d+(?::\\d+)?)?\\[1m\\]", "as": "{1} {2}.{3} (1M context)"},
-      {"match": "(?:[a-z]+\\.)?(?:anthropic[./])?claude-(opus|sonnet|haiku|fable)-(\\d+)-(\\d{1,2})(?:-\\d{8})?(?:-v\\d+(?::\\d+)?)?", "as": "{1} {2}.{3}"},
-      {"match": "(?:[a-z]+\\.)?(?:anthropic[./])?claude-(opus|sonnet|haiku|fable)-(\\d+)(?:-\\d{8})?(?:-v\\d+(?::\\d+)?)?", "as": "{1} {2}"},
-      {"match": "(?:[a-z]+\\.)?(?:anthropic[./])?claude-(\\d+)-(\\d{1,2})-(opus|sonnet|haiku)(?:-\\d{8})?(?:-v\\d+(?::\\d+)?)?", "as": "{3} {1}.{2}"},
-      {"match": "(?:[a-z]+\\.)?(?:anthropic[./])?claude-(\\d+)-(opus|sonnet|haiku)(?:-\\d{8})?(?:-v\\d+(?::\\d+)?)?", "as": "{2} {1}"},
+      {"match": "(?:[a-z]+\\.)?(?:anthropic[./])?claude-(opus|sonnet|haiku|fable)-(\\d+)-(\\d{1,2})(?:[-@]\\d{8})?(?:-v\\d+(?::\\d+)?)?\\[1m\\]", "as": "{1} {2}.{3} (1M context)"},
+      {"match": "(?:[a-z]+\\.)?(?:anthropic[./])?claude-(opus|sonnet|haiku|fable)-(\\d+)-(\\d{1,2})(?:[-@]\\d{8})?(?:-v\\d+(?::\\d+)?)?", "as": "{1} {2}.{3}"},
+      {"match": "(?:[a-z]+\\.)?(?:anthropic[./])?claude-(opus|sonnet|haiku|fable)-(\\d+)(?:[-@]\\d{8})?(?:-v\\d+(?::\\d+)?)?", "as": "{1} {2}"},
+      {"match": "(?:[a-z]+\\.)?(?:anthropic[./])?claude-(\\d+)-(\\d{1,2})-(opus|sonnet|haiku)(?:[-@]\\d{8})?(?:-v\\d+(?::\\d+)?)?", "as": "{3} {1}.{2}"},
+      {"match": "(?:[a-z]+\\.)?(?:anthropic[./])?claude-(\\d+)-(opus|sonnet|haiku)(?:[-@]\\d{8})?(?:-v\\d+(?::\\d+)?)?", "as": "{2} {1}"},
       {"match": "(opus|sonnet|haiku|fable)\\[1m\\]", "as": "{1} (1M context)"},
       {"match": "(opus|sonnet|haiku|fable)", "as": "{1}"}
     ]},
@@ -16,7 +16,8 @@
     {"icon": "gemini", "name": "Gemini", "match": "gemini"},
     {"icon": "openai", "name": "GPT", "match": "gpt|openai|(^|[/:])o[134]\\b",
      "names": [
-      {"match": "(?:codex/)?gpt-(\\d.*)", "as": "GPT {1}"}
+      {"match": "(?:codex/)?gpt-(\\d.*?)(?:-\\d{4}-\\d{2}-\\d{2}|-\\d{8})?\\[1m\\]", "as": "GPT {1} (1M context)"},
+      {"match": "(?:codex/)?gpt-(\\d.*?)(?:-\\d{4}-\\d{2}-\\d{2}|-\\d{8})?", "as": "GPT {1}"}
     ]},
     {"icon": "meta", "name": "Llama", "match": "llama"},
     {"icon": "mistral", "name": "Mistral", "match": "mistral|mixtral|stral\\b|ministral"},

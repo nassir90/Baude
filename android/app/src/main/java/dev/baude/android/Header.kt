@@ -112,6 +112,8 @@ fun idName(value: String): String? {
 fun modelName(value: String?, listed: List<ModelChoice>): String? {
     value ?: return null
     (listed.firstOrNull { it.value == value } ?: listed.firstOrNull { it.resolved == value })?.let { return it.name }
+    if (value.startsWith("agent/")) value.removePrefix("agent/").substringAfter("/", "").takeIf { it.isNotEmpty() }
+        ?.let { return modelName(it, listed) } // (another host's, run there: agent/<member>/<its value>)
     return idName(value) ?: when {
         value.startsWith("ollama/") -> value.removePrefix("ollama/")
         value.startsWith("openai/") && value.count { it == '/' } >= 2 -> value.split("/", limit = 3)[2]
@@ -381,7 +383,7 @@ fun ChatControls(hostId: String, sid: String, said: (String) -> Unit, open: (Str
                 } else pickModel(hostId, sid, s, v, choices, asked, said, open, modelSet)
             }
         }
-        ModelPicker((now?.name ?: model ?: Wording.Common.model).let { if (it.length > 30) it.take(29) + "…" else it },
+        ModelPicker((now?.name ?: modelName(model, choices) ?: Wording.Common.model).let { if (it.length > 30) it.take(29) + "…" else it },
             choices, now?.value ?: model) { v ->
             pickModel(hostId, sid, s, v, choices, asked, said, open, modelSet)
         }
@@ -528,7 +530,7 @@ fun ModelPicker(face: String, choices: List<ModelChoice>, picked: String?, pick:
     Box(Modifier.onGloballyPositioned { anchor = it.boundsInWindow() }) {
         val ctx = androidx.compose.ui.platform.LocalContext.current
         Row(Modifier.clip(RoundedCornerShape(6.dp)).combinedClickable(enabled = choices.isNotEmpty(),
-            onLongClick = now?.let { m -> { showSlug(ctx, m.resolved ?: m.value) } }) { open = true; query = "" }
+            onLongClick = picked?.let { v -> { showSlug(ctx, now?.resolved ?: v) } }) { open = true; query = "" }
             .padding(start = 8.dp, end = 4.dp, top = 6.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
             if (logo != null) Icon(logo, null, tint = c.fg, modifier = Modifier.padding(end = 6.dp).size(16.dp.icon))
             Text(face, style = Type.body, color = c.fg, maxLines = 1, overflow = TextOverflow.Ellipsis,

@@ -905,7 +905,7 @@ class WindowDrafts:
         listed = own + [lead for lead, _ms in kinds]
         others = [m for m in listed if pid_of(m) is not None]  # (one of each kind: told apart where two share a name)
         names = [(m["value"], providerslib.told_apart(m, others) if pid_of(m) is not None else
-                  m.get("displayName") or m["value"]) for m in listed]
+                  m.get("displayName") or providerslib.model_name(m["value"])) for m in listed]
         self.model_names = dict(names) | ({shown: dict(names)[pick]} if same else {})
         known = list(self.models_info.values())
         self.model_dd.set_choices(names or MODELS, {v: providerslib.model_slug(v, known) for v, _n in names})

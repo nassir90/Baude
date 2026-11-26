@@ -1,0 +1,4 @@
+{
+  "description": "How many files a theme's folder may hold, at most.",
+  "const": 256
+}

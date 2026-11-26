@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "A theme's skin: how the desktop apps draw their own widgets, over or in place of libadwaita's look. The phone draws the theme's colours and its own shapes.",
+  "properties": {
+    "css": {
+      "type": "boolean",
+      "description": "Whether it has theme.css: GTK CSS drawn over all of the desktop apps' own."
+    },
+    "gtk_theme": {
+      "type": "string",
+      "description": "A GTK theme it draws with in place of libadwaita's stylesheet (Windows XP's, Windows 95's: the apps' GTK_THEME), by its name, as the folder gtk/<name>/ in the theme has it, or as one installed on the machine. Taken as an app starts."
+    }
+  },
+  "additionalProperties": false
+}

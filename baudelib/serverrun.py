@@ -2,6 +2,7 @@
 a head's requests (handle), feedback, routines and Bots.
 """
 import base64
+import hashlib
 import json
 import os
 import re
@@ -13,7 +14,8 @@ import uuid
 
 from baudelib import (
     agentproxy, autofix, deps, desktopchats, emissionlink, emissiontools, hostaccounts, hostdb, hostfiles, hostfixes, hostkube,
-    hostlogin, mesh, meshtools, hostterminal, multiplexlink, notes, routines, telemetry, themes, wire, wording, worktree,
+    hostlogin, mesh, meshtools, hostterminal, multiplexlink, notes, routines, telemetry, themepacks, themes, wire, wording,
+    worktree,
 )
 from baudelib.serverstate import (
     APPS, BOT_PICTURE_MAX, Conn, FRAME_KEYS, _mtime, _write_json, _write_text, bot_dir, clean_env,
@@ -475,6 +477,18 @@ class ServerRunning:
             except (OSError, ValueError) as e:
                 return reply("error", error=str(e))
             return reply(op, theme=themes.theme(msg["name"]), before=before)
+        if op in ("theme_install", "theme_file", "theme_trust"):  # (a theme as a package: its file, its files, its code)
+            try:
+                if op == "theme_install":
+                    name, replaced = themepacks.install(msg.get("pack") or "")
+                    return reply(op, theme=themes.theme(name), replaced=replaced)
+                if op == "theme_file":
+                    data = themepacks.read_file(msg.get("name"), msg.get("path"))
+                    return reply(op, data=base64.b64encode(data).decode(), sha256=hashlib.sha256(data).hexdigest())
+                themepacks.trust(themes.check_name(msg.get("name")), msg.get("code"))
+                return reply(op, theme=themes.theme(msg["name"]))
+            except (OSError, ValueError) as e:
+                return reply("error", error=str(e))
         if op == "telemetry":  # (an app of this machine's: what it saw done in chats, and what it profiled, kept here)
             try:
                 self.telemetry.keep(msg)

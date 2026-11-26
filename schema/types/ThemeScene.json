@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "A theme's scene: scene.json, the space every app draws (data: what's in it, where, lit how, and where Baude's chats, hosts, Meta's cards and windows go), and what the desktop apps may run beside it.",
+  "properties": {
+    "desktop": {
+      "$ref": "ThemeSceneCode.json",
+      "description": "What the desktop apps run from the theme for its scene: left out for none. The phone never runs any of a theme's code: it draws scene.json alone."
+    }
+  },
+  "additionalProperties": false
+}

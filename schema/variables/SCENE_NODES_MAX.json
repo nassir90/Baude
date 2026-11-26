@@ -1,0 +1,4 @@
+{
+  "description": "How many nodes a scene may have, its slots' panels counted, at most.",
+  "const": 512
+}

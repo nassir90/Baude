@@ -146,6 +146,25 @@ An entry or a part may carry:
   phone's measures are made as it's built. The owner asked for a way, from inside the app, for Meta to create, install
   and preview themes in Settings, as generic as it can be while staying fast (2026-11-24). Source:
   `[{"issue": "BaudeInternal#218"}]`.
+- **A theme is colours, a skin or a scene, each with the ones under it.** One model covers every theme
+  (schema/types/ThemeManifest.json), a folder on its host (themes/<name>/) or that folder zipped as one file
+  (<name>.baudetheme) to pass round, installed on a host as the rule above has it (theme_install), its kind its highest
+  layer:
+  - colours: tokens.json, the colours every app draws (the rule above);
+  - skin: colours, and how the desktop apps draw their own widgets: theme.css over theirs, or a GTK theme in place of
+    libadwaita's stylesheet (Windows XP's, Windows 95's: gtk/<name>/ in the theme, or one on the machine, taken as an
+    app starts), its corners and title bar probed as they are now (theming.py); the phone draws the colours;
+  - scene: a skin, and a space (scene.json, schema/types/Scene.json) every app draws, Baude's own things placed in it
+    as live widgets (chats with their state, hosts, Meta cards, windows: SceneObject.json), lit, with bloom. The
+    widgets in a scene are drawn with the theme's colours and skin, so a scene of Windows 95 panels is one theme.
+  What each app takes from a theme: every app its data (tokens.json, scene.json, its models, textures and fonts);
+  the desktop apps its theme.css and GTK theme too, and its code (desktop/*.py, given the scene's SceneAPI, and
+  shaders/*.glsl), only once its host's user has trusted that code as it is (theme_trust: its sha256; changed, it's
+  not run till it's trusted again, and the scene's drawn from its data alone). The phone never runs a theme's code.
+  The owner: "If both of these can be done, and they can be distributed as some kind of plugin, we can merge the
+  semantic "theme" framework. Ontologically we want this to meld with the work we did on the windows XP themes and
+  such too" (2026-11-26). Source: `[{"session": "b3845b21-55ac-4aab-a769-fb8517403c51", "message":
+  "96faec93-ffcb-4edc-a5bb-b9af7c972ea9"}]`.
 - **Apps are thin clients; the logic is in the wire.** What an app or an agent's tool does to shared things (a
   notebook's pages and the edits proposed to them, a chat, the mesh) is the host's to work out, through typed wire
   messages in schema/types; an app or an MCP server asks the host and shows its answer. An agent's interface (an MCP

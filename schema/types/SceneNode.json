@@ -1,0 +1,75 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "One thing in a scene: a shape (mesh), a panel showing one of Baude's things, or slots: a panel for each of Baude's things that fit (the most recent chats, every host), laid out. Placed by its position, rotation and scale, in its parent's space if it has one.",
+  "properties": {
+    "id": {
+      "type": "string",
+      "description": "Its id, for its children, a scene's code and picks."
+    },
+    "parent": {
+      "type": "string",
+      "description": "The node it's placed in (its id): left out for the scene itself."
+    },
+    "position": {
+      "type": "array",
+      "items": {
+        "type": "number"
+      },
+      "description": "Where it is (3 numbers)."
+    },
+    "rotation": {
+      "type": "array",
+      "items": {
+        "type": "number"
+      },
+      "description": "Its turn about x, then y, then z, degrees (3 numbers)."
+    },
+    "scale": {
+      "type": "array",
+      "items": {
+        "type": "number"
+      },
+      "description": "Its size, times (3 numbers)."
+    },
+    "mesh": {
+      "type": "string",
+      "description": "Its shape: plane (1 by 1, facing +z), box (1 by 1 by 1), cylinder (1 across, 1 high, along y), sphere (1 across), or a model in the theme's models/ (.obj)."
+    },
+    "material": {
+      "type": "string",
+      "description": "Its material, by name (a panel's lights the widget's picture)."
+    },
+    "states": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      },
+      "description": "A material by the state of the thing it shows (its own, or its slot's): a chat's working, waiting, idle or stopped; a host's up or down."
+    },
+    "panel": {
+      "$ref": "ScenePanel.json",
+      "description": "The thing it shows as a panel: left out for none."
+    },
+    "slots": {
+      "$ref": "SceneSlots.json",
+      "description": "Panels for each thing that fits, laid out: left out for none."
+    },
+    "hidden": {
+      "type": "boolean",
+      "description": "Whether it's left out (not drawn, not picked) for now: a scene's code, or a reveal, shows it."
+    },
+    "pick": {
+      "enum": [
+        "open",
+        "reveal",
+        "none"
+      ],
+      "description": "What a click on it (not on a widget in it) does: open the thing it shows or its slot's (a chat in its window, a host in its page); reveal: it's hidden and the hidden nodes beside it (its parent's other children) are shown; none: nothing. open, left out."
+    }
+  },
+  "required": [
+    "id"
+  ],
+  "additionalProperties": false
+}

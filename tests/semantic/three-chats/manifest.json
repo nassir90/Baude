@@ -1,0 +1,8 @@
+{
+  "name": "three-chats",
+  "kind": "scene",
+  "description": "Three chats as panels on a lit floor: the framework's sample scene.",
+  "tokens": true,
+  "skin": {"css": true},
+  "scene": {"desktop": {"python": "desktop/scene.py"}}
+}

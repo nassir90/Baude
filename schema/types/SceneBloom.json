@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "A scene's bloom: what's brighter than threshold glows into what's round it.",
+  "properties": {
+    "threshold": {
+      "type": "number",
+      "description": "From how bright, 0 to 1 and over."
+    },
+    "strength": {
+      "type": "number",
+      "description": "How much of the glow is added."
+    },
+    "radius": {
+      "type": "number",
+      "description": "How far it spreads, px at the scene's size."
+    }
+  },
+  "additionalProperties": false
+}

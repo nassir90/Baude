@@ -1,0 +1,4 @@
+{
+  "description": "A theme's folder (or its .baudetheme), every file in it, at most, in bytes.",
+  "const": 33554432
+}

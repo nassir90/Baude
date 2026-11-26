@@ -40,7 +40,7 @@ def names():
     except OSError:
         return []
     return sorted((n for n in listed if NAME.fullmatch(n) and any(
-        os.path.isfile(os.path.join(folder(), n, f)) for f in (CSS_FILE, TOKENS_FILE))), key=str.lower)
+        os.path.isfile(os.path.join(folder(), n, f)) for f in (CSS_FILE, TOKENS_FILE, "manifest.json"))), key=str.lower)
 
 
 def files(name):
@@ -186,13 +186,15 @@ def colours(doc):
 
 
 def theme(name):
-    """A theme as the wire has it (Theme.json): its name, its CSS and its colours light and dark; an error in place
-    of them if its files aren't as a theme's are."""
+    """A theme as the wire has it (Theme.json): its name, its CSS and its colours light and dark, and as a package
+    (themepacks: its manifest, its scene, its files, its code); an error in place of them if its files aren't as a
+    theme's are."""
+    from baudelib import themepacks
     try:
         f = files(name)
         if f is None:
             return {"name": name, "error": f"There's no theme {name}."}
-        return {"name": name, "css": f["css"] or "", **colours(f["tokens"])}
+        return {"name": name, "css": f["css"] or "", **colours(f["tokens"]), **themepacks.describe(name)}
     except (OSError, ValueError) as e:
         return {"name": name, "error": str(e)}
 

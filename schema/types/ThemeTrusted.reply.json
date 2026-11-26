@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "theme_trust's answer.",
+  "properties": {
+    "op": {
+      "const": "theme_trust",
+      "description": "What it is."
+    },
+    "req": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "theme": {
+      "$ref": "Theme.json",
+      "description": "It, as it is now."
+    }
+  },
+  "required": [
+    "op"
+  ],
+  "additionalProperties": false
+}

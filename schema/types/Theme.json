@@ -1,11 +1,15 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
-  "description": "A theme as its host has it (its themes folder's <name>/: theme.css and tokens.json), worked out by the host for every app alike: the desktop apps draw its CSS over theirs and its colours, the phone its colours.",
+  "description": "A theme as its host has it (its themes folder's <name>/: manifest.json, theme.css, tokens.json, scene.json and its assets), worked out by the host for every app alike: the desktop apps draw its CSS over theirs and its colours, the phone its colours; a scene, every app.",
   "properties": {
     "name": {
       "type": "string",
       "description": "Its name: its folder's."
+    },
+    "manifest": {
+      "$ref": "ThemeManifest.json",
+      "description": "Its manifest: as its manifest.json has it, or as its files make it (kind colours or skin) where it has none."
     },
     "css": {
       "type": "string",
@@ -32,6 +36,25 @@
         "pattern": "^#[0-9a-f]{6}([0-9a-f]{2})?$"
       },
       "description": "Each colour of schema/tokens' libadwaita and baude groups the theme makes other than Baude's own in dark, by its token's path: #rrggbb, or #rrggbbaa where it's see-through. A colour made of another (baude.rule of libadwaita.borders) is here when that one's set."
+    },
+    "scene": {
+      "$ref": "Scene.json",
+      "description": "Its scene.json, checked: left out where it has none."
+    },
+    "files": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Each file in its folder, by its path (theme_file gets one)."
+    },
+    "code": {
+      "type": "string",
+      "description": "Its code's sha256 (its desktop/ Python and shaders together, hex): left out where it has none."
+    },
+    "trusted": {
+      "type": "boolean",
+      "description": "Whether its code, as it is, is trusted to run on this host's machine (theme_trust)."
     },
     "error": {
       "type": "string",

@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "theme_file's answer.",
+  "properties": {
+    "op": {
+      "const": "theme_file",
+      "description": "What it is."
+    },
+    "req": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "data": {
+      "type": "string",
+      "description": "The file, base64."
+    },
+    "sha256": {
+      "type": "string",
+      "description": "Its sha256, hex."
+    }
+  },
+  "required": [
+    "op"
+  ],
+  "additionalProperties": false
+}

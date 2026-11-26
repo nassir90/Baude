@@ -1,14 +1,17 @@
 package dev.baude.android
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -16,46 +19,74 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import org.json.JSONObject
 
-/** Who in the mesh may use what of a host's (accessview.py's, the same rows): a capability's rule, a choice of
- * Everybody, Nobody or Chosen Members (a chat's: Same as Host first), then for Chosen Members a switch for each member
- * the host knows of. Sent at once (set: the rule, null for Same as Host); the host's answer is what's shown. */
+/** Who in the mesh may use what of a host's (accessview.py's, the same rows): a capability's rule, a button naming who may
+ * (Everybody, Nobody, the members) that opens a check for each member the host knows of and one over them all, as Home's
+ * Groups have them: every one checked is Everybody, none Nobody, some those members (a chat's: Same as Host above them).
+ * Sent at once (set: the rule, null for Same as Host); the host's answer is what's shown. */
 @Composable
 fun AccessRule(cap: String, rule: JSONObject?, state: JSONObject, chat: Boolean = false, title: String? = null,
                set: (JSONObject?) -> Unit) {
     val c = LocalBaude.current
     val editable = state.optBoolean("editable")
-    val who = rule?.optString("who") ?: if (chat) "same" else "everybody"
-    val chosen = rule?.optJSONArray("members")?.let { m -> (0 until m.length()).map { m.optString(it) } }.orEmpty()
+    val hostRule = state.optJSONObject("rules")?.optJSONObject(cap)
+    val same = chat && rule == null
+    val shown = shownOf(if (same) hostRule else rule)
     val members = state.optJSONArray("members")?.let { m -> (0 until m.length()).map { m.getJSONObject(it) } }.orEmpty()
-    fun said(w: String) = if (w == "same") Wording.Access.sameAsHost else Wording.byKey["access.$w"] ?: w
-    fun rule(w: String, ids: List<String>) = if (w == "same") null
-        else Msg.AccessRule(who = w, members = if (w == "chosen") ids else null).json()
-    Column {
+    val names = members.associate { it.optString("id") to it.optString("name") }
+    val items = members.map { it.optString("id") to it.optString("name") } +
+        shown.orEmpty().filter { it !in names }.map { it to it.take(8) }
+    var open by remember { mutableStateOf(false) }
+    Column(Modifier.alpha(if (editable) 1f else 0.5f)) {
         if (chat) Text(PhoneAccess.named(cap), style = Type.body, color = c.fg,
             modifier = Modifier.padding(start = 12.dp, end = 12.dp, top = 10.dp))
-        Choice(if (chat) "" else title ?: PhoneAccess.named(cap), (if (chat) listOf("same") else emptyList()) + PhoneAccess.WHO, who, ::said,
-            enabled = editable) { set(rule(it, chosen)) }
-        if (who == "chosen") {
-            if (members.isEmpty()) Rule { ActionRow(Wording.Access.noMembers, null) }
-            for (m in members) Rule {
-                val id = m.optString("id")
-                SwitchRow(m.optString("name"), null, id in chosen, enabled = editable) { on ->
-                    set(rule("chosen", if (on) chosen + id else chosen - id))
+        ActionRow(if (chat) "" else title ?: PhoneAccess.named(cap), null, onClick = if (editable) ({ open = true }) else null, suffix = {
+            Box {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(if (same) Wording.Access.sameAsHost else summary(shown, names), style = Type.body, color = c.fg,
+                        maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.widthIn(max = 180.dp))
+                    Icon(Adwaita.PanDown, null, tint = c.fg, modifier = Modifier.size(16.dp.icon))
+                }
+                Popover(open, { open = false }, ticks = Ticks.START) {
+                    if (chat) {
+                        MenuCheck(Wording.Access.sameAsHost, same) { set(if (same) hostRule ?: ruleOf(null) else null) }
+                        MenuDivider()
+                    }
+                    MenuChecks(Wording.Access.everybody, items, shown, { set(ruleOf(it)) })
+                    if (members.isEmpty()) Text(Wording.Access.noMembers, style = Type.body, color = c.dim,
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp))
                 }
             }
-        }
+        })
     }
 }
 
-@Composable
-private fun Rule(content: @Composable () -> Unit) {
-    val c = LocalBaude.current
-    Box(Modifier.fillMaxWidth().height(1.dp).background(c.rule))
-    Box(Modifier.padding(start = 16.dp)) { content() }
+/** The members a rule lets in, as MenuChecks has them: null for everybody, none for nobody. */
+private fun shownOf(rule: JSONObject?): List<String>? = when (rule?.optString("who") ?: "everybody") {
+    "everybody" -> null
+    "chosen" -> rule?.optJSONArray("members")?.let { m -> (0 until m.length()).map { m.optString(it) } }.orEmpty()
+    else -> emptyList()
+}
+
+/** The rule for the members checked (shownOf's). */
+private fun ruleOf(shown: List<String>?): JSONObject = when {
+    shown == null -> Msg.AccessRule(who = "everybody").json()
+    shown.isEmpty() -> Msg.AccessRule(who = "nobody").json()
+    else -> Msg.AccessRule(who = "chosen", members = shown).json()
+}
+
+/** Who a rule lets in, in a few words: Everybody; Nobody; studio; studio, pixel-9; 3 members. */
+private fun summary(shown: List<String>?, names: Map<String, String>): String = when {
+    shown == null -> Wording.Access.everybody
+    shown.isEmpty() -> Wording.Access.nobody
+    shown.size <= 2 -> shown.joinToString(", ") { names[it] ?: it.take(8) }
+    else -> Wording.Access.nMembers(shown.size)
 }
 
 /** A reply to access or access_set: taken if it's the host's rules, else said in a toast and the last kept. */

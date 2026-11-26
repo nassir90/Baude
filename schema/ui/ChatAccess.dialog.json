@@ -21,19 +21,19 @@
   "parts": [
     {
       "name": "Agent Management row",
-      "shows": "The capability's row as Settings → Access has it, its dropdown with Same as Host first, then Everybody, Nobody, Chosen Members (and the member switches). On the phone the name sits on a line above the dropdown.",
+      "shows": "The capability's row as Settings → Access has it: its button names who may (Same as Host while the chat has no rule of its own) and opens a check \"Same as Host\" above the Settings checklist (Everybody over a check per member). While Same as Host is checked, the list shows the host's rule. On the phone the name sits on a line above the button.",
       "copy": [
         "access.manage",
         "access.same_as_host",
         "access.everybody",
         "access.nobody",
-        "access.chosen",
+        "access.n_members",
         "access.no_members"
       ],
       "actions": [
         {
-          "by": "pick or switch",
-          "does": "Sends access_set {session, rule} at once (Same as Host: rule null, the host's rule again)."
+          "by": "check or uncheck",
+          "does": "Sends access_set {session, rule} at once: a member or Everybody checked or unchecked gives the chat its own rule (Same as Host goes off); unchecking Same as Host keeps the host's rule as the chat's own; checking it sends rule null, the host's rule again."
         }
       ],
       "decisions": [
@@ -44,6 +44,16 @@
           "source": [
             {
               "issue": "BaudeInternal#231"
+            }
+          ]
+        },
+        {
+          "said": "Each capability showing two dropdowns is odd; who may should be read off a group-like list (paraphrased)",
+          "rule": "A chat's own access rule is the same one control as the host's: Same as Host is a check above the members' checklist, not a dropdown entry",
+          "decided": "2026-11-26",
+          "source": [
+            {
+              "issue": "BaudeInternal#238"
             }
           ]
         }

@@ -199,7 +199,7 @@ fun MenuChecks(allLabel: String, items: List<Pair<String, String>>, shown: List<
 /** A row with a square check before its label (libadwaita's check button): the accent filled with a tick when on, an
  * outline when off. heading: its label as MenuHeading's. */
 @Composable
-private fun MenuCheck(label: String, on: Boolean, heading: Boolean = false, onLongClick: (() -> Unit)? = null,
+fun MenuCheck(label: String, on: Boolean, heading: Boolean = false, onLongClick: (() -> Unit)? = null,
                       onClick: () -> Unit) {
     val c = LocalBaude.current
     MenuLine(true, onLongClick, onClick) {

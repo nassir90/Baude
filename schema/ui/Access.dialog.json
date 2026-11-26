@@ -42,7 +42,7 @@
     },
     {
       "name": "Capability rows",
-      "shows": "One boxed list, a row for each capability in this order: Shell, Emission Browser, Providers, Model Files, Agent Spawn, Agent Management, Kubernetes, Databases, Access Rules. Each row is the capability's name and a dropdown after it: Everybody, Nobody or Chosen Members. With Chosen Members, a switch row for each member the host can name (those it reaches, has lately, or a rule names), on for those chosen; on the desktop they are the row's expanded rows, on the phone the rows under it, indented. With no other member: one dim row \"No other members\". Rows the asking app may not change (editable false: a member the Access Rules rule refuses) are greyed.",
+      "shows": "One boxed list, a row for each capability in this order: Shell, Emission Browser, Providers, Model Files, Agent Spawn, Agent Management, Kubernetes, Databases, Access Rules. Each row is the capability's name and one button after it naming who may: Everybody, Nobody, the members' names (one or two), or \"<n> members\". The button opens the checklist the sessions' Groups and Kubernetes' Namespaces have: a check \"Everybody\" over a check for each member the host can name (those it reaches, has lately, or a rule names). Every member checked is Everybody, none is Nobody, some is those members. With no other member, \"No other members\" dim under Everybody. A row the asking app may not change (editable false: a member the Access Rules rule refuses) has its button greyed.",
       "copy": [
         "access.browser",
         "access.model_files",
@@ -55,13 +55,13 @@
         "window.kubernetes",
         "access.everybody",
         "access.nobody",
-        "access.chosen",
-        "access.no_members"
+        "access.no_members",
+        "access.n_members"
       ],
       "actions": [
         {
-          "by": "pick in the dropdown, or switch a member",
-          "does": "Sends access_set at once (capability, rule) and shows the rule as the host answers; picking Chosen Members opens the member rows. A refusal says \"Couldn't change access: <why>\" in a toast and the row goes back to what the host has."
+          "by": "check or uncheck in the button's list",
+          "does": "Sends access_set at once (capability, rule: everybody, nobody, or chosen with the members checked) and shows the rule as the host answers; checking Everybody checks every member, unchecking it unchecks every one. A refusal says \"Couldn't change access: <why>\" in a toast and the row goes back to what the host has."
         }
       ],
       "decisions": [
@@ -110,12 +110,22 @@
               "doc": "docs/agent/product.md#mesh-membership-is-trust"
             }
           ]
+        },
+        {
+          "said": "Each capability showing two dropdowns (a mode dropdown and the expander's) is odd; Everybody / Nobody / chosen members should be read off a group-like list (paraphrased)",
+          "rule": "Every app gives an access rule one control: a button naming who may, opening a checklist with Everybody over a check per member (the Groups and Namespaces checklist); all checked is Everybody, none Nobody, some those members. No separate mode dropdown, no expander",
+          "decided": "2026-11-26",
+          "source": [
+            {
+              "issue": "BaudeInternal#238"
+            }
+          ]
         }
       ]
     },
     {
       "name": "Meta's rows",
-      "shows": "Meta has a setting for each capability (access_<capability>), read on every host of the mesh, in its index as \"<host>: <rule>; …\" (everybody, nobody, or chosen: the members' names), looked up off the main loop. Meta may set a rule narrower itself ([<host>:] nobody, or chosen with fewer members); a wider one it shows for the user. Shown under a reply (show setting:access_<capability>), it is a row for each host, titled \"<host> / <capability>\" with its dropdown, greyed where that host's Access Rules refuse this one.",
+      "shows": "Meta has a setting for each capability (access_<capability>), read on every host of the mesh, in its index as \"<host>: <rule>; …\" (everybody, nobody, or chosen: the members' names), looked up off the main loop. Meta may set a rule narrower itself ([<host>:] nobody, or chosen with fewer members); a wider one it shows for the user. Shown under a reply (show setting:access_<capability>), it is a row for each host, titled \"<host> / <capability>\" with its button and checklist, greyed where that host's Access Rules refuse this one.",
       "copy": [
         "access.setting"
       ],
@@ -150,7 +160,7 @@
     "default: every rule Everybody but Access Rules, Nobody (a mesh with no rules works as before; only this machine's heads, and those over ssh, change the rules till members are chosen)",
     "error: the host's error in one dim row",
     "read-only: every row greyed (editable false)",
-    "no members: \"No other members\" under Chosen Members"
+    "no members: \"No other members\" under Everybody in the list"
   ],
   "scenes": [
     "40g-access"

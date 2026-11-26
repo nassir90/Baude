@@ -1,71 +1,99 @@
 """Who in the mesh may use what of a host's (baudelib.access; the access and access_set ops), as every app shows it:
 Settings → Access (Baude's and Record's, for the host picked beside New session), a chat's Access… (Baude's session
 row menu: its own rule for managing it), and Meta's rows (access_<capability>, each host's of the mesh), which Meta
-reads and narrows and the user widens. Each capability is a row: its name, a dropdown (Everybody, Nobody, Chosen
-Members; a chat's has Same as Host first), and, for Chosen Members, a switch for each member the host knows of. A
-change is sent at once, and the row shows what the host answers. The phone's Access.kt is the same."""
+reads and narrows and the user widens. Each capability is a row: its name, and a button naming who may (Everybody,
+Nobody, the members) that opens a check for each member the host knows of and one over them all, as the sidebar's
+Groups have them: every one checked is Everybody, none Nobody, some those members (a chat's has Same as Host above
+them). A change is sent at once, and the row shows what the host answers. The phone's Access.kt is the same."""
 import threading
 import time
 
-from gi.repository import Adw, GLib, Gtk
+from gi.repository import Adw, GLib, Gtk, Pango
 
 from baudelib import access, wording
 
 WHO = access.WHO
-SAME = "same"  # (a chat's: the host's rule)
 
 
-def who_said(who):
-    return wording.say("access.same_as_host") if who == SAME else wording.say(f"access.{who}")
+def shown_of(rule):
+    """The members a rule lets in, as a CheckList has them: None for everybody, [] for nobody."""
+    who = (rule or {}).get("who") or "everybody"
+    return None if who == "everybody" else list((rule or {}).get("members") or ()) if who == "chosen" else []
 
 
-class AccessRow(Adw.ExpanderRow):
+def rule_of(shown):
+    """The rule for the members checked (shown_of's)."""
+    return {"who": "everybody"} if shown is None else {"who": "chosen", "members": list(shown)} if shown else \
+        {"who": "nobody"}
+
+
+def summary(shown, names):
+    """Who a rule lets in, in a few words: Everybody; Nobody; studio; studio, pixel-9; 3 members."""
+    if shown is None:
+        return wording.say("access.everybody")
+    if not shown:
+        return wording.say("access.nobody")
+    return ", ".join(names.get(m, m[:8]) for m in shown) if len(shown) <= 2 else \
+        wording.say("access.n_members", n=len(shown))
+
+
+class AccessRow(Adw.ActionRow):
     """One capability's rule (cap), shown as the host has it (show) and set through send(rule, done) as it's changed:
-    done(reply) with what the host answered. chat: a chat's own rule, Same as Host first (rule None)."""
+    done(reply) with what the host answered. chat: a chat's own rule, Same as Host above the members (rule None)."""
 
     def __init__(self, cap, send, chat=False):
-        super().__init__(title=access.named(cap), enable_expansion=False)
+        from pickers import CheckList
+        super().__init__(title=access.named(cap))
         self.cap, self.send, self.chat = cap, send, chat
-        self.choices = ([SAME] if chat else []) + list(WHO)
-        self.drop = Gtk.DropDown.new_from_strings([who_said(w) for w in self.choices])
-        self.drop.set_valign(Gtk.Align.CENTER)
-        self.drop.set_sensitive(False)
-        self.drop.connect("notify::selected", lambda *_: self.picked())
-        self.add_suffix(self.drop)
-        self.switches, self.taking, self.rule, self.members = {}, False, None, []
+        self.label = Gtk.Label(ellipsize=Pango.EllipsizeMode.END, max_width_chars=24)
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        self.same = None
+        if chat:
+            self.same = Gtk.CheckButton(label=wording.say("access.same_as_host"))
+            self.same.connect("toggled", lambda b: self.taking or self.picked_same(b.get_active()))
+            box.append(self.same)
+            box.append(Gtk.Separator())
+        self.pick = CheckList(wording.say("access.everybody"), lambda shown: self.taking or self.picked(shown))
+        box.append(self.pick)
+        self.none = Gtk.Label(label=wording.say("access.no_members"), xalign=0, css_classes=["dim-label"],
+                              visible=False)
+        box.append(self.none)
+        self.button = Gtk.MenuButton(child=self.label, always_show_arrow=True, valign=Gtk.Align.CENTER,
+                                     popover=Gtk.Popover(child=box), sensitive=False)
+        self.add_suffix(self.button)
+        self.set_activatable_widget(self.button)
+        self.taking, self.rule, self.host_rule, self.members = False, None, None, []
 
-    def show(self, rule, members, editable):
-        """As the host has it: rule (None: a chat's, the host's), the members it can name, and whether it may be
-        changed from here."""
+    def show(self, rule, members, editable, host_rule=None):
+        """As the host has it: rule (None: a chat's, the host's, host_rule), the members it can name, and whether it
+        may be changed from here."""
         self.taking = True
-        self.rule, self.members = rule, members
-        who = (rule or {}).get("who") or (SAME if self.chat else "everybody")
-        self.drop.set_selected(self.choices.index(who))
-        self.drop.set_sensitive(editable)
-        chosen = set((rule or {}).get("members") or ())
-        for row in self.switches.values():
-            self.remove(row)
-        self.switches = {}
-        for m in members or [{"id": None, "name": wording.say("access.no_members")}]:
-            row = Adw.SwitchRow(title=GLib.markup_escape_text(m["name"]), active=m["id"] in chosen,
-                                sensitive=editable and m["id"] is not None)
-            row.connect("notify::active", lambda *_: self.picked())
-            self.add_row(row)
-            self.switches[m["id"]] = row
-        self.set_enable_expansion(who == "chosen")
+        self.rule, self.host_rule, self.members = rule, host_rule, members
+        same = self.chat and rule is None
+        shown = shown_of(host_rule if same else rule)
+        names = {m["id"]: m["name"] for m in members or ()}
+        self.pick.fill([(m["id"], m["name"]) for m in members or ()] +
+                       [(k, k[:8]) for k in shown or () if k not in names], shown)
+        self.none.set_visible(not members)
+        if self.same is not None:
+            self.same.set_active(same)
+        self.label.set_label(wording.say("access.same_as_host") if same else summary(shown, names))
+        self.pick.set_sensitive(True)
+        if self.same is not None:
+            self.same.set_sensitive(True)
+        self.button.set_sensitive(editable)
         self.taking = False
 
-    def picked(self):
-        if self.taking:
-            return
-        who = self.choices[self.drop.get_selected()]
-        if who == "chosen" and not self.get_expanded():
-            self.set_enable_expansion(True)
-            self.set_expanded(True)
-        rule = None if who == SAME else {"who": who, **({"members": [k for k, r in self.switches.items()
-                                                                     if k and r.get_active()]}
-                                                        if who == "chosen" else {})}
-        self.drop.set_sensitive(False)
+    def picked(self, shown):
+        self.sending(rule_of(shown))
+
+    def picked_same(self, on):
+        self.sending(None if on else dict(self.host_rule or {"who": "everybody"}))
+
+    def sending(self, rule):
+        self.pick.set_sensitive(False)
+        if self.same is not None:
+            self.same.set_sensitive(False)
         self.send(rule, self.answered)
 
     def answered(self, reply):
@@ -73,10 +101,11 @@ class AccessRow(Adw.ExpanderRow):
             from widgets import toast
             from baudelib import wire
             toast(self, wording.say("access.failed", why=wire.said(reply)))
-            self.show(self.rule, self.members, True)
+            self.show(self.rule, self.members, True, self.host_rule)
             return False
         state = reply["state"]
-        self.show(reply.get("chat") if self.chat else state["rules"][self.cap], state["members"], state["editable"])
+        self.show(reply.get("chat") if self.chat else state["rules"][self.cap], state["members"], state["editable"],
+                  state["rules"][self.cap])
         return False
 
 

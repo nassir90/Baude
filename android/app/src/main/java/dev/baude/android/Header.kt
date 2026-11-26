@@ -392,16 +392,14 @@ fun ChatControls(hostId: String, sid: String, said: (String) -> Unit, open: (Str
     ControlsRow(inBar) {
         val copies = copiesOf(hostId, model)
         val mine = HostSubscriptions.listed[hostId].orEmpty().filter { it.provider == prog }
-        if (copies.isEmpty() && (prog == "claude" || prog == "codex") && mine.size > 1 && s.takenUp != false) { // (its
-            // host's subscriptions for its model's provider: each a provider, by its name alone, as Baude's
-            // sync_accounts lists them; not for a Claude Desktop chat its host only lists: nothing of it runs there)
+        if (copies.isEmpty() && (prog == "claude" || prog == "codex") && mine.isNotEmpty() && s.takenUp != false) { // (its
+            // host's subscriptions for its model's provider, the CLI's own sign-in first: each a provider, by its name
+            // alone, as Baude's sync_accounts lists them; not for a Claude Desktop chat its host only lists: nothing
+            // of it runs there)
             val gone = asked["account"] == null && s.accountGone == true // (on an account since removed: said so)
             val on = if (gone) GONE_ACCOUNT else asked["account"] ?: listed("account").orEmpty()
-            val subs = mine.map { it.name.orEmpty() to it.id.orEmpty() } + when {
-                gone -> listOf(Wording.Subscriptions.removedAccount to GONE_ACCOUNT)
-                on.isEmpty() -> listOf(Wording.Subscriptions.cliDefault to "")
-                else -> emptyList()
-            }
+            val subs = listOf(Wording.Subscriptions.cliDefault to "") + mine.map { it.name.orEmpty() to it.id.orEmpty() } +
+                if (gone) listOf(Wording.Subscriptions.removedAccount to GONE_ACCOUNT) else emptyList()
             fun named(id: String) = subs.firstOrNull { it.second == id }?.first ?: Wording.Subscriptions.cliDefault
             Picker(middleCut(named(on)), Wording.Subscriptions.accountTip, subs, on) { v ->
                 if (v == on || v == GONE_ACCOUNT) return@Picker

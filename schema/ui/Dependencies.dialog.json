@@ -38,7 +38,7 @@
     },
     {
       "name": "groups",
-      "shows": "A heading and a boxed list for each thing that needs them, in this order, a group shown only when it has a row on that host: Providers (Claude Code, Codex CLI, MLX on macOS, Ollama), Git and GitHub (Git, GitHub CLI, GitHub Account), Kubernetes (kubectl, kubeconfig), Database Schemas (Docker), Multiplex (VTE; Xvfb on a Linux host with no display), Emission (WebKitGTK on Linux, WebKit on macOS), Signal (Node.js). In a group, rows go by name, a check (kubeconfig, GitHub Account) right after its program, and left out while its program isn't installed. The host's error, if it can't be asked, in the groups' place.",
+      "shows": "A heading and a boxed list for each thing that needs them, in this order, a group shown only when it has a row on that host: Providers (Claude Code, Codex CLI, MLX on macOS, Ollama), Git and GitHub (Git, GitHub CLI, GitHub Account), Kubernetes (kubectl, kubeconfig), Database Schemas (Docker), Multiplex (VTE; Xvfb on a Linux host with no display), Emission (WebKitGTK on Linux, WebKit on macOS), Signal (Node.js), Telemetry (line_profiler). In a group, rows go by name, a check (kubeconfig, GitHub Account) right after its program, and left out while its program isn't installed. The host's error, if it can't be asked, in the groups' place.",
       "copy": [
         "deps.providers",
         "deps.git_github",
@@ -46,7 +46,8 @@
         "window.database_schemas",
         "deps.multiplex",
         "mesh_versions.emission",
-        "side_panel.signal"
+        "side_panel.signal",
+        "telemetry.title"
       ]
     },
     {

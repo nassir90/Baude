@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "A line of code line_profiler timed.",
+  "properties": {
+    "file": {
+      "type": "string",
+      "description": "Its file: under the checkout, relative to it."
+    },
+    "line": {
+      "type": "integer",
+      "description": "Its line number."
+    },
+    "function": {
+      "type": "string",
+      "description": "The function it's in."
+    },
+    "code": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "The line's text, stripped."
+    },
+    "hits": {
+      "type": "integer",
+      "description": "Times it ran."
+    },
+    "seconds": {
+      "type": "number",
+      "description": "Time spent on it."
+    }
+  },
+  "required": [
+    "file",
+    "line",
+    "function",
+    "hits",
+    "seconds"
+  ],
+  "additionalProperties": false
+}

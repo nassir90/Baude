@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "chat_size's answer.",
+  "properties": {
+    "op": {
+      "const": "chat_size",
+      "description": "What it is."
+    },
+    "req": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "session": {
+      "type": "string",
+      "description": "The session's id."
+    },
+    "bytes": {
+      "type": "integer",
+      "description": "Its transcript's size."
+    },
+    "messages": {
+      "type": "integer",
+      "description": "Its messages: each prompt sent and each reply, a tool's result not counted."
+    },
+    "images": {
+      "type": "integer",
+      "description": "The images in it."
+    }
+  },
+  "required": [
+    "op",
+    "session",
+    "bytes",
+    "messages",
+    "images"
+  ],
+  "additionalProperties": false
+}

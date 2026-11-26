@@ -59,7 +59,8 @@ object PhoneHost {
      * wire.takes). */
     val OPS = listOf("hello", "ping", "subscribe", "start", "attach", "detach", "input", "stop", "transcript",
         "subagents", "rename", "archive", "unarchive", "delete", "always_allow", "bot", "bot_picture", "memory",
-        "read_file", "catalogue", "list_dir", "senders", "telemetry", "telemetry_read", "ephemeral", "control",
+        "read_file", "catalogue", "list_dir", "senders", "telemetry", "telemetry_read", "telemetry_set", "chat_size",
+        "ephemeral", "control",
         "set_permission_mode", "set_model")
     private val CONTROLS = setOf("control", "set_permission_mode", "set_model", "ephemeral") // (OPS' that aren't ops: the
     // control requests its agents take (control: any a claude takes, answered as a host answers them between turns), and
@@ -86,6 +87,7 @@ object PhoneHost {
             id = prefs.getString("id", null) ?: UUID.randomUUID().toString().also { prefs.edit().putString("id", it).apply() }
             name = prefs.getString("name", null)?.ifBlank { null } ?: deviceName()
             root = File(ctx.filesDir, "phone")
+            TelemetryStore.start(root, id)
             for (d in listOf("sessions", "transcripts", "agents", "pictures", "trash", "senders")) File(root, d).mkdirs()
             File(root, "ephemeral").deleteRecursively() // (side questions from before: gone with the app, as with their heads)
             File(root, "ephemeral").mkdirs()
@@ -260,10 +262,10 @@ object PhoneHost {
         if (op == Op.READ_FILE) return reply(Op.FILE, *readFile(msg))
         if (op == Op.LIST_DIR) return reply(Op.DIR, *listDir(Msg.ListDir.from(msg).path.orEmpty()))
         if (op == Op.CATALOGUE) return reply(Op.CATALOGUE, *catalogue(Msg.Catalogue.from(msg).cwd.orEmpty()))
-        if (op == Op.TELEMETRY) { // (this app's: what it was used for since it last said, kept here: TelemetryStore)
+        if (op == Op.TELEMETRY) { // (this app's: what it saw done in chats, kept here: TelemetryStore)
             work.execute {
                 try {
-                    TelemetryStore.keep(root, msg)
+                    TelemetryStore.keep(msg)
                     reply(Op.TELEMETRY_KEPT)
                 } catch (e: Exception) {
                     reply(Op.ERROR, "error" to (e.message ?: e.toString()))
@@ -271,10 +273,15 @@ object PhoneHost {
             }
             return
         }
-        if (op == Op.TELEMETRY_READ) { // (Settings → Telemetry: this phone's use, added up)
+        if (op == Op.TELEMETRY_READ || op == Op.TELEMETRY_SET) { // (Settings → Telemetry, any head's: this phone's)
             work.execute {
-                val (times, uses) = TelemetryStore.read(root, Msg.TelemetryRead.from(msg).days?.toInt() ?: 1)
-                reply(Op.TELEMETRY_READ, "times" to org.json.JSONArray(times), "uses" to org.json.JSONArray(uses))
+                try {
+                    if (op == Op.TELEMETRY_READ) reply(op, *TelemetryStore.read(msg))
+                    else TelemetryStore.set(msg)?.let { reply(Op.ERROR, "error" to it) }
+                        ?: reply(op, "state" to TelemetryStore.state())
+                } catch (e: Exception) {
+                    reply(Op.ERROR, "error" to (e.message ?: e.toString()))
+                }
             }
             return
         }
@@ -284,6 +291,7 @@ object PhoneHost {
             Op.INPUT -> Msg.Input.from(msg).session
             Op.STOP -> Msg.Stop.from(msg).session
             Op.TRANSCRIPT -> Msg.Transcript.from(msg).session
+            Op.CHAT_SIZE -> Msg.ChatSize.from(msg).session
             Op.SUBAGENTS -> Msg.Subagents.from(msg).session
             Op.SENDERS -> Msg.SendersOp.from(msg).session
             Op.RENAME -> Msg.Rename.from(msg).session
@@ -327,6 +335,7 @@ object PhoneHost {
                 reply(Op.TRANSCRIPT, "session" to s.id, *lines(transcript(s), t.offset?.toLong() ?: 0, t.limit?.toInt() ?: 0))
             }
             Op.SUBAGENTS -> reply(Op.SUBAGENTS, "session" to s.id, "files" to JSONArray(), "more" to false)
+            Op.CHAT_SIZE -> work.execute { reply(Op.CHAT_SIZE, "session" to s.id, *TelemetryStore.chatSize(transcript(s))) }
             Op.SENDERS -> senders(s)?.let { reply(Op.SENDERS, "session" to s.id, "senders" to JSONObject(it.toString()),
                 "rev" to s.meta.optInt("senders")) } ?: reply(Op.ERROR, "error" to "its sender store couldn't be read")
             Op.RENAME -> {
@@ -715,7 +724,7 @@ object PhoneHost {
     /** Its turn's over: its result said (to those attached live, and as turn_ended to every head subscribed), and what
      * was sent meanwhile taken now, in a turn of its own (in the same hold of the lock, so no other turn starts
      * between). */
-    fun ended(s: PhoneSession, result: String, error: Boolean, turns: Int, ms: Long) {
+    fun ended(s: PhoneSession, result: String, error: Boolean, turns: Int, ms: Long, tokensIn: Long = 0, tokensOut: Long = 0) {
         val stopped = s.cancel
         tell(s, JSONObject().put("type", "result").put("subtype", if (error) "error_during_execution" else "success")
             .put("is_error", error).put("result", result).put("num_turns", turns).put("duration_ms", ms)
@@ -740,6 +749,8 @@ object PhoneHost {
             }
             if (s.deleted) emptyList() else heads.filter { it.subscribed && (it.archived || !s.meta.optBoolean("archived")) }
         }
+        if (!s.meta.optBoolean("ephemeral")) TelemetryStore.turn(s.id, ms / 1000.0, s.meta.optString("model").ifEmpty { null },
+            s.meta.optString("effort").ifEmpty { null }, tokensIn, tokensOut)
         val end = Msg.TurnEnded(session = s.id, result = result, isError = error, cost = 0, turns = turns,
             durationMs = ms).json()
         for (h in subscribed) h.send(end)

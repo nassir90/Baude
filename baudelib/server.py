@@ -24,7 +24,10 @@ import threading
 import time
 import uuid
 
-from baudelib import accounts, codex, desktopchats, emissionlink, mesh, phonebrowser, models, notes, providers, selfupdate, wire, wording
+from baudelib import (
+    accounts, codex, desktopchats, emissionlink, mesh, phonebrowser, models, notes, providers, selfupdate, telemetry, wire,
+    wording,
+)
 from baudelib.serverstate import (
     AlreadyRunning, DRAFT_S, EMISSIONS_S, EPHEMERAL_S, EXIT_S, IDLE_S, Session, _read_json, _write_json, bot_dir,
     kept_sessions, lock_path, state_home, trash,
@@ -128,6 +131,8 @@ class Server(ServerRunning, ServerSessions):
         self.autofix_reading = set()  # (chats whose pull request Auto-fix is reading now: autofix.due)
         self.following = set()  # ((session, the one it waits on): waits of its agent's answered for it, answer_wait)
         self.mesh = mesh.Mesh(self)  # (the hosts it's linked to, and those they reach: mesh.py)
+        self.telemetry = telemetry.Telemetry(self.state_dir, self.me["id"], changed=self.changed, log=self.log)  # (its machine's
+        # chat events, samples and line profiles: baudelib/telemetry.py)
 
     def bind(self):
         """The socket listened on: made (again, if it's gone: its folder taken away, say), in a folder of its user's
@@ -245,7 +250,8 @@ class Server(ServerRunning, ServerSessions):
                 **self.mesh.here_behind(), "update": self.update,
                 "providers": self.mesh.providers_here(), "mesh": self.mesh.view(),
                 "notes": self.notes_seen,  # (Record's notebooks here, as written last: notes.stamp)
-                "edits": self.edits_seen}  # (the edits proposed to their pages, as written last: notes.edits_stamp)
+                "edits": self.edits_seen,  # (the edits proposed to their pages, as written last: notes.edits_stamp)
+                "telemetry": self.telemetry.state()}  # (on or off, and what each process here profiles: its apps follow it)
 
     def made_of(self, commit):
         """When commit was made, in seconds, as git here has it (None: it hasn't it), kept once asked."""

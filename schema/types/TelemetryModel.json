@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "A model's turns, or a model and effort's.",
+  "properties": {
+    "model": {
+      "type": "string",
+      "description": "The model."
+    },
+    "effort": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "The effort (null: a model's turns at any effort)."
+    },
+    "turns": {
+      "type": "integer",
+      "description": "Turns that ended on it."
+    },
+    "tokens": {
+      "type": "integer",
+      "description": "Their tokens, read and written."
+    }
+  },
+  "required": [
+    "model",
+    "turns",
+    "tokens"
+  ],
+  "additionalProperties": false
+}

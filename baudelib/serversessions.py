@@ -592,6 +592,7 @@ class ServerSessions:
                 if s.meta.get("context_usage") is not None:
                     self.save(s)
                 self.changed()
+                self.telemetry.turn(s.id, msg, s.meta.get("model"), s.meta.get("effort"), s.turn_began)
                 ended = {"op": "turn_ended", "session": s.id, "result": msg.get("result"),
                          "is_error": bool(msg.get("is_error")), "cost": msg.get("total_cost_usd"),
                          "turns": msg.get("num_turns"), "duration_ms": msg.get("duration_ms")}

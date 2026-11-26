@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "A host's telemetry: on or off, and what each process on its machine profiles.",
+  "properties": {
+    "on": {
+      "type": "boolean",
+      "description": "Events kept and the machine sampled."
+    },
+    "line_profiler": {
+      "type": "boolean",
+      "description": "line_profiler is installed for the host's Python."
+    },
+    "profiling": {
+      "type": "array",
+      "items": {
+        "$ref": "TelemetryProfiling.json"
+      },
+      "description": "Each process's: the host's, Baude's, Record's."
+    }
+  },
+  "required": [
+    "on",
+    "line_profiler",
+    "profiling"
+  ],
+  "additionalProperties": false
+}

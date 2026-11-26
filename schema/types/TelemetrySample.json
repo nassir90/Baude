@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "A host's machine and its processes, sampled every few seconds while telemetry is on.",
+  "properties": {
+    "at": {
+      "type": "number",
+      "description": "When, in seconds since the epoch."
+    },
+    "load": {
+      "type": [
+        "array",
+        "null"
+      ],
+      "items": {
+        "type": "number"
+      },
+      "description": "The machine's load average over 1, 5 and 15 minutes (null where it has none: a phone)."
+    },
+    "memory_total": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "description": "The machine's memory, in bytes."
+    },
+    "memory_used": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "description": "Its memory in use, in bytes."
+    },
+    "procs": {
+      "type": "array",
+      "items": {
+        "$ref": "TelemetryProc.json"
+      },
+      "description": "The host process and each app on its machine that told it telemetry."
+    }
+  },
+  "required": [
+    "at",
+    "procs"
+  ],
+  "additionalProperties": false
+}

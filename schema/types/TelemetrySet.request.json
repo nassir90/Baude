@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "A host's telemetry switched on or off, or what a process on its machine profiles set, at run time: kept by the host, and told to its machine's apps (Info's telemetry).",
+  "properties": {
+    "op": {
+      "const": "telemetry_set",
+      "description": "What it is."
+    },
+    "req": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "on": {
+      "type": [
+        "boolean",
+        "null"
+      ],
+      "description": "Telemetry on or off (null: as it is)."
+    },
+    "app": {
+      "anyOf": [
+        {
+          "enum": [
+            "host",
+            "baude",
+            "record"
+          ]
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The process whose profiling is set: the host's, Baude's or Record's (null: none)."
+    },
+    "functions": {
+      "type": [
+        "array",
+        "null"
+      ],
+      "items": {
+        "type": "string"
+      },
+      "description": "What it profiles: functions and modules by their dotted names; empty: off."
+    }
+  },
+  "required": [
+    "op"
+  ],
+  "additionalProperties": false
+}

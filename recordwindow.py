@@ -343,7 +343,7 @@ class Window(RecordHosts, Adw.ApplicationWindow, feedback.FeedbackHost, viewers.
         widgets.first_keys(self, (("<Control>b F9", lambda: self.left_slide.toggle()),
                                   (" ".join(m + "f" for m in widgets.ZOOM_MODS), find)))
         import telemetryview
-        telemetryview.watch(self, "record")  # (its places on screen and its actions' uses, told to this machine's host)
+        telemetryview.watch(self, "record", network())  # (its chats' activity, told to this machine's host)
         for triggers, fn in (("<Control><Alt>b", lambda: self.right_slide.toggle()),
                              (widgets.META_KEY, lambda: self.toggle_meta()),
                              (widgets.zoom_keys("w"), lambda: self.tabs.close_current()),

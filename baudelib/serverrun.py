@@ -29,6 +29,7 @@ class ServerRunning:
         threading.Thread(target=self._watch, daemon=True, name="watch").start()
         threading.Thread(target=self._emissions, daemon=True, name="emissions").start()
         self.mesh.start()
+        self.telemetry.start()
         with self.lock:  # (waits its agents were at as it last stopped, which stopped them: answered for them)
             waits = [(s, w) for s in self.sessions.values() for w in s.meta.get("waits_on") or []]
         for s, w in waits:
@@ -162,6 +163,7 @@ class ServerRunning:
         except OSError:
             pass
         self.mesh.stop()
+        self.telemetry.stop()
         for run in list(self.agent_runs.values()):  # (agents run here for chats elsewhere: stopped, their folders gone)
             run.end()
         with self.lock:
@@ -473,16 +475,19 @@ class ServerRunning:
             except (OSError, ValueError) as e:
                 return reply("error", error=str(e))
             return reply(op, theme=themes.theme(msg["name"]), before=before)
-        if op == "telemetry":  # (an app of this machine's: what it was used for since it last said, kept here)
+        if op == "telemetry":  # (an app of this machine's: what it saw done in chats, and what it profiled, kept here)
             try:
-                telemetry.keep(self.state_dir, msg)
+                self.telemetry.keep(msg)
             except OSError as e:
                 return reply("error", error=str(e))
             return reply("telemetry_kept")
-        if op == "telemetry_read":  # (Settings → Telemetry: this machine's apps' use, added up; on a thread of its own)
+        if op in ("telemetry_read", "telemetry_set"):  # (any head's, from anywhere in the mesh: on a thread of its own)
             def tell():
                 try:
-                    reply("telemetry_read", **telemetry.read(self.state_dir, msg.get("days")))
+                    if op == "telemetry_set":
+                        reply(op, state=self.telemetry.set(msg))
+                    else:
+                        reply(op, **self.telemetry.read(msg, self.me["id"]))
                 except Exception as e:  # noqa: BLE001 (anything gone wrong: still answered)
                     reply("error", error=f"{type(e).__name__}: {e}")
             threading.Thread(target=tell, daemon=True, name="telemetry").start()
@@ -697,6 +702,16 @@ class ServerRunning:
                 if (have := self.senders(s)) is None:
                     return reply("error", error=wording.say("host_errors.senders_unreadable"))
                 return reply("senders", session=s.id, senders=dict(have), rev=s.meta.get("senders") or 0)
+            if op == "chat_size":  # (worked out from its transcript as it is, on a thread of its own: never kept)
+                path = s.transcript()
+
+                def size():
+                    try:
+                        reply("chat_size", session=s.id, **telemetry.chat_size(path))
+                    except OSError as e:
+                        reply("error", error=str(e))
+                threading.Thread(target=size, daemon=True, name="chat-size").start()
+                return None
             if op == "transcript":
                 return reply("transcript", session=s.id, **self.read_transcript(s, msg.get("offset") or 0,
                                                                                msg.get("limit")))

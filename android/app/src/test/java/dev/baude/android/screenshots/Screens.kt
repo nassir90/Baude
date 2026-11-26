@@ -3,6 +3,8 @@ package dev.baude.android.screenshots
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.requiredHeight
+import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.unit.dp
@@ -211,23 +213,86 @@ abstract class Screens(private val theme: String) {
         screen("40c2-dependencies-end")
     }
 
-    // (Settings → Telemetry on a host: its machine's apps' time in each place and uses of each ☰ item, as it adds
-    // them up)
+    // (Settings → Telemetry on a host: its turns' tokens by day over a year, the models used, its machine now, its chats'
+    // latest activity and line profiling, as it answers telemetry_read; made-up numbers, the same every run)
     @Test fun telemetry() {
-        FixtureConnection.up(activity, Mesh.hosts.first()) { m ->
-            fun time(app: String, place: String, s: Int) = org.json.JSONObject().put("app", app).put("place", place).put("seconds", s)
-            fun use(app: String, name: String, n: Int) = org.json.JSONObject().put("app", app).put("name", name).put("count", n)
-            if (m.optString("op") != "telemetry_read") null
-            else org.json.JSONObject().put("op", "telemetry_read").put("req", m.opt("req"))
-                .put("times", org.json.JSONArray(listOf(time("record", "telemetry.notes", 6900), time("baude", "chats.chat", 9420),
-                    time("baude", "git.title", 1310), time("record", "chats.chat", 1500), time("baude", "meta_settings.title", 640),
-                    time("baude", "window.kubernetes", 95))))
-                .put("uses", org.json.JSONArray(listOf(use("baude", "window.settings", 4), use("baude", "window.kubernetes", 3),
-                    use("record", "window.ongoing_feedback", 2), use("baude", "meta_settings.full_width", 2))))
-        }
+        telemetryFixture()
         show { SettingsScreen({}, {}, page = 3) }
         laidOut()
         screen("40d-telemetry")
+    }
+
+    // (the same page's foot: its machine now, its chats' latest activity, line profiling and its top lines)
+    @Test fun telemetryFoot() {
+        telemetryFixture()
+        show {
+            androidx.compose.foundation.layout.Box(androidx.compose.ui.Modifier.fillMaxSize()
+                .wrapContentHeight(androidx.compose.ui.Alignment.Bottom, unbounded = true).requiredHeight(1500.dp)) {
+                dev.baude.android.TelemetryPage()
+            }
+        }
+        laidOut()
+        screen("40e-telemetry-foot")
+    }
+
+    // (the foot on a host without line_profiler: what's missing and how it's installed, in Line Profiling's place)
+    @Test fun telemetryNoProfiler() {
+        telemetryFixture(profiler = false)
+        show {
+            androidx.compose.foundation.layout.Box(androidx.compose.ui.Modifier.fillMaxSize()
+                .wrapContentHeight(androidx.compose.ui.Alignment.Bottom, unbounded = true).requiredHeight(1500.dp)) {
+                dev.baude.android.TelemetryPage()
+            }
+        }
+        laidOut()
+        screen("40f-telemetry-no-profiler")
+    }
+
+    private fun telemetryFixture(profiler: Boolean = true) {
+        FixtureConnection.up(activity, Mesh.hosts.first()) { m ->
+            if (m.optString("op") == "deps") return@up org.json.JSONObject().put("op", "deps").put("req", m.opt("req"))
+                .put("deps", org.json.JSONArray(listOf(org.json.JSONObject().put("dep", "line_profiler").put("name", "line_profiler")
+                    .put("where", "host").put("present", false).put("fix", "sudo apt install python3-line-profiler"))))
+            if (m.optString("op") != "telemetry_read") return@up null
+            val now = System.currentTimeMillis() / 1000.0
+            val rng = java.util.Random(7)
+            val state = org.json.JSONObject().put("on", true).put("line_profiler", profiler).put("profiling", org.json.JSONArray(listOf(
+                org.json.JSONObject().put("app", "host").put("functions", org.json.JSONArray(listOf("baudelib.telemetry.Telemetry.sample"))))))
+            val out = org.json.JSONObject().put("op", "telemetry_read").put("req", m.opt("req")).put("host", Mesh.hosts.first().id)
+                .put("state", state)
+            when (m.optJSONArray("what")?.optString(0)) {
+                "usage" -> {
+                    val today = java.time.LocalDate.now()
+                    val days = (0 until 370).filter { rng.nextDouble() < if (it > 120) 0.35 else 0.75 }.reversed().map {
+                        org.json.JSONObject().put("day", today.minusDays(it.toLong()).toString())
+                            .put("tokens", 50_000L + rng.nextInt(4_000_000)).put("turns", 1 + rng.nextInt(9)) }
+                    fun model(name: String, effort: String?, turns: Int, tokens: Long) = org.json.JSONObject().put("model", name)
+                        .put("effort", effort ?: org.json.JSONObject.NULL).put("turns", turns).put("tokens", tokens)
+                    out.put("usage", org.json.JSONObject().put("days", org.json.JSONArray(days))
+                        .put("models", org.json.JSONArray(listOf(model("claude-opus-4-7", null, 600, 280_800_000),
+                            model("claude-sonnet-4-6", null, 222, 99_100_000), model("gpt-5.4-codex", null, 70, 33_500_000))))
+                        .put("combos", org.json.JSONArray(listOf(model("claude-opus-4-7", "high", 451, 210_000_000)))))
+                }
+                "events" -> out.put("events", org.json.JSONArray(listOf("chat_opened", "chat_front", "turn_sent", "turn_ended",
+                    "chat_left").mapIndexed { i, k -> org.json.JSONObject().put("at", now - 900 + i * 60).put("app", "baude")
+                        .put("kind", k).put("host", Mesh.hosts.first().id).put("session", "c1a7e4f0-0000-4000-8000-000000000001")
+                        .apply { if (k == "turn_ended") put("seconds", 131.4) } }))
+                "metrics" -> out.put("metrics", org.json.JSONArray(listOf(org.json.JSONObject().put("at", now)
+                    .put("load", org.json.JSONArray(listOf(2.41, 2.10, 1.98))).put("memory_total", 17_179_869_184L)
+                    .put("memory_used", 11_811_160_064L).put("procs", org.json.JSONArray(listOf(
+                        org.json.JSONObject().put("app", "host").put("pid", 101).put("cpu", 1.4).put("rss", 148_897_792L),
+                        org.json.JSONObject().put("app", "baude").put("pid", 102).put("cpu", 6.2).put("rss", 642_777_088L),
+                        org.json.JSONObject().put("app", "record").put("pid", 103).put("cpu", 0.3).put("rss", 231_735_296L)))))))
+                "profiles" -> out.put("profiles", org.json.JSONArray(listOf(org.json.JSONObject().put("at", now - 30)
+                    .put("from", now - 60).put("app", "host").put("lines", org.json.JSONArray(listOf(
+                        org.json.JSONObject().put("file", "baudelib/telemetry.py").put("line", 271).put("function", "sample")
+                            .put("code", "stats = proc_stats(sorted(pids))").put("hits", 120).put("seconds", 0.912),
+                        org.json.JSONObject().put("file", "baudelib/telemetry.py").put("line", 131).put("function", "memory")
+                            .put("code", "text = subprocess.run([\"vm_stat\"], capture_output=True, text=True,")
+                            .put("hits", 120).put("seconds", 0.402)))))))
+            }
+            out
+        }
     }
 
     private fun missingFixture() {

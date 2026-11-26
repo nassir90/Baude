@@ -115,13 +115,19 @@ An entry or a part may carry:
   on and for how it behaves without it (2026-11-22), and for the page grouped by what needs each, with readiness and
   the providers' status (2026-11-25).
   Source: `[{"issue": "BaudeInternal#184"}, {"issue": "BaudeInternal#183"}, {"session": "f1afb37a-90af-47d8-8693-d537464b4022", "message": "a1bc42a8-97d0-4dad-98b0-d3a42bfa155e"}, {"issue": "BaudeInternal#227"}]`.
-- **What an app records of its use stays on the user's machines.** Every app counts the time each place is on screen
-  (a main tab, a side panel page, a view over the window, a dialog, a phone screen or page), only while it's in front and
-  was used in the last minute, and the uses of each menu item, named by schema/copy keys so every app's add up alike
-  (Telemetry.request.json lists the places). It tells its own machine's host only (the phone's app its own host), about
-  once a minute; the host keeps it in its state folder, and Settings → Telemetry (Telemetry.dialog.json) reads it from
-  the host picked. Nothing is sent outside the mesh. The owner asked for telemetry of screen time per place and of
-  feature use (2026-11-24). Source: `[{"issue": "BaudeInternal#205"}]`.
+- **Telemetry is a timestamped log that stays on the user's machines.** Every app tells its own machine's host only
+  (the phone's app its own host), as it happens and each with its own time: each chat opened, in front, left, each turn
+  sent and ended (how long, model, effort, tokens), by the chat's host id and session id; a host keeps its own sessions'
+  turn ends too, samples its machine and its processes every 5 seconds, and keeps line profiles of what it's told to
+  profile (line_profiler, optional). All of it only while that host's telemetry is on, switched at run time from
+  Settings → Telemetry or telemetry_set. Any member reads any host's over a stretch (telemetry_read), so one machine
+  pulls every host's and puts them together by time (baudelib/telemetry.py's gather); a chat's size is worked out
+  from its transcript when asked (chat_size), never kept. No screen time or menu counts. Nothing is sent outside the
+  mesh. The owner: "Once a minute is completely bonkers and quite useless", "Sreen time is a pretty useless metric,
+  how is that going to help me make the app better (in isolation)", "Store chat activity yes with timestamps", "Yes
+  store system metrics", "Yes build in line_profiler", "Yes add teh wire messags" (2026-11-26). Source:
+  `[{"issue": "BaudeInternal#205"}, {"session": "b3845b21-55ac-4aab-a769-fb8517403c51", "message":
+  "41aef9c4-02f6-4496-ac8a-bb9737df5262"}, {"issue": "BaudeInternal#228"}]`.
 - **Every piece of text starts with a capital letter.** Whatever an app puts on screen starts with a capital: notes and
   messages (a chat's SystemNote, an error, a status line) in sentence case ("Interrupted", "Model → Opus", "Committed on
   main", "Claude couldn't save this chat: the disk is full"), buttons, menu items and links in Title Case ("Show in

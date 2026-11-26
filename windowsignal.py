@@ -26,6 +26,7 @@ from gi.repository import Adw, Gdk, GLib, Graphene, Gtk  # noqa: E402
 import fixview  # noqa: E402  (☰ → Ongoing Feedback: the fixes, approved or rejected)
 from livefeed import read_appended  # noqa: E402
 import widgets  # noqa: E402  (what Record draws as Baude does: the links' logos; see widgets.py)
+import telemetryview  # noqa: E402  (its chats' activity, told to this machine's host)
 import markdownview  # noqa: E402
 import chatfind  # noqa: E402
 from markdownview import hover_uri  # noqa: E402,F401
@@ -235,6 +236,7 @@ class WindowSignal:
     def seen_chat(self):
         """The open chat seen (this window's the one you're in, on its chat's tab, or the chat's just opened): its
         notification gone."""
+        telemetryview.look(self)
         if self.is_active() and self.tabs.current() is self.tabs.get("chat"):
             widgets.withdraw_notification(self.chat_key(self.session_id))
 

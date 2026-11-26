@@ -162,8 +162,7 @@ class TerminalView(Gtk.Box):
         self.host_label.set_label((term.host_name or "") if term is not None else "")
 
     def open(self, where=None, name=None):
-        """Shown (or, out, its window brought up) on a terminal on where (the host picked, if none): the one shown if
-        it's there, else another of that host's, else a new one there."""
+        """Shown (or, out, its window brought up) on a terminal of yours on where (the host picked, if none): on_host."""
         import multiplexterm
         if (dep := multiplexterm.missing()) is not None:  # (no terminals: what's missing shown in their place)
             self.show_missing(dep)

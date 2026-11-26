@@ -167,6 +167,10 @@ private fun saidSize(n: Long?): String = when {
     else -> Wording.Images.sizeMb(mb = String.format(Locale.ROOT, "%.0f", n / (1L shl 20).toDouble()))
 }
 
+private fun pressureSaid(s: Msg.TelemetrySample): String? =
+    s.memoryPressure?.let { Wording.byKey["telemetry.pressure_$it"] ?: it }
+        ?: s.memoryStall?.let { Wording.Telemetry.stalled(percent = String.format(Locale.ROOT, "%.1f", it.toDouble())) }
+
 private fun tokens(n: Long) = fmtTokens(n.coerceAtMost(Int.MAX_VALUE.toLong()).toInt())
 
 private fun effortSaid(e: String?) = e?.let { Wording.byKey["mode_effort.effort_$it"] ?: it } ?: "–"
@@ -302,6 +306,9 @@ fun TelemetryPage() {
                 rows.add(valueRow(Wording.Telemetry.load, l.joinToString(" · ") { String.format(Locale.ROOT, "%.2f", it.toDouble()) })) }
             s.memoryTotal?.let { t -> rows.add(valueRow(Wording.BotMemory.title,
                 Wording.Telemetry.memoryOf(used = saidSize(s.memoryUsed?.toLong()), total = saidSize(t.toLong())))) }
+            s.swapTotal?.takeIf { it.toLong() > 0 }?.let { t -> rows.add(valueRow(Wording.Telemetry.swap,
+                Wording.Telemetry.memoryOf(used = saidSize(s.swapUsed?.toLong()), total = saidSize(t.toLong())))) }
+            pressureSaid(s)?.let { rows.add(valueRow(Wording.Telemetry.memoryPressure, it)) }
             for (p in s.procs.orEmpty().sortedBy { PROFILED.indexOf(it.app).let { i -> if (i < 0) 3 else i } })
                 rows.add(valueRow(APP_NAMES[p.app]?.invoke() ?: p.app.orEmpty(), Wording.Telemetry.cpuRss(
                     cpu = p.cpu?.let { String.format(Locale.ROOT, "%.1f", it.toDouble()) } ?: "–", rss = saidSize(p.rss?.toLong()))))

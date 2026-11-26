@@ -21,6 +21,10 @@
         "type": "object"
       },
       "description": "What it's asking, not answered yet: its agent's control requests (can_use_tool) as they came."
+    },
+    "writes": {
+      "type": "boolean",
+      "description": "Whether the head may change the chat (Agent Management's write, the chat's own first): false, it only reads it, and answers none of its asks."
     }
   },
   "required": ["op"],

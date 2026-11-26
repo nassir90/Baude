@@ -28,13 +28,13 @@
     "chat": {
       "anyOf": [
         {
-          "$ref": "AccessRule.json"
+          "$ref": "AccessChat.json"
         },
         {
           "type": "null"
         }
       ],
-      "description": "That chat's own rule for managing it (null: the host's manage rule)."
+      "description": "That chat's own rules for managing it (null, or a side not there: the host's)."
     }
   },
   "required": [

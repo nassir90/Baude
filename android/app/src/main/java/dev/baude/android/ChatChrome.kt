@@ -22,6 +22,7 @@ class Chrome {
     val tasks = mutableStateMapOf<String, JSONObject>() // (a task's id: its fields, replaced whole as they change)
     val taskOrder = mutableStateListOf<String>()    // (the tasks' ids, in the order each was first heard)
     val missing = mutableStateOf(false)             // (its host answered the attach: no such session)
+    val writes = mutableStateOf(true)               // (its host answered the attach: false, this phone only reads it)
     var interrupting = 0L                           // (an interrupt waiting: its token)
     var turnSent: Pair<String, List<Picked>>? = null // (what this phone sent for the turn going, text and files: Send again's)
     var restartAfterTurn = false                    // (signed in while it ran: its claude started again once it's over)

@@ -446,7 +446,8 @@ class WindowProc:
                 self.proc = RemoteProc(self.on_msg, self.on_exit, r.where, self.session_id,
                                        live=not self.resume_pending,  # (this machine's: as Baude's own claude would
                                        env=claudelib.claude_env() if r.mine else None,  # have had it)
-                                       always_allow=sorted(self.allowed_in(self.session_id)))
+                                       always_allow=sorted(self.allowed_in(self.session_id) -
+                                                           self.host_allowed.get(self.session_id, set())))
             except OSError as e:
                 refused = isinstance(e, baudelib.client.Refused)
                 if refused:  # (its host there, but the session not to be had)
@@ -462,8 +463,10 @@ class WindowProc:
                     self.attach_said = (self.session_id, kind)
         if self.proc is not None:
             self.attach_said = self.missing_session = self.missing_reason = self.retaken = None
-            self.allowed_in(self.session_id).update(self.proc.listing.get("always_allow") or ())  # (what its host
-            # allows it: another head's too)
+            self.host_allowed[self.session_id] = set(self.proc.listing.get("always_allow") or ())  # (what its host
+            self.allowed_in(self.session_id).update(self.host_allowed[self.session_id])  # allows it: another head's
+            # too; not sent it again as this attaches again)
+            self.apply_read_only()  # (one its host lets this head only read: no text box)
         if self.proc is not None and self.drop_running is not None:  # (attached again after a drop: its claude gone
             if self.drop_running and self.proc.listing.get("state") == "stopped":  # meanwhile, the next message
                 self.resume_reason = (self.session_id, "network error")  # resumes it: said then, begin_resume)
@@ -892,9 +895,13 @@ class WindowProc:
             return True
         return sid in self.sidebar.archived_ids()
 
+    def writes_chat(self):
+        """Whether this head may change the open chat: no, where its host lets it only read it (access)."""
+        return getattr(self, "remote", None) is None or getattr(getattr(self, "proc", None), "writes", True) is not False
+
     def set_read_only(self, on):
         """Make this session read-only, or not (and remember it for the session, once it has an id)."""
-        if self.archived:
+        if self.archived or not self.writes_chat():
             return  # (read-only till it's unarchived: the item's greyed)
         if self.session_id:
             ids = [i for i in self.read_only_ids() if i != self.session_id] + ([self.session_id] if on else [])
@@ -902,15 +909,17 @@ class WindowProc:
         self.apply_read_only(on)
 
     def apply_read_only(self, on=None):
-        """Show or hide the text box as the session asks (on: as given, None: as remembered for it); archived, it's
-        hidden whatever was chosen, and ☰ → Read-only session is checked and greyed."""
+        """Show or hide the text box as the session asks (on: as given, None: as remembered for it); archived, or one
+        its host lets this head only read, it's hidden whatever was chosen, and ☰ → Read-only session is checked and
+        greyed."""
         if on is None:
             on = bool(self.session_id) and self.session_id in self.read_only_ids()
         self.archived = self.chat_archived()
-        self.read_only = on or self.archived
+        forced = self.archived or not self.writes_chat()
+        self.read_only = on or forced
         if (action := self.lookup_action("readonly")) is not None:
             action.set_state(GLib.Variant.new_boolean(self.read_only))
-            action.set_enabled(not self.archived)
+            action.set_enabled(not forced)
         self.show_composer()
 
     def show_composer(self):

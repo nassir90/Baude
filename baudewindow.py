@@ -176,6 +176,7 @@ class BaudeWindow(WindowView, WindowProc, WindowDrafts, WindowSignal, WindowRemo
         self.total_cost = 0.0
         self.always_allowed = {}  # (a chat's session id, None for a new one till it has one: the tools always allowed
         # in it, here and on its host)
+        self.host_allowed = {}  # (a chat's session id: the tools its host said it allows always, as it was attached)
         self.attachments = []
         self.chat_sent, self.listed_begun = False, None  # (the sidebar lists the open chat once it's begun)
         self.pending = {}          # control request id -> (callback(response), refused(error) or None) (request)

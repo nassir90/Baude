@@ -48,14 +48,14 @@ private fun fullWidth(): MenuItem {
  * Feedback…, Ongoing Feedback. screen opens one of "settings", "changelog", "mesh", "fixes", "databases", "kubernetes" and
  * "terminal" over the chat. */
 @Composable
-fun ChatMenu(hostId: String, sid: String, feedback: () -> Unit, screen: (String) -> Unit) {
+fun ChatMenu(hostId: String, sid: String, feedback: () -> Unit, screen: (String) -> Unit, writes: Boolean = true) {
     val ctx = LocalContext.current
     MainMenu(listOf(
         listOfNotNull(
             MenuItem(Wording.Find.placeholder) { Find.open["$hostId/$sid"] = true },
             MenuItem(Wording.Window.copyTranscript) { copyReport(ctx, hostId, sid) },
-            if (sid.isEmpty()) null else MenuItem(Wording.Window.readOnly, Settings.isReadOnly(sid) || isArchived(hostId, sid),
-                                                  enabled = !isArchived(hostId, sid)) {
+            if (sid.isEmpty()) null else MenuItem(Wording.Window.readOnly, Settings.isReadOnly(sid) || isArchived(hostId, sid) ||
+                !writes, enabled = !isArchived(hostId, sid) && writes) { // (writes false: its host lets this phone only read it)
                 if (sid in Settings.readOnly) Settings.readOnly.remove(sid) else Settings.readOnly.add(sid)
                 Settings.save(ctx)
             },

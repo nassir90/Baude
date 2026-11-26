@@ -192,7 +192,7 @@ class Conn:
 
     def __init__(self, channel, origin=None, sender=None, verified=True):
         self.channel, self.out = channel, queue.Queue()
-        self.subscribed, self.answers = False, True  # (answers: what its sessions ask, if it's attached to them)
+        self.subscribed, self.mute = False, set()  # (mute: the chats it's attached to whose asks it won't answer)
         self.origin, self.sender = origin, sender  # (a tunnel's: the member it came from; the chat there its relay
         # named, as that member has it: what's sent through it is from)
         self.member, self.verified = origin, verified  # (who the access rules judge it as: a tunnel's origin, or the

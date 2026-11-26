@@ -1,15 +1,19 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
-  "description": "A host's rule for each of its capabilities, by name: everybody's where none's set.",
+  "description": "A host's rule for each of its capabilities, by name: a capability split into what reads and what changes has two, <capability>_read and <capability>_write (write lets a member read too); one with nothing to split has one. Everybody's where none's set, but access_write's, nobody's.",
   "properties": {
     "shell": {
       "$ref": "AccessRule.json",
       "description": "A shell on its machine: its terminals (terminal ops) and Multiplex's, through a Bot's terminal tools (multiplex)."
     },
-    "browser": {
+    "browser_read": {
       "$ref": "AccessRule.json",
-      "description": "Its Bots' Emission browsers: their tools' calls (emission), watching one (emission_watch) and a phone showing one (emission_serve)."
+      "description": "Its Bots' Emission browsers watched: the watch stream (emission_watch) and what the pane says back on it (emission_watch_say)."
+    },
+    "browser_write": {
+      "$ref": "AccessRule.json",
+      "description": "Its Bots' Emission browsers driven: their tools' calls (emission), a phone showing one and answering its calls (emission_serve, emission_answer), and a Bot made or driven (with Shell). Lets a member watch too."
     },
     "providers": {
       "$ref": "AccessRule.json",
@@ -23,38 +27,59 @@
       "$ref": "AccessRule.json",
       "description": "New chats and agents started on it (start, agent)."
     },
-    "manage": {
+    "manage_read": {
       "$ref": "AccessRule.json",
-      "description": "Its chats as they are: listed, read, written in, stopped, renamed, archived, deleted, a Bot's tasks and memory. A chat's own rule (Access's chat) goes before this."
+      "description": "Its chats as they are, read: listed (and told of their turns' ends), attached to and watched, their transcripts, sizes, subagents, senders, a Bot's picture, memory and tasks read, their Auto-fix as it is, their folders read (read_file, list_dir, git, signal_names, catalogue), forked from; Record's notebooks here listed, and the edits waiting on their pages (notes, edits). A chat's own rule (AccessChat's manage_read) goes before this."
     },
-    "kube": {
+    "manage_write": {
       "$ref": "AccessRule.json",
-      "description": "Its machine's Kubernetes clusters (kube, kube_follow)."
+      "description": "Its chats as they are, changed: written in, held messages sent or dropped, asks answered, stopped, renamed, archived, deleted, their folders moved, tools allowed always (attach's only where it adds some, its env only where it changes it), made Bots, their Auto-fix turned on or off, a Bot's memory written and tasks set, run and stopped, a chat adopted, moved to another subscription (with Subscriptions' write); Record's notebooks here written, and edits to their pages proposed, revised, withdrawn, decided and adopted (notes' write, edit_*). Lets a member read them too. A chat's own rule (AccessChat's manage_write) goes before this."
+    },
+    "kube_read": {
+      "$ref": "AccessRule.json",
+      "description": "Its machine's Kubernetes clusters read: contexts, lists, YAML, owners (kube) and logs and watches (kube_follow), and the clusters' parts of @."
+    },
+    "kube_write": {
+      "$ref": "AccessRule.json",
+      "description": "Its machine's Kubernetes clusters changed: a pod deleted (kube's delete). Lets a member read them too."
     },
     "databases": {
       "$ref": "AccessRule.json",
       "description": "Its machine's databases (databases)."
     },
-    "subscriptions": {
+    "subscriptions_read": {
       "$ref": "AccessRule.json",
-      "description": "Its subscription accounts: listed, added, renamed, removed (signed out), each provider's default picked, a chat moved to one (with the chat's manage rule too), their usage read, and signed in to (accounts, login, login_code), a token account's token being added with them."
+      "description": "Its subscription accounts read: listed, and their usage (accounts' list and usage)."
     },
-    "access": {
+    "subscriptions_write": {
       "$ref": "AccessRule.json",
-      "description": "These rules changed (access_set), and the host itself: stopped, linked and unlinked, deactivated, its telemetry, themes and feedback (quit, link, unlink, deactivate, activate, telemetry_set, theme_save, theme_remove, feedback). A head on its own machine, or one over ssh, may always."
+      "description": "Its subscription accounts changed: added, renamed, a token replaced, removed (signed out), a provider's default picked, a chat moved to one (with the chat's Agent Management write too), signed in to (accounts' sign_in and code, login, login_code). Lets a member read them too."
+    },
+    "access_read": {
+      "$ref": "AccessRule.json",
+      "description": "These rules read (access), and the host's own: its telemetry (telemetry_read) and its Ongoing Feedback listed (fixes' list and shot)."
+    },
+    "access_write": {
+      "$ref": "AccessRule.json",
+      "description": "These rules changed (access_set), and the host itself: stopped, linked and unlinked, deactivated, its telemetry, themes and feedback (quit, link, unlink, deactivate, activate, telemetry_set, theme_save, theme_remove, feedback), its Ongoing Feedback acted on (fixes' merge, discard, reopen, reply, fix, stop). Lets a member read them too. A head on its own machine, or one over ssh, may always."
     }
   },
   "required": [
     "shell",
-    "browser",
+    "browser_read",
+    "browser_write",
     "providers",
     "model_files",
     "spawn",
-    "manage",
-    "kube",
+    "manage_read",
+    "manage_write",
+    "kube_read",
+    "kube_write",
     "databases",
-    "subscriptions",
-    "access"
+    "subscriptions_read",
+    "subscriptions_write",
+    "access_read",
+    "access_write"
   ],
   "additionalProperties": false
 }

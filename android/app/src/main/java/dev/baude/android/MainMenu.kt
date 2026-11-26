@@ -2,18 +2,28 @@ package dev.baude.android
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.size
+import androidx.compose.material3.Icon
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.dp
 
 /** An item of the main menu: its label, a check mark where it's a toggle (checked: whether it's on; null: it isn't
  * one), whether it can be picked (greyed if not), and what it does. */
 class MenuItem(val label: String, val checked: Boolean? = null, val enabled: Boolean = true,
-               val content: (@Composable () -> Unit)? = null, val go: () -> Unit)
+               val content: (@Composable () -> Unit)? = null, val hosts: Hosts? = null, val go: () -> Unit)
+
+/** A family row's caret (menufamily.FamilyRow): New session's hosts that take op, the active one ticked; on(id) as one's
+ * picked. */
+class Hosts(val op: String, val active: String?, val on: (String) -> Unit)
 
 /** ☰'s main menu, as the header bar's: sections of one-line items with a rule between them (as Baude's and Record's:
  * the chat's, the view's, the views over the window, the app's); with a toggle among them every item has a column for
@@ -29,11 +39,36 @@ fun MainMenu(sections: List<List<MenuItem>>) {
                 if (i > 0) MenuDivider()
                 for (item in items) {
                     val content = item.content
+                    val hosts = item.hosts
                     if (content != null) Box(Modifier.clickable { open = false; item.go() }) { content() }
+                    else if (hosts != null) FamilyRow(item.label, hosts, { open = false; item.go() }) { id -> open = false; hosts.on(id) }
                     else MenuChoice(item.label, item.checked == true, enabled = item.enabled) {
                         open = false
                         item.go()
                     }
+                }
+            }
+        }
+    }
+}
+
+/** One of ⋮'s Kubernetes, Docker, Databases and Terminal (menufamily.FamilyRow): its name, tapped, opens it on the
+ * active host (go); the caret at its end, New session's host list (HostChoices) of the hosts that take it, the one
+ * tapped opening it there (pick). */
+@Composable
+private fun FamilyRow(label: String, hosts: Hosts, go: () -> Unit, pick: (String) -> Unit) {
+    val c = LocalBaude.current
+    var list by remember { mutableStateOf(false) }
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Box(Modifier.weight(1f)) { MenuChoice(label, false, onClick = go) }
+        Box {
+            Box(Modifier.size(Popups.row).clickable { list = true }, contentAlignment = Alignment.Center) {
+                Icon(Adwaita.PanDown, label, tint = c.fg, modifier = Modifier.size(16.dp.icon))
+            }
+            Popover(list, { list = false }, ticks = Ticks.END) {
+                HostChoices(newSessionHosts().filter { it != "phone" && takes(it, hosts.op) }, hosts.active) { id ->
+                    list = false
+                    pick(id)
                 }
             }
         }
@@ -55,7 +90,8 @@ private fun fullWidth(): MenuItem {
  * Feedback…, Ongoing Feedback. screen opens one of "settings", "changelog", "mesh", "fixes", "databases", "kubernetes",
  * "docker" and "terminal" over the chat. */
 @Composable
-fun ChatMenu(hostId: String, sid: String, feedback: () -> Unit, screen: (String) -> Unit, writes: Boolean = true) {
+fun ChatMenu(hostId: String, sid: String, feedback: () -> Unit, screen: (String) -> Unit, writes: Boolean = true,
+             tool: (String, String) -> Unit = { s, h -> if (h == hostId) screen(s) }) {
     val ctx = LocalContext.current
     MainMenu(listOf(
         listOfNotNull(
@@ -69,10 +105,10 @@ fun ChatMenu(hostId: String, sid: String, feedback: () -> Unit, screen: (String)
         ),
         listOf(fullWidth()),
         listOfNotNull(
-            if (takes(hostId, "kube")) MenuItem(Wording.Window.kubernetes) { screen("kubernetes") } else null,
-            if (takes(hostId, "docker")) MenuItem(Wording.Window.docker) { screen("docker") } else null,
-            if (takes(hostId, "databases")) MenuItem(Wording.Window.databaseSchemas) { screen("databases") } else null,
-            if (takes(hostId, "terminal")) MenuItem(Wording.Multiplex.terminalMenu) { screen("terminal") } else null,
+            if (takes(hostId, "kube")) family(Wording.Window.kubernetes, "kube", hostId, { tool("kubernetes", it) }) { screen("kubernetes") } else null,
+            if (takes(hostId, "docker")) family(Wording.Window.docker, "docker", hostId, { tool("docker", it) }) { screen("docker") } else null,
+            if (takes(hostId, "databases")) family(Wording.Window.databaseSchemas, "databases", hostId, { tool("databases", it) }) { screen("databases") } else null,
+            if (takes(hostId, "terminal")) family(Wording.Multiplex.terminalMenu, "terminal", hostId, { tool("terminal", it) }) { screen("terminal") } else null,
         ),
         listOf(usage { screen("subscriptions") }),
         listOf(
@@ -95,10 +131,10 @@ fun HomeMenu(settings: () -> Unit, changelog: () -> Unit, mesh: () -> Unit, feed
     MainMenu(listOf(
         listOf(fullWidth()),
         if (host == null) emptyList() else listOfNotNull(
-            if (takes(host, "kube")) MenuItem(Wording.Window.kubernetes) { tool("kubernetes", host) } else null,
-            if (takes(host, "docker")) MenuItem(Wording.Window.docker) { tool("docker", host) } else null,
-            if (takes(host, "databases")) MenuItem(Wording.Window.databaseSchemas) { tool("databases", host) } else null,
-            if (takes(host, "terminal")) MenuItem(Wording.Multiplex.terminalMenu) { tool("terminal", host) } else null,
+            if (takes(host, "kube")) family(Wording.Window.kubernetes, "kube", host, { tool("kubernetes", it) }) { tool("kubernetes", host) } else null,
+            if (takes(host, "docker")) family(Wording.Window.docker, "docker", host, { tool("docker", it) }) { tool("docker", host) } else null,
+            if (takes(host, "databases")) family(Wording.Window.databaseSchemas, "databases", host, { tool("databases", it) }) { tool("databases", host) } else null,
+            if (takes(host, "terminal")) family(Wording.Multiplex.terminalMenu, "terminal", host, { tool("terminal", it) }) { tool("terminal", host) } else null,
         ),
         listOf(usage(subscriptions)),
         listOf(
@@ -110,6 +146,10 @@ fun HomeMenu(settings: () -> Unit, changelog: () -> Unit, mesh: () -> Unit, feed
         ),
     ))
 }
+
+/** A family row (FamilyRow): label, its name opening it on host (go), its caret on another that takes op (on). */
+private fun family(label: String, op: String, host: String, on: (String) -> Unit, go: () -> Unit) =
+    MenuItem(label, hosts = Hosts(op, host, on), go = go)
 
 /** ☰'s usage row (MenuUsage): the current subscription's usage; tapped, Settings → Subscriptions (go). */
 private fun usage(go: () -> Unit) = MenuItem(Wording.Subscriptions.title, content = { MenuUsage() }, go = go)

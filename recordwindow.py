@@ -285,12 +285,8 @@ class Window(RecordHosts, Adw.ApplicationWindow, feedback.FeedbackHost, viewers.
         view = Gio.Menu()
         view.append(wording.say("meta_settings.full_width"), "win.fullwidth")
         menu.append_section(None, view)
-        tools = Gio.Menu()  # (Baude's views over the window; Files and Git are in the right bar, code in tabs)
-        for title, page in ((wording.say("window.kubernetes"), "kube"), (wording.say("window.docker"), "docker"),
-                            (wording.say("window.database_schemas"), "db")):
-            tools.append(title, f"win.viewer::{page}")
-        tools.append(wording.say("multiplex.terminal_menu"), "win.viewer::terminal")
-        tools.append(wording.say("bot_browser.title"), "win.browser")
+        tools = Gio.Menu()  # (Baude's views over the window, and Browser: menufamily.attach; Files and Git are in the
+        # right bar, code in tabs)
         menu.append_section(None, tools)
         usage = Gio.Menu()  # (the current subscription's usage: subscriptionpage.attach_menu_usage)
         menu.append_section(None, usage)
@@ -309,6 +305,7 @@ class Window(RecordHosts, Adw.ApplicationWindow, feedback.FeedbackHost, viewers.
         menu.append_section(None, app_menu)
         menu_btn = self.menu_button = Gtk.MenuButton(icon_name="open-menu-symbolic", menu_model=menu)
         import subscriptionpage
+        menufamily.attach(self, menu_btn, tools)  # (each on the host picked, or, from its caret, another; Baude's too)
         subscriptionpage.attach_menu_usage(self, menu_btn, usage)  # (the current subscription's usage, Baude's too)
         for name, fn in (("openchat", self.choose_chat), ("copylink", self.tabs.copy_link), ("copyreport", self.copy_report),
                          ("rename", self.rename),

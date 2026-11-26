@@ -128,6 +128,11 @@ CSS = tokens.css("""
 /* (☰'s usage row: its words the menu's, in line with its items') */
 .baude-menu-usage { font-weight: normal; padding-left: 28px; }
 .baude-menu-usage .heading { font-weight: bold; }
+/* (☰'s Kubernetes, Docker, Databases, Terminal and Browser: each a split, its name as the menu's items are, its
+   host dropdown a caret at its end) */
+.baude-family-row { min-height: 30px; }
+.baude-family-row button.baude-family-main { font-weight: normal; padding: 0 8px 0 34px; min-height: 30px; }
+.baude-family-row .baude-family-hosts > button { padding: 0 8px; min-height: 30px; }
 .cut-note button { min-height: 0; padding: 1px 8px; font-size: 0.9em; }
 /* One look for Baude and Record: the frame round the work (the bars, the lists on the left, the panels on the
    right: one colour, no lines between them), the inside where it's read and written (a box set into the frame),

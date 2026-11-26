@@ -51,7 +51,8 @@ class MainActivity : ComponentActivity() {
                     "chat" -> androidx.compose.runtime.key(now[1], now[2]) { // (another chat: its own pages, from Chat)
                         ChatShell(now[1], now[2], ::back, open = { h, s -> go(listOf("chat", h, s)) },
                             feedback = { go(listOf("feedback", now[1], now[2])) },
-                            screen = { go(listOf(it, now[1], now[2])) })
+                            screen = { go(listOf(it, now[1], now[2])) },
+                            tool = { s, h -> go(listOf(s, h, now[1], now[2])) }) // (another host's, over the chat)
                     }
                     "phone" -> PhoneScreen(::back, open = { go(listOf("chat", "phone", it)) })
                     "feedback" -> FeedbackScreen(feedbackContext(now), ::back)
@@ -100,7 +101,7 @@ class MainActivity : ComponentActivity() {
 
     private fun go(to: List<String>) {
         val now = screen.value
-        if ((now[0] == "chat" || now[0] in OVER && now.size == 3) && to[0] != "chat" && to[0] !in OVER) Mesh.close()
+        if ((now[0] == "chat" || now[0] in OVER && now.size >= 3) && to[0] != "chat" && to[0] !in OVER) Mesh.close()
         screen.value = if (to[0] == "contacts") listOf("contacts") else to
         if (to[0] !in OVER) Shares.returns = false // (a screen over it, and back: still the shared one)
         val shared = Shares.pending.value
@@ -127,6 +128,10 @@ class MainActivity : ComponentActivity() {
         }
         if (now[0] in OVER && now.size == 3) { // (back to the chat it was opened from)
             screen.value = listOf("chat", now[1], now[2])
+            return
+        }
+        if (now[0] in OVER && now.size == 4) { // (another host's, opened over a chat: back to that chat)
+            screen.value = listOf("chat", now[2], now[3])
             return
         }
         if (now[0] == "chat") Mesh.close()

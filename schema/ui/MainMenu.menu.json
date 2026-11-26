@@ -17,7 +17,10 @@
     "windowview.py:WindowView.on_fullwidth_toggled",
     "subscriptionpage.py:MenuUsage",
     "menufamily.py:open_browser",
-    "baudelib/emissionlink.py:open_window"
+    "baudelib/emissionlink.py:open_window",
+    "menufamily.py:FamilyRow",
+    "menufamily.py:open_family",
+    "terminalpane.py:TerminalView.open"
   ],
   "copy": [
     "window",
@@ -98,8 +101,29 @@
     },
     {
       "name": "Kubernetes",
-      "decisions": [{"said": "Drop the ellipses from Kubernetes and Database Schemas", "rule": "Every app names the Kubernetes and Databases items without an ellipsis: they open a view, not a dialog that asks for more", "decided": "2026-11-22", "source": [{"issue": "BaudeInternal#187"}]}],
-      "shows": "Row \"Kubernetes\".",
+      "decisions": [
+        {
+          "said": "Drop the ellipses from Kubernetes and Database Schemas",
+          "rule": "Every app names the Kubernetes and Databases items without an ellipsis: they open a view, not a dialog that asks for more",
+          "decided": "2026-11-22",
+          "source": [
+            {
+              "issue": "BaudeInternal#187"
+            }
+          ]
+        },
+        {
+          "said": "Opening Terminal, Kubernetes, Databases, Multiplex and the like on a host is slow: each needs a dropdown of hosts like New session's, the part left of it using the active host (paraphrased)",
+          "rule": "Every app's main menu draws each of Kubernetes, Docker, Databases, Terminal and Browser as a split: its name opens it on the active host (the one picked beside New session; on the phone, a chat's own host in its menu); a caret at its end opens New session's host list (the same rows, the active host ticked, hosts out of reach greyed, dimmed with only one host), and a host picked there opens it on that host without changing the active one",
+          "decided": "2026-11-26",
+          "source": [
+            {
+              "issue": "BaudeInternal#268"
+            }
+          ]
+        }
+      ],
+      "shows": "Row \"Kubernetes\". A split, as New session's is: the name, then a caret at the row's end (New session's host dropdown: its hosts as New session lists them, the active one ticked, one out of reach greyed; dimmed with only one host). The name opens it on the host picked beside New session; a host picked from the caret opens it there, the host picked beside New session left as it is.",
       "copy": [
         "window.kubernetes"
       ],
@@ -107,12 +131,45 @@
         {
           "by": "click",
           "does": "Opens the Kubernetes page, laid over the whole window"
+        },
+        {
+          "by": "click its caret, then a host",
+          "does": "Opens it on that host (Terminal: that host's terminal shown, else a new one there)"
+        }
+      ]
+    },
+    {
+      "name": "Docker",
+      "shows": "Row \"Docker\". A split, as New session's is: the name, then a caret at the row's end (New session's host dropdown: its hosts as New session lists them, the active one ticked, one out of reach greyed; dimmed with only one host). The name opens it on the host picked beside New session; a host picked from the caret opens it there, the host picked beside New session left as it is.",
+      "copy": [
+        "window.docker"
+      ],
+      "actions": [
+        {
+          "by": "click",
+          "does": "Opens the Docker page, laid over the whole window"
+        },
+        {
+          "by": "click its caret, then a host",
+          "does": "Opens it on that host (Terminal: that host's terminal shown, else a new one there)"
+        }
+      ],
+      "decisions": [
+        {
+          "said": "Opening Terminal, Kubernetes, Databases, Multiplex and the like on a host is slow: each needs a dropdown of hosts like New session's, the part left of it using the active host (paraphrased)",
+          "rule": "Every app's main menu draws each of Kubernetes, Docker, Databases, Terminal and Browser as a split: its name opens it on the active host (the one picked beside New session; on the phone, a chat's own host in its menu); a caret at its end opens New session's host list (the same rows, the active host ticked, hosts out of reach greyed, dimmed with only one host), and a host picked there opens it on that host without changing the active one",
+          "decided": "2026-11-26",
+          "source": [
+            {
+              "issue": "BaudeInternal#268"
+            }
+          ]
         }
       ]
     },
     {
       "name": "Databases",
-      "shows": "Row \"Databases\".",
+      "shows": "Row \"Databases\". A split, as New session's is: the name, then a caret at the row's end (New session's host dropdown: its hosts as New session lists them, the active one ticked, one out of reach greyed; dimmed with only one host). The name opens it on the host picked beside New session; a host picked from the caret opens it there, the host picked beside New session left as it is.",
       "copy": [
         "window.database_schemas"
       ],
@@ -120,25 +177,57 @@
         {
           "by": "click",
           "does": "Opens the Databases page, laid over the whole window"
+        },
+        {
+          "by": "click its caret, then a host",
+          "does": "Opens it on that host (Terminal: that host's terminal shown, else a new one there)"
+        }
+      ],
+      "decisions": [
+        {
+          "said": "Opening Terminal, Kubernetes, Databases, Multiplex and the like on a host is slow: each needs a dropdown of hosts like New session's, the part left of it using the active host (paraphrased)",
+          "rule": "Every app's main menu draws each of Kubernetes, Docker, Databases, Terminal and Browser as a split: its name opens it on the active host (the one picked beside New session; on the phone, a chat's own host in its menu); a caret at its end opens New session's host list (the same rows, the active host ticked, hosts out of reach greyed, dimmed with only one host), and a host picked there opens it on that host without changing the active one",
+          "decided": "2026-11-26",
+          "source": [
+            {
+              "issue": "BaudeInternal#268"
+            }
+          ]
         }
       ]
     },
     {
       "name": "Terminal",
-      "shows": "Row \"Terminal\".",
+      "shows": "Row \"Terminal\". A split, as New session's is: the name, then a caret at the row's end (New session's host dropdown: its hosts as New session lists them, the active one ticked, one out of reach greyed; dimmed with only one host). The name opens it on the host picked beside New session; a host picked from the caret opens it there, the host picked beside New session left as it is.",
       "copy": [
         "multiplex.terminal_menu"
       ],
       "actions": [
         {
           "by": "click",
-          "does": "Opens the Terminal view laid over the whole window, with a terminal on the host picked in the sidebar's host dropdown if it has none"
+          "does": "Opens the Terminal view laid over the whole window on a terminal on the host picked beside New session: the one shown if it's that host's, else another of that host's, else a new one there"
+        },
+        {
+          "by": "click its caret, then a host",
+          "does": "Opens it on that host (Terminal: that host's terminal shown, else a new one there)"
+        }
+      ],
+      "decisions": [
+        {
+          "said": "Opening Terminal, Kubernetes, Databases, Multiplex and the like on a host is slow: each needs a dropdown of hosts like New session's, the part left of it using the active host (paraphrased)",
+          "rule": "Every app's main menu draws each of Kubernetes, Docker, Databases, Terminal and Browser as a split: its name opens it on the active host (the one picked beside New session; on the phone, a chat's own host in its menu); a caret at its end opens New session's host list (the same rows, the active host ticked, hosts out of reach greyed, dimmed with only one host), and a host picked there opens it on that host without changing the active one",
+          "decided": "2026-11-26",
+          "source": [
+            {
+              "issue": "BaudeInternal#268"
+            }
+          ]
         }
       ]
     },
     {
       "name": "Browser",
-      "shows": "Row \"Browser\", after Terminal: one of the views and programs on the host picked beside New session.",
+      "shows": "Row \"Browser\", after Terminal: one of the views and programs on the host picked beside New session. A split, as New session's is: the name, then a caret at the row's end (New session's host dropdown: its hosts as New session lists them, the active one ticked, one out of reach greyed; dimmed with only one host). The name opens it on the host picked beside New session; a host picked from the caret opens it there, the host picked beside New session left as it is.",
       "copy": [
         "bot_browser.title"
       ],
@@ -151,6 +240,10 @@
         {
           "by": "click",
           "does": "Asks the host picked beside New session (this machine's if none) for Emission's window on its Default profile, on that machine's own screen (browser_open): the Emission that has the profile brought to the front as it is, else one started. What went wrong (the host not reached, refused) in a toast"
+        },
+        {
+          "by": "click its caret, then a host",
+          "does": "Opens it on that host (Terminal: that host's terminal shown, else a new one there)"
         }
       ],
       "decisions": [
@@ -161,6 +254,16 @@
           "source": [
             {
               "issue": "BaudeInternal#269"
+            }
+          ]
+        },
+        {
+          "said": "Opening Terminal, Kubernetes, Databases, Multiplex and the like on a host is slow: each needs a dropdown of hosts like New session's, the part left of it using the active host (paraphrased)",
+          "rule": "Every app's main menu draws each of Kubernetes, Docker, Databases, Terminal and Browser as a split: its name opens it on the active host (the one picked beside New session; on the phone, a chat's own host in its menu); a caret at its end opens New session's host list (the same rows, the active host ticked, hosts out of reach greyed, dimmed with only one host), and a host picked there opens it on that host without changing the active one",
+          "decided": "2026-11-26",
+          "source": [
+            {
+              "issue": "BaudeInternal#268"
             }
           ]
         }

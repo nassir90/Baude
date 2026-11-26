@@ -87,7 +87,7 @@ fun pages(bot: Boolean, hostId: String): List<Page> {
 @OptIn(ExperimentalFoundationApi::class, ExperimentalLayoutApi::class)
 @Composable
 fun ChatShell(hostId: String, sid: String, back: () -> Unit, open: (String, String) -> Unit, feedback: () -> Unit,
-              first: String = "chat", screen: (String) -> Unit = {}) {
+              first: String = "chat", screen: (String) -> Unit = {}, tool: (String, String) -> Unit = { _, _ -> }) {
     val c = LocalBaude.current
     val ctx = androidx.compose.ui.platform.LocalContext.current
     val chat = remember(hostId, sid) { Mesh.openChat(hostId, sid) }
@@ -219,7 +219,8 @@ fun ChatShell(hostId: String, sid: String, back: () -> Unit, open: (String, Stri
                 if (bot != null) PhoneBrowserButton(at, sid, name) // (Phone Use: a Bot's browser on this phone)
                 if (wide) IconButton(Adwaita.SidebarShowRight, Wording.SidePanel.toggleTip,
                     background = if (split) c.fg.copy(alpha = 0.10f) else null, onClick = toggle)
-                ChatMenu(at, sid, feedback, screen, writes = chat.chrome.writes.value)
+                ChatMenu(at, sid, feedback, screen, writes = chat.chrome.writes.value,
+                    tool = { s, h -> if (h == at) screen(s) else tool(s, h) })
             })
         androidx.compose.runtime.CompositionLocalProvider(LocalChatPlace provides place) {
         if (split) SideBySide(Modifier.weight(1f).fillMaxWidth(), close = toggle, chat = { Page("chat", true, false) }) {

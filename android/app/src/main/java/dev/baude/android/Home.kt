@@ -824,25 +824,48 @@ private fun HostPick() {
     var open by remember { mutableStateOf(false) }
     var menu by remember { mutableStateOf(false) }
     val pick = picked()
-    val known = (Mesh.hosts.map { it.id } + Mesh.sessions.keys + Mesh.members.keys.map { "mesh:$it" }).distinct()
-        .filter { takes(Mesh.conn(it)?.info, "subscribe") }
-    val ids = if (pick != null && pick !in known) known + pick else known // (kept, by the name it had)
-    fun name(id: String) = if (id in known) Mesh.label(id) else HomePrefs.hostName.value.ifBlank { Mesh.label(id) }
+    val ids = newSessionHosts()
+    val name = hostName()
     Box {
         Row(Modifier.clip(RoundedCornerShape(6.dp)).combinedClickable(onClick = { if (ids.size > 1) open = true },
             onLongClick = { menu = true }).padding(horizontal = 8.dp, vertical = 7.dp).alpha(if (ids.size > 1) 1f else 0.5f),
             verticalAlignment = Alignment.CenterVertically) {
-            Text(pick?.let(::name).orEmpty(), style = Type.body, color = c.fg, maxLines = 1, overflow = TextOverflow.MiddleEllipsis,
+            Text(pick?.let(name).orEmpty(), style = Type.body, color = c.fg, maxLines = 1, overflow = TextOverflow.MiddleEllipsis,
                 modifier = Modifier.widthIn(max = 120.dp))
             Icon(Adwaita.PanDown, Wording.Sidebar.hostPickerTip, tint = c.fg, modifier = Modifier.size(16.dp.icon))
         }
         Popover(open, { open = false }, ticks = Ticks.END) {
-            for (id in ids.sortedWith(compareBy<String>({ it != "phone" }, { name(it).lowercase() }))) MenuChoice(name(id), pick == id, textColor = if (dead(id)) c.dim else null) {
-                HomePrefs.pick(id); open = false
-            }
+            HostChoices(ids, pick) { id -> HomePrefs.pick(id); open = false }
         }
         HostMenu(menu) { menu = false }
     }
+}
+
+/** New session's hosts, as its picker lists them: every host known that takes chats, and the one picked, by the name it
+ * had, while it isn't known. */
+fun newSessionHosts(): List<String> {
+    val pick = picked()
+    val known = knownHosts()
+    return if (pick != null && pick !in known) known + pick else known
+}
+
+private fun knownHosts() = (Mesh.hosts.map { it.id } + Mesh.sessions.keys + Mesh.members.keys.map { "mesh:$it" }).distinct()
+    .filter { takes(Mesh.conn(it)?.info, "subscribe") }
+
+/** A host's name as New session's picker says it (the one picked, while it isn't known, by the name it had). */
+fun hostName(): (String) -> String {
+    val known = knownHosts()
+    return { id -> if (id in known) Mesh.label(id) else HomePrefs.hostName.value.ifBlank { Mesh.label(id) } }
+}
+
+/** New session's host list (HostPick's, and ⋮'s family rows' carets): ids, this phone first, then the rest by name,
+ * the one picked ticked, one out of reach greyed; pick(id) as one's tapped. */
+@Composable
+fun HostChoices(ids: List<String>, picked: String?, pick: (String) -> Unit) {
+    val c = LocalBaude.current
+    val name = hostName()
+    for (id in ids.sortedWith(compareBy<String>({ it != "phone" }, { name(it).lowercase() })))
+        MenuChoice(name(id), picked == id, textColor = if (dead(id)) c.dim else null) { pick(id) }
 }
 
 /** ⋮ beside the search: Group by (Folder, Created, Updated), the groups shown (a long-press on one: Rename Group…,

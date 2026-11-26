@@ -258,12 +258,7 @@ class BaudeWindow(WindowView, WindowProc, WindowDrafts, WindowSignal, WindowRemo
         view = Gio.Menu()
         view.append(wording.say("meta_settings.full_width"), "win.fullwidth")
         menu.append_section(None, view)
-        tools = Gio.Menu()
-        tools.append(wording.say("window.kubernetes"), "win.kube")
-        tools.append(wording.say("window.docker"), "win.docker")
-        tools.append(wording.say("window.database_schemas"), "win.dbschema")
-        tools.append(wording.say("multiplex.terminal_menu"), "win.terminal")
-        tools.append(wording.say("bot_browser.title"), "win.browser")
+        tools = Gio.Menu()  # (Kubernetes, Docker, Databases, Terminal, Browser: menufamily.attach)
         menu.append_section(None, tools)
         usage = Gio.Menu()  # (the current subscription's usage: subscriptionpage.attach_menu_usage)
         menu.append_section(None, usage)
@@ -284,6 +279,7 @@ class BaudeWindow(WindowView, WindowProc, WindowDrafts, WindowSignal, WindowRemo
         menu_btn = Gtk.MenuButton(icon_name="open-menu-symbolic", menu_model=menu,
                                   tooltip_text=wording.say("chat_header.menu"))
         import subscriptionpage
+        menufamily.attach(self, menu_btn, tools)  # (each on the host picked, or, from its caret, another; Record's too)
         subscriptionpage.attach_menu_usage(self, menu_btn, usage)  # (the current subscription's usage, Record's too)
         self.signal_btn = Gtk.MenuButton(icon_name=themed_icon("insert-link-symbolic", "emblem-symbolic-link-symbolic"),
                                          popover=self.signal_menu())
@@ -661,13 +657,16 @@ class BaudeWindow(WindowView, WindowProc, WindowDrafts, WindowSignal, WindowRemo
     # ---- feedback (Menu → Send Feedback…)
     def terminal_host(self):
         """(where, name): the host picked in the sidebar's dropdown, for ☰ → Terminal (this machine's, if none)."""
-        r = self.sidebar.shown_remote()
+        r = self.view_remote()
         if r is None:
             return {"via": "local"}, THIS_MACHINE
         return r.where, remote_name(r)
 
     def view_remote(self):
-        """The host picked's Remote (None: this machine), for the Kubernetes and database views (kubehost.picked)."""
+        """The host picked's Remote (None: this machine), for the Kubernetes and database views (kubehost.picked); while
+        ☰ opens one on another host from its caret, that host's (family_host: menufamily.open_family)."""
+        if getattr(self, "family_host", None) is not None:
+            return menufamily.remote_of(self, self.family_host) or None
         return self.sidebar.shown_remote()
 
     def open_record(self):

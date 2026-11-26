@@ -42,7 +42,7 @@
     },
     "session": {
       "type": "string",
-      "description": "use: the chat whose account it is, one of the host's sessions whose model is the account's provider's."
+      "description": "use: the chat whose account it is, one of the host's sessions whose model is the account's provider's. sign_in (a Claude account's) and token: the chat it's for, whose sign-in (ChatLogin) its host moves as it goes, as a login request's, if the asker may read the chat (Agent Management's read)."
     },
     "name": {
       "type": "string",

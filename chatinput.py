@@ -308,20 +308,23 @@ class _AccountLogin:
     for LoginCard as _HereLogin is: its lines heard, a pasted code passed on (code), stop() lets go of the connection,
     which stops it there."""
 
-    def __init__(self, where, profile, heard, done):
+    def __init__(self, where, profile, heard, done, session=None):
         import subscriptionpage
 
         def answered(reply):
             done(self, reply.get("error"), 0 if reply.get("signed_in") else 1, reply.get("who"))
             return False
-        self.ask = subscriptionpage.Ask(where, {"what": "sign_in", "id": profile}, answered,
+        self.done = done
+        self.ask = subscriptionpage.Ask(where, {"what": "sign_in", "id": profile,
+                                                **({"session": session} if session else {})}, answered,
                                         lambda line: heard(self, line + "\n"))
 
     def paste(self, code):
         return self.ask.send({"what": "code", "code": code})
 
-    def stop(self):
+    def stop(self):  # (no answer comes once it's let go of: cancelled, here)
         self.ask.stop()
+        GLib.idle_add(self.done, self, None, -15, None)
 
 
 class LoginCard(Gtk.Box):
@@ -349,7 +352,7 @@ class LoginCard(Gtk.Box):
         self.session = session
         self.account, self.account_where = account, account_where
         self.chat = (win.remote, win.session_id) if hasattr(win, "at_chat") else None  # (the chat it's in: signed in for)
-        self.proc, self.said, self.checking, self.resent = None, [], False, False
+        self.proc, self.said, self.checking, self.resent, self.gone = None, [], False, False, False
         self.login = login if login is not None else hostlogin.asked(ask) if ask is not None else None
         self.before = None  # (what it said as the sign-in going on from here started: put back if it's cancelled)
         self.title = sel_label("")
@@ -375,7 +378,8 @@ class LoginCard(Gtk.Box):
         self.resend.connect("clicked", lambda *_: self.send_again())
         self.append(self.resend)
         if account is not None and account.get("kind") == "token":
-            return self.token_box(ask or (self.login or {}).get("reason"))
+            self.token_box(ask or (self.login or {}).get("reason"))
+            return
         if self.login is None:
             self.start()
             return
@@ -384,14 +388,15 @@ class LoginCard(Gtk.Box):
     def show(self, login):
         """The chat's sign-in as it is now (ChatLogin; its host's, for a host's chat): what the card says, the same on
         every head. One going on from here says how it goes itself (heard, done)."""
-        if self.proc is not None or (self.account or {}).get("kind") == "token":
+        if self.proc is not None:
             self.login = login if login is not None else self.login
             return
-        if login is None:  # (nothing to sign in for: a /login stopped, from another head; else the card as it was)
-            if (self.login or {}).get("state") == "signing_in":
-                self.login = None
-                self.say(wording.say("sign_in.cancelled"))
-                self.again.set_visible(True)
+        if (self.account or {}).get("kind") == "token":
+            return self.show_token(login)
+        if login is None:  # (nothing to sign in for: another head's /login, stopped; else the card as it was)
+            if (self.login or {}).get("state") == "signing_in" and self.get_parent() is not None:
+                self.gone = True
+                self.get_parent().remove(self)
             return
         self.login = login
         state = login.get("state")
@@ -422,6 +427,21 @@ class LoginCard(Gtk.Box):
             self.again.set_label(wording.say("common.try_again"))
             self.again.set_visible(True)
 
+    def show_token(self, login):
+        """A chat under a Claude token account: its token replaced (from another head, too), or asked for again."""
+        if login is None or login.get("state") not in ("needed", "signed_in"):
+            return
+        self.login = login
+        signed = login["state"] == "signed_in"
+        self.token_row.set_visible(not signed)
+        if signed:
+            self.say(wording.say("subscriptions.token_saved"), self.account["name"])
+            self.resend.set_visible(self.can_resend())
+        else:
+            self.say(wording.say("subscriptions.replace_heading", name=self.account["name"]),
+                     login.get("reason") or "", dim=True)
+            self.resend.set_visible(False)
+
     def can_resend(self):
         return bool(self.retry) and not self.resent and (self.chat is None or self.win.at_chat(self.chat))
 
@@ -438,6 +458,7 @@ class LoginCard(Gtk.Box):
         row.append(token)
         row.append(save)
         self.append(row)
+        self.token_row = row
 
         def saved(error):
             save.set_sensitive(True)
@@ -456,7 +477,8 @@ class LoginCard(Gtk.Box):
             save.set_sensitive(False)
             token.set_sensitive(False)
             import subscriptionpage
-            subscriptionpage.replace_token(self.account_where, self.account["id"], token.get_text().strip(), saved)
+            subscriptionpage.replace_token(self.account_where, self.account["id"], token.get_text().strip(), saved,
+                                           self.session)
         save.connect("clicked", send)
         token.connect("activate", send)
 
@@ -474,7 +496,7 @@ class LoginCard(Gtk.Box):
         self.said, self.before = [], self.login
         try:
             if self.account is not None:
-                self.proc = _AccountLogin(self.account_where, self.account["id"], self.heard, self.done)
+                self.proc = _AccountLogin(self.account_where, self.account["id"], self.heard, self.done, self.session)
             elif self.where is not None:
                 self.proc = _HostLogin(self.where, self.args, self.heard, self.done, self.session)
             else:
@@ -536,8 +558,10 @@ class LoginCard(Gtk.Box):
         if code == 0:
             return self.signed_in(who)
         if code in (-15, 130) and not problem:
-            if self.before is not None:
-                self.show(self.before)
+            now = self.login if (self.login or {}).get("state") not in (None, "signing_in") else None
+            self.login = now or self.before  # (as its host has it since, if it's said: else as before; another head's
+            if self.login is not None:  # going on still, its host says again after)
+                self.show(self.login)
             else:  # (/login, stopped: nothing to sign in for)
                 self.say(wording.say("sign_in.cancelled"))
                 self.again.set_visible(True)

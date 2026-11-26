@@ -26,7 +26,7 @@
         "string",
         "null"
       ],
-      "description": "The chat it signs in for, if any."
+      "description": "The chat it signs in for, if any: ignored (the sign-in runs, for no chat) if the asker may not read it (Agent Management's read)."
     }
   },
   "required": [

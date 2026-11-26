@@ -646,6 +646,8 @@ def remove(page, account):
     return dialog
 
 
-def replace_token(where, profile, token, done):
-    """A chat's Claude account's token replaced on its host (where): done(error or None)."""
-    return Ask(where, {"what": "token", "id": profile, "token": token}, lambda r: done(r.get("error")) and False)
+def replace_token(where, profile, token, done, session=None):
+    """A chat's Claude account's token replaced on its host (where): done(error or None); session: the chat it's
+    for there, whose sign-in its host puts right."""
+    return Ask(where, {"what": "token", "id": profile, "token": token, **({"session": session} if session else {})},
+               lambda r: done(r.get("error")) and False)

@@ -797,6 +797,7 @@ object Mesh {
             main.post {
                 chat.chrome.missing.value = false
                 chat.chrome.writes.value = attached.writes != false
+                chat.chrome.keepsLogin = r.has("login") // (an older host's doesn't: the card worked out here)
             }
             val asks = attached.asks.orEmpty().mapNotNull(Ask::of)
             main.post {
@@ -933,8 +934,10 @@ object Mesh {
                         chat.sent.removeAll { it.id == line.uuid }
                         if (line.uuid != null) chat.queued.removeAll { it.tried && it.uuid == line.uuid } // (taken
                     }                                                                                    // as its link went)
-                    if (line.kind == "error" && chat.chrome.loginStandsIn && needsLogin(line.text))
+                    if (line.kind == "error" && chat.chrome.loginStandsIn && needsLogin(line.text)) {
                         chat.chrome.loginStandsIn = false // (its sign-in card's in its place already)
+                        Logins.stoodFor(chat, line.text)
+                    }
                     else chat.lines.add(line)
                 }
             }

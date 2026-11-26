@@ -39,7 +39,7 @@ from widgets import load_settings, pretty_path, save_settings, toast  # noqa: E4
 from markdownview import MarkdownView, sel_label  # noqa: E402,F401
 from startup import trace  # noqa: E402
 from toolcards import (  # noqa: E402
-    QuestionForm, StatusSlot, ToolCard, ended_by_stop, summarize_tool, tool_display, tool_input_view,
+    QuestionForm, StatusSlot, ToolCard, api_error_label, ended_by_stop, summarize_tool, tool_display, tool_input_view,
 )
 from chatinput import LoginCard, _AUTH_ESCAPES, needs_login  # noqa: E402
 from sessionlist import (  # noqa: E402
@@ -1157,29 +1157,62 @@ class WindowRemote:
         chat: what its host says of its sign-in after is said in that card (h_login)."""
         elsewhere = self.remote is not None and not self.remote.local
         account = self.chat_account_info()  # (a chat under a Claude account: that account signed in to there instead)
-        card = LoginCard(self, args, where=self.remote.where if self.remote is not None else None,
+        kept = self.host_keeps_login()
+        card = LoginCard(self, args, where=self.remote.where if kept or elsewhere else None,
                          host=remote_name(self.remote) if elsewhere else None, ask=ask, login=login,
-                         session=self.session_id if self.remote is not None else None,
+                         session=self.session_id if kept else None,
                          retry=getattr(self, "turn_sent", None) if ask is not None or login is not None else None,
                          account=account if (account or {}).get("kind") in ("token", "folder") else None,
                          account_where=self.remote.where if self.remote is not None else {"via": "local"})
+        was = getattr(self, "login_card", None)  # (the chat's card before: this one in its place)
+        if was is not None and was.get_parent() is not None and was.chat == card.chat and was.proc is None:
+            self.leave_login_card(was)
         self.login_card = card
         self.add(card)
         self.stick_bottom = True
         return card
 
+    def host_keeps_login(self):
+        """Whether the open chat's sign-in is its host's to keep (a host's chat, its host one that keeps it: attach's
+        answer says so); else the card's this head's own, as an older host's heads had it."""
+        return self.remote is not None and getattr(self.proc, "keeps_login", True)
+
     def h_login(self, msg):
         """A host's chat's sign-in, as its host has it (login_state, or attach's answer): said in the chat's sign-in
-        card, the same on every head; a card made if there's none, in place of the failed turn's error line."""
+        card, the same on every head; a card made if there's none, in place of the failed turn's error line. Another
+        turn that failed for want of it: the card moved to that turn."""
         login, card = msg.get("login"), getattr(self, "login_card", None)
         if card is not None and card.get_root() is self and card.chat == (self.remote, self.session_id):
+            if (login or {}).get("state") == "needed" and login.get("turn") != (card.login or {}).get("turn") and \
+                    card.get_parent() is not None:
+                why = self.drop_login_line() or getattr(self, "login_why", None)
+                self.move_login_card(card)
+                card.stands_for = why
+                self.stick_bottom = True
+                card.retry, card.resent = getattr(self, "turn_sent", None) or card.retry, False
             card.show(login)
+            if card.gone:  # (another head's sign-in, with nothing to sign in for, cancelled: nothing to say)
+                self.login_card = None
             return
         if login is None:
             return
-        self.drop_login_line()
+        why = self.drop_login_line() or (getattr(self, "login_why", None) if login.get("state") == "needed" else None)
         self.login_asked = True
-        self.sign_in(login=login).from_host = True
+        card = self.sign_in(login=login)
+        card.from_host, card.stands_for = True, why
+
+    def move_login_card(self, card):
+        """The chat's sign-in card moved to the end, for a later turn that failed for want of signing in: the error it
+        stood in for at the turn before drawn there again, as a head opening the chat later draws it."""
+        self.leave_login_card(card)
+        self.add(card)
+
+    def leave_login_card(self, card):
+        """A sign-in card taken out of the chat: the error it stood in for drawn where it was."""
+        if (parent := card.get_parent()) is not None:
+            if getattr(card, "stands_for", None):
+                parent.insert_child_after(api_error_label(card.stands_for), card)
+            parent.remove(card)
 
     def drop_login_line(self):
         """The last turn's error, drawn from history, when it's one signing in again would fix (claude's line for it,
@@ -1190,12 +1223,14 @@ class WindowRemote:
         text = child.get_text() if isinstance(child, Gtk.Label) else getattr(child, "text", None)
         if child is not None and isinstance(text, str) and needs_login(text):
             self.transcript.remove(child)
+            return text
+        return None
 
     def login_standing_in(self, content):
         """The chat's sign-in card, if its host says the chat needs signing in and content (a message of claude's,
         drawn from history after the card was made) is the error it stands in for; else None."""
         card = getattr(self, "login_card", None)
-        if card is None or not getattr(card, "from_host", False) or card.get_parent() is None or \
+        if card is None or not self.host_keeps_login() or card.get_parent() is None or \
                 card.chat != (self.remote, self.session_id) or (card.login or {}).get("state") != "needed":
             return None
         text = "".join(c.get("text", "") for c in content if isinstance(c, dict) and c.get("type") == "text") \
@@ -1260,8 +1295,8 @@ class WindowRemote:
         """A turn that failed for want of signing in (why: its error): said in a card in place of the error, with Sign
         in, on whichever machine the chat runs on (sign_in); once a turn. A host's chat's is its host's to say
         (login_state: h_login), so every head shows the same card."""
-        self.login_asked = True
-        if self.remote is None:
+        self.login_asked, self.login_why = True, why
+        if not self.host_keeps_login():
             self.sign_in(ask=why)
 
     def withdraw_asks(self, listed):

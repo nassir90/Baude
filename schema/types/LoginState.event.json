@@ -20,7 +20,7 @@
           "type": "null"
         }
       ],
-      "description": "Its sign-in now; null once a turn's gone through (nothing to sign in for)."
+      "description": "Its sign-in now; null once a turn's gone through, or a sign-in for it with nothing to sign in for before was cancelled."
     }
   },
   "required": ["op", "session"],

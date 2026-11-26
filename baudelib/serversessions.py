@@ -593,8 +593,6 @@ class ServerSessions:
                 self.changed()
             if kind in ("assistant", "user", "system", "result") and self.track(s, msg):
                 self.changed()
-            if models.model_program(s.meta.get("model")) == "claude":  # (its sign-in: needed, or put right by a turn)
-                hostlogin.heard(self, s, msg)
             if kind == "result" and s.id in self.cutting and self.stopped.is_set() and msg.get("subtype") == "success":
                 self.cutting.discard(s.id)  # (it ended as it was stopped: not cut after all)
                 s.meta.pop("cut", None)
@@ -630,6 +628,8 @@ class ServerSessions:
                         conn.send(ended)
             for conn in s.live:
                 conn.send({"op": "claude", "session": s.id, "msg": msg})
+            if models.model_program(s.meta.get("model")) == "claude":  # (its sign-in: needed, or put right by a turn;
+                hostlogin.heard(self, s, msg)  # told after what claude said, so a head's card follows its turn)
             for message, said, by in told:
                 self.tell_said(s, message, said, by)
             if kind == "result" and s.codex_queue:

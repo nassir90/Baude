@@ -320,22 +320,35 @@ class WindowDrafts:
     def sender_bubble(self, sender, text, atts=()):
         """A message from sender, not you (its host's sender store's): where yours are, grey (not your accent), as a
         queued one is, with who it's from in a small line at its top: a link to that chat (a task's: to its run, on
-        its Bot's Tasks page), if it names one."""
+        its Bot's Tasks page), if it names one; a chat a task's run started, then its run (a link to it) and how its
+        turn ended: "from subagent “Why” · Deploy site run · finished"."""
         bubble = self.user_bubble(text, atts)
         bubble.add_css_class("sender-bubble")
         said = wording.say("common.from_who", author=baudelib.wire.sender_name(sender))
-        head = Gtk.Label(label=said, xalign=1, wrap=True, wrap_mode=Pango.WrapMode.WORD_CHAR, halign=Gtk.Align.END)
+        run, about = baudelib.wire.sender_run(sender), baudelib.wire.sender_about(sender)
+        head = Gtk.Label(label=" · ".join([said, *about]), xalign=1, wrap=True, wrap_mode=Pango.WrapMode.WORD_CHAR,
+                         halign=Gtk.Align.END)
         if sender.get("session"):
-            head.set_markup(f'<a href="sender">{GLib.markup_escape_text(said)}</a>')
-            head.connect("activate-link", lambda *_: self.open_sender(sender) or True)
+            esc = GLib.markup_escape_text
+            parts = [f'<a href="sender">{esc(said)}</a>']
+            for i, part in enumerate(about):  # (its run: a link to it; how it ended, plain)
+                parts.append(f'<a href="run">{esc(part)}</a>' if i == 0 and sender.get("task_name") and run
+                             else esc(part))
+            head.set_markup(" · ".join(parts))
+            head.connect("activate-link", lambda _l, uri: self.open_sender(sender, uri == "run") or True)
         head.add_css_class("sender-from")
         bubble.prepend(head)
         return bubble
 
-    def open_sender(self, sender):
-        """The chat a message is from, opened (a task's: its Bot's, on its Tasks page at that run), on its host."""
-        self.see_blocker(self.remote, {"kind": "task" if sender.get("run") else "chat", "session": sender["session"],
-                                       "host": sender.get("host"), "run": sender.get("run"), "name": sender.get("name")})
+    def open_sender(self, sender, to_run=False):
+        """The chat a message is from, opened (a task's, or to_run, a chat a task's run started's run: its Bot's, on
+        its Tasks page at that run, its task's page under it), on its host."""
+        run = baudelib.wire.sender_run(sender)
+        if run and (to_run or not sender.get("bot")):
+            bot, task, rid = run
+            return self.see_blocker(self.remote, {"kind": "task", "session": bot, "host": sender.get("host"),
+                                                  "task": task, "run": rid, "name": sender.get("task_name")})
+        self.see_blocker(self.remote, {"kind": "chat", "session": sender["session"], "host": sender.get("host")})
 
     def can_revert(self):
         """Whether a message of yours can be reverted here: every model's chat can (its program cuts the conversation:

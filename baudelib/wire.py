@@ -1004,13 +1004,19 @@ SENDER_KINDS = ("bot", "chat", "subagent", "host")  # (who a message to a sessio
 _SENDER = re.compile(r'\A<baude-sender((?: [a-z_]+="[^"<>]*")*)>[^<]*</baude-sender>(?:\n\n|\n|\Z)')
 
 
+SENDER_OVER = ("finished", "stopped", "failed")  # (how a turn of a chat a task's run started ended: Sender's over)
+
+
 def clean_sender(sender):
-    """A sender as it's kept and said ({kind, name, host, host_name, session, run}: words, cut short), or None if it
-    isn't one."""
+    """A sender as it's kept and said ({kind, name, host, host_name, session, and a task's run's: bot, task, task_name,
+    run, over}: words, cut short), or None if it isn't one."""
     if not isinstance(sender, dict):
         return None
-    out = {k: " ".join(str(sender[k]).split())[:120] for k in ("name", "host", "host_name", "session", "run")
+    out = {k: " ".join(str(sender[k]).split())[:120]
+           for k in ("name", "host", "host_name", "session", "bot", "task", "task_name", "run")
            if isinstance(sender.get(k), str) and sender[k].strip()}
+    if sender.get("over") in SENDER_OVER:
+        out["over"] = sender["over"]
     out["kind"] = sender.get("kind") if sender.get("kind") in SENDER_KINDS else "host"
     return out
 
@@ -1025,6 +1031,25 @@ def sender_name(sender):
            "host": name or wording.say("senders.host_unnamed")}.get(
         kind, name or wording.say("senders.another"))  # (a kind of a newer host's: by its name)
     return wording.say("senders.on", who=who, where=where) if where and kind != "host" else who
+
+
+def sender_run(sender):
+    """The task's run a sender names, as its from line links it: (the run's Bot's session, its task, its run) on the
+    sender's host, or None. A task's own (a host sender) names its Bot by its session; a chat the run started names
+    it as its bot."""
+    if not sender.get("run") or not (sender.get("bot") or sender.get("session")):
+        return None
+    return sender.get("bot") or sender["session"], sender.get("task") or "", sender["run"]
+
+
+def sender_about(sender):
+    """What a from line says after who it's from, for a chat a task's run started: ["<task> run", "finished"]."""
+    out = []
+    if sender.get("task_name") and sender.get("run"):
+        out.append(wording.say("senders.task_run", task=sender["task_name"]))
+    if sender.get("over") in SENDER_OVER:
+        out.append(wording.say(f"task_notes.{sender['over']}"))
+    return out
 
 
 def from_task(here=True):
@@ -1046,8 +1071,13 @@ def said_by(sender, content):
     if sender is None:
         return content
     attrs = "".join(f' {k}="{html.escape(v, quote=True)}"' for k, v in sender.items())
+    about = ""
+    if sender.get("task_name") and sender.get("run"):  # (a chat a task's run started: which, and how its turn ended)
+        how = {"finished": "it finished", "stopped": "it was stopped", "failed": "it failed"}.get(sender.get("over"))
+        about = (f". Your task “{sender['task_name']}” started that chat in its run {sender['run']}"
+                 + (f"; {how}, and this is what it said" if how else ""))
     head = (f"<baude-sender{attrs}>A message from {html.escape(sender_name(sender), quote=False)}, not from your user"
-            f"</baude-sender>\n\n")
+            f"{html.escape(about, quote=False)}</baude-sender>\n\n")
     if isinstance(content, str):
         return head + content
     blocks = list(content or [])

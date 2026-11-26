@@ -40,6 +40,14 @@
     "session": {
       "type": "string",
       "description": "An agent's: the chat's id."
+    },
+    "over": {
+      "enum": [
+        "finished",
+        "stopped",
+        "failed"
+      ],
+      "description": "An agent's: how the chat's turn ended (Sender's over)."
     }
   },
   "required": [

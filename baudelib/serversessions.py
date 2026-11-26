@@ -128,7 +128,7 @@ class ServerSessions:
                     if by is None and came:
                         by = {"kind": "host", "name": wording.say("tasks.sender", name=came["name"]),
                               "host": self.me["id"], "host_name": self.me["name"], "session": came["sid"],
-                              "run": came["run"]}
+                              "task": came["task"], "run": came["run"]}
                     self.send_user(s, meta["prompt"], by)
             except Exception:  # (its claude couldn't start: no session, and the error's the answer)
                 if s.app_tools is not None:
@@ -635,7 +635,9 @@ class ServerSessions:
                     self.woken.set()  # (what Auto-fix found meanwhile: sent now)
                 s.note_written()  # (its own turn's lines: not another writer's, desktopchats.elsewhere)
                 self.tasks.turn_over(s, msg)  # (its tasks' asks it took: answered)
-                self.tasks.chat_over(s, msg.get("result"), bool(msg.get("is_error")))  # (a task's run's: its Bot told)
+                self.tasks.chat_over(s, msg.get("result"), "stopped" if msg.get("subtype") == "error_during_execution"
+                                     else "failed" if msg.get("is_error") else "finished")  # (a task's run's: its Bot
+                # told)
                 s.asks.clear()
                 if s.meta.get("context_usage") is not None:
                     self.save(s)
@@ -874,9 +876,11 @@ class ServerSessions:
             if not made or s.proc is not made[0]:
                 return  # (one let go of already: ensure_proc)
             if s.busy and not self.stopped.is_set() and not getattr(made[0], "restarting", False):
-                self.tasks.chat_over(s, wording.say("task_notes.stopped") if getattr(made[0], "stopping", False)
-                                     else wording.say("host_errors.claude_exited", code=code), True)  # (a task's
-                # run's, stopped or gone before its turn's end: its Bot told)
+                stopping = getattr(made[0], "stopping", False)
+                self.tasks.chat_over(s, wording.say("task_notes.stopped") if stopping else
+                                     wording.say("host_errors.claude_exited", code=code),
+                                     "stopped" if stopping else "failed")  # (a task's run's, stopped or gone before
+                # its turn's end: its Bot told)
             s.proc, s.busy, s.acting, s.streamed = None, False, False, False
             s.codex_queue.clear()
             s.asks.clear()

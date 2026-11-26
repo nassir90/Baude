@@ -788,10 +788,7 @@ fun Said(line: Line, from: Msg.StoredSender? = null, revert: RevertOffer? = null
         from != null -> Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
             Column(Modifier.padding(start = 48.dp).clip(RoundedCornerShape(Gap.bubbleRadius)).background(c.raised)
                 .padding(horizontal = Gap.bubbleH, vertical = Gap.bubbleV), horizontalAlignment = Alignment.End) {
-                val to = from.session?.ifBlank { null }?.let { sid -> from.host?.ifBlank { null }?.let { it to sid } }
-                Text(Wording.Common.fromWho(author = senderName(from)), style = Type.caption, color = if (to != null) c.accent else c.dim,
-                    textDecoration = if (to != null) androidx.compose.ui.text.style.TextDecoration.Underline else null,
-                    modifier = if (to != null) Modifier.clickable { openSender(to.first, to.second, from.run) } else Modifier)
+                FromLine(from)
                 SelectionContainer {
                     val shown = from.shown
                     Prose(SAID_BY.replace(shown ?: line.text, "").trim(), under = c.raised.compositeOver(c.inside))
@@ -800,6 +797,42 @@ fun Said(line: Line, from: Msg.StoredSender? = null, revert: RevertOffer? = null
         }
         else -> SaidLine(line, revert)
     }
+}
+
+/** A message's from line (SenderTurn's): "from <who>", a link to that chat if it names one (a task's: to its run);
+ * a chat a task's run started, then " · <task> run" (a link to the run, on its Bot's Tasks page) and " · finished"
+ * (or stopped, failed), as wire.sender_about says it. */
+@Composable
+fun FromLine(from: Msg.StoredSender) {
+    val c = LocalBaude.current
+    val host = from.host?.ifBlank { null }
+    val session = from.session?.ifBlank { null }
+    val run = from.run?.ifBlank { null }
+    val bot = from.bot?.ifBlank { null } ?: session
+    val link = TextLinkStyles(SpanStyle(color = c.accent, textDecoration = TextDecoration.Underline))
+    val text = buildAnnotatedString {
+        val who = Wording.Common.fromWho(author = senderName(from))
+        if (host != null && session != null) {
+            withLink(LinkAnnotation.Clickable("sender", link) {
+                if (from.bot.isNullOrBlank()) openSender(host, session, from.task, run) else openSender(host, session, null, null)
+            }) { append(who) }
+        } else append(who)
+        val task = from.taskName?.ifBlank { null }
+        if (task != null && run != null) {
+            append(" · ")
+            if (host != null && bot != null) withLink(LinkAnnotation.Clickable("run", link) {
+                openSender(host, bot, from.task, run)
+            }) { append(Wording.Senders.taskRun(task = task)) }
+            else append(Wording.Senders.taskRun(task = task))
+        }
+        when (from.over) {
+            "finished" -> Wording.TaskNotes.finished
+            "stopped" -> Wording.TaskNotes.stopped
+            "failed" -> Wording.TaskNotes.failed
+            else -> null
+        }?.let { append(" · "); append(it) }
+    }
+    Text(text, style = Type.caption, color = c.dim, textAlign = TextAlign.End)
 }
 
 @Composable

@@ -752,7 +752,11 @@ def main():
                     f" to: {question}", f"btw{turns}")
                 result("side answer")
                 continue
-            if "Your task's run" in text:
+            answer = next((a for k, a in json.loads(os.environ.get("FAKE_ANSWERS") or "{}").items() if k in text), None)
+            if answer is not None:  # (FAKE_ANSWERS: {words in the message: the answer to it}, as a scene wants it)
+                say(answer, f"answer{turns}")
+                result(answer)
+            elif "Your task's run" in text:
                 task_answer(turns, text)
             elif "AUTOFIX" in text or "needs fixing" in text:
                 autofix(turns, text)

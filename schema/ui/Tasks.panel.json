@@ -193,7 +193,7 @@
     },
     {
       "name": "run page",
-      "shows": "A header row: a back button (tooltip the task's name), the title '<task> · <when>' in bold, and a Stop button (stop icon) while it's running or asking. Then one line: its state's word (or, if it failed or was stopped, why), what started it ('By hand', 'Schedule', 'Git push'), how long it took, 'dummy answers' for a run with them, and its version. Then, if it started any chats (one-shot agents: baude-oneshot, the mesh tools or the script library's agent, run inside it), a group headed 'Started': a boxed row per chat, its title, its state as the sessions list draws it (working grey and pulsing, waiting yellow, else done blue: they go on after the run's over, and the run's state doesn't wait for them) and a chevron. Then its log, scrolling, in order: the script's output in code blocks and its errors in code blocks of their own in the error colour (consecutive lines of each together), each line it said as plain text, each ask of the Bot as a card headed 'Asked <Bot>' (or 'Handed to <Bot>' for a failure handed over) with what was asked, each answer as a card headed '<Bot> answered' with the Bot's answer, what each chat it started said as its first turn ended as a card headed '<chat> finished' (or '<chat> failed'), and anything else the host says of the run as plain text. Nothing says when it started or that it ended: the title and the line under it do. Read every second while it's going, the lines since added to what's drawn.",
+      "shows": "A header row: a back button (tooltip the task's name), the title '<task> · <when>' in bold, and a Stop button (stop icon) while it's running or asking. Then one line: its state's word (or, if it failed or was stopped, why), what started it ('By hand', 'Schedule', 'Git push'), how long it took, 'dummy answers' for a run with them, and its version. Then, if it started any chats (one-shot agents: baude-oneshot, the mesh tools or the script library's agent, run inside it), a group headed 'Started': a boxed row per chat, its title, its state as the sessions list draws it (working grey and pulsing, waiting yellow, else done blue: they go on after the run's over, and the run's state doesn't wait for them) and a chevron. Then its log, scrolling, in order: the script's output in code blocks and its errors in code blocks of their own in the error colour (consecutive lines of each together), each line it said as plain text, each ask of the Bot as a card headed 'Asked <Bot>' (or 'Handed to <Bot>' for a failure handed over) with what was asked, each answer as a card headed '<Bot> answered' with the Bot's answer, what each chat it started said as a turn ended (each stopped or failed turn, then its first that finished) as a card headed '<chat> finished' (or '<chat> stopped', '<chat> failed'), a line if its Bot can't be told yet, and anything else the host says of the run as plain text. Nothing says when it started or that it ended: the title and the line under it do. Read every second while it's going, the lines since added to what's drawn.",
       "copy": [
         "tasks.status",
         "tasks.asked_bot",
@@ -206,6 +206,9 @@
         "tasks.started_chats",
         "tasks.agent_done",
         "tasks.agent_failed",
+        "tasks.agent_stopped",
+        "tasks.agent_waiting",
+        "tasks.agent_not_told",
         "tasks.a_chat"
       ],
       "actions": [
@@ -467,6 +470,17 @@
         {
           "session": "b3845b21-55ac-4aab-a769-fb8517403c51",
           "message": "ded3957e-f255-4438-b4b3-ff7e69adeb1d"
+        }
+      ]
+    },
+    {
+      "said": "Dont really like how the oneshot messages mix. agent text and template text",
+      "rule": "A chat a task's run started reports each turn that's stopped or fails, and its first that finishes, to its Bot as a message of only its own words; the run's log has the same as a card headed \"<chat> finished\" (or stopped, failed), and the run's page stops looking for them once each chat it started has finished a turn, or an hour after the run's over. A run opened from a from line opens its task's page under it, so Back goes to that task",
+      "decided": "2026-11-26",
+      "source": [
+        {
+          "session": "b3845b21-55ac-4aab-a769-fb8517403c51",
+          "message": "31423098-8f2b-428f-aa29-cd83b2005272"
         }
       ]
     }

@@ -124,11 +124,19 @@ object TaskLinks {
     var pending by mutableStateOf<List<String>?>(null)
 }
 
-/** The chat a message is from (on host, its session), opened; a task's (run: its run), its Bot's chat on its Tasks
- * page, at that run. */
-fun openSender(host: String, session: String, run: String?) {
-    if (!run.isNullOrBlank()) TaskLinks.pending = listOf(host, session, "", run)
+/** The chat a message is from (on host, its session), opened; a task's run (run: its run, of task), its Bot's chat
+ * on its Tasks page, at that run, its task's page under it. */
+fun openSender(host: String, session: String, task: String?, run: String?) {
+    if (!run.isNullOrBlank()) TaskLinks.pending = listOf(host, session, task.orEmpty(), run)
     Meta.opener(host, session)
+}
+
+/** taskspage.all_reported: has every chat the run started said how its first turn finished, or is the run over long
+ * enough ago (an hour) that its page stops looking? */
+fun allReported(r: Msg.TaskRun, log: List<Msg.TaskLogLine>): Boolean {
+    val finished = log.filter { it.kind == "agent" && (it.over ?: "finished") == "finished" }.mapNotNull { it.session }.toSet()
+    val ended = r.ended?.toDouble()
+    return finished.containsAll(r.chats.orEmpty()) || ended != null && System.currentTimeMillis() / 1000.0 - ended > 3600
 }
 
 /** What the Tasks page shows (the list, the task open, the run open, the dialog up), kept while the chat's open.
@@ -244,6 +252,12 @@ fun TasksPage(hostId: String, sid: String, here: Boolean, state: TasksState? = n
                         st.log.clear()
                         st.log.addAll(got.log.orEmpty())
                         st.bot = got.bot.orEmpty()
+                        val tid = got.run?.task.orEmpty()
+                        if (tid.isNotEmpty() && st.task?.id != tid) { // (opened from a link: Back goes to its own task)
+                            st.task = st.tasks.firstOrNull { it.id == tid } ?: Msg.Task(id = tid)
+                            st.runs.clear()
+                            ask(Msg.TaskGet(session = sid, id = tid).json(), "load")
+                        }
                     }
                 }
                 Op.TASK_STARTED -> {}
@@ -285,7 +299,7 @@ fun TasksPage(hostId: String, sid: String, here: Boolean, state: TasksState? = n
         val p = TaskLinks.pending ?: return@LaunchedEffect
         if (p[0] != hostId || p[1] != sid) return@LaunchedEffect
         TaskLinks.pending = null
-        if (p[2].isNotEmpty()) openTask(Msg.Task(id = p[2]))
+        if (p[2].isNotEmpty()) openTask(st.tasks.firstOrNull { it.id == p[2] } ?: Msg.Task(id = p[2]))
         openRun(Msg.TaskRun(id = p[3], task = p[2], status = "running"))
     }
     LaunchedEffect(here) {
@@ -304,7 +318,7 @@ fun TasksPage(hostId: String, sid: String, here: Boolean, state: TasksState? = n
         while (here && st.live && st.page == "run") {
             delay(1_000)
             val r = st.run
-            if (going(r?.status) || r != null && st.log.count { it.kind == "agent" } < r.chats.orEmpty().size &&
+            if (going(r?.status) || r != null && !r.chats.isNullOrEmpty() && !allReported(r, st.log) &&
                 System.currentTimeMillis() / 1000 % 5 == 0L) readRun() // (what the chats it started said, logged)
         }
     }
@@ -486,7 +500,10 @@ private fun RunView(r: Msg.TaskRun, log: List<Msg.TaskLogLine>, bot: String, tas
                     "ask", "answer", "agent" -> Column(Modifier.fillMaxWidth().card(c), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         val chat = chats.firstOrNull { it.id == l.session }?.title?.ifBlank { null } ?: Wording.Tasks.aChat
                         Text(when {
-                            l.kind == "agent" && l.error == true -> Wording.Tasks.agentFailed(name = chat)
+                            l.kind == "agent" && (l.over ?: if (l.error == true) "failed" else "finished") == "stopped" ->
+                                Wording.Tasks.agentStopped(name = chat)
+                            l.kind == "agent" && (l.over == "failed" || l.over == null && l.error == true) ->
+                                Wording.Tasks.agentFailed(name = chat)
                             l.kind == "agent" -> Wording.Tasks.agentDone(name = chat)
                             l.kind == "answer" -> Wording.Tasks.botAnswered(bot = bot)
                             l.error == true -> Wording.Tasks.handedBot(bot = bot)

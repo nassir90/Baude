@@ -5,6 +5,7 @@ the Bot's answers, the chats it started and how they are). Each read from the Bo
 import datetime
 import json
 import os
+import time
 
 import gi
 
@@ -26,6 +27,7 @@ PAYLOAD = {"schedule": ("time",), "git_push": ("repo", "branch", "before", "afte
 STATUS_ICONS = {"done": "object-select-symbolic", "failed": "dialog-error-symbolic", "stopped": "process-stop-symbolic",
                 "skipped": "go-next-symbolic"}
 GOING = ("running", "asking")
+REPORTS_S = 3600  # (a run's page looks for what the chats it started said till this long after it's over, at most)
 INVALID = object()  # (a number field's value while its text isn't a number)
 
 
@@ -64,6 +66,14 @@ def stamp(t, clock=None, short=False):
     d = datetime.datetime.fromtimestamp(t, zone)
     return d.strftime("%H:%M") if d.date() == datetime.datetime.now(zone).date() else \
         d.strftime("%d %b %H:%M" if short else "%a %d %b %H:%M")
+
+
+def all_reported(run, log):
+    """Has every chat the run started said how its first turn finished (an agent line of its log, finished), or is the
+    run over long enough ago (REPORTS_S) that its page stops looking?"""
+    finished = {x.get("session") for x in log if x.get("kind") == "agent" and (x.get("over") or "finished") == "finished"}
+    return set(run.get("chats") or ()) <= finished or \
+        isinstance(run.get("ended"), (int, float)) and time.time() - run["ended"] > REPORTS_S
 
 
 def ran_at(run, clock=None, short=False):
@@ -226,9 +236,10 @@ class TasksPage(Gtk.Box):
         if shown == "run" and self.run and self.run.get("status") in GOING:
             self.ask({"op": "task_run", "session": self.sid, "run": self.run["id"]})
         elif shown == "run" and self.run and self.run.get("chats"):
-            if self.chats_now() != self.chats_drawn:  # (how they are, as the host lists them)
+            if self.chats_now() != self.chats_drawn:  # (how they are, as the host lists them: their cards' titles too)
+                self.drawn = None
                 self.draw_run()
-            if self.ticks % 5 == 0 and sum(x.get("kind") == "agent" for x in self.log) < len(self.run["chats"]):
+            if self.ticks % 5 == 0 and not all_reported(self.run, self.log):
                 self.ask({"op": "task_run", "session": self.sid, "run": self.run["id"]})  # (what they said, logged)
         if self.ticks % (5 if going else 30) == 0:
             self.ask({"op": "tasks", "session": self.sid})
@@ -272,6 +283,9 @@ class TasksPage(Gtk.Box):
             if op == "task_run":
                 self.log, self.bot = r.get("log") or [], r.get("bot") or self.bot
                 self.draw_run()
+                if self.run and self.run.get("task") and (self.task or {}).get("id") != self.run["task"]:
+                    self.task, self.runs = None, []  # (opened from a link: Back goes to its own task)
+                    self.ask({"op": "task", "session": self.sid, "id": self.run["task"]})
             else:
                 self.ask({"op": "tasks", "session": self.sid})
                 if self.task and self.task["id"] == self.run["task"]:
@@ -460,9 +474,14 @@ class TasksPage(Gtk.Box):
         self.drawn = (r["id"], len(log), log[-1] if log else None)
 
     def chats_now(self):
-        """The chats the run started, as its host lists them now: [(id, title, state)], those gone left out."""
+        """The chats the run started, as its host lists them now: [(id, title, state)], those gone left out. Its
+        state as Started's dot shows it: waiting (it asks something, as the sessions list says), working, or done."""
         listed = getattr(self.remote, "sessions", None) or {}
-        return [(c, listed[c].get("title") or wording.say("tasks.task"), listed[c].get("state"))
+
+        def state(x):
+            return "waiting" if x.get("state") == "waiting" or x.get("asks") else \
+                "working" if x.get("state") == "working" else "done"
+        return [(c, listed[c].get("title") or wording.say("tasks.task"), state(listed[c]))
                 for c in (self.run or {}).get("chats") or () if c in listed]
 
     def started(self, chats):
@@ -479,7 +498,7 @@ class TasksPage(Gtk.Box):
         for cid, title, state in chats:
             row = Adw.ActionRow(title=GLib.markup_escape_text(title), activatable=True)
             row.chat = cid
-            row.add_prefix(StatusDot(state if state in ("working", "waiting") else "done"))
+            row.add_prefix(StatusDot(state))
             row.add_suffix(Gtk.Image(icon_name="go-next-symbolic"))
             lb.append(row)
         lb.connect("row-activated", lambda _l, row: self.open_chat(row.chat))
@@ -511,7 +530,9 @@ class TasksPage(Gtk.Box):
             bot = self.bot or wording.say("sidebar.bot")
             chat = ((getattr(self.remote, "sessions", None) or {}).get(x.get("session")) or {}).get("title") or \
                 wording.say("tasks.a_chat")
-            head_text = wording.say("tasks.agent_failed" if x.get("error") else "tasks.agent_done", name=chat) \
+            over = x.get("over") or ("failed" if x.get("error") else "finished")
+            head_text = wording.say({"failed": "tasks.agent_failed", "stopped": "tasks.agent_stopped"}.get(
+                over, "tasks.agent_done"), name=chat) \
                 if k == "agent" else wording.say("tasks.bot_answered", bot=bot) if k == "answer" else \
                 wording.say("tasks.handed_bot", bot=bot) if x.get("error") else \
                 wording.say("tasks.asked_bot", bot=bot)

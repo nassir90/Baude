@@ -119,7 +119,7 @@ class SidebarMenu:
                 return
             if bot:
                 info["remote"].request({"op": "bot", "session": info["id"], "bot": {"name": name, "picture": None}},
-                                       self.bot_set)
+                                       lambda reply: self.bot_set(info, reply))
             else:
                 self.rename(info, entry.get_text())
         dlg.connect("response", answered)
@@ -201,7 +201,8 @@ class SidebarMenu:
             sent = {"name": name}
             if pick["data"] is not None:
                 sent["picture"] = base64.b64encode(pick["data"]).decode() if pick["data"] else ""
-            info["remote"].request({"op": "bot", "session": info["id"], "bot": sent}, self.bot_set)
+            info["remote"].request({"op": "bot", "session": info["id"], "bot": sent},
+                                   lambda reply: self.bot_set(info, reply))
         dlg.connect("response", answered)
         self.dialog = dlg
         dlg.present(self.win)
@@ -217,11 +218,17 @@ class SidebarMenu:
     def unbot(self, info):
         """Turn Back into a Chat: listed as a chat; its memory and picture kept on its host, for if it's made a Bot again."""
         if info is not None and info.get("remote") is not None:
-            info["remote"].request({"op": "bot", "session": info["id"], "bot": None}, self.bot_set)
+            info["remote"].request({"op": "bot", "session": info["id"], "bot": None},
+                                   lambda reply: self.bot_set(info, reply))
 
-    def bot_set(self, reply):
+    def bot_set(self, info, reply):
+        """A host answered Make Bot…, Bot Settings…, a Bot's Rename… or Turn Back into a Chat: listed as it answered
+        (as renamed_remote lists a rename), not as it was till the host next says what it has."""
         if reply.get("op") == "error":
             return self.win.note(wording.say("bot_settings.failed", why=baudelib.wire.said(reply)))
+        listed = reply.get("session")
+        if isinstance(listed, dict) and listed.get("id") == info["id"]:
+            info["remote"].sessions[info["id"]] = listed
         self.fill()
 
     def rename(self, info, title):

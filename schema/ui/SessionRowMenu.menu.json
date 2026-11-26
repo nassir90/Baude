@@ -73,6 +73,10 @@
       ]
     }
   ],
+  "decisions": [
+    {"said": "Bot Settings, Rename and the other right-click actions on the sidebar's rows seemed broken (paraphrased)", "rule": "What a row's menu does shows in its row as soon as the host answers (a Bot made, renamed, its picture changed, or a chat again included), and the list isn't rebuilt while a row's menu is open, so the menu stays open while any chat on any host changes", "decided": "2026-11-26", "source": [{"issue": "BaudeInternal#272"}]},
+    {"said": "Right-click menus jitter and sometimes close as the button comes up; they should show on the press and go on the release (paraphrased)", "rule": "A row's menu opens as the right button goes down and stays open as it comes up; held and let go over an item, that item is chosen", "decided": "2026-11-26", "source": [{"issue": "BaudeInternal#273"}]}
+  ],
   "states": [
     {"name": "this machine's session (plain)", "shows": "Rename…, Move to Group ▸, Archive (or Unarchive), Move to Trash…. Order: Rename…, Move to Group, Archive, Move to Trash…."},
     {"name": "host session, idle", "shows": "Rename…, [Make Bot… | Bot Settings… and Turn Back into a Chat], Move to Group ▸, Archive, Move to Trash…."},

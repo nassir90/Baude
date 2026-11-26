@@ -394,14 +394,14 @@ class SessionSidebar(SidebarMenu, Gtk.Box):
         rect = Gdk.Rectangle()
         rect.x, rect.y, rect.width, rect.height = int(x), int(y), 1, 1
         pop.set_pointing_to(rect)
-        pop.connect("closed", lambda p: GLib.idle_add(p.unparent))
+        self.menu_open = pop  # (open, or about to be: a row's isn't rebuilt from under it, fill waits till it's closed)
+        pop.connect("closed", lambda p: (self.menu_closed(p), GLib.idle_add(p.unparent)))
         # (on an idle, after the one its sections' separators are shown in: popped up before it, it's sized without
         # them, and macOS never sizes it again, so its last item was cut off)
         GLib.idle_add(self.popup_on_screen, pop)
         return pop
 
-    @staticmethod
-    def popup_on_screen(pop):
+    def popup_on_screen(self, pop):
         """menu_at's idle: pop shown while its parent's still on screen. The list rebuilt before it (a chat archived,
         trashed or refreshed) takes the row out of the window, and a popover over a widget with no window has no
         surface to open from: GTK crashes. Then it's dropped instead."""
@@ -410,7 +410,22 @@ class SessionSidebar(SidebarMenu, Gtk.Box):
             pop.popup()
         elif parent is not None:
             pop.unparent()
+            self.menu_closed(pop)
         return False
+
+    def menu_held(self):
+        """A row's menu is open (or about to be): the list isn't rebuilt under it, which closed it as it was used
+        (any chat on any host changing refills the list). fill waits for it to close."""
+        pop = getattr(self, "menu_open", None)
+        return pop is not None and (row := pop.get_parent()) is not None and row.is_ancestor(self.list)
+
+    def menu_closed(self, pop):
+        """menu_at's menu gone: the list rebuilt now if a fill waited for it."""
+        if getattr(self, "menu_open", None) is pop:
+            self.menu_open = None
+            if getattr(self, "fill_waiting", False):
+                self.fill_waiting = False
+                GLib.idle_add(lambda: self.fill() and False)
 
     # ---- groups: chats moved to one, and groups made, renamed and deleted (settings' chat_groups and group_names).
     # Each saves, keeps what's picked in ⋮ → Groups (a group renamed: picked by its new name; deleted: not), lists it
@@ -549,7 +564,8 @@ class SessionSidebar(SidebarMenu, Gtk.Box):
         # (only what the rows show: a server says so every time a transcript grows, and a refill drops a menu open on a row)
         # (and the host listed: this machine's again while the one picked is gone)
         seen = (sorted(hosts), sorted((s["id"], s.get("title"), s.get("state"), s["server"].state, s.get("cwd"),
-                                       s.get("said"), s.get("group"), bool(s.get("archived")), len(s.get("held") or []))
+                                       s.get("said"), s.get("group"), bool(s.get("archived")), len(s.get("held") or []),
+                                       str(s.get("bot")))  # (a Bot made, renamed, its picture changed, or a chat again)
                                       for s in network().sessions() if self.shows(s, hosts, groups, assigned)
                                       or s["id"] in getattr(self, "listed_remote", ())))
         if ids != self.remote_ids or seen != getattr(self, "remote_seen", None):
@@ -804,6 +820,9 @@ class SessionSidebar(SidebarMenu, Gtk.Box):
 
     def fill(self):
         if self.closed():
+            return
+        if self.menu_held():
+            self.fill_waiting = True
             return
         # rebuilding the list loses the scroll position (and focus scrolls it): put it back
         adj = self.scroller.get_vadjustment()

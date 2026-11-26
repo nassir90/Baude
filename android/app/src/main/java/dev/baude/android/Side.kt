@@ -64,13 +64,16 @@ fun <T> BoxedList(rows: List<T>, empty: String, inset: Dp = 10.dp, row: @Composa
     }
 }
 
+/** A dense list's row: the Fixes list's, and a task's inputs, triggers and runs (as Baude's navigation lists). */
+val DENSE_ROW = 38.dp
+
 /** A row of a boxed list (Adw.ActionRow): what's before it, its title and subtitle, what's after. compact: a dense
- * list's row, a menu's row high (Popups.row), its buttons filling it and its text a little in from its edges. */
+ * list's row, as high as the Fixes list's (DENSE_ROW), its text a little in from its edges. */
 @Composable
 fun ActionRow(title: String, subtitle: String?, onClick: (() -> Unit)? = null, prefix: (@Composable () -> Unit)? = null,
               suffix: (@Composable () -> Unit)? = null, titleLines: Int = 1, compact: Boolean = false) {
     val c = LocalBaude.current
-    Row(Modifier.fillMaxWidth().heightIn(min = if (compact) Popups.row else 50.dp)
+    Row(Modifier.fillMaxWidth().heightIn(min = if (compact) DENSE_ROW else 50.dp)
         .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
         .padding(horizontal = 12.dp, vertical = if (compact) 0.dp else 8.dp), verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp)) {

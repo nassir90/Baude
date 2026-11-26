@@ -53,6 +53,7 @@ abstract class TasksMockups(private val theme: String) {
         Settings.globalScale.value = 1f
         Settings.fullWidth.value = true
         Update.state.value = ""
+        dev.baude.android.LogWrap.on = true
     }
 
     private fun show(state: TasksState) {
@@ -162,6 +163,13 @@ abstract class TasksMockups(private val theme: String) {
         androidx.compose.runtime.snapshots.Snapshot.sendApplyNotifications()
         settle()
         shoot("run-back")
+    }
+
+    /** The run's log with Wrap turned off: its long lines scrolled sideways. */
+    @Test fun runUnwrapped() {
+        show(TaskFixtures.failedRun())
+        tap(Wording.CodeView.wrap)
+        shoot("run-unwrapped")
     }
 
     @Test fun trigger() {

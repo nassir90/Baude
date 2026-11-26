@@ -17,22 +17,21 @@ it can be copied anywhere.
     @task.main             # run with the inputs; an exception's traceback printed, the run failed (and handed to
     def deploy(inputs): ...  # the Bot by its host once it's over, if the task's failures are)
 
-Run outside a task (no BAUDE_TASK_RUN), or run with dummy answers, its asks (and its agents) are answered by a dummy
-agent: each field its default, its first choice, 0, false or "" (the script itself runs as it is, side effects and
-all). baude-oneshot and baude-mcp, run by the script, start their chats under its Bot too (BAUDE_SPAWNED_BY). Inputs then
-come from BAUDE_TASK_INPUTS, or a JSON object as the first argument."""
+Run outside a task (no BAUDE_TASK_RUN), its asks are answered with stand-ins: each field its default, its first
+choice, 0, false or "" (the script itself runs as it is, side effects and all), and its agents too. baude-oneshot and
+baude-mcp, run by the script, start their chats under its Bot too (BAUDE_SPAWNED_BY). Inputs then come from
+BAUDE_TASK_INPUTS, or a JSON object as the first argument."""
 import json
 import os
 import socket
 import sys
 import traceback
 
-__all__ = ["inputs", "payload", "run", "dry", "say", "ask", "fallback", "agent", "main", "Refused"]
+__all__ = ["inputs", "payload", "run", "say", "ask", "fallback", "agent", "main", "Refused"]
 
 run = os.environ.get("BAUDE_TASK_RUN")
 _DENIED = "Nobody was there to ask (a task's agent)."
 _PING_S = 5  # (a wait this long without a word: the host told it's still here; it takes 16 s of silence for gone)
-dry = os.environ.get("BAUDE_TASK_DRY") == "1" or not run
 
 
 def _json_env(name, argv_at=None):
@@ -91,7 +90,7 @@ class _Wire:
 _wire = _Wire()
 
 
-def _dummy(form):
+def _stand_in(form):
     return {f["name"]: f["default"] if "default" in f else (f.get("choices") or [""])[0]
             if f.get("type") == "choice" else 0 if f.get("type") == "number" else False
             if f.get("type") == "bool" else "" for f in form}
@@ -112,7 +111,7 @@ def ask(text, form=None, error=False):
     against the form. Refused: it couldn't answer, or not as asked."""
     if not run:
         print(f"ask: {text}", flush=True)
-        return _dummy(form) if form else "(a dummy agent's answer)"
+        return _stand_in(form) if form else "(a stand-in answer)"
     got = _wire.request({"op": "task_ask", "run": run, "token": os.environ.get("BAUDE_TASK_TOKEN", ""), "text": str(text),
                          **({"form": form} if form else {}), **({"error": True} if error else {})})
     return got.get("values") if form else got.get("text", "")
@@ -130,9 +129,9 @@ def agent(prompt, wait=True, cwd=None, model=None, title=None, mode=None, timeou
     asks for permission refused: at once while it's waited for, after a minute if not), nested under the task's Bot and kept with the run; the Bot's told
     what it says as its first turn ends. {session, text, failed}: with wait, what it said as that turn ended (or
     why it failed); else as soon as it's started (text None). Refused: the host didn't start it."""
-    if dry:
+    if not run:
         print(f"agent: {prompt}", flush=True)
-        return {"session": None, "text": None if not wait else "(a dummy agent's answer)", "failed": False}
+        return {"session": None, "text": None if not wait else "(a stand-in answer)", "failed": False}
     start = {"op": "start", "prompt": str(prompt), "title": title or " ".join(str(prompt).split())[:60],
              "mode": mode or "auto", "ask_timeout": 60, "ask_default": "deny", "attach": bool(wait), "answers": False,
              "spawned_by": os.environ.get("BAUDE_SPAWNED_BY", ""),

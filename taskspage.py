@@ -17,7 +17,7 @@ from baudelib import wire, wording  # noqa: E402
 from baudelib.tasks import LOG_SHOWN, MAX_EVERY, MIN_EVERY, number_of  # noqa: E402
 from markdownview import CodeBlock  # noqa: E402
 from panels import natural_height  # noqa: E402
-from widgets import Spinner, themed_icon  # noqa: E402
+from widgets import Spinner, load_settings, save_settings, themed_icon  # noqa: E402
 
 PAGE = wording.say("tasks.title")
 DAY_NAMES = tuple(wording.say(f"tasks.{d}") for d in ("mon", "tue", "wed", "thu", "fri", "sat", "sun"))
@@ -125,16 +125,11 @@ def dropdown(pairs, picked):
     return dd, values
 
 
-def alert(win, heading, child, responses, done, below=None):
-    """An alert dialog: child, scrolled if it's tall, and below it, out of the scrolling, below; responses
-    [(id, label, suggested)]; done(id) for each but cancel."""
+def alert(win, heading, child, responses, done):
+    """An alert dialog: child, scrolled if it's tall; responses [(id, label, suggested)]; done(id) for each but
+    cancel."""
     fits = Gtk.ScrolledWindow(child=child, propagate_natural_height=True, max_content_height=520,
                               hscrollbar_policy=Gtk.PolicyType.NEVER)
-    if below is not None:
-        extra = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-        extra.append(fits)
-        extra.append(below)
-        fits = extra
     dlg = Adw.AlertDialog(heading=heading, extra_child=fits, close_response="cancel",
                           default_response=responses[-1][0])
     for rid, label, suggested in responses:
@@ -155,6 +150,7 @@ class TasksPage(Gtk.Box):
         self.tasks, self.task, self.runs, self.run, self.log, self.bot = [], None, [], None, [], None
         self.drawn, self.tail = None, None  # (the run drawn: (its id, how many lines, its last); the block last drawn)
         self.chats_drawn = None  # (the chats it started, as they were drawn: chats_now's)
+        self.wrap = load_settings().get("task_log_wrap", True) is not False  # (its output and errors wrapped)
         self.stack = Gtk.Stack(vexpand=True, transition_type=Gtk.StackTransitionType.SLIDE_LEFT_RIGHT)
         self.append(self.stack)
         # the list
@@ -409,8 +405,7 @@ class TasksPage(Gtk.Box):
             lb = self.listbox(g)
             lb.connect("row-activated", lambda _l, row: self.open_run(row.run))
             for r in self.runs:
-                title = ran_at(r, self.clock, True) + (f" · {wording.say('tasks.dry_tag')}" if r.get("dry") else "")
-                row = Adw.ActionRow(title=GLib.markup_escape_text(title), activatable=True)
+                row = Adw.ActionRow(title=GLib.markup_escape_text(ran_at(r, self.clock, True)), activatable=True)
                 row.run = r
                 row.add_prefix(status_icon(r))
                 row.add_suffix(Gtk.Image(icon_name=kind_icon(r.get("kind"))))
@@ -440,6 +435,11 @@ class TasksPage(Gtk.Box):
             return
         self.run_title.set_label(f"{r.get('name') or wording.say('tasks.task')} · {ran_at(r, self.clock)}")
         self.run_box.back.set_tooltip_text(r.get("name") or wording.say("tasks.task"))
+        wrap = Gtk.ToggleButton(icon_name="baude-wrap-symbolic", tooltip_text=wording.say("code_view.wrap"),
+                                active=self.wrap, valign=Gtk.Align.CENTER, css_classes=["flat"])
+        wrap.connect("toggled", lambda b: self.set_wrap(b.get_active()))
+        head.append(wrap)
+        self.wrap_button = wrap
         if r.get("status") in GOING:
             head.append(flat("media-playback-stop-symbolic", wording.say("common.stop"),
                              lambda: self.ask({"op": "task_stop", "session": self.sid, "run": r["id"]})))
@@ -448,8 +448,6 @@ class TasksPage(Gtk.Box):
                  wording.say(kind.get(r.get("kind"), "tasks.by_hand"))]
         if r.get("ended"):
             facts.append(took(r.get("seconds")))
-        if r.get("dry"):
-            facts.append(wording.say("tasks.dummy_answers"))
         facts.append(r.get("version") or "")
         line = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=14)
         said = Gtk.Box(spacing=6)
@@ -509,6 +507,15 @@ class TasksPage(Gtk.Box):
         if self.remote is not None and cid in self.remote.sessions:
             self.win.open_mesh_chat({**self.remote.sessions[cid], "server": self.remote})
 
+    def set_wrap(self, on):
+        """The run's output and errors wrapped, or scrolled sideways: kept, and the log drawn again."""
+        if on == self.wrap:
+            return
+        self.wrap = on
+        save_settings(task_log_wrap=on)
+        self.drawn = None
+        self.draw_run()
+
     def log_line(self, x):
         """One line of the run's log added: output and errors run together in a code block of their own (errors in
         the error colour), each ask of the Bot and its answer a card, and what each chat it started said as its turn
@@ -519,7 +526,7 @@ class TasksPage(Gtk.Box):
                 self.tail[2].append(text)
                 self.tail[1].set_code("\n".join(self.tail[2]))
                 return
-            block = CodeBlock(text)
+            block = CodeBlock(text, wrap=self.wrap)
             if k == "err":
                 block.label.add_css_class("error")
             self.run_body.append(block)
@@ -612,8 +619,7 @@ class TasksPage(Gtk.Box):
         return row, read, valid, entry
 
     def run_form(self, t):
-        """Run t, its inputs filled here first, each a row as the settings have them: Run, or under them the lesser
-        Run with dummy answers."""
+        """Run t, its inputs filled here first, each a row as the settings have them."""
         group = Adw.PreferencesGroup()
         read, valid, entries = {}, [], []
         for f in t.get("form") or []:
@@ -622,27 +628,23 @@ class TasksPage(Gtk.Box):
             group.add(row)
             if entry is not None:
                 entries.append(entry)
-        dummy = Gtk.Button(label=wording.say("tasks.dry_run"), halign=Gtk.Align.CENTER, margin_top=12,
-                           css_classes=["flat"])
 
-        def run(dry):
-            self.ask({"op": "run_task", "session": self.sid, "id": t["id"], "dry": dry,
+        def run():
+            self.ask({"op": "run_task", "session": self.sid, "id": t["id"],
                       "inputs": {k: v for k, fn in read.items() if (v := fn()) is not None}})
         dlg = alert(self.win, wording.say("tasks.run_heading", name=t.get("name") or ""), group,
                     [("cancel", wording.say("common.cancel"), False), ("run", wording.say("tasks.run"), True)],
-                    lambda _r: run(False), below=dummy)
+                    lambda _r: run())
         dlg.set_size_request(420, -1)
 
         def filled(*_):
             ok = all(v() for v in valid)
             dlg.set_response_enabled("run", ok)
-            dummy.set_sensitive(ok)
             return ok
         for entry in entries:
             entry.connect("changed", filled)
-            entry.connect("activate", lambda _e: filled() and (dlg.close(), run(False)))
+            entry.connect("activate", lambda _e: filled() and (dlg.close(), run()))
         filled()
-        dummy.connect("clicked", lambda _b: (dlg.close(), run(True)))
         return dlg
 
     def add_trigger(self, t):

@@ -897,7 +897,8 @@ ARANGO_SH = ('exec arangosh --quiet --console.history false --server.endpoint tc
 def arango_eval(server, js, timeout=90):
     """What a read-only JavaScript program prints (JSON), run by arangosh in the server's container. Its @s are
     doubled: arangosh reads @NAME@ in an option's value as a variable, and @@ as an @."""
-    prefix = server.get("exec") or ["docker", "exec", "-i", server["container"]]
+    from baudelib import deps
+    prefix = server.get("exec") or [deps.program("docker") or "docker", "exec", "-i", server["container"]]
     program = ("(function () {" + js + "\n})();").replace("@", "@@")
     try:
         p = subprocess.run(prefix + ["sh", "-c", ARANGO_SH, "sh", program], capture_output=True, text=True,

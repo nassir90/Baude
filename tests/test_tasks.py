@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """A Bot's tasks over the wire, fuzzed: a host process (on a Unix socket of the run's own, its Bot the fake claude),
 a head on its socket. Each round makes a task (Python, shell, or the Bot's own prompt) with a random form and runs it:
-by hand, its form filled at random; dry (its asks answered by the dummy agent); failing (handed to its Bot); as a git
+by hand, its form filled at random; failing (handed to its Bot); as a git
 push to a repo of the run's own fires it (the payload filling its form); as its schedule comes due; stopped midway.
 Each run must end, its record and log must be as the schema has them, and the host must still answer after. Then a
 failure is healed end to end (handed to the Bot, which sets the task's script and runs it again with its own tools,
@@ -378,7 +378,7 @@ def main():
         assert got["op"] == "task", got
         assert got["task"]["version"] == tasks.version_of(script)
         fits("TaskReply", got)
-        how = rng.choice(("hand", "dry", "trigger", "stop"))
+        how = rng.choice(("hand", "trigger", "stop"))
         if how == "trigger" and trigger == "git_push":
             srv.tasks.polled.clear()
             srv.tasks.due(block=True)  # (its first look: the head seen, nothing fired)
@@ -396,8 +396,7 @@ def main():
             run = wait(lambda: next((r for r in head.ask({"op": "task", "session": sid, "id": tid})["runs"]
                                      if r["kind"] == "schedule"), None), "a schedule's run")
         else:
-            r = head.ask({"op": "run_task", "session": sid, "id": tid, "inputs": given(rng, form),
-                          "dry": how == "dry"})
+            r = head.ask({"op": "run_task", "session": sid, "id": tid, "inputs": given(rng, form)})
             assert r["op"] == "task_started", r
             fits("TaskStarted", r)
             run = r["run"]
@@ -439,7 +438,7 @@ def main():
         srv.tasks.stores.pop(sid, None)
     listed = head.ask({"op": "tasks", "session": sid})
     assert sum(t["name"] == "Old" for t in listed["tasks"]) == 1, listed
-    # the library outside a task: a dummy agent's answers
+    # the library outside a task: stand-in answers
     out = subprocess.run([sys.executable, "-c", "import baudetask as t; print(t.ask('x', form=[{'name': 'a', "
                           "'type': 'choice', 'choices': ['p', 'q']}]))"], capture_output=True, text=True,
                          env={k: v for k, v in os.environ.items() if not k.startswith("BAUDE_TASK")} |

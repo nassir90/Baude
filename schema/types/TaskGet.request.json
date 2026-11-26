@@ -21,6 +21,10 @@
     "id": {
       "type": "string",
       "description": "The task's id."
+    },
+    "script": {
+      "type": "boolean",
+      "description": "Whether the task's script comes back with it (its version always does); left out, it doesn't."
     }
   },
   "required": [

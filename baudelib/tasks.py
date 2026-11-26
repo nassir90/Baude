@@ -41,7 +41,6 @@ POLL_S, POLL_MIN, POLL_MAX = 30, 10, 3600  # (a git push trigger's looks at its 
 DAYS = (0, 1, 2, 3, 4, 5, 6)
 EXT = {"python": "py", "shell": "sh", "bot": "md"}
 SCRIPT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "script")  # (baudetask, on a script's path)
-DUMMY = "(a dummy agent's answer)"
 _NUMBER = re.compile(r"[+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?", re.ASCII)
 _FIELD = re.compile(r"[A-Za-z_][A-Za-z0-9_]{0,39}")
 _BRANCH = re.compile(r"[A-Za-z0-9._/-]{1,200}")
@@ -241,12 +240,6 @@ def fill(task, payload=None, fills=None, given=None):
     return out, missing
 
 
-def dummy(form):
-    """What a dummy agent fills form with: each field's default, else its first choice, 0, false or ""."""
-    return {f["name"]: f["default"] if "default" in f else (f.get("choices") or [""])[0] if f["type"] == "choice"
-            else 0 if f["type"] == "number" else False if f["type"] == "bool" else "" for f in form}
-
-
 def answered(text, form):
     """(values, None) from a Bot's answer to an ask with a form (a JSON object in it), or (None, what's wrong)."""
     start, end = (text or "").find("{"), (text or "").rfind("}")
@@ -350,6 +343,7 @@ class Store:
                     reap(r, folder)
                     r.update(status="stopped", ended=r.get("ended") or r["started"],
                              error=r.get("error") or wording.say("tasks.host_stopped"))
+                r.pop("dry", None)  # (kept before runs had no such field)
                 self.runs[r["id"]] = r
 
     def save(self):
@@ -536,7 +530,7 @@ class Tasks:
                 if task is None or s.meta.get("archived"):
                     raise ValueError(wording.say("host_errors.no_task"))
             inputs = msg.get("inputs") if isinstance(msg.get("inputs"), dict) else {}
-            run = self.start(s, task, None, "manual", {}, inputs, dry=bool(msg.get("dry")), by=by)
+            run = self.start(s, task, None, "manual", {}, inputs, by=by)
             return "task_started", {"session": s.id, "run": run}
         with self.lock:
             run = st.runs.get(msg.get("run"))
@@ -548,7 +542,7 @@ class Tasks:
                                 "bot": (s.meta.get("bot") or {}).get("name")}
 
     # ---- run
-    def start(self, s, task, trigger, kind, payload, given=None, dry=False, by=None):
+    def start(self, s, task, trigger, kind, payload, given=None, by=None):
         """(server's lock held) A run of task begun (or, one of it running already, kept as skipped): its record.
         by: the member that ran it by hand (None: a head here, or the Bot's own tools on this host; a trigger's: the
         Bot's own starter's): what the chats it starts are judged as.
@@ -561,7 +555,7 @@ class Tasks:
         now = time.time()
         run = {"id": uuid.uuid4().hex[:16], "task": task["id"], "name": task["name"], "version": task["version"],
                "trigger": (trigger or {}).get("id"), "kind": kind, "payload": payload or None, "inputs": inputs,
-               "dry": dry or None, "status": "running", "started": now, "offset": clock()["offset"], "asks": 0}
+               "status": "running", "started": now, "offset": clock()["offset"], "asks": 0}
         with self.lock:
             if self.going(s.id, task["id"]):
                 run.update(status="skipped", ended=now, seconds=0, error=wording.say("tasks.still_running"))
@@ -570,7 +564,7 @@ class Tasks:
             st.put_run(run)
             token = secrets.token_hex(16)
             self.running[run["id"]] = {"sid": s.id, "task": task["id"], "name": task["name"], "proc": None,
-                                       "token": token, "stop": None, "dry": dry,
+                                       "token": token, "stop": None,
                                        "by": by if kind == "manual" else s.meta.get("started_by")}
         threading.Thread(target=self._run, args=(s.id, st, dict(task), run, token), daemon=True,
                          name=f"task-{run['id']}").start()
@@ -592,10 +586,7 @@ class Tasks:
     def _run(self, sid, st, task, run, token):
         error, code = None, None
         try:
-            if task["runtime"] == "bot" and run.get("dry"):  # (what it'd be given, and the dummy's answer)
-                st.log(run["id"], "ask", st.script(task))
-                st.log(run["id"], "answer", DUMMY)
-            elif task["runtime"] == "bot":
+            if task["runtime"] == "bot":
                 self._cwd(sid, st)
                 text, failed = self.ask(run["id"], st.script(task), task["name"])
                 error = wording.say("tasks.bot_failed") if failed else None
@@ -607,7 +598,7 @@ class Tasks:
             held = self.running.get(run["id"]) or {}
             stopped = held.get("stop")
         hand = bool(error and not stopped and task.get("fallback") and task["runtime"] != "bot" and
-                    not held.get("dry") and not st.runs[run["id"]].get("handed"))
+                    not st.runs[run["id"]].get("handed"))
         ended = time.time()
         status = "stopped" if stopped else "failed" if error else "done"
         self._update(st, run["id"], status=status, ended=ended, seconds=round(ended - run["started"], 3), exit=code,
@@ -646,8 +637,6 @@ class Tasks:
                "BAUDE_TASK_PAYLOAD": json.dumps(run["payload"] or {}), "BAUDE_TASK_NAME": task["name"],
                "BAUDE_WIRE_VERSION": str(wire.VERSION),
                "PYTHONPATH": os.pathsep.join(p for p in (SCRIPT_DIR, os.environ.get("PYTHONPATH")) if p)}
-        if run.get("dry"):
-            env["BAUDE_TASK_DRY"] = "1"
         for k, v in run["inputs"].items():
             env[f"BAUDE_IN_{k.upper()}"] = v if isinstance(v, str) else json.dumps(v)
         with self.lock:
@@ -774,11 +763,6 @@ class Tasks:
             if not task.get("fallback"):
                 raise ValueError(wording.say("host_errors.task_no_fallback"))
             self._update(st, msg["run"], handed=True)  # (the script's handed its failure over: the host doesn't again)
-        if held["dry"]:
-            st.log(msg["run"], "ask", text, error=bool(msg.get("error")) or None)
-            values = dummy(form) if form else None
-            st.log(msg["run"], "answer", DUMMY, values=values)
-            return DUMMY, values
         said, failed = self.ask(msg["run"], text, task["name"], form=form, error=bool(msg.get("error")))
         if failed:
             raise ValueError(said or wording.say("tasks.bot_failed"))

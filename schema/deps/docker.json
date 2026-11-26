@@ -5,8 +5,8 @@
   "needed_by": ["window.docker", "window.database_schemas"],
   "group": "window.docker",
   "detect": {
-    "macos": [{"env": "BAUDE_DOCKER"}, {"which": "docker"}],
-    "linux": [{"env": "BAUDE_DOCKER"}, {"which": "docker"}]
+    "macos": [{"env": "BAUDE_DOCKER"}, {"which": "docker"}, {"glob": "/usr/local/bin/docker"}, {"glob": "/opt/homebrew/bin/docker"}, {"glob": "~/.docker/bin/docker"}, {"glob": "/Applications/Docker.app/Contents/Resources/bin/docker"}, {"glob": "~/.orbstack/bin/docker"}, {"glob": "~/.rd/bin/docker"}],
+    "linux": [{"env": "BAUDE_DOCKER"}, {"which": "docker"}, {"glob": "/usr/local/bin/docker"}, {"glob": "/usr/bin/docker"}, {"glob": "/snap/bin/docker"}, {"glob": "~/.docker/bin/docker"}, {"glob": "~/.rd/bin/docker"}]
   },
   "install": {
     "macos": "brew install --cask docker",

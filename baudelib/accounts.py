@@ -309,6 +309,10 @@ def _credential(provider, profile):
     return row[0]
 
 
+class SignedOut(OSError):
+    """A Codex account whose folder has no sign-in."""
+
+
 def environment(provider, env, profile=None):
     """env for a Codex run under an account (profile; None: the default here): its CODEX_HOME, and nothing that would
     sign it in otherwise."""
@@ -317,7 +321,7 @@ def environment(provider, env, profile=None):
         return env
     home = _credential(provider, profile)
     if not Path(home, "auth.json").is_file():
-        raise OSError(wording.say("subscriptions.codex_signed_out"))
+        raise SignedOut(wording.say("subscriptions.codex_signed_out"))
     env = {k: v for k, v in env.items() if k not in _CODEX_KEYS}
     env["CODEX_HOME"] = home
     return env
@@ -346,27 +350,38 @@ def claude_launch(env, profile):
 
 
 USAGE_CACHE_S = 25  # (how long a read of a subscription's usage is kept: clients asking every 30 s share one)
-_usage_read = {}  # (profile → (when, limits, when in seconds since 1970))
-_usage_locks = {}  # (profile → the lock one read of it runs under)
+CODEX_CLI = "codex"  # (the usage key of Codex's CLI's own sign-in; Claude's is "", an account's its id)
+_usage_read = {}  # (usage key → (when, limits, when in seconds since 1970))
+_usage_locks = {}  # (usage key → the lock one read of it runs under)
 _usage_guard = threading.Lock()
-_usage_one_at_a_time = threading.Lock()
+_usage_one_at_a_time = {"claude": threading.Lock(), "codex": threading.Lock()}  # (one provider's reads run one after another; a hung codex doesn't hold claude's)
 
 
-def plan_usage(profile, exe=None):
-    """The subscription's limits as _plan_usage reads them, but one read per profile at a time and one per
-    USAGE_CACHE_S: whoever asks while it runs, or just after, gets its answer. The reads (each a claude process) run one
-    after another across profiles."""
+def usage_key(provider, profile):
+    """What a subscription's usage is kept and said under: an account's id; the CLI's own sign-in's, "" for Claude's,
+    CODEX_CLI for Codex's."""
+    return profile or ("" if provider == "claude" else CODEX_CLI)
+
+
+def plan_usage(profile, exe=None, provider="claude"):
+    """The subscription's limits as _plan_usage (Claude's) or _codex_usage (Codex's) reads them, but one read per
+    subscription at a time and one per USAGE_CACHE_S: whoever asks while it runs, or just after, gets its answer. The
+    reads (each a claude or codex process) run one after another across one provider's subscriptions.
+    provider: whose CLI's own sign-in profile "" is (an account's is its own)."""
+    if profile:
+        provider = (account(profile) or {}).get("provider", provider)
+    key = usage_key(provider, profile)
     with _usage_guard:
-        lock = _usage_locks.setdefault(profile, threading.Lock())
+        lock = _usage_locks.setdefault(key, threading.Lock())
     with lock:
-        kept = _usage_read.get(profile)
+        kept = _usage_read.get(key)
         if kept and time.monotonic() - kept[0] < USAGE_CACHE_S:
             return kept[1]
-        with _usage_one_at_a_time:
-            limits = _plan_usage(profile, exe)
+        with _usage_one_at_a_time["codex" if provider == "codex" else "claude"]:
+            limits = _codex_usage(profile) if provider == "codex" else _plan_usage(profile, exe)
         with _usage_guard:
-            if _usage_locks.get(profile) is lock:  # (not an account removed while this read ran)
-                _usage_read[profile] = (time.monotonic(), limits, time.time())
+            if _usage_locks.get(key) is lock:  # (not an account removed while this read ran)
+                _usage_read[key] = (time.monotonic(), limits, time.time())
         return limits
 
 
@@ -391,7 +406,7 @@ def _drop_usage(profile, gone=False):
 
 
 def last_usage():
-    """Each subscription's (profile's) last read limits and when they were read (seconds since 1970): {profile: (read,
+    """Each subscription's (usage key's) last read limits and when they were read (seconds since 1970): {profile: (read,
     limits)}, for those whose last read said them; a client shows them till its own read answers."""
     with _usage_guard:
         return {profile: (kept[2], kept[1]) for profile, kept in _usage_read.items() if kept[1]}
@@ -443,6 +458,48 @@ def _plan_usage(profile, exe=None):
                      if isinstance(window, dict) and isinstance(window.get("utilization"), (float, int))]
             return found or None
     return None
+
+
+CODEX_WINDOWS = {300: "five_hour", 10080: "seven_day"}  # (Codex's limit windows, in minutes, that Claude's limits share names with)
+
+
+def _codex_window_key(minutes, fallback):
+    """A Codex limit window's key: five_hour or seven_day as Claude's, else its length (2_hour, 3_day), else fallback."""
+    if not isinstance(minutes, int) or isinstance(minutes, bool) or minutes <= 0:
+        return fallback
+    if minutes in CODEX_WINDOWS:
+        return CODEX_WINDOWS[minutes]
+    if minutes % 1440 == 0:
+        return f"{minutes // 1440}_day"
+    if minutes % 60 == 0:
+        return f"{minutes // 60}_hour"
+    return f"{minutes}_minute"
+
+
+def _codex_usage(profile):
+    """A Codex subscription's limits, [(key, percent, resets)], as its App Server's rate limits say them (profile "":
+    the CLI's own sign-in, run with this machine's CODEX_HOME); None where it can't say: a sign-in that isn't a
+    ChatGPT plan's. Raises SignedOut for an account with no sign-in, else OSError where codex isn't here or couldn't be
+    asked."""
+    from baudelib import codex, models
+
+    exe = models.codex_exe()
+    if not exe:
+        raise OSError("codex isn't on this machine")
+    try:
+        snapshot = codex.rate_limits(exe, profile=profile)
+    except RuntimeError as e:
+        raise OSError(str(e)) from None
+    if snapshot is None:
+        return None
+    found = []
+    for which in ("primary", "secondary"):
+        window = snapshot.get(which)
+        if isinstance(window, dict) and isinstance(window.get("usedPercent"), (int, float)) and \
+                not isinstance(window.get("usedPercent"), bool):
+            found.append((_codex_window_key(window.get("windowDurationMins"), which), window["usedPercent"],
+                          _reset_time(window.get("resetsAt"))))
+    return found or None
 
 
 def claude_session_profile(session):

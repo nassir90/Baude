@@ -962,9 +962,9 @@ class WindowDrafts:
             self.sync_accounts(shown)
         self.ctx_box.window_changed()  # (no session's said what it's used yet: this model's window)
 
-    # ---- a chat on Claude's or Codex's model whose host keeps more than one subscription account for it: each is a
-    # provider in the provider picker, by its name alone (an account is its host's: never another's), the chat's own
-    # picked. Picking another goes on with the chat under it (accounts' use: its agent started again, resuming it,
+    # ---- a chat on Claude's or Codex's model whose host keeps a subscription account for it (with the CLI's own
+    # sign-in, two subscriptions): each is a provider in the provider picker, by its name alone (an account is its
+    # host's: never another's), the CLI's own sign-in first, the chat's own picked. Picking another goes on with the chat under it (accounts' use: its agent started again, resuming it,
     # once its turn's over; a Claude Desktop chat's own claude, here, started again under it)
     ACCOUNTS_S = 30  # (s a host's accounts, as it last listed them, are taken as they are)
     ACCOUNT = "account|"  # (a provider picker key that's an account: its id after it)
@@ -997,8 +997,8 @@ class WindowDrafts:
         return said[1] if said else []
 
     def sync_accounts(self, shown):
-        """The provider picker as the chat's subscription accounts: shown (its model) Claude's or Codex's, and its host
-        keeping more than one account for it; else left as sync_providers left it. Not for a Claude Desktop chat its
+        """The provider picker as the chat's subscriptions, the CLI's own sign-in and each account: shown (its model)
+        Claude's or Codex's, and its host keeping an account for it; else left as sync_providers left it. Not for a Claude Desktop chat its
         host only lists (nothing of it runs there to move). An account since removed that the chat's on: listed as
         that, picked, till another's picked."""
         program = model_program(shown or self.model)
@@ -1007,15 +1007,14 @@ class WindowDrafts:
         if self.remote is not None and (self.remote.sessions.get(self.session_id) or {}).get("taken_up") is False:
             return
         mine = [a for a in self.host_accounts() if a.get("provider") == program]
-        if len(mine) < 2:
+        if not mine:  # (the CLI's own sign-in alone: nothing else to pick)
             return
         on = (self.chat_account_info() or {}).get("id") or ""
-        choices = [(self.ACCOUNT + a["id"], a["name"]) for a in mine]
+        choices = [(self.ACCOUNT, wording.say("subscriptions.cli_default"))] + \
+            [(self.ACCOUNT + a["id"], a["name"]) for a in mine]
         if self.chat_account_gone():
             on = self.ACCOUNT_GONE
             choices.append((on, wording.say("subscriptions.removed_account")))
-        elif not on:  # (the CLI's own sign-in, which it's on: listed too)
-            choices.append((self.ACCOUNT, wording.say("subscriptions.cli_default")))
         self.provider_dd.set_choices([(None, choices)])
         self.provider_dd.select(on if on == self.ACCOUNT_GONE else self.ACCOUNT + on)
         self.provider_dd.set_sensitive(True)

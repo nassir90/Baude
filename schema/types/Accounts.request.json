@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
-  "description": "The host's Claude and Codex subscription accounts (hostaccounts): list them; add one (Claude: name and an existing signed-in config folder, or name and token where the host has no claude; Codex: name and an existing signed-in home); rename one (id, name); replace a token account's token (id, token); remove one (id); select a provider's default for new chats (provider, id; \"\" for the CLI's own sign-in); use another for a chat (session, id; \"\" for the CLI's own sign-in: its agent started again under it, resuming the chat, once its turn's over); read a subscription's usage (id; \"\" for the CLI's own sign-in); sign in (sign_in: provider and name for a new account, or id to sign in to one again; Claude's runs claude auth login with the account's own folder, its lines coming as they're written, the page to open among them; Codex's codex login (method: the browser's, by default, or the device code's), its state coming as it goes (login: the page to open, and the device code's code to enter there); then its end; the connection's going stops it); pass a code the sign-in page showed to the sign-in this connection runs (code: no answer of its own); pass the address a browser ended on after a Codex browser sign-in's page to the one this connection runs (callback: url; answered with the page codex's server gave, or error). Each other is answered with accounts.",
+  "description": "The host's Claude and Codex subscription accounts (hostaccounts): list them; add one (Claude: name and an existing signed-in config folder, or name and token where the host has no claude; Codex: name and an existing signed-in home); rename one (id, name); replace a token account's token (id, token); remove one (id); select a provider's default for new chats (provider, id; \"\" for the CLI's own sign-in); use another for a chat (session, id; \"\" for the CLI's own sign-in: its agent started again under it, resuming the chat, once its turn's over); read a subscription's usage (id; \"\" for the CLI's own sign-in of provider, Claude's where none is said); sign in (sign_in: provider and name for a new account, or id to sign in to one again; Claude's runs claude auth login with the account's own folder, its lines coming as they're written, the page to open among them; Codex's codex login (method: the browser's, by default, or the device code's), its state coming as it goes (login: the page to open, and the device code's code to enter there); then its end; the connection's going stops it); pass a code the sign-in page showed to the sign-in this connection runs (code: no answer of its own); pass the address a browser ended on after a Codex browser sign-in's page to the one this connection runs (callback: url; answered with the page codex's server gave, or error). Each other is answered with accounts.",
   "properties": {
     "op": {
       "const": "accounts",
@@ -35,7 +35,7 @@
         "claude",
         "codex"
       ],
-      "description": "add, select, sign_in (a new account): whose."
+      "description": "add, select, sign_in (a new account): whose. usage with id \"\": whose CLI's own sign-in (Claude's where left out)."
     },
     "id": {
       "type": "string",

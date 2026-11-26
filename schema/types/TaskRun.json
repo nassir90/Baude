@@ -54,13 +54,6 @@
       ],
       "description": "Its form as filled."
     },
-    "dry": {
-      "type": [
-        "boolean",
-        "null"
-      ],
-      "description": "Run with dummy answers: its script run as it is, side effects and all, its asks answered by a dummy agent, not its Bot."
-    },
     "status": {
       "enum": [
         "running",

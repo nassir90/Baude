@@ -45,6 +45,10 @@
       },
       "description": "summary: the namespaces it's the totals of (every one when it's left out; none when it's empty)."
     },
+    "since": {
+      "type": "number",
+      "description": "summary: the newest history sample the head has (its at): only later ones are sent (every one when it's left out)."
+    },
     "namespace": {
       "type": "string",
       "description": "yaml, owner, delete: the object's namespace."

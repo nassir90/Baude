@@ -345,6 +345,45 @@ def on_context(items, resource, context):
     return items
 
 
+def jsonpath(template, o):
+    """kubectl's -o jsonpath for the templates the view gives it: {range PATH[*]}…{end}, {.a.b} (nothing where it's
+    missing, a map or list as JSON) and {"text"} (its escapes as JSON's)."""
+    import re
+    parts = re.findall(r'\{([^{}]*)\}|([^{}]+)', template)
+
+    def at(x, path):
+        for k in path.strip(".").split(".") if path.strip(".") else []:
+            x = x.get(k) if isinstance(x, dict) else None
+        return x
+
+    def run(i, x, outp):
+        while i < len(parts):
+            inner, text = parts[i]
+            i += 1
+            if text:
+                outp.append(text)
+            elif inner.startswith("range "):
+                path = inner[len("range "):].removesuffix("[*]")
+                depth, j = 1, i
+                while depth:
+                    depth += parts[j][0].startswith("range ") - (parts[j][0] == "end")
+                    j += 1
+                for item in at(x, path) or []:
+                    run(i, item, outp)
+                i = j
+            elif inner == "end":
+                return
+            elif inner.startswith('"'):
+                outp.append(json.loads(inner))
+            else:
+                v = at(x, inner)
+                outp.append("" if v is None else json.dumps(v, separators=(",", ":")) if isinstance(v, (dict, list))
+                            else str(v))
+    outp = []
+    run(0, o, outp)
+    return "".join(outp)
+
+
 def watch(resource, context):
     """kubectl get KIND --watch --output-watch-events -o json: what's there as ADDED, then each change as it happens
     (a pod deleted: MODIFIED, Terminating, or DELETED if forced), each event indented JSON as kubectl writes it; for
@@ -506,6 +545,12 @@ def main():
         out(f"apiVersion: v1\nkind: Object\nmetadata:\n  name: {name}\n  namespace: "
             f"{hit['metadata'].get('namespace', '')}\nstatus:\n  phase: {hit.get('status', {}).get('phase', '')}\n")
     items = on_context(items, resource, context)
+    for sel in (a.split("=", 1)[1] for a in rest if a.startswith("--field-selector=")):  # (status.phase!=Failed,…)
+        for term in sel.split(","):
+            path, value = term.split("!=")
+            items = [o for o in items if jsonpath("{." + path + "}", o) != value]
+    if fmt.startswith("jsonpath="):
+        out(jsonpath(fmt[len("jsonpath="):], {"items": items}))
     if fmt.startswith("custom-columns="):  # (NAME:.metadata.name,…, with --no-headers: a line each, by spaces)
         def at(o, path):
             for k in path.strip(".").split("."):

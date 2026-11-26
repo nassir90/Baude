@@ -37,12 +37,14 @@ import androidx.compose.ui.unit.dp
  * namespace's name a link: only its objects), and by node on a cluster of more than one. */
 @Composable
 fun KubeHome(st: KubeState, s: Msg.KubeSummary) {
-    val history = s.history.orEmpty()
+    val history = st.history
     val minutes = s.minutes?.toInt() ?: 0
+    val every = s.every?.toDouble() ?: 10.0
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(12.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        s.cpu?.let { KubeCard(it, history.map { h -> h.cpuUsed?.toDouble() }, history.map { h -> h.cpuRequests?.toDouble() }, minutes) }
-        s.memory?.let { KubeCard(it, history.map { h -> h.memoryUsed?.toDouble() }, history.map { h -> h.memoryRequests?.toDouble() }, minutes) }
+        val at = history.map { h -> h.at?.toDouble() ?: 0.0 }
+        s.cpu?.let { KubeCard(it, KubeSamples(at, history.map { h -> h.cpuUsed?.toDouble() }, history.map { h -> h.cpuRequests?.toDouble() }, minutes, every)) }
+        s.memory?.let { KubeCard(it, KubeSamples(at, history.map { h -> h.memoryUsed?.toDouble() }, history.map { h -> h.memoryRequests?.toDouble() }, minutes, every)) }
         KubeShares(st, s.namespaceColumns.orEmpty(), s.namespaces.orEmpty(), link = true)
         if (s.nodes.orEmpty().size > 1) KubeShares(st, s.nodeColumns.orEmpty(), s.nodes.orEmpty(), link = false)
     }
@@ -51,7 +53,7 @@ fun KubeHome(st: KubeState, s: Msg.KubeSummary) {
 /** One resource's card: its name and what the nodes can give pods; Requested, Used and Limits, each a bar of that (full
  * and orange past it), its amount and share; how it went. */
 @Composable
-private fun KubeCard(use: Msg.KubeUse, used: List<Double?>, requested: List<Double?>, minutes: Int) {
+private fun KubeCard(use: Msg.KubeUse, samples: KubeSamples) {
     val c = LocalBaude.current
     val cells = use.cells.orEmpty()
     val shares = use.shares.orEmpty()
@@ -81,7 +83,7 @@ private fun KubeCard(use: Msg.KubeUse, used: List<Double?>, requested: List<Doub
                     modifier = Modifier.width(38.dp))
             }
         }
-        Spark(used, requested, c.success, c.accentBg, Modifier.tip(Wording.Kube.historyTip(minutes)))
+        Spark(samples, c.success, c.accentBg, Modifier.tip(Wording.Kube.historyTip(samples.minutes)))
     }
 }
 
@@ -93,29 +95,37 @@ private fun Bar(fill: Float, colour: Color, track: Color) {
     }
 }
 
-/** How a resource went (kubehome.KubeSpark): used a line, requested dashed, scaled to the most either reached; nothing
- * with fewer than two samples. */
+/** A resource's history: each sample's time (seconds since 1970), what was used and requested then, and how far back it
+ * goes and how often it's sampled. */
+class KubeSamples(val at: List<Double>, val used: List<Double?>, val requested: List<Double?>, val minutes: Int, val every: Double)
+
+/** How a resource went (kubehome.KubeSpark): used a line, requested dashed, each sample at its time across the last
+ * `minutes` (to the newest), so a time with none is a gap; scaled to the most either reached; nothing with fewer than
+ * two samples. */
 @Composable
-private fun Spark(used: List<Double?>, requested: List<Double?>, usedColour: Color, requestedColour: Color, modifier: Modifier) {
-    val lines = listOf(requested to requestedColour, used to usedColour).filter { (v, _) -> v.count { it != null } >= 2 }
+private fun Spark(s: KubeSamples, usedColour: Color, requestedColour: Color, modifier: Modifier) {
+    val lines = listOf(s.requested to requestedColour, s.used to usedColour).filter { (v, _) -> v.count { it != null } >= 2 }
     if (lines.isEmpty()) return
     val top = (lines.flatMap { it.first }.filterNotNull().maxOrNull() ?: 0.0).let { if (it > 0) it * 1.15 else 1.0 }
+    val span = 60.0 * (if (s.minutes > 0) s.minutes else 30)
+    val right = s.at.lastOrNull() ?: 0.0
     Canvas(modifier.fillMaxWidth().padding(top = 4.dp).height(34.dp)) {
         for ((values, colour) in lines) {
             val path = Path()
-            var started = false
-            val n = values.size
+            var before: Double? = null
             values.forEachIndexed { i, v ->
                 if (v == null) {
-                    started = false
+                    before = null
                     return@forEachIndexed
                 }
-                val x = 1f + (size.width - 2f) * i / (n - 1)
+                val at = s.at[i]
+                val x = 1f + (size.width - 2f) * (1.0 - (right - at) / span).toFloat()
                 val y = size.height - 2f - (size.height - 4f) * (v / top).toFloat()
-                if (started) path.lineTo(x, y) else path.moveTo(x, y)
-                started = true
+                val b = before
+                if (b != null && at - b <= 2 * s.every) path.lineTo(x, y) else path.moveTo(x, y)
+                before = at
             }
-            val dashed = values === requested
+            val dashed = values === s.requested
             drawPath(path, colour.copy(alpha = 0.9f), style = Stroke(width = 1.5.dp.toPx(),
                 pathEffect = if (dashed) PathEffect.dashPathEffect(floatArrayOf(3.dp.toPx(), 3.dp.toPx())) else null))
         }

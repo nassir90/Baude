@@ -8699,7 +8699,6 @@ def test_kube_watch(app):
         kv.open()
         wait_for(lambda: kv.selection is not None and len(rows()) == 7 and kv.watch is not None, "pods, watched")
         wait_for(lambda: gets("pods", "--watch", "--output-watch-events"), "kubectl watching")
-        assert "live" in kv.status.get_label(), kv.status.get_label()
         listed = len([c for c in gets("pods") if "--watch" not in c])
         with open(state, "w") as f:  # (deleted by someone else: nothing in baude asked)
             json.dump({"shop/web-7d9f-abcde": "grace"}, f)

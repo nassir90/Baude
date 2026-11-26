@@ -14,40 +14,42 @@ MEASURES = (("requested", "kube-requested"), ("used", "kube-used"), ("limits", "
 
 class KubeSpark(Gtk.Widget):
     """How a resource went (the host's history): what's used, a line in the used bar's colour, and what's requested,
-    dashed in the requested bar's, both scaled to the most either reached (so a change shows, however small beside the
-    nodes'). Nothing is drawn with fewer than two samples."""
+    dashed in the requested bar's, each sample at its time across the last `minutes` (to the newest), so a time with
+    none (the host off, the cluster unreachable) is a gap; both scaled to the most either reached (so a change shows,
+    however small beside the nodes'). Nothing is drawn with fewer than two samples."""
     HEIGHT = 34
 
     def __init__(self):
         super().__init__(hexpand=True, height_request=self.HEIGHT, margin_top=6)
         self.add_css_class("kube-spark")  # (its colour: the used bar's)
-        self.used, self.requested = [], []
+        self.samples, self.minutes, self.every = [], 30, 10
 
-    def set_samples(self, used, requested):
-        self.used, self.requested = used, requested
+    def set_samples(self, samples, minutes, every):
+        """samples: (at, used, requested) each, oldest first."""
+        self.samples, self.minutes, self.every = samples, minutes or 30, every or 10
         self.queue_draw()
 
     def do_snapshot(self, snap):
         w, h = self.get_width(), self.get_height()
-        lines = [v for v in (self.used, self.requested) if sum(x is not None for x in v) >= 2]
+        lines = [i for i in (2, 1) if sum(s[i] is not None for s in self.samples) >= 2]
         if not lines or w <= 0:
             return
-        top = max(x for v in lines for x in v if x is not None) * 1.15 or 1
+        top = max(s[i] for i in lines for s in self.samples if s[i] is not None) * 1.15 or 1
+        span, right = 60 * self.minutes, self.samples[-1][0]
         cr = snap.append_cairo(Graphene.Rect().init(0, 0, w, h))
-        for values, color, dash in ((self.requested, accent_rgba(), [3, 3]), (self.used, self.get_color(), [])):
-            if sum(x is not None for x in values) < 2:
-                continue
+        for i in lines:
+            color, dash = (accent_rgba(), [3, 3]) if i == 2 else (self.get_color(), [])
             cr.set_source_rgba(color.red, color.green, color.blue, 0.9)
             cr.set_line_width(1.5)
             cr.set_dash(dash)
-            n, started = len(values), False
-            for i, v in enumerate(values):
-                if v is None:
-                    started = False
+            before = None
+            for s in self.samples:
+                if s[i] is None:
+                    before = None
                     continue
-                x, y = 1 + (w - 2) * i / (n - 1), h - 2 - (h - 4) * v / top
-                cr.line_to(x, y) if started else cr.move_to(x, y)
-                started = True
+                x, y = 1 + (w - 2) * (1 - (right - s[0]) / span), h - 2 - (h - 4) * s[i] / top
+                cr.line_to(x, y) if before is not None and s[0] - before <= 2 * self.every else cr.move_to(x, y)
+                before = s[0]
             cr.stroke()
 
 
@@ -91,7 +93,7 @@ class KubeCard(Gtk.Box):
         self.spark = KubeSpark()
         self.append(self.spark)
 
-    def show(self, use, used, requested, minutes):
+    def show(self, use, samples, minutes, every):
         self.title.set_label(use.get("title") or "")
         cells, shares = use.get("cells") or ["", "", "", ""], use.get("shares") or ["", "", ""]
         self.allocatable.set_label(cells[3])
@@ -103,7 +105,7 @@ class KubeCard(Gtk.Box):
             (bar.add_css_class if alloc and (value or 0) > alloc else bar.remove_css_class)("kube-over")
             self.amounts[i].set_label(cells[i])
             self.shares[i].set_label(shares[i])
-        self.spark.set_samples(used, requested)
+        self.spark.set_samples(samples, minutes, every)
         self.spark.set_tooltip_text(wording.say("kube.history_tip", minutes=minutes))
 
 
@@ -114,9 +116,18 @@ class KubeShares(Gtk.Grid):
     def __init__(self, on_namespace=None):
         super().__init__(column_spacing=22, row_spacing=6, margin_top=18)
         self.add_css_class("kube-home-table")
-        self.on_namespace, self.rows = on_namespace, []
+        self.on_namespace, self.rows, self.columns = on_namespace, [], []
 
     def show(self, columns, shares, text=""):
+        """The rows' cells' texts changed in place while the columns and the rows' names stay; else laid out anew."""
+        if list(columns) == self.columns and [s.get("name") or "" for s in shares] == [n for n, _c in self.rows]:
+            for share, (_name, cells) in zip(shares, self.rows):
+                for cell, text_ in zip(cells, share.get("cells") or []):
+                    label = cell.get_child() if isinstance(cell, Gtk.Button) else cell
+                    if label.get_label() != text_:
+                        label.set_label(text_)
+            return self.refilter(text)
+        self.columns = list(columns)
         while (child := self.get_first_child()) is not None:
             self.remove(child)
         self.rows = []
@@ -178,11 +189,10 @@ class KubeHome(Gtk.ScrolledWindow):
         return Gtk.ScrolledWindow(child=table, vscrollbar_policy=Gtk.PolicyType.NEVER, propagate_natural_height=True)
 
     def show(self, summary):
-        history, minutes = summary.get("history") or [], summary.get("minutes") or 0
-        self.cpu.show(summary.get("cpu") or {}, [s.get("cpu_used") for s in history],
-                      [s.get("cpu_requests") for s in history], minutes)
-        self.memory.show(summary.get("memory") or {}, [s.get("memory_used") for s in history],
-                         [s.get("memory_requests") for s in history], minutes)
+        history, minutes, every = summary.get("history") or [], summary.get("minutes") or 0, summary.get("every") or 0
+        for card, key in ((self.cpu, "cpu"), (self.memory, "memory")):
+            card.show(summary.get(key) or {}, [(s["at"], s.get(f"{key}_used"), s.get(f"{key}_requests"))
+                                               for s in history], minutes, every)
         self.namespaces.show(summary.get("namespace_columns") or [], summary.get("namespaces") or [], self.text)
         nodes = summary.get("nodes") or []
         self.nodes.get_ancestor(Gtk.ScrolledWindow).set_visible(len(nodes) > 1)  # (as the Nodes page: one node's is the stack's own)

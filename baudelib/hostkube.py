@@ -26,9 +26,15 @@ PAGES = {p["resource"]: p for _title, pages in kd.KUBE_SECTIONS for p in pages}
 _CUSTOM = {}  # (context, definition) -> the page its objects have
 BATCH_S = 0.1   # a log's lines are sent this often at most
 WATCH_S = 1.0   # a watch's changes are sent this often at most
-HISTORY_S = 30 * 60  # Home's totals are kept this long (in memory: from the first time it's asked for a context)
-_HISTORY = {}  # context -> deque of (when, kd.kube_tally of every namespace), a sample each time Home is read
+HISTORY_S = 30 * 60  # Home's history goes back this far
+IDLE_S = 30 * 60  # a context Home hasn't been read for in this long is no longer sampled, and its history let go
+# context -> {"asked": when Home last read it, "tried": when a sample was last taken (or tried), "read": (when, its
+# last kd.kube_summary_read) or None, "samples": deque of
+# (when, {namespace: (cpu requested, cpu used, memory requested, memory used)})}: from the first time Home is read for
+# a context, a sample every KUBE_REFRESH_S (_sampling) whether Home is open or not, in this process's memory
+_HISTORY = {}
 _HISTORY_LOCK = threading.Lock()
+_SAMPLER = []  # (the thread taking them, once there's one)
 
 
 def _home(path):
@@ -136,34 +142,78 @@ def _list(msg):
     return out
 
 
-def _sample(when, tally, namespaces):
+def _take(context):
+    """Read context's totals (kubectl: not under the lock) and keep what its history needs of them; the read."""
+    read, now = kd.kube_summary_read(context), time.time()
+    kept = {ns: (t[0], t[1], t[3], t[4]) for ns, t in kd.kube_tally(read)["namespaces"].items()}
+    with _HISTORY_LOCK:
+        h = _HISTORY.get(context)
+        if h is not None:
+            h["read"], h["tried"] = (now, read), now
+            h["samples"].append((now, kept))
+            while now - h["samples"][0][0] > HISTORY_S:
+                h["samples"].popleft()
+    return read
+
+
+def _sampling():
+    """A sample of each context Home has been read for every KUBE_REFRESH_S, till the process ends; a context not
+    read for IDLE_S is let go. (A sample that can't be read is a gap in its history.)"""
+    while True:
+        time.sleep(1)
+        now = time.time()
+        with _HISTORY_LOCK:
+            for context in [c for c, h in _HISTORY.items() if now - h["asked"] > IDLE_S]:
+                del _HISTORY[context]
+            due = [c for c, h in _HISTORY.items() if now - h["tried"] >= kd.KUBE_REFRESH_S]
+        for context in due:
+            try:
+                _take(context)
+            except (RuntimeError, ValueError, OSError):
+                with _HISTORY_LOCK:
+                    if context in _HISTORY:  # (tried again in KUBE_REFRESH_S, not at once)
+                        _HISTORY[context]["tried"] = time.time()
+
+
+def _sample(when, kept, namespaces):
     """A KubeSample: a history sample's totals in namespaces (None: every one)."""
-    rows = tally["namespaces"].values() if namespaces is None else \
-        [tally["namespaces"][ns] for ns in namespaces if ns in tally["namespaces"]]
+    rows = kept.values() if namespaces is None else [kept[ns] for ns in namespaces if ns in kept]
 
     def add(i):
         vals = [r[i] for r in rows if r[i] is not None]
         return sum(vals) if vals else None
-    return {"at": when, "cpu_requests": add(0) or 0, "cpu_used": add(1), "cpu_limits": add(2),
-            "memory_requests": add(3) or 0, "memory_used": add(4), "memory_limits": add(5)}
+    return {"at": when, "cpu_requests": add(0) or 0, "cpu_used": add(1), "memory_requests": add(2) or 0,
+            "memory_used": add(3)}
 
 
 def _summary(msg):
-    """Home: the stack's CPU and memory in the namespaces asked for (every one without), and how they went: a sample
-    is kept each time it's read (no oftener than every KUBE_REFRESH_S / 2), for HISTORY_S, in this process's memory."""
-    context, namespaces = msg.get("context"), msg.get("namespaces")
-    try:
-        read = kd.kube_summary_read(context)
-    except (RuntimeError, ValueError) as e:
-        return {"fault": _fault(getattr(e, "said", str(e)), context)}
-    now = time.time()
+    """Home: the stack's CPU and memory in the namespaces asked for (every one without), and how they went: the
+    samples taken since the one asked for (every one without), as _sampling keeps them. A read under
+    KUBE_REFRESH_S / 2 old is used again."""
+    context, namespaces, since = msg.get("context"), msg.get("namespaces"), msg.get("since")
+    since = since if isinstance(since, (int, float)) and not isinstance(since, bool) else None
     with _HISTORY_LOCK:
-        samples = _HISTORY.setdefault(context, collections.deque())
-        if not samples or now - samples[-1][0] >= kd.KUBE_REFRESH_S / 2:
-            samples.append((now, kd.kube_tally(read)))
-        while samples and now - samples[0][0] > HISTORY_S:
-            samples.popleft()
-        history = [_sample(when, tally, namespaces) for when, tally in samples]
+        h = _HISTORY.get(context)
+        last = h and h["read"]
+        read = last[1] if last and time.time() - last[0] < kd.KUBE_REFRESH_S / 2 else None
+        if h is None:
+            now = time.time()
+            _HISTORY[context] = {"asked": now, "tried": now, "read": None, "samples": collections.deque()}
+        else:
+            h["asked"] = time.time()
+        if not _SAMPLER:
+            _SAMPLER.append(threading.Thread(target=_sampling, name="kube-home-history", daemon=True))
+            _SAMPLER[0].start()
+    try:
+        read = read or _take(context)
+    except (RuntimeError, ValueError) as e:
+        with _HISTORY_LOCK:  # (a cluster never read isn't sampled)
+            if context in _HISTORY and not _HISTORY[context]["samples"]:
+                del _HISTORY[context]
+        return {"fault": _fault(getattr(e, "said", str(e)), context)}
+    with _HISTORY_LOCK:
+        samples = list((_HISTORY.get(context) or {"samples": ()})["samples"])
+    history = [_sample(when, kept, namespaces) for when, kept in samples if since is None or when > since]
     return {"summary": {**kd.kube_summary(read, namespaces), "history": history, "every": kd.KUBE_REFRESH_S,
                         "minutes": HISTORY_S // 60}}
 

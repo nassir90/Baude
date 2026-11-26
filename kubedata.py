@@ -140,22 +140,29 @@ def kube_uid(o):
     return m.get("uid") or (m.get("namespace") or "", m.get("name") or "")
 
 
-def kube_cpu(q):
-    """A CPU quantity in cores: 250m → 0.25, 2902430n → 0.0029, 2 → 2.0 (None if it isn't one)."""
-    m = re.fullmatch(r"([\d.]+)([numk]?)", str(q or "").strip())
+_QUANTITY = re.compile(r"([+-]?(?:\d+\.?\d*|\.\d+))(?:[eE]([+-]?\d+)|(Ki|Mi|Gi|Ti|Pi|Ei|n|u|m|k|M|G|T|P|E))?")
+_QUANTITY_SCALE = {"n": 1e-9, "u": 1e-6, "m": 1e-3, "k": 1e3, "M": 1e6, "G": 1e9, "T": 1e12, "P": 1e15, "E": 1e18,
+                   **{s + "i": 1024.0 ** (i + 1) for i, s in enumerate("KMGTPE")}}
+
+
+def kube_quantity(q):
+    """A Kubernetes quantity as a number: a decimal suffix (n u m k M G T P E), a binary one (Ki…Ei) or an exponent
+    (1e3, 5e-3); None if it isn't one."""
+    m = _QUANTITY.fullmatch(str(q or "").strip())
     if not m:
         return None
-    return float(m.group(1)) * {"n": 1e-9, "u": 1e-6, "m": 1e-3, "": 1.0, "k": 1e3}[m.group(2)]
+    n = float(m.group(1))
+    return n * 10.0 ** int(m.group(2)) if m.group(2) else n * _QUANTITY_SCALE.get(m.group(3) or "", 1.0)
+
+
+def kube_cpu(q):
+    """A CPU quantity in cores: 250m → 0.25, 2902430n → 0.0029, 2 → 2.0, 1e-3 → 0.001 (None if it isn't one)."""
+    return kube_quantity(q)
 
 
 def kube_bytes(q):
-    """A memory quantity in bytes: 57340Ki, 1Gi, 500M, 1e3 (None if it isn't one)."""
-    m = re.fullmatch(r"([\d.]+(?:e\d+)?)([KMGTPE]i?|k)?", str(q or "").strip())
-    if not m:
-        return None
-    unit = m.group(2) or ""
-    power = "KMGTPE".index(unit[0].upper()) + 1 if unit else 0
-    return float(m.group(1)) * ((1024 if unit.endswith("i") else 1000) ** power)
+    """A memory quantity in bytes: 57340Ki, 1Gi, 500M, 1e3, 1500m (None if it isn't one)."""
+    return kube_quantity(q)
 
 
 def kube_fmt_bytes(n):
@@ -1172,29 +1179,66 @@ def _asks(container):
 
 
 def kube_pod_asks(pod):
-    """What a pod asks of its node, as the scheduler reckons it: its containers' (and sidecars', init containers that
-    keep running) summed, or its largest init container's if that's more, plus its overhead. (cpu request, cpu limit,
-    memory request, memory limit): a limit is the sum of those set, as kubectl describe node adds them, and None if no
-    container sets one."""
+    """What a pod asks of its node, as the scheduler reckons it (the sidecar KEP's order): its containers and sidecars
+    (init containers that keep running) summed, or, if more, the most any init container needs while it runs beside
+    the sidecars started before it; plus its overhead. (cpu request, cpu limit, memory request, memory limit): a limit
+    is the sum of those set, as kubectl describe node adds them, its overhead added only when one is; None where
+    neither a container nor the overhead sets it."""
     spec = pod.get("spec") or {}
-    init = spec.get("initContainers") or []
-    running = list(spec.get("containers") or []) + [c for c in init if c.get("restartPolicy") == "Always"]
-    once = [c for c in init if c.get("restartPolicy") != "Always"]
+    running = [_asks(c) for c in spec.get("containers") or []]
+    init = [(c.get("restartPolicy") == "Always", _asks(c)) for c in spec.get("initContainers") or []]
     overhead = _asks({"resources": {"requests": spec.get("overhead") or {}}})
     out = []
     for i in range(4):
-        values = [a[i] for a in map(_asks, running)]
-        firsts = [a[i] for a in map(_asks, once)]
-        if all(v is None for v in values + firsts):
-            out.append(None)
+        extra = overhead[0 if i < 2 else 2]
+        if all(a[i] is None for a in running + [a for _s, a in init]):
+            out.append(extra if i in (0, 2) else None)
             continue
-        total = max(sum(v or 0 for v in values), max((v or 0 for v in firsts), default=0))
-        out.append(total + (overhead[i] or 0 if i in (0, 2) else 0))
+        total = sum(a[i] or 0 for a in running)
+        sidecars = peak = 0
+        for sidecar, a in init:
+            if sidecar:
+                total, sidecars = total + (a[i] or 0), sidecars + (a[i] or 0)
+                peak = max(peak, sidecars)
+            else:
+                peak = max(peak, (a[i] or 0) + sidecars)
+        out.append(max(total, peak) + (extra or 0))
     return tuple(out)
 
 
+# (what Home reads of each pod, no more: its place, its overhead, each container's resources and an init container's
+# restartPolicy; a line each, tab-separated, a map as JSON)
+KUBE_SUMMARY_PODS = (
+    r'jsonpath={range .items[*]}{"pod\t"}{.metadata.namespace}{"\t"}{.metadata.name}{"\t"}{.spec.nodeName}{"\t"}'
+    r'{.spec.overhead}{"\n"}{range .spec.initContainers[*]}{"init\t"}{.restartPolicy}{"\t"}{.resources}{"\n"}{end}'
+    r'{range .spec.containers[*]}{"container\t\t"}{.resources}{"\n"}{end}{end}')
+KUBE_SUMMARY_LIVE = "status.phase!=Succeeded,status.phase!=Failed"  # (a finished pod holds on to nothing)
 KUBE_SUMMARY_NODES = ("custom-columns=NAME:.metadata.name,CPU:.status.allocatable.cpu,"
                       "MEMORY:.status.allocatable.memory")
+
+
+def _kube_map(text):
+    try:
+        got = json.loads(text) if text.strip() else {}
+    except ValueError:
+        return {}
+    return got if isinstance(got, dict) else {}
+
+
+def kube_summary_pods(text):
+    """KUBE_SUMMARY_PODS's lines as the pods they're of: each [namespace, name, node, kube_pod_asks]."""
+    pods, pod = [], None
+    for line in text.splitlines():
+        kind, _, rest = line.partition("\t")
+        if kind == "pod":
+            ns, name, node, overhead = (rest.split("\t", 3) + ["", "", "", ""])[:4]
+            pod = {"spec": {"overhead": _kube_map(overhead), "containers": [], "initContainers": []}}
+            pods.append([ns, name, node, pod])
+        elif kind in ("init", "container") and pod is not None:
+            policy, _, resources = rest.partition("\t")
+            c = {"resources": _kube_map(resources), **({"restartPolicy": policy} if policy else {})}
+            pod["spec"]["initContainers" if kind == "init" else "containers"].append(c)
+    return [[ns, name, node, kube_pod_asks(p)] for ns, name, node, p in pods]
 
 
 def kube_summary_read(context):
@@ -1202,9 +1246,8 @@ def kube_summary_read(context):
     that finished: Succeeded, Failed), each [namespace, name, node, (asks)]; the nodes, each [name, allocatable cores,
     bytes] (None if they can't be listed); the pods' use from the metrics API ({(namespace, pod): (cores, bytes)}, or
     None without one). Raises RuntimeError if the pods can't be listed."""
-    items = json.loads(kube_get(context, "pods", "-o", "json", "--all-namespaces") or "{}").get("items") or []
-    pods = [[_km(o).get("namespace") or "", _km(o).get("name") or "", _ks(o, "spec", "nodeName", default="") or "",
-             kube_pod_asks(o)] for o in items if _ks(o, "status", "phase") not in ("Succeeded", "Failed")]
+    pods = kube_summary_pods(kube_get(context, "pods", "--all-namespaces", f"--field-selector={KUBE_SUMMARY_LIVE}",
+                                      "-o", KUBE_SUMMARY_PODS))
     try:  # (names and allocatable only: a big cluster's nodes, as JSON, list every image they hold)
         nodes = []
         for line in kube_get(context, "nodes", "-o", KUBE_SUMMARY_NODES, "--no-headers").splitlines():
@@ -1288,5 +1331,7 @@ def kube_summary(read, namespaces=None):
         "namespaces": [{"name": ns, "cells": [ns] + cells(v)} for ns, v in sorted(tally["namespaces"].items())],
         "node_columns": ["Node"] + KUBE_SUMMARY_COLUMNS[:4] + ["CPU allocatable"] + KUBE_SUMMARY_COLUMNS[4:] +
         ["Memory allocatable"],
-        "nodes": [{"name": name, "cells": [name] + (c := cells(tally["nodes"].get(name) or empty))[:4] +
-                   [kube_fmt_cores(cpu)] + c[4:] + [kube_fmt_bytes(mem)]} for name, cpu, mem in nodes or []]}
+        "nodes": [{"name": name, "cells": [title] + (c := cells(tally["nodes"].get(name) or empty))[:4] +
+                   [cpu] + c[4:] + [mem]} for name, title, cpu, mem in
+                  [(n, n, kube_fmt_cores(cpu), kube_fmt_bytes(mem)) for n, cpu, mem in nodes or []] +
+                  ([("", wording.say("kube.unscheduled"), "", "")] if "" in tally["nodes"] else [])]}

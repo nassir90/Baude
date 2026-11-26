@@ -98,6 +98,8 @@ class KubeState(val hostId: String) {
     var rows by mutableStateOf<List<Msg.KubeRow>>(emptyList())
     var metrics by mutableStateOf<Boolean?>(null)
     var summary by mutableStateOf<Msg.KubeSummary?>(null) // (Home's, as the host added it up)
+    var history by mutableStateOf<List<Msg.KubeSample>>(emptyList()) // (Home's samples so far, oldest first)
+    private var historyOf: String? = null // (whose they are: context and namespaces)
     var nsShown by mutableStateOf<List<String>?>(null) // (null: every namespace's)
     var filter by mutableStateOf("")
     var sortCol by mutableStateOf(0)
@@ -237,7 +239,13 @@ class KubeState(val hostId: String) {
 
     /** Home's totals, for the namespaces shown, as the host adds them up (kube's summary). */
     private fun readSummary(p: Msg.KubePage, ctx: String, g: Int) {
-        kube(hostId, Msg.Kube(what = "summary", context = ctx, namespaces = nsShown)) { r ->
+        val of = "$ctx/${nsShown?.joinToString(",")}"
+        if (of != historyOf) {
+            historyOf = of
+            history = emptyList()
+        }
+        val since = history.lastOrNull()?.at // (only the samples since the newest here)
+        kube(hostId, Msg.Kube(what = "summary", context = ctx, namespaces = nsShown, since = since)) { r ->
             if (g != gen) return@kube
             r.missing?.let { return@kube lacks(it) }
             val f = r.fault ?: r.error?.let { Msg.KubeFault(title = it, why = "", said = "") }
@@ -245,6 +253,10 @@ class KubeState(val hostId: String) {
             loading = false
             progress = null
             fault = null
+            val last = history.lastOrNull()?.at?.toDouble()
+            val merged = history + r.summary?.history.orEmpty().filter { h -> last == null || (h.at?.toDouble() ?: 0.0) > last }
+            val edge = (merged.lastOrNull()?.at?.toDouble() ?: 0.0) - 60.0 * (r.summary?.minutes?.toDouble() ?: 0.0)
+            history = merged.filter { (it.at?.toDouble() ?: 0.0) >= edge }
             summary = r.summary
             metrics = r.summary?.metrics
             tablePage = p

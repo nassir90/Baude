@@ -18,13 +18,6 @@
       ],
       "description": "Cores used, or null without metrics."
     },
-    "cpu_limits": {
-      "type": [
-        "number",
-        "null"
-      ],
-      "description": "Cores held to, or null."
-    },
     "memory_requests": {
       "type": "number",
       "description": "Bytes asked for."
@@ -35,13 +28,6 @@
         "null"
       ],
       "description": "Bytes used, or null without metrics."
-    },
-    "memory_limits": {
-      "type": [
-        "number",
-        "null"
-      ],
-      "description": "Bytes held to, or null."
     }
   },
   "additionalProperties": false

@@ -392,6 +392,7 @@ class KubeView(Gtk.Box):
         self.table_stack.add_named(self.table_scroll, "table")
         self.table_stack.add_named(self.build_error(), "error")
         self.home = KubeHome(self.set_namespace)  # (Home: the stack's CPU and memory, in the table's place)
+        self.home_key, self.home_history = None, []  # (Home's samples so far, and whose: host, context, namespaces)
         self.table_stack.add_named(self.home, "home")
         import depsview
         self.missing = depsview.Missing(again=self.read_contexts)  # (kubectl isn't on the host: show_missing)
@@ -928,6 +929,11 @@ class KubeView(Gtk.Box):
         msg = {"what": "summary", "context": context}
         if self.ns_shown is not None:
             msg["namespaces"] = list(self.ns_shown)
+        key = (id(self.host), context, msg.get("namespaces"))  # (another's history is read whole)
+        if key != self.home_key:
+            self.home_key, self.home_history = key, []
+        if self.home_history:  # (only the samples since the newest here)
+            msg["since"] = self.home_history[-1]["at"]
         if not self.host.here:
             return self.host.ask("kube", msg, lambda r: self._summarized(gen, r))
         KUBE_POOL.submit(lambda: GLib.idle_add(self._summarized, gen, hostkube.answer(None, msg)))
@@ -943,7 +949,11 @@ class KubeView(Gtk.Box):
         self.loading = False
         self.refresh_btn.set_loading(False)
         summary = r.get("summary") or {}
-        self.home.show(summary)
+        last = self.home_history[-1]["at"] if self.home_history else None
+        history = self.home_history + [h for h in summary.get("history") or [] if last is None or h["at"] > last]
+        edge = history[-1]["at"] - 60 * (summary.get("minutes") or 0) if history else 0
+        self.home_history = [h for h in history if h["at"] >= edge]
+        self.home.show({**summary, "history": self.home_history})
         self.table_stack.set_visible_child_name("home")
         self.metrics_note = wording.say("kube.metrics", seconds=KUBE_REFRESH_S) if summary.get("metrics") else \
             wording.say("kube.no_metrics")

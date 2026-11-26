@@ -52,11 +52,11 @@
       "items": {
         "$ref": "KubeSample.json"
       },
-      "description": "The totals each time they were read, oldest first, kept in the host's memory."
+      "description": "The totals every `every` seconds from the first time Home was read for the context, oldest first, kept in the host's memory: those after the request's since (every one without)."
     },
     "every": {
       "type": "integer",
-      "description": "How often a head reads them, in seconds."
+      "description": "How often the host samples them (and a head reads them), in seconds."
     },
     "minutes": {
       "type": "integer",

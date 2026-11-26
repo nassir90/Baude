@@ -110,7 +110,7 @@ class Chat(hostId: String, sid: String) {
     var readingEarlier = false
     val rewound = HashSet<String>()          // (records a rewind went back to, before what's read: cut there once read)
     val orphans = ArrayList<Line>()          // (results whose calls are before what's read: given them once read)
-    var prepended: ((Int) -> Unit)? = null   // (items drawn before the first: its list kept where it was)
+    var prepended: ((Int, Boolean) -> Unit)? = null // (items drawn before the first, and whether earlier was: its list kept where it was)
     var reading = false
     val loaded = mutableStateOf(false) // (its transcript read to its end once: where it was left can be found)
     var again = false
@@ -888,8 +888,9 @@ object Mesh {
         chat.chrome.taskOrder.addAll(0, heard)
         if (heard.isNotEmpty()) settleTasks(chat)
         chat.start = begin
+        val had = chat.earlier.value
         chat.earlier.value = begin > 0
-        chat.prepended?.invoke(itemIndex(chat, chat.lines.size - 1) + 1 - before)
+        chat.prepended?.invoke(itemIndex(chat, chat.lines.size - 1) + 1 - before, had)
         if (n == 0 && begin > 0) readEarlier(chat) // (nothing shown from it: on to the part before)
     }
 

@@ -298,7 +298,8 @@ class MetaCards:
             s = self.settings[spec["name"]]
             group = Adw.PreferencesGroup()
             group.add_css_class("meta-ui")
-            rows = s.row()  # (Settings' own, in Meta's look: CSS's .meta-ui; one a host, for some)
+            rows = s.host_row(spec["where"]) if spec.get("where") and hasattr(s, "host_row") else \
+                s.row()  # (Settings' own, in Meta's look: CSS's .meta-ui; one a host, for some, or the one changed)
             for row in rows if isinstance(rows, list) else [rows]:
                 group.add(row)
             return group

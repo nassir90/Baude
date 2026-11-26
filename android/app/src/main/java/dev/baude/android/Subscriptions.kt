@@ -29,9 +29,12 @@ import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.repeatOnLifecycle
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.text.SpanStyle
@@ -56,7 +59,10 @@ class HostAccounts(val hostId: String) {
     private val reading = HashSet<String>()
 
     /** A subscription's usage as last read: its limits (name, percent), or what to say instead. */
-    class Usage(val limits: List<Pair<String, Double>>?, val said: String?)
+    class Usage(val limits: List<Limit>?, val said: String?)
+
+    /** One limit: its key (five_hour…), name, percent used, and when it resets (seconds since 1970), if said. */
+    class Limit(val key: String, val name: String, val percent: Double, val resets: Double?)
 
     /** The Claude subscriptions whose usage is read: the CLI's own sign-in (where the host has claude), then each
      * account. */
@@ -73,7 +79,7 @@ class HostAccounts(val hostId: String) {
                 val limits = Msg.AccountsReply.from(r).usage?.takeIf { it.isNotEmpty() }
                 usage[id] = when {
                     error != null -> Usage(null, error)
-                    limits != null -> Usage(limits.map { it.name.orEmpty() to (it.percent?.toDouble() ?: 0.0) }, null)
+                    limits != null -> Usage(limits.map { Limit(it.key.orEmpty(), it.name.orEmpty(), it.percent?.toDouble() ?: 0.0, it.resets?.toDouble()) }, null)
                     else -> Usage(null, Wording.Subscriptions.usageUnavailable)
                 }
             }
@@ -107,7 +113,7 @@ class HostAccounts(val hostId: String) {
  * host picked beside New session, changed there: its name; for each provider, its heading with the pill picking the
  * subscription a new chat takes, then a card for each subscription (Claude's CLI default first, where the host has
  * claude), each account's with ⋮ (Rename…, Sign In Again… or Replace Token…, Remove…), and a Claude card's usage as a
- * bar for each limit with its percentage, read as the page is shown and every USAGE_S while it is; then Add account. */
+ * bar for each limit with its percentage, read as the page is shown and every USAGE_S while it is and the app is in front; then Add account. */
 @Composable
 fun SubscriptionsPage() {
     val c = LocalBaude.current
@@ -119,11 +125,14 @@ fun SubscriptionsPage() {
         Mesh.ask(h.hostId, Msg.Accounts(what = "list").json()) { r -> h.took(r)?.let { e -> h.error.value = e } }
     }
     val ids = host?.claudeIds().orEmpty()
-    LaunchedEffect(hostId, ids) {
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    LaunchedEffect(hostId, ids, lifecycle) {
         val h = host ?: return@LaunchedEffect
-        while (true) {
-            h.readUsage(ids)
-            delay(HostAccounts.USAGE_S * 1000L)
+        lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) { // (the app in front: read at once, then every USAGE_S)
+            while (true) {
+                h.readUsage(ids)
+                delay(HostAccounts.USAGE_S * 1000L)
+            }
         }
     }
     Column(Modifier.fillMaxSize().background(c.frame)) {
@@ -142,16 +151,17 @@ fun SubscriptionsPage() {
                         Icon(it, null, tint = c.fg, modifier = Modifier.size(16.dp.icon))
                     }
                     Text(title, style = Type.bold, color = c.fg, modifier = Modifier.weight(1f))
-                    if (error == null) {
-                        val names = mapOf("" to Wording.Subscriptions.cliDefault) + mine.associate { it.id.orEmpty() to it.name.orEmpty() }
-                        SubscriptionPill(names, host.defaults.value[provider]?.takeIf { it in names } ?: "", host.loaded.value) { id ->
-                            host.ask(Msg.Accounts(what = "select", provider = provider, id = id))
-                        }
-                    }
                 }
                 if (error != null) {
                     BoxedList(listOf(Unit), "") { ActionRow(error, null) }
                     continue
+                }
+                val names = mapOf("" to Wording.Subscriptions.cliDefault) + mine.associate { it.id.orEmpty() to it.name.orEmpty() }
+                BoxedList(listOf(Unit), "") {
+                    Choice(Wording.Subscriptions.current, names.keys.toList(), host.defaults.value[provider]?.takeIf { it in names } ?: "",
+                        { names.getValue(it) }, enabled = host.loaded.value) { id ->
+                        host.ask(Msg.Accounts(what = "select", provider = provider, id = id))
+                    }
                 }
                 if (provider == "claude" && host.claudeCli.value) SubscriptionCard(Wording.Subscriptions.cliDefault, null, host.usage[""], true) {}
                 for (a in mine) SubscriptionCard(a.name.orEmpty(), a, host.usage[a.id.orEmpty()], provider == "claude") { kind -> dialog = kind to a }
@@ -174,27 +184,6 @@ fun SubscriptionsPage() {
     }
 }
 
-/** The pill over a provider's cards: the subscription a new chat on the host takes (names: id → name, "" the CLI's
- * own sign-in), and a menu of them to pick from. */
-@Composable
-private fun SubscriptionPill(names: Map<String, String>, picked: String, enabled: Boolean, pick: (String) -> Unit) {
-    val c = LocalBaude.current
-    var open by remember { mutableStateOf(false) }
-    Box(Modifier.alpha(if (enabled) 1f else 0.5f)) {
-        Row(Modifier.clip(RoundedCornerShape(50)).background(c.fg.copy(alpha = 0.1f))
-            .clickable(enabled = enabled, onClickLabel = Wording.Subscriptions.account) { open = true }
-            .heightIn(min = 32.dp).padding(horizontal = 14.dp), verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            Text(names[picked].orEmpty(), style = Type.bold, color = c.fg, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.widthIn(max = 180.dp))
-            Icon(Adwaita.PanDown, null, tint = c.fg, modifier = Modifier.size(16.dp.icon))
-        }
-        Popover(open, { open = false }, ticks = Ticks.START) {
-            for ((id, name) in names) MenuChoice(name, id == picked) { open = false; if (id != picked) pick(id) }
-        }
-    }
-}
-
 /** A subscription's card: its name and, an account's, ⋮ with what can be done to it (pick: "rename", "again" or
  * "remove"); a Claude card's usage (claude): a bar for each limit with its name and percentage over it, else what was
  * said instead (Checking… till it's first read). */
@@ -212,9 +201,10 @@ private fun SubscriptionCard(name: String, a: Msg.Account?, usage: HostAccounts.
         if (claude) Column(Modifier.padding(end = 6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             val limits = usage?.limits
             if (limits == null) Text(usage?.said ?: Wording.Subscriptions.checking, style = Type.body, color = c.dim)
-            else for ((limit, percent) in limits) {
+            else for (l in limits) {
+                val percent = l.percent
                 Row(Modifier.fillMaxWidth()) {
-                    Text(limit, style = Type.body, color = c.fg, modifier = Modifier.weight(1f))
+                    Text(limitLabel(l), style = Type.body, color = c.fg, modifier = Modifier.weight(1f))
                     Text(Wording.Subscriptions.usagePercent(percent = "%.4g".format(java.util.Locale.ROOT, percent)
                         .trimEnd('0').trimEnd('.')), style = Type.body, color = c.dim)
                 }
@@ -224,6 +214,26 @@ private fun SubscriptionCard(name: String, a: Msg.Account?, usage: HostAccounts.
                 }
             }
         }
+    }
+}
+
+/** A limit's name over its bar, with when it resets in the viewer's local time and clock: Five Hour Limit (Resets 3:00 PM),
+ * Weekly Limit (Resets Friday 3:00 PM), or just the time where it resets today. */
+@Composable
+private fun limitLabel(l: HostAccounts.Limit): String {
+    val resets = l.resets ?: return l.name
+    val ctx = LocalContext.current
+    val at = java.time.Instant.ofEpochSecond(resets.toLong()).atZone(java.time.ZoneId.systemDefault())
+    val clock = if (android.text.format.DateFormat.is24HourFormat(ctx)) "HH:mm" else "h:mm a"
+    val time = at.format(java.time.format.DateTimeFormatter.ofPattern(clock))
+    val day = at.format(java.time.format.DateTimeFormatter.ofPattern("EEEE"))
+    val today = at.toLocalDate() == java.time.LocalDate.now()
+    return when {
+        l.key == "five_hour" -> Wording.Subscriptions.fiveHourLimit(time = time)
+        l.key == "seven_day" && today -> Wording.Subscriptions.weeklyLimitToday(time = time)
+        l.key == "seven_day" -> Wording.Subscriptions.weeklyLimit(day = day, time = time)
+        today -> Wording.Subscriptions.otherLimitToday(name = l.name, time = time)
+        else -> Wording.Subscriptions.otherLimit(name = l.name, day = day, time = time)
     }
 }
 

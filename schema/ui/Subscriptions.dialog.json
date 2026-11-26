@@ -10,7 +10,6 @@
   ],
   "code": [
     "subscriptionpage.py:Page",
-    "theming.py:CSS (menubutton.subscription-pill)",
     "subscriptionpage.py:Ask",
     "baudelib/hostaccounts.py:answer",
     "baudelib/accounts.py",
@@ -35,7 +34,7 @@
     },
     {
       "name": "provider group",
-      "shows": "For Claude, then Codex: a heading (the provider's logo and name, and the pill at its end), then a card for each subscription stacked, then a boxed list with Add account.",
+      "shows": "For Claude, then Codex: a heading (the provider's logo and name), a Current Subscription row, then a card for each subscription stacked, then a boxed list with Add account.",
       "decisions": [
         {
           "said": "Baude needs to be able to support running claude with different subscriptions, e.g. a team sub for work and an ultra sub for home that they absolutely need to keep separate (paraphrased)",
@@ -64,16 +63,16 @@
       ],
       "parts": [
         {
-          "name": "pill",
-          "shows": "At the heading's end: a pill with the name of the subscription a new chat on this host takes (\"CLI default\" for the CLI's own sign-in) and a down arrow.",
+          "name": "Current Subscription row",
+          "shows": "Under the heading, its own boxed row like Settings' Code Font: \"Current Subscription\" at the left and, at the right, the name of the subscription a new chat on this host takes (\"CLI default\" for the CLI's own sign-in) with a down arrow.",
           "copy": [
-            "subscriptions.account",
+            "subscriptions.current",
             "subscriptions.cli_default"
           ],
           "actions": [
             {
               "by": "click",
-              "does": "Menu: \"CLI default\" then each account by name, the one picked marked; picking one is select: the host's default for that provider; new chats not written in yet take it too"
+              "does": "Menu: \"CLI default\" then each account by name, the one picked marked; picking one is select: the host's default for that provider; new chats not written in yet take it too. The row shows the host's answer: a refused pick leaves it on the real default"
             }
           ],
           "decisions": [
@@ -86,12 +85,23 @@
                   "issue": "BaudeInternal#226"
                 }
               ]
+            },
+            {
+              "said": "226 dropdown is its own pill called \"Current Subscription\", similar to the Code Font row in settings but in isolation.",
+              "rule": "Every app's Subscriptions page puts each provider's dropdown in its own row named Current Subscription (label at the left, the picked subscription with a dropdown at the right, like Settings' Code Font row), above that provider's cards, not in the heading",
+              "decided": "2026-11-26",
+              "source": [
+                {
+                  "session": "b3845b21-55ac-4aab-a769-fb8517403c51",
+                  "message": "261792c7-ec64-4d01-aac0-475fd2183c0c"
+                }
+              ]
             }
           ]
         },
         {
           "name": "subscription card",
-          "shows": "One card per subscription, stacked: Claude's CLI default first (where the host has claude), then each account. Its name, and ⋮ on an account's card (CLI default has none). A Claude card then has its usage: for each limit, its name with its percentage at the end (\"Five hour\" … \"25%\") and a bar under them filled that far; \"Checking…\" till it's first read; \"Usage unavailable for this sign-in\" for a token account (a setup token can't read them) or the error if reading failed. A Codex card has its name and ⋮ only.",
+          "shows": "One card per subscription, stacked: Claude's CLI default first (where the host has claude), then each account. Its name, and ⋮ on an account's card (CLI default has none). A Claude card then has its usage: for each limit, its name with its percentage at the end (\"Five Hour Limit (Resets 3:16 PM)\" … \"25%\"; \"Weekly Limit (Resets Friday 3:16 PM)\", or \"Weekly Limit (Resets 3:16 PM)\" where it resets today; the times in the viewer's local time and clock format) and a bar under them filled that far; \"Checking…\" till it's first read; \"Usage unavailable for this sign-in\" for a token account (a setup token can't read them) or the error if reading failed. A Codex card has its name and ⋮ only.",
           "actions": [
             {
               "by": "click ⋮",
@@ -99,7 +109,7 @@
             },
             {
               "by": "(none)",
-              "does": "Each Claude card's usage is read from the host (accounts usage, its id; \"\" for CLI default) as the page is shown and every 30 seconds while it's shown, one read at a time per card, the bars drawn again in place"
+              "does": "Each Claude card's usage is read from the host (accounts usage, its id; \"\" for CLI default) as the page is shown and every 30 seconds while it's shown and the app (the phone's) or window (the desktop's) is in front, one read at a time per card, the bars drawn again in place; the host reads each account's usage once per ~25 s however many clients ask, one claude at a time"
             }
           ],
           "copy": [
@@ -112,7 +122,12 @@
             "subscriptions.usage_percent",
             "subscriptions.checking",
             "subscriptions.usage_unavailable",
-            "subscriptions.usage_failed"
+            "subscriptions.usage_failed",
+            "subscriptions.five_hour_limit",
+            "subscriptions.weekly_limit",
+            "subscriptions.weekly_limit_today",
+            "subscriptions.other_limit",
+            "subscriptions.other_limit_today"
           ],
           "decisions": [
             {
@@ -132,6 +147,17 @@
               "source": [
                 {
                   "issue": "BaudeInternal#226"
+                }
+              ]
+            },
+            {
+              "said": "226 should be Five Hour Limit (Resets <TIME>) and Weekly Limit (Resets <DAY> <TIME>) or just <TIME> if the Weekly Reset Time is today.",
+              "rule": "Every app labels a Claude card's limits Five Hour Limit (Resets <time>) and Weekly Limit (Resets <day> <time>), or Weekly Limit (Resets <time>) when the weekly reset is today, the times as the host's usage read says them, shown in the viewer's local time and clock format",
+              "decided": "2026-11-26",
+              "source": [
+                {
+                  "session": "b3845b21-55ac-4aab-a769-fb8517403c51",
+                  "message": "261792c7-ec64-4d01-aac0-475fd2183c0c"
                 }
               ]
             }

@@ -7,6 +7,14 @@
       "type": "string",
       "description": "Which limit (Five hour, Seven day…)."
     },
+    "key": {
+      "type": "string",
+      "description": "The limit's own name in Claude Code's usage (five_hour, seven_day…)."
+    },
+    "resets": {
+      "type": "number",
+      "description": "When it resets, in seconds since 1970 (left out where the usage doesn't say)."
+    },
     "percent": {
       "type": "number",
       "description": "How much of it is used, in percent."

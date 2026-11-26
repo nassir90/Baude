@@ -124,7 +124,7 @@ abstract class Screens(private val theme: String) {
 
     // (Settings → Subscriptions on workshop, the host picked, which has claude: Claude's Work and Home, folders signed
     // in to with claude auth login, Work the default, each card's usage read as the page is shown; Codex's Personal;
-    // then the pill's menu, an account's ⋮, Add account (the sign-in, its page's link and the code box) and Remove…)
+    // then the Current Subscription row's menu, an account's ⋮, Add account (the sign-in, its page's link and the code box) and Remove…)
     @Test fun subscriptions() {
         accountsFixture()
         show { SettingsScreen({}, {}, page = 1) }
@@ -136,7 +136,7 @@ abstract class Screens(private val theme: String) {
         accountsFixture()
         show { SettingsScreen({}, {}, page = 1) }
         laidOut()
-        tap("Work")
+        tap("Current Subscription")
         laidOut()
         withMenus("05f-subscriptions-pill")
     }
@@ -257,8 +257,10 @@ abstract class Screens(private val theme: String) {
                     if (m.optString("what") == "usage") {
                         val (five, seven) = mapOf("w1" to (25 to 40), "h2" to (72 to 18))[m.optString("id")] ?: (5 to 12)
                         put("usage", org.json.JSONArray(listOf(
-                            org.json.JSONObject().put("name", "Five hour").put("percent", five),
-                            org.json.JSONObject().put("name", "Seven day").put("percent", seven))))
+                            org.json.JSONObject().put("name", "Five hour").put("key", "five_hour").put("percent", five)
+                                .put("resets", System.currentTimeMillis() / 1000 + 3 * 3600 + 720),
+                            org.json.JSONObject().put("name", "Seven day").put("key", "seven_day").put("percent", seven)
+                                .put("resets", System.currentTimeMillis() / 1000 + 3 * 86400 + 5 * 3600))))
                     }
                 }
         }

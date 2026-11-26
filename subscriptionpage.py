@@ -1,8 +1,8 @@
 """Settings → Subscriptions (Baude's and Record's; the phone's SubscriptionsScreen the same): the Claude and Codex
 subscription accounts kept on the host picked beside New session (win.terminal_host, as ☰ → Terminal, Kubernetes and
-Database Schemas are), changed there through its accounts op (hostaccounts): for each provider, a pill picking the
-subscription a new chat takes, a card per subscription (an account's with ⋮: Rename…, Sign In Again… or Replace
-Token…, Remove…; a Claude card with its usage as a bar per limit, read every USAGE_S while the page is shown), and Add
+Database Schemas are), changed there through its accounts op (hostaccounts): for each provider, a Current Subscription row
+picking the subscription a new chat takes, a card per subscription (an account's with ⋮: Rename…, Sign In Again… or Replace
+Token…, Remove…; a Claude card with its usage as a bar per limit, read every USAGE_S while the page is shown in the window in front), and Add
 account. A Claude account is signed in to with claude auth login run on
 the host with the account's own folder: the page to open shown as a link, and a box for the code it shows. Where the
 host has no claude, it's a token from claude setup-token. Also the chat's Sign in card's token box for a chat under a
@@ -18,6 +18,34 @@ from baudelib import icons, wire, wording
 
 PROVIDERS = (("claude", "report.claude", "claude"), ("codex", "programs.codex", "openai"))
 USAGE_S = 30  # (how often a shown page reads its subscriptions' usage again)
+
+
+def clock_24h():
+    """Whether the desktop shows the time of day on a 24-hour clock: its own setting where it has one, else its locale's."""
+    source = Gio.SettingsSchemaSource.get_default()
+    if source is not None and source.lookup("org.gnome.desktop.interface", True) is not None:
+        setting = Gio.Settings.new("org.gnome.desktop.interface").get_string("clock-format")
+        if setting in ("12h", "24h"):
+            return setting == "24h"
+    return not GLib.DateTime.new_now_local().format("%p")
+
+
+def limit_label(key, name, resets):
+    """A limit's name over its bar, with when it resets in the viewer's local time and clock: Five Hour Limit (Resets
+    3:00 PM), Weekly Limit (Resets Friday 3:00 PM), or just the time where it resets today."""
+    if resets is None:
+        return name
+    when = GLib.DateTime.new_from_unix_local(int(resets))
+    time = when.format("%H:%M" if clock_24h() else "%-I:%M %p")
+    today = when.format("%Y-%m-%d") == GLib.DateTime.new_now_local().format("%Y-%m-%d")
+    day = when.format("%A")
+    if key == "five_hour":
+        return wording.say("subscriptions.five_hour_limit", time=time)
+    if key == "seven_day":
+        return wording.say("subscriptions.weekly_limit_today", time=time) if today else \
+            wording.say("subscriptions.weekly_limit", day=day, time=time)
+    return wording.say("subscriptions.other_limit_today", name=name, time=time) if today else \
+        wording.say("subscriptions.other_limit", name=name, day=day, time=time)
 
 
 class Ask:
@@ -85,8 +113,9 @@ class Page(Adw.PreferencesPage):
                 clamp.set_tightening_threshold(100_000)
         self.where, self.host = win.terminal_host()
         self.accounts, self.defaults, self.filling, self.claude_cli = [], {}, False, True
+        self.choices = {}
         self.lists, self.pills, self.usage, self.bars, self.reading = {}, {}, {}, {}, set()
-        self.shown, self.timer = None, None
+        self.shown, self.timer, self.window_watch = None, None, None
         top = Adw.PreferencesGroup()
         host = Adw.ActionRow(title=wording.say("new_session.host"))
         host.add_suffix(Gtk.Label(label=self.host, css_classes=["dim-label"]))
@@ -101,16 +130,18 @@ class Page(Adw.PreferencesPage):
             label = Gtk.Label(label=wording.say(title), hexpand=True, xalign=0)
             label.add_css_class("heading")
             heading.append(label)
-            pill = Gtk.MenuButton(css_classes=["pill", "subscription-pill"], valign=Gtk.Align.CENTER,
-                                  always_show_arrow=True, tooltip_text=wording.say("subscriptions.account"))
-            heading.append(pill)
             box.append(heading)
+            current = Adw.ComboRow(title=wording.say("subscriptions.current"), model=Gtk.StringList.new([]))
+            current.connect("notify::selected", self.picked, provider)
+            current_list = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE, css_classes=["boxed-list"])
+            current_list.append(current)
+            box.append(current_list)
             cards = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
             box.append(cards)
             group.add(box)
             group.update_property([Gtk.AccessibleProperty.LABEL], [wording.say(title)])
             self.add(group)
-            self.lists[provider], self.pills[provider] = cards, pill
+            self.lists[provider], self.pills[provider] = cards, (current_list, current)
         self.fill()
         self.ask({"what": "list"})
         self.connect("map", self.shown_now)
@@ -156,15 +187,15 @@ class Page(Adw.PreferencesPage):
         for provider, cards in self.lists.items():
             while (child := cards.get_first_child()) is not None:
                 cards.remove(child)
-            pill = self.pills[provider]
-            pill.set_visible(not error)
+            current_list, current = self.pills[provider]
+            current_list.set_visible(not error)
             if error:
                 rows = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE, css_classes=["boxed-list"])
                 rows.append(Adw.ActionRow(title=GLib.markup_escape_text(error), sensitive=False))
                 cards.append(rows)
                 continue
             mine = [a for a in self.accounts if a["provider"] == provider]
-            self.fill_pill(provider, pill, mine)
+            self.fill_pill(provider, current, mine)
             if provider == "claude" and self.claude_cli:
                 cards.append(self.card(provider, None))
             for account in mine:
@@ -175,24 +206,17 @@ class Page(Adw.PreferencesPage):
             rows.append(add)
             cards.append(rows)
 
-    def fill_pill(self, provider, pill, mine):
-        """The pill over a provider's cards: the subscription a new chat on this host takes, and a menu of the others
-        to pick from."""
+    def fill_pill(self, provider, row, mine):
+        """The Current Subscription row over a provider's cards: the subscription a new chat on this host takes, and the
+        others to pick from; set from what the host says its default is."""
         names = {"": wording.say("subscriptions.cli_default"), **{a["id"]: a["name"] for a in mine}}
         active = self.defaults.get(provider, "")
         active = active if active in names else ""
-        pill.set_label(names[active])
-        group = Gio.SimpleActionGroup()
-        pick = Gio.SimpleAction.new_stateful("pick", GLib.VariantType.new("s"), GLib.Variant("s", active))
-        pick.connect("change-state", self.picked, provider)
-        group.add_action(pick)
-        pill.insert_action_group("subs", group)
-        menu = Gio.Menu()
-        for profile, name in names.items():
-            item = Gio.MenuItem.new(name, None)
-            item.set_action_and_target_value("subs.pick", GLib.Variant("s", profile))
-            menu.append_item(item)
-        pill.set_menu_model(menu)
+        self.choices[provider] = list(names)
+        self.filling = True
+        row.set_model(Gtk.StringList.new(list(names.values())))
+        row.set_selected(list(names).index(active))
+        self.filling = False
 
     def card(self, provider, account):
         """A subscription's card: its name and ⋮ (an account's: Rename…, Sign In Again… or Replace Token…, Remove…),
@@ -229,9 +253,9 @@ class Page(Adw.PreferencesPage):
             bars.append(Gtk.Label(label=read or wording.say("subscriptions.checking"), xalign=0, wrap=True,
                                   css_classes=["dim-label"]))
             return
-        for name, percent in read:
+        for key, name, percent, resets in read:
             line = Gtk.Box(spacing=8)
-            line.append(Gtk.Label(label=name, xalign=0, hexpand=True))
+            line.append(Gtk.Label(label=limit_label(key, name, resets), xalign=0, hexpand=True, wrap=True))
             line.append(Gtk.Label(label=wording.say("subscriptions.usage_percent", percent=f"{percent:g}"),
                                   css_classes=["dim-label", "numeric"]))
             bars.append(line)
@@ -254,22 +278,48 @@ class Page(Adw.PreferencesPage):
         more.insert_action_group("account", actions)
         return more
 
-    def picked(self, action, value, provider):
-        profile = value.get_string()
+    def picked(self, row, _pspec, provider):
+        if self.filling:
+            return
+        choices = self.choices.get(provider, [])
+        if row.get_selected() >= len(choices):
+            return
+        profile = choices[row.get_selected()]
         if profile != self.defaults.get(provider, ""):
-            action.set_state(value)
-            self.ask({"what": "select", "provider": provider, "id": profile})
+            def answered(reply):  # (a refusal leaves the row on the host's own default)
+                if reply.get("error"):
+                    self.toast(reply["error"])
+                    self.fill_pill(provider, row, [a for a in self.accounts if a["provider"] == provider])
+            self.ask({"what": "select", "provider": provider, "id": profile}, answered)
 
     def shown_now(self, *_):
         """The page in front: its Claude subscriptions' usage read now and every USAGE_S till it isn't."""
         self.read_usage(self.claude_ids())
-        if self.timer is None:
-            self.timer = GLib.timeout_add_seconds(USAGE_S, self.tick)
+        window = self.get_root()
+        if window is not None and self.window_watch is None:
+            self.window_watch = (window, window.connect("notify::is-active", self.window_changed))
+        self.window_changed()
 
-    def hidden(self, *_):
+    def window_changed(self, *_):
+        """The timer runs only while the page's window is in front (not minimised or hidden behind others)."""
+        window = self.get_root()
+        if window is not None and window.is_active() and self.get_mapped():
+            if self.timer is None:
+                self.timer = GLib.timeout_add_seconds(USAGE_S, self.tick)
+        else:
+            self.stop_timer()
+
+    def stop_timer(self):
         if self.timer is not None:
             GLib.source_remove(self.timer)
             self.timer = None
+
+    def hidden(self, *_):
+        self.stop_timer()
+        if self.window_watch is not None:
+            window, handler = self.window_watch
+            window.disconnect(handler)
+            self.window_watch = None
 
     def tick(self):
         self.read_usage(self.claude_ids())
@@ -288,7 +338,7 @@ class Page(Adw.PreferencesPage):
                 if reply.get("error"):
                     self.usage[profile] = reply["error"]
                 elif reply.get("usage"):
-                    self.usage[profile] = [(u["name"], u["percent"]) for u in reply["usage"]]
+                    self.usage[profile] = [(u.get("key", ""), u["name"], u["percent"], u.get("resets")) for u in reply["usage"]]
                 else:
                     self.usage[profile] = wording.say("subscriptions.usage_unavailable")
                 self.fill_bars(profile)

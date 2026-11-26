@@ -18,6 +18,7 @@ from baudelib.transcripts import find_session, history_items, session_file
 import baudelib.client  # noqa: E402  (servers on the network and their sessions: see baudelib/client.py)
 import baudelib.hosts  # noqa: E402  (this machine's host process, started when it's wanted: see baudelib/hosts.py)
 from baudelib import worktree as worktreelib  # noqa: E402  (a chat's worktree that's gone: made again from its branch)
+from baudelib import providers as providerslib  # noqa: E402  (every app's model names)
 from baudelib import wording  # noqa: E402  (the words Baude shows: schema/copy, Record's and the Android app's too)
 from baudelib.models import model_program  # noqa: E402,F401
 
@@ -151,9 +152,9 @@ class MeshCard(ToolCard):
         if self.base == "start_subagent":
             title = (listed or {}).get("title") or self.task_title() or "Subagent"
             model = self.input.get("model") or (listed or {}).get("model")
-            if model and r is not None:
-                model = next((m.get("displayName") for m in r.info.get("models") or []
-                              if isinstance(m, dict) and m.get("value") == model and m.get("displayName")), model)
+            slug = providerslib.model_slug(model, r.info.get("models") or [] if r is not None else []) if model else None
+            if model:
+                model = providerslib.model_name(model, r.info.get("models") or [] if r is not None else [])
             bits = [f"Subagent on {host}" if host else "Subagent"] + ([model] if model else [])
         else:
             bot = ((listed or {}).get("bot") or {}).get("name")
@@ -178,6 +179,7 @@ class MeshCard(ToolCard):
             bits.append("its host went before it answered")
         self.title.set_markup(f"<b>{html.escape(title)}</b>")
         self.sub.set_text(" · ".join(bits))
+        self.sub.set_tooltip_text(slug if self.base == "start_subagent" else None)
         self.head_tip(listed, host)
 
     def head_tip(self, listed, host):
@@ -541,13 +543,20 @@ class WindowRemote:
             wording.say("new_session.host_named", name=remote_name(r), host=r.host)  # noqa: E731
         def offered(r):
             host = r or local_host()
-            return [(m["value"], m.get("displayName") or m["value"])
-                    for m in (host.info.get("models", []) if host is not None else []) if m["value"] != "codex/default"] or MODELS
+            listed = host.info.get("models", []) if host is not None else []
+            return [(m["value"], providerslib.model_name(m["value"], listed), providerslib.model_slug(m["value"], listed))
+                    for m in listed if m["value"] != "codex/default"] or [(v, n, v) for v, n in MODELS]
         servers_dd = Gtk.DropDown.new_from_strings([named(r) for r in servers])
         field(wording.say("new_session.host"), servers_dd)
         server = lambda: servers[servers_dd.get_selected()]  # noqa: E731
-        agent_dd = Gtk.DropDown.new_from_strings([label for _value, label in offered(servers[0])])
+        agent_dd = Gtk.DropDown.new_from_strings([label for _value, label, _slug in offered(servers[0])])
         field(wording.say("common.model"), agent_dd)
+        def slug_tip(*_):  # (the model's slug, on hover only)
+            listed = offered(server())
+            at = agent_dd.get_selected()
+            agent_dd.set_tooltip_text(listed[at][2] if at < len(listed) else None)
+        agent_dd.connect("notify::selected", slug_tip)
+        slug_tip()
         last = load_settings().get("remote_folders") or {}
         place = lambda r: HERE_HOST if r is None or host_key(r) == HERE_HOST else r.key  # noqa: E731
         home = lambda r: self.cwd if place(r) == HERE_HOST else r.info.get("home")  # noqa: E731
@@ -567,7 +576,7 @@ class WindowRemote:
         def picked_server(*_):  # (another server: the folder last used on it, else its home; what it runs)
             r = server()
             where.set_text((load_settings().get("remote_folders") or {}).get(place(r)) or home(r) or "~")
-            agent_dd.set_model(Gtk.StringList.new([label for _value, label in offered(r)]))
+            agent_dd.set_model(Gtk.StringList.new([label for _value, label, _slug in offered(r)]))
         servers_dd.connect("notify::selected", picked_server)
 
         def check():

@@ -16,6 +16,7 @@ gi.require_version("Graphene", "1.0")
 from gi.repository import Adw, Gdk, Gio, GLib, GObject, Graphene, Gsk, Gtk, Pango  # noqa: E402,F401
 
 from baudelib import icons  # noqa: E402  (schema/icons: every app's icons, the Android app's too)
+from baudelib import providers  # noqa: E402  (every app's model names)
 from baudelib import wording  # noqa: E402
 from widgets import RefIcon, WorkingDots, find_label, insert_actions, time_tip, walk  # noqa: E402
 
@@ -252,6 +253,7 @@ class ModelPicker(Gtk.MenuButton):
     def __init__(self, choices, tooltip, on_pick, chars=30):
         super().__init__(tooltip_text=tooltip, always_show_arrow=True, css_classes=["choice", "model-picker"])
         self.on_pick, self.values, self.labels, self.quiet, self.picked = on_pick, [], {}, False, None
+        self.slugs = {}
         face = Gtk.Box(spacing=6)
         self.face_icon = Gtk.Image(pixel_size=16, visible=False)
         self.shown = Gtk.Label(ellipsize=Pango.EllipsizeMode.END, max_width_chars=chars)
@@ -283,10 +285,12 @@ class ModelPicker(Gtk.MenuButton):
         self.set_popover(pop)
         self.set_choices(choices)
 
-    def set_choices(self, choices):
-        """Replace the entries ((value, label)), keeping the picked one picked if it's still there."""
+    def set_choices(self, choices, slugs=None):
+        """Replace the entries ((value, label)), keeping the picked one picked if it's still there. slugs: each
+        value's slug (providers.model_slug), shown on hover over its name only."""
         keep = self.value()
         self.values, self.labels = [v for v, _ in choices], dict(choices)
+        self.slugs = dict(slugs or {})
         order = {}  # (each family's place: where its first model was)
         for v, lbl in choices:
             order.setdefault(model_family(v, lbl)[1], len(order))
@@ -301,7 +305,7 @@ class ModelPicker(Gtk.MenuButton):
             icon = model_icon(value, lbl)
             line.append(Gtk.Image(icon_name=icon, pixel_size=16) if icon else Gtk.Box(width_request=16))
             line.append(Gtk.Label(label=lbl, xalign=0, hexpand=True, ellipsize=Pango.EllipsizeMode.END,
-                                  max_width_chars=40, tooltip_text=lbl if len(lbl) > 40 else None))
+                                  max_width_chars=40, tooltip_text=self.tip(value, lbl)))
             row.check = Gtk.Image(icon_name="object-select-symbolic", pixel_size=16, opacity=0)
             line.append(row.check)
             row.set_child(line)
@@ -311,9 +315,10 @@ class ModelPicker(Gtk.MenuButton):
     def select(self, value):
         """Show value as picked (appended if unknown; None: nothing), without on_pick."""
         if value is not None and value not in self.labels:
-            self.set_choices([*self.labels.items(), (value, value)])
+            self.set_choices([*self.labels.items(), (value, providers.model_name(value))], self.slugs)
         self.picked = value
         self.shown.set_label(self.labels.get(value, ""))
+        self.shown.set_tooltip_text(self.tip(value, self.labels.get(value, "")) if value is not None else None)
         icon = model_icon(value, self.labels.get(value, "")) if value is not None else None
         self.face_icon.set_from_icon_name(icon)
         self.face_icon.set_visible(icon is not None)
@@ -325,6 +330,11 @@ class ModelPicker(Gtk.MenuButton):
 
     def label(self):
         return self.labels.get(self.picked, "")
+
+    def tip(self, value, lbl):
+        """What hovering a model's name shows: its slug (the name in full where it's cut and its slug is its name)."""
+        slug = self.slugs.get(value, value)
+        return slug if slug != lbl else lbl if len(lbl) > 40 else None
 
     def _rows(self):
         i = 0

@@ -882,7 +882,8 @@ class WindowDrafts:
             return m.get("provider") or providerslib.provider_of(m["value"])
 
         def info(value):
-            return self.models_info.get(value) or {"value": value, "displayName": providerslib.model_name(value)}
+            return self.models_info.get(value) or \
+                {"value": value, "displayName": providerslib.model_name(value, list(self.models_info.values()))}
         pid = pid_of(info(shown)) if shown else None
         # (every model with a provider: the chat's host's Apple model, then the providers' in their order; the chat's
         # own last if its host's gone, the same one as another host's where it is)
@@ -904,9 +905,10 @@ class WindowDrafts:
         listed = own + [lead for lead, _ms in kinds]
         others = [m for m in listed if pid_of(m) is not None]  # (one of each kind: told apart where two share a name)
         names = [(m["value"], providerslib.told_apart(m, others) if pid_of(m) is not None else
-                  m.get("displayName") or m["value"]) for m in listed]
+                  m.get("displayName") or providerslib.model_name(m["value"])) for m in listed]
         self.model_names = dict(names) | ({shown: dict(names)[pick]} if same else {})
-        self.model_dd.set_choices(names or MODELS)
+        known = list(self.models_info.values())
+        self.model_dd.set_choices(names or MODELS, {v: providerslib.model_slug(v, known) for v, _n in names})
         if pick:
             self.model_dd.select(pick)
 

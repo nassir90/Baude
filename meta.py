@@ -150,7 +150,7 @@ def models(live=False):
               if isinstance(m, dict) and isinstance(m.get("value"), str) and m["value"] != "default"]
     _CLAUDE_SAID.clear()
     _CLAUDE_SAID.update((m["value"], m) for m in listed)  # (for model_entry: no settings read for each it's asked)
-    out = [(m["value"], m.get("displayName") or m["value"],
+    out = [(m["value"], m.get("displayName") or providerslib.model_name(m["value"]),
             list(m.get("supportedEffortLevels") or []) if m.get("supportsEffort") else None, None) for m in listed] or \
         [(value, lbl, None, None) for value, lbl in MODELS_OFFERED]
     out += [(m["value"], m["displayName"], m.get("supportedEffortLevels") or None, None)
@@ -944,7 +944,8 @@ def model_row(chat):
         entry = model_entry(model(), offered) or (offered[0] if offered else None)
         picker.quiet = True
         try:
-            picker.set_choices([(m[0], m[1]) for m in offered])
+            known = claude_described([m for m in offered if m[3] is None]) + list(providerslib.entries().values())
+            picker.set_choices([(m[0], m[1]) for m in offered], {m[0]: providerslib.model_slug(m[0], known) for m in offered})
             picker.select(entry[0] if entry else None)
         finally:
             picker.quiet = False

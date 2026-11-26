@@ -11,7 +11,7 @@ import re
 import shutil
 import time
 
-from baudelib import wording
+from baudelib import icons, wording
 
 REPO = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))  # (apple-claude/ and pi-claude/ are beside baudelib/)
 
@@ -415,6 +415,23 @@ def claude_names(m):
                         head if _HEAD.fullmatch(head) else None) if isinstance(x, str)]
     long = "[1m]" if any(_LONG.search(x.casefold()) for x in said) else ""
     return {f + long for f in map(_folded, said) if f}
+
+
+_NAMES = [(re.compile(m, re.IGNORECASE), a) for m, a in icons.model_names()]
+
+
+def id_name(value):
+    """A model's id as it reads as a name where no host lists it (schema/icons/models/families.json's names):
+    claude-opus-4-7 is "Opus 4.7", gpt-5.4-codex "GPT 5.4 codex"; None where none says."""
+    for pattern, said in _NAMES if isinstance(value, str) else ():
+        if hit := pattern.fullmatch(value):
+            return re.sub(r"\{(\d+)\}", lambda g: _part(hit.group(int(g.group(1)))), said)
+    return None
+
+
+def _part(text):
+    text = re.sub(r"[-_]", " ", text or "")
+    return text[:1].upper() + text[1:]
 
 
 def claude_match(value, listed, fallback=False):

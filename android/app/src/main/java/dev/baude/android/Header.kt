@@ -2,6 +2,7 @@ package dev.baude.android
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.ui.layout.layout
@@ -80,17 +81,52 @@ fun models(hostId: String): List<ModelChoice> {
         val v = m.optString("value")
         if (v.isBlank() || v == "default") continue
         val efforts = if (m.optBoolean("supportsEffort")) m.optJSONArray("supportedEffortLevels").strings() else emptyList()
-        out[v] = ModelChoice(v, m.optString("displayName").ifBlank { v }, efforts, m.optString("resolvedModel").ifBlank { null },
+        out[v] = ModelChoice(v, m.optString("displayName").ifBlank { idName(v) ?: v }, efforts, m.optString("resolvedModel").ifBlank { null },
             m.str("defaultEffort"))
     }
     for (m in info.models.orEmpty()) {
         val v = m.optString("value")
         if (v.isBlank() || v == "default" || v in out) continue
         val efforts = m.optJSONArray("supportedEffortLevels").strings()
-        out[v] = ModelChoice(v, m.optString("displayName").ifBlank { v }, efforts)
+        out[v] = ModelChoice(v, m.optString("displayName").ifBlank { idName(v) ?: v }, efforts, m.optString("resolvedModel").ifBlank { null })
     }
     return out.values.toList()
 }
+
+/** A model's id as it reads as a name where no host lists it (models.id_name: schema/icons/models/families.json's
+ * names): claude-opus-4-7 is "Opus 4.7", gpt-5.4-codex "GPT 5.4 codex"; null where none says. */
+fun idName(value: String): String? {
+    for (f in ModelFamilies.all) for ((match, said) in f.names) {
+        val hit = match.matchEntire(value) ?: continue
+        return Regex("\\{(\\d+)\\}").replace(said) { g ->
+            val part = hit.groups[g.groupValues[1].toInt()]?.value.orEmpty().replace(Regex("[-_]"), " ")
+            part.take(1).uppercase() + part.drop(1)
+        }
+    }
+    return null
+}
+
+/** A model's name, the same in every app whatever runs it and wherever (providers.model_name): as listed names it, by
+ * its value or what it resolves to (claude-opus-5-5 is opus, "Opus 5.5"); else as its id reads (idName); else its name
+ * to what serves it ("qwen3:4b" for "ollama/qwen3:4b"). Its slug (modelSlug) is shown only on a long-press. */
+fun modelName(value: String?, listed: List<ModelChoice>): String? {
+    value ?: return null
+    (listed.firstOrNull { it.value == value } ?: listed.firstOrNull { it.resolved == value })?.let { return it.name }
+    if (value.startsWith("agent/")) value.removePrefix("agent/").substringAfter("/", "").takeIf { it.isNotEmpty() }
+        ?.let { return modelName(it, listed) } // (another host's, run there: agent/<member>/<its value>)
+    return idName(value) ?: when {
+        value.startsWith("ollama/") -> value.removePrefix("ollama/")
+        value.startsWith("openai/") && value.count { it == '/' } >= 2 -> value.split("/", limit = 3)[2]
+        else -> value
+    }
+}
+
+/** A model's slug, what its server or claude calls it (providers.model_slug): what listed says it resolves to, else
+ * its value. */
+fun modelSlug(value: String, listed: List<ModelChoice>): String = listed.firstOrNull { it.value == value }?.resolved ?: value
+
+/** Shows a model's slug for a moment, as a long-press on its name does (a hover's tooltip on the desktop). */
+fun showSlug(ctx: android.content.Context, slug: String) = android.widget.Toast.makeText(ctx, slug, android.widget.Toast.LENGTH_LONG).show()
 
 /** A field's string, or null where it's null or missing (org.json says "null" for one). */
 fun JSONObject.str(k: String): String? = if (isNull(k)) null else optString(k).ifBlank { null }
@@ -209,7 +245,8 @@ fun meshModels(h: String?, shown: String? = null): List<ModelChoice> {
         if (out.any { it.value == c.value } || listed.any { sameModel(it, c) }) continue
         val lead = own?.takeIf { sameModel(it, c) } ?: c
         listed.add(lead)
-        out.add(ModelChoice(lead.value, nameOf(lead), if (lead.m.thinking == true) listOf("off", "low", "medium", "high") else emptyList()))
+        out.add(ModelChoice(lead.value, nameOf(lead), if (lead.m.thinking == true) listOf("off", "low", "medium", "high") else emptyList(),
+            lead.m.id?.ifBlank { null }))
     }
     return out.map { m -> listed.firstOrNull { it.value == m.value }?.let { m.copy(name = toldApart(it, listed)) } ?: m }
 }
@@ -346,7 +383,7 @@ fun ChatControls(hostId: String, sid: String, said: (String) -> Unit, open: (Str
                 } else pickModel(hostId, sid, s, v, choices, asked, said, open, modelSet)
             }
         }
-        ModelPicker((now?.name ?: model ?: Wording.Common.model).let { if (it.length > 30) it.take(29) + "…" else it },
+        ModelPicker((now?.name ?: modelName(model, choices) ?: Wording.Common.model).let { if (it.length > 30) it.take(29) + "…" else it },
             choices, now?.value ?: model) { v ->
             pickModel(hostId, sid, s, v, choices, asked, said, open, modelSet)
         }
@@ -480,6 +517,7 @@ private val MODEL_LIST_WIDTH = 280.dp
 /** The model picker (pickers.ModelPicker): its face the model's logo and name; a search over the models, each with its
  * family's logo, under their families' heads. On a page with a pane (a chat's, Meta's) its list opens there, under the
  * button and down to the bottom bar at most, scrolling; elsewhere (a dialog, Settings) in a menu under it. */
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 fun ModelPicker(face: String, choices: List<ModelChoice>, picked: String?, pick: (String) -> Unit) {
     val c = LocalBaude.current
@@ -490,7 +528,9 @@ fun ModelPicker(face: String, choices: List<ModelChoice>, picked: String?, pick:
     val now = choices.firstOrNull { it.value == picked }
     val logo = picked?.let { modelLogo(it, now?.name ?: face) }
     Box(Modifier.onGloballyPositioned { anchor = it.boundsInWindow() }) {
-        Row(Modifier.clip(RoundedCornerShape(6.dp)).clickable(enabled = choices.isNotEmpty()) { open = true; query = "" }
+        val ctx = androidx.compose.ui.platform.LocalContext.current
+        Row(Modifier.clip(RoundedCornerShape(6.dp)).combinedClickable(enabled = choices.isNotEmpty(),
+            onLongClick = picked?.let { v -> { showSlug(ctx, now?.resolved ?: v) } }) { open = true; query = "" }
             .padding(start = 8.dp, end = 4.dp, top = 6.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
             if (logo != null) Icon(logo, null, tint = c.fg, modifier = Modifier.padding(end = 6.dp).size(16.dp.icon))
             Text(face, style = Type.body, color = c.fg, maxLines = 1, overflow = TextOverflow.Ellipsis,
@@ -542,7 +582,8 @@ private fun ModelList(query: String, setQuery: (String) -> Unit, choices: List<M
 @Composable
 private fun ModelRow(m: ModelChoice, on: Boolean, onClick: () -> Unit) {
     val c = LocalBaude.current
-    MenuLine(onClick = onClick) {
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    MenuLine(onLongClick = { showSlug(ctx, m.resolved ?: m.value) }, onClick = onClick) {
         val logo = modelLogo(m.value, m.name)
         if (logo != null) Icon(logo, null, tint = c.fg, modifier = Modifier.size(16.dp.icon))
         else androidx.compose.foundation.layout.Spacer(Modifier.size(16.dp.icon))

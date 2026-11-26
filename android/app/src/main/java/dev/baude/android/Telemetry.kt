@@ -29,6 +29,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
@@ -223,9 +225,12 @@ private fun TokenGrid(days: List<Msg.TelemetryDay>) {
     }
 }
 
-private fun valueRow(title: String, value: String?): @Composable () -> Unit = {
+private fun valueRow(title: String, value: String?, slug: String? = null): @Composable () -> Unit = {
     val c = LocalBaude.current
-    ActionRow(title, null, suffix = { value?.let { Text(it, style = Type.body, color = c.dim, maxLines = 1) } })
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    Box(if (slug == null) Modifier else Modifier.pointerInput(slug) { detectTapGestures(onLongPress = { showSlug(ctx, slug) }) }) {
+        ActionRow(title, null, suffix = { value?.let { Text(it, style = Type.body, color = c.dim, maxLines = 1) } })
+    }
 }
 
 /** Settings → Telemetry (telemetryview.Page), Settings' fourth page: the host picked beside New session (this phone's
@@ -285,16 +290,17 @@ fun TelemetryPage() {
         val u = usage?.let { Msg.TelemetryReadReply.from(it).usage }
         if (u != null) {
             val models = models(hostId)
-            fun named(v: String?) = models.firstOrNull { it.value == v }?.name ?: v.orEmpty()
+            fun named(v: String?) = modelName(v, models).orEmpty()
             Heading(Wording.Telemetry.tokensByDay)
             BoxedList(listOfNotNull<@Composable () -> Unit>({ TokenGrid(u.days.orEmpty()) },
                 u.combos.orEmpty().firstOrNull()?.let { top -> valueRow(Wording.Telemetry.mostUsed,
-                    Wording.Telemetry.modelEffort(model = named(top.model), effort = effortSaid(top.effort))) }), "") { it() }
+                    Wording.Telemetry.modelEffort(model = named(top.model), effort = effortSaid(top.effort)),
+                    top.model?.let { modelSlug(it, models) }) }), "") { it() }
             if (u.models.orEmpty().isNotEmpty()) {
                 Heading(Wording.Telemetry.models)
                 BoxedList(u.models.orEmpty(), "") { m ->
                     valueRow(named(m.model), Wording.Telemetry.turnsTokens(turns = m.turns?.toLong() ?: 0,
-                        tokens = tokens(m.tokens?.toLong() ?: 0)))()
+                        tokens = tokens(m.tokens?.toLong() ?: 0)), m.model?.let { modelSlug(it, models) })()
                 }
             }
         }

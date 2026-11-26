@@ -86,6 +86,16 @@
           "issue": "BaudeInternal#227"
         }
       ]
+    },
+    {
+      "said": "App doesn't detect docker binary on my macOS even though I have Docker installed (paraphrased)",
+      "rule": "Every host finds Docker where its installers put it as well as on PATH, since a host started by the OS or an app has a minimal PATH: /usr/local/bin, /opt/homebrew/bin, Docker Desktop's app bundle and ~/.docker/bin, OrbStack's and Rancher Desktop's ~/.orbstack/bin and ~/.rd/bin (Linux: /usr/local/bin, /usr/bin, /snap/bin, ~/.docker/bin, ~/.rd/bin); every run of docker (the Docker view's reads, logs and shells, Databases' containers) uses that found path, and Dependencies says Installed for it",
+      "decided": "2026-11-26",
+      "source": [
+        {
+          "issue": "BaudeInternal#271"
+        }
+      ]
     }
   ],
   "scenes": [

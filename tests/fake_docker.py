@@ -8,6 +8,7 @@ seconds if that's set (never for more than two minutes). `exec -it` is a shell (
 import json
 import os
 import sys
+import tempfile
 import time
 
 NOW = time.time()
@@ -155,7 +156,7 @@ def main(argv):
         return logs(argv)
     elif cmd == "exec":
         os.environ["PS1"] = "/app # "
-        app = os.path.join(os.environ.get("TMPDIR", "/tmp"), "fake-docker-app")  # (the container's /app, made up)
+        app = os.path.join(os.environ.get("BAUDE_RUNTIME_DIR") or tempfile.mkdtemp(prefix="fake-docker-"), "fake-docker-app")  # (the container's /app, made up)
         os.makedirs(app, exist_ok=True)
         for name in ("app.py", "requirements.txt", "compose.yaml"):
             open(os.path.join(app, name), "a").close()

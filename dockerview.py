@@ -668,7 +668,7 @@ class DockerView(Gtk.Box):
         what = self.table_page["what"]
         shown = wording.say("kube.count_of", n=n, what=what, total=total) if n != total else \
             wording.say("kube.count", n=n, what=what)
-        bits = [self.note and self.note[1] > time.monotonic() and self.note[0], shown, self.context]
+        bits = [self.note and self.note[1] > time.monotonic() and self.note[0], shown]
         self.say(" · ".join(b for b in bits if b))
 
     def set_note(self, text, seconds=30):
@@ -735,10 +735,12 @@ class DockerView(Gtk.Box):
         if obj is None or not obj.get("logs"):
             return
         key = (self.context, self.context, obj["name"])
-        if (tab := self.dock.find(DockerLogs, key)) is not None:
+        page = self.table_page["key"]
+        if (tab := next((t for t in self.dock.all() if isinstance(t, DockerLogs) and t.pod_key == key
+                         and t.page == page), None)) is not None:
             return self.dock.show(tab)
         self.show_dock()
-        self.dock.add(DockerLogs(self.dock, self.host, self.context, self.table_page["key"], obj))
+        self.dock.add(DockerLogs(self.dock, self.host, self.context, page, obj))
 
     def show_shell(self, oid):
         obj = self.row(oid)

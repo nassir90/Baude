@@ -64,12 +64,20 @@ fun docker(hostId: String, msg: Msg.Docker, then: (Msg.DockerReply) -> Unit) {
 /** A container's or a Compose project's log followed, on a connection of its own to the host (as KubeFollow's):
  * stop() lets go of it, which stops the docker the host runs for it. */
 class DockerFollow(private val hostId: String, private val msg: Msg.DockerFollow, private val onText: (String) -> Unit,
-                   private val onEnd: (Msg.DockerEnd) -> Unit, private val onError: (String) -> Unit) {
+                   private val onEnd: (Msg.DockerEnd) -> Unit, private val onError: (String) -> Unit,
+                   private val onAgain: () -> Unit = {}) {
     private var conn: Connection? = null
     @Volatile private var stopped = false
+    private var sent = false
 
+    /** A reconnect asks again, and the log's tail comes again: onAgain lets the screen drop what it has first. */
     fun start(): Boolean {
-        conn = Mesh.watch(hostId, ::heard) { c -> if (!stopped && c.state == "up") c.send(msg.json()) }
+        conn = Mesh.watch(hostId, ::heard) { c ->
+            if (stopped || c.state != "up") return@watch
+            if (sent) Mesh.post { if (!stopped) onAgain() }
+            sent = true
+            c.send(msg.json())
+        }
         return conn != null
     }
 
@@ -271,7 +279,8 @@ class DockerState(val hostId: String) {
                 l.state = if (code != 0 && !e.said.isNullOrEmpty()) Wording.Docker.error(e.said)
                     else if (code != 0) Wording.Docker.exited(code) else Wording.Multiplex.ended
             },
-            onError = { l.tail = null; l.state = Wording.Docker.error(it) })
+            onError = { l.tail = null; l.state = Wording.Docker.error(it) },
+            onAgain = { l.text = "" })
         l.tail = f
         if (!f.start()) { l.tail = null; l.state = Wording.Docker.error(Connection.NOT_CONNECTED) }
     }

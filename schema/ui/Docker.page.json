@@ -195,6 +195,16 @@
           "issue": "BaudeInternal#249"
         }
       ]
+    },
+    {
+      "said": "\"Read-only but for the deletes you confirm\" / \"<context name> (obvious from top bar)\" / \"live\" not needd / \"36 pods\" fine",
+      "rule": "The Docker status line is as the Kubernetes one: the count (\"6 containers\") after a fresh note, if any, and no context name (the bar has it).",
+      "decided": "2026-11-26",
+      "source": [
+        {
+          "issue": "BaudeInternal#252"
+        }
+      ]
     }
   ],
   "scenes": [

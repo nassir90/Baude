@@ -119,9 +119,22 @@ def _podman_socket():
     return path if path and os.path.exists(path.splitlines()[0]) else None
 
 
-def contexts():
+CONTEXTS_TTL_S = 30
+_contexts_cache = (0.0, [])
+
+
+def contexts(fresh=False):
     """[{name, current, args}]: docker's contexts (args: --context), then Colima's and Podman's sockets that none of
-    them reaches (args: --host)."""
+    them reaches (args: --host). Kept for CONTEXTS_TTL_S seconds; fresh reads them again."""
+    global _contexts_cache
+    at, kept = _contexts_cache
+    if not fresh and kept and time.monotonic() - at < CONTEXTS_TTL_S:
+        return kept
+    _contexts_cache = (time.monotonic(), out := _read_contexts())
+    return out
+
+
+def _read_contexts():
     try:
         listed = _objects(_run(["context", "ls", "--format", "json"], timeout=10))
     except RuntimeError:
@@ -169,7 +182,7 @@ def diagnose(said, context):
 
 
 def _contexts_reply():
-    cs = contexts()
+    cs = contexts(fresh=True)
     return {"contexts": [{"name": c["name"], "current": c["current"]} for c in cs],
             "sections": [{"title": t, "icon": icon, "pages": [{"title": p, "key": k, "what": w} for p, k, w in pages]}
                          for t, icon, pages in SECTIONS]}
@@ -390,8 +403,11 @@ def _act(args, page, what, oid):
         verb = {"start": ["start"], "stop": ["stop"], "restart": ["restart"], "remove": ["down"]}[what]
         out = _run([*args, "compose", "-p", oid, *verb], timeout=300)
     elif page in ("running", "containers"):
-        verb = ["rm", "-f"] if what == "remove" else [what]
-        out = _run([*args, *verb, oid], timeout=120)
+        if what == "remove":
+            _run([*args, "stop", oid], timeout=120)
+            out = _run([*args, "rm", oid], timeout=120)
+        else:
+            out = _run([*args, what, oid], timeout=120)
     elif what == "remove":
         kind = {"images": "image", "volumes": "volume", "networks": "network"}[page]
         out = _run([*args, kind, "rm", oid], timeout=120)

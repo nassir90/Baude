@@ -673,11 +673,13 @@ def _(app):
 def docker_window(app, page=None):
     """The Docker view on tests/fake_docker.py's colima (a Compose project, shop, and a redis), its running containers
     read (or page's, picked in the sidebar)."""
+    before = os.environ.get("BAUDE_DOCKER")
     os.environ.update(BAUDE_DOCKER=os.path.join(HERE, "fake_docker.py"))
     for k in ("FAKE_DOCKER_FOLLOW", "FAKE_DOCKER_STATE"):
         os.environ.pop(k, None)
     baude.save_settings(docker_context=None, docker_inspect=None, kube_log_wrap=None)
     win = app.window(opts())
+    win.connect("destroy", lambda *_: os.environ.update(BAUDE_DOCKER=before) if before else os.environ.pop("BAUDE_DOCKER", None))
     dv = win.docker
     dv.open()
     T.wait_for(lambda: dv.store is not None and dv.store.get_n_items() and not dv.loading, "the containers")

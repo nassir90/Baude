@@ -439,7 +439,7 @@ class Window(RecordHosts, Adw.ApplicationWindow, feedback.FeedbackHost, viewers.
             if os.path.exists(chat.get("path") or ""):
                 self.open_chat(chat["path"], select=False, present=False)
         self.apply_full_width(self.store.full_width)
-        self.connect("close-request", lambda *_: self.store.save_now() and False)
+        self.connect("close-request", self._closing)
         self.connect("notify::is-active", Window._activated)  # (a plain function: no closure over the window)
         self.store.sender = self.send_notes
         self.host_dd.set_choices(self.note_hosts())
@@ -453,6 +453,11 @@ class Window(RecordHosts, Adw.ApplicationWindow, feedback.FeedbackHost, viewers.
         theming.warm_shaders(self)  # (after its first frame)
 
     BOOKS_WIDTH = DiaryEditor.PAGES_WIDTH  # the notebooks' column, in px: the pages' column's width
+
+    def _closing(self, *_):
+        self.kube.close()
+        self.docker.close()  # (their timers and follows stop with the window)
+        return self.store.save_now() and False
 
     def _side_moving(self, on):
         """A side bar's started moving (sliding, or dragged), or it's still again. A chat read in the tab shown (Reader)

@@ -156,7 +156,7 @@ abstract class TasksMockups(private val theme: String) {
     /** A Bot's chat asked by its task's run (a form to fill), then handed the run's failure: each heads with what the
      * task did and a table of the run, then the script's words. */
     @Test fun asked() {
-        val table = "| task | 6def981555c9 |\n|---|---|\n| run | 625623c87b8e486e |\n| start time | 2026-11-26 23:42:25+00:00 |\n"
+        val table = "| task | 6def981555c9 |\n|---|---|\n| run | 625623c87b8e486e |\n| start time | 2026-11-26 23:42:25 |\n"
         val tail = "| version | 2009f5f91a9f |\n| entrypoint | /usr/bin/python3 -u |\n" +
             "| script | /home/ada/.local/share/baude/bots/s1/tasks/scripts/2009f5f91a9f.py |\n"
         val from = dev.baude.android.Msg.StoredSender(kind = "host", name = "Task “Deploy site”", host = "h1",
@@ -169,7 +169,7 @@ abstract class TasksMockups(private val theme: String) {
                         table + "| duration | 0.0 s |\n" + tail + "\nWhich bucket does site go to?\n\n" +
                         "Answer with only a JSON object with these fields:\n- bucket: one of \"staging\", \"production\""), from)
                     dev.baude.android.Said(dev.baude.android.Line("you", "An instance of the 'Deploy site' task failed\n\n" +
-                        table + "| end time | 2026-11-26 23:42:37+00:00 |\n| duration | 12.4 s |\n" + tail +
+                        table + "| end time | 2026-11-26 23:42:37 |\n| duration | 12.4 s |\n" + tail +
                         "| exit code | 3 |\n\nIt failed: exited with 3. The end of its log:\n\nsay: deploying site\n" +
                         "err: the upload was refused: the bucket's key expired\n\nFind out why. If the script is at fault, " +
                         "fix it with your set_task tool and run it again with run_task."), from)

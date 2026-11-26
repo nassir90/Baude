@@ -327,7 +327,7 @@ def asked_head(name, tid, run, error):
     hands over itself)."""
     def at(t):
         zone = datetime.timezone(datetime.timedelta(seconds=run.get("offset") or 0))
-        return datetime.datetime.fromtimestamp(t, zone).isoformat(" ", "seconds")
+        return datetime.datetime.fromtimestamp(t, zone).strftime("%Y-%m-%d %H:%M:%S")
     started, ended = run.get("started"), run.get("ended")
     seconds = run.get("seconds") if ended else time.time() - started if started else None
     rows = [("task", tid), ("run", run.get("id")), ("started", started and at(started)),

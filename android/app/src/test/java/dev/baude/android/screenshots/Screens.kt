@@ -1342,17 +1342,29 @@ abstract class Screens(private val theme: String) {
     @Test fun chatSubscriptions() {
         val chat = Mesh.openChat("h1", "a")
         fill(chat)
-        val subs = listOf(Msg.Account(id = "p1", provider = "claude", name = "Personal", kind = "folder"),
-            Msg.Account(id = "w1", provider = "claude", name = "Work", kind = "folder"))
+        val subs = listOf(Msg.Account(id = "w1", provider = "claude", name = "Work Account", kind = "folder"))
+        dev.baude.android.HostSubscriptions.listed["h1"] = subs
+        show { ChatShell("h1", "a", back = {}, open = { _, _ -> }, feedback = {}) }
+        laidOut()
+        screen("20s-chat-subscriptions")
+        tap("CLI default")
+        laidOut()
+        withMenus("20t-chat-subscriptions-open")
+    }
+
+    // (the same chat on the added account: CLI default still listed, to go back to)
+    @Test fun chatSubscriptionsOnAccount() {
+        val chat = Mesh.openChat("h1", "a")
+        fill(chat)
+        val subs = listOf(Msg.Account(id = "w1", provider = "claude", name = "Work Account", kind = "folder"))
         dev.baude.android.HostSubscriptions.listed["h1"] = subs
         Mesh.sessions["h1"] = Mesh.sessions["h1"].orEmpty().map {
             if (it.id == "a") Msg.Session.from(it.json().put("account", subs[0].json())) else it }
         show { ChatShell("h1", "a", back = {}, open = { _, _ -> }, feedback = {}) }
         laidOut()
-        screen("20s-chat-subscriptions")
-        tap("Personal")
+        tap("Work Account")
         laidOut()
-        withMenus("20t-chat-subscriptions-open")
+        withMenus("20u-chat-subscriptions-on-account")
     }
 
     // (Settings → Meta's Intelligence, and the New session dialog's model, pressed: the menu under the button or, with

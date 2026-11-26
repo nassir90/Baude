@@ -87,7 +87,7 @@ One of your tasks: its script, triggers and form, and its latest runs (when, wha
 
 ### `set_task`
 
-Make one of your tasks, or change one (by its id; a field left out kept as it was, but triggers and form, given, are given whole). A Python script imports baudetask: baudetask.inputs (its form, filled), baudetask.payload (its trigger's event), say(text) (a line in its log), ask(text, form=None) (asks you: your answer, or the form's values), fallback(error), and @baudetask.main (an exception handed to you). A shell script gets its inputs as $BAUDE_IN_<FIELD>. A trigger's payload fills a field of the same name, or the one fills maps it to. Saving a new script makes a new version; run it with dummy answers first (run_task's dry) to check its asks.
+Make one of your tasks, or change one (by its id; a field left out kept as it was, but triggers and form, given, are given whole). A Python script imports baudetask: baudetask.inputs (its form, filled), baudetask.payload (its trigger's event), say(text) (a line in its log), ask(text, form=None) (asks you: your answer, or the form's values), fallback(error), and @baudetask.main (an exception handed to you). A shell script gets its inputs as $BAUDE_IN_<FIELD>. A trigger's payload fills a field of the same name, or the one fills maps it to. Saving a new script makes a new version.
 
 | Field | Type | Required | What it is |
 |---|---|---|---|
@@ -105,14 +105,13 @@ Make one of your tasks, or change one (by its id; a field left out kept as it wa
 
 ### `run_task`
 
-Run one of your tasks now, its form filled with inputs (the rest by default). dry: its script runs as it is, side effects and all, but its asks are answered by a dummy agent (each field's default, first choice, 0, false or "") and its failure isn't handed to you: to check its asks' format. Your own task's run is started and given at once (wait true: waited for until it ends or asks you, as you can only answer once this turn's over); another Bot's is waited for until it ends (wait false: at once). Gives its record and log; task_run reads it again.
+Run one of your tasks now, its form filled with inputs (the rest by default). Your own task's run is started and given at once (wait true: waited for until it ends or asks you, as you can only answer once this turn's over); another Bot's is waited for until it ends (wait false: at once). Gives its record and log; task_run reads it again.
 
 | Field | Type | Required | What it is |
 |---|---|---|---|
 | `session` | string |  | A Bot's session id (yours if none's given) |
 | `id` | string | yes |  |
 | `inputs` | object |  |  |
-| `dry` | boolean |  |  |
 | `wait` | boolean |  |  |
 
 ### `task_run`
@@ -829,7 +828,6 @@ One of a Bot's tasks run now, by hand.
 | `session` | string | yes | The session's id. |
 | `id` | string | yes | The task's id. |
 | `inputs` | object |  | Its form, filled. |
-| `dry` | boolean |  | Run with dummy answers: the script runs as it is, side effects and all, its asks answered by a dummy agent, its failure not handed over. |
 
 #### `senders` (SendersOp)
 
@@ -930,7 +928,7 @@ One of a Bot's tasks, its script and latest runs.
 
 #### `task_ask` (TaskAsk)
 
-A running script asks its Bot (on the host's own socket, with its run's token): something it can't decide, or (error) a failure handed over. Sent the Bot as a turn of its own once it's idle, answered as that turn ends (refused, as a failure, for a task whose failures aren't handed over; with dummy answers: by a dummy agent, at once).
+A running script asks its Bot (on the host's own socket, with its run's token): something it can't decide, or (error) a failure handed over. Sent the Bot as a turn of its own once it's idle, answered as that turn ends (refused, as a failure, for a task whose failures aren't handed over).
 
 | Field | Type | Required | What it is |
 |---|---|---|---|
@@ -3134,7 +3132,6 @@ A task's run: what started it, what it was given, how it went (a run's record is
 | `kind` | `manual` \| `schedule` \| `git_push` | yes | What started it. |
 | `payload` | object/null |  | The trigger's event. |
 | `inputs` | object/null |  | Its form as filled. |
-| `dry` | boolean/null |  | Run with dummy answers: its script run as it is, side effects and all, its asks answered by a dummy agent, not its Bot. |
 | `status` | `running` \| `asking` \| `done` \| `failed` \| `stopped` \| `skipped` | yes | How it is, or ended. |
 | `started` | number | yes | When it started. |
 | `offset` | integer/null |  | How far ahead of UTC its host's clock was as it started (seconds): its times shown as they were there. |

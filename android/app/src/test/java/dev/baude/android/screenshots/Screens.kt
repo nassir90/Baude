@@ -319,6 +319,20 @@ abstract class Screens(private val theme: String) {
         screen("40j-meta-access-set")
     }
 
+    // (Meta's value naming a host whose rule isn't known yet, "studio: unknown": that host's row, not an empty box)
+    @Test fun metaAccessUnknown() {
+        val studio = Host(id = "7d3f2a90-1c4e-4b6a-9e8d-5f0a2b3c4d5e", name = "studio", user = "dev", address = "studio.example")
+        Mesh.hosts.add(studio)
+        accessFixture(studio, "studio")
+        dev.baude.android.Meta.host.value = Mesh.hosts.first().id
+        val s = dev.baude.android.MetaSet.ALL.getValue("access_spawn")
+        val spec = org.json.JSONObject().put("setting", "access_spawn")
+            .put("hosts", org.json.JSONArray(s.changed?.invoke("studio: unknown").orEmpty()))
+        show { dev.baude.android.MetaSettingBox(s, emptyList(), spec) }
+        laidOut()
+        screen("40k-meta-access-unknown")
+    }
+
     /** A host answering access and access_set as one with members studio and pixel-9 would. */
     private fun accessFixture(host: Host = Mesh.hosts.first(), name: String = "workshop", spawn: String = "everybody") {
         val studio = "5b168c62-bc6e-4150-8d6f-de1c2fade4f3"
@@ -328,7 +342,7 @@ abstract class Screens(private val theme: String) {
         val rules = org.json.JSONObject().put("shell", rule("nobody")).put("browser", rule("chosen", studio))
             .put("providers", rule("everybody")).put("model_files", rule("chosen", studio, pixel)).put("spawn", rule(spawn))
             .put("manage", rule("everybody")).put("kube", rule("nobody")).put("databases", rule("everybody"))
-            .put("access", rule("nobody"))
+            .put("subscriptions", rule("everybody")).put("access", rule("nobody"))
         val state = org.json.JSONObject().put("host", name).put("rules", rules).put("editable", true)
             .put("members", org.json.JSONArray(listOf(org.json.JSONObject().put("id", pixel).put("name", "pixel-9"),
                 org.json.JSONObject().put("id", studio).put("name", "studio"))))

@@ -285,7 +285,7 @@ fun MetaSettingBox(s: MetaSetting, batch: List<Action>, spec: JSONObject? = null
         else Wording.MetaActions.setUndone(value = saidValue(it.data.opt("to")))
     }
     MetaBoxed(listOf(Unit), if (a != null) Modifier.tip(Wording.MetaActions.byMeta(action = a.said)) else Modifier) {
-        val only = spec?.optJSONArray("hosts")?.let { a -> (0 until a.length()).map { a.optString(it) } }
+        val only = spec?.optJSONArray("hosts")?.let { a -> (0 until a.length()).map { a.optString(it) } }?.ifEmpty { null }
         if (only != null && s.hostRows != null) s.hostRows.invoke(only)
         else s.row(fallback, if (batch.isEmpty()) null else ({ BatchControls(batch) }))
     }

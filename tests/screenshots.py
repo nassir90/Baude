@@ -114,6 +114,9 @@ def reset_state():
     shutil.rmtree(os.path.join(os.environ["XDG_CONFIG_HOME"], "Claude", "claude-code-sessions"),  # (a scene's Claude
                   ignore_errors=True)                                                             # Desktop chats)
     T.feedback._gh_seen.update(at=None, repo=None)
+    if (u := getattr(Gtk.Application.get_default(), "updater", None)) is not None:  # (a scene's new version)
+        u.stop()
+        Gtk.Application.get_default().updater = None
 
 
 THEMES = ("light", "dark")

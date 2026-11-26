@@ -58,26 +58,68 @@ def upstream(root=HERE):
     return git(root, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}", timeout=5) or None
 
 
-def look(started, module, root=HERE, follow=False):
-    """One look (off the main loop: it fetches): the commit to restart onto, or None. Fast-forwarded first if it's
-    behind its upstream and has nothing of its own (follow: never, nor fetched: only the HEAD something else moves);
-    then the commit checked out, if it isn't started, nothing's changed but what's committed, and module (baude,
-    record, baude_headless) imports from it."""
+def ahead_of(root, head, up):
+    """The upstream has commits the checkout hasn't, and the checkout has none of its own (it fast-forwards)."""
+    return bool(head and up and up != head and git(root, "merge-base", "--is-ancestor", "HEAD", up) is not None)
+
+
+def check(started, module, root=HERE, follow=False):
+    """One look (off the main loop: it fetches): (the commit to restart onto, None), or (None, why): why "dirty" (a
+    newer version's there, and something tracked is changed in the checkout), "diverged" (it won't fast-forward) or
+    "broken" (it won't import); (None, None) if there's nothing newer. Fast-forwarded first if it's behind its upstream
+    and has nothing of its own (follow: never, nor fetched: only the HEAD something else moves); then the commit
+    checked out, if it isn't started, nothing's changed but what's committed, and module (baude, record,
+    baude_headless) imports from it."""
     if not follow:
         git(root, "fetch", "--quiet", timeout=60)  # (failing, offline or no credentials: what's here still counts)
     clean = git(root, "status", "--porcelain", "--untracked-files=no") == ""
     head = git(root, "rev-parse", "HEAD")
     up = None if follow else git(root, "rev-parse", "@{upstream}")
-    if clean and head and up and up != head and git(root, "merge-base", "--is-ancestor", "HEAD", up) is not None:
-        git(root, "merge", "--ff-only", "--quiet", up)
+    ahead = ahead_of(root, head, up)
+    if not head:
+        return None, None
+    if not clean:
+        return None, "dirty" if ahead or head != started else None
+    if ahead:
+        if git(root, "merge", "--ff-only", "--quiet", up) is None:
+            return None, "diverged"
         head = git(root, "rev-parse", "HEAD")
-        clean = git(root, "status", "--porcelain", "--untracked-files=no") == ""
-    if not clean or not head or head == started or head in BROKEN:
-        return None
+        if git(root, "status", "--porcelain", "--untracked-files=no") != "":
+            return None, "dirty"
+    if head == started:
+        return None, None
+    if head in BROKEN:
+        return None, "broken"
     if importable(module, root):
-        return head
+        return head, None
     BROKEN.add(head)  # (not tried again: the next commit is)
-    return None
+    return None, "broken"
+
+
+def look(started, module, root=HERE, follow=False):
+    """check's commit: the one to restart onto, or None."""
+    return check(started, module, root, follow)[0]
+
+
+def offered(started, root=HERE):
+    """One look that changes nothing (off the main loop: it fetches), for Update with auto restart off: (the commit
+    check would restart onto, None) or (None, why) as check says why, or (None, None). Its upstream's if that has
+    commits the checkout hasn't (and it has none of its own), else, on main following an upstream, the commit checked
+    out if it isn't started: a branch that isn't main, or follows nothing, is offered only what its upstream moved.
+    Whether it imports is seen as Update's clicked (check; BROKEN ones are said)."""
+    git(root, "fetch", "--quiet", timeout=60)
+    head, up = git(root, "rev-parse", "HEAD"), git(root, "rev-parse", "@{upstream}")
+    if ahead_of(root, head, up):
+        commit = up
+    elif up and git(root, "rev-parse", "--abbrev-ref", "HEAD") == "main":
+        commit = head
+    else:
+        return None, None
+    if not commit or commit == started:
+        return None, None
+    if git(root, "status", "--porcelain", "--untracked-files=no") != "":
+        return None, "dirty"
+    return (None, "broken") if commit in BROKEN else (commit, None)
 
 
 def importable(module, root=HERE, gtk=None):

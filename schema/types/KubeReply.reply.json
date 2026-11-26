@@ -1,14 +1,17 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
-  "description": "kube's answer: contexts {contexts, where}; connect {sections, namespaces, nodes}; list {columns, rows, metrics, page}; yaml {text, file, refs}; owner {kind, name, resource}; delete {said}; fault when a cluster can't be read.",
+  "description": "kube's answer: contexts {contexts, where}; connect {sections, namespaces, nodes}; list {columns, rows, metrics, page}; yaml {text, file, refs}; owner {kind, name, resource}; summary {summary}; delete {said}; fault when a cluster can't be read.",
   "properties": {
     "op": {
       "const": "kube",
       "description": "What it is."
     },
     "req": {
-      "type": ["integer", "null"],
+      "type": [
+        "integer",
+        "null"
+      ],
       "description": "The request's number, the client's pick: its answers carry it back."
     },
     "what": {
@@ -71,7 +74,10 @@
       "description": "list: the objects."
     },
     "metrics": {
-      "type": ["boolean", "null"],
+      "type": [
+        "boolean",
+        "null"
+      ],
       "description": "list: whether CPU and memory could be read (pods, nodes), or null for another kind."
     },
     "text": {
@@ -101,6 +107,10 @@
       "type": "string",
       "description": "owner: its kind's resource."
     },
+    "summary": {
+      "$ref": "KubeSummary.json",
+      "description": "summary: the stack's CPU and memory."
+    },
     "said": {
       "type": "string",
       "description": "delete: what kubectl said."
@@ -110,6 +120,8 @@
       "description": "kubectl isn't on the host: the Kubernetes view shows this in its place."
     }
   },
-  "required": ["op"],
+  "required": [
+    "op"
+  ],
   "additionalProperties": false
 }

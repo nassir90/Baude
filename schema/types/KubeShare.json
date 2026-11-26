@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "A namespace's or a node's part of the stack's totals, a row of its table.",
+  "properties": {
+    "name": {
+      "type": "string",
+      "description": "The namespace or node."
+    },
+    "cells": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Each column's text."
+    }
+  },
+  "additionalProperties": false
+}

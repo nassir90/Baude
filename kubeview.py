@@ -48,6 +48,8 @@ from codeview import (  # noqa: E402,F401
 )
 from baudelib import deps, tokens, wording  # noqa: E402
 import kubehost  # noqa: E402
+from baudelib import hostkube  # noqa: E402
+from kubehome import KubeHome  # noqa: E402
 from kubedock import KubeDock, LogsTab, ShellTab  # noqa: E402
 import viewwindow  # noqa: E402
 
@@ -74,7 +76,7 @@ from kubedata import (  # noqa: E402,F401  (the data the view shows, with no GTK
     kube_printer_cell, _KUBE_MUST_HOLD, KUBE_CONDITION_TONES, _KUBE_CONDITION, kube_condition_tone, kube_col_title,
     kube_printer_col, _KUBE_PRINTED, kube_printer_columns, kube_crd_printer, kube_crd_page, _kp, _kp_condition,
     KEDA_SCALED_OBJECT, KEDA_SCALED_JOB, KEDA_TRIGGER_AUTH, CERT_MANAGER_CERTIFICATE, CERT_MANAGER_ISSUER, kube_page,
-    KUBE_PODS, KUBE_NODES, KUBE_SECTIONS, KUBE_SECTION_ICONS, KUBE_SECRETS_TEMPLATE, kube_custom_page, _KUBE_PRINTERS,
+    KUBE_HOME, KUBE_PODS, KUBE_NODES, KUBE_SECTIONS, KUBE_SECTION_ICONS, KUBE_SECRETS_TEMPLATE, kube_custom_page, _KUBE_PRINTERS,
     kube_page_columns, kube_page_crd, kube_list, kube_metrics_ctx, kube_pod_metrics, kube_node_metrics, kube_rows,
 )
 from kubedata import kube_cell_tone, kube_delete, kube_secret_yaml  # noqa: E402,F401
@@ -307,7 +309,7 @@ class KubeView(Gtk.Box):
         ensure_icons()
         self.win, self.contexts, self.context = win, [], None
         self.ns_shown, self.ns_by_context, self.ns_checks = None, {}, {}  # (None: all of them)
-        self.page, self.table_page, self.resources, self.namespaces = KUBE_PODS, None, None, []
+        self.page, self.table_page, self.resources, self.namespaces = KUBE_HOME, None, None, []
         self.generation, self.loading, self.timer, self.syncing = 0, False, None, False
         self.store = self.filter = self.selection = self.table = self.table_cols = None
         self.pending_pick = None  # (name, namespace) to select once the page is in (an owner clicked)
@@ -389,6 +391,8 @@ class KubeView(Gtk.Box):
         self.table_stack = Gtk.Stack(vexpand=True, hexpand=True)  # (the table, or why it can't be read)
         self.table_stack.add_named(self.table_scroll, "table")
         self.table_stack.add_named(self.build_error(), "error")
+        self.home = KubeHome(self.set_namespace)  # (Home: the stack's CPU and memory, in the table's place)
+        self.table_stack.add_named(self.home, "home")
         import depsview
         self.missing = depsview.Missing(again=self.read_contexts)  # (kubectl isn't on the host: show_missing)
         self.table_stack.add_named(self.missing, "missing")
@@ -739,8 +743,9 @@ class KubeView(Gtk.Box):
         self.fill_namespaces()
         for row in self.page_rows.values():
             api = row.page["api"]
-            served = row.page["resource"] in resources if not self.host.here else \
-                not api or api in resources or row.page["resource"] in resources  # (another host's: as it said)
+            served = row.page["source"] == "summary" or (  # (Home: any cluster's)
+                row.page["resource"] in resources if not self.host.here else
+                not api or api in resources or row.page["resource"] in resources)  # (another host's: as it said)
             if row.page.get("known"):  # (KEDA's, cert-manager's…: listed only on a cluster that has them)
                 row.served = served
                 row.set_visible(served and row.section not in self.folded)
@@ -815,6 +820,9 @@ class KubeView(Gtk.Box):
             self.fill_namespaces()
         else:
             self.sync_namespaces()
+        if self.page is KUBE_HOME:  # (its totals are the host's to add up again, for these namespaces)
+            self.load(switch=True)
+            return
         self.fade.swap(self.refilter)
 
     def set_namespace(self, ns):
@@ -890,6 +898,8 @@ class KubeView(Gtk.Box):
         if not quiet:
             self.say(wording.say("kube.reading", kind=page['title'].lower(), context=context))
             self.refresh_btn.set_loading(True)
+        if page is KUBE_HOME:
+            return self.read_summary(gen, context)
         if not self.host.here:
             return self.host.ask("kube", {"what": "list", "context": context, **self.page_ref(page)},
                                  lambda r: self._listed(gen, page, r))
@@ -911,6 +921,35 @@ class KubeView(Gtk.Box):
             ctx = kube_metrics_ctx(context, page)
             GLib.idle_add(self._loaded, gen, page, columns, kube_rows(page, items, ctx, columns), ctx, items)
         KUBE_POOL.submit(work)
+
+    def read_summary(self, gen, context):
+        """Home's totals, for the namespaces shown, as the host adds them up (hostkube's summary: there, or here as a
+        host process would)."""
+        msg = {"what": "summary", "context": context}
+        if self.ns_shown is not None:
+            msg["namespaces"] = list(self.ns_shown)
+        if not self.host.here:
+            return self.host.ask("kube", msg, lambda r: self._summarized(gen, r))
+        KUBE_POOL.submit(lambda: GLib.idle_add(self._summarized, gen, hostkube.answer(None, msg)))
+
+    def _summarized(self, gen, r):
+        if gen != self.generation:
+            return False
+        if r.get("missing"):
+            return self.show_missing(r["missing"]) and False
+        if r.get("error") or r.get("fault"):
+            fault = r.get("fault") or {"title": r["error"], "why": "", "fix": None, "said": ""}
+            return self._failed(gen, fault, fault.get("said") or "")
+        self.loading = False
+        self.refresh_btn.set_loading(False)
+        summary = r.get("summary") or {}
+        self.home.show(summary)
+        self.table_stack.set_visible_child_name("home")
+        self.metrics_note = wording.say("kube.metrics", seconds=KUBE_REFRESH_S) if summary.get("metrics") else \
+            wording.say("kube.no_metrics")
+        self.update_status()
+        self.fade.done()
+        return False
 
     @staticmethod
     def page_ref(page):
@@ -1208,6 +1247,7 @@ class KubeView(Gtk.Box):
         return not text or any(text in t.lower() for t in row.texts)
 
     def refilter(self):
+        self.home.refilter(self.search.get_text())
         if self.filter is not None:
             self.filter.changed(Gtk.FilterChange.DIFFERENT)
         q = self.search.get_text().strip()
@@ -1221,6 +1261,11 @@ class KubeView(Gtk.Box):
         find_label(label, text, self.search.get_text().strip())
 
     def update_status(self):
+        if self.page is KUBE_HOME:  # (a fresh note, and the metrics note)
+            if self.table_stack.get_visible_child_name() == "home":
+                bits = [self.note and self.note[1] > time.monotonic() and self.note[0], self.metrics_note]
+                self.say(" · ".join(b for b in bits if b))
+            return
         if self.selection is None:
             return
         n, total = self.selection.get_n_items(), self.store.get_n_items()

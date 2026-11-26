@@ -8075,6 +8075,7 @@ def test_kube_view(app):
         f.write("x = 1\n")
     try:
         kv = win.kube
+        kv.page = baude.KUBE_PODS  # (Home is the page it opens on: these read the pods)
         assert isinstance(kv.get_first_child(), Gtk.WindowHandle), "its bar moves the window, as the header bar does"
         win.activate_action("win.kube", None)
         assert kv.get_visible() and kv.context == "k3d-dev", "your kubeconfig's current context"
@@ -8408,6 +8409,7 @@ def test_kube_keda(app):
     rollouts = next(p for p in known if p["resource"] == "rollouts.argoproj.io")
     try:
         kv = win.kube
+        kv.page = baude.KUBE_PODS  # (Home is the page it opens on: these read the pods)
         win.activate_action("win.kube", None)
         wait_for(lambda: kv.resources is not None and kv.store is not None and kv.store.get_n_items() == 7, "the pods")
         assert not any(kv.page_rows[id(p)].get_visible() for p in known), "k3d-dev has no KEDA, nor any of the others"
@@ -8501,6 +8503,7 @@ def test_kube_kind_picked_while_connecting(app):
     deployments = next(p for _s, ps in baude.KUBE_SECTIONS for p in ps if p["resource"] == "deployments")
     try:
         kv = win.kube
+        kv.page = baude.KUBE_PODS  # (Home is the page it opens on: these read the pods)
         win.activate_action("win.kube", None)
         wait_for(lambda: kv.resources is not None and kv.store is not None, "k3d-dev")
         baude.kube_api_resources = lambda name: (held.wait(10), orig(name))[1]
@@ -8533,6 +8536,7 @@ def test_kube_custom_columns(app):
         return next(c for c in kv.columns if c.get_title() == title)
     try:
         kv = win.kube
+        kv.page = baude.KUBE_PODS  # (Home is the page it opens on: these read the pods)
         win.activate_action("win.kube", None)
         wait_for(lambda: kv.resources is not None and kv.store is not None and kv.store.get_n_items() == 7, "the pods")
         kv.side.select_row(kv.page_rows[id(baude.KUBE_SECTIONS[-1][1][0])])
@@ -8598,6 +8602,7 @@ def test_kube_switch_fade(app):
         return [kv.selection.get_item(i) for i in range(kv.selection.get_n_items())]
     try:
         kv = win.kube
+        kv.page = baude.KUBE_PODS  # (Home is the page it opens on: these read the pods)
         faded = lambda: kv.table_scroll.has_css_class("switching")  # noqa: E731
         win.activate_action("win.kube", None)
         wait_for(lambda: kv.store is not None and kv.store.get_n_items() == 7 and not faded(), "k3d-dev's pods")
@@ -8690,6 +8695,7 @@ def test_kube_watch(app):
         return [c for c in (json.loads(line) for line in open(log)) if c[3:4] == ["get"] and all(a in c for a in args)]
     try:
         kv = win.kube
+        kv.page = baude.KUBE_PODS  # (Home is the page it opens on: these read the pods)
         kv.open()
         wait_for(lambda: kv.selection is not None and len(rows()) == 7 and kv.watch is not None, "pods, watched")
         wait_for(lambda: gets("pods", "--watch", "--output-watch-events"), "kubectl watching")
@@ -8809,6 +8815,7 @@ def test_kube_pod_actions(app):
         pump(0.3)
     try:
         kv = win.kube
+        kv.page = baude.KUBE_PODS  # (Home is the page it opens on: these read the pods)
         kv.open()
         wait_for(lambda: kv.store is not None and kv.store.get_n_items() == 7 and not kv.loading, "the pods")
         pump(0.3)

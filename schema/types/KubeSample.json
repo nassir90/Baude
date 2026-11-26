@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "The stack's totals at one time, in the namespaces asked for.",
+  "properties": {
+    "at": {
+      "type": "number",
+      "description": "When (seconds since 1970)."
+    },
+    "cpu_requests": {
+      "type": "number",
+      "description": "Cores asked for."
+    },
+    "cpu_used": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "description": "Cores used, or null without metrics."
+    },
+    "cpu_limits": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "description": "Cores held to, or null."
+    },
+    "memory_requests": {
+      "type": "number",
+      "description": "Bytes asked for."
+    },
+    "memory_used": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "description": "Bytes used, or null without metrics."
+    },
+    "memory_limits": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "description": "Bytes held to, or null."
+    }
+  },
+  "additionalProperties": false
+}

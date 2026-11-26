@@ -208,6 +208,30 @@ def make_kubeconfig(path):
     return path
 
 
+def seed_home_history(context="k3d-dev", minutes=30, every=10):
+    """Home's history for a render, as if it had been open on context for minutes: the host's samples
+    (hostkube._HISTORY) of tests/fake_kubectl.py's totals, its pods' use rising and falling a little over the time.
+    Read with the fakes set up (KUBECONFIG, BAUDE_KUBECTL)."""
+    import collections
+    import math
+    import time
+    from baudelib import hostkube
+    import kubedata as kd
+    tally, now = kd.kube_tally(kd.kube_summary_read(context)), time.time()
+    samples = collections.deque()
+    n = minutes * 60 // every
+    for i in range(n):
+        f = 0.75 + 0.2 * math.sin(i / 9) + 0.08 * math.sin(i / 2.3) + 0.1 * i / n  # (the last sample: about now's)
+
+        def scaled(row):
+            return [v * f if j in (1, 4) and v is not None else v for j, v in enumerate(row)]
+        samples.append((now - (n - i) * every, {"total": scaled(tally["total"]),
+                                                "namespaces": {k: scaled(v) for k, v in tally["namespaces"].items()},
+                                                "nodes": tally["nodes"]}))
+    with hostkube._HISTORY_LOCK:
+        hostkube._HISTORY[context] = samples
+
+
 def records(folder, sid, steps=STEPS):
     """The chat as Claude Code writes it: one record per message, each with the folder it ran in. steps: ("you",
     text), ("reply", text), ("read", path, {line: text}), ("grep", pattern, ["path:line:text"]), ("bash", command,

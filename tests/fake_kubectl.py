@@ -36,13 +36,26 @@ def ctr(name="main", ready=True, restarts=0, waiting=None, exited=None, restarte
     return out
 
 
+def res(requests=None, limits=None):
+    """A container's resources: requests and limits, each (cpu, memory), either left out where it's None."""
+    out = {}
+    for key, pair in (("requests", requests), ("limits", limits)):
+        if pair:
+            out[key] = {k: v for k, v in zip(("cpu", "memory"), pair) if v is not None}
+    return out
+
+
 def pod(name, ns, minutes, phase="Running", containers=None, init=(), deleting=False, reason=None,
-        owner=("ReplicaSet", "web-7d9f")):
+        owner=("ReplicaSet", "web-7d9f"), resources=None):
+    """resources: each container's (res), by its name, init ones too."""
     containers = containers or [ctr()]
+    resources = resources or {}
     status = {"phase": phase, "containerStatuses": containers}
-    spec = {"nodeName": "node-1", "containers": [{"name": c["name"]} for c in containers]}
+    spec = {"nodeName": "node-1", "containers": [{"name": c["name"], "resources": resources.get(c["name"], {})}
+                                                 for c in containers]}
     if init:
-        status["initContainerStatuses"], spec["initContainers"] = list(init), [{"name": c["name"]} for c in init]
+        status["initContainerStatuses"], spec["initContainers"] = list(init), [
+            {"name": c["name"], "resources": resources.get(c["name"], {})} for c in init]
     if reason:
         status["reason"] = reason
     meta = {"name": name, "namespace": ns, "creationTimestamp": ts(minutes), "resourceVersion": "1",
@@ -52,27 +65,34 @@ def pod(name, ns, minutes, phase="Running", containers=None, init=(), deleting=F
     return {"metadata": meta, "spec": spec, "status": status}
 
 
+# (what they ask for and are held to: web's three pods alike; worker's memory limit and no CPU limit; the finished
+# and evicted pods' ask nothing of the node any more; api's init container asks for more CPU than its two containers)
+WEB = {"main": res(("100m", "128Mi"), ("500m", "256Mi"))}
 PODS = [
-    pod("web-7d9f-abcde", "shop", 5),
-    pod("web-7d9f-fghij", "shop", 3 * 24 * 60, containers=[ctr(restarts=2, restarted=20)]),  # (ready again lately)
+    pod("web-7d9f-abcde", "shop", 5, resources=WEB),
+    pod("web-7d9f-fghij", "shop", 3 * 24 * 60, containers=[ctr(restarts=2, restarted=20)],  # (ready again lately)
+        resources=WEB),
     pod("worker-5c4b-klmno", "jobs", 90, containers=[ctr(ready=False, restarts=7, waiting="CrashLoopBackOff")],
-        owner=("ReplicaSet", "worker-5c4b")),
+        owner=("ReplicaSet", "worker-5c4b"), resources={"main": res(("500m", "512Mi"), (None, "1Gi"))}),
     pod("batch-1-xyz", "jobs", 30, phase="Succeeded", containers=[ctr(ready=False, exited=("Completed", 0))],
-        owner=("Job", "batch-1")),
-    pod("old-web-pqrst", "shop", 600, deleting=True),
+        owner=("Job", "batch-1"), resources={"main": res(("200m", "256Mi"), ("1", "512Mi"))}),
+    pod("old-web-pqrst", "shop", 600, deleting=True, resources=WEB),
     pod("evicted-uvwxy", "jobs", 2000, phase="Failed", reason="Evicted",
-        containers=[ctr(ready=False, exited=("ContainerStatusUnknown", 137))]),
+        containers=[ctr(ready=False, exited=("ContainerStatusUnknown", 137))],
+        resources={"main": res(("1", "2Gi"), ("2", "4Gi"))}),
     pod("api-6f7c-mnopq", "shop", 2, containers=[ctr("api", ready=False), ctr("proxy")],  # (starting: api isn't ready)
-        init=[ctr("migrate", ready=False, exited=("Completed", 0))], owner=("ReplicaSet", "api-6f7c")),
+        init=[ctr("migrate", ready=False, exited=("Completed", 0))], owner=("ReplicaSet", "api-6f7c"),
+        resources={"api": res(("200m", "256Mi"), ("1", "512Mi")), "proxy": res(("50m", "64Mi")),
+                   "migrate": res(("300m", "128Mi"))}),
 ]
 METRICS = {"web-7d9f-abcde": ("250m", "128Mi"), "web-7d9f-fghij": ("1500000n", "64Mi"),
            "worker-5c4b-klmno": ("2", "1Gi"), "old-web-pqrst": ("10m", "32Mi"), "api-6f7c-mnopq": ("40m", "96Mi")}
 
 
-def node(name, role="control-plane"):
+def node(name, role="control-plane", cpu="4", memory="8023180Ki"):
     return {"metadata": {"name": name, "creationTimestamp": ts(9000),
                          "labels": {f"node-role.kubernetes.io/{role}": "true"}},
-            "status": {"nodeInfo": {"kubeletVersion": "v1.35.5"},
+            "status": {"nodeInfo": {"kubeletVersion": "v1.35.5"}, "allocatable": {"cpu": cpu, "memory": memory},
                        "addresses": [{"type": "InternalIP", "address": "10.0.0.2"}],
                        "conditions": [{"type": "Ready", "status": "True"}]}}
 SECRETS = [{"metadata": {"name": "db-creds", "namespace": "shop", "creationTimestamp": ts(100)},
@@ -317,10 +337,11 @@ def current(resource, context="k3d-dev"):
 
 
 def on_context(items, resource, context):
-    if context == "prod" and resource == "pods":
-        return items[:2]
+    if context == "prod" and resource == "pods":  # (on prod's workers)
+        return [{**p, "spec": {**p["spec"], "nodeName": f"prod-{i}"}} for i, p in zip((2, 3), items[:2])]
     if context == "prod" and resource == "nodes":
-        return [node("prod-1")] + [node(f"prod-{i}", "worker") for i in (2, 3)]
+        return [node("prod-1", cpu="3800m", memory="15Gi")] + [node(f"prod-{i}", "worker", "7800m", "31Gi")
+                                                               for i in (2, 3)]
     return items
 
 
@@ -485,6 +506,13 @@ def main():
         out(f"apiVersion: v1\nkind: Object\nmetadata:\n  name: {name}\n  namespace: "
             f"{hit['metadata'].get('namespace', '')}\nstatus:\n  phase: {hit.get('status', {}).get('phase', '')}\n")
     items = on_context(items, resource, context)
+    if fmt.startswith("custom-columns="):  # (NAME:.metadata.name,…, with --no-headers: a line each, by spaces)
+        def at(o, path):
+            for k in path.strip(".").split("."):
+                o = o.get(k) if isinstance(o, dict) else None
+            return "<none>" if o is None else str(o)
+        paths = [c.split(":", 1)[1] for c in fmt[len("custom-columns="):].split(",")]
+        out("".join("   ".join(at(o, p) for p in paths) + "\n" for o in items))
     if fmt == "name":  # (node/node-1)
         out("".join(f"{resource[:-1]}/{o['metadata']['name']}\n" for o in items))
     out(json.dumps({"apiVersion": "v1", "kind": "List", "items": items}))

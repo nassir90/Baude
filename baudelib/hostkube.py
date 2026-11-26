@@ -1,9 +1,10 @@
 """hostkube — the clusters this host's kubeconfig reaches, read for a head elsewhere (the phone's Kubernetes page): the
 desktop's own functions (kubedata), kubectl's answers as Freelens' pages and columns. Each kind's objects, an object's
-YAML, what controls an object, a pod deleted once it's asked (kube); a pod's log followed and a kind's list watched,
+YAML, what controls an object, a pod deleted once it's asked, the whole stack's CPU and memory (kube); a pod's log followed and a kind's list watched,
 on a connection of its own (follow). Secrets' values are never read, and kubectl is only ever given the arguments these
 build. No GTK."""
 import codecs
+import collections
 import json
 import os
 import select
@@ -25,6 +26,9 @@ PAGES = {p["resource"]: p for _title, pages in kd.KUBE_SECTIONS for p in pages}
 _CUSTOM = {}  # (context, definition) -> the page its objects have
 BATCH_S = 0.1   # a log's lines are sent this often at most
 WATCH_S = 1.0   # a watch's changes are sent this often at most
+HISTORY_S = 30 * 60  # Home's totals are kept this long (in memory: from the first time it's asked for a context)
+_HISTORY = {}  # context -> deque of (when, kd.kube_tally of every namespace), a sample each time Home is read
+_HISTORY_LOCK = threading.Lock()
 
 
 def _home(path):
@@ -111,7 +115,8 @@ def _connect(context):
     except RuntimeError:
         nodes = 0
     sections = [{"title": title, "icon": kd.KUBE_SECTION_ICONS.get(title, ""),
-                 "pages": [_page_json(p, not p.get("api") or p["api"] in resources or p["resource"] in resources)
+                 "pages": [_page_json(p, p["source"] == "summary" or not p.get("api") or p["api"] in resources or
+                                       p["resource"] in resources)
                            for p in pages]} for title, pages in kd.KUBE_SECTIONS]
     return {"sections": sections, "namespaces": [s for s in spaces if s], "nodes": nodes}
 
@@ -129,6 +134,38 @@ def _list(msg):
     if msg.get("crd") and msg.get("page") not in PAGES:
         out["page"] = _page_json(page)
     return out
+
+
+def _sample(when, tally, namespaces):
+    """A KubeSample: a history sample's totals in namespaces (None: every one)."""
+    rows = tally["namespaces"].values() if namespaces is None else \
+        [tally["namespaces"][ns] for ns in namespaces if ns in tally["namespaces"]]
+
+    def add(i):
+        vals = [r[i] for r in rows if r[i] is not None]
+        return sum(vals) if vals else None
+    return {"at": when, "cpu_requests": add(0) or 0, "cpu_used": add(1), "cpu_limits": add(2),
+            "memory_requests": add(3) or 0, "memory_used": add(4), "memory_limits": add(5)}
+
+
+def _summary(msg):
+    """Home: the stack's CPU and memory in the namespaces asked for (every one without), and how they went: a sample
+    is kept each time it's read (no oftener than every KUBE_REFRESH_S / 2), for HISTORY_S, in this process's memory."""
+    context, namespaces = msg.get("context"), msg.get("namespaces")
+    try:
+        read = kd.kube_summary_read(context)
+    except (RuntimeError, ValueError) as e:
+        return {"fault": _fault(getattr(e, "said", str(e)), context)}
+    now = time.time()
+    with _HISTORY_LOCK:
+        samples = _HISTORY.setdefault(context, collections.deque())
+        if not samples or now - samples[-1][0] >= kd.KUBE_REFRESH_S / 2:
+            samples.append((now, kd.kube_tally(read)))
+        while samples and now - samples[0][0] > HISTORY_S:
+            samples.popleft()
+        history = [_sample(when, tally, namespaces) for when, tally in samples]
+    return {"summary": {**kd.kube_summary(read, namespaces), "history": history, "every": kd.KUBE_REFRESH_S,
+                        "minutes": HISTORY_S // 60}}
 
 
 def _yaml(msg):
@@ -174,7 +211,10 @@ ARGS = ("context", "namespace", "name", "pod", "container", "kind", "page", "crd
 
 def _unsafe(msg):
     """The first name in a request that kubectl would take for an option (one that starts with -), or None."""
-    return next((k for k in ARGS if isinstance(msg.get(k), str) and msg[k].startswith("-")), None)
+    return next((k for k in ARGS if isinstance(msg.get(k), str) and msg[k].startswith("-")), None) or \
+        ("namespaces" if msg.get("namespaces") is not None and (not isinstance(msg["namespaces"], list) or
+                                                                not all(isinstance(n, str) for n in msg["namespaces"]))
+         else None)
 
 
 def answer(server, msg):
@@ -197,12 +237,14 @@ def answer(server, msg):
             return {"what": what, **_yaml(msg)}
         if what == "owner":
             return {"what": what, **_owner(msg)}
+        if what == "summary":
+            return {"what": what, **_summary(msg)}
         if what == "delete":
             return {"what": what, "said": kd.kube_delete(context, msg.get("namespace"), msg.get("name"),
                                                           bool(msg.get("force")))}
     except (RuntimeError, ValueError, OSError) as e:
         return {"what": what, "error": str(e)}
-    return {"what": what, "error": "kube takes contexts, connect, list, yaml, owner or delete"}
+    return {"what": what, "error": "kube takes contexts, connect, list, yaml, owner, summary or delete"}
 
 
 # ---------------------------------------------------------------- following

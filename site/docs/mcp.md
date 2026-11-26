@@ -229,7 +229,7 @@ The host's Claude and Codex subscription accounts (hostaccounts): list them; add
 | `what` | `list` \| `add` \| `rename` \| `token` \| `remove` \| `select` \| `use` \| `usage` \| `sign_in` \| `code` | yes | What to do. |
 | `provider` | `claude` \| `codex` |  | add, select, sign_in (a new account): whose. |
 | `id` | string |  | rename, token, remove, select, use, usage, sign_in: the account ("" for the CLI's own sign-in, select, use and usage only). |
-| `session` | string |  | use: the chat whose account it is, one of the host's sessions whose model is the account's provider's. |
+| `session` | string |  | use: the chat whose account it is, one of the host's sessions whose model is the account's provider's. sign_in (a Claude account's) and token: the chat it's for, whose sign-in (ChatLogin) its host moves as it goes, as a login request's, if the asker may read the chat (Agent Management's read). |
 | `name` | string |  | add, rename, sign_in (a new account): its name. |
 | `token` | string |  | add (Claude), token: a token from claude setup-token. |
 | `home` | string |  | add (Codex): an existing CODEX_HOME on the host, signed in with ChatGPT and keeping its credentials in a file. |
@@ -386,6 +386,29 @@ This connection detached from a session (an ephemeral one its head's done with d
 | Field | Type | Required | What it is |
 |---|---|---|---|
 | `session` | string | yes | The session's id. |
+
+#### `docker` (Docker)
+
+Docker's containers, images, volumes, networks and Compose projects on the host, read and acted on through its docker CLI: its contexts and the sidebar's categories (contexts), a category's objects (list), an object inspected (inspect), and a container or Compose project started, stopped, restarted or removed (start, stop, restart, remove; an image, a volume or a network removed).
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `what` | `contexts` \| `list` \| `inspect` \| `start` \| `stop` \| `restart` \| `remove` |  | What to do. |
+| `context` | string |  | The context, by its name, as contexts lists it. |
+| `page` | string |  | list, inspect and the actions: the category's page, by its key. |
+| `id` | string |  | inspect and the actions: the object, by its id (a Compose project's, its name). |
+| `format` | `json` \| `yaml` |  | inspect: as JSON (the default) or YAML. |
+
+#### `docker_follow` (DockerFollow)
+
+A container's or a Compose project's log, followed (logs): one a connection, the answers docker_text till docker_end or the connection goes (docker is stopped then).
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `what` | `logs` |  | What to follow. |
+| `context` | string |  | The context, by its name. |
+| `page` | string |  | The category's page, by its key: a container's or a Compose project's. |
+| `id` | string |  | The container's id, or the Compose project's name. |
 
 #### `edit_adopt` (EditAdopt)
 
@@ -670,11 +693,12 @@ A folder on the host: any on a computer's (a mesh member may start a session in 
 
 #### `login` (Login)
 
-claude auth login run on the host (a chat's claude signed in again there): one a connection, its answers login_said as it says each line, then login_end; the connection's going stops it.
+claude auth login run on the host (a chat's claude signed in again there): one a connection, its answers login_said as it says each line, then login_end; the connection's going stops it. session: the chat it's for, whose sign-in (ChatLogin) its host moves as it goes and tells every head attached to it (login_state).
 
 | Field | Type | Required | What it is |
 |---|---|---|---|
 | `args` | array of string |  | claude auth login's arguments (--console, --sso, --email <address>). |
+| `session` | string/null |  | The chat it signs in for, if any: ignored (the sign-in runs, for no chat) if the asker may not read it (Agent Management's read). |
 
 #### `login_code` (LoginCode)
 
@@ -1181,6 +1205,7 @@ attach's answer.
 |---|---|---|---|
 | `session` | Session |  | The session, as it's listed now. |
 | `asks` | array of object |  | What it's asking, not answered yet: its agent's control requests (can_use_tool) as they came. |
+| `login` | ChatLogin? |  | Its sign-in, if a turn failed for want of it and that's not been put right yet (ChatLogin): the sign-in card every head draws. |
 | `writes` | boolean |  | Whether the head may change the chat (Agent Management's write, the chat's own first): false, it only reads it, and answers none of its asks. |
 
 #### `autofix` (AutofixReply)
@@ -1301,6 +1326,41 @@ list_dir's answer: its entries, folders first (.git left out), DIR_LIMIT at most
 | `more` | boolean |  | There are more. |
 | `error` | string |  | Why it can't be read. |
 
+#### `docker` (DockerReply)
+
+docker's answer: contexts {contexts, sections}; list {columns, rows}; inspect {text, file}; start, stop, restart and remove {said}; fault when Docker can't be reached; missing when there's no docker.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `what` | string |  | What was done. |
+| `error` | string |  | What's wrong with the request. |
+| `fault` | DockerFault |  | Docker can't be reached: why. |
+| `contexts` | array of DockerContext |  | contexts: docker's contexts, and Colima's and Podman's found besides. |
+| `sections` | array of DockerSection |  | contexts: the sidebar's categories. |
+| `columns` | array of DockerColumn |  | list: the page's columns. |
+| `rows` | array of DockerRow |  | list: the objects. |
+| `text` | string |  | inspect: what docker inspect says of it. |
+| `file` | string |  | inspect: what it is called, for its highlighting. |
+| `said` | string |  | start, stop, restart, remove: what docker said. |
+| `missing` | Dep |  | docker isn't on the host: the Docker view shows this in its place. |
+
+#### `docker_end` (DockerEnd)
+
+docker_follow's last answer: docker ended.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `code` | integer |  | Its exit code. |
+| `said` | string |  | What it wrote, for a failure. |
+
+#### `docker_text` (DockerText)
+
+docker_follow logs: more of the log.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `text` | string |  | The lines. |
+
 #### `edit` (EditReply)
 
 edit_propose's, edit_revise's, edit_withdraw's and edit_decide's answer: the edit as it is now.
@@ -1370,7 +1430,7 @@ Anything wrong, with the request's req. A request whose op the host doesn't take
 | `error` | string | yes | What's wrong. |
 | `code` | `unsupported_operation` \| `invalid_data_type` \| `access_denied` |  | One of the schema's own refusals. |
 | `detail` | string |  | A refusal's: what was wrong (the op, or the field and why), for a person to read; code, not this, says which refusal it is. |
-| `denied` | `shell` \| `browser_read` \| `browser_write` \| `providers` \| `model_files` \| `spawn` \| `manage_read` \| `manage_write` \| `kube_read` \| `kube_write` \| `databases` \| `subscriptions_read` \| `subscriptions_write` \| `access_read` \| `access_write` |  | access_denied's: the rule refused (AccessRules'): a capability, or one side of one split into read and write. |
+| `denied` | `shell` \| `browser_read` \| `browser_write` \| `providers` \| `model_files` \| `spawn` \| `manage_read` \| `manage_write` \| `kube_read` \| `kube_write` \| `docker_read` \| `docker_write` \| `databases` \| `subscriptions_read` \| `subscriptions_write` \| `access_read` \| `access_write` |  | access_denied's: the rule refused (AccessRules'): a capability, or one side of one split into read and write. |
 | `plain` | boolean |  | Said for the user as it is. |
 | `gone` | GoneFolder |  | A session's folder gone and not made again. |
 | `missing` | Dep |  | What a chat's program needs that the host hasn't (claude, codex): error says what to install. |
@@ -1941,6 +2001,15 @@ A session's agent stopped.
 | `code` | integer/null |  | Its exit code. |
 | `stopped` | boolean |  | Told to (stop). |
 
+#### `login_state` (LoginState)
+
+A chat's sign-in changed on its host (a turn failed for want of it, a sign-in for it started, finished, failed or was cancelled): told every head attached to it, as attach's answer tells one attaching.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `session` | string | yes | The session's id. |
+| `login` | ChatLogin? |  | Its sign-in now; null once a turn's gone through, or a sign-in for it with nothing to sign in for before was cancelled. |
+
 #### `mcp_late` (McpLate)
 
 A call the head answered after it was failed (its connection was gone), as it did run.
@@ -2088,6 +2157,8 @@ A host's rule for each of its capabilities, by name: a capability split into wha
 | `manage_write` | AccessRule | yes | Its chats as they are, changed: written in, held messages sent or dropped, asks answered, stopped, renamed, archived, deleted, their folders moved, tools allowed always (attach's only where it adds some, its env only where it changes it), made Bots, their Auto-fix turned on or off, a Bot's memory written and tasks set, run and stopped, a chat adopted, moved to another subscription (with Subscriptions' write); Record's notebooks here written, and edits to their pages proposed, revised, withdrawn, decided and adopted (notes' write, edit_*). Lets a member read them too. A chat's own rule (AccessChat's manage_write) goes before this. |
 | `kube_read` | AccessRule | yes | Its machine's Kubernetes clusters read: contexts, lists, YAML, owners (kube) and logs and watches (kube_follow), and the clusters' parts of @. |
 | `kube_write` | AccessRule | yes | Its machine's Kubernetes clusters changed: a pod deleted (kube's delete). Lets a member read them too. |
+| `docker_read` | AccessRule | yes | Its machine's Docker read: contexts, lists, an object inspected (docker) and logs (docker_follow). A shell in a container is a terminal: Shell's. |
+| `docker_write` | AccessRule | yes | Its machine's Docker changed: a container or Compose project started, stopped, restarted or removed, an image, volume or network removed (docker's start, stop, restart, remove). Lets a member read it too. |
 | `databases` | AccessRule | yes | Its machine's databases (databases). |
 | `subscriptions_read` | AccessRule | yes | Its subscription accounts read: listed, and their usage (accounts' list and usage). |
 | `subscriptions_write` | AccessRule | yes | Its subscription accounts changed: added, renamed, a token replaced, removed (signed out), a provider's default picked, a chat moved to one (with the chat's Agent Management write too), signed in to (accounts' sign_in and code, login, login_code). Lets a member read them too. |
@@ -2183,6 +2254,18 @@ A checkout's branch.
 | `worktree` | string/null |  | The checkout it's in. |
 | `remote` | boolean |  | A remote branch. |
 | `touched` | boolean |  | This chat touched it (the list's first part). |
+
+#### ChatLogin
+
+A chat's sign-in to Claude, as its host has it: every head draws the chat's sign-in card from this alone (LoginCard), whichever head started what's going on.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `state` | `needed` \| `signing_in` \| `signed_in` \| `failed` | yes | needed: a turn failed for want of signing in (and every sign-in started since was cancelled); signing_in: claude auth login runs on the host for it; signed_in: it finished; failed: it ended without signing in. |
+| `expired` | boolean |  | needed because the sign-in there was ran out (expired, reached its time limit, can't be renewed), not because there's none. |
+| `reason` | string/null |  | needed: the first sentence of Claude's own error; failed: why the sign-in didn't finish. |
+| `who` | string/null |  | signed_in: who as, as claude auth status says it; null if it didn't say, or the head may not read Subscriptions. |
+| `turn` | integer |  | needed: which of the chat's turns that failed for want of signing in it's for, counted on its host since it started: a new one each time one fails, so every head moves the card to that turn. |
 
 #### Clock
 
@@ -2317,6 +2400,72 @@ An entry in a folder.
 | `dir` | boolean |  | A folder. |
 | `size` | integer |  | A file's size. |
 | `ignored` | boolean |  | git ignores it. |
+
+#### DockerColumn
+
+A table's column.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `title` | string | yes | Its title. |
+| `kind` | string/null |  | name, status, age, or null. |
+
+#### DockerContext
+
+A Docker context the host can reach: one of docker context ls, or Colima's or Podman's socket found besides.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `name` | string | yes | Its name. |
+| `current` | boolean |  | docker's current context. |
+
+#### DockerFault
+
+Why Docker can't be reached, as docker's failure says.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `title` | string | yes | What went wrong. |
+| `why` | string |  | What docker said that says why. |
+| `fix` | string/null |  | A command to run in a terminal that fixes it (Docker started), or null. |
+| `said` | string |  | All docker wrote. |
+
+#### DockerPage
+
+A page of the Docker view: what one of its sidebar's rows lists.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `title` | string | yes | Its name, as the sidebar has it. |
+| `key` | string | yes | What it's asked for by: running, containers, images, volumes, networks or compose. |
+| `what` | string |  | What it lists, in a word for a count: containers, images… |
+
+#### DockerRow
+
+An object's row.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `id` | string | yes | What it's asked for by: a container's, image's, volume's or network's id, a Compose project's name. |
+| `name` | string | yes | Its name. |
+| `cells` | array of string |  | Each column's text. |
+| `keys` | array of any |  | Each column's sort key: a number or text. |
+| `tones` | array of string |  | Each column's tone (ok, warn, bad), or empty. |
+| `tips` | array of string |  | Each column's tooltip, or empty (an age's: its time in full). |
+| `actions` | array of string |  | What can be done to it as it is: start, stop, restart, remove. |
+| `logs` | boolean |  | It has a log to follow (docker_follow). |
+| `shell` | array of string |  | A running container's: the command that opens a shell in it (bash if it has it, else sh), for a terminal on the host; else empty. |
+| `running` | boolean |  | A container that's running, or a Compose project with one running. |
+
+#### DockerSection
+
+A category of the Docker view's sidebar.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `title` | string | yes | Its name. |
+| `icon` | string |  | Its icon's name, or empty. |
+| `pages` | array of DockerPage |  | Its pages (one with the category's own name: the category is that page). |
 
 #### Edit
 

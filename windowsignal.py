@@ -281,6 +281,7 @@ class WindowSignal:
         self.sidebar.monitors.clear()
         self.sidebar.drop_midnight()
         self.kube.close()
+        self.docker.close()
         Gtk.StyleContext.remove_provider_for_display(self.get_display(), self.zoom_css)  # (its zoom: the display's)
         self.clear_transcript(closing=True)
         self.reset_stream_state()  # (the cards by id, too)

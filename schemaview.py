@@ -955,7 +955,7 @@ class SchemaView(Gtk.Box):
     def on_top(self):
         """Whether it's open and on top (the Kubernetes or Terminal view isn't over it): Ctrl+scroll and Ctrl +/−/0 are its
         diagram's then, not the chat's under it."""
-        return self.out.here() and not self.win.kube.out.here() and not self.win.terminal.get_visible()
+        return self.out.here() and not self.win.kube.out.here() and not self.win.docker.out.here() and not self.win.terminal.get_visible()
 
     def on_select(self, table):
         self.rows_btn.set_sensitive(table is not None)

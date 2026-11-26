@@ -240,7 +240,7 @@ def need(key, feature):
 
 
 # (Settings → Dependencies' groups, in its order: what needs them)
-GROUPS = ("deps.providers", "deps.git_github", "window.kubernetes", "window.database_schemas", "deps.multiplex",
+GROUPS = ("deps.providers", "deps.git_github", "window.kubernetes", "window.docker", "window.database_schemas", "deps.multiplex",
           "mesh_versions.emission", "side_panel.signal", "telemetry.title")
 
 

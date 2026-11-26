@@ -43,6 +43,14 @@
       "$ref": "AccessRule.json",
       "description": "Its machine's Kubernetes clusters changed: a pod deleted (kube's delete). Lets a member read them too."
     },
+    "docker_read": {
+      "$ref": "AccessRule.json",
+      "description": "Its machine's Docker read: contexts, lists, an object inspected (docker) and logs (docker_follow). A shell in a container is a terminal: Shell's."
+    },
+    "docker_write": {
+      "$ref": "AccessRule.json",
+      "description": "Its machine's Docker changed: a container or Compose project started, stopped, restarted or removed, an image, volume or network removed (docker's start, stop, restart, remove). Lets a member read it too."
+    },
     "databases": {
       "$ref": "AccessRule.json",
       "description": "Its machine's databases (databases)."
@@ -75,6 +83,8 @@
     "manage_write",
     "kube_read",
     "kube_write",
+    "docker_read",
+    "docker_write",
     "databases",
     "subscriptions_read",
     "subscriptions_write",

@@ -1122,7 +1122,7 @@ access_set's answer: the rules as they are now.
 
 #### `accounts` (AccountsReply)
 
-accounts' answer: the accounts and defaults as they are after it, and whether the host has claude and what it lacks of each provider's program (with error, if it couldn't be done); usage's, the limits; sign_in's, each line the sign-in writes (line alone), then its end.
+accounts' answer: the accounts and defaults as they are after it, and whether the host has claude and what it lacks of each provider's program and each subscription's last read usage (with error, if it couldn't be done); usage's, the limits; sign_in's, each line the sign-in writes (line alone), then its end.
 
 | Field | Type | Required | What it is |
 |---|---|---|---|
@@ -1137,6 +1137,7 @@ accounts' answer: the accounts and defaults as they are after it, and whether th
 | `signed_in` | boolean |  | sign_in: its end, signed in. |
 | `claude_cli` | boolean |  | Whether the host has claude: a Claude account there is a folder signed in to with claude auth login; without it, a token from claude setup-token. |
 | `missing` | object |  | What the host lacks of a provider's program, by provider (codex: its Codex CLI, as deps says it); a provider that's there isn't in it. Shown in place of Add account. |
+| `last_usage` | object |  | Each Claude subscription's usage as the host last read it, by id ("" for the CLI's own sign-in), where that read said its limits: a client shows it greyed till its own usage read answers. |
 | `who` | string/null |  | sign_in (Claude's), signed in: who as, as claude auth status says. |
 
 #### `activated` (Activated)
@@ -3084,6 +3085,15 @@ One of a subscription's limits, as Claude Code's get_usage says it.
 | `key` | string |  | The limit's own name in Claude Code's usage (five_hour, seven_day…). |
 | `resets` | number |  | When it resets, in seconds since 1970 (left out where the usage doesn't say). |
 | `percent` | number | yes | How much of it is used, in percent. |
+
+#### UsageReading
+
+A subscription's usage as its host last read it: its limits and when.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `usage` | array of UsageLimit | yes | The limits as that read said them. |
+| `read` | number | yes | When it was read, in seconds since 1970. |
 
 #### WaitTarget
 

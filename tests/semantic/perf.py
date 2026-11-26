@@ -16,7 +16,16 @@ scene["nodes"] = [n for n in scene["nodes"] if n["id"] in ("floor", "lamp")] + [
                "panel": {"show": "meta_card", "px": [340, 150], "size": [1.13, 0.5]}}}]
 if os.environ.get("NOBLOOM"):
     scene.pop("bloom", None)
-v = scenehost.SceneView(scene, wd, {"meta_card": lambda o: cards[o["id"]]}, theme=SAMPLE, trusted=True)
+if os.environ.get("SCENE") == "station":  # (the Space Station theme as it is, its 14 panels: station.py's world)
+    import station
+    station.load_station_css()
+    v, wd = station.station_view()
+    scene = v.scene
+    if os.environ.get("NOBLOOM"):
+        scene.pop("bloom", None)
+    N = None
+else:
+    v = scenehost.SceneView(scene, wd, {"meta_card": lambda o: cards[o["id"]]}, theme=SAMPLE, trusted=True)
 if os.environ.get("RENDER_ONLY"):  # (the view still: only GL drawing each frame, no layout)
     v.advance = lambda dt: (v.stats["frames"].append(0.0), v.area.queue_render())
 if os.environ.get("LAYOUT_ONLY"):  # (layout each frame, GL not asked to draw again)
@@ -57,7 +66,11 @@ if os.environ.get("SAMPLE"):  # (macOS's sample: where the main thread's time go
     subprocess.Popen(["sample", str(os.getpid()), "2", "-file", os.environ["SAMPLE"]], stdout=subprocess.DEVNULL,
                      stderr=subprocess.DEVNULL)
 still = measure(3.0)
-target = cards["c2"] if N > 2 else cards["c0"]
+if N is None:  # (the station: its working chat's Bash card)
+    N = sum(1 for n in v.nodes.values() if n.panel is not None and n.widget is not None)
+    target = next(n.widget for n in v.nodes.values() if n.widget is not None and getattr(n.widget, "obj", {}).get("id") == "h1/a").messages.get_last_child()
+else:
+    target = cards["c2"] if N > 2 else cards["c0"]
 k = [0]
 def grow():  # (a tool card's result changing: its panel's picture made again)
     k[0] += 1

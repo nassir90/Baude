@@ -1,0 +1,7 @@
+{
+  "name": "space-station",
+  "kind": "scene",
+  "description": "A basic space station: a ring, a hub and solar wings under the stars, Baude's chats, sessions, Meta's cards and a host on its decks.",
+  "tokens": true,
+  "skin": {"css": true}
+}

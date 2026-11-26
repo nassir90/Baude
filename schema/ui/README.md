@@ -177,6 +177,16 @@ An entry or a part may carry:
   Agent MCP requirements are different to that of the wire (which can be as detailed as we want). They still are
   basically thin clients." (source: BaudeInternal#200; session b3845b21-55ac-4aab-a769-fb8517403c51, message
   868770b1-06c0-44a3-bdb9-c1851cf4b39a)
+- **A scene theme is a test of how thin the apps are.** A scene (the Space Station's, tests/semantic/space-station)
+  places Baude's own widgets and windows in a lit space, and what it shows of them is what the wire and schema/types
+  say: SceneObject.json's things, made from the host's answers. Whatever a scene had to take from an app's own code
+  instead (its state, its rules) is listed with the scene, under Leaks, with the wire message it would need, till the
+  wire carries it. The owner asked for a "Really basic 3D space station with Baude widgets and windows in differnet
+  placies, 3D, specular diffuse lighting, bloom" (2026-11-26), and: "Baude GTK normal is merely a cradle for limmering
+  functionality. The true value / edge is revealed by swapping, stripping and rebuilding the frontend and seeing what
+  of our hard work remains of it." Source: `[{"session": "b3845b21-55ac-4aab-a769-fb8517403c51", "message":
+  "96faec93-ffcb-4edc-a5bb-b9af7c972ea9"}, {"session": "b3845b21-55ac-4aab-a769-fb8517403c51", "message":
+  "1d3ef2c7-6d97-4480-a1e2-b1526eab2287"}]`.
 - **A pull request is a pill.** Wherever an app draws a pull request (the Git page's list and log, a reply's or
   message's GitHub pull-request link or bare #12, Signal's links, Record's chat and notes), it's a pill: git's merge
   logo, a space, then the number, never a #, coloured by where it stands (green open, grey draft or closed, red changes

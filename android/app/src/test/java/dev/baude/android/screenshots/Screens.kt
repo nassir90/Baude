@@ -276,6 +276,26 @@ abstract class Screens(private val theme: String) {
         screen("40h-chat-access")
     }
 
+    // (a capability's members opened: a check each, Everybody over them)
+    @Test fun accessOpen() {
+        accessFixture()
+        show { SettingsScreen({}, {}, page = 4) }
+        laidOut()
+        tap(dev.baude.android.PhoneAccess.named("model_files"))
+        layOut()
+        screen("40g-access-open")
+    }
+
+    // (a chat's members opened: Same as Host over them)
+    @Test fun chatAccessOpen() {
+        accessFixture()
+        show { dev.baude.android.ChatAccess(Item("h1", Mesh.sessions.getValue("h1")[1], 0)) {} }
+        laidOut()
+        tap("studio")
+        layOut()
+        screen("40h-chat-access-open")
+    }
+
     // (Meta's row for a capability of the host it runs on, as show setting:access_providers draws it under a reply)
     @Test fun metaAccess() {
         accessFixture()

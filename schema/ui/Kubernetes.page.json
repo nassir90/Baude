@@ -499,21 +499,31 @@
     },
     {
       "name": "status line",
-      "shows": "A single dim line under the table, truncated at the end, of parts joined with \" · \": a note first while it's fresh (a delete's result, an owner not found; 30 seconds), the count (\"7 pods\", or \"3 pods of 7\" when the filter or namespaces hide some), \"In <namespaces>\" folded into the count when namespaces are chosen (\"3 pods of 7 in shop, jobs\"), the context's name, \"live\" while the list is watched, the metrics note (\"CPU and memory from the metrics API, every 10 s\", or \"no metrics API on this cluster (CPU and memory N/A)\"; Pods and Nodes only) and finally \"read-only but for the deletes you confirm\". The same line says progress: \"Connecting to <context>…\", \"Reading <kinds> on <context>…\", \"Finding <kind>/<name>…\", and, when a watch can't be kept, \"can't watch <kinds> (<why>): read every <n> s instead\".",
+      "shows": "A single dim line under the table, truncated at the end, of parts joined with \" · \": a note first while it's fresh (a delete's result, an owner not found; 30 seconds), the count (\"7 pods\", or \"3 pods of 7\" when the filter or namespaces hide some), \"In <namespaces>\" folded into the count when namespaces are chosen (\"3 pods of 7 in shop, jobs\") and the metrics note (\"CPU and memory from the metrics API, every 10 s\", or \"no metrics API on this cluster (CPU and memory N/A)\"; Pods and Nodes only). The same line says progress: \"Connecting to <context>…\", \"Reading <kinds> on <context>…\", \"Finding <kind>/<name>…\", and, when a watch can't be kept, \"can't watch <kinds> (<why>): read every <n> s instead\".",
       "copy": [
         "kube.count",
         "kube.count_of",
         "kube.in_namespaces",
-        "kube.live",
         "kube.metrics",
         "kube.no_metrics",
-        "kube.read_only",
         "kube.connecting",
         "kube.reading",
         "kube.finding",
         "kube.cant_watch",
         "kube.owner_missing",
         "kube.no_page"
+      ],
+      "decisions": [
+        {
+          "said": "\"Read-only but for the deletes you confirm\" / \"k33d-slice-kub1  (o ious from top bar)\" / \"live\" not needd / \"36 pods\" fine",
+          "rule": "Every app's Kubernetes status line is the count (\"36 pods\") and, for Pods and Nodes, the metrics note (after a fresh note, if any), and nothing else while it shows a list: no context name (the bar has it), no \"live\", no read-only note",
+          "decided": "2026-11-26",
+          "source": [
+            {
+              "issue": "BaudeInternal#252"
+            }
+          ]
+        }
       ]
     },
     {
@@ -604,6 +614,23 @@
     {
       "name": "another host",
       "shows": "The bar names the host picked; its contexts, its clusters' objects, YAML, logs and shells are read and run there by its host process. A host that can't be reached says \"<host>: <why>\" in the status line."
+    }
+  ],
+  "removed": [
+    {
+      "name": "The context's name, \"live\" and \"read-only but for the deletes you confirm\" in the status line",
+      "apps": [
+        "baude",
+        "record",
+        "phone"
+      ],
+      "why": "The owner: \"Read-only but for the deletes you confirm\" / \"k33d-slice-kub1  (o ious from top bar)\" / \"live\" not needd / \"36 pods\" fine",
+      "decided": "2026-11-26",
+      "source": [
+        {
+          "issue": "BaudeInternal#252"
+        }
+      ]
     }
   ],
   "decisions": [

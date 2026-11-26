@@ -1229,9 +1229,7 @@ class KubeView(Gtk.Box):
             wording.say("kube.count", n=n, what=what)
         if self.ns_shown is not None and self.table_page["namespaced"]:
             shown = wording.say("kube.in_namespaces", shown=shown, namespaces=self.ns_summary())
-        bits = [self.note and self.note[1] > time.monotonic() and self.note[0], shown,
-                self.context, self.watch is not None and wording.say("kube.live"), self.metrics_note,
-                wording.say("kube.read_only")]
+        bits = [self.note and self.note[1] > time.monotonic() and self.note[0], shown, self.metrics_note]
         self.say(" · ".join(b for b in bits if b))
 
     # ---- an object: its YAML; a namespace or a custom resource's definition, opened

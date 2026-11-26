@@ -136,7 +136,6 @@ object TelemetryStore {
             val swap = swap()
             write("metrics", listOf(JSONObject().put("at", now / 1000.0).put("load", JSONObject.NULL)
                 .put("memory_total", mem.totalMem).put("memory_used", mem.totalMem - mem.availMem)
-                .put("memory_available", mem.availMem)
                 .put("swap_total", swap?.first ?: JSONObject.NULL).put("swap_used", swap?.second ?: JSONObject.NULL)
                 .put("memory_pressure", if (mem.lowMemory) "critical" else "normal").put("memory_stall", JSONObject.NULL)
                 .put("procs", JSONArray().put(proc))))

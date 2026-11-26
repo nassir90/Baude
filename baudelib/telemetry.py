@@ -168,7 +168,7 @@ def _mac_memory():
     if libc.host_statistics64(host, 4, ctypes.byref(vm), ctypes.byref(count)) == 0:  # (HOST_VM_INFO64)
         # Activity Monitor's Memory Used: app memory (anonymous, less purgeable), wired and compressed
         used = (max(0, vm.internal - vm.purgeable) + vm.wire + vm.compressor) * page.value
-        out.update(memory_used=used, memory_available=max(0, total.value - used))
+        out.update(memory_used=used)
     swap = _SwapUsage()
     if _sysctl("vm.swapusage", swap):
         out.update(swap_total=swap.total, swap_used=swap.used)
@@ -182,7 +182,7 @@ def _linux_memory():
     try:
         with open("/proc/meminfo") as f:
             info = {k: int(v.split()[0]) * 1024 for k, v in (line.split(":", 1) for line in f if ":" in line)}
-        out.update(memory_total=info["MemTotal"], memory_available=info["MemAvailable"],
+        out.update(memory_total=info["MemTotal"],
                    memory_used=info["MemTotal"] - info["MemAvailable"])
         if "SwapTotal" in info:
             out.update(swap_total=info["SwapTotal"], swap_used=info["SwapTotal"] - info.get("SwapFree", 0))
@@ -199,13 +199,13 @@ def _linux_memory():
 
 def memory():
     """This machine's memory, swap and memory pressure, as a TelemetrySample's fields (each None if it can't be
-    told): bytes in use and available (used and available make the total), swap in use of its total, macOS's
+    told): bytes in use, swap in use of its total, macOS's
     pressure level and Linux's share of the last 10 seconds some task stalled waiting on memory (PSI's some avg10)."""
-    out = dict.fromkeys(("memory_total", "memory_used", "memory_available", "swap_total", "swap_used",
+    out = dict.fromkeys(("memory_total", "memory_used", "swap_total", "swap_used",
                          "memory_pressure", "memory_stall"))
     try:
         out.update(_mac_memory() if sys.platform == "darwin" else _linux_memory())
-    except (OSError, AttributeError, TypeError, ValueError):
+    except (OSError, AttributeError, TypeError, ValueError, ctypes.ArgumentError):
         pass
     return out
 

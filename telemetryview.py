@@ -290,7 +290,8 @@ def said_size(n):
 
 def said_pressure(s):
     if s.get("memory_pressure"):
-        return wording.say(f"telemetry.pressure_{s['memory_pressure']}")
+        key = f"telemetry.pressure_{s['memory_pressure']}"
+        return wording.say(key) if wording.has(key) else str(s["memory_pressure"])
     return wording.say("telemetry.stalled", percent=f"{s['memory_stall']:.1f}")
 
 
@@ -542,9 +543,7 @@ class Page(Adw.PreferencesPage):
         if s.get("memory_total"):
             rows.append(row(wording.say("bot_memory.title"), wording.say(
                 "telemetry.memory_of", used=said_size(s.get("memory_used")), total=said_size(s["memory_total"]))))
-        if s.get("memory_available") is not None:
-            rows.append(row(wording.say("telemetry.available"), said_size(s["memory_available"])))
-        if s.get("swap_total") is not None:
+        if s.get("swap_total"):
             rows.append(row(wording.say("telemetry.swap"), wording.say(
                 "telemetry.memory_of", used=said_size(s.get("swap_used")), total=said_size(s["swap_total"]))))
         if s.get("memory_pressure") or s.get("memory_stall") is not None:

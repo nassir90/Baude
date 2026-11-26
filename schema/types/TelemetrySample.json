@@ -29,21 +29,14 @@
         "integer",
         "null"
       ],
-      "description": "Its memory in use, in bytes (macOS: Activity Monitor's Memory Used, app memory, wired and compressed; Linux and a phone: the total less what's available)."
-    },
-    "memory_available": {
-      "type": [
-        "integer",
-        "null"
-      ],
-      "description": "Its memory available to start new work without swapping, in bytes (Linux's MemAvailable, Android's availMem; macOS: the total less what's in use)."
+      "description": "Its memory in use, in bytes (macOS: Activity Monitor's Memory Used, app memory, wired and compressed; Linux and a phone: the total less what's available to start new work without swapping)."
     },
     "swap_total": {
       "type": [
         "integer",
         "null"
       ],
-      "description": "Its swap, in bytes (macOS grows it as it's needed; a phone's is zram)."
+      "description": "Its swap, in bytes (macOS grows it as it's needed; a phone's is zram); 0 or null where it has none."
     },
     "swap_used": {
       "type": [

@@ -326,7 +326,7 @@ abstract class Screens(private val theme: String) {
                         .apply { if (k == "turn_ended") put("seconds", 131.4) } }))
                 "metrics" -> out.put("metrics", org.json.JSONArray(listOf(org.json.JSONObject().put("at", now)
                     .put("load", org.json.JSONArray(listOf(2.41, 2.10, 1.98))).put("memory_total", 17_179_869_184L)
-                    .put("memory_used", 11_811_160_064L).put("memory_available", 5_368_709_120L)
+                    .put("memory_used", 11_811_160_064L)
                     .put("swap_total", 3_221_225_472L).put("swap_used", 1_288_490_188L).put("memory_pressure", "normal")
                     .put("memory_stall", org.json.JSONObject.NULL).put("procs", org.json.JSONArray(listOf(
                         org.json.JSONObject().put("app", "host").put("pid", 101).put("cpu", 1.4).put("rss", 148_897_792L),

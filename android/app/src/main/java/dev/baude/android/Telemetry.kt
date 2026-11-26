@@ -306,8 +306,7 @@ fun TelemetryPage() {
                 rows.add(valueRow(Wording.Telemetry.load, l.joinToString(" · ") { String.format(Locale.ROOT, "%.2f", it.toDouble()) })) }
             s.memoryTotal?.let { t -> rows.add(valueRow(Wording.BotMemory.title,
                 Wording.Telemetry.memoryOf(used = saidSize(s.memoryUsed?.toLong()), total = saidSize(t.toLong())))) }
-            s.memoryAvailable?.let { rows.add(valueRow(Wording.Telemetry.available, saidSize(it.toLong()))) }
-            s.swapTotal?.let { t -> rows.add(valueRow(Wording.Telemetry.swap,
+            s.swapTotal?.takeIf { it.toLong() > 0 }?.let { t -> rows.add(valueRow(Wording.Telemetry.swap,
                 Wording.Telemetry.memoryOf(used = saidSize(s.swapUsed?.toLong()), total = saidSize(t.toLong())))) }
             pressureSaid(s)?.let { rows.add(valueRow(Wording.Telemetry.memoryPressure, it)) }
             for (p in s.procs.orEmpty().sortedBy { PROFILED.indexOf(it.app).let { i -> if (i < 0) 3 else i } })

@@ -19,7 +19,6 @@
     "machine": "Machine",
     "load": "Load",
     "memory_of": "{$used} of {$total}",
-    "available": "Available",
     "swap": "Swap",
     "memory_pressure": "Memory Pressure",
     "pressure_normal": "Normal",

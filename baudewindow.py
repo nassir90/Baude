@@ -47,6 +47,7 @@ from theming import settings_size, settings_switch  # noqa: E402,F401
 from codeview import find_in_focus  # noqa: E402,F401
 from kubeview import KubeView  # noqa: E402,F401
 from dockerview import DockerView  # noqa: E402
+import menufamily  # noqa: E402
 import terminalpane  # noqa: E402  (☰ → Terminal: Record's too)
 from schemaview import SchemaView  # noqa: E402,F401
 from startup import LAUNCHER, apply_scales, record_item, take_restart_state  # noqa: E402
@@ -262,6 +263,7 @@ class BaudeWindow(WindowView, WindowProc, WindowDrafts, WindowSignal, WindowRemo
         tools.append(wording.say("window.docker"), "win.docker")
         tools.append(wording.say("window.database_schemas"), "win.dbschema")
         tools.append(wording.say("multiplex.terminal_menu"), "win.terminal")
+        tools.append(wording.say("bot_browser.title"), "win.browser")
         menu.append_section(None, tools)
         usage = Gio.Menu()  # (the current subscription's usage: subscriptionpage.attach_menu_usage)
         menu.append_section(None, usage)
@@ -315,6 +317,9 @@ class BaudeWindow(WindowView, WindowProc, WindowDrafts, WindowSignal, WindowRemo
         docker = Gio.SimpleAction.new("docker", None)
         docker.connect("activate", lambda *_: self.docker.open())
         self.add_action(docker)
+        browser = Gio.SimpleAction.new("browser", None)  # (Emission's window on the host picked in the sidebar)
+        browser.connect("activate", lambda *_: menufamily.open_browser(self))
+        self.add_action(browser)
         terminal = Gio.SimpleAction.new("terminal", None)  # (a terminal on the host picked in the sidebar)
         terminal.connect("activate", lambda *_: self.terminal.open())
         self.add_action(terminal)

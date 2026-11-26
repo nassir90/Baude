@@ -22,6 +22,7 @@ import chatparts  # noqa: E402
 import panels  # noqa: E402
 import chatfind  # noqa: E402
 import pickers  # noqa: E402
+import menufamily  # noqa: E402
 import theming  # noqa: E402
 import meshui  # noqa: E402
 from baudelib import wording  # noqa: E402  (its words, Baude's: schema/copy)
@@ -289,6 +290,7 @@ class Window(RecordHosts, Adw.ApplicationWindow, feedback.FeedbackHost, viewers.
                             (wording.say("window.database_schemas"), "db")):
             tools.append(title, f"win.viewer::{page}")
         tools.append(wording.say("multiplex.terminal_menu"), "win.viewer::terminal")
+        tools.append(wording.say("bot_browser.title"), "win.browser")
         menu.append_section(None, tools)
         usage = Gio.Menu()  # (the current subscription's usage: subscriptionpage.attach_menu_usage)
         menu.append_section(None, usage)
@@ -315,6 +317,7 @@ class Window(RecordHosts, Adw.ApplicationWindow, feedback.FeedbackHost, viewers.
                          ("delete", self.delete),
                          ("new", lambda *_: self.new_notebook()), ("restart", lambda: self.restart()),
                          ("restartdaemon", lambda: self.restart_host()),
+                         ("browser", lambda: menufamily.open_browser(self)),
                          ("settings", lambda: Settings(self).present(self)), ("feedback", lambda: self.open_feedback()),
                          ("fixes", lambda: self.open_fixes()),
                          ("changelog", lambda: update.changelog_dialog().present(self)),

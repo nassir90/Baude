@@ -335,6 +335,88 @@ def hand_over(pid, urls):
         return False
 
 
+def usable_display():
+    """Whether a window started here is seen: macOS in a session at its screen (not a process ssh started, which has
+    none), or a display of someone's on Linux (not one of Emission's own, virtual)."""
+    if os.environ.get("EMISSION_VIRTUAL_DISPLAY"):
+        return False
+    if sys.platform != "darwin":
+        return bool(os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"))
+    import ctypes
+    try:
+        cg = ctypes.cdll.LoadLibrary("/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics")
+        cg.CGSessionCopyCurrentDictionary.restype = ctypes.c_void_p
+        session = cg.CGSessionCopyCurrentDictionary()
+        if not session:
+            return False
+        cf = ctypes.cdll.LoadLibrary("/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation")
+        cf.CFRelease.argtypes = [ctypes.c_void_p]
+        cf.CFRelease(session)
+        return True
+    except (OSError, AttributeError):
+        return False
+
+
+STARTED = {"at": -1e9}  # (when open_window last started an Emission: another not started while that one opens)
+START_S = 20
+
+
+def open_window(show=True):
+    """Emission's window here on its Default profile (☰ → Browser): the Emission that has it brought to the front
+    (show), else one started, on this machine's screen; OSError (why, to be said) where there's no screen to show it
+    on, or the profile is a Bot's browser's here (hosted in Baude, or out of sight), which isn't opened again. Its
+    answer's fields: started, whether it was."""
+    from baudelib import wording
+    pid = profile_id(DEFAULT)
+    try:
+        info = call(pid, {"op": "info"}, timeout=5)
+    except (OSError, ValueError):
+        info = None
+    if info is not None:
+        if info.get("hosted") or info.get("agent"):
+            raise OSError(wording.say("host_errors.browser_default_bots"))
+        if show:
+            try:
+                call(pid, {"op": "show"}, timeout=5)
+            except ValueError as e:
+                raise OSError(str(e))
+        return {"started": False}
+    if not usable_display():
+        raise OSError(wording.say("host_errors.browser_no_display"))
+    if time.monotonic() - STARTED["at"] < START_S:  # (started a moment ago, not open yet: that one's coming)
+        return {"started": True}
+    STARTED["at"] = time.monotonic()
+    os.makedirs(data_home(), exist_ok=True)
+    env = dict(os.environ)
+    if env.get("BAUDE_RUNTIME_DIR"):  # (its folders as this process has them: it starts in another)
+        env["BAUDE_RUNTIME_DIR"] = os.path.abspath(env["BAUDE_RUNTIME_DIR"])
+    with open(os.path.join(data_home(), "window.log"), "ab") as log:
+        subprocess.Popen([sys.executable, EMISSION], stdin=subprocess.DEVNULL, stdout=log, stderr=log,
+                         start_new_session=True, cwd=os.path.dirname(EMISSION), env=env)
+    return {"started": True}
+
+
+def default_window(wait_s):
+    """The socket of Emission's window here on its Default profile, for it to be watched from elsewhere (☰ → Browser
+    on another host): the one that has it, else one started (open_window's, not brought to the front), waited for
+    till wait_s has passed."""
+    pid = profile_id(DEFAULT)
+    open_window(show=False)
+    end = time.monotonic() + wait_s
+    while True:
+        try:
+            info = call(pid, {"op": "info"}, timeout=5)
+            break
+        except (OSError, ValueError) as e:
+            if time.monotonic() >= end:
+                raise OSError(str(e) or "Emission didn't open")
+            time.sleep(0.5)
+    if info.get("hosted") or info.get("agent"):
+        from baudelib import wording
+        raise OSError(wording.say("host_errors.browser_default_bots"))
+    return profile_socket(pid)
+
+
 def call_bot(bot_id, name, msg, timeout=60):
     """msg to the Emission that has bot_id's own profile here, started for it (out of sight: no window shown, its own
     display on Linux) if none has it."""

@@ -16,7 +16,7 @@ import gi  # noqa: E402
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Adw, Gio, GLib, Gtk  # noqa: E402
-from baudelib import wording  # noqa: E402  (its words, Baude's browser's: schema/copy)
+from baudelib import emissiontools, wording  # noqa: E402  (its words, Baude's browser's: schema/copy)
 from baudelib.emissionlink import (  # noqa
     DEFAULT, add_profile, call, call_bot, data_home, forget_profile, hand_over, lock_profile, open_pages, pending_note,
     profile_id, profiles, rename_profile, unlock_profile,
@@ -282,6 +282,11 @@ class Window(Adw.ApplicationWindow):
         if op == "open":
             self.take(pid, [u for u in msg.get("urls") or [] if isinstance(u, str)])
             return answer({"ok": True})
+        if op == "show":  # (☰ → Browser: this window brought to the front as it is, no page opened)
+            if not self.hosted and not self.agent and pid == self.profile_id:
+                self.present()
+                return answer({"ok": True})
+            return answer({"error": "not a window of that profile's"})
         if op == "info":  # (hosted: not an agent's to be asked to go; its pages opened there instead: open)
             return answer({"agent": self.agent, "hosted": self.hosted, "profile": self.profile, "pid": os.getpid(),
                            "tabs": len(self.tabs), "idle_s": idle_s, "commit": STARTED})
@@ -311,7 +316,10 @@ class Window(Adw.ApplicationWindow):
         if self.Engine is None:
             return answer({"error": "Emission has no page engine on this host"})
         listed = next((p for p in profiles() if p["id"] == pid), None)
-        if listed is None or not listed.get("bot"):  # (a Bot's tools reach a Bot's own profile, nothing else)
+        own = pid == self.profile_id and not self.agent and not self.hosted and bool(msg.get("from_pane")) and \
+            op in emissiontools.PANE_OPS | {"watch"}  # (this window, watched and driven from a Browser pane elsewhere:
+        if not own and (listed is None or not listed.get("bot")):  # ☰ → Browser on another host; else a Bot's
+            # tools reach a Bot's own profile, nothing else)
             return answer({"error": "Emission takes tools' requests for a Bot's own profile only"})
         if pid != self.profile_id:
             if not self.agent:  # (someone's own window, on another profile now: not moved for a Bot)

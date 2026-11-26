@@ -22,7 +22,10 @@
     "viewers.py:Viewers.viewer_overlays",
     "kubedock.py:KubeDock",
     "viewwindow.py:Out",
-    "android/.../DockerScreen.kt:DockerScreen"
+    "android/.../DockerScreen.kt:DockerScreen",
+    "kubeview.py:ColumnFilters",
+    "baudelib/hostdocker.py:_containers",
+    "android/.../ColumnFilters.kt:ColumnFilters"
   ],
   "copy": [
     "docker",
@@ -117,6 +120,39 @@
             {
               "by": "click",
               "does": "Logs: a tab in the dock with its log (docker logs -f, or docker compose logs -f) followed. Shell: a tab in the dock with a terminal running, on the host, the command the host gave for the row (docker exec -it, bash if it has it, else sh), which needs the host's Shell. Start, Stop, Restart: done at once, what docker said in the status line. Remove…: asked first."
+            }
+          ]
+        },
+        {
+          "name": "column filter",
+          "shows": "On a column whose values are words (not a name, age or containers column; one that sorts by its text, not a number, size or time; each value with a letter in it and at most 40 characters), with 30 or fewer different values and some value shared by more than one row (any number for a status column), hovering its heading shows a funnel button at the heading's right end. While the column filters, the funnel stays, in the accent. A value hidden but not in the list now stays hidden, listed with a count of 0. A container's Status is filtered by its state (Running, Restarting, Exited…), not its text, which says for how long.",
+          "copy": [
+            "kube.filter_column",
+            "kube.value_count",
+            "kube.no_value",
+            "fixes.all"
+          ],
+          "actions": [
+            {
+              "by": "click the funnel (the phone: hold the heading, or tap its funnel while it filters)",
+              "does": "Opens a popover: an \"All\" check, a separator, then a check per value of the column in the rows the other filters leave (and any value hidden), sorted by name, each \"Value (n)\" with how many rows have it; an empty cell is \"(none)\". The namespaces button's checklist."
+            },
+            {
+              "by": "untick or tick a value",
+              "does": "Hides or shows the rows with that value at once (nothing is read again); remembered in the settings for the kind (kube_hidden, Docker's docker_hidden: {kind: {column title: [values hidden]}}). All ticks every value; unticking All hides every row."
+            }
+          ],
+          "decisions": [
+            {
+              "said": "WE should be able to hover over container status, click a filter button on the right aligned and then see a chckbox dropdown to filter by the set of strings i.e. I usually want to filter out Succeeded / Failed nad only see running jobs.",
+              "rule": "Every app's resource tables (Kubernetes' kinds, Docker's pages) let a column of a few words be filtered by its values: a filter button at the column heading's right end (shown on hover, kept and in the accent while it filters; on a touch screen, holding the heading opens it and the funnel sits just after the title while it filters) opens All over a check per value with its row count; unticked values' rows are hidden, together with the namespaces picked and the filter box, and the status line counts the rows shown. The values hidden are remembered per kind (or Docker page) across refreshes and restarts, so hiding Succeeded and Failed pods stays.",
+              "decided": "2026-11-26",
+              "source": [
+                {
+                  "session": "b3845b21-55ac-4aab-a769-fb8517403c51",
+                  "message": "4a7c7159-3e78-447c-b165-0adab4d6d27f"
+                }
+              ]
             }
           ]
         }

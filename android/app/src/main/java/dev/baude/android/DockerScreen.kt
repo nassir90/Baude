@@ -132,6 +132,7 @@ class DockerState(val hostId: String) {
     var filter by mutableStateOf("")
     var sortCol by mutableStateOf(0)
     var sortDesc by mutableStateOf(false)
+    val colFilters = ColumnFilters("docker_hidden") // (a column's values, ticked: ColumnFilters)
     var selected by mutableStateOf<Msg.DockerRow?>(null)
     var inspect by mutableStateOf<Pair<String, String>?>(null) // (its text and file, or null while it's read)
     var format by mutableStateOf(prefs().getString("docker_inspect", "json") ?: "json")
@@ -212,6 +213,7 @@ class DockerState(val hostId: String) {
             }
             tablePage = p
             columns = cols
+            colFilters.load(p.key)
             rows = r.rows.orEmpty()
             selected = selected?.let { s -> rows.firstOrNull { it.id == s.id } }
         }
@@ -349,10 +351,22 @@ class DockerState(val hostId: String) {
     }
 }
 
-/** The rows to show: those with the filter's text in a cell, in the order sorted by (kubeOrder's). */
-fun dockerRows(st: DockerState): List<Msg.DockerRow> {
+/** What a column's filter goes by for a row's cell: the row's own word for it where it gives one (a container's state
+ * for its Status), else the cell's text (kubeview.kube_filter_value). */
+fun dockerValue(r: Msg.DockerRow, i: Int): String =
+    r.filters.orEmpty().getOrElse(i) { "" }.ifEmpty { r.cells.orEmpty().getOrElse(i) { "" } }
+
+/** Whether the filter's text keeps a row (the column filters aside). */
+fun dockerShows(st: DockerState, r: Msg.DockerRow): Boolean {
     val q = st.filter.trim().lowercase()
-    val kept = st.rows.filter { r -> q.isEmpty() || r.cells.orEmpty().any { q in it.lowercase() } }
+    return q.isEmpty() || r.cells.orEmpty().any { q in it.lowercase() }
+}
+
+/** The rows to show: those with the filter's text in a cell and the values the column filters keep, in the order sorted
+ * by (kubeOrder's). */
+fun dockerRows(st: DockerState): List<Msg.DockerRow> {
+    val titles = st.columns.map { it.title.orEmpty() }
+    val kept = st.rows.filter { r -> dockerShows(st, r) && st.colFilters.keeps(titles, { dockerValue(r, it) }) }
     val i = st.sortCol
     val sign = if (st.sortDesc) -1 else 1
     return kept.sortedWith { a, b ->
@@ -453,7 +467,9 @@ private fun DockerBody(st: DockerState) {
                 val sel = st.selected
                 if (sel != null) InspectLevel(st, sel)
                 else {
-                    val shown = remember(st.rows, st.filter, st.sortCol, st.sortDesc, st.columns) { dockerRows(st) }
+                    val shown = remember(st.rows, st.filter, st.sortCol, st.sortDesc, st.columns, st.colFilters.hidden) {
+                        dockerRows(st)
+                    }
                     Box(Modifier.weight(1f).fillMaxWidth().alpha(if (st.fade) 0.4f else 1f)) {
                         val lacks = st.missing
                         val f = st.fault
@@ -536,9 +552,16 @@ private fun DockerTable(st: DockerState, rows: List<Msg.DockerRow>) {
     val cols = st.columns
     val measure = rememberTextMeasurer()
     val density = LocalDensity.current
-    val widths = remember(rows, cols) {
+    val filters = remember(st.rows, cols, st.colFilters.hidden) { // (which columns offer a filter: filterable)
         cols.indices.map { i ->
-            var w = with(density) { measure.measure(cols[i].title.orEmpty(), Type.bold, softWrap = false).size.width.toDp() } + 12.dp
+            filterable(cols[i].kind, st.rows.map { dockerValue(it, i) }, st.rows.map { it.keys?.opt(i) },
+                !st.colFilters.hidden[cols[i].title.orEmpty()].isNullOrEmpty())
+        }
+    }
+    val widths = remember(rows, cols, filters) {
+        cols.indices.map { i ->
+            var w = with(density) { measure.measure(cols[i].title.orEmpty(), Type.bold, softWrap = false).size.width.toDp() } + 12.dp +
+                if (filters[i]) 16.dp.icon + 4.dp else 0.dp // (room for its funnel)
             for (r in rows) w = maxOf(w, with(density) {
                 measure.measure(r.cells.orEmpty().getOrElse(i) { "" }, Type.body, softWrap = false).size.width.toDp()
             } + 12.dp)
@@ -550,13 +573,26 @@ private fun DockerTable(st: DockerState, rows: List<Msg.DockerRow>) {
     val scroll = rememberScrollState()
     Column {
         Row(Modifier.horizontalScroll(scroll).width(total).background(c.raised)) {
+            val titles = cols.map { it.title.orEmpty() }
             for (i in cols.indices) {
-                Row(Modifier.width(widths[i]).clickable { if (st.sortCol == i) st.sortDesc = !st.sortDesc else { st.sortCol = i; st.sortDesc = false } }
-                    .padding(horizontal = 6.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text(cols[i].title.orEmpty(), style = Type.bold, color = c.fg, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f, fill = false))
-                    if (st.sortCol == i) Icon(if (st.sortDesc) Adwaita.PanDown else Adwaita.GoUp, null, tint = c.fg,
-                        modifier = Modifier.size(16.dp.icon))
+                val title = titles[i]
+                val filtering = !st.colFilters.hidden[title].isNullOrEmpty()
+                var open by remember(st.tablePage?.key, title) { mutableStateOf(false) }
+                Box(Modifier.width(widths[i])) {
+                    Row(Modifier.fillMaxWidth().combinedClickable(
+                        onClick = { if (st.sortCol == i) st.sortDesc = !st.sortDesc else { st.sortCol = i; st.sortDesc = false } },
+                        onLongClick = if (filters[i]) ({ open = true }) else null)
+                        .padding(horizontal = 6.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text(title, style = Type.bold, color = c.fg, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f, fill = false))
+                        if (st.sortCol == i) Icon(if (st.sortDesc) Adwaita.PanDown else Adwaita.GoUp, null, tint = c.fg,
+                            modifier = Modifier.size(16.dp.icon))
+                        if (filtering || open) Box(Modifier.padding(start = 4.dp)) { FilterMark(title, filtering) { open = true } }
+                    }
+                    FilterMenu(open, { open = false }, st.colFilters, title) {
+                        st.rows.map { r -> dockerValue(r, i) to (dockerShows(st, r) &&
+                            st.colFilters.keeps(titles, { dockerValue(r, it) }, skip = i)) }
+                    }
                 }
             }
             Box(Modifier.width(buttons))

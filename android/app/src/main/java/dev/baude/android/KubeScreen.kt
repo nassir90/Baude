@@ -104,6 +104,7 @@ class KubeState(val hostId: String) {
     var filter by mutableStateOf("")
     var sortCol by mutableStateOf(0)
     var sortDesc by mutableStateOf(false)
+    val colFilters = ColumnFilters("kube_hidden") // (a column's values, ticked: ColumnFilters)
     var selected by mutableStateOf<String?>(null)
     var yaml by mutableStateOf<YamlShown?>(null)
     val docks = mutableStateListOf<Any>().apply { addAll(parked.remove(hostId).orEmpty()) } // (LogsShown, ShellShown:
@@ -276,6 +277,7 @@ class KubeState(val hostId: String) {
         }
         tablePage = p
         columns = cols
+        colFilters.load(p.resource)
         metrics = got
         rowsIn(list)
         fade = false
@@ -727,7 +729,8 @@ private fun Body(st: KubeState) {
                 val y = st.yaml
                 if (y != null) YamlLevel(st, y)
                 else {
-                    val shown = remember(st.rows, st.nsShown, st.filter, st.sortCol, st.sortDesc, st.tablePage, st.columns) {
+                    val shown = remember(st.rows, st.nsShown, st.filter, st.sortCol, st.sortDesc, st.tablePage, st.columns,
+                        st.colFilters.hidden) {
                         kubeRows(st)
                     }
                     Box(Modifier.weight(1f).fillMaxWidth().alpha(if (st.fade) 0.4f else 1f)) {

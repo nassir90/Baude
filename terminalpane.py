@@ -175,13 +175,17 @@ class TerminalView(Gtk.Box):
         self.on_host(*((where, name) if where is not None else self.pane.host()))
 
     def on_host(self, where, name):
-        """A terminal on where shown: the one shown if it's there, else another there, else a new one."""
+        """A terminal of yours on where shown: the one shown if it's that, else another there, else a new one. Yours:
+        opened here (not one attached to, a Bot's), no Bot at its tools, its program still running."""
+        def yours(term):
+            return getattr(term, "host_where", None) == where and getattr(term, "attach_to", None) is None and \
+                term.bot is None and term.status is None and not getattr(term, "stopped", False)
         tabs = self.pane.tabs
         current = self.pane.current()
-        if current is not None and getattr(current, "host_where", None) == where:
+        if current is not None and yours(current):
             return self.pane._focus()
         for i in range(tabs.get_n_pages()):
-            if getattr(tabs.get_nth_page(i).get_child(), "host_where", None) == where:
+            if yours(tabs.get_nth_page(i).get_child()):
                 return tabs.set_selected_page(tabs.get_nth_page(i))
         self.pane.open(where, name)
 

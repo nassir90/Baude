@@ -109,7 +109,7 @@
           ]
         }
       ],
-      "shows": "\"Kubernetes\" (section with Databases). A split, as New session's is: the name, then a caret at the row's end (New session's host dropdown: its hosts as New session lists them, the active one ticked, one out of reach greyed; dimmed with only one host). The name opens it on the host picked beside New session; a host picked from the caret opens it there, the host picked beside New session left as it is.",
+      "shows": "\"Kubernetes\" (section with Databases). A split, as New session's is: the name, then a caret at the row's end (New session's host dropdown: its hosts as New session lists them, the active one ticked, one out of reach greyed; dimmed with only one host). The name opens it on the host picked beside New session; a host picked from the caret opens it there (the ticked one too), the host picked beside New session left as it is. On the phone the same rows, each shown where any host takes it: its name greyed where the active host doesn't, its caret listing the hosts that do.",
       "copy": [
         "window.kubernetes"
       ],
@@ -120,13 +120,13 @@
         },
         {
           "by": "click its caret, then a host",
-          "does": "Opens it on that host (Terminal: that host's terminal shown, else a new one there)"
+          "does": "Opens it on that host, the menu closed, the ticked host too (Terminal: your own terminal there that's still running, the one shown first, else a new one there; never a Bot's, one attached to, or one that's ended)"
         }
       ]
     },
     {
       "name": "Docker",
-      "shows": "Row \"Docker\". A split, as New session's is: the name, then a caret at the row's end (New session's host dropdown: its hosts as New session lists them, the active one ticked, one out of reach greyed; dimmed with only one host). The name opens it on the host picked beside New session; a host picked from the caret opens it there, the host picked beside New session left as it is.",
+      "shows": "Row \"Docker\". A split, as New session's is: the name, then a caret at the row's end (New session's host dropdown: its hosts as New session lists them, the active one ticked, one out of reach greyed; dimmed with only one host). The name opens it on the host picked beside New session; a host picked from the caret opens it there (the ticked one too), the host picked beside New session left as it is. On the phone the same rows, each shown where any host takes it: its name greyed where the active host doesn't, its caret listing the hosts that do.",
       "copy": [
         "window.docker"
       ],
@@ -137,7 +137,7 @@
         },
         {
           "by": "click its caret, then a host",
-          "does": "Opens it on that host (Terminal: that host's terminal shown, else a new one there)"
+          "does": "Opens it on that host, the menu closed, the ticked host too (Terminal: your own terminal there that's still running, the one shown first, else a new one there; never a Bot's, one attached to, or one that's ended)"
         }
       ],
       "decisions": [
@@ -155,7 +155,7 @@
     },
     {
       "name": "Databases",
-      "shows": "\"Databases\" A split, as New session's is: the name, then a caret at the row's end (New session's host dropdown: its hosts as New session lists them, the active one ticked, one out of reach greyed; dimmed with only one host). The name opens it on the host picked beside New session; a host picked from the caret opens it there, the host picked beside New session left as it is.",
+      "shows": "\"Databases\" A split, as New session's is: the name, then a caret at the row's end (New session's host dropdown: its hosts as New session lists them, the active one ticked, one out of reach greyed; dimmed with only one host). The name opens it on the host picked beside New session; a host picked from the caret opens it there (the ticked one too), the host picked beside New session left as it is. On the phone the same rows, each shown where any host takes it: its name greyed where the active host doesn't, its caret listing the hosts that do.",
       "copy": [
         "window.database_schemas"
       ],
@@ -166,7 +166,7 @@
         },
         {
           "by": "click its caret, then a host",
-          "does": "Opens it on that host (Terminal: that host's terminal shown, else a new one there)"
+          "does": "Opens it on that host, the menu closed, the ticked host too (Terminal: your own terminal there that's still running, the one shown first, else a new one there; never a Bot's, one attached to, or one that's ended)"
         }
       ],
       "decisions": [
@@ -184,7 +184,7 @@
     },
     {
       "name": "Terminal",
-      "shows": "\"Terminal\" (in the section with Kubernetes and Databases). A split, as New session's is: the name, then a caret at the row's end (New session's host dropdown: its hosts as New session lists them, the active one ticked, one out of reach greyed; dimmed with only one host). The name opens it on the host picked beside New session; a host picked from the caret opens it there, the host picked beside New session left as it is.",
+      "shows": "\"Terminal\" (in the section with Kubernetes and Databases). A split, as New session's is: the name, then a caret at the row's end (New session's host dropdown: its hosts as New session lists them, the active one ticked, one out of reach greyed; dimmed with only one host). The name opens it on the host picked beside New session; a host picked from the caret opens it there (the ticked one too), the host picked beside New session left as it is. On the phone the same rows, each shown where any host takes it: its name greyed where the active host doesn't, its caret listing the hosts that do.",
       "copy": [
         "multiplex.terminal_menu"
       ],
@@ -195,7 +195,7 @@
         },
         {
           "by": "click its caret, then a host",
-          "does": "Opens it on that host (Terminal: that host's terminal shown, else a new one there)"
+          "does": "Opens it on that host, the menu closed, the ticked host too (Terminal: your own terminal there that's still running, the one shown first, else a new one there; never a Bot's, one attached to, or one that's ended)"
         }
       ],
       "decisions": [
@@ -213,7 +213,7 @@
     },
     {
       "name": "Browser",
-      "shows": "Row \"Browser\", after Terminal: one of the views and programs on the host picked beside New session. A split, as New session's is: the name, then a caret at the row's end (New session's host dropdown: its hosts as New session lists them, the active one ticked, one out of reach greyed; dimmed with only one host). The name opens it on the host picked beside New session; a host picked from the caret opens it there, the host picked beside New session left as it is.",
+      "shows": "Row \"Browser\", after Terminal: one of the views and programs on the host picked beside New session. A split, as New session's is: the name, then a caret at the row's end (New session's host dropdown: its hosts as New session lists them, the active one ticked, one out of reach greyed; dimmed with only one host). The name opens it on the host picked beside New session; a host picked from the caret opens it there (the ticked one too), the host picked beside New session left as it is.",
       "copy": [
         "bot_browser.title"
       ],
@@ -229,7 +229,7 @@
         },
         {
           "by": "click its caret, then a host",
-          "does": "Opens it on that host (Terminal: that host's terminal shown, else a new one there)"
+          "does": "Opens it on that host, the menu closed, the ticked host too (Terminal: your own terminal there that's still running, the one shown first, else a new one there; never a Bot's, one attached to, or one that's ended)"
         }
       ],
       "decisions": [

@@ -145,6 +145,7 @@ class FamilyRow(Gtk.Box):
         caret.connect("setup", lambda _f, item: item.set_child(Gtk.Box()))
         self.hosts.set_factory(caret)
         self.hosts.set_dimmed(set())
+        self.hosts.pick_again()  # (the host ticked, picked: opened there too, the menu closed)
         self.hosts.update_property([Gtk.AccessibleProperty.LABEL], [label])
         self.append(self.hosts)
 
@@ -167,10 +168,11 @@ class FamilyRow(Gtk.Box):
         # session's: dimmed, no other host to pick)
 
     def picked(self, key):
+        """A host picked in its caret's list (the one ticked too): it opened there, the menu closed (its tick put back
+        on the active host as it next opens: fill)."""
         self.popover.popdown()
         if (win := self.win()) is not None:
             GLib.idle_add(lambda: open_family(win, self.family, key) and False)
-            self.fill()
 
 
 def attach(win, menu_button, section):

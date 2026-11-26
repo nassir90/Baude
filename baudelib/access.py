@@ -103,7 +103,7 @@ def _tasks(msg):
 OPS = {  # (the rule each op is checked for, before it's taken (a function: msg's, by its fields); FOUND's as it's found)
     **dict.fromkeys(("terminal", "terminal_in", "terminal_resize", "terminal_close", "terminals", "multiplex"), "shell"),
     **dict.fromkeys(("emission_watch", "emission_watch_say"), "browser_read"),
-    **dict.fromkeys(("emission", "emission_serve", "emission_answer"), "browser_write"),
+    **dict.fromkeys(("emission", "emission_serve", "emission_answer", "browser_open"), "browser_write"),
     "infer": "providers",
     "files": "model_files",
     **dict.fromkeys(("start", "agent"), "spawn"),  # (a chat forked: its manage_read too; adopted: its manage_write)

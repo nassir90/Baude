@@ -222,11 +222,11 @@ One of a host's access rules set (capability: the rule's name), or a chat's own 
 
 #### `accounts` (Accounts)
 
-The host's Claude and Codex subscription accounts (hostaccounts): list them; add one (Claude: name and an existing signed-in config folder, or name and token where the host has no claude; Codex: name and an existing signed-in home); rename one (id, name); replace a token account's token (id, token); remove one (id); select a provider's default for new chats (provider, id; "" for the CLI's own sign-in); use another for a chat (session, id; "" for the CLI's own sign-in: its agent started again under it, resuming the chat, once its turn's over); read a subscription's usage (id; "" for the CLI's own sign-in); sign in (sign_in: provider and name for a new account, or id to sign in to one again; Claude's runs claude auth login with the account's own folder, Codex's a device-code login; its lines come as they're written, the page to open among them, then its end; the connection's going stops it); pass a code the sign-in page showed to the sign-in this connection runs (code: no answer of its own). Each other is answered with accounts.
+The host's Claude and Codex subscription accounts (hostaccounts): list them; add one (Claude: name and an existing signed-in config folder, or name and token where the host has no claude; Codex: name and an existing signed-in home); rename one (id, name); replace a token account's token (id, token); remove one (id); select a provider's default for new chats (provider, id; "" for the CLI's own sign-in); use another for a chat (session, id; "" for the CLI's own sign-in: its agent started again under it, resuming the chat, once its turn's over); read a subscription's usage (id; "" for the CLI's own sign-in); sign in (sign_in: provider and name for a new account, or id to sign in to one again; Claude's runs claude auth login with the account's own folder, its lines coming as they're written, the page to open among them; Codex's codex login (method: the browser's, by default, or the device code's), its state coming as it goes (login: the page to open, and the device code's code to enter there); then its end; the connection's going stops it); pass a code the sign-in page showed to the sign-in this connection runs (code: no answer of its own); pass the address a browser ended on after a Codex browser sign-in's page to the one this connection runs (callback: url; answered with the page codex's server gave, or error). Each other is answered with accounts.
 
 | Field | Type | Required | What it is |
 |---|---|---|---|
-| `what` | `list` \| `add` \| `rename` \| `token` \| `remove` \| `select` \| `use` \| `usage` \| `sign_in` \| `code` | yes | What to do. |
+| `what` | `list` \| `add` \| `rename` \| `token` \| `remove` \| `select` \| `use` \| `usage` \| `sign_in` \| `code` \| `callback` | yes | What to do. |
 | `provider` | `claude` \| `codex` |  | add, select, sign_in (a new account): whose. |
 | `id` | string |  | rename, token, remove, select, use, usage, sign_in: the account ("" for the CLI's own sign-in, select, use and usage only). |
 | `session` | string |  | use: the chat whose account it is, one of the host's sessions whose model is the account's provider's. sign_in (a Claude account's) and token: the chat it's for, whose sign-in (ChatLogin) its host moves as it goes, as a login request's, if the asker may read the chat (Agent Management's read). |
@@ -235,6 +235,9 @@ The host's Claude and Codex subscription accounts (hostaccounts): list them; add
 | `home` | string |  | add (Codex): an existing CODEX_HOME on the host, signed in with ChatGPT and keeping its credentials in a file. |
 | `folder` | string |  | add (Claude): an existing Claude config folder on the host, signed in (claude auth status says so, run with it). |
 | `code` | string |  | code: what the sign-in page showed, pasted. |
+| `method` | `browser` \| `device` |  | sign_in, Codex's: browser (the default: codex login, its page sending the browser back to the host's 127.0.0.1) or device (codex login --device-auth). |
+| `url` | string |  | callback: the address the browser ended on (its path and query are what's passed on). |
+| `cb` | integer |  | callback: a number of the asker's pick, carried back on its answer (one sign-in can have several callbacks waiting). |
 
 #### `activate` (Activate)
 
@@ -318,6 +321,10 @@ A Bot's picture.
 | Field | Type | Required | What it is |
 |---|---|---|---|
 | `session` | string | yes | The session's id. |
+
+#### `browser_open` (BrowserOpen)
+
+Emission's window on the host's own screen, on its Default profile (☰ → Browser): the one that has it brought to the front, else one started.
 
 #### `catalogue` (Catalogue)
 
@@ -658,6 +665,7 @@ A cluster's objects as Freelens lists them, read through the host's kubeconfig a
 | `crd` | string |  | list, yaml: a custom resource's definition (plural.group) for a kind that isn't listed. |
 | `namespaces` | array of string |  | summary: the namespaces it's the totals of (every one when it's left out; none when it's empty). |
 | `since` | number |  | summary: the newest history sample the head has (its at): only later ones are sent (every one when it's left out). |
+| `fresh` | boolean |  | summary: read the cluster now (Refresh), not a read the host kept or the fault it holds while it waits to try a failing cluster again. |
 | `namespace` | string |  | yaml, owner, delete: the object's namespace. |
 | `name` | string |  | yaml, owner, delete: the object's name. |
 | `kind` | string |  | owner: the object's kind. |
@@ -819,6 +827,14 @@ A session renamed (by its agent if it's running; else as it would).
 |---|---|---|---|
 | `session` | string | yes | The session's id. |
 | `title` | string |  | Its title. |
+
+#### `restart` (Restart)
+
+The host process's restart, as a head asks for it: once nothing's running (its pending restart, info's restart, kept by the host), now, or held while this head shows what it waits for.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `do` | `free` \| `now` \| `pause` | yes | free: restart once no chat's running a command and no task's running (and this head's pause let go of); now: restart at once, what's running stopped and turns cut short; pause: no restart while this head holds it (till it says free, or its connection goes). |
 
 #### `run_task` (RunTask)
 
@@ -1150,7 +1166,7 @@ access_set's answer: the rules as they are now.
 
 #### `accounts` (AccountsReply)
 
-accounts' answer: the accounts and defaults as they are after it, and whether the host has claude and what it lacks of each provider's program and each subscription's last read usage (with error, if it couldn't be done); usage's, the limits; sign_in's, each line the sign-in writes (line alone), then its end.
+accounts' answer: the accounts and defaults as they are after it, and whether the host has claude and what it lacks of each provider's program and each subscription's last read usage (with error, if it couldn't be done); usage's, the limits; sign_in's, each line Claude's sign-in writes (line alone), or Codex's state as it goes (login alone), then its end; callback's, the page codex's server answered (page alone), or error.
 
 | Field | Type | Required | What it is |
 |---|---|---|---|
@@ -1161,12 +1177,15 @@ accounts' answer: the accounts and defaults as they are after it, and whether th
 | `defaults.claude` | string |  | Claude's default account's id, "" for the CLI's own sign-in. |
 | `defaults.codex` | string |  | Codex's. |
 | `usage` | array/null of UsageLimit |  | usage: the subscription's limits; null where they can't be read for its sign-in (a setup token's, an API key's). |
-| `line` | string |  | sign_in: a line the sign-in wrote (the page to open, or Codex's device code, among them). |
+| `line` | string |  | sign_in (Claude's): a line the sign-in wrote (the page to open among them). |
+| `login` | ChatLogin |  | sign_in (Codex's): its state as it goes (login alone: signing_in, then with the page, and the device code's code), then on its end, signed_in or failed. |
+| `page` | CallbackPage |  | callback: what the Codex sign-in's server answered the address. |
+| `cb` | integer |  | callback: the request's cb, carried back. |
 | `signed_in` | boolean |  | sign_in: its end, signed in. |
 | `claude_cli` | boolean |  | Whether the host has claude: a Claude account there is a folder signed in to with claude auth login; without it, a token from claude setup-token. |
 | `missing` | object |  | What the host lacks of a provider's program, by provider (codex: its Codex CLI, as deps says it); a provider that's there isn't in it. Shown in place of Add account. |
 | `last_usage` | object |  | Each Claude subscription's usage as the host last read it, by id ("" for the CLI's own sign-in), where that read said its limits: a client shows it greyed till its own usage read answers. |
-| `who` | string/null |  | sign_in (Claude's), signed in: who as, as claude auth status says. |
+| `who` | string/null |  | sign_in, signed in: who as, as claude auth status says (Codex's: the email its sign-in names). |
 
 #### `activated` (Activated)
 
@@ -1237,6 +1256,14 @@ bot's answer.
 | Field | Type | Required | What it is |
 |---|---|---|---|
 | `session` | Session |  | The session, as it's listed now. |
+
+#### `browser_opened` (BrowserOpened)
+
+browser_open's answer: Emission's window is in front there.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `started` | boolean |  | Whether an Emission was started for it (none had the profile). |
 
 #### `busy` (Busy)
 
@@ -1736,6 +1763,14 @@ rename's answer.
 |---|---|---|---|
 | `session` | Session |  | The session, as it's listed now. |
 
+#### `restart_pending` (RestartPending)
+
+restart's answer: the restart it keeps, as info's restart says it (it goes once nothing blocks it and nobody's holding it).
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `restart` | RestartState? |  | Its restart, or null: none pending. |
+
 #### `senders` (SendersReply)
 
 Its sender store.
@@ -2165,7 +2200,7 @@ A host's rule for each of its capabilities, by name: a capability split into wha
 |---|---|---|---|
 | `shell` | AccessRule | yes | A shell on its machine: its terminals (terminal ops) and Multiplex's, through a Bot's terminal tools (multiplex). |
 | `browser_read` | AccessRule | yes | Its Bots' Emission browsers watched: the watch stream (emission_watch) and what the pane says back on it (emission_watch_say). |
-| `browser_write` | AccessRule | yes | Its Bots' Emission browsers driven: their tools' calls (emission), a phone showing one and answering its calls (emission_serve, emission_answer), and a Bot made or driven (with Shell). Lets a member watch too. |
+| `browser_write` | AccessRule | yes | Its Bots' Emission browsers driven: their tools' calls (emission), a phone showing one and answering its calls (emission_serve, emission_answer), Emission's own window brought up on its screen (browser_open), and a Bot made or driven (with Shell). Lets a member watch too. |
 | `providers` | AccessRule | yes | Its inference providers' models, run through the mesh (infer). |
 | `model_files` | AccessRule | yes | Its models' files, read through the mesh (files). |
 | `spawn` | AccessRule | yes | New chats and agents started on it (start, agent). |
@@ -2271,16 +2306,32 @@ A checkout's branch.
 | `remote` | boolean |  | A remote branch. |
 | `touched` | boolean |  | This chat touched it (the list's first part). |
 
-#### ChatLogin
+#### CallbackPage
 
-A chat's sign-in to Claude, as its host has it: every head draws the chat's sign-in card from this alone (LoginCard), whichever head started what's going on.
+What a Codex browser sign-in's server on the host answered the address a browser ended on (accounts callback), for the head to show that browser: its own redirects back to itself followed.
 
 | Field | Type | Required | What it is |
 |---|---|---|---|
-| `state` | `needed` \| `signing_in` \| `signed_in` \| `failed` | yes | needed: a turn failed for want of signing in (and every sign-in started since was cancelled); signing_in: claude auth login runs on the host for it; signed_in: it finished; failed: it ended without signing in. |
+| `status` | integer | yes | Its HTTP status. |
+| `type` | string |  | Its Content-Type. |
+| `body` | string | yes | The page. |
+| `location` | string |  | Where it sends the browser on to, if it does (a page of OpenAI's). |
+
+#### ChatLogin
+
+A sign-in, as its host has it: a chat's to Claude, from which every head draws the chat's sign-in card alone (LoginCard), whichever head started what's going on; or a Codex account's sign-in in Subscriptions (accounts sign_in's login), from which the head that asked draws its card.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `state` | `needed` \| `signing_in` \| `signed_in` \| `failed` | yes | needed: a turn failed for want of signing in (and every sign-in started since was cancelled); signing_in: claude auth login (codex login) runs on the host for it; signed_in: it finished; failed: it ended without signing in. |
+| `method` | `browser` \| `device` |  | A Codex sign-in's: browser, codex login's own (its page sends the browser back to codex's server on the host's 127.0.0.1, at port); device, codex login --device-auth's (a code entered on its page). |
+| `url` | string |  | signing_in, a Codex sign-in's: the page to open, once codex has said it. |
+| `code` | string |  | signing_in, a Codex device-code sign-in's: the one-time code to enter on that page. |
+| `port` | integer |  | signing_in, a Codex browser sign-in's: the port of the host's 127.0.0.1 its page sends the browser back to (1455, else 1457). |
+| `opened` | boolean |  | signing_in, a Codex browser sign-in's: codex opened the page in the host's own browser itself (on macOS, where it doesn't go by BROWSER). |
 | `expired` | boolean |  | needed because the sign-in there was ran out (expired, reached its time limit, can't be renewed), not because there's none. |
 | `reason` | string/null |  | needed: the first sentence of Claude's own error; failed: why the sign-in didn't finish. |
-| `who` | string/null |  | signed_in: who as, as claude auth status says it; null if it didn't say, or the head may not read Subscriptions. |
+| `who` | string/null |  | signed_in: who as, as claude auth status says it (Codex's: the email its sign-in names); null if it didn't say, or the head may not read Subscriptions. |
 | `turn` | integer |  | needed: which of the chat's turns that failed for want of signing in it's for, counted on its host since it started: a new one each time one fails, so every head moves the card to that turn. |
 
 #### Clock
@@ -2621,6 +2672,7 @@ What a host is, as its hello says (and sessions carries).
 | `behind` | integer/null |  | How many commits it lacks of the mesh's newest code (mesh's newest), as its git counts them (null: it can't). |
 | `heads` | array of Head |  | The apps on its machine connected to it, by the code they run (each counted behind as its own commit is). |
 | `update` | Update? |  | Its own updater's newer version, if it has one ready. |
+| `restart` | RestartState? |  | Its restart, kept till nothing blocks it (restart), or null: none pending. |
 | `providers` | array of Provider |  | This machine's model providers (with base_url). |
 | `mesh` | MeshView |  | The members it reaches and the links it's made. |
 | `notes` | string |  | Record's notebooks here, as written last (notes.stamp: "" for none). |
@@ -2628,6 +2680,7 @@ What a host is, as its hello says (and sessions carries).
 | `phone` | boolean |  | A phone's host. |
 | `ops` | array of string |  | The ops it takes, given by a host that takes only part of the wire (a phone's), with what its sessions take besides (start's ephemeral; control requests: control, set_permission_mode, set_model). |
 | `telemetry` | TelemetryState |  | Its telemetry state: the apps on its machine tell it telemetry only while it's on, and profile what it says. |
+| `tool_names` | ToolNames |  | How its MCP tools are named: what every head shows for one ("Mesh / Tasks"). |
 
 #### KubeColumn
 
@@ -2747,6 +2800,17 @@ A namespace's or a node's part of the stack's totals, a row of its table.
 |---|---|---|---|
 | `name` | string |  | The namespace or node. |
 | `cells` | array of string |  | Each column's text. |
+| `keys` | array of any |  | Each column's number (the name's, its text in lower case), or null where there's none (no limit set, nothing requested, no metrics API): what it's sorted by, and what an "Other (n)" row adds up. |
+
+#### KubeShareColumn
+
+A column of Home's namespaces' or nodes' table: its title, and what its numbers are, so a head can sort by it and add rows up (the "Other (n)" row).
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `title` | string | yes | Its title. |
+| `kind` | `name` \| `count` \| `cores` \| `bytes` \| `share` | yes | What it holds: the namespace's or node's name, a count, cores (0.00), bytes (1.2GiB), or a share (82%): column of[0] as a share of column of[1]. |
+| `of` | array of integer |  | A share's columns: what's used, and what it's a share of (its requests or limits). |
 
 #### KubeSummary
 
@@ -2758,13 +2822,16 @@ Home: the whole stack's CPU and memory, in the namespaces asked for: the pods th
 | `memory` | KubeUse |  | Memory, in bytes. |
 | `metrics` | boolean |  | Whether the cluster has a metrics API (else nothing is used). |
 | `pods` | integer |  | How many pods are added up. |
-| `namespace_columns` | array of string |  | The namespaces table's column titles. |
-| `namespaces` | array of KubeShare |  | Each namespace's part. |
-| `node_columns` | array of string |  | The nodes table's column titles. |
-| `nodes` | array of KubeShare |  | Each node's part (against its own allocatable). |
+| `namespace_columns` | array of KubeShareColumn |  | The namespaces table's columns. |
+| `namespaces` | array of KubeShare |  | Each namespace's part, most CPU used first (then most requested). |
+| `node_columns` | array of KubeShareColumn |  | The nodes table's columns. |
+| `nodes` | array of KubeShare |  | Each node's part (against its own allocatable), most CPU used first (then most requested). |
 | `history` | array of KubeSample |  | The totals every `every` seconds from the first time Home was read for the context, oldest first, kept in the host's memory: those after the request's since (every one without). |
 | `every` | integer |  | How often the host samples them (and a head reads them), in seconds. |
 | `minutes` | integer |  | How far back the history goes, in minutes. |
+| `sorted_by` | integer |  | The column both tables come sorted by, most first: CPU used. |
+| `shown` | integer |  | How many rows a table shows, most first by the column it's sorted by; the rest are added up in one "Other (n)" row. |
+| `began` | number |  | When the host began this history (seconds since 1970): a context named for another cluster now (its cluster or server changed) begins anew, and a head drops the samples it holds from before. |
 
 #### KubeUse
 
@@ -2955,6 +3022,32 @@ A member's record: who it is and the members it's linked to. A host sends its ow
 | `seq` | integer | yes | Its number: higher, newer. |
 | `info` | MemberInfo |  | Who it is. |
 | `links` | array of string |  | The members it's linked to. |
+
+#### RestartBlocker
+
+One thing a pending restart waits for: a chat whose agent is running a command, a task's run, an agent run on this host for another host's chat (an Apple or pi model), or a terminal on this host that someone is attached to.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `kind` | `chat` \| `task` \| `agent` \| `terminal` | yes | A chat running a command, a task running, an agent run for a chat elsewhere, or an attached terminal. |
+| `session` | string |  | The chat's id: a chat's, a task's Bot's, or the chat elsewhere an agent run is for. |
+| `host` | string |  | An agent run's: the id of the host its chat is on. |
+| `task` | string |  | A task run's: its task's id. |
+| `run` | string |  | A task run's: its id. |
+| `terminal` | string |  | A terminal's: its id (terminal's attach). |
+| `name` | string | yes | The chat's title, the task's name, the agent's model, or the terminal's title. |
+| `what` | string |  | What it runs: the chat's oldest command, the agent run's chat's host, or the terminal's program. |
+
+#### RestartState
+
+A restart of the host process it's keeping till nothing blocks it: what asked for it, whether a head's holding it, and what it waits for. Every head shows the same.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `by` | `head` \| `update` | yes | What asked for it: a head (Restart Daemon), or its own updater (a newer version). |
+| `to` | string |  | The commit it'll restart onto, when its updater asked. |
+| `paused` | boolean | yes | A head is showing what it waits for: it won't restart till that head's let go. |
+| `blockers` | array of RestartBlocker | yes | What it waits for, oldest session first. |
 
 #### Running
 
@@ -3225,7 +3318,7 @@ A process's use of its machine, in one sample.
 
 | Field | Type | Required | What it is |
 |---|---|---|---|
-| `app` | `host` \| `baude` \| `record` \| `phone` | yes | Which: the host process, Baude, Record, or the phone's app (its host too). |
+| `app` | `host` \| `baude` \| `record` \| `emission` \| `multiplex` \| `phone` | yes | Which: the host process, Baude, Record, Emission, Multiplex, or the phone's app (its host too). |
 | `pid` | integer | yes | Its process id. |
 | `cpu` | number/null |  | Its CPU since the sample before, in percent of one core (null in its first sample). |
 | `rss` | integer/null |  | Its resident memory, in bytes. |
@@ -3265,7 +3358,7 @@ A host's machine and its processes, sampled every few seconds while telemetry is
 | `swap_used` | integer/null |  | Its swap in use, in bytes. |
 | `memory_pressure` | string/null |  | How pressed for memory the system says it is: "normal", "warning" or "critical" (macOS's memory pressure level; a phone's low memory: critical, else normal); null where it has no level (Linux). |
 | `memory_stall` | number/null |  | The share of the last 10 seconds, in percent, some task stalled waiting on memory (Linux's pressure stall information, some avg10); null where it has none. |
-| `procs` | array of TelemetryProc | yes | The host process and each app on its machine that told it telemetry. |
+| `procs` | array of TelemetryProc | yes | The host process, each app on its machine that told it telemetry (Baude, Record, the phone's app), and each Emission and Multiplex running there (the host finds those itself). |
 
 #### TelemetryState
 
@@ -3322,6 +3415,15 @@ A theme's files as they're written: what's kept to put one back (an undo).
 |---|---|---|---|
 | `css` | string/null |  | theme.css's text, or null with none. |
 | `tokens` | object/null |  | tokens.json's: a resolver document (schema/tokens/baude.resolver.json's format, its sources written in it) whose sets go over Baude's tokens, then its theme modifier's light or dark context over Baude's light or dark; colours of the libadwaita and baude groups only. null with none. |
+
+#### ToolNames
+
+How a host's MCP tools are named, for its heads to show (mcp__<server>__<tool> as "Server / Tool"): what its MCP servers and their tools say they're called, and the names its claude says its servers are configured as.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `servers` | object |  | Each server's title, by its name as it's put in its tools' names (each character not a letter, digit, _ or - made _): mesh: Mesh, claude_ai_Slack: Slack. |
+| `tools` | object |  | A tool's title, by its whole name, where its server gives one (mcp__emission__javascript_tool: Run JavaScript). |
 
 #### Update
 
@@ -3431,6 +3533,6 @@ Somewhere wire.reach can go: this machine's host process, one listening on anoth
 | `TERMINAL_KEEP_S` | `600` | A terminal (terminal op) no connection is attached to now: its program kept running this long to be attached to again, in seconds. |
 | `TERMINAL_KEPT_BYTES` | `262144` | What a terminal (terminal op) wrote lately, kept to show again on attach: this many bytes at most. |
 | `TTL` | `16` | A tunnel's passed through at most this many hosts (open's ttl). |
-| `VERSION` | `20` | The wire's version, as a host's hello says it. |
+| `VERSION` | `21` | The wire's version, as a host's hello says it. |
 | `ZOOM_MAX` | `1568` | A browser zoom's longest side, in pixels. |
 | `ZOOM_QUALITY` | `90` | A browser zoom's JPEG quality. |

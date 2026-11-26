@@ -9,7 +9,9 @@
   "code": [
     "recordwindow.py:Window.__init__",
     "recordhosts.py:RecordHosts.restart_host",
-    "subscriptionpage.py:MenuUsage"
+    "subscriptionpage.py:MenuUsage",
+    "menufamily.py:open_browser",
+    "baudelib/emissionlink.py:open_window"
   ],
   "copy": [
     "window",
@@ -20,7 +22,8 @@
     "code_apart",
     "meta_settings",
     "hosts",
-    "subscriptions"
+    "subscriptions",
+    "bot_browser"
   ],
   "parts": [
     {
@@ -116,6 +119,36 @@
         {
           "by": "click",
           "does": "Opens the Terminal view over the window, with a terminal on the host picked in the notebooks' host dropdown if it has none."
+        }
+      ]
+    },
+    {
+      "name": "Browser",
+      "shows": "Row \"Browser\", after Terminal: one of the views and programs on the host picked beside New session.",
+      "copy": [
+        "bot_browser.title"
+      ],
+      "phone": {
+        "does": "nothing",
+        "why": "Brings up Emission's own window on a computer's screen: launching a desktop program",
+        "decided": "2026-11-21"
+      },
+      "actions": [
+        {
+          "by": "click",
+          "does": "Asks the host picked beside New session (this machine's if none) for Emission's window on its Default profile, on that machine's own screen (browser_open): the Emission that has the profile brought to the front as it is, else one started. What went wrong (the host not reached, refused) in a toast"
+        }
+      ],
+      "decisions": [
+        {
+          "said": "Add Emission to the family of Databases, Kubernetes, Terminal and the rest, as \"Browser\" (paraphrased)",
+          "rule": "Every desktop app's main menu has Browser among the views and programs on a host, after Terminal, starting or bringing to the front Emission on that host",
+          "decided": "2026-11-26",
+          "source": [
+            {
+              "issue": "BaudeInternal#269"
+            }
+          ]
         }
       ]
     },

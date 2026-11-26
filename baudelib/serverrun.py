@@ -736,6 +736,14 @@ class ServerRunning:
                     reply("error", error=str(e))
             threading.Thread(target=browse, daemon=True, name="emission").start()
             return None
+        if op == "browser_open":  # (☰ → Browser: Emission's window here, brought to the front or started; on a thread)
+            def browser():
+                try:
+                    reply("browser_opened", **emissionlink.open_window())
+                except OSError as e:
+                    reply("error", error=str(e))
+            threading.Thread(target=browser, daemon=True, name="browser-open").start()
+            return None
         if op in ("terminal", "terminal_in", "terminal_resize", "terminal_close", "terminals"):  # (a terminal here:
             if (bad := hostterminal.take(conn, msg)) is not None:  # hostterminal, its bytes carried on this connection)
                 return reply("error", error=bad)

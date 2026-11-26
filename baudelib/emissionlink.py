@@ -335,6 +335,25 @@ def hand_over(pid, urls):
         return False
 
 
+def open_window():
+    """Emission's window here on its Default profile (☰ → Browser, from a head anywhere): the Emission that has it brought
+    to the front, else one started (on this machine's screen). Its answer's fields: started, whether it was."""
+    pid = profile_id(DEFAULT)
+    try:
+        call(pid, {"op": "show"}, timeout=5)
+        return {"started": False}
+    except (OSError, ValueError):
+        pass
+    os.makedirs(data_home(), exist_ok=True)
+    env = dict(os.environ)
+    if env.get("BAUDE_RUNTIME_DIR"):  # (its folders as this process has them: it starts in another)
+        env["BAUDE_RUNTIME_DIR"] = os.path.abspath(env["BAUDE_RUNTIME_DIR"])
+    with open(os.path.join(data_home(), "window.log"), "ab") as log:
+        subprocess.Popen([sys.executable, EMISSION], stdin=subprocess.DEVNULL, stdout=log, stderr=log,
+                         start_new_session=True, cwd=os.path.dirname(EMISSION), env=env)
+    return {"started": True}
+
+
 def call_bot(bot_id, name, msg, timeout=60):
     """msg to the Emission that has bot_id's own profile here, started for it (out of sight: no window shown, its own
     display on Linux) if none has it."""

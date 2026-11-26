@@ -282,6 +282,11 @@ class Window(Adw.ApplicationWindow):
         if op == "open":
             self.take(pid, [u for u in msg.get("urls") or [] if isinstance(u, str)])
             return answer({"ok": True})
+        if op == "show":  # (☰ → Browser: this window brought to the front as it is, no page opened)
+            if not self.hosted and not self.agent and pid == self.profile_id:
+                self.present()
+                return answer({"ok": True})
+            return answer({"error": "not a window of that profile's"})
         if op == "info":  # (hosted: not an agent's to be asked to go; its pages opened there instead: open)
             return answer({"agent": self.agent, "hosted": self.hosted, "profile": self.profile, "pid": os.getpid(),
                            "tabs": len(self.tabs), "idle_s": idle_s, "commit": STARTED})

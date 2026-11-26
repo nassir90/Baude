@@ -1,5 +1,5 @@
 {
-  "description": "The ☰ menu at the right end of the Baude main window's header bar, in sections with a rule between them as Record's: the chat's (Open in Record…, Copy Transcript for an Issue, Read-only session), the view's (Full-width text), the views over the window (Kubernetes, Docker, Databases, Terminal), the current subscription's usage, the app's (Settings…, Changelog, Mesh, Send Feedback…, Ongoing Feedback, Restart Baude, Restart Daemon). Items beside a check mark are toggles.",
+  "description": "The ☰ menu at the right end of the Baude main window's header bar, in sections with a rule between them as Record's: the chat's (Open in Record…, Copy Transcript for an Issue, Read-only session), the view's (Full-width text), the views over the window (Kubernetes, Docker, Databases, Terminal, Browser), the current subscription's usage, the app's (Settings…, Changelog, Mesh, Send Feedback…, Ongoing Feedback, Restart Baude, Restart Daemon). Items beside a check mark are toggles.",
   "apps": [
     "baude"
   ],
@@ -15,7 +15,9 @@
     "windowremote.py:WindowRemote.restart_host",
     "windowproc.py:WindowProc.set_read_only",
     "windowview.py:WindowView.on_fullwidth_toggled",
-    "subscriptionpage.py:MenuUsage"
+    "subscriptionpage.py:MenuUsage",
+    "menufamily.py:open_browser",
+    "baudelib/emissionlink.py:open_window"
   ],
   "copy": [
     "window",
@@ -26,7 +28,8 @@
     "code_apart",
     "hosts",
     "multiplex",
-    "subscriptions"
+    "subscriptions",
+    "bot_browser"
   ],
   "phone": {
     "does": "⋮ in the chat's header bar, with the same items where they apply (the items with does: nothing aside)",
@@ -130,6 +133,36 @@
         {
           "by": "click",
           "does": "Opens the Terminal view laid over the whole window, with a terminal on the host picked in the sidebar's host dropdown if it has none"
+        }
+      ]
+    },
+    {
+      "name": "Browser",
+      "shows": "Row \"Browser\", after Terminal: one of the views and programs on the host picked beside New session.",
+      "copy": [
+        "bot_browser.title"
+      ],
+      "phone": {
+        "does": "nothing",
+        "why": "Brings up Emission's own window on a computer's screen: launching a desktop program",
+        "decided": "2026-11-21"
+      },
+      "actions": [
+        {
+          "by": "click",
+          "does": "Asks the host picked beside New session (this machine's if none) for Emission's window on its Default profile, on that machine's own screen (browser_open): the Emission that has the profile brought to the front as it is, else one started. What went wrong (the host not reached, refused) in a toast"
+        }
+      ],
+      "decisions": [
+        {
+          "said": "Add Emission to the family of Databases, Kubernetes, Terminal and the rest, as \"Browser\" (paraphrased)",
+          "rule": "Every desktop app's main menu has Browser among the views and programs on a host, after Terminal, starting or bringing to the front Emission on that host",
+          "decided": "2026-11-26",
+          "source": [
+            {
+              "issue": "BaudeInternal#269"
+            }
+          ]
         }
       ]
     },

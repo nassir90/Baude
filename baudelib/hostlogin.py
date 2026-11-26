@@ -10,6 +10,7 @@ import re
 import subprocess
 import threading
 
+from baudelib import deps
 from baudelib.claude import claude_env, claude_exe
 
 # A turn's error that signing in again would fix: claude's own words for it ("Invalid API key · Please run /login",
@@ -82,6 +83,8 @@ def start(server, conn, msg):
     if (proc := getattr(conn, "login", None)) is not None and proc.poll() is None:
         return conn.send({"op": "error", "req": req, "error": "this connection runs a sign-in already"})
     exe, env = server.exe or claude_exe(), claude_env() | (server.env or {}) | NO_BROWSER
+    if (dep := deps.missing("claude")) is not None:  # (no claude here: what to install, as Dependencies says it)
+        return conn.send({"op": "login_end", "req": req, "code": None, "why": deps.say(dep, "report.claude")})
     try:
         proc = subprocess.Popen([exe, "auth", "login", *(msg.get("args") or [])], stdin=subprocess.PIPE,
                                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1, env=env)

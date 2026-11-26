@@ -4,6 +4,7 @@ relay Claude Code runs as Meta's MCP server (RELAY), and the session itself (Age
 """
 import json
 import os
+import shutil
 import socket
 import sys
 import tempfile
@@ -13,7 +14,7 @@ import uuid
 from gi.repository import GLib  # noqa: E402
 
 import chatparts  # noqa: E402
-from baudelib import agentproxy, codex, meshtools, modelfiles, wire, wording  # noqa: E402
+from baudelib import agentproxy, codex, deps, meshtools, modelfiles, wire, wording  # noqa: E402
 from baudelib import models as modelslib  # noqa: E402
 from baudelib import providers as providerslib  # noqa: E402
 from baudelib.claude import ClaudeProc  # noqa: E402
@@ -497,6 +498,8 @@ class Agent:
         # Mac runs besides, each given Meta's tools through the same MCP relay, and its effort only if it takes one)
         commands = commands and takes_commands(model)  # (only Claude's models act)
         run = modelslib.launch(model, "auto" if commands else "default", effort)
+        if run["program"] == "codex" or run["program"] == "claude" and not (exe and shutil.which(exe)):
+            deps.need(run["program"], "report.claude" if run["program"] == "claude" else "programs.codex")  # (as a chat's)
         if run["missing"]:
             raise OSError(wording.say("meta.apple_not_built") if run["program"] == "apple" else
                           wording.say("meta.runner_missing", program=run["program"]))

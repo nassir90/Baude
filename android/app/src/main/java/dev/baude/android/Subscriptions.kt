@@ -56,6 +56,7 @@ class HostAccounts(val hostId: String) {
     val loaded = mutableStateOf(false)
     val usage = mutableStateMapOf<String, Usage>() // (each Claude subscription's, by id: "" the CLI's own sign-in)
     val claudeCli = mutableStateOf(true) // (whether the host has claude: without it, a Claude account is a token)
+    val missing = mutableStateOf<Map<String, Msg.Dep>>(emptyMap()) // (a provider's program the host lacks, by provider)
     private val reading = HashSet<String>()
 
     /** A subscription's usage as last read: its limits (name, percent), or what to say instead. */
@@ -98,6 +99,7 @@ class HostAccounts(val hostId: String) {
         g.accounts?.let { accounts.value = it }
         g.defaults?.let { d -> defaults.value = d.keys().asSequence().associateWith { d.optString(it) } }
         g.claudeCli?.let { claudeCli.value = it }
+        missing.value = g.missing.orEmpty()
         loaded.value = true
         error.value = null
         return g.error?.ifBlank { null }
@@ -113,7 +115,8 @@ class HostAccounts(val hostId: String) {
  * host picked beside New session, changed there: its name; for each provider, its heading with the pill picking the
  * subscription a new chat takes, then a card for each subscription (Claude's CLI default first, where the host has
  * claude), each account's with ⋮ (Rename…, Sign In Again… or Replace Token…, Remove…), and a Claude card's usage as a
- * bar for each limit with its percentage, read as the page is shown and every USAGE_S while it is and the app is in front; then Add account. */
+ * bar for each limit with its percentage, read as the page is shown and every USAGE_S while it is and the app is in front; then Add account
+ * (where the host lacks the provider's program, its Dependencies row instead: DepRow). */
 @Composable
 fun SubscriptionsPage() {
     val c = LocalBaude.current
@@ -165,7 +168,11 @@ fun SubscriptionsPage() {
                 }
                 if (provider == "claude" && host.claudeCli.value) SubscriptionCard(Wording.Subscriptions.cliDefault, null, host.usage[""], true) {}
                 for (a in mine) SubscriptionCard(a.name.orEmpty(), a, host.usage[a.id.orEmpty()], provider == "claude") { kind -> dialog = kind to a }
-                BoxedList(listOf(Unit), "") { ButtonRow(Wording.Subscriptions.addAccount, Adwaita.ListAdd) { dialog = "add" to provider } }
+                val lacks = host.missing.value[provider] // (its program isn't on the host: what Dependencies says, no account to add)
+                BoxedList(listOf(Unit), "") {
+                    if (lacks != null) DepRow(lacks, depTitle(lacks, title))
+                    else ButtonRow(Wording.Subscriptions.addAccount, Adwaita.ListAdd) { dialog = "add" to provider }
+                }
             }
         }
     }

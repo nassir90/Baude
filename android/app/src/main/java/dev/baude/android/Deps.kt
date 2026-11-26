@@ -41,10 +41,7 @@ fun MissingDep(dep: Msg.Dep, feature: String, again: () -> Unit) {
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(24.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp, Alignment.CenterVertically), horizontalAlignment = Alignment.CenterHorizontally) {
         Icon(Adwaita.PackageXGeneric, null, tint = c.dim, modifier = Modifier.size(32.dp.icon))
-        val name = feature.removeSuffix("…")
-        Text(if (name.equals(dep.name, ignoreCase = true)) Wording.Deps.notInstalled(dep = dep.name.orEmpty())
-            else Wording.Deps.needs(feature = name, dep = dep.name.orEmpty()), style = Type.title,
-            color = c.fg, textAlign = TextAlign.Center)
+        Text(depTitle(dep, feature), style = Type.title, color = c.fg, textAlign = TextAlign.Center)
         val fix = dep.fix
         val link = dep.link
         if (!fix.isNullOrBlank()) Row(Modifier.clip(RoundedCornerShape(Gap.codeRadius)).background(c.raised)
@@ -60,14 +57,22 @@ fun MissingDep(dep: Msg.Dep, feature: String, again: () -> Unit) {
     }
 }
 
-/** A dependency's row (depsview.row): its name, then what's said of it while it's there (Installed, Signed in,
+/** What a feature without dep says of it (deps.title): "Kubernetes needs kubectl", or "Codex CLI isn't installed" where
+ * the feature's name is in the dependency's. feature: the feature's name. */
+fun depTitle(dep: Msg.Dep, feature: String): String {
+    val name = feature.removeSuffix("…")
+    return if (dep.name.orEmpty().contains(name, ignoreCase = true)) Wording.Deps.notInstalled(dep = dep.name.orEmpty())
+    else Wording.Deps.needs(feature = name, dep = dep.name.orEmpty())
+}
+
+/** A dependency's row (depsview.row): its name (or title, where a feature's page lists it), then what's said of it while it's there (Installed, Signed in,
  * Running, 3 models), or the command that installs or readies it with Copy (else its install page; a check with no command, its status only). */
 @Composable
-fun DepRow(dep: Msg.Dep) {
+fun DepRow(dep: Msg.Dep, title: String? = null) {
     val c = LocalBaude.current
     val clip = LocalClipboardManager.current
     val uri = LocalUriHandler.current
-    ActionRow(dep.name.orEmpty(), null, suffix = {
+    ActionRow(title ?: dep.name.orEmpty(), null, titleLines = if (title != null) 2 else 1, suffix = {
         val fix = dep.fix
         val link = dep.link
         if (dep.present == true) Text(dep.ready ?: Wording.Deps.installed, style = Type.body, color = c.dim)

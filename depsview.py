@@ -109,10 +109,10 @@ def copy_fix(widget, dep):
         toast(widget, text)
 
 
-def row(dep):
-    """A dependency's row: its name, then what's said of it while it's there (Installed, Signed in, Running, 3 models),
+def row(dep, title=None):
+    """A dependency's row: its name (or title: "Codex CLI isn't installed", where a feature's page lists it), then what's said of it while it's there (Installed, Signed in, Running, 3 models),
     or the command that installs or readies it with Copy (else its install page; a check with no command, its status only)."""
-    out = Adw.ActionRow(title=GLib.markup_escape_text(dep["name"]))
+    out = Adw.ActionRow(title=GLib.markup_escape_text(title or dep["name"]))
     if dep.get("present"):
         out.add_suffix(Gtk.Label(label=dep.get("ready") or wording.say("deps.installed"), css_classes=["dim-label"]))
     elif dep.get("fix"):

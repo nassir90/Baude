@@ -3,7 +3,8 @@ subscription accounts kept on the host picked beside New session (win.terminal_h
 Database Schemas are), changed there through its accounts op (hostaccounts): for each provider, a Current Subscription row
 picking the subscription a new chat takes, a card per subscription (an account's with ⋮: Rename…, Sign In Again… or Replace
 Token…, Remove…; a Claude card with its usage as a bar per limit, read every USAGE_S while the page is shown in the window in front), and Add
-account. A Claude account is signed in to with claude auth login run on
+account (where the host lacks the provider's program, what Settings → Dependencies says of it instead: depsview.row).
+A Claude account is signed in to with claude auth login run on
 the host with the account's own folder: the page to open shown as a link, and a box for the code it shows. Where the
 host has no claude, it's a token from claude setup-token. Also the chat's Sign in card's token box for a chat under a
 token account (replace_token)."""
@@ -14,10 +15,15 @@ import threading
 
 from gi.repository import Adw, Gio, GLib, Gtk
 
-from baudelib import icons, wire, wording
+from baudelib import deps, icons, wire, wording
 
 PROVIDERS = (("claude", "report.claude", "claude"), ("codex", "programs.codex", "openai"))
 USAGE_S = 30  # (how often a shown page reads its subscriptions' usage again)
+
+
+def title_of(provider):
+    """A provider's copy key (PROVIDERS'): report.claude, programs.codex."""
+    return next(title for p, title, _logo in PROVIDERS if p == provider)
 
 
 def clock_24h():
@@ -112,7 +118,7 @@ class Page(Adw.PreferencesPage):
                 clamp.set_maximum_size(100_000)
                 clamp.set_tightening_threshold(100_000)
         self.where, self.host = win.terminal_host()
-        self.accounts, self.defaults, self.filling, self.claude_cli = [], {}, False, True
+        self.accounts, self.defaults, self.filling, self.claude_cli, self.missing = [], {}, False, True, {}
         self.choices = {}
         self.lists, self.pills, self.usage, self.bars, self.reading = {}, {}, {}, {}, set()
         self.shown, self.timer, self.window_watch = None, None, None
@@ -162,11 +168,12 @@ class Page(Adw.PreferencesPage):
         return Ask(self.where, msg, answered)
 
     def took(self, reply):
-        """An answer's accounts, defaults and whether the host has claude, kept and shown (drawn again only if they
-        changed); a Claude subscription not read yet, read."""
+        """An answer's accounts, defaults, whether the host has claude and what it lacks, kept and shown (drawn again
+        only if they changed); a Claude subscription not read yet, read."""
         self.accounts, self.defaults = reply["accounts"], reply.get("defaults") or {}
         self.claude_cli = reply.get("claude_cli", self.claude_cli)
-        if (self.accounts, self.defaults, self.claude_cli) != self.shown:
+        self.missing = reply.get("missing") or {}
+        if (self.accounts, self.defaults, self.claude_cli, self.missing) != self.shown:
             self.fill()
         if self.get_mapped():
             self.read_usage([p for p in self.claude_ids() if p not in self.usage])
@@ -182,7 +189,7 @@ class Page(Adw.PreferencesPage):
         return [*([""] if self.claude_cli else []), *(a["id"] for a in self.accounts if a["provider"] == "claude")]
 
     def fill(self, error=None):
-        self.shown = None if error else (self.accounts, self.defaults, self.claude_cli)
+        self.shown = None if error else (self.accounts, self.defaults, self.claude_cli, self.missing)
         self.bars = {}
         for provider, cards in self.lists.items():
             while (child := cards.get_first_child()) is not None:
@@ -200,10 +207,14 @@ class Page(Adw.PreferencesPage):
                 cards.append(self.card(provider, None))
             for account in mine:
                 cards.append(self.card(provider, account))
-            add = Adw.ButtonRow(title=wording.say("subscriptions.add_account"), end_icon_name="list-add-symbolic")
-            add.connect("activated", lambda _row, p=provider: (add_claude if p == "claude" else add_codex)(self))
             rows = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE, css_classes=["boxed-list"])
-            rows.append(add)
+            if (dep := self.missing.get(provider)) is not None:  # (its program isn't on the host: no account to add)
+                from depsview import row
+                rows.append(row(dep, deps.title(dep, title_of(provider))))
+            else:
+                add = Adw.ButtonRow(title=wording.say("subscriptions.add_account"), end_icon_name="list-add-symbolic")
+                add.connect("activated", lambda _row, p=provider: (add_claude if p == "claude" else add_codex)(self))
+                rows.append(add)
             cards.append(rows)
 
     def fill_pill(self, provider, row, mine):

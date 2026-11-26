@@ -16,7 +16,10 @@
     "Subscriptions.kt:HostAccounts",
     "Subscriptions.kt:SubscriptionsPage",
     "Subscriptions.kt:ClaudeLogin",
-    "Settings.kt:SettingsScreen"
+    "Settings.kt:SettingsScreen",
+    "baudelib/deps.py",
+    "depsview.py:row",
+    "Deps.kt:DepRow"
   ],
   "copy": [
     "subscriptions",
@@ -165,9 +168,25 @@
         },
         {
           "name": "Add account",
-          "shows": "Button row \"Add account\" with a plus.",
+          "shows": "Button row \"Add account\" with a plus. Where the host lacks the provider's program (Codex's codex, by the host's deps), its Dependencies row in its place: \"Codex CLI isn't installed\", the install command with Copy (else the install page).",
           "copy": [
-            "subscriptions.add_account"
+            "subscriptions.add_account",
+            "deps.not_installed",
+            "deps.needs",
+            "deps.install_page",
+            "common.copy"
+          ],
+          "decisions": [
+            {
+              "said": "Settings → Subscriptions showed a raw \"No such file or directory: 'codex'\" error; the dependencies page already has a central store that knows whether runtimes and dependencies are installed, and it should gate features like this one (paraphrased)",
+              "rule": "Every app's Subscriptions page asks the host's dependency store (schema/deps, the same one Settings → Dependencies lists) whether each provider's program is there; where it isn't, that provider's Add account row is replaced by its Dependencies row, titled \"<program> isn't installed\" with the host's install command and Copy (else its install page), and a sign-in the host is asked to run without it answers with that same line, never the run's OS error",
+              "decided": "2026-11-26",
+              "source": [
+                {
+                  "issue": "BaudeInternal#234"
+                }
+              ]
+            }
           ]
         }
       ]

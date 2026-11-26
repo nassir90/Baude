@@ -66,7 +66,7 @@
     },
     {
       "name": "task page",
-      "shows": "A header row: a back button (tooltip 'Tasks'), the task's name in bold (ellipsized), then flat buttons Run (play), Change (pencil) and Delete (trash). Below it, scrolling, a boxed list of one switch row, 'Hand failures to the Bot', then three groups each with its heading: 'Triggers', 'Inputs', 'Runs'. Each group's rows are a dense list's: Baude's as compact as the sessions list (at least 26 px, 1 px above and below, their buttons 24 px), the phone's a menu's row high (popup.row, 34), its buttons filling it. No script and no runtime: the run page's version, and a failed run's log, are all of the script a person sees. Read when opened, every 5 seconds while a run is going, and after each change here.",
+      "shows": "A header row: a back button (tooltip 'Tasks'), the task's name in bold (ellipsized), then flat buttons Run (play), Change (pencil) and Delete (trash). Below it, scrolling, a boxed list of one switch row, 'Hand failures to the Bot', then three groups each with its heading: 'Triggers', 'Inputs', 'Runs'. Each group's rows are a dense list's, as tall as a navigation list's rows: Baude's at least 36 px (1 px above and below, their buttons 24 px), as the Fixes page's; the phone's at least 38 dp, as its Fixes list's. No script and no runtime: the run page's version, and a failed run's log, are all of the script a person sees. Read when opened, every 5 seconds while a run is going, and after each change here.",
       "copy": [
         "tasks.title",
         "tasks.run",
@@ -177,10 +177,9 @@
         },
         {
           "name": "runs",
-          "shows": "Heading 'Runs'. Its latest runs, newest first, a compact row each: the state icon, the title '<when>' on one line (HH:MM if today, else '03 Nov 14:00', on the host's clock as it was when the run started; how long it took is on the run page), and at the end an icon for what started it (play by hand, alarm clock schedule, branch git push) and the version, monospace, dim. A run with dummy answers has ' · dry' after the title. None: the dim line 'No runs yet'.",
+          "shows": "Heading 'Runs'. Its latest runs, newest first, a compact row each: the state icon, the title '<when>' on one line (HH:MM if today, else '03 Nov 14:00', on the host's clock as it was when the run started; how long it took is on the run page), and at the end an icon for what started it (play by hand, alarm clock schedule, branch git push) and the version, monospace, dim. None: the dim line 'No runs yet'.",
           "copy": [
-            "tasks.no_runs",
-            "tasks.dry_tag"
+            "tasks.no_runs"
           ],
           "actions": [
             {
@@ -193,7 +192,7 @@
     },
     {
       "name": "run page",
-      "shows": "A header row: a back button (tooltip the task's name), the title '<task> · <when>' in bold, and a Stop button (stop icon) while it's running or asking. Then one line: its state's word (or, if it failed or was stopped, why), what started it ('By hand', 'Schedule', 'Git push'), how long it took, 'dummy answers' for a run with them, and its version. Then its log, scrolling, in order: the script's output in code blocks and its errors in code blocks of their own in the error colour (consecutive lines of each together), each line it said as plain text, each ask of the Bot as a card headed 'Asked <Bot>' (or 'Handed to <Bot>' for a failure handed over) with what was asked, each answer as a card headed '<Bot> answered' with the Bot's answer, and anything else the host says of the run as plain text. Nothing says when it started or that it ended: the title and the line under it do. Read every second while it's going, the lines since added to what's drawn.",
+      "shows": "A header row: a back button (tooltip the task's name), the title '<task> · <when>' in bold, and a Wrap toggle (text-wrap icon, tooltip 'Wrap long lines', drawn pressed while on), and a Stop button (stop icon) while it's running or asking. Then one line: its state's word (or, if it failed or was stopped, why), what started it ('By hand', 'Schedule', 'Git push'), how long it took, and its version. Then its log, scrolling, in order: the script's output in code blocks and its errors in code blocks of their own in the error colour (consecutive lines of each together; their long lines wrapped at the page's width while Wrap is on, else scrolled sideways), each line it said as plain text, each ask of the Bot as a card headed 'Asked <Bot>' (or 'Handed to <Bot>' for a failure handed over) with what was asked, each answer as a card headed '<Bot> answered' with the Bot's answer, and anything else the host says of the run as plain text. Nothing says when it started or that it ended: the title and the line under it do. Read every second while it's going, the lines since added to what's drawn.",
       "copy": [
         "tasks.status",
         "tasks.asked_bot",
@@ -202,7 +201,8 @@
         "common.stop",
         "tasks.schedule",
         "tasks.git_push",
-        "tasks.by_hand"
+        "tasks.by_hand",
+        "code_view.wrap"
       ],
       "actions": [
         {
@@ -212,6 +212,22 @@
         {
           "by": "click Stop",
           "does": "stops the run on the host"
+        },
+        {
+          "by": "click Wrap",
+          "does": "wraps the output and error blocks' long lines at the page's width, or scrolls them sideways again; remembered across sessions (setting task_log_wrap, on until turned off)"
+        }
+      ],
+      "decisions": [
+        {
+          "said": "A task run's terminal-style logs need a word-wrap mode (paraphrased)",
+          "rule": "Every app's run page has a Wrap toggle for its output and error blocks, as the Kubernetes logs have one: on, long lines wrap at the page's width; off, they scroll sideways. It's on until turned off, and remembered (task_log_wrap)",
+          "decided": "2026-11-26",
+          "source": [
+            {
+              "issue": "BaudeInternal#265"
+            }
+          ]
         }
       ]
     },
@@ -244,27 +260,22 @@
     },
     {
       "name": "run form",
-      "shows": "An alert dialog headed 'Run <task>', as the app's settings dialogs are (Change Task, a chat's Access): its inputs as one boxed list of setting rows, each titled with its label (its name if none), wrapped, with no subtitle, filled with its default: a yes/no input a switch row, a text or number input an entry row (a number's in the error colour, and Run off, while it isn't one), a choice a drop-down row of its choices. Under the list, centred, the lesser flat button Run with dummy answers. Then the buttons Cancel and Run (suggested), the only two side by side. The phone draws the same: its boxed list, switch, entry and choice rows, the flat Run with dummy answers under them, Cancel and Run at the end.",
+      "shows": "An alert dialog headed 'Run <task>', as the app's settings dialogs are (Change Task, a chat's Access): its inputs as one boxed list of setting rows, each titled with its label (its name if none), wrapped, with no subtitle, filled with its default: a yes/no input a switch row, a text or number input an entry row (a number's in the error colour, and Run off, while it isn't one), a choice a drop-down row of its choices. Then the buttons Cancel and Run (suggested). The phone draws the same: its boxed list, switch, entry and choice rows, Cancel and Run at the end.",
       "copy": [
         "tasks.run_heading",
         "common.cancel",
-        "tasks.dry_run",
         "tasks.run"
       ],
       "actions": [
         {
           "by": "click Run",
           "does": "runs it with its inputs as filled"
-        },
-        {
-          "by": "click Run with dummy answers",
-          "does": "runs the script as it is, side effects and all, with its asks answered by a dummy agent and its failure not handed to the Bot"
         }
       ],
       "decisions": [
         {
           "said": "The run form looked ugly and unlike any of the app's other settings (paraphrased: the form shown when running a task with inputs)",
-          "rule": "Every app draws a task's run form as its settings: one boxed list of rows titled with each input's label (wrapped, no subtitle), a switch row for yes/no, an entry row for text and number, a drop-down row for a choice; one suggested button, Run, beside Cancel; Run with dummy answers out of that row, a flat button under the list, outside what scrolls; a number is red from the start while its text isn't a finite number (not nan, inf, 1e999 or 1_000), an empty optional number is fine and sends nothing (the host's default stands), Enter in an entry runs the form when it's fit",
+          "rule": "Every app draws a task's run form as its settings: one boxed list of rows titled with each input's label (wrapped, no subtitle), a switch row for yes/no, an entry row for text and number, a drop-down row for a choice; one suggested button, Run, beside Cancel, and no other button; a number is red from the start while its text isn't a finite number (not nan, inf, 1e999 or 1_000), an empty optional number is fine and sends nothing (the host's default stands), Enter in an entry runs the form when it's fit",
           "decided": "2026-11-26",
           "source": [
             {
@@ -398,16 +409,6 @@
       ]
     },
     {
-      "said": "Test a workflow with a dummy agent and check the format is correct",
-      "rule": "Every app's run form offers Run with dummy answers: the script runs as it is, its asks answered by a dummy agent",
-      "decided": "2026-11-26",
-      "source": [
-        {
-          "issue": "BaudeInternal#241"
-        }
-      ]
-    },
-    {
       "said": "For tasks UI, users probably don't need to see scripts at all these are probably going to blow up to pretty complex apps in the bot git repo.",
       "rule": "No app shows a task's script or lets a person edit it, nor its runtime: the Bot writes and changes scripts (set_task), and a person asks the Bot to. A task's version stays on its runs and its run page; a run's log (tracebacks too) shows as it is",
       "decided": "2026-11-26",
@@ -431,12 +432,22 @@
     },
     {
       "said": "Form row height should ne narrower as should triggrs and runs",
-      "rule": "Every app draws a task's Inputs, Triggers and Runs as dense lists: each app's compact row (Baude's as the sessions list's, 26 px; the phone's a menu's, 34), not a full list row",
+      "rule": "Every app draws a task's Inputs, Triggers and Runs as dense lists, but not thinner than its navigation lists' rows: Baude's 36 px (libadwaita's navigation-sidebar row, as the Fixes page and Record's notebooks have), the phone's 38 dp (as its Fixes list); not the 26 px sessions-list row, nor a full list row",
       "decided": "2026-11-26",
       "source": [
         {
           "session": "b3845b21-55ac-4aab-a769-fb8517403c51",
           "message": "21d61362-b76e-4eed-a2d6-59d2e5eb5a2d"
+        }
+      ]
+    },
+    {
+      "said": "The rows in Tasks are too thin; make them a little taller (paraphrased)",
+      "rule": "Every app draws a task's Inputs, Triggers and Runs as dense lists, but not thinner than its navigation lists' rows: Baude's 36 px (libadwaita's navigation-sidebar row, as the Fixes page and Record's notebooks have), the phone's 38 dp (as its Fixes list); not the 26 px sessions-list row, nor a full list row",
+      "decided": "2026-11-26",
+      "source": [
+        {
+          "issue": "BaudeInternal#267"
         }
       ]
     }
@@ -465,6 +476,20 @@
       ],
       "why": "A consequence of no scripts in the UI: the host takes no task without a script; scripts are the Bot's to write. A person asks the Bot for a new task",
       "decided": "2026-11-26"
+    },
+    {
+      "name": "Run with dummy answers (the run form's button, a run's ' · dry' tag and 'dummy answers' fact, run_task's dry)",
+      "apps": [
+        "baude",
+        "phone"
+      ],
+      "why": "The owner called Run with dummy answers a terrible feature and asked for it to go (paraphrased). Every app runs a task only for real: no button, tag or wire flag for a run whose asks a dummy agent answers",
+      "decided": "2026-11-26",
+      "source": [
+        {
+          "issue": "BaudeInternal#266"
+        }
+      ]
     }
   ]
 }

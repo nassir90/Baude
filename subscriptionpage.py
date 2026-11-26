@@ -2,7 +2,7 @@
 subscription accounts kept on the host picked beside New session (win.terminal_host, as ☰ → Terminal, Kubernetes and
 Databases are), changed there through its accounts op (hostaccounts): for each provider, a Current Subscription row
 picking the subscription a new chat takes, a card per subscription (an account's with ⋮: Rename…, Sign In Again… or Replace
-Token…, Remove…; a Claude card with its usage as a bar per limit, read every USAGE_S while the page is shown in the window in front), and Add
+Token…, Remove…; each card with its usage as a bar per limit, read every USAGE_S while the page is shown in the window in front), and Add
 account (where the host lacks the provider's program, what Settings → Dependencies says of it instead: depsview.row).
 A Claude account is signed in to with claude auth login run on
 the host with the account's own folder: the page to open shown as a link, and a box for the code it shows. Where the
@@ -22,6 +22,7 @@ from baudelib import deps, icons, tokens, wire, wording
 
 PROVIDERS = (("claude", "report.claude", "claude"), ("codex", "programs.codex", "openai"))
 USAGE_S = 30  # (how often a shown page reads its subscriptions' usage again)
+CODEX_CLI = "codex"  # (Codex's CLI's own sign-in's usage key, as its host says it: accounts.CODEX_CLI)
 STALE_OPACITY = tokens.number("subscriptions.stale-opacity")  # (a card's usage as the host last read it, till the page's own read answers)
 
 
@@ -134,8 +135,9 @@ class Ask:
 
 
 class Page(Adw.PreferencesPage):
-    """The page: its host (where, name), its accounts as the host last said them, and each Claude subscription's usage
-    (usage: id → its limits [(name, percent)], or what to say instead), read as the page is shown and every
+    """The page: its host (where, name), its accounts as the host last said them, and each subscription's usage
+    (usage: its usage key, an account's id, "" for Claude's CLI's own sign-in and CODEX_CLI for Codex's → its limits
+    [(name, percent)], or what to say instead), read as the page is shown and every
     USAGE_S while it is; till its first read answers, what the host last read (last: id → its limits), greyed."""
 
     def __init__(self, win):
@@ -148,6 +150,7 @@ class Page(Adw.PreferencesPage):
         self.where, self.host = win.terminal_host()
         self.here = wire.is_local(self.where)  # (the host's this machine's: a sign-in's page opened here at once)
         self.accounts, self.defaults, self.filling, self.claude_cli, self.missing = [], {}, False, True, {}
+        self.codex_usage = False  # (whether the host reads Codex usage: an older host's reads of Codex's CLI default are Claude's)
         self.choices = {}
         self.lists, self.pills, self.usage, self.bars, self.reading, self.last = {}, {}, {}, {}, set(), {}
         self.shown, self.timer, self.window_watch = None, None, None
@@ -199,7 +202,7 @@ class Page(Adw.PreferencesPage):
     def took(self, reply):
         """An answer's accounts, defaults, whether the host has claude and what it lacks, kept and shown (drawn again
         only if they changed), and the usage the host last read, shown greyed where this page hasn't read it yet; a
-        Claude subscription not read yet, read."""
+        subscription not read yet, read."""
         self.accounts, self.defaults = reply["accounts"], reply.get("defaults") or {}
         last = {p: _limits(r["usage"]) for p, r in (reply.get("last_usage") or {}).items()}
         if last != self.last:
@@ -209,23 +212,30 @@ class Page(Adw.PreferencesPage):
                     self.fill_bars(profile)
         self.claude_cli = reply.get("claude_cli", self.claude_cli)
         self.missing = reply.get("missing") or {}
-        if (self.accounts, self.defaults, self.claude_cli, self.missing) != self.shown:
+        self.codex_usage = bool(reply.get("codex_usage"))
+        if (self.accounts, self.defaults, self.claude_cli, self.missing, self.codex_usage) != self.shown:
             self.fill()
         if self.get_mapped():
-            self.read_usage([p for p in self.claude_ids() if p not in self.usage])
+            self.read_usage([p for p in self.usage_ids() if p not in self.usage])
 
     def toast(self, text):
         dialog = self.get_ancestor(Adw.PreferencesDialog)
         if dialog is not None:
             dialog.add_toast(Adw.Toast(title=text, timeout=3))
 
-    def claude_ids(self):
-        """The Claude subscriptions whose usage is read: the CLI's own sign-in (where the host has claude), then each
-        account."""
-        return [*([""] if self.claude_cli else []), *(a["id"] for a in self.accounts if a["provider"] == "claude")]
+    def usage_ids(self):
+        """The subscriptions whose usage is read, by usage key: Claude's CLI's own sign-in (where the host has claude),
+        each Claude account, Codex's CLI's own sign-in (where the host has codex), each Codex account."""
+        return [*([""] if self.claude_cli else []), *(a["id"] for a in self.accounts if a["provider"] == "claude"),
+                *([CODEX_CLI] if self.cli_card("codex") else []),
+                *(a["id"] for a in self.accounts if a["provider"] == "codex" and self.codex_usage)]
+
+    def cli_card(self, provider):
+        """Whether a provider's CLI's own sign-in has a card: the host has its program (Codex's: and reads its usage)."""
+        return self.claude_cli if provider == "claude" else provider not in self.missing and self.codex_usage
 
     def fill(self, error=None):
-        self.shown = None if error else (self.accounts, self.defaults, self.claude_cli, self.missing)
+        self.shown = None if error else (self.accounts, self.defaults, self.claude_cli, self.missing, self.codex_usage)
         self.bars = {}
         for provider, cards in self.lists.items():
             while (child := cards.get_first_child()) is not None:
@@ -239,7 +249,7 @@ class Page(Adw.PreferencesPage):
                 continue
             mine = [a for a in self.accounts if a["provider"] == provider]
             self.fill_pill(provider, current, mine)
-            if provider == "claude" and self.claude_cli:
+            if self.cli_card(provider):
                 cards.append(self.card(provider, None))
             for account in mine:
                 cards.append(self.card(provider, account))
@@ -267,7 +277,7 @@ class Page(Adw.PreferencesPage):
 
     def card(self, provider, account):
         """A subscription's card: its name and ⋮ (an account's: Rename…, Sign In Again… or Replace Token…, Remove…),
-        then, for Claude's, its usage: a bar for each limit with its percentage."""
+        then its usage: a bar for each limit with its percentage."""
         card = Gtk.Box(css_classes=["card"])
         inside = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8, hexpand=True, margin_top=6, margin_bottom=12,
                          margin_start=12, margin_end=6)
@@ -279,16 +289,16 @@ class Page(Adw.PreferencesPage):
         if account is not None:
             top.append(self.account_menu(account))
         inside.append(top)
-        if provider == "claude":
+        if provider == "claude" or self.codex_usage:
             bars = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, margin_end=6)
             inside.append(bars)
-            profile = account["id"] if account else ""
+            profile = account["id"] if account else "" if provider == "claude" else CODEX_CLI
             self.bars[profile] = bars
             self.fill_bars(profile)
         return card
 
     def fill_bars(self, profile):
-        """A Claude card's usage as last read: a bar for each limit, its name and percentage over it; else what was
+        """A card's usage as last read: a bar for each limit, its name and percentage over it; else what was
         said instead. Till it's first read here, the host's last reading greyed (Checking… where it has none)."""
         bars = self.bars.get(profile)
         if bars is None:
@@ -332,8 +342,8 @@ class Page(Adw.PreferencesPage):
             self.ask({"what": "select", "provider": provider, "id": profile}, answered)
 
     def shown_now(self, *_):
-        """The page in front: its Claude subscriptions' usage read now and every USAGE_S till it isn't."""
-        self.read_usage(self.claude_ids())
+        """The page in front: its subscriptions' usage read now and every USAGE_S till it isn't."""
+        self.read_usage(self.usage_ids())
         window = self.get_root()
         if window is not None and self.window_watch is None:
             self.window_watch = (window, window.connect("notify::is-active", self.window_changed))
@@ -361,7 +371,7 @@ class Page(Adw.PreferencesPage):
             self.window_watch = None
 
     def tick(self):
-        self.read_usage(self.claude_ids())
+        self.read_usage(self.usage_ids())
         return True
 
     def read_usage(self, profiles):
@@ -381,7 +391,8 @@ class Page(Adw.PreferencesPage):
                 else:
                     self.usage[profile] = wording.say("subscriptions.usage_unavailable")
                 self.fill_bars(profile)
-            self.ask({"what": "usage", "id": profile}, done)
+            self.ask({"what": "usage", "provider": "codex", "id": ""} if profile == CODEX_CLI else
+                     {"what": "usage", "id": profile}, done)
 
 
 def usage_lines(box, read):

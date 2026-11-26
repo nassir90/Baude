@@ -16,6 +16,7 @@
     "checking": "Checking…",
     "usage_unavailable": "Usage unavailable for this sign-in",
     "usage_failed": "Could not read usage from Claude Code",
+    "codex_usage_failed": "Could not read usage from Codex",
     "more_tip": "Change this account",
     "add_claude": "Add Claude account",
     "add_codex": "Add Codex account",

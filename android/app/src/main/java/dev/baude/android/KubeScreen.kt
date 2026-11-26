@@ -327,8 +327,9 @@ class KubeState(val hostId: String) {
     }
 
     /** Read the page's objects (and, for pods and nodes, their CPU and memory); switch: it's another kind, so the
-     * table fades until they're in. */
-    fun load(quiet: Boolean = false, switch: Boolean = false) {
+     * table fades until they're in; fresh (Refresh): Home is read now, not from what the host kept or while it waits
+     * to try a failing cluster again. */
+    fun load(quiet: Boolean = false, switch: Boolean = false, fresh: Boolean = false) {
         val ctx = context ?: return
         stopWatch()
         if (switch) fade = true
@@ -336,7 +337,7 @@ class KubeState(val hostId: String) {
         val g = ++gen
         loading = true
         if (!quiet) progress = Wording.Kube.reading(p.title.orEmpty().lowercase(), ctx)
-        if (p.source == "summary") return readSummary(p, ctx, g)
+        if (p.source == "summary") return readSummary(p, ctx, g, fresh)
         kube(hostId, Msg.Kube(what = "list", context = ctx, server = server, page = p.resource, crd = p.crd)) { r ->
             if (g != gen) return@kube
             r.missing?.let { return@kube lacks(it) }
@@ -348,14 +349,15 @@ class KubeState(val hostId: String) {
     }
 
     /** Home's totals, for the namespaces shown, as the host adds them up (kube's summary). */
-    private fun readSummary(p: Msg.KubePage, ctx: String, g: Int) {
+    private fun readSummary(p: Msg.KubePage, ctx: String, g: Int, fresh: Boolean) {
         val of = "$ctx/${nsShown?.joinToString(",")}"
         if (of != historyOf) {
             historyOf = of
             history = emptyList()
         }
         val since = history.lastOrNull()?.at // (only the samples since the newest here)
-        kube(hostId, Msg.Kube(what = "summary", context = ctx, server = server, namespaces = nsShown, since = since)) { r ->
+        kube(hostId, Msg.Kube(what = "summary", context = ctx, server = server, namespaces = nsShown, since = since,
+            fresh = if (fresh) true else null)) { r ->
             if (g != gen) return@kube
             r.missing?.let { return@kube lacks(it) }
             if (r.removed == true) return@kube gone(g)
@@ -364,8 +366,10 @@ class KubeState(val hostId: String) {
             loading = false
             progress = null
             fault = null
-            val last = history.lastOrNull()?.at?.toDouble()
-            val merged = history + r.summary?.history.orEmpty().filter { h -> last == null || (h.at?.toDouble() ?: 0.0) > last }
+            val began = r.summary?.began?.toDouble() ?: 0.0 // (a sample from before it: another cluster's, the name reused)
+            val held = history.filter { (it.at?.toDouble() ?: 0.0) >= began }
+            val last = held.lastOrNull()?.at?.toDouble()
+            val merged = held + r.summary?.history.orEmpty().filter { h -> last == null || (h.at?.toDouble() ?: 0.0) > last }
             val edge = (merged.lastOrNull()?.at?.toDouble() ?: 0.0) - 60.0 * (r.summary?.minutes?.toDouble() ?: 0.0)
             history = merged.filter { (it.at?.toDouble() ?: 0.0) >= edge }
             summary = r.summary
@@ -781,7 +785,7 @@ fun KubeScreen(hostId: String, back: () -> Unit, context: String? = null, page: 
     Column(Modifier.fillMaxSize().background(c.frame)) {
         Bar(Wording.Window.kubernetes, start = { IconButton(Adwaita.GoPrevious, Wording.Browser.back, onClick = up) }, end = {
             if (st.loading && st.progress != null) Box(Modifier.padding(horizontal = 9.dp)) { Spinner() }
-            IconButton(Adwaita.ViewRefresh, Wording.Common.readAgain) { st.load() }
+            IconButton(Adwaita.ViewRefresh, Wording.Common.readAgain) { st.load(fresh = true) }
             IconButton(Adwaita.WindowClose, Wording.Images.close, onClick = leave)
         })
         if (st.level == "categories") Categories(st)

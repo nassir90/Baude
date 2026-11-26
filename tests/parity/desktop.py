@@ -455,6 +455,17 @@ def build(app, sc):
         return scenes_chat.kube_window(app)[0]
     if name == "kubernetes-home":
         return scenes_chat.kube_home(app)[0]
+    if name == "kubernetes-home-prod":
+        return scenes_chat.kube_home(app, "prod")[0]
+    if name == "kubernetes-home-crowded":
+        return scenes_chat.kube_home(app, "crowded")[0]
+    if name == "kubernetes-home-hover":  # (the tooltip's text is in the dump; its bubble is a surface of its own)
+        win, kv = scenes_chat.kube_home(app, "crowded")
+        spark = kv.home.memory.spark
+        T.pump(0.3)
+        spark._tip(spark, 1 + (spark.get_width() - 2) * 0.8, spark.get_height() / 2, False,
+                   type("Tip", (), {"set_text": lambda self, t: spark.set_tooltip_text(t)})())
+        return win
     if name == "kubernetes-column-filter":
         baude.save_settings(kube_hidden={"pods": {"Status": ["Failed", "Succeeded"]}})
         win, kv = scenes_chat.kube_window(app)

@@ -519,7 +519,7 @@ class KubeView(Gtk.Box):
         bar.append(self.search)
         bar.append(Gtk.Box(hexpand=True))
         self.refresh_btn = RefreshButton(tooltip_text=wording.say("common.read_again"))
-        self.refresh_btn.connect("clicked", lambda *_: self.load())
+        self.refresh_btn.connect("clicked", lambda *_: self.load(fresh=True))
         bar.append(self.refresh_btn)
         self.out = viewwindow.Out(self, bar, wording.say("window.kubernetes"), self.search)  # (out to a window of
         # its own, as ☰ → Terminal's goes; its close)
@@ -1201,9 +1201,10 @@ class KubeView(Gtk.Box):
         return False
 
     # ---- reading a page
-    def load(self, quiet=False, switch=False):
+    def load(self, quiet=False, switch=False, fresh=False):
         """Read the page's objects (and, for pods and nodes, their CPU and memory) in the background. switch: it's
-        another kind, so the table fades until they're in (a refresh doesn't)."""
+        another kind, so the table fades until they're in (a refresh doesn't). fresh (Refresh): Home is read now, not
+        from what the host kept or while it waits to try a failing cluster again."""
         if not self.context:
             return
         self.stop_watch()  # (read again: watched again from what's read)
@@ -1216,7 +1217,7 @@ class KubeView(Gtk.Box):
             self.say(wording.say("kube.reading", kind=page['title'].lower(), context=context))
             self.refresh_btn.set_loading(True)
         if page is KUBE_HOME:
-            return self.read_summary(gen, context)
+            return self.read_summary(gen, context, fresh)
         if not self.host.here:
             return self.host.ask("kube", {"what": "list", "context": context, "server": self.server,
                                           **self.page_ref(page)}, lambda r: self._listed(gen, page, r))
@@ -1241,10 +1242,12 @@ class KubeView(Gtk.Box):
             GLib.idle_add(self._loaded, gen, page, columns, kube_rows(page, items, ctx, columns), ctx, items)
         KUBE_POOL.submit(work)
 
-    def read_summary(self, gen, context):
+    def read_summary(self, gen, context, fresh=False):
         """Home's totals, for the namespaces shown, as the host adds them up (hostkube's summary: there, or here as a
         host process would)."""
         msg = {"what": "summary", "context": context, "server": self.server or ""}
+        if fresh:
+            msg["fresh"] = True
         if self.ns_shown is not None:
             msg["namespaces"] = list(self.ns_shown)
         key = (id(self.host), context, msg.get("namespaces"))  # (another's history is read whole)
@@ -1269,8 +1272,10 @@ class KubeView(Gtk.Box):
         self.loading = False
         self.refresh_btn.set_loading(False)
         summary = r.get("summary") or {}
-        last = self.home_history[-1]["at"] if self.home_history else None
-        history = self.home_history + [h for h in summary.get("history") or [] if last is None or h["at"] > last]
+        began = summary.get("began") or 0  # (a sample from before it: another cluster's, the context's name reused)
+        held = [h for h in self.home_history if h["at"] >= began]
+        last = held[-1]["at"] if held else None
+        history = held + [h for h in summary.get("history") or [] if last is None or h["at"] > last]
         edge = history[-1]["at"] - 60 * (summary.get("minutes") or 0) if history else 0
         self.home_history = [h for h in history if h["at"] >= edge]
         self.home.show({**summary, "history": self.home_history})

@@ -27,12 +27,11 @@ def world():
 
 
 def transcripts():
-    bash = toolcards.ToolCard("Bash", "t1")
-    bash.set_input({"command": "pytest tests/test_upload.py -q"})
-    bash.set_result("3 passed in 0.41s", False)
-    bash.set_state("done")
-    agent = toolcards.ToolCard("Agent", "t2")
-    agent.set_input({"description": "Find where the release notes are built", "prompt": "Look through the docs"})
+    """The fixture chats' transcripts: (kind, what), a tool call's {name, input, result}."""
+    bash = {"name": "Bash", "id": "toolu_t1", "input": {"command": "pytest tests/test_upload.py -q"},
+            "result": "3 passed in 0.41s"}
+    agent = {"name": "Agent", "id": "toolu_t2",
+             "input": {"description": "Find where the release notes are built", "prompt": "Look through the docs"}}
     return {
         "h1/a": [("user", "The upload test fails one run in five. Can you find why?"),
                  ("reply", "It races the temp folder's cleanup. Running the test again with the fix:"), ("tool", bash)],
@@ -42,6 +41,59 @@ def transcripts():
     }
 
 
+APP = []
+
+
+def app():
+    """tests/test_baude.py's App, made once: a BaudeApp with a host in this process, a throwaway environment of its
+    own (its claude config, where the chats below are written) and the fake claude."""
+    if not APP:
+        sys.path.insert(0, os.path.join(W, "tests"))
+        sys.argv = sys.argv[:1] + [a for a in sys.argv[1:] if not a.startswith("-Apple") and a != "YES"]
+        import test_baude
+        APP.append(test_baude.App())
+    return APP[0]
+
+
+def session_id(oid):
+    import uuid
+    return str(uuid.uuid5(uuid.NAMESPACE_URL, "baude-scene:" + oid))
+
+
+def write_chats(wd, transcripts):
+    """Each of wd's chats written as claude writes a session (in the claude config's projects, its folder one of its
+    own in the home folder, named for it), its transcript's messages and tool calls in it, titled with its name: real chats for the app's pages to
+    open. Returns thing → its session's id, for the providers (default_providers' session)."""
+    import re
+    for o in wd.objects:
+        if o["kind"] != "chat":
+            continue
+        slug = re.sub(r"[^a-z0-9]+", "-", (o.get("name") or o["id"]).lower()).strip("-")
+        sid, cwd = session_id(o["id"]), os.path.join(os.path.expanduser("~"), slug)
+        os.makedirs(cwd, exist_ok=True)
+        d = os.path.join(os.environ["CLAUDE_CONFIG_DIR"], "projects", re.sub(r"[^A-Za-z0-9]", "-", cwd))
+        os.makedirs(d, exist_ok=True)
+        base = {"cwd": cwd, "sessionId": sid, "isSidechain": False}
+        recs = []
+        for kind, what in transcripts.get(o["id"]) or [("user", o.get("name") or "")]:  # (one with nothing said yet:
+            # its name, what it was begun with, so that it's listed)
+            if kind == "user":
+                recs.append({**base, "type": "user", "message": {"role": "user", "content": [{"type": "text", "text": what}]}})
+            elif kind == "reply":
+                recs.append({**base, "type": "assistant", "message": {"role": "assistant", "content": [
+                    {"type": "text", "text": what}]}})
+            elif kind == "tool":
+                recs.append({**base, "type": "assistant", "message": {"role": "assistant", "content": [
+                    {"type": "tool_use", "id": what["id"], "name": what["name"], "input": what["input"]}]}})
+                if "result" in what:
+                    recs.append({**base, "type": "user", "message": {"role": "user", "content": [
+                        {"type": "tool_result", "tool_use_id": what["id"], "content": what["result"]}]}})
+        recs.append({"type": "custom-title", "customTitle": o.get("name") or "", "sessionId": sid})
+        with open(os.path.join(d, f"{sid}.jsonl"), "w") as f:
+            f.write("\n".join(json.dumps(r) for r in recs) + "\n")
+    return lambda o: session_id(o["id"])
+
+
 def load_theme_css():
     css = Gtk.CssProvider()
     with open(os.path.join(SAMPLE, "theme.css")) as f:
@@ -49,9 +101,24 @@ def load_theme_css():
     Gtk.StyleContext.add_provider_for_display(Gdk.Display.get_default(), css, Gtk.STYLE_PROVIDER_PRIORITY_USER)
 
 
+def chat_providers(wd, transcripts, **more):
+    """The providers with the app's own chat pages (ChatPage): wd's chats written as sessions (write_chats) and opened
+    by the app's windows."""
+    return scenehost.default_providers(wd, transcripts=transcripts, app=app().app,
+                                       session=write_chats(wd, transcripts), **more)
+
+
+def chat_page(v, oid):
+    """The chat page of the panel showing chat oid, once its chat's open in it."""
+    n = next(n for n in v.nodes.values() if isinstance(n.widget, scenehost.ChatPage) and (v.obj_of(n) or {}).get("id") == oid)
+    import test_baude
+    test_baude.wait_for(lambda: n.widget.win is not None and n.widget.win.session_id == n.widget.sid, f"{oid} opened")
+    return n.widget
+
+
 def view(scene=None, wd=None, trusted=True, providers=None, opened=None):
     wd = wd or world()
-    return scenehost.SceneView(scene or sample_scene(), wd, providers or scenehost.default_providers(wd, transcripts=transcripts()),
+    return scenehost.SceneView(scene or sample_scene(), wd, providers or chat_providers(wd, transcripts()),
                                theme=SAMPLE, trusted=trusted, open=(opened.append if opened is not None else None))
 
 

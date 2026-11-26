@@ -1,6 +1,6 @@
 """The Space Station scene theme's rig (a prototype's): its world made from what a host says (Session.json's
-sessions, a host, TelemetryUsage's days), and Baude's own widgets for each of its panels: the chat panel, the
-sidebar's own rows (SessionSidebar.session_row, from sessionlist.remote_info of the same sessions), Meta's cards
+sessions, a host, TelemetryUsage's days), and Baude's own widgets for each of its panels: each chat's own page
+(scenehost.ChatPage, the chats written as sessions for the rig's app), the sidebar's own rows (SessionSidebar.session_row, from sessionlist.remote_info of the same sessions), Meta's cards
 (MetaCards), the host, and a real window (Usage: the context bar and the tokens' grid) borrowed through WindowPanel.
 Imported by station_render.py and perf.py (SCENE=station)."""
 from rig import *  # noqa: F401,F403
@@ -99,8 +99,10 @@ def station_transcripts():
 
 
 def providers(wd, windows):
+    """Baude's own widgets: the chats' own pages (rig.chat_providers), the sidebar's rows, Meta's cards, the host, a
+    window."""
     rows, cards = Rows(), {f"m{i}": make_card(i)[1] for i in CARDS}
-    base = scenehost.default_providers(wd, windows=windows, transcripts=station_transcripts())
+    base = chat_providers(wd, station_transcripts(), windows=windows)
     return {**base, "chat_row": rows.row, "meta_card": lambda o: cards[o["id"]]}
 
 

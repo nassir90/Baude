@@ -153,6 +153,7 @@ class LabHost {
         val up = Way()
         val down = Way()
         link = up to down
+        var read = 0L // (how far the phone's read its transcript on this link)
         thread(isDaemon = true, name = "lab-host") {
             try {
                 up.input.bufferedReader().forEachLine { line ->
@@ -169,6 +170,10 @@ class LabHost {
                             val all = synchronized(this) { transcript.toByteArray() }
                             val from = m.optLong("offset").let { if (it > all.size) 0 else it.toInt() } // (past its end:
                             // from its start, as serversessions.read_lines has it)
+                            if (!m.has("limit")) { // (not an earlier part: read on, or read again from before)
+                                if (from < read) log.add("transcript read again from $from, $read of it read already")
+                                read = maxOf(read, all.size.toLong())
+                            }
                             reply(JSONObject().put("op", "transcript").put("session", "a").put("offset", from).put("next", all.size)
                                 .put("size", all.size).put("data", Base64.getEncoder().encodeToString(all.copyOfRange(from, all.size))))
                         }

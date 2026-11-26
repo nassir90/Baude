@@ -34,15 +34,15 @@ from gi.repository import Adw, Gdk, GdkPixbuf, Gio, GLib, GObject, Graphene, Gsk
 
 import lookup  # noqa: E402,F401
 from lookupkube import (  # noqa: E402,F401  (⌘K's engine: what a folder has)
-    _km, _ks, kube_contexts, kube_fault, kube_fmt_age, kube_get, kube_local, kube_run, kube_seconds, kube_tool,
-    kubeconfig_paths,
+    KUBE_BROKEN_TRIES, _km, _ks, kube_config_broken, kube_contexts, kube_contexts_watch, kube_fault, kube_fmt_age,
+    kube_get, kube_key, kube_local, kube_removed, kube_run, kube_seconds, kube_target, kube_tool, kubeconfig_paths,
 )
 from widgets import (  # noqa: E402,F401
     WorkerPool, ensure_icons, find_label, full_time, inside, load_settings, paned_grip, pretty_path, save_settings,
     insert_actions, time_tip, toast, view_bar, _scales,
 )
 from imageviews import Fade, RefreshButton  # noqa: E402,F401
-from pickers import CheckList, ellipsize_dropdown  # noqa: E402,F401
+from pickers import CheckList, ContextPicker, ellipsize_dropdown  # noqa: E402,F401
 from codeview import (  # noqa: E402,F401
     CodeView,
 )
@@ -295,6 +295,177 @@ class KubeSquares(Gtk.Widget):
                 snap.pop()
 
 
+# A column a filter is offered on: words (not numbers, sizes or times), few of them. More values than this and the column
+# is a list to search (the filter box), not one to tick through; a value longer than this is a sentence, not a word.
+KUBE_FILTER_MOST, KUBE_FILTER_LONGEST = 30, 40
+KUBE_FILTER_NEVER = ("name", "age", "containers")  # (the kinds of column never offered one)
+
+
+def kube_filter_value(texts, by, i):
+    """What a column's filter goes by for a row: the row's own word for that cell where it gives one (by: a Docker
+    container's state for its Status, whose text says how long), else the cell's text."""
+    return (by[i] if by and i < len(by) and by[i] else "") or (texts[i] if i < len(texts) else "")
+
+
+def kube_filterable(kind, values, keys, filtered=False):
+    """Whether a column offers a filter: it isn't a name, age or containers column, it sorts by its text (not a number
+    or a time), each of its values has a letter in it and is a word or a few (KUBE_FILTER_LONGEST at most), it has
+    KUBE_FILTER_MOST or fewer of them, and some value is had by more than one row (a column of a value a row, an ID or
+    an address, has nothing to filter by; empty cells aside), but for a status column. One that's filtered keeps its button.
+    values: the column's value for each row (kube_filter_value); keys: what each row sorts by."""
+    if filtered:
+        return True
+    if kind in KUBE_FILTER_NEVER or not values:
+        return False
+    if any(k not in (None, "") and not isinstance(k, str) for k in keys):
+        return False
+    seen = {v for v in values if v}
+    if not seen or len(seen) > KUBE_FILTER_MOST:
+        return False
+    if any(len(v) > KUBE_FILTER_LONGEST or not any(ch.isalpha() for ch in v) for v in seen):
+        return False
+    words = [v for v in values if v]
+    return kind == "status" or len(seen) < len(words)
+
+
+class ColumnFilters:
+    """A table's column filters (the Kubernetes view's and the Docker view's): a column kube_filterable has a funnel at
+    its heading's right end, seen while the heading's hovered and kept while it filters. Clicked, a check per value of
+    the column in the list (those the other filters leave), with how many rows have it, under one over them all (the
+    namespaces button's CheckList). An unticked value's rows are hidden. Remembered by kind in the settings
+    (setting: {kind: {column title: [values hidden]}}), so a value hidden stays hidden, from the list or not."""
+
+    def __init__(self, setting, changed):
+        self.setting, self.changed = setting, changed
+        self.kind, self.titles, self.kinds, self.hidden, self.buttons, self.columns = None, [], [], {}, {}, []
+        self.store, self.others, self.queued = None, (lambda row: True), False
+
+    def queue(self):
+        """update, once the rows stop changing (a watch changes them one at a time)."""
+        if not self.queued:
+            self.queued = True
+            GLib.idle_add(lambda: setattr(self, "queued", False) or self.update() or False)
+
+    def attach(self, cv, cols, kind, store, others):
+        """A table just built: cols, its columns' (title, kind); kind, its page's; store, its rows; others(row): whether
+        the view's other filters (namespaces, the filter box) keep a row."""
+        self.kind, self.store, self.others = kind, store, others
+        self.titles, self.kinds = [t for t, _k in cols], [k for _t, k in cols]
+        model = cv.get_columns()
+        self.columns = [model.get_item(n) for n in range(model.get_n_items())]
+        saved = (load_settings().get(self.setting) or {}).get(kind) or {}
+        self.hidden = {t: set(v) for t, v in saved.items() if v}
+        self.buttons = {}
+        store.connect("items-changed", lambda *_: self.queue())
+        header = cv.get_first_child()
+        title = header.get_first_child() if header is not None and header.get_css_name() == "header" else None
+        for i, name in enumerate(self.titles):
+            if title is None:
+                break
+            box = title.get_first_child()
+            if isinstance(box, Gtk.Box):
+                pick = CheckList(wording.say("fixes.all"), lambda keys, i=i: self.pick(i, keys))
+                btn = Gtk.MenuButton(icon_name="baude-filter-symbolic", popover=Gtk.Popover(child=pick), visible=False,
+                                     valign=Gtk.Align.CENTER,
+                                     tooltip_text=wording.say("kube.filter_column", column=name))
+                btn.add_css_class("flat")
+                btn.add_css_class("kube-col-filter")
+                btn.pick = pick
+                btn.set_create_popup_func(lambda b, i=i: self.fill(i))
+                # (the heading's own click claims a press on its way back up, to sort by the column on release, and its
+                # drag moves the column: the funnel's press is taken on the way down, before either sees it)
+                press = Gtk.GestureClick(propagation_phase=Gtk.PropagationPhase.CAPTURE)
+                press.connect("pressed", lambda g, *_a, b=btn: (g.set_state(Gtk.EventSequenceState.CLAIMED),
+                                                                 b.popup()))
+                btn.add_controller(press)
+                for signal in ("show", "closed"):
+                    btn.get_popover().connect(signal, lambda _p, b=btn: self.mark(b))
+                box.append(Gtk.Box(hexpand=True))
+                box.append(btn)
+                self.buttons[i] = btn
+            title = title.get_next_sibling()
+
+    def value(self, row, i):
+        return kube_filter_value(row.texts, row.obj.get("filters") if isinstance(row.obj, dict) else None, i)
+
+    def shown(self, i):
+        """Whether column i is in the table (the Node column is only on a cluster of more than one node)."""
+        return i >= len(self.columns) or self.columns[i].get_visible()
+
+    def visible(self, row, skip=None):
+        """Whether the column filters (but skip's, and those of a column not in the table) keep a row."""
+        for i, name in enumerate(self.titles):
+            if i != skip and (gone := self.hidden.get(name)) and self.value(row, i) in gone and self.shown(i):
+                return False
+        return True
+
+    def column(self, rows, i):
+        """Column i's values and sort keys, row by row, up to the row that brings it past KUBE_FILTER_MOST values."""
+        values, keys, seen = [], [], set()
+        for r in rows:
+            v = self.value(r, i)
+            values.append(v)
+            keys.append(r.keys[i] if i < len(r.keys) else None)
+            seen.add(v)
+            if len(seen) > KUBE_FILTER_MOST + 1:  # (one more for the empty value)
+                break
+        return values, keys
+
+    def rows(self):
+        return [self.store.get_item(n) for n in range(self.store.get_n_items())] if self.store is not None else []
+
+    def update(self):
+        """The buttons shown on the columns that offer a filter (as the rows are now), marked on those filtering."""
+        rows = self.rows()
+        for i, btn in self.buttons.items():
+            filtered = bool(self.hidden.get(self.titles[i]))
+            btn.set_visible(filtered or self.kinds[i] not in KUBE_FILTER_NEVER and
+                            kube_filterable(self.kinds[i], *self.column(rows, i)))
+            self.mark(btn)
+            if btn.get_popover().get_visible():
+                self.fill(i)
+
+    def mark(self, btn):
+        i = next((k for k, b in self.buttons.items() if b is btn), None)
+        if i is None:  # (a button of a table since built again)
+            return
+        for css, on in (("kube-col-filtering", bool(self.hidden.get(self.titles[i]))),
+                        ("kube-col-open", btn.get_popover().get_visible())):
+            (btn.add_css_class if on else btn.remove_css_class)(css)
+
+    def fill(self, i):
+        """The column's checks: its values in the rows the other filters keep, and any it hides, with their counts."""
+        btn, name = self.buttons[i], self.titles[i]
+        counts = {}
+        for r in self.rows():
+            if self.others(r) and self.visible(r, skip=i):
+                v = self.value(r, i)
+                counts[v] = counts.get(v, 0) + 1
+        gone = self.hidden.get(name) or set()
+        values = sorted(set(counts) | gone, key=lambda v: (v == "", v.lower()))
+        btn.pick.fill([(v, wording.say("kube.value_count", value=v or wording.say("kube.no_value"), n=counts.get(v, 0)))
+                       for v in values], [v for v in values if v not in gone] if gone else None,
+                      dimmed={v for v in values if not counts.get(v)})
+        self.mark(btn)
+
+    def pick(self, i, keys):
+        name, btn = self.titles[i], self.buttons[i]
+        listed = [k for k, _label in btn.pick.items or ()]
+        gone = (self.hidden.get(name) or set()) - set(listed)  # (hidden, not in the list now: kept hidden)
+        gone |= set(listed) - set(listed if keys is None else keys)
+        if gone:
+            self.hidden[name] = gone
+        else:
+            self.hidden.pop(name, None)
+        saved = dict(load_settings().get(self.setting) or {})
+        saved[self.kind] = {t: sorted(v) for t, v in self.hidden.items()}
+        if not saved[self.kind]:
+            del saved[self.kind]
+        save_settings(**{self.setting: saved})
+        self.mark(btn)
+        self.changed()
+
+
 class KubeView(Gtk.Box):
     """☰ → Kubernetes…: a cluster's objects, as Freelens lays them out (see "kubernetes" above). The top bar: your
     kubeconfig's context, the namespaces shown (any set of them; a pod's namespace, clicked, shows only that one), a
@@ -307,28 +478,31 @@ class KubeView(Gtk.Box):
         super().__init__(orientation=Gtk.Orientation.VERTICAL, visible=False, focusable=True)
         self.add_css_class("baude-frame")  # (the bar and the sidebar: theming.CSS; the rest the inside, set into it)
         ensure_icons()
-        self.win, self.contexts, self.context = win, [], None
-        self.ns_shown, self.ns_by_context, self.ns_checks = None, {}, {}  # (None: all of them)
+        self.win, self.contexts, self.context, self.server = win, [], None, None  # (the context shown, its server)
+        self.removed = None  # (the context shown when it went from the kubeconfig: what the view says, till another's picked)
+        self.none_yet = False  # (the kubeconfig had no context when it was read: the first one added is shown)
+        self.following = None  # (the kubeconfig's contexts, followed while the view's open: watch_contexts)
+        self.ns_shown, self.ns_by_context, self.ns_checks = None, {}, {}  # (None: all of them; by kube_key)
         self.page, self.table_page, self.resources, self.namespaces = KUBE_HOME, None, None, []
         self.generation, self.loading, self.timer, self.syncing = 0, False, None, False
         self.store = self.filter = self.selection = self.table = self.table_cols = None
+        self.col_filters = ColumnFilters("kube_hidden", self.refilter)  # (a column's values, ticked: col_filters)
         self.pending_pick = None  # (name, namespace) to select once the page is in (an owner clicked)
         # the page's objects by uid, as last read or watched; how its rows were made (now, metrics); the watch
         self.objects, self.ctx, self.watch, self.watch_fails = {}, {"now": 0, "metrics": None, "node_metrics": None}, None, 0
+        self.watch_broken = 0  # (watches run again at once for a kubeconfig caught half written: KUBE_BROKEN_TRIES)
         self.metrics_note, self.node_count, self.note, self.dialog = "", 0, None, None
         self.found = weakref.WeakKeyDictionary()  # the table's labels and their text (find_label)
         self.host = kubehost.Host(None, {"via": "local"}, wording.say("senders.local"))  # (where it reads: open)
-        self.last_context = {}  # (by host: the context it showed last; this machine's is in the settings)
+        self.last_context = {}  # (by host: the context it showed last, its kube_key; this machine's is in the settings)
         bar = view_bar()
         title = Gtk.Label(label=wording.say("window.kubernetes"))
         title.add_css_class("heading")
         bar.append(title)
         self.host_label = viewwindow.host_label()
         bar.append(self.host_label)
-        self.context_dd = ellipsize_dropdown(Gtk.DropDown.new_from_strings([]), 32)
-        self.context_dd.set_tooltip_text(wording.say("kube.context_tip"))
-        self.context_dd.connect("notify::selected", self.on_pick)
-        bar.append(self.context_dd)
+        self.context_pick = ContextPicker(wording.say("kube.context_tip"), self.pick_context, 32)
+        bar.append(self.context_pick)
         # the namespaces shown: a check each, any set of them at once (Freelens' multi-select), or all of them
         self.ns_label = Gtk.Label(label=wording.say("kube.all_namespaces"), ellipsize=Pango.EllipsizeMode.END,
                                   max_width_chars=24)
@@ -397,6 +571,7 @@ class KubeView(Gtk.Box):
         import depsview
         self.missing = depsview.Missing(again=self.read_contexts)  # (kubectl isn't on the host: show_missing)
         self.table_stack.add_named(self.missing, "missing")
+        self.table_stack.add_named(self.build_removed(), "removed")
         table_box.append(self.table_stack)
         table_box.append(self.status)
         self.details = CodeView()
@@ -481,6 +656,23 @@ class KubeView(Gtk.Box):
         box.append(self.error_more)
         return Gtk.ScrolledWindow(child=box, hscrollbar_policy=Gtk.PolicyType.NEVER)
 
+    def build_removed(self):
+        """What's shown instead of the table when the context shown goes from the kubeconfig (a tool deleted its
+        cluster): that it was removed, and the contexts there are now to pick another from. Nothing else is picked for
+        you: whatever you'd do next would be done to another cluster."""
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12, valign=Gtk.Align.CENTER,
+                      halign=Gtk.Align.CENTER, margin_start=24, margin_end=24, margin_top=24, margin_bottom=24)
+        icon = Gtk.Image(icon_name="network-server-symbolic", pixel_size=2 * _scales["icon_px"])
+        icon.add_css_class("dim-label")
+        box.append(icon)
+        title = Gtk.Label(label=wording.say("kube.removed"), wrap=True, justify=Gtk.Justification.CENTER)
+        title.add_css_class("title-3")
+        box.append(title)
+        self.removed_pick = ContextPicker(wording.say("kube.context_tip"), self.pick_context, 32)
+        self.removed_pick.set_halign(Gtk.Align.CENTER)
+        box.append(self.removed_pick)
+        return Gtk.ScrolledWindow(child=box, hscrollbar_policy=Gtk.PolicyType.NEVER)
+
     def show_error(self, diag, said):
         """The cluster can't be read: why, instead of the table (and a word of it in the status line)."""
         self.error_title.set_label(diag["title"])
@@ -559,6 +751,8 @@ class KubeView(Gtk.Box):
         if self.timer is None:
             self.timer = GLib.timeout_add_seconds(KUBE_REFRESH_S, self.tick)
         self.read_contexts(context, namespace)
+        if self.following is None:
+            self.watch_contexts()
 
     def read_contexts(self, context=None, namespace=None):
         """The host's kubeconfig contexts read (there, by its host process, if it's another), the one wanted then
@@ -569,7 +763,7 @@ class KubeView(Gtk.Box):
         if host.here:
             if (missing := deps.missing("kubectl")) is not None:
                 return self.show_missing(missing)
-            contexts = [c for c in kube_contexts() if not c.get("cluster_only")]
+            contexts = [c for c in kube_contexts(wait=False) if not c.get("cluster_only")]
             where = ", ".join(pretty_path(p) for p in kubeconfig_paths()) or wording.say("kube.no_kubeconfig")
             self._contexts(host, contexts, where, context, namespace)
             return
@@ -596,19 +790,128 @@ class KubeView(Gtk.Box):
         """The host's kubeconfig contexts are in: the one wanted picked and read."""
         if host is not self.host:
             return
-        self.contexts = contexts
+        self.set_contexts(contexts)
         names = [c["name"] for c in self.contexts]
+        self.none_yet = not names and not error  # (one added later is shown: contexts_changed)
         if error or not names:
             self.say(f"{host.name}: {error}" if error else wording.say("kube.no_context", where=where))
             return
-        last = load_settings().get("kube_context") if host.here else self.last_context.get(host.key())
-        current = next((c["name"] for c in self.contexts if c.get("current")), None)
+        if context is None and self.removed is not None:  # (the one shown was removed: no other is picked for you)
+            return
+        settings = load_settings()
+        last = (settings.get("kube_context"), settings.get("kube_context_server") or "") if host.here else \
+            self.last_context.get(host.key())
+        last = last[0] if last in {kube_key(c) for c in self.contexts} else None  # (the same cluster: not one made
+        current = next((c["name"] for c in self.contexts if c.get("current")), None)  # again under its name)
         want = context if context in names else last if last in names else current or names[0]
-        self.syncing = True  # (no "(current)" after one: Freelens doesn't, and the one it opens on says enough)
-        self.context_dd.set_model(Gtk.StringList.new(names))
-        self.context_dd.set_selected(names.index(want))
-        self.syncing = False
         self.switch_context(want, namespaces=[namespace] if namespace else None)
+
+    def set_contexts(self, contexts):
+        """The host's contexts as they are now, in both pickers (no "(current)" after one: Freelens doesn't, and the
+        one it opens on says enough); what was kept of one that's gone let go of."""
+        keys = {kube_key(c) for c in contexts}
+        for c in self.contexts:
+            if kube_key(c) not in keys:
+                self.forget(kube_key(c))
+        self.contexts = contexts
+        names = [c["name"] for c in contexts]
+        for pick in (self.context_pick, self.removed_pick):
+            pick.set_contexts(names)
+        self.context_pick.select(self.context if self.context in names else None)
+
+    def forget(self, key):
+        """What the view kept of a context that's gone (its cluster deleted, or made again: another cluster): the
+        namespaces it showed, and that it was the one shown last."""
+        self.ns_by_context.pop(key, None)
+        if self.host.here:
+            settings = load_settings()
+            if (settings.get("kube_context"), settings.get("kube_context_server") or "") == key:
+                save_settings(kube_context=None, kube_context_server=None)
+        elif self.last_context.get(self.host.key()) == key:
+            del self.last_context[self.host.key()]
+
+    def watch_contexts(self):
+        """The host's kubeconfig followed while the view's open (tools add and delete clusters as they go): on this
+        machine, its files looked at every second (kube_contexts_watch); on another host, by its host process
+        (kube_follow's contexts), which sends them each time they change."""
+        self.unwatch_contexts()
+        host = self.host
+        if host.here:
+            def changed(contexts):
+                GLib.idle_add(lambda: self.contexts_changed(host, [c for c in contexts if not c.get("cluster_only")])
+                              and False)
+            self.following = kube_contexts_watch(changed)
+            return
+
+        def ended(f, _code, _said, _removed):  # (the connection dropped: followed again in a while)
+            if f is self.following:
+                self.following = None
+                GLib.timeout_add_seconds(5, lambda: (self.get_visible() and self.host is host and self.following is None
+                                                     and self.watch_contexts(), False)[1])
+        self.following = kubehost.Follow(host.where, {"what": "contexts"}, ended,
+                                         on_contexts=lambda f, r: f is self.following and
+                                         self.contexts_changed(host, r.get("contexts") or [], r.get("where") or ""))
+
+    def unwatch_contexts(self):
+        f, self.following = self.following, None
+        if isinstance(f, kubehost.Follow):
+            f.stop()
+        elif f is not None:
+            f()
+
+    def contexts_changed(self, host, contexts, where=None):
+        """The host's contexts changed (one added, deleted, made again, the current one): the pickers keep up; if the
+        one shown is gone, so is its cluster (removed). None shown yet, as there was none: the one wanted picked."""
+        if self.get_root() is None:  # (its window's gone)
+            return self.unwatch_contexts()
+        if host is not self.host or not self.get_visible():
+            return
+        before = self.context
+        self.set_contexts(contexts)
+        if before is not None and (before, self.server or "") not in {kube_key(c) for c in contexts}:
+            self.cluster_removed()
+        elif before is None and self.removed is None and contexts and getattr(self, "none_yet", False):
+            self._contexts(host, contexts, where or "", None, None)
+        elif not contexts and self.removed is None:
+            self.say(wording.say("kube.no_context", where=where or ", ".join(pretty_path(p) for p in kubeconfig_paths())
+                                 or wording.say("kube.no_kubeconfig")))
+
+    def cluster_removed(self):
+        """The context shown went from the kubeconfig (a tool deleted its cluster, or made another under its name):
+        everything read from it let go of, its watch, logs and Home stopped, a shell in it told and ended; the view
+        says it was removed, with the contexts there are to pick from. No other is picked for you."""
+        name = self.context
+        if name is None:
+            return
+        self.removed, self.context, self.server, self.resources = name, None, None, None
+        self.generation += 1  # (whatever was being read of it: let go of)
+        self.loading = False
+        self.refresh_btn.set_loading(False)
+        self.stop_watch()
+        self.hide_details()
+        if self.dialog is not None:  # (a delete being asked about: its cluster's gone)
+            self.dialog.force_close()
+            self.dialog = None
+        for tab in self.dock.all():
+            if tab.pod_key[0] == name:
+                tab.gone()
+        if self.store is not None:
+            self.store.remove_all()
+        self.home_key, self.home_history = None, []
+        self.fade.done()
+        self.context_pick.select(None)
+        self.removed_pick.select(None)
+        self.table_stack.set_visible_child_name("removed")
+        self.say(wording.say("kube.removed_status", context=name))
+
+    def _removed(self, gen):
+        """kubectl (or the host) said the context shown isn't in the kubeconfig: it went before the files were looked
+        at again."""
+        if gen == self.generation and self.context is not None:
+            if self.host.here:
+                self.set_contexts([c for c in kube_contexts(wait=False) if not c.get("cluster_only")])
+            self.cluster_removed()
+        return False
 
     def leave_host(self):
         """Another host picked: the last one's clusters let go of (its watch, its logs and shells, its table)."""
@@ -616,10 +919,12 @@ class KubeView(Gtk.Box):
         self.stop_watch()
         self.hide_details()
         self.generation += 1
-        self.context, self.contexts, self.resources, self.ns_by_context = None, [], None, {}
-        self.syncing = True
-        self.context_dd.set_model(Gtk.StringList.new([]))
-        self.syncing = False
+        self.unwatch_contexts()
+        self.context, self.server, self.removed, self.contexts, self.resources = None, None, None, [], None
+        self.ns_by_context = {}
+        for pick in (self.context_pick, self.removed_pick):
+            pick.set_contexts([])
+            pick.select(None)
         if self.store is not None:
             self.store.remove_all()
         self.table_stack.set_visible_child_name("table")
@@ -628,6 +933,7 @@ class KubeView(Gtk.Box):
         self.set_visible(False)
         self.dock.close_all()
         self.stop_watch()
+        self.unwatch_contexts()
         if self.timer is not None:
             GLib.source_remove(self.timer)
             self.timer = None
@@ -664,27 +970,30 @@ class KubeView(Gtk.Box):
         self.status.set_label(text)
 
     # ---- picking a context, namespaces, a kind
-    def on_pick(self, dd, _pspec):
-        if self.syncing:
-            return
-        GLib.idle_add(lambda: self.picked(dd) and False)  # (not from inside the drop-down's own signal)
+    def key(self):
+        """The context shown, as a cluster (kube_key): its name and its server."""
+        return self.context, self.server or ""
 
-    def picked(self, dd):
-        if dd is self.context_dd and self.contexts:
-            self.switch_context(self.contexts[dd.get_selected()]["name"])
+    def pick_context(self, name):
+        """A context picked (in the bar, or where a removed one was): shown, as it is now."""
+        if any(c["name"] == name for c in self.contexts):
+            GLib.idle_add(lambda: self.switch_context(name) and False)  # (not from inside the picker's own signal)
 
     def switch_context(self, name, namespaces=None):
         """Read a context's namespaces and the resources it serves, then the page; the table fades meanwhile (the
         other cluster's object isn't shown beside it). It shows namespaces, else those it showed last time."""
         self.context, self.resources, self.namespaces, self.note = name, None, [], None
-        self.ns_shown = namespaces if namespaces is not None else self.ns_by_context.get(name)
+        self.server = next((kube_key(c)[1] for c in self.contexts if c["name"] == name), "")
+        self.removed = None
+        self.context_pick.select(name)
+        self.ns_shown = namespaces if namespaces is not None else self.ns_by_context.get(self.key())
         self.ns_shown = None if self.ns_shown is None else list(self.ns_shown)
-        self.ns_by_context[name] = self.ns_shown and list(self.ns_shown)
+        self.ns_by_context[self.key()] = self.ns_shown and list(self.ns_shown)
         self.fill_namespaces()
         if self.host.here:
-            save_settings(kube_context=name)
+            save_settings(kube_context=name, kube_context_server=self.server)
         else:
-            self.last_context[self.host.key()] = name
+            self.last_context[self.host.key()] = self.key()
         self.say(wording.say("kube.connecting", context=name))
         self.hide_details()
         self.dock.close_all()  # (another cluster's: not its pods')
@@ -696,18 +1005,22 @@ class KubeView(Gtk.Box):
             def connected(r):
                 if r.get("missing"):
                     return gen == self.generation and self.show_missing(r["missing"])
+                if r.get("removed"):
+                    return self._removed(gen)
                 if r.get("error") or r.get("fault"):
                     fault = r.get("fault") or {"title": r["error"], "why": "", "fix": None, "said": ""}
                     return self._failed(gen, fault, fault.get("said") or "")
                 served = {p["resource"] for s in r.get("sections") or [] for p in s.get("pages") or [] if p.get("served")}
                 self._connected(gen, name, served, r.get("namespaces") or [], r.get("nodes") or 0)
-            self.host.ask("kube", {"what": "connect", "context": name}, connected)
+            self.host.ask("kube", {"what": "connect", "context": name, "server": self.server}, connected)
             return
 
         def work():
             try:
                 resources = kube_api_resources(name)
             except RuntimeError as e:
+                if getattr(e, "removed", False):
+                    return GLib.idle_add(self._removed, gen)
                 said = getattr(e, "said", str(e))
                 GLib.idle_add(self._failed, gen, kube_diagnose(said, kube_signin(name)), said)
                 return
@@ -770,8 +1083,10 @@ class KubeView(Gtk.Box):
         a link, say)."""
         self.page_rows[id(KUBE_NODES)].set_visible(self.node_count > 1 or self.page is KUBE_NODES)
         for c in getattr(self, "columns", None) or []:
-            if c.get_title() == "Node":
+            if c.get_title() == "Node" and c.get_visible() != (self.node_count > 1):
                 c.set_visible(self.node_count > 1)
+                if self.col_filters.hidden.get("Node"):  # (its filter goes with it, and comes back with it)
+                    self.refilter()
 
     def on_side(self, _box, row):
         if row is None or self.syncing or not hasattr(row, "page"):
@@ -816,7 +1131,7 @@ class KubeView(Gtk.Box):
         filtered."""
         self.ns_shown = None if names is None else list(dict.fromkeys(names))
         if self.context:
-            self.ns_by_context[self.context] = self.ns_shown and list(self.ns_shown)
+            self.ns_by_context[self.key()] = self.ns_shown and list(self.ns_shown)
         if any(ns not in self.ns_checks for ns in self.ns_shown or ()):
             self.fill_namespaces()
         else:
@@ -833,7 +1148,7 @@ class KubeView(Gtk.Box):
             return
         self.ns_shown = [ns] if ns else None  # (from the Namespaces page: its pods)
         if self.context:
-            self.ns_by_context[self.context] = self.ns_shown and list(self.ns_shown)
+            self.ns_by_context[self.key()] = self.ns_shown and list(self.ns_shown)
         self.fill_namespaces()
         self.page = KUBE_PODS
         self.select_page_row(KUBE_PODS)
@@ -842,12 +1157,13 @@ class KubeView(Gtk.Box):
     def go_to_owner(self, kind, name, ns):
         """Show what controls an object (a pod's Controlled By, clicked): a ReplicaSet's Deployment, a Job's CronJob,
         when it has one; its page, with it selected (its YAML beside the table)."""
-        context = self.context
+        context, gen = self.context, self.generation
         self.say(wording.say("kube.finding", kind=kind, name=name))
         if not self.host.here:
-            return self.host.ask("kube", {"what": "owner", "context": context, "kind": kind, "name": name,
-                                          "namespace": ns or None},
-                                 lambda r: self._go_to(context, r.get("kind") or kind, r.get("name") or name, ns))
+            return self.host.ask("kube", {"what": "owner", "context": context, "server": self.server, "kind": kind,
+                                          "name": name, "namespace": ns or None},
+                                 lambda r: self._removed(gen) if r.get("removed") else
+                                 self._go_to(context, r.get("kind") or kind, r.get("name") or name, ns))
 
         def work():
             k, n = kind, name
@@ -902,8 +1218,8 @@ class KubeView(Gtk.Box):
         if page is KUBE_HOME:
             return self.read_summary(gen, context)
         if not self.host.here:
-            return self.host.ask("kube", {"what": "list", "context": context, **self.page_ref(page)},
-                                 lambda r: self._listed(gen, page, r))
+            return self.host.ask("kube", {"what": "list", "context": context, "server": self.server,
+                                          **self.page_ref(page)}, lambda r: self._listed(gen, page, r))
 
         def work():
             # (a custom resource's definition, read alongside the list: two kubectl round trips at once, not after)
@@ -913,6 +1229,8 @@ class KubeView(Gtk.Box):
             try:
                 items = kube_list(context, page)
             except (RuntimeError, ValueError) as e:
+                if getattr(e, "removed", False):
+                    return GLib.idle_add(self._removed, gen)
                 said = getattr(e, "said", str(e))
                 GLib.idle_add(self._failed, gen, kube_diagnose(said, kube_signin(context)), said)
                 return
@@ -926,7 +1244,7 @@ class KubeView(Gtk.Box):
     def read_summary(self, gen, context):
         """Home's totals, for the namespaces shown, as the host adds them up (hostkube's summary: there, or here as a
         host process would)."""
-        msg = {"what": "summary", "context": context}
+        msg = {"what": "summary", "context": context, "server": self.server or ""}
         if self.ns_shown is not None:
             msg["namespaces"] = list(self.ns_shown)
         key = (id(self.host), context, msg.get("namespaces"))  # (another's history is read whole)
@@ -943,6 +1261,8 @@ class KubeView(Gtk.Box):
             return False
         if r.get("missing"):
             return self.show_missing(r["missing"]) and False
+        if r.get("removed"):
+            return self._removed(gen)
         if r.get("error") or r.get("fault"):
             fault = r.get("fault") or {"title": r["error"], "why": "", "fix": None, "said": ""}
             return self._failed(gen, fault, fault.get("said") or "")
@@ -974,6 +1294,8 @@ class KubeView(Gtk.Box):
             return
         if r.get("missing"):
             return self.show_missing(r["missing"])
+        if r.get("removed"):
+            return self._removed(gen)
         if r.get("error") or r.get("fault"):
             fault = r.get("fault") or {"title": r["error"], "why": "", "fix": None, "said": ""}
             return self._failed(gen, fault, fault.get("said") or "")
@@ -1001,8 +1323,9 @@ class KubeView(Gtk.Box):
             return
         if not self.host.here:  # (watched there: its rows sent whole as they change, its metrics read there)
             self.watch = kubehost.Follow(self.host.where, {"what": "watch", "context": self.context,
-                                                           **self.page_ref(page)},
-                                         lambda w, code, said: self._watch_ended(w, gen, page, code, said),
+                                                           "server": self.server, **self.page_ref(page)},
+                                         lambda w, code, said, removed: self._watch_ended(w, gen, page, code, said,
+                                                                                          removed),
                                          on_rows=lambda w, r: self._host_rows(w, gen, page, r))
             return
         args = ["--context", self.context, "get", page["resource"]] + (["--all-namespaces"] if page["namespaced"]
@@ -1033,7 +1356,7 @@ class KubeView(Gtk.Box):
             elif have is None or (_km(o).get("resourceVersion") != _km(have).get("resourceVersion")
                                   if _km(o).get("resourceVersion") else o != have):
                 self.objects[key], changed = o, True
-        self.watch_fails = 0
+        self.watch_fails = self.watch_broken = 0
         if changed:
             self.show_rows(page, kube_rows(page, list(self.objects.values()), dict(self.ctx, now=time.time()),
                                            self.table_cols))
@@ -1043,20 +1366,42 @@ class KubeView(Gtk.Box):
         """A watched list's rows as another host sent them, as it changed (with why it's read, not watched, if so)."""
         if w is not self.watch or gen != self.generation:
             return
-        self.watch_fails = 0
+        self.watch_fails = self.watch_broken = 0
         self.show_rows(page, kubehost.rows(r.get("rows")))
         self.ctx = self.host_ctx(r.get("metrics"))
         if r.get("note"):
             self.set_note(r["note"])
         self.update_status()
 
-    def _watch_ended(self, w, gen, page, code, said):
+    def _watch_ended(self, w, gen, page, code, said, removed=False):
         """The watch ended (the API server ends them after a while; or it failed): watched again after a second, or
-        after 5 s if it failed (Freelens' retry); after three failures in a row, read every KUBE_REFRESH_S instead."""
+        after 5 s if it failed (Freelens' retry), at once (twice at most) if kubectl read a kubeconfig caught half
+        written; after three failures in a row, read every KUBE_REFRESH_S instead. Its context gone from the
+        kubeconfig: removed (looked up off the main thread: kube_removed waits for a file being written)."""
         if w is not self.watch:
             return
         self.watch = None
         if gen != self.generation or not self.get_visible():
+            return
+        if removed:
+            return self._removed(gen)
+        if code and self.host.here:
+            key = self.key()
+
+            def work():
+                gone = kube_removed(key)
+                GLib.idle_add(lambda: (self._removed(gen) if gone else self._watch_again(w, gen, page, code, said))
+                              and False)
+            KUBE_POOL.submit(work)
+            return
+        self._watch_again(w, gen, page, code, said)
+
+    def _watch_again(self, w, gen, page, code, said):
+        if gen != self.generation or self.watch is not None or not self.get_visible():
+            return
+        if code and not w.seen and self.watch_broken < KUBE_BROKEN_TRIES and kube_config_broken(said):
+            self.watch_broken += 1
+            GLib.timeout_add(300, lambda: self.watch is None and self.watch_page(gen, page) and False)
             return
         if code and not w.seen:
             self.watch_fails += 1
@@ -1107,7 +1452,7 @@ class KubeView(Gtk.Box):
         self.table_stack.set_visible_child_name("table")
         if self.table_page is not page or self.table_cols is not columns:  # (or another cluster's printer columns)
             self.build_table(page, columns)
-        self.objects, self.ctx, self.watch_fails = {kube_uid(o): o for o in items}, ctx, 0
+        self.objects, self.ctx, self.watch_fails, self.watch_broken = {kube_uid(o): o for o in items}, ctx, 0, 0
         self.show_rows(page, rows)
         self.watch_page(gen, page)
         if page is KUBE_PODS or page["resource"] == "nodes":
@@ -1143,6 +1488,8 @@ class KubeView(Gtk.Box):
         self.selection.connect("notify::selected-item", self.on_select)
         cv.set_model(self.selection)
         cv.connect("activate", self.on_activate)
+        self.col_filters.attach(cv, [(col["title"], col["kind"]) for col in cols], page["resource"], self.store,
+                                self.shows)
         first = next((c for c, col in zip(columns, cols) if col["kind"] == "name"), columns[0])
         if page["resource"] == "events":  # (the latest first)
             first = next(c for c in columns if c.get_title() == "Last Seen")
@@ -1252,6 +1599,10 @@ class KubeView(Gtk.Box):
         return Gtk.ColumnViewColumn(title="", factory=f, resizable=False)
 
     def row_visible(self, row, _data=None):
+        return self.shows(row) and self.col_filters.visible(row)
+
+    def shows(self, row):
+        """Whether the namespaces picked and the filter box keep a row."""
         if self.ns_shown is not None and self.table_page is not None and self.table_page["namespaced"] and \
                 row.obj["namespace"] not in self.ns_shown:
             return False
@@ -1317,6 +1668,7 @@ class KubeView(Gtk.Box):
             self.details.load(json.dumps(obj["raw"], indent=2), "release.json")
             return
         shown = ((context, page["resource"], obj["name"], obj["namespace"]), _km(obj["raw"]).get("resourceVersion"))
+        gen = self.generation
         if shown == self.details_shown:  # (the table read again, this object no different: its YAML stays)
             return
         again = self.details_shown is not None and self.details_shown[0] == shown[0]
@@ -1328,6 +1680,8 @@ class KubeView(Gtk.Box):
             try:
                 text = kube_get(context, *args)
             except RuntimeError as e:
+                if getattr(e, "removed", False):
+                    return GLib.idle_add(self._removed, gen)
                 d = kube_diagnose(getattr(e, "said", str(e)))
                 text = f"# {d['title']}: {d['why']}\n"
             GLib.idle_add(self._details_read, shown, text, again)
@@ -1341,10 +1695,12 @@ class KubeView(Gtk.Box):
         again = self.details_shown is not None and self.details_shown[0] == shown[0]
         self.details_shown = shown
         self.details_fade.hold()
-        self.host.ask("kube", {"what": "yaml", "context": context, "namespace": obj["namespace"] or None,
-                               "name": obj["name"], **self.page_ref(page)},
-                      lambda r: self._details_read(shown, r.get("text") or f"# {r.get('error') or ''}\n", again,
-                                                   r.get("file") or "object.yaml"))
+        gen = self.generation
+        self.host.ask("kube", {"what": "yaml", "context": context, "server": self.server,
+                               "namespace": obj["namespace"] or None, "name": obj["name"], **self.page_ref(page)},
+                      lambda r: self._removed(gen) if r.get("removed") else
+                      self._details_read(shown, r.get("text") or f"# {r.get('error') or ''}\n", again,
+                                         r.get("file") or "object.yaml"))
 
     def _details_read(self, shown, text, again, file="object.yaml"):
         """An object's YAML is in: shown (where it was scrolled to, if it's the same object read again), with the
@@ -1439,7 +1795,7 @@ class KubeView(Gtk.Box):
         names = [n for n, _i in cs]
         pick = names.index(default) if default in names else next((i for i, (_n, init) in enumerate(cs) if not init), 0)
         self.show_dock()
-        self.dock.add(LogsTab(self.dock, self.host, *pod_key, cs, pick))
+        self.dock.add(LogsTab(self.dock, self.host, *pod_key, cs, pick, server=self.server or ""))
 
     def show_shell(self, key):
         """A shell in a pod in a new tab of the dock, in its default container (as its logs pick one), of its running
@@ -1454,7 +1810,7 @@ class KubeView(Gtk.Box):
             return
         self.show_dock()
         self.dock.add(ShellTab(self.dock, self.host, self.context, obj["namespace"], obj["name"], names,
-                               names.index(default) if default in names else 0))
+                               names.index(default) if default in names else 0, server=self.server or ""))
 
     def hide_logs(self):
         """Every log's tab closed: kubectl, following them, is stopped (never left running)."""
@@ -1510,22 +1866,28 @@ class KubeView(Gtk.Box):
         dlg.add_response("cancel", wording.say("common.cancel"))
         dlg.add_response("delete", wording.say("kube.force_delete_response") if force else wording.say("common.delete"))
         dlg.set_response_appearance("delete", Adw.ResponseAppearance.DESTRUCTIVE)
-        dlg.connect("response", lambda _d, r: r == "delete" and self.delete_pod(context, ns, name, force))
+        server = self.server or ""
+        dlg.connect("response", lambda _d, r: r == "delete" and self.delete_pod(context, ns, name, force, server))
         self.dialog = dlg
         dlg.present(self.win)
 
-    def delete_pod(self, context, ns, name, force):
+    def delete_pod(self, context, ns, name, force, server=""):
         """Delete it (confirmed), off the main thread: what kubectl said goes in the status line, and the list is
-        read again."""
+        read again. Only on the cluster it was confirmed for: its context gone, or made again under its name (another
+        server), nothing is deleted."""
         self.set_note(wording.say("kube.force_deleting", name=name) if force else
                       wording.say("kube.deleting", name=name))
+        gen = self.generation
         if not self.host.here:
-            return self.host.ask("kube", {"what": "delete", "context": context, "namespace": ns, "name": name,
-                                          "force": force},
-                                 lambda r: self._deleted(context, r.get("said") or r.get("error") or ""))
+            return self.host.ask("kube", {"what": "delete", "context": context, "server": server, "namespace": ns,
+                                          "name": name, "force": force},
+                                 lambda r: self._removed(gen) if r.get("removed") else
+                                 self._deleted(context, r.get("said") or r.get("error") or ""))
 
         def work():
-            GLib.idle_add(self._deleted, context, kube_delete(context, ns, name, force))
+            if kube_removed((context, server)):
+                return GLib.idle_add(self._removed, gen)
+            GLib.idle_add(self._deleted, context, kube_delete(context, ns, name, force, server))
         KUBE_POOL.submit(work)
 
     def _deleted(self, context, said):

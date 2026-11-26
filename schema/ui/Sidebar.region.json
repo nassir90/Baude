@@ -344,10 +344,20 @@
       ]
     },
     {
+      "name": "Daemon restart line",
+      "shows": "At the foot, under the rule and over Update, one line per host keeping a daemon restart (This Mac's first, each named \"<host>: …\" when there's more than one): \"Restarting the daemon once N things are done\", or \"Daemon restart paused\" while any app shows what it waits for or a See Thread from it is being looked at: a flat button each.",
+      "copy": ["hosts.restart_waiting", "hosts.restart_paused", "hosts.restart_on", "hosts.restart_blockers", "hosts.restart_nothing", "hosts.see_thread", "shared_settings.restart", "hosts.force_restart", "hosts.restart_failed"],
+      "actions": [{"by": "click", "does": "Opens \"Waiting For\": a row for each chat running a command (a terminal icon, the chat's title), each task running (a play icon, the task's name), each agent run for a chat on another host (a gear icon, the model) and each terminal someone's attached to (a keyboard icon, its title), each row with a See Thread button, or \"Nothing running\"; the restart is paused while it's open. Restart (suggested) lets go of the pause, and the daemon restarts once nothing is running; Force Restart (destructive) restarts it now, what's running stopped, turns cut short and their queued follow-ups sent again once it's back. Closing it lets go of the pause (only while the restart is still pending). See Thread closes it and shows that chat, run page or terminal, the restart still paused; the window closing lets go of it."}],
+      "decisions": [{"said": "When the daemon is waiting to restart, the owner wants to see which chats, tasks or services are holding it up; while that view is open the restart is paused, with Restart and Force Restart buttons (paraphrased)", "rule": "Every app shows a host's pending daemon restart at the foot of its list; tapped or clicked, it lists what the restart waits for (each chat running a command, each task running) and the restart is paused while that view is open. Restart (or closing it) restarts once nothing is running; Force Restart restarts now. The host keeps the pending restart and its blockers and says them on the wire (info's restart), so every app shows the same", "decided": "2026-11-26", "source": [{"issue": "BaudeInternal#253"}]}, {"said": "can I click it to go to the thread? There should be a \"See Thread\" button", "rule": "Every app's \"Waiting For\" gives each row a See Thread button: a chat (or the chat elsewhere an agent run is for) opens that chat, a running task opens its run page, an attached terminal opens that terminal. The restart stays paused while the person looks: the line at the foot reads \"Daemon restart paused\", and clicking it brings back Restart and Force Restart", "decided": "2026-11-26", "source": [{"session": "b3845b21-55ac-4aab-a769-fb8517403c51", "message": "9a0fed72-7780-4e0b-be64-d9b520977385"}, {"session": "b3845b21-55ac-4aab-a769-fb8517403c51", "message": "eb02ba15-d365-430f-aee2-df3f20aa63ed"}]}, {"said": "The restart also waits for agent runs this host does for other hosts' chats and for host terminals someone is attached to, not for Multiplex, Emission or Auto-fix, which survive a daemon restart; closing Waiting For resumes the restart (paraphrased)", "rule": "Every host waits for, and every app lists, chats running a command, task runs, agent runs for chats on other hosts (Apple and pi models) and attached host terminals; closing \"Waiting For\" without a button lets go of the pause, so the restart goes on", "decided": "2026-11-26", "source": [{"issue": "BaudeInternal#253"}]}]
+    },
+    {
       "name": "Update bar",
-      "shows": "At the very foot, under a rule from the list, only while a new version waits to be restarted onto: a flat button \"Update\" at the left. Tooltip: \"Waiting for:\" with bullet lines of what the restart waits for, or \"A new version is ready\".",
+      "shows": "At the very foot, under a rule from the list, whenever a newer version is there, whether or not Auto restart on update is on: a flat button \"Update\" at the left. Tooltip: \"Waiting for:\" with bullet lines of what an automatic restart waits for, or \"A new version is ready\". Shown in every window, one opened after the version was found too. A newer version that can't be restarted onto says why in dim text in place of the button: \"Local changes in the checkout\", \"Can't fast-forward\" or \"The new version didn't start\". A checkout on a branch other than main, or following no upstream, is offered only what its upstream moved, never its own commits.",
       "copy": [
         "update_bar.update",
+        "update_bar.why_dirty",
+        "update_bar.why_diverged",
+        "update_bar.why_broken",
         "update_bar.waiting_for",
         "update_bar.ready"
       ],
@@ -359,10 +369,10 @@
       "actions": [
         {
           "by": "click",
-          "does": "Restarts onto the new version now (asking first if that would stop something running)."
+          "does": "Looks at the checkout again (never a version found earlier), fetches the new version in if it isn't yet, checks it imports, and restarts onto it now (asking first if that would stop something running). A spinner shows on the button meanwhile; clicked while a look is under way, it carries on after it. With Auto restart on update off, this is the only way it restarts."
         }
       ],
-      "decisions": [{"said": "Asked for the Update Available button to be white and not bold.", "rule": "Every app's Update button is in the text's own colour (white on a dark bar), not bold, not the accent.", "decided": "2026-11-12", "source": [{"issue": "BaudeInternal#48"}]}]
+      "decisions": [{"said": "Asked for the Update Available button to be white and not bold.", "rule": "Every app's Update button is in the text's own colour (white on a dark bar), not bold, not the accent.", "decided": "2026-11-12", "source": [{"issue": "BaudeInternal#48"}]}, {"said": "Even with Auto restart on update off, the Update button should always show when a newer version is there, at the foot of the sessions list or of the window (paraphrased)", "rule": "Every app looks for a newer version whether or not Auto restart on update is on, and shows Update at the foot of its sessions or notebooks list whenever one is there; with the setting off it never restarts by itself, only when Update is clicked", "decided": "2026-11-26", "source": [{"issue": "BaudeInternal#254"}]}]
     },
     {
       "name": "Sidebar toggle",

@@ -5,6 +5,7 @@ import re
 import time
 
 import lookup  # noqa: E402,F401
+import lookupkube  # noqa: E402
 from lookup import full_time  # noqa: E402,F401
 from lookupkube import (  # noqa: E402,F401
     _km, _ks, kube_fault, kube_fmt_age, kube_get, kube_run, kube_seconds, kube_tool,
@@ -104,20 +105,20 @@ def kube_api_resources(context):
     return set(kube_run("kubectl", ["--context", context, "api-resources", "-o", "name"]).split())
 
 
-def kube_delete_pod(context, namespace, name, force=False):
+def kube_delete_pod(context, namespace, name, force=False, server=None):
     """Delete a pod, once you've confirmed it (worker thread): what kubectl said. Without force it doesn't wait for
     the pod to go (its grace period, 30 s by default): the list shows it Terminating meanwhile. With force, the API
-    forgets it at once, whether or not its containers have stopped."""
-    args = ["--context", context, "delete", "pod", name, "-n", namespace]
+    forgets it at once, whether or not its containers have stopped. With server, only on that server (kube_target)."""
+    args = [*lookupkube.kube_target(context, server), "delete", "pod", name, "-n", namespace]
     args += ["--grace-period=0", "--force"] if force else ["--wait=false"]
     return kube_run("kubectl", args, timeout=60).strip()
 
 
-def kube_delete(context, namespace, name, force=False):
+def kube_delete(context, namespace, name, force=False, server=None):
     """Delete a pod (worker thread), once you've confirmed it: what to say of it: kubectl's text, else that it's gone,
     or why it failed."""
     try:
-        return kube_delete_pod(context, namespace, name, force) or wording.say("kube.deleted", name=name)
+        return kube_delete_pod(context, namespace, name, force, server) or wording.say("kube.deleted", name=name)
     except RuntimeError as e:
         return wording.say("kube.delete_failed", name=name, why=e)
 
@@ -1060,6 +1061,7 @@ def kube_custom_page(crd):
 
 
 _KUBE_PRINTERS = {}  # (context, definition) -> (when, its printer columns, or None: it couldn't be read)
+lookupkube.KUBE_FORGET.append(lambda key: [_KUBE_PRINTERS.pop(k, None) for k in list(_KUBE_PRINTERS) if k[0] == key[0]])
 
 
 def kube_page_columns(context, page, max_age=60, items=()):

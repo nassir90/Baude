@@ -241,16 +241,31 @@ def _tone(state, status):
     return ""
 
 
+def _state_text(state, status):
+    """A container's Status cell: its state capitalised, then its health in parentheses, or for an exited one its
+    exit code (Running (healthy), Exited (1))."""
+    text = state.capitalize()
+    if state == "exited":
+        m = re.search(r"exited \((\d+)\)", (status or "").lower())
+        return f"{text} ({m.group(1)})" if m else text
+    m = re.search(r"\((healthy|unhealthy|health: starting)\)", (status or "").lower())
+    return f"{text} ({m.group(1).replace('health: ', '')})" if m else text
+
+
 def _age(at, now):
     return (kube_fmt_age(now - at) if at is not None else "", now - at if at is not None else None,
             lookup.full_time(at) if at is not None else "")
 
 
-def _row(id_, name, cols, cells, actions=(), logs=False, shell=(), running=False):
-    """A row: cells as (text, key, tone, tip) by column."""
-    return {"id": id_, "name": name, "cells": [c[0] for c in cells], "keys": [c[1] for c in cells],
-            "tones": [c[2] for c in cells], "tips": [c[3] for c in cells], "actions": list(actions), "logs": logs,
-            "shell": list(shell), "running": running}
+def _row(id_, name, cols, cells, actions=(), logs=False, shell=(), running=False, filters=None):
+    """A row: cells as (text, key, tone, tip) by column; filters: what a column's filter goes by for a cell, by column,
+    where it isn't the cell's text ("" where it is)."""
+    row = {"id": id_, "name": name, "cells": [c[0] for c in cells], "keys": [c[1] for c in cells],
+           "tones": [c[2] for c in cells], "tips": [c[3] for c in cells], "actions": list(actions), "logs": logs,
+           "shell": list(shell), "running": running}
+    if filters:
+        row["filters"] = list(filters)
+    return row
 
 
 def _containers(args, everything, now):
@@ -264,13 +279,15 @@ def _containers(args, everything, now):
         ports = ", ".join(p.strip() for p in (c.get("Ports") or "").split(",") if p.strip())
         project = _labels(c.get("Labels")).get("com.docker.compose.project", "")
         running = state == "running"
+        shown = _state_text(state, status) if state else status
         actions = ("stop", "restart", "remove") if running or state == "restarting" else \
             ("start", "remove") if state in ("exited", "created", "dead") else ("stop", "remove")
         rows.append(_row(cid, name, cols, [
             (name, name, "", ""), (c.get("Image") or "", c.get("Image") or "", "", ""),
-            (status, status, _tone(state, status), ""), (ports, ports, "", ""), (project, project, "", ""),
+            (shown, shown, _tone(state, status), ""), (ports, ports, "", ""), (project, project, "", ""),
             (age, key, "", tip)], actions, logs=True,
-            shell=[_docker(), *args, "exec", "-it", cid, *SHELL] if running else (), running=running))
+            shell=[_docker(), *args, "exec", "-it", cid, *SHELL] if running else (), running=running,
+            filters=["", "", state.capitalize(), "", "", ""]))  # (its Status filtered by its state alone: Running, not Running (healthy))
     return cols, rows
 
 

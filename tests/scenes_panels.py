@@ -182,6 +182,107 @@ def _(app):
     return win
 
 
+def offer_update(app, result=("0123456789", None), busy=False):
+    """A new version's there (or why it can't be restarted onto, or Update clicked and being checked), as a look at git
+    with nothing applied finds it: in this app's updater."""
+    u = app.app.updater
+    if u is None:
+        u = app.app.updater = baude.update.Updater("baude", app.app.idle, app.app.restart,
+                                                   blocked=app.app.update_waiting)
+    u.seen(result)
+    u.busy = busy
+    u.changed()
+
+
+def update_scene(app, result, busy=False):
+    sidebar_sessions(T.TMP)
+    win = app.window()
+    offer_update(app, result, busy)
+    T.wait_for(lambda: win.sidebar.update_bar.get_visible(), "Update bar shown")
+    T.pump(0.3)
+    return win
+
+
+@scene("56c-update-offered", "A newer version there, Auto restart on update off: Update at the foot of the sessions list, "
+                            "restarted onto only when it's clicked")
+def _(app):
+    return update_scene(app, ("0123456789", None))
+
+
+@scene("56d-update-second-window", "A newer version offered, then a second window opened: Update at the foot of its "
+                                   "sessions list too")
+def _(app):
+    sidebar_sessions(T.TMP)
+    first = app.window()
+    offer_update(app)
+    T.wait_for(lambda: first.sidebar.update_bar.get_visible(), "Update shown")
+    second = app.window()
+    T.wait_for(lambda: second.sidebar.update_bar.get_visible(), "Update shown in the second window")
+    T.pump(0.3)
+    return second
+
+
+@scene("56e-update-checking", "Update clicked: a spinner on the button while the new version is fetched in and checked")
+def _(app):
+    return update_scene(app, ("0123456789", None), busy=True)
+
+
+@scene("56f-update-dirty", "A newer version there, something tracked changed in the checkout: why, in place of Update")
+def _(app):
+    return update_scene(app, (None, "dirty"))
+
+
+@scene("56g-update-diverged", "A newer version there that won't fast-forward: why, in place of Update")
+def _(app):
+    return update_scene(app, (None, "diverged"))
+
+
+@scene("56h-update-broken", "A newer version that didn't start: why, in place of Update")
+def _(app):
+    return update_scene(app, (None, "broken"))
+
+
+RESTART_BLOCKERS = [{"kind": "chat", "session": "11111111-0000-4000-8000-000000000001", "name": "Refactor settings",
+                     "what": "npm test -- --watch=false"},
+                    {"kind": "task", "session": "22222222-0000-4000-8000-000000000002", "task": "t1", "run": "r1",
+                     "name": "Nightly deploy", "what": "a task's run"},
+                    {"kind": "agent", "session": "33333333-0000-4000-8000-000000000003", "host": "lab-mac-id",
+                     "name": "apple-foundation", "what": "Running apple-foundation for a chat on lab-mac"},
+                    {"kind": "terminal", "terminal": "abc123", "name": "zsh", "what": "/bin/zsh -l"}]
+
+
+def _restart_pending(app, paused):
+    """This Mac's host process (the run's own, in this process) keeping a restart that a chat running a command and a
+    task's run hold up (RESTART_BLOCKERS, as its blockers say them), and paused if paused: as the heads hear it."""
+    sidebar_sessions(T.TMP)
+    win = app.window()
+    srv = baude.baudelib.hosts._HERE[0]
+    srv.blockers = lambda: RESTART_BLOCKERS
+    if paused:
+        srv.restart_holds.add("a head")
+    srv.restart_when_free("head")
+    T.wait_for(lambda: win.sidebar.update_bar.restart.get_visible(), "the restart said")
+    T.pump(0.3)
+    return win
+
+
+@scene("56d-daemon-restart-pending", "Restart Daemon with a chat running a command and a task running: the daemon "
+                                     "keeps the restart, said at the foot of the sessions list till they're done")
+def _(app):
+    return _restart_pending(app, False)
+
+
+@scene("56e-daemon-restart-blockers", "That line clicked: what the restart waits for, the restart paused meanwhile "
+                                      "(every app says so), with Restart (once they're done) and Force Restart (now)")
+def _(app):
+    win = _restart_pending(app, True)
+    r = baude.local_host()
+    r.request = lambda msg, then=None: None  # (nothing asked of it: the picture's the point)
+    baude.meshui.restart_dialog(r, win, lambda now: None, lambda b: None)
+    T.pump(0.5)
+    return win
+
+
 @scene("55-network-group-menu", "⋮ beside the search: Group by, then which groups are listed: each "
                                 "group the sessions are in. Here lab-mac's (New session's host), in Lab")
 def _(app):

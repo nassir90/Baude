@@ -40,12 +40,13 @@ def picked(win):
 
 class Follow:
     """A kube_follow on a host, on a connection of its own (the host ends its kubectl when that goes): on_text(f, text)
-    as a log's lines come, on_rows(f, reply) as a watched list changes, on_end(f, code, said) once it ends by itself;
+    as a log's lines come, on_rows(f, reply) as a watched list changes, on_contexts(f, reply) as the kubeconfig's
+    contexts do, on_end(f, code, said, removed) once it ends by itself (removed: its context went from the kubeconfig);
     all on the main thread. stop() ends it: nothing more is handed on."""
     REQ = 1
 
-    def __init__(self, where, msg, on_end, on_text=None, on_rows=None):
-        self.on_end, self.on_text, self.on_rows = on_end, on_text, on_rows
+    def __init__(self, where, msg, on_end, on_text=None, on_rows=None, on_contexts=None):
+        self.on_end, self.on_text, self.on_rows, self.on_contexts = on_end, on_text, on_rows, on_contexts
         self.ch, self.stopped, self.seen = None, False, 0
         threading.Thread(target=self._run, args=(where, msg), daemon=True, name="kube-follow").start()
 
@@ -53,7 +54,7 @@ class Follow:
         try:
             ch, _info = wire.reach(where, timeout=15)
         except (OSError, ValueError) as e:
-            GLib.idle_add(self._ended, 1, str(e) or wording.say("host_status.no_answer"))
+            GLib.idle_add(self._ended, 1, str(e) or wording.say("host_status.no_answer"), False)
             return
         self.ch = ch
         if self.stopped:
@@ -61,7 +62,7 @@ class Follow:
             return
         ch.keep_alive()
         ch.send({"op": "kube_follow", "req": self.REQ, **{k: v for k, v in msg.items() if v is not None}})
-        end = (1, wording.say("host_status.connection_dropped"))
+        end = (1, wording.say("host_status.connection_dropped"), False)
         try:
             for r in ch:
                 if r.get("req") != self.REQ:
@@ -71,14 +72,16 @@ class Follow:
                     GLib.idle_add(self._hand, self.on_text, r.get("text") or "")
                 elif op == "kube_rows" and self.on_rows is not None:
                     GLib.idle_add(self._hand, self.on_rows, r)
+                elif op == "kube_contexts" and self.on_contexts is not None:
+                    GLib.idle_add(self._hand, self.on_contexts, r)
                 elif op == "kube_end":
-                    end = (r.get("code") or 0, r.get("said") or "")
+                    end = (r.get("code") or 0, r.get("said") or "", bool(r.get("removed")))
                     break
                 elif op == "error":
-                    end = (1, wire.said(r))
+                    end = (1, wire.said(r), False)
                     break
         except (OSError, ValueError) as e:
-            end = (1, str(e))
+            end = (1, str(e), False)
         ch.close()
         GLib.idle_add(self._ended, *end)
 
@@ -88,10 +91,10 @@ class Follow:
             fn(self, what)
         return False
 
-    def _ended(self, code, said):
+    def _ended(self, code, said, removed):
         if not self.stopped:
             self.stopped = True
-            self.on_end(self, code, said)
+            self.on_end(self, code, said, removed)
         return False
 
     def stop(self):

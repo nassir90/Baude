@@ -124,7 +124,7 @@ private fun KeyButton(label: String, icon: ImageVector? = null, on: Boolean = fa
 @Composable
 fun TerminalScreen(hostId: String, back: () -> Unit) {
     val c = LocalBaude.current
-    val t = remember(hostId) { Terms.plain(hostId) }
+    val t = remember(hostId) { Terms.wanted.remove(hostId)?.ifBlank { null }?.let { Terms.attached(hostId, it) } ?: Terms.plain(hostId) }
     BackHandler(onBack = back)
     Column(Modifier.fillMaxSize().background(c.frame)) {
         val title = t.title.ifBlank { Wording.Multiplex.terminalMenu } + if (t.ended != null) " (${Wording.Multiplex.ended})" else ""

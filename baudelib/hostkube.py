@@ -1,7 +1,8 @@
 """hostkube — the clusters this host's kubeconfig reaches, read for a head elsewhere (the phone's Kubernetes page): the
 desktop's own functions (kubedata), kubectl's answers as Freelens' pages and columns. Each kind's objects, an object's
 YAML, what controls an object, a pod deleted once it's asked, the whole stack's CPU and memory (kube); a pod's log followed and a kind's list watched,
-on a connection of its own (follow). Secrets' values are never read, and kubectl is only ever given the arguments these
+on a connection of its own (follow); the kubeconfig's contexts, sent again as tools add and delete clusters (follow's
+contexts). Secrets' values are never read, and kubectl is only ever given the arguments these
 build. No GTK."""
 import codecs
 import collections
@@ -24,21 +25,32 @@ from baudelib import deps, wording  # noqa: E402
 
 PAGES = {p["resource"]: p for _title, pages in kd.KUBE_SECTIONS for p in pages}
 _CUSTOM = {}  # (context, definition) -> the page its objects have
+lookupkube.KUBE_FORGET.append(lambda key: [_CUSTOM.pop(k, None) for k in list(_CUSTOM) if k[0] == key[0]])
 BATCH_S = 0.1   # a log's lines are sent this often at most
 WATCH_S = 1.0   # a watch's changes are sent this often at most
 HISTORY_S = 30 * 60  # Home's history goes back this far
 IDLE_S = 24 * 60 * 60  # a context Home hasn't been read for in a day is no longer sampled, and its history let go
 BACKOFF_S = 5 * 60  # a cluster that keeps failing to be read is tried again at most this far apart (twice as far each time)
-# context -> {"cluster": (its cluster, its server) as the kubeconfig names them, "began": when this history began,
-# "asked": when Home last read it, "next": when the next sample is due, "fails": how many reads in a row failed,
-# "fault": the last one's error, "read": (when, its last kd.kube_summary_read) or None, "samples": deque of
+# cluster (kube_key: its context's name and server) -> {"entry": its context's kubeconfig entry as last seen (_entry),
+# "began": when this history began, "asked": when Home last read it, "next": when the next sample is due, "fails": how
+# many reads in a row failed, "fault": the last one's error, "reading": the read under way ({"done": Event, then "read"
+# or "error"}) or None, "read": (when, its last kd.kube_summary_read) or None, "samples": deque of
 # (when, {namespace: (cpu requested, cpu used, memory requested, memory used)})}: from the first time Home is read for
-# a context, a sample every KUBE_REFRESH_S (_sampling) whether Home is open or not, in this process's memory, for as
-# long as the kubeconfig names that context with that cluster and server (one gone, or another cluster under its name,
-# drops it at once)
+# a cluster, a sample every KUBE_REFRESH_S (_sampling; further apart while its reads fail) whether Home is open or not,
+# in this process's memory, till its context goes from the kubeconfig or its server changes (KUBE_FORGET, on a
+# kubeconfig read whole: one caught half written never lets go of a history) or Home isn't read for it for IDLE_S
 _HISTORY = {}
 _HISTORY_LOCK = threading.Lock()
 _SAMPLER = []  # (the thread taking them, while there's a context to sample)
+
+
+def _forget_history(key):
+    """A cluster's history let go of: its context went from the kubeconfig, or its server changed (another cluster)."""
+    with _HISTORY_LOCK:
+        _HISTORY.pop(tuple(key), None)
+
+
+lookupkube.KUBE_FORGET.append(_forget_history)
 
 
 def _home(path):
@@ -103,18 +115,25 @@ def _metrics(page, ctx):
         ctx["node_metrics"] is not None if page["resource"] == "nodes" else None
 
 
-def _contexts():
-    contexts = [c for c in lookupkube.kube_contexts() if not c.get("cluster_only")]
+def _contexts(contexts=None):
+    contexts = [c for c in (lookupkube.kube_contexts() if contexts is None else contexts) if not c.get("cluster_only")]
     where = ", ".join(_home(p) for p in lookupkube.kubeconfig_paths()) or wording.say("kube.no_kubeconfig")
-    return {"contexts": [{"name": c["name"], "current": bool(c.get("current")),
+    return {"contexts": [{"name": c["name"], "server": c.get("server") or "", "current": bool(c.get("current")),
                           "local": bool(lookupkube.kube_local(c.get("server")))} for c in contexts], "where": where}
+
+
+def _failed(e, context):
+    """A read that failed: the context gone from the kubeconfig (removed), or why the cluster can't be read (fault)."""
+    if getattr(e, "removed", False):
+        return {"removed": True}
+    return {"fault": _fault(getattr(e, "said", str(e)), context)}
 
 
 def _connect(context):
     try:
         resources = kd.kube_api_resources(context)
     except RuntimeError as e:
-        return {"fault": _fault(getattr(e, "said", str(e)), context)}
+        return _failed(e, context)
     try:
         spaces = sorted(lookupkube._km(n).get("name", "") for n in json.loads(
             kd.kube_get(context, "namespaces", "-o", "json") or "{}").get("items") or [])
@@ -136,7 +155,7 @@ def _list(msg):
     try:
         items = kd.kube_list(context, page)
     except (RuntimeError, ValueError) as e:
-        return {"fault": _fault(getattr(e, "said", str(e)), context)}
+        return _failed(e, context)
     columns = kd.kube_page_columns(context, page, items=items)
     ctx = kd.kube_metrics_ctx(context, page)
     out = {"columns": [{"title": c["title"], "kind": c["kind"]} for c in columns],
@@ -146,66 +165,100 @@ def _list(msg):
     return out
 
 
-def _identities():
-    """Each kubeconfig context's (cluster, server), by its name: what a context's history is kept for."""
-    try:
-        return {c["name"]: (c.get("cluster"), c.get("server")) for c in lookupkube.kube_contexts()
-                if not c.get("cluster_only")}
-    except OSError:  # (a kubeconfig replaced while it's read: as it was a moment ago, next time)
-        return None
+def _entry(c):
+    """What a context's kubeconfig entry says of it, to tell when it's changed (a cluster that was failing to be read
+    is then tried again at once)."""
+    return tuple(c.get(k) for k in ("cluster", "user", "namespace", "server", "kubeconfig"))
 
 
-def _history(context, cluster, now):
-    """A new history for context (under _HISTORY_LOCK), its first sample due now."""
-    h = {"cluster": cluster, "began": now, "asked": now, "next": now, "fails": 0, "fault": None, "read": None,
-         "samples": collections.deque()}
-    _HISTORY[context] = h
-    return h
+def _renewed(h, c, now):
+    """A history's backoff let go of if its context's kubeconfig entry c has changed since (under _HISTORY_LOCK)."""
+    if c is not None and _entry(c) != h["entry"]:
+        h["entry"] = _entry(c)
+        h["fails"], h["fault"], h["next"] = 0, None, now
 
 
-def _take(context, h):
-    """Read context's totals (kubectl: not under the lock) and keep what its history h needs of them; the read. A
-    failed read is tried again twice as late each time in a row, up to BACKOFF_S (and raises)."""
-    try:
-        read = kd.kube_summary_read(context)
-    except (RuntimeError, ValueError, OSError) as e:
-        with _HISTORY_LOCK:
-            if _HISTORY.get(context) is h:  # (not one let go, or begun anew, while it was read)
-                h["fails"] += 1
-                h["fault"] = e
-                h["next"] = time.time() + min(BACKOFF_S, kd.KUBE_REFRESH_S * 2 ** (h["fails"] - 1))
-        raise
-    now = time.time()
-    kept = {ns: (t[0], t[1], t[3], t[4]) for ns, t in kd.kube_tally(read)["namespaces"].items()}
+def _take(key, h):
+    """Read a cluster's totals for its history h (kubectl: not under the lock) and keep what h needs of them; the read.
+    One read at a time for a history: one asked for while another is under way waits for it and has what it had, so
+    no sample is taken twice or kept out of order. A failed read is tried again twice as late each time in a row, up
+    to BACKOFF_S (and raises)."""
     with _HISTORY_LOCK:
-        if _HISTORY.get(context) is h:
-            h["read"], h["next"], h["fails"], h["fault"] = (now, read), now + kd.KUBE_REFRESH_S, 0, None
-            h["samples"].append((now, kept))
-            while now - h["samples"][0][0] > HISTORY_S:
-                h["samples"].popleft()
-    return read
+        run, mine = h["reading"], h["reading"] is None
+        if mine:
+            run = h["reading"] = {"done": threading.Event()}
+    if mine:
+        try:
+            run["read"] = kd.kube_summary_read(key[0])
+            kept = {ns: (t[0], t[1], t[3], t[4]) for ns, t in kd.kube_tally(run["read"])["namespaces"].items()}
+        except Exception as e:  # noqa: BLE001 (handed on, as it is, to whoever asked)
+            run["error"] = e
+        now = time.time()
+        with _HISTORY_LOCK:
+            h["reading"] = None
+            if _HISTORY.get(key) is h and "error" in run:  # (not one let go of while it was read)
+                h["fails"] += 1
+                h["fault"] = run["error"]
+                h["next"] = now + min(BACKOFF_S, kd.KUBE_REFRESH_S * 2 ** (h["fails"] - 1))
+            elif _HISTORY.get(key) is h:
+                h["read"], h["next"], h["fails"], h["fault"] = (now, run["read"]), now + kd.KUBE_REFRESH_S, 0, None
+                h["samples"].append((now, kept))
+                while now - h["samples"][0][0] > HISTORY_S:
+                    h["samples"].popleft()
+        run["done"].set()
+    else:
+        run["done"].wait()
+    if "error" in run:
+        raise run["error"]
+    return run["read"]
+
+
+def _sample_one(key, h):
+    """A sample taken for one history, on a thread of its own (a cluster that hangs holds up no other)."""
+    try:
+        _take(key, h)
+    except (RuntimeError, ValueError, OSError):
+        pass  # (a gap in its history; tried again as _take says)
+    except Exception as e:  # noqa: BLE001
+        print(f"kube-home-history: {key[0]}: {e!r}", file=sys.stderr, flush=True)
 
 
 def _sampling():
     """A sample of each context Home has been read for every KUBE_REFRESH_S (further apart while it fails), till none
-    is left: a context not read for IDLE_S (a day), gone from the kubeconfig or naming another cluster is let go at
-    once. (A sample that can't be read is a gap in its history.)"""
+    is left: a context not read for IDLE_S (a day) is let go of, and one gone from the kubeconfig isn't read (and is let
+    go of by KUBE_FORGET). One still being read isn't read again. (A sample that can't be read is a gap in its
+    history.) Nothing that goes wrong ends it."""
     while True:
         time.sleep(1)
-        now, known = time.time(), _identities()
-        with _HISTORY_LOCK:
-            for context in [c for c, h in _HISTORY.items() if now - h["asked"] > IDLE_S or
-                            known is not None and known.get(c) != h["cluster"]]:
-                del _HISTORY[context]
-            if not _HISTORY:
-                _SAMPLER.clear()
+        try:
+            if not _sample_due():
                 return
-            due = [(c, h) for c, h in _HISTORY.items() if now >= h["next"]]
-        for context, h in due:
-            try:
-                _take(context, h)
-            except (RuntimeError, ValueError, OSError):
-                pass
+        except Exception as e:  # noqa: BLE001 (tried again in a second)
+            print(f"kube-home-history: {e!r}", file=sys.stderr, flush=True)
+
+
+def _sample_due():
+    """The samples that are due started, each on its own thread; False once there's no history left (and the sampler
+    let go of)."""
+    now = time.time()
+    with _HISTORY_LOCK:
+        for key in [k for k, h in _HISTORY.items() if now - h["asked"] > IDLE_S]:
+            del _HISTORY[key]
+        if not _HISTORY:
+            _SAMPLER.clear()
+            return False
+        free = [(k, h) for k, h in _HISTORY.items() if h["reading"] is None]
+    contexts = lookupkube.kube_contexts() if free else []
+    for key, h in free:
+        if lookupkube.kube_removed(key, contexts=contexts):  # (KUBE_FORGET lets go of its history)
+            continue
+        c = next((c for c in contexts if lookupkube.kube_key(c) == key and not c.get("cluster_only")), None)
+        with _HISTORY_LOCK:
+            _renewed(h, c, now)
+            due = _HISTORY.get(key) is h and h["reading"] is None and now >= h["next"]
+        if due:
+            threading.Thread(target=_sample_one, args=(key, h), name="kube-home-sample", daemon=True).start()
+    return True
 
 
 def _sample(when, kept, namespaces):
@@ -222,36 +275,35 @@ def _sample(when, kept, namespaces):
 def _summary(msg):
     """Home: the stack's CPU and memory in the namespaces asked for (every one without), and how they went: the
     samples taken since the one asked for (every one without), as _sampling keeps them. A read under
-    KUBE_REFRESH_S / 2 old is used again; while a cluster that failed waits to be tried again, its last fault is."""
+    KUBE_REFRESH_S / 2 old is used again; while a cluster that failed waits to be tried again, its last fault is.
+    fresh (Refresh): read now, whatever's kept or waited for."""
     context, namespaces, since = msg.get("context"), msg.get("namespaces"), msg.get("since")
     since = since if isinstance(since, (int, float)) and not isinstance(since, bool) else None
-    known, now = _identities(), time.time()
+    fresh = msg.get("fresh") is True
+    c = next((c for c in lookupkube.kube_contexts() if c["name"] == context and not c.get("cluster_only")), None)
+    key, now = (lookupkube.kube_key(c) if c is not None else None), time.time()
     with _HISTORY_LOCK:
-        h = _HISTORY.get(context)
-        cluster = known.get(context) if known is not None else h and h["cluster"]
-        if h is not None and h["cluster"] != cluster:
-            del _HISTORY[context]
-            h = None
-        if cluster is None:  # (not in the kubeconfig: kubectl says so, and there's nothing to sample)
-            h = None
-        elif h is None:
-            h = _history(context, cluster, now)
-        else:
+        h = _HISTORY.get(key) if key is not None else None  # (not in the kubeconfig: kubectl says so, unsampled)
+        if h is None and key is not None:
+            h = _HISTORY[key] = {"entry": _entry(c), "began": now, "asked": now, "next": now, "fails": 0,
+                                 "fault": None, "reading": None, "read": None, "samples": collections.deque()}
+        elif h is not None:
             h["asked"] = now
+            _renewed(h, c, now)
         last = h and h["read"]
-        read = last[1] if last and now - last[0] < kd.KUBE_REFRESH_S / 2 else None
-        waiting = h is not None and h["fails"] and now < h["next"] and h["fault"]
+        read = last[1] if last and not fresh and now - last[0] < kd.KUBE_REFRESH_S / 2 else None
+        waiting = h["fault"] if h is not None and not fresh and h["fails"] and now < h["next"] else None
         if h is not None and not _SAMPLER:
             _SAMPLER.append(threading.Thread(target=_sampling, name="kube-home-history", daemon=True))
             _SAMPLER[0].start()
     try:
-        if waiting:
+        if waiting is not None:
             raise waiting
-        read = read or (_take(context, h) if h is not None else kd.kube_summary_read(context))
+        read = read or (_take(key, h) if h is not None else kd.kube_summary_read(context))
     except (RuntimeError, ValueError, OSError) as e:
-        return {"fault": _fault(getattr(e, "said", str(e)), context)}
+        return _failed(e, context)
     with _HISTORY_LOCK:
-        samples = list(h["samples"]) if h is not None and _HISTORY.get(context) is h else []
+        samples = list(h["samples"]) if h is not None and _HISTORY.get(key) is h else []
     history = [_sample(when, kept, namespaces) for when, kept in samples if since is None or when > since]
     return {"summary": {**kd.kube_summary(read, namespaces), "history": history, "every": kd.KUBE_REFRESH_S,
                         "minutes": HISTORY_S // 60, "began": h["began"] if h is not None else now}}
@@ -272,6 +324,8 @@ def _yaml(msg):
     try:
         text = kd.kube_get(context, *args)
     except RuntimeError as e:
+        if getattr(e, "removed", False):
+            return {"removed": True}
         d = kd.kube_diagnose(getattr(e, "said", str(e)))
         return {"text": f"# {d['title']}: {d['why']}\n", "file": "object.yaml", "refs": []}
     return {"text": text, "file": "object.yaml",
@@ -293,6 +347,18 @@ def _owner(msg):
             break
         kind, name = up["kind"], up["name"]
     return {"kind": kind, "name": name, "resource": kd.KUBE_CLIMB.get(kind) or kd.kube_resource(kind)}
+
+
+def _key(msg):
+    """The context a request is for: its name, with the server the head knows it by when it says one (a context of
+    that name with another server is another cluster, made again under the same name)."""
+    server = msg.get("server")
+    return (msg.get("context"), server) if isinstance(server, str) else msg.get("context")
+
+
+def _server(msg):
+    """The server the head knows a request's context by, if it says one (kubectl is pointed at it: kube_target)."""
+    return msg.get("server") if isinstance(msg.get("server"), str) else None
 
 
 ARGS = ("context", "namespace", "name", "pod", "container", "kind", "page", "crd")
@@ -318,6 +384,10 @@ def answer(server, msg):
             return {"what": what, **_contexts()}
         if not isinstance(context, str) or not context:
             return {"what": what, "error": "kube needs a context"}
+        if lookupkube.kube_removed(_key(msg)):  # (deleted from the kubeconfig, or made again: kubectl isn't asked of it)
+            return {"what": what, "removed": True}
+        if what == "check":  # (still there: a shell may start)
+            return {"what": what}
         if what == "connect":
             return {"what": what, **_connect(context)}
         if what == "list":
@@ -330,10 +400,12 @@ def answer(server, msg):
             return {"what": what, **_summary(msg)}
         if what == "delete":
             return {"what": what, "said": kd.kube_delete(context, msg.get("namespace"), msg.get("name"),
-                                                          bool(msg.get("force")))}
+                                                          bool(msg.get("force")), _server(msg))}
     except (RuntimeError, ValueError, OSError) as e:
+        if getattr(e, "removed", False):
+            return {"what": what, "removed": True}
         return {"what": what, "error": str(e)}
-    return {"what": what, "error": "kube takes contexts, connect, list, yaml, owner, summary or delete"}
+    return {"what": what, "error": "kube takes contexts, check, connect, list, yaml, owner, summary or delete"}
 
 
 # ---------------------------------------------------------------- following
@@ -359,16 +431,63 @@ def stop(conn):
             threading.Timer(3, lambda p=proc: p.poll() is None and p.kill()).start()
 
 
+def _gone(conn, key, procs):
+    """While a follow runs: its kubectls (procs, a list it keeps current) stopped once its context goes from the
+    kubeconfig. A function that says whether it has (call it to let go of the watcher with stop=True)."""
+    removed = threading.Event()
+
+    def changed(contexts):  # (on the watcher's thread: looked up in its contexts, nothing waited on)
+        if lookupkube.kube_removed(key, contexts=contexts):
+            removed.set()
+            for proc in list(procs):
+                if proc.poll() is None:
+                    try:
+                        proc.terminate()
+                    except OSError:
+                        pass
+    unwatch = lookupkube.kube_contexts_watch(changed)
+
+    def gone(stop=False):
+        if stop:
+            unwatch()
+        return removed.is_set()
+    return gone
+
+
 def _logs(conn, req, msg):
     previous = bool(msg.get("previous"))
-    args = ["--context", msg["context"], "logs", "--previous" if previous else "-f", f"--tail={kd.KUBE_LOG_TAIL}",
-            "-n", msg["namespace"], msg["pod"], "-c", msg["container"]]
+    args = [*lookupkube.kube_target(msg["context"], _server(msg)), "logs", "--previous" if previous else "-f",
+            f"--tail={kd.KUBE_LOG_TAIL}", "-n", msg["namespace"], msg["pod"], "-c", msg["container"]]
+    procs = []
+    gone = _gone(conn, _key(msg), procs)
     try:
-        proc = _start(conn, args, stderr=subprocess.STDOUT)
-    except OSError as e:
-        conn.send({"op": "kube_end", "req": req, "code": 1, "said": str(e)})
-        return
-    pending, lock, done = [], threading.Lock(), threading.Event()
+        for again in (True, False):
+            try:
+                proc = _start(conn, args, stderr=subprocess.STDOUT)
+            except OSError as e:
+                conn.send({"op": "kube_end", "req": req, "code": 1, "said": str(e)})
+                return
+            procs[:] = [proc]
+            code, held = _log_lines(conn, req, proc)
+            if again and code and held is not None and lookupkube.kube_config_broken(held) and not gone():
+                time.sleep(0.3)  # (a kubeconfig caught half written: kubectl run once more, what it said unsent)
+                continue
+            if held:
+                conn.send({"op": "kube_text", "req": req, "text": held})
+            break
+        if gone() or code and lookupkube.kube_removed(_key(msg)):
+            conn.send({"op": "kube_end", "req": req, "code": code or 1, "removed": True})
+        else:
+            conn.send({"op": "kube_end", "req": req, "code": code})
+    finally:
+        gone(stop=True)
+
+
+def _log_lines(conn, req, proc):
+    """A log's lines sent as kubectl writes them, BATCH_S's worth at a time, till it ends: its exit code, and what it
+    wrote if it ended within its first second (held back, unsent: the caller sends it, or runs it again); None if
+    that was sent."""
+    pending, lock, done, began = [], threading.Lock(), threading.Event(), time.monotonic()
 
     def read():
         decode = codecs.getincrementaldecoder("utf-8")(errors="replace").decode
@@ -384,16 +503,24 @@ def _logs(conn, req, msg):
                 pending.append(decode(chunk))
         done.set()
     threading.Thread(target=read, daemon=True, name="kube-logs-read").start()
+    held = ""
     while True:
         finished = done.wait(BATCH_S)
         with lock:
             text, pending[:] = "".join(pending), []
+        if held is not None:
+            held += text
+            if finished:
+                break
+            if time.monotonic() - began < 1:
+                continue
+            text, held = held, None
         if text:
             conn.send({"op": "kube_text", "req": req, "text": text})
         if finished:
             break
     proc.stdout.close()
-    conn.send({"op": "kube_end", "req": req, "code": proc.wait()})
+    return proc.wait(), held
 
 
 def _apply(objects, events):
@@ -414,12 +541,29 @@ def _apply(objects, events):
 
 
 def _watch(conn, req, msg):
+    procs = []
+    gone = _gone(conn, _key(msg), procs)
+    try:
+        _watching(conn, req, msg, gone, procs)
+    finally:
+        gone(stop=True)
+
+
+def _watching(conn, req, msg, gone, procs):
+    """A kind's list watched (kubectl get --watch), its rows sent as they change; till the connection goes, or the
+    context goes from the kubeconfig (kube_end, removed)."""
     context, page = msg["context"], _page(msg)
     if page["source"] != "kubectl":
         conn.send({"op": "kube_end", "req": req, "code": 1, "said": "that kind isn't watched"})
         return
+
+    def removed(code=1):
+        if gone() or code and lookupkube.kube_removed(_key(msg)):
+            conn.send({"op": "kube_end", "req": req, "code": code or 1, "removed": True})
+            return True
+        return False
     state = {"ctx": kd.kube_metrics_ctx(context, page), "metrics_at": time.monotonic()}
-    objects, fails = {}, 0
+    objects, fails, broken = {}, 0, 0
 
     def send(note=""):
         columns = kd.kube_page_columns(context, page, items=list(objects.values()))
@@ -439,6 +583,7 @@ def _watch(conn, req, msg):
         else:
             try:
                 proc = _start(conn, args, stderr=subprocess.PIPE)
+                procs[:] = [proc]
             except OSError as e:
                 code, said, proc = 1, str(e), None
             if proc is not None:
@@ -482,10 +627,14 @@ def _watch(conn, req, msg):
                 said = (proc.stderr.read() or b"").decode(errors="replace").strip()
                 proc.stderr.close()
                 code = proc.wait()
-        if getattr(conn, "gone", False):
+        if getattr(conn, "gone", False) or removed(code):
             return
+        if code and not seen and broken < lookupkube.KUBE_BROKEN_TRIES and lookupkube.kube_config_broken(said):
+            broken += 1  # (a kubeconfig caught half written: watched again at once, twice at most)
+            time.sleep(0.3)
+            continue
         if seen:
-            fails = 0
+            fails = broken = 0
         if code and not seen:
             fails += 1
             if fails >= 3:  # (it can't be watched: read every few seconds, the rows sent with why)
@@ -499,12 +648,29 @@ def _watch(conn, req, msg):
                         send(note)
                     except (RuntimeError, ValueError):
                         pass
+                    if removed(0):
+                        return
                     for _ in range(kd.KUBE_REFRESH_S * 4):
                         if getattr(conn, "gone", False):
                             return
                         time.sleep(0.25)
                 return
         time.sleep(5 if code and not seen else 1)
+
+
+def _follow_contexts(conn, req):
+    """The kubeconfig's contexts (kube_contexts), sent as the follow starts and again each time they change (tools
+    adding and deleting clusters as they go), till the connection goes."""
+    changed = threading.Event()
+    unwatch = lookupkube.kube_contexts_watch(lambda _contexts: changed.set())
+    try:
+        conn.send({"op": "kube_contexts", "req": req, **_contexts()})
+        while not getattr(conn, "gone", False):
+            if changed.wait(1):
+                changed.clear()
+                conn.send({"op": "kube_contexts", "req": req, **_contexts()})
+    finally:
+        unwatch()
 
 
 def follow(server, conn, msg):
@@ -515,12 +681,16 @@ def follow(server, conn, msg):
         conn.send({"op": "kube_end", "req": req, "code": 1, "said": f"{bad} can't start with -"})
         return
     try:
-        if msg.get("what") == "logs":
+        if msg.get("what") == "contexts":
+            _follow_contexts(conn, req)
+        elif msg.get("what") in ("logs", "watch") and lookupkube.kube_removed(_key(msg)):
+            conn.send({"op": "kube_end", "req": req, "code": 1, "removed": True})
+        elif msg.get("what") == "logs":
             _logs(conn, req, msg)
         elif msg.get("what") == "watch":
             _watch(conn, req, msg)
         else:
-            conn.send({"op": "error", "req": req, "error": "kube_follow takes logs or watch"})
+            conn.send({"op": "error", "req": req, "error": "kube_follow takes contexts, logs or watch"})
             return
     except (KeyError, ValueError, OSError, RuntimeError) as e:
         conn.send({"op": "kube_end", "req": req, "code": 1, "said": str(e)})

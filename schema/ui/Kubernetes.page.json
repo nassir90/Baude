@@ -30,7 +30,11 @@
     "kubeview.py:KubeView.read_summary",
     "baudelib/hostkube.py:_summary",
     "kubedata.py:kube_summary",
-    "kubedata.py:kube_pod_asks"
+    "kubedata.py:kube_pod_asks",
+    "kubeview.py:ColumnFilters",
+    "kubeview.py:kube_filterable",
+    "android/.../ColumnFilters.kt:ColumnFilters",
+    "android/.../KubeTable.kt:KubeTable"
   ],
   "copy": [
     "kube",
@@ -55,14 +59,39 @@
         },
         {
           "name": "context picker",
-          "shows": "A drop-down of every kubeconfig context (clusters no context names are not listed). Shows the picked context's name, truncated in the middle past about 32 characters. The one used last is picked on open, else the kubeconfig's current one, else the first. No \"(current)\" suffix.",
+          "shows": "A button showing the picked context's name, truncated in the middle past about 32 characters (\"Choose a context\", dim, when none is picked because the one shown was removed); it opens a list of every kubeconfig context (clusters no context names are not listed), sorted by name with numbers by their value (slice-2 before slice-10), the picked one ticked. With more than 15 contexts the list has a search box (\"Find a context\": every word typed in the name; \"No contexts match\" when none does) and contexts sharing the start of their name up to the first - _ . : / or @ are grouped under that start, dim, with a rule before a context on its own after a group. The list follows the host's kubeconfig live: contexts added or deleted by other tools appear and go within about a second, a row at a time, without the list being rebuilt, losing its place or closing. The one used last is picked on open (only if it is still the same cluster: same name and server), else the kubeconfig's current one, else the first. No \"(current)\" suffix.",
           "copy": [
-            "kube.context_tip"
+            "kube.context_tip",
+            "kube.pick_context",
+            "kube.find_context",
+            "kube.no_context_match"
           ],
           "actions": [
             {
               "by": "pick another context",
-              "does": "Switches to that cluster: the table fades, the logs close and their kubectl stops, the YAML closes, any watch stops, then the cluster's resources, namespaces and node count are read and the page is read again. Each context remembers the namespaces shown in it; the context is remembered across sessions."
+              "does": "Switches to that cluster: the table fades, the logs close and their kubectl stops, the YAML closes, any watch stops, then the cluster's resources, namespaces and node count are read and the page is read again. Each cluster (context name plus its server) remembers the namespaces shown in it; the context is remembered across sessions with its server."
+            },
+            {
+              "by": "key Up / Down, Enter in the search",
+              "does": "Moves through the contexts shown; Enter picks the highlighted one."
+            }
+          ],
+          "phone": {
+            "does": "Tapped, the context list opens in the page, in the table's place, with Back (not as a popup): the same list, search and groups, the picked one ticked; picking one shows it, picking the one shown goes back to its table.",
+            "why": "a list of 27 and more contexts with a search needs the page's height, which a popup on a phone doesn't have",
+            "decided": "2026-11-26"
+          },
+          "decisions": [
+            {
+              "said": "Also btw, we now have external services live modifying the kubeconfig to create and delete clusters (slices) for testing.",
+              "rule": "Every app's context picker follows the host's kubeconfig live (pushed by the host, never needing a refresh), sorted, grouped by name prefix and searchable once there are more than 15, and updated row by row without flicker.",
+              "decided": "2026-11-26",
+              "source": [
+                {
+                  "session": "b3845b21-55ac-4aab-a769-fb8517403c51",
+                  "message": "0dbf17c8-06c6-4cae-b428-473aeda5e013"
+                }
+              ]
             }
           ]
         },
@@ -388,6 +417,50 @@
               "does": "Adds a row for that definition's kind to the sidebar (under Definitions), selects it, and shows that kind's objects with the columns the definition declares."
             }
           ]
+        },
+        {
+          "name": "column filter",
+          "shows": "On a column whose values are words (not a name, age or containers column; one that sorts by its text, not a number, size or time; each value with a letter in it and at most 40 characters), with 30 or fewer different values and some value shared by more than one row (any number for a status column), hovering its heading shows a funnel button at the heading's right end. While the column filters, the funnel stays, in the accent. A value hidden but not in the list now stays hidden, listed with a count of 0; a value with a count of 0 is greyed (dim) but can still be ticked. A filter on a column the table doesn't show (the Node column on a cluster of one node) hides nothing until the column is back.",
+          "copy": [
+            "kube.filter_column",
+            "kube.value_count",
+            "kube.no_value",
+            "fixes.all"
+          ],
+          "actions": [
+            {
+              "by": "click the funnel (the phone: hold the heading, or tap its funnel while it filters)",
+              "does": "Opens a popover: an \"All\" check, a separator, then a check per value of the column in the rows the other filters leave (and any value hidden), sorted by name, each \"Value (n)\" with how many rows have it; an empty cell is \"(none)\". The namespaces button's checklist."
+            },
+            {
+              "by": "untick or tick a value",
+              "does": "Hides or shows the rows with that value at once (nothing is read again); remembered in the settings for the kind (kube_hidden, Docker's docker_hidden: {kind: {column title: [values hidden]}}). All ticks every value; unticking All hides every row."
+            }
+          ],
+          "decisions": [
+            {
+              "said": "WE should be able to hover over container status, click a filter button on the right aligned and then see a chckbox dropdown to filter by the set of strings i.e. I usually want to filter out Succeeded / Failed nad only see running jobs.",
+              "rule": "Every app's resource tables (Kubernetes' kinds, Docker's pages) let a column of a few words be filtered by its values: a filter button at the column heading's right end (shown on hover, kept and in the accent while it filters; on a touch screen, holding the heading opens it and the funnel sits just after the title while it filters) opens All over a check per value with its row count; unticked values' rows are hidden, together with the namespaces picked and the filter box, and the status line counts the rows shown. The values hidden are remembered per kind (or Docker page) across refreshes and restarts, so hiding Succeeded and Failed pods stays.",
+              "decided": "2026-11-26",
+              "source": [
+                {
+                  "session": "b3845b21-55ac-4aab-a769-fb8517403c51",
+                  "message": "4a7c7159-3e78-447c-b165-0adab4d6d27f"
+                }
+              ]
+            },
+            {
+              "said": "UX -- in the filter column fileds with no elements should be slighlt grayed out but still clickavble",
+              "rule": "In every app's column filter, a value no row has (a count of 0) is drawn greyed, as a dim label, and stays a check that can be ticked or unticked.",
+              "decided": "2026-11-26",
+              "source": [
+                {
+                  "session": "b3845b21-55ac-4aab-a769-fb8517403c51",
+                  "message": "d58d44a8-1c67-40ed-9a24-27be89804cb4"
+                }
+              ]
+            }
+          ]
         }
       ]
     },
@@ -582,7 +655,7 @@
         },
         {
           "name": "shell tab",
-          "shows": "A shell in a pod (its row's shell button; a new tab each time). Its controls at the strip's end: a small dim state text (empty while it runs, \"kubectl exited with <code>\" once it ends), a container picker of the pod's running containers (not init containers). Inside under the strip (without VTE in the app: the missing-dependency state, \"Terminal needs VTE\", its install command with Copy, and Restart), a Multiplex terminal running kubectl exec -it in the container (on the host the view reads, run there by its host process when that's another host, with the kubectl that host is set to use): bash if the container has it, else sh. Its text in the window's light or dark colours. Its edges glow in the accent while a Bot is at its terminal tools there, as Emission's page does.",
+          "shows": "A shell in a pod (its row's shell button; a new tab each time). Its controls at the strip's end: a small dim state text (empty while it runs, \"kubectl exited with <code>\" once it ends), a container picker of the pod's running containers (not init containers). Inside under the strip (without VTE in the app: the missing-dependency state, \"Terminal needs VTE\", its install command with Copy, and Restart), a Multiplex terminal running kubectl exec -it in the container (on the host the view reads, run there by its host process when that's another host, with the kubectl that host is set to use): bash if the container has it, else sh. It starts (and starts again) only once the host says the cluster is still the one shown, its server too, and kubectl exec is pointed at that server, so a shell never opens in a cluster deleted and made again under the same context name; one that fails within its first seconds on a kubeconfig caught half written is run once more. Its text in the window's light or dark colours. Its edges glow in the accent while a Bot is at its terminal tools there, as Emission's page does.",
           "copy": [
             "kube.shell",
             "kube.container",
@@ -634,7 +707,20 @@
     },
     {
       "name": "live updating",
-      "shows": "While the view is open the list is watched (kubectl get --watch) so rows appear, change and go as the cluster changes; where a watch isn't possible the list is read again every 10 s. Pods' and Nodes' CPU and memory are read again every 10 s. A row selected stays selected through a refresh (and its YAML stays unless the object's version changed). Home is read again every 10 s."
+      "shows": "While the view is open the list is watched (kubectl get --watch) so rows appear, change and go as the cluster changes; where a watch isn't possible the list is read again every 10 s. Pods' and Nodes' CPU and memory are read again every 10 s. A row selected stays selected through a refresh (and its YAML stays unless the object's version changed). Home is read again every 10 s. The host's kubeconfig files (every file in KUBECONFIG, else ~/.kube/config) are looked at every second by their inode, size and modification time (a stat each), read once they have stopped changing, and the contexts pushed to every app showing the view (kube_follow contexts). A kubectl call that read a kubeconfig half written is run once more (a watch, twice at most, then it counts as failed); one whose context has gone is answered as removed. Pod deletes and logs, like shells, are pointed at the server the context was shown with. Home's history is kept per cluster (name and server) and dropped when the context goes or its server changes. Database Schemas follows the same list: its server picker is looked for again when a local cluster is added or deleted, keeping the diagram shown while its server is still there.",
+      "decisions": [
+        {
+          "said": "Also btw, we now have external services live modifying the kubeconfig to create and delete clusters (slices) for testing.",
+          "rule": "Every app reads the host's kubeconfig as tools rewrite it: changes are noticed cheaply and pushed, a half-written file is never taken for the whole, and a kubectl call that hit one is retried once.",
+          "decided": "2026-11-26",
+          "source": [
+            {
+              "session": "b3845b21-55ac-4aab-a769-fb8517403c51",
+              "message": "0dbf17c8-06c6-4cae-b428-473aeda5e013"
+            }
+          ]
+        }
+      ]
     },
     {
       "name": "keys",
@@ -740,6 +826,30 @@
     {
       "name": "another host",
       "shows": "The bar names the host picked; its contexts, its clusters' objects, YAML, logs and shells are read and run there by its host process. A host that can't be reached says \"<host>: <why>\" in the status line."
+    },
+    {
+      "name": "cluster removed",
+      "shows": "The context shown went from the kubeconfig (a tool deleted its cluster, or made another under the same name, i.e. another server): the table, Home or the error is replaced by a dim server icon, \"This cluster was removed\" and a context button (\"Choose a context\") to pick another; the bar's picker shows \"Choose a context\" too. The status line says \"<context> was removed from the kubeconfig\". Its watch, Home, metrics refresh and any read in flight stop; no kubectl error or spinner is shown. Docked log tabs of that cluster stop following and say \"cluster removed\"; a shell tab writes \"<context> was removed from the kubeconfig: this shell has ended.\" in its terminal and ends kubectl exec, its text kept. An open delete dialog closes. No other context is picked automatically, even when one of the same name comes back: that is another cluster, and its remembered namespaces start fresh.",
+      "copy": [
+        "kube.removed",
+        "kube.removed_status",
+        "kube.removed_state",
+        "kube.removed_shell",
+        "kube.pick_context"
+      ],
+      "decisions": [
+        {
+          "said": "Also btw, we now have external services live modifying the kubeconfig to create and delete clusters (slices) for testing.",
+          "rule": "When the cluster shown is deleted from the kubeconfig, every app says so calmly with a picker to choose another, stops everything reading it, tells an open shell, and never falls back to another cluster by itself (acting on the wrong cluster is dangerous). A context recreated under the same name is a new cluster: nothing kept of the old one is used.",
+          "decided": "2026-11-26",
+          "source": [
+            {
+              "session": "b3845b21-55ac-4aab-a769-fb8517403c51",
+              "message": "0dbf17c8-06c6-4cae-b428-473aeda5e013"
+            }
+          ]
+        }
+      ]
     }
   ],
   "removed": [

@@ -117,6 +117,9 @@ class Server(ServerRunning, ServerSessions):
         # commands to end (set_update); and the commit it's shutting down to start again on (shutdown's restart)
         self.commit = selfupdate.git(selfupdate.HERE, "rev-parse", "HEAD", timeout=5) or None
         self.update, self.restarting = None, None
+        # (a restart kept till nothing blocks it: {owners: what asked for it, head or update, to}; the heads holding it
+        # while they show what it waits for)
+        self.pending_restart, self.restart_holds = None, set()
         self.heads_apart = set()  # (the commits of heads on other code that have said hello: logged once each)
         # the apps connected here, by the code they run (heads that have subscribed, and this machine's Emissions:
         # info's heads, and this host's record's for the mesh); when each commit was made, as git here has it
@@ -250,7 +253,7 @@ class Server(ServerRunning, ServerSessions):
                 "groups": sorted({s.meta.get("group") or self.me["group"] for s in self.sessions.values()}
                                  | {self.me["group"]}),
                 "init": self.me.get("init") or None, "commit": self.commit, "made": self.made,
-                **self.mesh.here_behind(), "update": self.update,
+                **self.mesh.here_behind(), "update": self.update, "restart": self.restart_state(),
                 "providers": self.mesh.providers_here(), "mesh": self.mesh.view(),
                 "notes": self.notes_seen,  # (Record's notebooks here, as written last: notes.stamp)
                 "edits": self.edits_seen,  # (the edits proposed to their pages, as written last: notes.edits_stamp)

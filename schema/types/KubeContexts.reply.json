@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "kube_follow contexts' answer: the kubeconfig's contexts, as the follow starts and each time they change.",
+  "properties": {
+    "op": {
+      "const": "kube_contexts",
+      "description": "What it is."
+    },
+    "req": {
+      "type": ["integer", "null"],
+      "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "contexts": {
+      "type": "array",
+      "items": {
+        "$ref": "KubeContext.json"
+      },
+      "description": "The kubeconfig's contexts."
+    },
+    "where": {
+      "type": "string",
+      "description": "The kubeconfig files, or what stands for none."
+    }
+  },
+  "required": ["op"],
+  "additionalProperties": false
+}

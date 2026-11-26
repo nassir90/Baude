@@ -242,7 +242,7 @@ abstract class Parity(private val theme: String, private val scene: String) {
             val at = roots.map { if (rel.isEmpty()) it else File(it, rel) }
             return at.firstOrNull { it.exists() } ?: at.last()
         }
-        if (op == "kube" || op == "databases") return hostAnswer(msg)
+        if (op == "kube" || op == "databases" || op == "docker") return hostAnswer(msg)
         when (op) {
             "transcript" -> {
                 val from = msg.optLong("offset", 0).coerceIn(0, shown.size.toLong()).toInt()
@@ -514,6 +514,25 @@ abstract class Parity(private val theme: String, private val scene: String) {
                 tap("CPU")
                 tap("CPU")
             }
+            name == "kubernetes-column-filter" -> {
+                dev.baude.android.Mesh.app.getSharedPreferences("settings", android.content.Context.MODE_PRIVATE).edit()
+                    .putString("kube_hidden", """{"pods": {"Status": ["Failed", "Succeeded"]}}""").commit()
+                show { KubeScreen(host.getString("id"), {}, page = "pods") }
+                tap("CPU")
+                tap("CPU")
+                repeat(5) { if (find("CPU") == null) flush(true) }
+                sideways(2500f) // (the table scrolled to its end: Status in sight)
+            }
+            name == "docker-column-filter" -> {
+                dev.baude.android.Mesh.app.getSharedPreferences("settings", android.content.Context.MODE_PRIVATE).edit()
+                    .putString("docker_hidden", """{"containers": {"Status": ["Exited"]}}""").commit()
+                show { dev.baude.android.DockerScreen(host.getString("id"), {}) }
+                repeat(10) { if (find("CPU") == null && find("Status") == null) flush(true) }
+                tapDescribed(Wording.Browser.back)
+                tap("All")
+                repeat(10) { flush(true) }
+                sideways(400f) // (Status in sight)
+            }
             name == "kubernetes-home" -> {
                 show { KubeScreen(host.getString("id"), {}) }
                 repeat(10) { if (find("shop") == null) flush(true) } // (contexts, connect, then the summary: a host.py each)
@@ -550,6 +569,30 @@ abstract class Parity(private val theme: String, private val scene: String) {
                 tapInRow(Wording.Kube.logs, "worker-5c4b-klmno")
                 tapInRow(Wording.Kube.shell, "api-6f7c-mnopq")
                 dev.baude.android.Terms.live.last().feed("root@api-6f7c-mnopq:/app# ls\r\nroot@api-6f7c-mnopq:/app# ".toByteArray())
+                flush(true)
+            }
+            name == "kubernetes-contexts" -> {
+                val st = dev.baude.android.KubeState(host.getString("id"))
+                show { KubeScreen(host.getString("id"), {}, page = "pods", state = st) }
+                tap("CPU")
+                tap("CPU")
+                // (a tool's test clusters added to the kubeconfig, as the host's kube_contexts says them)
+                val extra = listOf("staging") + (1..18).map { "slice-$it" } + listOf(412, 418, 431, 455).map { "pr-$it-preview" } +
+                    listOf("kind-ci")
+                st.contextsIn(st.contexts + extra.map { Msg.KubeContext(name = it, server = "https://k3d-dev.local:6443") })
+                st.level = "contexts"
+                flush(true)
+            }
+            name == "kubernetes-removed" -> {
+                val st = dev.baude.android.KubeState(host.getString("id"))
+                show { KubeScreen(host.getString("id"), {}, page = "pods", state = st) }
+                tap("CPU")
+                tap("CPU")
+                tapInRow(Wording.Kube.logs, "worker-5c4b-klmno")
+                tapInRow(Wording.Kube.shell, "api-6f7c-mnopq")
+                dev.baude.android.Terms.live.last().feed("root@api-6f7c-mnopq:/app# ".toByteArray())
+                // (k3d-dev deleted from the kubeconfig by a tool, as the host's kube_contexts says it)
+                st.contextsIn(st.contexts.filter { it.name != "k3d-dev" })
                 flush(true)
             }
             name == "terminal" -> {
@@ -690,6 +733,15 @@ abstract class Parity(private val theme: String, private val scene: String) {
     }
 
     /** The chat's list (the one that scrolls up and down, with items) scrolled to its end. */
+    /** The first sideways-scrolling thing (a table's columns) scrolled by px. */
+    private fun sideways(px: Float) {
+        val node = roots().flatMap { all(it.semanticsOwner.rootSemanticsNode) }.firstOrNull { n ->
+            n.config.contains(SemanticsProperties.HorizontalScrollAxisRange) && n.config.contains(SemanticsActions.ScrollBy)
+        } ?: return
+        node.config[SemanticsActions.ScrollBy].action?.invoke(px, 0f)
+        settle()
+    }
+
     private fun toEnd() {
         val list = roots().flatMap { all(it.semanticsOwner.rootSemanticsNode) }.firstOrNull { n ->
             val c = n.config

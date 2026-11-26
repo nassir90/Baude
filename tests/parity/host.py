@@ -63,6 +63,15 @@ def databases(msg):
     return hostdb.answer(None, msg)
 
 
+def docker(msg):
+    """docker: tests/fake_docker.py's colima, read as hostdocker.py reads a real one."""
+    from baudelib import hostdocker
+    os.environ["BAUDE_DOCKER"] = os.path.join(TESTS, "fake_docker.py")
+    for k in ("FAKE_DOCKER_FOLLOW", "FAKE_DOCKER_STATE"):
+        os.environ.pop(k, None)
+    return hostdocker.answer(None, msg)
+
+
 def main():
     msg = json.load(sys.stdin)
     tmp = tempfile.mkdtemp(prefix="parity-host-", dir="/tmp")
@@ -73,6 +82,8 @@ def main():
             reply = hostfixes.answer(None, msg)
         elif msg.get("op") == "kube":
             reply = kube(msg)
+        elif msg.get("op") == "docker":
+            reply = docker(msg)
         elif msg.get("op") == "databases":
             reply = databases(msg)
         else:

@@ -304,6 +304,7 @@ class WindowRemote:
         self.view_session(path)
         self.show_title(info.get("title"))
         self.show_held()
+        self.show_listed_context(again=True)
         self.default_mode()
         if r.state == "alive" and (r.sessions.get(info["id"]) or {}).get("state") in ("working", "waiting") \
                 and not self.live_elsewhere():  # (at a turn: live, as it goes on, Stop and all; attached once, so
@@ -372,6 +373,7 @@ class WindowRemote:
         for card in self.mesh_cards:  # (the chats they started or messaged: as their hosts list them now)
             card.refresh_header()
         self.show_held()
+        self.show_listed_context()
         if self.remote is None and self.proc is not None and not self.busy \
                 and (self.desktop_chat or is_desktop(self.session_id)) and self.host_took_up():
             self.restart_proc()  # (a Desktop chat this machine's host took up: its own claude let go, written in

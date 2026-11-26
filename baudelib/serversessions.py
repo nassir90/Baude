@@ -15,9 +15,9 @@ from baudelib import (
     deps, desktopchats, worktree,
 )
 from baudelib.serverstate import (
-    AGENT_TOOLS, CATALOGUE_LIMIT, CATALOGUE_WAIT_S, CHECK_SOCKET_S, CLAUDE_OPTIONS, COMMAND_TOOLS, FILE_LIMIT,
-    GRACE_MOST, RENAME_S, SETTINGS, Session, TAKEN, TRANSCRIPT_CHUNK, _said, _what, _write_json, bot_system, clean_env,
-    turn_acting,
+    AGENT_TOOLS, CATALOGUE_LIMIT, CATALOGUE_WAIT_S, CHECK_SOCKET_S, CLAUDE_OPTIONS, COMMAND_TOOLS, CONTEXT_EVERY_S,
+    FILE_LIMIT, GRACE_MOST, RENAME_S, SETTINGS, Session, TAKEN, TRANSCRIPT_CHUNK, _said, _what, _write_json, bot_system,
+    clean_env, context_listing, turn_acting,
 )
 
 CARRY_TRIES = 5  # (copies of a chat's record made, each written to as it was copied, before its account waits again)
@@ -443,6 +443,8 @@ class ServerSessions:
                 return answer({"applied": {"model": s.meta.get("model"), "effort": s.meta.get("effort")}})
             if sub == "interrupt":  # (nothing here to stop: no result's coming, so a head waiting on one ends its turn)
                 return answer({"running": False})
+            if sub == "get_context_usage":  # (what it last said)
+                return answer(s.meta.get("context_usage") or {})
             return answer({})
         try:
             proc = self.ensure_proc(s)
@@ -486,6 +488,7 @@ class ServerSessions:
                                                if k in ("commands", "models", "output_style", "available_output_styles")}
                             _write_json(os.path.join(self.state_dir, "server.json"), self.me)
                         r = {**r, "response": self.init(s.meta["init"], fresh=True)}
+                        self.ask_context(s)
                     for conn, theirs in s.waiting_init:
                         conn.send({"op": "claude", "session": s.id,
                                    "msg": {**msg, "response": {**r, "request_id": theirs}}})
@@ -510,8 +513,10 @@ class ServerSessions:
                         s.meta[undo[0]] = undo[1]  # (refused, a mode it can't switch to say: kept as it still is)
                         self.save(s)
                         self.changed()
-                    if callable(theirs):  # (the server's own request: rename)
-                        theirs(r.get("subtype") == "success")
+                    if undo and undo[0] == "model" and r.get("subtype") == "success":
+                        self.ask_context(s)  # (another model: another window)
+                    if callable(theirs):  # (the server's own request: rename, ask_context)
+                        theirs(r.get("subtype") == "success", r.get("response") or {})
                     else:
                         conn.send({"op": "claude", "session": s.id,
                                    "msg": {**msg, "response": {**r, "request_id": theirs}}})
@@ -539,8 +544,10 @@ class ServerSessions:
                     conn.send({"op": "claude", "session": s.id, "msg": msg})
                 self.changed()
                 return
-            if kind == "system" and msg.get("subtype") == "codex_context":
-                s.meta["context_usage"] = msg["usage"]
+            if kind == "system" and msg.get("subtype") in ("codex_context", "baude_context"):
+                self.keep_context(s, msg.get("usage"))  # (pi-claude's, MLX's count of what it's sent)
+            if kind == "system" and msg.get("subtype") == "compact_boundary":
+                self.ask_context(s)
             if kind == "system" and msg.get("subtype") == "status" and msg.get("permissionMode") \
                     and msg["permissionMode"] != s.meta.get("mode") \
                     and not any(u and u[0] == "mode" for _c, _r, u in s.routes.values()):
@@ -571,6 +578,7 @@ class ServerSessions:
                 self.changed()
             if kind in ("assistant", "user") and not msg.get("parent_tool_use_id"):
                 self.keep(s, kind, msg.get("message") or {})
+                self.ask_context(s, soon=True)  # (a reply, a tool's result: the window filling through a turn)
             if kind == "stream_event" and not msg.get("parent_tool_use_id"):
                 s.streamed = True  # (its text said as it's written: the same text come whole after is late)
             if kind in ("stream_event", "assistant") and not msg.get("parent_tool_use_id") and \
@@ -601,6 +609,7 @@ class ServerSessions:
                 s.asks.clear()
                 if s.meta.get("context_usage") is not None:
                     self.save(s)
+                self.ask_context(s)
                 self.changed()
                 self.telemetry.turn(s.id, msg, s.meta.get("model"), s.meta.get("effort"), s.turn_began)
                 ended = {"op": "turn_ended", "session": s.id, "result": msg.get("result"),
@@ -856,6 +865,44 @@ class ServerSessions:
                     conn.send({"op": "exited", "session": s.id, "code": code, **stopped})
             self.changed()
 
+    def ask_context(self, s, soon=False):
+        """(lock held) How much of its window the session's agent has used, asked of it (get_context_usage) and kept
+        for every head (keep_context): as it starts, as a turn ends, after a compaction or another model; soon: through
+        a turn, a moment from now, at most once a second (asked only as a turn ended, a small model's 32k filled through
+        a turn of tool calls with the meter standing still). Codex's says it itself."""
+        proc = s.proc
+        if proc is None or getattr(proc, "stopping", False) or models.model_program(s.meta.get("model")) == "codex":
+            return
+        if soon:
+            wait = s.context_asked + CONTEXT_EVERY_S - time.time()
+            if s.context_soon or wait > 0:
+                if not s.context_soon:
+                    s.context_soon = True
+                    threading.Timer(max(wait, 0), self._context_due, (s, proc)).start()
+                return
+        s.context_asked = time.time()
+        on = f"srv_{next(self.rids)}"
+        s.routes[on] = (None, lambda ok, said=None: ok and self.keep_context(s, said), None)
+        proc.send({"type": "control_request", "request_id": on, "request": {"subtype": "get_context_usage"}})
+
+    def _context_due(self, s, proc):
+        with self.lock:
+            s.context_soon = False
+            if s.proc is proc and s.busy:
+                self.ask_context(s)
+
+    def keep_context(self, s, usage):
+        """(lock held) What its agent said of its context, kept as every head's told it (context_listing): one that
+        says neither a window nor to be shown without one changes nothing. Saved between turns (with what the turn
+        kept, as it ends)."""
+        kept = context_listing(usage)
+        if kept is None or kept == context_listing(s.meta.get("context_usage")):
+            return
+        s.meta["context_usage"] = kept
+        if not s.busy:
+            self.save(s)
+        self.changed()
+
     def drop_routes(self, s):
         """(lock held) What was asked of a session's claude that's gone: no answer's coming (the server's own requests
         are done without one)."""
@@ -873,7 +920,7 @@ class ServerSessions:
         if not title:
             raise ValueError(wording.say("host_errors.empty_title"))
 
-        def write(by_claude):
+        def write(by_claude, _said=None):
             path = None if s.kept() else s.transcript()
             if path and not by_claude:
                 with open(path, "a", encoding="utf-8") as f:

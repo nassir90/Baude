@@ -116,6 +116,17 @@
       "type": "boolean",
       "description": "Whether its turn is at its tools: from a tool call's start till text starts after it, the turn ends or its agent goes; only while it's working, not asking."
     },
+    "context": {
+      "anyOf": [
+        {
+          "$ref": "ContextUsage.json"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "How much of its context window its agent last said it's used, kept while its agent's stopped; null till it's said."
+    },
     "on_phone": {
       "type": "boolean",
       "description": "A Bot's browser is on a phone now."

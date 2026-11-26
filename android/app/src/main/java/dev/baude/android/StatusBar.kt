@@ -127,7 +127,7 @@ fun rememberWindow(hostId: String, model: String?, tokens: Int) {
 private fun usedOf(u: JSONObject) = if (u.has("totalTokens") && !u.isNull("totalTokens")) u.optInt("totalTokens") else null
 
 fun contextShown(chat: Chat, model: String? = Mesh.session(chat.hostId, chat.sid)?.model?.ifBlank { null },
-                 usage: JSONObject? = chat.chrome.usage.value): ContextShown {
+                 usage: JSONObject? = Mesh.session(chat.hostId, chat.sid)?.context?.json()): ContextShown {
     val at = chat.hostId
     val u = usage
     val total = u?.optInt("maxTokens", 0) ?: 0
@@ -211,6 +211,10 @@ fun StatusBar(chat: Chat, openPage: (String) -> Unit) {
     val at = chat.hostId
     val session = Mesh.session(at, chat.sid)
     val working = isWorking(chat)
+    val window = session?.context?.maxTokens?.toInt()
+    LaunchedEffect(window, session?.model) { // (its window kept for the model's next session: rememberWindow)
+        if (window != null) rememberWindow(at, session?.model?.ifBlank { null }, window)
+    }
     LaunchedEffect(working) { // (a turn over: an interrupt's wait and the API's retrying let go of)
         if (!working) {
             ch.interrupting = 0

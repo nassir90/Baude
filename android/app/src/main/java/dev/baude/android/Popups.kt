@@ -200,7 +200,7 @@ fun MenuChecks(allLabel: String, items: List<Pair<String, String>>, shown: List<
  * outline when off. heading: its label as MenuHeading's. */
 @Composable
 fun MenuCheck(label: String, on: Boolean, heading: Boolean = false, onLongClick: (() -> Unit)? = null,
-                      onClick: () -> Unit) {
+              onClick: () -> Unit) {
     val c = LocalBaude.current
     MenuLine(true, onLongClick, onClick) {
         val box = Modifier.size(16.dp.icon).clip(RoundedCornerShape(3.dp))

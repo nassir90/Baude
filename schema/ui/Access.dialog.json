@@ -163,6 +163,7 @@
     "no members: \"No other members\" under Everybody in the list"
   ],
   "scenes": [
-    "40g-access"
+    "40g-access",
+    "40g-access-open"
   ]
 }

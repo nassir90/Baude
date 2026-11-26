@@ -37,12 +37,14 @@ fun AccessRule(cap: String, rule: JSONObject?, state: JSONObject, chat: Boolean 
     val editable = state.optBoolean("editable")
     val hostRule = state.optJSONObject("rules")?.optJSONObject(cap)
     val same = chat && rule == null
-    val shown = shownOf(if (same) hostRule else rule)
     val members = state.optJSONArray("members")?.let { m -> (0 until m.length()).map { m.getJSONObject(it) } }.orEmpty()
     val names = members.associate { it.optString("id") to it.optString("name") }
+    val shown = shownOf(if (same) hostRule else rule, names.keys)
     val items = members.map { it.optString("id") to it.optString("name") } +
         shown.orEmpty().filter { it !in names }.map { it to it.take(8) }
     var open by remember { mutableStateOf(false) }
+    var sending by remember(state) { mutableStateOf(false) }
+    val send = { next: JSONObject? -> if (!sending) { sending = true; set(next) } }
     Column(Modifier.alpha(if (editable) 1f else 0.5f)) {
         if (chat) Text(PhoneAccess.named(cap), style = Type.body, color = c.fg,
             modifier = Modifier.padding(start = 12.dp, end = 12.dp, top = 10.dp))
@@ -55,10 +57,10 @@ fun AccessRule(cap: String, rule: JSONObject?, state: JSONObject, chat: Boolean 
                 }
                 Popover(open, { open = false }, ticks = Ticks.START) {
                     if (chat) {
-                        MenuCheck(Wording.Access.sameAsHost, same) { set(if (same) hostRule ?: ruleOf(null) else null) }
+                        MenuCheck(Wording.Access.sameAsHost, same) { send(if (same) hostRule ?: ruleOf(null) else null) }
                         MenuDivider()
                     }
-                    MenuChecks(Wording.Access.everybody, items, shown, { set(ruleOf(it)) })
+                    MenuChecks(Wording.Access.everybody, items, shown, { send(ruleOf(it)) })
                     if (members.isEmpty()) Text(Wording.Access.noMembers, style = Type.body, color = c.dim,
                         modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp))
                 }
@@ -67,10 +69,12 @@ fun AccessRule(cap: String, rule: JSONObject?, state: JSONObject, chat: Boolean 
     }
 }
 
-/** The members a rule lets in, as MenuChecks has them: null for everybody, none for nobody. */
-private fun shownOf(rule: JSONObject?): List<String>? = when (rule?.optString("who") ?: "everybody") {
+/** The members a rule lets in, as MenuChecks has them: null for everybody (or a rule naming every one of members), none
+ * for nobody. */
+private fun shownOf(rule: JSONObject?, members: Set<String>): List<String>? = when (rule?.optString("who") ?: "everybody") {
     "everybody" -> null
     "chosen" -> rule?.optJSONArray("members")?.let { m -> (0 until m.length()).map { m.optString(it) } }.orEmpty()
+        .let { if (it.isNotEmpty() && members.isNotEmpty() && it.containsAll(members)) null else it }
     else -> emptyList()
 }
 
@@ -85,7 +89,7 @@ private fun ruleOf(shown: List<String>?): JSONObject = when {
 private fun summary(shown: List<String>?, names: Map<String, String>): String = when {
     shown == null -> Wording.Access.everybody
     shown.isEmpty() -> Wording.Access.nobody
-    shown.size <= 2 -> shown.joinToString(", ") { names[it] ?: it.take(8) }
+    shown.size <= 2 -> (names.keys.filter { it in shown } + shown.filter { it !in names }).joinToString(", ") { names[it] ?: it.take(8) }
     else -> Wording.Access.nMembers(shown.size)
 }
 
@@ -93,7 +97,7 @@ private fun summary(shown: List<String>?, names: Map<String, String>): String = 
 private fun took(reply: JSONObject, last: JSONObject?): JSONObject? {
     if (reply.optString("op") != Op.ERROR) return reply
     toast(Wording.Access.failed(why = Msg.Error.from(reply).said.orEmpty()))
-    return last ?: reply
+    return last?.let { JSONObject(it.toString()) } ?: reply
 }
 
 /** Settings → Access (accessview.Page): the host picked beside New session, then each capability's rule. */

@@ -15,10 +15,12 @@ from baudelib import access, wording
 WHO = access.WHO
 
 
-def shown_of(rule):
-    """The members a rule lets in, as a CheckList has them: None for everybody, [] for nobody."""
+def shown_of(rule, members=()):
+    """The members a rule lets in, as a CheckList has them: None for everybody (or a rule naming every one of
+    members), [] for nobody."""
     who = (rule or {}).get("who") or "everybody"
-    return None if who == "everybody" else list((rule or {}).get("members") or ()) if who == "chosen" else []
+    chosen = list((rule or {}).get("members") or ()) if who == "chosen" else []
+    return None if who == "everybody" or chosen and members and set(members) <= set(chosen) else chosen
 
 
 def rule_of(shown):
@@ -33,7 +35,8 @@ def summary(shown, names):
         return wording.say("access.everybody")
     if not shown:
         return wording.say("access.nobody")
-    return ", ".join(names.get(m, m[:8]) for m in shown) if len(shown) <= 2 else \
+    return ", ".join(names.get(m, m[:8]) for m in [m for m in names if m in shown] +
+                     [m for m in shown if m not in names]) if len(shown) <= 2 else \
         wording.say("access.n_members", n=len(shown))
 
 
@@ -70,8 +73,8 @@ class AccessRow(Adw.ActionRow):
         self.taking = True
         self.rule, self.host_rule, self.members = rule, host_rule, members
         same = self.chat and rule is None
-        shown = shown_of(host_rule if same else rule)
         names = {m["id"]: m["name"] for m in members or ()}
+        shown = shown_of(host_rule if same else rule, names)
         self.pick.fill([(m["id"], m["name"]) for m in members or ()] +
                        [(k, k[:8]) for k in shown or () if k not in names], shown)
         self.none.set_visible(not members)
@@ -101,7 +104,7 @@ class AccessRow(Adw.ActionRow):
             from widgets import toast
             from baudelib import wire
             toast(self, wording.say("access.failed", why=wire.said(reply)))
-            self.show(self.rule, self.members, True, self.host_rule)
+            self.show(self.rule, self.members, self.button.get_sensitive(), self.host_rule)
             return False
         state = reply["state"]
         self.show(reply.get("chat") if self.chat else state["rules"][self.cap], state["members"], state["editable"],

@@ -38,7 +38,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.ImeAction
@@ -267,8 +266,8 @@ fun TasksPage(hostId: String, sid: String, here: Boolean, state: TasksState? = n
         readRun()
     }
     fun save(task: JSONObject) = ask(Msg.Tasks(session = sid, set = task).json(), "save") { if (st.page == "task") readTask() }
-    fun runIt(t: Msg.Task, inputs: JSONObject = JSONObject(), dry: Boolean = false) =
-        ask(Msg.RunTask(session = sid, id = t.id.orEmpty(), inputs = inputs, dry = dry).json(), "run") {
+    fun runIt(t: Msg.Task, inputs: JSONObject = JSONObject()) =
+        ask(Msg.RunTask(session = sid, id = t.id.orEmpty(), inputs = inputs).json(), "run") {
             load()
             if (st.page == "task") readTask()
         }
@@ -349,7 +348,7 @@ fun TasksPage(hostId: String, sid: String, here: Boolean, state: TasksState? = n
         TaskDialog(t) { made -> st.editing = null; if (made != null) save(made) }
     }
     st.running?.let { t ->
-        RunForm(t) { inputs, dry -> st.running = null; if (inputs != null) runIt(t, inputs, dry) }
+        RunForm(t) { inputs -> st.running = null; if (inputs != null) runIt(t, inputs) }
     }
     st.adding?.let { t ->
         TriggerDialog(t, st.clock) { made ->
@@ -417,8 +416,7 @@ private fun TaskView(t: Msg.Task, runs: List<Msg.TaskRun>, offset: Int, back: ()
             }
             GroupHeading(Wording.Tasks.runs)
             BoxedList(runs, Wording.Tasks.noRuns) { r ->
-                val title = listOfNotNull(hostWhen(r.started?.toDouble(), r.offset?.toInt() ?: offset, short = true),
-                    if (r.dry == true) Wording.Tasks.dryTag else null).joinToString(" · ")
+                val title = hostWhen(r.started?.toDouble(), r.offset?.toInt() ?: offset, short = true)
                 ActionRow(title, null, onClick = { openRun(r) }, compact = true, prefix = { RunState(r.status) }, suffix = {
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Icon(kindIcon(r.kind), kindWord(r.kind), tint = c.dim, modifier = Modifier.size(16.dp.icon))
@@ -443,7 +441,7 @@ private fun RunView(r: Msg.TaskRun, log: List<Msg.TaskLogLine>, bot: String, tas
             if (going(r.status)) IconButton(Adwaita.MediaPlaybackStop, Wording.Common.stop, onClick = stop)
         }
         Text(listOfNotNull(r.error?.ifBlank { null } ?: Wording.Tasks.status(status = r.status.orEmpty()), kindWord(r.kind),
-            r.seconds?.let { tookText(it.toDouble()) }, if (r.dry == true) Wording.Tasks.dummyAnswers else null, r.version)
+            r.seconds?.let { tookText(it.toDouble()) }, r.version)
             .joinToString(" · "),
             style = Type.caption, color = c.dim, modifier = Modifier.padding(start = 10.dp, end = 10.dp, bottom = 6.dp))
         // (consecutive output lines together as one block, consecutive errors as another)
@@ -534,9 +532,9 @@ private fun numberOf(text: String): Number? {
 }
 
 /** Run <task>: a row for each of its inputs as the settings have them (a switch, an entry, a choice), titled with its
- * label and filled with its default; Cancel and Run, and under the rows the lesser Run with dummy answers. */
+ * label and filled with its default; Cancel and Run. */
 @Composable
-private fun RunForm(t: Msg.Task, done: (JSONObject?, Boolean) -> Unit) {
+private fun RunForm(t: Msg.Task, done: (JSONObject?) -> Unit) {
     val c = LocalBaude.current
     val fields = t.form.orEmpty()
     val values = remember { mutableStateListOf<String>().apply { addAll(fields.map { f ->
@@ -555,29 +553,23 @@ private fun RunForm(t: Msg.Task, done: (JSONObject?, Boolean) -> Unit) {
         }
     }
     AlertDialog(
-        onDismissRequest = { done(null, false) },
+        onDismissRequest = { done(null) },
         title = { Text(Wording.Tasks.runHeading(name = t.name.orEmpty())) },
         text = {
-            Column {
-                Column(Modifier.weight(1f, fill = false).heightIn(max = 520.dp).verticalScroll(rememberScrollState())) {
-                    BoxedList(fields.indices.toList(), "", inset = 0.dp) { i ->
-                        val f = fields[i]
-                        val label = f.label?.ifBlank { null } ?: f.name.orEmpty()
-                        when (f.type) {
-                            "bool" -> SwitchRow(label, null, values[i] == "true", titleLines = Int.MAX_VALUE) { values[i] = it.toString() }
-                            "choice" -> Choice(label, f.choices.orEmpty(), values[i], { it }, titleLines = Int.MAX_VALUE) { values[i] = it }
-                            else -> EntryRow(label, values[i], f.type == "number", !fit(i), { if (filledIn) done(filled(), false) }) { values[i] = it }
-                        }
+            Column(Modifier.heightIn(max = 520.dp).verticalScroll(rememberScrollState())) {
+                BoxedList(fields.indices.toList(), "", inset = 0.dp) { i ->
+                    val f = fields[i]
+                    val label = f.label?.ifBlank { null } ?: f.name.orEmpty()
+                    when (f.type) {
+                        "bool" -> SwitchRow(label, null, values[i] == "true", titleLines = Int.MAX_VALUE) { values[i] = it.toString() }
+                        "choice" -> Choice(label, f.choices.orEmpty(), values[i], { it }, titleLines = Int.MAX_VALUE) { values[i] = it }
+                        else -> EntryRow(label, values[i], f.type == "number", !fit(i), { if (filledIn) done(filled()) }) { values[i] = it }
                     }
-                }
-                Box(Modifier.align(Alignment.CenterHorizontally).padding(top = 12.dp).clip(RoundedCornerShape(8.dp))
-                    .clickable(enabled = filledIn, role = Role.Button) { done(filled(), true) }.padding(horizontal = 16.dp, vertical = 9.dp)) {
-                    Text(Wording.Tasks.dryRun, style = Type.bold, color = if (filledIn) c.fg else c.fg.copy(alpha = c.fg.alpha * 0.4f))
                 }
             }
         },
-        confirmButton = { Button(Wording.Tasks.run, suggested = true, enabled = filledIn) { done(filled(), false) } },
-        dismissButton = { Button(Wording.Common.cancel) { done(null, false) } },
+        confirmButton = { Button(Wording.Tasks.run, suggested = true, enabled = filledIn) { done(filled()) } },
+        dismissButton = { Button(Wording.Common.cancel) { done(null) } },
         containerColor = c.dialog,
     )
 }

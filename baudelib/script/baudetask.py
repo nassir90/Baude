@@ -15,19 +15,18 @@ it can be copied anywhere.
     @task.main             # run with the inputs; an exception's traceback printed, the run failed (and handed to
     def deploy(inputs): ...  # the Bot by its host once it's over, if the task's failures are)
 
-Run outside a task (no BAUDE_TASK_RUN), or run with dummy answers, its asks are answered by a dummy agent: each field
-its default, its first choice, 0, false or "" (the script itself runs as it is, side effects and all). Inputs then
-come from BAUDE_TASK_INPUTS, or a JSON object as the first argument."""
+Run outside a task (no BAUDE_TASK_RUN), its asks are answered with stand-ins: each field its default, its first
+choice, 0, false or "" (the script itself runs as it is, side effects and all). Inputs then come from
+BAUDE_TASK_INPUTS, or a JSON object as the first argument."""
 import json
 import os
 import socket
 import sys
 import traceback
 
-__all__ = ["inputs", "payload", "run", "dry", "say", "ask", "fallback", "main", "Refused"]
+__all__ = ["inputs", "payload", "run", "say", "ask", "fallback", "main", "Refused"]
 
 run = os.environ.get("BAUDE_TASK_RUN")
-dry = os.environ.get("BAUDE_TASK_DRY") == "1" or not run
 
 
 def _json_env(name, argv_at=None):
@@ -86,7 +85,7 @@ class _Wire:
 _wire = _Wire()
 
 
-def _dummy(form):
+def _stand_in(form):
     return {f["name"]: f["default"] if "default" in f else (f.get("choices") or [""])[0]
             if f.get("type") == "choice" else 0 if f.get("type") == "number" else False
             if f.get("type") == "bool" else "" for f in form}
@@ -107,7 +106,7 @@ def ask(text, form=None, error=False):
     against the form. Refused: it couldn't answer, or not as asked."""
     if not run:
         print(f"ask: {text}", flush=True)
-        return _dummy(form) if form else "(a dummy agent's answer)"
+        return _stand_in(form) if form else "(a stand-in answer)"
     got = _wire.request({"op": "task_ask", "run": run, "token": os.environ.get("BAUDE_TASK_TOKEN", ""), "text": str(text),
                          **({"form": form} if form else {}), **({"error": True} if error else {})})
     return got.get("values") if form else got.get("text", "")

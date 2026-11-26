@@ -38,9 +38,9 @@ def deploy(inputs):
         Msg.TaskTrigger(id = "s1", kind = "schedule", at = "09:00", days = listOf(0, 1, 2, 3, 4)))
 
     private fun run(id: String, task: String, name: String, status: String, kind: String, started: Double, seconds: Double?,
-                    version: String, dry: Boolean = false) =
+                    version: String) =
         Msg.TaskRun(id = id, task = task, name = name, status = status, kind = kind, started = started,
-            ended = seconds?.let { started + it }, seconds = seconds, version = version, dry = if (dry) true else null)
+            ended = seconds?.let { started + it }, seconds = seconds, version = version)
 
     private const val V = "3f9c2a7e41b0"
     private const val V_OLD = "8a21d04c77e3"
@@ -48,7 +48,7 @@ def deploy(inputs):
     val runs get() = listOf(
         run("r4", "t1", "Deploy site", "done", "git_push", now - 2 * 3600, 48.0, V),
         run("r3", "t1", "Deploy site", "failed", "schedule", at(9, 0, 1), 72.0, V),
-        run("r2", "t1", "Deploy site", "done", "manual", at(16, 20, 2), 21.0, V_OLD, dry = true),
+        run("r2", "t1", "Deploy site", "done", "manual", at(16, 20, 2), 21.0, V_OLD),
         run("r1", "t1", "Deploy site", "done", "schedule", at(9, 0, 3), 186.0, V_OLD))
 
     val deploy get() = Msg.Task(id = "t1", name = "Deploy site", runtime = "python", script = DEPLOY_SCRIPT, version = V, form = form,

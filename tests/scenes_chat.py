@@ -119,6 +119,21 @@ def _(app):
     return win
 
 
+@scene("14b-mcp-names", "MCP tools by name: ToolSearch selecting the mesh's tools (input open), a mesh tool, a Slack tool asking")
+def _(app):
+    win = app.window(opts())
+    win.h_system({"type": "system", "subtype": "init", "session_id": "s1", "tools": [],
+                  "mcp_servers": [{"name": "mesh", "status": "connected"}, {"name": "claude.ai Slack", "status": "connected"}]})
+    tool_with_output(win, "ToolSearch", {"query": "select:mcp__mesh__tasks,mcp__mesh__task_run", "max_results": 2}, "q1",
+                     "Loaded 2 tools")
+    win.tool_cards["q1"].output_toggle.set_expanded(False)
+    tool_with_output(win, "mcp__mesh__tasks", {"bot": "a1b2c3"}, "q2", "[]", open_input=False)
+    win.tool_cards["q2"].output_toggle.set_expanded(False)
+    ask_permission(win, "mcp__claude_ai_Slack__slack_send_message",
+                   {"channel_id": "C024BE91L", "message": "Two tasks ran today: nightly tests and the weekly report."}, "q3")
+    return win
+
+
 @scene("20-tool-views", "Readable tool inputs: Read, Grep, Glob, TodoWrite, Task (expanded)")
 def _(app):
     win = app.window(opts())

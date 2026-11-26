@@ -26,7 +26,7 @@
     },
     {
       "name": "own box (no card)",
-      "shows": "A box with a 1px amber border, 8px corners, 8px/12px padding, items 6px apart: first \"Allow <tool>?\" in bold, then dimmed (60%) after two spaces the call's one-line summary; MCP tools are named \"<Server>: <Tool title>\" (\"Allow GitHub: Create issue?\"). Under it the same input view a card would show, then the buttons.",
+      "shows": "A box with a 1px amber border, 8px corners, 8px/12px padding, items 6px apart: first \"Allow <tool>?\" in bold, then dimmed (60%) after two spaces the call's one-line summary; MCP tools are named \"<Server> / <Tool>\" (\"Allow GitHub / Create issue?\"), as their cards name them (ToolCall), in Always allow too. Under it the same input view a card would show, then the buttons.",
       "copy": [
         "asks.allow_tool"
       ]

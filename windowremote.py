@@ -40,7 +40,7 @@ from widgets import load_settings, pretty_path, save_settings, toast  # noqa: E4
 from markdownview import MarkdownView, sel_label  # noqa: E402,F401
 from startup import trace  # noqa: E402
 from toolcards import (  # noqa: E402
-    QuestionForm, StatusSlot, ToolCard, api_error_label, ended_by_stop, summarize_tool, tool_display, tool_input_view,
+    QuestionForm, StatusSlot, ToolCard, api_error_label, ended_by_stop, summarize_tool, tool_label, tool_input_view,
 )
 from chatinput import LoginCard, _AUTH_ESCAPES, needs_login  # noqa: E402
 from sessionlist import (  # noqa: E402
@@ -1188,7 +1188,7 @@ class WindowRemote:
         self.permission_card(rid, name, inp, req.get("tool_use_id"))
         self.tell_desktop(self.session_id, wording.say("asks.has_question_for_you", name="Claude")
                           if name == "AskUserQuestion"
-                          else wording.say("asks.waiting_for_tool", tool=name or wording.say("asks.a_tool")))
+                          else wording.say("asks.waiting_for_tool", tool=tool_label(name) if name else wording.say("asks.a_tool")))
 
     def sign_in(self, args=(), ask=None, login=None):
         """/login (or a turn that failed for want of it: ask, its error; a host's chat's sign-in as its host has it:
@@ -1369,8 +1369,7 @@ class WindowRemote:
             box.append(sel_label(f"<b>{html.escape(wording.say('asks.has_question', name='Claude'))}</b>"))
             box.append(row)
         elif card is None:
-            title, source = tool_display(name)
-            what = f"{source}: {title}" if source else title
+            what = tool_label(name)
             summary = summarize_tool(name, inp)
             box.append(sel_label(f"<b>{html.escape(wording.say('asks.allow_tool', tool=what))}</b>" +
                                  (f"  <span alpha='60%'>{html.escape(summary)}</span>" if summary else "")))
@@ -1392,7 +1391,7 @@ class WindowRemote:
                     def kept(reply, allowed=allowed):
                         if reply.get("op") == "error":
                             allowed.discard(name)
-                            self.note(wording.say("asks.not_always_allowed", tool=tool_display(name)[0],
+                            self.note(wording.say("asks.not_always_allowed", tool=tool_label(name),
                                                   why=baudelib.wire.said(reply)))
                     self.remote.request({"op": "always_allow", "session": self.session_id, "add": [name]}, kept)
             proc.asks.pop(rid, None)
@@ -1420,10 +1419,10 @@ class WindowRemote:
                 self.tool_cards[tool_use_id].set_decision(decision)  # keeps tool groups together
             elif behavior != "allow":  # (allowed, it runs: nothing to say)
                 self.note(wording.say("tool_calls.denied_tool" if decision == "denied" else "tool_calls.not_answered_tool",
-                                      tool=name))
+                                      tool=tool_label(name)))
 
         choices = [(wording.say("common.allow"), "allow", False, "suggested-action"),
-                   (wording.say("asks.always_allow", tool=tool_display(name)[0]), "allow", True, None),
+                   (wording.say("asks.always_allow", tool=tool_label(name)), "allow", True, None),
                    (wording.say("common.deny"), "deny", False, "destructive-action")]
         if model_program(self.model) != "claude" and not self.host_lists("always_allow"):  # (Apple's model, or one on
             del choices[1]  # this Mac: each call asked, no always; a host's that keeps it, as a phone's: offered)

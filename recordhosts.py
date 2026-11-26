@@ -67,13 +67,13 @@ class RecordHosts:
 
     def terminal_host(self):
         """(where, name): the host picked in the dropdown, for ☰ → Terminal (this machine's, if none)."""
-        key = self.store.picked or HERE_HOST
-        r = self.host_remote(key)
+        r = self.view_remote()
         return ({"via": "local"}, THIS_MACHINE) if r is None else (r.where, remote_name(r))
 
     def view_remote(self):
-        """The host picked's Remote (None: this machine), for the Kubernetes and database views (kubehost.picked)."""
-        return self.host_remote(self.store.picked or HERE_HOST)
+        """The host picked's Remote (None: this machine), for the Kubernetes and database views (kubehost.picked); while
+        ☰ opens one on another host from its caret, that host's (family_host: menufamily.open_family)."""
+        return self.host_remote(getattr(self, "family_host", None) or self.store.picked or HERE_HOST)
 
     def host_remote(self, key):
         """A host's Remote, by its key, there or not (None for this machine, or one not known)."""

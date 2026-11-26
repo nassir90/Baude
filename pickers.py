@@ -151,6 +151,19 @@ class ChoiceDropDown(Gtk.DropDown):
 
     def _changed(self, *_):
         if not self.quiet and self.value() is not None:
+            self.repicked = True  # (this row's activation told already: not again by _activated)
+            GLib.idle_add(lambda: setattr(self, "repicked", False))
+            self.on_pick(self.value())
+
+    def pick_again(self):
+        """on_pick fired too as the row already picked is picked again in its list (☰'s carets: it opened there)."""
+        listed = next((w for w in walk(self) if isinstance(w, Gtk.ListView)), None)
+        if listed is not None:
+            self.repicked = False
+            listed.connect("activate", self._activated)
+
+    def _activated(self, _list, at):
+        if not getattr(self, "repicked", False) and at == self.get_selected() and self.value() is not None:
             self.on_pick(self.value())
 
     def _quietly(self, fn):

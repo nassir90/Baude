@@ -86,7 +86,8 @@ def _usage(server, profile, done):
         return done(error=wording.say("subscriptions.usage_failed"))
     if limits is None:
         return done(usage=None)
-    done(usage=[{"name": name, "percent": round(float(percent), 1)} for name, percent in limits])
+    done(usage=[{"name": name.replace("_", " ").capitalize(), "key": name, "percent": round(float(percent), 1),
+                 **({"resets": resets} if resets is not None else {})} for name, percent, resets in limits])
 
 
 def _signed_in_home(location):

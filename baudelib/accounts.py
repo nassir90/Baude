@@ -16,6 +16,8 @@ credentials Codex manages."""
 import os
 import shutil
 import sqlite3
+import threading
+import time
 import uuid
 from contextlib import contextmanager
 from pathlib import Path
@@ -341,8 +343,46 @@ def claude_launch(env, profile):
     return env, read
 
 
+USAGE_CACHE_S = 25  # (how long a read of a subscription's usage is kept: clients asking every 30 s share one)
+_usage_read = {}  # (profile → (when, limits))
+_usage_locks = {}  # (profile → the lock one read of it runs under)
+_usage_guard = threading.Lock()
+_usage_one_at_a_time = threading.Lock()
+
+
 def plan_usage(profile, exe=None):
-    """The subscription's limits, [(name, percent)], as Claude Code's get_usage says them without sending a chat turn;
+    """The subscription's limits as _plan_usage reads them, but one read per profile at a time and one per
+    USAGE_CACHE_S: whoever asks while it runs, or just after, gets its answer. The reads (each a claude process) run one
+    after another across profiles."""
+    with _usage_guard:
+        lock = _usage_locks.setdefault(profile, threading.Lock())
+    with lock:
+        kept = _usage_read.get(profile)
+        if kept and time.monotonic() - kept[0] < USAGE_CACHE_S:
+            return kept[1]
+        with _usage_one_at_a_time:
+            limits = _plan_usage(profile, exe)
+        _usage_read[profile] = (time.monotonic(), limits)
+        return limits
+
+
+def _reset_time(value):
+    """When a limit resets, as Claude Code's get_usage says it (an ISO time or seconds since 1970): seconds since 1970,
+    or None."""
+    from datetime import datetime, timezone
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return float(value) / 1000 if value > 1e11 else float(value)
+    if isinstance(value, str):
+        try:
+            when = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+        return (when if when.tzinfo else when.replace(tzinfo=timezone.utc)).timestamp()
+    return None
+
+
+def _plan_usage(profile, exe=None):
+    """The subscription's limits, [(key, percent, resets)], as Claude Code's get_usage says them without sending a chat turn;
     None where it can't say: a setup token's account (it has the inference scope only, and the usage endpoint needs the
     profile scope) or a sign-in that isn't a claude.ai subscription's. A folder account's are read with its folder."""
     import json
@@ -368,7 +408,7 @@ def plan_usage(profile, exe=None):
         reply = record.get("response") if isinstance(record, dict) else None
         if isinstance(reply, dict) and reply.get("request_id") == "usage":
             limits = (reply.get("response") or {}).get("rate_limits") or {}
-            found = [(name.replace("_", " ").capitalize(), window["utilization"]) for name, window in limits.items()
+            found = [(name, window["utilization"], _reset_time(window.get("resets_at"))) for name, window in limits.items()
                      if isinstance(window, dict) and isinstance(window.get("utilization"), (float, int))]
             return found or None
     return None

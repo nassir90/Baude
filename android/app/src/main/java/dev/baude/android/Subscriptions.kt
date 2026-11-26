@@ -1,15 +1,22 @@
 package dev.baude.android
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Icon
@@ -18,18 +25,26 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.repeatOnLifecycle
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextLinkStyles
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withLink
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.delay
 import org.json.JSONObject
 
 /** The accounts a host keeps, as its accounts answer last said them (hostaccounts):
@@ -39,8 +54,37 @@ class HostAccounts(val hostId: String) {
     val defaults = mutableStateOf<Map<String, String>>(emptyMap())
     val error = mutableStateOf<String?>(null)
     val loaded = mutableStateOf(false)
-    val usage = mutableStateOf<String?>(null)
+    val usage = mutableStateMapOf<String, Usage>() // (each Claude subscription's, by id: "" the CLI's own sign-in)
     val claudeCli = mutableStateOf(true) // (whether the host has claude: without it, a Claude account is a token)
+    private val reading = HashSet<String>()
+
+    /** A subscription's usage as last read: its limits (name, percent), or what to say instead. */
+    class Usage(val limits: List<Limit>?, val said: String?)
+
+    /** One limit: its key (five_hour…), name, percent used, and when it resets (seconds since 1970), if said. */
+    class Limit(val key: String, val name: String, val percent: Double, val resets: Double?)
+
+    /** The Claude subscriptions whose usage is read: the CLI's own sign-in (where the host has claude), then each
+     * account. */
+    fun claudeIds(): List<String> =
+        (if (claudeCli.value) listOf("") else emptyList()) + accounts.value.filter { it.provider == "claude" }.map { it.id.orEmpty() }
+
+    /** (on the main thread) Each subscription's (id's) usage asked of the host, one ask at a time each. */
+    fun readUsage(ids: List<String>) {
+        for (id in ids) {
+            if (!reading.add(id)) continue
+            Mesh.ask(hostId, Msg.Accounts(what = "usage", id = id).json()) { r ->
+                reading.remove(id)
+                val error = took(r)
+                val limits = Msg.AccountsReply.from(r).usage?.takeIf { it.isNotEmpty() }
+                usage[id] = when {
+                    error != null -> Usage(null, error)
+                    limits != null -> Usage(limits.map { Limit(it.key.orEmpty(), it.name.orEmpty(), it.percent?.toDouble() ?: 0.0, it.resets?.toDouble()) }, null)
+                    else -> Usage(null, Wording.Subscriptions.usageUnavailable)
+                }
+            }
+        }
+    }
 
     /** An accounts request (what, and its fields): the page filled again from what it answers; then(error or null). */
     fun ask(msg: Msg.Accounts, then: (String?) -> Unit = { e -> if (e != null) toast(e) }) {
@@ -60,14 +104,16 @@ class HostAccounts(val hostId: String) {
     }
 
     companion object {
+        const val USAGE_S = 30 // (how often a shown page reads its subscriptions' usage again)
         val PROVIDERS = listOf("claude" to Wording.Report.claude, "codex" to Wording.Programs.codex)
     }
 }
 
 /** Settings → Subscriptions (subscriptionpage.Page), Settings' second page: the Claude and Codex accounts kept on the
- * host picked beside New session, changed there: its name; each
- * provider's Account picker (the default a new chat takes), its accounts each with ⋮ (Rename…, Sign In Again… or
- * Replace Token…, Remove…), Subscription usage (Claude) and Add account. */
+ * host picked beside New session, changed there: its name; for each provider, its heading with the pill picking the
+ * subscription a new chat takes, then a card for each subscription (Claude's CLI default first, where the host has
+ * claude), each account's with ⋮ (Rename…, Sign In Again… or Replace Token…, Remove…), and a Claude card's usage as a
+ * bar for each limit with its percentage, read as the page is shown and every USAGE_S while it is and the app is in front; then Add account. */
 @Composable
 fun SubscriptionsPage() {
     val c = LocalBaude.current
@@ -78,6 +124,17 @@ fun SubscriptionsPage() {
         val h = host ?: return@LaunchedEffect
         Mesh.ask(h.hostId, Msg.Accounts(what = "list").json()) { r -> h.took(r)?.let { e -> h.error.value = e } }
     }
+    val ids = host?.claudeIds().orEmpty()
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    LaunchedEffect(hostId, ids, lifecycle) {
+        val h = host ?: return@LaunchedEffect
+        lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) { // (the app in front: read at once, then every USAGE_S)
+            while (true) {
+                h.readUsage(ids)
+                delay(HostAccounts.USAGE_S * 1000L)
+            }
+        }
+    }
     Column(Modifier.fillMaxSize().background(c.frame)) {
         Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
             BoxedList(listOf(Unit), "") {
@@ -86,34 +143,29 @@ fun SubscriptionsPage() {
                 })
             }
             if (host != null) for ((provider, title) in HostAccounts.PROVIDERS) {
-                Row(Modifier.padding(start = 14.dp, end = 14.dp, top = 6.dp), verticalAlignment = Alignment.CenterVertically,
+                val error = host.error.value
+                val mine = host.accounts.value.filter { it.provider == provider }
+                Row(Modifier.padding(start = 14.dp, end = 10.dp, top = 6.dp), verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     modelLogo(if (provider == "claude") "claude" else "gpt", title)?.let {
                         Icon(it, null, tint = c.fg, modifier = Modifier.size(16.dp.icon))
                     }
-                    Text(title, style = Type.bold, color = c.fg)
+                    Text(title, style = Type.bold, color = c.fg, modifier = Modifier.weight(1f))
                 }
-                val error = host.error.value
-                val mine = host.accounts.value.filter { it.provider == provider }
-                val rows: List<Any> = if (error != null) listOf("error") else
-                    listOf("account") + mine + listOfNotNull("usage".takeIf { provider == "claude" }) + "add"
-                BoxedList(rows, "") { row ->
-                    when (row) {
-                        "error" -> ActionRow(error.orEmpty(), null)
-                        "account" -> {
-                            val ids = listOf("") + mine.map { it.id.orEmpty() }
-                            val names = mapOf("" to Wording.Subscriptions.cliDefault) + mine.associate { it.id.orEmpty() to it.name.orEmpty() }
-                            Choice(Wording.Subscriptions.account, ids, host.defaults.value[provider]?.takeIf { it in ids } ?: "",
-                                { names[it].orEmpty() }, enabled = host.loaded.value) { id ->
-                                host.usage.value = null
-                                host.ask(Msg.Accounts(what = "select", provider = provider, id = id))
-                            }
-                        }
-                        "usage" -> UsageRow(host)
-                        "add" -> ButtonRow(Wording.Subscriptions.addAccount, Adwaita.ListAdd) { dialog = "add" to provider }
-                        is Msg.Account -> AccountRow(row) { kind -> dialog = kind to row }
+                if (error != null) {
+                    BoxedList(listOf(Unit), "") { ActionRow(error, null) }
+                    continue
+                }
+                val names = mapOf("" to Wording.Subscriptions.cliDefault) + mine.associate { it.id.orEmpty() to it.name.orEmpty() }
+                BoxedList(listOf(Unit), "") {
+                    Choice(Wording.Subscriptions.current, names.keys.toList(), host.defaults.value[provider]?.takeIf { it in names } ?: "",
+                        { names.getValue(it) }, enabled = host.loaded.value) { id ->
+                        host.ask(Msg.Accounts(what = "select", provider = provider, id = id))
                     }
                 }
+                if (provider == "claude" && host.claudeCli.value) SubscriptionCard(Wording.Subscriptions.cliDefault, null, host.usage[""], true) {}
+                for (a in mine) SubscriptionCard(a.name.orEmpty(), a, host.usage[a.id.orEmpty()], provider == "claude") { kind -> dialog = kind to a }
+                BoxedList(listOf(Unit), "") { ButtonRow(Wording.Subscriptions.addAccount, Adwaita.ListAdd) { dialog = "add" to provider } }
             }
         }
     }
@@ -132,47 +184,74 @@ fun SubscriptionsPage() {
     }
 }
 
-/** An account's row: its name, and ⋮ with what can be done to it (pick: "rename", "again" or "remove"). */
+/** A subscription's card: its name and, an account's, ⋮ with what can be done to it (pick: "rename", "again" or
+ * "remove"); a Claude card's usage (claude): a bar for each limit with its name and percentage over it, else what was
+ * said instead (Checking… till it's first read). */
 @Composable
-private fun AccountRow(a: Msg.Account, pick: (String) -> Unit) {
-    var open by remember { mutableStateOf(false) }
-    ActionRow(a.name.orEmpty(), null, suffix = {
-        Box {
-            IconButton(Adwaita.ViewMore, Wording.Subscriptions.moreTip) { open = true }
-            Popover(open, { open = false }) {
-                MenuChoice(Wording.Common.renameEllipsis, false) { open = false; pick("rename") }
-                MenuChoice(if (a.kind == "token") Wording.Subscriptions.replaceToken else Wording.Subscriptions.signInAgain, false) {
-                    open = false
-                    pick("again")
+private fun SubscriptionCard(name: String, a: Msg.Account?, usage: HostAccounts.Usage?, claude: Boolean, pick: (String) -> Unit) {
+    val c = LocalBaude.current
+    val shape = RoundedCornerShape(12.dp)
+    Column(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 4.dp).clip(shape).background(c.card)
+        .border(1.dp, c.rule, shape).padding(start = 12.dp, end = 6.dp, top = 4.dp, bottom = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(Modifier.fillMaxWidth().heightIn(min = 36.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(name, style = Type.body, color = c.fg, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+            if (a != null) AccountMenu(a, pick)
+        }
+        if (claude) Column(Modifier.padding(end = 6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            val limits = usage?.limits
+            if (limits == null) Text(usage?.said ?: Wording.Subscriptions.checking, style = Type.body, color = c.dim)
+            else for (l in limits) {
+                val percent = l.percent
+                Row(Modifier.fillMaxWidth()) {
+                    Text(limitLabel(l), style = Type.body, color = c.fg, modifier = Modifier.weight(1f))
+                    Text(Wording.Subscriptions.usagePercent(percent = "%.4g".format(java.util.Locale.ROOT, percent)
+                        .trimEnd('0').trimEnd('.')), style = Type.body, color = c.dim)
                 }
-                MenuChoice(Wording.Common.removeEllipsis, false) { open = false; pick("remove") }
+                Box(Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(50)).background(c.fg.copy(alpha = 0.15f))) {
+                    Box(Modifier.fillMaxWidth((percent / 100).toFloat().coerceIn(0f, 1f)).fillMaxHeight().clip(RoundedCornerShape(50))
+                        .background(c.accentBg))
+                }
             }
         }
-    })
+    }
 }
 
-/** Subscription usage: read from the host as it's tapped, what it says after its name. */
+/** A limit's name over its bar, with when it resets in the viewer's local time and clock: Five Hour Limit (Resets 3:00 PM),
+ * Weekly Limit (Resets Friday 3:00 PM), or just the time where it resets today. */
 @Composable
-private fun UsageRow(host: HostAccounts) {
-    val c = LocalBaude.current
-    var checking by remember { mutableStateOf(false) }
-    ActionRow(Wording.Subscriptions.usage, null, onClick = if (checking) null else ({
-        checking = true
-        host.usage.value = Wording.Subscriptions.checking
-        Mesh.ask(host.hostId, Msg.Accounts(what = "usage", id = host.defaults.value["claude"].orEmpty()).json()) { r ->
-            checking = false
-            val error = host.took(r)
-            val limits = Msg.AccountsReply.from(r).usage
-            host.usage.value = error ?: limits?.takeIf { it.isNotEmpty() }?.joinToString(" · ") {
-                Wording.Subscriptions.usageLimit(name = it.name.orEmpty(), percent = "%.4g".format(it.percent?.toDouble() ?: 0.0)
-                    .trimEnd('0').trimEnd('.'))
-            } ?: Wording.Subscriptions.usageUnavailable
+private fun limitLabel(l: HostAccounts.Limit): String {
+    val resets = l.resets ?: return l.name
+    val ctx = LocalContext.current
+    val at = java.time.Instant.ofEpochSecond(resets.toLong()).atZone(java.time.ZoneId.systemDefault())
+    val clock = if (android.text.format.DateFormat.is24HourFormat(ctx)) "HH:mm" else "h:mm a"
+    val time = at.format(java.time.format.DateTimeFormatter.ofPattern(clock))
+    val day = at.format(java.time.format.DateTimeFormatter.ofPattern("EEEE"))
+    val today = at.toLocalDate() == java.time.LocalDate.now()
+    return when {
+        l.key == "five_hour" -> Wording.Subscriptions.fiveHourLimit(time = time)
+        l.key == "seven_day" && today -> Wording.Subscriptions.weeklyLimitToday(time = time)
+        l.key == "seven_day" -> Wording.Subscriptions.weeklyLimit(day = day, time = time)
+        today -> Wording.Subscriptions.otherLimitToday(name = l.name, time = time)
+        else -> Wording.Subscriptions.otherLimit(name = l.name, day = day, time = time)
+    }
+}
+
+/** An account's ⋮ with what can be done to it (pick: "rename", "again" or "remove"). */
+@Composable
+private fun AccountMenu(a: Msg.Account, pick: (String) -> Unit) {
+    var open by remember { mutableStateOf(false) }
+    Box {
+        IconButton(Adwaita.ViewMore, Wording.Subscriptions.moreTip) { open = true }
+        Popover(open, { open = false }) {
+            MenuChoice(Wording.Common.renameEllipsis, false) { open = false; pick("rename") }
+            MenuChoice(if (a.kind == "token") Wording.Subscriptions.replaceToken else Wording.Subscriptions.signInAgain, false) {
+                open = false
+                pick("again")
+            }
+            MenuChoice(Wording.Common.removeEllipsis, false) { open = false; pick("remove") }
         }
-    }), suffix = {
-        // (at most half the row: the row's name stays whole, the limits wrap under each other)
-        host.usage.value?.let { Text(it, style = Type.body, color = c.dim, maxLines = 3, modifier = Modifier.widthIn(max = 110.dp)) }
-        Icon(Adwaita.ViewRefresh, null, tint = c.dim, modifier = Modifier.size(16.dp.icon))
-    })
+    }
 }
 
 /** A dialog's form that stays till what it sends is done: its fields, why it wasn't, and its button. */

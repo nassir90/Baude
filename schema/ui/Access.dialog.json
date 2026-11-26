@@ -1,5 +1,5 @@
 {
-  "description": "The Settings dialog's Access page (Baude's, Record's and the phone's; on the phone the fifth page of Settings, switched to by the bar at its foot): for the host picked beside New session, who in the mesh may use each of its capabilities, as it answers access. The host enforces each rule on the wire ops the capability uses (baudelib/access.py, PhoneAccess.kt): a member it refuses is answered access_denied, and a head on the host's own machine, or over ssh, is never refused.",
+  "description": "The Settings dialog's Access page (Baude's, Record's and the phone's; on the phone the fifth page of Settings, switched to by the bar at its foot): for the host picked beside New session, who in the mesh may use each of its capabilities, as it answers access. The host enforces each rule on the wire ops the capability uses (baudelib/access.py, PhoneAccess.kt): a member it refuses is answered access_denied, and a head on the host's own machine, or over ssh, is never refused. Who's asking comes from the signed open of the member's tunnel (mesh.py), or, for a chat's own tools, the member that started the chat.",
   "apps": [
     "baude",
     "record",
@@ -19,8 +19,11 @@
     "PhoneAccess.kt:PhoneAccess",
     "PhoneHost.kt:PhoneHost",
     "accessview.py:meta_settings",
-    "accessview.py:local_row",
-    "meta.py:shared_settings"
+    "meta.py:shared_settings",
+    "accessview.py:host_row",
+    "accessview.py:narrow",
+    "metatools.py:MetaTools.set_setting",
+    "baudelib/mesh.py:Mesh.opener"
   ],
   "copy": [
     "access",
@@ -81,12 +84,38 @@
               "issue": "BaudeInternal#231"
             }
           ]
+        },
+        {
+          "said": "The Access Rules capability defaults to Nobody: only local and ssh heads change rules until members are listed (paraphrased)",
+          "rule": "Access Rules starts at Nobody; every other capability at Everybody",
+          "decided": "2026-11-26",
+          "source": [
+            {
+              "issue": "BaudeInternal#231"
+            },
+            {
+              "doc": "docs/agent/product.md#mesh-membership-is-trust"
+            }
+          ]
+        },
+        {
+          "said": "A rule is only as good as its weakest path; who is asking must come from the authenticated link, not a claim a member can forge (paraphrased)",
+          "rule": "Every op reaching a capability's effect is guarded by it (reading a chat's folder, git and @ names by Agent Management, Kubernetes and databases parts of @ by theirs, host-admin ops by Access Rules, approving commands by Shell, Bots by Shell and Emission Browser), and members are told by their signed keys",
+          "decided": "2026-11-26",
+          "source": [
+            {
+              "issue": "BaudeInternal#231"
+            },
+            {
+              "doc": "docs/agent/product.md#mesh-membership-is-trust"
+            }
+          ]
         }
       ]
     },
     {
       "name": "Meta's rows",
-      "shows": "Meta has a setting for each capability of this machine's host (access_<capability>), in its index with the rule as it is (everybody, nobody, or chosen: the members' names). Shown under a reply (show setting:access_<capability>), it is the capability's row titled \"<host> / <capability>\" with its dropdown. Meta can't change them itself: the user changes them in the row.",
+      "shows": "Meta has a setting for each capability (access_<capability>), read on every host of the mesh, in its index as \"<host>: <rule>; …\" (everybody, nobody, or chosen: the members' names), looked up off the main loop. Meta may set a rule narrower itself ([<host>:] nobody, or chosen with fewer members); a wider one it shows for the user. Shown under a reply (show setting:access_<capability>), it is a row for each host, titled \"<host> / <capability>\" with its dropdown, greyed where that host's Access Rules refuse this one.",
       "copy": [
         "access.setting"
       ],
@@ -100,12 +129,25 @@
               "issue": "BaudeInternal#231"
             }
           ]
+        },
+        {
+          "said": "Meta may narrow a rule itself; widening shows the row for the user to flip; rows for any mesh host, not only this machine's (paraphrased)",
+          "rule": "Meta narrows access rules on any host itself and shows the row for a wider one; it never widens one",
+          "decided": "2026-11-26",
+          "source": [
+            {
+              "issue": "BaudeInternal#231"
+            },
+            {
+              "doc": "docs/agent/product.md#mesh-membership-is-trust"
+            }
+          ]
         }
       ]
     }
   ],
   "states": [
-    "default: every rule Everybody (a mesh with no rules works as before)",
+    "default: every rule Everybody but Access Rules, Nobody (a mesh with no rules works as before; only this machine's heads, and those over ssh, change the rules till members are chosen)",
     "error: the host's error in one dim row",
     "read-only: every row greyed (editable false)",
     "no members: \"No other members\" under Chosen Members"

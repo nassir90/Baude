@@ -31,6 +31,10 @@
       "type": "boolean",
       "description": "false: it can't be linked to, only from (a phone, with no sshd)."
     },
+    "key": {
+      "type": "string",
+      "description": "Its key (Ed25519's public half, in base64): what signs the tunnels it opens."
+    },
     "providers": {
       "type": "array",
       "items": {

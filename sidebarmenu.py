@@ -65,8 +65,9 @@ class SidebarMenu:
             items[1:1] = [(wording.say("sidebar.bot_settings_ellipsis"), "make_bot"),
                                 (wording.say("sidebar.unbot"), "unbot")] if info.get("bot") else \
                 [(wording.say("sidebar.make_bot_ellipsis"), "make_bot")]
-        if info.get("remote") is not None and not info.get("dead") and info["remote"].state == "alive":  # (who in
-            items.insert(len(items) - 1, (wording.say("access.access_ellipsis"), "access"))  # the mesh may manage it)
+        if info.get("remote") is not None and not info.get("dead") and info["remote"].state == "alive" and \
+                info.get("taken_up") is not False:  # (who in the mesh may manage it; a Claude Desktop chat only listed:
+            items.insert(len(items) - 1, (wording.say("access.access_ellipsis"), "access"))  # the host's rule)
         for label, action in items:
             if action is None:
                 menu.append_submenu(label, self.group_submenu(info))

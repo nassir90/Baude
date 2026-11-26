@@ -156,41 +156,105 @@ object MetaSet {
     ).apply { for (cap in PhoneAccess.CAPABILITIES) put("access_$cap", MetaAccess.setting(cap)) }
 }
 
-/** Meta's access_<capability> settings (accessview.meta_settings): the rules of the host Meta runs on, as it last
- * said them (asked again as they're read, the answer there for the next read), each shown as its row titled
- * "<host> / <capability>"; the user's to change. */
+/** Meta's access_<capability> settings (accessview.meta_settings): the rules of every host the phone reaches that has
+ * them, as each last said them (asked again as they're read, the answers there for the next read), said
+ * "<host>: <rule>; ..." and shown as a row for each host, titled "<host> / <capability>". Meta may set a rule itself
+ * only to a narrower one ("<host>: <who>[: names]", or "<who>" for the host Meta runs on); a wider one is the user's,
+ * on its row. Nothing here waits for a host: each is asked, and its answer kept, off the main thread. */
 object MetaAccess {
-    private val state = androidx.compose.runtime.mutableStateOf<JSONObject?>(null)
+    private val states = androidx.compose.runtime.mutableStateMapOf<String, JSONObject>() // (a host's id: its AccessState)
+    private val ORDER = listOf("nobody", "chosen", "everybody")
 
-    private fun ask(then: (JSONObject) -> Unit = {}) {
-        val h = metaHost() ?: return
-        Mesh.ask(h, Msg.Access().json()) { r -> r.optJSONObject("state")?.let { state.value = it }; then(r) }
+    private fun hosts(): List<Pair<String, String>> = Mesh.reached(Op.ACCESS)
+
+    private fun ask(h: String) = Mesh.ask(h, Msg.Access().json()) { r -> r.optJSONObject("state")?.let { states[h] = it } }
+
+    private fun ids(rule: JSONObject?) = rule?.optJSONArray("members")?.let { m -> (0 until m.length()).map { m.optString(it) } }.orEmpty()
+
+    private fun names(st: JSONObject) = st.optJSONArray("members")?.let { m ->
+        (0 until m.length()).associate { m.getJSONObject(it).let { x -> x.optString("id") to x.optString("name") } } }.orEmpty()
+
+    private fun ruleSaid(st: JSONObject?, cap: String): String {
+        val rule = st?.optJSONObject("rules")?.optJSONObject(cap) ?: return "unknown"
+        if (rule.optString("who") != "chosen") return rule.optString("who")
+        val named = names(st)
+        return "chosen: " + ids(rule).joinToString(", ") { named[it] ?: it.take(8) }
     }
 
     private fun said(cap: String): String {
-        ask()
-        val st = state.value ?: return "unknown"
-        val rule = st.optJSONObject("rules")?.optJSONObject(cap) ?: return "unknown"
-        if (rule.optString("who") != "chosen") return rule.optString("who")
-        val names = st.optJSONArray("members")?.let { m -> (0 until m.length()).associate { m.getJSONObject(it).let { x -> x.optString("id") to x.optString("name") } } }.orEmpty()
-        val ids = rule.optJSONArray("members")?.let { m -> (0 until m.length()).map { m.optString(it) } }.orEmpty()
-        return "chosen: " + ids.joinToString(", ") { names[it] ?: it.take(8) }
+        val hs = hosts()
+        for ((h, _) in hs) ask(h)
+        return hs.joinToString("; ") { (h, label) -> "$label: ${ruleSaid(states[h], cap)}" }.ifEmpty { "unknown" }
     }
 
+    /** Is rule no wider than was: everybody, then chosen (fewer members, narrower), then nobody? */
+    private fun narrower(was: JSONObject?, rule: JSONObject): Boolean {
+        val a = ORDER.indexOf(was?.optString("who") ?: "everybody")
+        val b = ORDER.indexOf(rule.optString("who"))
+        if (b == 1 && a == 1) return ids(was).containsAll(ids(rule))
+        return b < a || b == a || b == 1 && ids(rule).isEmpty()
+    }
+
+    /** value read: each host's rule it names, by the host's id (unknown: left as it is). */
+    private fun parse(cap: String, value: Any?): Map<String, JSONObject> {
+        val out = LinkedHashMap<String, JSONObject>()
+        val hs = hosts()
+        for (part in value?.toString().orEmpty().split(";").map { it.trim() }.filter { it.isNotEmpty() }) {
+            val t = part.split(":", limit = 3).map { it.trim() }
+            val (h, rest) = if (t[0].lowercase() in PhoneAccess.WHO + "unknown") (metaHost()
+                ?: throw IllegalArgumentException("access_$cap: Meta's host isn't connected")) to t
+            else (hs.firstOrNull { it.second.equals(t[0], true) || it.first == t[0] }?.first
+                ?: throw IllegalArgumentException("access_$cap: no host '${t[0]}': ${hs.joinToString(", ") { it.second }}")) to t.drop(1)
+            val who = rest.getOrNull(0)?.lowercase() ?: throw IllegalArgumentException("access_$cap: <host>: everybody|nobody|chosen[: names]")
+            if (who == "unknown") continue
+            if (who !in PhoneAccess.WHO) throw IllegalArgumentException("access_$cap is everybody, nobody or chosen: <names>")
+            val st = states[h] ?: throw IllegalArgumentException("access_$cap: that host's rules aren't known yet; ask again")
+            val named = names(st)
+            val members = if (who != "chosen") null else rest.getOrNull(1).orEmpty().split(",").map { it.trim() }.filter { it.isNotEmpty() }
+                .map { n -> named.entries.firstOrNull { it.value.equals(n, true) || it.key == n }?.key
+                    ?: throw IllegalArgumentException("access_$cap: no member '$n' on that host: ${named.values.joinToString(", ")}") }
+            out[h] = Msg.AccessRule(who = who, members = members).json()
+        }
+        return out
+    }
+
+    /** value as it'd be with what's given set: each host's rule, only narrower ones. */
+    private fun coerce(cap: String, value: Any?): String {
+        val given = parse(cap, value)
+        for ((h, rule) in given) if (!narrower(states[h]?.optJSONObject("rules")?.optJSONObject(cap), rule))
+            throw IllegalArgumentException("only narrower: show its row for the user to widen")
+        return hosts().joinToString("; ") { (h, label) ->
+            val st = states[h]
+            "$label: " + (given[h]?.let { r -> ruleSaid(st?.let { JSONObject(it.toString()).put("rules", JSONObject().put(cap, r)) }, cap) }
+                ?: ruleSaid(st, cap))
+        }
+    }
+
+    private fun send(h: String, cap: String, rule: JSONObject?) =
+        Mesh.ask(h, Msg.AccessSet(capability = cap, rule = null).json().put("rule", rule)) { r ->
+            if (r.optString("op") == Op.ERROR) toast(Wording.Access.failed(why = Msg.Error.from(r).said.orEmpty()))
+            r.optJSONObject("state")?.let { states[h] = it }
+        }
+
     fun setting(cap: String) = MetaSetting("access_$cap", {
-        Wording.Access.setting(host = state.value?.optString("host") ?: Wording.NewSession.host, capability = PhoneAccess.named(cap))
-    }, { said(cap) }, { PhoneAccess.WHO.joinToString("|") }, oneOf("access_$cap") { PhoneAccess.WHO },
-        { throw IllegalArgumentException("the user's to change: show its row") },
-        "who in the mesh may use it on the host Meta runs on; the user's to change", metaSets = false, row = { _, _ ->
-            androidx.compose.runtime.LaunchedEffect(cap) { ask() }
-            val st = state.value
-            if (st != null) {
-                AccessRule(cap, st.optJSONObject("rules")?.optJSONObject(cap), st,
-                    title = Wording.Access.setting(host = st.optString("host"), capability = PhoneAccess.named(cap))) { rule ->
-                    val h = metaHost() ?: return@AccessRule
-                    Mesh.ask(h, Msg.AccessSet(capability = cap, rule = null).json().put("rule", rule)) { r ->
-                        if (r.optString("op") == Op.ERROR) toast(Wording.Access.failed(why = Msg.Error.from(r).said.orEmpty()))
-                        r.optJSONObject("state")?.let { state.value = it }
+        Wording.Access.setting(host = hosts().joinToString(", ") { it.second }.ifEmpty { Wording.NewSession.host },
+            capability = PhoneAccess.named(cap))
+    }, { said(cap) }, { "<host>: everybody|nobody|chosen: <names>; ..." }, { v -> coerce(cap, v) },
+        { v ->
+            for ((h, rule) in parse(cap, v)) {
+                val was = states[h]?.optJSONObject("rules")?.optJSONObject(cap)
+                if (!narrower(was, rule)) throw IllegalArgumentException("only narrower: show its row for the user to widen")
+                if (was?.toString() != rule.toString()) send(h, cap, rule)
+            }
+        },
+        "who in the mesh may use it, on each host; Meta may narrow a rule, the user widens one on its row", row = { _, _ ->
+            Column {
+                for ((h, _) in hosts()) {
+                    androidx.compose.runtime.LaunchedEffect(h, cap) { ask(h) }
+                    val st = states[h] ?: continue
+                    AccessRule(cap, st.optJSONObject("rules")?.optJSONObject(cap), st,
+                        title = Wording.Access.setting(host = st.optString("host"), capability = PhoneAccess.named(cap))) { rule ->
+                        send(h, cap, rule)
                     }
                 }
             }

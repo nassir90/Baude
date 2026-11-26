@@ -20,6 +20,7 @@ import java.util.concurrent.atomic.AtomicInteger
 abstract class Head {
     open val origin: String? get() = null // (a tunnel's: the member it came from, as the mesh said)
     open val sender: JSONObject? get() = null // (a tunnel's: who what's sent through it is from, as its relay named)
+    open val verified: Boolean get() = true // (a tunnel's: false, unsigned by a member with no key pinned here)
     @Volatile var subscribed = false
     @Volatile var archived = false
     @Volatile var answers = true // (what its agents ask, answered by it, as attach says: ask_timeout's wait runs on without)
@@ -77,6 +78,9 @@ object PhoneHost {
     private var dirty = false
     private var started = false
     private lateinit var root: File
+
+    /** Its folder (phone/): where the mesh's key and pins are kept too (PhoneLink). */
+    fun folder(): File = root
 
     fun start(c: Context) {
         synchronized(lock) {
@@ -261,14 +265,34 @@ object PhoneHost {
         }
         if (op == Op.ACCESS || op == Op.ACCESS_SET) return access(head, msg, ::reply)
         if (op == Op.START) {
-            val fork = Msg.Start.from(msg).forkFrom
-            if (!PhoneAccess.allowed(head, "spawn") || fork != null && !PhoneAccess.allowed(head, "manage", session(fork)?.meta))
-                return head.send(PhoneAccess.refused(req, if (!PhoneAccess.allowed(head, "spawn")) "spawn" else "manage"))
+            val r = Msg.Start.from(msg)
+            val src = r.forkFrom?.let { session(it) }
+            if (!PhoneAccess.allowed(head, "spawn")) return head.send(PhoneAccess.refused(req, "spawn"))
+            if (r.forkFrom != null && !PhoneAccess.allowed(head, "manage", src?.meta)) return head.send(PhoneAccess.refused(req, "manage"))
+            // (from a member: a Bot, or one forked, runs its browser and terminals, so it takes both; answering its own
+            // asks, or a mode that doesn't ask, takes the shell)
+            val bot = r.bot != null || src?.meta?.optJSONObject("bot") != null
+            val unasked = r.askDefault == "allow" || (r.mode ?: "default") !in ASKING_MODES
+            (if (bot) PhoneAccess.firstRefused(head, "shell", "browser") else if (unasked) PhoneAccess.firstRefused(head, "shell") else null)
+                ?.let { return head.send(PhoneAccess.refused(req, it)) }
             return start(head, msg, ::reply)
         }
-        if (op == Op.READ_FILE) return reply(Op.FILE, *readFile(msg))
-        if (op == Op.LIST_DIR) return reply(Op.DIR, *listDir(Msg.ListDir.from(msg).path.orEmpty()))
-        if (op == Op.CATALOGUE) return reply(Op.CATALOGUE, *catalogue(Msg.Catalogue.from(msg).cwd.orEmpty()))
+        if (op == Op.READ_FILE || op == Op.LIST_DIR || op == Op.CATALOGUE) { // (a member: in the folders of the chats it may
+            val path = when (op) {                                            // manage only; list_dir, manage's own)
+                Op.READ_FILE -> Msg.ReadFile.from(msg).path
+                Op.LIST_DIR -> Msg.ListDir.from(msg).path
+                else -> Msg.Catalogue.from(msg).cwd
+            }.orEmpty()
+            if (head.origin != null && (op == Op.LIST_DIR && !PhoneAccess.allowed(head, "manage") || !managesFolder(head, path)))
+                return head.send(PhoneAccess.refused(req, "manage"))
+            return when (op) {
+                Op.READ_FILE -> reply(Op.FILE, *readFile(msg))
+                Op.LIST_DIR -> reply(Op.DIR, *listDir(path))
+                else -> reply(Op.CATALOGUE, *catalogue(path))
+            }
+        }
+        if (op == Op.TELEMETRY_SET && !PhoneAccess.allowed(head, "access")) // (this phone's own: Access Rules')
+            return head.send(PhoneAccess.refused(req, "access"))
         if (op == Op.TELEMETRY) { // (this app's: what it saw done in chats, kept here: TelemetryStore)
             work.execute {
                 try {
@@ -313,6 +337,7 @@ object PhoneHost {
         }.orEmpty()
         val s = synchronized(lock) { sessions[sid] } ?: return reply(Op.ERROR, "error" to "no session $sid")
         if (!PhoneAccess.allowed(head, "manage", s.meta)) return head.send(PhoneAccess.refused(req, "manage"))
+        needs(head, op, msg, s)?.let { return head.send(PhoneAccess.refused(req, it)) }
         when (op) {
             Op.ATTACH -> synchronized(lock) {
                 val a = Msg.Attach.from(msg)
@@ -419,6 +444,44 @@ object PhoneHost {
         }
     }
 
+    private val ASKING_MODES = setOf("default", "plan", "acceptEdits") // (modes that ask before a command's run)
+
+    /** What else than manage a member's op on s takes, refused (the first it may not use), if anything: always
+     * allowing tools, answering an ask yes, or a mode that doesn't ask, the shell; making a Bot, or driving one (a
+     * message to it), its browser and terminals too. */
+    private fun needs(head: Head, op: String, msg: JSONObject, s: PhoneSession): String? {
+        if (head.origin == null) return null
+        val bot = s.meta.optJSONObject("bot") != null
+        return when (op) {
+            Op.ALWAYS_ALLOW -> PhoneAccess.firstRefused(head, "shell")
+            Op.ATTACH -> if (Msg.Attach.from(msg).alwaysAllow.isNullOrEmpty()) null else PhoneAccess.firstRefused(head, "shell")
+            Op.BOT -> if (msg.optJSONObject("bot") != null) PhoneAccess.firstRefused(head, "shell", "browser") else null
+            Op.INPUT -> {
+                val m = Msg.Input.from(msg).msg ?: JSONObject()
+                val request = m.optJSONObject("request")
+                when (m.optString("type")) {
+                    "user" -> if (bot) PhoneAccess.firstRefused(head, "shell", "browser") else null
+                    "control_response" -> if (m.optJSONObject("response")?.optString("subtype") == "success" &&
+                        m.optJSONObject("response")?.optJSONObject("response")?.optString("behavior") != "deny")
+                        PhoneAccess.firstRefused(head, "shell") else null
+                    "control_request" -> if (request?.optString("subtype") == "set_permission_mode" &&
+                        request.optString("mode") !in ASKING_MODES) PhoneAccess.firstRefused(head, "shell") else null
+                    else -> null
+                }
+            }
+            else -> null
+        }
+    }
+
+    /** (a member's) Is path in the folder of an agent head may manage? */
+    private fun managesFolder(head: Head, path: String): Boolean {
+        val f = File(path).takeIf { path.startsWith("/") }?.canonicalFile ?: return false
+        return synchronized(lock) {
+            sessions.values.any { s -> PhoneAccess.allowed(head, "manage", s.meta) &&
+                (f == s.folder.canonicalFile || f.path.startsWith(s.folder.canonicalPath + File.separator)) }
+        }
+    }
+
     /** A new agent: its folder made, a Bot if it's named, its prompt sent. Its model's one the mesh serves this phone
      * (Inference's value; none given, the first of them, as a host runs its own default). ask_timeout, ask_default and
      * spawned_by as a host's start has them (a subagent: Auto at most, meshtools.SUBAGENT_MODES). */
@@ -465,6 +528,8 @@ object PhoneHost {
             .put("start_key", r.startKey.orEmpty().takeIf(::isId) ?: JSONObject.NULL)
             .put("fork_from", src?.id ?: JSONObject.NULL).put("ephemeral", ephemeral)
             .put("own_folder", !(ephemeral && src != null))
+        head.origin?.let { meta.put("started_by", JSONObject().put("id", it).put("verified", head.verified)) } // (a
+        // member's: who it's from, as the rules judge what it does)
         if (src != null && !ephemeral) meta.put("title", r.title.orEmpty().trim().ifBlank { null }
             ?: src.meta.opt("title") ?: JSONObject.NULL)
         val s = PhoneSession(meta)
@@ -729,7 +794,8 @@ object PhoneHost {
         return f == File(s.folder, MEMORY).canonicalFile
     }
 
-    /** Its turn's over: its result said (to those attached live, and as turn_ended to every head subscribed), and what
+    /** Its turn's over: its result said (to those attached live, and as turn_ended to every head subscribed that may
+     * manage it), and what
      * was sent meanwhile taken now, in a turn of its own (in the same hold of the lock, so no other turn starts
      * between). */
     fun ended(s: PhoneSession, result: String, error: Boolean, turns: Int, ms: Long, tokensIn: Long = 0, tokensOut: Long = 0) {
@@ -755,7 +821,8 @@ object PhoneHost {
                     save(s)
                 }
             }
-            if (s.deleted) emptyList() else heads.filter { it.subscribed && (it.archived || !s.meta.optBoolean("archived")) }
+            if (s.deleted) emptyList() else heads.filter { it.subscribed && (it.archived || !s.meta.optBoolean("archived")) &&
+                PhoneAccess.allowed(it, "manage", s.meta) } // (told only those it's listed to)
         }
         if (!s.meta.optBoolean("ephemeral")) TelemetryStore.turn(s.id, ms / 1000.0, s.meta.optString("model").ifEmpty { null },
             s.meta.optString("effort").ifEmpty { null }, tokensIn, tokensOut)

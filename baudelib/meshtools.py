@@ -76,7 +76,7 @@ class Mesh:
         self.relay = {"path": socket} if socket else {}  # (a member reached through that host process)
 
     def here(self):
-        ch, info = _channel(self.local)
+        ch, info = self.channel(self.local)
         ch.close()
         return info
 
@@ -92,7 +92,7 @@ class Mesh:
 
         def look(entry):  # (each at once: one that's down takes its time without holding up the rest)
             try:
-                ch, info = _channel({"via": "mesh", "host": entry["id"], **self.relay})
+                ch, info = self.channel({"via": "mesh", "host": entry["id"], **self.relay})
                 ch.close()
                 entry.update(reachable=True, models=[x.get("value") for x in info.get("models") or []])
             except (OSError, KeyError, ValueError) as e:
@@ -144,7 +144,7 @@ class Mesh:
         return {"host": where["host"], "host_name": m.get("name")}
 
     def request(self, where, msg, timeout=30):
-        ch, _info = _channel(where)
+        ch, _info = self.channel(where)
         try:
             ch.sock.settimeout(timeout)
             ch.send({**msg, "req": 1})
@@ -178,7 +178,8 @@ class Mesh:
         raise ValueError(f"no chat {session} {'on ' + host if host else 'in the mesh'}: chats lists them")
 
     def channel(self, where, timeout=10):
-        """(channel, info) for where, as from this chat (relay's as): what's sent on it is from this chat."""
+        """(channel, info) for where, as from this chat (relay's as, or on its host's socket hello's): what's sent on
+        it is from this chat, and its host judges it as the member that started the chat, if one did (access)."""
         return _channel(where, timeout, self.me, self.meta, self.agent)
 
     def ask(self, where, session, text, wait=True, timeout_s=WAIT_S, title=None):

@@ -1,9 +1,9 @@
 """Who in the mesh may use what of a host's (baudelib.access; the access and access_set ops), as every app shows it:
 Settings → Access (Baude's and Record's, for the host picked beside New session), a chat's Access… (Baude's session
-row menu: its own rule for managing it), and Meta's rows (access_<capability>, this machine's host's), which Meta shows
-and the user changes. Each capability is a row: its name, a dropdown (Everybody, Nobody, Chosen Members; a chat's has
-Same as Host first), and, for Chosen Members, a switch for each member the host knows of. A change is sent at once,
-and the row shows what the host answers. The phone's Access.kt is the same."""
+row menu: its own rule for managing it), and Meta's rows (access_<capability>, each host's of the mesh), which Meta
+reads and narrows and the user widens. Each capability is a row: its name, a dropdown (Everybody, Nobody, Chosen
+Members; a chat's has Same as Host first), and, for Chosen Members, a switch for each member the host knows of. A
+change is sent at once, and the row shows what the host answers. The phone's Access.kt is the same."""
 import threading
 import time
 
@@ -140,29 +140,61 @@ def chat_dialog(parent, remote, session, title):
     return dlg
 
 
-# ---- Meta's rows: this machine's host's rules, which Meta shows and the user changes
+# ---- Meta's rows: the rules of each host of the mesh, which Meta reads, narrows, and shows for the user to widen
 
-_KNOWN = {"at": 0.0, "state": None}
+_KNOWN = {}  # (host id -> {"name", "where", "state"}: each one's rules as it last said them)
+_LOOK = {"at": -1e9, "going": False}
 _KNOWN_LOCK = threading.Lock()
 KNOWN_S = 5
+ORDER = {"nobody": 0, "chosen": 1, "everybody": 2}
 
 
-def known():
-    """This machine's host's rules as it last said them (asked again once they're KNOWN_S old; None if it isn't
-    running or can't say)."""
+def hosts():
+    """[(id, name, where)]: this machine's host and the members it reaches, as last looked (look)."""
     with _KNOWN_LOCK:
-        if time.monotonic() - _KNOWN["at"] > KNOWN_S:
-            import themelook
-            reply = themelook.ask_host({"op": "access"}, timeout=2, start=False)
-            _KNOWN.update(at=time.monotonic(), state=reply.get("state"))
-        return _KNOWN["state"]
+        return [(k, v["name"], v["where"]) for k, v in _KNOWN.items()]
 
 
-def said(cap):
-    """cap's rule here, as Meta reads it: everybody, nobody, or chosen: the members' names."""
-    state = known()
-    if state is None:
-        return "unknown"
+def look(force=False):
+    """The hosts' rules asked for again, off the main loop, if they're KNOWN_S old (or force): never waited for."""
+    with _KNOWN_LOCK:
+        if _LOOK["going"] or not force and time.monotonic() - _LOOK["at"] < KNOWN_S:
+            return
+        _LOOK["going"] = True
+
+    def run():
+        from baudelib import wire
+        try:
+            ch, info = wire.reach({"via": "local"}, timeout=2)
+            ch.close()
+            found = [(info.get("id"), info.get("name"), {"via": "local"})] + [
+                (m.get("id"), m.get("name"), {"via": "mesh", "host": m.get("id")})
+                for m in (info.get("mesh") or {}).get("members") or [] if wire.is_id(m.get("id") or "")]
+        except (OSError, ValueError):
+            found = []
+        got = {}
+        for hid, name, where in found:
+            try:
+                ch, _ = wire.reach(where, timeout=4)
+                try:
+                    ch.send({"op": "access", "req": 1})
+                    while (r := ch.reply()) is not None and r.get("req") != 1:
+                        pass
+                finally:
+                    ch.close()
+            except OSError:
+                continue
+            if r and r.get("op") == "access":
+                got[hid] = {"name": r["state"]["host"] or name, "where": where, "state": r["state"]}
+        with _KNOWN_LOCK:
+            _KNOWN.clear()
+            _KNOWN.update(got)
+            _LOOK.update(at=time.monotonic(), going=False)
+    threading.Thread(target=run, daemon=True, name="access-look").start()
+
+
+def rule_said(state, cap):
+    """cap's rule in a host's state, as Meta reads it: everybody, nobody, or chosen: the members' names."""
     rule = state["rules"][cap]
     if rule["who"] != "chosen":
         return rule["who"]
@@ -170,13 +202,78 @@ def said(cap):
     return "chosen: " + ", ".join(names.get(m, m[:8]) for m in rule.get("members") or ())
 
 
-def local_row(cap):
-    """cap's row for this machine's host, filled as it answers; what's set there read again by Meta's next look."""
-    where = {"via": "local"}
+def said(cap):
+    """cap's rule on each host, as last looked: "<host>: <rule>; ...", or unknown (looked for now)."""
+    look()
+    with _KNOWN_LOCK:
+        known = [(v["name"], v["state"]) for v in _KNOWN.values()]
+    return "; ".join(f"{name}: {rule_said(st, cap)}" for name, st in known) or "unknown"
 
+
+def narrower(new, old):
+    """Does new let in no one old doesn't?"""
+    if ORDER[new["who"]] != ORDER[old["who"]]:
+        return ORDER[new["who"]] < ORDER[old["who"]]
+    return new["who"] != "chosen" or set(new.get("members") or ()) <= set(old.get("members") or ())
+
+
+def parse(value, cap):
+    """(host's (id, name, where) or None for this machine's, rule) of what Meta gave: "[<host>:] <who>[: names]"."""
+    parts = [p.strip() for p in str(value).split(":")]
+    known = hosts()
+    host = None
+    if parts and parts[0].lower() not in WHO:
+        host = next((h for h in known if h[1].lower() == parts[0].lower() or h[0] == parts[0]), None)
+        if host is None:
+            raise ValueError(f"No host {parts[0]!r}: they're {', '.join(h[1] for h in known) or 'not known yet'}.")
+        parts = parts[1:]
+    who = (parts[0] if parts else "").lower()
+    if who not in WHO:
+        raise ValueError(f"access_{cap} is [<host>:] everybody, nobody, or chosen: <members>.")
+    rule = {"who": who}
+    if who == "chosen":
+        state = next((v["state"] for k, v in _KNOWN.items() if host and k == host[0] or not host and
+                      v["where"].get("via") == "local"), None) or {"members": []}
+        ids = {m["name"].lower(): m["id"] for m in state["members"]}
+        names = [n.strip() for n in ":".join(parts[1:]).split(",") if n.strip()]
+        if any(n.lower() not in ids for n in names):
+            raise ValueError(f"Members are named as {', '.join(m['name'] for m in state['members']) or 'none here'}.")
+        rule["members"] = [ids[n.lower()] for n in names]
+    return host, rule
+
+
+def narrow(cap, value):
+    """(off the main loop) cap's rule on a host made narrower, as Meta asked: ValueError for one that'd let more in."""
+    from baudelib import wire
+    host, rule = parse(value, cap)
+    where = host[2] if host else {"via": "local"}
+
+    def ask(msg):
+        ch, _ = wire.reach(where, timeout=4)
+        try:
+            ch.send({**msg, "req": 1})
+            while (r := ch.reply()) is not None and r.get("req") != 1:
+                pass
+        finally:
+            ch.close()
+        if not r or r.get("op") == "error":
+            raise ValueError(wire.said(r) or "the host didn't answer")
+        return r
+    old = ask({"op": "access"})["state"]["rules"][cap]
+    if not narrower(rule, old):
+        raise ValueError(f"Only the user widens a rule: show setting:access_{cap} for them to.")
+    state = ask({"op": "access_set", "capability": cap, "rule": rule})["state"]
+    look(force=True)
+    return f"{state['host']}: {rule_said(state, cap)}"
+
+
+def host_row(cap, hid, where):
+    """cap's row for a host of the mesh, filled as it answers; what's set there read again by Meta's next look."""
     def send(rule, done):
-        _KNOWN["at"] = 0.0
-        ask(where, {"op": "access_set", "capability": cap, "rule": rule}, done)
+        def answered(reply):
+            look(force=True)
+            return done(reply)
+        ask(where, {"op": "access_set", "capability": cap, "rule": rule}, answered)
     row = AccessRow(cap, send)
 
     def took(reply):
@@ -190,26 +287,32 @@ def local_row(cap):
 
 
 def meta_settings():
-    """Meta's settings for this machine's host's rules (access_<capability>): shown, the user's to change."""
+    """Meta's settings for the mesh's hosts' rules (access_<capability>): read on every host, narrowed by Meta
+    (narrow), widened only by the user, on the rows shown (one a host)."""
     import meta
 
     class AccessSetting(meta.Setting):
+        later = True  # (set off the main loop: metatools' set_setting)
+
         @property
         def title(self):
-            name = (known() or {}).get("host") or wording.say("new_session.host")
-            return wording.say("access.setting", host=name, capability=access.named(self.cap))
+            return access.named(self.cap)
 
         @title.setter
         def title(self, _value):
             pass
 
+        def coerce(self, value):
+            parse(value, self.cap)
+            return str(value).strip()
+
     out = []
     for cap in access.CAPABILITIES:
-        def put(_v):
-            raise ValueError("the user's to change: show its row")
-        s = AccessSetting(f"access_{cap}", None, lambda cap=cap: said(cap), put, lambda cap=cap: local_row(cap),
-                          list(WHO), note="who in the mesh may use it on this machine's host; the user's to change",
-                          meta_sets=False)
+        s = AccessSetting(f"access_{cap}", None, lambda cap=cap: said(cap), lambda v, cap=cap: narrow(cap, v),
+                          lambda cap=cap: [host_row(cap, hid, where) for hid, _name, where in hosts()] or
+                          [host_row(cap, None, {"via": "local"})], list(WHO),
+                          note="who may use it on each host of the mesh, as [<host>:] everybody, nobody or chosen: "
+                          "<members>; you may narrow a rule, the user widens one on its row")
         s.cap = cap
         out.append(s)
     return {s.name: s for s in out}

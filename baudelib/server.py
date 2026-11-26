@@ -418,7 +418,7 @@ class Server(ServerRunning, ServerSessions):
 
     def shown_to(self, conn, listing):
         """(lock held) Of a listing, the chats conn may manage (access): those it's told of."""
-        if conn.origin is None:
+        if conn.member is None:
             return listing
         return [x for x in listing if self.access.allowed(
             conn, "manage", self.sessions.get(x["id"]) or self.desktop.chats.get(x["id"]))]

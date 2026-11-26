@@ -145,7 +145,8 @@ fun SessionMenu(item: Item, open: Boolean, at: DpOffset, dismiss: () -> Unit) {
                 dismiss()
                 Mesh.conn(h)?.request(Msg.Stop(session = sid).json()) {}
             }
-            MenuChoice(Wording.Access.accessEllipsis, false) { dismiss(); accessing = true }
+            if (s.takenUp != false) MenuChoice(Wording.Access.accessEllipsis, false) { dismiss(); accessing = true } // (a
+            // Claude Desktop chat only listed: the host's rule, till it's written in)
             MenuChoice(Wording.Trash.moveDots, false) { dismiss(); trashing = true }
         }
     }

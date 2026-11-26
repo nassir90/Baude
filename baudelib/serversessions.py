@@ -85,7 +85,9 @@ class ServerSessions:
                 isinstance(params.get("grace"), (int, float)) and params["grace"] > 0 else None,
                 "spawned_by": params.get("spawned_by") if wire.is_id(params.get("spawned_by") or "") else None,
                 "start_key": params.get("start_key") if wire.is_id(params.get("start_key") or "") else None,
-                "draft": bool(params.get("draft")) and not (params.get("prompt") or "").strip()}
+                "draft": bool(params.get("draft")) and not (params.get("prompt") or "").strip(),
+                **({"started_by": {"id": conn.member, "verified": conn.verified}}  # (a member's: its tools judged as it)
+                   if getattr(conn, "member", None) is not None else {})}
         with self.lock:
             if self.stopped.is_set():
                 raise OSError("the host process is stopping")
@@ -597,8 +599,9 @@ class ServerSessions:
                          "is_error": bool(msg.get("is_error")), "cost": msg.get("total_cost_usd"),
                          "turns": msg.get("num_turns"), "duration_ms": msg.get("duration_ms")}
                 for conn in self.conns:  # (as it happens: a turn too short for a sessions listing to see isn't missed;
-                    # an archived session's to those who see archived ones)
-                    if conn.subscribed and (conn.archived or not s.meta.get("archived")):
+                    # an archived session's to those who see archived ones; to those it's listed for: access)
+                    if conn.subscribed and (conn.archived or not s.meta.get("archived")) and \
+                            self.access.allowed(conn, "manage", s):
                         conn.send(ended)
             for conn in s.live:
                 conn.send({"op": "claude", "session": s.id, "msg": msg})

@@ -119,6 +119,21 @@ def _(app):
     return win
 
 
+@scene("14b-mcp-names", "MCP tools by name: ToolSearch selecting the mesh's tools (input open), a mesh tool, a Slack tool asking")
+def _(app):
+    win = app.window(opts())
+    win.h_system({"type": "system", "subtype": "init", "session_id": "s1", "tools": [],
+                  "mcp_servers": [{"name": "mesh", "status": "connected"}, {"name": "claude.ai Slack", "status": "connected"}]})
+    tool_with_output(win, "ToolSearch", {"query": "select:mcp__mesh__tasks,mcp__mesh__task_run", "max_results": 2}, "q1",
+                     "Loaded 2 tools")
+    win.tool_cards["q1"].output_toggle.set_expanded(False)
+    tool_with_output(win, "mcp__mesh__tasks", {"bot": "a1b2c3"}, "q2", "[]", open_input=False)
+    win.tool_cards["q2"].output_toggle.set_expanded(False)
+    ask_permission(win, "mcp__claude_ai_Slack__slack_send_message",
+                   {"channel_id": "C024BE91L", "message": "Two tasks ran today: nightly tests and the weekly report."}, "q3")
+    return win
+
+
 @scene("20-tool-views", "Readable tool inputs: Read, Grep, Glob, TodoWrite, Task (expanded)")
 def _(app):
     win = app.window(opts())
@@ -630,7 +645,7 @@ def _(app):
 def kube_home(app, context="k3d-dev"):
     """The Kubernetes view's Home on tests/fake_kubectl.py's context, as if it had been open half an hour."""
     import kube_fixture as kf
-    os.environ.update(KUBECONFIG=kf.make_kubeconfig(os.path.join(T.TMP, "shot-kubeconfig")),
+    os.environ.update(KUBECONFIG=kf.make_kubeconfig(os.path.join(T.TMP, "shot-kubeconfig"), context == "crowded"),
                       BAUDE_KUBECTL=os.path.join(HERE, "fake_kubectl.py"), BAUDE_HELM=os.path.join(HERE, "fake_kubectl.py"))
     for k in ("FAKE_KUBECTL_PG", "FAKE_KUBECTL_FOLLOW", "FAKE_KUBECTL_STATE"):
         os.environ.pop(k, None)
@@ -655,6 +670,14 @@ def _(app):
        size=(1200 + SIDEBAR, H))
 def _(app):
     return kube_home(app, "prod")[0]
+
+
+@scene("38e-kubernetes-home-crowded", "Kubernetes' Home on a cluster of fifteen namespaces and twelve nodes whose "
+                                      "limits are 2.3 times what the nodes can give pods: each bar past allocatable "
+                                      "its own orange segment, a tick at allocatable; the ten namespaces and nodes "
+                                      "using the most CPU, the rest an Other row", size=(1200 + SIDEBAR, H))
+def _(app):
+    return kube_home(app, "crowded")[0]
 
 
 @scene("38e-kubernetes-logs", "Kubernetes: a pod's logs under the table, followed (kubectl logs -f), its containers "

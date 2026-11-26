@@ -152,11 +152,11 @@ class TasksState(val live: Boolean = true) {
 
 /** A task as it's sent to be saved: the whole of it but its script (left as it is: the Bot's to change). */
 private fun whole(t: Msg.Task, form: List<Msg.TaskField>? = t.form,
-                  triggers: List<Msg.TaskTrigger>? = t.triggers): JSONObject {
+                  triggers: List<Msg.TaskTrigger>? = t.triggers, fallback: Boolean = t.fallback ?: true): JSONObject {
     val o = JSONObject().put("name", t.name.orEmpty()).put("runtime", t.runtime ?: "python")
         .put("form", JSONArray(form.orEmpty().map { it.json() }))
         .put("triggers", JSONArray(triggers.orEmpty().map { it.json() }))
-        .put("fallback", t.fallback ?: true).put("paused", t.paused == true)
+        .put("fallback", fallback).put("paused", t.paused == true)
     t.id?.let { o.put("id", it) }
     t.timeoutS?.let { o.put("timeout_s", it) }
     return o
@@ -317,7 +317,8 @@ fun TasksPage(hostId: String, sid: String, here: Boolean, state: TasksState? = n
                     TaskView(t, st.runs.toList(), offset, back = { st.page = "list"; load() }, run = { runOrAsk(t) },
                         change = { st.editing = t }, delete = { st.deleting = t }, addTrigger = { st.adding = t },
                         removeTrigger = { tr -> save(whole(t, triggers = t.triggers.orEmpty().filter { it.id != tr.id })) },
-                        editForm = { st.forming = t }, openRun = { openRun(it) })
+                        editForm = { st.forming = t }, openRun = { openRun(it) },
+                        hand = { on -> save(whole(t, fallback = on)) })
                 }
                 "run" -> st.run?.let { r ->
                     RunView(r, st.log.toList(), st.bot.ifBlank { Wording.Sidebar.bot }, st.task?.name ?: r.name.orEmpty(), offset,
@@ -381,7 +382,7 @@ fun TasksPage(hostId: String, sid: String, here: Boolean, state: TasksState? = n
 @Composable
 private fun TaskView(t: Msg.Task, runs: List<Msg.TaskRun>, offset: Int, back: () -> Unit, run: () -> Unit, change: () -> Unit,
                      delete: () -> Unit, addTrigger: () -> Unit, removeTrigger: (Msg.TaskTrigger) -> Unit, editForm: () -> Unit,
-                     openRun: (Msg.TaskRun) -> Unit) {
+                     openRun: (Msg.TaskRun) -> Unit, hand: (Boolean) -> Unit) {
     val c = LocalBaude.current
     Column(Modifier.fillMaxSize()) {
         PageHeader(Wording.Tasks.title, t.name.orEmpty().ifBlank { Wording.Tasks.task }, back) {
@@ -390,6 +391,9 @@ private fun TaskView(t: Msg.Task, runs: List<Msg.TaskRun>, offset: Int, back: ()
             IconButton(Adwaita.UserTrash, Wording.Common.delete, onClick = delete)
         }
         Scrolled {
+            BoxedList(listOf(t), "") { x ->
+                SwitchRow(Wording.Tasks.fallback, null, x.fallback ?: true) { on -> hand(on) }
+            }
             GroupHeading(Wording.Tasks.triggers) { IconButton(Adwaita.ListAdd, Wording.Tasks.addTrigger, onClick = addTrigger) }
             BoxedList(t.triggers.orEmpty(), Wording.Tasks.byHand) { tr ->
                 ActionRow(triggerText(tr), null, compact = true, prefix = {
@@ -491,26 +495,21 @@ private fun Label(text: String) {
     Text(text, style = Type.body, color = LocalBaude.current.fg)
 }
 
-/** Change Task: its name, and whether a failure's handed to the Bot. */
+/** Change Task: its name. */
 @Composable
 private fun TaskDialog(t: Msg.Task, done: (JSONObject?) -> Unit) {
     val c = LocalBaude.current
     var name by remember { mutableStateOf(t.name.orEmpty()) }
-    var fallback by remember { mutableStateOf(t.fallback ?: true) }
     AlertDialog(
         onDismissRequest = { done(null) },
         title = { Text(Wording.Tasks.changeHeading) },
         text = {
             Column(Modifier.heightIn(max = 520.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Field(name, { name = it }, Wording.Common.name)
-                Row(Modifier.fillMaxWidth().clickable { fallback = !fallback }, verticalAlignment = Alignment.CenterVertically) {
-                    Text(Wording.Tasks.fallback, style = Type.body, color = c.fg, modifier = Modifier.weight(1f))
-                    Switch(fallback, { fallback = it }, colors = SwitchDefaults.colors(checkedTrackColor = c.accentBg, checkedThumbColor = c.accentFg))
-                }
             }
         },
         confirmButton = {
-            Button(Wording.Common.save, suggested = true) { done(whole(t).put("name", name).put("fallback", fallback)) }
+            Button(Wording.Common.save, suggested = true) { done(whole(t).put("name", name)) }
         },
         dismissButton = { Button(Wording.Common.cancel) { done(null) } },
         containerColor = c.dialog,

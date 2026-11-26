@@ -9,7 +9,7 @@ import os
 import re
 import weakref
 
-from baudelib import wording  # noqa: E402  (the words Baude shows: schema/copy, Record's and the Android app's too)
+from baudelib import toolnames, wording  # noqa: E402  (the words Baude shows: schema/copy, Record's and the Android app's too)
 
 import gi
 
@@ -141,6 +141,8 @@ def summarize_tool(name, inp):
             return " · ".join(f"{q.get('header') or q.get('question')}: {inp['answers'][q.get('question')]}"
                               for q in qs if isinstance(q, dict) and q.get("question") in inp["answers"])
         return _first_line(str(qs[0].get("question", ""))) + (f" (+{len(qs) - 1} more)" if len(qs) > 1 else "")
+    if name == "ToolSearch" and (picked := toolnames.selected(inp.get("query"))) is not None:
+        return ", ".join(tool_label(n) for n in picked)  # (the tools it loads, as their cards name them)
     if isinstance(inp.get("command"), str) and not (inp.get("description") or "").strip():
         return ""  # nothing rather than our own words: a description on this line is always Claude's
     for key in ("description", "command", "file_path", "notebook_path", "pattern", "url", "query",
@@ -196,37 +198,22 @@ def _kv_rows(inp, skip=(), depth=0):
     return grid if row else None
 
 
-def humanize(identifier):
-    """snake_case / camelCase / kebab-case -> 'words like this'."""
-    words = re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", identifier).replace("_", " ").replace("-", " ")
-    return " ".join(words.split()).lower()
-
-
-MCP_SERVER_NAMES = {"github": "GitHub", "gitlab": "GitLab", "gmail": "Gmail", "gdrive": "Google Drive",
-                    "google_drive": "Google Drive", "gcal": "Google Calendar", "slack": "Slack",
-                    "notion": "Notion", "linear": "Linear", "jira": "Jira", "figma": "Figma",
-                    "postgres": "Postgres", "sqlite": "SQLite", "playwright": "Playwright", "sentry": "Sentry"}
+humanize = toolnames.humanize  # (snake_case / camelCase / kebab-case -> 'words like this')
 
 
 def tool_display(name):
-    """(friendly title, source or None) for a tool name. MCP tools are named
-    mcp__<server>__<tool>; the CLI gives nothing friendlier, so derive it:
-    mcp__github__create_issue -> ("Create issue", "GitHub")
-    mcp__claude_ai_Slack__slack_send_message -> ("Send message", "Slack")."""
-    if not name.startswith("mcp__") or name.count("__") < 2:
+    """(friendly title, source or None) for a tool name: an MCP server's tool (mcp__<server>__<tool>) as its server
+    and its tool are named (baudelib.toolnames: what they and its host say, else its name in words):
+    mcp__github__create_issue -> ("Create issue", "GitHub"); any other as it is."""
+    got = toolnames.describe(name)
+    if got is None:
         return name, None
-    _, server, tool = name.split("__", 2)
-    server = re.sub(r"^(claude_ai_|plugin_[^_]+_)", "", server)
-    if re.fullmatch(r"[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}", server):
-        source = wording.say("tool_calls.mcp")  # an unnamed connector: only an id
-    else:
-        source = MCP_SERVER_NAMES.get(server.lower()) or " ".join(
-            w[:1].upper() + w[1:] for w in humanize(server).split())
-    prefix = server.lower() + "_"
-    if tool.lower().startswith(prefix):  # slack_send_message on the Slack server
-        tool = tool[len(prefix):]
-    title = humanize(tool)
-    return (title[:1].upper() + title[1:]) or name, source
+    return got[1], got[0] or wording.say("tool_calls.mcp")  # (an unnamed connector: only an id)
+
+
+def tool_label(name):
+    """A tool's name as it's shown: an MCP server's tool as "Server / Tool" (mcp__mesh__tasks: Mesh / Tasks)."""
+    return toolnames.label(name, wording.say("tool_calls.mcp"))
 
 
 def tool_input_view(name, inp):
@@ -302,6 +289,10 @@ def tool_input_view(name, inp):
             text = html.escape(t.get("content") or t.get("activeForm") or "")
             add(sel_label(f"{mark}  <s>{text}</s>" if t.get("status") == "completed" else f"{mark}  {text}"))
         rest = None
+    elif base == "ToolSearch" and (picked := toolnames.selected(inp.get("query"))) is not None:
+        for n in picked:  # (the tools it loads, a line each, as their cards name them)
+            add(sel_label(html.escape(tool_label(n))))
+        rest = _kv_rows(inp, skip=("query",))
     else:
         rest = _kv_rows(inp)
     if rest:
@@ -653,15 +644,13 @@ class ToolCard(Gtk.Box):
         if self.decision == "denied":
             extra.append(wording.say("tool_calls.denied"))
         tail = "".join(f"  <span alpha='55%'>· {html.escape(e)}</span>" for e in extra)
-        title, source = tool_display(self.name)
-        self.title.set_markup(f"<b>{html.escape(title)}</b>")
-        src = f"<span alpha='55%'>{html.escape(source)}</span>  " if source else ""
+        self.title.set_markup(f"<b>{html.escape(tool_label(self.name))}</b>")
         shown = html.escape(s)
         if self.image_acts is not None and s and s == _first_line(self.input.get("file_path") or ""):
             shown = image_link_markup(s, self.image_acts)
         elif self.base in ("Grep", "Glob") and s and s == _first_line(self.input.get("pattern") or ""):
             shown = f"<tt>{shown}</tt>"  # (a pattern, as it's written: in the code's letters)
-        markup = f"{src}{shown}{tail}" if src or shown else tail.lstrip()  # (nothing before it: no gap)
+        markup = f"{shown}{tail}" if shown else tail.lstrip()  # (nothing before it: no gap)
         self.header.set_markup(markup)
         # (a selectable, ellipsized label given markup once it's shown draws it without the markup's look, GTK 4.24,
         # till its style next changes: the look given again as the label's own attributes)

@@ -127,6 +127,10 @@
     "telemetry": {
       "$ref": "TelemetryState.json",
       "description": "Its telemetry state: the apps on its machine tell it telemetry only while it's on, and profile what it says."
+    },
+    "tool_names": {
+      "$ref": "ToolNames.json",
+      "description": "How its MCP tools are named: what every head shows for one (\"Mesh / Tasks\")."
     }
   },
   "required": ["id"],

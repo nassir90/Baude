@@ -11,7 +11,7 @@ import threading
 import time
 import uuid
 
-from baudelib import wire, wording
+from baudelib import toolnames, wire, wording
 
 NAME = "mesh"  # (its tools are mcp__mesh__hosts, ...)
 META = "Meta"  # (a head's Meta, which is no chat on a host: what its messages are from, as a phone's Meta chat is)
@@ -615,8 +615,9 @@ def cut(parts):
     return text if len(text) <= TEXT_MAX else text[:TEXT_MAX] + f"\n(… {len(text) - TEXT_MAX} more characters)"
 
 
-def listed(schemas=None):
-    return [{"name": n, "description": d, "inputSchema": {"type": "object", "properties": props, "required": req}}
+def listed(schemas=None, server=NAME):
+    return [{"name": n, **({"title": t} if (t := toolnames.TITLES.get(server, {}).get(n)) else {}), "description": d,
+             "inputSchema": {"type": "object", "properties": props, "required": req}}
             for n, (d, props, req) in (schemas or SCHEMAS).items()]
 
 
@@ -661,9 +662,10 @@ def serve_tools(name, schemas, call, rfile=None, wfile=None, started=None):
                 started(msg.get("params") or {})
             send({"jsonrpc": "2.0", "id": mid, "result": {
                 "protocolVersion": (msg.get("params") or {}).get("protocolVersion") or "2025-06-18",
-                "capabilities": {"tools": {}}, "serverInfo": {"name": name, "version": "1"}}})
+                "capabilities": {"tools": {}},
+                "serverInfo": {"name": name, "title": toolnames.SERVERS.get(name, name), "version": "1"}}})
         elif method == "tools/list":
-            send({"jsonrpc": "2.0", "id": mid, "result": {"tools": listed(schemas)}})
+            send({"jsonrpc": "2.0", "id": mid, "result": {"tools": listed(schemas, name)}})
         elif method == "tools/call":
             p = msg.get("params") or {}
             threading.Thread(target=run, args=(mid, p.get("name"), p.get("arguments") or {}), daemon=True).start()

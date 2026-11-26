@@ -201,11 +201,25 @@ def make_repo(folder):
     return folder
 
 
-def make_kubeconfig(path):
+def kubeconfig_with(name, server):
+    """A kubeconfig of one context, name, on its own cluster at server (made-up credentials)."""
+    return (f"apiVersion: v1\nkind: Config\nclusters:\n- cluster:\n    server: {server}\n  name: {name}\ncontexts:\n"
+            f"- context:\n    cluster: {name}\n    user: {name}\n  name: {name}\nusers:\n- name: {name}\n  user:\n"
+            f"    token: {SECRETS[0]}\n")
+
+
+def make_kubeconfig(path, crowded=False):
+    """The kubeconfig, at path; with crowded, a second one beside it naming tests/fake_kubectl.py's crowded cluster
+    too: KUBECONFIG's value for them (both, by the path separator)."""
     with open(path, "w") as f:
         f.write(KUBECONFIG)
     os.chmod(path, 0o600)
-    return path
+    if not crowded:
+        return path
+    with open(path + "-crowded", "w") as f:
+        f.write(kubeconfig_with("crowded", "https://crowded.example.test:6443"))
+    os.chmod(path + "-crowded", 0o600)
+    return path + os.pathsep + path + "-crowded"
 
 
 def seed_home_history(context="k3d-dev", minutes=30, every=10):
@@ -228,8 +242,11 @@ def seed_home_history(context="k3d-dev", minutes=30, every=10):
         samples.append((now - (n - i) * every, {ns: (t[0], t[1] * f if t[1] is not None else None, t[3],
                                                      t[4] * f if t[4] is not None else None)
                                                 for ns, t in tally["namespaces"].items()}))
+    import lookupkube
+    c = next(c for c in lookupkube.kube_contexts() if c["name"] == context and not c.get("cluster_only"))
     with hostkube._HISTORY_LOCK:
-        hostkube._HISTORY[context] = {"asked": now, "tried": now - every, "read": None, "samples": samples}
+        h = hostkube._HISTORY[lookupkube.kube_key(c)] = hostkube._history(c, now - minutes * 60)
+        h["asked"], h["next"], h["samples"] = now, now + every, samples
 
 
 def records(folder, sid, steps=STEPS):

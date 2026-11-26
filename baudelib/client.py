@@ -16,7 +16,7 @@ import threading
 import time
 import urllib.parse
 
-from baudelib import claude, mesh, selfupdate, wire, wording
+from baudelib import claude, mesh, selfupdate, toolnames, wire, wording
 
 FORGET_S = 7 * 86400
 RETRY_S = (1, 2, 5, 10, 30)  # a dead host is tried again after these, then every last one
@@ -115,6 +115,7 @@ class Remote:
         cached = cached or {}
         self.network, self.key, self.where = network, key, dict(where)
         self.info = cached.get("info") or {}
+        toolnames.learn(self.info.get("tool_names"))  # (how its MCP tools are named: every chat's cards say them so)
         self.sessions = {s["id"]: s for s in cached.get("sessions") or [] if isinstance(s, dict) and wire.is_id(s.get("id"))}
         self.syncing = {}  # session id -> the lock its mirror's written under (sync); (id, "subagents"): its subagents'
         self.agents_synced = {}  # session id -> the subagents stamp it listed that its mirror's caught up with
@@ -238,6 +239,7 @@ class Remote:
             op = msg.get("op")
             if op == "sessions":
                 self.info = msg.get("server") or self.info
+                toolnames.learn(self.info.get("tool_names"))
                 # (this machine's Claude Desktop chats its host only lists: Baude lists them itself, from Desktop's
                 # own list, as its own claude runs them; Record has no chats)
                 self.sessions = {s["id"]: s for s in msg.get("sessions") or []

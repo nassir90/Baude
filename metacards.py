@@ -21,7 +21,7 @@ import widgets  # noqa: E402
 import refkinds  # noqa: E402
 import markdownview  # noqa: E402
 import chatparts  # noqa: E402
-from baudelib import wording  # noqa: E402
+from baudelib import toolnames, wording  # noqa: E402
 from baudelib.client import chat_name  # noqa: E402
 from meta import (  # noqa: E402
     CODE_LINES, COMMAND_TOOLS, EDIT_TOOLS, NAME, READ_TOOLS, REF_COLOR, REF_RE, api_doc, auto_mode_note, available,
@@ -161,9 +161,11 @@ class MetaCards:
 
     # ---- a tool call, as Baude's chat shows one
     def tool_title(self, name):
-        """A tool's name as its card says it: Claude Code's as they are (Read), Meta's own and the mesh's in words (Move
-        pages, Start subagent)."""
-        name = name.removeprefix("mcp__meta__").removeprefix("mcp__mesh__")
+        """A tool's name as its card says it: Claude Code's as they are (Read), Meta's own in words (Move pages), another
+        MCP server's as every chat's cards say it (Mesh / Start subagent)."""
+        name = name.removeprefix("mcp__meta__")
+        if name.startswith("mcp__"):
+            return toolnames.label(name, wording.say("tool_calls.mcp"))
         return name if name in READ_TOOLS + COMMAND_TOOLS else name.replace("_", " ").capitalize() if name else \
             wording.say("meta.tool_changes")
 

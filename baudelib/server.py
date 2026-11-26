@@ -26,7 +26,7 @@ import uuid
 
 from baudelib import (
     access, accounts, codex, desktopchats, emissionlink, mesh, phonebrowser, models, notes, providers, selfupdate, tasks,
-    telemetry, wire,
+    telemetry, toolnames, wire,
     wording,
 )
 from baudelib.serverstate import (
@@ -257,7 +257,8 @@ class Server(ServerRunning, ServerSessions):
                 "providers": self.mesh.providers_here(), "mesh": self.mesh.view(),
                 "notes": self.notes_seen,  # (Record's notebooks here, as written last: notes.stamp)
                 "edits": self.edits_seen,  # (the edits proposed to their pages, as written last: notes.edits_stamp)
-                "telemetry": self.telemetry.state()}  # (on or off, and what each process here profiles: its apps follow it)
+                "telemetry": self.telemetry.state(),  # (on or off, and what each process here profiles: its apps follow it)
+                "tool_names": toolnames.table(self.me.get("mcp_servers") or ())}  # (how its MCP tools are named)
 
     def made_of(self, commit):
         """When commit was made, in seconds, as git here has it (None: it hasn't it), kept once asked."""

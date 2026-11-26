@@ -13,6 +13,11 @@
         "type": "string"
       },
       "description": "Each column's text."
+    },
+    "keys": {
+      "type": "array",
+      "items": {},
+      "description": "Each column's number (the name's, its text in lower case), or null where there's none (no limit set, nothing requested, no metrics API): what it's sorted by, and what an \"Other (n)\" row adds up."
     }
   },
   "additionalProperties": false

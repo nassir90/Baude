@@ -8,7 +8,8 @@
   ],
   "code": [
     "recordwindow.py:Window.__init__",
-    "recordhosts.py:RecordHosts.restart_host"
+    "recordhosts.py:RecordHosts.restart_host",
+    "subscriptionpage.py:MenuUsage"
   ],
   "copy": [
     "window",
@@ -18,7 +19,8 @@
     "fixes",
     "code_apart",
     "meta_settings",
-    "hosts"
+    "hosts",
+    "subscriptions"
   ],
   "parts": [
     {
@@ -114,6 +116,37 @@
         {
           "by": "click",
           "does": "Opens the Terminal view over the window, with a terminal on the host picked in the notebooks' host dropdown if it has none."
+        }
+      ]
+    },
+    {
+      "name": "Usage",
+      "shows": "A section of its own, after the views over the window: the current Claude subscription on the host picked beside New session (the one a new chat there takes; \"CLI default\" for the CLI's own sign-in) by name, then each of its limits as its Subscriptions card shows them: Five Hour Limit (Resets <time>) and Weekly Limit (Resets <day> <time>), its percentage at the right and its bar under it. Its words start where the menu's items' do. Read from the host as the menu opens (again once 30 seconds have passed); till that answers, the host's last reading greyed, or \"Checking…\". An error, or \"Usage unavailable for this sign-in\", in its place. Not shown where the host has no Claude subscription.",
+      "copy": [
+        "subscriptions.cli_default",
+        "subscriptions.five_hour_limit",
+        "subscriptions.weekly_limit",
+        "subscriptions.weekly_limit_today",
+        "subscriptions.usage_percent",
+        "subscriptions.checking",
+        "subscriptions.usage_unavailable"
+      ],
+      "actions": [
+        {
+          "by": "click",
+          "does": "Opens Settings on its Subscriptions page"
+        }
+      ],
+      "decisions": [
+        {
+          "said": "Usage needs to be available directly in the ☰ menu (paraphrased)",
+          "rule": "Every app's main menu shows the current subscription's usage, its five-hour and weekly limits, inline, without opening Settings; a click on it opens Settings → Subscriptions",
+          "decided": "2026-11-26",
+          "source": [
+            {
+              "issue": "BaudeInternal#270"
+            }
+          ]
         }
       ]
     },

@@ -357,7 +357,7 @@ fun sections(query: String): List<Section> {
 @Composable
 fun Home(open: (String, String) -> Unit, feedback: () -> Unit, phone: () -> Unit = {},
          settings: () -> Unit = {}, mesh: () -> Unit = {}, changelog: () -> Unit = {}, fixes: () -> Unit = {},
-         tool: (String, String) -> Unit = { _, _ -> }, note: @Composable () -> Unit = {}) {
+         tool: (String, String) -> Unit = { _, _ -> }, subscriptions: () -> Unit = {}, note: @Composable () -> Unit = {}) {
     val c = LocalBaude.current
     val ctx = androidx.compose.ui.platform.LocalContext.current
     LaunchedEffect(Unit) { HomePrefs.load(ctx) }
@@ -389,7 +389,7 @@ fun Home(open: (String, String) -> Unit, feedback: () -> Unit, phone: () -> Unit
     Column(Modifier.fillMaxSize()) {
         Bar("Baude", left = true, end = {
             IconButton(Adwaita.Phone, Wording.ThisPhone.title, onClick = phone) // (its own agents: PhoneScreen)
-            HomeMenu(settings, changelog, mesh, feedback, fixes, tool)
+            HomeMenu(settings, changelog, mesh, feedback, fixes, tool, subscriptions)
         })
         note()
         if (Mesh.hosts.isEmpty()) GreyBanner("Add a host to see its sessions.", onClick = { adding = true })

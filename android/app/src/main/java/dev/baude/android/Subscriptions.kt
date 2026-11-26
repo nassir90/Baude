@@ -220,24 +220,83 @@ private fun SubscriptionCard(name: String, a: Msg.Account?, usage: HostAccounts.
             Text(name, style = Type.body, color = c.fg, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
             if (a != null) AccountMenu(a, pick)
         }
-        val stale = usage == null && last != null
-        if (claude) Column(Modifier.padding(end = 6.dp).alpha(if (stale) Tokens.Subscriptions.staleOpacity.toFloat() else 1f),
-            verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            val limits = if (stale) last else usage?.limits
-            if (limits == null) Text(usage?.said ?: Wording.Subscriptions.checking, style = Type.body, color = c.dim)
-            else for (l in limits) {
-                val percent = l.percent
-                Row(Modifier.fillMaxWidth()) {
-                    Text(limitLabel(l), style = Type.body, color = c.fg, modifier = Modifier.weight(1f))
-                    Text(Wording.Subscriptions.usagePercent(percent = "%.4g".format(java.util.Locale.ROOT, percent)
-                        .trimEnd('0').trimEnd('.')), style = Type.body, color = c.dim)
-                }
-                Box(Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(50)).background(c.fg.copy(alpha = 0.15f))) {
-                    Box(Modifier.fillMaxWidth((percent / 100).toFloat().coerceIn(0f, 1f)).fillMaxHeight().clip(RoundedCornerShape(50))
-                        .background(c.accentBg))
-                }
+        if (claude) UsageBars(usage, last, Modifier.padding(end = 6.dp))
+    }
+}
+
+/** A subscription's usage (a Subscriptions card's, and ⋮'s usage row's): a line for each limit, its name and percentage,
+ * its bar under it; else what was said instead. Till it's read, what the host last read (last) greyed (Checking… where
+ * it has none). */
+@Composable
+private fun UsageBars(usage: HostAccounts.Usage?, last: List<HostAccounts.Limit>?, modifier: Modifier = Modifier) {
+    val c = LocalBaude.current
+    val stale = usage == null && last != null
+    Column(modifier.alpha(if (stale) Tokens.Subscriptions.staleOpacity.toFloat() else 1f),
+        verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        val limits = if (stale) last else usage?.limits
+        if (limits == null) Text(usage?.said ?: Wording.Subscriptions.checking, style = Type.body, color = c.dim)
+        else for (l in limits) {
+            val percent = l.percent
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(limitLabel(l), style = Type.body, color = c.fg, modifier = Modifier.weight(1f))
+                Text(Wording.Subscriptions.usagePercent(percent = "%.4g".format(java.util.Locale.ROOT, percent)
+                    .trimEnd('0').trimEnd('.')), style = Type.body, color = c.dim)
+            }
+            Box(Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(50)).background(c.fg.copy(alpha = 0.15f))) {
+                Box(Modifier.fillMaxWidth((percent / 100).toFloat().coerceIn(0f, 1f)).fillMaxHeight().clip(RoundedCornerShape(50))
+                    .background(c.accentBg))
             }
         }
+    }
+}
+
+/** ⋮'s usage row (subscriptionpage.MenuUsage): the current Claude subscription on the host picked beside New session (the
+ * one a new chat there takes), its name, then its limits as its Subscriptions card has them, read as ⋮ opens (again once
+ * USAGE_S has passed); the host's last reading greyed till then. Nothing where the host has no Claude subscription. Its
+ * menu item opens Settings → Subscriptions as it's tapped (MainMenu). */
+@Composable
+fun MenuUsage() {
+    val c = LocalBaude.current
+    val hostId = picked()?.takeIf { it != "phone" } ?: Mesh.hosts.firstOrNull()?.id ?: return
+    val host = MenuUsageHosts.of(hostId)
+    LaunchedEffect(hostId) {
+        Mesh.ask(hostId, Msg.Accounts(what = "list").json()) { r ->
+            host.took(r)?.let { e -> host.error.value = e }
+            val id = MenuUsageHosts.profile(host) ?: return@ask
+            if (System.currentTimeMillis() - (MenuUsageHosts.readAt[hostId] ?: 0L) >= HostAccounts.USAGE_S * 1000L) {
+                MenuUsageHosts.readAt[hostId] = System.currentTimeMillis()
+                host.usage.remove(id)
+                host.readUsage(listOf(id))
+            }
+        }
+    }
+    if (!host.loaded.value && host.error.value == null) return
+    val id = MenuUsageHosts.profile(host)
+    if (host.error.value == null && id == null) return
+    val name = host.accounts.value.firstOrNull { it.provider == "claude" && it.id.orEmpty() == id }?.name ?: Wording.Subscriptions.cliDefault
+    Column(Modifier.fillMaxWidth().padding(start = menuTextStart(), end = Popups.inset, top = 8.dp, bottom = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        val error = host.error.value
+        if (error != null) Text(error, style = Type.body, color = c.dim)
+        else {
+            Text(name, style = Type.bold, color = c.fg, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            UsageBars(host.usage[id], host.last.value[id])
+        }
+    }
+}
+
+/** ⋮'s usage row's hosts' accounts, kept between its openings (as the desktop's row keeps its reading), and when each
+ * was last read. */
+object MenuUsageHosts {
+    private val hosts = HashMap<String, HostAccounts>()
+    val readAt = HashMap<String, Long>()
+    fun of(id: String) = hosts.getOrPut(id) { HostAccounts(id) }
+
+    /** The current Claude subscription's id ("" the CLI's own sign-in), or null where the host has none. */
+    fun profile(h: HostAccounts): String? {
+        val id = h.defaults.value["claude"].orEmpty()
+        val account = h.accounts.value.any { it.provider == "claude" && it.id.orEmpty() == id && id != "" }
+        return if (account) id else if (h.claudeCli.value) "" else null
     }
 }
 

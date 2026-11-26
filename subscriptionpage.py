@@ -293,24 +293,12 @@ class Page(Adw.PreferencesPage):
         bars = self.bars.get(profile)
         if bars is None:
             return
-        while (child := bars.get_first_child()) is not None:
-            bars.remove(child)
         read = self.usage.get(profile)
         stale = read is None and profile in self.last
         bars.set_opacity(STALE_OPACITY if stale else 1)
         if stale:
             read = self.last[profile]
-        if not isinstance(read, list):
-            bars.append(Gtk.Label(label=read or wording.say("subscriptions.checking"), xalign=0, wrap=True,
-                                  css_classes=["dim-label"]))
-            return
-        for key, name, percent, resets in read:
-            line = Gtk.Box(spacing=8)
-            line.append(Gtk.Label(label=limit_label(key, name, resets), xalign=0, hexpand=True, wrap=True))
-            line.append(Gtk.Label(label=wording.say("subscriptions.usage_percent", percent=f"{percent:g}"),
-                                  css_classes=["dim-label", "numeric"]))
-            bars.append(line)
-            bars.append(Gtk.ProgressBar(fraction=max(0.0, min(1.0, percent / 100))))
+        usage_lines(bars, read)
 
     def account_menu(self, account):
         actions = Gio.SimpleActionGroup()
@@ -394,6 +382,138 @@ class Page(Adw.PreferencesPage):
                     self.usage[profile] = wording.say("subscriptions.usage_unavailable")
                 self.fill_bars(profile)
             self.ask({"what": "usage", "id": profile}, done)
+
+
+def usage_lines(box, read):
+    """read (a subscription's limits [(key, name, percent, resets)], or what to say instead) drawn into box: a line for
+    each limit, its name and percentage, its bar under it (a Subscriptions card's, and ☰'s usage row's)."""
+    while (child := box.get_first_child()) is not None:
+        box.remove(child)
+    if not isinstance(read, list):
+        box.append(Gtk.Label(label=read or wording.say("subscriptions.checking"), xalign=0, wrap=True,
+                             css_classes=["dim-label"]))
+        return
+    for key, name, percent, resets in read:
+        line = Gtk.Box(spacing=8)
+        line.append(Gtk.Label(label=limit_label(key, name, resets), xalign=0, hexpand=True, wrap=True))
+        line.append(Gtk.Label(label=wording.say("subscriptions.usage_percent", percent=f"{percent:g}"),
+                              css_classes=["dim-label", "numeric"]))
+        box.append(line)
+        box.append(Gtk.ProgressBar(fraction=max(0.0, min(1.0, percent / 100))))
+
+
+def open_subscriptions(win):
+    """Settings opened (Baude's or Record's, its win.settings) on its Subscriptions page."""
+    win.activate_action("win.settings", None)
+    dialog = win.get_visible_dialog()
+    if isinstance(dialog, Adw.PreferencesDialog):
+        page = next((p for p in _pages(dialog) if isinstance(p, Page)), None)
+        if page is not None:
+            dialog.set_visible_page(page)
+
+
+def _pages(dialog):
+    from widgets import walk
+    return [w for w in walk(dialog) if isinstance(w, Adw.PreferencesPage)]
+
+
+class MenuUsage(Gtk.Button):
+    """☰'s usage row (Baude's and Record's): the current Claude subscription on the host picked beside New session (the
+    one a new chat there takes), its name, then each limit's name, percentage and bar as its Subscriptions card has them,
+    read as ☰ opens (again once USAGE_S has passed); the host's last reading greyed till then. Hidden where the host has
+    no Claude subscription. A click opens Settings → Subscriptions. Holds its window weakly."""
+
+    def __init__(self, win, popover):
+        super().__init__(css_classes=["flat", "baude-menu-usage"])
+        import weakref
+        self.win = weakref.ref(win)
+        inside = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, margin_top=4, margin_bottom=4)
+        self.name = Gtk.Label(xalign=0, ellipsize=3, css_classes=["heading"])
+        self.bars = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        inside.append(self.name)
+        inside.append(self.bars)
+        self.set_child(inside)
+        self.read_at, self.where, self.asking, self.profile = 0.0, None, False, None
+        self.connect("clicked", MenuUsage._clicked, popover)
+        popover.connect("show", lambda *_: self.refresh())
+        self.set_visible(False)
+
+    @staticmethod
+    def _clicked(self, popover):
+        popover.popdown()
+        if (win := self.win()) is not None:
+            open_subscriptions(win)
+
+    def refresh(self):
+        import time
+        win = self.win()
+        if win is None or self.asking:
+            return
+        where, _name = win.terminal_host()
+        if where == self.where and time.monotonic() - self.read_at < USAGE_S:
+            return
+        if where != self.where:
+            self.where, self.profile = where, None
+            self.set_visible(False)
+        self.asking = True
+        Ask(where, {"what": "list"}, lambda reply, where=where: self.listed(where, reply))
+
+    def listed(self, where, reply):
+        if where != self.where:
+            self.asking = False
+            return False
+        if reply.get("error") or "accounts" not in reply:
+            self.asking = False
+            self.show_read(None, reply.get("error") or wording.say("host_status.no_answer"))
+            return False
+        accounts = [a for a in reply["accounts"] if a.get("provider") == "claude"]
+        profile = (reply.get("defaults") or {}).get("claude", "")
+        account = next((a for a in accounts if a["id"] == profile), None)
+        if account is None:
+            profile = ""
+        if account is None and not reply.get("claude_cli", True):
+            self.asking = False
+            self.set_visible(False)
+            return False
+        self.profile = profile
+        self.name.set_label(account["name"] if account else wording.say("subscriptions.cli_default"))
+        last = (reply.get("last_usage") or {}).get(profile)
+        if last and last.get("usage") and self.read_at == 0.0:
+            self.show_read(_limits(last["usage"]), None, stale=True)
+        elif not self.get_visible():
+            self.show_read(None, None)
+        Ask(where, {"what": "usage", "id": profile}, lambda r, where=where, profile=profile: self.read(where, profile, r))
+        return False
+
+    def read(self, where, profile, reply):
+        import time
+        self.asking = False
+        if where != self.where or profile != self.profile:
+            return False
+        self.read_at = time.monotonic()
+        if reply.get("error"):
+            self.show_read(None, reply["error"])
+        elif reply.get("usage"):
+            self.show_read(_limits(reply["usage"]), None)
+        else:
+            self.show_read(None, wording.say("subscriptions.usage_unavailable"))
+        return False
+
+    def show_read(self, limits, said, stale=False):
+        self.bars.set_opacity(STALE_OPACITY if stale else 1)
+        usage_lines(self.bars, limits if limits is not None else said)
+        self.set_visible(True)
+
+
+def attach_menu_usage(win, menu_button, section):
+    """☰'s usage row put first in section (a Gio.Menu of menu_button's model): a MenuUsage in its popover."""
+    item = Gio.MenuItem()
+    item.set_attribute_value("custom", GLib.Variant.new_string("usage"))
+    section.prepend_item(item)
+    popover = menu_button.get_popover()
+    usage = MenuUsage(win, popover)
+    popover.add_child(usage, "usage")
+    return usage
 
 
 def _limits(usage):

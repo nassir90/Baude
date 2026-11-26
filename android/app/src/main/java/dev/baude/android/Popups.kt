@@ -242,6 +242,12 @@ private fun Tick(on: Boolean, enabled: Boolean = true) {
     else Spacer(Modifier.size(16.dp.icon))
 }
 
+/** Where a menu's rows' words start, from its side: past its check column where it has one (a row of its own drawing,
+ * in line with the others: ⋮'s usage row). */
+@Composable
+fun menuTextStart(): androidx.compose.ui.unit.Dp =
+    if (LocalTicks.current == Ticks.START) Popups.inset + 16.dp.icon + Popups.gap else Popups.inset
+
 /** A menu's heading: small, bold and dim, where its rows' first things are. */
 @Composable
 fun MenuHeading(text: String) {

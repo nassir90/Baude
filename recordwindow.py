@@ -290,6 +290,8 @@ class Window(RecordHosts, Adw.ApplicationWindow, feedback.FeedbackHost, viewers.
             tools.append(title, f"win.viewer::{page}")
         tools.append(wording.say("multiplex.terminal_menu"), "win.viewer::terminal")
         menu.append_section(None, tools)
+        usage = Gio.Menu()  # (the current subscription's usage: subscriptionpage.attach_menu_usage)
+        menu.append_section(None, usage)
         app_menu = Gio.Menu()
         item = Gio.MenuItem.new(wording.say("window.settings"), "win.settings")
         item.set_attribute_value("accel", GLib.Variant.new_string(widgets.SETTINGS_KEY))
@@ -304,6 +306,8 @@ class Window(RecordHosts, Adw.ApplicationWindow, feedback.FeedbackHost, viewers.
         app_menu.append(wording.say("code_apart.restart_daemon"), "win.restartdaemon")
         menu.append_section(None, app_menu)
         menu_btn = self.menu_button = Gtk.MenuButton(icon_name="open-menu-symbolic", menu_model=menu)
+        import subscriptionpage
+        subscriptionpage.attach_menu_usage(self, menu_btn, usage)  # (the current subscription's usage, Baude's too)
         for name, fn in (("openchat", self.choose_chat), ("copylink", self.tabs.copy_link), ("copyreport", self.copy_report),
                          ("rename", self.rename),
                          ("export", lambda: self.current and self.ask_export([self.current], self.current["name"])),

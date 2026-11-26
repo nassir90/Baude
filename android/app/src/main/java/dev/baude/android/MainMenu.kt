@@ -1,16 +1,19 @@
 package dev.baude.android
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 
 /** An item of the main menu: its label, a check mark where it's a toggle (checked: whether it's on; null: it isn't
  * one), whether it can be picked (greyed if not), and what it does. */
-class MenuItem(val label: String, val checked: Boolean? = null, val enabled: Boolean = true, val go: () -> Unit)
+class MenuItem(val label: String, val checked: Boolean? = null, val enabled: Boolean = true,
+               val content: (@Composable () -> Unit)? = null, val go: () -> Unit)
 
 /** ☰'s main menu, as the header bar's: sections of one-line items with a rule between them (as Baude's and Record's:
  * the chat's, the view's, the views over the window, the app's); with a toggle among them every item has a column for
@@ -24,9 +27,13 @@ fun MainMenu(sections: List<List<MenuItem>>) {
         Popover(open, { open = false }, ticks = if (shown.flatten().any { it.checked != null }) Ticks.START else Ticks.NONE) {
             shown.forEachIndexed { i, items ->
                 if (i > 0) MenuDivider()
-                for (item in items) MenuChoice(item.label, item.checked == true, enabled = item.enabled) {
-                    open = false
-                    item.go()
+                for (item in items) {
+                    val content = item.content
+                    if (content != null) Box(Modifier.clickable { open = false; item.go() }) { content() }
+                    else MenuChoice(item.label, item.checked == true, enabled = item.enabled) {
+                        open = false
+                        item.go()
+                    }
                 }
             }
         }
@@ -67,6 +74,7 @@ fun ChatMenu(hostId: String, sid: String, feedback: () -> Unit, screen: (String)
             if (takes(hostId, "databases")) MenuItem(Wording.Window.databaseSchemas) { screen("databases") } else null,
             if (takes(hostId, "terminal")) MenuItem(Wording.Multiplex.terminalMenu) { screen("terminal") } else null,
         ),
+        listOf(usage { screen("subscriptions") }),
         listOf(
             MenuItem(Wording.Window.settings) { screen("settings") },
             MenuItem(Wording.Changelog.title) { screen("changelog") },
@@ -82,7 +90,7 @@ fun ChatMenu(hostId: String, sid: String, feedback: () -> Unit, screen: (String)
  * one of "kubernetes", "docker", "databases" and "terminal" on a host. */
 @Composable
 fun HomeMenu(settings: () -> Unit, changelog: () -> Unit, mesh: () -> Unit, feedback: () -> Unit, fixes: () -> Unit,
-             tool: (String, String) -> Unit = { _, _ -> }) {
+             tool: (String, String) -> Unit = { _, _ -> }, subscriptions: () -> Unit = {}) {
     val host = picked()?.takeIf { it != "phone" }
     MainMenu(listOf(
         listOf(fullWidth()),
@@ -92,6 +100,7 @@ fun HomeMenu(settings: () -> Unit, changelog: () -> Unit, mesh: () -> Unit, feed
             if (takes(host, "databases")) MenuItem(Wording.Window.databaseSchemas) { tool("databases", host) } else null,
             if (takes(host, "terminal")) MenuItem(Wording.Multiplex.terminalMenu) { tool("terminal", host) } else null,
         ),
+        listOf(usage(subscriptions)),
         listOf(
             MenuItem(Wording.Window.settings) { settings() },
             MenuItem(Wording.Changelog.title) { changelog() },
@@ -101,6 +110,9 @@ fun HomeMenu(settings: () -> Unit, changelog: () -> Unit, mesh: () -> Unit, feed
         ),
     ))
 }
+
+/** ☰'s usage row (MenuUsage): the current subscription's usage; tapped, Settings → Subscriptions (go). */
+private fun usage(go: () -> Unit) = MenuItem(Wording.Subscriptions.title, content = { MenuUsage() }, go = go)
 
 /** Whether a chat is archived on its host: read-only till it's unarchived (baudewindow's chat_archived). */
 fun isArchived(hostId: String, sid: String) = sid.isNotEmpty() && Mesh.session(hostId, sid)?.archived == true

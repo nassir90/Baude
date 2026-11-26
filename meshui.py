@@ -212,7 +212,7 @@ def restart_dialog(remote, parent, ask, see=None):
     box.set_placeholder(Gtk.Label(label=wording.say("hosts.restart_nothing"), css_classes=["dim-label"],
                                   margin_top=12, margin_bottom=12))
     scroll = Gtk.ScrolledWindow(child=box, propagate_natural_height=True, max_content_height=320,
-                                hscrollbar_policy=Gtk.PolicyType.NEVER)
+                                hscrollbar_policy=Gtk.PolicyType.NEVER, width_request=560)
     dlg = Adw.AlertDialog(heading=wording.say("hosts.restart_blockers"), extra_child=scroll,
                           default_response="restart", close_response="close", prefer_wide_layout=True)
     dlg.add_response("force", wording.say("hosts.force_restart"))
@@ -239,8 +239,9 @@ def restart_dialog(remote, parent, ask, see=None):
         while (row := box.get_row_at_index(0)) is not None:
             box.remove(row)
         for b in blockers:
-            row = Adw.ActionRow(title=b.get("name") or b.get("what") or "", use_markup=False,
-                                tooltip_text=b.get("what") or None)
+            title = b.get("name") or b.get("what") or ""
+            row = Adw.ActionRow(title=title, title_lines=1, use_markup=False,
+                                tooltip_text="\n".join(dict.fromkeys(filter(None, (title, b.get("what"))))) or None)
             row.add_prefix(Gtk.Image(icon_name=BLOCKER_ICONS.get(b.get("kind"), "utilities-terminal-symbolic")))
             if see is not None and (b.get("session") or b.get("terminal")):
                 go = Gtk.Button(label=wording.say("hosts.see_thread"), valign=Gtk.Align.CENTER)

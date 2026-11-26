@@ -100,6 +100,8 @@ OPS = {"tabs_context": "tabs", "tabs_create": "new_tab", "navigate": "navigate",
 ARGS = {"tabId": "tab", "ref_id": "ref"}  # (the tools' arguments, named as Claude in Chrome's: the ops' names for them)
 NAMING_TABS = ("tabs", "prompts")  # (an answer's lists whose entries name a tab: tabId there, as at its top)
 HOST_OPS = {*OPS.values(), "sites", "select_tab"}  # (what a host passes on to a Bot's Emission: its tools' requests, nothing else)
+PANE_OPS = {"tabs", "navigate", "new_tab", "close_tab", "select_tab", "click", "hover", "drag", "type", "key", "scroll",
+            "answer_prompt"}  # (what a Browser pane does with someone's own Emission window it watches: ☰ → Browser elsewhere)
 
 
 class Browser:

@@ -16,7 +16,9 @@
     "windowdrafts.py:WindowDrafts.sender_bubble",
     "windowdrafts.py:WindowDrafts.senders_came",
     "baudelib/wire.py:sender_name",
-    "baudelib/autofix.py:send"
+    "baudelib/autofix.py:send",
+    "windowdrafts.py:WindowDrafts.open_sender",
+    "baudelib/wire.py:sender_about"
   ],
   "copy": [
     "senders",
@@ -26,11 +28,11 @@
   "parts": [
     {
       "name": "bubble",
-      "shows": "A sent-message bubble (right-aligned, 12px corners, attachments then markdown text), filled with the text colour at 7% (grey) instead of the accent; its text in the normal colour (not dimmed like a queued one). The hidden line the host puts at the head of the text for the agent (\"A message from …, not from your user\") is never shown; if the host says what to show of it (a held answer), that is shown instead of the full text."
+      "shows": "A sent-message bubble (right-aligned, 12px corners, attachments then markdown text), filled with the text colour at 7% (grey) instead of the accent; its text in the normal colour (not dimmed like a queued one). The hidden line the host puts at the head of the text for the agent (\"A message from …, not from your user\") is never shown; if the host says what to show of it (a held answer), that is shown instead of the full text. A chat a Bot's task's run started telling the Bot what it said: the bubble is only that chat's own words, never a line of the app's around them; what the task and run were and how the turn ended go in the from line, and the Bot's agent is told them in the hidden line."
     },
     {
       "name": "from line",
-      "shows": "At the top of the bubble, right-aligned, wrapping: \"from <who>\" at 0.85em and 60% opacity. <who> is: \"<name>, a Bot\" (or \"a Bot, a Bot\" without a name); \"“<chat title>”\" (or \"a chat\"); \"subagent “<name>”\" (or \"a subagent\"); a host's name (or \"a host\"); another kind by its name (or \"another\"). For anything but a host, \" on <host>\" follows when the sender's host is known, e.g. \"from Ada, a Bot on lab-mac\".",
+      "shows": "At the top of the bubble, right-aligned, wrapping: \"from <who>\" at 0.85em and 60% opacity. <who> is: \"<name>, a Bot\" (or \"a Bot, a Bot\" without a name); \"“<chat title>”\" (or \"a chat\"); \"subagent “<name>”\" (or \"a subagent\"); a host's name (or \"a host\"); another kind by its name (or \"another\"). For anything but a host, \" on <host>\" follows when the sender's host is known, e.g. \"from Ada, a Bot on lab-mac\". When the sender names a chat (a Bot, a chat, a subagent: its session), the line is a link (underlined, link colour): it opens that chat on its host. A task's run's (a host sender naming a run: what a run sends a chat it starts, and its asks of its Bot) opens the run's Bot's chat on its Tasks page, at that run. A chat a task's run started, telling its Bot what it said (a subagent sender naming the run's Bot, task and run, and how its turn ended), adds \" · <task> run\" (a link: the run, on the Bot's Tasks page, its task's page under it, so Back goes to that task) and \" · finished\" (or \"stopped\", \"failed\"), each joined by \" · \", e.g. \"from subagent “Why the deploy failed” on lab-mac · Deploy site run · finished\"; its name is a link to its chat. A task's own line in a chat its run started (\"from Task “Deploy site”\") and on its asks of its Bot is a link to the run.",
       "copy": [
         "common.from_who",
         "senders.bot",
@@ -41,7 +43,21 @@
         "senders.subagent_unnamed",
         "senders.host_unnamed",
         "senders.another",
-        "senders.on"
+        "senders.on",
+        "senders.task_run",
+        "task_notes.finished",
+        "task_notes.stopped",
+        "task_notes.failed"
+      ],
+      "actions": [
+        {
+          "by": "click",
+          "does": "on who it's from: opens the chat it's from (a task's: its Bot's Tasks page at that run, its task's page under it)"
+        },
+        {
+          "by": "click",
+          "does": "on \"<task> run\": opens the run's Bot's chat on its Tasks page at that run, its task's page under it"
+        }
       ]
     },
     {
@@ -74,7 +90,37 @@
       "said": "Sure fix (2)",
       "rule": "A message an agent outside the apps (baude-mcp's message_chat) sends a chat carries its name as the sender (as_agent) and is drawn as from it, not as the user's, as Meta's are.",
       "decided": "2026-11-25",
-      "source": [{"issue": "BaudeInternal#200"}, {"session": "b3845b21-55ac-4aab-a769-fb8517403c51", "message": "868770b1-06c0-44a3-bdb9-c1851cf4b39a"}]
+      "source": [
+        {
+          "issue": "BaudeInternal#200"
+        },
+        {
+          "session": "b3845b21-55ac-4aab-a769-fb8517403c51",
+          "message": "868770b1-06c0-44a3-bdb9-c1851cf4b39a"
+        }
+      ]
+    },
+    {
+      "said": "* Philosophy: I have a deployment tak that fallsback to a oneshot agent when teh deploy fails. But the oneshot agent spawned outside of the bot which is not ideal, and did not keep in touch with the bot either.",
+      "rule": "Every app's from line links to the chat a message is from, so a Bot told what a task's agent said can open that agent's chat, and that agent's chat can open the run that started it",
+      "decided": "2026-11-26",
+      "source": [
+        {
+          "session": "b3845b21-55ac-4aab-a769-fb8517403c51",
+          "message": "ded3957e-f255-4438-b4b3-ff7e69adeb1d"
+        }
+      ]
+    },
+    {
+      "said": "Dont really like how the oneshot messages mix. agent text and template text",
+      "rule": "Every app shows a message a chat a task's run started sends its Bot as only that chat's own words. The context (the chat, a link; the task's run, a link; finished, stopped or failed) is in the from line, and the Bot's agent gets it in the sender's hidden line (baude-sender), not as text of the message. That chat's own first message shows the task's prompt as it is, from \"Task “<name>”\"",
+      "decided": "2026-11-26",
+      "source": [
+        {
+          "session": "b3845b21-55ac-4aab-a769-fb8517403c51",
+          "message": "31423098-8f2b-428f-aa29-cd83b2005272"
+        }
+      ]
     }
   ],
   "scenes": []

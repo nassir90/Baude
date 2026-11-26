@@ -221,12 +221,12 @@ One of a host's access rules set (capability: the rule's name), or a chat's own 
 
 #### `accounts` (Accounts)
 
-The host's Claude and Codex subscription accounts (hostaccounts): list them; add one (Claude: name and an existing signed-in config folder, or name and token where the host has no claude; Codex: name and an existing signed-in home); rename one (id, name); replace a token account's token (id, token); remove one (id); select a provider's default for new chats (provider, id; "" for the CLI's own sign-in); use another for a chat (session, id; "" for the CLI's own sign-in: its agent started again under it, resuming the chat, once its turn's over); read a subscription's usage (id; "" for the CLI's own sign-in); sign in (sign_in: provider and name for a new account, or id to sign in to one again; Claude's runs claude auth login with the account's own folder, its lines coming as they're written, the page to open among them; Codex's codex login (method: the browser's, by default, or the device code's), its state coming as it goes (login: the page to open, and the device code's code to enter there); then its end; the connection's going stops it); pass a code the sign-in page showed to the sign-in this connection runs (code: no answer of its own); pass the address a browser ended on after a Codex browser sign-in's page to the one this connection runs (callback: url; answered with the page codex's server gave, or error). Each other is answered with accounts.
+The host's Claude and Codex subscription accounts (hostaccounts): list them; add one (Claude: name and an existing signed-in config folder, or name and token where the host has no claude; Codex: name and an existing signed-in home); rename one (id, name); replace a token account's token (id, token); remove one (id); select a provider's default for new chats (provider, id; "" for the CLI's own sign-in); use another for a chat (session, id; "" for the CLI's own sign-in: its agent started again under it, resuming the chat, once its turn's over); read a subscription's usage (id; "" for the CLI's own sign-in of provider, Claude's where none is said); sign in (sign_in: provider and name for a new account, or id to sign in to one again; Claude's runs claude auth login with the account's own folder, its lines coming as they're written, the page to open among them; Codex's codex login (method: the browser's, by default, or the device code's), its state coming as it goes (login: the page to open, and the device code's code to enter there); then its end; the connection's going stops it); pass a code the sign-in page showed to the sign-in this connection runs (code: no answer of its own); pass the address a browser ended on after a Codex browser sign-in's page to the one this connection runs (callback: url; answered with the page codex's server gave, or error). Each other is answered with accounts.
 
 | Field | Type | Required | What it is |
 |---|---|---|---|
 | `what` | `list` \| `add` \| `rename` \| `token` \| `remove` \| `select` \| `use` \| `usage` \| `sign_in` \| `code` \| `callback` | yes | What to do. |
-| `provider` | `claude` \| `codex` |  | add, select, sign_in (a new account): whose. |
+| `provider` | `claude` \| `codex` |  | add, select, sign_in (a new account): whose. usage with id "": whose CLI's own sign-in (Claude's where left out). |
 | `id` | string |  | rename, token, remove, select, use, usage, sign_in: the account ("" for the CLI's own sign-in, select, use and usage only). |
 | `session` | string |  | use: the chat whose account it is, one of the host's sessions whose model is the account's provider's. sign_in (a Claude account's) and token: the chat it's for, whose sign-in (ChatLogin) its host moves as it goes, as a login request's, if the asker may read the chat (Agent Management's read). |
 | `name` | string |  | add, rename, sign_in (a new account): its name. |
@@ -485,6 +485,7 @@ A Bot's browser tool's request (baudelib.emissiontools) to the Emission that has
 | Field | Type | Required | What it is |
 |---|---|---|---|
 | `bot` | BotRef |  | The Bot. |
+| `default` | boolean |  | The call is to Emission's own window here on its Default profile instead of a Bot's (☰ → Browser from another host, watched): what a Browser pane does (tabs, navigate, new_tab, close_tab, select_tab, click, hover, drag, type, key, scroll, answer_prompt), nothing else. |
 | `call` | object |  | The tool's request. |
 
 #### `emission_answer` (EmissionAnswer)
@@ -515,6 +516,7 @@ A Bot's browser here watched (Baude's Browser pane): one a connection.
 | Field | Type | Required | What it is |
 |---|---|---|---|
 | `bot` | BotRef |  | The Bot. |
+| `default` | boolean |  | Emission's own window here watched instead of a Bot's, on its Default profile (☰ → Browser from another host): started (on this host's screen) if none has the profile; checked for browser_write. |
 | `max_w` | integer |  | The pane's width. |
 | `max_h` | integer |  | The pane's height. |
 
@@ -888,6 +890,9 @@ A new session. Its prompt is sent once it's begun.
 | `attach` | boolean |  | This connection's attached live to it first. |
 | `answers` | boolean |  | As attach's. |
 | `spawned_by` | string |  | The id of the chat here whose mesh tools start it. |
+| `task_run` | object |  | A task's run going here that starts it, as the run's environment names it (BAUDE_TASK_RUN, BAUDE_TASK_TOKEN): nested under its Bot (spawned_by), kept in the run's chats, judged as the member that ran it, and its first turn's end told its Bot. Refused if no run's going with that token. |
+| `task_run.run` | string | yes | The run's id. |
+| `task_run.token` | string | yes | The run's token. |
 | `system` | string |  | More for claude's system prompt (--append-system-prompt). |
 | `add_dirs` | array of string |  | Folders it may use besides its own (--add-dir). |
 | `allowed_tools` | array of string |  | Tool rules (--allowedTools: ["Bash(git:*)", "Edit"]). |
@@ -941,6 +946,7 @@ One of a Bot's tasks, its script and latest runs.
 |---|---|---|---|
 | `session` | string | yes | The session's id. |
 | `id` | string | yes | The task's id. |
+| `script` | boolean |  | Whether the task's script comes back with it (its version always does); left out, it doesn't. |
 
 #### `task_ask` (TaskAsk)
 
@@ -1174,15 +1180,16 @@ accounts' answer: the accounts and defaults as they are after it, and whether th
 | `defaults` | object |  | Each provider's default for new chats. |
 | `defaults.claude` | string |  | Claude's default account's id, "" for the CLI's own sign-in. |
 | `defaults.codex` | string |  | Codex's. |
-| `usage` | array/null of UsageLimit |  | usage: the subscription's limits; null where they can't be read for its sign-in (a setup token's, an API key's). |
+| `usage` | array/null of UsageLimit |  | usage: the subscription's limits; null where they can't be read for its sign-in (a setup token's, an API key's, a Codex sign-in that isn't a ChatGPT plan's). |
 | `line` | string |  | sign_in (Claude's): a line the sign-in wrote (the page to open among them). |
 | `login` | ChatLogin |  | sign_in (Codex's): its state as it goes (login alone: signing_in, then with the page, and the device code's code), then on its end, signed_in or failed. |
 | `page` | CallbackPage |  | callback: what the Codex sign-in's server answered the address. |
 | `cb` | integer |  | callback: the request's cb, carried back. |
 | `signed_in` | boolean |  | sign_in: its end, signed in. |
 | `claude_cli` | boolean |  | Whether the host has claude: a Claude account there is a folder signed in to with claude auth login; without it, a token from claude setup-token. |
+| `codex_usage` | boolean |  | Whether the host reads a Codex subscription's usage (usage with provider codex, and last_usage's "codex"): a client shows Codex's CLI default card and Codex usage only where it does; an older host's usage read of "" is Claude's. |
 | `missing` | object |  | What the host lacks of a provider's program, by provider (codex: its Codex CLI, as deps says it); a provider that's there isn't in it. Shown in place of Add account. |
-| `last_usage` | object |  | Each Claude subscription's usage as the host last read it, by id ("" for the CLI's own sign-in), where that read said its limits: a client shows it greyed till its own usage read answers. |
+| `last_usage` | object |  | Each Claude and Codex subscription's usage as the host last read it, by id ("" for Claude's CLI's own sign-in, "codex" for Codex's), where that read said its limits: a client shows it greyed till its own usage read answers. |
 | `who` | string/null |  | sign_in, signed in: who as, as claude auth status says (Codex's: the email its sign-in names). |
 
 #### `activated` (Activated)
@@ -2198,7 +2205,7 @@ A host's rule for each of its capabilities, by name: a capability split into wha
 |---|---|---|---|
 | `shell` | AccessRule | yes | A shell on its machine: its terminals (terminal ops) and Multiplex's, through a Bot's terminal tools (multiplex). |
 | `browser_read` | AccessRule | yes | Its Bots' Emission browsers watched: the watch stream (emission_watch) and what the pane says back on it (emission_watch_say). |
-| `browser_write` | AccessRule | yes | Its Bots' Emission browsers driven: their tools' calls (emission), a phone showing one and answering its calls (emission_serve, emission_answer), Emission's own window brought up on its screen (browser_open), and a Bot made or driven (with Shell). Lets a member watch too. |
+| `browser_write` | AccessRule | yes | Its Bots' Emission browsers driven: their tools' calls (emission), a phone showing one and answering its calls (emission_serve, emission_answer), Emission's own window brought up on its screen (browser_open), or watched and driven from elsewhere (emission_watch and emission, default), and a Bot made or driven (with Shell). Lets a member watch too. |
 | `providers` | AccessRule | yes | Its inference providers' models, run through the mesh (infer). |
 | `model_files` | AccessRule | yes | Its models' files, read through the mesh (files). |
 | `spawn` | AccessRule | yes | New chats and agents started on it (start, agent). |
@@ -3067,6 +3074,11 @@ Who a message to a session is from, if not its user, filled in by the host from 
 | `host` | string |  | Its host's id. |
 | `host_name` | string |  | Its host's name. |
 | `session` | string |  | Its session's id, on its host. |
+| `bot` | string |  | A chat a task's run started (a subagent sender, its report of a turn): the session of the run's Bot, on its host. |
+| `task` | string |  | A task's run's: the id of its task, on its Bot's Tasks page. |
+| `task_name` | string |  | A chat a task's run started: its task's name, as the from line says it ("<task> run"). |
+| `run` | string |  | A task's run's: the id of the run, on its Bot's Tasks page (its Bot: bot, else its session). |
+| `over` | `finished` \| `stopped` \| `failed` |  | A chat a task's run started: how the turn it reports ended (finished; stopped: interrupted or stopped; failed: an error, or its agent ended before its turn did). |
 
 #### Session
 
@@ -3101,7 +3113,8 @@ A session as a host lists it.
 | `context` | ContextUsage? |  | How much of its context window its agent last said it's used, kept while its agent's stopped; null till it's said. |
 | `on_phone` | boolean |  | A Bot's browser is on a phone now. |
 | `fork_from` | string/null |  | The session it was forked from. |
-| `spawned_by` | string/null |  | The chat whose mesh tools started it (start's spawned_by). |
+| `spawned_by` | string/null |  | The chat whose mesh tools started it (start's spawned_by), or the Bot whose task's run started it. |
+| `task_run` | TaskRunRef? |  | The task's run that started it (start's task_run), on its Bot's host. |
 | `desktop` | boolean |  | Claude Desktop's: a chat in Claude Desktop's own list on its host's machine. Every app lists it in the Desktop group. |
 | `taken_up` | boolean |  | false for a Claude Desktop chat its host only lists: nothing of it runs on the host till it's written in, which takes it up (as adopt does). Missing for every other. |
 | `elsewhere` | boolean |  | Claude Desktop is writing it now (written in the last minute, not by the host's own agent): every app keeps it read-only while it is. |
@@ -3139,6 +3152,11 @@ Who a message to a session is from, as its host's sender store keeps it (by the 
 | `host` | string |  | Its host's id. |
 | `host_name` | string |  | Its host's name. |
 | `session` | string |  | Its session's id, on its host. |
+| `bot` | string |  | A chat a task's run started (a subagent sender, its report of a turn): the session of the run's Bot, on its host. |
+| `task` | string |  | A task's run's: the id of its task, on its Bot's Tasks page. |
+| `task_name` | string |  | A chat a task's run started: its task's name, as the from line says it ("<task> run"). |
+| `run` | string |  | A task's run's: the id of the run, on its Bot's Tasks page (its Bot: bot, else its session). |
+| `over` | `finished` \| `stopped` \| `failed` |  | A chat a task's run started: how the turn it reports ended (finished; stopped: interrupted or stopped; failed: an error, or its agent ended before its turn did). |
 | `shown` | string |  | What heads show of the message in place of its text: set by the host only (a held answer sent: its shown, its agent having been told more). |
 
 #### SubagentFile
@@ -3206,10 +3224,12 @@ A line of a run's log.
 | Field | Type | Required | What it is |
 |---|---|---|---|
 | `at` | number | yes | When. |
-| `kind` | `out` \| `err` \| `say` \| `ask` \| `answer` \| `status` | yes | What it is: the script's output or errors, a line it said, an ask of its Bot, the Bot's answer, or the run's state changing. |
+| `kind` | `out` \| `err` \| `say` \| `ask` \| `answer` \| `status` \| `agent` | yes | What it is: the script's output or errors, a line it said, an ask of its Bot, the Bot's answer, the run's state changing, or what a chat it started said as its first turn ended (told its Bot too). |
 | `text` | string | yes | What it says. |
 | `values` | object/null |  | An answer's values, from a form. |
-| `error` | boolean/null |  | An ask's: it was an error handed over. |
+| `error` | boolean/null |  | An ask's: it was an error handed over. An agent's: the chat failed, or was stopped. |
+| `session` | string |  | An agent's: the chat's id. |
+| `over` | `finished` \| `stopped` \| `failed` |  | An agent's: how the chat's turn ended (Sender's over). |
 
 #### TaskRun
 
@@ -3234,8 +3254,20 @@ A task's run: what started it, what it was given, how it went (a run's record is
 | `error` | string/null |  | Why it failed or was skipped. |
 | `asks` | integer/null |  | How many times it asked its Bot. |
 | `handed` | boolean/null |  | Its failure was handed to its Bot. |
+| `chats` | array/null of string |  | The chats it started on its Bot's host (start's task_run), by their ids, oldest first: they go on after it's over, their states as the sessions listing has them. |
 | `pid` | integer/null |  | Its script's process id, as it runs. |
 | `pgid` | integer/null |  | Its script's process group, as it runs: what's left of it killed as its host starts again, if its host was killed as it ran. |
+
+#### TaskRunRef
+
+The task's run a chat was started by (Session's task_run), on its Bot's host.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `bot` | string | yes | The Bot's session id. |
+| `task` | string | yes | The task's id. |
+| `run` | string | yes | The run's id. |
+| `name` | string |  | The task's name as it ran. |
 
 #### TaskTrigger
 
@@ -3433,12 +3465,12 @@ Its own updater has a newer version ready, and waits for those commands to end b
 
 #### UsageLimit
 
-One of a subscription's limits, as Claude Code's get_usage says it.
+One of a subscription's limits, as Claude Code's get_usage says it, or Codex's App Server's rate limits (account/rateLimits/read).
 
 | Field | Type | Required | What it is |
 |---|---|---|---|
 | `name` | string | yes | Which limit (Five hour, Seven day…). |
-| `key` | string |  | The limit's own name in Claude Code's usage (five_hour, seven_day…). |
+| `key` | string |  | The limit's own name in Claude Code's usage (five_hour, seven_day…); a Codex limit's, by its window's length (five_hour and seven_day as Claude's, else 2_hour, 3_day…). |
 | `resets` | number |  | When it resets, in seconds since 1970 (left out where the usage doesn't say). |
 | `percent` | number | yes | How much of it is used, in percent. |
 
@@ -3530,6 +3562,6 @@ Somewhere wire.reach can go: this machine's host process, one listening on anoth
 | `TERMINAL_KEEP_S` | `600` | A terminal (terminal op) no connection is attached to now: its program kept running this long to be attached to again, in seconds. |
 | `TERMINAL_KEPT_BYTES` | `262144` | What a terminal (terminal op) wrote lately, kept to show again on attach: this many bytes at most. |
 | `TTL` | `16` | A tunnel's passed through at most this many hosts (open's ttl). |
-| `VERSION` | `21` | The wire's version, as a host's hello says it. |
+| `VERSION` | `22` | The wire's version, as a host's hello says it. |
 | `ZOOM_MAX` | `1568` | A browser zoom's longest side, in pixels. |
 | `ZOOM_QUALITY` | `90` | A browser zoom's JPEG quality. |

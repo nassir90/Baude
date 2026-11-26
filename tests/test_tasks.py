@@ -6,7 +6,10 @@ push to a repo of the run's own fires it (the payload filling its form); as its 
 Each run must end, its record and log must be as the schema has them, and the host must still answer after. Then a
 failure is healed end to end (handed to the Bot, which sets the task's script and runs it again with its own tools,
 the new run asking it), two pushes during one run are both deployed (by the run after it), a Bot's routines, kept as
-they were, are moved to tasks (twice: once only), and the script library is run outside a task. No GTK.
+they were, are moved to tasks (twice: once only), a deploy's failure falls back to one-shot agents (the library's,
+and baude-oneshot's) that nest under the Bot, are kept with the run, and are told the Bot as they finish (a stopped
+first turn, then the next that finishes; what's to be told kept over a restart of the host), and the script library is
+run outside a task. No GTK.
 
     python3 tests/test_tasks.py [--rounds N] [--seed S]
 """
@@ -195,6 +198,141 @@ def pushes(head, srv, sid, repo):
     print("pushes: two during a run, deployed by the next", flush=True)
 
 
+AGENTS = '''import os, subprocess, sys
+import baudetask as task
+try:
+    raise RuntimeError("the deploy went wrong")
+except RuntimeError as e:
+    got = task.agent(f"The deploy failed: {e}. Find out why.", title="Why the deploy failed")
+    task.say("agent", got["session"], got["failed"])
+    out = subprocess.run([sys.executable, %(oneshot)r, "--title", "Look again", "Look again."], capture_output=True,
+                         text=True)
+    task.say("oneshot", out.returncode, out.stderr.strip())
+    assert out.returncode == 0
+'''
+
+
+def agents(head, srv, sid):
+    """A deploy that fails and falls back to one-shot agents (task.agent, and baude-oneshot run by the script): each
+    nests under the Bot, is kept with the run, records the run, and is told the Bot (from it) as its turn ends, the
+    run's log saying so too."""
+    oneshot = os.path.join(os.path.dirname(HERE), "baude_oneshot.py")
+    tid = head.ask({"op": "tasks", "session": sid, "set": {
+        "name": "Deploy with fallback", "runtime": "python", "fallback": False, "timeout_s": 30,
+        "script": AGENTS % {"oneshot": oneshot}}})["saved"]
+    rid = head.ask({"op": "run_task", "session": sid, "id": tid})["run"]["id"]
+    got = ended(head, sid, rid)
+    assert got["run"]["status"] == "done", got
+    chats = got["run"].get("chats") or []
+    assert len(chats) == 2, got["run"]
+    with srv.lock:
+        listed = {c: srv.sessions[c].listing() for c in chats}
+    for c in chats:
+        fits("Session", listed[c])
+        assert listed[c]["spawned_by"] == sid and listed[c]["task_run"]["run"] == rid, listed[c]
+
+    def told():  # (the Bot's own asks of its user, as it's told: refused, so it goes on to the next)
+        senders = bot_senders(srv, sid)
+        return {v.get("session") for v in senders if v.get("kind") == "subagent"} >= set(chats)
+    wait(told, "the Bot told what its task's agents said")
+    for v in bot_senders(srv, sid):  # (who it's from says the run, and how its turn ended: not the message)
+        if v.get("session") in chats:
+            fits("StoredSender", v)
+            assert v["bot"] == sid and v["run"] == rid and v["task"] == tid and v["over"] == "finished", v
+    log = wait(lambda: [x for x in ended(head, sid, rid)["log"] if x["kind"] == "agent"] if
+               len([x for x in ended(head, sid, rid)["log"] if x["kind"] == "agent"]) == 2 else None, "the agents' log")
+    assert {x["session"] for x in log} == set(chats), log
+    # run by a member of the mesh: the chat it starts is judged as that member (its started_by), as its tools are
+    head.ask({"op": "tasks", "session": sid, "set": {
+        "id": tid, "name": "Deploy with fallback", "runtime": "python", "fallback": False, "timeout_s": 30,
+        "script": 'import baudetask as task\ntask.agent("Look into it.", wait=False)\n'}})
+    member = {"id": "member-a", "verified": True}
+    with srv.lock:
+        st = srv.tasks.store(srv.sessions[sid])
+        rid = srv.tasks.start(srv.sessions[sid], st.find(tid), None, "manual", {}, {}, by=member)["id"]
+    chat = ended(head, sid, rid)["run"]["chats"][0]
+    with srv.lock:
+        assert srv.sessions[chat].meta.get("started_by") == member, srv.sessions[chat].meta
+    assert srv.started_by(chat) == ("member-a", True)
+    with srv.lock:  # (run by a head here: judged as a head here, not as the Bot's own starter)
+        srv.sessions[sid].meta["started_by"] = member
+        rid = srv.tasks.start(srv.sessions[sid], st.find(tid), None, "manual", {}, {})["id"]
+    chat = ended(head, sid, rid)["run"]["chats"][0]
+    with srv.lock:
+        srv.sessions[sid].meta.pop("started_by")
+    assert srv.started_by(chat) is None
+    # a chat whose first turn is stopped: the Bot told so, and told again as its next turn finishes; not after that
+    os.environ["FAKE_ANSWERS"] = json.dumps({"HELD again": "Found it: the key expired."})
+    head.ask({"op": "tasks", "session": sid, "set": {
+        "id": tid, "name": "Deploy with fallback", "runtime": "python", "fallback": False, "timeout_s": 30,
+        "script": 'import baudetask as task\ntask.agent("SUBAGENT OPEN look", wait=False, title="Held")\n'}})
+    rid = head.ask({"op": "run_task", "session": sid, "id": tid})["run"]["id"]
+    chat = ended(head, sid, rid)["run"]["chats"][0]
+
+    def overs():
+        return [v.get("over") for v in bot_senders(srv, sid) if v.get("session") == chat]
+
+    def going():
+        with srv.lock:
+            c = srv.sessions[chat]
+            return c.busy and c.proc is not None and c.listing().get("title")
+    wait(going, "the held chat's turn")
+    time.sleep(0.5)
+    with srv.lock:  # (as a head's Stop interrupts it)
+        srv.sessions[chat].proc.send({"type": "control_request", "request_id": "int1",
+                                      "request": {"subtype": "interrupt"}})
+    wait(lambda: overs() == ["stopped"], "the Bot told the chat stopped")
+    wait(lambda: not srv.sessions[chat].busy, "the held chat idle")
+    with srv.lock:
+        srv.take_input(None, srv.sessions[chat], {"type": "user", "message": {"role": "user", "content": "HELD again"}})
+    wait(lambda: overs() == ["stopped", "finished"], "the Bot told the chat finished")
+    log = [x for x in ended(head, sid, rid)["log"] if x["kind"] == "agent"]
+    assert [x.get("over") for x in log] == ["stopped", "finished"], log
+    wait(lambda: not srv.sessions[chat].busy, "the held chat idle again")
+    with srv.lock:
+        srv.take_input(None, srv.sessions[chat], {"type": "user", "message": {"role": "user", "content": "HELD again"}})
+    wait(lambda: not srv.sessions[chat].busy, "its own turn over")
+    time.sleep(1)
+    assert overs() == ["stopped", "finished"], overs()  # (after its first finished turn: its own chat's)
+    head.ask({"op": "tasks", "session": sid, "delete": tid})
+    print("agents: a failure's one-shot agents nested under the Bot, kept with the run, told the Bot", flush=True)
+
+
+def bot_senders(srv, sid):
+    """The Bot's sender store's senders, its own asks of its user refused on the way (so it goes on to the next)."""
+    with srv.lock:
+        bot = srv.sessions[sid]
+        for ask in list(bot.asks):
+            srv.take_input(None, bot, {"type": "control_response", "response": {
+                "subtype": "success", "request_id": ask, "response": {"behavior": "deny", "message": "no"}}})
+        return list((srv.senders(bot) or {}).values())
+
+
+def restarted(head, srv, sid):
+    """A chat a run started finishes while its Bot is busy, and the host stops before the Bot's told: the host
+    started again tells it. The new host, once it has."""
+    from baudelib.server import Server
+    tid = head.ask({"op": "tasks", "session": sid, "set": {
+        "name": "Told after a restart", "runtime": "python", "fallback": False, "timeout_s": 30,
+        "script": 'import baudetask as task\ntask.agent("HELD again", title="Told later")\n'}})["saved"]
+    with srv.lock:  # (busy: what the chat says waits)
+        srv.sessions[sid].busy = True
+    rid = head.ask({"op": "run_task", "session": sid, "id": tid})["run"]["id"]
+    chat = ended(head, sid, rid)["run"]["chats"][0]
+    wait(lambda: (srv.sessions[chat].meta.get("task_run") or {}).get("pending"), "the report pending")
+    time.sleep(0.5)
+    assert not any(v.get("session") == chat for v in bot_senders(srv, sid))
+    srv.shutdown()
+    again = Server(state_dir=srv.state_dir, name="tasks-host", log=lambda _t: None,
+                   socket_path=os.path.join(os.environ["BAUDE_RUNTIME_DIR"], "h2.sock"))
+    threading.Thread(target=again.serve_forever, daemon=True).start()
+    wait(lambda: [v.get("over") for v in bot_senders(again, sid) if v.get("session") == chat] == ["finished"],
+         "the Bot told after the restart")
+    assert not (again.sessions[chat].meta.get("task_run") or {}).get("pending"), again.sessions[chat].meta
+    print("agents: what a chat said, told its Bot after the host restarted", flush=True)
+    return again
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--rounds", type=int, default=6)
@@ -236,8 +374,8 @@ def main():
         assert set_["op"] == "tasks", set_
         fits("TasksReply", set_)
         tid = set_["saved"]
-        got = head.ask({"op": "task", "session": sid, "id": tid, "script": True})
-        assert got["op"] == "task" and got["task"]["script"] == script, got
+        got = head.ask({"op": "task", "session": sid, "id": tid})
+        assert got["op"] == "task", got
         assert got["task"]["version"] == tasks.version_of(script)
         fits("TaskReply", got)
         how = rng.choice(("hand", "trigger", "stop"))
@@ -281,6 +419,7 @@ def main():
             assert head.ask({"op": "tasks", "session": sid, "delete": tid})["op"] == "tasks"
     heal(head, sid)
     pushes(head, srv, sid, repo)
+    agents(head, srv, sid)
     # a script's ops, refused without the run's token
     bad = head.ask({"op": "task_report", "run": "nope", "token": "nope", "say": "hi"})
     assert bad["op"] == "error", bad
@@ -305,6 +444,7 @@ def main():
                          env={k: v for k, v in os.environ.items() if not k.startswith("BAUDE_TASK")} |
                          {"PYTHONPATH": tasks.SCRIPT_DIR})
     assert "{'a': 'p'}" in out.stdout, out
+    srv = restarted(head, srv, sid)
     srv.shutdown()
     print(f"ok: {runs} runs", flush=True)
 

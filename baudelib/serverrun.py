@@ -43,6 +43,7 @@ class ServerRunning:
             threading.Thread(target=self.answer_wait, args=(s, w), daemon=True, name="wait").start()
         with self.lock:  # (follow-ups a restart cut short: sent now, keep_follow_ups)
             self.send_follow_ups()
+            self.tasks.resume_told()  # (what chats a task's run started had still to tell their Bots: told now)
         self.log(f"serving {len(self.sessions)} sessions on {self.socket_path}, group {self.me['group']!r}"
                  + (f", commit {self.commit[:12]}" if self.commit else ""))
         while not self.stopped.is_set():
@@ -414,14 +415,19 @@ class ServerRunning:
                 self.heads_look()
 
     def emission_watch(self, conn, req, bot, msg):
-        """A Bot's Emission here (started if it isn't) watched for conn: its frames (as JPEG) and state, a message
-        each (emission_frame), till either end goes (emission_watch_end)."""
+        """A Bot's Emission here (started if it isn't; bot None: Emission's own window on its Default profile)
+        watched for conn: its frames (as JPEG) and state, a message each (emission_frame), till either end goes
+        (emission_watch_end)."""
         size = {k: int(msg[k]) for k in ("max_w", "max_h") if isinstance(msg.get(k), int)}
         try:
-            emissionlink.call_bot(bot["id"], bot.get("name"), {"op": "info"}, timeout=emissiontools.HOST_WAIT_S)
+            if bot is None:  # (Emission's own window here, on its Default profile: ☰ → Browser elsewhere)
+                path = emissionlink.default_window(emissiontools.HOST_WAIT_S)
+            else:
+                emissionlink.call_bot(bot["id"], bot.get("name"), {"op": "info"}, timeout=emissiontools.HOST_WAIT_S)
+                path = emissionlink.profile_socket(emissionlink.bot_profile(bot["id"], None))
             sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-            sock.connect(emissionlink.profile_socket(emissionlink.bot_profile(bot["id"], None)))
-            sock.sendall((json.dumps({"op": "watch", **size}) + "\n").encode())
+            sock.connect(path)
+            sock.sendall((json.dumps({"op": "watch", "from_pane": bot is None, **size}) + "\n").encode())
         except (OSError, ValueError) as e:
             conn.send({"op": "error", "req": req, "error": str(e)})
             return
@@ -721,13 +727,19 @@ class ServerRunning:
             return conn.agent_run.take(msg)
         if op == "emission":  # (a Bot's browser tools: its own Emission profile here, started for it if it isn't
             bot = msg.get("bot") if isinstance(msg.get("bot"), dict) else {}  # running; on a thread of its own)
-            if not isinstance(bot.get("id"), str) or not bot["id"] or not isinstance(msg.get("call"), dict):
+            own = msg.get("default") is True  # (Emission's own window on its Default profile, from a Browser pane
+            if not own and (not isinstance(bot.get("id"), str) or not bot["id"]) or \
+                    not isinstance(msg.get("call"), dict):  # elsewhere: what a pane does, nothing else)
                 return reply("error", error="emission needs a Bot (its id) and a call")
-            if msg["call"].get("op") not in emissiontools.HOST_OPS:  # (the tools' requests only: no quit, open, …)
+            if msg["call"].get("op") not in (emissiontools.PANE_OPS if own else emissiontools.HOST_OPS):
                 return reply("error", error=f"emission takes the tools' requests, not {msg['call'].get('op')!r}")
 
             def browse():
                 try:
+                    if own:
+                        return reply("emission", result=emissionlink.call(
+                            emissionlink.profile_id(emissionlink.DEFAULT), {**msg["call"], "from_pane": True},
+                            timeout=emissiontools.HOST_WAIT_S))
                     if self.phones.phone(bot["id"]) is not None:  # (its browser on a phone now: asked there)
                         return reply("emission", result=self.phones.call(bot, msg["call"]))
                     reply("emission", result=emissionlink.call_bot(bot["id"], bot.get("name"), msg["call"],
@@ -740,7 +752,7 @@ class ServerRunning:
             def browser():
                 try:
                     reply("browser_opened", **emissionlink.open_window())
-                except OSError as e:
+                except (OSError, ValueError) as e:
                     reply("error", error=str(e))
             threading.Thread(target=browser, daemon=True, name="browser-open").start()
             return None
@@ -776,10 +788,14 @@ class ServerRunning:
                              name="kube-follow").start()
             return None
         if op == "emission_watch":  # (a Browser pane elsewhere: a Bot's Emission here watched, its frames carried on
-            bot = msg.get("bot") if isinstance(msg.get("bot"), dict) else {}  # this connection; one a connection)
-            if not isinstance(bot.get("id"), str) or not bot["id"] or getattr(conn, "emission_watch", None):
+            bot = msg.get("bot") if isinstance(msg.get("bot"), dict) else {}  # this connection; one a connection.
+            if msg.get("default") is True:  # default: Emission's own window instead, ☰ → Browser's)
+                bot = None
+            elif not isinstance(bot.get("id"), str) or not bot["id"]:
                 return reply("error", error="emission_watch needs a Bot (its id), one on a connection")
-            if self.phones.phone(bot["id"]) is not None:
+            if getattr(conn, "emission_watch", None):
+                return reply("error", error="emission_watch needs a Bot (its id), one on a connection")
+            if bot is not None and self.phones.phone(bot["id"]) is not None:
                 return reply("error", error=wording.say("host_errors.browser_on_phone"))
             threading.Thread(target=self.emission_watch, args=(conn, req, bot, msg), daemon=True,
                              name="emission-watch").start()
@@ -988,7 +1004,8 @@ class ServerRunning:
                 return reply("bot_picture", session=s.id, picture=self.bot_picture(s))
             if op in ("tasks", "task", "run_task", "task_run", "task_stop"):  # (a Bot's tasks: baudelib.tasks)
                 try:
-                    kind, fields = self.tasks.op(s, msg)
+                    kind, fields = self.tasks.op(s, msg, by={"id": conn.member, "verified": conn.verified}
+                                                 if conn.member is not None else None)
                 except (ValueError, TypeError, OSError) as e:
                     return reply("error", error=str(e))
                 return reply(kind, **fields)

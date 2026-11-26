@@ -11,6 +11,7 @@
     "another": "another",
     "on": "{$who} on {$where}",
     "through_mesh": "through the mesh",
-    "local": "local"
+    "local": "local",
+    "task_run": "{$task} run"
   }
 }

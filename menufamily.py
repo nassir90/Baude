@@ -1,6 +1,8 @@
 """☰'s views and programs on a host (Baude's and Record's): Kubernetes, Docker, Databases, Terminal and Browser, each a
-row (FamilyRow) opening it on the host picked beside New session, or, from its caret, on another. Browser asks that host for Emission's window on its own screen
-(browser_open: emissionlink.open_window), brought to the front or started; what went wrong said in a toast."""
+row (FamilyRow) opening it on the host picked beside New session, or, from its caret, on another. Browser on this
+machine asks its host for Emission's window on its own screen (browser_open: emissionlink.open_window), brought to the
+front or started; on another host, that host's Emission streamed into a window here (browserpane.browser_window); what
+went wrong said in a toast."""
 import threading
 
 from gi.repository import Adw, Gio, GLib, Gtk
@@ -37,18 +39,32 @@ def ask_host(where, msg, done):
     threading.Thread(target=run, daemon=True, name="menu-family").start()
 
 
-def open_browser(win, where=None, name=None):
-    """☰ → Browser: Emission's window on the host (where, name; the one picked beside New session if not given) brought
-    to the front, else started there."""
-    if where is None:
-        where, name = win.terminal_host()
+UNSET = object()
+
+
+def open_browser(win, remote=UNSET):
+    """☰ → Browser on a host (remote: another's Remote, None this machine; the one picked beside New session if not
+    given). On this machine's own host, Emission's window here brought to the front, else started (browser_open);
+    on another, that host's Emission streamed into a window here, as a Bot's browser is watched
+    (browserpane.browser_window). What went wrong said in a toast; a click while the last is asked does nothing."""
+    if remote is UNSET:
+        remote = win.view_remote()
+    if remote is not None and not remote.mine:
+        import browserpane
+        from sessionlist import remote_name
+        return browserpane.browser_window(win, remote, remote_name(remote))
+    if getattr(win, "browser_asking", False):
+        return None
 
     def done(reply):
+        win.browser_asking = False
         if reply.get("error"):
             toasts = getattr(win, "toasts", None)
             if isinstance(toasts, Adw.ToastOverlay):
                 toasts.add_toast(Adw.Toast(title=GLib.markup_escape_text(reply["error"]), timeout=4))
-    ask_host(where, {"op": "browser_open"}, done)
+    win.browser_asking = True
+    ask_host({"via": "local"}, {"op": "browser_open"}, done)
+    return None
 
 
 # ---- the family's rows in ☰: each a split, as New session's is: its name opens it on the host picked beside New
@@ -98,9 +114,9 @@ def open_family(win, family, key=None):
         if isinstance(toasts, Adw.ToastOverlay):
             toasts.add_toast(Adw.Toast(title=GLib.markup_escape_text(wording.say("hosts.looking", host=name)), timeout=3))
         return None
-    where, name = ({"via": "local"}, THIS_MACHINE) if r is None else (r.where, remote_name(r))
     if family == "browser":
-        return open_browser(win, where, name)
+        return open_browser(win, r)
+    where, name = ({"via": "local"}, THIS_MACHINE) if r is None else (r.where, remote_name(r))
     if family == "terminal":
         return win.terminal.open(where, name)
     win.family_host = key

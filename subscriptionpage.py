@@ -431,20 +431,23 @@ def _pages(dialog):
 class MenuUsage(Gtk.Button):
     """☰'s usage row (Baude's and Record's): the current Claude subscription on the host picked beside New session (the
     one a new chat there takes), its name, then each limit's name, percentage and bar as its Subscriptions card has them,
-    read as ☰ opens (again once USAGE_S has passed); the host's last reading greyed till then. Hidden where the host has
-    no Claude subscription. A click opens Settings → Subscriptions. Holds its window weakly."""
+    read as ☰ opens (again once USAGE_S has passed, after an answer or an error); the host's last reading greyed till
+    then. An answer that comes after the host picked has changed (or after a newer ask) is dropped. Where the host has no
+    Claude subscription its item is out of section (so no rule is drawn round nothing). A click opens Settings →
+    Subscriptions. Holds its window weakly."""
 
-    def __init__(self, win, popover):
+    def __init__(self, win, popover, section):
         super().__init__(css_classes=["flat", "baude-menu-usage"])
         import weakref
         self.win = weakref.ref(win)
+        self.popover, self.section = popover, section
         inside = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, margin_top=4, margin_bottom=4)
         self.name = Gtk.Label(xalign=0, ellipsize=3, css_classes=["heading"])
         self.bars = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
         inside.append(self.name)
         inside.append(self.bars)
         self.set_child(inside)
-        self.read_at, self.where, self.asking, self.profile = 0.0, None, False, None
+        self.read_at, self.where, self.ticket, self.profile = 0.0, None, 0, None
         self.connect("clicked", MenuUsage._clicked, popover)
         popover.connect("show", lambda *_: self.refresh())
         self.set_visible(False)
@@ -455,26 +458,47 @@ class MenuUsage(Gtk.Button):
         if (win := self.win()) is not None:
             open_subscriptions(win)
 
+    def shown(self, on):
+        """The row in ☰ (its item in its section, the row there) or out of it."""
+        if on and self.section.get_n_items() == 0:
+            item = Gio.MenuItem()
+            item.set_attribute_value("custom", GLib.Variant.new_string("usage"))
+            self.section.append_item(item)
+            self.popover.add_child(self, "usage")
+        elif not on and self.section.get_n_items():
+            if self.get_parent() is not None:
+                self.popover.remove_child(self)
+            self.section.remove(0)
+        self.set_visible(on)
+
     def refresh(self):
         import time
         win = self.win()
-        if win is None or self.asking:
+        if win is None:
             return
         where, _name = win.terminal_host()
         if where == self.where and time.monotonic() - self.read_at < USAGE_S:
             return
         if where != self.where:
-            self.where, self.profile = where, None
-            self.set_visible(False)
-        self.asking = True
-        Ask(where, {"what": "list"}, lambda reply, where=where: self.listed(where, reply))
+            self.where, self.profile, self.read_at = where, None, 0.0
+            self.name.set_label("")
+            usage_lines(self.bars, None)
+            self.shown(False)
+        self.ticket += 1
+        ticket = self.ticket
+        self.read_at = time.monotonic()  # (asked: not again till USAGE_S has passed, whatever it answers)
+        Ask(where, {"what": "list"}, lambda reply: self.listed(ticket, where, reply))
 
-    def listed(self, where, reply):
-        if where != self.where:
-            self.asking = False
+    def current(self, ticket, where):
+        """Whether an answer to ask ticket (on host where) is still the one to show."""
+        win = self.win()
+        return win is not None and ticket == self.ticket and where == self.where == win.terminal_host()[0]
+
+    def listed(self, ticket, where, reply):
+        if not self.current(ticket, where):
             return False
         if reply.get("error") or "accounts" not in reply:
-            self.asking = False
+            self.name.set_label("")
             self.show_read(None, reply.get("error") or wording.say("host_status.no_answer"))
             return False
         accounts = [a for a in reply["accounts"] if a.get("provider") == "claude"]
@@ -483,25 +507,23 @@ class MenuUsage(Gtk.Button):
         if account is None:
             profile = ""
         if account is None and not reply.get("claude_cli", True):
-            self.asking = False
-            self.set_visible(False)
+            self.shown(False)
             return False
+        if profile != self.profile:
+            usage_lines(self.bars, None)
         self.profile = profile
         self.name.set_label(account["name"] if account else wording.say("subscriptions.cli_default"))
         last = (reply.get("last_usage") or {}).get(profile)
-        if last and last.get("usage") and self.read_at == 0.0:
+        if last and last.get("usage") and not self.get_visible():
             self.show_read(_limits(last["usage"]), None, stale=True)
         elif not self.get_visible():
             self.show_read(None, None)
-        Ask(where, {"what": "usage", "id": profile}, lambda r, where=where, profile=profile: self.read(where, profile, r))
+        Ask(where, {"what": "usage", "id": profile}, lambda r: self.read(ticket, where, profile, r))
         return False
 
-    def read(self, where, profile, reply):
-        import time
-        self.asking = False
-        if where != self.where or profile != self.profile:
+    def read(self, ticket, where, profile, reply):
+        if not self.current(ticket, where) or profile != self.profile:
             return False
-        self.read_at = time.monotonic()
         if reply.get("error"):
             self.show_read(None, reply["error"])
         elif reply.get("usage"):
@@ -513,18 +535,14 @@ class MenuUsage(Gtk.Button):
     def show_read(self, limits, said, stale=False):
         self.bars.set_opacity(STALE_OPACITY if stale else 1)
         usage_lines(self.bars, limits if limits is not None else said)
-        self.set_visible(True)
+        self.name.set_visible(bool(self.name.get_label()))
+        self.shown(True)
 
 
 def attach_menu_usage(win, menu_button, section):
-    """☰'s usage row put first in section (a Gio.Menu of menu_button's model): a MenuUsage in its popover."""
-    item = Gio.MenuItem()
-    item.set_attribute_value("custom", GLib.Variant.new_string("usage"))
-    section.prepend_item(item)
-    popover = menu_button.get_popover()
-    usage = MenuUsage(win, popover)
-    popover.add_child(usage, "usage")
-    return usage
+    """☰'s usage row in section (a Gio.Menu of menu_button's model, its own): a MenuUsage in its popover, its item put
+    in as it's shown."""
+    return MenuUsage(win, menu_button.get_popover(), section)
 
 
 def _limits(usage):

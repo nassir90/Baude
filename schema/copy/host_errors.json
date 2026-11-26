@@ -8,6 +8,8 @@
     "gh_list_failed": "gh issue list failed",
     "gh_create_failed": "gh issue create failed",
     "browser_on_phone": "this Bot's browser is on a phone now: it's shown there",
+    "browser_no_display": "this host has no screen to show Emission on",
+    "browser_default_bots": "Emission's Default profile is a Bot's browser on this host now: close that first",
     "being_deleted": "session {$session} is being deleted",
     "not_a_folder": "not a folder here: {$path}",
     "at_a_turn": "it's at a turn: stop it, or wait for its end, first",

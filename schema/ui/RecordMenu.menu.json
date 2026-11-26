@@ -225,7 +225,7 @@
       "actions": [
         {
           "by": "click",
-          "does": "Asks the host picked beside New session (this machine's if none) for Emission's window on its Default profile, on that machine's own screen (browser_open): the Emission that has the profile brought to the front as it is, else one started. What went wrong (the host not reached, refused) in a toast"
+          "does": "On this machine's own host: Emission's window on its Default profile, on this screen (browser_open), the Emission that has the profile brought to the front as it is, else one started. On another host picked beside New session: that host's Emission window on its Default profile (started there if none has it) streamed into a window here, watched and driven as a Bot's browser is, where that host's Browser (write) rule lets this member (emission_watch and emission, default); one window for each host, brought to the front on a second click. Never started where the host has no screen to show it on (no virtual display): that's said instead. Where the Default profile is a Bot's browser there (hosted in Baude, or out of sight), that's said instead of a second Emission started. A click while the last is asked does nothing. What went wrong (no screen, the host not reached, refused) in a toast"
         },
         {
           "by": "click its caret, then a host",
@@ -252,12 +252,22 @@
               "issue": "BaudeInternal#268"
             }
           ]
+        },
+        {
+          "said": "On a host elsewhere, Browser opens that host's Emission streamed into a Baude window, as a Bot's browser is watched; it checks for a usable display first and never starts under a virtual one (paraphrased)",
+          "rule": "☰ → Browser opens or raises Emission's own window on this machine's host; on another host it streams that host's Emission into a window here (browser_write), and says there's no screen rather than starting one under Xvfb",
+          "decided": "2026-11-26",
+          "source": [
+            {
+              "issue": "BaudeInternal#269"
+            }
+          ]
         }
       ]
     },
     {
       "name": "Usage",
-      "shows": "A section of its own, after the views over the window: the current Claude subscription on the host picked beside New session (the one a new chat there takes; \"CLI default\" for the CLI's own sign-in) by name, then each of its limits as its Subscriptions card shows them: Five Hour Limit (Resets <time>) and Weekly Limit (Resets <day> <time>), its percentage at the right and its bar under it. Its words start where the menu's items' do. Read from the host as the menu opens (again once 30 seconds have passed); till that answers, the host's last reading greyed, or \"Checking…\". An error, or \"Usage unavailable for this sign-in\", in its place. Not shown where the host has no Claude subscription.",
+      "shows": "A section of its own, after the views over the window: the current Claude subscription on the host picked beside New session (the one a new chat there takes; \"CLI default\" for the CLI's own sign-in) by name, then each of its limits as its Subscriptions card shows them: Five Hour Limit (Resets <time>) and Weekly Limit (Resets <day> <time>), its percentage at the right and its bar under it. Its words start where the menu's items' do. Read from the host as the menu opens (again once 30 seconds have passed, after an answer or an error); an answer that comes after another host is picked is dropped, the row cleared as the host changes; till that answers, the host's last reading greyed, or \"Checking…\". An error, or \"Usage unavailable for this sign-in\", in its place. Not shown where the host has no Claude subscription, and its section with it (no rule round nothing).",
       "copy": [
         "subscriptions.cli_default",
         "subscriptions.five_hour_limit",

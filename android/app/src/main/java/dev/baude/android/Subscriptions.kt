@@ -186,6 +186,8 @@ fun SubscriptionsPage() {
         kind == "rename" -> RenameAccount(host, a, close)
         kind == "again" && a.kind == "token" -> ReplaceToken(host, a, close)
         kind == "again" && a.provider == "claude" -> ClaudeSignIn(host, a.id.orEmpty(), close)
+        kind == "again" && a.provider == "codex" && host.missing.value["codex"] != null ->
+            host.missing.value.getValue("codex").let { SignInLacks(it, depTitle(it, Wording.Programs.codex), a, close) }
         kind == "again" -> CodexSignIn(host, a.id.orEmpty(), null, close)
         kind == "remove" -> RemoveAccount(host, a, close)
     }
@@ -277,6 +279,20 @@ private fun Form(heading: String, submit: String, done: () -> Unit, said: String
         },
         confirmButton = { Button(submit, suggested = true, enabled = !busy, onClick = go) },
         dismissButton = { Button(Wording.Common.close, onClick = done) },
+        containerColor = c.dialog,
+    )
+}
+
+/** An account's Sign In Again… where its provider's program isn't on the host: the heading and, in place of the sign-in
+ * button, the Dependencies row (dep, titled title). */
+@Composable
+private fun SignInLacks(dep: Msg.Dep, title: String, a: Msg.Account, done: () -> Unit) {
+    val c = LocalBaude.current
+    AlertDialog(
+        onDismissRequest = done,
+        title = { Text(Wording.Subscriptions.signInHeading(name = a.name.orEmpty())) },
+        text = { BoxedList(listOf(Unit), "") { DepRow(dep, title) } },
+        confirmButton = { Button(Wording.Common.close, onClick = done) },
         containerColor = c.dialog,
     )
 }

@@ -103,10 +103,10 @@ def gh_path():
                                        if os.access(p, os.X_OK)), None)
 
 
-def gh(*args, body=None, timeout=60):
-    """gh, given body on its stdin: (it worked, what it printed or its error; with no gh, what to install)."""
+def gh(*args, body=None, timeout=60, feature="window.ongoing_feedback"):
+    """gh, given body on its stdin: (it worked, what it printed or its error; with no gh, what to install for feature, a copy key)."""
     if gh_path() is None:
-        return False, deps.say(deps.info("gh", here=False), "window.ongoing_feedback")
+        return False, deps.say(deps.info("gh", here=False), feature)
     try:
         r = subprocess.run([gh_path(), *args], input=body, capture_output=True, text=True, timeout=timeout,
                            env={**os.environ, "GH_PROMPT_DISABLED": "1", "GH_NO_UPDATE_NOTIFIER": "1"})

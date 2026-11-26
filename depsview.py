@@ -97,19 +97,19 @@ def ask(where, done, msg=None):
     threading.Thread(target=run, daemon=True, name=msg["op"]).start()
 
 
-def copy_fix(widget, dep):
-    """Copy's: the command on the clipboard, and a toast saying what to do next (Restart for the app's own, else Try Again)."""
+def copy_fix(widget, dep, settings=None):
+    """Copy's: the command on the clipboard, and a toast saying what to do next (Restart for the app's own; Try Again on a feature's page; in Settings, which has none, only to run it; settings: the Settings dialog a row in a dialog over it toasts on)."""
     from widgets import toast
     widget.get_clipboard().set(dep["fix"])
-    text = wording.say("deps.copied_restart") if dep.get("where") == "app" else wording.say("kube.copied_try_again")
-    dialog = widget.get_ancestor(Adw.PreferencesDialog)  # (Settings: its toast is over its own page)
+    dialog = settings or widget.get_ancestor(Adw.PreferencesDialog)  # (Settings: its toast is over its own page)
+    text = wording.say("deps.copied_restart" if dep.get("where") == "app" else "deps.copied" if dialog else "kube.copied_try_again")
     if dialog is not None:
         dialog.add_toast(Adw.Toast(title=text, timeout=2))
     else:
         toast(widget, text)
 
 
-def row(dep, title=None):
+def row(dep, title=None, settings=None):
     """A dependency's row: its name (or title: "Codex CLI isn't installed", where a feature's page lists it), then what's said of it while it's there (Installed, Signed in, Running, 3 models),
     or the command that installs or readies it with Copy (else its install page; a check with no command, its status only)."""
     out = Adw.ActionRow(title=GLib.markup_escape_text(title or dep["name"]))
@@ -120,7 +120,7 @@ def row(dep, title=None):
         out.add_suffix(fix)
         copy = Gtk.Button(icon_name="edit-copy-symbolic", tooltip_text=wording.say("common.copy"),
                           valign=Gtk.Align.CENTER, css_classes=["flat"])
-        copy.connect("clicked", lambda b: copy_fix(b, dep))
+        copy.connect("clicked", lambda b: copy_fix(b, dep, settings))
         out.add_suffix(copy)
     elif dep.get("ready"):
         out.add_suffix(Gtk.Label(label=dep["ready"], css_classes=["dim-label"]))

@@ -600,6 +600,14 @@ def sign_in_again(page, account):
         return dialog
     dialog, form, status, submit, say = _form(page, wording.say("subscriptions.sign_in_heading", name=account["name"]),
                                               wording.say("subscriptions.device_code"))
+    if (dep := page.missing.get("codex")) is not None:  # (its program isn't on the host: nothing to sign in with)
+        from depsview import row
+        rows = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE, css_classes=["boxed-list"])
+        rows.append(row(dep, deps.title(dep, title_of("codex")), page.get_ancestor(Adw.PreferencesDialog)))
+        form.set_size_request(480, -1)  # (room for the command beside the title)
+        form.append(rows)
+        dialog.present(page)
+        return dialog
     for w in (status, submit):
         form.append(w)
     running = []

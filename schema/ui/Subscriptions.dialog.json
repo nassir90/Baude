@@ -168,7 +168,7 @@
         },
         {
           "name": "Add account",
-          "shows": "Button row \"Add account\" with a plus. Where the host lacks the provider's program (Codex's codex, by the host's deps), its Dependencies row in its place: \"Codex CLI isn't installed\", the install command with Copy (else the install page).",
+          "shows": "Button row \"Add account\" with a plus. Where the host lacks the provider's program (Codex's codex, by the host's deps), its Dependencies row in its place: \"Codex CLI isn't installed\", the install command with Copy (else the install page); Copy toasts \"Copied: run it in a terminal\", Settings having no Try Again.",
           "copy": [
             "subscriptions.add_account",
             "deps.not_installed",
@@ -256,9 +256,10 @@
     },
     {
       "name": "Sign In Again dialog",
-      "shows": "Heading \"Sign in to <name> again\". A Claude folder account's: Sign in, then the sign-in page's link and the code box, as Add Claude account's. Codex's: Sign in with device code (its output in the dialog as it comes). Close.",
+      "shows": "Heading \"Sign in to <name> again\". A Claude folder account's: Sign in, then the sign-in page's link and the code box, as Add Claude account's. Codex's: Sign in with device code (its output in the dialog as it comes), or, where the host lacks codex, its Dependencies row (\"Codex CLI isn't installed\", the install command with Copy) in place of the button. Close.",
       "copy": [
-        "subscriptions.sign_in_heading"
+        "subscriptions.sign_in_heading",
+        "deps.copied"
       ]
     },
     {

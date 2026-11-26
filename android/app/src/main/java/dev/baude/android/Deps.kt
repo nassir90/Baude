@@ -81,7 +81,7 @@ fun DepRow(dep: Msg.Dep, title: String? = null) {
                 modifier = Modifier.widthIn(max = 160.dp))
             IconButton(Adwaita.EditCopy, Wording.Common.copy) {
                 clip.setText(AnnotatedString(fix))
-                toast(Wording.Kube.copiedTryAgain)
+                toast(Wording.Deps.copied)
             }
         } else if (!dep.ready.isNullOrBlank()) Text(dep.ready.orEmpty(), style = Type.body, color = c.dim)
         else if (!link.isNullOrBlank() && dep.check != true) Button(Wording.Deps.installPage) {

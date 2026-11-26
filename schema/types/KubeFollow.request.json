@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
-  "description": "A pod's log followed (logs), or a kind's list watched (watch): one a connection, the answers kube_text and kube_rows till the connection goes (kubectl is stopped then).",
+  "description": "The kubeconfig's contexts followed (contexts: kube_contexts, sent again whenever tools add or delete clusters), a pod's log followed (logs), or a kind's list watched (watch): one a connection, the answers kube_contexts, kube_text and kube_rows till the connection goes (kubectl is stopped then), or till the context goes from the kubeconfig (kube_end, removed).",
   "properties": {
     "op": {
       "const": "kube_follow",
@@ -12,12 +12,16 @@
       "description": "The request's number, the client's pick: its answers carry it back."
     },
     "what": {
-      "enum": ["logs", "watch"],
-      "description": "What to follow."
+      "enum": ["contexts", "logs", "watch"],
+      "description": "What to follow: the kubeconfig's contexts (kube_contexts, as they change), a pod's log, or a kind's list."
     },
     "context": {
       "type": "string",
       "description": "The kubeconfig context."
+    },
+    "server": {
+      "type": "string",
+      "description": "The context's server as the head knows it (KubeContext's): a context of that name with another server is another cluster, and the request is answered removed."
     },
     "page": {
       "type": "string",

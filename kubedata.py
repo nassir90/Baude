@@ -5,6 +5,7 @@ import re
 import time
 
 import lookup  # noqa: E402,F401
+import lookupkube  # noqa: E402
 from lookup import full_time  # noqa: E402,F401
 from lookupkube import (  # noqa: E402,F401
     _km, _ks, kube_fault, kube_fmt_age, kube_get, kube_run, kube_seconds, kube_tool,
@@ -1060,6 +1061,7 @@ def kube_custom_page(crd):
 
 
 _KUBE_PRINTERS = {}  # (context, definition) -> (when, its printer columns, or None: it couldn't be read)
+lookupkube.KUBE_FORGET.append(lambda name: [_KUBE_PRINTERS.pop(k, None) for k in list(_KUBE_PRINTERS) if k[0] == name])
 
 
 def kube_page_columns(context, page, max_age=60, items=()):

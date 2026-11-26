@@ -1,7 +1,8 @@
 """hostkube — the clusters this host's kubeconfig reaches, read for a head elsewhere (the phone's Kubernetes page): the
 desktop's own functions (kubedata), kubectl's answers as Freelens' pages and columns. Each kind's objects, an object's
 YAML, what controls an object, a pod deleted once it's asked, the whole stack's CPU and memory (kube); a pod's log followed and a kind's list watched,
-on a connection of its own (follow). Secrets' values are never read, and kubectl is only ever given the arguments these
+on a connection of its own (follow); the kubeconfig's contexts, sent again as tools add and delete clusters (follow's
+contexts). Secrets' values are never read, and kubectl is only ever given the arguments these
 build. No GTK."""
 import codecs
 import collections
@@ -24,6 +25,7 @@ from baudelib import deps, wording  # noqa: E402
 
 PAGES = {p["resource"]: p for _title, pages in kd.KUBE_SECTIONS for p in pages}
 _CUSTOM = {}  # (context, definition) -> the page its objects have
+lookupkube.KUBE_FORGET.append(lambda name: [_CUSTOM.pop(k, None) for k in list(_CUSTOM) if k[0] == name])
 BATCH_S = 0.1   # a log's lines are sent this often at most
 WATCH_S = 1.0   # a watch's changes are sent this often at most
 HISTORY_S = 30 * 60  # Home's history goes back this far
@@ -99,18 +101,25 @@ def _metrics(page, ctx):
         ctx["node_metrics"] is not None if page["resource"] == "nodes" else None
 
 
-def _contexts():
-    contexts = [c for c in lookupkube.kube_contexts() if not c.get("cluster_only")]
+def _contexts(contexts=None):
+    contexts = [c for c in (lookupkube.kube_contexts() if contexts is None else contexts) if not c.get("cluster_only")]
     where = ", ".join(_home(p) for p in lookupkube.kubeconfig_paths()) or wording.say("kube.no_kubeconfig")
-    return {"contexts": [{"name": c["name"], "current": bool(c.get("current")),
+    return {"contexts": [{"name": c["name"], "server": c.get("server") or "", "current": bool(c.get("current")),
                           "local": bool(lookupkube.kube_local(c.get("server")))} for c in contexts], "where": where}
+
+
+def _failed(e, context):
+    """A read that failed: the context gone from the kubeconfig (removed), or why the cluster can't be read (fault)."""
+    if getattr(e, "removed", False):
+        return {"removed": True}
+    return {"fault": _fault(getattr(e, "said", str(e)), context)}
 
 
 def _connect(context):
     try:
         resources = kd.kube_api_resources(context)
     except RuntimeError as e:
-        return {"fault": _fault(getattr(e, "said", str(e)), context)}
+        return _failed(e, context)
     try:
         spaces = sorted(lookupkube._km(n).get("name", "") for n in json.loads(
             kd.kube_get(context, "namespaces", "-o", "json") or "{}").get("items") or [])
@@ -132,7 +141,7 @@ def _list(msg):
     try:
         items = kd.kube_list(context, page)
     except (RuntimeError, ValueError) as e:
-        return {"fault": _fault(getattr(e, "said", str(e)), context)}
+        return _failed(e, context)
     columns = kd.kube_page_columns(context, page, items=items)
     ctx = kd.kube_metrics_ctx(context, page)
     out = {"columns": [{"title": c["title"], "kind": c["kind"]} for c in columns],
@@ -210,7 +219,7 @@ def _summary(msg):
         with _HISTORY_LOCK:  # (a cluster never read isn't sampled)
             if context in _HISTORY and not _HISTORY[context]["samples"]:
                 del _HISTORY[context]
-        return {"fault": _fault(getattr(e, "said", str(e)), context)}
+        return _failed(e, context)
     with _HISTORY_LOCK:
         samples = list((_HISTORY.get(context) or {"samples": ()})["samples"])
     history = [_sample(when, kept, namespaces) for when, kept in samples if since is None or when > since]
@@ -233,6 +242,8 @@ def _yaml(msg):
     try:
         text = kd.kube_get(context, *args)
     except RuntimeError as e:
+        if getattr(e, "removed", False):
+            return {"removed": True}
         d = kd.kube_diagnose(getattr(e, "said", str(e)))
         return {"text": f"# {d['title']}: {d['why']}\n", "file": "object.yaml", "refs": []}
     return {"text": text, "file": "object.yaml",
@@ -254,6 +265,13 @@ def _owner(msg):
             break
         kind, name = up["kind"], up["name"]
     return {"kind": kind, "name": name, "resource": kd.KUBE_CLIMB.get(kind) or kd.kube_resource(kind)}
+
+
+def _key(msg):
+    """The context a request is for: its name, with the server the head knows it by when it says one (a context of
+    that name with another server is another cluster, made again under the same name)."""
+    server = msg.get("server")
+    return (msg.get("context"), server) if isinstance(server, str) else msg.get("context")
 
 
 ARGS = ("context", "namespace", "name", "pod", "container", "kind", "page", "crd")
@@ -279,6 +297,8 @@ def answer(server, msg):
             return {"what": what, **_contexts()}
         if not isinstance(context, str) or not context:
             return {"what": what, "error": "kube needs a context"}
+        if lookupkube.kube_removed(_key(msg)):  # (deleted from the kubeconfig, or made again: kubectl isn't asked of it)
+            return {"what": what, "removed": True}
         if what == "connect":
             return {"what": what, **_connect(context)}
         if what == "list":
@@ -293,6 +313,8 @@ def answer(server, msg):
             return {"what": what, "said": kd.kube_delete(context, msg.get("namespace"), msg.get("name"),
                                                           bool(msg.get("force")))}
     except (RuntimeError, ValueError, OSError) as e:
+        if getattr(e, "removed", False):
+            return {"what": what, "removed": True}
         return {"what": what, "error": str(e)}
     return {"what": what, "error": "kube takes contexts, connect, list, yaml, owner, summary or delete"}
 
@@ -320,16 +342,63 @@ def stop(conn):
             threading.Timer(3, lambda p=proc: p.poll() is None and p.kill()).start()
 
 
+def _gone(conn, key, procs):
+    """While a follow runs: its kubectls (procs, a list it keeps current) stopped once its context goes from the
+    kubeconfig. A function that says whether it has (call it to let go of the watcher with stop=True)."""
+    removed = threading.Event()
+
+    def changed(_contexts):
+        if lookupkube.kube_removed(key):
+            removed.set()
+            for proc in list(procs):
+                if proc.poll() is None:
+                    try:
+                        proc.terminate()
+                    except OSError:
+                        pass
+    unwatch = lookupkube.kube_contexts_watch(changed)
+
+    def gone(stop=False):
+        if stop:
+            unwatch()
+        return removed.is_set()
+    return gone
+
+
 def _logs(conn, req, msg):
     previous = bool(msg.get("previous"))
     args = ["--context", msg["context"], "logs", "--previous" if previous else "-f", f"--tail={kd.KUBE_LOG_TAIL}",
             "-n", msg["namespace"], msg["pod"], "-c", msg["container"]]
+    procs = []
+    gone = _gone(conn, _key(msg), procs)
     try:
-        proc = _start(conn, args, stderr=subprocess.STDOUT)
-    except OSError as e:
-        conn.send({"op": "kube_end", "req": req, "code": 1, "said": str(e)})
-        return
-    pending, lock, done = [], threading.Lock(), threading.Event()
+        for again in (True, False):
+            try:
+                proc = _start(conn, args, stderr=subprocess.STDOUT)
+            except OSError as e:
+                conn.send({"op": "kube_end", "req": req, "code": 1, "said": str(e)})
+                return
+            procs[:] = [proc]
+            code, held = _log_lines(conn, req, proc)
+            if again and code and held is not None and lookupkube.kube_config_broken(held) and not gone():
+                time.sleep(0.3)  # (a kubeconfig caught half written: kubectl run once more, what it said unsent)
+                continue
+            if held:
+                conn.send({"op": "kube_text", "req": req, "text": held})
+            break
+        if gone() or code and lookupkube.kube_removed(_key(msg)):
+            conn.send({"op": "kube_end", "req": req, "code": code or 1, "removed": True})
+        else:
+            conn.send({"op": "kube_end", "req": req, "code": code})
+    finally:
+        gone(stop=True)
+
+
+def _log_lines(conn, req, proc):
+    """A log's lines sent as kubectl writes them, BATCH_S's worth at a time, till it ends: its exit code, and what it
+    wrote if it ended within its first second (held back, unsent: the caller sends it, or runs it again); None if
+    that was sent."""
+    pending, lock, done, began = [], threading.Lock(), threading.Event(), time.monotonic()
 
     def read():
         decode = codecs.getincrementaldecoder("utf-8")(errors="replace").decode
@@ -345,16 +414,24 @@ def _logs(conn, req, msg):
                 pending.append(decode(chunk))
         done.set()
     threading.Thread(target=read, daemon=True, name="kube-logs-read").start()
+    held = ""
     while True:
         finished = done.wait(BATCH_S)
         with lock:
             text, pending[:] = "".join(pending), []
+        if held is not None:
+            held += text
+            if finished:
+                break
+            if time.monotonic() - began < 1:
+                continue
+            text, held = held, None
         if text:
             conn.send({"op": "kube_text", "req": req, "text": text})
         if finished:
             break
     proc.stdout.close()
-    conn.send({"op": "kube_end", "req": req, "code": proc.wait()})
+    return proc.wait(), held
 
 
 def _apply(objects, events):
@@ -375,10 +452,27 @@ def _apply(objects, events):
 
 
 def _watch(conn, req, msg):
+    procs = []
+    gone = _gone(conn, _key(msg), procs)
+    try:
+        _watching(conn, req, msg, gone, procs)
+    finally:
+        gone(stop=True)
+
+
+def _watching(conn, req, msg, gone, procs):
+    """A kind's list watched (kubectl get --watch), its rows sent as they change; till the connection goes, or the
+    context goes from the kubeconfig (kube_end, removed)."""
     context, page = msg["context"], _page(msg)
     if page["source"] != "kubectl":
         conn.send({"op": "kube_end", "req": req, "code": 1, "said": "that kind isn't watched"})
         return
+
+    def removed(code=1):
+        if gone() or code and lookupkube.kube_removed(_key(msg)):
+            conn.send({"op": "kube_end", "req": req, "code": code or 1, "removed": True})
+            return True
+        return False
     state = {"ctx": kd.kube_metrics_ctx(context, page), "metrics_at": time.monotonic()}
     objects, fails = {}, 0
 
@@ -400,6 +494,7 @@ def _watch(conn, req, msg):
         else:
             try:
                 proc = _start(conn, args, stderr=subprocess.PIPE)
+                procs[:] = [proc]
             except OSError as e:
                 code, said, proc = 1, str(e), None
             if proc is not None:
@@ -443,8 +538,11 @@ def _watch(conn, req, msg):
                 said = (proc.stderr.read() or b"").decode(errors="replace").strip()
                 proc.stderr.close()
                 code = proc.wait()
-        if getattr(conn, "gone", False):
+        if getattr(conn, "gone", False) or removed(code):
             return
+        if code and not seen and lookupkube.kube_config_broken(said):  # (a kubeconfig caught half written)
+            time.sleep(0.3)
+            continue
         if seen:
             fails = 0
         if code and not seen:
@@ -460,12 +558,29 @@ def _watch(conn, req, msg):
                         send(note)
                     except (RuntimeError, ValueError):
                         pass
+                    if removed(0):
+                        return
                     for _ in range(kd.KUBE_REFRESH_S * 4):
                         if getattr(conn, "gone", False):
                             return
                         time.sleep(0.25)
                 return
         time.sleep(5 if code and not seen else 1)
+
+
+def _follow_contexts(conn, req):
+    """The kubeconfig's contexts (kube_contexts), sent as the follow starts and again each time they change (tools
+    adding and deleting clusters as they go), till the connection goes."""
+    changed = threading.Event()
+    unwatch = lookupkube.kube_contexts_watch(lambda _contexts: changed.set())
+    try:
+        conn.send({"op": "kube_contexts", "req": req, **_contexts()})
+        while not getattr(conn, "gone", False):
+            if changed.wait(1):
+                changed.clear()
+                conn.send({"op": "kube_contexts", "req": req, **_contexts()})
+    finally:
+        unwatch()
 
 
 def follow(server, conn, msg):
@@ -476,12 +591,16 @@ def follow(server, conn, msg):
         conn.send({"op": "kube_end", "req": req, "code": 1, "said": f"{bad} can't start with -"})
         return
     try:
-        if msg.get("what") == "logs":
+        if msg.get("what") == "contexts":
+            _follow_contexts(conn, req)
+        elif msg.get("what") in ("logs", "watch") and lookupkube.kube_removed(_key(msg)):
+            conn.send({"op": "kube_end", "req": req, "code": 1, "removed": True})
+        elif msg.get("what") == "logs":
             _logs(conn, req, msg)
         elif msg.get("what") == "watch":
             _watch(conn, req, msg)
         else:
-            conn.send({"op": "error", "req": req, "error": "kube_follow takes logs or watch"})
+            conn.send({"op": "error", "req": req, "error": "kube_follow takes contexts, logs or watch"})
             return
     except (KeyError, ValueError, OSError, RuntimeError) as e:
         conn.send({"op": "kube_end", "req": req, "code": 1, "said": str(e)})

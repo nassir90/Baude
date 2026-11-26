@@ -34,7 +34,8 @@ from gi.repository import Adw, Gdk, GdkPixbuf, Gio, GLib, GObject, Graphene, Gsk
 import lookup  # noqa: E402,F401
 from lookup import find_spans  # noqa: E402,F401  (⌘K's engine: what a folder has)
 from lookupkube import (  # noqa: E402,F401
-    PG_LISTS, arango_eval, at_once, db_index, db_names, pg_databases_cached, pg_query, pg_servers_cached,
+    PG_LISTS, arango_eval, at_once, db_index, db_names, kube_contexts, kube_contexts_watch, kube_key, kube_local,
+    pg_databases_cached, pg_query, pg_servers_cached,
 )
 from widgets import (  # noqa: E402,F401
     FIND_RGB, WorkerPool, ZOOM_STEP, find_attrs, inside, paned_grip, view_bar, _scales,
@@ -566,6 +567,12 @@ class SchemaCanvas(Gtk.Widget):
         snap.restore()
 
 
+def server_label(s):
+    """A database server as its picker lists it: its container, its engine and version."""
+    engine = "ArangoDB" if s.get("engine") == "arango" else "Postgres"
+    return f"{s['container']} ({engine} {s['version']})" if s.get("version") else s["container"]
+
+
 class SchemaView(Gtk.Box):
     """Full-window database schemas (☰ → Database Schemas…, or a table name in a reply): pick a server, a
     database and a schema; the diagram; a table's first rows below it. Esc closes."""
@@ -578,6 +585,7 @@ class SchemaView(Gtk.Box):
         self.dbs, self.namespace, self.hint, self.syncing = {}, "public", "", False
         self.generation = self.rows_generation = 0  # (the last schema and rows asked for: older ones aren't shown)
         self.host = kubehost.Host(None, {"via": "local"}, wording.say("senders.local"))  # (where it reads: open)
+        self.following, self.clusters = None, None  # (the host's kubeconfig followed while open: its local clusters)
         bar = view_bar()
         title = Gtk.Label(label=wording.say("databases.title"))
         title.add_css_class("heading")
@@ -688,6 +696,71 @@ class SchemaView(Gtk.Box):
             self.set_visible(True)
             self.grab_focus()
         self.look_again()
+        if not same_host or self.following is None:
+            self.watch_clusters()
+
+    def watch_clusters(self):
+        """The host's local Kubernetes clusters followed while the view's open (its kubeconfig's contexts whose API
+        server is on it, as tools add and delete them): the servers in their pods looked for again as they change."""
+        self.unwatch_clusters()
+        host, self.clusters = self.host, None
+
+        def changed(contexts):
+            if self.get_root() is None:  # (its window's gone)
+                return self.unwatch_clusters()
+            local = sorted(kube_key(c) for c in contexts if c.get("local", kube_local(c.get("server"))) and
+                           not c.get("cluster_only"))
+            if self.clusters is not None and local != self.clusters and host is self.host and self.get_visible():
+                self.servers_again()
+            self.clusters = local
+        if host.here:
+            self.following = kube_contexts_watch(lambda contexts: GLib.idle_add(lambda: changed(contexts) and False))
+            self.clusters = sorted(kube_key(c) for c in kube_contexts()
+                                   if kube_local(c.get("server")) and not c.get("cluster_only"))
+            return
+        self.following = kubehost.Follow(host.where, {"what": "contexts"}, lambda *_: None,
+                                         on_contexts=lambda f, r: f is self.following and changed(r.get("contexts") or []))
+
+    def unwatch_clusters(self):
+        f, self.following = self.following, None
+        if isinstance(f, kubehost.Follow):
+            f.stop()
+        elif f is not None:
+            f()
+
+    def servers_again(self):
+        """The servers looked for again (a local cluster added or deleted): the pickers keep up, the diagram shown
+        stays while its server's still there."""
+        host = self.host
+        if host.here:
+            def work():
+                try:
+                    servers = pg_servers_cached()
+                    dbs = {sv["container"]: pg_databases_cached(sv) for sv in servers}
+                except RuntimeError:
+                    return
+                GLib.idle_add(self._servers_again, host, servers, dbs)
+            DB_POOL.submit(work)
+            return
+        host.ask("databases", {"what": "servers"}, lambda r: r.get("servers") is not None and
+                 self._servers_again(host, r["servers"], r.get("databases") or {}))
+
+    def _servers_again(self, host, servers, dbs):
+        if host is not self.host or [sv["container"] for sv in servers] == [sv["container"] for sv in self.servers]:
+            return False
+        if self.server is not None and any(sv["container"] == self.server["container"] for sv in servers):
+            server = next(sv for sv in servers if sv["container"] == self.server["container"])
+            self.servers, self.dbs = servers, dbs
+            self.syncing = True
+            self.server_dd.set_model(Gtk.StringList.new([server_label(sv) for sv in servers]))
+            self.server_dd.set_selected(servers.index(server))
+            self.syncing = False
+            self.server = server
+            return False
+        self.server = None
+        self._discovered(servers, dbs, None, None if servers else wording.say("databases.no_postgres"),
+                         searched=False)
+        return False
 
     def look_again(self):
         """The host's database servers looked for (there, by its host process, if it's another), the table wanted
@@ -720,6 +793,7 @@ class SchemaView(Gtk.Box):
 
     def close(self):
         self.set_visible(False)
+        self.unwatch_clusters()
         self.win.input.grab_focus()
 
     def escape(self):
@@ -770,9 +844,7 @@ class SchemaView(Gtk.Box):
             return False
         self.servers, self.dbs = servers, dbs
         self.syncing = True
-        engine = lambda s: "ArangoDB" if s.get("engine") == "arango" else "Postgres"  # noqa: E731
-        self.server_dd.set_model(Gtk.StringList.new([f"{s['container']} ({engine(s)} {s['version']})" if s["version"]
-                                                     else s["container"] for s in servers]))
+        self.server_dd.set_model(Gtk.StringList.new([server_label(s) for s in servers]))
         self.db_list_for = None
         self.syncing = False
         if found:

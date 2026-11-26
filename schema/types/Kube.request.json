@@ -30,6 +30,10 @@
       "type": "string",
       "description": "The kubeconfig context."
     },
+    "server": {
+      "type": "string",
+      "description": "The context's server as the head knows it (KubeContext's): a context of that name with another server is another cluster, and the request is answered removed."
+    },
     "page": {
       "type": "string",
       "description": "list, yaml: the kind's page, by its resource."

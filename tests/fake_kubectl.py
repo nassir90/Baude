@@ -4,7 +4,9 @@ kubectl answers. k3d-dev has a metrics API and one node; prod has neither a metr
 KEDA (its custom resources, which k3d-dev doesn't serve). Every call
 is logged ($FAKE_KUBECTL_LOG), so the tests can check which commands ran (only reading ones, but for the deletes they
 confirm), and that a Secret's values were never asked for. A test can hold a context's answers back, or take its
-cluster down ($FAKE_KUBECTL_HOLD).
+cluster down ($FAKE_KUBECTL_HOLD). With $KUBECONFIG, its contexts are the ones there are, as a test adds and deletes
+them (each but prod a cluster like k3d-dev); a context that isn't there, or a file cut off as it's written, fails as
+kubectl does.
 
 `logs` prints a few lines of a pod's container (its previous run's with --previous); with -f it then waits to be
 stopped, printing a line every $FAKE_KUBECTL_FOLLOW seconds if that's set (and never for more than two minutes).
@@ -408,6 +410,34 @@ def watch(resource, context):
         time.sleep(0.2)
 
 
+def kubeconfig_contexts():
+    """The contexts named in $KUBECONFIG's files, as kubectl reads them (each but prod a cluster like k3d-dev: a test
+    can add and delete contexts as tools do); None without a $KUBECONFIG file; (path, line) for a file that can't be
+    read as YAML (one cut off as it's written)."""
+    import re
+    if not os.environ.get("KUBECONFIG"):
+        return None
+    names, read = [], False
+    for path in os.environ["KUBECONFIG"].split(os.pathsep):
+        try:
+            with open(path) as f:
+                text = f.read()
+        except OSError:
+            continue
+        read = True
+        section = None
+        for n, line in enumerate(text.splitlines(), 1):
+            if line.strip() and not re.match(r"^\s*(- )?[\w.@/:-]+:( .*)?$|^\s*- [^:]+$", line):
+                return path, n
+            if not line.startswith((" ", "-")):
+                section = line.split(":")[0]
+            elif section == "contexts" and (m := re.match(r"^(?:- |  )name: (\S+)$", line)):
+                names.append(m.group(1))
+        if text and not text.endswith("\n"):
+            return path, len(text.splitlines())
+    return names if read else None
+
+
 def main():
     args = sys.argv[1:]
     with open(os.environ.get("FAKE_KUBECTL_LOG", os.devnull), "a") as f:
@@ -416,9 +446,11 @@ def main():
         out(json.dumps([{"name": "web", "namespace": "shop", "revision": "3", "updated": "2026-10-22 10:00:00",
                          "status": "deployed", "chart": "web-1.2.0", "app_version": "1.2.0"}]))
     context = args[args.index("--context") + 1] if "--context" in args else "k3d-dev"
-    if context not in ("k3d-dev", "prod"):
-        sys.stderr.write(f'error: context "{context}" does not exist\n')
-        sys.exit(1)
+    known = kubeconfig_contexts()
+    if known is not None and not isinstance(known, list):  # (a kubeconfig caught half written)
+        fail(f'error: error loading config file "{known[0]}": yaml: line {known[1]}: could not find expected \':\'')
+    if context not in (known if known is not None else ("k3d-dev", "prod")):
+        fail(f"error: context was not found for specified context: {context}")
     # a test's folder ($FAKE_KUBECTL_HOLD): a file named after the context holds its answers back while it's there;
     # one named <context>.down makes it a cluster that doesn't answer at all
     if hold := os.environ.get("FAKE_KUBECTL_HOLD"):

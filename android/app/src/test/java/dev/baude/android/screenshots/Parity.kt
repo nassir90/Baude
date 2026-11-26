@@ -536,6 +536,30 @@ abstract class Parity(private val theme: String, private val scene: String) {
                 dev.baude.android.Terms.live.last().feed("root@api-6f7c-mnopq:/app# ls\r\nroot@api-6f7c-mnopq:/app# ".toByteArray())
                 flush(true)
             }
+            name == "kubernetes-contexts" -> {
+                val st = dev.baude.android.KubeState(host.getString("id"))
+                show { KubeScreen(host.getString("id"), {}, page = "pods", state = st) }
+                tap("CPU")
+                tap("CPU")
+                // (a tool's test clusters added to the kubeconfig, as the host's kube_contexts says them)
+                val extra = listOf("staging") + (1..18).map { "slice-$it" } + listOf(412, 418, 431, 455).map { "pr-$it-preview" } +
+                    listOf("kind-ci")
+                st.contextsIn(st.contexts + extra.map { Msg.KubeContext(name = it, server = "https://k3d-dev.local:6443") })
+                st.level = "contexts"
+                flush(true)
+            }
+            name == "kubernetes-removed" -> {
+                val st = dev.baude.android.KubeState(host.getString("id"))
+                show { KubeScreen(host.getString("id"), {}, page = "pods", state = st) }
+                tap("CPU")
+                tap("CPU")
+                tapInRow(Wording.Kube.logs, "worker-5c4b-klmno")
+                tapInRow(Wording.Kube.shell, "api-6f7c-mnopq")
+                dev.baude.android.Terms.live.last().feed("root@api-6f7c-mnopq:/app# ".toByteArray())
+                // (k3d-dev deleted from the kubeconfig by a tool, as the host's kube_contexts says it)
+                st.contextsIn(st.contexts.filter { it.name != "k3d-dev" })
+                flush(true)
+            }
             name == "terminal" -> {
                 show { dev.baude.android.TerminalScreen(host.getString("id"), {}) }
                 flush(true)

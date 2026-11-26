@@ -8079,9 +8079,7 @@ def test_kube_view(app):
         assert isinstance(kv.get_first_child(), Gtk.WindowHandle), "its bar moves the window, as the header bar does"
         win.activate_action("win.kube", None)
         assert kv.get_visible() and kv.context == "k3d-dev", "your kubeconfig's current context"
-        model = kv.context_dd.get_model()
-        assert [model.get_string(i) for i in range(model.get_n_items())] == ["k3d-dev", "prod"], \
-            "the contexts by name, no (current) after one, as in Freelens"
+        assert kv.context_pick.names() == ["k3d-dev", "prod"], "the contexts by name, no (current) after one, as in Freelens"
         def label_of(row):
             return next(w for w in find(row, Gtk.Label)).get_label()
         heads = [label_of(r) for r in side_rows() if not hasattr(r, "page") and r.get_visible()]
@@ -8298,7 +8296,7 @@ def test_kube_view(app):
         assert sorted(r.obj["name"] for r in rows()) == ["api-6f7c-mnopq", "old-web-pqrst", "web-7d9f-abcde",
                                                          "web-7d9f-fghij"]
         # another context, with no metrics API: CPU and memory N/A, and said so
-        kv.context_dd.set_selected([c["name"] for c in kv.contexts].index("prod"))
+        kv.pick_context("prod")
         wait_for(lambda: kv.context == "prod" and kv.store.get_n_items() == 2, "prod's pods")
         assert kv.ns_label.get_label() == "All namespaces", "the namespaces shown are each context's own"
         assert all(cell(r, "CPU") == "N/A" and cell(r, "Memory") == "N/A" for r in rows())
@@ -8310,7 +8308,7 @@ def test_kube_view(app):
         wait_for(lambda: kv.table_page is baude.KUBE_NODES and kv.store.get_n_items() == 3, "prod's nodes")
         assert [cell(r, "Roles") for r in rows()] == ["control-plane", "worker", "worker"]
         # back on k3d-dev, Nodes stays while it's the page shown, and goes once another is
-        kv.context_dd.set_selected([c["name"] for c in kv.contexts].index("k3d-dev"))
+        kv.pick_context("k3d-dev")
         wait_for(lambda: kv.context == "k3d-dev" and kv.node_count == 1 and kv.store.get_n_items() == 1, "its node")
         assert kv.page_rows[id(baude.KUBE_NODES)].get_visible()
         assert kv.ns_shown == ["shop"] and kv.ns_label.get_label() == "shop", "k3d-dev's namespace, as it was left"
@@ -8398,7 +8396,7 @@ def test_kube_keda(app):
         return next(c for c in kv.columns if c.get_title() == title)
 
     def pick(name):
-        kv.context_dd.set_selected([c["name"] for c in kv.contexts].index(name))
+        kv.pick_context(name)
 
     def show(page, n):
         kv.side.select_row(kv.page_rows[id(page)])
@@ -8507,7 +8505,7 @@ def test_kube_kind_picked_while_connecting(app):
         win.activate_action("win.kube", None)
         wait_for(lambda: kv.resources is not None and kv.store is not None, "k3d-dev")
         baude.kube_api_resources = lambda name: (held.wait(10), orig(name))[1]
-        kv.context_dd.set_selected([c["name"] for c in kv.contexts].index("prod"))
+        kv.pick_context("prod")
         wait_for(lambda: kv.context == "prod" and kv.resources is None, "prod connecting")
         kv.side.select_row(kv.page_rows[id(deployments)])  # (picked while it connects)
         held.set()
@@ -8595,7 +8593,7 @@ def test_kube_switch_fade(app):
             os.remove(path)
 
     def pick(name):
-        kv.context_dd.set_selected([c["name"] for c in kv.contexts].index(name))
+        kv.pick_context(name)
         wait_for(lambda: kv.context == name, f"{name} picked")
 
     def rows():
@@ -8611,8 +8609,8 @@ def test_kube_switch_fade(app):
         pick("prod")
         assert faded() and kv.store.get_n_items() == 7, "k3d-dev's pods, faded, while prod is read"
         assert kv.status.get_label() == "Connecting to prod…"
-        assert not any(w.has_css_class("switching") for w in (kv.context_dd, kv.ns_btn, kv.search, kv.side, kv.status))
-        assert kv.context_dd.is_sensitive() and kv.side.is_sensitive()
+        assert not any(w.has_css_class("switching") for w in (kv.context_pick, kv.ns_btn, kv.search, kv.side, kv.status))
+        assert kv.context_pick.is_sensitive() and kv.side.is_sensitive()
         pump(0.5)
         assert faded(), "still faded: prod hasn't answered"
         # picked again meanwhile: still faded, the same fade, and only the last one shown
@@ -8976,7 +8974,7 @@ def test_kube_pod_actions(app):
         wait_for(lambda: "web-7d9f-abcde" not in [r.obj["name"] for r in rows()], "read again: gone")
         assert kv.status.get_label().startswith('pod "web-7d9f-abcde" force deleted · ')
         # a remote cluster's: said plainly
-        kv.context_dd.set_selected([c["name"] for c in kv.contexts].index("prod"))
+        kv.pick_context("prod")
         wait_for(lambda: kv.context == "prod" and kv.store.get_n_items() == 2 and not kv.loading, "prod's pods")
         for action in ("kube.delete", "kube.force-delete"):
             dlg = ask("shop/web-7d9f-fghij", action)

@@ -40,7 +40,7 @@ private const val LOG_LINES = 20000 // (kubedata.KUBE_LOG_LINES: a log keeps thi
 
 /** A pod's logs shown: whose, its containers (init ones marked), the one picked, the text so far and what it's doing. */
 class LogsShown(val context: String, val namespace: String, val pod: String, val containers: List<Pair<String, Boolean>>,
-                container: String) {
+                container: String, val server: String = "") {
     var container by mutableStateOf(container)
     var previous by mutableStateOf(false)
     var follow by mutableStateOf(true)

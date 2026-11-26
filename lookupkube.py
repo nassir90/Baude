@@ -243,11 +243,28 @@ def kube_name_pattern(raw):
     return regex, len(literal)
 
 
+def _kubeconfig_named():
+    env = os.environ.get("KUBECONFIG")
+    return [os.path.expanduser(p) for p in env.split(os.pathsep) if p] if env else [os.path.expanduser("~/.kube/config")]
+
+
 def kubeconfig_paths():
     """The kubeconfig files kubectl would read: $KUBECONFIG's, else ~/.kube/config (the ones that exist)."""
-    env = os.environ.get("KUBECONFIG")
-    paths = [p for p in env.split(os.pathsep) if p] if env else ["~/.kube/config"]
-    return [os.path.realpath(os.path.expanduser(p)) for p in paths if os.path.isfile(os.path.expanduser(p))]
+    return [os.path.realpath(p) for p in _kubeconfig_named() if os.path.isfile(p)]
+
+
+def kubeconfig_stamp():
+    """What tells whether a kubeconfig file changed, with a stat each and nothing read: every file kubectl would read
+    (one that isn't there yet too), its inode, size and modification time. A tool that writes a new file and renames
+    it over the old one changes its inode; one that writes in place, its size or time."""
+    out = []
+    for p in _kubeconfig_named():
+        try:
+            st = os.stat(p)
+            out.append((p, st.st_ino, st.st_size, st.st_mtime_ns))
+        except OSError:
+            out.append((p, None))
+    return tuple(out)
 
 
 def kubeconfig_entries(path):
@@ -261,11 +278,14 @@ def kubeconfig_entries(path):
     except OSError:
         return out
     keep = {"cluster", "namespace", "user", "server"}
+    if not text.strip() or not text.endswith("\n") and not text.rstrip().endswith("}"):
+        out["partial"] = True  # (emptied to be written again, or cut off as it's written: every tool ends a
+        # kubeconfig with a newline)
     if text.lstrip().startswith("{"):  # (JSON is YAML too)
         try:
             doc = json.loads(text)
         except ValueError:
-            return out
+            return {**out, "partial": True}
         for section, inner in (("contexts", "context"), ("clusters", "cluster"), ("users", None)):
             for e in doc.get(section) or []:
                 if isinstance(e, dict) and isinstance(e.get("name"), str):
@@ -373,30 +393,143 @@ def kube_made_as(c):
 
 
 _KUBE_CONTEXTS = {}
+_KUBE_GOOD = {}  # path -> its entries as last read whole (kept for one caught half written)
+_KUBE_CONTEXTS_LOCK = threading.RLock()
+KUBE_FORGET = []  # fn(name): what's kept of a context dropped, as it goes from the kubeconfig or its server changes
+
+
+def kube_key(c):
+    """A context as a cluster: its name and its cluster's server. One deleted and made again under the same name is
+    another cluster (its server's port, at least, is new), and nothing kept of the old one is its."""
+    return c.get("name"), c.get("server") or ""
+
+
+def _kube_entries(path):
+    """kubeconfig_entries(path), taken again for a moment if it's caught half written; still half written, the last
+    whole read of it."""
+    for _ in range(10):
+        e = kubeconfig_entries(path)
+        if not e.get("partial"):
+            _KUBE_GOOD[path] = e
+            return e
+        time.sleep(0.05)
+    return _KUBE_GOOD.get(path, e)
 
 
 def kube_contexts():
     """Every kubeconfig context kubectl would see, with its cluster's server: [{name, cluster, server, namespace, user,
     kubeconfig, line, current}]; the clusters no context names are listed as contexts of their own name too. Read again
-    when a file changes."""
-    paths = kubeconfig_paths()
-    key = tuple((p, os.stat(p).st_mtime_ns) for p in paths if os.path.exists(p))
-    if key not in _KUBE_CONTEXTS:
-        out, current = [], None
-        for p in paths:
-            e = kubeconfig_entries(p)
-            current = current or e["current"]  # (the first file that sets it wins, as in kubectl)
-            servers = {c["name"]: c.get("server") for c in e["clusters"]}
-            for c in e["contexts"]:
-                out.append({**c, "server": servers.get(c.get("cluster")), "kubeconfig": p})
-            named = {c.get("cluster") for c in e["contexts"]}
-            out += [{"name": c["name"], "cluster": c["name"], "server": c.get("server"), "kubeconfig": p,
-                     "line": c.get("line"), "cluster_only": True} for c in e["clusters"] if c["name"] not in named]
+    when a file changes (kubeconfig_stamp), and again if one changed while it was read."""
+    with _KUBE_CONTEXTS_LOCK:
+        for _ in range(5):
+            key = kubeconfig_stamp()
+            if key in _KUBE_CONTEXTS:
+                return _KUBE_CONTEXTS[key]
+            out, current = [], None
+            for p in kubeconfig_paths():
+                e = _kube_entries(p)
+                current = current or e["current"]  # (the first file that sets it wins, as in kubectl)
+                servers = {c["name"]: c.get("server") for c in e["clusters"]}
+                for c in e["contexts"]:
+                    out.append({**c, "server": servers.get(c.get("cluster")), "kubeconfig": p})
+                named = {c.get("cluster") for c in e["contexts"]}
+                out += [{"name": c["name"], "cluster": c["name"], "server": c.get("server"), "kubeconfig": p,
+                         "line": c.get("line"), "cluster_only": True} for c in e["clusters"] if c["name"] not in named]
+            if kubeconfig_stamp() == key:
+                break
         for c in out:
             c["current"] = c["name"] == current
+        before = next(iter(_KUBE_CONTEXTS.values()), None)
         _KUBE_CONTEXTS.clear()
         _KUBE_CONTEXTS[key] = out
-    return _KUBE_CONTEXTS[key]
+    if before is not None:
+        _kube_forget(before, out)
+    return out
+
+
+def _kube_forget(before, now):
+    """What's kept of each context that's gone, or whose server changed, let go of (KUBE_FORGET's, and the local
+    clusters' workloads and databases, read again next time they're asked for)."""
+    keys = {kube_key(c) for c in now}
+    gone = [c for c in before if kube_key(c) not in keys]
+    for c in gone:
+        _KUBE_RUNNING.pop(c["name"], None)
+        for fn in list(KUBE_FORGET):
+            try:
+                fn(c["name"])
+            except Exception:  # noqa: BLE001 (one cache's trouble isn't the others')
+                pass
+    if any(kube_local(c.get("server")) for c in gone) or \
+            {kube_key(c) for c in now if kube_local(c.get("server"))} - {kube_key(c) for c in before}:
+        for k in [k for k in PG_LISTS if k == ("servers",) or k == ("index",) or k[0] == "databases"]:
+            PG_LISTS.pop(k, None)
+
+
+class _KubeWatcher:
+    """The kubeconfig files looked at every POLL_S (a stat each: kubeconfig_stamp), on one thread for every watcher,
+    while there's one. A change is read once the files have stopped changing for SETTLE_S, so a file being written is
+    never taken for its half; then each watcher's fn(contexts) is called (on that thread) if the contexts differ from
+    those it was last told of (or had when it began): one added or gone, a server, the current one."""
+    POLL_S = 1.0
+    SETTLE_S = 0.3
+
+    def __init__(self):
+        self.fns, self.lock, self.thread = {}, threading.Lock(), None  # (fn -> the contexts it knows of)
+
+    def add(self, fn):
+        known = self.said(kube_contexts())
+        with self.lock:
+            self.fns[fn] = known
+            if self.thread is None:
+                self.thread = threading.Thread(target=self._run, daemon=True, name="kubeconfig-watch")
+                self.thread.start()
+
+        def remove():
+            with self.lock:
+                self.fns.pop(fn, None)
+        return remove
+
+    @staticmethod
+    def said(contexts):
+        return [(c["name"], c.get("server"), bool(c.get("current")), bool(c.get("cluster_only"))) for c in contexts]
+
+    def _run(self):
+        stamp = kubeconfig_stamp()
+        while True:
+            time.sleep(self.POLL_S)
+            with self.lock:
+                if not self.fns:
+                    self.thread = None
+                    return
+            now = kubeconfig_stamp()
+            if now == stamp:
+                continue
+            while True:  # (still being written: read once it's done)
+                time.sleep(self.SETTLE_S)
+                if (again := kubeconfig_stamp()) == now:
+                    break
+                now = again
+            stamp = now
+            contexts = kube_contexts()
+            said = self.said(contexts)
+            with self.lock:
+                told = [fn for fn, known in self.fns.items() if known != said]
+                for fn in told:
+                    self.fns[fn] = said
+            for fn in told:
+                try:
+                    fn(contexts)
+                except Exception:  # noqa: BLE001 (a watcher's trouble isn't the others')
+                    pass
+
+
+_WATCHER = _KubeWatcher()
+
+
+def kube_contexts_watch(fn):
+    """fn(contexts) whenever the kubeconfig's contexts change (kube_contexts' list; on a thread of the watcher's), as
+    external tools add and delete clusters; a function that stops it."""
+    return _WATCHER.add(fn)
 
 
 def at_once(fn, items, workers=8):
@@ -757,11 +890,40 @@ def kube_tool(name):
 
 class KubeError(RuntimeError):
     """kubectl or helm failed: str() is the last line it wrote, said all of it. The last line is often only that a
-    credential plugin failed; why it did (aws, gcloud, kubelogin's own message) is in the lines before (kube_diagnose)."""
+    credential plugin failed; why it did (aws, gcloud, kubelogin's own message) is in the lines before (kube_diagnose).
+    removed: the context it was run in is no longer in the kubeconfig (its cluster was deleted meanwhile)."""
 
-    def __init__(self, last, said=""):
+    def __init__(self, last, said="", removed=False):
         super().__init__(last)
-        self.said = said or last
+        self.said, self.removed = said or last, removed
+
+
+_KUBE_BROKEN = re.compile(r"error loading config file|couldn't get version/kind|error converting YAML|yaml: line \d+|"
+                          r"yaml: (did not find|could not find|mapping values)|unexpected end of JSON input|"
+                          r"json: cannot unmarshal", re.I)
+
+
+_KUBE_NO_CONTEXT = re.compile(r"context was not found for specified context|context \"[^\"]*\" does not exist|"
+                              r"no context exists with the name", re.I)
+
+
+def kube_config_broken(said):
+    """Whether kubectl failed because it read a kubeconfig file half written (a tool rewriting it meanwhile)."""
+    return bool(_KUBE_BROKEN.search(said or ""))
+
+
+def kube_removed(context):
+    """Whether a context is no longer in the kubeconfig (a context name, or a kube_key: then a context of that name
+    with another server is a cluster made again, and the one asked for is gone too)."""
+    name, server = context if isinstance(context, tuple) else (context, None)
+
+    def gone():
+        return not any(c["name"] == name and (server is None or (c.get("server") or "") == server)
+                       for c in kube_contexts() if not c.get("cluster_only"))
+    if not gone():
+        return False
+    time.sleep(_KubeWatcher.SETTLE_S)  # (a file being written: looked at again once it's had time to be)
+    return gone()
 
 
 # Fault injection: BAUDE_KUBE_FAULT=<name> makes every kubectl call fail as it does then, with what kubectl (1.37)
@@ -823,17 +985,25 @@ def kube_fault(tool):
 
 
 def kube_run(tool, args, timeout=30):
-    """A kubectl or helm command's output; KubeError with what it wrote if it fails."""
+    """A kubectl or helm command's output; KubeError with what it wrote if it fails (removed, if its context has gone
+    from the kubeconfig). One that read a kubeconfig half written (a tool rewriting it) is run once more."""
     if (fault := kube_fault(tool)) is not None and "config" not in args[:1]:
         raise KubeError(fault.splitlines()[-1], fault)
-    try:
-        p = subprocess.run([kube_tool(tool), *args], capture_output=True, text=True, timeout=timeout,
-                           stdin=subprocess.DEVNULL)
-    except (OSError, subprocess.TimeoutExpired) as e:
-        raise KubeError(f"{tool}: {e}") from e
+    context = next((args[i + 1] for i in range(len(args) - 1) if args[i] in ("--context", "--kube-context")), None)
+    for again in (True, False):
+        try:
+            p = subprocess.run([kube_tool(tool), *args], capture_output=True, text=True, timeout=timeout,
+                               stdin=subprocess.DEVNULL)
+        except (OSError, subprocess.TimeoutExpired) as e:
+            raise KubeError(f"{tool}: {e}") from e
+        said = (p.stderr or p.stdout).strip() if p.returncode else ""
+        removed = p.returncode and context is not None and _KUBE_NO_CONTEXT.search(said) and kube_removed(context)
+        if not (again and p.returncode and not removed and (kube_config_broken(said) or _KUBE_NO_CONTEXT.search(said))):
+            break
+        time.sleep(0.3)  # (its context not there yet as kubectl read it: the file was being written)
     if p.returncode:
-        said = (p.stderr or p.stdout).strip()
-        raise KubeError(said.splitlines()[-1] if said else f"{tool} exited with {p.returncode}", said)
+        raise KubeError(said.splitlines()[-1] if said else f"{tool} exited with {p.returncode}", said,
+                        removed=bool(removed or context is not None and kube_removed(context)))
     return p.stdout
 
 

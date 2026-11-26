@@ -136,6 +136,14 @@ abstract class Screens(private val theme: String) {
         screen("05a-subscriptions")
     }
 
+    // (Settings → Subscriptions opened while each card's usage read is still out: what workshop last read of each, greyed)
+    @Test fun subscriptionsLastRead() {
+        accountsFixture(reading = true)
+        show { SettingsScreen({}, {}, page = 1) }
+        laidOut()
+        screen("05j-subscriptions-last-read")
+    }
+
     @Test fun subscriptionsPill() {
         accountsFixture()
         show { SettingsScreen({}, {}, page = 1) }
@@ -435,22 +443,28 @@ abstract class Screens(private val theme: String) {
         }
     }
 
-    private fun accountsFixture() {
+    /** workshop's accounts; reading: each usage read left unanswered, the host's last reading of each in every answer. */
+    private fun accountsFixture(reading: Boolean = false) {
         FixtureConnection.up(activity, Mesh.hosts.first()) { m ->
-            if (m.optString("op") != "accounts") null
+            if (m.optString("op") != "accounts" || (reading && m.optString("what") == "usage")) null
             else org.json.JSONObject().put("op", "accounts").put("req", m.opt("req")).put("what", m.optString("what"))
                 .put("accounts", org.json.JSONArray(listOf(HOME_ACCOUNT, WORK,
                     org.json.JSONObject().put("id", "p1").put("provider", "codex").put("name", "Personal").put("kind", "profile"))))
                 .put("defaults", org.json.JSONObject().put("claude", "w1").put("codex", "")).put("claude_cli", true)
                 .apply {
-                    if (m.optString("what") == "usage") {
-                        val (five, seven) = mapOf("w1" to (25 to 40), "h2" to (72 to 18))[m.optString("id")] ?: (5 to 12)
-                        put("usage", org.json.JSONArray(listOf(
+                    fun limits(id: String): org.json.JSONArray {
+                        val (five, seven) = mapOf("w1" to (25 to 40), "h2" to (72 to 18))[id] ?: (5 to 12)
+                        return org.json.JSONArray(listOf(
                             org.json.JSONObject().put("name", "Five hour").put("key", "five_hour").put("percent", five)
                                 .put("resets", System.currentTimeMillis() / 1000 + 3 * 3600 + 720),
                             org.json.JSONObject().put("name", "Seven day").put("key", "seven_day").put("percent", seven)
-                                .put("resets", System.currentTimeMillis() / 1000 + 3 * 86400 + 5 * 3600))))
+                                .put("resets", System.currentTimeMillis() / 1000 + 3 * 86400 + 5 * 3600)))
                     }
+                    if (m.optString("what") == "usage") put("usage", limits(m.optString("id")))
+                    if (reading) put("last_usage", org.json.JSONObject().apply {
+                        for (id in listOf("", "w1", "h2")) put(id, org.json.JSONObject().put("usage", limits(id))
+                            .put("read", System.currentTimeMillis() / 1000 - 600))
+                    })
                 }
         }
     }
@@ -1472,6 +1486,55 @@ abstract class Screens(private val theme: String) {
         chat.streaming.value = (1..12).joinToString("\n\n") { "Streamed paragraph $it of the reply, which keeps on growing below." }
         repeat(60) { frame() }
         activity.window.decorView.captureRoboImage("build/screenshots/$theme/46-chat-follow-after-interrupt.png")
+    }
+
+    /** The long chat scrolled up to its first lines with more of its transcript before them, the host slow to send
+     * it: what's before them asked for and not come yet, the host failing it (asked again a little later, the spinner
+     * still up), then come and put above, what was in view left there. */
+    @Test fun chatEarlier() {
+        Mesh.close()
+        dev.baude.android.ChatPlaces.keep("h1/b", androidx.compose.foundation.lazy.LazyListState(), true) // (none kept: opened at its end)
+        val asked = ArrayList<Pair<org.json.JSONObject, (org.json.JSONObject) -> Unit>>()
+        val earlier = (1..12).joinToString("") { i ->
+            org.json.JSONObject().put("type", "user").put("uuid", "e$i").put("message", org.json.JSONObject().put("role", "user")
+                .put("content", "Earlier question $i about the build cache.")).toString() + "\n" +
+            org.json.JSONObject().put("type", "assistant").put("uuid", "r$i").put("message", org.json.JSONObject().put("role", "assistant")
+                .put("content", org.json.JSONArray().put(org.json.JSONObject().put("type", "text")
+                    .put("text", "Earlier answer $i: the cache key changes whenever a plugin's version does.")))).toString() + "\n"
+        }.toByteArray()
+        val c = FixtureConnection.up(activity, Mesh.hosts.first()) { null }
+        val slow = object : dev.baude.android.Connection(activity, dev.baude.android.Place.Direct(Mesh.hosts.first()), identify = { _, _ -> },
+            route = { null }, heard = { _, _ -> }, changed = {}) {
+            init { state = "up"; info = c.info }
+            override fun start() {}
+            override fun stop() {}
+            override fun send(msg: org.json.JSONObject) = true
+            override fun request(msg: org.json.JSONObject, then: (org.json.JSONObject) -> Unit) { asked.add(msg to then) }
+        }
+        @Suppress("UNCHECKED_CAST")
+        (Mesh::class.java.getDeclaredField("conns").apply { isAccessible = true }.get(Mesh) as HashMap<String, dev.baude.android.Connection>)["h1"] = slow
+        val chat = Mesh.openChat("h1", "b")
+        chat.lines.addAll(longChat())
+        chat.start = earlier.size.toLong()
+        chat.earlier.value = true
+        chat.loaded.value = true
+        show { ChatShell("h1", "b", back = {}, open = { _, _ -> }, feedback = {}) }
+        repeat(60) { frame() }
+        repeat(14) { drag(from = 0.25f, to = 0.85f) }
+        repeat(30) { frame() }
+        activity.window.decorView.captureRoboImage("build/screenshots/$theme/47b-chat-earlier-reading.png")
+        fun earlierAsks() = asked.filter { it.first.optString("op") == "transcript" && it.first.has("limit") }
+        val first = earlierAsks().size
+        earlierAsks().last().second(org.json.JSONObject().put("op", "error").put("error", "not connected"))
+        repeat(30) { frame() }
+        activity.window.decorView.captureRoboImage("build/screenshots/$theme/47c-chat-earlier-failed.png")
+        org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idleFor(java.time.Duration.ofSeconds(2))
+        check(earlierAsks().size == first + 1) { "asked again after a failure: ${earlierAsks().size - first}" }
+        val (msg, then) = earlierAsks().last()
+        then(org.json.JSONObject().put("op", "transcript").put("offset", msg.optLong("offset"))
+            .put("data", java.util.Base64.getEncoder().encodeToString(earlier)).put("next", earlier.size).put("size", earlier.size + 1000))
+        repeat(30) { frame() }
+        activity.window.decorView.captureRoboImage("build/screenshots/$theme/47d-chat-earlier-read.png")
     }
 
     /** A code block scrolled by a finger, then what you send: the end comes into view. */

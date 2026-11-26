@@ -375,7 +375,8 @@ class BaudeWindow(WindowView, WindowProc, WindowDrafts, WindowSignal, WindowRemo
         keys = Gtk.EventControllerKey(propagation_phase=Gtk.PropagationPhase.CAPTURE)
         keys.connect("key-pressed", lambda *_: setattr(self, "keyed_at", time.monotonic()) or False)
         self.scroller.add_controller(keys)
-        self.connect("realize", lambda *_: self.get_frame_clock().connect_after("layout", self.on_layout))
+        self.connect("realize", lambda *_: (self.get_frame_clock().connect_after("layout", self.on_layout),
+                                            self.get_frame_clock().connect_after("layout", self.place_earlier_spin)))
         # (while it's scrolled: see reader_moved; the earlier chunks drawn a little a frame: see fill_frame)
         self.moved_at, self.still_timer, self.cull_at = 0.0, None, None
         self.fill_jobs, self.fill_tick, self.fill_reveal, self.estimate_tick = collections.deque(), None, 1, None
@@ -463,6 +464,10 @@ class BaudeWindow(WindowView, WindowProc, WindowDrafts, WindowSignal, WindowRemo
         self.chat_find.drawn = lambda: None if self.history is None else (
             self.history.shown, sum(len(job.items) + len(job.hidden) for job in self.fill_jobs))
         root.append(self.chat_find.wrap())
+        # (over the part of the chat in view that's still to come above, while it's read or drawn: place_earlier_spin)
+        self.earlier_spin, self.earlier_spin_y = widgets.Spinner(can_target=False, visible=False), None
+        self.scroller.get_parent().add_overlay(self.earlier_spin)
+        self.scroller.get_parent().connect("get-child-position", self.earlier_spin_position)
         root.append(composer)
         # (more said than the model's window holds: said over the box, its send button off, till a bigger model or a
         # new chat)

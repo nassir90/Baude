@@ -15,10 +15,11 @@ import threading
 
 from gi.repository import Adw, Gio, GLib, Gtk
 
-from baudelib import deps, icons, wire, wording
+from baudelib import deps, icons, tokens, wire, wording
 
 PROVIDERS = (("claude", "report.claude", "claude"), ("codex", "programs.codex", "openai"))
 USAGE_S = 30  # (how often a shown page reads its subscriptions' usage again)
+STALE_OPACITY = tokens.number("subscriptions.stale-opacity")  # (a card's usage as the host last read it, till the page's own read answers)
 
 
 def title_of(provider):
@@ -108,7 +109,7 @@ class Ask:
 class Page(Adw.PreferencesPage):
     """The page: its host (where, name), its accounts as the host last said them, and each Claude subscription's usage
     (usage: id → its limits [(name, percent)], or what to say instead), read as the page is shown and every
-    USAGE_S while it is."""
+    USAGE_S while it is; till its first read answers, what the host last read (last: id → its limits), greyed."""
 
     def __init__(self, win):
         super().__init__(title=wording.say("subscriptions.title"), icon_name="system-users-symbolic")
@@ -120,7 +121,7 @@ class Page(Adw.PreferencesPage):
         self.where, self.host = win.terminal_host()
         self.accounts, self.defaults, self.filling, self.claude_cli, self.missing = [], {}, False, True, {}
         self.choices = {}
-        self.lists, self.pills, self.usage, self.bars, self.reading = {}, {}, {}, {}, set()
+        self.lists, self.pills, self.usage, self.bars, self.reading, self.last = {}, {}, {}, {}, set(), {}
         self.shown, self.timer, self.window_watch = None, None, None
         top = Adw.PreferencesGroup()
         host = Adw.ActionRow(title=wording.say("new_session.host"))
@@ -169,8 +170,15 @@ class Page(Adw.PreferencesPage):
 
     def took(self, reply):
         """An answer's accounts, defaults, whether the host has claude and what it lacks, kept and shown (drawn again
-        only if they changed); a Claude subscription not read yet, read."""
+        only if they changed), and the usage the host last read, shown greyed where this page hasn't read it yet; a
+        Claude subscription not read yet, read."""
         self.accounts, self.defaults = reply["accounts"], reply.get("defaults") or {}
+        last = {p: _limits(r["usage"]) for p, r in (reply.get("last_usage") or {}).items()}
+        if last != self.last:
+            self.last = last
+            for profile in self.bars:
+                if profile not in self.usage:
+                    self.fill_bars(profile)
         self.claude_cli = reply.get("claude_cli", self.claude_cli)
         self.missing = reply.get("missing") or {}
         if (self.accounts, self.defaults, self.claude_cli, self.missing) != self.shown:
@@ -253,13 +261,17 @@ class Page(Adw.PreferencesPage):
 
     def fill_bars(self, profile):
         """A Claude card's usage as last read: a bar for each limit, its name and percentage over it; else what was
-        said instead (Checking… till it's first read)."""
+        said instead. Till it's first read here, the host's last reading greyed (Checking… where it has none)."""
         bars = self.bars.get(profile)
         if bars is None:
             return
         while (child := bars.get_first_child()) is not None:
             bars.remove(child)
         read = self.usage.get(profile)
+        stale = read is None and profile in self.last
+        bars.set_opacity(STALE_OPACITY if stale else 1)
+        if stale:
+            read = self.last[profile]
         if not isinstance(read, list):
             bars.append(Gtk.Label(label=read or wording.say("subscriptions.checking"), xalign=0, wrap=True,
                                   css_classes=["dim-label"]))
@@ -349,11 +361,16 @@ class Page(Adw.PreferencesPage):
                 if reply.get("error"):
                     self.usage[profile] = reply["error"]
                 elif reply.get("usage"):
-                    self.usage[profile] = [(u.get("key", ""), u["name"], u["percent"], u.get("resets")) for u in reply["usage"]]
+                    self.usage[profile] = _limits(reply["usage"])
                 else:
                     self.usage[profile] = wording.say("subscriptions.usage_unavailable")
                 self.fill_bars(profile)
             self.ask({"what": "usage", "id": profile}, done)
+
+
+def _limits(usage):
+    """The wire's UsageLimits as a card draws them: [(key, name, percent, resets)]."""
+    return [(u.get("key", ""), u["name"], u["percent"], u.get("resets")) for u in usage]
 
 
 def _form(page, heading, submit_label):

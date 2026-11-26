@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
-  "description": "accounts' answer: the accounts and defaults as they are after it, and whether the host has claude and what it lacks of each provider's program (with error, if it couldn't be done); usage's, the limits; sign_in's, each line the sign-in writes (line alone), then its end.",
+  "description": "accounts' answer: the accounts and defaults as they are after it, and whether the host has claude and what it lacks of each provider's program and each subscription's last read usage (with error, if it couldn't be done); usage's, the limits; sign_in's, each line the sign-in writes (line alone), then its end.",
   "properties": {
     "op": {
       "const": "accounts",
@@ -72,6 +72,13 @@
         "$ref": "Dep.json"
       },
       "description": "What the host lacks of a provider's program, by provider (codex: its Codex CLI, as deps says it); a provider that's there isn't in it. Shown in place of Add account."
+    },
+    "last_usage": {
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "UsageReading.json"
+      },
+      "description": "Each Claude subscription's usage as the host last read it, by id (\"\" for the CLI's own sign-in), where that read said its limits: a client shows it greyed till its own usage read answers."
     },
     "who": {
       "type": [

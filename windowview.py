@@ -22,6 +22,7 @@ from gi.repository import Adw, Gdk, GLib, Gtk  # noqa: E402
 import chatparts  # noqa: E402
 import composerview  # noqa: E402
 import chatfind  # noqa: E402
+import widgets  # noqa: E402
 from chatparts import UserTurn  # noqa: E402
 from widgets import ZOOM_MAX, ZOOM_MIN, fmt_scale, pretty_path, save_settings  # noqa: E402,F401
 from markdownview import MarkdownView, link_markup, sel_label  # noqa: E402,F401
@@ -787,6 +788,65 @@ class WindowView:
         top = self.history_box.get_first_child() if self.history else None
         # (not once the chat's start is drawn, out of turn: nothing's earlier than that)
         self.earlier_btn.set_visible(bool(self.history and self.history.more) and not getattr(top, "filled", False))
+        # (while the start of a long chat is indexed, its place is the spinner's: place_earlier_spin)
+        indexing = bool(self.history and self.history.todo)
+        self.earlier_btn.set_opacity(0 if indexing else 1)
+        self.earlier_btn.set_can_target(not indexing)
+        self.earlier_btn.set_focusable(not indexing)
+        self.earlier_btn.set_sensitive(not indexing)
+        self.earlier_btn.update_state([Gtk.AccessibleState.HIDDEN], [indexing])  # (nor read out)
+
+    SPIN_PAD = 16  # px between the spinner and the top of a chunk's place not drawn yet that's in view
+
+    def place_earlier_spin(self, *_):
+        """After each layout pass: where the spinner goes over the chat while what's above the view is still to come
+        (earlier_spin_at), hidden when none of that's in view. The overlay puts it there (earlier_spin_position): moved,
+        it's only placed again, not measured."""
+        spin, y = self.earlier_spin, self.earlier_spin_at()
+        if y == self.earlier_spin_y:
+            return
+        self.earlier_spin_y = y
+        if (y is not None) != spin.get_visible():
+            spin.set_visible(y is not None)
+        elif y is not None:
+            spin.get_parent().queue_allocate()
+
+    def earlier_spin_position(self, over, child, rect):
+        """The overlay's place for the spinner: centred, earlier_spin_y down from the top of the view."""
+        if child is not self.earlier_spin or self.earlier_spin_y is None:
+            return False
+        size = widgets.scales["icon_px"]
+        rect.x, rect.y, rect.width, rect.height = (over.get_width() - size) // 2, self.earlier_spin_y, size, size
+        return True
+
+    def earlier_spin_at(self):
+        """Where the spinner goes, in px from the top of the view: in the Show earlier button's place while the start
+        of a long chat is indexed, else at the top of the part in view of the topmost earlier chunk's place not drawn
+        yet (its spacer: drawn into from its bottom up, a little a frame); None for neither in view. Only the places
+        not drawn yet are looked at, from the lowest up, till one's above the view."""
+        hist = getattr(self, "history_box", None)
+        if self.history is None or hist is None or hist.get_parent() is not self.transcript:
+            return None
+        page, size = self.scroller.get_height(), widgets.scales["icon_px"]
+        if page <= 0:
+            return None
+        if self.history.todo:
+            ok, b = self.earlier_btn.compute_bounds(self.scroller)
+            if ok and self.earlier_btn.get_visible() and b.get_y() < page and b.get_y() + b.get_height() > 0:
+                return round(b.get_y() + (b.get_height() - size) / 2)
+            return None
+        best = None
+        for group in ([job.slot for job in self.fill_jobs], self.chunk_slots or ()):  # (each lowest first)
+            for slot in group:
+                ok, b = slot.spacer.compute_bounds(self.scroller) if slot.spacer is not None else (False, None)
+                if not ok or b.get_y() >= page:
+                    continue
+                if b.get_y() + b.get_height() <= 0:
+                    break
+                lo, hi = max(b.get_y(), 0), min(b.get_y() + b.get_height(), page)
+                if hi - lo >= size + 2 * self.SPIN_PAD and (best is None or lo < best):
+                    best = lo
+        return None if best is None else round(best + self.SPIN_PAD)
 
     # ---- the earlier chunks of a long chat: each has its place from the start (make_chunk_slots), as tall as its items
     # are likely to be (estimate_slots), so the chat's about its full height at once and the scrollbar's thumb doesn't

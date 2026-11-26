@@ -23,6 +23,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
@@ -272,15 +273,21 @@ fun ChatPage(chat: Chat, name: String, attach: Boolean = true, stop: (() -> Unit
         if (found == null) return@LaunchedEffect
         found.second?.let { chat.calls.opened[it] = true }
         follow = false
-        list.animateScrollToItem(found.first)
+        list.animateScrollToItem(found.first + earlierRows(chat))
     }
-    LaunchedEffect(chat) { // (scrolled up to its first lines: what's before them read and put above, readEarlier)
+    LaunchedEffect(chat) { // (scrolled up to its first lines, its host up: what's before them read and put above, readEarlier)
         androidx.compose.runtime.snapshotFlow {
-            if (chat.loaded.value && placed && chat.earlier.value && list.firstVisibleItemIndex < 3) chat.lines.size else -1
+            Mesh.tick.value
+            val up = Mesh.conn(chat.hostId)?.state == "up"
+            if (chat.loaded.value && placed && chat.earlier.value && up && list.firstVisibleItemIndex - earlierRows(chat) < 3) chat.lines.size else -1
         }.collect { if (it >= 0) Mesh.readEarlier(chat) }
     }
     androidx.compose.runtime.DisposableEffect(chat) { // (what's read before put above: what's on screen stays there)
-        chat.prepended = { n -> if (n > 0) list.requestScrollToItem(list.firstVisibleItemIndex + n, list.firstVisibleItemScrollOffset) }
+        chat.prepended = { n, had -> // (the first line in view where it was, under the spinner or not: earlierRows)
+            val top = if (had) 1 else 0
+            val first = list.layoutInfo.visibleItemsInfo.firstOrNull { it.index >= top }
+            if (first != null && (n > 0 || top != earlierRows(chat))) list.requestScrollToItem(first.index - top + earlierRows(chat) + n, -first.offset)
+        }
         onDispose { chat.prepended = null }
     }
     Mesh.tick.value
@@ -293,7 +300,7 @@ fun ChatPage(chat: Chat, name: String, attach: Boolean = true, stop: (() -> Unit
     val matches = remember(findQuery, chat.lines.size) { findMatches(chat, findQuery) }
     val findAt = (Find.at[findKey] ?: 0).coerceIn(0, maxOf(0, matches.size - 1))
     LaunchedEffect(findQuery, findAt, matches.size) { // (stepped to: scrolled into view)
-        matches.getOrNull(findAt)?.let { follow = false; list.animateScrollToItem(itemIndex(chat, it.lineIndex), -with(density) { findBarHeight.toPx().toInt() }) }
+        matches.getOrNull(findAt)?.let { follow = false; list.animateScrollToItem(itemIndex(chat, it.lineIndex) + earlierRows(chat), -with(density) { findBarHeight.toPx().toInt() }) }
     }
     androidx.compose.runtime.CompositionLocalProvider(LocalImageOpener provides openImage,
         LocalImageItem provides { key: String -> Viewer.item(chat, key) }, LocalFind provides findQuery,
@@ -308,6 +315,11 @@ fun ChatPage(chat: Chat, name: String, attach: Boolean = true, stop: (() -> Unit
             verticalArrangement = Arrangement.spacedBy(Gap.messageGap)) {
             val taken = reverting?.let { r -> chat.lines.indexOfFirst { it.kind == "you" && it.uuid == r.uuid }.takeIf { it >= 0 } }
             val shown = if (taken != null) chat.lines.take(taken) else chat.lines
+            if (earlierRows(chat) > 0) item(key = "earlier") { // (what's before its lines, read as it's scrolled up to)
+                Box(Modifier.fillMaxWidth().padding(vertical = 8.dp).height(16.dp), contentAlignment = Alignment.Center) {
+                    if (chat.readingEarlier) Spinner() // (only while it's asked for, or asked again soon)
+                }
+            }
             val offered = alwaysOffered(session?.let { it.model.orEmpty() }, at)
             val askName = if (session?.bot != null) name else "Claude" // (a Bot's question: its name's)
             drawn(shown, chat.calls, asking = { call -> chat.asks.firstOrNull { it.toolUseId == call.id } },

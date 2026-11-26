@@ -12,7 +12,7 @@ import uuid
 
 from baudelib import (
     accounts, agentproxy, autofix, chattools, claude, codex, emissiontools, meshtools, models, multiplextools, notes, transcripts, wire, wording,
-    deps, desktopchats, hostlogin, worktree,
+    deps, desktopchats, hostlogin, toolnames, worktree,
 )
 from baudelib.serverstate import (
     AGENT_TOOLS, CATALOGUE_LIMIT, CATALOGUE_WAIT_S, CHECK_SOCKET_S, CLAUDE_OPTIONS, COMMAND_TOOLS, CONTEXT_EVERY_S,
@@ -571,6 +571,14 @@ class ServerSessions:
                     s.meta["cli_id"] = msg["session_id"]
                     s.meta["codex_started"] = True
                     self.save(s)
+            if kind == "system" and subtype == "init":  # (the MCP servers it has, by their names: its info's tool_names)
+                named = sorted({*(self.me.get("mcp_servers") or ()),
+                                *(m["name"] for m in msg.get("mcp_servers") or ()
+                                  if isinstance(m, dict) and isinstance(m.get("name"), str) and m["name"])})
+                if named != (self.me.get("mcp_servers") or []):
+                    self.me["mcp_servers"] = named
+                    _write_json(os.path.join(self.state_dir, "server.json"), self.me)
+                    self.changed()
             if kind == "system" and subtype == "init" and not isinstance(proc, codex.CodexProc) \
                     and msg.get("session_id") and msg["session_id"] != (s.meta.get("cli_id") or s.id):
                 s.meta["cli_id"] = msg["session_id"]  # (claude went on in a transcript of another id)

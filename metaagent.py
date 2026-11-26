@@ -335,7 +335,7 @@ for line in sys.stdin:
     try:
         if method == "initialize":
             result = {"protocolVersion": (msg.get("params") or {}).get("protocolVersion") or "2025-06-18",
-                      "capabilities": {"tools": {}}, "serverInfo": {"name": "meta", "version": "1"}}
+                      "capabilities": {"tools": {}}, "serverInfo": {"name": "meta", "title": "Meta", "version": "1"}}
         elif method == "tools/list":
             result = {"tools": call("_tools", {}).get("tools", [])}
         elif method == "tools/call":

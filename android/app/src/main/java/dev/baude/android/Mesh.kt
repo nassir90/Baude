@@ -656,8 +656,8 @@ object Mesh {
             val questions = ask.tool == "AskUserQuestion" && ask.input.optJSONArray("questions") != null
             if (call != null) {
                 if (!questions) call.decision = "denied"
-            } else chat.lines.add(Line("note", if (questions) Wording.ToolCalls.notAnsweredTool(tool = ask.tool)
-                else Wording.ToolCalls.deniedTool(tool = ask.tool)))
+            } else chat.lines.add(Line("note", if (questions) Wording.ToolCalls.notAnsweredTool(tool = toolTitle(ask.tool))
+                else Wording.ToolCalls.deniedTool(tool = toolTitle(ask.tool))))
         }
         if (answers != null) ask.toolUseId?.let { chat.calls.byId[it] }?.input = JSONObject(ask.input.toString()).put("answers", answers)
         val response = when {
@@ -673,7 +673,7 @@ object Mesh {
         if (always) {
             c.request(Msg.AlwaysAllow(session = chat.sid, add = listOf(ask.tool)).json()) { r -> // (refused: not here either)
                 if (r.optString("op") == Op.ERROR) main.post {
-                    chat.said.value = Wording.Asks.notAlwaysAllowed(tool = toolDisplay(ask.tool).first, why = Msg.Error.from(r).said.orEmpty())
+                    chat.said.value = Wording.Asks.notAlwaysAllowed(tool = toolTitle(ask.tool), why = Msg.Error.from(r).said.orEmpty())
                 }
             }
         }
@@ -1533,30 +1533,12 @@ fun toolLine(b: JSONObject): String {
     return if (what.isBlank()) toolTitle(name) else "${toolTitle(name)} · ${what.lines().first().take(80)}"
 }
 
-/** A tool's name as Baude says it (tool_display): (its title, its source), an MCP tool's (mcp__<server>__<tool>)
- * made words, its server's name the source. */
-fun toolDisplay(name: String): Pair<String, String?> {
-    if (!name.startsWith("mcp__") || name.split("__").size < 3) return name to null
-    val (_, rawServer, rawTool) = name.split("__", limit = 3)
-    val server = rawServer.replace(Regex("^(claude_ai_|plugin_[^_]+_)"), "")
-    val source = if (Regex("[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}").matches(server)) Wording.ToolCalls.mcp
-    else MCP_NAMES[server.lowercase()] ?: humanize(server).split(" ").joinToString(" ") { it.replaceFirstChar(Char::uppercase) }
-    val tool = if (rawTool.lowercase().startsWith(server.lowercase() + "_")) rawTool.substring(server.length + 1) else rawTool
-    val title = humanize(tool)
-    return title.replaceFirstChar(Char::uppercase).ifBlank { name } to source
-}
-
-/** "Source: Title", or the title alone. */
-fun toolTitle(name: String): String = toolDisplay(name).let { (title, source) -> if (source != null) "$source: $title" else title }
+/** "Server / Tool" for an MCP server's tool (tool_label), any other as it is. */
+fun toolTitle(name: String): String = McpNames.label(name)
 
 fun humanize(id: String) =
     id.replace(Regex("([a-z0-9])([A-Z])"), "$1 $2").replace("_", " ").replace("-", " ").trim().split(Regex("\\s+"))
         .joinToString(" ").lowercase()
-
-private val MCP_NAMES = mapOf("github" to "GitHub", "gitlab" to "GitLab", "gmail" to "Gmail", "gdrive" to "Google Drive",
-    "google_drive" to "Google Drive", "gcal" to "Google Calendar", "slack" to "Slack", "notion" to "Notion",
-    "linear" to "Linear", "jira" to "Jira", "figma" to "Figma", "postgres" to "Postgres", "sqlite" to "SQLite",
-    "playwright" to "Playwright", "sentry" to "Sentry")
 
 private fun JSONArray?.objects(): List<JSONObject> =
     if (this == null) emptyList() else (0 until length()).mapNotNull { optJSONObject(it) }

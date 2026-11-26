@@ -34,7 +34,7 @@ from chatparts import (  # noqa: E402  (a message of yours, its revert button: M
 )
 from widgets import ZOOM_STEP, discard, load_settings, save_settings, toast  # noqa: E402,F401
 from markdownview import ARTIFACT_TITLES, MarkdownView  # noqa: E402,F401
-from toolcards import CUT_CONTINUE, ToolCard, track_commands  # noqa: E402
+from toolcards import CUT_CONTINUE, ToolCard, tool_label, track_commands  # noqa: E402
 from chatinput import Attachment, attachment_widget, clipboard_has  # noqa: E402
 from sessionlist import (  # noqa: E402
     ClaudeProc, HERE_HOST, RemoteProc, THIS_MACHINE, is_desktop, local_host, main_folder, on_main, remote_info,
@@ -719,7 +719,8 @@ class WindowProc:
                 proc.asks[msg["request_id"]] = msg
                 self.sidebar.restate()
                 self.tell_desktop(proc.key, wording.say("asks.waiting_for_tool",
-                                                        tool=req.get("tool_name") or wording.say("asks.a_tool")))
+                                                        tool=tool_label(req["tool_name"]) if req.get("tool_name")
+                                                        else wording.say("asks.a_tool")))
         elif t == "result":
             self.tell_desktop(proc.key, turn_said(msg))
             if not self.left_turn_ended(proc.key, lambda content, said, done: (proc.user(content, said),

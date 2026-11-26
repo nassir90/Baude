@@ -99,7 +99,7 @@ fun ToolCard(call: Call, ask: Ask?, answer: @Composable (Ask) -> Unit, view: ((C
         Column(Modifier.fillMaxWidth().border(1.dp, if (asking) c.warning else if (bad) c.destructive else c.rule,
             RoundedCornerShape(Gap.cardRadius)).padding(horizontal = Gap.cardH, vertical = Gap.cardV)) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text(toolDisplay(call.name).first, Modifier.weight(1f), style = Type.body.copy(fontWeight = Tokens.Font.bold),
+                Text(toolTitle(call.name), Modifier.weight(1f), style = Type.body.copy(fontWeight = Tokens.Font.bold),
                     color = c.fg, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 if (inputShown || outputShown || call.subagent) Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                     if (inputShown) Toggle(when (call.base) {
@@ -140,10 +140,9 @@ fun ToolCard(call: Call, ask: Ask?, answer: @Composable (Ask) -> Unit, view: ((C
     }
 }
 
-/** The line after a card's toggles (ToolCard.refresh_header): its MCP server dimmed, what it's for, and what's
- * become of it, dimmed after a dot. */
+/** The line after a card's toggles (ToolCard.refresh_header): what it's for, and what's become of it, dimmed after a
+ * dot. */
 private fun header(call: Call, c: BaudeColors): AnnotatedString {
-    val source = toolDisplay(call.name).second
     val said = summary(call.name, call.input)
     val dim = SpanStyle(color = c.fg.copy(alpha = c.fg.alpha * 0.55f))
     val marks = listOfNotNull(when (call.state) {
@@ -152,16 +151,12 @@ private fun header(call: Call, c: BaudeColors): AnnotatedString {
         else -> null
     }, if (call.decision == "denied") Wording.ToolCalls.denied else null)
     return buildAnnotatedString {
-        if (source != null) {
-            withStyle(dim) { append(source) }
-            append("  ")
-        }
         if (call.base in setOf("Grep", "Glob") && said.isNotEmpty() &&
             said == call.input.said("pattern").trim().lines().firstOrNull().orEmpty().take(120))
             withStyle(SpanStyle(fontFamily = FontFamily.Monospace)) { append(said) }
         else append(said)
         marks.forEachIndexed { i, m ->
-            append(if (i == 0 && source == null && said.isEmpty()) "" else "  ")
+            append(if (i == 0 && said.isEmpty()) "" else "  ")
             withStyle(dim) { append("· $m") }
         }
     }
@@ -313,6 +308,10 @@ fun InputView(name: String, input: JSONObject) {
                         if (done) withStyle(SpanStyle(textDecoration = TextDecoration.LineThrough)) { append(text) } else append(text)
                     }, style = Type.body, color = c.fg)
                 }
+            }
+            base == "ToolSearch" && McpNames.selected(input.said("query")) != null -> {
+                for (n in McpNames.selected(input.said("query")).orEmpty()) Text(toolTitle(n), style = Type.body, color = c.fg)
+                KvRows(input, setOf("query"))
             }
             else -> KvRows(input)
         }

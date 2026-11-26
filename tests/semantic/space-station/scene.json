@@ -115,8 +115,8 @@
     3,
     2
    ],
-   "metalness": 0.35,
-   "roughness": 0.45
+   "metalness": 0.0,
+   "roughness": 0.4
   },
   "frame": {
    "color": "#2c313b",

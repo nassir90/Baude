@@ -124,7 +124,7 @@ def read_glb(data):
     magic, version, _n = struct.unpack_from("<4sII", data, 0)
     if magic != b"glTF" or version != 2:
         raise ValueError("glb: not glTF 2 binary")
-    jlen, jtype = struct.unpack_from("<II", data, 12)
+    jlen, _jtype = struct.unpack_from("<II", data, 12)
     doc = json.loads(data[20:20 + jlen])
     blen, _btype = struct.unpack_from("<II", data, 20 + jlen)
     blob = memoryview(data)[28 + jlen:28 + jlen + blen]
@@ -273,6 +273,11 @@ def _grade_pass():
 def _geometry(verts, repeat=(1, 1)):
     import pygfx as gfx
     a = np.array(verts, np.float32).reshape(-1, 8)
+    tri = a.reshape(-1, 3, 8)
+    face = np.cross(tri[:, 1, :3] - tri[:, 0, :3], tri[:, 2, :3] - tri[:, 0, :3])
+    cw = (face * tri[:, :, 3:6].sum(1)).sum(1) < 0  # (scenegl's winding isn't one way: pygfx lights a face by it)
+    tri[cw] = tri[cw][:, ::-1]
+    a = tri.reshape(-1, 8)
     uv = a[:, 6:8] * np.array(repeat, np.float32)
     return gfx.Geometry(positions=a[:, :3].copy(), normals=a[:, 3:6].copy(), texcoords=uv,
                         indices=np.arange(len(a), dtype=np.uint32).reshape(-1, 3))
@@ -304,7 +309,7 @@ class Renderer:
         self.geoms, self.models, self.textures, self.mats = {}, {}, {}, {}
         self.target = self.renderer = None
         self.size = None
-        self.stats = {"render_ms": [], "readback_ms": [], "uploads": 0, "upload_ms": 0.0}
+        self.stats = {"render_ms": [], "readback_ms": []}  # (a frame's pygfx render to the GPU's finish; its readback)
         sc = view.scene
         env = sc.get("environment") or {}
         self.env = None
@@ -340,7 +345,7 @@ class Renderer:
                 li.local.position = tuple(-d * 20)
                 li.target.local.position = (0, 0, 0)
                 li.shadow.camera.width = li.shadow.camera.height = 18
-                li.shadow.camera.depth_range = (1, 60)
+                li.shadow.camera.depth_range = (0.5, 250)  # (deep enough to take in a far planet: past it, all is shadow)
                 li.shadow.bias = 0.0008
                 li.shadow.normal_bias = 0.02
                 self.sun = self.sun or li
@@ -389,6 +394,11 @@ class Renderer:
                 else:
                     nrm = nrm * s  # (the normals of the squashed shape)
                     nrm /= np.maximum(np.linalg.norm(nrm, axis=1, keepdims=True), 1e-9)
+                    tri, tn = p.reshape(-1, 3, 3), nrm.reshape(-1, 3, 3)
+                    face = np.cross(tri[:, 1] - tri[:, 0], tri[:, 2] - tri[:, 0])
+                    cw = (face * tn.sum(1)).sum(1) < 0
+                    tri[cw], tn[cw] = tri[cw][:, ::-1], tn[cw][:, ::-1]
+                    p, nrm = tri.reshape(-1, 3), tn.reshape(-1, 3)
                 g = self.gfx.Geometry(positions=p.astype(np.float32), normals=nrm.astype(np.float32),
                                       texcoords=np.zeros((len(p), 2), np.float32),
                                       indices=np.arange(len(p), dtype=np.uint32).reshape(-1, 3))
@@ -397,9 +407,10 @@ class Renderer:
         return self.models[name]
 
     # -- materials
-    def material(self, m):
-        """A scene material (SceneMaterial.json) as a pygfx standard material."""
-        key = json.dumps(m, sort_keys=True)
+    def material(self, m, far=False):
+        """A scene material (SceneMaterial.json) as a pygfx standard material. far: on something far off and big (a
+        planet), which the environment round the station doesn't reach."""
+        key = json.dumps([m, far], sort_keys=True)
         if key in self.mats:
             return self.mats[key]
         gfx = self.gfx
@@ -408,7 +419,7 @@ class Renderer:
         shin, spec = float(m.get("shininess", 32)), float(m.get("specular", 0.2))
         rough = m.get("roughness", min(1.0, max(0.12, math.sqrt(2 / (shin + 2)) * 1.6)))
         metal = m.get("metalness", min(0.85, spec * 0.7))
-        kw = dict(color=col, roughness=float(rough), metalness=float(metal), env_map=self.env,
+        kw = dict(color=col, roughness=float(rough), metalness=float(metal), env_map=None if far else self.env,
                   env_map_intensity=self.env_k)
         if em:
             kw.update(emissive=em, emissive_intensity=glow * 1.3)
@@ -420,7 +431,10 @@ class Renderer:
         if m.get("orm_texture"):
             orm = self.texture(m["orm_texture"], "physical")
             kw.update(roughness_map=orm, metalness_map=orm)
-        mat = gfx.MeshStandardMaterial(**kw)
+        if spec >= 0.3 and not em and not far:  # (a shiny surface: a clear coat over it, its shine the light's and the sky's)
+            mat = gfx.MeshPhysicalMaterial(clearcoat=min(1.0, spec), clearcoat_roughness=max(0.05, float(rough) * 0.5), **kw)
+        else:
+            mat = gfx.MeshStandardMaterial(**kw)
         self.mats[key] = mat
         return mat
 
@@ -462,26 +476,27 @@ class Renderer:
 
     # -- the scene's objects, kept in step with its nodes
     def sync(self):
+        """Each shown node's object made (again if its material changed) and placed; gone nodes' taken out. A node's
+        matrix is worked out once per place it's in (kept with scenehost's), and given to pygfx only when it changes."""
         v, gfx = self.view, self.gfx
         seen = set()
         for nid in v.order:
             n = v.nodes.get(nid)
             if n is None or not v.shown(n):
                 continue
-            mat = v.material(n)
             if n.mesh is not None:
                 if n.material in self.hidden_materials:
                     continue
                 seen.add(nid)
+                mat = v.material(n)
                 ob = self.objects.get(nid)
-                mkey = json.dumps(mat, sort_keys=True)
-                if ob is None or ob[2] != mkey:
+                if ob is None or ob[2] is not mat:
                     if ob is not None:
                         self.scene.remove(ob[0])
-                    ob = (self.mesh_object(n, mat), "mesh", mkey)
+                    ob = [self.mesh_object(n, mat), "mesh", mat, None]
                     self.objects[nid] = ob
                     self.scene.add(ob[0])
-                ob[0].local.matrix = _mat4(v.world_matrix(n))
+                m = v.drawn(n, "gfx", lambda: _mat4(v.world_matrix(n)))
             elif n.panel is not None and n.face is not None and n.alloc is not None:
                 seen.add(nid)
                 tex = self.picture(n)
@@ -491,13 +506,18 @@ class Renderer:
                 if ob is None or ob[2] is not tex:
                     if ob is not None:
                         self.scene.remove(ob[0])
-                    m = gfx.Mesh(self.geometry("plane"), self.panel_material(tex))
-                    m.receive_shadow = m.cast_shadow = False
-                    ob = (m, "panel", tex)
+                    pm = gfx.Mesh(self.geometry("plane"), self.panel_material(tex))
+                    pm.receive_shadow = pm.cast_shadow = False
+                    ob = [pm, "panel", tex, None]
                     self.objects[nid] = ob
-                    self.scene.add(m)
+                    self.scene.add(pm)
                 sw, sh = n.panel.get("size") or (1.6, 1.2)
-                ob[0].local.matrix = _mat4(Graphene.Matrix().init_scale(sw, sh, 1).multiply(v.world_matrix(n)))
+                m = v.drawn(n, ("gfx", sw, sh), lambda: _mat4(Graphene.Matrix().init_scale(sw, sh, 1).multiply(v.world_matrix(n))))
+            else:
+                continue
+            if ob[3] is not m:
+                ob[0].local.matrix = m
+                ob[3] = m
         for nid in [k for k in self.objects if k not in seen]:
             self.scene.remove(self.objects.pop(nid)[0])
 
@@ -513,8 +533,8 @@ class Renderer:
                 grp.add(part)
             return grp
         repeat = mat.get("repeat") or (1, 1)
-        m = gfx.Mesh(self.geometry(n.mesh, repeat), self.material(mat))
         big = max(abs(x) for x in n.scale) > 8
+        m = gfx.Mesh(self.geometry(n.mesh, repeat), self.material(mat, far=big))
         m.cast_shadow = not glowing and not big
         m.receive_shadow = not glowing and not big
         return m
@@ -549,8 +569,8 @@ class Renderer:
             t = self.gfx.Texture(a.copy(), dim=2, generate_mipmaps=True)
             n.tex = self.gfx.TextureMap(t, filter="linear", wrap="clamp")
         n.texsize, n.dirty = (pw, ph), False
-        self.stats["uploads"] += 1
-        self.stats["upload_ms"] += (time.perf_counter() - t0) * 1000
+        v.stats["uploads"] += 1  # (as scenehost counts them: the GSK readback and the upload)
+        v.stats["upload_ms"] += (time.perf_counter() - t0) * 1000
         return n.tex
 
     # -- the camera, as scenehost's (the same eye, target and field of view)

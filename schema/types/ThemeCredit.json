@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "Files of a theme's that someone else made: what they are, who made them, where they came from and their licence.",
+  "properties": {
+    "files": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "The theme's files it covers, by their paths in the folder (made from the work, or the work itself)."
+    },
+    "work": {
+      "type": "string",
+      "description": "The work's name, as its source has it."
+    },
+    "author": {
+      "type": "string",
+      "description": "Who made it."
+    },
+    "source": {
+      "type": "string",
+      "description": "Where it was got from (a URL)."
+    },
+    "license": {
+      "type": "string",
+      "description": "Its licence (CC0-1.0, an SPDX id)."
+    },
+    "changes": {
+      "type": "string",
+      "description": "What was done to it for the theme: left out for nothing."
+    }
+  },
+  "required": [
+    "files",
+    "work",
+    "source",
+    "license"
+  ],
+  "additionalProperties": false
+}

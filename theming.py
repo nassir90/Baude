@@ -303,9 +303,10 @@ listview.file-tree > row { min-height: 24px; padding-top: 1px; padding-bottom: 1
 .side-panel { background: transparent; }
 .side-panel .boxed-list, .boxed-list.host-state, .side-panel .composer-box.side-question-ask {
   box-shadow: none; border: 1px solid @baude_rule; }
-/* a task's inputs, triggers and runs (TasksPage.listbox): as compact as the sessions list, their buttons sized to fit */
-list.tasks-rows > row { min-height: 26px; padding-top: 1px; padding-bottom: 1px; }
-list.tasks-rows > row > box.header { min-height: 26px; }
+/* a task's inputs, triggers and runs (TasksPage.listbox): as tall as a navigation list's rows (the Fixes page's,
+   Record's notebooks'), their buttons sized to fit */
+list.tasks-rows > row { min-height: 36px; padding-top: 1px; padding-bottom: 1px; }
+list.tasks-rows > row > box.header { min-height: 36px; }
 list.tasks-rows > row > box.header > box.title { margin-top: 0; margin-bottom: 0; }
 list.tasks-rows > row button { min-height: 24px; min-width: 24px; padding: 0; }
 .side-panel .side-question { padding: 0; }  /* (its thread's square set INSIDE_GAP into it) */

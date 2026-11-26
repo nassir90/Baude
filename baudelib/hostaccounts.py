@@ -44,7 +44,7 @@ def state(server=None):
     missing = {"codex": dep} if (dep := deps.missing("codex")) is not None else {}
     last = {profile: {"read": round(read), "usage": _limits(limits)} for profile, (read, limits) in accounts.last_usage().items()}
     return {"accounts": accounts.listing(), "defaults": accounts.defaults(), "claude_cli": bool(claude_cli(server)),
-            "missing": missing, "last_usage": last}
+            "missing": missing, "last_usage": last, "codex_usage": True}
 
 
 def answer(server, conn, msg, reply):
@@ -89,7 +89,8 @@ def answer(server, conn, msg, reply):
             server.use_account(msg.get("session"), profile)
             return done()
         if what == "usage":
-            threading.Thread(target=_usage, args=(server, profile, done), daemon=True, name="usage").start()
+            threading.Thread(target=_usage, args=(server, profile, provider or "claude", done), daemon=True,
+                             name="usage").start()
             return None
         if what == "sign_in":
             if provider == "claude" or (accounts.account(profile) or {}).get("provider") == "claude":
@@ -118,11 +119,17 @@ def _for_chat(server, conn, msg, done):
     return ended
 
 
-def _usage(server, profile, done):
+def _usage(server, profile, provider, done):
+    """A subscription's usage (profile; "": the CLI's own sign-in of provider, Claude's where none is said)."""
+    if profile:
+        provider = (accounts.account(profile) or {}).get("provider", provider)
     try:
-        limits = accounts.plan_usage(profile, claude_cli(server))
+        limits = accounts.plan_usage(profile, claude_cli(server), provider)
+    except accounts.SignedOut as e:
+        return done(error=str(e))
     except (OSError, subprocess.SubprocessError):
-        return done(error=wording.say("subscriptions.usage_failed"))
+        return done(error=wording.say("subscriptions.codex_usage_failed" if provider == "codex" else
+                                      "subscriptions.usage_failed"))
     if limits is None:
         return done(usage=None)
     done(usage=_limits(limits))
@@ -313,6 +320,8 @@ def _sign_in(conn, msg, reply, done):
                 return done(error=str(e), login={"state": "failed", "method": method, "reason": str(e)})
         elif not ok and fresh:
             shutil.rmtree(directory, ignore_errors=True)
+        elif ok:
+            accounts.forget_usage(profile)  # (signed in again, perhaps as someone else: its usage read afresh)
         if not ok:
             why = next((x for x in reversed(lines) if x.lower().startswith("error")), None) or \
                 (lines[-1] if lines and lines[-1] not in (page, code) else wording.say("subscriptions.codex_failed"))

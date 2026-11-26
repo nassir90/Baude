@@ -136,6 +136,16 @@ abstract class Screens(private val theme: String) {
         screen("05a-subscriptions")
     }
 
+    // (the same page scrolled to Codex: its CLI default's and Personal's usage, each limit with its bar)
+    @Test fun subscriptionsCodexUsage() {
+        accountsFixture()
+        show { SettingsScreen({}, {}, page = 1) }
+        laidOut()
+        scrollUnder("Personal")
+        laidOut()
+        screen("05k-subscriptions-codex-usage")
+    }
+
     // (Settings → Subscriptions opened while each card's usage read is still out: what workshop last read of each, greyed)
     @Test fun subscriptionsLastRead() {
         accountsFixture(reading = true)
@@ -608,17 +618,19 @@ abstract class Screens(private val theme: String) {
             else org.json.JSONObject().put("op", "accounts").put("req", m.opt("req")).put("what", m.optString("what"))
                 .put("accounts", org.json.JSONArray(listOf(HOME_ACCOUNT, WORK,
                     org.json.JSONObject().put("id", "p1").put("provider", "codex").put("name", "Personal").put("kind", "profile"))))
-                .put("defaults", org.json.JSONObject().put("claude", "w1").put("codex", "")).put("claude_cli", true)
+                .put("defaults", org.json.JSONObject().put("claude", "w1").put("codex", "")).put("claude_cli", true).put("codex_usage", true)
                 .apply {
                     fun limits(id: String): org.json.JSONArray {
-                        val (five, seven) = mapOf("w1" to (25 to 40), "h2" to (72 to 18))[id] ?: (5 to 12)
+                        val (five, seven) = mapOf("w1" to (25 to 40), "h2" to (72 to 18), "codex" to (37 to 61),
+                            "p1" to (8 to 3))[id] ?: (5 to 12)
                         return org.json.JSONArray(listOf(
                             org.json.JSONObject().put("name", "Five hour").put("key", "five_hour").put("percent", five)
                                 .put("resets", System.currentTimeMillis() / 1000 + 3 * 3600 + 720),
                             org.json.JSONObject().put("name", "Seven day").put("key", "seven_day").put("percent", seven)
                                 .put("resets", System.currentTimeMillis() / 1000 + 3 * 86400 + 5 * 3600)))
                     }
-                    if (m.optString("what") == "usage") put("usage", limits(m.optString("id")))
+                    if (m.optString("what") == "usage") put("usage", limits(m.optString("id")
+                        .ifEmpty { if (m.optString("provider") == "codex") "codex" else "" }))
                     if (reading) put("last_usage", org.json.JSONObject().apply {
                         for (id in listOf("", "w1", "h2")) put(id, org.json.JSONObject().put("usage", limits(id))
                             .put("read", System.currentTimeMillis() / 1000 - 600))
@@ -1330,17 +1342,29 @@ abstract class Screens(private val theme: String) {
     @Test fun chatSubscriptions() {
         val chat = Mesh.openChat("h1", "a")
         fill(chat)
-        val subs = listOf(Msg.Account(id = "p1", provider = "claude", name = "Personal", kind = "folder"),
-            Msg.Account(id = "w1", provider = "claude", name = "Work", kind = "folder"))
+        val subs = listOf(Msg.Account(id = "w1", provider = "claude", name = "Work Account", kind = "folder"))
+        dev.baude.android.HostSubscriptions.listed["h1"] = subs
+        show { ChatShell("h1", "a", back = {}, open = { _, _ -> }, feedback = {}) }
+        laidOut()
+        screen("20s-chat-subscriptions")
+        tap("CLI default")
+        laidOut()
+        withMenus("20t-chat-subscriptions-open")
+    }
+
+    // (the same chat on the added account: CLI default still listed, to go back to)
+    @Test fun chatSubscriptionsOnAccount() {
+        val chat = Mesh.openChat("h1", "a")
+        fill(chat)
+        val subs = listOf(Msg.Account(id = "w1", provider = "claude", name = "Work Account", kind = "folder"))
         dev.baude.android.HostSubscriptions.listed["h1"] = subs
         Mesh.sessions["h1"] = Mesh.sessions["h1"].orEmpty().map {
             if (it.id == "a") Msg.Session.from(it.json().put("account", subs[0].json())) else it }
         show { ChatShell("h1", "a", back = {}, open = { _, _ -> }, feedback = {}) }
         laidOut()
-        screen("20s-chat-subscriptions")
-        tap("Personal")
+        tap("Work Account")
         laidOut()
-        withMenus("20t-chat-subscriptions-open")
+        withMenus("20u-chat-subscriptions-on-account")
     }
 
     // (Settings → Meta's Intelligence, and the New session dialog's model, pressed: the menu under the button or, with

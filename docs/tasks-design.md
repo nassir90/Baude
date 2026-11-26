@@ -54,7 +54,7 @@ push since (its payload's `before` the head last run, `after` the head now).
 
 Each run is kept as `runs/<id>.json` with a log `runs/<id>.log` (JSON lines `{at, kind, text, values?}`, kinds `out`,
 `err`, `say`, `ask`, `answer`, `status`). The latest 100 runs of each task are kept. A run records: task, version,
-trigger (`{id, kind}`, `manual` for by hand), payload, inputs, `dry`, started (and the host's UTC offset then, so its
+trigger (`{id, kind}`, `manual` for by hand), payload, inputs, started (and the host's UTC offset then, so its
 time reads as it did there), ended, seconds, exit code, error, asks, `handed` (its failure given to the Bot), and its
 script's `pid` and `pgid`.
 
@@ -108,15 +108,6 @@ Each Bot gets a git repo in its folder for its tools; a task's script is a file 
 The host serves the repo to the Bot's working folder; a push to it is a `git_push` trigger on the Bot's own repo that
 redeploys its tasks, so the Bot's fix-and-push is the deploy.
 
-## Simulating: runs with dummy answers
-
-`run_task` with `dry: true` (the apps' **Run with dummy answers**) runs the script as it is, side effects and all, with
-its asks answered by a **dummy agent**: each form field gets its default, the first choice, `0`, `false` or `""`, and a
-plain ask gets a fixed line. Nothing reaches the Bot and a failure isn't handed over, so "test this workflow with a
-dummy agent and check the format" is one such run, and the run's log shows what each ask would have sent. Chose naming
-it for what it does over skipping side effects: the host can't tell which of a script's steps have side effects. Later: the dummy given a script of answers, and a Bot told to run its own
-workflows dry before saving them.
-
 ## Telemetry
 
 The runs are the telemetry: when each trigger fired, how long each run took, failures, the version each ran, how
@@ -129,7 +120,7 @@ events (`task_run`) on Settings → Telemetry's timeline.
 |---|---|---|
 | `tasks {session, set?, delete?}` | `tasks {session, tasks, clock}` | a Bot's tasks, without their scripts; one made or changed (`set`, a Task with its `script`), or deleted |
 | `task {session, id, script?}` | `task {session, task, runs}` | one task, with its script if `script` is true (the Bot's `task` tool asks; the apps don't), and its latest runs |
-| `run_task {session, id, inputs?, dry?}` | `task_started {session, run}` | run it now, by hand |
+| `run_task {session, id, inputs?}` | `task_started {session, run}` | run it now, by hand |
 | `task_run {session, run}` | `task_run {session, run, log}` | one run and its log |
 | `task_stop {session, run}` | `task_run` | a run stopped |
 | `task_report {run, token, say?}` | `task_reported` | a script's line in its run's log |
@@ -172,11 +163,10 @@ Bot's repo, and they're the Bot's to write and change (`set_task`). To change a 
 ## In this PR
 
 Tasks as scripts run by the host (python, shell, bot); manual, schedule and git push triggers; payloads filling
-forms; `baudetask` (say, ask, fallback, main) over the wire; runs with dummy answers; the host's fallback for
+forms; `baudetask` (say, ask, fallback, main) over the wire; the host's fallback for
 failed runs; runs and logs; the Bot's task tools; Routines moved over; the Tasks page on Baude and the phone; a test
 that runs tasks through the wire.
 
 ## Later
 
-Web, Emission and script triggers; self-healing's parse-error raising and automatic rerun; Bot git repos; scripted
-dummy answers; host telemetry events; tasks that belong to no Bot.
+Web, Emission and script triggers; self-healing's parse-error raising and automatic rerun; Bot git repos; host telemetry events; tasks that belong to no Bot.

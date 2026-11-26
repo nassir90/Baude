@@ -1,6 +1,6 @@
 """Who in the mesh may use what of a host's (Settings → Access, on every app; the access and access_set ops): rules
 for each of its capabilities (CAPABILITIES: a shell, its Bots' browsers, its providers' models, their files, new chats
-and agents, its chats as they are, its clusters, its databases, its subscription accounts, and these rules themselves
+and agents, its chats as they are, its clusters, its Docker, its databases, its subscription accounts, and these rules themselves
 with the host's own admin), each everybody, nobody or the members chosen, by their ids, as the mesh has them (a
 tunnel's origin: Conn's). A capability whose ops part into reading and changing (SPLIT) has two rules, <cap>_read and
 <cap>_write, and write lets a member read too: a member let write is let read, and the rules are kept so read's lets in
@@ -48,6 +48,10 @@ NOBODY = {"who": "nobody"}
 
 def _kube(msg):
     return "kube_write" if msg.get("what") == "delete" else "kube_read"
+
+
+def _docker(msg):
+    return "docker_write" if msg.get("what") in ("start", "stop", "restart", "remove") else "docker_read"
 
 
 def _accounts(msg):
@@ -105,6 +109,8 @@ OPS = {  # (the rule each op is checked for, before it's taken (a function: msg'
     **dict.fromkeys(("start", "agent"), "spawn"),  # (a chat forked: its manage_read too; adopted: its manage_write)
     "kube": _kube,
     "kube_follow": "kube_read",
+    "docker": _docker,
+    "docker_follow": "docker_read",
     "databases": "databases",
     "accounts": _accounts,  # (a chat moved to one: its manage_write too)
     **dict.fromkeys(("login", "login_code"), "subscriptions_write"),
@@ -134,7 +140,7 @@ SAFE_MODES = (None, "default", "plan", "acceptEdits")  # (permission modes that 
 SHELL_TOOLS = ("Bash", "PowerShell")  # (tools that run commands: approving one, or allowing it always, is a shell's worth)
 COPY = {cap: f"access.{cap}" for cap in CAPABILITIES} | {  # (each capability's name, as every app says it)
     "shell": "kube.shell", "providers": "deps.providers", "kube": "window.kubernetes",
-    "subscriptions": "subscriptions.title"}
+    "docker": "window.docker", "subscriptions": "subscriptions.title"}
 FILE = "access.json"
 MEMBERS_MAX = 256
 

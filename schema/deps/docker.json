@@ -1,12 +1,12 @@
 {
-  "description": "Docker, which Database Schemas finds a host's running Postgres and ArangoDB servers in.",
+  "description": "Docker, which the Docker view reads and acts on a host's containers, images, volumes, networks and Compose projects with (a container's logs and shell too), and Database Schemas finds a host's running Postgres and ArangoDB servers in.",
   "name": "Docker",
   "where": "host",
-  "needed_by": ["window.database_schemas"],
-  "group": "window.database_schemas",
+  "needed_by": ["window.docker", "window.database_schemas"],
+  "group": "window.docker",
   "detect": {
-    "macos": [{"which": "docker"}],
-    "linux": [{"which": "docker"}]
+    "macos": [{"env": "BAUDE_DOCKER"}, {"which": "docker"}],
+    "linux": [{"env": "BAUDE_DOCKER"}, {"which": "docker"}]
   },
   "install": {
     "macos": "brew install --cask docker",

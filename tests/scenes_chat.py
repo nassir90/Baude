@@ -670,6 +670,64 @@ def _(app):
     return win
 
 
+def docker_window(app, page=None):
+    """The Docker view on tests/fake_docker.py's colima (a Compose project, shop, and a redis), its running containers
+    read (or page's, picked in the sidebar)."""
+    os.environ.update(BAUDE_DOCKER=os.path.join(HERE, "fake_docker.py"))
+    for k in ("FAKE_DOCKER_FOLLOW", "FAKE_DOCKER_STATE"):
+        os.environ.pop(k, None)
+    baude.save_settings(docker_context=None, docker_inspect=None, kube_log_wrap=None)
+    win = app.window(opts())
+    dv = win.docker
+    dv.open()
+    T.wait_for(lambda: dv.store is not None and dv.store.get_n_items() and not dv.loading, "the containers")
+    if page is not None:
+        row = dv.side.get_first_child()
+        while row is not None and getattr(row, "page", {}).get("key") != page:
+            row = row.get_next_sibling()
+        dv.side.select_row(row)
+        T.wait_for(lambda: dv.table_page is dv.page and not dv.loading, "the page")
+    return win, dv
+
+
+@scene("38f-docker", "Docker (☰ → Docker): the host's Docker laid out as the Kubernetes view is: its categories "
+                     "(Containers, running and all; Images; Volumes; Networks; Compose Projects), a page's objects "
+                     "sorted by any column, a status tone each; at a row's end its log, a shell and ⋮ (Start, Stop, "
+                     "Restart, Remove…, as it is); a row selected, inspected beside the table",
+       size=(1200 + SIDEBAR, H))
+def _(app):
+    win, dv = docker_window(app, "containers")
+    dv.selection.set_selected(0)
+    T.wait_for(lambda: "Config" in dv.details.buffer.get_property("text"), "its inspect")
+    return win
+
+
+@scene("38f-docker-dock", "Docker: a container's log followed and a shell in it (docker exec -it, run by the host), "
+                          "a tab each in the dock under the table", size=(1200 + SIDEBAR, H))
+def _(app):
+    win, dv = docker_window(app)
+    T.pump(0.3)
+    shop = next(dv.store.get_item(i).obj for i in range(dv.store.get_n_items())
+                if dv.store.get_item(i).obj["name"] == "shop-api-1")
+    dv.show_logs(shop["id"])
+    T.wait_for(lambda: dv.logs is not None and "GET /healthz" in dv.logs.buffer.get_property("text"), "its log")
+    dv.show_shell(shop["id"])
+    T.wait_for(lambda: dv.shell_term is not None and "/app #" in dv.shell_term.screen()["screen"], "its prompt")
+    dv.shell_term.type("ls\n")
+    T.pump(0.5)
+    win.connect("destroy", lambda *_: dv.dock.close_all())
+    return win
+
+
+@scene("38f-docker-remove", "Docker: Remove… on a running container, asked first: what it is, the context, and what "
+                            "goes with it", size=(1200 + SIDEBAR, H))
+def _(app):
+    win, dv = docker_window(app)
+    dv.act(dv.selection.get_item(0).obj["id"], "remove")
+    T.pump(0.5)
+    return win
+
+
 class HostThere:
     """Another host, picked in the window's host dropdown, for the Kubernetes and database views: the tests' own host
     process (in this one, so the fakes here are its too), reached by its socket, under a fixture name."""

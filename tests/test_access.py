@@ -42,6 +42,7 @@ for var, sub in (("HOME", "home"), ("XDG_DATA_HOME", "xdg-data"), ("XDG_CONFIG_H
     os.makedirs(os.environ[var], exist_ok=True)
 os.environ["KUBECONFIG"] = os.path.join(TMP, "no-kubeconfig")
 os.environ["DOCKER_HOST"] = "unix://" + os.path.join(TMP, "no-docker.sock")
+os.environ["BAUDE_DOCKER"] = os.path.join(HERE, "fake_docker.py")  # (docker's ops let through: the fake's machine, never one here)
 os.environ["BAUDE_RUNTIME_DIR"] = tempfile.mkdtemp(prefix="bda-", dir="/tmp")
 os.environ.update(BAUDE_SSH="false", BAUDE_MENU_BAR="0", BAUDE_UPDATE="0", BAUDE_GH="", FAKE_CLAUDE_SESSION_IDS="1",
                   FAKE_CLAUDE_TRANSCRIPTS="1")
@@ -58,7 +59,7 @@ from baudelib.server import Server  # noqa: E402
 
 # (ops that'd start something of the machine's own, or change the host itself, if they were let through: a shell, a
 # browser, a claude, a link, the host stopped; sent only where they're refused)
-STARTS = {"terminal", "terminal_in", "multiplex", "emission", "emission_watch", "start", "agent", "kube_follow", "infer",
+STARTS = {"terminal", "terminal_in", "multiplex", "emission", "emission_watch", "start", "agent", "kube_follow", "docker_follow", "infer",
           "files", "emission_serve", "input", "delete", "stop", "archive", "unarchive", "set_cwd", "run_task", "task_stop",
           "autofix", "held", "memory", "tasks", "rename", "bot", "always_allow", "waits_on", "attach",
           "emission_watch_say", "emission_answer", "terminal_resize", "terminal_close", "detach", "quit", "link",

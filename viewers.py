@@ -70,10 +70,13 @@ class ViewerHost:
         theming.load_css()
         import terminalpane
         self.schema, self.kube = SchemaView(self), KubeView(self)
+        import dockerview
+        self.docker = dockerview.DockerView(self)
         self.terminal = terminalpane.TerminalView(self, lambda: self.terminal_host())  # (☰ → Terminal)
         host = Gtk.Overlay(child=child)
         host.add_overlay(self.schema)
         host.add_overlay(self.kube)
+        host.add_overlay(self.docker)
         host.add_overlay(self.terminal)
         self.lightbox = lightbox.Lightbox(self)  # (an image large: over all of it)
         host.add_overlay(self.lightbox)

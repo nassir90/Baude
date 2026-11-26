@@ -17,7 +17,7 @@ class MainActivity : ComponentActivity() {
     private val screen = mutableStateOf<List<String>>(listOf("contacts"))
 
     /** The screens laid over a chat, opened with its host and session: back goes to the chat. */
-    private val OVER = setOf("feedback", "settings", "changelog", "mesh", "fixes", "databases", "kubernetes", "terminal")
+    private val OVER = setOf("feedback", "settings", "changelog", "mesh", "fixes", "databases", "kubernetes", "docker", "terminal")
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -62,6 +62,7 @@ class MainActivity : ComponentActivity() {
                     "mesh" -> MeshScreen(::back)
                     "databases" -> DatabaseScreen(now[1], ::back)
                     "kubernetes" -> KubeScreen(now[1], ::back)
+                    "docker" -> DockerScreen(now[1], ::back)
                     "terminal" -> TerminalScreen(now[1], ::back)
                     "fixes" -> FixesScreen(::back, feedback = { go(listOf("feedback") + now.drop(1) + "fixes") })
                     else -> Home(open = { h, s -> go(listOf("chat", h, s)) },

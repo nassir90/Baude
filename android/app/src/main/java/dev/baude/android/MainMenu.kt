@@ -44,9 +44,9 @@ private fun fullWidth(): MenuItem {
 }
 
 /** A chat's ☰ (baudewindow.BaudeWindow's menu, in its sections): Find, Copy Transcript for an Issue, Read-only
- * session (checked and greyed while the chat's archived: read-only till it's unarchived); Full-width text; Kubernetes…, Database Schemas…, Terminal (a host that takes them); Settings…, Changelog, Mesh, Send
- * Feedback…, Ongoing Feedback. screen opens one of "settings", "changelog", "mesh", "fixes", "databases", "kubernetes" and
- * "terminal" over the chat. */
+ * session (checked and greyed while the chat's archived: read-only till it's unarchived); Full-width text; Kubernetes…, Docker, Database Schemas…, Terminal (a host that takes them); Settings…, Changelog, Mesh, Send
+ * Feedback…, Ongoing Feedback. screen opens one of "settings", "changelog", "mesh", "fixes", "databases", "kubernetes",
+ * "docker" and "terminal" over the chat. */
 @Composable
 fun ChatMenu(hostId: String, sid: String, feedback: () -> Unit, screen: (String) -> Unit, writes: Boolean = true) {
     val ctx = LocalContext.current
@@ -63,6 +63,7 @@ fun ChatMenu(hostId: String, sid: String, feedback: () -> Unit, screen: (String)
         listOf(fullWidth()),
         listOfNotNull(
             if (takes(hostId, "kube")) MenuItem(Wording.Window.kubernetes) { screen("kubernetes") } else null,
+            if (takes(hostId, "docker")) MenuItem(Wording.Window.docker) { screen("docker") } else null,
             if (takes(hostId, "databases")) MenuItem(Wording.Window.databaseSchemas) { screen("databases") } else null,
             if (takes(hostId, "terminal")) MenuItem(Wording.Multiplex.terminalMenu) { screen("terminal") } else null,
         ),
@@ -78,7 +79,7 @@ fun ChatMenu(hostId: String, sid: String, feedback: () -> Unit, screen: (String)
 
 /** The home screen's ☰: the items that don't need a chat open, and Kubernetes…, Database Schemas…, Terminal on the
  * host picked beside New session (a host that takes them), as Baude's ☰ opens them on its window's host. tool opens
- * one of "kubernetes", "databases" and "terminal" on a host. */
+ * one of "kubernetes", "docker", "databases" and "terminal" on a host. */
 @Composable
 fun HomeMenu(settings: () -> Unit, changelog: () -> Unit, mesh: () -> Unit, feedback: () -> Unit, fixes: () -> Unit,
              tool: (String, String) -> Unit = { _, _ -> }) {
@@ -87,6 +88,7 @@ fun HomeMenu(settings: () -> Unit, changelog: () -> Unit, mesh: () -> Unit, feed
         listOf(fullWidth()),
         if (host == null) emptyList() else listOfNotNull(
             if (takes(host, "kube")) MenuItem(Wording.Window.kubernetes) { tool("kubernetes", host) } else null,
+            if (takes(host, "docker")) MenuItem(Wording.Window.docker) { tool("docker", host) } else null,
             if (takes(host, "databases")) MenuItem(Wording.Window.databaseSchemas) { tool("databases", host) } else null,
             if (takes(host, "terminal")) MenuItem(Wording.Multiplex.terminalMenu) { tool("terminal", host) } else null,
         ),

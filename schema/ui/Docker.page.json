@@ -1,0 +1,186 @@
+{
+  "description": "A full-window view over the chat that lays a host's Docker out as the Kubernetes view lays a cluster out: a top bar to pick the Docker context and filter, a sidebar of categories, a table of the chosen page's objects, the selected object inspected beside it (JSON or YAML), and containers' and Compose projects' followed logs and shells in containers under both, a tab each. A container or Compose project is started, stopped, restarted or removed from its row's ⋮, an image, volume or network removed; every remove is asked first. Everything it shows and does is asked of the host picked in the window's host dropdown (this machine's too), through that host's host process (the docker and docker_follow ops); it can move out to a window of its own and back, as the Kubernetes view does.",
+  "apps": [
+    "baude",
+    "record",
+    "phone"
+  ],
+  "opens": [
+    "☰ → Docker",
+    "The phone: ☰ → Docker on a chat, or on the home screen's host"
+  ],
+  "code": [
+    "dockerview.py:DockerView",
+    "dockerview.py:DockerLogs",
+    "dockerview.py:DockerShell",
+    "dockerview.py:Follow",
+    "baudelib/hostdocker.py:answer",
+    "baudelib/hostdocker.py:follow",
+    "baudelib/hostdocker.py:contexts",
+    "baudelib/hostdocker.py:SECTIONS",
+    "baudewindow.py:BaudeWindow.__init__",
+    "viewers.py:Viewers.viewer_overlays",
+    "kubedock.py:KubeDock",
+    "viewwindow.py:Out",
+    "android/.../DockerScreen.kt:DockerScreen"
+  ],
+  "copy": [
+    "docker",
+    "kube",
+    "window",
+    "common"
+  ],
+  "parts": [
+    {
+      "name": "top bar",
+      "shows": "As the Kubernetes view's: the title, the host's name, a context picker, a filter box, a gap, a refresh button, Move to Its Own Window, a close button.",
+      "parts": [
+        {
+          "name": "title",
+          "shows": "Heading \"Docker\"",
+          "copy": [
+            "window.docker"
+          ]
+        },
+        {
+          "name": "host",
+          "shows": "The host the view reads, by name, dim: the one picked in the window's host dropdown when the view opened, this machine's when none is."
+        },
+        {
+          "name": "context picker",
+          "shows": "A drop-down of the host's Docker contexts (docker context ls), and Colima's and Podman's sockets found that none of them reaches; opens on the one picked there last, else docker's current one.",
+          "copy": [
+            "docker.context_tip"
+          ]
+        },
+        {
+          "name": "filter",
+          "shows": "A search box: only rows with its text in a cell, the text highlighted in them (Ctrl+F).",
+          "copy": [
+            "kube.filter",
+            "kube.filter_tip"
+          ]
+        },
+        {
+          "name": "refresh",
+          "shows": "Reads the page again; it's read every 10 s besides while the view is open.",
+          "copy": [
+            "common.read_again"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "sidebar",
+      "shows": "The host's categories, as the host lists them: Containers (a heading with its icon over Running and All), Images, Volumes, Networks, Compose Projects, each a row with its icon. The page shown is selected.",
+      "phone": {
+        "does": "As the Kubernetes page's sidebar on the phone: a page of its own, the bar's ◂ from the table, a heading the body's size, bold, its row at least 30 high, a page's row at least 23 high",
+        "why": "The Kubernetes page's phone sidebar, which the owner decided (Kubernetes.page.json)",
+        "decided": "2026-11-22"
+      }
+    },
+    {
+      "name": "table",
+      "shows": "The page's objects, a column each as the host says them (containers: Name, Image, Status, Ports, Project, Age; images: Repository, Tag, ID, Size, Age; volumes: Name, Driver, Project, Mountpoint; networks: Name, Driver, Scope, ID, Age; Compose projects: Name, Status, Config Files); a status coloured green running, orange restarting or starting, red failed; an age's tooltip its time in full. Click a column to sort by it. Under it, a status line: how many are shown, the context, and what was last done.",
+      "parts": [
+        {
+          "name": "row's end",
+          "shows": "A logs button (a container's or a Compose project's), a shell button (a running container's) and ⋮: the row's actions as the host says them (Start, Stop, Restart, Remove…).",
+          "copy": [
+            "kube.logs",
+            "kube.shell",
+            "new_session.start",
+            "common.stop",
+            "shared_settings.restart",
+            "common.remove_ellipsis"
+          ],
+          "actions": [
+            {
+              "by": "click",
+              "does": "Logs: a tab in the dock with its log (docker logs -f, or docker compose logs -f) followed. Shell: a tab in the dock with a terminal running, on the host, the command the host gave for the row (docker exec -it, bash if it has it, else sh), which needs the host's Shell. Start, Stop, Restart: done at once, what docker said in the status line. Remove…: asked first."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "inspect",
+      "shows": "Beside the table (the phone: in its place), the selected row's name, a JSON / YAML picker (remembered) and a hide button, then what docker inspect says of it, as JSON or YAML; a Compose project's: its containers.",
+      "copy": [
+        "docker.format_tip",
+        "kube.hide"
+      ]
+    },
+    {
+      "name": "dock",
+      "shows": "As the Kubernetes view's: under the table, a strip of tabs (\"<name> · <context>\", ×), the picked one's log (follow, wrap, find) or terminal under it.",
+      "copy": [
+        "kube.following",
+        "multiplex.ended",
+        "docker.exited",
+        "docker.error"
+      ],
+      "phone": {
+        "does": "As the Kubernetes page's dock on the phone: the picked tab's controls on a row of their own under the strip",
+        "why": "The Kubernetes page's phone dock (Kubernetes.page.json)",
+        "decided": "2026-11-25"
+      }
+    },
+    {
+      "name": "remove dialog",
+      "shows": "\"Remove container <name>?\" (or image, volume, network, Compose project), \"On <context>.\", and what goes with it (a running container's stopped first; a Compose project is taken down, its volumes kept); Cancel and a red Remove. Nothing's removed unless Remove is chosen.",
+      "copy": [
+        "docker.remove_container_heading",
+        "docker.remove_image_heading",
+        "docker.remove_volume_heading",
+        "docker.remove_network_heading",
+        "docker.remove_compose_heading",
+        "docker.on_context",
+        "docker.remove_running_body",
+        "docker.remove_container_body",
+        "docker.remove_image_body",
+        "docker.remove_volume_body",
+        "docker.remove_network_body",
+        "docker.remove_compose_body"
+      ]
+    }
+  ],
+  "states": [
+    {
+      "name": "Docker missing",
+      "shows": "The host has no docker: the missing dependency's state in the table's place (\"Docker needs Docker\"), with the host's install command and Try Again."
+    },
+    {
+      "name": "not running",
+      "shows": "The context's daemon can't be reached: \"Docker isn't running\", what docker said, the command that starts it (open -a Docker, colima start, podman machine start, systemctl) with Copy, Try Again, and docker's output folded away.",
+      "copy": [
+        "docker.not_running",
+        "docker.output"
+      ]
+    },
+    {
+      "name": "no context",
+      "shows": "The status line says there's no Docker context to show.",
+      "copy": [
+        "docker.no_context"
+      ]
+    }
+  ],
+  "decisions": [
+    {
+      "said": "The owner asked for a Docker page with what the Kubernetes page has: exec, a list of each kind of object, and categories in the left bar.",
+      "rule": "Every app has a Docker page laid out as its Kubernetes page is (categories in the sidebar, a table, the object beside it, logs and shells docked under), its data and actions all asked of the host through the wire's docker and docker_follow ops, a shell in a container a terminal on that host, and every remove asked first.",
+      "decided": "2026-11-26",
+      "source": [
+        {
+          "issue": "BaudeInternal#249"
+        }
+      ]
+    }
+  ],
+  "scenes": [
+    "38f-docker",
+    "38f-docker-dock",
+    "38f-docker-remove"
+  ]
+}

@@ -10,6 +10,7 @@
     "transcript_copied": "Transcript copied",
     "database_schemas": "Database Schemas",
     "kubernetes": "Kubernetes",
+    "docker": "Docker",
     "feedback_tab_tip": "The feedback on Baude, and where each stands",
     "rename_tip": "Rename: right-click the {$thing} in the sidebar, or F2",
     "restart_now_heading": "Restart now?",

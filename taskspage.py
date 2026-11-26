@@ -346,6 +346,12 @@ class TasksPage(Gtk.Box):
         head.append(flat("media-playback-start-symbolic", wording.say("tasks.run"), lambda: self.start(t)))
         head.append(flat("document-edit-symbolic", wording.say("tasks.change"), lambda: self.change(t)))
         head.append(flat("user-trash-symbolic", wording.say("common.delete"), lambda: self.delete(t)))
+        # failures
+        lb = self.listbox(self.task_body)
+        lb.set_margin_top(2)
+        hand = Adw.SwitchRow(title=wording.say("tasks.fallback"), use_markup=False, active=t.get("fallback", True))
+        hand.connect("notify::active", lambda r, _p: self.save(self.kept(t, fallback=r.get_active())))
+        lb.append(hand)
         # triggers
         g = self.group(wording.say("tasks.triggers"),
                        flat("list-add-symbolic", wording.say("tasks.add_trigger"), lambda: self.add_trigger(t)))
@@ -481,18 +487,11 @@ class TasksPage(Gtk.Box):
 
     # ---- dialogs
     def change(self, t):
-        """t changed: its name, and whether its failures go to the Bot."""
-        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
-        name = Gtk.Entry(placeholder_text=wording.say("common.name"), text=t.get("name") or "")
-        box.append(name)
-        fallback = Adw.SwitchRow(title=wording.say("tasks.fallback"), active=t.get("fallback", True))
-        lb = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE)
-        lb.add_css_class("boxed-list")
-        lb.append(fallback)
-        box.append(lb)
-        alert(self.win, wording.say("tasks.change_heading"), box,
+        """t renamed."""
+        name = Gtk.Entry(placeholder_text=wording.say("common.name"), text=t.get("name") or "", valign=Gtk.Align.CENTER)
+        alert(self.win, wording.say("tasks.change_heading"), name,
               [("cancel", wording.say("common.cancel"), False), ("save", wording.say("common.save"), True)],
-              lambda _r: self.save(self.kept(t, name=name.get_text(), fallback=fallback.get_active())))
+              lambda _r: self.save(self.kept(t, name=name.get_text())))
 
     def delete(self, t):
         """t deleted, once that's confirmed: its runs and scripts too."""

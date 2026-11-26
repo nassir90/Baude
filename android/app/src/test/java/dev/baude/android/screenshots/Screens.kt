@@ -305,20 +305,34 @@ abstract class Screens(private val theme: String) {
         screen("40i-meta-access")
     }
 
+    // (Meta's set_setting narrowing one host's rule, of two: that host's row alone under the reply)
+    @Test fun metaAccessSet() {
+        accessFixture(spawn = "nobody")
+        val studio = Host(id = "7d3f2a90-1c4e-4b6a-9e8d-5f0a2b3c4d5e", name = "studio", user = "dev", address = "studio.example")
+        Mesh.hosts.add(studio)
+        accessFixture(studio, "studio")
+        dev.baude.android.Meta.host.value = Mesh.hosts.first().id
+        val spec = org.json.JSONObject().put("setting", "access_spawn")
+            .put("hosts", org.json.JSONArray(listOf(Mesh.hosts.first().id)))
+        show { dev.baude.android.MetaSettingBox(dev.baude.android.MetaSet.ALL.getValue("access_spawn"), emptyList(), spec) }
+        laidOut()
+        screen("40j-meta-access-set")
+    }
+
     /** A host answering access and access_set as one with members studio and pixel-9 would. */
-    private fun accessFixture() {
+    private fun accessFixture(host: Host = Mesh.hosts.first(), name: String = "workshop", spawn: String = "everybody") {
         val studio = "5b168c62-bc6e-4150-8d6f-de1c2fade4f3"
         val pixel = "9c0e7a11-4f2d-4b8e-a3c5-2d7e9f1b6a40"
         fun rule(who: String, vararg m: String) = org.json.JSONObject().put("who", who)
             .apply { if (who == "chosen") put("members", org.json.JSONArray(m.toList())) }
         val rules = org.json.JSONObject().put("shell", rule("nobody")).put("browser", rule("chosen", studio))
-            .put("providers", rule("everybody")).put("model_files", rule("chosen", studio, pixel)).put("spawn", rule("everybody"))
+            .put("providers", rule("everybody")).put("model_files", rule("chosen", studio, pixel)).put("spawn", rule(spawn))
             .put("manage", rule("everybody")).put("kube", rule("nobody")).put("databases", rule("everybody"))
             .put("access", rule("nobody"))
-        val state = org.json.JSONObject().put("host", "workshop").put("rules", rules).put("editable", true)
+        val state = org.json.JSONObject().put("host", name).put("rules", rules).put("editable", true)
             .put("members", org.json.JSONArray(listOf(org.json.JSONObject().put("id", pixel).put("name", "pixel-9"),
                 org.json.JSONObject().put("id", studio).put("name", "studio"))))
-        FixtureConnection.up(activity, Mesh.hosts.first()) { m ->
+        FixtureConnection.up(activity, host) { m ->
             if (m.optString("op") != "access") return@up null
             org.json.JSONObject().put("op", "access").put("req", m.opt("req")).put("state", state)
                 .apply { if (m.has("session")) put("session", m.get("session")).put("chat", rule("chosen", studio)) }

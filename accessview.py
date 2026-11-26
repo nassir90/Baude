@@ -338,6 +338,15 @@ def meta_settings():
             parse(value, self.cap)
             return str(value).strip()
 
+        def where(self, value):
+            """The host value sets a rule on, as wire reaches it."""
+            host, _rule = parse(value, self.cap)
+            return host[2] if host else {"via": "local"}
+
+        def host_row(self, where):
+            """The row of the host a change was on, alone (set_setting's)."""
+            return [host_row(self.cap, None, where)]
+
     out = []
     for cap in access.CAPABILITIES:
         s = AccessSetting(f"access_{cap}", None, lambda cap=cap: said(cap), lambda v, cap=cap: narrow(cap, v),

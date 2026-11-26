@@ -521,7 +521,8 @@ private fun defaultText(f: Msg.TaskField): String = when (val d = f.default) {
     else -> d.toString()
 }
 
-/** Run <task>: a control for each field of its form, filled with its default; Cancel, Dry run, Run. */
+/** Run <task>: a row for each of its inputs as the settings have them (a switch, an entry, a choice), titled with its
+ * label and filled with its default; Cancel and Run, and under the rows the lesser Run with dummy answers. */
 @Composable
 private fun RunForm(t: Msg.Task, done: (JSONObject?, Boolean) -> Unit) {
     val c = LocalBaude.current
@@ -529,13 +530,14 @@ private fun RunForm(t: Msg.Task, done: (JSONObject?, Boolean) -> Unit) {
     val values = remember { mutableStateListOf<String>().apply { addAll(fields.map { f ->
         if (f.type == "bool") (f.default == true).toString() else if (f.type == "choice") defaultText(f).ifBlank { f.choices.orEmpty().firstOrNull().orEmpty() }
         else defaultText(f) }) } }
+    val filledIn = fields.indices.all { i -> fields[i].type != "number" || values[i].trim().toDoubleOrNull() != null }
     fun filled() = JSONObject().apply {
         fields.forEachIndexed { i, f ->
-            val v = values[i]
+            val v = values[i].trim()
             put(f.name.orEmpty(), when (f.type) {
                 "bool" -> v == "true"
                 "number" -> v.toLongOrNull() ?: v.toDoubleOrNull() ?: JSONObject.NULL
-                else -> v
+                else -> values[i]
             })
         }
     }
@@ -543,35 +545,44 @@ private fun RunForm(t: Msg.Task, done: (JSONObject?, Boolean) -> Unit) {
         onDismissRequest = { done(null, false) },
         title = { Text(Wording.Tasks.runHeading(name = t.name.orEmpty())) },
         text = {
-            Column(Modifier.heightIn(max = 520.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                fields.forEachIndexed { i, f ->
+            Column(Modifier.heightIn(max = 520.dp).verticalScroll(rememberScrollState())) {
+                BoxedList(fields.indices.toList(), "", inset = 0.dp) { i ->
+                    val f = fields[i]
                     val label = f.label?.ifBlank { null } ?: f.name.orEmpty()
                     when (f.type) {
-                        "bool" -> Row(Modifier.fillMaxWidth().clickable { values[i] = (values[i] != "true").toString() },
-                            verticalAlignment = Alignment.CenterVertically) {
-                            Text(label, style = Type.body, color = c.fg, modifier = Modifier.weight(1f))
-                            Switch(values[i] == "true", { values[i] = it.toString() },
-                                colors = SwitchDefaults.colors(checkedTrackColor = c.accentBg, checkedThumbColor = c.accentFg))
-                        }
-                        "choice" -> Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Label(label)
-                            Picker(values[i], label, f.choices.orEmpty().map { it to it }, values[i]) { values[i] = it }
-                        }
-                        "number" -> { Label(label); NumberField(values[i]) { values[i] = it.filter { ch -> ch.isDigit() || ch == '.' || ch == '-' } } }
-                        else -> { Label(label); Field(values[i], { values[i] = it }, "") }
+                        "bool" -> SwitchRow(label, null, values[i] == "true", titleLines = Int.MAX_VALUE) { values[i] = it.toString() }
+                        "choice" -> Choice(label, f.choices.orEmpty(), values[i], { it }, titleLines = Int.MAX_VALUE) { values[i] = it }
+                        else -> EntryRow(label, values[i], f.type == "number") { values[i] = it }
                     }
                 }
-                // (stacked, as the desktop's alert stacks them when they don't fit side by side)
-                Column(Modifier.fillMaxWidth().padding(top = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Button(Wording.Tasks.run, suggested = true, modifier = Modifier.fillMaxWidth()) { done(filled(), false) }
-                    Button(Wording.Tasks.dryRun, modifier = Modifier.fillMaxWidth()) { done(filled(), true) }
-                    Button(Wording.Common.cancel, modifier = Modifier.fillMaxWidth()) { done(null, false) }
+                Box(Modifier.align(Alignment.CenterHorizontally).padding(top = 12.dp).clip(RoundedCornerShape(8.dp))
+                    .clickable(enabled = filledIn) { done(filled(), true) }.padding(horizontal = 16.dp, vertical = 9.dp)) {
+                    Text(Wording.Tasks.dryRun, style = Type.bold, color = if (filledIn) c.fg else c.fg.copy(alpha = c.fg.alpha * 0.4f))
                 }
             }
         },
-        confirmButton = {},
+        confirmButton = { Button(Wording.Tasks.run, suggested = true, enabled = filledIn) { done(filled(), false) } },
+        dismissButton = { Button(Wording.Common.cancel) { done(null, false) } },
         containerColor = c.dialog,
     )
+}
+
+/** A row to type in (Adw.EntryRow): its title small over what's typed, a pencil after; number: a number's keyboard, and
+ * the title and text in the error colour while it isn't one. */
+@Composable
+private fun EntryRow(title: String, value: String, number: Boolean, set: (String) -> Unit) {
+    val c = LocalBaude.current
+    val bad = number && value.trim().toDoubleOrNull() == null
+    Row(Modifier.fillMaxWidth().heightIn(min = 50.dp).padding(horizontal = 12.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(title, style = Type.caption, color = if (bad) c.destructive else c.dim)
+            BasicTextField(value, set, singleLine = true, textStyle = Type.body.copy(color = if (bad) c.destructive else c.fg),
+                cursorBrush = SolidColor(c.accentBg), modifier = Modifier.fillMaxWidth(),
+                keyboardOptions = if (number) KeyboardOptions(keyboardType = KeyboardType.Number) else KeyboardOptions.Default)
+        }
+        Icon(Adwaita.DocumentEdit, null, tint = c.fg, modifier = Modifier.size(16.dp.icon))
+    }
 }
 
 /** Add Trigger: a schedule (every so many minutes or hours, or at a time of day on the days picked) or a git push (a

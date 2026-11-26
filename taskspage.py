@@ -501,36 +501,68 @@ class TasksPage(Gtk.Box):
         dlg.present(self.win)
         return dlg
 
-    def field_widget(self, f):
-        """(a control for an input, its value as it's read)"""
+    def field_row(self, f):
+        """(an input's row, as a setting's: a switch, an entry or a drop-down titled with its label; its value as it's
+        read, None while it isn't one)"""
+        title = f.get("label") or f["name"]
         if f["type"] == "bool":
-            w = Gtk.Switch(active=bool(f.get("default")), halign=Gtk.Align.START)
-            return w, w.get_active
-        if f["type"] == "number":
-            w = Gtk.SpinButton.new_with_range(-1e9, 1e9, 1)
-            w.set_value(float(f.get("default") or 0))
-            return w, lambda: w.get_value()
+            row = Adw.SwitchRow(title=title, use_markup=False, active=bool(f.get("default")))
+            return row, row.get_active
         if f["type"] == "choice":
-            w = Gtk.DropDown.new_from_strings(f.get("choices") or [""])
-            if f.get("default") in (f.get("choices") or []):
-                w.set_selected(f["choices"].index(f["default"]))
-            return w, lambda: (f.get("choices") or [""])[w.get_selected()]
-        w = Gtk.Entry(text=str(f.get("default") or ""))
-        return w, w.get_text
+            choices = f.get("choices") or [""]
+            row = Adw.ComboRow(title=title, use_markup=False, model=Gtk.StringList.new(choices))
+            if f.get("default") in choices:
+                row.set_selected(choices.index(f["default"]))
+            return row, lambda: choices[row.get_selected()]
+        default = f.get("default")
+        if f["type"] == "number":
+            row = Adw.EntryRow(title=title, use_markup=False, input_purpose=Gtk.InputPurpose.NUMBER,
+                               text="" if default is None else f"{float(default):g}")
+
+            def number():
+                try:
+                    n = float(row.get_text().strip())
+                except ValueError:
+                    return None
+                return int(n) if n.is_integer() else n
+            row.connect("changed", lambda r: (r.remove_css_class if number() is not None else r.add_css_class)("error"))
+            return row, number
+        row = Adw.EntryRow(title=title, use_markup=False, text="" if default is None else str(default))
+        return row, row.get_text
 
     def run_form(self, t):
-        """Run t, its inputs filled here first: or run it dry."""
-        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
-        read = {}
+        """Run t, its inputs filled here first, each a row as the settings have them: Run, or under them the lesser
+        Run with dummy answers."""
+        group = Adw.PreferencesGroup()
+        read, entries = {}, []
         for f in t.get("form") or []:
-            box.append(Gtk.Label(label=f.get("label") or f["name"], xalign=0))
-            w, read[f["name"]] = self.field_widget(f)
-            box.append(w)
-        alert(self.win, wording.say("tasks.run_heading", name=t.get("name") or ""), box,
-              [("cancel", wording.say("common.cancel"), False), ("dry", wording.say("tasks.dry_run"), False),
-               ("run", wording.say("tasks.run"), True)],
-              lambda r: self.ask({"op": "run_task", "session": self.sid, "id": t["id"],
-                                  "inputs": {k: fn() for k, fn in read.items()}, "dry": r == "dry"}))
+            row, read[f["name"]] = self.field_row(f)
+            group.add(row)
+            if isinstance(row, Adw.EntryRow):
+                entries.append(row)
+        dummy = Gtk.Button(label=wording.say("tasks.dry_run"), halign=Gtk.Align.CENTER, margin_top=12,
+                           css_classes=["flat"])
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        box.append(group)
+        box.append(dummy)
+
+        def run(dry):
+            self.ask({"op": "run_task", "session": self.sid, "id": t["id"],
+                      "inputs": {k: fn() for k, fn in read.items()}, "dry": dry})
+        dlg = alert(self.win, wording.say("tasks.run_heading", name=t.get("name") or ""), box,
+                    [("cancel", wording.say("common.cancel"), False), ("run", wording.say("tasks.run"), True)],
+                    lambda _r: run(False))
+        dlg.set_size_request(420, -1)
+
+        def filled(*_):
+            ok = all(fn() is not None for fn in read.values())
+            dlg.set_response_enabled("run", ok)
+            dummy.set_sensitive(ok)
+        for row in entries:
+            row.connect("changed", filled)
+        filled()
+        dummy.connect("clicked", lambda _b: (dlg.close(), run(True)))
+        return dlg
 
     def add_trigger(self, t):
         """A trigger added to t: a schedule or a git push, and which of its payload's keys fills each field."""

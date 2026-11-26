@@ -41,6 +41,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.delay
 import org.json.JSONObject
@@ -48,11 +49,12 @@ import java.util.Base64
 
 // ------------------------------------------------------------------------------------------------- boxed lists --
 
-/** A side panel page's list (a boxed list: rounded 12, its edge, rows ruled apart), 10 in from the page's edges. */
+/** A side panel page's list (a boxed list: rounded 12, its edge, rows ruled apart), 10 in from the page's edges (or
+ * inset: a dialog's, flush with its sides). */
 @Composable
-fun <T> BoxedList(rows: List<T>, empty: String, row: @Composable (T) -> Unit) {
+fun <T> BoxedList(rows: List<T>, empty: String, inset: Dp = 10.dp, row: @Composable (T) -> Unit) {
     val c = LocalBaude.current
-    Column(Modifier.fillMaxWidth().padding(10.dp).clip(RoundedCornerShape(12.dp)).background(c.card)
+    Column(Modifier.fillMaxWidth().padding(inset).clip(RoundedCornerShape(12.dp)).background(c.card)
         .border(1.dp, c.rule, RoundedCornerShape(12.dp))) {
         if (rows.isEmpty()) Empty(empty)
         rows.forEachIndexed { i, r ->

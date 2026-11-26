@@ -219,7 +219,7 @@
     },
     {
       "name": "run form",
-      "shows": "An alert dialog headed 'Run <task>' with one control per input: text field, number box, switch, or drop-down of its choices, each labelled, filled with its default; buttons Cancel, Run with dummy answers and Run (suggested).",
+      "shows": "An alert dialog headed 'Run <task>', as the app's settings dialogs are (Change Task, a chat's Access): its inputs as one boxed list of setting rows, each titled with its label (its name if none), wrapped, with no subtitle, filled with its default: a yes/no input a switch row, a text or number input an entry row (a number's in the error colour, and Run off, while it isn't one), a choice a drop-down row of its choices. Under the list, centred, the lesser flat button Run with dummy answers. Then the buttons Cancel and Run (suggested), the only two side by side. The phone draws the same: its boxed list, switch, entry and choice rows, the flat Run with dummy answers under them, Cancel and Run at the end.",
       "copy": [
         "tasks.run_heading",
         "common.cancel",
@@ -234,6 +234,18 @@
         {
           "by": "click Run with dummy answers",
           "does": "runs the script as it is, side effects and all, with its asks answered by a dummy agent and its failure not handed to the Bot"
+        }
+      ],
+      "decisions": [
+        {
+          "said": "The run form looked ugly and unlike any of the app's other settings (paraphrased: the form shown when running a task with inputs)",
+          "rule": "Every app draws a task's run form as its settings: one boxed list of rows titled with each input's label (wrapped, no subtitle), a switch row for yes/no, an entry row for text and number, a drop-down row for a choice; one suggested button, Run, beside Cancel; Run with dummy answers out of that row, a flat button under the list",
+          "decided": "2026-11-26",
+          "source": [
+            {
+              "issue": "BaudeInternal#258"
+            }
+          ]
         }
       ]
     },

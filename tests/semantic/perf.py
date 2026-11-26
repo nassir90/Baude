@@ -5,7 +5,8 @@ frame clock and GL run as on screen. Prints RESULT."""
 from rig import *  # noqa: F401,F403
 import math, resource, statistics
 N = int(os.environ.get("N", "3"))
-cards = {f"c{i}": make_card(i)[1] for i in range(N)}
+XMAS = os.environ.get("SCENE") == "christmas"  # (the Christmas scene as it's drawn: its dashboard, signs, letters)
+cards = {f"c{i}": make_card(i)[1] for i in range(0 if XMAS else N)}
 wd = scenehost.World([{"kind": "meta_card", "id": f"c{i}", "name": f"card {i}", "used": NOW - i} for i in range(N)])
 scene = sample_scene()
 cols = max(1, round(math.sqrt(N * 1.6)))
@@ -16,7 +17,19 @@ scene["nodes"] = [n for n in scene["nodes"] if n["id"] in ("floor", "lamp")] + [
                "panel": {"show": "meta_card", "px": [340, 150], "size": [1.13, 0.5]}}}]
 if os.environ.get("NOBLOOM"):
     scene.pop("bloom", None)
-v = scenehost.SceneView(scene, wd, {"meta_card": lambda o: cards[o["id"]]}, theme=SAMPLE, trusted=True)
+if XMAS:
+    import christmas_rig as X
+    theme = X.install()
+    v = X.view(theme, X.world(), X.dashboard())
+    for k in [k for k in v.nodes if k.endswith("/box")][:N if os.environ.get("OPEN") else 0]:  # (OPEN=1: N letters out)
+        n = v.nodes[k]
+        n.hidden = True
+        for o in v.nodes.values():
+            if o.parent == n.parent and o is not n:
+                o.hidden = False
+    scene = v.scene
+else:
+    v = scenehost.SceneView(scene, wd, {"meta_card": lambda o: cards[o["id"]]}, theme=SAMPLE, trusted=True)
 if os.environ.get("RENDER_ONLY"):  # (the view still: only GL drawing each frame, no layout)
     v.advance = lambda dt: (v.stats["frames"].append(0.0), v.area.queue_render())
 if os.environ.get("LAYOUT_ONLY"):  # (layout each frame, GL not asked to draw again)
@@ -57,13 +70,19 @@ if os.environ.get("SAMPLE"):  # (macOS's sample: where the main thread's time go
     subprocess.Popen(["sample", str(os.getpid()), "2", "-file", os.environ["SAMPLE"]], stdout=subprocess.DEVNULL,
                      stderr=subprocess.DEVNULL)
 still = measure(3.0)
-target = cards["c2"] if N > 2 else cards["c0"]
+target = None if XMAS else cards["c2"] if N > 2 else cards["c0"]
 k = [0]
 def grow():  # (a tool card's result changing: its panel's picture made again)
     k[0] += 1
     if hasattr(target, "set_result"):
         target.set_result(f"{k[0]} passed", False)
+    elif hasattr(target, "said"):
+        target.said(f"{k[0]}")
     else:
         target.queue_draw()
+if XMAS:
+    pump(0.5)
+    shown = [n.widget for n in v.nodes.values() if n.widget is not None and hasattr(n.widget, "said")]
+    target = shown[0] if shown else next(n.widget for n in v.nodes.values() if n.widget is not None)
 changing = measure(3.0, grow)
-print("RESULT " + json.dumps({"n": N, "scale": win.get_scale_factor(), "bloom": "bloom" in scene, "renderer": type(win.get_renderer()).__name__, "still": still, "one_changing_10hz": changing}), flush=True)
+print("RESULT " + json.dumps({"n": N, "scene": "christmas" if XMAS else "grid", "nodes": len(v.nodes), "panels": sum(n.face is not None and v.shown(n) for n in v.nodes.values()), "scale": win.get_scale_factor(), "bloom": "bloom" in scene, "renderer": type(win.get_renderer()).__name__, "still": still, "one_changing_10hz": changing}), flush=True)

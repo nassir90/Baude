@@ -165,6 +165,18 @@ An entry or a part may carry:
   semantic "theme" framework. Ontologically we want this to meld with the work we did on the windows XP themes and
   such too" (2026-11-26). Source: `[{"session": "b3845b21-55ac-4aab-a769-fb8517403c51", "message":
   "96faec93-ffcb-4edc-a5bb-b9af7c972ea9"}]`.
+- **A scene is drawn from the wire's things alone.** What a scene places comes from what every app is told (a host's
+  info: itself, its mesh's members up and those gone down; each host's sessions: its chats, their state, a Bot's
+  name), never from one app's own state, so a scene's hosts are places and its chats things in them on every app.
+  Slots can be made for a slot's thing (a host's chats in that host's place: where {host: $id}), so that takes data
+  alone. The Christmas scene (tests/semantic/christmas) is one: each host a tree in the room, its chats wrapped under
+  it, a chat opened a letter, and the dashboard a window's content on the desk's paper. The owner asked for a
+  "Christmas scene with different boxes opening letters that are chats, dashboard with paper theme that's just full
+  baude, different hosts as physical spaces" (2026-11-26), and of the apps: "Baude GTK normal is merely a cradle for
+  limmering functionality. The true value / edge is revealed by swapping, stripping and rebuilding the frontend and
+  seeing what of our hard work remains of it" (2026-11-26). Source: `[{"session":
+  "b3845b21-55ac-4aab-a769-fb8517403c51", "message": "96faec93-ffcb-4edc-a5bb-b9af7c972ea9"}, {"session":
+  "b3845b21-55ac-4aab-a769-fb8517403c51", "message": "1d3ef2c7-6d97-4480-a1e2-b1526eab2287"}]`.
 - **Apps are thin clients; the logic is in the wire.** What an app or an agent's tool does to shared things (a
   notebook's pages and the edits proposed to them, a chat, the mesh) is the host's to work out, through typed wire
   messages in schema/types; an app or an MCP server asks the host and shows its answer. An agent's interface (an MCP

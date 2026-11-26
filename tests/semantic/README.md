@@ -10,6 +10,11 @@ tests/proto3d/fakeloc.dylib tests/proto3d/fakeloc.m`).
     N=3|50|200 GSK_RENDERER=gl run tests/semantic/perf.py  # frame time, CPU, picture uploads, N live panels
     MODE=a|a2|c N=200 GSK_RENDERER=gl run tests/semantic/gsk200.py  # where a frame of #454's stage goes
 
+    GSK_RENDERER=gl OUT=dir run tests/semantic/christmas.py   # the Christmas scene installed as its .baudetheme
+                                                         # through the host, light and dark: the room, a host's place,
+                                                         # a present opened and its letter used, the dashboard
+    SCENE=christmas [OPEN=1 N=9] GSK_RENDERER=gl run tests/semantic/perf.py  # its frames (OPEN: N letters out)
+
 perf.py takes NOBLOOM=1, RENDER_ONLY=1 (GL each frame, no layout), LAYOUT_ONLY=1, SCENE_FINISH=1 (glFinish after each
 frame, to time the GPU) and SAMPLE=file (macOS's sample of the run).
 

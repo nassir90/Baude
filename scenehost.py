@@ -73,10 +73,13 @@ class World:
     def get(self, oid):
         return next((o for o in self.objects if o["id"] == oid), None)
 
-    def query(self, slots):
-        """The things slots are for, in their order."""
+    def query(self, slots, around=None):
+        """The things slots are for, in their order. around: the thing the slots are in (a host's, for slots in a host's
+        slot), whose fields a where's $field names (a chat's host $id)."""
+        where = {k: ((around or {}).get(v[1:]) if isinstance(v, str) and v.startswith("$") else v)
+                 for k, v in (slots.get("where") or {}).items()}
         out = [o for o in self.objects if o["kind"] == slots["of"] and
-               all(str(o.get(k)).lower() == str(v).lower() for k, v in (slots.get("where") or {}).items())]
+               all(str(o.get(k)).lower() == str(v).lower() for k, v in where.items())]
         if slots.get("sort") == "name":
             out.sort(key=lambda o: (o.get("name") or "").lower())
         else:
@@ -84,12 +87,26 @@ class World:
         return out[:slots["limit"]] if slots.get("limit") else out
 
     @staticmethod
+    def from_info(info):
+        """The mesh's hosts as a host's info has them (schema/types/Info.json): itself and the members it reaches, up;
+        those reached lately and not now (its mesh's gone), down."""
+        mesh = info.get("mesh") or {}
+        out = [{"kind": "host", "id": info["id"], "name": info.get("name") or info["id"], "state": "up"}]
+        seen = {info["id"]}
+        for m, state in [(m, "up") for m in mesh.get("members") or ()] + [(m, "down") for m in mesh.get("gone") or ()]:
+            if m["id"] not in seen:
+                seen.add(m["id"])
+                out.append({"kind": "host", "id": m["id"], "name": m.get("name") or m["id"], "state": state})
+        return out
+
+    @staticmethod
     def from_sessions(host, sessions, bots=None):
-        """A host's sessions (schema/types/Session.json, as its sessions answer has them) as the scene's chats; bots:
-        a Bot's name by session id (a Bot has only its Name)."""
+        """A host's sessions (schema/types/Session.json, as its sessions answer has them) as the scene's chats, a Bot's
+        named as it is (its session's bot, BotListing); bots: a name by session id over that."""
         bots = bots or {}
         return [{"kind": "chat", "id": f"{host}/{s['id']}", "host": host, "state": s.get("state", "stopped"),
-                 "name": bots.get(s["id"]) or s.get("title") or "", "bot": s["id"] in bots or bool(s.get("bot")),
+                 "name": bots.get(s["id"]) or (s.get("bot") or {}).get("name") or s.get("title") or "",
+                 "bot": s["id"] in bots or bool(s.get("bot")),
                  "used": s.get("said") or s.get("updated") or 0} for s in sessions if not s.get("archived")]
 
 
@@ -400,9 +417,13 @@ class SceneView(Gtk.Widget):
     def sync(self):
         """Each slots node's panels made again for the things that fit now (a thing's panel kept, live, while it still
         fits), and each panel's thing as the world has it now."""
-        for sid in [k for k in self.order if self.nodes[k].slots]:
-            s = self.nodes[sid]
-            fits = self.world.query(s.slots)
+        at = 0
+        while at < len(self.order):  # (slots made for a slot's thing, a host's chats, are met as they're made)
+            sid, at = self.order[at], at + 1
+            s = self.nodes.get(sid)
+            if s is None or not s.slots:
+                continue
+            fits = self.world.query(s.slots, self.obj_of(s))
             had = {n.obj["id"]: n for n in self.nodes.values() if n.made_by == sid and n.parent == sid}
             keep = {o["id"] for o in fits}
             for oid, n in had.items():

@@ -3,6 +3,13 @@
   "type": "object",
   "description": "A scene (a theme's scene.json): a space every app draws, with Baude's things placed in it as live widgets, real and usable as they are in a window. Distances are metres; angles degrees; +y is up.",
   "properties": {
+    "renderer": {
+      "enum": [
+        "gl",
+        "gfx"
+      ],
+      "description": "What the desktop draws it with: gl (the scene's own GL: lights, bloom), or gfx (pygfx: physically based materials, its environment's light, shadows, its backdrop, models), where pygfx is installed, else gl. gl, left out."
+    },
     "camera": {
       "$ref": "SceneCamera.json",
       "description": "Where it's seen from."
@@ -14,6 +21,18 @@
     "ambient": {
       "type": "string",
       "description": "Light that reaches everything evenly (#rrggbb)."
+    },
+    "environment": {
+      "$ref": "SceneEnvironment.json",
+      "description": "An HDR image whose light everything reflects (gfx): left out for none."
+    },
+    "backdrop": {
+      "$ref": "SceneBackdrop.json",
+      "description": "A sky image drawn behind everything (gfx): left out for the background colour."
+    },
+    "exposure": {
+      "type": "number",
+      "description": "How bright the frame's exposed, before its tone curve (gfx): 1, left out."
     },
     "lights": {
       "type": "array",

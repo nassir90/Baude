@@ -1,4 +1,5 @@
 {
+ "renderer": "gfx",
  "camera": {
   "position": [
    0,
@@ -15,6 +16,18 @@
    "yaw": 9,
    "period": 48
   }
+ },
+ "environment": {
+  "texture": "studio_small_09_1k.hdr",
+  "intensity": 0.3
+ },
+ "backdrop": {
+  "texture": "stars.jpg",
+  "intensity": 0.35,
+  "instead_of": [
+   "star",
+   "star_bright"
+  ]
  },
  "background": "#03050a",
  "ambient": "#1c2230",
@@ -59,6 +72,18 @@
  },
  "materials": {
   "hull": {
+   "color": "#c9cfd8",
+   "specular": 0.7,
+   "shininess": 72,
+   "texture": "hull_color.jpg",
+   "normal_texture": "hull_normal.jpg",
+   "orm_texture": "hull_orm.jpg",
+   "repeat": [
+    2,
+    1
+   ]
+  },
+  "module": {
    "color": "#959dab",
    "specular": 0.7,
    "shininess": 72
@@ -82,7 +107,16 @@
   "solar": {
    "color": "#1d3566",
    "specular": 0.95,
-   "shininess": 110
+   "shininess": 110,
+   "texture": "solar_color.jpg",
+   "normal_texture": "solar_normal.jpg",
+   "orm_texture": "solar_orm.jpg",
+   "repeat": [
+    3,
+    2
+   ],
+   "metalness": 0.35,
+   "roughness": 0.45
   },
   "frame": {
    "color": "#2c313b",
@@ -160,11 +194,12 @@
   {
    "id": "hub",
    "mesh": "cylinder",
-   "material": "hull",
+   "model": "hangar_roundGlass.glb",
+   "material": "module",
    "scale": [
-    1.6,
-    1.1,
-    1.6
+    1.9,
+    1.0,
+    1.65
    ],
    "pick": "none"
   },
@@ -267,7 +302,8 @@
   {
    "id": "ring/0",
    "mesh": "box",
-   "material": "hull",
+   "model": "corridor_window.glb",
+   "material": "module",
    "position": [
     0.0,
     0.0,
@@ -275,13 +311,13 @@
    ],
    "rotation": [
     0,
-    0.0,
+    90.0,
     0
    ],
    "scale": [
-    1.307,
+    0.62,
     0.5,
-    0.62
+    1.307
    ],
    "pick": "none"
   },
@@ -309,7 +345,8 @@
   {
    "id": "ring/1",
    "mesh": "box",
-   "material": "hull",
+   "model": "corridor_window.glb",
+   "material": "module",
    "position": [
     1.236,
     0.0,
@@ -317,13 +354,13 @@
    ],
    "rotation": [
     0,
-    18.0,
+    108.0,
     0
    ],
    "scale": [
-    1.307,
+    0.62,
     0.5,
-    0.62
+    1.307
    ],
    "pick": "none"
   },
@@ -351,7 +388,8 @@
   {
    "id": "ring/2",
    "mesh": "box",
-   "material": "hull",
+   "model": "corridor_window.glb",
+   "material": "module",
    "position": [
     2.351,
     0.0,
@@ -359,13 +397,13 @@
    ],
    "rotation": [
     0,
-    36.0,
+    126.0,
     0
    ],
    "scale": [
-    1.307,
+    0.62,
     0.5,
-    0.62
+    1.307
    ],
    "pick": "none"
   },
@@ -393,7 +431,8 @@
   {
    "id": "ring/3",
    "mesh": "box",
-   "material": "hull",
+   "model": "corridor_window.glb",
+   "material": "module",
    "position": [
     3.236,
     0.0,
@@ -401,13 +440,13 @@
    ],
    "rotation": [
     0,
-    54.0,
+    144.0,
     0
    ],
    "scale": [
-    1.307,
+    0.62,
     0.5,
-    0.62
+    1.307
    ],
    "pick": "none"
   },
@@ -435,7 +474,8 @@
   {
    "id": "ring/4",
    "mesh": "box",
-   "material": "hull",
+   "model": "corridor_window.glb",
+   "material": "module",
    "position": [
     3.804,
     0.0,
@@ -443,13 +483,13 @@
    ],
    "rotation": [
     0,
-    72.0,
+    162.0,
     0
    ],
    "scale": [
-    1.307,
+    0.62,
     0.5,
-    0.62
+    1.307
    ],
    "pick": "none"
   },
@@ -477,7 +517,8 @@
   {
    "id": "ring/5",
    "mesh": "box",
-   "material": "hull",
+   "model": "corridor_window.glb",
+   "material": "module",
    "position": [
     4.0,
     0.0,
@@ -485,13 +526,13 @@
    ],
    "rotation": [
     0,
-    90.0,
+    180.0,
     0
    ],
    "scale": [
-    1.307,
+    0.62,
     0.5,
-    0.62
+    1.307
    ],
    "pick": "none"
   },
@@ -519,7 +560,8 @@
   {
    "id": "ring/6",
    "mesh": "box",
-   "material": "hull",
+   "model": "corridor_window.glb",
+   "material": "module",
    "position": [
     3.804,
     0.0,
@@ -527,13 +569,13 @@
    ],
    "rotation": [
     0,
-    108.0,
+    198.0,
     0
    ],
    "scale": [
-    1.307,
+    0.62,
     0.5,
-    0.62
+    1.307
    ],
    "pick": "none"
   },
@@ -561,7 +603,8 @@
   {
    "id": "ring/7",
    "mesh": "box",
-   "material": "hull",
+   "model": "corridor_window.glb",
+   "material": "module",
    "position": [
     3.236,
     0.0,
@@ -569,13 +612,13 @@
    ],
    "rotation": [
     0,
-    126.0,
+    216.0,
     0
    ],
    "scale": [
-    1.307,
+    0.62,
     0.5,
-    0.62
+    1.307
    ],
    "pick": "none"
   },
@@ -603,7 +646,8 @@
   {
    "id": "ring/8",
    "mesh": "box",
-   "material": "hull",
+   "model": "corridor_window.glb",
+   "material": "module",
    "position": [
     2.351,
     0.0,
@@ -611,13 +655,13 @@
    ],
    "rotation": [
     0,
-    144.0,
+    234.0,
     0
    ],
    "scale": [
-    1.307,
+    0.62,
     0.5,
-    0.62
+    1.307
    ],
    "pick": "none"
   },
@@ -645,7 +689,8 @@
   {
    "id": "ring/9",
    "mesh": "box",
-   "material": "hull",
+   "model": "corridor_window.glb",
+   "material": "module",
    "position": [
     1.236,
     0.0,
@@ -653,13 +698,13 @@
    ],
    "rotation": [
     0,
-    162.0,
+    252.0,
     0
    ],
    "scale": [
-    1.307,
+    0.62,
     0.5,
-    0.62
+    1.307
    ],
    "pick": "none"
   },
@@ -687,7 +732,8 @@
   {
    "id": "ring/10",
    "mesh": "box",
-   "material": "hull",
+   "model": "corridor_window.glb",
+   "material": "module",
    "position": [
     0.0,
     0.0,
@@ -695,13 +741,13 @@
    ],
    "rotation": [
     0,
-    180.0,
+    270.0,
     0
    ],
    "scale": [
-    1.307,
+    0.62,
     0.5,
-    0.62
+    1.307
    ],
    "pick": "none"
   },
@@ -729,7 +775,8 @@
   {
    "id": "ring/11",
    "mesh": "box",
-   "material": "hull",
+   "model": "corridor_window.glb",
+   "material": "module",
    "position": [
     -1.236,
     0.0,
@@ -737,13 +784,13 @@
    ],
    "rotation": [
     0,
-    198.0,
+    288.0,
     0
    ],
    "scale": [
-    1.307,
+    0.62,
     0.5,
-    0.62
+    1.307
    ],
    "pick": "none"
   },
@@ -771,7 +818,8 @@
   {
    "id": "ring/12",
    "mesh": "box",
-   "material": "hull",
+   "model": "corridor_window.glb",
+   "material": "module",
    "position": [
     -2.351,
     0.0,
@@ -779,13 +827,13 @@
    ],
    "rotation": [
     0,
-    216.0,
+    306.0,
     0
    ],
    "scale": [
-    1.307,
+    0.62,
     0.5,
-    0.62
+    1.307
    ],
    "pick": "none"
   },
@@ -813,7 +861,8 @@
   {
    "id": "ring/13",
    "mesh": "box",
-   "material": "hull",
+   "model": "corridor_window.glb",
+   "material": "module",
    "position": [
     -3.236,
     0.0,
@@ -821,13 +870,13 @@
    ],
    "rotation": [
     0,
-    234.0,
+    324.0,
     0
    ],
    "scale": [
-    1.307,
+    0.62,
     0.5,
-    0.62
+    1.307
    ],
    "pick": "none"
   },
@@ -855,7 +904,8 @@
   {
    "id": "ring/14",
    "mesh": "box",
-   "material": "hull",
+   "model": "corridor_window.glb",
+   "material": "module",
    "position": [
     -3.804,
     0.0,
@@ -863,13 +913,13 @@
    ],
    "rotation": [
     0,
-    252.0,
+    342.0,
     0
    ],
    "scale": [
-    1.307,
+    0.62,
     0.5,
-    0.62
+    1.307
    ],
    "pick": "none"
   },
@@ -897,7 +947,8 @@
   {
    "id": "ring/15",
    "mesh": "box",
-   "material": "hull",
+   "model": "corridor_window.glb",
+   "material": "module",
    "position": [
     -4.0,
     0.0,
@@ -905,13 +956,13 @@
    ],
    "rotation": [
     0,
-    270.0,
+    360.0,
     0
    ],
    "scale": [
-    1.307,
+    0.62,
     0.5,
-    0.62
+    1.307
    ],
    "pick": "none"
   },
@@ -939,7 +990,8 @@
   {
    "id": "ring/16",
    "mesh": "box",
-   "material": "hull",
+   "model": "corridor_window.glb",
+   "material": "module",
    "position": [
     -3.804,
     0.0,
@@ -947,13 +999,13 @@
    ],
    "rotation": [
     0,
-    288.0,
+    378.0,
     0
    ],
    "scale": [
-    1.307,
+    0.62,
     0.5,
-    0.62
+    1.307
    ],
    "pick": "none"
   },
@@ -981,7 +1033,8 @@
   {
    "id": "ring/17",
    "mesh": "box",
-   "material": "hull",
+   "model": "corridor_window.glb",
+   "material": "module",
    "position": [
     -3.236,
     0.0,
@@ -989,13 +1042,13 @@
    ],
    "rotation": [
     0,
-    306.0,
+    396.0,
     0
    ],
    "scale": [
-    1.307,
+    0.62,
     0.5,
-    0.62
+    1.307
    ],
    "pick": "none"
   },
@@ -1023,7 +1076,8 @@
   {
    "id": "ring/18",
    "mesh": "box",
-   "material": "hull",
+   "model": "corridor_window.glb",
+   "material": "module",
    "position": [
     -2.351,
     0.0,
@@ -1031,13 +1085,13 @@
    ],
    "rotation": [
     0,
-    324.0,
+    414.0,
     0
    ],
    "scale": [
-    1.307,
+    0.62,
     0.5,
-    0.62
+    1.307
    ],
    "pick": "none"
   },
@@ -1065,7 +1119,8 @@
   {
    "id": "ring/19",
    "mesh": "box",
-   "material": "hull",
+   "model": "corridor_window.glb",
+   "material": "module",
    "position": [
     -1.236,
     0.0,
@@ -1073,13 +1128,13 @@
    ],
    "rotation": [
     0,
-    342.0,
+    432.0,
     0
    ],
    "scale": [
-    1.307,
+    0.62,
     0.5,
-    0.62
+    1.307
    ],
    "pick": "none"
   },
@@ -1275,7 +1330,8 @@
   {
    "id": "lab",
    "mesh": "box",
-   "material": "hull",
+   "model": "hangar_smallA.glb",
+   "material": "module",
    "position": [
     -4.55,
     0.0,
@@ -1287,7 +1343,7 @@
     0
    ],
    "scale": [
-    0.9,
+    1.3,
     0.7,
     1.3
    ],
@@ -1332,6 +1388,50 @@
     0.6,
     1.4,
     0.6
+   ],
+   "pick": "none"
+  },
+  {
+   "id": "dock/craft",
+   "mesh": "box",
+   "model": "craft_cargoA.glb",
+   "material": "module",
+   "position": [
+    6.6,
+    -0.9,
+    -1.6
+   ],
+   "rotation": [
+    8,
+    -70,
+    4
+   ],
+   "scale": [
+    1.1,
+    0.55,
+    1.0
+   ],
+   "pick": "none"
+  },
+  {
+   "id": "dish",
+   "mesh": "box",
+   "model": "satelliteDish_large.glb",
+   "material": "module",
+   "position": [
+    1.2,
+    3.62,
+    -0.6
+   ],
+   "rotation": [
+    0,
+    200,
+    0
+   ],
+   "scale": [
+    0.55,
+    0.53,
+    0.5
    ],
    "pick": "none"
   },

@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "A scene's environment (gfx): an HDR image round it, its light reflected by every surface and lighting it a little.",
+  "properties": {
+    "texture": {
+      "type": "string",
+      "description": "An equirectangular .hdr in the theme's textures/."
+    },
+    "intensity": {
+      "type": "number",
+      "description": "How strong its light is: 1, left out."
+    }
+  },
+  "required": [
+    "texture"
+  ],
+  "additionalProperties": false
+}

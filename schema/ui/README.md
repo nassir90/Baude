@@ -169,6 +169,12 @@ An entry or a part may carry:
   semantic "theme" framework. Ontologically we want this to meld with the work we did on the windows XP themes and
   such too" (2026-11-26). Source: `[{"session": "b3845b21-55ac-4aab-a769-fb8517403c51", "message":
   "96faec93-ffcb-4edc-a5bb-b9af7c972ea9"}]`.
+- **A scene's chat is the chat's own page.** A chat in a scene is drawn as the app's own chat page of that chat, the
+  widgets its window shows (its messages, tool cards, the box to write in and the status bar), live, differing from
+  the window's only by the scene's light and the panel's edge; a stand-in made of parts is drawn only where there's no
+  app to give the page (the sample's rig without one). The owner, of the Space Station scene: "Space station UI looked
+  100% different, quite concerning" (2026-11-26). Source: `[{"session": "b3845b21-55ac-4aab-a769-fb8517403c51",
+  "message": "ef0e29ca-95e4-410d-8a14-fb11966725c7"}]`.
 - **Apps are thin clients; the logic is in the wire.** What an app or an agent's tool does to shared things (a
   notebook's pages and the edits proposed to them, a chat, the mesh) is the host's to work out, through typed wire
   messages in schema/types; an app or an MCP server asks the host and shows its answer. An agent's interface (an MCP

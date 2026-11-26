@@ -10,6 +10,9 @@ tests/proto3d/fakeloc.dylib tests/proto3d/fakeloc.m`).
     N=3|50|200 GSK_RENDERER=gl run tests/semantic/perf.py  # frame time, CPU, picture uploads, N live panels
     MODE=a|a2|c N=200 GSK_RENDERER=gl run tests/semantic/gsk200.py  # where a frame of #454's stage goes
 
+A scene's chat panels are the app's own chat pages (scenehost.ChatPage): the rigs make a BaudeApp with a host in this
+process (tests/test_baude.py's App) and write each fixture chat as a session for it (rig.write_chats).
+
 perf.py takes NOBLOOM=1, RENDER_ONLY=1 (GL each frame, no layout), LAYOUT_ONLY=1, SCENE_FINISH=1 (glFinish after each
 frame, to time the GPU) and SAMPLE=file (macOS's sample of the run).
 

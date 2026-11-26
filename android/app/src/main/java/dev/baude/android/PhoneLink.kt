@@ -317,6 +317,14 @@ object PhoneLink {
         }
     }
 
+    /** (main thread: the app brought back, or the network given back) Hosts whose link failed tried again now, not
+     * after their wait: what failed while the phone slept was Android's doing, not theirs. */
+    fun resume() {
+        nextTry.clear()
+        fails.clear()
+        look()
+    }
+
     /** One request to a member's host process on a tunnel of its own, opened from here as from sender (a chat of
      * this phone's: what's sent through it is from that chat, as the far host stamps it: wire.py's Senders): its reply,
      * or an error one if it didn't answer; null if there's no way to it (no link of the phone's reaches it, or its

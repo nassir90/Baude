@@ -78,7 +78,7 @@
     {"name": "chat-image-pager-swipe", "what": "The first of three pictures in the large view, a finger held 40% of the way through a swipe to the next (the phone; Baude draws it at rest)", "transcript": "pictures.jsonl", "lightbox": true, "swipe": 0.4, "inventory": ["ImageViewer.page"]},
     {"name": "chat-image-pager-zoomed", "what": "The first of three pictures zoomed in by a double tap, then a finger held after a swipe of half the screen: the picture panned to its edge, then the next one coming in (the phone; Baude draws it at rest)", "transcript": "pictures.jsonl", "lightbox": true, "zoom": true, "swipe": 0.5, "inventory": ["ImageViewer.page"]},
     {"name": "feedback", "what": "Send Feedback, empty", "inventory": ["SendFeedback.dialog"]},
-    {"name": "databases", "what": "Database Schemas on the fixture database, fitted", "inventory": ["DatabaseSchemas.page"]},
+    {"name": "databases", "what": "Databases on the fixture database, fitted", "inventory": ["DatabaseSchemas.page"]},
     {"name": "kubernetes", "what": "Kubernetes on the fake cluster k3d-dev, its pods by CPU", "inventory": ["Kubernetes.page", "KubernetesPodMenu.menu"]},
     {"name": "kubernetes-home", "what": "Kubernetes' Home on the fake cluster k3d-dev: CPU and memory requested, used and limits against allocatable, half an hour's history, by namespace", "inventory": ["Kubernetes.page"]},
     {"name": "kubernetes-home-prod", "what": "Kubernetes' Home on the fake cluster prod: no metrics API (used N/A), three nodes, requested and limits added up by namespace and by node", "inventory": ["Kubernetes.page"]},

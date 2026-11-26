@@ -178,7 +178,7 @@
             },
             {
               "said": "The Kubernetes view out in its own window should use the window's top bar, not leave a band of empty space at the top (paraphrased)",
-              "rule": "In every app, a view moved out to a window of its own (Kubernetes, Database Schemas, and any view built the same way) puts its bar's controls in that window's title bar or header bar, with nothing empty above the view; back over the window it came from, its bar is as it was",
+              "rule": "In every app, a view moved out to a window of its own (Kubernetes, Databases, and any view built the same way) puts its bar's controls in that window's title bar or header bar, with nothing empty above the view; back over the window it came from, its bar is as it was",
               "decided": "2026-11-26",
               "source": [
                 {
@@ -707,7 +707,7 @@
     },
     {
       "name": "live updating",
-      "shows": "While the view is open the list is watched (kubectl get --watch) so rows appear, change and go as the cluster changes; where a watch isn't possible the list is read again every 10 s. Pods' and Nodes' CPU and memory are read again every 10 s. A row selected stays selected through a refresh (and its YAML stays unless the object's version changed). Home is read again every 10 s. The host's kubeconfig files (every file in KUBECONFIG, else ~/.kube/config) are looked at every second by their inode, size and modification time (a stat each), read once they have stopped changing, and the contexts pushed to every app showing the view (kube_follow contexts). A kubectl call that read a kubeconfig half written is run once more (a watch, twice at most, then it counts as failed); one whose context has gone is answered as removed. Pod deletes and logs, like shells, are pointed at the server the context was shown with. Home's history is kept per cluster (name and server) and dropped when the context goes or its server changes. Database Schemas follows the same list: its server picker is looked for again when a local cluster is added or deleted, keeping the diagram shown while its server is still there.",
+      "shows": "While the view is open the list is watched (kubectl get --watch) so rows appear, change and go as the cluster changes; where a watch isn't possible the list is read again every 10 s. Pods' and Nodes' CPU and memory are read again every 10 s. A row selected stays selected through a refresh (and its YAML stays unless the object's version changed). Home is read again every 10 s. The host's kubeconfig files (every file in KUBECONFIG, else ~/.kube/config) are looked at every second by their inode, size and modification time (a stat each), read once they have stopped changing, and the contexts pushed to every app showing the view (kube_follow contexts). A kubectl call that read a kubeconfig half written is run once more (a watch, twice at most, then it counts as failed); one whose context has gone is answered as removed. Pod deletes and logs, like shells, are pointed at the server the context was shown with. Home's history is kept per cluster (name and server) and dropped when the context goes or its server changes. Databases follows the same list: its server picker is looked for again when a local cluster is added or deleted, keeping the diagram shown while its server is still there.",
       "decisions": [
         {
           "said": "Also btw, we now have external services live modifying the kubeconfig to create and delete clusters (slices) for testing.",

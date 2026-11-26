@@ -1,5 +1,5 @@
 {
-  "description": "Docker, which the Docker view reads and acts on a host's containers, images, volumes, networks and Compose projects with (a container's logs and shell too), and Database Schemas finds a host's running Postgres and ArangoDB servers in.",
+  "description": "Docker, which the Docker view reads and acts on a host's containers, images, volumes, networks and Compose projects with (a container's logs and shell too), and Databases finds a host's running Postgres and ArangoDB servers in.",
   "name": "Docker",
   "where": "host",
   "needed_by": ["window.docker", "window.database_schemas"],

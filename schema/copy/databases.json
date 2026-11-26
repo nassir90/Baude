@@ -12,7 +12,6 @@
     "view": "view",
     "materialized_view": "materialized view",
     "foreign_table": "foreign table",
-    "title": "Database schema",
     "server_tip": "Server (container)",
     "schema_tip": "Schema",
     "definition": "Definition",

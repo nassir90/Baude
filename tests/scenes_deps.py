@@ -44,7 +44,7 @@ def _(app):
     return win
 
 
-@scene("39b-missing-docker", "Database Schemas (☰ → Database Schemas) on a host without Docker and no server found: "
+@scene("39b-missing-docker", "Databases (☰ → Databases) on a host without Docker and no server found: "
                              "what's missing, the command that installs it there with Copy, and Try Again",
        size=(1200 + SIDEBAR, H))
 def _(app):
@@ -78,7 +78,7 @@ def _(app):
     return dependencies(app)[0]
 
 
-@scene("39g-dependencies-end", "Settings → Dependencies scrolled to its end: Kubernetes, Database Schemas, Multiplex, "
+@scene("39g-dependencies-end", "Settings → Dependencies scrolled to its end: Kubernetes, Databases, Multiplex, "
                                "Emission and Signal", size=(1200 + SIDEBAR, H))
 def _(app):
     win, page = dependencies(app)

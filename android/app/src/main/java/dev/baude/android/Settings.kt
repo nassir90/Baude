@@ -406,10 +406,10 @@ private fun VersionRow() {
 /** A row with a switch (Adw.SwitchRow). */
 @Composable
 fun SwitchRow(title: String, subtitle: String?, on: Boolean, enabled: Boolean = true,
-              extra: (@Composable () -> Unit)? = null, set: (Boolean) -> Unit) {
+              extra: (@Composable () -> Unit)? = null, titleLines: Int = 1, set: (Boolean) -> Unit) {
     val c = LocalBaude.current
     Box(Modifier.alpha(if (enabled) 1f else 0.5f)) {
-        ActionRow(title, subtitle, onClick = if (enabled) ({ set(!on) }) else null, suffix = {
+        ActionRow(title, subtitle, onClick = if (enabled) ({ set(!on) }) else null, titleLines = titleLines, suffix = {
             Switch(on, set, enabled = enabled,
                 colors = SwitchDefaults.colors(checkedTrackColor = c.accentBg, checkedThumbColor = c.accentFg))
             extra?.invoke()
@@ -422,11 +422,12 @@ fun SwitchRow(title: String, subtitle: String?, on: Boolean, enabled: Boolean = 
 @Composable
 fun Choice(title: String, values: List<String>, picked: String, label: (String) -> String,
            dot: ((String) -> Color)? = null, subtitle: String? = null, enabled: Boolean = true,
-           before: (@Composable () -> Unit)? = null, extra: (@Composable () -> Unit)? = null, pick: (String) -> Unit) {
+           before: (@Composable () -> Unit)? = null, extra: (@Composable () -> Unit)? = null, titleLines: Int = 1,
+           pick: (String) -> Unit) {
     val c = LocalBaude.current
     var open by remember { mutableStateOf(false) }
     Box(Modifier.alpha(if (enabled) 1f else 0.5f)) {
-    ActionRow(title, subtitle, onClick = if (enabled) ({ open = true }) else null, suffix = {
+    ActionRow(title, subtitle, onClick = if (enabled) ({ open = true }) else null, titleLines = titleLines, suffix = {
         before?.invoke()
         Box {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {

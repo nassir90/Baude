@@ -75,6 +75,9 @@ fun findMatches(chat: Chat, query: String): List<Match> {
     return out
 }
 
+/** The rows a chat's list has before its lines: the spinner, while there's more before them to read (Mesh.readEarlier). */
+fun earlierRows(chat: Chat): Int = if (chat.earlier.value) 1 else 0
+
 /** The list item a line is drawn in (drawn: a run of calls is one). */
 fun itemIndex(chat: Chat, lineIndex: Int): Int {
     var items = 0

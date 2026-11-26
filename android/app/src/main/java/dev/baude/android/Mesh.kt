@@ -107,10 +107,10 @@ class Chat(hostId: String, sid: String) {
     var offset = -1L
     var start = -1L                          // (where what's read of its transcript starts: what's before is read as
     val earlier = mutableStateOf(false)      // it's scrolled up to, readEarlier; earlier: there's some)
-    var readingEarlier = false
+    var readingEarlier by mutableStateOf(false) // (asked for, or asked again soon: the spinner's up meanwhile)
     val rewound = HashSet<String>()          // (records a rewind went back to, before what's read: cut there once read)
     val orphans = ArrayList<Line>()          // (results whose calls are before what's read: given them once read)
-    var prepended: ((Int) -> Unit)? = null   // (items drawn before the first: its list kept where it was)
+    var prepended: ((Int, Boolean) -> Unit)? = null // (items drawn before the first, and whether earlier was: its list kept where it was)
     var reading = false
     val loaded = mutableStateOf(false) // (its transcript read to its end once: where it was left can be found)
     var again = false
@@ -825,13 +825,22 @@ object Mesh {
 
     /** The part of the chat's transcript before what's read (up to window of it), read and put before its lines, as
      * the desktop's history reads further back as it's scrolled up (transcripts.HistoryIndex). */
-    fun readEarlier(chat: Chat, window: Long = TAIL) {
+    fun readEarlier(chat: Chat, window: Long = TAIL, tries: Int = 0) {
         if (chat.readingEarlier || chat.start <= 0) return
         val c = conns[chat.hostId] ?: return
         chat.readingEarlier = true
         val until = chat.start
         val from = (until - window).coerceAtLeast(0)
         val got = java.io.ByteArrayOutputStream()
+        fun again(wait: Long) { // (not read: asked again once its host is up, later each time it fails while up)
+            main.postDelayed({
+                when {
+                    chat.prepended == null -> chat.readingEarlier = false // (its page gone: asked as it's next scrolled up to)
+                    conns[chat.hostId]?.state != "up" -> again(1000)
+                    else -> { chat.readingEarlier = false; readEarlier(chat, window, tries + 1) }
+                }
+            }, wait)
+        }
         fun step(at: Long) {
             c.request(Msg.Transcript(session = chat.sid, offset = at, limit = until - at).json()) { r ->
                 val ok = r.optString("op") == Op.TRANSCRIPT
@@ -841,7 +850,7 @@ object Mesh {
                 val next = reply.next?.toLong() ?: at
                 got.write(bytes, 0, minOf(bytes.size.toLong(), until - at).toInt())
                 if (ok && next in (at + 1) until until) step(next)
-                else main.post { if (ok) earlierRead(chat, from, until, window, got.toByteArray()) else chat.readingEarlier = false }
+                else main.post { if (ok) earlierRead(chat, from, until, window, got.toByteArray()) else again(1000L shl minOf(tries, 4)) }
             }
         }
         step(from)
@@ -888,8 +897,9 @@ object Mesh {
         chat.chrome.taskOrder.addAll(0, heard)
         if (heard.isNotEmpty()) settleTasks(chat)
         chat.start = begin
+        val had = chat.earlier.value
         chat.earlier.value = begin > 0
-        chat.prepended?.invoke(itemIndex(chat, chat.lines.size - 1) + 1 - before)
+        chat.prepended?.invoke(itemIndex(chat, chat.lines.size - 1) + 1 - before, had)
         if (n == 0 && begin > 0) readEarlier(chat) // (nothing shown from it: on to the part before)
     }
 

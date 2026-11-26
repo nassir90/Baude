@@ -360,7 +360,7 @@ class ServerRunning:
         body = text.strip()[:60000] + ("\n\n## Context\n" + "\n".join(f"- {c[:300]}" for c in context[:20]) if context
                                         else "") + "\n\n" + mark + "\n"
         ok, out = fixes.gh("issue", "list", "--repo", repo, "--state", "all", "--limit", "5", "--search",
-                           f'"baude-note-{note}" in:body', "--json", "number,url,body")
+                           f'"baude-note-{note}" in:body', "--json", "number,url,body", feature="fixes.send_feedback")
         if not ok:
             return reply("error", error=out or wording.say("host_errors.gh_list_failed"))
         try:
@@ -368,7 +368,8 @@ class ServerRunning:
         except ValueError:
             made = None
         if made is None:
-            ok, out = fixes.gh("issue", "create", "--repo", repo, "--title", title, "--body-file", "-", body=body)
+            ok, out = fixes.gh("issue", "create", "--repo", repo, "--title", title, "--body-file", "-", body=body,
+                               feature="fixes.send_feedback")
             url = next((line for line in out.splitlines() if line.startswith("https://")), None) if ok else None
             if url is None:
                 return reply("error", error=out or wording.say("host_errors.gh_create_failed"))

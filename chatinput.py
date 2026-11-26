@@ -9,7 +9,7 @@ import subprocess
 import threading
 
 from baudelib.claude import claude_env, claude_exe
-from baudelib import hostlogin, wire  # noqa: E402  (signing in on another machine; what a turn's error needing it is)
+from baudelib import deps, hostlogin, wire  # noqa: E402  (signing in on another machine; what a turn's error needing it is)
 from baudelib.hostlogin import auth_status, needs_login, signed_in_as  # noqa: E402,F401
 import baudelib.client  # noqa: E402  (servers on the network and their sessions: see baudelib/client.py)
 import baudelib.hosts  # noqa: E402  (this machine's host process, started when it's wanted: see baudelib/hosts.py)
@@ -225,6 +225,7 @@ class _HereLogin:
     claude auth status says, signed in). OSError if it can't be started."""
 
     def __init__(self, args, heard, done):
+        deps.need("claude", "report.claude")
         self.proc = subprocess.Popen([claude_exe(), "auth", "login", *args], stdin=subprocess.PIPE,
                                      stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1,
                                      env=claude_env())
@@ -430,6 +431,9 @@ class LoginCard(Gtk.Box):
                 self.proc = _HostLogin(self.where, self.args, self.heard, self.done)
             else:
                 self.proc = _HereLogin(self.args, self.heard, self.done)
+        except deps.Missing as e:  # (no claude here: what to install, as Settings → Dependencies says it)
+            self.proc = None
+            self.done(None, str(e))
         except OSError as e:
             self.proc = None
             self.done(None, f"couldn't start claude: {e}")

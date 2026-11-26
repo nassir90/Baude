@@ -232,6 +232,13 @@ def missing(key, here=None):
     return None if got["present"] else got
 
 
+def need(key, feature):
+    """Missing (feature without it) raised if it isn't here: looked for before a program's run, so what's said is
+    this, not the run's OSError."""
+    if (dep := missing(key)) is not None:
+        raise Missing(dep, feature)
+
+
 # (Settings → Dependencies' groups, in its order: what needs them)
 GROUPS = ("deps.providers", "deps.git_github", "window.kubernetes", "window.database_schemas", "deps.multiplex",
           "mesh_versions.emission", "side_panel.signal", "telemetry.title")

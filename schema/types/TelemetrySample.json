@@ -64,7 +64,7 @@
       "items": {
         "$ref": "TelemetryProc.json"
       },
-      "description": "The host process and each app on its machine that told it telemetry."
+      "description": "The host process, each app on its machine that told it telemetry (Baude, Record, the phone's app), and each Emission and Multiplex running there (the host finds those itself)."
     }
   },
   "required": [

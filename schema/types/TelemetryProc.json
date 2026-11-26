@@ -8,9 +8,11 @@
         "host",
         "baude",
         "record",
+        "emission",
+        "multiplex",
         "phone"
       ],
-      "description": "Which: the host process, Baude, Record, or the phone's app (its host too)."
+      "description": "Which: the host process, Baude, Record, Emission, Multiplex, or the phone's app (its host too)."
     },
     "pid": {
       "type": "integer",

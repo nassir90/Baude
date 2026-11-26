@@ -18,6 +18,7 @@ import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.unit.em
 
 /** Baude's colours (libadwaita's, as GTK resolves them, light and dark: theming.CSS's baude_frame, _inside, _rule and
  * _raised made of them; schema/tokens', Tokens.light and Tokens.dark), so the app looks as Baude does. */
@@ -135,6 +136,8 @@ object Type {
     val title = TextStyle(fontSize = Tokens.Font.body, fontWeight = Tokens.Font.bold)
     val dialogTitle = TextStyle(fontSize = Tokens.Font.title, fontWeight = Tokens.Font.bold)  // (Adw.AlertDialog's heading)
     val mono = TextStyle(fontSize = Tokens.Font.mono, fontFamily = CodeFont.family)  // (.mono: Settings → Code Font's, from the next start)
+    val deviceCode = TextStyle(fontSize = Tokens.Font.deviceCode, fontFamily = CodeFont.family, fontWeight = Tokens.Font.bold,
+        letterSpacing = 0.08.em)  // (.device-code: a device-code sign-in's one-time code)
 }
 
 /** The app's look as Settings has it: light or dark (Appearance: the system's, or one of them), the accent (Accent

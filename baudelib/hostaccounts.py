@@ -2,26 +2,36 @@
 mesh (Settings → Subscriptions in Baude, Record and the phone, and a chat's Sign in card): listed (list), added
 (add: a Claude token, or an existing signed-in Claude folder or CODEX_HOME), renamed (rename), removed (remove), a
 token account's token replaced (token), each provider's default picked (select), a subscription's usage read
-(usage), and a sign-in run here (sign_in): `claude auth login` with a Claude account's own folder, or Codex's
-device-code login with its CODEX_HOME, each line it writes carried back as it's written (the page to open among
-them), a code pasted on the head passed to it (code), then the end; the connection's going stops it. Every answer
-but a sign-in's lines carries the accounts and defaults as they are after it, and whether this host has claude
+(usage), and a sign-in run here (sign_in): `claude auth login` with a Claude account's own folder, each line it
+writes carried back as it's written (the page to open among them), a code pasted on the head passed to it (code),
+or Codex's login with its CODEX_HOME (the browser's, the address the head's browser ended on passed to it: callback;
+or the device code's), said as its state (login: the page to open, and the device code's code to enter there, once
+codex writes them), then the end; the connection's going stops it. Every answer
+but a sign-in's lines and states carries the accounts and defaults as they are after it, and whether this host has claude
 (claude_cli: without it, a Claude account is a token), what's missing of a provider's program (missing: Codex's, by
 deps, which a Codex sign-in is checked against before it's run), and each subscription's last read usage with when
 (last_usage: shown greyed on a client till its own read answers). No GTK."""
+import base64
 import json
 import os
+import re
 import shutil
 import subprocess
+import sys
 import tempfile
 import threading
+import urllib.parse
 import uuid
+from http.client import HTTPConnection, HTTPException, InvalidURL
 
 from baudelib import accounts, deps, hostlogin, wording
 from baudelib.claude import claude_env, claude_exe
 from baudelib.hostlogin import ESCAPES, NO_BROWSER, auth_status, signed_in_as
 
 PROMPT = "Paste code here if prompted > "  # (claude auth login's, with no line break after it)
+URL = re.compile(r"https://\S+")
+# (codex login --device-auth's one-time code, on a line of its own under "Enter this one-time code": ABCD-12345)
+DEVICE_CODE = re.compile(r"^[A-Z0-9]{3,}(?:-[A-Z0-9]{3,})+$")
 
 
 def claude_cli(server):
@@ -49,6 +59,8 @@ def answer(server, conn, msg, reply):
             return done()
         if what == "code":  # (a sign-in's, on this connection: no answer of its own)
             return _code(conn, msg.get("code"))
+        if what == "callback":  # (a Codex browser sign-in's, on this connection: answered with the page, or why not)
+            return _callback(conn, msg.get("url"), reply, msg.get("cb"))
         if what == "add":
             if provider == "claude" and msg.get("folder"):
                 accounts.add("claude", msg.get("name"), _signed_in_folder(server, msg["folder"]), kind="folder")
@@ -86,7 +98,7 @@ def answer(server, conn, msg, reply):
             return _sign_in(conn, msg, reply, done)
     except (ValueError, OSError) as e:
         return done(error=str(e))
-    return done(error="accounts takes list, add, rename, token, remove, select, use, usage, sign_in or code")
+    return done(error="accounts takes list, add, rename, token, remove, select, use, usage, sign_in, code or callback")
 
 
 def _for_chat(server, conn, msg, done):
@@ -230,8 +242,14 @@ def _claude_sign_in(server, conn, msg, reply, done):
 
 
 def _sign_in(conn, msg, reply, done):
-    """codex login --device-auth, into a new profile folder (a new account, named name) or an account's own (id: signed
-    in to again), one a connection."""
+    """codex login, into a new profile folder (a new account, named name) or an account's own (id: signed in to again),
+    one a connection: the browser's (method browser, the default: codex's own server on this machine's 127.0.0.1 takes
+    the page's redirect, at port, and the head that isn't on this machine passes it the address its browser ended on,
+    callback), else the device code's (method device: --device-auth), which it falls back to by itself where the
+    browser's can't listen (its ports taken). What it says comes as the sign-in's state (login, a ChatLogin):
+    signing_in at once, then with the page to open (url: the browser's, with port and opened where codex opened it in
+    this machine's browser itself; the device code's, with the code to enter there) once codex writes it; its end says
+    signed_in (who: the account's email, as its sign-in says it) or failed (reason: what codex said last)."""
     if (proc := getattr(conn, "accounts_login", None)) is not None and proc.poll() is None:
         return done(error="this connection runs a sign-in already")
     profile = msg.get("id") or ""
@@ -241,44 +259,143 @@ def _sign_in(conn, msg, reply, done):
     deps.need("codex", "programs.codex")
     accounts.root().mkdir(mode=0o700, parents=True, exist_ok=True)
     directory = tempfile.mkdtemp(prefix="codex-", dir=accounts.root()) if fresh else accounts.codex_home(profile)
-    try:
-        if fresh:
+    if fresh:
+        try:
             with open(os.path.join(directory, "config.toml"), "x") as config:
                 config.write('cli_auth_credentials_store = "file"\n')
-        proc = subprocess.Popen([deps.program("codex"), "-c", 'cli_auth_credentials_store="file"', "login",
-                                 "--device-auth"], env={**os.environ, "CODEX_HOME": directory},
-                                stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
-                                errors="replace")
-    except OSError:
-        if fresh:
+        except OSError:
             shutil.rmtree(directory, ignore_errors=True)
-        raise
-    conn.accounts_login = proc
-    if getattr(conn, "gone", False):
-        proc.terminate()
+            raise
 
-    def read():
-        lines = []
+    def run(method):
+        # (BROWSER: codex opens the page with it on Linux, and `true` does nothing; on macOS it opens it itself)
+        proc = subprocess.Popen([deps.program("codex"), "-c", 'cli_auth_credentials_store="file"', "login",
+                                 *(["--device-auth"] if method == "device" else [])],
+                                env={**os.environ, **NO_BROWSER, "CODEX_HOME": directory}, stdin=subprocess.DEVNULL,
+                                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, errors="replace")
+        conn.accounts_login, conn.accounts_port = proc, None
+        if getattr(conn, "gone", False):
+            proc.terminate()
+        reply("accounts", what="sign_in", login={"state": "signing_in", "method": method})
+        threading.Thread(target=read, args=(proc, method), daemon=True, name="codex-login").start()
+
+    def read(proc, method):
+        lines, page, code, port, after_code, told = [], None, None, None, False, None
         with proc.stdout:
             for line in proc.stdout:
-                if line := ESCAPES.sub("", line).strip():
-                    lines.append(line)
-                    reply("accounts", what="sign_in", line=line)
+                if not (line := ESCAPES.sub("", line).strip()):
+                    continue
+                lines.append(line)
+                if page is None and (m := URL.search(line)):
+                    page = m.group(0).rstrip(".,)")
+                    port = callback_port(page) if method == "browser" else None
+                elif method == "device" and code is None and (DEVICE_CODE.match(line) or after_code and " " not in line):
+                    code = line
+                after_code = code is None and "code" in line.lower()
+                if page and (page, code) != told:  # (the page as soon as it's said, then with its code)
+                    told, conn.accounts_port = (page, code), port
+                    reply("accounts", what="sign_in", login={
+                        "state": "signing_in", "method": method, "url": page, **({"code": code} if code else {}),
+                        **({"port": port, "opened": sys.platform == "darwin"} if port else {})})
         ok = proc.wait() == 0 and os.path.isfile(os.path.join(directory, "auth.json"))
+        conn.accounts_port = None
+        if not ok and method == "browser" and any("already in use" in x for x in lines) and \
+                not getattr(conn, "gone", False) and proc.returncode not in (-15, 130):
+            try:
+                return run("device")  # (its ports taken: the device code's way instead)
+            except OSError as e:
+                lines.append(str(e))
         if ok and fresh:
             try:
                 accounts.add("codex", msg.get("name"), directory)
             except ValueError as e:
                 shutil.rmtree(directory, ignore_errors=True)
-                return done(error=str(e))
+                return done(error=str(e), login={"state": "failed", "method": method, "reason": str(e)})
         elif not ok and fresh:
             shutil.rmtree(directory, ignore_errors=True)
         if not ok:
-            return done(error=(lines[-1] if lines else wording.say("subscriptions.codex_failed")))
-        done(signed_in=True)
+            why = next((x for x in reversed(lines) if x.lower().startswith("error")), None) or \
+                (lines[-1] if lines and lines[-1] not in (page, code) else wording.say("subscriptions.codex_failed"))
+            return done(error=why, login={"state": "failed", "method": method, "reason": why})
+        who = codex_who(directory)
+        done(signed_in=True, who=who, login={"state": "signed_in", "method": method, "who": who})
 
-    threading.Thread(target=read, daemon=True, name="codex-login").start()
+    try:
+        run("device" if msg.get("method") == "device" else "browser")
+    except OSError:
+        if fresh:
+            shutil.rmtree(directory, ignore_errors=True)
+        raise
     return None
+
+
+def callback_port(page):
+    """The port of the 127.0.0.1 address a browser sign-in's page sends the browser back to (its redirect_uri), or
+    None."""
+    try:
+        back = urllib.parse.urlsplit(urllib.parse.parse_qs(urllib.parse.urlsplit(page).query)["redirect_uri"][0])
+        return back.port if back.hostname in ("127.0.0.1", "localhost") else None
+    except (KeyError, IndexError, ValueError):
+        return None
+
+
+def _callback(conn, address, reply, cb=None):
+    """The address a browser ended on after a sign-in's page (pasted on the head, or the request its browser made to
+    the head's own 127.0.0.1), sent on to the browser sign-in this connection runs: requested of codex's server here,
+    at its port, as the browser would have (only its path and query: never anywhere else), and what it answered
+    (page: the page codex shows the browser, its own redirects back to itself followed) carried back."""
+    proc, port = getattr(conn, "accounts_login", None), getattr(conn, "accounts_port", None)
+    tag = {"cb": cb} if cb is not None else {}
+    try:
+        sent = urllib.parse.urlsplit((address or "").strip())
+    except ValueError:
+        sent = None
+    if proc is None or proc.poll() is not None or not port:
+        return reply("accounts", what="callback", **tag, error=wording.say("subscriptions.no_sign_in"))
+    if sent is None or not sent.path.endswith("/auth/callback") or not sent.query:
+        return reply("accounts", what="callback", **tag, error=wording.say("subscriptions.not_callback"))
+
+    def ask():
+        path = f"/auth/callback?{sent.query}"
+        try:
+            for _ in range(3):
+                http = HTTPConnection("127.0.0.1", port, timeout=120)
+                try:
+                    http.request("GET", path, headers={"Host": f"127.0.0.1:{port}"})
+                    r = http.getresponse()
+                    body, kind, location = r.read(1 << 20), r.getheader("Content-Type") or "", r.getheader("Location")
+                finally:
+                    http.close()
+                back = urllib.parse.urlsplit(location or "")
+                if r.status in (301, 302, 303, 307) and location and (not back.netloc or back.hostname in (
+                        "127.0.0.1", "localhost") and back.port == port):
+                    path = back.path + (f"?{back.query}" if back.query else "")  # (its own success page)
+                    continue
+                return reply("accounts", what="callback", **tag, page={
+                    "status": r.status, "type": kind, "body": body.decode("utf-8", "replace"),
+                    **({"location": location} if location else {})})
+        except (InvalidURL, ValueError):  # (a query it can't send: a page that says so)
+            return reply("accounts", what="callback", **tag, page={
+                "status": 400, "type": "text/plain; charset=utf-8", "body": wording.say("subscriptions.not_callback")})
+        except (OSError, HTTPException) as e:
+            return reply("accounts", what="callback", **tag, error=str(e) or wording.say("host_status.no_answer"))
+        reply("accounts", what="callback", **tag, error=wording.say("host_status.no_answer"))
+
+    threading.Thread(target=ask, daemon=True, name="codex-callback").start()
+    return None
+
+
+def codex_who(directory):
+    """Whose a CODEX_HOME's ChatGPT sign-in is: the email its auth.json's id token names, or None."""
+    try:
+        with open(os.path.join(directory, "auth.json"), encoding="utf-8") as f:
+            token = (json.load(f).get("tokens") or {}).get("id_token") or ""
+        body = token.split(".")[1]
+        claims = json.loads(base64.urlsafe_b64decode(body + "=" * (-len(body) % 4)))
+    except (OSError, ValueError, IndexError, AttributeError, TypeError):
+        return None
+    email = claims.get("email") if isinstance(claims, dict) else None
+    return email if isinstance(email, str) and email else None
 
 
 def stop(conn):

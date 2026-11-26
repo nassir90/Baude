@@ -26,6 +26,7 @@ GRACE_MOST = wire.CONSTANTS["GRACE_MAX_S"]  # (start's grace: an ephemeral sessi
 # to come back)
 APPS = frozenset({"baude", "record", "baude-android"})  # (heads listed as apps connected: a script that says
 # anything else, or a host's mesh, is no app)
+MULTIPLEX_S = 15  # (this machine's Multiplex windows, asked this often: telemetry's processes)
 EMISSIONS_S = 30  # (this machine's Emissions, and the code each runs, asked this often: heads_look)
 CHECK_SOCKET_S = 600  # (nobody attached: its socket looked at this often, in case its folder's been taken away)
 TRANSCRIPT_CHUNK = 1 << 20

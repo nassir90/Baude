@@ -1,5 +1,5 @@
 {
-  "description": "The Settings dialog's Telemetry page (Baude's, Record's and the phone's; on the phone the fourth page of Settings, switched to by the bar at its foot): for the host picked beside New session, whether it collects telemetry, then what it keeps, as it answers telemetry_read: its turns' tokens by day over a year, the most used model and effort and each model's turns, its machine now, its chats' latest activity, and line profiling of its processes.",
+  "description": "The Settings dialog's Telemetry page (Baude's, Record's and the phone's; on the phone the fourth page of Settings, switched to by the bar at its foot): for the host picked beside New session, whether it collects telemetry, then what it keeps, as it answers telemetry_read: its turns' tokens by day over a year, the most used model and effort and each model's turns, its machine now, its processes now, and line profiling of its processes.",
   "apps": [
     "baude",
     "record",
@@ -21,7 +21,13 @@
     "Telemetry.kt:TelemetryPage",
     "Telemetry.kt:Telemetry",
     "TelemetryStore.kt:TelemetryStore",
-    "PhoneHost.kt:PhoneHost"
+    "PhoneHost.kt:PhoneHost",
+    "telemetryview.py:proc_row",
+    "telemetryview.py:logo",
+    "baudelib/server.py:Server.found_procs",
+    "baudelib/emissionlink.py:running",
+    "Telemetry.kt:ProcessRow",
+    "Telemetry.kt:AppLogo"
   ],
   "copy": [
     "telemetry",
@@ -31,7 +37,9 @@
     "bot_memory",
     "images",
     "mode_effort",
-    "tokens"
+    "tokens",
+    "deps",
+    "side_panel"
   ],
   "parts": [
     {
@@ -73,6 +81,38 @@
             {
               "session": "b3845b21-55ac-4aab-a769-fb8517403c51",
               "message": "41aef9c4-02f6-4496-ac8a-bb9737df5262"
+            }
+          ]
+        },
+        {
+          "said": "Sreen time is a pretty useless metric, how is that going to help me make the app better (in isolation)",
+          "rule": "No app counts time on screen per place or menu uses; what's kept is a log of events, each with its own time, that can be put together with the host's samples and profiles",
+          "decided": "2026-11-26",
+          "source": [
+            {
+              "session": "b3845b21-55ac-4aab-a769-fb8517403c51",
+              "message": "41aef9c4-02f6-4496-ac8a-bb9737df5262"
+            }
+          ]
+        },
+        {
+          "said": "Store chat activity yes with timestamps",
+          "rule": "Every app keeps each chat opened, chat in front, chat left, turn sent and turn ended (with how long it took, its model, effort and tokens) by the chat's host id and session id; the chat's host keeps each of its turns' ends too. A chat's size, messages and images are never kept: chat_size works them out from its transcript when they're asked for",
+          "decided": "2026-11-26",
+          "source": [
+            {
+              "session": "b3845b21-55ac-4aab-a769-fb8517403c51",
+              "message": "41aef9c4-02f6-4496-ac8a-bb9737df5262"
+            }
+          ]
+        },
+        {
+          "said": "The owner doesn't care about the Chat Activity panel on the telemetry page (paraphrased)",
+          "rule": "No app shows chat activity on its Telemetry page; what each app tells its host of chats is still kept (the host's own turn ends are what Tokens by Day and Models add up, and the log is what samples and profiles are put together with), only not shown",
+          "decided": "2026-11-26",
+          "source": [
+            {
+              "issue": "BaudeInternal#261"
             }
           ]
         }
@@ -125,7 +165,7 @@
     },
     {
       "name": "Machine",
-      "shows": "Heading \"Machine\": rows of the host's latest sample, asked again every 5 seconds while the page is shown: Load (1, 5 and 15 minutes; not on a phone), Memory (in use of the total, \"11.0 GB of 16.0 GB\"), Swap (in use of the total, \"1.2 GB of 3.0 GB\"; hidden where the host has no swap), Memory Pressure (the level the system gives, \"Normal\", \"Warning\" or \"Critical\", on macOS and a phone; on Linux the share of the last 10 seconds some task stalled on memory, \"1.3% Stalled\"), each only where the host could tell it, then the host process, Baude and Record (the phone's app on a phone) each with its CPU and memory (\"6.2% · 613 MB\"). While telemetry is off, one dim row \"Telemetry is off\" in its place.",
+      "shows": "Heading \"Machine\": rows of the host's latest sample, asked again every 5 seconds while the page is shown: Load (1, 5 and 15 minutes; not on a phone), Memory (in use of the total, \"11.0 GB of 16.0 GB\"), Swap (in use of the total, \"1.2 GB of 3.0 GB\"; hidden where the host has no swap), Memory Pressure (the level the system gives, \"Normal\", \"Warning\" or \"Critical\", on macOS and a phone; on Linux the share of the last 10 seconds some task stalled on memory, \"1.3% Stalled\"), each only where the host could tell it. While telemetry is off, one dim row \"Telemetry is off\" in its place.",
       "copy": [
         "telemetry.machine",
         "telemetry.load",
@@ -139,10 +179,6 @@
         "telemetry.stalled",
         "telemetry.size_gb",
         "images.size_mb",
-        "telemetry.host_process",
-        "mesh_versions.baude",
-        "mesh_versions.record",
-        "telemetry.cpu_rss",
         "telemetry.off"
       ],
       "decisions": [
@@ -166,45 +202,52 @@
               "issue": "BaudeInternal#236"
             }
           ]
+        },
+        {
+          "said": "Machine should be a section, and the page reads \"Machine\" then \"Processes\" (paraphrased)",
+          "rule": "Every app's Telemetry page has Machine (the machine's own rows) and, under it, Processes; no process is a row of Machine",
+          "decided": "2026-11-26",
+          "source": [
+            {
+              "issue": "BaudeInternal#261"
+            }
+          ]
         }
       ]
     },
     {
-      "name": "Chat Activity",
-      "shows": "Heading \"Chat Activity\", the latest 12 events of the last day, the latest first: the chat's title (its id's start where the app doesn't know it), then what happened and when, dim: \"Chat Opened\", \"Chat in Front\", \"Chat Left\", \"Turn Sent\", \"Turn Ended in 2m 11s\", \"23:48:29\". A turn's end the host and an app both saw is shown once. None: one dim row \"Nothing recorded\".",
+      "name": "Processes",
+      "shows": "Heading \"Processes\": a row each process the host's latest sample has (its procs, as typed: app and pid), in this order, those of one app by pid: Host Process, Baude, Record, Emission, Multiplex (the phone's app, as Baude, on a phone's host). Each row: its app's logo at its start, monochrome in the row's text colour as the model logos are and as big as one (16 px; schema/icons/baude's baude-app-<app>-symbolic: the logo's shape with what's drawn on it cut out, no tile, no accent; the host process Baude's, the phone's app Baude's), the app's name, and its CPU and memory after it, dim (\"6.2% · 613 MB\"). Hidden while telemetry is off, or the sample has none.",
       "copy": [
-        "telemetry.chat_activity",
-        "telemetry.chat_opened",
-        "telemetry.chat_front",
-        "telemetry.chat_left",
-        "telemetry.turn_sent",
-        "telemetry.turn_ended",
-        "telemetry.turn_ended_in",
-        "telemetry.nothing",
-        "time.seconds",
-        "time.minutes_seconds",
-        "time.hours_minutes"
+        "side_panel.processes",
+        "telemetry.host_process",
+        "mesh_versions.baude",
+        "mesh_versions.record",
+        "mesh_versions.emission",
+        "deps.multiplex",
+        "telemetry.cpu_rss",
+        "telemetry.size_gb",
+        "images.size_mb"
       ],
       "decisions": [
         {
-          "said": "Sreen time is a pretty useless metric, how is that going to help me make the app better (in isolation)",
-          "rule": "No app counts time on screen per place or menu uses; what's kept is a log of events, each with its own time, that can be put together with the host's samples and profiles",
+          "said": "Processes is a section of its own showing the Baude processes open, Record's, Emission's and Multiplex's and so on, each with its app's logo to its left about the size of the model logos (paraphrased)",
+          "rule": "Every host samples every process of Baude's apps on its machine: those that tell it telemetry (Baude, Record, the phone's app) and those it finds itself (each Emission, by its info's pid, and each Multiplex window, by multiplexlink's sockets); every app lists them under Processes, each with its app's logo at a model logo's size, its name, CPU and memory",
           "decided": "2026-11-26",
           "source": [
             {
-              "session": "b3845b21-55ac-4aab-a769-fb8517403c51",
-              "message": "41aef9c4-02f6-4496-ac8a-bb9737df5262"
+              "issue": "BaudeInternal#261"
             }
           ]
         },
         {
-          "said": "Store chat activity yes with timestamps",
-          "rule": "Every app keeps each chat opened, chat in front, chat left, turn sent and turn ended (with how long it took, its model, effort and tokens) by the chat's host id and session id; the chat's host keeps each of its turns' ends too. A chat's size, messages and images are never kept: chat_size works them out from its transcript when they're asked for",
+          "said": "icons are not what I wanted, they should be monochrome",
+          "rule": "Every app draws each process's logo as a symbolic icon in the row's text colour, as the model logos are drawn (schema/icons/baude's baude-app-<app>-symbolic: the app's logo shape with what's drawn on it cut out), never the coloured logo or one tinted in the accent",
           "decided": "2026-11-26",
           "source": [
             {
               "session": "b3845b21-55ac-4aab-a769-fb8517403c51",
-              "message": "41aef9c4-02f6-4496-ac8a-bb9737df5262"
+              "message": "ae00d4f1-22a6-4e1f-afe6-1ef28e5f464a"
             }
           ]
         }
@@ -250,7 +293,7 @@
   ],
   "states": [
     "off: Collect Telemetry off, \"Telemetry is off\" in the machine's place",
-    "empty: no turns in the year: the grid all faint, no Most Used or Models; no events: \"Nothing recorded\"",
+    "empty: no turns in the year: the grid all faint, no Most Used or Models",
     "error: the host's error in one dim row",
     "no line_profiler: its install row in Line Profiling's place"
   ],
@@ -268,6 +311,21 @@
         {
           "session": "b3845b21-55ac-4aab-a769-fb8517403c51",
           "message": "41aef9c4-02f6-4496-ac8a-bb9737df5262"
+        }
+      ]
+    },
+    {
+      "name": "Chat Activity",
+      "apps": [
+        "baude",
+        "record",
+        "phone"
+      ],
+      "why": "The owner doesn't care about the Chat Activity panel on the telemetry page (paraphrased; the events are still kept)",
+      "decided": "2026-11-26",
+      "source": [
+        {
+          "issue": "BaudeInternal#261"
         }
       ]
     }

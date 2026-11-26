@@ -167,7 +167,7 @@
           "actions": [
             {
               "by": "click button",
-              "does": "Restarts Baude, the daemon (once no command is running on it; an idle model turn is cut short and offered Continue) or both; the Dismiss button just stops the message. A toast \"Restarting the daemon once N sessions finish running a command\" while it waits, \"Daemon restarted\" after"
+              "does": "Restarts Baude, the daemon (once no command is running on it; an idle model turn is cut short and offered Continue) or both; the Dismiss button just stops the message. A toast \"Restarting the daemon once N things are done\" with Details while it waits (Sidebar's \"Daemon restart toast\"), \"Daemon restarted\" after"
             }
           ],
           "decisions": [

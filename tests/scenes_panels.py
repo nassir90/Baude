@@ -261,24 +261,26 @@ def _restart_pending(app, paused):
     if paused:
         srv.restart_holds.add("a head")
     srv.restart_when_free("head")
-    T.wait_for(lambda: win.sidebar.update_bar.restart.get_visible(), "the restart said")
+    baude.meshui._TOASTED.clear()  # (toasted in a scene before: this one's is new)
+    win.get_application().show_update_bars()
+    T.wait_for(lambda: win.sidebar.restart_toasts.shown, "the restart toasted")
     T.pump(0.3)
     return win
 
 
 @scene("56d-daemon-restart-pending", "Restart Daemon with a chat running a command and a task running: the daemon "
-                                     "keeps the restart, said at the foot of the sessions list till they're done")
+                                     "keeps the restart, toasted with Details till they're done")
 def _(app):
     return _restart_pending(app, False)
 
 
-@scene("56e-daemon-restart-blockers", "That line clicked: what the restart waits for, the restart paused meanwhile "
+@scene("56e-daemon-restart-blockers", "Details on that toast: what the restart waits for, the restart paused meanwhile "
                                       "(every app says so), with Restart (once they're done) and Force Restart (now)")
 def _(app):
-    win = _restart_pending(app, True)
-    r = baude.local_host()
-    r.request = lambda msg, then=None: None  # (nothing asked of it: the picture's the point)
-    baude.meshui.restart_dialog(r, win, lambda now: None, lambda b: None)
+    win = _restart_pending(app, False)
+    toast = next(iter(win.sidebar.restart_toasts.shown.values()))
+    toast.emit("button-clicked")
+    T.wait_for(lambda: isinstance(win.get_visible_dialog(), baude.Adw.AlertDialog), "Waiting For")
     T.pump(0.5)
     return win
 

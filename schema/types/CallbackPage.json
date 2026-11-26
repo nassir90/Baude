@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "What a Codex browser sign-in's server on the host answered the address a browser ended on (accounts callback), for the head to show that browser: its own redirects back to itself followed.",
+  "properties": {
+    "status": {
+      "type": "integer",
+      "description": "Its HTTP status."
+    },
+    "type": {
+      "type": "string",
+      "description": "Its Content-Type."
+    },
+    "body": {
+      "type": "string",
+      "description": "The page."
+    },
+    "location": {
+      "type": "string",
+      "description": "Where it sends the browser on to, if it does (a page of OpenAI's)."
+    }
+  },
+  "required": [
+    "status",
+    "body"
+  ],
+  "additionalProperties": false
+}

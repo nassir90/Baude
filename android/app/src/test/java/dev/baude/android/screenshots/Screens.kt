@@ -178,6 +178,61 @@ abstract class Screens(private val theme: String) {
         screen("05d-subscriptions-sign-in")
     }
 
+    // (Add account (Codex) on workshop: the sign-in's card at each step as the host says it: the browser's, waiting
+    // and then its page's link with the box for the address the browser ended on; that address not taken; the device
+    // code's, waiting and then with its code; signed in; failed)
+    @Test fun subscriptionsCodexSignIn() {
+        accountsFixture()
+        val host = dev.baude.android.HostAccounts(Mesh.hosts.first().id)
+        val login = dev.baude.android.CodexLogin(host, null).apply {
+            name.value = "Work"
+            this.login.value = Msg.ChatLogin(state = "signing_in", method = "browser")
+        }
+        show {
+            SettingsScreen({}, {}, page = 1)
+            dev.baude.android.CodexSignIn(host, null, "Work", {}, login)
+        }
+        laidOut()
+        screen("05k-codex-browser-waiting")
+        login.login.value = Msg.ChatLogin(state = "signing_in", method = "browser", port = 1455,
+            url = "https://auth.openai.com/oauth/authorize?response_type=code&client_id=app_fixture&redirect_uri=http%3A%2F%2F127.0.0.1%3A1455%2Fauth%2Fcallback&state=st4te")
+        laidOut()
+        screen("05l-codex-browser-paste")
+        login.address.value = "https://chatgpt.com/"
+        login.note.value = "That isn't the address the browser ended on after signing in"
+        laidOut()
+        screen("05m-codex-browser-wrong-address")
+        login.address.value = ""
+        login.note.value = null
+        login.login.value = Msg.ChatLogin(state = "signing_in", method = "device")
+        laidOut()
+        screen("05n-codex-device-waiting")
+        login.login.value = Msg.ChatLogin(state = "signing_in", method = "device", url = "https://auth.openai.com/codex/device", code = "KQ7M-3XWPD")
+        laidOut()
+        screen("05o-codex-device-code")
+        login.login.value = Msg.ChatLogin(state = "signed_in", method = "browser", who = "personal@example.com")
+        laidOut()
+        screen("05p-codex-signed-in")
+        login.login.value = Msg.ChatLogin(state = "failed", method = "browser",
+            reason = "Error logging in: OAuth callback error: access_denied")
+        laidOut()
+        screen("05q-codex-failed")
+    }
+
+    // (Claude's chat Sign in card, to compare with Codex's: the page's link and the code box)
+    @Test fun chatLoginCard() {
+        accountsFixture()
+        val login = dev.baude.android.Login(Mesh.hosts.first().id, "s1", null, null, emptyList()).apply {
+            stage.value = "page"
+            url.value = "https://claude.ai/oauth/authorize?code=true&client_id=fixture"
+        }
+        render("05r-chat-login-card") {
+            androidx.compose.foundation.layout.Box(androidx.compose.ui.Modifier.padding(16.dp)) {
+                dev.baude.android.LoginCard(login)
+            }
+        }
+    }
+
     @Test fun subscriptionsRemove() {
         accountsFixture()
         show { SettingsScreen({}, {}, page = 1) }
@@ -271,8 +326,8 @@ abstract class Screens(private val theme: String) {
         screen("40c2-dependencies-end")
     }
 
-    // (Settings → Telemetry on a host: its turns' tokens by day over a year, the models used, its machine now, its chats'
-    // latest activity and line profiling, as it answers telemetry_read; made-up numbers, the same every run)
+    // (Settings → Telemetry on a host: its turns' tokens by day over a year, the models used, its machine and its
+    // processes now and line profiling, as it answers telemetry_read; made-up numbers, the same every run)
     @Test fun telemetry() {
         telemetryFixture()
         show { SettingsScreen({}, {}, page = 3) }
@@ -280,7 +335,7 @@ abstract class Screens(private val theme: String) {
         screen("40d-telemetry")
     }
 
-    // (the same page's foot: its machine now, its chats' latest activity, line profiling and its top lines)
+    // (the same page's foot: its machine and its processes now, line profiling and its top lines)
     @Test fun telemetryFoot() {
         telemetryFixture()
         show {
@@ -459,7 +514,10 @@ abstract class Screens(private val theme: String) {
                     .put("memory_stall", org.json.JSONObject.NULL).put("procs", org.json.JSONArray(listOf(
                         org.json.JSONObject().put("app", "host").put("pid", 101).put("cpu", 1.4).put("rss", 148_897_792L),
                         org.json.JSONObject().put("app", "baude").put("pid", 102).put("cpu", 6.2).put("rss", 642_777_088L),
-                        org.json.JSONObject().put("app", "record").put("pid", 103).put("cpu", 0.3).put("rss", 231_735_296L)))))))
+                        org.json.JSONObject().put("app", "record").put("pid", 103).put("cpu", 0.3).put("rss", 231_735_296L),
+                        org.json.JSONObject().put("app", "emission").put("pid", 104).put("cpu", 3.8).put("rss", 412_090_368L),
+                        org.json.JSONObject().put("app", "emission").put("pid", 106).put("cpu", 1.1).put("rss", 389_021_696L),
+                        org.json.JSONObject().put("app", "multiplex").put("pid", 105).put("cpu", 0.6).put("rss", 98_566_144L)))))))
                 "profiles" -> out.put("profiles", org.json.JSONArray(listOf(org.json.JSONObject().put("at", now - 30)
                     .put("from", now - 60).put("app", "host").put("lines", org.json.JSONArray(listOf(
                         org.json.JSONObject().put("file", "baudelib/telemetry.py").put("line", 271).put("function", "sample")

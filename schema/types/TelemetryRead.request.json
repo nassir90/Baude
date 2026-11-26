@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
-  "description": "What this host's machine's apps were used for (telemetry's, as kept), added up over the last days.",
+  "description": "A host's telemetry over a stretch: its chat events, its samples, its line profiles, and its turns added up; its telemetry state with it. Any member of the mesh may ask any other: one machine pulls every host's and puts them together by their times.",
   "properties": {
     "op": {
       "const": "telemetry_read",
@@ -14,16 +14,41 @@
       ],
       "description": "The request's number, the client's pick: its answers carry it back."
     },
-    "days": {
-      "type": "integer",
-      "minimum": 1,
-      "maximum": 366,
-      "description": "How many days back, today the first: 1 is today's alone."
+    "from": {
+      "type": "number",
+      "description": "From, in seconds since the epoch."
+    },
+    "to": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "description": "To (null: now)."
+    },
+    "what": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": [
+          "events",
+          "metrics",
+          "profiles",
+          "usage"
+        ]
+      },
+      "description": "What's wanted (none: only the state)."
+    },
+    "limit": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "description": "The most events, samples and profiles each (the latest kept; default 5000)."
     }
   },
   "required": [
     "op",
-    "days"
+    "from"
   ],
   "additionalProperties": false
 }

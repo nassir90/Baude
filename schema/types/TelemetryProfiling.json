@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "What a process is told to profile.",
+  "properties": {
+    "app": {
+      "enum": [
+        "host",
+        "baude",
+        "record"
+      ],
+      "description": "The process: the host's, Baude's or Record's."
+    },
+    "functions": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "What's profiled: functions (module.function, module.Class.method) and modules (every function in it); none: off."
+    },
+    "error": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Why it isn't profiling what it's told to (a name not found; line_profiler not installed)."
+    }
+  },
+  "required": [
+    "app",
+    "functions"
+  ],
+  "additionalProperties": false
+}

@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
-  "description": "telemetry_read's answer: the time on each place and the uses of each item, by app, the most first.",
+  "description": "telemetry_read's answer, each list the earliest first.",
   "properties": {
     "op": {
       "const": "telemetry_read",
@@ -14,25 +14,51 @@
       ],
       "description": "The request's number, the client's pick: its answers carry it back."
     },
-    "times": {
-      "type": "array",
-      "items": {
-        "$ref": "TelemetryTime.json"
-      },
-      "description": "Each app's places, the longest first."
+    "host": {
+      "type": "string",
+      "description": "The host's id."
     },
-    "uses": {
+    "state": {
+      "$ref": "TelemetryState.json",
+      "description": "Its telemetry state."
+    },
+    "events": {
       "type": "array",
       "items": {
-        "$ref": "TelemetryUse.json"
+        "$ref": "TelemetryEvent.json"
       },
-      "description": "Each app's items, the most used first."
+      "description": "Its chat events."
+    },
+    "metrics": {
+      "type": "array",
+      "items": {
+        "$ref": "TelemetrySample.json"
+      },
+      "description": "Its samples."
+    },
+    "profiles": {
+      "type": "array",
+      "items": {
+        "$ref": "TelemetryProfile.json"
+      },
+      "description": "Its line profiles."
+    },
+    "usage": {
+      "anyOf": [
+        {
+          "$ref": "TelemetryUsage.json"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Its turns added up."
     }
   },
   "required": [
     "op",
-    "times",
-    "uses"
+    "host",
+    "state"
   ],
   "additionalProperties": false
 }

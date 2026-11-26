@@ -1,7 +1,7 @@
 """What Baude and Record show of a dependency (baudelib.deps, schema/deps): Missing, the state a feature shows in its
 place when one it needs isn't there (☰ → Terminal without VTE, Kubernetes without kubectl on its host, Database Schemas
 without Docker, the Git page without git; the phone's MissingDep the same), and Settings → Dependencies (Page: the host
-picked beside New session's, as its deps op says them, then the app's own)."""
+picked beside New session's, as its deps op says them, under what needs them)."""
 import threading
 
 from gi.repository import Adw, GLib, Gtk, Pango
@@ -27,7 +27,7 @@ class Missing(Gtk.ScrolledWindow):
         self.title = Gtk.Label(wrap=True, justify=Gtk.Justification.CENTER)
         self.title.add_css_class("title-3")
         box.append(self.title)
-        self.fix = Gtk.Label(selectable=True, xalign=0)
+        self.fix = Gtk.Label(selectable=True, xalign=0, wrap=True, wrap_mode=Pango.WrapMode.WORD_CHAR)
         self.fix.add_css_class("mono")
         copy = Gtk.Button(icon_name="edit-copy-symbolic", tooltip_text=wording.say("common.copy"),
                           valign=Gtk.Align.CENTER)
@@ -110,10 +110,11 @@ def copy_fix(widget, dep):
 
 
 def row(dep):
-    """A dependency's row: its name, then Installed, or the command that installs it with Copy (else its page)."""
+    """A dependency's row: its name, then what's said of it while it's there (Installed, Signed in, Running, 3 models),
+    or the command that installs or readies it with Copy (else its install page; a check with no command, its status only)."""
     out = Adw.ActionRow(title=GLib.markup_escape_text(dep["name"]))
     if dep.get("present"):
-        out.add_suffix(Gtk.Label(label=wording.say("deps.installed"), css_classes=["dim-label"]))
+        out.add_suffix(Gtk.Label(label=dep.get("ready") or wording.say("deps.installed"), css_classes=["dim-label"]))
     elif dep.get("fix"):
         fix = Gtk.Label(label=dep["fix"], selectable=True, ellipsize=Pango.EllipsizeMode.START, css_classes=["mono"])
         out.add_suffix(fix)
@@ -121,17 +122,27 @@ def row(dep):
                           valign=Gtk.Align.CENTER, css_classes=["flat"])
         copy.connect("clicked", lambda b: copy_fix(b, dep))
         out.add_suffix(copy)
-    elif dep.get("link"):
-        out.add_suffix(Gtk.LinkButton(uri=dep["link"], label=wording.say("deps.install_page"),
-                                      valign=Gtk.Align.CENTER))
+    elif dep.get("ready"):
+        out.add_suffix(Gtk.Label(label=dep["ready"], css_classes=["dim-label"]))
+    elif dep.get("link") and not dep.get("check"):
+        out.add_suffix(Gtk.LinkButton(uri=dep["link"], valign=Gtk.Align.CENTER, label=wording.say("deps.install_page")))
     return out
 
 
-class Page(Adw.PreferencesPage):
-    """Settings → Dependencies: the host picked beside New session (as Subscriptions has it), what its features need
-    and whether it's there; then the app's own (app: its name)."""
+def grouped(listed):
+    """A deps answer's dependencies by what needs them: [(its group's copy key, [Dep])], in the order it lists them."""
+    out = {}
+    for dep in listed or []:
+        out.setdefault(dep.get("group") or "", []).append(dep)
+    return list(out.items())
 
-    def __init__(self, win, app):
+
+class Page(Adw.PreferencesPage):
+    """Settings → Dependencies: the host picked beside New session (as Subscriptions has it), then what its features
+    and its machine's apps need and whether it's there, a group for each thing that needs them (Providers, Git and
+    GitHub, Kubernetes, …), as its deps op says them."""
+
+    def __init__(self, win):
         super().__init__(title=wording.say("deps.title"), icon_name="package-x-generic-symbolic")
         from widgets import walk
         for clamp in walk(self):  # (as widgets.settings_page: rows as wide as the dialog)
@@ -144,21 +155,22 @@ class Page(Adw.PreferencesPage):
         name.add_suffix(Gtk.Label(label=host, css_classes=["dim-label"]))
         top.add(name)
         self.add(top)
-        self.host_rows = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE, css_classes=["boxed-list"])
-        group = Adw.PreferencesGroup()
-        group.add(self.host_rows)
-        self.add(group)
-        own = Adw.PreferencesGroup(title=GLib.markup_escape_text(app))
-        for dep in deps.report("app"):
-            own.add(row(dep))
-        self.add(own)
+        self.groups = []  # (the groups shown, once the host's answered)
         ask(where, self.took)
 
     def took(self, reply):
-        self.host_rows.remove_all()
+        for group in self.groups:
+            self.remove(group)
+        self.groups = []
         if reply.get("error"):
-            self.host_rows.append(Adw.ActionRow(title=GLib.markup_escape_text(reply["error"]), sensitive=False))
-        for dep in reply.get("deps") or []:
-            self.host_rows.append(row(dep))
+            group = Adw.PreferencesGroup()
+            group.add(Adw.ActionRow(title=GLib.markup_escape_text(reply["error"]), sensitive=False))
+            self.groups.append(group)
+        for key, listed in grouped(deps.for_viewer(reply.get("deps"))):
+            group = Adw.PreferencesGroup(title=GLib.markup_escape_text(wording.say(key) if wording.has(key) else key))
+            for dep in listed:
+                group.add(row(dep))
+            self.groups.append(group)
+        for group in self.groups:
+            self.add(group)
         return False
-

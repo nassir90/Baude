@@ -31,6 +31,7 @@ from livefeed import LIVE_SECONDS  # noqa: E402
 import meta  # noqa: E402  (Meta, the helper in the side panel: Record's too; see meta.py)
 import metalook  # noqa: E402
 import widgets  # noqa: E402  (what Record draws as Baude does: the links' logos; see widgets.py)
+import telemetryview  # noqa: E402  (its chats' activity, told to this machine's host)
 from chatparts import fmt_tokens  # noqa: E402,F401
 from widgets import load_settings, pretty_path, save_settings, toast  # noqa: E402,F401
 from markdownview import MarkdownView, sel_label  # noqa: E402,F401
@@ -1016,6 +1017,8 @@ class WindowRemote:
         self.restart_proc(resume=True)
 
     def h_result(self, msg):
+        telemetryview.turn_ended(self, msg, self.model, self.local_effort if model_program(self.model) == "pi" else
+                                 self.effort)
         self.compact_ended()
         if self.send_after_result is not None:  # (the turn a revert stopped, ended: what's in the box sent, after this)
             GLib.idle_add(self.send_reverted)

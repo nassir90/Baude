@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "The turns that ended in a stretch (turn_ended events, each turn once), added up by the host.",
+  "properties": {
+    "days": {
+      "type": "array",
+      "items": {
+        "$ref": "TelemetryDay.json"
+      },
+      "description": "Each day with a turn, the earliest first."
+    },
+    "models": {
+      "type": "array",
+      "items": {
+        "$ref": "TelemetryModel.json"
+      },
+      "description": "Each model, the most turns first."
+    },
+    "combos": {
+      "type": "array",
+      "items": {
+        "$ref": "TelemetryModel.json"
+      },
+      "description": "Each model and effort together, the most turns first."
+    }
+  },
+  "required": [
+    "days",
+    "models",
+    "combos"
+  ],
+  "additionalProperties": false
+}

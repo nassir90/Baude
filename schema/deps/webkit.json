@@ -3,6 +3,7 @@
   "name": "WebKitGTK",
   "where": "app",
   "needed_by": ["bot_browser.title", "mesh_versions.emission"],
+  "group": "mesh_versions.emission",
   "detect": {
     "linux": [{"gi": "WebKit", "version": "6.0"}]
   },

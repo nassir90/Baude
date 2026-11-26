@@ -55,7 +55,7 @@
     },
     {
       "name": "Telemetry page",
-      "shows": "The dialog's fourth page, after Dependencies: what the host picked beside New session says its machine's apps were used for. Described in Telemetry.dialog.json.",
+      "shows": "The dialog's fourth page, after Dependencies: what the host picked beside New session keeps of its turns, its machine, its chats' activity and its line profiles. Described in Telemetry.dialog.json.",
       "copy": [
         "telemetry.title"
       ],

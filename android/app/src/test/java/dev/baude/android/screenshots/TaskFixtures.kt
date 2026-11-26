@@ -38,9 +38,9 @@ def deploy(inputs):
         Msg.TaskTrigger(id = "s1", kind = "schedule", at = "09:00", days = listOf(0, 1, 2, 3, 4)))
 
     private fun run(id: String, task: String, name: String, status: String, kind: String, started: Double, seconds: Double?,
-                    version: String, dry: Boolean = false) =
+                    version: String) =
         Msg.TaskRun(id = id, task = task, name = name, status = status, kind = kind, started = started,
-            ended = seconds?.let { started + it }, seconds = seconds, version = version, dry = if (dry) true else null)
+            ended = seconds?.let { started + it }, seconds = seconds, version = version)
 
     private const val V = "3f9c2a7e41b0"
     private const val V_OLD = "8a21d04c77e3"
@@ -48,7 +48,7 @@ def deploy(inputs):
     val runs get() = listOf(
         run("r4", "t1", "Deploy site", "done", "git_push", now - 2 * 3600, 48.0, V),
         run("r3", "t1", "Deploy site", "failed", "schedule", at(9, 0, 1), 72.0, V),
-        run("r2", "t1", "Deploy site", "done", "manual", at(16, 20, 2), 21.0, V_OLD, dry = true),
+        run("r2", "t1", "Deploy site", "done", "manual", at(16, 20, 2), 21.0, V_OLD),
         run("r1", "t1", "Deploy site", "done", "schedule", at(9, 0, 3), 186.0, V_OLD))
 
     val deploy get() = Msg.Task(id = "t1", name = "Deploy site", runtime = "python", script = DEPLOY_SCRIPT, version = V, form = form,
@@ -72,9 +72,10 @@ def deploy(inputs):
         line("out", "Already on 'main'"),
         line("out", "Your branch is up to date with 'origin/main'."),
         line("out", "building 14 pages… done"),
-        line("out", "uploading to the bucket"),
+        line("out", "uploading public/ to the staging bucket (14 files, 1.2 MB) with cache-control max-age=300 on every page"),
         line("err", "Traceback (most recent call last):"),
         line("err", "  File \"deploy.py\", line 9, in deploy"),
+        line("err", "    subprocess.run([\"make\", \"publish\"], check=True)"),
         line("err", "subprocess.CalledProcessError: Command '['make', 'publish']' returned non-zero exit status 2."),
         line("ask", "It failed: make publish exited with 2. It's your task t1; its script (version $V) is tasks/scripts/$V.py. Find out why.", error = true),
         line("answer", "The upload's key had expired. I renewed it and ran the task again: that run finished in 51 s."))

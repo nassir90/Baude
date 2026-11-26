@@ -38,6 +38,7 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -440,7 +441,9 @@ fun Home(open: (String, String) -> Unit, feedback: () -> Unit, phone: () -> Unit
                 }
             }
         }
-        if (update) UpdateBar()
+        // (each host keeping a restart of its daemon: said at the foot too, as Baude's sidebar says This Mac's)
+        val restarts = Mesh.known().mapNotNull { (id, _, up) -> Mesh.conn(id)?.info?.restart?.takeIf { up }?.let { id to it } }
+        if (update || restarts.isNotEmpty()) UpdateBar(update, restarts, open, tool)
     }
     SnackbarHost(snack, Modifier.align(Alignment.BottomCenter).navigationBarsPadding())
     }
@@ -534,24 +537,90 @@ private fun HostBanner(text: String) {
     }
 }
 
-/** At the foot, under a rule from the chats (Baude's UpdateBar): Update, while a newer build's ready or waiting to be
+/** At the foot, under a rule from the chats (Baude's UpdateBar): each host's pending daemon restart (restarts; named
+ * when there's more than one), tapped: what it waits for (RestartBlockers; See Thread on one: its chat, open(host,
+ * session), or its terminal, tool("terminal", host)); and Update (update), while a newer build's ready or waiting to be
  * downloaded (Update.kt), how much of it's come while it's downloading; tapped, installed. A newer build that can't be
  * installed over this one: why, instead. */
 @Composable
-private fun UpdateBar() {
+private fun UpdateBar(update: Boolean, restarts: List<Pair<String, Msg.RestartState>>, open: (String, String) -> Unit,
+                      tool: (String, String) -> Unit) {
     val c = LocalBaude.current
     val ctx = androidx.compose.ui.platform.LocalContext.current
+    var blockers by remember { mutableStateOf<String?>(null) } // (the host whose restart's waits are shown)
     Column(Modifier.fillMaxWidth().navigationBarsPadding()) {
         HorizontalDivider(color = c.rule)
-        if (Update.state.value == "downloading")
+        for ((hostId, r) in restarts) { // (a daemon's pending restart, tapped: what it waits for)
+            val said = if (r.paused == true) Wording.Hosts.restartPaused else Wording.Hosts.restartWaiting(n = r.blockers.orEmpty().size)
+            Text(if (restarts.size > 1) Wording.Hosts.restartOn(host = Mesh.label(hostId), said = said) else said,
+                style = Type.body, color = c.fg, modifier = Modifier.padding(horizontal = 6.dp, vertical = 4.dp)
+                    .clip(RoundedCornerShape(6.dp)).clickable { blockers = hostId }.padding(horizontal = 10.dp, vertical = 7.dp))
+        }
+        if (update && Update.state.value == "downloading")
             androidx.compose.material3.LinearProgressIndicator({ Update.progress.value }, Modifier.fillMaxWidth(),
                 color = c.accentBg, trackColor = c.rule)
-        if (Update.state.value == "wrong") // (a newer build that can't be installed over this one: why)
+        if (update && Update.state.value == "wrong") // (a newer build that can't be installed over this one: why)
             Text(Update.why.value, style = Type.caption, color = c.dim,
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 11.dp))
-        else Text(Wording.UpdateBar.update, style = Type.body, color = c.fg, modifier = Modifier.padding(horizontal = 6.dp, vertical = 4.dp)
+        else if (update) Text(Wording.UpdateBar.update, style = Type.body, color = c.fg, modifier = Modifier.padding(horizontal = 6.dp, vertical = 4.dp)
             .clip(RoundedCornerShape(6.dp)).clickable { Update.install(ctx) }.padding(horizontal = 10.dp, vertical = 7.dp))
     }
+    blockers?.let { h ->
+        RestartBlockers(h, done = { blockers = null }) { b -> // (See Thread: the restart held while it's looked at)
+            when (b.kind) {
+                "terminal" -> { Terms.wanted[h] = b.terminal.orEmpty(); tool("terminal", h) }
+                "task" -> { TaskLinks.pending = listOf(h, b.session.orEmpty(), b.task.orEmpty(), b.run.orEmpty()); open(h, b.session.orEmpty()) }
+                else -> open(b.host?.ifBlank { null } ?: h, b.session.orEmpty())
+            }
+        }
+    }
+}
+
+/** What a host's pending restart waits for (Baude's meshui.restart_dialog): each chat running a command, each task's
+ * run, each agent run there for a chat elsewhere, each terminal there someone's attached to; the restart held while
+ * it's shown (restart pause: every app says it's paused), and again once its connection's back. Restart: it restarts
+ * once nothing's running; Force Restart: now, what's running stopped. Closed, or gone from the screen otherwise, the
+ * pause is let go of (restart free, only while it's still pending: never a restart of its own). See Thread on a row:
+ * see(it), the restart held meanwhile (the line says it's paused; tapped, this again). */
+@Composable
+fun RestartBlockers(hostId: String, done: () -> Unit, see: (Msg.RestartBlocker) -> Unit = {}) {
+    val c = LocalBaude.current
+    Mesh.tick.value
+    val conn = Mesh.conn(hostId)
+    val up = conn?.state == "up"
+    var held by remember { mutableStateOf(true) } // (false once it's answered, or left to look at a row)
+    LaunchedEffect(hostId, up) { if (up) conn?.request(Msg.Restart(`do` = "pause").json()) {} }
+    androidx.compose.runtime.DisposableEffect(hostId) {
+        onDispose { if (held && conn?.info?.restart != null) conn.request(Msg.Restart(`do` = "free").json()) {} }
+    }
+    val blockers = conn?.info?.restart?.blockers.orEmpty()
+    fun answer(now: Boolean) {
+        held = false
+        conn?.request(Msg.Restart(`do` = if (now) "now" else "free").json()) {}
+        done()
+    }
+    AlertDialog(onDismissRequest = { done() }, // (gone from the screen: let go of, above)
+        title = { Text(Wording.Hosts.restartBlockers) },
+        text = {
+            Column {
+                if (blockers.isEmpty()) Text(Wording.Hosts.restartNothing, style = Type.body, color = c.dim)
+                for (b in blockers) Row(Modifier.padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Icon(when (b.kind) {
+                        "task" -> Adwaita.MediaPlaybackStart
+                        "agent" -> Adwaita.EmblemSystem
+                        "terminal" -> Adwaita.InputKeyboard
+                        else -> Adwaita.UtilitiesTerminal
+                    }, null, tint = c.fg, modifier = Modifier.size(16.dp.icon))
+                    Text(b.name?.ifBlank { null } ?: b.what.orEmpty(), style = Type.body, color = c.fg, maxLines = 1,
+                        overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                    if (!b.session.isNullOrEmpty() || !b.terminal.isNullOrEmpty())
+                        Button(Wording.Hosts.seeThread) { held = false; done(); see(b) }
+                }
+            }
+        },
+        confirmButton = { Button(Wording.SharedSettings.restart, suggested = true) { answer(false) } },
+        dismissButton = { Button(Wording.Hosts.forceRestart, destructive = true) { answer(true) } }, containerColor = c.dialog)
 }
 
 /** A section's header (Baude's header_row): its name (.sidebar-folder), the arrow to fold it, + for a new session

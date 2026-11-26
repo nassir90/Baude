@@ -71,6 +71,7 @@ gi.require_version("Graphene", "1.0")
 from gi.repository import Adw, Gdk, Gio, GLib, Gtk  # noqa: E402
 import pointers  # noqa: E402  (the pointer's shape: Record's too)
 import update  # noqa: E402  (a new version from git, restarted onto once idle: Record's too)
+import meshui  # noqa: E402  (a daemon's pending restart, said at the sidebar's foot: Record's too)
 baudelib.wire.HEAD_COMMIT = update.STARTED  # (said to the host processes it reaches: logged by one on other code)
 baudelib.wire.HEAD_CLIENT = "baude"  # (listed as Baude among the apps connected to a host)
 import widgets  # noqa: E402  (what Record draws as Baude does: the links' logos; see widgets.py)
@@ -83,7 +84,7 @@ from startup import (  # noqa: E402
     APP_ID, LAUNCHER, TRACE, follow_accent, launch_command, logo_icon, macos_dock_icon, restart_state_path,
     take_restart_state, trace,
 )
-from sessionlist import THIS_MACHINE, _NETWORK, local_host, save_info_cache  # noqa: E402
+from sessionlist import THIS_MACHINE, _NETWORK, local_host, remote_name, save_info_cache  # noqa: E402
 from baudewindow import BaudeWindow  # noqa: E402
 
 
@@ -212,9 +213,12 @@ class BaudeApp(Adw.Application):
     def show_update_bars(self, windows=None):
         """Every window's Update bar (or windows': those new ones, built since) as things stand."""
         why, u = self.update_reasons(), self.updater
+        net = _NETWORK[0] if _NETWORK else None
+        restart = meshui.restart_lines(net.alive() if net is not None else [], remote_name)
         for w in windows or self.windows():
             if (bar := getattr(getattr(w, "sidebar", None), "update_bar", None)) is not None:
                 bar.say(why, u.why if u is not None and not u.pending() else None, u is not None and u.busy)
+                bar.say_restart(restart)
 
     def update_now(self, win):
         """The bar clicked: restarted now. Nothing running: straight away; what's running, stopped: said first, and
@@ -224,7 +228,7 @@ class BaudeApp(Adw.Application):
         def go():
             host = local_host()
             if host is not None and host.info.get("update"):
-                host.request({"op": "quit", "restart": True})  # (it comes back as a chat wants it: local_server)
+                win.restart_host(now=True)  # (it starts again on the new version, and comes back)
             if self.updater is not None and self.updater.pending():
                 self.updater.apply(self.restart)
         if not why:

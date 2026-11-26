@@ -1484,7 +1484,7 @@ abstract class WireSchema : DefaultTask() {
             for ((f, p) in fields) out.append("            ${camel(f)}?.let { o.put(\"$f\", ${kind(p, f).second("it")}) }\n")
             out.append("            return o\n        }\n\n")
             out.append("        companion object {\n")
-            out.append("            fun from(o: JSONObject) = $name(\n")
+            out.append("            fun from(o: JSONObject): $name = $name(\n")
             for ((f, p) in fields) out.append("                ${camel(f)} = ${kind(p, f).third},\n")
             out.append("            )\n        }\n    }\n\n")
         }

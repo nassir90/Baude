@@ -180,7 +180,7 @@ fun MetaCallLine(key: String) {
             when {
                 call.state != "error" && base == "set_setting" && spec != null && MetaSet.ALL.containsKey(spec.optString("setting")) -> {
                     held = spec
-                    MetaSettingBox(MetaSet.ALL.getValue(spec.optString("setting")), batch)
+                    MetaSettingBox(MetaSet.ALL.getValue(spec.optString("setting")), batch, spec)
                 }
                 base == "show" || base == "open_form" || base == "fill_form" -> {}
                 batch.any { it.marks.isNotEmpty() } -> ChangeBox(batch)
@@ -278,13 +278,15 @@ fun ChangeBox(batch: List<Action>) {
 /** A setting Meta changed (setting_box): the setting's own row, in Meta's look, saying what it was, with its batch's
  * controls; changed there, Meta's told with the next message. */
 @Composable
-fun MetaSettingBox(s: MetaSetting, batch: List<Action>) {
+fun MetaSettingBox(s: MetaSetting, batch: List<Action>, spec: JSONObject? = null) {
     val a = batch.firstOrNull()
     val fallback = a?.let {
         if (!it.undone.value) Wording.MetaActions.was(value = saidValue(it.data.opt("from")))
         else Wording.MetaActions.setUndone(value = saidValue(it.data.opt("to")))
     }
     MetaBoxed(listOf(Unit), if (a != null) Modifier.tip(Wording.MetaActions.byMeta(action = a.said)) else Modifier) {
-        s.row(fallback, if (batch.isEmpty()) null else ({ BatchControls(batch) }))
+        val only = spec?.optJSONArray("hosts")?.let { a -> (0 until a.length()).map { a.optString(it) } }
+        if (only != null && s.hostRows != null) s.hostRows.invoke(only)
+        else s.row(fallback, if (batch.isEmpty()) null else ({ BatchControls(batch) }))
     }
 }

@@ -309,6 +309,10 @@ def _credential(provider, profile):
     return row[0]
 
 
+class SignedOut(OSError):
+    """A Codex account whose folder has no sign-in."""
+
+
 def environment(provider, env, profile=None):
     """env for a Codex run under an account (profile; None: the default here): its CODEX_HOME, and nothing that would
     sign it in otherwise."""
@@ -317,7 +321,7 @@ def environment(provider, env, profile=None):
         return env
     home = _credential(provider, profile)
     if not Path(home, "auth.json").is_file():
-        raise OSError(wording.say("subscriptions.codex_signed_out"))
+        raise SignedOut(wording.say("subscriptions.codex_signed_out"))
     env = {k: v for k, v in env.items() if k not in _CODEX_KEYS}
     env["CODEX_HOME"] = home
     return env
@@ -350,7 +354,7 @@ CODEX_CLI = "codex"  # (the usage key of Codex's CLI's own sign-in; Claude's is 
 _usage_read = {}  # (usage key → (when, limits, when in seconds since 1970))
 _usage_locks = {}  # (usage key → the lock one read of it runs under)
 _usage_guard = threading.Lock()
-_usage_one_at_a_time = threading.Lock()
+_usage_one_at_a_time = {"claude": threading.Lock(), "codex": threading.Lock()}  # (one provider's reads run one after another; a hung codex doesn't hold claude's)
 
 
 def usage_key(provider, profile):
@@ -362,8 +366,8 @@ def usage_key(provider, profile):
 def plan_usage(profile, exe=None, provider="claude"):
     """The subscription's limits as _plan_usage (Claude's) or _codex_usage (Codex's) reads them, but one read per
     subscription at a time and one per USAGE_CACHE_S: whoever asks while it runs, or just after, gets its answer. The
-    reads (each a claude or codex process) run one after another across subscriptions. provider: whose CLI's own
-    sign-in profile "" is (an account's is its own)."""
+    reads (each a claude or codex process) run one after another across one provider's subscriptions.
+    provider: whose CLI's own sign-in profile "" is (an account's is its own)."""
     if profile:
         provider = (account(profile) or {}).get("provider", provider)
     key = usage_key(provider, profile)
@@ -373,7 +377,7 @@ def plan_usage(profile, exe=None, provider="claude"):
         kept = _usage_read.get(key)
         if kept and time.monotonic() - kept[0] < USAGE_CACHE_S:
             return kept[1]
-        with _usage_one_at_a_time:
+        with _usage_one_at_a_time["codex" if provider == "codex" else "claude"]:
             limits = _codex_usage(profile) if provider == "codex" else _plan_usage(profile, exe)
         with _usage_guard:
             if _usage_locks.get(key) is lock:  # (not an account removed while this read ran)
@@ -475,7 +479,8 @@ def _codex_window_key(minutes, fallback):
 def _codex_usage(profile):
     """A Codex subscription's limits, [(key, percent, resets)], as its App Server's rate limits say them (profile "":
     the CLI's own sign-in, run with this machine's CODEX_HOME); None where it can't say: a sign-in that isn't a
-    ChatGPT plan's. Raises OSError where codex isn't here or couldn't be asked."""
+    ChatGPT plan's. Raises SignedOut for an account with no sign-in, else OSError where codex isn't here or couldn't be
+    asked."""
     from baudelib import codex, models
 
     exe = models.codex_exe()

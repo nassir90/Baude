@@ -136,6 +136,7 @@ class AppServer(ClaudeProc):
         self.lock = threading.RLock()
         self.ids, self.requests = itertools.count(1), {}
         self.said, self.said_lock = {}, threading.Lock()  # (notes shown: text → kind)
+        self.error_code = None  # (the code of the last error Codex answered a request with)
         self.profile = accounts.selected("codex") if profile is None else profile
         auth = ["-c", 'cli_auth_credentials_store="file"'] if self.profile else []
         self.p = subprocess.Popen([exe, *auth, "app-server", "--listen", "stdio://"], cwd=cwd,
@@ -209,6 +210,7 @@ class AppServer(ClaudeProc):
         if callbacks:
             done, failed = callbacks
             if "error" in msg:
+                self.error_code = msg["error"].get("code")  # (what the failed callback may ask about)
                 failed(msg["error"].get("message") or "Codex request failed")
             else:
                 done(msg.get("result") or {})
@@ -261,17 +263,27 @@ def list_models(exe, env=None, timeout=15, profile=None):
             app.p.wait()
 
 
+SIGN_IN_ERRORS = ("codex account authentication required", "chatgpt authentication required")  # (what Codex says of a sign-in with no ChatGPT plan: an API key's, or none)
+
+
 def rate_limits(exe, env=None, timeout=20, profile=""):
     """A Codex subscription's (profile's; "": the CLI's own sign-in, its CODEX_HOME) rate limits as its App Server reads
     them, without starting a thread: the snapshot's primary and secondary windows ({usedPercent, windowDurationMins,
-    resetsAt}), None where it can't say for this sign-in (an API key's, or none)."""
+    resetsAt}), None where Codex says its sign-in has none (an API key's, or none). Any other failure, a timeout
+    included, raises RuntimeError."""
     from queue import Empty, Queue
 
     outcome = Queue()
     app = AppServer(exe, None, env, lambda code: outcome.put(RuntimeError(f"App Server exited ({code})")),
                     lambda _: None, profile)
+
+    def failed(error):
+        said = error.lower()
+        auth = app.error_code == -32600 and any(text in said for text in SIGN_IN_ERRORS)
+        outcome.put(None if auth else RuntimeError(error))
+
     try:
-        app.initialize(lambda: app.rpc("account/rateLimits/read", None, outcome.put, lambda _error: outcome.put(None)),
+        app.initialize(lambda: app.rpc("account/rateLimits/read", {"excludeResetCreditDetails": True}, outcome.put, failed),
                        lambda error: outcome.put(RuntimeError(error)))
         try:
             result = outcome.get(timeout=timeout)

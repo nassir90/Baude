@@ -618,7 +618,7 @@ abstract class Screens(private val theme: String) {
             else org.json.JSONObject().put("op", "accounts").put("req", m.opt("req")).put("what", m.optString("what"))
                 .put("accounts", org.json.JSONArray(listOf(HOME_ACCOUNT, WORK,
                     org.json.JSONObject().put("id", "p1").put("provider", "codex").put("name", "Personal").put("kind", "profile"))))
-                .put("defaults", org.json.JSONObject().put("claude", "w1").put("codex", "")).put("claude_cli", true)
+                .put("defaults", org.json.JSONObject().put("claude", "w1").put("codex", "")).put("claude_cli", true).put("codex_usage", true)
                 .apply {
                     fun limits(id: String): org.json.JSONArray {
                         val (five, seven) = mapOf("w1" to (25 to 40), "h2" to (72 to 18), "codex" to (37 to 61),

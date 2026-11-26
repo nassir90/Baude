@@ -44,7 +44,7 @@ def state(server=None):
     missing = {"codex": dep} if (dep := deps.missing("codex")) is not None else {}
     last = {profile: {"read": round(read), "usage": _limits(limits)} for profile, (read, limits) in accounts.last_usage().items()}
     return {"accounts": accounts.listing(), "defaults": accounts.defaults(), "claude_cli": bool(claude_cli(server)),
-            "missing": missing, "last_usage": last}
+            "missing": missing, "last_usage": last, "codex_usage": True}
 
 
 def answer(server, conn, msg, reply):
@@ -125,6 +125,8 @@ def _usage(server, profile, provider, done):
         provider = (accounts.account(profile) or {}).get("provider", provider)
     try:
         limits = accounts.plan_usage(profile, claude_cli(server), provider)
+    except accounts.SignedOut as e:
+        return done(error=str(e))
     except (OSError, subprocess.SubprocessError):
         return done(error=wording.say("subscriptions.codex_usage_failed" if provider == "codex" else
                                       "subscriptions.usage_failed"))

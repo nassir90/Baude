@@ -61,6 +61,7 @@ class HostAccounts(val hostId: String) {
     val loaded = mutableStateOf(false)
     val usage = mutableStateMapOf<String, Usage>() // (each subscription's, by usage key: an account's id, "" Claude's CLI's own sign-in, CODEX_CLI Codex's)
     val last = mutableStateOf<Map<String, List<Limit>>>(emptyMap()) // (what the host last read of each, shown greyed till usage has it)
+    val codexUsage = mutableStateOf(false) // (whether the host reads Codex usage: an older host's reads of Codex's CLI default are Claude's)
     val claudeCli = mutableStateOf(true) // (whether the host has claude: without it, a Claude account is a token)
     val missing = mutableStateOf<Map<String, Msg.Dep>>(emptyMap()) // (a provider's program the host lacks, by provider)
     private val reading = HashSet<String>()
@@ -75,10 +76,11 @@ class HostAccounts(val hostId: String) {
      * each Claude account, Codex's CLI's own sign-in (where the host has codex), each Codex account. */
     fun usageIds(): List<String> =
         (if (claudeCli.value) listOf("") else emptyList()) + accounts.value.filter { it.provider == "claude" }.map { it.id.orEmpty() } +
-            (if (cliCard("codex")) listOf(CODEX_CLI) else emptyList()) + accounts.value.filter { it.provider == "codex" }.map { it.id.orEmpty() }
+            (if (cliCard("codex")) listOf(CODEX_CLI) else emptyList()) +
+            accounts.value.filter { it.provider == "codex" && codexUsage.value }.map { it.id.orEmpty() }
 
-    /** Whether a provider's CLI's own sign-in has a card: the host has its program. */
-    fun cliCard(provider: String) = if (provider == "claude") claudeCli.value else provider !in missing.value
+    /** Whether a provider's CLI's own sign-in has a card: the host has its program (Codex's: and reads its usage). */
+    fun cliCard(provider: String) = if (provider == "claude") claudeCli.value else provider !in missing.value && codexUsage.value
 
     /** (on the main thread) Each subscription's (id's) usage asked of the host, one ask at a time each. */
     fun readUsage(ids: List<String>) {
@@ -110,6 +112,7 @@ class HostAccounts(val hostId: String) {
         g.accounts?.let { accounts.value = it }
         g.defaults?.let { d -> defaults.value = d.keys().asSequence().associateWith { d.optString(it) } }
         g.claudeCli?.let { claudeCli.value = it }
+        codexUsage.value = g.codexUsage == true
         missing.value = g.missing.orEmpty()
         g.lastUsage?.let { l -> last.value = l.mapValues { limits(it.value.usage.orEmpty()) } }
         loaded.value = true
@@ -184,8 +187,9 @@ fun SubscriptionsPage() {
                 }
                 val cli = if (provider == "claude") "" else HostAccounts.CODEX_CLI
                 if (host.cliCard(provider))
-                    SubscriptionCard(Wording.Subscriptions.cliDefault, null, host.usage[cli], host.last.value[cli]) {}
-                for (a in mine) SubscriptionCard(a.name.orEmpty(), a, host.usage[a.id.orEmpty()], host.last.value[a.id.orEmpty()]) {
+                    SubscriptionCard(Wording.Subscriptions.cliDefault, null, host.usage[cli], host.last.value[cli], true) {}
+                for (a in mine) SubscriptionCard(a.name.orEmpty(), a, host.usage[a.id.orEmpty()], host.last.value[a.id.orEmpty()],
+                    provider == "claude" || host.codexUsage.value) {
                     kind -> dialog = kind to a }
                 val lacks = host.missing.value[provider] // (its program isn't on the host: what Dependencies says, no account to add)
                 BoxedList(listOf(Unit), "") {
@@ -217,7 +221,7 @@ fun SubscriptionsPage() {
  * said instead. Till it's first read here, what the host last read (last) greyed (Checking… where it has none). */
 @Composable
 private fun SubscriptionCard(name: String, a: Msg.Account?, usage: HostAccounts.Usage?, last: List<HostAccounts.Limit>?,
-                             pick: (String) -> Unit) {
+                             shown: Boolean, pick: (String) -> Unit) {
     val c = LocalBaude.current
     val shape = RoundedCornerShape(12.dp)
     Column(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 4.dp).clip(shape).background(c.card)
@@ -228,7 +232,7 @@ private fun SubscriptionCard(name: String, a: Msg.Account?, usage: HostAccounts.
             if (a != null) AccountMenu(a, pick)
         }
         val stale = usage == null && last != null
-        Column(Modifier.padding(end = 6.dp).alpha(if (stale) Tokens.Subscriptions.staleOpacity.toFloat() else 1f),
+        if (shown) Column(Modifier.padding(end = 6.dp).alpha(if (stale) Tokens.Subscriptions.staleOpacity.toFloat() else 1f),
             verticalArrangement = Arrangement.spacedBy(6.dp)) {
             val limits = if (stale) last else usage?.limits
             if (limits == null) Text(usage?.said ?: Wording.Subscriptions.checking, style = Type.body, color = c.dim)

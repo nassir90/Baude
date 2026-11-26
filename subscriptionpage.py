@@ -150,6 +150,7 @@ class Page(Adw.PreferencesPage):
         self.where, self.host = win.terminal_host()
         self.here = wire.is_local(self.where)  # (the host's this machine's: a sign-in's page opened here at once)
         self.accounts, self.defaults, self.filling, self.claude_cli, self.missing = [], {}, False, True, {}
+        self.codex_usage = False  # (whether the host reads Codex usage: an older host's reads of Codex's CLI default are Claude's)
         self.choices = {}
         self.lists, self.pills, self.usage, self.bars, self.reading, self.last = {}, {}, {}, {}, set(), {}
         self.shown, self.timer, self.window_watch = None, None, None
@@ -211,7 +212,8 @@ class Page(Adw.PreferencesPage):
                     self.fill_bars(profile)
         self.claude_cli = reply.get("claude_cli", self.claude_cli)
         self.missing = reply.get("missing") or {}
-        if (self.accounts, self.defaults, self.claude_cli, self.missing) != self.shown:
+        self.codex_usage = bool(reply.get("codex_usage"))
+        if (self.accounts, self.defaults, self.claude_cli, self.missing, self.codex_usage) != self.shown:
             self.fill()
         if self.get_mapped():
             self.read_usage([p for p in self.usage_ids() if p not in self.usage])
@@ -225,15 +227,15 @@ class Page(Adw.PreferencesPage):
         """The subscriptions whose usage is read, by usage key: Claude's CLI's own sign-in (where the host has claude),
         each Claude account, Codex's CLI's own sign-in (where the host has codex), each Codex account."""
         return [*([""] if self.claude_cli else []), *(a["id"] for a in self.accounts if a["provider"] == "claude"),
-                *([CODEX_CLI] if "codex" not in self.missing else []),
-                *(a["id"] for a in self.accounts if a["provider"] == "codex")]
+                *([CODEX_CLI] if self.cli_card("codex") else []),
+                *(a["id"] for a in self.accounts if a["provider"] == "codex" and self.codex_usage)]
 
     def cli_card(self, provider):
-        """Whether a provider's CLI's own sign-in has a card: the host has its program."""
-        return self.claude_cli if provider == "claude" else provider not in self.missing
+        """Whether a provider's CLI's own sign-in has a card: the host has its program (Codex's: and reads its usage)."""
+        return self.claude_cli if provider == "claude" else provider not in self.missing and self.codex_usage
 
     def fill(self, error=None):
-        self.shown = None if error else (self.accounts, self.defaults, self.claude_cli, self.missing)
+        self.shown = None if error else (self.accounts, self.defaults, self.claude_cli, self.missing, self.codex_usage)
         self.bars = {}
         for provider, cards in self.lists.items():
             while (child := cards.get_first_child()) is not None:
@@ -287,11 +289,12 @@ class Page(Adw.PreferencesPage):
         if account is not None:
             top.append(self.account_menu(account))
         inside.append(top)
-        bars = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, margin_end=6)
-        inside.append(bars)
-        profile = account["id"] if account else "" if provider == "claude" else CODEX_CLI
-        self.bars[profile] = bars
-        self.fill_bars(profile)
+        if provider == "claude" or self.codex_usage:
+            bars = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, margin_end=6)
+            inside.append(bars)
+            profile = account["id"] if account else "" if provider == "claude" else CODEX_CLI
+            self.bars[profile] = bars
+            self.fill_bars(profile)
         return card
 
     def fill_bars(self, profile):

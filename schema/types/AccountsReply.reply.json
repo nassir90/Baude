@@ -78,6 +78,10 @@
       "type": "boolean",
       "description": "Whether the host has claude: a Claude account there is a folder signed in to with claude auth login; without it, a token from claude setup-token."
     },
+    "codex_usage": {
+      "type": "boolean",
+      "description": "Whether the host reads a Codex subscription's usage (usage with provider codex, and last_usage's \"codex\"): a client shows Codex's CLI default card and Codex usage only where it does; an older host's usage read of \"\" is Claude's."
+    },
     "missing": {
       "type": "object",
       "additionalProperties": {

@@ -7,6 +7,7 @@ import shutil
 import weakref
 import time
 
+from baudelib import providers  # noqa: E402  (every app's model names)
 from baudelib import wording  # noqa: E402  (the words Baude shows: schema/copy, Record's and the Android app's too)
 from lookup import REF_KINDS, ref_date
 
@@ -713,7 +714,7 @@ class SignalPage(panels.ExpandStack):
         options = Gtk.Box(spacing=6)
         lsp = load_settings().get("signal_lsp")  # (unanswered, servers already installed are used: nothing to fetch)
         for attr, label, active, tip, fn in (
-                ("sonnet", (load_settings().get("signal_model") or "sonnet").capitalize(),
+                ("sonnet", providers.model_name(load_settings().get("signal_model") or "sonnet"),
                  bool(load_settings().get("signal_reader", True)),
                  wording.say("signal.reader_tip"),
                  self.set_sonnet),
@@ -889,9 +890,10 @@ class SignalPage(panels.ExpandStack):
     def show_reader(self, ref):
         """The reader's chat, the lines it's added since it was last drawn (kept at the bottom if it was there)."""
         chat, box = ref.reader_chat, self.reader_box
-        name = ref.agent.model.capitalize() if ref.agent is not None else "Reader"
+        name = providers.model_name(ref.agent.model) if ref.agent is not None else "Reader"
         self.reader_row.set_title(name)
         self.reader_title.set_text(name)
+        self.reader_title.set_tooltip_text(ref.agent.model if ref.agent is not None else None)
         drawn = self.reader_shown
         if drawn is None or drawn[0] is not chat or drawn[1] > len(chat) or \
                 (drawn[1] and chat[drawn[1] - 1][0] != drawn[2]):  # (another chat, or older lines dropped)

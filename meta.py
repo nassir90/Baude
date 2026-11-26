@@ -944,7 +944,8 @@ def model_row(chat):
         entry = model_entry(model(), offered) or (offered[0] if offered else None)
         picker.quiet = True
         try:
-            picker.set_choices([(m[0], m[1]) for m in offered])
+            known = claude_described([m for m in offered if m[3] is None]) + list(providerslib.entries().values())
+            picker.set_choices([(m[0], m[1]) for m in offered], {m[0]: providerslib.model_slug(m[0], known) for m in offered})
             picker.select(entry[0] if entry else None)
         finally:
             picker.quiet = False

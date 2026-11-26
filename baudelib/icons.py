@@ -34,6 +34,13 @@ def model_families():
         return [(x["icon"], x["name"], x["match"]) for x in json.load(f)["families"]]
 
 
+def model_names():
+    """[(match, as)]: how models' ids read as names (schema/icons/models/families.json's families' names, in its order):
+    the pattern that's the whole id, the name it reads as ({n}: its group n, - and _ as spaces, a capital first)."""
+    with open(os.path.join(folder("models"), "families.json"), encoding="utf-8") as f:
+        return [(n["match"], n["as"]) for x in json.load(f)["families"] for n in x.get("names", [])]
+
+
 def logo(app, accent=None):
     """app's logo (apps/<app>.svg) in accent, an accent's name (schema/tokens' accent): the tile's colour (its first
     rect's fill) the accent's, wherever the logo draws in it. None, or a name that isn't an accent's: as it's drawn."""

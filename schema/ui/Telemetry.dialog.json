@@ -103,12 +103,24 @@
     },
     {
       "name": "Models",
-      "shows": "Heading \"Models\", a row each model that ran a turn in the year, the most turns first: its name, and \"600 Turns · 280.8M\" after it (\"1 Turn\" for one), dim.",
+      "shows": "Heading \"Models\", a row each model that ran a turn in the year, the most turns first: its name (as every app names it; its slug on hover, a long-press on the phone), and \"600 Turns · 280.8M\" after it (\"1 Turn\" for one), dim.",
       "copy": [
         "telemetry.models",
         "telemetry.turns_tokens",
         "tokens.millions",
         "tokens.thousands"
+      ],
+      "decisions": [
+        {
+          "said": "Model names are formatted one way across the app, the slug shown only on hover: the model dropdown's names match the telemetry section's (paraphrased)",
+          "rule": "Every app names a model one way everywhere (providers.model_name on the desktop, modelName on the phone): as its host lists it, else as its id reads by schema/icons/models/families.json's names (claude-opus-4-7 is \"Opus 4.7\"), else its name to what serves it; its slug (claude-opus-5-5, gpt-5.4-codex) shows only on hover, or a long-press on the phone",
+          "decided": "2026-11-26",
+          "source": [
+            {
+              "issue": "BaudeInternal#235"
+            }
+          ]
+        }
       ]
     },
     {

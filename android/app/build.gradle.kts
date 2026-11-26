@@ -979,8 +979,9 @@ abstract class BaudeIcons : DefaultTask() {
         out.append("import androidx.compose.ui.graphics.vector.ImageVector\n\n")
         out.append("/** The model families (schema/icons/models/families.json, as the desktop's pickers.MODEL_FAMILIES reads it). */\n")
         out.append("object ModelFamilies {\n")
-        out.append("    /** A family: its name (what its models are headed by), what finds it in a model's name or value, its logo. */\n")
-        out.append("    class Family(val name: String, val match: Regex, val logo: ImageVector)\n\n")
+        out.append("    /** A family: its name (what its models are headed by), what finds it in a model's name or value, its logo,\n")
+        out.append("     * and how its models' ids read as names (each pattern that's a whole id, case ignored, and the name it reads as). */\n")
+        out.append("    class Family(val name: String, val match: Regex, val logo: ImageVector, val names: List<Pair<Regex, String>> = emptyList())\n\n")
         out.append("    /** Each family, the first that matches a model's its own. */\n")
         out.append("    val all: List<Family> by lazy {\n        listOf(\n")
         for (x in doc["families"] as List<Map<String, Any?>>) {
@@ -988,7 +989,14 @@ abstract class BaudeIcons : DefaultTask() {
             val member = pascal("model-$icon")
             if (drawn[member] != "models/baude-model-$icon-symbolic.svg")
                 throw GradleException("schema/icons/$where: no baude-model-$icon-symbolic.svg for $icon")
-            out.append("            Family(${quoted(x["name"] as String)}, Regex(${quoted(x["match"] as String)}), Adwaita.$member),\n")
+            @Suppress("UNCHECKED_CAST")
+            val names = (x["names"] as? List<Map<String, Any?>>).orEmpty().map { n ->
+                val m = n["match"] as? String ?: throw GradleException("schema/icons/$where: a name with no match")
+                val a = n["as"] as? String ?: throw GradleException("schema/icons/$where: a name with no as")
+                "Regex(${quoted(m)}, RegexOption.IGNORE_CASE) to ${quoted(a)}"
+            }
+            out.append("            Family(${quoted(x["name"] as String)}, Regex(${quoted(x["match"] as String)}), Adwaita.$member")
+            out.append(if (names.isEmpty()) "),\n" else ", listOf(${names.joinToString(", ")})),\n")
         }
         return out.append("        )\n    }\n}\n").toString()
     }

@@ -13,7 +13,7 @@ import weakref
 
 from gi.repository import Adw, GLib, Gtk
 
-from baudelib import lineprofile, wording
+from baudelib import lineprofile, providers, wording
 
 PROFILE_S = 30  # (how often what's profiled here is told)
 QUEUE_MAX = 1000  # (events kept for a host that isn't there yet)
@@ -371,8 +371,11 @@ def effort_said(effort):
     return wording.say(key) if effort and wording.has(key) else effort or "–"
 
 
-def model_name(value, models):
-    return next((m.get("displayName") for m in models if m.get("value") == value and m.get("displayName")), value)
+def model_row(value, models, *values):
+    """A row named for a model, as every app names it (providers.model_name), its slug on hover."""
+    r = row(providers.model_name(value, models) or "–", *values)
+    r.set_tooltip_text(providers.model_slug(value, models) if isinstance(value, str) else None)
+    return r
 
 
 def row(title, *values, sensitive=True, mono=False):
@@ -497,13 +500,15 @@ class Page(Adw.PreferencesPage):
         box.append(grid_row)
         if u["combos"]:
             c = u["combos"][0]
-            box.append(row(wording.say("telemetry.most_used"),
-                           wording.say("telemetry.model_effort", model=model_name(c["model"], models),
-                                       effort=effort_said(c.get("effort")))))
+            most = row(wording.say("telemetry.most_used"),
+                       wording.say("telemetry.model_effort", model=providers.model_name(c["model"], models) or "–",
+                                   effort=effort_said(c.get("effort"))))
+            most.set_tooltip_text(providers.model_slug(c["model"], models) if isinstance(c["model"], str) else None)
+            box.append(most)
         g.add(box)
         self.group("models", wording.say("telemetry.models") if u["models"] else None,
-                   [row(model_name(m["model"], models),
-                        wording.say("telemetry.turns_tokens", turns=m["turns"], tokens=tokens(m["tokens"])))
+                   [model_row(m["model"], models,
+                              wording.say("telemetry.turns_tokens", turns=m["turns"], tokens=tokens(m["tokens"])))
                     for m in u["models"]])
         return False
 

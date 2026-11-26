@@ -1,9 +1,10 @@
 """hostkube — the clusters this host's kubeconfig reaches, read for a head elsewhere (the phone's Kubernetes page): the
 desktop's own functions (kubedata), kubectl's answers as Freelens' pages and columns. Each kind's objects, an object's
-YAML, what controls an object, a pod deleted once it's asked (kube); a pod's log followed and a kind's list watched,
+YAML, what controls an object, a pod deleted once it's asked, the whole stack's CPU and memory (kube); a pod's log followed and a kind's list watched,
 on a connection of its own (follow). Secrets' values are never read, and kubectl is only ever given the arguments these
 build. No GTK."""
 import codecs
+import collections
 import json
 import os
 import select
@@ -25,6 +26,15 @@ PAGES = {p["resource"]: p for _title, pages in kd.KUBE_SECTIONS for p in pages}
 _CUSTOM = {}  # (context, definition) -> the page its objects have
 BATCH_S = 0.1   # a log's lines are sent this often at most
 WATCH_S = 1.0   # a watch's changes are sent this often at most
+HISTORY_S = 30 * 60  # Home's history goes back this far
+IDLE_S = 24 * 60 * 60  # a context Home hasn't been read for in a day is no longer sampled, and its history let go
+# context -> {"asked": when Home last read it, "tried": when a sample was last taken (or tried), "read": (when, its
+# last kd.kube_summary_read) or None, "samples": deque of
+# (when, {namespace: (cpu requested, cpu used, memory requested, memory used)})}: from the first time Home is read for
+# a context, a sample every KUBE_REFRESH_S (_sampling) whether Home is open or not, in this process's memory
+_HISTORY = {}
+_HISTORY_LOCK = threading.Lock()
+_SAMPLER = []  # (the thread taking them, once there's one)
 
 
 def _home(path):
@@ -111,7 +121,8 @@ def _connect(context):
     except RuntimeError:
         nodes = 0
     sections = [{"title": title, "icon": kd.KUBE_SECTION_ICONS.get(title, ""),
-                 "pages": [_page_json(p, not p.get("api") or p["api"] in resources or p["resource"] in resources)
+                 "pages": [_page_json(p, p["source"] == "summary" or not p.get("api") or p["api"] in resources or
+                                       p["resource"] in resources)
                            for p in pages]} for title, pages in kd.KUBE_SECTIONS]
     return {"sections": sections, "namespaces": [s for s in spaces if s], "nodes": nodes}
 
@@ -129,6 +140,82 @@ def _list(msg):
     if msg.get("crd") and msg.get("page") not in PAGES:
         out["page"] = _page_json(page)
     return out
+
+
+def _take(context):
+    """Read context's totals (kubectl: not under the lock) and keep what its history needs of them; the read."""
+    read, now = kd.kube_summary_read(context), time.time()
+    kept = {ns: (t[0], t[1], t[3], t[4]) for ns, t in kd.kube_tally(read)["namespaces"].items()}
+    with _HISTORY_LOCK:
+        h = _HISTORY.get(context)
+        if h is not None:
+            h["read"], h["tried"] = (now, read), now
+            h["samples"].append((now, kept))
+            while now - h["samples"][0][0] > HISTORY_S:
+                h["samples"].popleft()
+    return read
+
+
+def _sampling():
+    """A sample of each context Home has been read for every KUBE_REFRESH_S, till the process ends; a context not
+    read for IDLE_S (a day) is let go. (A sample that can't be read is a gap in its history.)"""
+    while True:
+        time.sleep(1)
+        now = time.time()
+        with _HISTORY_LOCK:
+            for context in [c for c, h in _HISTORY.items() if now - h["asked"] > IDLE_S]:
+                del _HISTORY[context]
+            due = [c for c, h in _HISTORY.items() if now - h["tried"] >= kd.KUBE_REFRESH_S]
+        for context in due:
+            try:
+                _take(context)
+            except (RuntimeError, ValueError, OSError):
+                with _HISTORY_LOCK:
+                    if context in _HISTORY:  # (tried again in KUBE_REFRESH_S, not at once)
+                        _HISTORY[context]["tried"] = time.time()
+
+
+def _sample(when, kept, namespaces):
+    """A KubeSample: a history sample's totals in namespaces (None: every one)."""
+    rows = kept.values() if namespaces is None else [kept[ns] for ns in namespaces if ns in kept]
+
+    def add(i):
+        vals = [r[i] for r in rows if r[i] is not None]
+        return sum(vals) if vals else None
+    return {"at": when, "cpu_requests": add(0) or 0, "cpu_used": add(1), "memory_requests": add(2) or 0,
+            "memory_used": add(3)}
+
+
+def _summary(msg):
+    """Home: the stack's CPU and memory in the namespaces asked for (every one without), and how they went: the
+    samples taken since the one asked for (every one without), as _sampling keeps them. A read under
+    KUBE_REFRESH_S / 2 old is used again."""
+    context, namespaces, since = msg.get("context"), msg.get("namespaces"), msg.get("since")
+    since = since if isinstance(since, (int, float)) and not isinstance(since, bool) else None
+    with _HISTORY_LOCK:
+        h = _HISTORY.get(context)
+        last = h and h["read"]
+        read = last[1] if last and time.time() - last[0] < kd.KUBE_REFRESH_S / 2 else None
+        if h is None:
+            now = time.time()
+            _HISTORY[context] = {"asked": now, "tried": now, "read": None, "samples": collections.deque()}
+        else:
+            h["asked"] = time.time()
+        if not _SAMPLER:
+            _SAMPLER.append(threading.Thread(target=_sampling, name="kube-home-history", daemon=True))
+            _SAMPLER[0].start()
+    try:
+        read = read or _take(context)
+    except (RuntimeError, ValueError) as e:
+        with _HISTORY_LOCK:  # (a cluster never read isn't sampled)
+            if context in _HISTORY and not _HISTORY[context]["samples"]:
+                del _HISTORY[context]
+        return {"fault": _fault(getattr(e, "said", str(e)), context)}
+    with _HISTORY_LOCK:
+        samples = list((_HISTORY.get(context) or {"samples": ()})["samples"])
+    history = [_sample(when, kept, namespaces) for when, kept in samples if since is None or when > since]
+    return {"summary": {**kd.kube_summary(read, namespaces), "history": history, "every": kd.KUBE_REFRESH_S,
+                        "minutes": HISTORY_S // 60}}
 
 
 def _yaml(msg):
@@ -174,7 +261,10 @@ ARGS = ("context", "namespace", "name", "pod", "container", "kind", "page", "crd
 
 def _unsafe(msg):
     """The first name in a request that kubectl would take for an option (one that starts with -), or None."""
-    return next((k for k in ARGS if isinstance(msg.get(k), str) and msg[k].startswith("-")), None)
+    return next((k for k in ARGS if isinstance(msg.get(k), str) and msg[k].startswith("-")), None) or \
+        ("namespaces" if msg.get("namespaces") is not None and (not isinstance(msg["namespaces"], list) or
+                                                                not all(isinstance(n, str) for n in msg["namespaces"]))
+         else None)
 
 
 def answer(server, msg):
@@ -197,12 +287,14 @@ def answer(server, msg):
             return {"what": what, **_yaml(msg)}
         if what == "owner":
             return {"what": what, **_owner(msg)}
+        if what == "summary":
+            return {"what": what, **_summary(msg)}
         if what == "delete":
             return {"what": what, "said": kd.kube_delete(context, msg.get("namespace"), msg.get("name"),
                                                           bool(msg.get("force")))}
     except (RuntimeError, ValueError, OSError) as e:
         return {"what": what, "error": str(e)}
-    return {"what": what, "error": "kube takes contexts, connect, list, yaml, owner or delete"}
+    return {"what": what, "error": "kube takes contexts, connect, list, yaml, owner, summary or delete"}
 
 
 # ---------------------------------------------------------------- following

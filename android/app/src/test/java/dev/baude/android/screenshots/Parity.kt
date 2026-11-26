@@ -510,12 +510,16 @@ abstract class Parity(private val theme: String, private val scene: String) {
             name == "changelog" -> show { ChangelogScreen(null, {}) }
             name == "databases" -> show { DatabaseScreen(host.getString("id"), {}) }
             name == "kubernetes" -> {
-                show { KubeScreen(host.getString("id"), {}) }
+                show { KubeScreen(host.getString("id"), {}, page = "pods") }
                 tap("CPU")
                 tap("CPU")
             }
-            name == "kubernetes-shell" -> {
+            name == "kubernetes-home" -> {
                 show { KubeScreen(host.getString("id"), {}) }
+                repeat(10) { if (find("shop") == null) flush(true) } // (contexts, connect, then the summary: a host.py each)
+            }
+            name == "kubernetes-shell" -> {
+                show { KubeScreen(host.getString("id"), {}, page = "pods") }
                 tap("CPU")
                 tap("CPU")
                 tapInRow(Wording.Kube.shell, "api-6f7c-mnopq")
@@ -524,7 +528,7 @@ abstract class Parity(private val theme: String, private val scene: String) {
                 flush(true)
             }
             name == "kubernetes-dock" -> {
-                show { KubeScreen(host.getString("id"), {}) }
+                show { KubeScreen(host.getString("id"), {}, page = "pods") }
                 tap("CPU")
                 tap("CPU")
                 tapInRow(Wording.Kube.logs, "worker-5c4b-klmno")

@@ -453,6 +453,8 @@ def build(app, sc):
         return win
     if name == "kubernetes":
         return scenes_chat.kube_window(app)[0]
+    if name == "kubernetes-home":
+        return scenes_chat.kube_home(app)[0]
     if name == "kubernetes-shell":
         win, kv = scenes_chat.kube_window(app)
         T.pump(0.3)

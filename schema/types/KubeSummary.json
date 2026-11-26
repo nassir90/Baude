@@ -1,0 +1,67 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "Home: the whole stack's CPU and memory, in the namespaces asked for: the pods that hold on to a node (not those that finished), added up, by namespace and by node, and how the totals went.",
+  "properties": {
+    "cpu": {
+      "$ref": "KubeUse.json",
+      "description": "CPU, in cores."
+    },
+    "memory": {
+      "$ref": "KubeUse.json",
+      "description": "Memory, in bytes."
+    },
+    "metrics": {
+      "type": "boolean",
+      "description": "Whether the cluster has a metrics API (else nothing is used)."
+    },
+    "pods": {
+      "type": "integer",
+      "description": "How many pods are added up."
+    },
+    "namespace_columns": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "The namespaces table's column titles."
+    },
+    "namespaces": {
+      "type": "array",
+      "items": {
+        "$ref": "KubeShare.json"
+      },
+      "description": "Each namespace's part."
+    },
+    "node_columns": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "The nodes table's column titles."
+    },
+    "nodes": {
+      "type": "array",
+      "items": {
+        "$ref": "KubeShare.json"
+      },
+      "description": "Each node's part (against its own allocatable)."
+    },
+    "history": {
+      "type": "array",
+      "items": {
+        "$ref": "KubeSample.json"
+      },
+      "description": "The totals every `every` seconds from the first time Home was read for the context, oldest first, kept in the host's memory: those after the request's since (every one without)."
+    },
+    "every": {
+      "type": "integer",
+      "description": "How often the host samples them (and a head reads them), in seconds."
+    },
+    "minutes": {
+      "type": "integer",
+      "description": "How far back the history goes, in minutes."
+    }
+  },
+  "additionalProperties": false
+}

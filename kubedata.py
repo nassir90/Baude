@@ -140,22 +140,29 @@ def kube_uid(o):
     return m.get("uid") or (m.get("namespace") or "", m.get("name") or "")
 
 
-def kube_cpu(q):
-    """A CPU quantity in cores: 250m → 0.25, 2902430n → 0.0029, 2 → 2.0 (None if it isn't one)."""
-    m = re.fullmatch(r"([\d.]+)([numk]?)", str(q or "").strip())
+_QUANTITY = re.compile(r"([+-]?(?:\d+\.?\d*|\.\d+))(?:[eE]([+-]?\d+)|(Ki|Mi|Gi|Ti|Pi|Ei|n|u|m|k|M|G|T|P|E))?")
+_QUANTITY_SCALE = {"n": 1e-9, "u": 1e-6, "m": 1e-3, "k": 1e3, "M": 1e6, "G": 1e9, "T": 1e12, "P": 1e15, "E": 1e18,
+                   **{s + "i": 1024.0 ** (i + 1) for i, s in enumerate("KMGTPE")}}
+
+
+def kube_quantity(q):
+    """A Kubernetes quantity as a number: a decimal suffix (n u m k M G T P E), a binary one (Ki…Ei) or an exponent
+    (1e3, 5e-3); None if it isn't one."""
+    m = _QUANTITY.fullmatch(str(q or "").strip())
     if not m:
         return None
-    return float(m.group(1)) * {"n": 1e-9, "u": 1e-6, "m": 1e-3, "": 1.0, "k": 1e3}[m.group(2)]
+    n = float(m.group(1))
+    return n * 10.0 ** int(m.group(2)) if m.group(2) else n * _QUANTITY_SCALE.get(m.group(3) or "", 1.0)
+
+
+def kube_cpu(q):
+    """A CPU quantity in cores: 250m → 0.25, 2902430n → 0.0029, 2 → 2.0, 1e-3 → 0.001 (None if it isn't one)."""
+    return kube_quantity(q)
 
 
 def kube_bytes(q):
-    """A memory quantity in bytes: 57340Ki, 1Gi, 500M, 1e3 (None if it isn't one)."""
-    m = re.fullmatch(r"([\d.]+(?:e\d+)?)([KMGTPE]i?|k)?", str(q or "").strip())
-    if not m:
-        return None
-    unit = m.group(2) or ""
-    power = "KMGTPE".index(unit[0].upper()) + 1 if unit else 0
-    return float(m.group(1)) * ((1024 if unit.endswith("i") else 1000) ** power)
+    """A memory quantity in bytes: 57340Ki, 1Gi, 500M, 1e3, 1500m (None if it isn't one)."""
+    return kube_quantity(q)
 
 
 def kube_fmt_bytes(n):
@@ -827,6 +834,9 @@ KUBE_PODS = kube_page("Pods", "pods", True, [
     K_AGE, _status_col(lambda o, c: kube_pod_status(o))])
 
 
+KUBE_HOME = kube_page("Home", "home", True, [], source="summary")  # (the whole stack's CPU and memory: kube_summary)
+
+
 KUBE_NODES = kube_page("Nodes", "nodes", False, [
     K_NAME, _cpu_col(_node_usage), _mem_col(_node_usage), kube_col("Roles", _node_roles),
     kube_col("Version", lambda o, c: _ks(o, "status", "nodeInfo", "kubeletVersion", default="")),
@@ -834,6 +844,7 @@ KUBE_NODES = kube_page("Nodes", "nodes", False, [
 
 
 KUBE_SECTIONS = [
+    ("Home", [KUBE_HOME]),
     ("Nodes", [KUBE_NODES]),
     ("Workloads", [
         KUBE_PODS,
@@ -1025,7 +1036,7 @@ KUBE_SECTIONS = [
 
 
 # each category's icon, as Freelens' sidebar has them (KUBE_ICONS)
-KUBE_SECTION_ICONS = {"Nodes": "baude-kube-nodes-symbolic", "Workloads": "baude-kube-workloads-symbolic",
+KUBE_SECTION_ICONS = {"Home": "baude-kube-home-symbolic", "Nodes": "baude-kube-nodes-symbolic", "Workloads": "baude-kube-workloads-symbolic",
                       "Config": "baude-kube-config-symbolic", "Network": "baude-kube-network-symbolic",
                       "Storage": "baude-kube-storage-symbolic", "Namespaces": "baude-kube-namespaces-symbolic",
                       "Events": "baude-kube-events-symbolic", "Helm": "baude-kube-helm-symbolic",
@@ -1154,3 +1165,173 @@ def kube_rows(page, items, ctx, columns=None):
                                    "namespace": _km(o).get("namespace") or o.get("namespace") or "", "raw": o,
                                    "now": ctx["now"]}))
     return rows
+
+
+# ---- the whole stack's CPU and memory (Home): what its pods ask for and are held to, what they use, what the nodes give
+def _asks(container):
+    """A container's requests and limits: (cpu request, cpu limit, memory request, memory limit), None where unset."""
+    r = container.get("resources") or {}
+    req, lim = r.get("requests") or {}, r.get("limits") or {}
+    return (kube_cpu(req.get("cpu")) if req.get("cpu") is not None else None,
+            kube_cpu(lim.get("cpu")) if lim.get("cpu") is not None else None,
+            kube_bytes(req.get("memory")) if req.get("memory") is not None else None,
+            kube_bytes(lim.get("memory")) if lim.get("memory") is not None else None)
+
+
+def kube_pod_asks(pod):
+    """What a pod asks of its node, as the scheduler reckons it (the sidecar KEP's order): its containers and sidecars
+    (init containers that keep running) summed, or, if more, the most any init container needs while it runs beside
+    the sidecars started before it; plus its overhead. (cpu request, cpu limit, memory request, memory limit): a limit
+    is the sum of those set, as kubectl describe node adds them, its overhead added only when one is; None where
+    neither a container nor the overhead sets it."""
+    spec = pod.get("spec") or {}
+    running = [_asks(c) for c in spec.get("containers") or []]
+    init = [(c.get("restartPolicy") == "Always", _asks(c)) for c in spec.get("initContainers") or []]
+    overhead = _asks({"resources": {"requests": spec.get("overhead") or {}}})
+    out = []
+    for i in range(4):
+        extra = overhead[0 if i < 2 else 2]
+        if all(a[i] is None for a in running + [a for _s, a in init]):
+            out.append(extra if i in (0, 2) else None)
+            continue
+        total = sum(a[i] or 0 for a in running)
+        sidecars = peak = 0
+        for sidecar, a in init:
+            if sidecar:
+                total, sidecars = total + (a[i] or 0), sidecars + (a[i] or 0)
+                peak = max(peak, sidecars)
+            else:
+                peak = max(peak, (a[i] or 0) + sidecars)
+        out.append(max(total, peak) + (extra or 0))
+    return tuple(out)
+
+
+# (what Home reads of each pod, no more: its place, its overhead, each container's resources and an init container's
+# restartPolicy; a line each, tab-separated, a map as JSON)
+KUBE_SUMMARY_PODS = (
+    r'jsonpath={range .items[*]}{"pod\t"}{.metadata.namespace}{"\t"}{.metadata.name}{"\t"}{.spec.nodeName}{"\t"}'
+    r'{.spec.overhead}{"\n"}{range .spec.initContainers[*]}{"init\t"}{.restartPolicy}{"\t"}{.resources}{"\n"}{end}'
+    r'{range .spec.containers[*]}{"container\t\t"}{.resources}{"\n"}{end}{end}')
+KUBE_SUMMARY_LIVE = "status.phase!=Succeeded,status.phase!=Failed"  # (a finished pod holds on to nothing)
+KUBE_SUMMARY_NODES = ("custom-columns=NAME:.metadata.name,CPU:.status.allocatable.cpu,"
+                      "MEMORY:.status.allocatable.memory")
+
+
+def _kube_map(text):
+    try:
+        got = json.loads(text) if text.strip() else {}
+    except ValueError:
+        return {}
+    return got if isinstance(got, dict) else {}
+
+
+def kube_summary_pods(text):
+    """KUBE_SUMMARY_PODS's lines as the pods they're of: each [namespace, name, node, kube_pod_asks]."""
+    pods, pod = [], None
+    for line in text.splitlines():
+        kind, _, rest = line.partition("\t")
+        if kind == "pod":
+            ns, name, node, overhead = (rest.split("\t", 3) + ["", "", "", ""])[:4]
+            pod = {"spec": {"overhead": _kube_map(overhead), "containers": [], "initContainers": []}}
+            pods.append([ns, name, node, pod])
+        elif kind in ("init", "container") and pod is not None:
+            policy, _, resources = rest.partition("\t")
+            c = {"resources": _kube_map(resources), **({"restartPolicy": policy} if policy else {})}
+            pod["spec"]["initContainers" if kind == "init" else "containers"].append(c)
+    return [[ns, name, node, kube_pod_asks(p)] for ns, name, node, p in pods]
+
+
+def kube_summary_read(context):
+    """What Home is made of, read (worker thread): the pods that hold on to their node's CPU and memory (not those
+    that finished: Succeeded, Failed), each [namespace, name, node, (asks)]; the nodes, each [name, allocatable cores,
+    bytes] (None if they can't be listed); the pods' use from the metrics API ({(namespace, pod): (cores, bytes)}, or
+    None without one). Raises RuntimeError if the pods can't be listed."""
+    pods = kube_summary_pods(kube_get(context, "pods", "--all-namespaces", f"--field-selector={KUBE_SUMMARY_LIVE}",
+                                      "-o", KUBE_SUMMARY_PODS))
+    try:  # (names and allocatable only: a big cluster's nodes, as JSON, list every image they hold)
+        nodes = []
+        for line in kube_get(context, "nodes", "-o", KUBE_SUMMARY_NODES, "--no-headers").splitlines():
+            parts = line.split()
+            if len(parts) == 3:
+                nodes.append([parts[0], kube_cpu(parts[1]), kube_bytes(parts[2])])
+    except RuntimeError:
+        nodes = None
+    return {"pods": pods, "nodes": nodes, "metrics": kube_pod_metrics(context)}
+
+
+def kube_fmt_cores(n):
+    return "N/A" if n is None else f"{n:.2f}"
+
+
+def _share(n, of):
+    return f"{round(100 * n / of)}%" if n is not None and of else ""
+
+
+def kube_use(title, requests, used, limits, allocatable, memory):
+    """One resource's totals as a reply carries them (KubeUse): its numbers, their texts, each as a share of what's
+    allocatable."""
+    fmt = kube_fmt_bytes if memory else kube_fmt_cores
+    alloc = None if allocatable is None else kube_fmt_bytes(allocatable) if memory else \
+        wording.say("kube.cores", n=round(allocatable, 2) if allocatable % 1 else int(allocatable))
+    return {"title": title, "requests": requests, "used": used, "limits": limits, "allocatable": allocatable,
+            "cells": [fmt(requests), fmt(used), "–" if limits is None else fmt(limits), alloc or ""],
+            "shares": [_share(requests, allocatable), _share(used, allocatable), _share(limits, allocatable)]}
+
+
+def kube_tally(read, namespaces=None):
+    """read's pods (kube_summary_read) in namespaces (None: every one) added up by namespace and by node:
+    {"total": [cpu request, cpu used, cpu limit, memory request, memory used, memory limit, pods], "namespaces":
+    {namespace: the same}, "nodes": {node: the same}}. A limit stays None while no pod sets one; used, while there are
+    no metrics."""
+    metrics = read["metrics"]
+
+    def add(into, ns, name, asks):
+        use = metrics.get((ns, name)) if metrics is not None else None
+        values = (asks[0], use and use[0], asks[1], asks[2], use and use[1], asks[3])
+        for i, v in enumerate(values):
+            if v is not None:
+                into[i] = (into[i] or 0) + v
+            elif i in (1, 4) and metrics is not None and into[i] is None:
+                into[i] = 0
+        into[6] += 1
+    def blank():
+        return [0, None if metrics is None else 0, None, 0, None if metrics is None else 0, None, 0]
+    total, by_ns, by_node = blank(), {}, {}
+    for ns, name, node, asks in read["pods"]:
+        if namespaces is not None and ns not in namespaces:
+            continue
+        add(total, ns, name, asks)
+        add(by_ns.setdefault(ns, blank()), ns, name, asks)
+        add(by_node.setdefault(node, blank()), ns, name, asks)
+    return {"total": total, "namespaces": by_ns, "nodes": by_node}
+
+
+KUBE_SUMMARY_COLUMNS = ["Pods", "CPU requested", "CPU used", "CPU limits", "Memory requested", "Memory used",
+                        "Memory limits"]
+
+
+def kube_summary(read, namespaces=None):
+    """Home's numbers (KubeSummary, its history aside): the pods in namespaces (None: every one), their CPU and memory
+    asked for, used and held to, against what every node can give them; and the same by namespace and by node (a
+    node's against its own)."""
+    tally, nodes = kube_tally(read, namespaces), read["nodes"]
+    alloc_cpu = None if not nodes else sum(n[1] or 0 for n in nodes)
+    alloc_mem = None if not nodes else sum(n[2] or 0 for n in nodes)
+
+    def cells(t):
+        return [str(t[6]), kube_fmt_cores(t[0]), kube_fmt_cores(t[1]), "–" if t[2] is None else kube_fmt_cores(t[2]),
+                kube_fmt_bytes(t[3]), kube_fmt_bytes(t[4]), "–" if t[5] is None else kube_fmt_bytes(t[5])]
+    t = tally["total"]
+    empty = [0, None if read["metrics"] is None else 0, None, 0, None if read["metrics"] is None else 0, None, 0]
+    return {
+        "cpu": kube_use("CPU", t[0], t[1], t[2], alloc_cpu, False),
+        "memory": kube_use("Memory", t[3], t[4], t[5], alloc_mem, True),
+        "metrics": read["metrics"] is not None, "pods": t[6],
+        "namespace_columns": ["Namespace"] + KUBE_SUMMARY_COLUMNS,
+        "namespaces": [{"name": ns, "cells": [ns] + cells(v)} for ns, v in sorted(tally["namespaces"].items())],
+        "node_columns": ["Node"] + KUBE_SUMMARY_COLUMNS[:4] + ["CPU allocatable"] + KUBE_SUMMARY_COLUMNS[4:] +
+        ["Memory allocatable"],
+        "nodes": [{"name": name, "cells": [title] + (c := cells(tally["nodes"].get(name) or empty))[:4] +
+                   [cpu] + c[4:] + [mem]} for name, title, cpu, mem in
+                  [(n, n, kube_fmt_cores(cpu), kube_fmt_bytes(mem)) for n, cpu, mem in nodes or []] +
+                  ([("", wording.say("kube.unscheduled"), "", "")] if "" in tally["nodes"] else [])]}

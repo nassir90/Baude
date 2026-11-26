@@ -42,6 +42,8 @@ def kube(msg):
                       BAUDE_KUBECTL=os.path.join(TESTS, "fake_kubectl.py"), BAUDE_HELM=os.path.join(TESTS, "fake_kubectl.py"))
     for k in ("FAKE_KUBECTL_PG", "FAKE_KUBECTL_FOLLOW", "FAKE_KUBECTL_STATE", "BAUDE_KUBE_FAULT"):
         os.environ.pop(k, None)
+    if msg.get("what") == "summary":  # (a process a request: Home's history as the desktop scene's)
+        kube_fixture.seed_home_history(msg.get("context") or "k3d-dev")
     return hostkube.answer(None, msg)
 
 

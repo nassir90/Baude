@@ -52,8 +52,13 @@ const val KUBE_REFRESH_S = 10
 private val PODS = Msg.KubePage(title = "Pods", resource = "pods", namespaced = true, served = true, optional = false,
     source = "kubectl")
 
+/** Home (kubedata.KUBE_HOME): the page the view opens on. */
+private val HOME = Msg.KubePage(title = "Home", resource = "home", namespaced = true, served = true, optional = false,
+    source = "summary")
+
 /** What the host's sections' icon names (the desktop's, baude-kube-nodes-symbolic…) are drawn as here. */
 fun kubeIcon(name: String?): ImageVector? = when (name?.removePrefix("baude-kube-")?.removeSuffix("-symbolic")) {
+    "home" -> Adwaita.KubeHome
     "nodes" -> Adwaita.KubeNodes
     "workloads" -> Adwaita.KubeWorkloads
     "helm" -> Adwaita.KubeHelm
@@ -87,11 +92,14 @@ class KubeState(val hostId: String) {
     var added by mutableStateOf<List<Msg.KubePage>>(emptyList()) // (custom resources opened from Definitions)
     var namespaces by mutableStateOf<List<String>>(emptyList())
     var nodes by mutableStateOf(0)
-    var page by mutableStateOf(PODS)
+    var page by mutableStateOf(HOME)
     var tablePage by mutableStateOf<Msg.KubePage?>(null)
     var columns by mutableStateOf<List<Msg.KubeColumn>>(emptyList())
     var rows by mutableStateOf<List<Msg.KubeRow>>(emptyList())
     var metrics by mutableStateOf<Boolean?>(null)
+    var summary by mutableStateOf<Msg.KubeSummary?>(null) // (Home's, as the host added it up)
+    var history by mutableStateOf<List<Msg.KubeSample>>(emptyList()) // (Home's samples so far, oldest first)
+    private var historyOf: String? = null // (whose they are: context and namespaces)
     var nsShown by mutableStateOf<List<String>?>(null) // (null: every namespace's)
     var filter by mutableStateOf("")
     var sortCol by mutableStateOf(0)
@@ -219,12 +227,41 @@ class KubeState(val hostId: String) {
         val g = ++gen
         loading = true
         if (!quiet) progress = Wording.Kube.reading(p.title.orEmpty().lowercase(), ctx)
+        if (p.source == "summary") return readSummary(p, ctx, g)
         kube(hostId, Msg.Kube(what = "list", context = ctx, page = p.resource, crd = p.crd)) { r ->
             if (g != gen) return@kube
             r.missing?.let { return@kube lacks(it) }
             val f = r.fault ?: r.error?.let { Msg.KubeFault(title = it, why = "", said = "") }
             if (f != null) return@kube failed(f)
             loaded(p, r.columns.orEmpty(), r.rows.orEmpty(), r.metrics, g)
+        }
+    }
+
+    /** Home's totals, for the namespaces shown, as the host adds them up (kube's summary). */
+    private fun readSummary(p: Msg.KubePage, ctx: String, g: Int) {
+        val of = "$ctx/${nsShown?.joinToString(",")}"
+        if (of != historyOf) {
+            historyOf = of
+            history = emptyList()
+        }
+        val since = history.lastOrNull()?.at // (only the samples since the newest here)
+        kube(hostId, Msg.Kube(what = "summary", context = ctx, namespaces = nsShown, since = since)) { r ->
+            if (g != gen) return@kube
+            r.missing?.let { return@kube lacks(it) }
+            val f = r.fault ?: r.error?.let { Msg.KubeFault(title = it, why = "", said = "") }
+            if (f != null) return@kube failed(f)
+            loading = false
+            progress = null
+            fault = null
+            val last = history.lastOrNull()?.at?.toDouble()
+            val merged = history + r.summary?.history.orEmpty().filter { h -> last == null || (h.at?.toDouble() ?: 0.0) > last }
+            val edge = (merged.lastOrNull()?.at?.toDouble() ?: 0.0) - 60.0 * (r.summary?.minutes?.toDouble() ?: 0.0)
+            history = merged.filter { (it.at?.toDouble() ?: 0.0) >= edge }
+            summary = r.summary
+            metrics = r.summary?.metrics
+            tablePage = p
+            rows = emptyList()
+            fade = false
         }
     }
 
@@ -319,6 +356,7 @@ class KubeState(val hostId: String) {
     fun showNamespaces(names: List<String>?) {
         nsShown = names?.distinct()
         context?.let { nsByContext["$hostId/$it"] = nsShown }
+        if (page.source == "summary") return load(switch = true) // (Home's totals: the host's to add up again)
         fade = true
         Mesh.later(150) { fade = false }
     }
@@ -503,6 +541,9 @@ class KubeState(val hostId: String) {
         val ctx = context.orEmpty()
         fault?.let { return "$ctx: ${it.title}" }
         val p = tablePage ?: return ""
+        val fresh0 = note?.takeIf { it.second > SystemClock.elapsedRealtime() }?.first
+        if (p.source == "summary") return listOfNotNull(fresh0, if (metrics == true) Wording.Kube.metrics(KUBE_REFRESH_S)
+            else Wording.Kube.noMetrics).joinToString(" · ")
         val what = p.title.orEmpty().lowercase()
         var count = if (shown != rows.size) Wording.Kube.countOf(shown, what, rows.size) else Wording.Kube.count(shown, what)
         if (nsShown != null && p.namespaced == true) count = Wording.Kube.inNamespaces(count, nsSummary())
@@ -692,7 +733,9 @@ private fun Body(st: KubeState) {
                     Box(Modifier.weight(1f).fillMaxWidth().alpha(if (st.fade) 0.4f else 1f)) {
                         val lacks = st.missing
                         if (lacks != null) MissingDep(lacks, Wording.Window.kubernetes) { st.open(null, null, null, null) }
-                        else if (st.fault != null) ErrorState(st, st.fault!!) else if (st.tablePage != null) KubeTable(st, shown)
+                        else if (st.fault != null) ErrorState(st, st.fault!!)
+                        else if (st.tablePage?.source == "summary") st.summary?.let { KubeHome(st, it) }
+                        else if (st.tablePage != null) KubeTable(st, shown)
                     }
                     val status = st.status(shown.size)
                     if (status.isNotEmpty()) Text(status, style = Type.caption, color = c.dim, maxLines = 1,

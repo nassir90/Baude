@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "One resource's totals (CPU in cores, memory in bytes): what the pods ask for, use and are held to, and what the nodes can give them.",
+  "properties": {
+    "title": {
+      "type": "string",
+      "description": "Its name: CPU, Memory."
+    },
+    "requests": {
+      "type": "number",
+      "description": "What the pods ask for (their containers' requests)."
+    },
+    "used": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "description": "What they use now (the metrics API's), or null without one."
+    },
+    "limits": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "description": "What they're held to (the limits their containers set), or null when none sets one."
+    },
+    "allocatable": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "description": "What the nodes can give pods, or null when the nodes can't be listed."
+    },
+    "cells": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "requests, used, limits and allocatable as they're shown."
+    },
+    "shares": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "requests, used and limits as shares of allocatable (28%), or empty."
+    }
+  },
+  "additionalProperties": false
+}

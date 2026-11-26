@@ -607,7 +607,7 @@ def kube_window(app):
     baude.save_settings(kube_context=None, kube_log_wrap=None)
     win = app.window(opts())
     kv = win.kube
-    kv.open()
+    kv.open(page=baude.KUBE_PODS)
     T.wait_for(lambda: kv.store is not None and kv.store.get_n_items() == 7 and not kv.loading, "the pods")
     kv.table.sort_by_column(next(c for c in kv.columns if c.get_title() == "CPU"), Gtk.SortType.DESCENDING)
     return win, kv
@@ -625,6 +625,36 @@ def _(app):
     T.pump(0.3)
     kv.ns_btn.popup()
     return win
+
+
+def kube_home(app, context="k3d-dev"):
+    """The Kubernetes view's Home on tests/fake_kubectl.py's context, as if it had been open half an hour."""
+    import kube_fixture as kf
+    os.environ.update(KUBECONFIG=kf.make_kubeconfig(os.path.join(T.TMP, "shot-kubeconfig")),
+                      BAUDE_KUBECTL=os.path.join(HERE, "fake_kubectl.py"), BAUDE_HELM=os.path.join(HERE, "fake_kubectl.py"))
+    for k in ("FAKE_KUBECTL_PG", "FAKE_KUBECTL_FOLLOW", "FAKE_KUBECTL_STATE"):
+        os.environ.pop(k, None)
+    baude.save_settings(kube_context=None, kube_log_wrap=None)
+    kf.seed_home_history(context)
+    win = app.window(opts())
+    kv = win.kube
+    kv.open(context=context, page=baude.KUBE_HOME)
+    T.wait_for(lambda: kv.table_stack.get_visible_child_name() == "home" and not kv.loading, "Home")
+    return win, kv
+
+
+@scene("38e-kubernetes-home", "Kubernetes' Home: the whole stack's CPU and memory, requested, used and limits, each a "
+                              "bar against what the nodes can give pods, how they went over the last half hour; by "
+                              "namespace (and by node, on a cluster of more than one)", size=(1200 + SIDEBAR, H))
+def _(app):
+    return kube_home(app)[0]
+
+
+@scene("38e-kubernetes-home-prod", "Kubernetes' Home on a cluster with no metrics API and three nodes: what's used "
+                                   "is N/A, requested and limits still added up, by namespace and by node",
+       size=(1200 + SIDEBAR, H))
+def _(app):
+    return kube_home(app, "prod")[0]
 
 
 @scene("38e-kubernetes-logs", "Kubernetes: a pod's logs under the table, followed (kubectl logs -f), its containers "
@@ -794,7 +824,7 @@ def _(app):
         os.environ.pop(k, None)
     win = HostThere().pick(app.window(opts()))
     kv = win.kube
-    kv.open()
+    kv.open(page=baude.KUBE_PODS)
     T.wait_for(lambda: kv.store is not None and kv.store.get_n_items() == 7 and not kv.loading, "the pods", 30)
     kv.show_logs("shop/api-6f7c-mnopq")
     T.wait_for(lambda: kv.logs is not None and "GET /healthz 200 0.9ms" in kv.logs.buffer.get_property("text"),

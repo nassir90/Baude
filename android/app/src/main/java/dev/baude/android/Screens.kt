@@ -621,7 +621,7 @@ fun AskButtons(chat: Chat, ask: Ask, alwaysOffered: Boolean, name: String = "Cla
         FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Button(Wording.Common.allow, suggested = true, enabled = writes) { Mesh.answer(chat, ask, allow = true) }
             // (a plan's agreed to each time)
-            if (alwaysOffered && ask.tool != "ExitPlanMode") Button(Wording.Asks.alwaysAllow(tool = toolDisplay(ask.tool).first),
+            if (alwaysOffered && ask.tool != "ExitPlanMode") Button(Wording.Asks.alwaysAllow(tool = toolTitle(ask.tool)),
                 enabled = writes) {
                 Mesh.answer(chat, ask, allow = true, always = true)
             }

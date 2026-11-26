@@ -537,6 +537,26 @@ abstract class Parity(private val theme: String, private val scene: String) {
                 show { KubeScreen(host.getString("id"), {}) }
                 repeat(10) { if (find("shop") == null) flush(true) } // (contexts, connect, then the summary: a host.py each)
             }
+            name == "kubernetes-home-prod" -> {
+                show { KubeScreen(host.getString("id"), {}, context = "prod") }
+                repeat(10) { if (find("shop") == null) flush(true) }
+            }
+            name == "kubernetes-home-crowded" -> { // (scrolled to its tables' end: the Other rows)
+                show { KubeScreen(host.getString("id"), {}, context = "crowded") }
+                repeat(10) { if (find("billing") == null) flush(true) }
+                roots().flatMap { all(it.semanticsOwner.rootSemanticsNode) }.filter { n ->
+                    n.config.contains(SemanticsProperties.VerticalScrollAxisRange) && n.config.contains(SemanticsActions.ScrollBy)
+                }.forEach { n -> repeat(4) { n.config[SemanticsActions.ScrollBy].action?.invoke(0f, 2500f); settle() } }
+                flush(true)
+            }
+            name == "kubernetes-home-hover" -> { // (a long press on the memory history, then dragged to four fifths across)
+                show { KubeScreen(host.getString("id"), {}, context = "crowded") }
+                repeat(10) { if (find("billing") == null) flush(true) }
+                // (the memory card's history, where the crowded scene draws it: its semantics report no size here)
+                val v = activity.window.decorView
+                touch(v.width * 0.66f, v.height * 0.636f, v.width * 0.74f, lift = false, holdMs = 800)
+                flush(true)
+            }
             name == "kubernetes-shell" -> {
                 show { KubeScreen(host.getString("id"), {}, page = "pods") }
                 tap("CPU")
@@ -839,7 +859,7 @@ abstract class Parity(private val theme: String, private val scene: String) {
     }
 
     /** A finger put down at (x, y) and moved across to toX in steps a frame apart, then lifted (or held there). */
-    private fun touch(x: Float, y: Float, toX: Float, lift: Boolean = true) {
+    private fun touch(x: Float, y: Float, toX: Float, lift: Boolean = true, holdMs: Long = 0) {
         val v = activity.window.decorView
         val down = android.os.SystemClock.uptimeMillis()
         fun send(action: Int, at: Float) {
@@ -850,6 +870,9 @@ abstract class Parity(private val theme: String, private val scene: String) {
             org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idleFor(Duration.ofMillis(16))
         }
         send(android.view.MotionEvent.ACTION_DOWN, x)
+        repeat((holdMs / 16).toInt()) { // (held still: a long press)
+            org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idleFor(Duration.ofMillis(16))
+        }
         val steps = 12
         if (toX != x) for (i in 1..steps) send(android.view.MotionEvent.ACTION_MOVE, x + (toX - x) * i / steps)
         if (lift) send(android.view.MotionEvent.ACTION_UP, toX)

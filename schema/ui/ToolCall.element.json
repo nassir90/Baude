@@ -10,6 +10,8 @@
     "toolcards.py:ToolCard",
     "toolcards.py:summarize_tool",
     "toolcards.py:tool_display",
+    "toolcards.py:tool_label",
+    "baudelib/toolnames.py",
     "toolcards.py:tool_input_view",
     "toolcards.py:_kv_rows",
     "toolcards.py:_value_widget",
@@ -48,7 +50,8 @@
       "parts": [
         {
           "name": "name",
-          "shows": "The tool's name in bold, as Claude Code names it (Bash, Read, Edit, Write, Grep, Glob, WebFetch, WebSearch, TodoWrite, Task, Agent, Skill, NotebookEdit, ExitPlanMode, …). An MCP tool (mcp__<server>__<tool>) shows its tool part humanized and capitalized, with the server's prefix dropped: mcp__github__create_issue → \"Create issue\", mcp__claude_ai_Slack__slack_send_message → \"Send message\"."
+          "shows": "The tool's name in bold, as Claude Code names it (Bash, Read, Edit, Write, Grep, Glob, WebFetch, WebSearch, TodoWrite, Task, Agent, Skill, NotebookEdit, ExitPlanMode, …). An MCP tool (mcp__<server>__<tool>) shows as \"<Server> / <Tool>\" (mcp__mesh__tasks → \"Mesh / Tasks\", mcp__claude_ai_Slack__slack_send_message → \"Slack / Send message\"): the server's title and the tool's from what's structured, best first: Baude's own servers' (baudelib/toolnames.py: each says them in its initialize's serverInfo.title and its tools/list's title), the names the chat's host says its claude's servers are configured as (its system init's mcp_servers, kept by the host and said in its info's tool_names: \"claude.ai Slack\" → \"Slack\"), and only then the name itself in words (the server's prefix dropped from the tool's: slack_send_message → \"Send message\"; a server known only by an id is \"MCP\").",
+          "decisions": [{"said": "A ToolSearch call showed its raw query (select:mcp__mesh__tasks) and MCP tools showed as mcp__server__tool; asked for human-readable, namespaced names such as \"Mesh / Tool\", ideally from the JSON (the server's and tool's own names) rather than split from underscores (paraphrased)", "rule": "Every app names an MCP server's tool \"<Server> / <Tool>\" wherever it names one (a tool card, Meta's cards for other servers' tools, ToolSearch's select list, a permission prompt, Always allow, a denied note, a notification), from the server's and tool's own titles and the server names Claude Code reports, which the chat's host says on the wire (Info's tool_names); splitting the name is only the fallback.", "decided": "2026-11-26", "source": [{"issue": "BaudeInternal#257"}]}]
         },
         {
           "name": "toggles",
@@ -85,7 +88,7 @@
         },
         {
           "name": "summary",
-          "shows": "Plain weight, first line only, at most 120 characters, then cut with … to fit. What it is: Claude's description if the input has one; else the first of command, file_path, notebook_path, pattern, url, query, prompt, path, skill that's set. A command (Bash) without a description shows nothing here: a description on this line is always Claude's, never Baude's words. Grep/Glob's pattern is in monospace. An MCP tool's server name comes first, dimmed (55%), then two spaces (\"GitHub  …\"; an unnamed connector with only an id shows \"MCP\"). Then, dimmed at 55% after \"  · \": \"running in background\", \"interrupted\", and/or \"denied\". AskUserQuestion: its first question (+\" (+N more)\"), and once answered \"<header>: <answer> · <header>: <answer>\". The summary is selectable (to copy) and updates live as the input streams in.",
+          "shows": "Plain weight, first line only, at most 120 characters, then cut with … to fit. What it is: Claude's description if the input has one; else the first of command, file_path, notebook_path, pattern, url, query, prompt, path, skill that's set. A command (Bash) without a description shows nothing here: a description on this line is always Claude's, never Baude's words. Grep/Glob's pattern is in monospace. A ToolSearch whose query selects tools (\"select:a,b\") shows them by name, comma-separated (\"Mesh / Tasks, Mesh / Task run\"), never the raw query; its input view lists them a line each. Then, dimmed at 55% after \"  · \": \"running in background\", \"interrupted\", and/or \"denied\". AskUserQuestion: its first question (+\" (+N more)\"), and once answered \"<header>: <answer> · <header>: <answer>\". The summary is selectable (to copy) and updates live as the input streams in.",
           "copy": [
             "tool_calls.running_in_background",
             "meta.interrupted",

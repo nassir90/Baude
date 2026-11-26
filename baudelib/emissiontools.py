@@ -8,7 +8,7 @@ import os
 import sys
 import threading
 
-from baudelib import meshtools, wire
+from baudelib import meshtools, toolnames, wire
 
 NAME = "emission"
 HOST_WAIT_S = 85  # (the host's wait on Emission's answer: a page's load is 30 s of it at most)
@@ -290,8 +290,8 @@ def serve(me=None, rfile=None, wfile=None, socket=None):
             cancels.pop(key(mid), None)
         if result is not None and not cancelled.is_set():  # (a cancelled call's answered with nothing, as MCP has it)
             send({"jsonrpc": "2.0", "id": mid, "result": result})
-    listed = [{"name": n, "description": d, "inputSchema": {"type": "object", "properties": props,
-                                                            **({"required": req} if req else {})}}
+    listed = [{"name": n, **({"title": t} if (t := toolnames.TITLES[NAME].get(n)) else {}), "description": d,
+               "inputSchema": {"type": "object", "properties": props, **({"required": req} if req else {})}}
               for n, (d, props, req) in SCHEMAS.items()]
 
     def take(msg):
@@ -306,7 +306,8 @@ def serve(me=None, rfile=None, wfile=None, socket=None):
         if method == "initialize":
             send({"jsonrpc": "2.0", "id": mid, "result": {
                 "protocolVersion": params.get("protocolVersion") or "2025-06-18",
-                "capabilities": {"tools": {}}, "serverInfo": {"name": NAME, "version": "1"}}})
+                "capabilities": {"tools": {}},
+                "serverInfo": {"name": NAME, "title": toolnames.SERVERS[NAME], "version": "1"}}})
         elif method == "tools/list":
             send({"jsonrpc": "2.0", "id": mid, "result": {"tools": listed}})
         elif method == "tools/call":

@@ -1096,6 +1096,30 @@ abstract class Screens(private val theme: String) {
         layOut()
         screen("10f-chat-read-only-member-menu")
     }
+    /** MCP tools named: a ToolSearch loading the mesh's tools (its input open), a mesh tool's card, and a Slack
+     * connector's tool asking to run, the host's info saying how its tools are named. */
+    @Test fun chatMcpNames() {
+        Mesh.infos["h1"] = Msg.Info.from(org.json.JSONObject().put("id", "h1").put("name", "workshop").put("tool_names",
+            org.json.JSONObject().put("servers", org.json.JSONObject().put("mesh", "Mesh").put("claude_ai_Slack", "Slack"))))
+        val chat = Mesh.openChat("h1", "a")
+        settle()
+        chat.lines.clear()
+        fun call(id: String, name: String, input: org.json.JSONObject) = dev.baude.android.took(chat.calls, chat.lines,
+            Line("call", org.json.JSONObject().put("id", id).put("name", name).put("input", input).toString()))
+        chat.lines.add(Line("you", "Which of my tasks ran today? Post it to the team channel."))
+        call("ts", "ToolSearch", org.json.JSONObject().put("query", "select:mcp__mesh__tasks,mcp__mesh__task_run").put("max_results", 2))
+        call("mt", "mcp__mesh__tasks", org.json.JSONObject().put("bot", "a1b2c3"))
+        val post = org.json.JSONObject().put("channel_id", "C024BE91L").put("message", "Two tasks ran today: nightly tests and the weekly report.")
+        call("sl", "mcp__claude_ai_Slack__slack_send_message", post)
+        chat.calls.byId.getValue("ts").result("Loaded 2 tools", false, emptyList())
+        chat.calls.byId.getValue("mt").result("[]", false, emptyList())
+        chat.calls.byId.getValue("ts").inputOpen = true
+        chat.calls.opened["ts"] = true
+        chat.asks.add(dev.baude.android.Ask("perm-sl", "mcp__claude_ai_Slack__slack_send_message", post, "sl"))
+        show { ChatShell("h1", "a", back = {}, open = { _, _ -> }, feedback = {}, first = "chat") }
+        laidOut()
+        screen("10g-chat-mcp-names")
+    }
     @Test fun chatMeta() = chatAt("11-chat-meta", "meta")
     @Test fun chatSubagents() = chatAt("12-chat-subagents", "agents")
     // (Meta's forms, cards in its conversation: one brought up, filled by Meta, submitted; another scrolled past,

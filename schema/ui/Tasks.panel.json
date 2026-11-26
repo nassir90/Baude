@@ -66,7 +66,7 @@
     },
     {
       "name": "task page",
-      "shows": "A header row: a back button (tooltip 'Tasks'), the task's name in bold (ellipsized), then flat buttons Run (play), Change (pencil) and Delete (trash). Below it, scrolling, three groups each with its heading: 'Triggers', 'Inputs', 'Runs'. Each group's rows are a dense list's: Baude's as compact as the sessions list (at least 26 px, 1 px above and below, their buttons 24 px), the phone's a menu's row high (popup.row, 34), its buttons filling it. No script and no runtime: the run page's version, and a failed run's log, are all of the script a person sees. Read when opened, every 5 seconds while a run is going, and after each change here.",
+      "shows": "A header row: a back button (tooltip 'Tasks'), the task's name in bold (ellipsized), then flat buttons Run (play), Change (pencil) and Delete (trash). Below it, scrolling, a boxed list of one switch row, 'Hand failures to the Bot', then three groups each with its heading: 'Triggers', 'Inputs', 'Runs'. Each group's rows are a dense list's: Baude's as compact as the sessions list (at least 26 px, 1 px above and below, their buttons 24 px), the phone's a menu's row high (popup.row, 34), its buttons filling it. No script and no runtime: the run page's version, and a failed run's log, are all of the script a person sees. Read when opened, every 5 seconds while a run is going, and after each change here.",
       "copy": [
         "tasks.title",
         "tasks.run",
@@ -74,6 +74,7 @@
         "common.delete",
         "tasks.delete_heading",
         "common.cancel",
+        "tasks.fallback",
         "tasks.triggers",
         "signal_card.inputs",
         "tasks.runs"
@@ -97,6 +98,31 @@
         }
       ],
       "parts": [
+        {
+          "name": "hand failures",
+          "shows": "Above the groups, its own small boxed list of one switch row titled 'Hand failures to the Bot' (no subtitle, title not markup), on while a failed run is handed to the Bot.",
+          "copy": [
+            "tasks.fallback"
+          ],
+          "actions": [
+            {
+              "by": "toggle the switch",
+              "does": "saves the task at once on the host with its fallback as set, its script, runtime, inputs and triggers as they are; no dialog, no Save"
+            }
+          ],
+          "decisions": [
+            {
+              "said": "Hand failures to the bot toggle should be on the main task page not in some pen field.",
+              "rule": "Every app puts the 'Hand failures to the Bot' switch on the task's page, saved the moment it is flipped, and not in the Change Task dialog",
+              "decided": "2026-11-26",
+              "source": [
+                {
+                  "issue": "BaudeInternal#259"
+                }
+              ]
+            }
+          ]
+        },
         {
           "name": "triggers",
           "shows": "Heading 'Triggers' with a flat + at its right (tooltip 'Add trigger'). One compact row per trigger: an icon (alarm clock for a schedule, branch for a git push), the title saying what fires it ('weekdays at 09:00', 'every 2 hours', 'push to main in ~/site'), a warning icon with the trigger's last error as its tooltip if it has one, and a remove button (minus; tooltip 'Remove trigger'). No triggers: the dim line 'By hand' (every task can be run by hand).",
@@ -206,18 +232,17 @@
     },
     {
       "name": "task dialog",
-      "shows": "An alert dialog headed 'Change Task', Cancel and Save (suggested). Content: a 'Name' field and a switch row 'Hand failures to the Bot'. Neither the script nor how it runs: those are the Bot's to change.",
+      "shows": "An alert dialog headed 'Change Task', Cancel and Save (suggested). Content: a 'Name' field only. Not the script, not how it runs, not whether failures go to the Bot (a switch on the task's page): those are the Bot's to change or have a place of their own.",
       "copy": [
         "tasks.change_heading",
         "common.name",
-        "tasks.fallback",
         "common.cancel",
         "common.save"
       ],
       "actions": [
         {
           "by": "click Save",
-          "does": "saves its name and fallback on the host, its script, runtime, inputs and triggers as they are"
+          "does": "saves its name on the host, its script, runtime, inputs, triggers and fallback as they are"
         },
         {
           "by": "click Cancel / key Esc",
@@ -227,7 +252,7 @@
     },
     {
       "name": "run form",
-      "shows": "An alert dialog headed 'Run <task>' with one control per input: text field, number box, switch, or drop-down of its choices, each labelled, filled with its default; buttons Cancel, Run with dummy answers and Run (suggested).",
+      "shows": "An alert dialog headed 'Run <task>', as the app's settings dialogs are (Change Task, a chat's Access): its inputs as one boxed list of setting rows, each titled with its label (its name if none), wrapped, with no subtitle, filled with its default: a yes/no input a switch row, a text or number input an entry row (a number's in the error colour, and Run off, while it isn't one), a choice a drop-down row of its choices. Under the list, centred, the lesser flat button Run with dummy answers. Then the buttons Cancel and Run (suggested), the only two side by side. The phone draws the same: its boxed list, switch, entry and choice rows, the flat Run with dummy answers under them, Cancel and Run at the end.",
       "copy": [
         "tasks.run_heading",
         "common.cancel",
@@ -242,6 +267,18 @@
         {
           "by": "click Run with dummy answers",
           "does": "runs the script as it is, side effects and all, with its asks answered by a dummy agent and its failure not handed to the Bot"
+        }
+      ],
+      "decisions": [
+        {
+          "said": "The run form looked ugly and unlike any of the app's other settings (paraphrased: the form shown when running a task with inputs)",
+          "rule": "Every app draws a task's run form as its settings: one boxed list of rows titled with each input's label (wrapped, no subtitle), a switch row for yes/no, an entry row for text and number, a drop-down row for a choice; one suggested button, Run, beside Cancel; Run with dummy answers out of that row, a flat button under the list, outside what scrolls; a number is red from the start while its text isn't a finite number (not nan, inf, 1e999 or 1_000), an empty optional number is fine and sends nothing (the host's default stands), Enter in an entry runs the form when it's fit",
+          "decided": "2026-11-26",
+          "source": [
+            {
+              "issue": "BaudeInternal#258"
+            }
+          ]
         }
       ]
     },

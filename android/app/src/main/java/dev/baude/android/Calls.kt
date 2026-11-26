@@ -117,6 +117,7 @@ fun summary(name: String, input: JSONObject?): String {
         return first(qs.optJSONObject(0)!!.optString("question")) + if (qs.length() > 1) " (+${qs.length() - 1} more)" else ""
     }
     fun text(k: String) = input.opt(k) as? String
+    if (name == "ToolSearch") McpNames.selected(text("query").orEmpty())?.let { picked -> return picked.joinToString(", ") { toolTitle(it) } }
     if (text("command") != null && text("description").orEmpty().isBlank()) return ""
     for (k in listOf("description", "command", "file_path", "notebook_path", "pattern", "url", "query", "prompt", "path", "skill"))
         text(k)?.takeIf { it.isNotBlank() }?.let { return first(it) }

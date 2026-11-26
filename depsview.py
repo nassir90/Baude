@@ -1,5 +1,5 @@
 """What Baude and Record show of a dependency (baudelib.deps, schema/deps): Missing, the state a feature shows in its
-place when one it needs isn't there (☰ → Terminal without VTE, Kubernetes without kubectl on its host, Database Schemas
+place when one it needs isn't there (☰ → Terminal without VTE, Kubernetes without kubectl on its host, Databases
 without Docker, the Git page without git; the phone's MissingDep the same), and Settings → Dependencies (Page: the host
 picked beside New session's, as its deps op says them, under what needs them)."""
 import threading

@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Icon
@@ -37,8 +38,10 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -156,11 +159,11 @@ class TasksState(val live: Boolean = true) {
 
 /** A task as it's sent to be saved: the whole of it but its script (left as it is: the Bot's to change). */
 private fun whole(t: Msg.Task, form: List<Msg.TaskField>? = t.form,
-                  triggers: List<Msg.TaskTrigger>? = t.triggers): JSONObject {
+                  triggers: List<Msg.TaskTrigger>? = t.triggers, fallback: Boolean = t.fallback ?: true): JSONObject {
     val o = JSONObject().put("name", t.name.orEmpty()).put("runtime", t.runtime ?: "python")
         .put("form", JSONArray(form.orEmpty().map { it.json() }))
         .put("triggers", JSONArray(triggers.orEmpty().map { it.json() }))
-        .put("fallback", t.fallback ?: true).put("paused", t.paused == true)
+        .put("fallback", fallback).put("paused", t.paused == true)
     t.id?.let { o.put("id", it) }
     t.timeoutS?.let { o.put("timeout_s", it) }
     return o
@@ -324,7 +327,8 @@ fun TasksPage(hostId: String, sid: String, here: Boolean, state: TasksState? = n
                     TaskView(t, st.runs.toList(), offset, back = { st.page = "list"; load() }, run = { runOrAsk(t) },
                         change = { st.editing = t }, delete = { st.deleting = t }, addTrigger = { st.adding = t },
                         removeTrigger = { tr -> save(whole(t, triggers = t.triggers.orEmpty().filter { it.id != tr.id })) },
-                        editForm = { st.forming = t }, openRun = { openRun(it) })
+                        editForm = { st.forming = t }, openRun = { openRun(it) },
+                        hand = { on -> save(whole(t, fallback = on)) })
                 }
                 "run" -> st.run?.let { r ->
                     Mesh.tick.value
@@ -391,7 +395,7 @@ fun TasksPage(hostId: String, sid: String, here: Boolean, state: TasksState? = n
 @Composable
 private fun TaskView(t: Msg.Task, runs: List<Msg.TaskRun>, offset: Int, back: () -> Unit, run: () -> Unit, change: () -> Unit,
                      delete: () -> Unit, addTrigger: () -> Unit, removeTrigger: (Msg.TaskTrigger) -> Unit, editForm: () -> Unit,
-                     openRun: (Msg.TaskRun) -> Unit) {
+                     openRun: (Msg.TaskRun) -> Unit, hand: (Boolean) -> Unit) {
     val c = LocalBaude.current
     Column(Modifier.fillMaxSize()) {
         PageHeader(Wording.Tasks.title, t.name.orEmpty().ifBlank { Wording.Tasks.task }, back) {
@@ -400,6 +404,9 @@ private fun TaskView(t: Msg.Task, runs: List<Msg.TaskRun>, offset: Int, back: ()
             IconButton(Adwaita.UserTrash, Wording.Common.delete, onClick = delete)
         }
         Scrolled {
+            BoxedList(listOf(t), "") { x ->
+                SwitchRow(Wording.Tasks.fallback, null, x.fallback ?: true) { on -> hand(on) }
+            }
             GroupHeading(Wording.Tasks.triggers) { IconButton(Adwaita.ListAdd, Wording.Tasks.addTrigger, onClick = addTrigger) }
             BoxedList(t.triggers.orEmpty(), Wording.Tasks.byHand) { tr ->
                 ActionRow(triggerText(tr), null, compact = true, prefix = {
@@ -514,40 +521,46 @@ private fun Label(text: String) {
     Text(text, style = Type.body, color = LocalBaude.current.fg)
 }
 
-/** Change Task: its name, and whether a failure's handed to the Bot. */
+/** Change Task: its name. */
 @Composable
 private fun TaskDialog(t: Msg.Task, done: (JSONObject?) -> Unit) {
     val c = LocalBaude.current
     var name by remember { mutableStateOf(t.name.orEmpty()) }
-    var fallback by remember { mutableStateOf(t.fallback ?: true) }
     AlertDialog(
         onDismissRequest = { done(null) },
         title = { Text(Wording.Tasks.changeHeading) },
         text = {
             Column(Modifier.heightIn(max = 520.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Field(name, { name = it }, Wording.Common.name)
-                Row(Modifier.fillMaxWidth().clickable { fallback = !fallback }, verticalAlignment = Alignment.CenterVertically) {
-                    Text(Wording.Tasks.fallback, style = Type.body, color = c.fg, modifier = Modifier.weight(1f))
-                    Switch(fallback, { fallback = it }, colors = SwitchDefaults.colors(checkedTrackColor = c.accentBg, checkedThumbColor = c.accentFg))
-                }
             }
         },
         confirmButton = {
-            Button(Wording.Common.save, suggested = true) { done(whole(t).put("name", name).put("fallback", fallback)) }
+            Button(Wording.Common.save, suggested = true) { done(whole(t).put("name", name)) }
         },
         dismissButton = { Button(Wording.Common.cancel) { done(null) } },
         containerColor = c.dialog,
     )
 }
 
-/** A field's default as the run form fills it. */
+/** A field's default as the run form fills it (a number as the host has it). */
 private fun defaultText(f: Msg.TaskField): String = when (val d = f.default) {
     null, JSONObject.NULL -> ""
-    is Number -> if (d.toDouble() == Math.floor(d.toDouble())) d.toLong().toString() else d.toString()
     else -> d.toString()
 }
 
-/** Run <task>: a control for each field of its form, filled with its default; Cancel, Dry run, Run. */
+private val NUMBER = Regex("[+-]?(?:[0-9]+\\.?[0-9]*|\\.[0-9]+)(?:[eE][+-]?[0-9]+)?")
+
+/** Text as the number it is (a Long when whole and small, else a Double): null for text that isn't a finite number in
+ * plain digits (not NaN, Infinity, 1e999, 1_000 or 1f), and for empty text. */
+private fun numberOf(text: String): Number? {
+    val s = text.trim()
+    if (!NUMBER.matches(s)) return null
+    val d = s.toDoubleOrNull()?.takeIf { it.isFinite() } ?: return null
+    return s.toLongOrNull() ?: d
+}
+
+/** Run <task>: a row for each of its inputs as the settings have them (a switch, an entry, a choice), titled with its
+ * label and filled with its default; Cancel and Run, and under the rows the lesser Run with dummy answers. */
 @Composable
 private fun RunForm(t: Msg.Task, done: (JSONObject?, Boolean) -> Unit) {
     val c = LocalBaude.current
@@ -555,49 +568,62 @@ private fun RunForm(t: Msg.Task, done: (JSONObject?, Boolean) -> Unit) {
     val values = remember { mutableStateListOf<String>().apply { addAll(fields.map { f ->
         if (f.type == "bool") (f.default == true).toString() else if (f.type == "choice") defaultText(f).ifBlank { f.choices.orEmpty().firstOrNull().orEmpty() }
         else defaultText(f) }) } }
+    /** A number's text is fit to run while it's a number, or empty if the field is optional (then nothing is sent). */
+    fun fit(i: Int) = fields[i].type != "number" || if (values[i].isBlank()) fields[i].required != true else numberOf(values[i]) != null
+    val filledIn = fields.indices.all { fit(it) }
     fun filled() = JSONObject().apply {
         fields.forEachIndexed { i, f ->
-            val v = values[i]
-            put(f.name.orEmpty(), when (f.type) {
-                "bool" -> v == "true"
-                "number" -> v.toLongOrNull() ?: v.toDoubleOrNull() ?: JSONObject.NULL
-                else -> v
-            })
+            when (f.type) {
+                "bool" -> put(f.name.orEmpty(), values[i] == "true")
+                "number" -> numberOf(values[i])?.let { put(f.name.orEmpty(), it) }
+                else -> put(f.name.orEmpty(), values[i])
+            }
         }
     }
     AlertDialog(
         onDismissRequest = { done(null, false) },
         title = { Text(Wording.Tasks.runHeading(name = t.name.orEmpty())) },
         text = {
-            Column(Modifier.heightIn(max = 520.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                fields.forEachIndexed { i, f ->
-                    val label = f.label?.ifBlank { null } ?: f.name.orEmpty()
-                    when (f.type) {
-                        "bool" -> Row(Modifier.fillMaxWidth().clickable { values[i] = (values[i] != "true").toString() },
-                            verticalAlignment = Alignment.CenterVertically) {
-                            Text(label, style = Type.body, color = c.fg, modifier = Modifier.weight(1f))
-                            Switch(values[i] == "true", { values[i] = it.toString() },
-                                colors = SwitchDefaults.colors(checkedTrackColor = c.accentBg, checkedThumbColor = c.accentFg))
+            Column {
+                Column(Modifier.weight(1f, fill = false).heightIn(max = 520.dp).verticalScroll(rememberScrollState())) {
+                    BoxedList(fields.indices.toList(), "", inset = 0.dp) { i ->
+                        val f = fields[i]
+                        val label = f.label?.ifBlank { null } ?: f.name.orEmpty()
+                        when (f.type) {
+                            "bool" -> SwitchRow(label, null, values[i] == "true", titleLines = Int.MAX_VALUE) { values[i] = it.toString() }
+                            "choice" -> Choice(label, f.choices.orEmpty(), values[i], { it }, titleLines = Int.MAX_VALUE) { values[i] = it }
+                            else -> EntryRow(label, values[i], f.type == "number", !fit(i), { if (filledIn) done(filled(), false) }) { values[i] = it }
                         }
-                        "choice" -> Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Label(label)
-                            Picker(values[i], label, f.choices.orEmpty().map { it to it }, values[i]) { values[i] = it }
-                        }
-                        "number" -> { Label(label); NumberField(values[i]) { values[i] = it.filter { ch -> ch.isDigit() || ch == '.' || ch == '-' } } }
-                        else -> { Label(label); Field(values[i], { values[i] = it }, "") }
                     }
                 }
-                // (stacked, as the desktop's alert stacks them when they don't fit side by side)
-                Column(Modifier.fillMaxWidth().padding(top = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Button(Wording.Tasks.run, suggested = true, modifier = Modifier.fillMaxWidth()) { done(filled(), false) }
-                    Button(Wording.Tasks.dryRun, modifier = Modifier.fillMaxWidth()) { done(filled(), true) }
-                    Button(Wording.Common.cancel, modifier = Modifier.fillMaxWidth()) { done(null, false) }
+                Box(Modifier.align(Alignment.CenterHorizontally).padding(top = 12.dp).clip(RoundedCornerShape(8.dp))
+                    .clickable(enabled = filledIn, role = Role.Button) { done(filled(), true) }.padding(horizontal = 16.dp, vertical = 9.dp)) {
+                    Text(Wording.Tasks.dryRun, style = Type.bold, color = if (filledIn) c.fg else c.fg.copy(alpha = c.fg.alpha * 0.4f))
                 }
             }
         },
-        confirmButton = {},
+        confirmButton = { Button(Wording.Tasks.run, suggested = true, enabled = filledIn) { done(filled(), false) } },
+        dismissButton = { Button(Wording.Common.cancel) { done(null, false) } },
         containerColor = c.dialog,
     )
+}
+
+/** A row to type in (Adw.EntryRow): its title small over what's typed, a pencil after; number: a number's keyboard, and
+ * the title and text in the error colour while it isn't one. */
+@Composable
+private fun EntryRow(title: String, value: String, number: Boolean, bad: Boolean, enter: () -> Unit, set: (String) -> Unit) {
+    val c = LocalBaude.current
+    Row(Modifier.fillMaxWidth().heightIn(min = 50.dp).padding(horizontal = 12.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(title, style = Type.caption, color = if (bad) c.destructive else c.dim)
+            BasicTextField(value, set, singleLine = true, textStyle = Type.body.copy(color = if (bad) c.destructive else c.fg),
+                cursorBrush = SolidColor(c.accentBg), modifier = Modifier.fillMaxWidth(),
+                keyboardOptions = KeyboardOptions(keyboardType = if (number) KeyboardType.Number else KeyboardType.Text, imeAction = ImeAction.Done),
+                keyboardActions = KeyboardActions(onDone = { enter() }))
+        }
+        Icon(Adwaita.DocumentEdit, null, tint = c.fg, modifier = Modifier.size(16.dp.icon))
+    }
 }
 
 /** Add Trigger: a schedule (every so many minutes or hours, or at a time of day on the days picked) or a git push (a

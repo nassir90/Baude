@@ -172,7 +172,7 @@ def serve(cwd, only=None, rfile=None, wfile=None):
             continue
         if method == "initialize":
             result = {"protocolVersion": (msg.get("params") or {}).get("protocolVersion") or "2025-06-18",
-                      "capabilities": {"tools": {}}, "serverInfo": {"name": NAME, "version": "1"}}
+                      "capabilities": {"tools": {}}, "serverInfo": {"name": NAME, "title": "Host", "version": "1"}}
         elif method == "tools/list":
             result = {"tools": tools.listed()}
         elif method == "tools/call":

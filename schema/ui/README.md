@@ -57,7 +57,7 @@ An entry or a part may carry:
 - **A closed window leaves nothing listening.** Anything an entry draws that follows the theme (dark or light, the accent) stops following it when its window closes; the owner found Baude and Record growing in memory the longer they run (2026-11-24). Source: `[{"issue": "BaudeInternal#213"}]`.
 - **What closes is freed.** A closed window, a closed tab (a file's code, a chat, a page of notes, the Feedback tab) and a closed dialog are freed with everything they hold, as are a list's rows when it's filled again (a notebook's pages as another notebook is picked), and changing the accent doesn't keep each logo drawn for it; the owner found Baude and Record growing in memory the longer they run (2026-11-24). Source: `[{"issue": "BaudeInternal#213"}]`.
 - **A view out in its own window uses that window's title bar.** A view that moves out to a window of its own
-  (Kubernetes, Docker, Database Schemas, and any view built like them; viewwindow.Out and ViewWindow on the desktop) puts
+  (Kubernetes, Docker, Databases, and any view built like them; viewwindow.Out and ViewWindow on the desktop) puts
   its bar's controls in that window's header bar, beside the window's own controls, with no empty band above the
   view; back over the window it came from, its bar is as it was. The owner found an empty band at the top of the
   Kubernetes view moved out (2026-11-26). Source: `[{"issue": "BaudeInternal#250"}]`.
@@ -167,6 +167,14 @@ An entry or a part may carry:
   saying it was cancelled on the host's own machine while another machine showed Claude's real error, and asked that
   the wire and the main chat keep widgets consistent across the heads viewing a chat (2026-11-26). Source:
   `[{"issue": "BaudeInternal#247"}]`.
+- **An MCP tool is named "Server / Tool".** Wherever an app names a tool of an MCP server (mcp__<server>__<tool>):
+  its card, Meta's card for another server's tool, a ToolSearch's "select:" list, a permission prompt and its Always
+  allow, a denied note, a notification, it says "<Server> / <Tool>" ("Mesh / Tasks"), never the raw name or query. The
+  names come from what's structured: Baude's own servers' titles (their serverInfo.title and tools/list title,
+  baudelib/toolnames.py) and the servers' configured names Claude Code reports (system init's mcp_servers), which a
+  host keeps and says in its info's tool_names; the name split into words is only the fallback. The owner asked for
+  human-readable, namespaced MCP names such as "Mesh / Tool" in place of ToolSearch's raw select:mcp__mesh__tasks,
+  ideally from the JSON rather than split from underscores (2026-11-26). Source: `[{"issue": "BaudeInternal#257"}]`.
 - **A pull request is a pill.** Wherever an app draws a pull request (the Git page's list and log, a reply's or
   message's GitHub pull-request link or bare #12, Signal's links, Record's chat and notes), it's a pill: git's merge
   logo, a space, then the number, never a #, coloured by where it stands (green open, grey draft or closed, red changes

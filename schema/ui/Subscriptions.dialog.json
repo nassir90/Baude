@@ -1,5 +1,5 @@
 {
-  "description": "The Settings dialog's Subscriptions page (Baude's, Record's and the phone's; on the phone the second page of Settings, switched to by the bar at its foot as the desktop dialog's switcher is when narrow): the Claude and Codex subscription accounts kept on the host picked beside New session (as ☰ → Terminal, Kubernetes… and Database Schemas… use it), changed there through its accounts request. Named Subscriptions, not Providers: Settings' Meta group and the model pickers already call inference providers (Ollama, MLX, an endpoint) Providers.",
+  "description": "The Settings dialog's Subscriptions page (Baude's, Record's and the phone's; on the phone the second page of Settings, switched to by the bar at its foot as the desktop dialog's switcher is when narrow): the Claude and Codex subscription accounts kept on the host picked beside New session (as ☰ → Terminal, Kubernetes… and Databases… use it), changed there through its accounts request. Named Subscriptions, not Providers: Settings' Meta group and the model pickers already call inference providers (Ollama, MLX, an endpoint) Providers.",
   "apps": [
     "baude",
     "record",

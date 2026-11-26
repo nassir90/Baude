@@ -434,18 +434,20 @@ list.navigation-sidebar.kube-side > row.kube-side-head-row { margin-top: 9px; }
 .kube-ok { color: @success_color; }
 .kube-warn { color: @warning_color; }
 .kube-bad { color: @error_color; }
-/* Home: a card each for CPU and memory, a bar each for requested (the accent), used (green) and limits (grey), orange
-   past what the nodes can give; its tables plain, on the inside */
+/* Home: a card each for CPU and memory, a bar each for requested (the accent), used (green) and limits (grey), the
+   part past what the nodes can give a segment of its own in orange, a tick where that is; its tables plain, on the
+   inside */
 .kube-home-card { border: 1px solid @baude_rule; border-radius: 10px; padding: 14px 16px; }
-levelbar.kube-bar > trough { min-height: 10px; border-radius: 5px; padding: 0; background: alpha(currentColor, 0.1); }
-levelbar.kube-bar > trough > block { min-height: 10px; border-radius: 5px; border: none; }
-levelbar.kube-bar > trough > block.empty { background: none; }
-levelbar.kube-requested > trough > block.filled { background: @accent_bg_color; }
-levelbar.kube-used > trough > block.filled { background: @success_color; }
-levelbar.kube-limits > trough > block.filled { background: alpha(currentColor, 0.45); }
-levelbar.kube-over > trough > block.filled { background: @warning_color; }
+.kube-bar { min-height: 10px; border-radius: 5px; background: alpha(currentColor, 0.1); }
+.kube-fill { border-radius: 5px; }
+.kube-fill.kube-joined { border-top-right-radius: 0; border-bottom-right-radius: 0; }
+.kube-requested { background: @accent_bg_color; }
+.kube-used { background: @success_color; }
+.kube-limits { background: alpha(currentColor, 0.45); }
+.kube-fill.kube-over { background: @warning_color; border-top-left-radius: 0; border-bottom-left-radius: 0; }
+.kube-tick { background: alpha(currentColor, 0.75); border-radius: 1px; }
 .kube-spark { color: @success_color; }
-.kube-home-head { font-size: 0.85em; font-weight: bold; opacity: 0.6; }
+.kube-home-head { font-size: 0.85em; font-weight: bold; opacity: 0.6; padding: 2px 4px; min-height: 0; }
 .schema-canvas { font-size: 0.92em; }
 .schema-rows { background: @baude_inside; }  /* (opaque: nothing of the diagram shows through) */
 .schema-status { background: alpha(@baude_inside, 0.85); border-radius: 6px; padding: 3px 8px; font-size: 0.85em; }

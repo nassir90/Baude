@@ -11,7 +11,7 @@ import baudelib.client  # noqa: E402  (servers on the network and their sessions
 import baudelib.hosts  # noqa: E402  (this machine's host process, started when it's wanted: see baudelib/hosts.py)
 from baudelib import models as modelslib  # noqa: E402  (what runs a model: claude, apple-claude or pi-claude)
 from baudelib import providers as providerslib  # noqa: E402  (where the models besides Claude's run: their providers)
-from baudelib import wording  # noqa: E402  (the words Baude shows: schema/copy, Record's and the Android app's too)
+from baudelib import toolnames, wording  # noqa: E402  (the words Baude shows: schema/copy, Record's and the Android app's too)
 from baudelib.models import model_program  # noqa: E402,F401
 from lookup import signal_place
 
@@ -1251,6 +1251,7 @@ class WindowDrafts:
         if st == "init":
             self.init_info = msg  # (its model and tools, as claude says them: report)
             TOOL_NAMES.update(t for t in msg.get("tools") or [] if isinstance(t, str))  # (what Signal can name)
+            toolnames.learn_servers(msg.get("mcp_servers"))  # (its MCP servers' names, as they're configured)
         if st == "init" and self.resume_pending:
             return  # the fresh helper process's own id: the session we show is the viewed one
         if st == "init" and self.remote is not None:  # (a network session is its server's id, whatever claude's is)

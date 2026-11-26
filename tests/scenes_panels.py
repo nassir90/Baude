@@ -182,6 +182,18 @@ def _(app):
     return win
 
 
+@scene("56c-update-offered", "A newer version there, Auto restart on update off: Update at the foot of the sessions list, "
+                            "restarted onto only when it's clicked")
+def _(app):
+    sidebar_sessions(T.TMP)
+    win = app.window()
+    u = app.app.updater = baude.update.Updater("baude", app.app.idle, app.app.restart, blocked=app.app.update_waiting)
+    u.seen(baude.update.STARTED[::-1])  # (any commit but this one's, as a look at git with nothing applied finds)
+    T.wait_for(lambda: win.sidebar.update_bar.get_visible(), "Update shown")
+    T.pump(0.3)
+    return win
+
+
 @scene("55-network-group-menu", "⋮ beside the search: Group by, then which groups are listed: each "
                                 "group the sessions are in. Here lab-mac's (New session's host), in Lab")
 def _(app):

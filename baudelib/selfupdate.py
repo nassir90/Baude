@@ -80,6 +80,20 @@ def look(started, module, root=HERE, follow=False):
     return None
 
 
+def offered(started, root=HERE):
+    """One look that changes nothing (off the main loop: it fetches), for Update with auto restart off: the commit
+    look would restart onto, or None. Its upstream's if the checkout's behind it with nothing of its own, else the
+    commit checked out if it isn't started; either way only with nothing changed but what's committed, and not one
+    that wouldn't import (BROKEN; whether it imports is seen as Update's clicked: look)."""
+    git(root, "fetch", "--quiet", timeout=60)
+    if git(root, "status", "--porcelain", "--untracked-files=no") != "":
+        return None
+    head, up = git(root, "rev-parse", "HEAD"), git(root, "rev-parse", "@{upstream}")
+    if head and up and up != head and git(root, "merge-base", "--is-ancestor", "HEAD", up) is not None:
+        head = up
+    return head if head and head != started and head not in BROKEN else None
+
+
 def importable(module, root=HERE, gtk=None):
     """module imports from root in a Python of its own, its bytecode cached for the start (startup.launch_command's):
     without GTK started (no display opened: nothing shown or brought to the front), or, for what needs no GTK

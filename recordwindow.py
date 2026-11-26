@@ -572,16 +572,17 @@ class Window(RecordHosts, Adw.ApplicationWindow, feedback.FeedbackHost, viewers.
         return why
 
     def update_waiting(self, waiting):
-        """(update.Updater's) A new version found and waiting on idle, or not: the bar at the notebooks' foot."""
-        self.update_bar.say(self.restart_blockers() if waiting else None)
+        """(update.Updater's) What Update shows changed: a new version found and waiting on idle (what it waits for in
+        the tooltip), only offered (auto restart off), or none: the bar at the notebooks' foot."""
+        u = getattr(self.get_application(), "updater", None)
+        self.update_bar.say(self.restart_blockers() if waiting else [] if u is not None and u.pending() else None)
 
     def update_now(self):
         """The bar clicked: restarted onto the new version now (a question being answered stopped, said and asked)."""
         u = getattr(self.get_application(), "updater", None)
-        if u is None or not u.ready:
+        if u is None or not u.pending():
             return
-        go = lambda: self.restart({"from": u.started, "to": u.ready,  # noqa: E731
-                                   "commits": update.new_commits(u.started, u.ready, u.root)})
+        go = lambda: u.apply(self.restart)  # noqa: E731
         if self.chat.ask is None:
             return go()
         dlg = Adw.AlertDialog(heading=wording.say("window.restart_now_heading"),

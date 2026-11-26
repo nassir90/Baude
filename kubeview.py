@@ -39,7 +39,7 @@ from lookupkube import (  # noqa: E402,F401  (⌘K's engine: what a folder has)
 )
 from widgets import (  # noqa: E402,F401
     WorkerPool, ensure_icons, find_label, full_time, inside, load_settings, paned_grip, pretty_path, save_settings,
-    time_tip, toast, view_bar, _scales,
+    insert_actions, time_tip, toast, view_bar, _scales,
 )
 from imageviews import Fade, RefreshButton  # noqa: E402,F401
 from pickers import CheckList, ellipsize_dropdown  # noqa: E402,F401
@@ -435,7 +435,7 @@ class KubeView(Gtk.Box):
             act = Gio.SimpleAction.new(name, GLib.VariantType.new("s"))
             act.connect("activate", lambda _a, target, fn=fn: fn(target.get_string()))
             actions.add_action(act)
-        self.insert_action_group("kube", actions)
+        insert_actions(self, "kube", actions)
 
     def build_error(self):
         """What's shown instead of the table when the cluster can't be read: what went wrong (kube_diagnose), the

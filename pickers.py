@@ -17,7 +17,7 @@ from gi.repository import Adw, Gdk, Gio, GLib, GObject, Graphene, Gsk, Gtk, Pang
 
 from baudelib import icons  # noqa: E402  (schema/icons: every app's icons, the Android app's too)
 from baudelib import wording  # noqa: E402
-from widgets import RefIcon, WorkingDots, find_label, time_tip, walk  # noqa: E402
+from widgets import RefIcon, WorkingDots, find_label, insert_actions, time_tip, walk  # noqa: E402
 
 
 class LineGutter(Gtk.Widget):
@@ -407,7 +407,7 @@ class HostPicker(Gtk.MenuButton):
         self.action.connect("change-state", self._changed)
         group = Gio.SimpleActionGroup()
         group.add_action(self.action)
-        self.insert_action_group("hostpicker", group)
+        insert_actions(self, "hostpicker", group)
 
     def _changed(self, action, value):
         action.set_state(value)

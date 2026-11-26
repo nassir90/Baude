@@ -8,9 +8,12 @@ asserted), run offscreen against the tests' throwaway data and fake claude.
     python3 tests/bench_leaks.py --trace 1              # + the Python lines that allocated most each round
     python3 tests/bench_leaks.py --heap                 # (macOS) + the GPU's compiled programs (`heap -s`), and blocks
     GSK_RENDERER=gl python3 tests/bench_leaks.py --heap # (drawn by GTK's GL renderer: cairo's is the default here)
+    GSK_RENDERER=ngl python3 tests/bench_leaks.py --heap --unseen -r 20  # (+ the window put in where no one sees it,
+                                                        # macos.in_unseen: its frames drawn on the GPU, as on a screen)
 
 Each round does every action once; then the round's growth: malloc (what's handed out and not freed: exact, where the
-footprint Activity Monitor shows keeps freed memory a while), the footprint, Python's objects, and GObjects by kind
+footprint Activity Monitor shows keeps freed memory a while; on macOS without the purgeable zone's caches, which the
+system takes back as it needs and which are counted apart, as purgeable), the footprint, Python's objects, and GObjects by kind
 (GOBJECT_DEBUG=instance-count: widgets, windows, popovers, surfaces, renderers, GL contexts). A round that grows the
 same each time is a leak; the first round warms caches up.
 
@@ -51,6 +54,8 @@ ap.add_argument("-a", "--actions", help="comma-separated (see above); default: a
 ap.add_argument("-r", "--rounds", type=int, default=4)
 ap.add_argument("--trace", type=int, default=0, help="tracemalloc's frames: the top allocation sites each round")
 ap.add_argument("--heap", action="store_true", help="(macOS) the GPU's programs and malloc's untyped blocks")
+ap.add_argument("--unseen", action="store_true", help="(macOS) the main window put in where no one sees it "
+                "(macos.in_unseen): drawn frame by frame, as on a screen")
 ap.add_argument("--json", help="also write the rounds' numbers here")
 args = ap.parse_known_args()[0]  # (and AppKit's own, -ApplePersistenceIgnoreState YES)
 if args.trace:
@@ -179,6 +184,11 @@ def long_chat(folder, sid, turns=150):
     return path
 
 
+def unseen(win):
+    if args.unseen and not macos.in_unseen(win):
+        print("(--unseen: the window couldn't be put in; it's drawn as it is offscreen)", flush=True)
+
+
 def baude_actions():
     folder = os.path.join(T.TMP, "repo")
     os.makedirs(folder)
@@ -195,6 +205,7 @@ def baude_actions():
     opts = T.argparse.Namespace(cwd=folder, model=None, resume=None)
     win = app.window(opts)
     T.wait_for(lambda: not win.sidebar.loading, "the sidebar", 60)
+    unseen(win)
 
     def open_chat(w, path):
         info = baude.cached_session_info(path) or {}
@@ -260,6 +271,7 @@ def baude_actions():
 def record_actions():
     app = T.App()
     win = app.win
+    unseen(win)
 
     def notebooks():
         for tid in ("b", "a"):

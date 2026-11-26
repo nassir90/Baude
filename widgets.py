@@ -729,7 +729,27 @@ def discard(widget):
     GLib.idle_add(_dispose_tree, widget)
 
 
+def insert_actions(widget, prefix, group):
+    """widget.insert_action_group, taken out again and emptied as widget's disposed (_dispose_tree): a widget's
+    dispose keeps the groups put in it (they go only as it's finalized), and a group's actions' handlers, which
+    usually reach back to it, are held where Python's collector can't see them (on the actions, in C), so the widget
+    was never finalized, and with it the window it was in."""
+    widget.insert_action_group(prefix, group)
+    widget.action_groups = {**getattr(widget, "action_groups", {}), prefix: group}
+
+
+def drop_actions(widget):
+    """The action groups insert_actions put in widget, and in what's in it, taken out and emptied."""
+    for w in walk(widget):
+        for prefix, group in getattr(w, "action_groups", {}).items():
+            w.insert_action_group(prefix, None)
+            for name in group.list_actions():
+                group.remove_action(name)
+
+
 def _dispose_tree(widget):
+    drop_actions(widget)
+
     def parts(w):  # (parents first: a container's dispose lets go of its children. Not a scrollbar's insides: none
         if isinstance(w, Adw.ComboRow):  # are ours, and its scrolled window asks them for its adjustment as it goes.
             return  # Nor a combo row: its dispose, run again as it's freed, uses its list, freed the first time. Nor
@@ -810,6 +830,7 @@ def free_closed_windows(app):
                 if w.get_parent() is not None:
                     w.unparent()
                 _dispose_tree(w)
+        drop_actions(window)
         if isinstance(window, Gio.ActionMap):  # (its ☰'s actions: their handlers are mostly its own methods)
             for name in window.list_actions():
                 window.remove_action(name)
@@ -997,8 +1018,14 @@ def keep_times(widget):
         retime(widget)
         if widget.times_tick is None:
             widget.times_tick = GLib.timeout_add_seconds(60, tick)
+
+    def hidden(*_):  # (the minute's timer holds the widget: one closed with its window lived on till it ran)
+        if widget.times_tick is not None:
+            GLib.source_remove(widget.times_tick)
+            widget.times_tick = None
     widget.times_tick = None
     widget.connect("map", shown)
+    widget.connect("unmap", hidden)
 
 
 def pretty_path(path):

@@ -224,7 +224,7 @@ class PagesList(Gtk.Box):
             a = Gio.SimpleAction.new(name, GLib.VariantType.new("s"))
             a.connect("activate", lambda _a, v, fn=fn: fn(v.get_string()))
             acts.add_action(a)
-        self.insert_action_group("pages", acts)
+        widgets.insert_actions(self, "pages", acts)
 
     @property
     def folded(self):
@@ -279,6 +279,7 @@ class PagesList(Gtk.Box):
         marked so (metalook.mark_row), and those it's highlighted."""
         while (r := self.index.get_row_at_index(0)) is not None:
             self.index.remove(r)
+            widgets.discard(r)  # (its right-click's handler holds it: never freed otherwise)
         if self.notebook is None:
             return
         self.listed = order, grey = self.names()

@@ -32,18 +32,35 @@ class _MallInfo2(ctypes.Structure):  # (glibc's struct mallinfo2)
                                                "uordblks", "fordblks", "keepcost")]
 
 
+def _purgeable(libc):
+    """macOS: what malloc's purgeable zone has out (a _MallocStats), if there's one yet. It holds caches the system
+    may take back (CoreGraphics' decoded images: each Dock tile set keeps one, the last 16 kept), outside the
+    footprint while unused."""
+    zones, n = ctypes.POINTER(ctypes.c_void_p)(), ctypes.c_uint()
+    libc.malloc_get_all_zones.argtypes = [ctypes.c_uint, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p]
+    libc.malloc_get_zone_name.restype, libc.malloc_get_zone_name.argtypes = ctypes.c_char_p, [ctypes.c_void_p]
+    stats = _MallocStats()
+    if libc.malloc_get_all_zones(0, None, ctypes.byref(zones), ctypes.byref(n)) == 0:
+        for zone in (zones[i] for i in range(n.value)):
+            if b"Purgeable" in (libc.malloc_get_zone_name(zone) or b""):
+                libc.malloc_zone_statistics(ctypes.c_void_p(zone), ctypes.byref(stats))
+    return stats
+
+
 def memory():
-    """{"footprint", "malloc", "blocks"}, in MB (blocks: how many malloc has out). footprint is what Activity Monitor
-    shows (Linux: RSS and swap); malloc doesn't count memory freed but kept for reuse, so it shows growth exactly."""
+    """{"footprint", "malloc", "blocks", "purgeable"}, in MB (blocks: how many malloc has out). footprint is what
+    Activity Monitor shows (Linux: RSS and swap); malloc doesn't count memory freed but kept for reuse, so it shows
+    growth exactly. purgeable (macOS): malloc's caches the system may take back (_purgeable), not in malloc's."""
     libc = ctypes.CDLL(ctypes.util.find_library("c"))
     if sys.platform == "darwin":
         info, count = _VmInfo(), ctypes.c_uint(ctypes.sizeof(_VmInfo) // 4)
         ok = libc.task_info(ctypes.c_uint.in_dll(libc, "mach_task_self_"), 22, ctypes.byref(info),
                             ctypes.byref(count)) == 0  # (22: TASK_VM_INFO)
-        stats = _MallocStats()
+        stats, cache = _MallocStats(), _purgeable(libc)
         libc.malloc_zone_statistics(None, ctypes.byref(stats))
-        return {"footprint": info.phys_footprint / 2**20 if ok else 0.0, "malloc": stats.size_in_use / 2**20,
-                "blocks": stats.blocks_in_use}
+        return {"footprint": info.phys_footprint / 2**20 if ok else 0.0,
+                "malloc": (stats.size_in_use - cache.size_in_use) / 2**20,
+                "blocks": stats.blocks_in_use - cache.blocks_in_use, "purgeable": cache.size_in_use / 2**20}
     got = {}
     try:
         with open("/proc/self/status") as f:
@@ -55,7 +72,8 @@ def memory():
         used, blocks = (mi.uordblks + mi.hblkhd) / 2**20, mi.ordblks + mi.hblks
     except (OSError, AttributeError):
         used, blocks = 0.0, 0
-    return {"footprint": got.get("VmRSS", 0) + got.get("VmSwap", 0), "malloc": used, "blocks": blocks}
+    return {"footprint": got.get("VmRSS", 0) + got.get("VmSwap", 0), "malloc": used, "blocks": blocks,
+            "purgeable": 0.0}
 
 
 _LAST = {"kinds": None, "snapshot": None, "n": 0}
@@ -68,7 +86,7 @@ def write(report, path=None, top=25):
     m = memory()
     kinds = Counter(type(o).__name__ for o in gc.get_objects())
     report.write(f"\n--- memory: footprint {m['footprint']:.0f} MB, malloc {m['malloc']:.1f} MB in {m['blocks']:,} "
-                 f"blocks, {sum(kinds.values()):,} Python objects\n")
+                 f"blocks (and {m['purgeable']:.1f} MB of purgeable caches), {sum(kinds.values()):,} Python objects\n")
     if _LAST["kinds"] is not None:
         grew = (kinds - _LAST["kinds"]).most_common(top)
         report.write("Python objects, the kinds that grew since the last report:\n" +

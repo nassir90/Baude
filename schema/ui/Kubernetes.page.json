@@ -515,7 +515,7 @@
       ],
       "decisions": [
         {
-          "said": "\"Read-only but for the deletes you confirm\" / \"k33d-slice-kub1  (o ious from top bar)\" / \"live\" not needd / \"36 pods\" fine",
+          "said": "\"Read-only but for the deletes you confirm\" / \"<context name> (obvious from top bar)\" / \"live\" not needd / \"36 pods\" fine",
           "rule": "Every app's Kubernetes status line is the count (\"36 pods\") and, for Pods and Nodes, the metrics note (after a fresh note, if any), and nothing else while it shows a list: no context name (the bar has it), no \"live\", no read-only note",
           "decided": "2026-11-26",
           "source": [
@@ -624,7 +624,7 @@
         "record",
         "phone"
       ],
-      "why": "The owner: \"Read-only but for the deletes you confirm\" / \"k33d-slice-kub1  (o ious from top bar)\" / \"live\" not needd / \"36 pods\" fine",
+      "why": "The owner: \"Read-only but for the deletes you confirm\" / \"<context name> (obvious from top bar)\" / \"live\" not needd / \"36 pods\" fine",
       "decided": "2026-11-26",
       "source": [
         {

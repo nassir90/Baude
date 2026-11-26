@@ -51,6 +51,16 @@
       "type": "string",
       "description": "The id of the chat here whose mesh tools start it."
     },
+    "task_run": {
+      "type": "object",
+      "description": "A task's run going here that starts it, as the run's environment names it (BAUDE_TASK_RUN, BAUDE_TASK_TOKEN): nested under its Bot (spawned_by), kept in the run's chats, judged as the member that ran it, and its first turn's end told its Bot. Refused if no run's going with that token.",
+      "properties": {
+        "run": {"type": "string", "description": "The run's id."},
+        "token": {"type": "string", "description": "The run's token."}
+      },
+      "required": ["run", "token"],
+      "additionalProperties": false
+    },
     "system": {
       "type": "string",
       "description": "More for claude's system prompt (--append-system-prompt)."

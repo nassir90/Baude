@@ -99,13 +99,17 @@ private fun gaussTail(x: Float): Float {
     return if (x >= 0) (1f - erf) / 2 else (1f + erf) / 2
 }
 
-/** A chat's state, as Baude's StatusDot: working (grey, pulsing), waiting (asking: yellow); nothing between turns. */
+private val DONE = androidx.compose.ui.graphics.Color(0xFF3584E4) // (Baude's .status-dot.done)
+
+/** A chat's state, as Baude's StatusDot: working (grey, pulsing), waiting (asking: yellow), done (blue: where it's
+ * said, a run's Started); nothing between turns. */
 @Composable
 fun StatusDot(state: String, asking: Boolean) {
     val c = LocalBaude.current
     val colour = when {
         asking -> c.warning
         state == "working" -> c.fg.copy(alpha = 0.45f)
+        state == "done" -> DONE
         else -> return
     }
     val pulse by rememberInfiniteTransition(label = "dot").animateFloat(

@@ -123,6 +123,21 @@ object TaskLinks {
     var pending by mutableStateOf<List<String>?>(null)
 }
 
+/** The chat a message is from (on host, its session), opened; a task's run (run: its run, of task), its Bot's chat
+ * on its Tasks page, at that run, its task's page under it. */
+fun openSender(host: String, session: String, task: String?, run: String?) {
+    if (!run.isNullOrBlank()) TaskLinks.pending = listOf(host, session, task.orEmpty(), run)
+    Meta.opener(host, session)
+}
+
+/** taskspage.all_reported: has every chat the run started said how its first turn finished, or is the run over long
+ * enough ago (an hour) that its page stops looking? */
+fun allReported(r: Msg.TaskRun, log: List<Msg.TaskLogLine>): Boolean {
+    val finished = log.filter { it.kind == "agent" && (it.over ?: "finished") == "finished" }.mapNotNull { it.session }.toSet()
+    val ended = r.ended?.toDouble()
+    return finished.containsAll(r.chats.orEmpty()) || ended != null && System.currentTimeMillis() / 1000.0 - ended > 3600
+}
+
 /** What the Tasks page shows (the list, the task open, the run open, the dialog up), kept while the chat's open.
  * live false: nothing's asked of a host (a holder filled by hand, as the screenshot rig's fixtures are). */
 class TasksState(val live: Boolean = true) {
@@ -236,6 +251,12 @@ fun TasksPage(hostId: String, sid: String, here: Boolean, state: TasksState? = n
                         st.log.clear()
                         st.log.addAll(got.log.orEmpty())
                         st.bot = got.bot.orEmpty()
+                        val tid = got.run?.task.orEmpty()
+                        if (tid.isNotEmpty() && st.task?.id != tid) { // (opened from a link: Back goes to its own task)
+                            st.task = st.tasks.firstOrNull { it.id == tid } ?: Msg.Task(id = tid)
+                            st.runs.clear()
+                            ask(Msg.TaskGet(session = sid, id = tid).json(), "load")
+                        }
                     }
                 }
                 Op.TASK_STARTED -> {}
@@ -272,11 +293,12 @@ fun TasksPage(hostId: String, sid: String, here: Boolean, state: TasksState? = n
             if (st.page == "task") readTask()
         }
     fun runOrAsk(t: Msg.Task) = if (t.form.orEmpty().isNotEmpty()) st.running = t else runIt(t)
-    LaunchedEffect(hostId, sid) { // (opened from a pending restart's See Thread: at that run)
+    LaunchedEffect(hostId, sid, TaskLinks.pending) { // (opened from a pending restart's See Thread, or a chat's line
+        // from the task's run that started it: at that run)
         val p = TaskLinks.pending ?: return@LaunchedEffect
         if (p[0] != hostId || p[1] != sid) return@LaunchedEffect
         TaskLinks.pending = null
-        if (p[2].isNotEmpty()) openTask(Msg.Task(id = p[2]))
+        if (p[2].isNotEmpty()) openTask(st.tasks.firstOrNull { it.id == p[2] } ?: Msg.Task(id = p[2]))
         openRun(Msg.TaskRun(id = p[3], task = p[2], status = "running"))
     }
     LaunchedEffect(here) {
@@ -294,7 +316,9 @@ fun TasksPage(hostId: String, sid: String, here: Boolean, state: TasksState? = n
     LaunchedEffect(here, st.page, st.run?.id) {
         while (here && st.live && st.page == "run") {
             delay(1_000)
-            if (going(st.run?.status)) readRun()
+            val r = st.run
+            if (going(r?.status) || r != null && !r.chats.isNullOrEmpty() && !allReported(r, st.log) &&
+                System.currentTimeMillis() / 1000 % 5 == 0L) readRun() // (what the chats it started said, logged)
         }
     }
     DisposableEffect(hostId, sid) {
@@ -320,9 +344,12 @@ fun TasksPage(hostId: String, sid: String, here: Boolean, state: TasksState? = n
                         hand = { on -> save(whole(t, fallback = on)) })
                 }
                 "run" -> st.run?.let { r ->
+                    Mesh.tick.value
+                    val chats = r.chats.orEmpty().mapNotNull { Mesh.session(hostId, it) }
                     RunView(r, st.log.toList(), st.bot.ifBlank { Wording.Sidebar.bot }, st.task?.name ?: r.name.orEmpty(), offset,
-                        back = { st.page = "task"; readTask() },
-                        stop = { ask(Msg.TaskStop(session = sid, run = r.id.orEmpty()).json(), "stop") })
+                        chats, back = { st.page = "task"; readTask() },
+                        stop = { ask(Msg.TaskStop(session = sid, run = r.id.orEmpty()).json(), "stop") },
+                        openChat = { Meta.opener(hostId, it) })
                 }
                 else -> Scrolled {
                     BoxedList(st.tasks.toList(), if (st.loaded || st.error == null) Wording.Tasks.noTasks else "") { t ->
@@ -440,11 +467,13 @@ internal object LogWrap {
 }
 
 /** A run's page: its header (back, '<task> · <when>', Wrap, Stop while it's going), one line of its facts (why it failed in
- * place of its state, if it did), and its log: the script's output and its errors each in code blocks of their own
- * (errors in the error colour), its asks of the Bot and the Bot's answers as cards, the rest as plain lines. */
+ * place of its state, if it did), Started (the chats it started, as their host lists them now: working, waiting or
+ * done, each opened as it's tapped), and its log: the script's output and its errors each in code blocks of their own
+ * (errors in the error colour), its asks of the Bot and the Bot's answers as cards, and what each chat it started
+ * said as its turn ended, the rest as plain lines. */
 @Composable
-private fun RunView(r: Msg.TaskRun, log: List<Msg.TaskLogLine>, bot: String, task: String, offset: Int, back: () -> Unit,
-                    stop: () -> Unit) {
+private fun RunView(r: Msg.TaskRun, log: List<Msg.TaskLogLine>, bot: String, task: String, offset: Int,
+                    chats: List<Msg.Session>, back: () -> Unit, stop: () -> Unit, openChat: (String) -> Unit) {
     val c = LocalBaude.current
     Column(Modifier.fillMaxSize()) {
         PageHeader(task, "$task · ${hostWhen(r.started?.toDouble(), r.offset?.toInt() ?: offset)}", back) {
@@ -457,6 +486,14 @@ private fun RunView(r: Msg.TaskRun, log: List<Msg.TaskLogLine>, bot: String, tas
             r.seconds?.let { tookText(it.toDouble()) }, r.version)
             .joinToString(" · "),
             style = Type.caption, color = c.dim, modifier = Modifier.padding(start = 10.dp, end = 10.dp, bottom = 6.dp))
+        if (chats.isNotEmpty()) {
+            GroupHeading(Wording.Tasks.startedChats)
+            BoxedList(chats, "") { s ->
+                ActionRow(s.title.orEmpty().ifBlank { Wording.Tasks.task }, null, onClick = { openChat(s.id.orEmpty()) },
+                    prefix = { StatusDot(if (s.state == "working") "working" else "done", s.state == "waiting" || !s.asks.isNullOrEmpty()) },
+                    suffix = { Icon(Adwaita.GoNext, null, tint = c.dim, modifier = Modifier.size(16.dp.icon)) })
+            }
+        }
         // (consecutive output lines together as one block, consecutive errors as another)
         val parts = mutableListOf<List<Msg.TaskLogLine>>()
         for (l in log) {
@@ -471,8 +508,14 @@ private fun RunView(r: Msg.TaskRun, log: List<Msg.TaskLogLine>, bot: String, tas
                 val l = p.first()
                 when (l.kind) {
                     "out", "err" -> LogBlock(p, LogWrap.on)
-                    "ask", "answer" -> Column(Modifier.fillMaxWidth().card(c), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    "ask", "answer", "agent" -> Column(Modifier.fillMaxWidth().card(c), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        val chat = chats.firstOrNull { it.id == l.session }?.title?.ifBlank { null } ?: Wording.Tasks.aChat
                         Text(when {
+                            l.kind == "agent" && (l.over ?: if (l.error == true) "failed" else "finished") == "stopped" ->
+                                Wording.Tasks.agentStopped(name = chat)
+                            l.kind == "agent" && (l.over == "failed" || l.over == null && l.error == true) ->
+                                Wording.Tasks.agentFailed(name = chat)
+                            l.kind == "agent" -> Wording.Tasks.agentDone(name = chat)
                             l.kind == "answer" -> Wording.Tasks.botAnswered(bot = bot)
                             l.error == true -> Wording.Tasks.handedBot(bot = bot)
                             else -> Wording.Tasks.askedBot(bot = bot)

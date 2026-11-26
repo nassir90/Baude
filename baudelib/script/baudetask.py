@@ -11,12 +11,15 @@ it can be copied anywhere.
     plan = task.ask("Resolve this conflict: ...", form=[{"name": "keep", "type": "choice",
                                                          "choices": ["ours", "theirs"]}])  # {"keep": "ours"}
     task.fallback(error)   # a failure handed to its Bot mid-run (if the task's failures are): what it said
+    chat = task.agent("The deploy failed: ...", wait=False)  # a chat of its own started, nested under its Bot,
+                           # kept with the run: {session, text, failed}; its Bot's told what it says as its turn ends
 
     @task.main             # run with the inputs; an exception's traceback printed, the run failed (and handed to
     def deploy(inputs): ...  # the Bot by its host once it's over, if the task's failures are)
 
 Run outside a task (no BAUDE_TASK_RUN), its asks are answered with stand-ins: each field its default, its first
-choice, 0, false or "" (the script itself runs as it is, side effects and all). Inputs then come from
+choice, 0, false or "" (the script itself runs as it is, side effects and all), and its agents too. baude-oneshot and
+baude-mcp, run by the script, start their chats under its Bot too (BAUDE_SPAWNED_BY). Inputs then come from
 BAUDE_TASK_INPUTS, or a JSON object as the first argument."""
 import json
 import os
@@ -24,9 +27,11 @@ import socket
 import sys
 import traceback
 
-__all__ = ["inputs", "payload", "run", "say", "ask", "fallback", "main", "Refused"]
+__all__ = ["inputs", "payload", "run", "say", "ask", "fallback", "agent", "main", "Refused"]
 
 run = os.environ.get("BAUDE_TASK_RUN")
+_DENIED = "Nobody was there to ask (a task's agent)."
+_PING_S = 5  # (a wait this long without a word: the host told it's still here; it takes 16 s of silence for gone)
 
 
 def _json_env(name, argv_at=None):
@@ -117,6 +122,61 @@ def fallback(error):
     if isinstance(error, BaseException):
         error = "".join(traceback.format_exception(type(error), error, error.__traceback__))
     return ask(f"This failed:\n\n{error}", error=True)
+
+
+def agent(prompt, wait=True, cwd=None, model=None, title=None, mode=None, timeout_s=3600):
+    """A chat of its own started on the task's host with prompt (in cwd, the host's home if none; Auto at most, its
+    asks for permission refused: at once while it's waited for, after a minute if not), nested under the task's Bot and kept with the run; the Bot's told
+    what it says as its first turn ends. {session, text, failed}: with wait, what it said as that turn ended (or
+    why it failed); else as soon as it's started (text None). Refused: the host didn't start it."""
+    if not run:
+        print(f"agent: {prompt}", flush=True)
+        return {"session": None, "text": None if not wait else "(a stand-in answer)", "failed": False}
+    start = {"op": "start", "prompt": str(prompt), "title": title or " ".join(str(prompt).split())[:60],
+             "mode": mode or "auto", "ask_timeout": 60, "ask_default": "deny", "attach": bool(wait), "answers": False,
+             "spawned_by": os.environ.get("BAUDE_SPAWNED_BY", ""),
+             "task_run": {"run": run, "token": os.environ.get("BAUDE_TASK_TOKEN", "")},
+             **{k: v for k, v in (("cwd", cwd), ("model", model)) if v}}
+    if not start["spawned_by"]:
+        start.pop("spawned_by")
+    sid = _wire.request(start)["session"]["id"]
+    if not wait:
+        return {"session": sid, "text": None, "failed": False}
+    import time
+    end, said = time.monotonic() + timeout_s, {"session": sid, "text": None, "failed": True}
+    try:
+        _wire.sock.settimeout(_PING_S)
+        while time.monotonic() < end:
+            try:
+                got = _wire.line()
+            except socket.timeout:  # (said something, so the host doesn't take it for gone)
+                _wire.sock.sendall(b'{"op": "ping"}\n')
+                continue
+            if got.get("session") != sid:
+                continue
+            msg = got.get("msg") or {}
+            if got.get("op") == "claude" and msg.get("type") == "control_request" and \
+                    (msg.get("request") or {}).get("subtype") == "can_use_tool":  # (no one's here to ask: refused)
+                _wire.sock.sendall((json.dumps({"op": "input", "session": sid, "msg": {
+                    "type": "control_response", "response": {"subtype": "success", "request_id": msg.get("request_id"),
+                                                             "response": {"behavior": "deny", "message": _DENIED}}}})
+                                    + "\n").encode())
+                continue
+            if got.get("op") == "exited":
+                said["text"] = "its agent ended before its turn did"
+                break
+            if got.get("op") == "claude" and msg.get("type") == "result":
+                said.update(text=str(msg.get("result") or ""), failed=bool(msg.get("is_error")))
+                break
+    except (OSError, ValueError) as e:
+        said["text"] = f"{type(e).__name__}: {e}"
+    finally:
+        try:
+            _wire.sock.settimeout(None)
+            _wire.sock.sendall((json.dumps({"op": "detach", "session": sid}) + "\n").encode())
+        except OSError:
+            pass
+    return said
 
 
 def main(fn):

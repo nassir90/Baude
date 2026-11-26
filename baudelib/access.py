@@ -104,8 +104,9 @@ class Access:
     def needs(self, conn, msg, session):
         """What else than manage a chat's op asks of a member (session: the chat's), as it would let it run commands
         or drive a Bot: shell to approve a command or allow one always, to start one with commands allowed, or to send
-        to one that runs them without asking; shell and browser for a Bot, which has terminals and a browser of its
-        own, to make one, start or fork one, or send it a turn. The first refused, or None."""
+        to one that runs them without asking, or to make, change or run one of a Bot's tasks (a script run here);
+        shell and browser for a Bot, which has terminals and a browser of its own, to make one, start or fork one, send
+        it a turn, or run or set one of its tasks (which ask it). The first refused, or None."""
         if getattr(conn, "member", None) is None:
             return None
         op, meta = msg.get("op"), getattr(session, "meta", None) or {}
@@ -124,8 +125,10 @@ class Access:
                 (inner.get("request") or {}).get("subtype") == "set_permission_mode" and \
                 (inner.get("request") or {}).get("mode") not in SAFE_MODES:
             caps.append("shell")
+        if op == "run_task" or op == "tasks" and "set" in msg:  # (a task: a script run here, a shell's worth)
+            caps.append("shell")
         sends = op == "input" and inner.get("type") == "user" or op == "held" and msg.get("send") or \
-            op == "run_routine" or op == "routines" and "set" in msg
+            op == "run_task" or op == "tasks" and "set" in msg
         if sends and (meta.get("mode") not in SAFE_MODES or
                       any(t in SHELL_TOOLS for t in getattr(session, "always_allow", None) or ()) or
                       any(isinstance(t, str) and t.split("(")[0] in SHELL_TOOLS

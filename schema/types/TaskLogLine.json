@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "A line of a run's log.",
+  "properties": {
+    "at": {
+      "type": "number",
+      "description": "When."
+    },
+    "kind": {
+      "enum": [
+        "out",
+        "err",
+        "say",
+        "ask",
+        "answer",
+        "status"
+      ],
+      "description": "What it is: the script's output or errors, a line it said, an ask of its Bot, the Bot's answer, or the run's state changing."
+    },
+    "text": {
+      "type": "string",
+      "description": "What it says."
+    },
+    "values": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "description": "An answer's values, from a form."
+    },
+    "error": {
+      "type": [
+        "boolean",
+        "null"
+      ],
+      "description": "An ask's: it was an error handed over."
+    }
+  },
+  "required": [
+    "at",
+    "kind",
+    "text"
+  ],
+  "additionalProperties": false
+}

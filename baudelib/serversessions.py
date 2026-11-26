@@ -266,8 +266,9 @@ class ServerSessions:
                                                 "args": [agentproxy.HEADLESS, "multiplex-tools", "--socket",
                                                          os.path.abspath(self.socket_path)],
                                                 "env": {"BAUDE_SESSION": s.id}}
-            rules += [f"mcp__{meshtools.NAME}__{t}" for t in meshtools.SCHEMAS]  # (never asked about, a Bot's or
-            if s.meta.get("bot"):                                               # Meta's)
+            rules += [f"mcp__{meshtools.NAME}__{t}" for t in meshtools.SCHEMAS  # (never asked about, a Bot's or Meta's;
+                      if t not in meshtools.ASKED]                          # but those that run code here, as Bash is)
+            if s.meta.get("bot"):
                 rules += [f"mcp__{emissiontools.NAME}__{t}" for t in emissiontools.SCHEMAS]
                 rules += [f"mcp__{multiplextools.NAME}__{t}" for t in multiplextools.SCHEMAS]
         if servers:
@@ -596,7 +597,7 @@ class ServerSessions:
                 if (s.meta.get("autofix") or {}).get("waiting"):
                     self.woken.set()  # (what Auto-fix found meanwhile: sent now)
                 s.note_written()  # (its own turn's lines: not another writer's, desktopchats.elsewhere)
-                s.routines_out.clear()
+                self.tasks.turn_over(s, msg)  # (its tasks' asks it took: answered)
                 s.asks.clear()
                 if s.meta.get("context_usage") is not None:
                     self.save(s)
@@ -1015,7 +1016,7 @@ class ServerSessions:
             else:
                 waits = [s.used + self.idle_s - time.time() for s in running if self.stoppable(s)]
                 waits.append(checked + CHECK_SOCKET_S - time.monotonic())
-                if (soon := self.routines_due()) is not None:
+                if (soon := self.tasks.due()) is not None:
                     waits.append(min(soon, 60))
                 if (soon := self.autofix_due()) is not None:
                     waits.append(min(soon, 60))  # (looked at again each minute: a machine asleep meanwhile isn't
@@ -1030,16 +1031,16 @@ class ServerSessions:
                 with self.lock:
                     now_running = any(s.proc is not None for s in self.sessions.values())
                 if not now_running and self.exit_s and time.monotonic() - quiet >= self.exit_s and not self.conns \
-                        and not self.mesh.links and not self.mesh.outs and self.routines_due() is None \
+                        and not self.mesh.links and not self.mesh.outs and self.tasks.due() is None \
                         and self.autofix_due() is None:  # (linked,
-                    # or making links: the mesh's members may want it; a routine to run: it's to be here for it)
+                    # or making links: the mesh's members may want it; a task to run or a branch to watch: it's to be here)
                     self.log(f"nothing running and nobody here for {self.exit_s / 3600:g} h: going")
                     threading.Thread(target=self.shutdown, daemon=True, name="exit").start()
                     return
             if self.stopped.is_set():
                 return
             if attached:
-                self.routines_due()
+                self.tasks.due()
             if time.monotonic() - checked > (10 if attached else CHECK_SOCKET_S - 1):
                 checked = time.monotonic()
                 self.still_bound()

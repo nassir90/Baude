@@ -1,32 +1,45 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
-  "description": "routines' and run_routine's answer: a Bot's routines.",
+  "description": "tasks' answer: a Bot's tasks (their scripts left out).",
   "properties": {
     "op": {
-      "const": "routines",
+      "const": "tasks",
       "description": "What it is."
     },
     "req": {
-      "type": ["integer", "null"],
+      "type": [
+        "integer",
+        "null"
+      ],
       "description": "The request's number, the client's pick: its answers carry it back."
     },
     "session": {
       "type": "string",
       "description": "The session's id."
     },
-    "routines": {
+    "tasks": {
       "type": "array",
       "items": {
-        "$ref": "Routine.json"
+        "$ref": "Task.json"
       },
-      "description": "Its routines."
+      "description": "Its tasks."
     },
     "clock": {
       "$ref": "Clock.json",
       "description": "The host's clock."
+    },
+    "saved": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "The id of the task set, if one was."
     }
   },
-  "required": ["op", "session"],
+  "required": [
+    "op",
+    "session"
+  ],
   "additionalProperties": false
 }

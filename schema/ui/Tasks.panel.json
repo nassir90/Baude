@@ -1,0 +1,398 @@
+{
+  "description": "A Bot's tasks, a page of the right-hand side panel: scripts the Bot's host keeps and runs (Python, shell, or a prompt the Bot is given as a turn), by hand or as a trigger fires (a schedule, a git push to a branch of a repo on the host), each run given its form filled by hand or by the trigger's event, the Bot asked mid-run when the script can't decide and handed a failed run. The page goes from the list of tasks to a task's page to a run's log, each with a back button. Only exists while the open chat is a Bot; otherwise the tab is hidden, and if it was shown the panel falls back to Meta. docs/tasks-design.md has the model and the wire.",
+  "apps": [
+    "baude",
+    "phone"
+  ],
+  "opens": [
+    "the 'Tasks' tab (alarm-clock icon) in the side panel's switcher, visible only while the open chat is a Bot"
+  ],
+  "code": [
+    "taskspage.py:TasksPage",
+    "taskspage.py:TasksPage.draw_list",
+    "taskspage.py:TasksPage.open_task",
+    "taskspage.py:TasksPage.open_run",
+    "taskspage.py:TasksPage.edit",
+    "taskspage.py:TasksPage.run_form",
+    "taskspage.py:TasksPage.add_trigger",
+    "taskspage.py:TasksPage.edit_form",
+    "baudelib/tasks.py",
+    "sidepanel.py:SidePanel.bot_changed"
+  ],
+  "copy": [
+    "tasks",
+    "common"
+  ],
+  "parts": [
+    {
+      "name": "tab",
+      "shows": "Switcher tab with an alarm-clock icon and the label 'Tasks'; present only for a Bot chat.",
+      "copy": [
+        "tasks.title"
+      ]
+    },
+    {
+      "name": "list",
+      "shows": "The first view. A row at the top with empty space at the left and a flat + button at the right (tooltip 'New task'), then a boxed list of the Bot's tasks in the order its host keeps them, scrolling, no selection. Empty: the centred dim text 'No tasks yet'. Read when the chat is opened, when a turn of the Bot ends, every 30 seconds while the page is shown (5 while a run is going), and after each change here.",
+      "copy": [
+        "tasks.new_task",
+        "tasks.no_tasks"
+      ],
+      "actions": [
+        {
+          "by": "click +",
+          "does": "opens the New Task dialog"
+        }
+      ],
+      "parts": [
+        {
+          "name": "task row",
+          "shows": "Before the title, its last run's state icon (a tick done, a stop sign failed, a spinner running or asking, a square stopped, an arrow skipped; nothing if it has never run; its state's word as the tooltip). Title: the task's name. At the end: a switch (on = its triggers fire; tooltip 'Turn off to pause') and a Run button (play icon). No subtitle. Row text is escaped, never markup.",
+          "copy": [
+            "tasks.turn_off",
+            "tasks.run",
+            "tasks.status"
+          ],
+          "actions": [
+            {
+              "by": "click the row",
+              "does": "opens the task's page"
+            },
+            {
+              "by": "toggle the switch",
+              "does": "pauses or resumes its triggers on the host at once (a schedule resumed is worked out afresh from now)"
+            },
+            {
+              "by": "click Run",
+              "does": "runs it now; a task with form fields opens the run form first"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "task page",
+      "shows": "A header row: a back button (tooltip 'Tasks'), the task's name in bold (ellipsized), then flat buttons Run (play), Change (pencil) and Delete (trash). Below it, scrolling, four groups each with its heading: 'Triggers', 'Form', 'Script', 'Runs'. Read when opened, every 5 seconds while a run is going, and after each change here.",
+      "copy": [
+        "tasks.title",
+        "tasks.run",
+        "tasks.change",
+        "common.delete",
+        "tasks.delete_heading",
+        "common.cancel",
+        "tasks.triggers",
+        "tasks.form",
+        "tasks.script",
+        "tasks.runs"
+      ],
+      "actions": [
+        {
+          "by": "click back",
+          "does": "back to the list"
+        },
+        {
+          "by": "click Run",
+          "does": "as the row's Run"
+        },
+        {
+          "by": "click Change",
+          "does": "opens the Change Task dialog, once the task's script is read"
+        },
+        {
+          "by": "click Delete",
+          "does": "asks 'Delete <task>?' (Cancel, Delete in red, Cancel the default); Delete deletes the task on the host, with its runs and the scripts only it ran, and goes back to the list"
+        }
+      ],
+      "parts": [
+        {
+          "name": "triggers",
+          "shows": "Heading 'Triggers' with a flat + at its right (tooltip 'Add trigger'). One row per trigger: an icon (alarm clock for a schedule, branch for a git push), the title saying what fires it ('weekdays at 09:00', 'every 2 hours', 'push to main in ~/site'), a warning icon with the trigger's last error as its tooltip if it has one, and a remove button (minus; tooltip 'Remove trigger'). No triggers: the dim line 'By hand' (every task can be run by hand).",
+          "copy": [
+            "tasks.add_trigger",
+            "tasks.remove_trigger",
+            "tasks.by_hand",
+            "tasks.push_to",
+            "tasks.every_hour",
+            "tasks.every_hours",
+            "tasks.every_minutes",
+            "tasks.weekdays",
+            "tasks.weekends",
+            "tasks.every_day",
+            "tasks.days_at",
+            "tasks.mon",
+            "tasks.tue",
+            "tasks.wed",
+            "tasks.thu",
+            "tasks.fri",
+            "tasks.sat",
+            "tasks.sun"
+          ],
+          "actions": [
+            {
+              "by": "click +",
+              "does": "opens the Add Trigger dialog"
+            },
+            {
+              "by": "click remove",
+              "does": "removes the trigger on the host at once"
+            }
+          ]
+        },
+        {
+          "name": "form",
+          "shows": "Heading 'Form' with a flat pencil at its right (tooltip 'Change'). One row per field: title its label (or name), at the end its type in dim text (Text, Number, Yes or no, Choice). No fields: the dim line 'No fields'.",
+          "copy": [
+            "tasks.form",
+            "tasks.no_fields",
+            "tasks.text",
+            "tasks.number",
+            "tasks.yes_no",
+            "tasks.choice"
+          ],
+          "actions": [
+            {
+              "by": "click the pencil",
+              "does": "opens the form dialog"
+            }
+          ]
+        },
+        {
+          "name": "script",
+          "shows": "Heading 'Script' with, at its right, how it runs (Python, Shell or Bot) and its version (12 hex, monospace, dim). Under it the script in a code block (highlighted as Python or shell; a Bot task's prompt as plain text).",
+          "copy": [
+            "tasks.python",
+            "kube.shell",
+            "sidebar.bot"
+          ]
+        },
+        {
+          "name": "runs",
+          "shows": "Heading 'Runs'. Its latest runs, newest first: the state icon, the title '<when> · <how long>' (when: HH:MM if today, else 'Mon 03 Nov 14:00', on the host's clock as it was when the run started; how long: '12 s' or '3 min 4 s'), and at the end an icon for what started it (play by hand, alarm clock schedule, branch git push) and the version, monospace, dim. A run with dummy answers has ' · dummy answers' after that. None: the dim line 'No runs yet'.",
+          "copy": [
+            "tasks.no_runs",
+            "tasks.seconds",
+            "tasks.minutes_took",
+            "tasks.dummy_answers"
+          ],
+          "actions": [
+            {
+              "by": "click a run",
+              "does": "opens the run's log"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "run page",
+      "shows": "A header row: a back button (tooltip the task's name), the title '<task> · <when>' in bold, and a Stop button (stop icon) while it's running or asking. Then one line: its state's word (or, if it failed or was stopped, why), what started it ('By hand', 'Schedule', 'Git push'), how long it took, 'dummy answers' for a run with them, and its version. Then its log, scrolling, in order: the script's output in code blocks and its errors in code blocks of their own in the error colour (consecutive lines of each together), each line it said as plain text, each ask of the Bot as a card headed 'Asked <Bot>' (or 'Handed to <Bot>' for a failure handed over) with what was asked, each answer as a card headed '<Bot> answered' with the Bot's answer, and anything else the host says of the run as plain text. Nothing says when it started or that it ended: the title and the line under it do. Read every second while it's going, the lines since added to what's drawn.",
+      "copy": [
+        "tasks.status",
+        "tasks.asked_bot",
+        "tasks.handed_bot",
+        "tasks.bot_answered",
+        "common.stop",
+        "tasks.schedule",
+        "tasks.git_push",
+        "tasks.by_hand"
+      ],
+      "actions": [
+        {
+          "by": "click back",
+          "does": "back to the task's page"
+        },
+        {
+          "by": "click Stop",
+          "does": "stops the run on the host"
+        }
+      ]
+    },
+    {
+      "name": "message line",
+      "shows": "A dim wrapping line at the bottom of the page (10 px margins), hidden unless something failed: \"Couldn't load the tasks.\", \"Couldn't run the task.\", \"Couldn't save the task.\", \"Couldn't delete the task.\", \"Couldn't stop the run.\"; the host's reason is in its tooltip. It goes away after the next successful answer.",
+      "copy": [
+        "tasks.couldnt"
+      ]
+    },
+    {
+      "name": "task dialog",
+      "shows": "An alert dialog headed 'New Task' (or 'Change Task'), Cancel and Save (suggested). Content (scrolls, 520 px at most): a 'Name' field; 'Runs as' with a drop-down Python / Shell / Bot; the label 'Script' over a monospace multi-line box (at least 200 px tall); a switch row 'Hand failures to the Bot' (on for a new task).",
+      "copy": [
+        "tasks.new_heading",
+        "tasks.change_heading",
+        "common.name",
+        "tasks.runtime",
+        "tasks.python",
+        "kube.shell",
+        "sidebar.bot",
+        "tasks.script",
+        "tasks.fallback",
+        "common.cancel",
+        "common.save"
+      ],
+      "actions": [
+        {
+          "by": "click Save",
+          "does": "saves it on the host (a new script makes a new version); a new task's page opens"
+        },
+        {
+          "by": "click Cancel / key Esc",
+          "does": "closes without saving"
+        }
+      ]
+    },
+    {
+      "name": "run form",
+      "shows": "An alert dialog headed 'Run <task>' with one control per field: text field, number box, switch, or drop-down of its choices, each labelled, filled with its default; buttons Cancel, Run with dummy answers and Run (suggested).",
+      "copy": [
+        "tasks.run_heading",
+        "common.cancel",
+        "tasks.dry_run",
+        "tasks.run"
+      ],
+      "actions": [
+        {
+          "by": "click Run",
+          "does": "runs it with the form as filled"
+        },
+        {
+          "by": "click Run with dummy answers",
+          "does": "runs the script as it is, side effects and all, with its asks answered by a dummy agent and its failure not handed to the Bot"
+        }
+      ]
+    },
+    {
+      "name": "trigger dialog",
+      "shows": "An alert dialog headed 'Add Trigger', Cancel and Save. A drop-down Schedule / Git push. Schedule: 'Every' or 'At a time of day'; every: a number and minutes / hours (5 to 44640 minutes, 1 to 744 hours: what the host takes); at: 'Times in <zone>' (or 'Times on the host's clock'), an HH:MM field and seven day toggles Mon to Sun. Git push: 'Repository folder' (a path on the host) and 'Branch' (main). Then, if the task has fields, 'Fills' and one drop-down per field, '<field> from', with 'nothing' and the trigger's payload keys (schedule: time; git push: repo, branch, before, after, commit, message, author), set to the key of the field's own name if there is one.",
+      "copy": [
+        "tasks.trigger_heading",
+        "tasks.schedule",
+        "tasks.git_push",
+        "tasks.every",
+        "tasks.at_a_time",
+        "tasks.minutes",
+        "tasks.hours",
+        "tasks.times_in",
+        "tasks.host_clock",
+        "tasks.repo",
+        "lookup.branch",
+        "tasks.fills",
+        "tasks.fills_field",
+        "tasks.nothing",
+        "common.cancel",
+        "common.save"
+      ],
+      "text": [
+        "HH:MM",
+        "09:00",
+        "main"
+      ]
+    },
+    {
+      "name": "form dialog",
+      "shows": "An alert dialog headed 'Form', Cancel and Save. One row per field: a name field, a type drop-down (Text, Number, Yes or no, Choice), a 'Choices, comma-separated' field shown for a choice, a 'Default' field, and a remove button (tooltip 'Remove field'); under them an 'Add field' button.",
+      "copy": [
+        "tasks.form",
+        "tasks.field_name",
+        "tasks.text",
+        "tasks.number",
+        "tasks.yes_no",
+        "tasks.choice",
+        "tasks.choices",
+        "tasks.remove_field",
+        "tasks.add_field",
+        "common.cancel",
+        "common.save",
+        "meta_settings.effort_default"
+      ]
+    }
+  ],
+  "states": [
+    {
+      "name": "empty",
+      "shows": "'No tasks yet'"
+    },
+    {
+      "name": "paused task",
+      "shows": "Switch off"
+    },
+    {
+      "name": "running",
+      "shows": "A spinner before the task's name and run; the run page's Stop button"
+    },
+    {
+      "name": "asking",
+      "shows": "As running, its state 'asking its Bot'; the run's log ends with the ask's card"
+    },
+    {
+      "name": "failed",
+      "shows": "Stop-sign icon; the run's log ends with the error, and a 'Handed to <Bot>' card with the Bot's answer if it was handed over"
+    },
+    {
+      "name": "error",
+      "shows": "Message line at the bottom"
+    }
+  ],
+  "decisions": [
+    {
+      "said": "Routines are rewritten as Tasks: tasks are scripts, run on a schedule or by hand at any time",
+      "rule": "Every app shows a Bot's tasks where its routines were, each runnable by hand, with its triggers (a schedule among them)",
+      "decided": "2026-11-26",
+      "source": [
+        {
+          "issue": "BaudeInternal#241"
+        }
+      ]
+    },
+    {
+      "said": "Triggers generalise schedules; a task can be started by external events, a git push first",
+      "rule": "Every app lists a task's triggers (schedule, git push) and adds or removes them on the task's page",
+      "decided": "2026-11-26",
+      "source": [
+        {
+          "issue": "BaudeInternal#241"
+        }
+      ]
+    },
+    {
+      "said": "A task's script can call its Bot as a fallback on errors and to handle non-deterministic steps",
+      "rule": "Every app shows a run's asks of its Bot and the Bot's answers in the run's log, a failure handed over marked so",
+      "decided": "2026-11-26",
+      "source": [
+        {
+          "issue": "BaudeInternal#241"
+        }
+      ]
+    },
+    {
+      "said": "Input forms that triggers populate, and that the Bot can fill",
+      "rule": "Every app shows a task's form, fills it before a run by hand, and lets a trigger map its payload onto the fields",
+      "decided": "2026-11-26",
+      "source": [
+        {
+          "issue": "BaudeInternal#241"
+        }
+      ]
+    },
+    {
+      "said": "Telemetry includes when triggers happen, how long scripts take, failures and version hashes",
+      "rule": "Every app lists a task's runs with when, how long, what started it, how it ended and the version it ran",
+      "decided": "2026-11-26",
+      "source": [
+        {
+          "issue": "BaudeInternal#241"
+        }
+      ]
+    },
+    {
+      "said": "Test a workflow with a dummy agent and check the format is correct",
+      "rule": "Every app's run form offers Run with dummy answers: the script runs as it is, its asks answered by a dummy agent",
+      "decided": "2026-11-26",
+      "source": [
+        {
+          "issue": "BaudeInternal#241"
+        }
+      ]
+    }
+  ]
+}

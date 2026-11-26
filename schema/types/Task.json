@@ -1,0 +1,102 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "One of a Bot's tasks (baudelib.tasks): a script its host runs, by hand or as a trigger fires, its form filled, its Bot asked when it can't decide or fails.",
+  "properties": {
+    "id": {
+      "type": "string",
+      "description": "Its id."
+    },
+    "name": {
+      "type": "string",
+      "description": "Its name."
+    },
+    "runtime": {
+      "enum": [
+        "python",
+        "shell",
+        "bot"
+      ],
+      "description": "How its script's run: Python 3, /bin/sh, or given to its Bot as a turn (a prompt)."
+    },
+    "script": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Its script (task's answer, and a set's; tasks' listing leaves it out)."
+    },
+    "version": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Its script's version: the first 12 hex of its SHA-256."
+    },
+    "form": {
+      "type": [
+        "array",
+        "null"
+      ],
+      "items": {
+        "$ref": "TaskField.json"
+      },
+      "description": "Its form's fields."
+    },
+    "triggers": {
+      "type": [
+        "array",
+        "null"
+      ],
+      "items": {
+        "$ref": "TaskTrigger.json"
+      },
+      "description": "What starts it."
+    },
+    "fallback": {
+      "type": [
+        "boolean",
+        "null"
+      ],
+      "description": "A run that fails is handed to its Bot, with its log."
+    },
+    "timeout_s": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "description": "The longest a run may take; it's stopped after."
+    },
+    "paused": {
+      "type": [
+        "boolean",
+        "null"
+      ],
+      "description": "Its triggers don't fire (it can still be run by hand)."
+    },
+    "last": {
+      "anyOf": [
+        {
+          "$ref": "TaskRun.json"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Its latest run."
+    },
+    "next": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "description": "When a schedule of its fires next."
+    }
+  },
+  "required": [
+    "id",
+    "name",
+    "runtime"
+  ],
+  "additionalProperties": false
+}

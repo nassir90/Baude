@@ -25,7 +25,8 @@ import time
 import uuid
 
 from baudelib import (
-    access, accounts, codex, desktopchats, emissionlink, mesh, phonebrowser, models, notes, providers, selfupdate, telemetry, wire,
+    access, accounts, codex, desktopchats, emissionlink, mesh, phonebrowser, models, notes, providers, selfupdate, tasks,
+    telemetry, wire,
     wording,
 )
 from baudelib.serverstate import (
@@ -134,6 +135,7 @@ class Server(ServerRunning, ServerSessions):
         self.telemetry = telemetry.Telemetry(self.state_dir, self.me["id"], changed=self.changed, log=self.log)  # (its machine's
         # chat events, samples and line profiles: baudelib/telemetry.py)
         self.access = access.Access(self)  # (who in the mesh may use what of its: baudelib/access.py)
+        self.tasks = tasks.Tasks(self)  # (its Bots' tasks: baudelib/tasks.py)
 
     def bind(self):
         """The socket listened on: made (again, if it's gone: its folder taken away, say), in a folder of its user's
@@ -306,7 +308,8 @@ class Server(ServerRunning, ServerSessions):
 
     def running(self):
         """(lock held) Every command its sessions' claudes are running (Session.commands): [{session, what}]."""
-        return [{"session": s.id, "what": c["what"]} for s in self.sessions.values() for c in s.commands()]
+        return [{"session": s.id, "what": c["what"]} for s in self.sessions.values() for c in s.commands()] + \
+            self.tasks.busy()  # (and its tasks' runs)
 
     def delete(self, s, reply):
         """A session gone (deleting set as it's asked: nothing more's taken for it): its claude stopped and waited for,

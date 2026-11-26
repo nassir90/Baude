@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "A running script asks its Bot (on the host's own socket, with its run's token): something it can't decide, or (error) a failure handed over. Sent the Bot as a turn of its own once it's idle, answered as that turn ends (refused, as a failure, for a task whose failures aren't handed over; with dummy answers: by a dummy agent, at once).",
+  "properties": {
+    "op": {
+      "const": "task_ask",
+      "description": "What it is."
+    },
+    "req": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "run": {
+      "type": "string",
+      "description": "Its run's id."
+    },
+    "token": {
+      "type": "string",
+      "description": "Its run's token."
+    },
+    "text": {
+      "type": "string",
+      "description": "What's asked."
+    },
+    "form": {
+      "type": "array",
+      "items": {
+        "$ref": "TaskField.json"
+      },
+      "description": "Fields the Bot's to fill: its answer's values."
+    },
+    "error": {
+      "type": "boolean",
+      "description": "It's an error handed over."
+    }
+  },
+  "required": [
+    "op",
+    "run",
+    "token",
+    "text"
+  ],
+  "additionalProperties": false
+}

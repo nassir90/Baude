@@ -117,7 +117,8 @@ class Server(ServerRunning, ServerSessions):
         # commands to end (set_update); and the commit it's shutting down to start again on (shutdown's restart)
         self.commit = selfupdate.git(selfupdate.HERE, "rev-parse", "HEAD", timeout=5) or None
         self.update, self.restarting = None, None
-        # (a restart kept till nothing blocks it: {by, to}; the heads holding it while they show what it waits for)
+        # (a restart kept till nothing blocks it: {owners: what asked for it, head or update, to}; the heads holding it
+        # while they show what it waits for)
         self.pending_restart, self.restart_holds = None, set()
         self.heads_apart = set()  # (the commits of heads on other code that have said hello: logged once each)
         # the apps connected here, by the code they run (heads that have subscribed, and this machine's Emissions:

@@ -58,12 +58,20 @@ abstract class RestartMockups(private val theme: String) {
 
     @After fun down() = FixtureConnection.down()
 
-    private fun host(paused: Boolean) {
+    private fun host(paused: Boolean, other: Boolean = false) {
         val c = FixtureConnection.up(activity, Host(id = "h1", name = "lab-mac", user = "dev", address = "lab-mac"))
         c.info = Msg.Info(id = "h1", name = "lab-mac", home = "/home/dev", restart = Msg.RestartState(by = "head",
             paused = paused, blockers = listOf(
                 Msg.RestartBlocker(kind = "chat", session = "s1", name = "Refactor settings", what = "npm test -- --watch=false"),
-                Msg.RestartBlocker(kind = "task", session = "s2", name = "Nightly deploy", what = "a task's run"))))
+                Msg.RestartBlocker(kind = "task", session = "s2", task = "t1", run = "r1", name = "Nightly deploy", what = "a task's run"),
+                Msg.RestartBlocker(kind = "agent", session = "s3", host = "h2", name = "apple-foundation",
+                    what = "Running apple-foundation for a chat on build-box"),
+                Msg.RestartBlocker(kind = "terminal", terminal = "abc123", name = "zsh", what = "/bin/zsh -l"))))
+        if (other) {
+            val d = FixtureConnection.up(activity, Host(id = "h2", name = "build-box", user = "dev", address = "build-box"))
+            d.info = Msg.Info(id = "h2", name = "build-box", home = "/home/dev", restart = Msg.RestartState(by = "update",
+                paused = false, blockers = listOf(Msg.RestartBlocker(kind = "chat", session = "s4", name = "Docs pass", what = "make html"))))
+        }
         activity.setContent {
             BaudeTheme { Box(Modifier.fillMaxSize().background(LocalBaude.current.inside)) { Home(open = { _, _ -> }, feedback = {}) } }
         }
@@ -104,6 +112,11 @@ abstract class RestartMockups(private val theme: String) {
     @Test fun pending() {
         host(false)
         shoot("pending")
+    }
+
+    @Test fun twoHosts() {
+        host(false, other = true)
+        shoot("two-hosts")
     }
 
     @Test fun blockers() {

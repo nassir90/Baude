@@ -659,29 +659,30 @@ class WindowRemote:
 
     def restart_host(self, then=None, now=False):
         """This Mac's host process stopped and started again (a newer one, after an update): kept by it as its restart
-        (restart free) till no chat's running a command and no task's running there, as stopping it would stop them;
-        now: at once, those stopped. Every head shows it pending at its list's foot (meshui.restart_said), and what it
-        waits for (show_restart_blockers). A turn that's only the model writing is cut short, said so (cut), and
-        carried on with Continue. Its claudes stop, their transcripts kept, and each of its sessions resumes as it's
-        next written to (the windows on them reattach as it's back). then: what's done once it's gone, in place of
-        waiting for it back (Baude restarted too: the new Baude reaches it)."""
+        (restart free) till nothing it runs blocks it (meshui.restart_dialog says what), as stopping it would stop
+        that; now: at once, those stopped. Every head shows it pending at its list's foot (meshui.restart_lines). A
+        turn that's only the model writing is cut short, said so (cut), and carried on with Continue. Its claudes
+        stop, their transcripts kept, and each of its sessions resumes as it's next written to (the windows on them
+        reattach as it's back). then: what's done once it's gone, in place of waiting for it back (Baude restarted
+        too: the new Baude reaches it). One on older code is asked as it was then (meshui.ask_restart)."""
         r = local_host()
         if r is None:  # (none running: started, as the restart would)
             if then is not None:
                 return then()
             return self.local_server(lambda _r: toast(self.sidebar, wording.say("hosts.daemon_restarted")), quiet=True)
-        self.wait_host_gone(r, then)
-        r.request({"op": "restart", "do": "now" if now else "free"}, lambda _reply: None)
+        meshui.ask_restart(r, now, lambda text: toast(self.sidebar, text),
+                           lambda grace: self.wait_host_gone(r, then, grace))
 
-    def wait_host_gone(self, r, then=None):
+    def wait_host_gone(self, r, then=None, grace=5):
         """r (This Mac's host process) restarting: once it's gone, then(), or it back (local_server), said; given up
-        on if its restart's dropped and it's still there. One wait at a time."""
+        on if, grace seconds on, its restart's dropped and it's still there. One wait at a time."""
+        r.restart_until = max(getattr(r, "restart_until", 0), time.monotonic() + grace)
         if getattr(r, "restart_waited", False):
             return
-        r.restart_waited, asked = True, time.monotonic()
+        r.restart_waited = True
 
         def gone():  # (the old one gone: the new one, as it started itself, reached as any is: local_server)
-            if r.state == "alive" and (r.info.get("restart") or time.monotonic() - asked < 5):
+            if r.state == "alive" and (r.info.get("restart") or time.monotonic() < r.restart_until):
                 return True
             r.restart_waited = False
             if r.state == "alive":
@@ -693,11 +694,43 @@ class WindowRemote:
             return False
         GLib.timeout_add(250, gone)
 
-    def show_restart_blockers(self):
-        """The line at the sidebar's foot clicked: what This Mac's daemon's restart waits for (meshui.restart_dialog),
-        the restart held meanwhile."""
-        if (r := local_host()) is not None and r.info.get("restart"):
-            meshui.restart_dialog(r, self, lambda now: self.wait_host_gone(r))
+    def show_restart_blockers(self, key=None):
+        """A line at the sidebar's foot clicked (key: its host's): what that daemon's restart waits for
+        (meshui.restart_dialog), the restart held meanwhile; See Thread on one shows it (see_blocker)."""
+        r = next((r for r in network().alive() if r.key == key), None) if key is not None else local_host()
+        if r is None or not r.info.get("restart"):
+            return
+
+        def ask(now):
+            if r.mine:
+                return self.restart_host(now=now)
+            meshui.ask_restart(r, now, lambda text: toast(self.sidebar, text))
+        meshui.restart_dialog(r, self, ask, lambda b: self.see_blocker(r, b))
+
+    def see_blocker(self, r, b):
+        """What r's restart waits for, shown (See Thread): a chat, opened (an agent run's: the chat on its host it's
+        for); a task's run, its Bot's chat opened on its Tasks page, at that run; a terminal, ☰ → Terminal on it."""
+        if b.get("kind") == "terminal":
+            return self.terminal.show(r.where, remote_name(r), b["terminal"])
+        sid = b.get("session")
+        on = next((x for x in network().remotes() if x.info.get("id") == b["host"]), None) if b.get("host") else r
+        on = on if on is not None and sid in on.sessions else network().find(sid)
+        if on is None:
+            return
+        self.open_mesh_chat({**on.sessions[sid], "server": on})
+        if b.get("kind") != "task" or not b.get("run"):
+            return
+        tasks, end = self.panel.tasks, time.monotonic() + 10
+
+        def at_run():  # (once the chat's open, its Tasks page reading its Bot's: the run)
+            if tasks.sid != sid:
+                return time.monotonic() < end
+            self.show_panel(True, "tasks")
+            if b.get("task"):
+                tasks.open_task(b["task"])
+            tasks.open_run({"id": b["run"], "name": b.get("name"), "status": "running"})
+            return False
+        GLib.timeout_add(100, at_run)
 
     def local_server(self, then, wait_s=20, quiet=False):
         """This machine's host process (local_host), which runs every chat of Baude's: then(it), on the main loop, once

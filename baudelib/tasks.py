@@ -713,10 +713,10 @@ class Tasks:
             return [{"session": r["sid"], "what": wording.say("tasks.task_running")} for r in self.running.values()]
 
     def blocking(self):
-        """Each run going, as a pending restart lists it (RestartBlocker): [{kind, session, name, what}]."""
+        """Each run going, as a pending restart lists it (RestartBlocker): [{kind, session, task, run, name, what}]."""
         with self.lock:
-            return [{"kind": "task", "session": r["sid"], "name": r.get("name") or "",
-                     "what": wording.say("tasks.task_running")} for r in self.running.values()]
+            return [{"kind": "task", "session": r["sid"], "task": r["task"], "run": rid, "name": r.get("name") or "",
+                     "what": wording.say("tasks.task_running")} for rid, r in self.running.items()]
 
     # ---- a script's
     def held(self, msg):

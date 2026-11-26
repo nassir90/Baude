@@ -116,6 +116,11 @@ private fun kindIcon(kind: String?) = when (kind) {
 private fun payloadKeys(kind: String) = if (kind == "git_push") listOf("repo", "branch", "before", "after", "commit", "message", "author")
     else listOf("time")
 
+/** A run to show as its Bot's chat opens (a pending restart's See Thread): [host, the Bot's session, task, run]. */
+object TaskLinks {
+    var pending by mutableStateOf<List<String>?>(null)
+}
+
 /** What the Tasks page shows (the list, the task open, the run open, the dialog up), kept while the chat's open.
  * live false: nothing's asked of a host (a holder filled by hand, as the screenshot rig's fixtures are). */
 class TasksState(val live: Boolean = true) {
@@ -265,6 +270,13 @@ fun TasksPage(hostId: String, sid: String, here: Boolean, state: TasksState? = n
             if (st.page == "task") readTask()
         }
     fun runOrAsk(t: Msg.Task) = if (t.form.orEmpty().isNotEmpty()) st.running = t else runIt(t)
+    LaunchedEffect(hostId, sid) { // (opened from a pending restart's See Thread: at that run)
+        val p = TaskLinks.pending ?: return@LaunchedEffect
+        if (p[0] != hostId || p[1] != sid) return@LaunchedEffect
+        TaskLinks.pending = null
+        if (p[2].isNotEmpty()) openTask(Msg.Task(id = p[2]))
+        openRun(Msg.TaskRun(id = p[3], task = p[2], status = "running"))
+    }
     LaunchedEffect(here) {
         while (here && st.live) {
             load()

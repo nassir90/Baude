@@ -244,8 +244,11 @@ def _(app):
 
 RESTART_BLOCKERS = [{"kind": "chat", "session": "11111111-0000-4000-8000-000000000001", "name": "Refactor settings",
                      "what": "npm test -- --watch=false"},
-                    {"kind": "task", "session": "22222222-0000-4000-8000-000000000002", "name": "Nightly deploy",
-                     "what": "a task's run"}]
+                    {"kind": "task", "session": "22222222-0000-4000-8000-000000000002", "task": "t1", "run": "r1",
+                     "name": "Nightly deploy", "what": "a task's run"},
+                    {"kind": "agent", "session": "33333333-0000-4000-8000-000000000003", "host": "lab-mac-id",
+                     "name": "apple-foundation", "what": "Running apple-foundation for a chat on lab-mac"},
+                    {"kind": "terminal", "terminal": "abc123", "name": "zsh", "what": "/bin/zsh -l"}]
 
 
 def _restart_pending(app, paused):
@@ -275,7 +278,7 @@ def _(app):
     win = _restart_pending(app, True)
     r = baude.local_host()
     r.request = lambda msg, then=None: None  # (nothing asked of it: the picture's the point)
-    baude.meshui.restart_dialog(r, win, lambda now: None)
+    baude.meshui.restart_dialog(r, win, lambda now: None, lambda b: None)
     T.pump(0.5)
     return win
 

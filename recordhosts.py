@@ -135,7 +135,8 @@ class RecordHosts:
         restart (restart free) till nothing's running there, or now (now); said at the notebooks' foot while it's
         pending (show_restart), and once it's back, or that it isn't. then: what's done once it's back (Record
         restarted too). One that's running but not yet connected to (the app's hosts are looked at when first
-        wanted) is waited for, up to 15 s, before it's asked."""
+        wanted) is waited for, up to 15 s, before it's asked; one on older code asked as it was then
+        (meshui.ask_restart)."""
         r = local_remote()
         if r is None and joining < 15 and baudelib.serverstate.running_pid() is not None:
             network().here()
@@ -143,18 +144,19 @@ class RecordHosts:
             return
         if r is None:
             return self.start_host(then)
-        self.wait_host_gone(r, then)
-        r.request({"op": "restart", "do": "now" if now else "free"}, lambda _reply: None)
+        meshui.ask_restart(r, now, self.toast, lambda grace: self.wait_host_gone(r, then, grace))
 
-    def wait_host_gone(self, r, then=None):
+    def wait_host_gone(self, r, then=None, grace=5):
         """r (this machine's host process) restarting: once it's gone, it back (start_host: the one it started itself,
-        reached), then(); given up on if its restart's dropped and it's still there. One wait at a time."""
+        reached), then(); given up on if, grace seconds on, its restart's dropped and it's still there. One wait at a
+        time."""
+        r.restart_until = max(getattr(r, "restart_until", 0), time.monotonic() + grace)
         if getattr(r, "restart_waited", False):
             return
-        r.restart_waited, asked = True, time.monotonic()
+        r.restart_waited = True
 
         def gone():
-            if r.state == "alive" and (r.info.get("restart") or time.monotonic() - asked < 5):
+            if r.state == "alive" and (r.info.get("restart") or time.monotonic() < r.restart_until):
                 return True
             r.restart_waited = False
             if r.state != "alive":
@@ -163,15 +165,43 @@ class RecordHosts:
         GLib.timeout_add(250, gone)
 
     def show_restart(self):
-        """This machine's daemon's pending restart, said at the notebooks' foot (meshui.restart_said)."""
-        r = local_remote()
-        if getattr(self, "update_bar", None) is not None:
-            self.update_bar.say_restart(meshui.restart_said(r.info.get("restart") if r is not None else None))
+        """Each host's pending daemon restart (this machine's, and those of the hosts reached), said at the notebooks'
+        foot (meshui.restart_lines)."""
+        if getattr(self, "update_bar", None) is None:
+            return
+        here = local_remote()
+        hosts = network().alive() if _NETWORK else [here] if here is not None else []
+        self.update_bar.say_restart(meshui.restart_lines(hosts, remote_name))
 
-    def show_restart_blockers(self):
-        """That line clicked: what the restart waits for (meshui.restart_dialog), the restart held meanwhile."""
-        if (r := local_remote()) is not None and r.info.get("restart"):
-            meshui.restart_dialog(r, self, lambda now: self.wait_host_gone(r))
+    def show_restart_blockers(self, key=None):
+        """A line at the foot clicked (key: its host's): what that restart waits for (meshui.restart_dialog), the
+        restart held meanwhile; See Thread on one shows it (see_blocker)."""
+        r = next((r for r in network().alive() if r.key == key), None) if key is not None else local_remote()
+        if r is None or not r.info.get("restart"):
+            return
+
+        def ask(now):
+            if r.mine:
+                return self.restart_host(now=now)
+            meshui.ask_restart(r, now, self.toast)
+        meshui.restart_dialog(r, self, ask, lambda b: self.see_blocker(r, b))
+
+    def see_blocker(self, r, b):
+        """What r's restart waits for, shown (See Thread): a terminal, ☰ → Terminal on it; a chat (a task's Bot's, an
+        agent run's on its host), read in a tab of its own, as Open a Chat… reads one, once its transcript's here."""
+        if b.get("kind") == "terminal":
+            return self.terminal.show(r.where, remote_name(r), b["terminal"])
+        sid = b.get("session")
+        on = next((x for x in network().remotes() if x.info.get("id") == b["host"]), None) if b.get("host") else r
+        on = on if on is not None and sid in on.sessions else network().find(sid)
+        if on is None:
+            return
+
+        def read():
+            path = on.mirror(sid)
+            if os.path.isfile(path):
+                GLib.idle_add(lambda: self.open_chat(path) and False)
+        threading.Thread(target=lambda: (on.sync(sid), read()), daemon=True, name="see-thread").start()
 
     def start_host(self, then=None):
         def start():

@@ -84,7 +84,7 @@ from startup import (  # noqa: E402
     APP_ID, LAUNCHER, TRACE, follow_accent, launch_command, logo_icon, macos_dock_icon, restart_state_path,
     take_restart_state, trace,
 )
-from sessionlist import THIS_MACHINE, _NETWORK, local_host, save_info_cache  # noqa: E402
+from sessionlist import THIS_MACHINE, _NETWORK, local_host, remote_name, save_info_cache  # noqa: E402
 from baudewindow import BaudeWindow  # noqa: E402
 
 
@@ -213,8 +213,8 @@ class BaudeApp(Adw.Application):
     def show_update_bars(self, windows=None):
         """Every window's Update bar (or windows': those new ones, built since) as things stand."""
         why, u = self.update_reasons(), self.updater
-        host = local_host()
-        restart = meshui.restart_said(host.info.get("restart") if host is not None else None)
+        net = _NETWORK[0] if _NETWORK else None
+        restart = meshui.restart_lines(net.alive() if net is not None else [], remote_name)
         for w in windows or self.windows():
             if (bar := getattr(getattr(w, "sidebar", None), "update_bar", None)) is not None:
                 bar.say(why, u.why if u is not None and not u.pending() else None, u is not None and u.busy)

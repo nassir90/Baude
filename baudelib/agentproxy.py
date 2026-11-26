@@ -546,6 +546,7 @@ class Run:
         names = [n for n in msg.get("servers") or [] if wire.is_id(n)][:16]
         self.server, self.conn, self.id, self.token = server, conn, secrets.token_hex(8), secrets.token_hex(16)
         self.relays, self.lock, self.gone = {}, threading.Lock(), False
+        self.model, self.chat = model, resume  # (what a pending restart says it waits for: Server.blockers)
         self.folder = tempfile.mkdtemp(prefix="baude-agent-")
         # (pi's session, the caller's: a copy here for pi to take it up from, said to be this run's folder's, where
         # pi-claude's run; what pi adds to it is sent to the caller as it's added, session.ts)

@@ -155,6 +155,9 @@ fun ChatShell(hostId: String, sid: String, back: () -> Unit, open: (String, Stri
         kotlinx.coroutines.delay(100) // (the page has read it by now)
         chat.showAgent.value = null
     }
+    LaunchedEffect(all.size) { // (opened from a pending restart's See Thread on a task's run: its Tasks page)
+        if (TaskLinks.pending?.let { it[0] == hostId && it[1] == sid } == true) show("tasks")
+    }
     LaunchedEffect(pager.currentPage, all.size) { all.getOrNull(pager.currentPage)?.let { shown = it.key } }
     LaunchedEffect(all.size) { // (a Bot no more: its pages gone, Meta shown if one of them was, as Baude does)
         if (sideAll.none { it.key == side }) side = "meta"

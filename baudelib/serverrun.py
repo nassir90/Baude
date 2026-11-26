@@ -40,6 +40,8 @@ class ServerRunning:
             waits = [(s, w) for s in self.sessions.values() for w in s.meta.get("waits_on") or []]
         for s, w in waits:
             threading.Thread(target=self.answer_wait, args=(s, w), daemon=True, name="wait").start()
+        with self.lock:  # (follow-ups a restart cut short: sent now, keep_follow_ups)
+            self.send_follow_ups()
         self.log(f"serving {len(self.sessions)} sessions on {self.socket_path}, group {self.me['group']!r}"
                  + (f", commit {self.commit[:12]}" if self.commit else ""))
         while not self.stopped.is_set():
@@ -117,13 +119,21 @@ class ServerRunning:
             self.stop_procs(procs)
         return busy
 
-    def halt(self, if_idle=False, restart=None):
+    def halt(self, if_idle=False, restart=None, pending=False):
         """(shutdown's first half, all at once, so nothing starts between the look and the stop) Nothing more taken,
-        unless (if_idle) a command's running; every session whose claude is at a turn or asking marked cut, and kept
-        so: (busy, the claudes to stop). Those: None if it's not stopping (busy) or stopping already."""
+        unless (if_idle) a command's running, or (pending: its kept restart going through) a head's paused it or
+        something blocks it since it was looked at; every session whose claude is at a turn or asking marked cut, and
+        kept so, and its follow-ups kept for after a restart (keep_follow_ups): (busy, the claudes to stop). Those:
+        None if it's not stopping (busy) or stopping already."""
         with self.lock:
             if self.stopped.is_set():
-                if not if_idle:  # (stopping for an update, and told to stop: it goes, and doesn't start again)
+                if not if_idle and restart:  # (stopping already, and told to restart now: it starts again)
+                    self.restarting = self.restarting or restart
+                    self.keep_follow_ups()
+                    if self.quitting is not None and not self.quitting["restart"]:
+                        self.quitting = {**self.quitting, "restart": True}
+                        self.said_quitting()
+                elif not if_idle:  # (stopping for an update, and told to stop: it goes, and doesn't start again)
                     self.restarting = None
                     if self.quitting is not None and self.quitting["restart"]:
                         self.quitting = {**self.quitting, "restart": False}
@@ -131,8 +141,12 @@ class ServerRunning:
                 return None, None
             if if_idle and (busy := self.running()):
                 return busy, None
+            if pending and (self.pending_restart is None or self.restart_holds or self.blockers()):
+                return [], None
             self.stopped.set()
             self.restarting = restart
+            if restart:
+                self.keep_follow_ups()
             procs = []
             for s in self.sessions.values():
                 if s.app_tools is not None:  # (the host going: its heads' tools let go of)
@@ -146,39 +160,88 @@ class ServerRunning:
                 procs.append(s.proc)
         return None, procs
 
+    def keep_follow_ups(self):
+        """(lock held) Each session's follow-ups sent at a turn a restart cuts short (queued, codex_queue): kept in its
+        meta (follow_ups), and sent once it's started again (send_follow_ups), not lost with its claude."""
+        for s in self.sessions.values():
+            held = [{"message": m, "uuid": u} for m, u, _by in s.queued] + \
+                [{"message": m.get("message") or {}, "uuid": m.get("uuid")} for m, _by in s.codex_queue]
+            if held:
+                s.meta["follow_ups"] = (s.meta.get("follow_ups") or []) + held
+                s.queued = []
+                s.codex_queue.clear()
+                self.save(s)
+
+    def send_follow_ups(self):
+        """(lock held) Follow-ups a restart cut short (keep_follow_ups): sent, in order, as they were first."""
+        for s in list(self.sessions.values()):
+            held = s.meta.pop("follow_ups", None)
+            if not held:
+                continue
+            self.save(s)
+            for f in held:
+                msg = {"type": "user", "message": f["message"],
+                       **({"uuid": f["uuid"]} if wire.is_id(f.get("uuid") or "") else {})}
+                try:
+                    self.take_input(None, s, msg, again=wire.is_id(f.get("uuid") or ""))
+                except Exception as e:  # (one that can't be sent: said in the log, the rest sent)
+                    self.log(f"{s.id}: a follow-up kept over a restart not sent: {type(e).__name__}: {e}")
+            self.log(f"{s.id}: {len(held)} follow-up{'s' if len(held) != 1 else ''} kept over a restart sent")
+
     # ---- a restart kept till nothing blocks it (info's restart): a head's Restart Daemon, or its own updater's
     def blockers(self):
-        """(lock held) What a restart waits for (running, as every head lists it: RestartBlocker): each chat whose
-        agent's running a command (its oldest), then each task's run."""
+        """(lock held) What a restart waits for (as every head lists it: RestartBlocker): each chat whose agent's
+        running a command (its oldest), each task's run, each agent run here for a chat on another host (an Apple or
+        pi model's), and each terminal here someone's attached to."""
         chats = [{"kind": "chat", "session": s.id, "name": s.listing()["title"] or "", "what": cmds[0]["what"]}
                  for s in self.sessions.values() if (cmds := s.commands())]
-        return chats + self.tasks.blocking()
+        agents = []
+        for run in self.agent_runs.values():
+            if not isinstance(run, agentproxy.Run) or run.gone:
+                continue
+            host = getattr(run.conn, "member", None)
+            agents.append({"kind": "agent", "name": run.model, **({"session": run.chat} if run.chat else {}),
+                           **({"host": host} if isinstance(host, str) else {}),
+                           "what": wording.say("hosts.restart_agent", model=run.model,
+                                               host=self.mesh.name_of(host) if isinstance(host, str) else "?")})
+        return chats + self.tasks.blocking() + agents + hostterminal.blocking()
 
     def restart_state(self):
-        """(lock held) info's restart: the restart kept (RestartState), or None."""
+        """(lock held) info's restart: the restart kept (RestartState), or None. by: a head's, while one's asked for
+        it, else its updater's."""
         p = self.pending_restart
         if p is None:
             return None
-        return {"by": p["by"], **({"to": p["to"]} if p.get("to") else {}), "paused": bool(self.restart_holds),
-                "blockers": self.blockers()}
+        return {"by": "head" if "head" in p["owners"] else "update", **({"to": p["to"]} if p.get("to") else {}),
+                "paused": bool(self.restart_holds), "blockers": self.blockers()}
 
     def restart_when_free(self, by, to=None):
-        """A restart kept (by: head, update; to: the commit an update's onto), and gone through once nothing's running
-        and no head's holding it (_restart_watch), heads told as what it waits for changes."""
+        """A restart kept (by: head, update, each kept for apart: drop_restart; to: the commit an update's onto), and
+        gone through once nothing's running and no head's holding it (_restart_watch), heads told as what it waits for
+        changes."""
         with self.lock:
             p = self.pending_restart
-            self.pending_restart = {"by": p["by"] if p else by, "to": to or (p or {}).get("to")}
+            self.pending_restart = {"owners": (p["owners"] if p else set()) | {by},
+                                    "to": to or (p or {}).get("to")}
             if p is None:
                 threading.Thread(target=self._restart_watch, daemon=True, name="restart").start()
             self.changed()
             return self.restart_state()
 
     def drop_restart(self, by):
-        """Its updater's restart let go of (updates turned off, or the checkout moved on): one a head asked for stays."""
+        """by's restart let go of (its updater's: updates turned off, or the checkout moved on): one a head asked for
+        stays. Gone once nothing's asking for it, the heads' pauses with it (a pause outlives nothing)."""
         with self.lock:
-            if self.pending_restart is not None and self.pending_restart["by"] == by:
+            p = self.pending_restart
+            if p is None or by not in p["owners"]:
+                return
+            owners = p["owners"] - {by}
+            if owners:
+                self.pending_restart = {"owners": owners, "to": None if by == "update" else p.get("to")}
+            else:
                 self.pending_restart = None
-                self.changed()
+                self.restart_holds.clear()
+            self.changed()
 
     def hold_restart(self, conn, on):
         """(lock held) A head showing what the restart waits for holds it (on), or lets go of it."""
@@ -204,12 +267,16 @@ class ServerRunning:
 
     def restart_now(self, force=True):
         """The host process stopped to start again on the code checked out (baude_headless.py's serve: restarting);
-        not force: only if nothing's running. True once it's stopping."""
+        not force: only if nothing's running and no head's paused it (halt looks again, as it stops). True once it's
+        stopping."""
         with self.lock:
             to = (self.pending_restart or {}).get("to")
         to = to or selfupdate.git(selfupdate.HERE, "rev-parse", "HEAD", timeout=5) or self.commit or "here"
-        if self.shutdown(if_idle=not force, restart=to) is not None:
+        busy, procs = self.halt(if_idle=not force, restart=to, pending=not force)
+        if busy is not None:
             return False
+        if procs is not None:
+            self.stop_procs(procs)
         self.log(f"restart{' forced' if force else ''}: stopping to start again")
         return True
 

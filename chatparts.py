@@ -27,17 +27,15 @@ class UpdateBar(Gtk.Box):
     restarted onto (what an automatic restart waits for in its tooltip: say); clicked, on_click (restart now; asked
     only if that stops something). While it's fetched in and checked, a spinner on the button; a newer version that
     can't be restarted onto says why instead of the button. Over it, while this machine's daemon has a restart
-    pending, a line saying so (say_restart); clicked, on_restart (what it waits for: meshui.restart_dialog)."""
+    pending, a line saying so, and one for each other host with one (say_restart); clicked, on_restart(its key) (what
+    it waits for: meshui.restart_dialog)."""
 
     def __init__(self, on_click, on_restart=None):
         super().__init__(orientation=Gtk.Orientation.VERTICAL, visible=False)
         self.add_css_class("update-bar")
         self.append(Gtk.Separator())
-        self.restart = Gtk.Button(halign=Gtk.Align.FILL, margin_start=6, margin_end=6, margin_top=4, visible=False)
-        self.restart_label = Gtk.Label(xalign=0, wrap=True, wrap_mode=Pango.WrapMode.WORD_CHAR)
-        self.restart.set_child(self.restart_label)
-        self.restart.add_css_class("flat")
-        self.restart.connect("clicked", lambda *_: on_restart and on_restart())
+        self.on_restart, self.restart_lines = on_restart, None
+        self.restart = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, visible=False)  # (a line per host: say_restart)
         self.append(self.restart)
         self.spinner = Gtk.Spinner(visible=False)
         row = Gtk.Box(spacing=6)
@@ -69,11 +67,21 @@ class UpdateBar(Gtk.Box):
                 wording.say("update_bar.ready"))
         self.shown()
 
-    def say_restart(self, said):
-        """said: the daemon's pending restart, said (meshui.restart_said), or None: none, no line."""
-        self.restart.set_visible(said is not None)
-        if said is not None:
-            self.restart_label.set_label(said)
+    def say_restart(self, lines):
+        """lines: each host's pending daemon restart, [(its key, said: meshui.restart_said)]; none, no line. Each
+        clicked: on_restart(key)."""
+        lines = [x for x in lines or () if x[1]]
+        if lines != self.restart_lines:
+            self.restart_lines = lines
+            while (c := self.restart.get_first_child()) is not None:
+                self.restart.remove(c)
+            for key, said in lines:
+                b = Gtk.Button(halign=Gtk.Align.FILL, margin_start=6, margin_end=6, margin_top=4,
+                               child=Gtk.Label(label=said, xalign=0, wrap=True, wrap_mode=Pango.WrapMode.WORD_CHAR))
+                b.add_css_class("flat")
+                b.connect("clicked", lambda _b, key=key: self.on_restart and self.on_restart(key))
+                self.restart.append(b)
+        self.restart.set_visible(bool(lines))
         self.shown()
 
     def shown(self):

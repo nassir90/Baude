@@ -60,7 +60,7 @@
     },
     {
       "name": "provider picker",
-      "shows": "Left of the model picker, a drop-down button with an arrow showing where the chat's model runs, written \"<host> / <provider>\" (for example \"local / MLX\"), cut with … in the middle past 24 characters. Only shown while the chat's model is one that runs on a provider (Ollama, MLX, Apple, an OpenAI-compatible server), never for Claude's own models. For a Claude or Codex model whose chat's host keeps more than one subscription account for it (Settings → Subscriptions), it lists those accounts instead, each by its name alone (no \"<host> / \": an account is its host's), with no heading, the chat's own picked; the CLI's own sign-in (\"CLI default\") is listed too while the chat runs on it, and an account since removed that the chat is on as \"Removed subscription\", picked, till another is picked. Not shown for a Claude Desktop chat its host only lists. Its tooltip is \"Subscription this chat runs on\".",
+      "shows": "Left of the model picker, a drop-down button with an arrow showing where the chat's model runs, written \"<host> / <provider>\" (for example \"local / MLX\"), cut with … in the middle past 24 characters. Only shown while the chat's model is one that runs on a provider (Ollama, MLX, Apple, an OpenAI-compatible server), never for Claude's own models. For a Claude or Codex model whose chat's host keeps a subscription account for it (Settings → Subscriptions), it lists the chat's host's subscriptions for it instead: the CLI's own sign-in (\"CLI default\", itself a subscription, so one added account makes two) first, then each account, each by its name alone (no \"<host> / \": an account is its host's), with no heading, the chat's own picked; an account since removed that the chat is on is listed last as \"Removed subscription\", picked, till another is picked. Not shown for a Claude Desktop chat its host only lists. Its tooltip is \"Subscription this chat runs on\".",
       "copy": [
         "chat_header.provider_tip",
         "chat_header.provider_tip_only"
@@ -83,6 +83,16 @@
           "source": [
             {
               "issue": "BaudeInternal#237"
+            }
+          ]
+        },
+        {
+          "said": "(BaudeInternal#263, paraphrased) with two Claude subscriptions on one host, CLI default and an added Work Account, the chat's provider drop-down to choose which one the tokens come from didn't show, so work and personal use couldn't be kept apart; the CLI default wasn't being counted as a provider",
+          "rule": "Every app counts the CLI's own sign-in (CLI default) as one of a host's subscriptions for Claude or Codex: the chat's provider picker shows once the host keeps one added account for the model's provider, and always lists CLI default (first) beside the accounts, selectable whichever the chat is on",
+          "decided": "2026-11-26",
+          "source": [
+            {
+              "issue": "BaudeInternal#263"
             }
           ]
         }

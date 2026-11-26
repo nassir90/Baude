@@ -76,6 +76,7 @@ restore_search_list() {
     done <<END
 $list
 END
+    [ "$#" -gt 0 ] || return  # (never an empty list: see make_identity)
     security list-keychains -d user -s "$@"
 }
 
@@ -96,6 +97,10 @@ make_identity() {
         [ -f "$PASSFILE" ] || { /usr/bin/openssl rand -hex 32 >"$PASSFILE"; say "created $PASSFILE (the keychain's password, mode 0600)"; }
         chmod 600 "$PASSFILE"
         before=$(security list-keychains -d user)
+        # (an empty search list means security can't see the user's own (HOME isn't theirs): it would still write the real
+        # one, so restoring "nothing" would drop the login keychain. Nothing is made then.)
+        [ -n "$(printf '%s' "$before" | tr -d '[:space:]')" ] || fail "The keychain search list reads empty (is HOME your own?)." \
+            "Run this as yourself, with your own HOME, so the search list can be put back as it was"
         security create-keychain -p "$(cat "$PASSFILE")" "$KEYCHAIN"
         # (create-keychain adds it to the search list: taken out again at once, codesign is pointed at the file)
         if [ "$(security list-keychains -d user)" != "$before" ]; then

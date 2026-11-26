@@ -68,7 +68,8 @@ if os.environ.get("SAMPLE"):  # (macOS's sample: where the main thread's time go
 still = measure(3.0)
 if N is None:  # (the station: its working chat's Bash card)
     N = sum(1 for n in v.nodes.values() if n.panel is not None and n.widget is not None)
-    target = next(n.widget for n in v.nodes.values() if n.widget is not None and getattr(n.widget, "obj", {}).get("id") == "h1/a").messages.get_last_child()
+    import test_baude
+    target = test_baude.find(chat_page(v, "h1/a").win.transcript, toolcards.ToolCard)[-1]
 else:
     target = cards["c2"] if N > 2 else cards["c0"]
 k = [0]

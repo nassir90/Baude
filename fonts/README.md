@@ -13,3 +13,11 @@ Mono is the default. Each is under the SIL Open Font License 1.1, its licence be
 | Cascadia Code | `CascadiaCode/` (variable: weight; upright, italic) | [google/fonts](https://github.com/google/fonts/tree/main/ofl/cascadiacode) |
 | Inconsolata | `Inconsolata/` (variable: width, weight) | [google/fonts](https://github.com/google/fonts/tree/main/ofl/inconsolata) |
 | CommitMono | `CommitMono/` (400 and 700; upright, italic) | [CommitMono 1.143](https://github.com/eigilnikolajsen/commit-mono/releases/tag/v1.143) |
+
+One more is a fallback, not a code font: where the terminal's font has no glyph for a Nerd Font icon (the private-use
+code points `ls`, prompts and editors print), Multiplex draws it from Symbols Nerd Font Mono, under the MIT License
+(`LICENSE` beside it).
+
+| Font | Files | From |
+|---|---|---|
+| Symbols Nerd Font Mono | `NerdFontsSymbols/` (regular) | [Nerd Fonts 3.5.1](https://github.com/ryanoasis/nerd-fonts/releases/tag/v3.5.1), `NerdFontsSymbolsOnly.zip` |

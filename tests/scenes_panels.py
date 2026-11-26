@@ -1541,7 +1541,7 @@ sys.exit(3)
 
 @scene("57f-task-asks-bot", "A Bot's chat (Juniper's) asked by its task's run (a form to fill), then handed the run's "
                             "failure: each message heads with what the task did and a table of its run (its task and "
-                            "run ids, times, version, what ran its script, exit code), then the script's words",
+                            "run ids, times, version, the command it runs, exit code), then the script's words",
        size=(1200 + SIDEBAR, H))
 def _(app):
     win = network_window(app, None)

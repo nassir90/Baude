@@ -157,8 +157,8 @@ abstract class TasksMockups(private val theme: String) {
      * task did and a table of the run, then the script's words. */
     @Test fun asked() {
         val table = "| task | 6def981555c9 |\n|---|---|\n| run | 625623c87b8e486e |\n| start time | 2026-11-26 23:42:25 |\n"
-        val tail = "| version | 2009f5f91a9f |\n| entrypoint | /usr/bin/python3 -u |\n" +
-            "| script | /home/ada/.local/share/baude/bots/s1/tasks/scripts/2009f5f91a9f.py |\n"
+        val tail = "| version | 2009f5f91a9f |\n" +
+            "| command | /usr/bin/python3 -u /home/ada/.local/share/baude/bots/s1/tasks/scripts/2009f5f91a9f.py |\n"
         val from = dev.baude.android.Msg.StoredSender(kind = "host", name = "Task “Deploy site”", host = "h1",
             hostName = "workshop", session = "s1", task = "t1", run = "r3")
         activity.setContent {

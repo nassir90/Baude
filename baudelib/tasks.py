@@ -315,15 +315,15 @@ def runner(task):
     return {"python": [sys.executable, "-u"], "shell": ["/bin/sh"]}.get(task["runtime"], [])
 
 
-def entrypoint(task):
-    """runner, as a command line (None: a bot task's)."""
-    return shlex.join(runner(task)) or None
+def command(task, path):
+    """What a run of task runs, its script at path, as a command line (None: a bot task's, given its Bot as a turn)."""
+    return shlex.join([*runner(task), path]) if runner(task) else None
 
 
 def asked_head(name, tid, run, error):
     """What an ask of a run's Bot starts with: the task (name) failed, or asks, then a table of the run (its task's
-    id tid, its record run): its ids, when it started (and ended), how long it's taken, the version, what ran it,
-    its script, its exit code; a row left out that isn't known (an ask's run hasn't ended, nor has a failure it
+    id tid, its record run): its ids, when it started (and ended), how long it's taken, the version, the command it
+    runs, its exit code; a row left out that isn't known (an ask's run hasn't ended, nor has a failure it
     hands over itself)."""
     def at(t):
         zone = datetime.timezone(datetime.timedelta(seconds=run.get("offset") or 0))
@@ -333,8 +333,7 @@ def asked_head(name, tid, run, error):
     rows = [("task", tid), ("run", run.get("id")), ("started", started and at(started)),
             ("ended", ended and at(ended)),
             ("duration", seconds is not None and wording.say("tasks.asked_seconds", seconds=round(seconds, 1))),
-            ("version", run.get("version")), ("entrypoint", run.get("entrypoint")), ("script", run.get("script")),
-            ("exit", run.get("exit"))]
+            ("version", run.get("version")), ("command", run.get("command")), ("exit", run.get("exit"))]
     rows = [(wording.say(f"tasks.asked_{k}"), str(v).replace("|", "\\|").replace("\n", " "))
             for k, v in rows if v is not None and v is not False and v != ""]
     lines = [f"| {k} | {v} |" for k, v in rows]
@@ -589,7 +588,7 @@ class Tasks:
         run = {"id": uuid.uuid4().hex[:16], "task": task["id"], "name": task["name"], "version": task["version"],
                "trigger": (trigger or {}).get("id"), "kind": kind, "payload": payload or None, "inputs": inputs,
                "status": "running", "started": now, "offset": clock()["offset"], "asks": 0,
-               "script": st.script_path(task), "entrypoint": entrypoint(task)}
+               "command": command(task, st.script_path(task))}
         with self.lock:
             if self.going(s.id, task["id"]):
                 run.update(status="skipped", ended=now, seconds=0, error=wording.say("tasks.still_running"))

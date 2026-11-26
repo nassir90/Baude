@@ -1397,12 +1397,12 @@ task.agent("LINGER: check the release links", wait=False, title="Check the relea
 '''
 
 
-def task_agents(win):
-    """Juniper's task Deploy site run, falling back to three one-shot agents (task.agent): one finished and one failed
-    (what each said told Juniper), one still working; all nested under Juniper and kept with the run. (Juniper, the
-    run's id, its chats)."""
+def task_agents(win, chat="Write the release notes for 2.4"):
+    """A Bot's (Juniper's, else the chat's: Fern's) task Deploy site run, falling back to three one-shot agents
+    (task.agent): one finished and one failed (what each said told the Bot), one still working; all nested under the
+    Bot and kept with the run. (the Bot, the run's id, its chats)."""
     server = NET["lab"][0]
-    bot = NET["ids"]["Write the release notes for 2.4"]
+    bot = NET["ids"][chat]
     os.environ["FAKE_LINGER_S"] = "120"  # (the last agent's turn: going on as it's drawn)
     os.environ["FAKE_ANSWERS"] = json.dumps({  # (the first agent's answer, and Juniper's to what each says)
         "Find out why.": "The bucket's key expired yesterday. Renew it, then run the task again.",
@@ -1480,13 +1480,15 @@ def _(app):
     return win
 
 
-@scene("57d-task-bot-told", "The Bot's chat told what two chats its task's run started said: each bubble only the "
+@scene("57d-task-bot-told", "A Bot's chat (Fern's) told what two chats its task's run started said: each bubble only the "
                             "chat's own words, its from line the chat (a link), the task's run (a link) and how its "
                             "turn ended (finished, failed)", size=(1200 + SIDEBAR, H))
 def _(app):
     win = network_window(app, None)
     lab_bots(win)
-    bot, _rid, chats = task_agents(win)
+    if "told" not in NET:  # (seeded once, on Fern, whose chat no other scene runs a task in: each pass, each theme,
+        NET["told"] = task_agents(win, "Plan the Q1 roadmap")  # shows its two reports once)
+    bot, _rid, chats = NET["told"]
     server = NET["lab"][0]
 
     def told():
@@ -1495,7 +1497,7 @@ def _(app):
         return sum(v.get("kind") == "subagent" and v.get("session") in chats for v in got.values()) == 2
     T.wait_for(told, "the Bot told", 30)
     win.sidebar.on_activate(win.sidebar.list, session_row(win, bot))
-    T.wait_for(lambda: win.session_id == bot, "Juniper open")
+    T.wait_for(lambda: win.session_id == bot, "Fern open")
     T.wait_for(lambda: len(T.find(win, Gtk.Label, lambda x: x.has_css_class("sender-from") and
                                   " run · " in x.get_text())) >= 2, "the two told bubbles", 20)
     T.pump(2)

@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
-  "description": "How much of its context window a session's agent last said it's used (Claude Code's get_context_usage answer, Codex's token count, pi-claude's count of what it sends), kept by its host: asked of its agent as it starts, through a turn (at most once a second), as the turn ends, after a compaction and after its model's changed, and kept while its agent's stopped. Every app's context meter shows it.",
+  "description": "How much of its context window a session's agent last said it's used (Claude Code's get_context_usage answer, Codex's token count, pi-claude's count of what it sends), kept by its host: asked of its agent as it starts, through a turn while a chat has it open (at most once a second), as the turn ends, after a compaction and after its model's changed, and kept while its agent's stopped; given another model's window (or none) if one's picked while it's stopped. Every app's context meter shows it.",
   "properties": {
     "totalTokens": {
       "type": ["integer", "null"],
@@ -20,7 +20,7 @@
       "items": {
         "$ref": "ContextCategory.json"
       },
-      "description": "What the tokens are, as its agent splits them (its meter's tooltip)."
+      "description": "What the tokens are, as its agent splits them (its meter's tooltip). Left out of a session's listing: the chat that's open asks for them (get_context_usage)."
     }
   },
   "additionalProperties": false

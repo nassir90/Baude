@@ -431,9 +431,15 @@ class Session:
 
 
 def context_listing(usage):
-    """What an agent said of its context (get_context_usage's answer, Codex's or pi-claude's count) as every head's
-    told it (ContextUsage); None for one with neither a window nor a wish to be shown without one (a stopped one's
-    {})."""
+    """What every head's told of a session's context (ContextUsage, as context_kept has it): its count and window,
+    without its categories (those are said to the chat that's open, on get_context_usage)."""
+    kept = context_kept(usage)
+    return None if kept is None else {k: v for k, v in kept.items() if k != "categories"}
+
+
+def context_kept(usage):
+    """What an agent said of its context (get_context_usage's answer, Codex's or pi-claude's count) as it's kept
+    (ContextUsage); None for one with neither a window nor a wish to be shown without one (a stopped one's {})."""
     if not isinstance(usage, dict):
         return None
     used, total = usage.get("totalTokens"), usage.get("maxTokens")

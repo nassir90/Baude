@@ -15,6 +15,7 @@ class Chrome {
     val cost = mutableStateOf(0.0)
     var costSeen = 0.0                              // (the last total claude gave: spent_since)
     val lastTurn = mutableStateOf("")
+    val categories = mutableStateOf<org.json.JSONArray?>(null)   // (what the tokens of its context are: askCategories)
     val usage = mutableStateOf<JSONObject?>(null)   // (what Meta's session said of its context: a chat's is listed)
     val outgrown = mutableStateOf(false)            // (a turn ended saying the prompt's too long)
     val retrying = mutableStateOf<JSONObject?>(null) // (an api_retry, till what it says next)
@@ -202,6 +203,15 @@ fun refreshContext(chat: Chat, model: String? = null) {
     val asked = model ?: Mesh.session(at, chat.sid)?.model?.ifBlank { null }
     controlAnswer(at, chat.sid, JSONObject().put("subtype", "get_context_usage")) { r, _ ->
         if (r != null && r.length() > 0) showUsage(chat, r, asked)
+    }
+}
+
+/** What the tokens of a chat's context are, asked of its host (a session's listing has its count only). */
+fun askCategories(chat: Chat) {
+    val at = chat.hostId
+    if (!takes(at, "control")) return
+    controlAnswer(at, chat.sid, JSONObject().put("subtype", "get_context_usage")) { r, _ ->
+        r?.optJSONArray("categories")?.let { chat.chrome.categories.value = it }
     }
 }
 

@@ -125,6 +125,10 @@ class WindowProc:
         self.context_listed = (self.session_id, usage)
         self.remember_context(self.model, usage)
         self.show_context(usage)
+        sid = self.session_id  # (the tooltip's categories: not listed, asked of its host, which has them kept)
+        self.request({"subtype": "get_context_usage"},
+                     lambda said: self.session_id == sid and said.get("categories") and self.show_context(
+                         {**usage, "categories": said["categories"]}))
 
     CONTEXT_EVERY_MS = 1000
 

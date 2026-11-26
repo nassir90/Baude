@@ -17,7 +17,7 @@ from baudelib import (
 from baudelib.serverstate import (
     AGENT_TOOLS, CATALOGUE_LIMIT, CATALOGUE_WAIT_S, CHECK_SOCKET_S, CLAUDE_OPTIONS, COMMAND_TOOLS, CONTEXT_EVERY_S,
     FILE_LIMIT, GRACE_MOST, RENAME_S, SETTINGS, Session, TAKEN, TRANSCRIPT_CHUNK, _said, _what, _write_json, bot_system,
-    clean_env, context_listing, turn_acting,
+    clean_env, context_kept, context_listing, turn_acting,
 )
 
 CARRY_TRIES = 5  # (copies of a chat's record made, each written to as it was copied, before its account waits again)
@@ -437,6 +437,8 @@ class ServerSessions:
             s.meta["effort"] = models.codex_effort(self.codex_models(s.meta.get("profiles", {}).get("codex", "")), s.meta["model"], s.meta.get("effort"))
         self.save(s)
         if (s.proc is None or getattr(s.proc, "stopping", False)) and sub != "rewind_conversation":
+            if sub == "set_model":
+                self.rewindow(s)
             self.changed()  # (stopped: answered from what's kept, for when it runs; only a message starts it, and a
             # revert, which its claude makes)
             if sub == "get_settings":
@@ -446,6 +448,8 @@ class ServerSessions:
             if sub == "get_context_usage":  # (what it last said)
                 return answer(s.meta.get("context_usage") or {})
             return answer({})
+        if sub == "get_context_usage" and s.meta.get("context_usage"):  # (what it last said, categories too: the
+            return answer(s.meta["context_usage"])  # listing has its count only)
         try:
             proc = self.ensure_proc(s)
         except OSError as e:  # (its claude couldn't be started: a revert's said so, not left waiting)
@@ -503,6 +507,7 @@ class ServerSessions:
                             s.queued = []  # (sent after it, at the turn it stopped: gone with it)
                     if (target := s.reverting.pop(rid, None)) and rewound:
                         self.unstamp(s, target)
+                        self.ask_context(s)  # (less of the window used)
                     applied = (r.get("response") or {}).get("applied") if r.get("subtype") == "success" else None
                     if isinstance(applied, dict):  # (get_settings: what claude runs with, its own defaults too: kept,
                         for key in ("model", "effort"):  # for when it's asked again and isn't running)
@@ -874,11 +879,15 @@ class ServerSessions:
         if proc is None or getattr(proc, "stopping", False) or models.model_program(s.meta.get("model")) == "codex":
             return
         if soon:
+            if not s.viewers:  # (nobody has it open: asked as turns end, not through them)
+                return
             wait = s.context_asked + CONTEXT_EVERY_S - time.time()
             if s.context_soon or wait > 0:
                 if not s.context_soon:
                     s.context_soon = True
-                    threading.Timer(max(wait, 0), self._context_due, (s, proc)).start()
+                    timer = threading.Timer(max(wait, 0), self._context_due, (s, proc))
+                    timer.daemon = True
+                    timer.start()
                 return
         s.context_asked = time.time()
         on = f"srv_{next(self.rids)}"
@@ -888,20 +897,36 @@ class ServerSessions:
     def _context_due(self, s, proc):
         with self.lock:
             s.context_soon = False
-            if s.proc is proc and s.busy:
+            if s.proc is proc and s.busy and s.viewers:
                 self.ask_context(s)
+
+    def rewindow(self, s):
+        """(lock held) Another model picked while its agent can't be asked: the count kept is of the window it
+        had, so it's given the new model's window if that's known, else none (the listing then shows the model's own,
+        as for a session that's never said)."""
+        kept = s.meta.get("context_usage")
+        if not isinstance(kept, dict) or not kept.get("maxTokens"):
+            return
+        window = models.window_of(s.meta.get("model"))
+        if window:
+            s.meta["context_usage"] = {**kept, "maxTokens": window}
+        else:
+            s.meta["context_usage"] = {k: v for k, v in kept.items() if k != "maxTokens"}
+        self.save(s)
 
     def keep_context(self, s, usage):
         """(lock held) What its agent said of its context, kept as every head's told it (context_listing): one that
         says neither a window nor to be shown without one changes nothing. Saved between turns (with what the turn
         kept, as it ends)."""
-        kept = context_listing(usage)
-        if kept is None or kept == context_listing(s.meta.get("context_usage")):
+        kept = context_kept(usage)
+        if kept is None:
             return
-        s.meta["context_usage"] = kept
+        listed = context_listing(kept) != context_listing(s.meta.get("context_usage"))
+        s.meta["context_usage"] = kept  # (its categories too: said to the chat that's open, on get_context_usage)
         if not s.busy:
             self.save(s)
-        self.changed()
+        if listed:
+            self.changed()
 
     def drop_routes(self, s):
         """(lock held) What was asked of a session's claude that's gone: no answer's coming (the server's own requests

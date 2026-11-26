@@ -142,7 +142,7 @@ fun contextShown(chat: Chat, model: String? = Mesh.session(chat.hostId, chat.sid
         used?.let { Wording.ContextUsage.usedNoLimit(used = fmtTokens(it)) } ?: Wording.ContextUsage.unknownNoLimit,
         null, 0f, Wording.ContextUsage.tooltip, false)
     val n = used ?: 0
-    val lines = u.optJSONArray("categories").list().filter { it.optInt("tokens") > 0 && it.optString("kind") != "deferred" }
+    val lines = (u.optJSONArray("categories") ?: chat.chrome.categories.value).list().filter { it.optInt("tokens") > 0 && it.optString("kind") != "deferred" }
         .joinToString("\n") { "${it.optString("name")}: ${fmtTokens(it.optInt("tokens"))}" }
     return ContextShown(Wording.ContextUsage.label,
         Wording.ContextUsage.count(used = fmtTokens(n), total = fmtTokens(total)), minOf(1f, n.toFloat() / total),
@@ -212,8 +212,12 @@ fun StatusBar(chat: Chat, openPage: (String) -> Unit) {
     val session = Mesh.session(at, chat.sid)
     val working = isWorking(chat)
     val window = session?.context?.maxTokens?.toInt()
-    LaunchedEffect(window, session?.model) { // (its window kept for the model's next session: rememberWindow)
-        if (window != null) rememberWindow(at, session?.model?.ifBlank { null }, window)
+    val used = session?.context?.totalTokens
+    LaunchedEffect(window) { // (its window kept for the model's next session, as it's said: not as the model changes)
+        if (window != null) rememberWindow(at, Mesh.session(at, chat.sid)?.model?.ifBlank { null }, window)
+    }
+    LaunchedEffect(used, window) { // (what the tokens are, for the tooltip: its host lists the count only)
+        if (session?.context != null) askCategories(chat)
     }
     LaunchedEffect(working) { // (a turn over: an interrupt's wait and the API's retrying let go of)
         if (!working) {

@@ -518,6 +518,22 @@ abstract class Parity(private val theme: String, private val scene: String) {
                 show { KubeScreen(host.getString("id"), {}) }
                 repeat(10) { if (find("shop") == null) flush(true) } // (contexts, connect, then the summary: a host.py each)
             }
+            name == "kubernetes-home-crowded" -> { // (scrolled to its tables' end: the Other rows)
+                show { KubeScreen(host.getString("id"), {}, context = "crowded") }
+                repeat(10) { if (find("billing") == null) flush(true) }
+                roots().flatMap { all(it.semanticsOwner.rootSemanticsNode) }.filter { n ->
+                    n.config.contains(SemanticsProperties.VerticalScrollAxisRange) && n.config.contains(SemanticsActions.ScrollBy)
+                }.forEach { n -> repeat(4) { n.config[SemanticsActions.ScrollBy].action?.invoke(0f, 2500f); settle() } }
+                flush(true)
+            }
+            name == "kubernetes-home-hover" -> { // (a finger held on the memory history and dragged to four fifths across)
+                show { KubeScreen(host.getString("id"), {}, context = "crowded") }
+                repeat(10) { if (find("billing") == null) flush(true) }
+                // (the memory card's history, where the crowded scene draws it: its semantics report no size here)
+                val v = activity.window.decorView
+                touch(v.width * 0.66f, v.height * 0.636f, v.width * 0.74f, lift = false)
+                flush(true)
+            }
             name == "kubernetes-shell" -> {
                 show { KubeScreen(host.getString("id"), {}, page = "pods") }
                 tap("CPU")

@@ -28,13 +28,17 @@ BATCH_S = 0.1   # a log's lines are sent this often at most
 WATCH_S = 1.0   # a watch's changes are sent this often at most
 HISTORY_S = 30 * 60  # Home's history goes back this far
 IDLE_S = 24 * 60 * 60  # a context Home hasn't been read for in a day is no longer sampled, and its history let go
-# context -> {"asked": when Home last read it, "tried": when a sample was last taken (or tried), "read": (when, its
-# last kd.kube_summary_read) or None, "samples": deque of
+BACKOFF_S = 5 * 60  # a cluster that keeps failing to be read is tried again at most this far apart (twice as far each time)
+# context -> {"cluster": (its cluster, its server) as the kubeconfig names them, "began": when this history began,
+# "asked": when Home last read it, "next": when the next sample is due, "fails": how many reads in a row failed,
+# "fault": the last one's error, "read": (when, its last kd.kube_summary_read) or None, "samples": deque of
 # (when, {namespace: (cpu requested, cpu used, memory requested, memory used)})}: from the first time Home is read for
-# a context, a sample every KUBE_REFRESH_S (_sampling) whether Home is open or not, in this process's memory
+# a context, a sample every KUBE_REFRESH_S (_sampling) whether Home is open or not, in this process's memory, for as
+# long as the kubeconfig names that context with that cluster and server (one gone, or another cluster under its name,
+# drops it at once)
 _HISTORY = {}
 _HISTORY_LOCK = threading.Lock()
-_SAMPLER = []  # (the thread taking them, once there's one)
+_SAMPLER = []  # (the thread taking them, while there's a context to sample)
 
 
 def _home(path):
@@ -142,14 +146,40 @@ def _list(msg):
     return out
 
 
-def _take(context):
-    """Read context's totals (kubectl: not under the lock) and keep what its history needs of them; the read."""
-    read, now = kd.kube_summary_read(context), time.time()
+def _identities():
+    """Each kubeconfig context's (cluster, server), by its name: what a context's history is kept for."""
+    try:
+        return {c["name"]: (c.get("cluster"), c.get("server")) for c in lookupkube.kube_contexts()
+                if not c.get("cluster_only")}
+    except OSError:  # (a kubeconfig replaced while it's read: as it was a moment ago, next time)
+        return None
+
+
+def _history(context, cluster, now):
+    """A new history for context (under _HISTORY_LOCK), its first sample due now."""
+    h = {"cluster": cluster, "began": now, "asked": now, "next": now, "fails": 0, "fault": None, "read": None,
+         "samples": collections.deque()}
+    _HISTORY[context] = h
+    return h
+
+
+def _take(context, h):
+    """Read context's totals (kubectl: not under the lock) and keep what its history h needs of them; the read. A
+    failed read is tried again twice as late each time in a row, up to BACKOFF_S (and raises)."""
+    try:
+        read = kd.kube_summary_read(context)
+    except (RuntimeError, ValueError, OSError) as e:
+        with _HISTORY_LOCK:
+            if _HISTORY.get(context) is h:  # (not one let go, or begun anew, while it was read)
+                h["fails"] += 1
+                h["fault"] = e
+                h["next"] = time.time() + min(BACKOFF_S, kd.KUBE_REFRESH_S * 2 ** (h["fails"] - 1))
+        raise
+    now = time.time()
     kept = {ns: (t[0], t[1], t[3], t[4]) for ns, t in kd.kube_tally(read)["namespaces"].items()}
     with _HISTORY_LOCK:
-        h = _HISTORY.get(context)
-        if h is not None:
-            h["read"], h["tried"] = (now, read), now
+        if _HISTORY.get(context) is h:
+            h["read"], h["next"], h["fails"], h["fault"] = (now, read), now + kd.KUBE_REFRESH_S, 0, None
             h["samples"].append((now, kept))
             while now - h["samples"][0][0] > HISTORY_S:
                 h["samples"].popleft()
@@ -157,22 +187,25 @@ def _take(context):
 
 
 def _sampling():
-    """A sample of each context Home has been read for every KUBE_REFRESH_S, till the process ends; a context not
-    read for IDLE_S (a day) is let go. (A sample that can't be read is a gap in its history.)"""
+    """A sample of each context Home has been read for every KUBE_REFRESH_S (further apart while it fails), till none
+    is left: a context not read for IDLE_S (a day), gone from the kubeconfig or naming another cluster is let go at
+    once. (A sample that can't be read is a gap in its history.)"""
     while True:
         time.sleep(1)
-        now = time.time()
+        now, known = time.time(), _identities()
         with _HISTORY_LOCK:
-            for context in [c for c, h in _HISTORY.items() if now - h["asked"] > IDLE_S]:
+            for context in [c for c, h in _HISTORY.items() if now - h["asked"] > IDLE_S or
+                            known is not None and known.get(c) != h["cluster"]]:
                 del _HISTORY[context]
-            due = [c for c, h in _HISTORY.items() if now - h["tried"] >= kd.KUBE_REFRESH_S]
-        for context in due:
+            if not _HISTORY:
+                _SAMPLER.clear()
+                return
+            due = [(c, h) for c, h in _HISTORY.items() if now >= h["next"]]
+        for context, h in due:
             try:
-                _take(context)
+                _take(context, h)
             except (RuntimeError, ValueError, OSError):
-                with _HISTORY_LOCK:
-                    if context in _HISTORY:  # (tried again in KUBE_REFRESH_S, not at once)
-                        _HISTORY[context]["tried"] = time.time()
+                pass
 
 
 def _sample(when, kept, namespaces):
@@ -189,33 +222,39 @@ def _sample(when, kept, namespaces):
 def _summary(msg):
     """Home: the stack's CPU and memory in the namespaces asked for (every one without), and how they went: the
     samples taken since the one asked for (every one without), as _sampling keeps them. A read under
-    KUBE_REFRESH_S / 2 old is used again."""
+    KUBE_REFRESH_S / 2 old is used again; while a cluster that failed waits to be tried again, its last fault is."""
     context, namespaces, since = msg.get("context"), msg.get("namespaces"), msg.get("since")
     since = since if isinstance(since, (int, float)) and not isinstance(since, bool) else None
+    known, now = _identities(), time.time()
     with _HISTORY_LOCK:
         h = _HISTORY.get(context)
-        last = h and h["read"]
-        read = last[1] if last and time.time() - last[0] < kd.KUBE_REFRESH_S / 2 else None
-        if h is None:
-            now = time.time()
-            _HISTORY[context] = {"asked": now, "tried": now, "read": None, "samples": collections.deque()}
+        cluster = known.get(context) if known is not None else h and h["cluster"]
+        if h is not None and h["cluster"] != cluster:
+            del _HISTORY[context]
+            h = None
+        if cluster is None:  # (not in the kubeconfig: kubectl says so, and there's nothing to sample)
+            h = None
+        elif h is None:
+            h = _history(context, cluster, now)
         else:
-            h["asked"] = time.time()
-        if not _SAMPLER:
+            h["asked"] = now
+        last = h and h["read"]
+        read = last[1] if last and now - last[0] < kd.KUBE_REFRESH_S / 2 else None
+        waiting = h is not None and h["fails"] and now < h["next"] and h["fault"]
+        if h is not None and not _SAMPLER:
             _SAMPLER.append(threading.Thread(target=_sampling, name="kube-home-history", daemon=True))
             _SAMPLER[0].start()
     try:
-        read = read or _take(context)
-    except (RuntimeError, ValueError) as e:
-        with _HISTORY_LOCK:  # (a cluster never read isn't sampled)
-            if context in _HISTORY and not _HISTORY[context]["samples"]:
-                del _HISTORY[context]
+        if waiting:
+            raise waiting
+        read = read or (_take(context, h) if h is not None else kd.kube_summary_read(context))
+    except (RuntimeError, ValueError, OSError) as e:
         return {"fault": _fault(getattr(e, "said", str(e)), context)}
     with _HISTORY_LOCK:
-        samples = list((_HISTORY.get(context) or {"samples": ()})["samples"])
+        samples = list(h["samples"]) if h is not None and _HISTORY.get(context) is h else []
     history = [_sample(when, kept, namespaces) for when, kept in samples if since is None or when > since]
     return {"summary": {**kd.kube_summary(read, namespaces), "history": history, "every": kd.KUBE_REFRESH_S,
-                        "minutes": HISTORY_S // 60}}
+                        "minutes": HISTORY_S // 60, "began": h["began"] if h is not None else now}}
 
 
 def _yaml(msg):

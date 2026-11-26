@@ -207,7 +207,7 @@
     },
     {
       "name": "Home",
-      "shows": "In the table's place while Home is picked (the YAML pane and the dock as ever), scrolling: two cards side by side (one above the other where there isn't room), CPU then Memory, each with a rule round it and rounded corners. A card's head: its name (bold) and, at the right, dim, what every node can give pods together (their allocatable: \"4 cores\", \"7.7GiB\"; tooltip \"What the nodes can give pods (their allocatable)\"). Under it three rows, Requested, Used and Limits: the word (its tooltip says what it adds up), a bar 10 px tall with round ends filled to the amount's share of allocatable (Requested in the accent, Used green, Limits grey; any of them past allocatable full and orange), the amount (CPU in cores to two places, \"1.10\"; memory as the table's, \"704.0MiB\"; \"N/A\" for Used without a metrics API; \"–\" for Limits when no container sets one) and its share (\"27%\") dim. No bars when the nodes can't be listed. Under the rows, how it went: Used as a green line and Requested as a dashed line in the accent, over the history the host keeps (tooltip \"Used (and requested, dashed) over the last 30 minutes\"), each sample at its time across the 30 minutes up to the newest, so a stretch with none (the host off, the cluster unreachable) is a gap in the lines; scaled to the most either reached; nothing drawn with fewer than two samples. Under the cards a table of the namespaces shown, a row each, sorted by name: Namespace, Pods, CPU requested, CPU used, CPU limits, Memory requested, Memory used, Memory limits, its head dim and bold, numbers to the right. On a cluster of more than one node (as the Nodes row), a table of the nodes under it: Node, Pods, CPU requested, CPU used, CPU limits, CPU allocatable, Memory requested, Memory used, Memory limits, Memory allocatable; pods not yet on a node are a row of their own, \"Unscheduled\", with no allocatable. Each 10 s read changes the tables' texts in place (a row added or gone, or new columns, lays them out anew). The filter keeps the rows any cell of which has its text. The tables scroll sideways when they're wider than the room. The host adds it up (kube's summary; schema/types KubeSummary): every app asks and draws its answer (schema/ui README: apps are thin clients). A read under the Kubernetes read rule, as list is. Requested and limits are the pods' that hold on to their node (not Succeeded or Failed ones), each pod's as the scheduler reckons it (the sidecar KEP's order): its containers' and sidecars' summed, or, if more, the most any init container needs while it runs beside the sidecars started before it; plus its overhead (a request's always, a limit's only where a limit is set); a limit is the sum of those set, as kubectl describe node adds them. The host reads only what that needs: kubectl get pods with a field selector leaving out Succeeded and Failed ones, -o jsonpath of each pod's namespace, name, node and overhead and its containers' and init containers' resources and restartPolicy. Used is the metrics API's pods (metrics-server) summed, so it adds up with the namespaces' and nodes' rows; without one it's N/A and the status line says so. Allocatable is every node's status.allocatable summed; a node's row is against its own. History: from the first time Home is read for a context, the host samples it every 10 s until its process ends, whether Home is open or not (only contexts Home has been read for; one not read for a day is let go), each namespace's requested and used, for 30 minutes, in its own memory (none kept on disk; a host restarted starts again); the totals of the namespaces shown are worked out from them. An app asks only for the samples after the newest it has (since) and keeps the last 30 minutes'.",
+      "shows": "In the table's place while Home is picked (the YAML pane and the dock as ever), scrolling: two cards side by side (one above the other where there isn't room), CPU then Memory, each with a rule round it and rounded corners. A card's head: its name (bold) and, at the right, dim, what every node can give pods together (their allocatable: \"4 cores\", \"7.7GiB\"; tooltip \"What the nodes can give pods (their allocatable)\"). Under it three rows, Requested, Used and Limits: the word (its tooltip says what it adds up), a bar 10 px tall with round ends whose track stands for the most of allocatable, requested, used and limits: the amount filled in its colour up to allocatable (Requested in the accent, Used green, Limits grey), any part past allocatable a segment of its own in orange (square where it meets the rest), and a tick at allocatable whenever the track goes past it, the amount (CPU in cores to two places, \"1.10\"; memory as the table's, \"704.0MiB\"; \"N/A\" for Used without a metrics API; \"–\" for Limits when no container sets one) and its share (\"27%\") dim. No bars when the nodes can't be listed. When any of them is past allocatable, a line in orange under the rows says how far the most over is: \"Limits 2.3× allocatable\". Under them, how it went, 48 px tall: Used as a green line and Requested as a dashed line in the accent, over the history the host keeps, each sample at its time across the 30 minutes up to the newest, so a stretch with none (the host off, the cluster unreachable) is a gap in the lines; across it, flat at their values now, Allocatable dotted (the card's text colour) and Limits dashed in the Limits bar's grey. Its top stands for allocatable (and 8% more) while the most used or requested reaches a quarter of allocatable, so the lines read against what the nodes can give; under that, for the most they reached (and 15% more), so a small use's ups and downs still show, and allocatable is then out of view. A reference line is drawn only while it's within the top (limits past it, as on an overcommitted cluster, aren't drawn; the bars and the over line say it). Nothing is drawn with fewer than two samples. Pointing at it (the desktop: hover; the phone: a finger held, or dragged across) marks the sample nearest in time with a thin vertical line and a dot on each line, and shows its time (HH:MM:SS), Used, Requested, Limits and Allocatable, one a line (limits and allocatable as now): the desktop in its tooltip, the phone in a dark bubble above the history that follows the finger and goes when it lifts; in a gap the desktop's tooltip is \"Used (and requested, dashed) over the last 30 minutes, against allocatable (dotted) and limits (dashed) now\". Under the cards a table of the namespaces shown, a row each: Namespace, Pods, CPU requested, CPU used, CPU limits, CPU % of requests, CPU % of limits, Memory requested, Memory used, Memory limits, Memory % of requests, Memory % of limits (used as a share of what's requested and of the limits, as Grafana's CPU Quota table and k9s; \"–\" where nothing is requested or no limit is set), its head dim and bold, numbers to the right. On a cluster of more than one node (as the Nodes row), a table of the nodes under it: Node, Pods, CPU requested, CPU used, CPU limits, CPU allocatable, Memory requested, Memory used, Memory limits, Memory allocatable; pods not yet on a node are a row of their own, \"Unscheduled\", with no allocatable (\"–\"). Both tables come sorted by CPU used, most first (then most requested), the heading sorted by marked with a small arrow; a table of more than 11 rows shows the first 10 as sorted and an \"Other (n)\" row adding up the rest (its name dim and not a link; its shares the shares of its sums). The host lays the columns out (schema/types KubeShareColumn: each its kind, so an app sorts by it and adds rows up) and gives each row's numbers (KubeShare keys). Each 10 s read changes the tables' texts in place (a row added or gone, another order, or new columns, lays them out anew). The filter keeps the rows any cell of which has its text, before the first 10 are taken. The tables scroll sideways when they're wider than the room. The host adds it up (kube's summary; schema/types KubeSummary): every app asks and draws its answer (schema/ui README: apps are thin clients). A read under the Kubernetes read rule, as list is. Requested and limits are the pods' that hold on to their node (not Succeeded or Failed ones), each pod's as the scheduler reckons it (the sidecar KEP's order): its containers' and sidecars' summed, or, if more, the most any init container needs while it runs beside the sidecars started before it; plus its overhead (a request's always, a limit's only where a limit is set); a limit is the sum of those set, as kubectl describe node adds them. The host reads only what that needs: kubectl get pods with a field selector leaving out Succeeded and Failed ones, -o jsonpath of each pod's namespace, name, node and overhead and its containers' and init containers' resources and restartPolicy. Used is the metrics API's pods (metrics-server) summed, so it adds up with the namespaces' and nodes' rows; without one it's N/A and the status line says so. Allocatable is every node's status.allocatable summed; a node's row is against its own. History: from the first time Home is read for a context, the host samples it every 10 s until its process ends, whether Home is open or not (only contexts Home has been read for), each namespace's requested and used, for 30 minutes, in its own memory (none kept on disk; a host restarted starts again); the totals of the namespaces shown are worked out from them. A context's history is kept for the cluster and server the kubeconfig names for it: within a second of the context going from the kubeconfig (or naming another cluster or server) its sampling stops and its history is dropped (the sampling thread ends when no context is left), a context not read for a day is let go too, and a name reused for another cluster begins a new history (KubeSummary began: an app drops the samples it holds from before it). A read that fails is tried again 10 s later, then twice as far apart each time in a row, up to 5 minutes; while it waits, Home is answered with the last failure without asking the cluster. An app asks only for the samples after the newest it has (since) and keeps the last 30 minutes'.",
       "copy": [
         "kube.cores",
         "kube.allocatable_tip",
@@ -219,7 +219,10 @@
         "kube.limits_tip",
         "kube.history_tip",
         "kube.only_namespace",
-        "kube.unscheduled"
+        "kube.unscheduled",
+        "kube.allocatable",
+        "kube.over_allocatable",
+        "kube.other"
       ],
       "actions": [
         {
@@ -229,6 +232,14 @@
         {
           "by": "click a namespace's name (a link, tooltip \"Only <namespace>'s\")",
           "does": "Shows only that namespace, as a namespace link in a table does."
+        },
+        {
+          "by": "click (the phone: tap) a table's column heading",
+          "does": "Sorts that table by it, most first for numbers and A to Z for names; again, the other way. Rows without a number go last either way. The first 10 and the Other row follow the order."
+        },
+        {
+          "by": "hover the history (the phone: hold a finger on it, or drag it across)",
+          "does": "A line and dots at the sample nearest in time, its time, Used, Requested, Limits and Allocatable shown (the desktop: tooltip; the phone: a bubble above it, gone when the finger lifts)."
         },
         {
           "by": "none (the view open on Home)",
@@ -253,6 +264,32 @@
           "source": [
             {
               "issue": "BaudeInternal#251"
+            }
+          ]
+        },
+        {
+          "said": "Look up examples of how AWS, freelens, grafana do the graphing stuff and let me know if htere's any improvement",
+          "rule": "Every app's Home reads against capacity as Freelens, Grafana and AWS Container Insights do: the history has dashed Allocatable and Limits lines at their values now and shows a sample's time, used, requested and limits when pointed at (hover, or a finger held and dragged); a card's bars are scaled to the most of allocatable, used, requested and limits, with a tick at allocatable, the part past it a segment of its own and a line saying how far over (\"Limits 2.3× allocatable\"); the namespaces table has used as a share of requests and of limits for CPU and memory (\"–\" where there's none), is sorted by CPU used with sortable headings, and a namespaces' or nodes' table of more than 10 rows shows the top 10 and an \"Other (n)\" row",
+          "decided": "2026-11-26",
+          "source": [
+            {
+              "session": "b3845b21-55ac-4aab-a769-fb8517403c51",
+              "message": "4a7c7159-3e78-447c-b165-0adab4d6d27f"
+            },
+            {
+              "session": "b3845b21-55ac-4aab-a769-fb8517403c51",
+              "message": "5d1d4b21-4eda-4d3b-ad2d-77ac0a89bb19"
+            }
+          ]
+        },
+        {
+          "said": "Also btw, we now have external services live modifying the kubeconfig to create and delete clusters (slices) for testing.",
+          "rule": "Every host keeps a context's Home history for the cluster and server the kubeconfig names for it: a context gone from the kubeconfig stops being sampled and its history is dropped at once, a name reused for another cluster begins a new history, and reads that keep failing are tried again further and further apart (to 5 minutes), not every 10 s",
+          "decided": "2026-11-26",
+          "source": [
+            {
+              "session": "b3845b21-55ac-4aab-a769-fb8517403c51",
+              "message": "0dbf17c8-06c6-4cae-b428-473aeda5e013"
             }
           ]
         }
@@ -743,6 +780,7 @@
     "38e-kubernetes-host",
     "38e-kubernetes-window",
     "38e-kubernetes-home",
-    "38e-kubernetes-home-prod"
+    "38e-kubernetes-home-prod",
+    "38e-kubernetes-home-crowded"
   ]
 }

@@ -253,8 +253,10 @@ class KubeState(val hostId: String) {
             loading = false
             progress = null
             fault = null
-            val last = history.lastOrNull()?.at?.toDouble()
-            val merged = history + r.summary?.history.orEmpty().filter { h -> last == null || (h.at?.toDouble() ?: 0.0) > last }
+            val began = r.summary?.began?.toDouble() ?: 0.0 // (a sample from before it: another cluster's, the name reused)
+            val held = history.filter { (it.at?.toDouble() ?: 0.0) >= began }
+            val last = held.lastOrNull()?.at?.toDouble()
+            val merged = held + r.summary?.history.orEmpty().filter { h -> last == null || (h.at?.toDouble() ?: 0.0) > last }
             val edge = (merged.lastOrNull()?.at?.toDouble() ?: 0.0) - 60.0 * (r.summary?.minutes?.toDouble() ?: 0.0)
             history = merged.filter { (it.at?.toDouble() ?: 0.0) >= edge }
             summary = r.summary

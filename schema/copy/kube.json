@@ -88,7 +88,10 @@
     "requested_tip": "What the pods ask for: their containers' requests",
     "used_tip": "What the pods use now, from the metrics API",
     "limits_tip": "What the pods are held to: their containers' limits, where they set one",
-    "history_tip": "Used (and requested, dashed) over the last {$minutes} minutes",
+    "history_tip": "Used (and requested, dashed) over the last {$minutes} minutes, against allocatable (dotted) and limits (dashed) now",
+    "allocatable": "Allocatable",
+    "over_allocatable": "{$what} {$times}× allocatable",
+    "other": "Other ({$n})",
     "unscheduled": "Unscheduled"
   }
 }

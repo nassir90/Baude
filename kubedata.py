@@ -1306,32 +1306,99 @@ def kube_tally(read, namespaces=None):
     return {"total": total, "namespaces": by_ns, "nodes": by_node}
 
 
-KUBE_SUMMARY_COLUMNS = ["Pods", "CPU requested", "CPU used", "CPU limits", "Memory requested", "Memory used",
-                        "Memory limits"]
+KUBE_SHARES_SHOWN = 10  # a namespaces' or nodes' table shows this many rows, the rest added up in an "Other (n)" row
+
+
+def _col(title, kind, of=None):
+    """A Home table's column (KubeShareColumn): its title, what its numbers are (name, count, cores, bytes, or share:
+    column of[0] as a share of column of[1]), so a head can sort by it and add rows up."""
+    return {"title": title, "kind": kind, **({"of": of} if of else {})}
+
+
+def _pct(n, of):
+    return None if n is None or not of else 100 * n / of
+
+
+def kube_fmt_cell(kind, n, none="–"):
+    """A Home table's number as its column shows it: none where there's none (no limit set, no request; N/A for what's
+    used without a metrics API)."""
+    if kind == "share":
+        return "–" if n is None else f"{round(n)}%"
+    if kind == "count":
+        return str(int(n or 0))
+    if n is None:
+        return none
+    return kube_fmt_bytes(n) if kind == "bytes" else kube_fmt_cores(n)
+
+
+def _none(column, metrics):
+    """What a column says where it has no number: N/A for what's used without a metrics API, else –."""
+    return "N/A" if not metrics and column["kind"] in ("cores", "bytes") and column["title"].endswith(" used") else "–"
+
+
+def kube_shares_other(columns, rows, title, metrics=True):
+    """An "Other (n)" row (KubeShare, named ""): rows (KubeShares) added up under columns (KubeShareColumns): each
+    number's sum (None where none has one), a share the share of the sums."""
+    keys = [title.lower()]
+    for c in columns[1:]:
+        if c["kind"] == "share":
+            keys.append(None)
+            continue
+        vals = [r["keys"][len(keys)] for r in rows if len(r.get("keys") or []) > len(keys)]
+        vals = [v for v in vals if isinstance(v, (int, float))]
+        keys.append(sum(vals) if vals else None)
+    for i, c in enumerate(columns):
+        if c["kind"] == "share" and len(c.get("of") or []) == 2:
+            n, of = keys[c["of"][0]], keys[c["of"][1]]
+            keys[i] = _pct(n, of) if of else None
+    return {"name": "", "keys": keys,
+            "cells": [title] + [kube_fmt_cell(c["kind"], n, _none(c, metrics)) for c, n in zip(columns[1:], keys[1:])]}
 
 
 def kube_summary(read, namespaces=None):
     """Home's numbers (KubeSummary, its history aside): the pods in namespaces (None: every one), their CPU and memory
-    asked for, used and held to, against what every node can give them; and the same by namespace and by node (a
-    node's against its own)."""
+    asked for, used and held to, against what every node can give them; and the same by namespace (with what's used as
+    a share of what's requested and of the limits, as Grafana's CPU Quota table and k9s) and by node (a node's against
+    its own), each table's rows most CPU used first."""
     tally, nodes = kube_tally(read, namespaces), read["nodes"]
     alloc_cpu = None if not nodes else sum(n[1] or 0 for n in nodes)
     alloc_mem = None if not nodes else sum(n[2] or 0 for n in nodes)
-
-    def cells(t):
-        return [str(t[6]), kube_fmt_cores(t[0]), kube_fmt_cores(t[1]), "–" if t[2] is None else kube_fmt_cores(t[2]),
-                kube_fmt_bytes(t[3]), kube_fmt_bytes(t[4]), "–" if t[5] is None else kube_fmt_bytes(t[5])]
+    metrics = read["metrics"] is not None
     t = tally["total"]
-    empty = [0, None if read["metrics"] is None else 0, None, 0, None if read["metrics"] is None else 0, None, 0]
+    empty = [0, None if not metrics else 0, None, 0, None if not metrics else 0, None, 0]
+    ns_columns = [_col("Namespace", "name"), _col("Pods", "count"), _col("CPU requested", "cores"),
+                  _col("CPU used", "cores"), _col("CPU limits", "cores"), _col("CPU % of requests", "share", [3, 2]),
+                  _col("CPU % of limits", "share", [3, 4]), _col("Memory requested", "bytes"),
+                  _col("Memory used", "bytes"), _col("Memory limits", "bytes"),
+                  _col("Memory % of requests", "share", [8, 7]), _col("Memory % of limits", "share", [8, 9])]
+    node_columns = [_col("Node", "name"), _col("Pods", "count"), _col("CPU requested", "cores"),
+                    _col("CPU used", "cores"), _col("CPU limits", "cores"), _col("CPU allocatable", "cores"),
+                    _col("Memory requested", "bytes"), _col("Memory used", "bytes"), _col("Memory limits", "bytes"),
+                    _col("Memory allocatable", "bytes")]
+
+    def share(name, title, numbers, columns):
+        keys = [title.lower()] + [None if n is None else float(n) for n in numbers]
+        return {"name": name, "cells": [title] + [kube_fmt_cell(c["kind"], n, _none(c, metrics))
+                                                  for c, n in zip(columns[1:], numbers)], "keys": keys}
+
+    def ns_numbers(v):
+        cpu_req = v[0] or None  # (a request of nothing: "–" as no request)
+        mem_req = v[3] or None
+        return [v[6], v[0], v[1], v[2], _pct(v[1], cpu_req), _pct(v[1], v[2]), v[3], v[4], v[5],
+                _pct(v[4], mem_req), _pct(v[4], v[5])]
+
+    def busiest(rows):  # (most CPU used first, then most requested; ties by name)
+        return sorted(rows, key=lambda r: (-(r["keys"][3] if r["keys"][3] is not None else -1),
+                                           -(r["keys"][2] or 0), r["keys"][0]))
+    node_rows = [(n, n, cpu, mem) for n, cpu, mem in nodes or []] + \
+        ([("", wording.say("kube.unscheduled"), None, None)] if "" in tally["nodes"] else [])
     return {
         "cpu": kube_use("CPU", t[0], t[1], t[2], alloc_cpu, False),
         "memory": kube_use("Memory", t[3], t[4], t[5], alloc_mem, True),
-        "metrics": read["metrics"] is not None, "pods": t[6],
-        "namespace_columns": ["Namespace"] + KUBE_SUMMARY_COLUMNS,
-        "namespaces": [{"name": ns, "cells": [ns] + cells(v)} for ns, v in sorted(tally["namespaces"].items())],
-        "node_columns": ["Node"] + KUBE_SUMMARY_COLUMNS[:4] + ["CPU allocatable"] + KUBE_SUMMARY_COLUMNS[4:] +
-        ["Memory allocatable"],
-        "nodes": [{"name": name, "cells": [title] + (c := cells(tally["nodes"].get(name) or empty))[:4] +
-                   [cpu] + c[4:] + [mem]} for name, title, cpu, mem in
-                  [(n, n, kube_fmt_cores(cpu), kube_fmt_bytes(mem)) for n, cpu, mem in nodes or []] +
-                  ([("", wording.say("kube.unscheduled"), "", "")] if "" in tally["nodes"] else [])]}
+        "metrics": metrics, "pods": t[6], "sorted_by": 3, "shown": KUBE_SHARES_SHOWN,
+        "namespace_columns": ns_columns,
+        "namespaces": busiest([share(ns, ns, ns_numbers(v), ns_columns) for ns, v in tally["namespaces"].items()]),
+        "node_columns": node_columns,
+        "nodes": busiest([share(name, title, [(v := tally["nodes"].get(name) or empty)[6], v[0], v[1], v[2], cpu,
+                                              v[3], v[4], v[5], mem], node_columns)
+                          for name, title, cpu, mem in node_rows])}

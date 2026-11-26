@@ -630,7 +630,7 @@ def _(app):
 def kube_home(app, context="k3d-dev"):
     """The Kubernetes view's Home on tests/fake_kubectl.py's context, as if it had been open half an hour."""
     import kube_fixture as kf
-    os.environ.update(KUBECONFIG=kf.make_kubeconfig(os.path.join(T.TMP, "shot-kubeconfig")),
+    os.environ.update(KUBECONFIG=kf.make_kubeconfig(os.path.join(T.TMP, "shot-kubeconfig"), context == "crowded"),
                       BAUDE_KUBECTL=os.path.join(HERE, "fake_kubectl.py"), BAUDE_HELM=os.path.join(HERE, "fake_kubectl.py"))
     for k in ("FAKE_KUBECTL_PG", "FAKE_KUBECTL_FOLLOW", "FAKE_KUBECTL_STATE"):
         os.environ.pop(k, None)
@@ -655,6 +655,14 @@ def _(app):
        size=(1200 + SIDEBAR, H))
 def _(app):
     return kube_home(app, "prod")[0]
+
+
+@scene("38e-kubernetes-home-crowded", "Kubernetes' Home on a cluster of fifteen namespaces and twelve nodes whose "
+                                      "limits are 2.3 times what the nodes can give pods: each bar past allocatable "
+                                      "its own orange segment, a tick at allocatable; the ten namespaces and nodes "
+                                      "using the most CPU, the rest an Other row", size=(1200 + SIDEBAR, H))
+def _(app):
+    return kube_home(app, "crowded")[0]
 
 
 @scene("38e-kubernetes-logs", "Kubernetes: a pod's logs under the table, followed (kubectl logs -f), its containers "

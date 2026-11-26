@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """A stand-in for kubectl (and helm) for the Kubernetes view's tests: a made-up cluster per context, answered the way
 kubectl answers. k3d-dev has a metrics API and one node; prod has neither a metrics API nor just one node, but has
-KEDA (its custom resources, which k3d-dev doesn't serve). Every call
+KEDA (its custom resources, which k3d-dev doesn't serve); crowded has fifteen namespaces on twelve nodes, a metrics API, and
+limits 2.3 times what its nodes can give pods. A context named slice-… is a test cluster an outside service makes and
+deletes: it answers (as k3d-dev) only while a kubeconfig in $KUBECONFIG names it. Every call
 is logged ($FAKE_KUBECTL_LOG), so the tests can check which commands ran (only reading ones, but for the deletes they
 confirm), and that a Secret's values were never asked for. A test can hold a context's answers back, or take its
 cluster down ($FAKE_KUBECTL_HOLD).
@@ -325,7 +327,38 @@ def delete(rest):
     out(f'pod "{name}" deleted\n')
 
 
+# crowded: fifteen namespaces, the busiest first, on twelve nodes (16 cores and 64Gi in all); requests 12 cores and 40Gi, limits
+# 2.3 times allocatable (docs sets none, admin asks for nothing), each namespace's use a different share of its requests
+CROWDED_NS = ["shop", "search", "billing", "media", "auth", "ledger", "queue", "reports", "mail", "cache", "edge", "ml",
+              "docs", "admin", "jobs"]
+CROWDED_PODS, CROWDED_METRICS = [], {}
+_W = list(range(15, 0, -1))
+_LIMITED = [w if ns != "docs" else 0 for ns, w in zip(CROWDED_NS, _W)]
+for _i, (_ns, _w) in enumerate(zip(CROWDED_NS, _W)):
+    _req = (f"{round(12000 * _w / sum(_W))}m", f"{round(40960 * _w / sum(_W))}Mi") if _ns != "admin" else None
+    _lim = (f"{round(16000 * 2.3 * _LIMITED[_i] / sum(_LIMITED))}m",
+            f"{round(65536 * 2.3 * _LIMITED[_i] / sum(_LIMITED))}Mi") if _LIMITED[_i] else None
+    _use = (0.25, 0.6, 1.4, 0.9, 0.45, 1.1, 0.8, 0.3, 0.7, 1.6, 0.5, 0.95, 0.65, 0.2, 0.35)[_i]
+    _name = f"{_ns}-main-{_i:02d}x"
+    CROWDED_PODS.append(pod(_name, _ns, 60 + _i, owner=("ReplicaSet", f"{_ns}-main"),
+                            resources={"main": res(_req, _lim)}))
+    CROWDED_METRICS[_name] = (f"{round(12000 * _w / sum(_W) * _use * (1 if _req else 0.2))}m",
+                              f"{round(40960 * _w / sum(_W) * _use * (1 if _req else 0.2))}Mi")
+
+
+def crowded_nodes():  # (16 cores and 64Gi in all)
+    return [node(f"node-{i:02d}", "worker" if i > 1 else "control-plane", "2" if i <= 4 else "1",
+                 "8Gi" if i <= 4 else "4Gi") for i in range(1, 13)]
+
+
 def current(resource, context="k3d-dev"):
+    if context == "crowded" and resource in ("pods", "namespaces"):
+        return CROWDED_PODS if resource == "pods" else [
+            {"metadata": {"name": n, "creationTimestamp": ts(5000)}, "status": {"phase": "Active"}} for n in CROWDED_NS]
+    return _current(resource, context)
+
+
+def _current(resource, context="k3d-dev"):
     """A kind's objects now: a deleted pod Terminating, or not there at all if it was forced; KEDA's on prod."""
     items = PODS if resource == "pods" else OBJECTS.get(resource, []) + \
         (PROD_OBJECTS.get(resource, []) if context == "prod" else [])
@@ -337,6 +370,10 @@ def current(resource, context="k3d-dev"):
 
 
 def on_context(items, resource, context):
+    if context == "crowded" and resource == "pods":
+        return [{**p, "spec": {**p["spec"], "nodeName": f"node-{i % 12 + 1:02d}"}} for i, p in enumerate(items)]
+    if context == "crowded" and resource == "nodes":
+        return crowded_nodes()
     if context == "prod" and resource == "pods":  # (on prod's workers)
         return [{**p, "spec": {**p["spec"], "nodeName": f"prod-{i}"}} for i, p in zip((2, 3), items[:2])]
     if context == "prod" and resource == "nodes":
@@ -416,7 +453,11 @@ def main():
         out(json.dumps([{"name": "web", "namespace": "shop", "revision": "3", "updated": "2026-10-22 10:00:00",
                          "status": "deployed", "chart": "web-1.2.0", "app_version": "1.2.0"}]))
     context = args[args.index("--context") + 1] if "--context" in args else "k3d-dev"
-    if context not in ("k3d-dev", "prod"):
+    if context.startswith("slice-"):  # (there while a kubeconfig names it; a cluster like k3d-dev's)
+        named = any(f"name: {context}\n" in open(p).read() for p in (os.environ.get("KUBECONFIG") or "").split(":")
+                    if p and os.path.isfile(p))
+        context = "k3d-dev" if named else context
+    if context not in ("k3d-dev", "prod", "crowded"):
         sys.stderr.write(f'error: context "{context}" does not exist\n')
         sys.exit(1)
     # a test's folder ($FAKE_KUBECTL_HOLD): a file named after the context holds its answers back while it's there;
@@ -499,10 +540,14 @@ def main():
                        "/apis/batch/v1/cronjobs"):  # (a kind's list, every namespace: items carry no kind)
             out(json.dumps({"kind": "List", "items": OBJECTS.get(rest[1].rsplit("/", 1)[1], [])}))
         if rest[1].endswith("/pods"):
+            pods, metrics = (CROWDED_PODS, CROWDED_METRICS) if context == "crowded" else (PODS, METRICS)
             out(json.dumps({"items": [{"metadata": {"name": n, "namespace": p["metadata"]["namespace"]},
                                        "containers": [{"name": "main", "usage": {"cpu": c, "memory": m}}]}
-                                      for n, (c, m) in METRICS.items()
-                                      for p in PODS if p["metadata"]["name"] == n]}))
+                                      for n, (c, m) in metrics.items()
+                                      for p in pods if p["metadata"]["name"] == n]}))
+        if context == "crowded":
+            out(json.dumps({"items": [{"metadata": {"name": n["metadata"]["name"]},
+                                       "usage": {"cpu": "700m", "memory": "2Gi"}} for n in crowded_nodes()]}))
         out(json.dumps({"items": [{"metadata": {"name": "node-1"}, "usage": {"cpu": "500m", "memory": "2Gi"}}]}))
     resource = rest[0]
     fmt = next((a for a in rest if a.startswith("go-template=")), None) or \

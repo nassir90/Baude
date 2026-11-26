@@ -1,42 +1,109 @@
 """The Kubernetes view's Home (KubeHome): the whole stack's CPU and memory, as the host adds them up (hostkube's
 summary): requested, used and limits, each a bar against what the nodes can give pods, with how they went; then the
 same by namespace, and by node on a cluster of more than one. Baude and Record both show it (kubeview's KubeView)."""
+import time
+
 import gi  # noqa: E402
 
 gi.require_version("Gtk", "4.0")
-from gi.repository import Graphene, Gtk, Pango  # noqa: E402
+from gi.repository import Graphene, Gsk, Gtk, Pango  # noqa: E402
 
 from baudelib import wording  # noqa: E402
+from kubedata import kube_fmt_bytes, kube_fmt_cores, kube_shares_other  # noqa: E402
 from widgets import accent_rgba  # noqa: E402
 
 MEASURES = (("requested", "kube-requested"), ("used", "kube-used"), ("limits", "kube-limits"))
 
 
+def spark_top(peak, allocatable):
+    """The value a history's top stands for: allocatable (and a little), so the lines read against what the nodes can
+    give, while what's used or requested reaches a quarter of it; under that, the most they reached (and a little),
+    allocatable then out of view, so a small use's ups and downs still show."""
+    if allocatable and peak >= allocatable / 4:
+        return max(peak, allocatable) * 1.08
+    return peak * 1.15 or 1
+
+
 class KubeSpark(Gtk.Widget):
     """How a resource went (the host's history): what's used, a line in the used bar's colour, and what's requested,
     dashed in the requested bar's, each sample at its time across the last `minutes` (to the newest), so a time with
-    none (the host off, the cluster unreachable) is a gap; both scaled to the most either reached (so a change shows,
-    however small beside the nodes'). Nothing is drawn with fewer than two samples."""
-    HEIGHT = 34
+    none (the host off, the cluster unreachable) is a gap; across them, allocatable dotted and the limits dashed in the
+    limits bar's colour, as they are now, each while it's in view (spark_top). Hovered: a line at the sample nearest
+    the pointer, its time, used, requested, limits and allocatable in the tooltip. Nothing is drawn with fewer than two
+    samples."""
+    HEIGHT = 48
 
     def __init__(self):
-        super().__init__(hexpand=True, height_request=self.HEIGHT, margin_top=6)
+        super().__init__(hexpand=True, height_request=self.HEIGHT, margin_top=6, has_tooltip=True)
         self.add_css_class("kube-spark")  # (its colour: the used bar's)
         self.samples, self.minutes, self.every = [], 30, 10
+        self.allocatable = self.limits = None
+        self.fmt, self.hover = kube_fmt_cores, None
+        self.connect("query-tooltip", self._tip)
+        motion = Gtk.EventControllerMotion()
+        motion.connect("leave", lambda *_: self._hovered(None))
+        self.add_controller(motion)
 
-    def set_samples(self, samples, minutes, every):
-        """samples: (at, used, requested) each, oldest first."""
+    def set_samples(self, samples, minutes, every, allocatable=None, limits=None, fmt=kube_fmt_cores):
+        """samples: (at, used, requested) each, oldest first; allocatable and limits: now's (None: none)."""
         self.samples, self.minutes, self.every = samples, minutes or 30, every or 10
+        self.allocatable, self.limits, self.fmt = allocatable, limits, fmt
+        if self.hover is not None and self.hover >= len(samples):
+            self.hover = None
         self.queue_draw()
+
+    def _lines(self):
+        return [i for i in (2, 1) if sum(s[i] is not None for s in self.samples) >= 2]
+
+    def _scale(self, lines):
+        peak = max([s[i] for i in lines for s in self.samples if s[i] is not None] or [0])
+        return spark_top(peak, self.allocatable)
+
+    def _x(self, at, w):
+        return 1 + (w - 2) * (1 - (self.samples[-1][0] - at) / (60 * self.minutes))
+
+    def _hovered(self, i):
+        if i != self.hover:
+            self.hover = i
+            self.queue_draw()
+
+    def _tip(self, _w, x, _y, _kb, tooltip):
+        w = self.get_width()
+        lines = self._lines()
+        if not lines or w <= 2:
+            self._hovered(None)
+            tooltip.set_text(wording.say("kube.history_tip", minutes=self.minutes))
+            return True
+        at = self.samples[-1][0] - 60 * self.minutes * (1 - (x - 1) / (w - 2))
+        near = [i for i, s in enumerate(self.samples) if any(s[j] is not None for j in lines)]
+        i = min(near, key=lambda i: abs(self.samples[i][0] - at))
+        if abs(self.samples[i][0] - at) > 2 * self.every:  # (in a gap)
+            self._hovered(None)
+            tooltip.set_text(wording.say("kube.history_tip", minutes=self.minutes))
+            return True
+        self._hovered(i)
+        tooltip.set_text(spark_values(self.samples[i], self.limits, self.allocatable, self.fmt))
+        return True
 
     def do_snapshot(self, snap):
         w, h = self.get_width(), self.get_height()
-        lines = [i for i in (2, 1) if sum(s[i] is not None for s in self.samples) >= 2]
+        lines = self._lines()
         if not lines or w <= 0:
             return
-        top = max(s[i] for i in lines for s in self.samples if s[i] is not None) * 1.15 or 1
-        span, right = 60 * self.minutes, self.samples[-1][0]
+        top = self._scale(lines)
+        fg = self.get_parent().get_color()
         cr = snap.append_cairo(Graphene.Rect().init(0, 0, w, h))
+
+        def y(v):
+            return h - 2 - (h - 4) * v / top
+        for value, alpha, dash, width in ((self.allocatable, 0.6, [1, 3], 1.2), (self.limits, 0.45, [6, 3], 1.5)):
+            if value is not None and 0 < value <= top:
+                cr.set_source_rgba(fg.red, fg.green, fg.blue, alpha)
+                cr.set_line_width(width)
+                cr.set_dash(dash)
+                cr.move_to(1, y(value))
+                cr.line_to(w - 1, y(value))
+                cr.stroke()
         for i in lines:
             color, dash = (accent_rgba(), [3, 3]) if i == 2 else (self.get_color(), [])
             cr.set_source_rgba(color.red, color.green, color.blue, 0.9)
@@ -47,15 +114,85 @@ class KubeSpark(Gtk.Widget):
                 if s[i] is None:
                     before = None
                     continue
-                x, y = 1 + (w - 2) * (1 - (right - s[0]) / span), h - 2 - (h - 4) * s[i] / top
-                cr.line_to(x, y) if before is not None and s[0] - before <= 2 * self.every else cr.move_to(x, y)
+                x = self._x(s[0], w)
+                cr.line_to(x, y(s[i])) if before is not None and s[0] - before <= 2 * self.every else cr.move_to(x, y(s[i]))
                 before = s[0]
             cr.stroke()
+        if self.hover is not None:  # (the sample hovered: a line down, a dot on each line)
+            s = self.samples[self.hover]
+            x = self._x(s[0], w)
+            cr.set_dash([])
+            cr.set_source_rgba(fg.red, fg.green, fg.blue, 0.35)
+            cr.set_line_width(1)
+            cr.move_to(x, 0)
+            cr.line_to(x, h)
+            cr.stroke()
+            for i in lines:
+                if s[i] is not None:
+                    color = accent_rgba() if i == 2 else self.get_color()
+                    cr.set_source_rgba(color.red, color.green, color.blue, 1)
+                    cr.arc(x, y(s[i]), 2.5, 0, 6.2832)
+                    cr.fill()
+
+
+def spark_values(sample, limits, allocatable, fmt):
+    """A history sample's tooltip: its time, then used, requested, limits and allocatable (the last two as now)."""
+    def say(n):
+        return "–" if n is None else fmt(n)
+    return "\n".join([time.strftime("%H:%M:%S", time.localtime(sample[0])),
+                      f"{wording.say('kube.used')}  {say(sample[1])}",
+                      f"{wording.say('kube.requested')}  {say(sample[2])}",
+                      f"{wording.say('kube.limits')}  {say(limits)}",
+                      f"{wording.say('kube.allocatable')}  {say(allocatable)}"])
+
+
+class KubeBar(Gtk.Widget):
+    """A measure's bar (KubeUse's): its track the card's scale (the most of allocatable, requested, used and limits);
+    the measure filled in its colour up to allocatable, any part past it a segment of its own in orange, and a tick
+    at allocatable when the scale goes past it."""
+
+    def __init__(self, css):
+        super().__init__(hexpand=True, valign=Gtk.Align.CENTER)
+        self.add_css_class("kube-bar")
+        self.fill, self.over, self.tick = Gtk.Box(), Gtk.Box(), Gtk.Box()
+        self.fill.add_css_class("kube-fill")
+        self.fill.add_css_class(css)
+        self.over.add_css_class("kube-fill")
+        self.over.add_css_class("kube-over")
+        self.tick.add_css_class("kube-tick")
+        for part in (self.fill, self.over, self.tick):
+            part.set_parent(self)
+        self.value, self.allocatable, self.scale = 0, 0, 1
+
+    def do_dispose(self):
+        for part in (self.fill, self.over, self.tick):
+            part.unparent()
+
+    def set(self, value, allocatable, scale):
+        self.value, self.allocatable, self.scale = value or 0, allocatable or 0, scale or 1
+        self.queue_allocate()
+
+    def do_measure(self, orientation, _for):
+        return (0, 0, -1, -1) if orientation == Gtk.Orientation.HORIZONTAL else (10, 10, -1, -1)
+
+    def do_size_allocate(self, w, h, _baseline):
+        def put(part, x, width, y=0, height=h):
+            part.set_visible(width >= 1)
+            if width >= 1:
+                part.allocate(round(width), height, -1, Gsk.Transform().translate(Graphene.Point().init(round(x), y)))
+        within = min(self.value, self.allocatable) * w / self.scale
+        past = max(0, self.value - self.allocatable) * w / self.scale
+        (self.fill.add_css_class if past >= 1 else self.fill.remove_css_class)("kube-joined")
+        put(self.fill, 0, within)
+        put(self.over, within, past)
+        put(self.tick, self.allocatable * w / self.scale - 1, 2 if self.scale > self.allocatable * 1.001 else 0, -3,
+            h + 6)
 
 
 class KubeCard(Gtk.Box):
     """One resource's totals (KubeUse): its name, what the nodes can give pods, then Requested, Used and Limits each a
-    bar of that (full and orange past it), its amount and its share; how it went under them."""
+    bar (KubeBar) of the most of them and allocatable, its amount and its share of allocatable; past allocatable, how
+    far the most over is (Limits 2.3× allocatable); how it went under them."""
 
     def __init__(self):
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=4, hexpand=True)
@@ -73,11 +210,7 @@ class KubeCard(Gtk.Box):
         for i, (key, css) in enumerate(MEASURES):
             label = Gtk.Label(label=wording.say(f"kube.{key}"), xalign=0, tooltip_text=wording.say(f"kube.{key}_tip"))
             grid.attach(label, 0, i, 1, 1)
-            bar = Gtk.LevelBar(min_value=0, max_value=1, hexpand=True, valign=Gtk.Align.CENTER)
-            for name in ("low", "high", "full"):  # (no colour by how full: each measure keeps its own)
-                bar.remove_offset_value(name)
-            bar.add_css_class("kube-bar")
-            bar.add_css_class(css)
+            bar = KubeBar(css)
             grid.attach(bar, 1, i, 1, 1)
             amount = Gtk.Label(xalign=1, width_chars=9)
             amount.add_css_class("numeric")
@@ -90,55 +223,112 @@ class KubeCard(Gtk.Box):
             self.amounts.append(amount)
             self.shares.append(share)
         self.append(grid)
+        self.over = Gtk.Label(xalign=0, visible=False, margin_top=2)
+        self.over.add_css_class("kube-warn")
+        self.append(self.over)
         self.spark = KubeSpark()
         self.append(self.spark)
 
-    def show(self, use, samples, minutes, every):
+    def show(self, use, samples, minutes, every, memory=False):
         self.title.set_label(use.get("title") or "")
         cells, shares = use.get("cells") or ["", "", "", ""], use.get("shares") or ["", "", ""]
         self.allocatable.set_label(cells[3])
         alloc = use.get("allocatable")
-        for i, key in enumerate(("requests", "used", "limits")):
-            value, bar = use.get(key), self.bars[i]
-            bar.set_visible(bool(alloc))
-            bar.set_value(min(1.0, (value or 0) / alloc) if alloc else 0)
-            (bar.add_css_class if alloc and (value or 0) > alloc else bar.remove_css_class)("kube-over")
+        values = [use.get(key) for key in ("requests", "used", "limits")]
+        scale = max([alloc or 0] + [v or 0 for v in values])
+        for i, value in enumerate(values):
+            self.bars[i].set_visible(bool(alloc))
+            self.bars[i].set(value, alloc, scale)
             self.amounts[i].set_label(cells[i])
             self.shares[i].set_label(shares[i])
-        self.spark.set_samples(samples, minutes, every)
-        self.spark.set_tooltip_text(wording.say("kube.history_tip", minutes=minutes))
+        over = max(((v, MEASURES[i][0]) for i, v in enumerate(values) if alloc and (v or 0) > alloc), default=None)
+        self.over.set_visible(over is not None)
+        if over is not None:
+            self.over.set_label(wording.say("kube.over_allocatable", what=wording.say(f"kube.{over[1]}"),
+                                            times=f"{over[0] / alloc:.1f}"))
+        self.spark.set_samples(samples, minutes, every, alloc, use.get("limits"),
+                               kube_fmt_bytes if memory else kube_fmt_cores)
+
+
+def share_order(rows, col, desc):
+    """rows (KubeShares) sorted by column col's key, most first when desc; a row without one last either way, rows
+    alike kept in the host's order (most CPU used first)."""
+    def key(r):
+        keys = r.get("keys") or []
+        return keys[col] if col < len(keys) else None
+    have = [r for r in rows if key(r) is not None]
+    return sorted(have, key=key, reverse=desc) + [r for r in rows if key(r) is None]
 
 
 class KubeShares(Gtk.Grid):
-    """A table of namespaces' or nodes' parts (KubeShare), as the host lays it out: its columns' titles, a row each,
-    numbers to the right. A namespace's name is a link: only its objects (on_namespace)."""
+    """A table of namespaces' or nodes' parts (KubeShare), as the host lays it out: its columns' titles, each a button
+    sorting by it (again: the other way), a row each, numbers to the right; the `shown` first as sorted, the rest
+    added up in an "Other (n)" row. A namespace's name is a link: only its objects (on_namespace)."""
 
     def __init__(self, on_namespace=None):
         super().__init__(column_spacing=22, row_spacing=6, margin_top=18)
         self.add_css_class("kube-home-table")
-        self.on_namespace, self.rows, self.columns = on_namespace, [], []
+        self.on_namespace, self.rows, self.columns, self.laid = on_namespace, [], [], None
+        self.shares, self.shown, self.metrics, self.text = [], 10, True, ""
+        self.sort = None  # (column, most first), once there's a table
 
-    def show(self, columns, shares, text=""):
-        """The rows' cells' texts changed in place while the columns and the rows' names stay; else laid out anew."""
-        if list(columns) == self.columns and [s.get("name") or "" for s in shares] == [n for n, _c in self.rows]:
-            for share, (_name, cells) in zip(shares, self.rows):
+    def show(self, columns, shares, text="", sorted_by=None, shown=10, metrics=True):
+        if [c.get("title") for c in columns] != [c.get("title") for c in self.columns]:
+            self.sort = (sorted_by, True) if sorted_by is not None else None
+        self.columns, self.shares, self.shown, self.metrics, self.text = list(columns), list(shares), shown, metrics, text
+        self.lay()
+
+    def refilter(self, text):
+        self.text = text
+        self.lay()
+
+    def sort_by(self, col):
+        if self.sort and self.sort[0] == col:
+            self.sort = (col, not self.sort[1])
+        else:
+            self.sort = (col, self.columns[col].get("kind") != "name")
+        self.lay()
+
+    def lay(self):
+        """The rows with the filter's text in a cell (any case), sorted, the first `shown` and an "Other (n)" row of the
+        rest: their texts changed in place while the columns, the order and the rows' names stay; else laid out anew."""
+        q = self.text.strip().lower()
+        rows = [s for s in self.shares if not q or any(q in c.lower() for c in s.get("cells") or [])]
+        if self.sort is not None:
+            rows = share_order(rows, *self.sort)
+        rest = rows[self.shown:] if len(rows) > self.shown + 1 else []
+        rows = rows[:len(rows) - len(rest)]
+        if rest:
+            rows.append({**kube_shares_other(self.columns, rest, wording.say("kube.other", n=len(rest)), self.metrics),
+                         "other": True})
+        laid = ([c.get("title") for c in self.columns], self.sort, [(r.get("name"), r["name"] == "" and
+                                                                     r["cells"][0]) for r in rows])
+        if laid == self.laid:
+            for share, (_name, cells) in zip(rows, self.rows):
                 for cell, text_ in zip(cells, share.get("cells") or []):
                     label = cell.get_child() if isinstance(cell, Gtk.Button) else cell
                     if label.get_label() != text_:
                         label.set_label(text_)
-            return self.refilter(text)
-        self.columns = list(columns)
+            return
+        self.laid = laid
         while (child := self.get_first_child()) is not None:
             self.remove(child)
         self.rows = []
-        for i, title in enumerate(columns):
-            head = Gtk.Label(label=title, xalign=0 if i == 0 else 1, hexpand=i == 0)
-            head.add_css_class("kube-home-head")
-            self.attach(head, i, 0, 1, 1)
-        for r, share in enumerate(shares, 1):
+        for i, column in enumerate(self.columns):
+            head = Gtk.Box(spacing=2, halign=Gtk.Align.START if i == 0 else Gtk.Align.END)
+            head.append(Gtk.Label(label=column.get("title") or ""))
+            if self.sort and self.sort[0] == i:
+                head.append(Gtk.Image(icon_name="pan-down-symbolic" if self.sort[1] else "pan-up-symbolic",
+                                      pixel_size=10))
+            button = Gtk.Button(child=head, hexpand=i == 0, halign=Gtk.Align.FILL)
+            button.add_css_class("flat")
+            button.add_css_class("kube-home-head")
+            button.connect("clicked", lambda _b, i=i: self.sort_by(i))
+            self.attach(button, i, 0, 1, 1)
+        for r, share in enumerate(rows, 1):
             cells = []
             for i, text_ in enumerate(share.get("cells") or []):
-                if i == 0 and self.on_namespace is not None:
+                if i == 0 and self.on_namespace is not None and not share.get("other"):
                     cell = Gtk.Button(child=Gtk.Label(label=text_, xalign=0, ellipsize=Pango.EllipsizeMode.END),
                                       halign=Gtk.Align.START,
                                       tooltip_text=wording.say("kube.only_namespace", namespace=text_))
@@ -148,18 +338,11 @@ class KubeShares(Gtk.Grid):
                 else:
                     cell = Gtk.Label(label=text_, xalign=0 if i == 0 else 1)
                     cell.add_css_class("numeric")
+                    if share.get("other") and i == 0:
+                        cell.add_css_class("dim-label")
                 self.attach(cell, i, r, 1, 1)
                 cells.append(cell)
             self.rows.append((share.get("name") or "", cells))
-        self.refilter(text)
-
-    def refilter(self, text):
-        """Only the rows any cell of which has text in it (any case)."""
-        q = text.strip().lower()
-        for name, cells in self.rows:
-            keep = not q or any(q in (c.get_label() if isinstance(c, Gtk.Label) else name).lower() for c in cells)
-            for c in cells:
-                c.set_visible(keep)
 
 
 class KubeHome(Gtk.ScrolledWindow):
@@ -192,11 +375,13 @@ class KubeHome(Gtk.ScrolledWindow):
         history, minutes, every = summary.get("history") or [], summary.get("minutes") or 0, summary.get("every") or 0
         for card, key in ((self.cpu, "cpu"), (self.memory, "memory")):
             card.show(summary.get(key) or {}, [(s["at"], s.get(f"{key}_used"), s.get(f"{key}_requests"))
-                                               for s in history], minutes, every)
-        self.namespaces.show(summary.get("namespace_columns") or [], summary.get("namespaces") or [], self.text)
+                                               for s in history], minutes, every, key == "memory")
+        how = {"sorted_by": summary.get("sorted_by"), "shown": summary.get("shown") or 10,
+               "metrics": bool(summary.get("metrics"))}
+        self.namespaces.show(summary.get("namespace_columns") or [], summary.get("namespaces") or [], self.text, **how)
         nodes = summary.get("nodes") or []
         self.nodes.get_ancestor(Gtk.ScrolledWindow).set_visible(len(nodes) > 1)  # (as the Nodes page: one node's is the stack's own)
-        self.nodes.show(summary.get("node_columns") or [], nodes, self.text)
+        self.nodes.show(summary.get("node_columns") or [], nodes, self.text, **how)
 
     def refilter(self, text):
         self.text = text

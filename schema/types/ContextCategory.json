@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "One kind of what a session's context holds (ContextUsage's categories): the system prompt, tools, messages, free space.",
+  "properties": {
+    "name": {
+      "type": "string",
+      "description": "What it is, as its agent names it."
+    },
+    "tokens": {
+      "type": "integer",
+      "description": "The tokens it takes up."
+    },
+    "kind": {
+      "type": ["string", "null"],
+      "description": "Its agent's kind for it (deferred: not in the context yet, left out of the count shown)."
+    }
+  },
+  "required": ["name", "tokens"],
+  "additionalProperties": false
+}

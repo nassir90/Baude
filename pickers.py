@@ -1,5 +1,5 @@
 """pickers — what's picked from: a code view's line numbers (LineGutter), dropdowns (ChoiceDropDown,
-press_opens_dropdowns), the model and host pickers, tree lists (TreeList, TreeListView), a sidebar's action, a
+press_opens_dropdowns), the model, host and kubeconfig context pickers, tree lists (TreeList, TreeListView), a sidebar's action, a
 label that fades where it's cut (FadeLabel), and ⌘K's palette (RefPalette).
 """
 import math
@@ -395,6 +395,165 @@ class ModelPicker(Gtk.MenuButton):
             self.select(row.value)
             if not self.quiet:
                 self.on_pick(row.value)
+
+
+CONTEXTS_SEARCHED = 15  # a context picker with more than this many has a search, and its contexts grouped by prefix
+
+
+def context_order(name):
+    """A context's place in a picker: by name, any case, numbers by their value (slice-2 before slice-10)."""
+    return [(0, int(t), "") if t.isdigit() else (1, 0, t.lower()) for t in re.split(r"(\d+)", name) if t]
+
+
+def context_groups(names):
+    """Each context's group, by the start of its name up to its first - _ . : / or @, where two or more share it
+    ("slice" for slice-a and slice-b); "" for one alone."""
+    starts = {n: re.split(r"[-_.:/@]", n, 1)[0] if re.search(r"[-_.:/@]", n) else "" for n in names}
+    count = {}
+    for start in starts.values():
+        count[start] = count.get(start, 0) + 1
+    return {n: start if start and count[start] > 1 else "" for n, start in starts.items()}
+
+
+class ContextPicker(Gtk.MenuButton):
+    """A kubeconfig context picker: its face the context picked (or "Choose a context", dim, when none is); a list of
+    the contexts by name, the picked one ticked. Past CONTEXTS_SEARCHED of them, a search over them (every word typed
+    in the name) and their groups' names over them (context_groups). set_contexts() puts in and takes out only the rows
+    that changed, so a list open as tools add and delete clusters doesn't flicker or lose its place. on_pick(name)
+    for the user's picks only."""
+
+    def __init__(self, tooltip, on_pick, chars=32):
+        super().__init__(tooltip_text=tooltip, always_show_arrow=True, css_classes=["choice", "model-picker"])
+        self.on_pick, self.picked, self.rows, self.groups = on_pick, None, {}, {}
+        self.shown = Gtk.Label(ellipsize=Pango.EllipsizeMode.MIDDLE, max_width_chars=chars)
+        self.set_child(self.shown)
+        pop = Gtk.Popover(css_classes=["model-palette"])
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        self.search = Gtk.SearchEntry(placeholder_text=wording.say("kube.find_context"), visible=False)
+        self.search.connect("search-changed", lambda *_: self._filter())
+        self.search.connect("activate", lambda *_: self._activate(self.list.get_selected_row()))
+        self.search.connect("stop-search", lambda *_: self.popdown())
+        keys = Gtk.EventControllerKey()
+        keys.connect("key-pressed", self._key)
+        self.search.add_controller(keys)
+        self.list = Gtk.ListBox(selection_mode=Gtk.SelectionMode.BROWSE, css_classes=["model-list"])
+        self.list.set_sort_func(lambda a, b: (context_order(a.value) > context_order(b.value)) -
+                                (context_order(a.value) < context_order(b.value)))
+        self.list.set_filter_func(self._shown)
+        self.list.set_header_func(self._header)
+        self.list.connect("row-activated", lambda _l, row: self._activate(row))
+        self.list.set_placeholder(Gtk.Label(label=wording.say("kube.no_context_match"), css_classes=["dim-label"],
+                                            margin_top=12, margin_bottom=12))
+        self.scroll = Gtk.ScrolledWindow(child=self.list, hscrollbar_policy=Gtk.PolicyType.NEVER,
+                                         propagate_natural_height=True, propagate_natural_width=True,
+                                         max_content_height=420, min_content_width=200)
+        box.append(self.search)
+        box.append(self.scroll)
+        pop.set_child(box)
+        pop.connect("show", lambda *_: self._opened())
+        self.set_popover(pop)
+        self.select(None)
+
+    def set_contexts(self, names):
+        """The contexts listed now: rows for new ones put in, those gone taken out, the rest left as they are."""
+        names = list(dict.fromkeys(names))
+        for name in [n for n in self.rows if n not in names]:
+            self.list.remove(self.rows.pop(name))
+        for name in names:
+            if name in self.rows:
+                continue
+            row = Gtk.ListBoxRow(css_classes=["model-row"])
+            row.value = name
+            line = Gtk.Box(spacing=8)
+            line.append(Gtk.Label(label=name, xalign=0, hexpand=True, ellipsize=Pango.EllipsizeMode.MIDDLE,
+                                  max_width_chars=44, tooltip_text=name if len(name) > 44 else None))
+            row.check = Gtk.Image(icon_name="object-select-symbolic", pixel_size=16,
+                                  opacity=1 if name == self.picked else 0)
+            line.append(row.check)
+            row.set_child(line)
+            self.rows[name] = row
+            self.list.append(row)
+        many = len(names) > CONTEXTS_SEARCHED
+        self.groups = context_groups(names) if many else {}
+        self.search.set_visible(many)
+        if not many and self.search.get_text():
+            self.search.set_text("")
+        self.list.invalidate_headers()
+        self.list.invalidate_filter()
+
+    def select(self, name):
+        """Show name as picked (None: none is, the face asks for one), without on_pick."""
+        self.picked = name
+        self.shown.set_label(name or wording.say("kube.pick_context"))
+        (self.shown.remove_css_class if name else self.shown.add_css_class)("dim-label")
+        self.shown.set_tooltip_text(name if name and len(name) > 32 else None)
+        for value, row in self.rows.items():
+            row.check.set_opacity(1 if value == name else 0)
+
+    def value(self):
+        return self.picked
+
+    def names(self):
+        """The contexts listed, in the list's order."""
+        return sorted(self.rows, key=context_order)
+
+    def _shown(self, row):
+        return all(w in row.value.lower() for w in self.search.get_text().lower().split())
+
+    def _header(self, row, before):
+        group = self.groups.get(row.value, "")
+        if group and (before is None or self.groups.get(before.value, "") != group):
+            row.set_header(Gtk.Label(label=group, xalign=0, css_classes=["model-family", "dim-label"]))
+        elif not group and before is not None and self.groups.get(before.value, ""):
+            row.set_header(Gtk.Separator(margin_top=4, margin_bottom=4))  # (past a group: one on its own)
+        else:
+            row.set_header(None)
+
+    def _filter(self):
+        self.list.invalidate_filter()
+        self.list.invalidate_headers()
+        first = next((r for r in self._rows() if self._shown(r)), None)
+        self.list.select_row(first)
+
+    def _rows(self):
+        return [self.rows[n] for n in self.names()]
+
+    def _opened(self):
+        self.search.set_text("")
+        self._filter()
+        now = self.rows.get(self.picked)
+        if now is not None:
+            self.list.select_row(now)
+            GLib.idle_add(lambda: (now.get_parent() is not None and now.grab_focus(), False)[1])
+        if self.search.get_visible():
+            self.search.grab_focus()
+
+    def _key(self, _c, keyval, _code, _state):
+        if keyval not in (Gdk.KEY_Down, Gdk.KEY_Up):
+            return False
+        shown = [r for r in self._rows() if self._shown(r)]
+        if not shown:
+            return True
+        now = self.list.get_selected_row()
+        i = shown.index(now) if now in shown else -1
+        row = shown[max(0, min(len(shown) - 1, i + (1 if keyval == Gdk.KEY_Down else -1)))]
+        self.list.select_row(row)
+        adj, (ok, rect) = self.scroll.get_vadjustment(), row.compute_bounds(self.list)
+        if ok:  # (kept in view)
+            y, h = rect.get_y(), rect.get_height()
+            if y < adj.get_value():
+                adj.set_value(y)
+            elif y + h > adj.get_value() + adj.get_page_size():
+                adj.set_value(y + h - adj.get_page_size())
+        return True
+
+    def _activate(self, row):
+        if row is None or not self._shown(row):
+            return
+        self.popdown()
+        if row.value != self.picked:
+            self.select(row.value)
+            self.on_pick(row.value)
 
 
 def ellipsize_dropdown(dd, chars=30):

@@ -25,8 +25,9 @@
         },
         {
           "name": "server picker",
-          "shows": "A drop-down, tooltip \"Server (container)\", of every database server found: \"<container> (Postgres <version>)\" or \"<container> (ArangoDB <version>)\" (just the container name when the version is unknown), truncated past about 34 characters.",
+          "shows": "A drop-down, tooltip \"Server (container)\", of every database server found: \"<container> (Postgres <version>)\" or \"<container> (ArangoDB <version>)\" (just the container name when the version is unknown), truncated past about 34 characters. It keeps up with the host's kubeconfig: when a local cluster is added to it or deleted from it, the servers are looked for again and the list replaced, the diagram shown staying while its server is still there (else the first server's first database is read).",
           "copy": ["databases.server_tip"],
+          "decisions": [{"said": "Also btw, we now have external services live modifying the kubeconfig to create and delete clusters (slices) for testing.", "rule": "Every app's Database Schemas lists the servers of the local clusters the kubeconfig has now, as tools add and delete them, never those of a deleted cluster from a cache.", "decided": "2026-11-26", "source": [{"session": "b3845b21-55ac-4aab-a769-fb8517403c51", "message": "0dbf17c8-06c6-4cae-b428-473aeda5e013"}]}],
           "actions": [
             {"by": "pick another", "does": "Reads that server's first database (not \"postgres\" if there is another) and draws it."}
           ]

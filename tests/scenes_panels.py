@@ -182,6 +182,66 @@ def _(app):
     return win
 
 
+def offer_update(app, result=("0123456789", None), busy=False):
+    """A new version's there (or why it can't be restarted onto, or Update clicked and being checked), as a look at git
+    with nothing applied finds it: in this app's updater."""
+    u = app.app.updater
+    if u is None:
+        u = app.app.updater = baude.update.Updater("baude", app.app.idle, app.app.restart,
+                                                   blocked=app.app.update_waiting)
+    u.seen(result)
+    u.busy = busy
+    u.changed()
+
+
+def update_scene(app, result, busy=False):
+    sidebar_sessions(T.TMP)
+    win = app.window()
+    offer_update(app, result, busy)
+    T.wait_for(lambda: win.sidebar.update_bar.get_visible(), "Update bar shown")
+    T.pump(0.3)
+    return win
+
+
+@scene("56c-update-offered", "A newer version there, Auto restart on update off: Update at the foot of the sessions list, "
+                            "restarted onto only when it's clicked")
+def _(app):
+    return update_scene(app, ("0123456789", None))
+
+
+@scene("56d-update-second-window", "A newer version offered, then a second window opened: Update at the foot of its "
+                                   "sessions list too")
+def _(app):
+    sidebar_sessions(T.TMP)
+    first = app.window()
+    offer_update(app)
+    T.wait_for(lambda: first.sidebar.update_bar.get_visible(), "Update shown")
+    second = app.window()
+    T.wait_for(lambda: second.sidebar.update_bar.get_visible(), "Update shown in the second window")
+    T.pump(0.3)
+    return second
+
+
+@scene("56e-update-checking", "Update clicked: a spinner on the button while the new version is fetched in and checked")
+def _(app):
+    return update_scene(app, ("0123456789", None), busy=True)
+
+
+@scene("56f-update-dirty", "A newer version there, something tracked changed in the checkout: why, in place of Update")
+def _(app):
+    return update_scene(app, (None, "dirty"))
+
+
+@scene("56g-update-diverged", "A newer version there that won't fast-forward: why, in place of Update")
+def _(app):
+    return update_scene(app, (None, "diverged"))
+
+
+@scene("56h-update-broken", "A newer version that didn't start: why, in place of Update")
+def _(app):
+    return update_scene(app, (None, "broken"))
+
+
 @scene("55-network-group-menu", "⋮ beside the search: Group by, then which groups are listed: each "
                                 "group the sessions are in. Here lab-mac's (New session's host), in Lab")
 def _(app):

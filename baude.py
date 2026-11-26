@@ -182,44 +182,51 @@ class BaudeApp(Adw.Application):
         """Every window idle (BaudeWindow.idle): a new version can be restarted onto."""
         return all(w.idle() for w in self.windows())
 
-    # ---- Update: the sidebars' foot while a new version waits, Baude's (on its windows: restart_blockers)
-    # or This Mac's host process's (on its commands: info's update)
+    # ---- Update: the sidebars' foot while a new version's there, Baude's (offered, or waiting on its windows:
+    # restart_blockers) or This Mac's host process's (on its commands: info's update)
     def update_waiting(self, waiting):
         self.update_held = waiting
         self.show_update_bars()
 
-    def update_reasons(self):
-        """What the updates waiting wait for, said; None if none is waiting."""
-        why, waiting = [], False
-        if getattr(self, "update_held", False) and self.updater is not None and self.updater.ready:
-            waiting = True
-            why += [w for win in self.windows() for w in win.restart_blockers()]
+    def update_blockers(self):
+        """What restarting now would stop or wait on, said: each window's restart_blockers, if Baude has a new version,
+        and This Mac's host process's commands, if its update's waiting on them."""
+        why = [w for win in self.windows() for w in win.restart_blockers()] \
+            if self.updater is not None and self.updater.pending() else []
         host = local_host()
         held = (host.info.get("update") if host is not None else None) or None
         if held:
-            waiting = True
             why += [f"{THIS_MACHINE}'s host process: {c.get('what') or 'a command'}"
                     for c in held.get("waiting") or []] or [f"{THIS_MACHINE}'s host process"]
-        return list(dict.fromkeys(why)) if waiting else None
+        return list(dict.fromkeys(why))
 
-    def show_update_bars(self):
-        why = self.update_reasons()
-        for w in self.windows():
-            if (bar := getattr(w.sidebar, "update_bar", None)) is not None:
-                bar.say(why)
+    def update_reasons(self):
+        """What the updates waiting wait for, said ([] for a version only offered: auto restart off); None if no new
+        version's there."""
+        u, host = self.updater, local_host()
+        held = bool(host is not None and host.info.get("update"))
+        if not held and (u is None or not (u.pending() or u.why)):
+            return None
+        return self.update_blockers() if held or getattr(self, "update_held", False) else []
+
+    def show_update_bars(self, windows=None):
+        """Every window's Update bar (or windows': those new ones, built since) as things stand."""
+        why, u = self.update_reasons(), self.updater
+        for w in windows or self.windows():
+            if (bar := getattr(getattr(w, "sidebar", None), "update_bar", None)) is not None:
+                bar.say(why, u.why if u is not None and not u.pending() else None, u is not None and u.busy)
 
     def update_now(self, win):
         """The bar clicked: restarted now. Nothing running: straight away; what's running, stopped: said first, and
         asked."""
-        why = [w for w in (self.update_reasons() or []) if w != wording.say("window.blocker_using")]
+        why = [w for w in self.update_blockers() if w != wording.say("window.blocker_using")]
 
         def go():
             host = local_host()
             if host is not None and host.info.get("update"):
                 host.request({"op": "quit", "restart": True})  # (it comes back as a chat wants it: local_server)
-            if self.updater is not None and self.updater.ready:
-                u = self.updater
-                self.restart({"from": u.started, "to": u.ready, "commits": update.new_commits(u.started, u.ready, u.root)})
+            if self.updater is not None and self.updater.pending():
+                self.updater.apply(self.restart)
         if not why:
             return go()
         dlg = Adw.AlertDialog(heading=wording.say("window.restart_now_heading"), default_response="cancel",

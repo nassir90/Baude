@@ -65,17 +65,17 @@ class LineGutter(Gtk.Widget):
 
 class CheckList(Gtk.Box):
     """A check for each of a list of things, and one over them all, as the Kubernetes page's Namespaces and the
-    sidebar's ⋮ → Groups have them: those checked are shown, in the order checked; none checked is every one ([]), the
-    one over them checked. Checking that one shows every one again, and it can't be unchecked: something is always
-    shown. changed(the keys shown, [] for every one) as they're picked; menu(key, check, x, y), x and y in the check's,
-    on a right-click on one. heading: the one over them all reads as a section heading (the popover's "Group by"), its
+    sidebar's ⋮ → Groups have them: those checked are shown, in the order checked. Every one shown is every one checked
+    (None), the one over them checked too; checking that one checks every one, unchecking it unchecks every one ([]).
+    changed(the keys shown, None for every one) as they're picked; menu(key, check, x, y), x and y in the check's, on a
+    right-click on one. heading: the one over them all reads as a section heading (the popover's "Group by"), its
     check kept."""
 
     def __init__(self, all_label, changed, menu=None, max_height=420, heading=False):
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=4)
-        self.changed, self.menu, self.items, self.shown, self.checks, self.syncing = changed, menu, None, [], {}, False
+        self.changed, self.menu, self.items, self.shown, self.checks, self.syncing = changed, menu, None, None, {}, False
         self.all = Gtk.CheckButton(label=all_label)
-        self.all.connect("toggled", lambda b: self.syncing or self.pick([]))
+        self.all.connect("toggled", lambda b: self.syncing or self.pick(None if b.get_active() else []))
         if heading and isinstance(label := self.all.get_last_child(), Gtk.Label):
             label.add_css_class("heading")
             label.add_css_class("dim-label")
@@ -87,7 +87,7 @@ class CheckList(Gtk.Box):
                                        max_content_height=max_height))
 
     def fill(self, items, shown):
-        """items: [(key, label)], in order; shown: the keys checked ([]: every one). Built again only when the items
+        """items: [(key, label)], in order; shown: the keys checked (None: every one). Built again only when the items
         change."""
         if items != self.items:
             child = self.list.get_first_child()
@@ -99,7 +99,7 @@ class CheckList(Gtk.Box):
                 check = self.checks[key] = Gtk.CheckButton(label=label)
                 check.key = key
                 check.connect("toggled", lambda b: self.syncing or self.pick(
-                    [k for k in self.shown if k != b.key] + [b.key] * b.get_active()))
+                    [k for k in self.keys() if k != b.key] + [b.key] * b.get_active()))
                 if self.menu is not None:
                     right = Gtk.GestureClick(button=Gdk.BUTTON_SECONDARY)
                     right.connect("pressed", lambda _g, _n, x, y, c=check: self.menu(c.key, c, x, y))
@@ -107,18 +107,25 @@ class CheckList(Gtk.Box):
                 self.list.append(check)
         self.sync(shown)
 
+    def keys(self):
+        """The keys checked: every one's, in order, while every one is."""
+        return [key for key, _label in self.items or ()] if self.shown is None else self.shown
+
     def sync(self, shown):
-        """The checks as shown says (the keys checked, [] for every one), changed not told."""
+        """The checks as shown says (the keys checked, None for every one), changed not told."""
         was, self.syncing = self.syncing, True
-        self.shown = list(shown)
-        self.all.set_active(not self.shown)
+        self.shown = None if shown is None else list(shown)
+        self.all.set_active(self.shown is None)
         for key, check in self.checks.items():
-            check.set_active(key in self.shown)
+            check.set_active(self.shown is None or key in self.shown)
         self.syncing = was
 
     def pick(self, keys):
-        """Checked or unchecked by hand: these keys shown ([]: every one), and changed told."""
-        keys = list(dict.fromkeys(keys))
+        """Checked or unchecked by hand: these keys shown (None: every one), and changed told."""
+        if keys is not None:
+            keys = list(dict.fromkeys(keys))
+            if keys and set(keys) >= {key for key, _label in self.items or ()}:
+                keys = None
         self.sync(keys)
         self.changed(keys)
 

@@ -14,7 +14,7 @@ from gi.repository import Adw, Gdk, Gio, GLib, Gtk, Pango  # noqa: E402,F401
 
 import lookupgit  # noqa: E402
 from baudelib import wording  # noqa: E402
-from widgets import pretty_path, settings_page  # noqa: E402
+from widgets import insert_actions, pretty_path, settings_page  # noqa: E402
 from pickers import RefPalette  # noqa: E402
 
 
@@ -236,7 +236,7 @@ def mesh_dialog(net):
         act.connect("activate", lambda _a, key, ask=ask: (r := remote(key.get_string())) is not None and
                     ask(dialog, net, r, fill))
         actions.add_action(act)
-    dialog.insert_action_group("mesh", actions)
+    insert_actions(dialog, "mesh", actions)
 
     def menu(key):
         items = Gio.Menu()

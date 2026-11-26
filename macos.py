@@ -138,7 +138,8 @@ def objc_send(obj, sel, *args, types=(), ret=None):
 
 
 DOCK_PX = 512  # (the Dock's tile at its largest, magnified: 256 points, 512 px on a Retina screen. Each tile set (the
-# accent changed) holds on to memory in AppKit, none of it given back: 8.7 MB each from 1024 px, 2.6 MB from 512)
+# accent changed) leaves CoreGraphics a decoded copy of it, 2.6 MB from 512 px (8.7 MB from 1024), the last 16 kept:
+# in malloc's purgeable zone, which the system takes back as it needs and doesn't count in the footprint)
 
 
 def dock_image(png):

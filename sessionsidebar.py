@@ -22,7 +22,7 @@ import pickers  # noqa: E402
 from widgets import Ticker  # noqa: E402,F401
 from pickers import ChoiceDropDown  # noqa: E402  (a dropdown over (value, label): Record's hosts too)
 from widgets import (  # noqa: E402,F401
-    discard, ensure_icons, load_settings, pretty_path, save_settings, time_ago, toast, walk,
+    discard, ensure_icons, insert_actions, load_settings, pretty_path, save_settings, time_ago, toast, walk,
 )
 from pickers import CheckList, TreeList, sidebar_action, ellipsize_dropdown  # noqa: E402,F401
 
@@ -202,7 +202,7 @@ class SessionSidebar(SidebarMenu, Gtk.Box):
             act = Gio.SimpleAction.new(name, GLib.VariantType.new("s"))
             act.connect("activate", lambda _a, v, fn=fn: (pop.popdown(), fn(v.get_string())))
             actions.add_action(act)
-        self.insert_action_group("sb", actions)
+        insert_actions(self, "sb", actions)
         self.actions = actions
         self.remote_keys, self.remote_ids = {}, frozenset()  # (a server's folders: their servers; see groups)
         self.assigned = None  # (chat_groups, as groups last read them, for session_row)

@@ -294,6 +294,7 @@ class WindowSignal:
                               (ref.ask_listeners, self.ask_lsp), (ref.question_listeners, self.ask_ref)):
             if fn in listeners:
                 listeners.remove(fn)
+        ref.unfollow(self)
         ran = self in ref.runners
         ref.runners.discard(self)
         if not ref.listeners:

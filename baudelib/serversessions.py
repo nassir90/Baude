@@ -20,6 +20,10 @@ from baudelib.serverstate import (
     turn_acting,
 )
 
+CARRY_TRIES = 5  # (copies of a chat's record made, each written to as it was copied, before its account waits again)
+FOLLOW_UP_WAIT = 30  # (s a claude's given to begin the turn a follow-up sent at the last one starts, before an account
+# picked at that turn's taken: begun by then, it's taken after that turn instead)
+
 
 class ServerSessions:
     """Server's sessions: starting one, its claude, what's said to it and by it, who from, and reading it."""
@@ -366,6 +370,8 @@ class ServerSessions:
             self.ensure_proc(s).send(msg)
             if at_turn and s.kept():  # (taken after the turn it's sent in: kept after it too)
                 s.queued.append((msg.get("message") or {}, msg.get("uuid"), conn))
+            elif at_turn:  # (claude's own to take after the turn it's sent in: an account picked waits for it)
+                s.sent_at_turn = True
             else:
                 self.keep(s, "user", msg.get("message") or {}, msg.get("uuid"))
                 self.tell_said(s, msg.get("message") or {}, msg["uuid"], conn)
@@ -596,8 +602,6 @@ class ServerSessions:
                     self.save(s)
                 self.changed()
                 self.telemetry.turn(s.id, msg, s.meta.get("model"), s.meta.get("effort"), s.turn_began)
-                if getattr(s, "account_after_turn", False) and s.proc is proc:  # (another account picked mid-turn)
-                    self.restart_agent(s)
                 ended = {"op": "turn_ended", "session": s.id, "result": msg.get("result"),
                          "is_error": bool(msg.get("is_error")), "cost": msg.get("total_cost_usd"),
                          "turns": msg.get("num_turns"), "duration_ms": msg.get("duration_ms")}
@@ -616,6 +620,10 @@ class ServerSessions:
                 else:
                     held, by = s.codex_queue.pop(0)
                     self.take_input(by, s, held, again=True)
+            if kind == "result":
+                followed, s.sent_at_turn = bool(told) or s.sent_at_turn, False
+                if s.account_after_turn and proc is s.proc:  # (another account picked at the turn: moved onto it,
+                    self.account_after(s, FOLLOW_UP_WAIT if followed else 0)  # follow-ups sent at it answered first)
 
     def tell_said(self, s, message, said, conn=None):
         """(lock held) A message given a session's agent, as it's kept (take_input; one taken at a turn, as the turn
@@ -839,6 +847,7 @@ class ServerSessions:
             self.drop_routes(s)
             if not self.stopped.is_set():
                 self.drop_waits(s)
+                self.account_after(s)  # (an account picked at a turn it ended with: taken now)
             if not getattr(made[0], "restarting", False) and not self.stopped.is_set():  # (the host stopping: said
                 # as that, said_quitting)
                 stopped = {"stopped": True} if getattr(made[0], "stopping", False) else {}  # (told to: op stop)
@@ -896,8 +905,9 @@ class ServerSessions:
 
     def use_account(self, sid, profile):
         """A chat goes on under another of its host's accounts for its model's provider (profile; "": the CLI's own
-        sign-in): its agent started again under it, resuming the chat, now or, mid-turn, once the turn's over.
-        ValueError for a chat that isn't here, or an account that isn't one for its model."""
+        sign-in): its agent started again under it, resuming the chat, now or, mid-turn or with follow-ups waiting,
+        once they're answered (switch_account). ValueError for a chat that isn't here, or an account that isn't one for
+        its model; OSError if its record can't be carried to the account (nothing's stopped then)."""
         with self.lock:
             s = self.sessions.get(sid) if isinstance(sid, str) else None
             program = models.model_program(s.meta.get("model")) if s is not None else None
@@ -905,29 +915,71 @@ class ServerSessions:
                 raise ValueError(wording.say("subscriptions.no_account_here"))
             if profile and (accounts.account(profile) or {}).get("provider") != program:
                 raise ValueError(wording.say("subscriptions.gone"))
-            profiles = s.meta.setdefault("profiles", {})
-            was = profiles.get(program, "")
-            if was == profile:
+            if profile == (s.meta.get("profiles") or {}).get(program, ""):  # (its own picked back: none waiting)
+                s.account_to, s.account_after_turn = None, False
+                self.changed()
                 return
-            if program == "codex":
-                accounts.carry_codex_thread(s.meta.get("cli_id"), was, profile)
-            else:
-                accounts.use_claude_session(s.id, profile)
-            profiles[program] = profile
-            s.meta["account_picked"] = True  # (not the default's as it's first written in: default_changed)
-            if s.proc is not None and s.busy:
-                s.account_after_turn = True
-            elif s.proc is not None:
-                self.restart_agent(s)
-            self.save(s)
-            self.changed()
+            s.account_to = profile
+        self.switch_account(s)
 
-    def restart_agent(self, s):
-        """(lock held) A session's agent stopped to be started again by what's sent it next (ensure_proc), those
-        attached not told it went: under another account, say."""
-        s.account_after_turn = False
-        s.proc.stopping = s.proc.restarting = True
-        s.proc.kill()
+    def switch_account(self, s):
+        """(lock not held) A chat moved onto the account picked for it (account_to), once nothing's running in it nor
+        waiting for it (a turn, follow-ups sent at it: queued, codex_queue; till then account_after_turn, and this again
+        as the turn's over): its record carried to the account (accounts.carry_chat), the lock not held as it's copied,
+        then, if nothing's written it meanwhile, the account kept as its own and its agent started again under it with
+        what's sent it next. OSError if the copy fails (the chat left as it was)."""
+        for tries in range(CARRY_TRIES):
+            with self.lock:
+                to = s.account_to
+                if to is None or s.deleting or s.deleted:
+                    return
+                if s.busy or s.queued or s.codex_queue or tries == CARRY_TRIES - 1:  # (written to all along: taken
+                    s.account_after_turn = True  # after its next turn)
+                    return
+                program = models.model_program(s.meta.get("model"))
+                was = (s.meta.get("profiles") or {}).get(program, "")
+                thread = s.meta.get("cli_id")
+                transcript = None if s.kept() or program != "claude" else s.transcript()
+            try:
+                path, seen = accounts.carry_chat(program, thread, transcript, was, to)
+            except (OSError, ValueError) as e:
+                with self.lock:
+                    if s.account_to == to:
+                        s.account_to, s.account_after_turn = None, False
+                        self.changed()
+                self.log(f"{s.id}: not moved to another account: {e}")
+                raise OSError(str(e)) from e
+            with self.lock:
+                if s.account_to != to or s.busy or s.queued or s.codex_queue or \
+                        accounts.carry_seen(seen) != seen:
+                    continue  # (picked again, or written or sent to as it was copied: looked at again)
+                s.meta.setdefault("profiles", {})[program] = to
+                s.meta["account_picked"] = True  # (not the default's as it's first written in: default_changed)
+                s.account_to, s.account_after_turn = None, False
+                if program == "claude":
+                    accounts.use_claude_session(s.id, to)
+                    if path:
+                        s.meta["path"] = path  # (where its claude under the account resumes it, and writes it on)
+                if s.proc is not None and not getattr(s.proc, "stopping", False):
+                    self.restart_agent(s)
+                self.save(s)
+                self.changed()
+                return
+
+    def account_after(self, s, wait=0):
+        """(lock held) A chat's turn over, or its agent gone, with an account picked for it meanwhile: moved onto it on
+        a thread of its own (switch_account; the copy can take a while), if nothing waits for it still. wait: s given
+        its claude first to begin the turn a follow-up sent at the last one starts (one begun: moved after it)."""
+        if s.account_to is None or s.busy or s.queued or s.codex_queue:
+            return
+
+        def run():
+            time.sleep(wait)
+            try:
+                self.switch_account(s)
+            except OSError:
+                pass  # (logged: the chat stays on the account it's on)
+        threading.Thread(target=run, daemon=True, name="account").start()
 
     def default_changed(self, provider, profile):
         """A provider's default account picked: the new chats not written in yet, with no agent running, take it, as

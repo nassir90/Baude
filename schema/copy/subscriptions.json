@@ -49,6 +49,7 @@
     "token_saved": "Token replaced",
     "no_account_here": "This chat's model runs on no subscription",
     "account_tip": "Subscription this chat runs on",
-    "account_note": "subscription → {$name}"
+    "account_note": "Subscription → {$name}",
+    "removed_account": "Removed subscription"
   }
 }

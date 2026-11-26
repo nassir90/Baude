@@ -584,7 +584,8 @@ class WindowDrafts:
                     waiting.answered()
             self.waiting_cards.clear()
         else:
-            self.restart_after_turn = False  # (started again now, on whatever sign-in there is)
+            self.restart_after_turn = False  # (started again now, on whatever sign-in there is, or the account picked)
+            self.take_account()
             self.restart_proc(resume=True)
         self.end_turn(proc)
         return False
@@ -946,6 +947,7 @@ class WindowDrafts:
     # once its turn's over; a Claude Desktop chat's own claude, here, started again under it)
     ACCOUNTS_S = 30  # (s a host's accounts, as it last listed them, are taken as they are)
     ACCOUNT = "account|"  # (a provider picker key that's an account: its id after it)
+    ACCOUNT_GONE = "account-gone"  # (the provider picker's key for an account since removed that the chat's on)
 
     def host_accounts(self):
         """The subscription accounts of the chat's host, as it last listed them ([] till it has), listed again once
@@ -963,7 +965,9 @@ class WindowDrafts:
             host.accounts_asking = True
 
             def answered(reply, host=host, was=said):
-                host.accounts_asking = False
+                host.accounts_asking = False  # (answered, refused, or the connection gone: asked again next time)
+                if reply.get("op") != "accounts":
+                    return
                 listed = [a for a in reply.get("accounts") or [] if isinstance(a, dict) and a.get("id")]
                 host.accounts_said = (GLib.get_monotonic_time() / 1e6, listed)
                 if (was or (0, []))[1] != listed and self.remote is host and self.get_application() is not None:
@@ -973,34 +977,53 @@ class WindowDrafts:
 
     def sync_accounts(self, shown):
         """The provider picker as the chat's subscription accounts: shown (its model) Claude's or Codex's, and its host
-        keeping more than one account for it; else left as sync_providers left it."""
+        keeping more than one account for it; else left as sync_providers left it. Not for a Claude Desktop chat its
+        host only lists (nothing of it runs there to move). An account since removed that the chat's on: listed as
+        that, picked, till another's picked."""
         program = model_program(shown or self.model)
         if program not in ("claude", "codex") or not self.session_id:
+            return
+        if self.remote is not None and (self.remote.sessions.get(self.session_id) or {}).get("taken_up") is False:
             return
         mine = [a for a in self.host_accounts() if a.get("provider") == program]
         if len(mine) < 2:
             return
         on = (self.chat_account_info() or {}).get("id") or ""
         choices = [(self.ACCOUNT + a["id"], a["name"]) for a in mine]
-        if not on:  # (the CLI's own sign-in, which it's on: listed too)
+        if self.chat_account_gone():
+            on = self.ACCOUNT_GONE
+            choices.append((on, wording.say("subscriptions.removed_account")))
+        elif not on:  # (the CLI's own sign-in, which it's on: listed too)
             choices.append((self.ACCOUNT, wording.say("subscriptions.cli_default")))
         self.provider_dd.set_choices([(None, choices)])
-        self.provider_dd.select(self.ACCOUNT + on)
+        self.provider_dd.select(on if on == self.ACCOUNT_GONE else self.ACCOUNT + on)
         self.provider_dd.set_sensitive(True)
         self.provider_dd.set_visible(True)
         self.provider_dd.set_tooltip_text(wording.say("subscriptions.account_tip"))
+
+    def chat_account_gone(self):
+        """Is the chat on a subscription account since removed from its host?"""
+        if self.remote is not None:
+            return bool((self.remote.sessions.get(self.session_id) or {}).get("account_gone"))
+        import sqlite3
+        from baudelib import accounts
+        try:
+            profile = accounts.claude_session_profile(self.session_id)
+            return bool(profile) and accounts.account(profile) is None
+        except (OSError, sqlite3.Error):
+            return False
 
     def use_account(self, profile):
         """The chat goes on under another of its host's accounts (profile; "": the CLI's own sign-in)."""
         name = next((a["name"] for a in self.host_accounts() if a["id"] == profile), None) or \
             wording.say("subscriptions.cli_default")
-        if self.remote is None:  # (a Claude Desktop chat's own claude, here: started again under it, resuming it)
-            from baudelib import accounts
-            accounts.use_claude_session(self.session_id, profile)
-            self.note(wording.say("subscriptions.account_note", name=name))
+        if self.remote is None:  # (a Claude Desktop chat's own claude, here: started again under it, resuming it,
+            self.account_to = profile  # once its turn's over)
             if getattr(self, "busy", False) and self.proc is not None:
                 self.restart_after_turn = True
-            else:
+                self.note(wording.say("subscriptions.account_note", name=name))
+            elif self.take_account():
+                self.note(wording.say("subscriptions.account_note", name=name))
                 self.restart_proc(resume=True)
             self.sync_providers()
             return
@@ -1013,15 +1036,37 @@ class WindowDrafts:
                 listed = self.remote.sessions.get(self.session_id) if self.remote is not None else None
                 if isinstance(listed, dict):  # (as its host lists it next: taken now)
                     listed["account"] = next((a for a in self.host_accounts() if a["id"] == profile), None)
+                    listed["account_gone"] = False
             self.sync_providers()
         self.remote.request({"op": "accounts", "what": "use", "session": self.session_id, "id": profile}, answered)
+
+    def take_account(self):
+        """A Claude Desktop chat run here moved onto the account picked for it (account_to), with no claude running
+        in it: its transcript carried to that account's projects folder where it isn't the one it's in
+        (accounts.carry_chat), and the account kept as its own. Whether it was (a copy that fails: said, the chat left
+        on the one it's on)."""
+        profile, self.account_to = getattr(self, "account_to", None), None
+        if profile is None or not self.session_id:
+            return False
+        from baudelib import accounts, transcripts
+        try:
+            accounts.carry_chat("claude", self.session_id, transcripts.session_file(self.session_id),
+                                accounts.claude_session_profile(self.session_id), profile)
+            accounts.use_claude_session(self.session_id, profile)
+        except (OSError, ValueError) as e:
+            self.note(str(e))
+            return False
+        return True
 
     def on_provider_changed(self, key):
         """Another provider of the chat's model picked (alike_keys): the chat's model is its copy there, as a model
         picked is; mid-turn, once the turn's over. Its own picked back: no move, one waiting dropped. An account
         picked (sync_accounts): the chat goes on under it."""
+        if key == self.ACCOUNT_GONE:
+            return
         if key.startswith(self.ACCOUNT):
-            if key[len(self.ACCOUNT):] != ((self.chat_account_info() or {}).get("id") or ""):
+            if key[len(self.ACCOUNT):] != ((self.chat_account_info() or {}).get("id") or "") or \
+                    self.chat_account_gone():
                 self.use_account(key[len(self.ACCOUNT):])
             return
         self.move_after_turn = None

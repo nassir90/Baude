@@ -7,8 +7,8 @@ hosts must still answer after. The same ops from a head on the host's own socket
   - opens forged on the way: no from, another member's from, a signature taken off: closed, or, from a member whose
     key isn't known, served as from one no rule chooses;
   - relays borrowed: a member's tunnel, or a chat a member started, asking to be passed on: refused;
-  - ops whose chat or folder is optional (git, signal_names, read_file, catalogue, list_dir): a member's only where it
-    may manage;
+  - ops whose chat or folder is optional (git, signal_names, read_file, catalogue, list_dir), and a chat moved to
+    another subscription (accounts' use): a member's only where it may manage;
   - the chat's Bash asked about: approved by the member only with Shell too, and its turn's end (turn_ended) told it
     only if it may manage the chat.
 No GTK.
@@ -253,7 +253,8 @@ def main():
                     ({"op": "read_file", "path": os.path.join(folder, "f.txt")}, chat_let),
                     ({"op": "catalogue", "cwd": folder}, chat_let),
                     ({"op": "read_file", "path": os.path.join(HERE, "test_access.py")}, False),
-                    ({"op": "list_dir", "path": TMP}, lets["manage"])]
+                    ({"op": "list_dir", "path": TMP}, lets["manage"]),
+                    ({"op": "accounts", "what": "use", "session": chat.id, "id": ""}, lets["access"] and chat_let)]
         for msg, allowed in rng.sample(optional, len(optional)):
             req += 1
             got = ask(member, msg, req)

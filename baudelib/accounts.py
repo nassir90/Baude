@@ -13,6 +13,7 @@ account's CODEX_HOME has settings of its own. Where the host has no claude, a Cl
 its claude on a pipe (CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR), which claude reads once as it starts, so it's in no
 environment its tools inherit. A Codex account is a CODEX_HOME of its own (kind "profile"), with file-backed
 credentials Codex manages."""
+import glob
 import os
 import shutil
 import sqlite3
@@ -439,20 +440,85 @@ def use_claude_session(session, profile):
             db.execute("INSERT OR REPLACE INTO sessions VALUES (?,?)", (session, profile))
 
 
-def carry_codex_thread(thread, was, now):
-    """A Codex chat's thread (its rollout file) copied from the CODEX_HOME of the account it ran under (was; "": the
-    CLI's own) to that of the account it goes on under (now), where it isn't already, so Codex there resumes it."""
-    def home(profile):
-        return Path(codex_home(profile)) if profile else \
-            Path(os.environ.get("CODEX_HOME") or os.path.expanduser("~/.codex"))
-    if not thread or was == now:
+def _codex_home(profile):
+    """The CODEX_HOME a Codex chat under profile runs with ("": the CLI's own), or None: an account since removed."""
+    if not profile:
+        return Path(os.environ.get("CODEX_HOME") or os.path.expanduser("~/.codex"))
+    try:
+        return Path(codex_home(profile))
+    except ValueError:
+        return None
+
+
+def claude_projects(profile):
+    """The projects folder a claude run under profile ("": the CLI's own sign-in) keeps its chats in, as a real path: a
+    folder account's own, where it has one (claude_folders), else the host's (share links it there)."""
+    from baudelib.transcripts import projects_dir
+    if profile and (account(profile) or {}).get("kind") == "folder":
+        mine = os.path.join(_credential("claude", profile), "projects")
+        if os.path.lexists(mine):
+            return os.path.realpath(mine)
+    return os.path.realpath(projects_dir())
+
+
+def _seen(paths):
+    """What the files are now ((path, size, mtime) each): the same again once a copy's made if nothing's written them."""
+    out = []
+    for path in paths:
+        try:
+            st = os.stat(path)
+            out.append((str(path), st.st_size, st.st_mtime_ns))
+        except OSError:
+            out.append((str(path), None, None))
+    return tuple(out)
+
+
+def _carry(source, to):
+    """source copied to `to`, unless what's there is as new (copy2 keeps the time it was written: a chat moved back to
+    an account it ran under gets what it's said since), through a file beside it renamed over it, so a claude or Codex
+    reading `to` never sees half of it."""
+    source, to = Path(source), Path(to)
+    if os.path.realpath(source) == os.path.realpath(to):
         return
-    source, target = home(was), home(now)
-    for found in (source / "sessions").glob(f"**/rollout-*{thread}.jsonl"):
-        to = target / found.relative_to(source)
-        if not to.exists():
-            to.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(found, to)
+    if to.exists() and to.stat().st_mtime_ns >= source.stat().st_mtime_ns:
+        return
+    to.parent.mkdir(parents=True, exist_ok=True)
+    temp = to.with_name(f".{to.name}.{uuid.uuid4().hex}.tmp")
+    try:
+        shutil.copy2(source, temp)
+        os.replace(temp, to)
+    finally:
+        if temp.exists():
+            temp.unlink()
+
+
+def carry_chat(program, thread, transcript, was, now):
+    """A chat's own record carried from the account it ran under (was; "": the CLI's own) to the one it goes on under
+    (now), so its program there resumes it: Codex's thread (its rollout files, by thread id) from was's CODEX_HOME to
+    now's; claude's transcript (its path) into now's projects folder, where that isn't the one it's in. Returns (its
+    transcript where now's claude finds it, or None; what the files copied were, _seen, to tell if they're written
+    after). Nothing to carry from an account since removed. OSError if a copy fails."""
+    if program == "codex":
+        source, target = _codex_home(was), _codex_home(now)
+        if not thread or was == now or source is None or target is None:
+            return None, ()
+        found = list((source / "sessions").glob(f"**/rollout-*{glob.escape(thread)}.jsonl"))
+        seen = _seen(found)
+        for path in found:
+            _carry(path, target / path.relative_to(source))
+        return None, seen
+    if not transcript or not os.path.exists(transcript):
+        return None, ()
+    seen = _seen([transcript])
+    project = os.path.basename(os.path.dirname(transcript))
+    to = os.path.join(claude_projects(now), project, os.path.basename(transcript))
+    _carry(transcript, to)
+    return to, seen
+
+
+def carry_seen(seen):
+    """_seen again for the files carry_chat copied: equal to what it returned if none's been written since."""
+    return _seen([p for p, _size, _mtime in seen])
 
 
 def remember_claude_session(session, profile):

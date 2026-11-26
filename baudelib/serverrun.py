@@ -398,8 +398,9 @@ class ServerRunning:
                 conn.member, conn.verified = by
         if (cap := access.OPS.get(op)) is not None and not self.access.allowed(conn, cap):
             return conn.send(self.access.refused(req, cap))
-        if op in ("start", "task_output", "autofix", "git", "signal_names") and not self.may_manage(conn, msg):  # (a
-            return conn.send(self.access.refused(req, "manage"))  # chat named: forked, adopted, read, its Auto-fix)
+        if (op in ("start", "task_output", "autofix", "git", "signal_names") or op == "accounts" and
+                msg.get("what") == "use") and not self.may_manage(conn, msg):  # (a chat named: forked, adopted, read,
+            return conn.send(self.access.refused(req, "manage"))  # its Auto-fix, moved to another subscription)
         if op in ("read_file", "git", "signal_names", "catalogue") and conn.member is not None and \
                 not self.managed_folder(conn, msg.get("path") if op == "read_file" else msg.get("cwd")):
             return conn.send(self.access.refused(req, "manage"))  # (a member's: in the folder of a chat it manages)

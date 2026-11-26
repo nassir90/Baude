@@ -529,12 +529,16 @@ object MetaTools {
                 val st = MetaSet.ALL[n] ?: return no("No setting '$n': they're ${MetaSet.ALL.keys.joinToString(", ")}.")
                 if (!st.metaSets) return no("$n is the user's to change: show setting:$n for them to.")
                 val before = st.get()
+                var only: List<String>? = null
                 val now = try {
-                    st.coerce(args.opt("value")).also { st.put(it) }
+                    st.coerce(args.opt("value")).also {
+                        only = st.changed?.invoke(args.opt("value"))
+                        st.put(it)
+                    }
                 } catch (e: IllegalArgumentException) {
                     return no(e.message.orEmpty())
                 }
-                shown(at, JSONObject().put("setting", n).put("set", now))
+                shown(at, JSONObject().put("setting", n).put("set", now).apply { only?.let { put("hosts", JSONArray(it)) } })
                 if (now == before) return ok("$n is ${saidValue(now)} already. Its row is under your reply.")
                 val a = act(Wording.MetaActions.settingChanged(setting = st.title(), before = saidValue(before), after = saidValue(now)),
                     "setting", JSONObject().put("name", n).put("from", before).put("to", now), at = at)

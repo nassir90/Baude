@@ -205,15 +205,16 @@ class BaudeApp(Adw.Application):
         version's there."""
         u, host = self.updater, local_host()
         held = bool(host is not None and host.info.get("update"))
-        if not held and (u is None or not u.pending()):
+        if not held and (u is None or not (u.pending() or u.why)):
             return None
         return self.update_blockers() if held or getattr(self, "update_held", False) else []
 
-    def show_update_bars(self):
-        why = self.update_reasons()
-        for w in self.windows():
-            if (bar := getattr(w.sidebar, "update_bar", None)) is not None:
-                bar.say(why)
+    def show_update_bars(self, windows=None):
+        """Every window's Update bar (or windows': those new ones, built since) as things stand."""
+        why, u = self.update_reasons(), self.updater
+        for w in windows or self.windows():
+            if (bar := getattr(getattr(w, "sidebar", None), "update_bar", None)) is not None:
+                bar.say(why, u.why if u is not None and not u.pending() else None, u is not None and u.busy)
 
     def update_now(self, win):
         """The bar clicked: restarted now. Nothing running: straight away; what's running, stopped: said first, and

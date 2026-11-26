@@ -57,10 +57,11 @@ def quiet(win):
 
 
 class Updater:
-    """The app's look at git every CHECK_S (in a thread): with auto restart on (enabled), look, and the restart once a
+    """The app's look at git every CHECK_S (in a thread): with auto restart on (enabled), check, and the restart once a
     new version's found and idle() says so: restart(note), note what the new one says it was updated by (restarted);
-    off, offered, the version Update would restart onto, left as it is till it's clicked (apply). changed(waiting)
-    each time what Update shows changes: waiting, a version found that waits on idle."""
+    off, offered, the version Update would restart onto, left as it is till it's clicked (apply). A newer version that
+    can't be restarted onto is said (why: "dirty", "diverged" or "broken"). blocked(waiting) each time what Update
+    shows changes; waiting, a version found that waits on idle."""
 
     def __init__(self, module, idle, restart, root=HERE, every=CHECK_S, blocked=None):
         self.module, self.idle, self.restart, self.root = module, idle, restart, root
@@ -68,6 +69,10 @@ class Updater:
         self.started = STARTED if root == HERE else git(root, "rev-parse", "HEAD", timeout=5)  # (this process's code)
         self.ready = None  # (a commit found to restart onto: waiting for idle, or for Update with auto restart off)
         self.offered = None  # (a commit there to update to, the checkout not touched: auto restart off)
+        self.why = None  # (a newer version's there but can't be restarted onto: the reason, in place of Update)
+        self.waiting = False  # (a version found waits on idle)
+        self.busy = False  # (Update clicked: the version being fetched in and checked)
+        self.clicked = None  # (what to do with the version once it's ready: Update clicked while a look was in flight)
         self.looking = False
         self.source = GLib.timeout_add_seconds(every, self.tick) if self.started else None
 
@@ -75,67 +80,88 @@ class Updater:
         """A new version Update would restart onto (ready, or offered)."""
         return bool(self.ready or self.offered)
 
+    def changed(self):
+        self.blocked(self.waiting)
+
+    def run(self, fn, done):
+        self.looking = True
+        threading.Thread(target=lambda: GLib.idle_add(done, fn()), daemon=True).start()
+
     def tick(self):
         if self.ready is None and not self.looking and selfupdate.allowed():
-            self.looking = True
             if enabled():
-                threading.Thread(target=lambda: GLib.idle_add(self.found, look(self.started, self.module, self.root)),
-                                 daemon=True).start()
+                self.run(lambda: selfupdate.check(self.started, self.module, self.root), self.found)
             else:
-                threading.Thread(target=lambda: GLib.idle_add(self.seen, selfupdate.offered(self.started, self.root)),
-                                 daemon=True).start()
+                self.run(lambda: selfupdate.offered(self.started, self.root), self.seen)
         return True
 
-    def seen(self, commit):
+    def seen(self, result):
+        """(Auto restart off) what a look found: the commit offered, or why not."""
         self.looking = False
-        if self.ready is None and commit != self.offered:
-            self.offered = commit
-            self.blocked(False)
+        if self.clicked is not None:
+            self.go()
+        elif self.ready is None and result != (self.offered, self.why):
+            self.offered, self.why = result
+            self.changed()
         return False
 
-    def found(self, commit):
+    def found(self, result):
+        commit, why = result
         self.looking = False
-        if commit is not None and self.ready is None:
-            self.ready, self.offered = commit, None
+        if self.clicked is not None:
+            self.go()
+        elif commit is not None and self.ready is None:
+            self.ready, self.offered, self.why = commit, None, None
             GLib.timeout_add_seconds(READY_S, self.when_idle)
             self.when_idle()
+        elif commit is None and self.ready is None and (self.offered, self.why) != (None, why):
+            self.offered, self.why = None, why
+            self.changed()
         return False
 
     def when_idle(self):
-        """A new version found: restarted onto it once the app's idle (and still meant to update; turned off, it waits
-        for Update)."""
-        if self.ready is None or not enabled():
-            self.blocked(False)
-            return False
-        if not self.idle():
-            self.blocked(True)
+        """A new version found: restarted onto it once the app's idle. Turned off meanwhile, it's offered instead, to
+        wait for Update (and found again, as it's turned back on)."""
+        if self.ready is None:
+            self.waiting = False
+        elif not enabled():
+            self.ready, self.offered, self.waiting = None, self.ready, False
+        elif not self.idle():
+            self.waiting = True
+            self.changed()
             return True
-        self.restart(self.note())
+        else:
+            self.restart(self.note())
+            return False
+        self.changed()
         return False
 
     def note(self):
         return {"from": self.started, "to": self.ready, "commits": new_commits(self.started, self.ready, self.root)}
 
     def apply(self, then):
-        """Update clicked: the version offered fetched in and checked (look), and then(note) once it's ready; it
-        isn't offered after all (it won't import, the checkout's changed): no longer offered, and then isn't called."""
-        if self.ready is not None:
-            return then(self.note())
-        if self.looking:
-            return None
-        self.looking = True
+        """Update clicked: the checkout looked at again (check: fetched, fast-forwarded, the code checked to import),
+        never the version found before, and then(note) once it's ready; if it isn't after all, the reason's said and
+        then isn't called. A look in flight is waited for, and the click carried on after it."""
+        self.clicked, self.busy = then, True
+        self.changed()
+        if not self.looking:
+            self.go()
 
-        def done(commit):
-            self.looking, self.offered = False, None
-            if commit is not None:
-                self.ready = commit
-            self.blocked(False)
-            if commit is not None:
-                then(self.note())
-            return False
-        threading.Thread(target=lambda: GLib.idle_add(done, look(self.started, self.module, self.root)),
-                         daemon=True).start()
-        return None
+    def go(self):
+        self.run(lambda: selfupdate.check(self.started, self.module, self.root), self.applied)
+
+    def applied(self, result):
+        commit, why = result
+        then, self.clicked, self.looking, self.busy = self.clicked, None, False, False
+        self.ready, self.offered, self.why = commit, None, why
+        if commit is not None and then is not None:
+            self.waiting = False
+            self.changed()
+            then(self.note())
+        else:
+            self.changed()
+        return False
 
     def stop(self):
         if self.source is not None:

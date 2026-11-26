@@ -239,7 +239,7 @@
       "decisions": [
         {
           "said": "The run form looked ugly and unlike any of the app's other settings (paraphrased: the form shown when running a task with inputs)",
-          "rule": "Every app draws a task's run form as its settings: one boxed list of rows titled with each input's label (wrapped, no subtitle), a switch row for yes/no, an entry row for text and number, a drop-down row for a choice; one suggested button, Run, beside Cancel; Run with dummy answers out of that row, a flat button under the list",
+          "rule": "Every app draws a task's run form as its settings: one boxed list of rows titled with each input's label (wrapped, no subtitle), a switch row for yes/no, an entry row for text and number, a drop-down row for a choice; one suggested button, Run, beside Cancel; Run with dummy answers out of that row, a flat button under the list, outside what scrolls; a number is red from the start while its text isn't a finite number (not nan, inf, 1e999 or 1_000), an empty optional number is fine and sends nothing (the host's default stands), Enter in an entry runs the form when it's fit",
           "decided": "2026-11-26",
           "source": [
             {

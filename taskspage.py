@@ -13,7 +13,7 @@ gi.require_version("Adw", "1")
 from gi.repository import Adw, GLib, Gtk, Pango  # noqa: E402
 
 from baudelib import wire, wording  # noqa: E402
-from baudelib.tasks import LOG_SHOWN, MAX_EVERY, MIN_EVERY  # noqa: E402
+from baudelib.tasks import LOG_SHOWN, MAX_EVERY, MIN_EVERY, number_of  # noqa: E402
 from markdownview import CodeBlock  # noqa: E402
 from panels import natural_height  # noqa: E402
 from widgets import Spinner, themed_icon  # noqa: E402
@@ -26,6 +26,7 @@ PAYLOAD = {"schedule": ("time",), "git_push": ("repo", "branch", "before", "afte
 STATUS_ICONS = {"done": "object-select-symbolic", "failed": "dialog-error-symbolic", "stopped": "process-stop-symbolic",
                 "skipped": "go-next-symbolic"}
 GOING = ("running", "asking")
+INVALID = object()  # (a number field's value while its text isn't a number)
 
 
 def branch_icon():
@@ -114,11 +115,16 @@ def dropdown(pairs, picked):
     return dd, values
 
 
-def alert(win, heading, child, responses, done):
-    """An alert dialog: child, scrolled if it's tall; responses [(id, label, suggested)]; done(id) for each but
-    cancel."""
+def alert(win, heading, child, responses, done, below=None):
+    """An alert dialog: child, scrolled if it's tall, and below it, out of the scrolling, below; responses
+    [(id, label, suggested)]; done(id) for each but cancel."""
     fits = Gtk.ScrolledWindow(child=child, propagate_natural_height=True, max_content_height=520,
                               hscrollbar_policy=Gtk.PolicyType.NEVER)
+    if below is not None:
+        extra = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        extra.append(fits)
+        extra.append(below)
+        fits = extra
     dlg = Adw.AlertDialog(heading=heading, extra_child=fits, close_response="cancel",
                           default_response=responses[-1][0])
     for rid, label, suggested in responses:
@@ -502,64 +508,73 @@ class TasksPage(Gtk.Box):
         return dlg
 
     def field_row(self, f):
-        """(an input's row, as a setting's: a switch, an entry or a drop-down titled with its label; its value as it's
-        read, None while it isn't one)"""
+        """(an input's row, as a setting's: a switch, a drop-down or an entry beside a title that wraps, as its label
+        may be long; its value as it's read (None: a number left empty, nothing to send; INVALID: not a number); whether
+        it's fit to run; its entry, if it has one)"""
         title = f.get("label") or f["name"]
         if f["type"] == "bool":
             row = Adw.SwitchRow(title=title, use_markup=False, active=bool(f.get("default")))
-            return row, row.get_active
+            return row, row.get_active, lambda: True, None
         if f["type"] == "choice":
             choices = f.get("choices") or [""]
             row = Adw.ComboRow(title=title, use_markup=False, model=Gtk.StringList.new(choices))
             if f.get("default") in choices:
                 row.set_selected(choices.index(f["default"]))
-            return row, lambda: choices[row.get_selected()]
+            return row, lambda: choices[row.get_selected()], lambda: True, None
         default = f.get("default")
-        if f["type"] == "number":
-            row = Adw.EntryRow(title=title, use_markup=False, input_purpose=Gtk.InputPurpose.NUMBER,
-                               text="" if default is None else f"{float(default):g}")
+        number = f["type"] == "number"
+        entry = Gtk.Entry(valign=Gtk.Align.CENTER, width_request=150, hexpand=False,
+                          input_purpose=Gtk.InputPurpose.NUMBER if number else Gtk.InputPurpose.FREE_FORM,
+                          text="" if default is None else repr(default) if number else str(default))
+        row = Adw.ActionRow(title=title, use_markup=False, activatable_widget=entry)
+        row.add_suffix(entry)
+        if not number:
+            return row, entry.get_text, lambda: True, entry
 
-            def number():
-                try:
-                    n = float(row.get_text().strip())
-                except ValueError:
-                    return None
-                return int(n) if n.is_integer() else n
-            row.connect("changed", lambda r: (r.remove_css_class if number() is not None else r.add_css_class)("error"))
-            return row, number
-        row = Adw.EntryRow(title=title, use_markup=False, text="" if default is None else str(default))
-        return row, row.get_text
+        def read():
+            try:
+                return number_of(entry.get_text())
+            except ValueError:
+                return INVALID
+
+        def valid():
+            n = read()
+            return n is not INVALID and (n is not None or not f.get("required"))
+        entry.connect("changed", lambda e: (e.remove_css_class if valid() else e.add_css_class)("error"))
+        if not valid():
+            entry.add_css_class("error")
+        return row, read, valid, entry
 
     def run_form(self, t):
         """Run t, its inputs filled here first, each a row as the settings have them: Run, or under them the lesser
         Run with dummy answers."""
         group = Adw.PreferencesGroup()
-        read, entries = {}, []
+        read, valid, entries = {}, [], []
         for f in t.get("form") or []:
-            row, read[f["name"]] = self.field_row(f)
+            row, read[f["name"]], ok, entry = self.field_row(f)
+            valid.append(ok)
             group.add(row)
-            if isinstance(row, Adw.EntryRow):
-                entries.append(row)
+            if entry is not None:
+                entries.append(entry)
         dummy = Gtk.Button(label=wording.say("tasks.dry_run"), halign=Gtk.Align.CENTER, margin_top=12,
                            css_classes=["flat"])
-        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-        box.append(group)
-        box.append(dummy)
 
         def run(dry):
-            self.ask({"op": "run_task", "session": self.sid, "id": t["id"],
-                      "inputs": {k: fn() for k, fn in read.items()}, "dry": dry})
-        dlg = alert(self.win, wording.say("tasks.run_heading", name=t.get("name") or ""), box,
+            self.ask({"op": "run_task", "session": self.sid, "id": t["id"], "dry": dry,
+                      "inputs": {k: v for k, fn in read.items() if (v := fn()) is not None}})
+        dlg = alert(self.win, wording.say("tasks.run_heading", name=t.get("name") or ""), group,
                     [("cancel", wording.say("common.cancel"), False), ("run", wording.say("tasks.run"), True)],
-                    lambda _r: run(False))
+                    lambda _r: run(False), below=dummy)
         dlg.set_size_request(420, -1)
 
         def filled(*_):
-            ok = all(fn() is not None for fn in read.values())
+            ok = all(v() for v in valid)
             dlg.set_response_enabled("run", ok)
             dummy.set_sensitive(ok)
-        for row in entries:
-            row.connect("changed", filled)
+            return ok
+        for entry in entries:
+            entry.connect("changed", filled)
+            entry.connect("activate", lambda _e: filled() and (dlg.close(), run(False)))
         filled()
         dummy.connect("clicked", lambda _b: (dlg.close(), run(True)))
         return dlg

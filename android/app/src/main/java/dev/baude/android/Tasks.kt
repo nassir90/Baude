@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Icon
@@ -37,8 +38,10 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -514,11 +517,21 @@ private fun TaskDialog(t: Msg.Task, done: (JSONObject?) -> Unit) {
     )
 }
 
-/** A field's default as the run form fills it. */
+/** A field's default as the run form fills it (a number as the host has it). */
 private fun defaultText(f: Msg.TaskField): String = when (val d = f.default) {
     null, JSONObject.NULL -> ""
-    is Number -> if (d.toDouble() == Math.floor(d.toDouble())) d.toLong().toString() else d.toString()
     else -> d.toString()
+}
+
+private val NUMBER = Regex("[+-]?(?:[0-9]+\\.?[0-9]*|\\.[0-9]+)(?:[eE][+-]?[0-9]+)?")
+
+/** Text as the number it is (a Long when whole and small, else a Double): null for text that isn't a finite number in
+ * plain digits (not NaN, Infinity, 1e999, 1_000 or 1f), and for empty text. */
+private fun numberOf(text: String): Number? {
+    val s = text.trim()
+    if (!NUMBER.matches(s)) return null
+    val d = s.toDoubleOrNull()?.takeIf { it.isFinite() } ?: return null
+    return s.toLongOrNull() ?: d
 }
 
 /** Run <task>: a row for each of its inputs as the settings have them (a switch, an entry, a choice), titled with its
@@ -530,33 +543,36 @@ private fun RunForm(t: Msg.Task, done: (JSONObject?, Boolean) -> Unit) {
     val values = remember { mutableStateListOf<String>().apply { addAll(fields.map { f ->
         if (f.type == "bool") (f.default == true).toString() else if (f.type == "choice") defaultText(f).ifBlank { f.choices.orEmpty().firstOrNull().orEmpty() }
         else defaultText(f) }) } }
-    val filledIn = fields.indices.all { i -> fields[i].type != "number" || values[i].trim().toDoubleOrNull() != null }
+    /** A number's text is fit to run while it's a number, or empty if the field is optional (then nothing is sent). */
+    fun fit(i: Int) = fields[i].type != "number" || if (values[i].isBlank()) fields[i].required != true else numberOf(values[i]) != null
+    val filledIn = fields.indices.all { fit(it) }
     fun filled() = JSONObject().apply {
         fields.forEachIndexed { i, f ->
-            val v = values[i].trim()
-            put(f.name.orEmpty(), when (f.type) {
-                "bool" -> v == "true"
-                "number" -> v.toLongOrNull() ?: v.toDoubleOrNull() ?: JSONObject.NULL
-                else -> values[i]
-            })
+            when (f.type) {
+                "bool" -> put(f.name.orEmpty(), values[i] == "true")
+                "number" -> numberOf(values[i])?.let { put(f.name.orEmpty(), it) }
+                else -> put(f.name.orEmpty(), values[i])
+            }
         }
     }
     AlertDialog(
         onDismissRequest = { done(null, false) },
         title = { Text(Wording.Tasks.runHeading(name = t.name.orEmpty())) },
         text = {
-            Column(Modifier.heightIn(max = 520.dp).verticalScroll(rememberScrollState())) {
-                BoxedList(fields.indices.toList(), "", inset = 0.dp) { i ->
-                    val f = fields[i]
-                    val label = f.label?.ifBlank { null } ?: f.name.orEmpty()
-                    when (f.type) {
-                        "bool" -> SwitchRow(label, null, values[i] == "true", titleLines = Int.MAX_VALUE) { values[i] = it.toString() }
-                        "choice" -> Choice(label, f.choices.orEmpty(), values[i], { it }, titleLines = Int.MAX_VALUE) { values[i] = it }
-                        else -> EntryRow(label, values[i], f.type == "number") { values[i] = it }
+            Column {
+                Column(Modifier.weight(1f, fill = false).heightIn(max = 520.dp).verticalScroll(rememberScrollState())) {
+                    BoxedList(fields.indices.toList(), "", inset = 0.dp) { i ->
+                        val f = fields[i]
+                        val label = f.label?.ifBlank { null } ?: f.name.orEmpty()
+                        when (f.type) {
+                            "bool" -> SwitchRow(label, null, values[i] == "true", titleLines = Int.MAX_VALUE) { values[i] = it.toString() }
+                            "choice" -> Choice(label, f.choices.orEmpty(), values[i], { it }, titleLines = Int.MAX_VALUE) { values[i] = it }
+                            else -> EntryRow(label, values[i], f.type == "number", !fit(i), { if (filledIn) done(filled(), false) }) { values[i] = it }
+                        }
                     }
                 }
                 Box(Modifier.align(Alignment.CenterHorizontally).padding(top = 12.dp).clip(RoundedCornerShape(8.dp))
-                    .clickable(enabled = filledIn) { done(filled(), true) }.padding(horizontal = 16.dp, vertical = 9.dp)) {
+                    .clickable(enabled = filledIn, role = Role.Button) { done(filled(), true) }.padding(horizontal = 16.dp, vertical = 9.dp)) {
                     Text(Wording.Tasks.dryRun, style = Type.bold, color = if (filledIn) c.fg else c.fg.copy(alpha = c.fg.alpha * 0.4f))
                 }
             }
@@ -570,16 +586,16 @@ private fun RunForm(t: Msg.Task, done: (JSONObject?, Boolean) -> Unit) {
 /** A row to type in (Adw.EntryRow): its title small over what's typed, a pencil after; number: a number's keyboard, and
  * the title and text in the error colour while it isn't one. */
 @Composable
-private fun EntryRow(title: String, value: String, number: Boolean, set: (String) -> Unit) {
+private fun EntryRow(title: String, value: String, number: Boolean, bad: Boolean, enter: () -> Unit, set: (String) -> Unit) {
     val c = LocalBaude.current
-    val bad = number && value.trim().toDoubleOrNull() == null
     Row(Modifier.fillMaxWidth().heightIn(min = 50.dp).padding(horizontal = 12.dp, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             Text(title, style = Type.caption, color = if (bad) c.destructive else c.dim)
             BasicTextField(value, set, singleLine = true, textStyle = Type.body.copy(color = if (bad) c.destructive else c.fg),
                 cursorBrush = SolidColor(c.accentBg), modifier = Modifier.fillMaxWidth(),
-                keyboardOptions = if (number) KeyboardOptions(keyboardType = KeyboardType.Number) else KeyboardOptions.Default)
+                keyboardOptions = KeyboardOptions(keyboardType = if (number) KeyboardType.Number else KeyboardType.Text, imeAction = ImeAction.Done),
+                keyboardActions = KeyboardActions(onDone = { enter() }))
         }
         Icon(Adwaita.DocumentEdit, null, tint = c.fg, modifier = Modifier.size(16.dp.icon))
     }

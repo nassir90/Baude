@@ -11,6 +11,7 @@ over as its tasks are first read: each a bot task, its prompt the script, its sc
 import datetime
 import hashlib
 import json
+import math
 import os
 import re
 import secrets
@@ -39,6 +40,7 @@ DAYS = (0, 1, 2, 3, 4, 5, 6)
 EXT = {"python": "py", "shell": "sh", "bot": "md"}
 SCRIPT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "script")  # (baudetask, on a script's path)
 DUMMY = "(a dummy agent's answer)"
+_NUMBER = re.compile(r"[+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?", re.ASCII)
 _FIELD = re.compile(r"[A-Za-z_][A-Za-z0-9_]{0,39}")
 _BRANCH = re.compile(r"[A-Za-z0-9._/-]{1,200}")
 
@@ -70,6 +72,20 @@ def clean_field(f):
     return out
 
 
+def number_of(text):
+    """text as a number, an int when it's whole: None when it's empty; ValueError when it isn't a finite number in
+    plain digits (not nan, inf, 1e999 or 1_000)."""
+    text = text.strip()
+    if not text:
+        return None
+    if not _NUMBER.fullmatch(text):
+        raise ValueError(text)
+    n = float(text)
+    if not math.isfinite(n):
+        raise ValueError(text)
+    return int(n) if n.is_integer() else n
+
+
 def coerce(field, value):
     """value as field takes it, or ValueError."""
     kind = field.get("type")
@@ -77,10 +93,12 @@ def coerce(field, value):
         if isinstance(value, bool):
             raise ValueError(f"{field['name']} is a number")
         try:
-            n = float(value)
-        except (TypeError, ValueError):
-            raise ValueError(f"{field['name']} is a number") from None
-        return int(n) if n.is_integer() else n
+            n = number_of(value) if isinstance(value, str) else number_of(repr(value))
+        except ValueError:
+            n = None
+        if n is None:
+            raise ValueError(f"{field['name']} is a number")
+        return n
     if kind == "bool":
         if isinstance(value, bool):
             return value

@@ -397,14 +397,14 @@ class ServerRunning:
             conn.acting = msg["as"]                                                       # as the member that started it)
             if (by := self.started_by(msg["as"])) is not None:
                 conn.member, conn.verified = by
-        if (cap := access.OPS.get(op)) is not None and not self.access.allowed(conn, cap):
-            return conn.send(self.access.refused(req, cap))
+        if (cap := access.rule_of(msg)) is not None and op not in access.FOUND and not self.access.allowed(conn, cap):
+            return conn.send(self.access.refused(req, cap))  # (a chat's: as it's found, its own rules first)
         if (op in ("start", "task_output", "autofix", "git", "signal_names") or op == "accounts" and
-                msg.get("what") == "use") and not self.may_manage(conn, msg):  # (a chat named: forked, adopted, read,
-            return conn.send(self.access.refused(req, "manage"))  # its Auto-fix, moved to another subscription)
+                msg.get("what") == "use") and (cap := self.manage_refused(conn, msg)):  # (a chat named: forked,
+            return conn.send(self.access.refused(req, cap))  # adopted, read, its Auto-fix, moved to another subscription)
         if op in ("read_file", "git", "signal_names", "catalogue") and conn.member is not None and \
                 not self.managed_folder(conn, msg.get("path") if op == "read_file" else msg.get("cwd")):
-            return conn.send(self.access.refused(req, "manage"))  # (a member's: in the folder of a chat it manages)
+            return conn.send(self.access.refused(req, "manage_read"))  # (a member's: in the folder of a chat it reads)
         if op == "start":
             with self.lock:
                 src = self.sessions.get(msg.get("fork_from")) if isinstance(msg.get("fork_from"), str) else None
@@ -458,7 +458,7 @@ class ServerRunning:
             def catalogue():
                 try:
                     got = self.catalogue(msg.get("cwd"), bool(msg.get("wait")))
-                    kube, dbs = self.access.allowed(conn, "kube"), self.access.allowed(conn, "databases")
+                    kube, dbs = self.access.allowed(conn, "kube_read"), self.access.allowed(conn, "databases")
                     got["items"] = [it for it in got["items"] if (kube or not catalogued_kube(it)) and
                                     (dbs or it.get("icon") != "db")]  # (its clusters' and databases' parts: theirs)
                     reply("catalogue", **got)
@@ -664,8 +664,8 @@ class ServerRunning:
             where = msg.get("where") if wire.is_where(msg.get("where")) else None
             done = (self.mesh.deactivate if op == "deactivate" else self.mesh.activate)(msg.get("id"), where)
             return reply(op + "d", any=done)
-        if not self.may_manage(conn, msg):  # (every op from here on is a chat's: refused before it's touched)
-            return conn.send(self.access.refused(req, "manage"))
+        if cap := self.manage_refused(conn, msg):  # (every op from here on is a chat's: refused before it's touched)
+            return conn.send(self.access.refused(req, cap))
         with self.lock:  # (a Claude Desktop chat only listed, written in: taken up first, its folder made again below;
             # not while Desktop's writing it)
             if msg.get("session") in self.desktop.chats and desktopchats.takes_up(msg):
@@ -691,9 +691,10 @@ class ServerRunning:
             if (cap := self.access.needs(conn, msg, s)) is not None:  # (commands run, or a Bot driven, through it)
                 return conn.send(self.access.refused(req, cap))
             if op == "waits_on" and conn.member is not None and conn.acting != s.id:  # (its own agent's tools' only)
-                return conn.send(self.access.refused(req, "manage"))
+                return conn.send(self.access.refused(req, "manage_write"))
             if op == "attach":
-                conn.answers = msg.get("answers", True) is not False  # (false: it won't answer what's asked)
+                writes = self.access.allowed(conn, "manage_write", s)  # (one that only reads: answers nothing)
+                conn.answers = writes and msg.get("answers", True) is not False  # (false: it won't answer what's asked)
                 s.attached_once = True
                 if s.drop_timer is not None:  # (a head back on it: not dropped after all)
                     s.drop_timer.cancel()
@@ -707,7 +708,8 @@ class ServerRunning:
                 autofix.held(self, s, conn)  # (Auto-fix stopped while nobody was here: said now)
                 if msg.get("live"):
                     s.live.add(conn)
-                if msg.get("app_tools") and s.app_tools is not None:  # (its head back: its tools carried to it again)
+                if msg.get("app_tools") and writes and s.app_tools is not None:  # (its head back: its tools carried to
+                    # it again)
                     s.app_tools.bind(conn)
                 return reply("attached", session=s.listing(), asks=list(s.asks.values()))
             if op == "detach":  # (meant: an ephemeral session its head's done with dropped at once, not after its grace)
@@ -848,20 +850,25 @@ class ServerRunning:
         with self.lock:
             chats = list(self.sessions.values()) + list(self.desktop.chats.values())
         folders = {os.path.realpath(c.meta["cwd"]) for c in chats
-                   if isinstance(c.meta.get("cwd"), str) and self.access.allowed(conn, "manage", c)}
+                   if isinstance(c.meta.get("cwd"), str) and self.access.allowed(conn, "manage_read", c)}
         return any(real == f or real.startswith(f.rstrip(os.sep) + os.sep) for f in folders)
 
-    def may_manage(self, conn, msg):
-        """May conn manage the chat msg names (session; a start's fork_from or adopt), as access has it?"""
+    def manage_refused(self, conn, msg):
+        """The rule, if any, by which conn may not do msg to the chat it names (session; a start's fork_from, read, or
+        adopt, written; a chat moved to another subscription, written), as access has it: msg's own side of
+        Agent Management (access.OPS) for the rest."""
         if conn.member is None:
-            return True
+            return None
+        side = access.rule_of(msg)
+        side = "manage_write" if msg.get("op") == "accounts" else side if access.capability(side or "") == "manage" \
+            else "manage_read"
         for key in ("session", "fork_from", "adopt"):
             if isinstance(sid := msg.get(key), str) and sid:
                 with self.lock:
                     s = self.sessions.get(sid) or self.desktop.chats.get(sid)
-                if not self.access.allowed(conn, "manage", s):
-                    return False
-        return True
+                if not self.access.allowed(conn, want := "manage_write" if key == "adopt" else side, s):
+                    return want
+        return None
 
     def access_op(self, conn, msg, reply):
         """access and access_set: the host's rules, a chat's own (session) too; set from where access allows it."""
@@ -871,19 +878,15 @@ class ServerRunning:
             listed = sid in self.desktop.chats
         if sid is not None and listed and s is None:  # (a Claude Desktop chat only listed: its rule's the host's)
             return reply("error", error=wording.say("access.desktop_listed"), plain=True)
-        if sid is not None and (s is None or not self.access.allowed(conn, "manage", s)):
+        if sid is not None and (s is None or not self.access.allowed(conn, "manage_read", s)):
             return reply("error", error=f"no session {sid}")
         if op == "access_set":
-            if not self.access.allowed(conn, "access"):
-                return conn.send(self.access.refused(msg.get("req"), "access"))
+            if not self.access.allowed(conn, "access_write"):
+                return conn.send(self.access.refused(msg.get("req"), "access_write"))
             try:
                 if s is not None:
-                    rule = access.clean(msg["rule"]) if msg.get("rule") is not None else None
                     with self.lock:
-                        if rule is None:
-                            s.meta.pop("access", None)
-                        else:
-                            s.meta["access"] = rule
+                        self.access.set_own(s.meta, msg.get("capability"), msg.get("rule"))
                         self.save(s)
                 elif msg.get("capability") is not None and msg.get("rule") is not None:
                     self.access.set(msg["capability"], msg["rule"])
@@ -892,9 +895,9 @@ class ServerRunning:
             except (OSError, ValueError) as e:
                 return reply("error", error=str(e))
             self.log(f"access: {sid or msg['capability']} set by {conn.member or 'a head here'}")
-        own = dict(s.meta["access"]) if s is not None and s.meta.get("access") else None
-        return reply(op, state=self.access.state(conn, (own or {}).get("members") or ()),
-                     session=sid if s is not None else None, chat=own)
+        own = access.own_rules(s.meta) if s is not None else {}
+        return reply(op, state=self.access.state(conn, [m for r in own.values() for m in r.get("members") or ()]),
+                     session=sid if s is not None else None, chat=own or None)
 
     def set_bot(self, s, bot):
         """(under the lock) A chat made a Bot (bot: {name, picture: base64 or None to keep it, or "" to drop it}), its

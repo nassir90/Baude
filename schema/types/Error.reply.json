@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
-  "description": "Anything wrong, with the request's req. A request whose op the host doesn't take is answered with code unsupported_operation (error \"unsupported operation\"), and one whose fields aren't as the schema has them with code invalid_data_type (error \"invalid data type\"): the same from every host, what was wrong in detail. One a host's access rules refuse is answered with code access_denied (error \"access denied\"), denied naming the capability.",
+  "description": "Anything wrong, with the request's req. A request whose op the host doesn't take is answered with code unsupported_operation (error \"unsupported operation\"), and one whose fields aren't as the schema has them with code invalid_data_type (error \"invalid data type\"): the same from every host, what was wrong in detail. One a host's access rules refuse is answered with code access_denied (error \"access denied\"), denied naming the rule.",
   "properties": {
     "op": {
       "const": "error",
@@ -24,8 +24,8 @@
       "description": "A refusal's: what was wrong (the op, or the field and why), for a person to read; code, not this, says which refusal it is."
     },
     "denied": {
-      "enum": ["shell", "browser", "providers", "model_files", "spawn", "manage", "kube", "databases", "subscriptions", "access"],
-      "description": "access_denied's: the capability refused."
+      "enum": ["shell", "browser_read", "browser_write", "providers", "model_files", "spawn", "manage_read", "manage_write", "kube_read", "kube_write", "databases", "subscriptions_read", "subscriptions_write", "access_read", "access_write"],
+      "description": "access_denied's: the rule refused (AccessRules'): a capability, or one side of one split into read and write."
     },
     "plain": {
       "type": "boolean",

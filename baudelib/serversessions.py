@@ -609,7 +609,7 @@ class ServerSessions:
                 for conn in self.conns:  # (as it happens: a turn too short for a sessions listing to see isn't missed;
                     # an archived session's to those who see archived ones; to those it's listed for: access)
                     if conn.subscribed and (conn.archived or not s.meta.get("archived")) and \
-                            self.access.allowed(conn, "manage", s):
+                            self.access.allowed(conn, "manage_read", s):
                         conn.send(ended)
             for conn in s.live:
                 conn.send({"op": "claude", "session": s.id, "msg": msg})

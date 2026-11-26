@@ -263,17 +263,22 @@ object PhoneHost {
                 return reply(Op.SESSIONS, "sessions" to listing(head.archived, head), "server" to info())
             }
         }
-        if (op == Op.ACCESS || op == Op.ACCESS_SET) return access(head, msg, ::reply)
+        if (op == Op.ACCESS || op == Op.ACCESS_SET) { // (reading the rules: access_read; changing them: access_write)
+            val name = if (op == Op.ACCESS) "access_read" else "access_write"
+            if (!PhoneAccess.allowed(head, name)) return head.send(PhoneAccess.refused(req, name))
+            return access(head, msg, ::reply)
+        }
         if (op == Op.START) {
             val r = Msg.Start.from(msg)
             val src = r.forkFrom?.let { session(it) }
             if (!PhoneAccess.allowed(head, "spawn")) return head.send(PhoneAccess.refused(req, "spawn"))
-            if (r.forkFrom != null && !PhoneAccess.allowed(head, "manage", src?.meta)) return head.send(PhoneAccess.refused(req, "manage"))
+            if (r.forkFrom != null && !PhoneAccess.allowed(head, "manage_read", src?.meta))
+                return head.send(PhoneAccess.refused(req, "manage_read"))
             // (from a member: a Bot, or one forked, runs its browser and terminals, so it takes both; answering its own
             // asks, or a mode that doesn't ask, takes the shell)
             val bot = r.bot != null || src?.meta?.optJSONObject("bot") != null
             val unasked = r.askDefault == "allow" || (r.mode ?: "default") !in ASKING_MODES
-            (if (bot) PhoneAccess.firstRefused(head, "shell", "browser") else if (unasked) PhoneAccess.firstRefused(head, "shell") else null)
+            (if (bot) PhoneAccess.firstRefused(head, "shell", "browser_write") else if (unasked) PhoneAccess.firstRefused(head, "shell") else null)
                 ?.let { return head.send(PhoneAccess.refused(req, it)) }
             return start(head, msg, ::reply)
         }
@@ -283,16 +288,16 @@ object PhoneHost {
                 Op.LIST_DIR -> Msg.ListDir.from(msg).path
                 else -> Msg.Catalogue.from(msg).cwd
             }.orEmpty()
-            if (head.origin != null && (op == Op.LIST_DIR && !PhoneAccess.allowed(head, "manage") || !managesFolder(head, path)))
-                return head.send(PhoneAccess.refused(req, "manage"))
+            if (head.origin != null && (op == Op.LIST_DIR && !PhoneAccess.allowed(head, "manage_read") || !managesFolder(head, path)))
+                return head.send(PhoneAccess.refused(req, "manage_read"))
             return when (op) {
                 Op.READ_FILE -> reply(Op.FILE, *readFile(msg))
                 Op.LIST_DIR -> reply(Op.DIR, *listDir(path))
                 else -> reply(Op.CATALOGUE, *catalogue(path))
             }
         }
-        if (op == Op.TELEMETRY_SET && !PhoneAccess.allowed(head, "access")) // (this phone's own: Access Rules')
-            return head.send(PhoneAccess.refused(req, "access"))
+        if (op == Op.TELEMETRY_SET && !PhoneAccess.allowed(head, "access_write")) // (this phone's own: Access Rules')
+            return head.send(PhoneAccess.refused(req, "access_write"))
         if (op == Op.TELEMETRY) { // (this app's: what it saw done in chats, kept here: TelemetryStore)
             work.execute {
                 try {
@@ -336,12 +341,14 @@ object PhoneHost {
             else -> null
         }.orEmpty()
         val s = synchronized(lock) { sessions[sid] } ?: return reply(Op.ERROR, "error" to "no session $sid")
-        if (!PhoneAccess.allowed(head, "manage", s.meta)) return head.send(PhoneAccess.refused(req, "manage"))
+        val side = PhoneAccess.side(op, msg) // (reading it, or changing it: its own rules first)
+        if (!PhoneAccess.allowed(head, side, s.meta)) return head.send(PhoneAccess.refused(req, side))
         needs(head, op, msg, s)?.let { return head.send(PhoneAccess.refused(req, it)) }
         when (op) {
             Op.ATTACH -> synchronized(lock) {
                 val a = Msg.Attach.from(msg)
-                head.answers = a.answers ?: true
+                head.answers = (a.answers ?: true) && PhoneAccess.allowed(head, "manage_write", s.meta) // (one that only
+                // reads: answers nothing)
                 s.viewers.add(head)
                 if (a.live == true) s.live.add(head)
                 for (t in a.alwaysAllow.orEmpty()) if (t != ASK_TOOL) s.alwaysAllow.add(t)
@@ -455,12 +462,12 @@ object PhoneHost {
         return when (op) {
             Op.ALWAYS_ALLOW -> PhoneAccess.firstRefused(head, "shell")
             Op.ATTACH -> if (Msg.Attach.from(msg).alwaysAllow.isNullOrEmpty()) null else PhoneAccess.firstRefused(head, "shell")
-            Op.BOT -> if (msg.optJSONObject("bot") != null) PhoneAccess.firstRefused(head, "shell", "browser") else null
+            Op.BOT -> if (msg.optJSONObject("bot") != null) PhoneAccess.firstRefused(head, "shell", "browser_write") else null
             Op.INPUT -> {
                 val m = Msg.Input.from(msg).msg ?: JSONObject()
                 val request = m.optJSONObject("request")
                 when (m.optString("type")) {
-                    "user" -> if (bot) PhoneAccess.firstRefused(head, "shell", "browser") else null
+                    "user" -> if (bot) PhoneAccess.firstRefused(head, "shell", "browser_write") else null
                     "control_response" -> if (m.optJSONObject("response")?.optString("subtype") == "success" &&
                         m.optJSONObject("response")?.optJSONObject("response")?.optString("behavior") != "deny")
                         PhoneAccess.firstRefused(head, "shell") else null
@@ -477,7 +484,7 @@ object PhoneHost {
     private fun managesFolder(head: Head, path: String): Boolean {
         val f = File(path).takeIf { path.startsWith("/") }?.canonicalFile ?: return false
         return synchronized(lock) {
-            sessions.values.any { s -> PhoneAccess.allowed(head, "manage", s.meta) &&
+            sessions.values.any { s -> PhoneAccess.allowed(head, "manage_read", s.meta) &&
                 (f == s.folder.canonicalFile || f.path.startsWith(s.folder.canonicalPath + File.separator)) }
         }
     }
@@ -822,7 +829,7 @@ object PhoneHost {
                 }
             }
             if (s.deleted) emptyList() else heads.filter { it.subscribed && (it.archived || !s.meta.optBoolean("archived")) &&
-                PhoneAccess.allowed(it, "manage", s.meta) } // (told only those it's listed to)
+                PhoneAccess.allowed(it, "manage_read", s.meta) } // (told only those it's listed to)
         }
         if (!s.meta.optBoolean("ephemeral")) TelemetryStore.turn(s.id, ms / 1000.0, s.meta.optString("model").ifEmpty { null },
             s.meta.optString("effort").ifEmpty { null }, tokensIn, tokensOut)
@@ -962,7 +969,7 @@ object PhoneHost {
     /** Its agents a head's told of: those it may manage (PhoneAccess). */
     private fun listing(archived: Boolean, head: Head): JSONArray = synchronized(lock) {
         JSONArray(sessions.values.filter { (archived || !it.meta.optBoolean("archived")) && !it.meta.optBoolean("ephemeral") }
-            .filter { PhoneAccess.allowed(head, "manage", it.meta) }
+            .filter { PhoneAccess.allowed(head, "manage_read", it.meta) }
             .map { listing(it) }
             .sortedByDescending { it.optDouble("said") })
     }
@@ -985,31 +992,26 @@ object PhoneHost {
 
     fun session(sid: String): PhoneSession? = synchronized(lock) { sessions[sid] }
 
-    /** access and access_set (PhoneAccess): its rules, a chat's own (session) too; set where the access rule allows. */
+    /** access and access_set (PhoneAccess): its rules, a chat's own (session) too; read where access_read allows, set where access_write does. */
     private fun access(head: Head, msg: JSONObject, reply: (String, Array<out Pair<String, Any?>>) -> Unit) {
         val op = msg.optString("op")
         val sid = msg.optString("session").takeIf { msg.has("session") && !msg.isNull("session") }
         val s = sid?.let { session(it) }
-        if (sid != null && (s == null || !PhoneAccess.allowed(head, "manage", s.meta)))
+        if (sid != null && (s == null || !PhoneAccess.allowed(head, "manage_read", s.meta)))
             return reply(Op.ERROR, arrayOf("error" to "no session $sid"))
         if (op == Op.ACCESS_SET) {
-            if (!PhoneAccess.allowed(head, "access")) return head.send(PhoneAccess.refused(msg.opt("req"), "access"))
             val rule = msg.optJSONObject("rule")
-            val done = if (s != null) {
-                val r = rule?.let { PhoneAccess.clean(it) ?: return reply(Op.ERROR, arrayOf("error" to Wording.Access.badRule)) }
-                synchronized(lock) {
-                    if (r == null) s.meta.remove("access") else s.meta.put("access", r)
-                    save(s)
-                }
-                true
+            val done = if (s != null) synchronized(lock) {
+                PhoneAccess.setOwn(s.meta, msg.optString("capability"), rule).also { if (it) save(s) }
             } else PhoneAccess.set(msg.optString("capability"), rule)
             if (!done) return reply(Op.ERROR, arrayOf("error" to Wording.Access.badRule))
             changed()
         }
-        val own = s?.meta?.optJSONObject("access")
-        val extra = own?.optJSONArray("members")?.let { m -> (0 until m.length()).map { m.optString(it) } }.orEmpty()
+        val own = synchronized(lock) { PhoneAccess.ownJson(s?.meta) }
+        val extra = own?.let { o -> o.keys().asSequence().flatMap { k -> o.optJSONObject(k)?.optJSONArray("members")
+            ?.let { m -> (0 until m.length()).map { m.optString(it) } }.orEmpty() }.toList() }.orEmpty()
         reply(op, arrayOf("state" to PhoneAccess.state(head, extra), "session" to (if (s != null) sid else null),
-            "chat" to (own?.let { JSONObject(it.toString()) })))
+            "chat" to own))
     }
 
     private fun picture(s: PhoneSession) = File(root, "pictures/${s.id}")

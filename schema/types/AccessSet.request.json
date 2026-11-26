@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
-  "description": "One of a host's access rules set (capability), or a chat's own rule for managing it (session; rule null: the host's again). Refused (access_denied) from a member the access rule doesn't allow.",
+  "description": "One of a host's access rules set (capability: the rule's name), or a chat's own rule for managing it (session; capability manage_read or manage_write; rule null: the host's again). Refused (access_denied) from a member the access_write rule doesn't allow.",
   "properties": {
     "op": {
       "const": "access_set",
@@ -19,22 +19,27 @@
         {
           "enum": [
             "shell",
-            "browser",
+            "browser_read",
+            "browser_write",
             "providers",
             "model_files",
             "spawn",
-            "manage",
-            "kube",
+            "manage_read",
+            "manage_write",
+            "kube_read",
+            "kube_write",
             "databases",
-            "subscriptions",
-            "access"
+            "subscriptions_read",
+            "subscriptions_write",
+            "access_read",
+            "access_write"
           ]
         },
         {
           "type": "null"
         }
       ],
-      "description": "The capability whose rule it is."
+      "description": "The rule's name (AccessRules'): a chat's, manage_read or manage_write."
     },
     "session": {
       "type": [

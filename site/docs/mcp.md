@@ -204,7 +204,7 @@ Baude's apps, `baude-mcp` and the phone talk to a host process in JSON, one obje
 
 #### `access` (Access)
 
-A host's access rules, and a chat's own if session's given.
+A host's access rules, and a chat's own if session's given (refused from a member access_read doesn't allow).
 
 | Field | Type | Required | What it is |
 |---|---|---|---|
@@ -212,11 +212,11 @@ A host's access rules, and a chat's own if session's given.
 
 #### `access_set` (AccessSet)
 
-One of a host's access rules set (capability), or a chat's own rule for managing it (session; rule null: the host's again). Refused (access_denied) from a member the access rule doesn't allow.
+One of a host's access rules set (capability: the rule's name), or a chat's own rule for managing it (session; capability manage_read or manage_write; rule null: the host's again). Refused (access_denied) from a member the access_write rule doesn't allow.
 
 | Field | Type | Required | What it is |
 |---|---|---|---|
-| `capability` | any |  | The capability whose rule it is. |
+| `capability` | any |  | The rule's name (AccessRules'): a chat's, manage_read or manage_write. |
 | `session` | string/null |  | A chat of the host's: its own rule. |
 | `rule` | AccessRule? |  | The rule (null, for a chat: the host's). |
 
@@ -1108,7 +1108,7 @@ access's answer.
 |---|---|---|---|
 | `state` | AccessState | yes | The host's rules now. |
 | `session` | string/null |  | The chat asked about. |
-| `chat` | AccessRule? |  | That chat's own rule for managing it (null: the host's manage rule). |
+| `chat` | AccessChat? |  | That chat's own rules for managing it (null, or a side not there: the host's). |
 
 #### `access_set` (AccessSetReply)
 
@@ -1118,7 +1118,7 @@ access_set's answer: the rules as they are now.
 |---|---|---|---|
 | `state` | AccessState | yes | The host's rules now. |
 | `session` | string/null |  | The chat asked about. |
-| `chat` | AccessRule? |  | That chat's own rule for managing it (null: the host's manage rule). |
+| `chat` | AccessChat? |  | That chat's own rules for managing it (null, or a side not there: the host's). |
 
 #### `accounts` (AccountsReply)
 
@@ -1362,14 +1362,14 @@ emission_watch's answer: it's watched: emission_frame follows, many, till emissi
 
 #### `error` (Error)
 
-Anything wrong, with the request's req. A request whose op the host doesn't take is answered with code unsupported_operation (error "unsupported operation"), and one whose fields aren't as the schema has them with code invalid_data_type (error "invalid data type"): the same from every host, what was wrong in detail. One a host's access rules refuse is answered with code access_denied (error "access denied"), denied naming the capability.
+Anything wrong, with the request's req. A request whose op the host doesn't take is answered with code unsupported_operation (error "unsupported operation"), and one whose fields aren't as the schema has them with code invalid_data_type (error "invalid data type"): the same from every host, what was wrong in detail. One a host's access rules refuse is answered with code access_denied (error "access denied"), denied naming the rule.
 
 | Field | Type | Required | What it is |
 |---|---|---|---|
 | `error` | string | yes | What's wrong. |
 | `code` | `unsupported_operation` \| `invalid_data_type` \| `access_denied` |  | One of the schema's own refusals. |
 | `detail` | string |  | A refusal's: what was wrong (the op, or the field and why), for a person to read; code, not this, says which refusal it is. |
-| `denied` | `shell` \| `browser` \| `providers` \| `model_files` \| `spawn` \| `manage` \| `kube` \| `databases` \| `subscriptions` \| `access` |  | access_denied's: the capability refused. |
+| `denied` | `shell` \| `browser_read` \| `browser_write` \| `providers` \| `model_files` \| `spawn` \| `manage_read` \| `manage_write` \| `kube_read` \| `kube_write` \| `databases` \| `subscriptions_read` \| `subscriptions_write` \| `access_read` \| `access_write` |  | access_denied's: the rule refused (AccessRules'): a capability, or one side of one split into read and write. |
 | `plain` | boolean |  | Said for the user as it is. |
 | `gone` | GoneFolder |  | A session's folder gone and not made again. |
 | `missing` | Dep |  | What a chat's program needs that the host hasn't (claude, codex): error says what to install. |
@@ -2044,6 +2044,15 @@ A tunnel's there.
 
 ### Entities
 
+#### AccessChat
+
+A chat's own rules for managing it, each going before its host's of the same name; one not there is the host's.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `manage_read` | AccessRule |  | Who may read it. |
+| `manage_write` | AccessRule |  | Who may change it (and read it). |
+
 #### AccessMember
 
 A member a rule can name: one the host reaches, has lately, or a rule names.
@@ -2064,20 +2073,25 @@ Who in the mesh may use one of a host's capabilities: every member, none, or tho
 
 #### AccessRules
 
-A host's rule for each of its capabilities, by name: everybody's where none's set.
+A host's rule for each of its capabilities, by name: a capability split into what reads and what changes has two, <capability>_read and <capability>_write (write lets a member read too); one with nothing to split has one. Everybody's where none's set, but access_write's, nobody's.
 
 | Field | Type | Required | What it is |
 |---|---|---|---|
-| `shell` | AccessRule | yes | A shell on its machine: its terminals (terminal ops) and Multiplex's, through a Bot's terminal tools (multiplex). |
-| `browser` | AccessRule | yes | Its Bots' Emission browsers: their tools' calls (emission), watching one (emission_watch) and a phone showing one (emission_serve). |
-| `providers` | AccessRule | yes | Its inference providers' models, run through the mesh (infer). |
-| `model_files` | AccessRule | yes | Its models' files, read through the mesh (files). |
-| `spawn` | AccessRule | yes | New chats and agents started on it (start, agent). |
-| `manage` | AccessRule | yes | Its chats as they are: listed, read, written in, stopped, renamed, archived, deleted, a Bot's tasks and memory. A chat's own rule (Access's chat) goes before this. |
-| `kube` | AccessRule | yes | Its machine's Kubernetes clusters (kube, kube_follow). |
-| `databases` | AccessRule | yes | Its machine's databases (databases). |
-| `subscriptions` | AccessRule | yes | Its subscription accounts: listed, added, renamed, removed (signed out), each provider's default picked, a chat moved to one (with the chat's manage rule too), their usage read, and signed in to (accounts, login, login_code), a token account's token being added with them. |
-| `access` | AccessRule | yes | These rules changed (access_set), and the host itself: stopped, linked and unlinked, deactivated, its telemetry, themes and feedback (quit, link, unlink, deactivate, activate, telemetry_set, theme_save, theme_remove, feedback). A head on its own machine, or one over ssh, may always. |
+| `shell` | AccessRule | yes | A shell on its machine: its terminals (terminal ops) and Multiplex's, through a Bot's terminal tools (multiplex). Not split: what a shell shows is whatever it runs, so watching one is using it. |
+| `browser_read` | AccessRule | yes | Its Bots' Emission browsers watched: the watch stream (emission_watch) and what the pane says back on it (emission_watch_say). |
+| `browser_write` | AccessRule | yes | Its Bots' Emission browsers driven: their tools' calls (emission), a phone showing one and answering its calls (emission_serve, emission_answer), and a Bot made or driven (with Shell). Lets a member watch too. |
+| `providers` | AccessRule | yes | Its inference providers' models, run through the mesh (infer). Not split: running a model is its one use. |
+| `model_files` | AccessRule | yes | Its models' files, read through the mesh (files). Not split: nothing writes them through the mesh. |
+| `spawn` | AccessRule | yes | New chats and agents started on it (start, agent). Not split: starting one is its one use. |
+| `manage_read` | AccessRule | yes | Its chats as they are, read: listed (and told of their turns' ends), attached to and watched, their transcripts, sizes, subagents, senders, a Bot's picture, memory and tasks read, their folders read (read_file, list_dir, git, signal_names, catalogue), forked from. A chat's own rule (AccessChat's manage_read) goes before this. |
+| `manage_write` | AccessRule | yes | Its chats as they are, changed: written in, held messages sent or dropped, asks answered, stopped, renamed, archived, deleted, their folders moved, tools allowed always, made Bots, their Auto-fix, a Bot's memory written and tasks set, run and stopped, a chat adopted, moved to another subscription (with Subscriptions' write). Lets a member read them too. A chat's own rule (AccessChat's manage_write) goes before this. |
+| `kube_read` | AccessRule | yes | Its machine's Kubernetes clusters read: contexts, lists, YAML, owners (kube) and logs and watches (kube_follow), and the clusters' parts of @. |
+| `kube_write` | AccessRule | yes | Its machine's Kubernetes clusters changed: a pod deleted (kube's delete). Lets a member read them too. |
+| `databases` | AccessRule | yes | Its machine's databases (databases). Not split: the host only reads them (servers, schemas, rows). |
+| `subscriptions_read` | AccessRule | yes | Its subscription accounts read: listed, and their usage (accounts' list and usage). |
+| `subscriptions_write` | AccessRule | yes | Its subscription accounts changed: added, renamed, a token replaced, removed (signed out), a provider's default picked, a chat moved to one (with the chat's Agent Management write too), signed in to (accounts' sign_in and code, login, login_code). Lets a member read them too. |
+| `access_read` | AccessRule | yes | These rules read (access). |
+| `access_write` | AccessRule | yes | These rules changed (access_set), and the host itself: stopped, linked and unlinked, deactivated, its telemetry, themes and feedback (quit, link, unlink, deactivate, activate, telemetry_set, theme_save, theme_remove, feedback). Lets a member read them too. A head on its own machine, or one over ssh, may always. |
 
 #### AccessState
 
@@ -2088,7 +2102,7 @@ A host's access rules, as access and access_set answer them.
 | `host` | string | yes | The host's name. |
 | `rules` | AccessRules | yes | Each capability's. |
 | `members` | array of AccessMember | yes | The members its rules can name, by name. |
-| `editable` | boolean | yes | The connection asking may change them (access_set): a head on its machine or over ssh, else a member the access rule allows. |
+| `editable` | boolean | yes | The connection asking may change them (access_set): a head on its machine or over ssh, else a member the access_write rule allows. |
 
 #### Account
 

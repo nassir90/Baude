@@ -1,43 +1,96 @@
-"""Who in the mesh may use what of a host's (Settings → Access, on every app; the access and access_set ops): a rule
+"""Who in the mesh may use what of a host's (Settings → Access, on every app; the access and access_set ops): rules
 for each of its capabilities (CAPABILITIES: a shell, its Bots' browsers, its providers' models, their files, new chats
 and agents, its chats as they are, its clusters, its databases, its subscription accounts, and these rules themselves
 with the host's own admin), each everybody, nobody or the members chosen, by their ids, as the mesh has them (a
-tunnel's origin: Conn's). A chat may have a rule of its own for managing it, kept in its meta (access), which goes
-before the host's manage rule.
+tunnel's origin: Conn's). A capability whose ops part into reading and changing (SPLIT) has two rules, <cap>_read and
+<cap>_write, and write lets a member read too: a member let write is let read, and the rules are kept so read's lets in
+everyone write's does (set). The rest have one (RULES: every rule's name, as the wire's AccessRules has them). A chat
+may have rules of its own for managing it, kept in its meta (access: AccessChat's), which go before the host's.
 
 Who's asking is Conn's member: a tunnel's origin, as its open was signed (mesh.Mesh.opener), or, for a connection a
 chat's own tools make on its host's socket (hello's as), the member that started that chat (its meta's started_by), so
 a chat started from elsewhere does nothing its starter couldn't. A head on the host's own machine, or one reaching it
 over ssh (no member), is never refused: these rules are for the rest of the mesh. A member whose open wasn't signed by
 a key known here (on older code: not verified) is let in by an everybody rule only. A rule not set is everybody's, as a
-mesh with no rules has it, but for the rules themselves (access), which are nobody's: only this machine's heads, and
-those over ssh, change them till members are chosen. Kept in access.json in the host's state folder. The ops each
-capability takes are OPS; a chat's (those with a session) are manage's, checked as the chat's found (allowed's
-session), and some ask more of it (needs). What's refused is answered with wire's access_denied, naming the
-capability."""
+mesh with no rules has it, but for changing the rules themselves (access_write), which is nobody's: only this machine's
+heads, and those over ssh, change them till members are chosen. Kept in access.json in the host's state folder; a rule
+kept before its capability was split is both of its sides' (Access Rules': write's, as it only ever guarded changing
+them). The rule each op is checked for is OPS's; a chat's (FOUND) are checked as the chat's found (allowed's session),
+and some ask more of it (needs). What's refused is answered with wire's access_denied, naming the rule."""
 import os
 import threading
 
 from baudelib import wire, wording
 
-CAPABILITIES = tuple(wire.DEFS["AccessRules"]["properties"])
+RULES = tuple(wire.DEFS["AccessRules"]["properties"])
+SIDES = ("_read", "_write")
+
+
+def capability(rule):
+    """The capability a rule's for: kube_write's kube, shell's shell."""
+    return rule.removesuffix("_read").removesuffix("_write") if rule.endswith(SIDES) else rule
+
+
+CAPABILITIES = tuple(dict.fromkeys(capability(r) for r in RULES))
+SPLIT = tuple(c for c in CAPABILITIES if c + "_read" in RULES)
+
+
+def rules_of(cap):
+    """cap's rules: its read and write, or the one."""
+    return (cap + "_read", cap + "_write") if cap in SPLIT else (cap,)
+
+
 WHO = tuple(wire.DEFS["AccessRule"]["properties"]["who"]["enum"])
 EVERYBODY = {"who": "everybody"}
-OPS = {  # (the ops each capability's rule is checked for, before they're taken; a chat's ops: manage, as it's found)
+NOBODY = {"who": "nobody"}
+
+
+def _kube(msg):
+    return "kube_write" if msg.get("what") == "delete" else "kube_read"
+
+
+def _accounts(msg):
+    return "subscriptions_read" if msg.get("what") in ("list", "usage") else "subscriptions_write"
+
+
+def _attach(msg):  # (tools allowed always, or the head's environment for its claude: a change to the chat)
+    return "manage_write" if msg.get("always_allow") or msg.get("env") else "manage_read"
+
+
+def _memory(msg):
+    return "manage_write" if msg.get("text") is not None or msg.get("seen") is not None else "manage_read"
+
+
+def _tasks(msg):
+    return "manage_write" if "set" in msg or "delete" in msg else "manage_read"
+
+
+OPS = {  # (the rule each op is checked for, before it's taken (a function: msg's, by its fields); FOUND's as it's found)
     **dict.fromkeys(("terminal", "terminal_in", "terminal_resize", "terminal_close", "terminals", "multiplex"), "shell"),
-    **dict.fromkeys(("emission", "emission_watch", "emission_watch_say", "emission_serve", "emission_answer"),
-                    "browser"),
+    **dict.fromkeys(("emission_watch", "emission_watch_say"), "browser_read"),
+    **dict.fromkeys(("emission", "emission_serve", "emission_answer"), "browser_write"),
     "infer": "providers",
     "files": "model_files",
-    **dict.fromkeys(("start", "agent"), "spawn"),
-    **dict.fromkeys(("kube", "kube_follow"), "kube"),
+    **dict.fromkeys(("start", "agent"), "spawn"),  # (a chat forked: its manage_read too; adopted: its manage_write)
+    "kube": _kube,
+    "kube_follow": "kube_read",
     "databases": "databases",
-    "list_dir": "manage",  # (any folder's entries: as much as a chat's, which could list them)
-    **dict.fromkeys(("accounts", "login", "login_code"), "subscriptions"),  # (a chat moved to one: manage's too)
-    **dict.fromkeys(("quit", "link", "unlink", "deactivate", "activate", "telemetry_set", "theme_save", "theme_remove",
-                     "feedback"), "access"),  # (the host's own)
+    "accounts": _accounts,  # (a chat moved to one: its manage_write too)
+    **dict.fromkeys(("login", "login_code"), "subscriptions_write"),
+    "access": "access_read",
+    **dict.fromkeys(("access_set", "quit", "link", "unlink", "deactivate", "activate", "telemetry_set", "theme_save",
+                     "theme_remove", "feedback"), "access_write"),  # (the rules, and the host's own)
+    "list_dir": "manage_read",  # (any folder's entries: as much as a chat's, which could list them)
+    # (a chat's, or a chat's folder's: checked as it's found)
+    **dict.fromkeys(("detach", "transcript", "chat_size", "subagents", "senders", "bot_picture", "task", "task_run",
+                     "task_output", "read_file", "git", "signal_names", "catalogue"), "manage_read"),
+    "attach": _attach,
+    "memory": _memory,
+    "tasks": _tasks,
+    **dict.fromkeys(("input", "held", "stop", "rename", "archive", "unarchive", "delete", "set_cwd", "always_allow",
+                     "bot", "autofix", "run_task", "task_stop", "waits_on"), "manage_write"),
 }
-DEFAULTS = {"access": {"who": "nobody"}}  # (a rule not set, if it isn't everybody's)
+DEFAULTS = {"access_write": NOBODY}  # (a rule not set, if it isn't everybody's)
 SAFE_MODES = (None, "default", "plan", "acceptEdits")  # (permission modes that ask before a command's run)
 SHELL_TOOLS = ("Bash", "PowerShell")  # (tools that run commands: approving one, or allowing it always, is a shell's worth)
 COPY = {cap: f"access.{cap}" for cap in CAPABILITIES} | {  # (each capability's name, as every app says it)
@@ -47,9 +100,23 @@ FILE = "access.json"
 MEMBERS_MAX = 256
 
 
-def named(cap):
-    """cap as every app names it."""
-    return wording.say(COPY[cap])
+def rule_of(msg):
+    """The rule msg's op is checked for (OPS'), or None for one no rule guards."""
+    r = OPS.get(msg.get("op"))
+    return r(msg) if callable(r) else r
+
+
+FOUND = frozenset(op for op in OPS if op != "list_dir" and capability(rule_of({"op": op})) == "manage")  # (a chat's)
+
+
+def named(rule):
+    """A rule as every app names it: its capability's name, and Read or Write for a split one's."""
+    cap = capability(rule)
+    said = wording.say(COPY[cap])
+    if cap == rule:
+        return said
+    return wording.say("access.side", capability=said,
+                       side=wording.say("access.read" if rule.endswith("_read") else "access.write"))
 
 
 def clean(rule):
@@ -68,6 +135,60 @@ def lets(rule, member):
     return who == "everybody" or who == "chosen" and member in (rule.get("members") or ())
 
 
+def wider(a, b):
+    """A rule letting in everyone a or b does."""
+    if "everybody" in (a["who"], b["who"]) or a["who"] == "nobody" or b["who"] == "nobody":
+        return dict(b if a["who"] == "nobody" or b["who"] == "everybody" else a)
+    return {"who": "chosen", "members": list(dict.fromkeys(a["members"] + b["members"]))[:MEMBERS_MAX]}
+
+
+def narrower(a, b):
+    """A rule letting in only those both a and b do."""
+    if a["who"] == "everybody" or b["who"] == "nobody":
+        return dict(b)
+    if b["who"] == "everybody" or a["who"] == "nobody":
+        return dict(a)
+    both = [m for m in a["members"] if m in b["members"]]
+    return {"who": "chosen", "members": both} if both else dict(NOBODY)
+
+
+def kept_together(rules, name, base=None):
+    """rules (a capability's, by name; base: what one not in rules is) with name's just set, its other side made to
+    match: read widened to let in everyone write does, write narrowed to those read does. Changed in place."""
+    cap = capability(name)
+    if cap == name:
+        return rules
+    read, write = cap + "_read", cap + "_write"
+    get = lambda r: rules.get(r) if rules.get(r) is not None else (base or {}).get(r, EVERYBODY)  # noqa: E731
+    if name == write and rules.get(write) is not None:
+        if (r := wider(get(read), rules[write])) != get(read):
+            rules[read] = r
+    elif name == read and rules.get(read) is not None:
+        if (w := narrower(get(write), rules[read])) != get(write):
+            rules[write] = w
+    return rules
+
+
+def own_rules(meta):
+    """A chat's own rules (its meta's access), by name: one kept before Agent Management was split, both sides'."""
+    own = (meta or {}).get("access") if isinstance(meta, dict) else None
+    if not isinstance(own, dict):
+        return {}
+    if "who" in own:
+        try:
+            return dict.fromkeys(rules_of("manage"), clean(own))
+        except ValueError:
+            return dict.fromkeys(rules_of("manage"), dict(NOBODY))
+    out = {}
+    for r in rules_of("manage"):
+        if r in own:
+            try:
+                out[r] = clean(own[r])
+            except ValueError:
+                out[r] = dict(NOBODY)
+    return out
+
+
 class Access:
     """A host's rules (server: the Server they're for), read from its state folder as it starts."""
 
@@ -79,33 +200,37 @@ class Access:
         kept = _read_json(self.path)
         kept = kept.get("rules") if isinstance(kept, dict) and isinstance(kept.get("rules"), dict) else {}
         self.rules = {}
-        for cap in CAPABILITIES:
+        for name in RULES:
+            cap = capability(name)
+            was = name if name in kept else cap if cap in kept and (cap != "access" or name == "access_write") else None
             try:
-                self.rules[cap] = clean(kept.get(cap)) if cap in kept else dict(DEFAULTS.get(cap, EVERYBODY))
+                self.rules[name] = clean(kept[was]) if was else dict(DEFAULTS.get(name, EVERYBODY))
             except ValueError:  # (a file not as it's written: that rule taken as the safest there is)
-                self.rules[cap] = {"who": "nobody"}
+                self.rules[name] = dict(NOBODY)
+        for cap in SPLIT:
+            kept_together(self.rules, cap + "_write")
 
-    def rule(self, cap):
+    def rule(self, name):
         with self.lock:
-            return dict(self.rules[cap])
+            return dict(self.rules[name])
 
-    def allowed(self, conn, cap, session=None):
-        """May conn (a Conn) use cap? A chat's own rule (session: its Session) goes before the host's for manage."""
+    def allowed(self, conn, name, session=None):
+        """May conn use what rule name guards? A chat's own rules (session: its Session) go before the host's for
+        manage's; one let write is let read."""
         member = getattr(conn, "member", None)
         if member is None:  # (this machine's, or over ssh: its user's own)
             return True
         if not getattr(conn, "verified", True):  # (not known to be who it says: nobody a rule could choose)
             member = ""
-        if cap == "manage" and session is not None and isinstance(getattr(session, "meta", None), dict) \
-                and (own := session.meta.get("access")) is not None:
-            return lets(own, member)
-        return lets(self.rule(cap), member)
+        own = own_rules(getattr(session, "meta", None)) if capability(name) == "manage" and session is not None else {}
+        sides = (name, capability(name) + "_write") if name.endswith("_read") else (name,)
+        return any(lets(own[r] if r in own else self.rule(r), member) for r in sides)
 
     def needs(self, conn, msg, session):
-        """What else than manage a chat's op asks of a member (session: the chat's), as it would let it run commands
+        """What else than manage_write a chat's op asks of a member (session: the chat's), as it would let it run commands
         or drive a Bot: shell to approve a command or allow one always, to start one with commands allowed, or to send
         to one that runs them without asking, or to make, change or run one of a Bot's tasks (a script run here);
-        shell and browser for a Bot, which has terminals and a browser of its own, to make one, start or fork one, send
+        shell and browser_write for a Bot, which has terminals and a browser of its own, to make one, start or fork one, send
         it a turn, or run or set one of its tasks (which ask it). The first refused, or None."""
         if getattr(conn, "member", None) is None:
             return None
@@ -136,7 +261,7 @@ class Access:
             caps.append("shell")  # (a chat that runs commands without asking: driving it is a shell)
         if (op == "bot" and msg.get("bot") is not None or op == "start" and (msg.get("bot") is not None or
                                                                             meta.get("bot")) or sends and meta.get("bot")):
-            caps += ["shell", "browser"]
+            caps += ["shell", "browser_write"]
         return next((c for c in caps if not self.allowed(conn, c)), None)
 
     @staticmethod
@@ -148,19 +273,38 @@ class Access:
         tool = ((asked or {}).get("request") or {}).get("tool_name")
         return said.get("behavior") != "deny" and (asked is None or tool in SHELL_TOOLS)
 
-    def refused(self, req, cap):
-        """access_denied's error for request req: cap refused."""
-        return {**wire.refused(wire.DENIED, req, named(cap)), "denied": cap}
+    def refused(self, req, name):
+        """access_denied's error for request req: rule name refused."""
+        return {**wire.refused(wire.DENIED, req, named(name)), "denied": name}
 
-    def set(self, cap, rule):
-        """cap's rule set (rule: as the wire has it) and kept: ValueError if it can't be."""
-        if cap not in CAPABILITIES:
+    def set(self, name, rule):
+        """Rule name set (rule: as the wire has it), its other side kept with it (kept_together), and kept: ValueError
+        if it can't be."""
+        if name not in RULES:
             raise ValueError(wording.say("access.bad_rule"))
         rule = clean(rule)
         from baudelib.serverstate import _write_json
         with self.lock:
-            self.rules[cap] = rule
+            self.rules[name] = rule
+            kept_together(self.rules, name)
             _write_json(self.path, {"rules": self.rules})
+
+    def set_own(self, meta, name, rule):
+        """A chat's own rule name (manage_read or manage_write) set in its meta (rule None: the host's again), its
+        other side kept with it: ValueError if it can't be."""
+        if name not in rules_of("manage"):
+            raise ValueError(wording.say("access.bad_rule"))
+        own = own_rules(meta)
+        if rule is None:
+            own.pop(name, None)
+        else:
+            own[name] = clean(rule)
+            with self.lock:
+                kept_together(own, name, self.rules)
+        if own:
+            meta["access"] = own
+        else:
+            meta.pop("access", None)
 
     def members(self, extra=()):
         """The members a rule can name: those the mesh reaches or reached lately, then any rule names (extra too) that
@@ -183,4 +327,4 @@ class Access:
         with self.lock:
             rules = {cap: dict(r) for cap, r in self.rules.items()}
         return {"host": self.server.me["name"], "rules": rules, "members": self.members(extra),
-                "editable": self.allowed(conn, "access")}
+                "editable": self.allowed(conn, "access_write")}

@@ -40,6 +40,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -71,7 +72,7 @@ val DENSE_ROW = 38.dp
  * list's row, as high as the Fixes list's (DENSE_ROW), its text a little in from its edges. */
 @Composable
 fun ActionRow(title: String, subtitle: String?, onClick: (() -> Unit)? = null, prefix: (@Composable () -> Unit)? = null,
-              suffix: (@Composable () -> Unit)? = null, titleLines: Int = 1, compact: Boolean = false) {
+              suffix: (@Composable () -> Unit)? = null, titleLines: Int = 1, compact: Boolean = false, bold: Boolean = false) {
     val c = LocalBaude.current
     Row(Modifier.fillMaxWidth().heightIn(min = if (compact) DENSE_ROW else 50.dp)
         .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
@@ -79,7 +80,8 @@ fun ActionRow(title: String, subtitle: String?, onClick: (() -> Unit)? = null, p
         horizontalArrangement = Arrangement.spacedBy(12.dp)) {
         prefix?.invoke()
         Column(Modifier.weight(1f).padding(vertical = if (compact) 4.dp else 0.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            Text(title, style = Type.body, color = c.fg, maxLines = titleLines, overflow = TextOverflow.Ellipsis)
+            Text(title, style = if (bold) Type.body.copy(fontWeight = FontWeight.Bold) else Type.body, color = c.fg, maxLines = titleLines,
+                overflow = TextOverflow.Ellipsis)
             if (!subtitle.isNullOrBlank()) Text(subtitle, style = Type.caption, color = c.dim, maxLines = 2,
                 overflow = TextOverflow.Ellipsis)
         }

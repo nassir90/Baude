@@ -72,7 +72,7 @@ def _(app):
 @scene("39d-dependencies", "Settings → Dependencies: the host picked beside New session (this machine's here), then "
                            "what its features and its machine's apps need under what needs each (Providers, Git and "
                            "GitHub, Kubernetes, …): Installed, Running with Ollama's models, or the command that "
-                           "installs or readies it with Copy (gh signed out), else its page (a kubeconfig with no "
+                           "installs or readies it with Copy (gh signed out), else its status only (a kubeconfig with no "
                            "context)", size=(1200 + SIDEBAR, H))
 def _(app):
     return dependencies(app)[0]

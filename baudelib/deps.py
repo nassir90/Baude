@@ -8,7 +8,7 @@ schema/deps has a file for each, named by its key: {"description", "name" (as it
 schema/copy keys that name them), "group" (the copy key of what Settings → Dependencies lists it under: GROUPS),
 "detect" ({"macos"|"linux": [way, …]}: any way that finds it finds it; a platform not there doesn't need it),
 "install" ({"macos"|"debian"|"fedora"|"arch": the command; a check's: the one that readies it}), "link" (its install
-page; a check's: how it's set up), "no_display" (true: only a host with no display needs it), "of" (a check: the key
+page; a check has none), "no_display" (true: only a host with no display needs it), "of" (a check: the key
 of the program it's a check of, which it's left out without, and listed after), "ready" (the copy key said of it when
 it's there: deps.installed if none; given n, the count its probe found, where it takes one), "installed" and "start"
 (ways and commands: one installed and not running, Ollama, is given its start command in place of its install's)}.
@@ -148,14 +148,16 @@ def _ollama():
     from baudelib import providers
     try:
         tags = providers.fetch(providers.ollama_url() + "/api/tags") or {}
-    except (OSError, ValueError):
+    except OSError as e:
+        return "deps.running_key" if str(e).startswith("401") else None  # (it answered: it wants a key)
+    except ValueError:
         return None
     return len([m for m in tags.get("models") or [] if isinstance(m, dict)])
 
 
 def _mlx():
     from baudelib import models
-    return len(models.downloaded_models()) if models.mlx_server() else None
+    return len(models.downloaded_models()) if not models.mlx_missing() else None
 
 
 PROBES = {"kube_contexts": _kube_contexts, "gh_signed_in": _gh_signed_in, "ollama": _ollama, "mlx": _mlx}
@@ -189,17 +191,23 @@ def present(key):
 
 def info(key, here=None):
     """What's said of it (the wire's Dep): {dep, name, where, present, fix (this platform's command, or None), link,
-    group, check, ready (what's said of it while it's there)}. here: whether it's here, if the caller knows (its own
-    import failed, say); else it's looked for."""
+    group, check, ready (what's said of it while it's there; "Couldn't check" when its look raised)}. here: whether
+    it's here, if the caller knows (its own import failed, say); else it's looked for."""
     d = TABLE[key]
-    there, n = _state(key) if here is None or key in hidden() else (here, None)
-    fix = d["install"].get(platform())
-    if not there and d.get("start") and _finds(d.get("installed", {}).get(SYSTEM)) is not None:
-        fix = d["start"].get(platform())  # (installed, not running: started)
-    ready = d.get("ready", "deps.installed")
-    return {"dep": key, "name": d["name"], "where": d["where"], "present": bool(there), "fix": fix,
-            "link": d.get("link"), "group": d.get("group"), "check": "of" in d,
-            "ready": None if not there else wording.say(ready) if wording.has(ready) else wording.say(ready, n=n or 0)}
+    out = {"dep": key, "name": d["name"], "where": d["where"], "present": False, "fix": None,
+           "link": d.get("link"), "group": d.get("group"), "check": "of" in d, "ready": None}
+    try:
+        there, n = _state(key) if here is None or key in hidden() else (here, None)
+        fix = d["install"].get(platform())
+        if not there and d.get("start") and _finds(d.get("installed", {}).get(SYSTEM)) is not None:
+            fix = d["start"].get(platform())  # (installed, not running: started)
+    except Exception:  # noqa: BLE001 (one probe gone wrong is its row's "couldn't check", not the answer's error)
+        return {**out, "link": None, "ready": wording.say("deps.unchecked")}
+    ready = n if isinstance(n, str) else d.get("ready", "deps.installed")
+    out.update(present=bool(there), fix=fix)
+    if there:
+        out["ready"] = wording.say(ready) if wording.has(ready) else wording.say(ready, n=n or 0)
+    return out
 
 
 def missing(key, here=None):
@@ -225,6 +233,26 @@ def report():
         if out[-1]["present"]:
             out += [info(c) for c in sorted(TABLE, key=lambda c: TABLE[c]["name"].lower())
                     if TABLE[c].get("of") == k and needed(c)]
+    return out
+
+
+def for_viewer(listed):
+    """A host's answer with the rows of what the app's own process needs (where "app": VTE, WebKit, Node) read here
+    instead, in this app's process, whichever host it asked: the same groups, each program's checks after it."""
+    units = {}
+    for dep in listed or []:
+        if dep.get("where") == "app":
+            continue
+        if dep.get("check") and units.get(dep.get("group")):
+            units[dep["group"]][-1].append(dep)
+        else:
+            units.setdefault(dep.get("group"), []).append([dep])
+    for k in TABLE:
+        if TABLE[k]["where"] == "app" and needed(k):
+            units.setdefault(TABLE[k]["group"], []).append([info(k)])
+    out = []
+    for group in sorted(units, key=lambda g: GROUPS.index(g) if g in GROUPS else len(GROUPS)):
+        out += [d for unit in sorted(units[group], key=lambda u: u[0]["name"].lower()) for d in unit]
     return out
 
 

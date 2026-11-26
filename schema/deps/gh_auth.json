@@ -15,6 +15,5 @@
     "debian": "gh auth login",
     "fedora": "gh auth login",
     "arch": "gh auth login"
-  },
-  "link": "https://cli.github.com/manual/gh_auth_login"
+  }
 }

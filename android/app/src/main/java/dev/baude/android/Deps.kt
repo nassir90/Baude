@@ -61,7 +61,7 @@ fun MissingDep(dep: Msg.Dep, feature: String, again: () -> Unit) {
 }
 
 /** A dependency's row (depsview.row): its name, then what's said of it while it's there (Installed, Signed in,
- * Running, 3 models), or the command that installs or readies it with Copy (else its page: a check's Setup Page). */
+ * Running, 3 models), or the command that installs or readies it with Copy (else its install page; a check with no command, its status only). */
 @Composable
 fun DepRow(dep: Msg.Dep) {
     val c = LocalBaude.current
@@ -78,7 +78,8 @@ fun DepRow(dep: Msg.Dep) {
                 clip.setText(AnnotatedString(fix))
                 toast(Wording.Kube.copiedTryAgain)
             }
-        } else if (!link.isNullOrBlank()) Button(if (dep.check == true) Wording.Deps.setupPage else Wording.Deps.installPage) {
+        } else if (!dep.ready.isNullOrBlank()) Text(dep.ready.orEmpty(), style = Type.body, color = c.dim)
+        else if (!link.isNullOrBlank() && dep.check != true) Button(Wording.Deps.installPage) {
             try { uri.openUri(link) } catch (_: Exception) {}
         }
     })
@@ -109,7 +110,7 @@ fun DepsPage() {
         val e = error
         val l = listed
         if (e != null) BoxedList(listOf(e), "") { ActionRow(it, null) }
-        else if (l != null) for ((group, deps) in l.groupBy { it.group.orEmpty() }) {
+        else if (l != null) for ((group, deps) in l.filter { it.where != "app" }.groupBy { it.group.orEmpty() }) {
             if (group.isNotEmpty()) Heading(Wording.byKey[group] ?: group)
             BoxedList(deps, "") { DepRow(it) }
         }

@@ -111,7 +111,7 @@ def copy_fix(widget, dep):
 
 def row(dep):
     """A dependency's row: its name, then what's said of it while it's there (Installed, Signed in, Running, 3 models),
-    or the command that installs or readies it with Copy (else its page: a check's Setup Page)."""
+    or the command that installs or readies it with Copy (else its install page; a check with no command, its status only)."""
     out = Adw.ActionRow(title=GLib.markup_escape_text(dep["name"]))
     if dep.get("present"):
         out.add_suffix(Gtk.Label(label=dep.get("ready") or wording.say("deps.installed"), css_classes=["dim-label"]))
@@ -122,9 +122,10 @@ def row(dep):
                           valign=Gtk.Align.CENTER, css_classes=["flat"])
         copy.connect("clicked", lambda b: copy_fix(b, dep))
         out.add_suffix(copy)
-    elif dep.get("link"):
-        out.add_suffix(Gtk.LinkButton(uri=dep["link"], valign=Gtk.Align.CENTER, label=wording.say(
-            "deps.setup_page" if dep.get("check") else "deps.install_page")))
+    elif dep.get("ready"):
+        out.add_suffix(Gtk.Label(label=dep["ready"], css_classes=["dim-label"]))
+    elif dep.get("link") and not dep.get("check"):
+        out.add_suffix(Gtk.LinkButton(uri=dep["link"], valign=Gtk.Align.CENTER, label=wording.say("deps.install_page")))
     return out
 
 
@@ -165,7 +166,7 @@ class Page(Adw.PreferencesPage):
             group = Adw.PreferencesGroup()
             group.add(Adw.ActionRow(title=GLib.markup_escape_text(reply["error"]), sensitive=False))
             self.groups.append(group)
-        for key, listed in grouped(reply.get("deps")):
+        for key, listed in grouped(deps.for_viewer(reply.get("deps"))):
             group = Adw.PreferencesGroup(title=GLib.markup_escape_text(wording.say(key) if wording.has(key) else key))
             for dep in listed:
                 group.add(row(dep))

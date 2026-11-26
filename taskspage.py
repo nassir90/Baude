@@ -1,7 +1,7 @@
 """A Bot's tasks, on the side panel's Tasks page (schema/ui/Tasks.panel.json, docs/tasks-design.md): scripts its host
-keeps and runs (baudelib.tasks), by hand or as their triggers fire. The list of them; a task's page (its triggers, form,
-script and runs); a run's page (its log, its asks of the Bot and the Bot's answers). Each read from the Bot's host and
-set there."""
+keeps and runs (baudelib.tasks), by hand or as their triggers fire; their scripts are the Bot's to write (its set_task
+tool). The list of them; a task's page (its triggers, inputs and runs); a run's page (its log, its asks of the Bot and
+the Bot's answers). Each read from the Bot's host and set there."""
 import datetime
 import json
 import os
@@ -21,7 +21,6 @@ from widgets import Spinner, themed_icon  # noqa: E402
 PAGE = wording.say("tasks.title")
 DAY_NAMES = tuple(wording.say(f"tasks.{d}") for d in ("mon", "tue", "wed", "thu", "fri", "sat", "sun"))
 TYPES = (("text", "tasks.text"), ("number", "tasks.number"), ("bool", "tasks.yes_no"), ("choice", "tasks.choice"))
-RUNTIMES = (("python", "tasks.python"), ("shell", "kube.shell"), ("bot", "sidebar.bot"))
 KINDS = (("schedule", "tasks.schedule"), ("git_push", "tasks.git_push"))
 PAYLOAD = {"schedule": ("time",), "git_push": ("repo", "branch", "before", "after", "commit", "message", "author")}
 STATUS_ICONS = {"done": "object-select-symbolic", "failed": "dialog-error-symbolic", "stopped": "process-stop-symbolic",
@@ -56,19 +55,20 @@ def when(t):
     return wording.say("tasks.days_at", days=said, time=t.get("at"))
 
 
-def stamp(t, clock=None):
-    """A time as the host's clock has it: HH:MM today, else its day too."""
+def stamp(t, clock=None, short=False):
+    """A time as the host's clock has it: HH:MM today, else its day too (short: without the weekday)."""
     if not t:
         return wording.say("tasks.never")
     zone = datetime.timezone(datetime.timedelta(seconds=clock["offset"])) if clock else None
     d = datetime.datetime.fromtimestamp(t, zone)
-    return d.strftime("%H:%M") if d.date() == datetime.datetime.now(zone).date() else d.strftime("%a %d %b %H:%M")
+    return d.strftime("%H:%M") if d.date() == datetime.datetime.now(zone).date() else \
+        d.strftime("%d %b %H:%M" if short else "%a %d %b %H:%M")
 
 
-def ran_at(run, clock=None):
+def ran_at(run, clock=None, short=False):
     """When a run started, as its host's clock had it then (its own offset), else as it has it now."""
     offset = run.get("offset")
-    return stamp(run.get("started"), {"offset": offset} if isinstance(offset, int) else clock)
+    return stamp(run.get("started"), {"offset": offset} if isinstance(offset, int) else clock, short)
 
 
 def took(seconds):
@@ -142,11 +142,7 @@ class TasksPage(Gtk.Box):
         self.append(self.stack)
         # the list
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-        head = Gtk.Box(spacing=6, margin_start=10, margin_end=10, margin_top=8, margin_bottom=4)
-        head.append(Gtk.Box(hexpand=True))  # (the page's name is the switcher's: New task at the end)
-        head.append(flat("list-add-symbolic", wording.say("tasks.new_task"), lambda: self.edit(None)))
-        box.append(head)
-        self.list = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE, margin_start=10, margin_end=10,
+        self.list = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE, margin_start=10, margin_end=10, margin_top=10,
                                 valign=Gtk.Align.START)
         self.list.add_css_class("boxed-list")
         empty = Gtk.Label(label=wording.say("tasks.no_tasks"), margin_top=24, margin_bottom=24)
@@ -228,7 +224,7 @@ class TasksPage(Gtk.Box):
                 self.ask({"op": "task", "session": self.sid, "id": self.task["id"]})
         return True
 
-    def ask(self, msg, then=None):
+    def ask(self, msg):
         self.asked += 1
         sid = self.sid
         op = msg.get("op")
@@ -245,8 +241,6 @@ class TasksPage(Gtk.Box):
                 return
             self.said.set_visible(False)
             self.took(r)
-            if then is not None:
-                then(r)
         self.remote.request(msg, got)
 
     def took(self, r):
@@ -275,11 +269,11 @@ class TasksPage(Gtk.Box):
         self.stack.set_visible_child_name(name)
         self.refresh()
 
-    def save(self, task, then=None):
-        self.ask({"op": "tasks", "session": self.sid, "set": task}, then)
+    def save(self, task):
+        self.ask({"op": "tasks", "session": self.sid, "set": task})
 
     def kept(self, task, **changed):
-        """task as it's sent to be set again (its script left as it is), with changed."""
+        """task as it's sent to be set again (its script left as it is: the Bot's to change), with changed."""
         return {**{k: task.get(k) for k in ("id", "name", "runtime", "form", "triggers", "fallback", "timeout_s",
                                             "paused")}, **changed}
 
@@ -300,7 +294,7 @@ class TasksPage(Gtk.Box):
             self.list.append(row)
 
     def start(self, task):
-        """task run now: its form filled first, if it has one."""
+        """task run now: its inputs filled first, if it has any."""
         if task.get("form"):
             return self.run_form(task)
         self.ask({"op": "run_task", "session": self.sid, "id": task["id"]})
@@ -328,6 +322,7 @@ class TasksPage(Gtk.Box):
     def listbox(self, into):
         lb = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE)
         lb.add_css_class("boxed-list")
+        lb.add_css_class("tasks-rows")
         into.append(lb)
         return lb
 
@@ -363,24 +358,17 @@ class TasksPage(Gtk.Box):
                                     lambda x=tr: self.save(self.kept(t, triggers=[y for y in t["triggers"]
                                                                                   if y["id"] != x["id"]]))))
                 lb.append(row)
-        # form
-        g = self.group(wording.say("tasks.form"),
+        # inputs
+        g = self.group(wording.say("signal_card.inputs"),
                        flat("document-edit-symbolic", wording.say("tasks.change"), lambda: self.edit_form(t)))
         if not t.get("form"):
-            g.append(dim(wording.say("tasks.no_fields")))
+            g.append(dim(wording.say("signal_card.no_inputs")))
         else:
             lb = self.listbox(g)
             for f in t["form"]:
                 row = Adw.ActionRow(title=GLib.markup_escape_text(f.get("label") or f["name"]))
                 row.add_suffix(dim(wording.say(dict(TYPES)[f["type"]])))
                 lb.append(row)
-        # script
-        version = dim(t.get("version") or "")
-        version.add_css_class("mono")
-        g = self.group(wording.say("tasks.script"), dim(wording.say(dict(RUNTIMES)[t["runtime"]])), version)
-        if t.get("script") is not None:
-            g.append(CodeBlock(t["script"], syntax={"python": "python", "shell": "bash"}.get(t["runtime"], ""),
-                               wrap=t["runtime"] == "bot"))
         # runs
         g = self.group(wording.say("tasks.runs"))
         if not self.runs:
@@ -389,9 +377,7 @@ class TasksPage(Gtk.Box):
             lb = self.listbox(g)
             lb.connect("row-activated", lambda _l, row: self.open_run(row.run))
             for r in self.runs:
-                title = f"{ran_at(r, self.clock)} · " + (
-                    took(r.get("seconds")) if r.get("ended") else wording.say("tasks.status", status=r["status"])) + \
-                    (f" · {wording.say('tasks.dummy_answers')}" if r.get("dry") else "")
+                title = ran_at(r, self.clock, True) + (f" · {wording.say('tasks.dry_tag')}" if r.get("dry") else "")
                 row = Adw.ActionRow(title=GLib.markup_escape_text(title), activatable=True)
                 row.run = r
                 row.add_prefix(status_icon(r))
@@ -489,10 +475,18 @@ class TasksPage(Gtk.Box):
 
     # ---- dialogs
     def change(self, t):
-        """t changed: its dialog opened once its script's read (the page drawn from the list has none yet)."""
-        if t.get("script") is not None:
-            return self.edit(t)
-        self.ask({"op": "task", "session": self.sid, "id": t["id"]}, lambda r: self.edit(r["task"]))
+        """t changed: its name, and whether its failures go to the Bot."""
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        name = Gtk.Entry(placeholder_text=wording.say("common.name"), text=t.get("name") or "")
+        box.append(name)
+        fallback = Adw.SwitchRow(title=wording.say("tasks.fallback"), active=t.get("fallback", True))
+        lb = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE)
+        lb.add_css_class("boxed-list")
+        lb.append(fallback)
+        box.append(lb)
+        alert(self.win, wording.say("tasks.change_heading"), box,
+              [("cancel", wording.say("common.cancel"), False), ("save", wording.say("common.save"), True)],
+              lambda _r: self.save(self.kept(t, name=name.get_text(), fallback=fallback.get_active())))
 
     def delete(self, t):
         """t deleted, once that's confirmed: its runs and scripts too."""
@@ -507,42 +501,8 @@ class TasksPage(Gtk.Box):
         dlg.present(self.win)
         return dlg
 
-    def edit(self, t):
-        """A task made, or (t) changed: its name, how it runs, its script, whether its failures go to the Bot."""
-        t = t or {}
-        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
-        name = Gtk.Entry(placeholder_text=wording.say("common.name"), text=t.get("name") or "")
-        box.append(name)
-        row = Gtk.Box(spacing=8)
-        row.append(Gtk.Label(label=wording.say("tasks.runtime"), xalign=0, hexpand=True))
-        runtime, runtimes = dropdown(RUNTIMES, t.get("runtime") or "python")
-        row.append(runtime)
-        box.append(row)
-        box.append(Gtk.Label(label=wording.say("tasks.script"), xalign=0))
-        script = Gtk.TextView(monospace=True, top_margin=6, bottom_margin=6, left_margin=6, right_margin=6)
-        script.get_buffer().set_text(t.get("script") or "")
-        frame = Gtk.ScrolledWindow(min_content_height=200, child=script)
-        frame.add_css_class("card")
-        box.append(frame)
-        fallback = Adw.SwitchRow(title=wording.say("tasks.fallback"), active=t.get("fallback", True))
-        lb = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE)
-        lb.add_css_class("boxed-list")
-        lb.append(fallback)
-        box.append(lb)
-
-        def done(_r):
-            buf = script.get_buffer()
-            text = buf.get_text(buf.get_start_iter(), buf.get_end_iter(), False)
-            made = {**(self.kept(t) if t else {}), "name": name.get_text(),
-                    "runtime": runtimes[runtime.get_selected()], "fallback": fallback.get_active()}
-            if not t or text != t.get("script"):
-                made["script"] = text
-            self.save(made, lambda r: r.get("saved") and self.open_task(r["saved"]))
-        alert(self.win, wording.say("tasks.change_heading" if t else "tasks.new_heading"), box,
-              [("cancel", wording.say("common.cancel"), False), ("save", wording.say("common.save"), True)], done)
-
     def field_widget(self, f):
-        """(a control for a form's field, its value as it's read)"""
+        """(a control for an input, its value as it's read)"""
         if f["type"] == "bool":
             w = Gtk.Switch(active=bool(f.get("default")), halign=Gtk.Align.START)
             return w, w.get_active
@@ -559,7 +519,7 @@ class TasksPage(Gtk.Box):
         return w, w.get_text
 
     def run_form(self, t):
-        """Run t, its form filled here first: or run it dry."""
+        """Run t, its inputs filled here first: or run it dry."""
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
         read = {}
         for f in t.get("form") or []:
@@ -657,14 +617,14 @@ class TasksPage(Gtk.Box):
                      done), kind
 
     def edit_form(self, t):
-        """t's form changed: its fields, each a name, a type, its choices and its default."""
+        """t's inputs changed: each a name, a type, its choices and its default."""
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
         rows = []
 
         def add(f):
             card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
             line = Gtk.Box(spacing=6)
-            name = Gtk.Entry(placeholder_text=wording.say("tasks.field_name"), text=f.get("name") or "",
+            name = Gtk.Entry(placeholder_text=wording.say("common.name"), text=f.get("name") or "",
                              hexpand=True)
             kind, kinds = dropdown(TYPES, f.get("type") or "text")
             line.append(name)
@@ -672,7 +632,7 @@ class TasksPage(Gtk.Box):
             choices = Gtk.Entry(placeholder_text=wording.say("tasks.choices"), text=", ".join(f.get("choices") or []))
             default = Gtk.Entry(placeholder_text=wording.say("meta_settings.effort_default"), text="" if f.get("default") is None else str(f["default"]))
             item = (card, name, kind, kinds, choices, default)
-            line.append(flat("list-remove-symbolic", wording.say("tasks.remove_field"),
+            line.append(flat("list-remove-symbolic", wording.say("tasks.remove_input"),
                              lambda: (rows.remove(item), fields.remove(card))))
             card.append(line)
             card.append(choices)
@@ -685,7 +645,7 @@ class TasksPage(Gtk.Box):
         box.append(fields)
         for f in t.get("form") or []:
             add(f)
-        more = Gtk.Button(label=wording.say("tasks.add_field"), halign=Gtk.Align.START)
+        more = Gtk.Button(label=wording.say("tasks.add_input"), halign=Gtk.Align.START)
         more.connect("clicked", lambda *_: add({}))
         box.append(more)
 
@@ -699,5 +659,5 @@ class TasksPage(Gtk.Box):
                     f["default"] = default.get_text()
                 form.append(f)
             self.save(self.kept(t, form=form))
-        alert(self.win, wording.say("tasks.form"), box,
+        alert(self.win, wording.say("tasks.inputs_heading"), box,
               [("cancel", wording.say("common.cancel"), False), ("save", wording.say("common.save"), True)], done)

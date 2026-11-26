@@ -27,7 +27,7 @@ import java.io.File
 import java.time.Duration
 
 /** The Tasks page drawn from TaskFixtures (no host: its state filled by hand), light and dark: the list, Deploy site's
- * page, a failed run's log, and Add Trigger with Git push picked. Writes <TASKS_OUT, else build/screenshots/tasks>/
+ * page, a failed run's log, Add Trigger with Git push picked, Change Task and Change Inputs. Writes <TASKS_OUT, else build/screenshots/tasks>/
  * <theme>/tasks-<name>.png. A render rig, not a test. In android/:
  *     ./gradlew --offline testDebugUnitTest --tests '*TasksMockups*' */
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
@@ -126,6 +126,16 @@ abstract class TasksMockups(private val theme: String) {
         show(TaskFixtures.page())
         tap(Wording.Tasks.run)
         shoot("run-form")
+    }
+
+    @Test fun change() {
+        show(TaskFixtures.page().apply { editing = task })
+        shoot("change")
+    }
+
+    @Test fun inputs() {
+        show(TaskFixtures.page().apply { forming = task })
+        shoot("inputs")
     }
 
     @Test fun delete() {

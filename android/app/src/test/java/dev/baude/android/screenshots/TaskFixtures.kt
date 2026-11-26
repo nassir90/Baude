@@ -5,7 +5,7 @@ import dev.baude.android.TasksState
 import org.json.JSONObject
 
 /** A Bot's tasks as its host would list them (made up: no host asked), for the Tasks page drawn by the rigs: three
- * tasks, Deploy site's page with its triggers, form, script and runs, and a run of it that failed and was handed to
+ * tasks, Deploy site's page with its triggers, inputs and runs, and a run of it that failed and was handed to
  * its Bot, Juniper. Times are from now, on a clock at UTC. */
 object TaskFixtures {
     private val now get() = System.currentTimeMillis() / 1000.0

@@ -1,7 +1,6 @@
 package dev.baude.android
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -79,12 +78,12 @@ fun triggerText(t: Msg.TaskTrigger): String {
 }
 
 /** A time on the host's clock (its offset): HH:MM today, else 'Mon 03 Nov 14:00'. */
-fun hostWhen(t: Double?, offset: Int): String {
+fun hostWhen(t: Double?, offset: Int, short: Boolean = false): String {
     if (t == null || t == 0.0) return Wording.Tasks.never
     val zone = TimeZone.getTimeZone("GMT").apply { rawOffset = offset * 1000 }
     val day = SimpleDateFormat("yyyyMMdd", Locale.ENGLISH).apply { timeZone = zone }
     val at = Date((t * 1000).toLong())
-    val pattern = if (day.format(at) == day.format(Date())) "HH:mm" else "EEE dd MMM HH:mm"
+    val pattern = if (day.format(at) == day.format(Date())) "HH:mm" else if (short) "dd MMM HH:mm" else "EEE dd MMM HH:mm"
     return SimpleDateFormat(pattern, Locale.ENGLISH).apply { timeZone = zone }.format(at)
 }
 
@@ -92,12 +91,6 @@ fun hostWhen(t: Double?, offset: Int): String {
 fun tookText(seconds: Double): String {
     val s = Math.round(seconds).toInt()
     return if (s < 60) Wording.Tasks.seconds(n = s) else Wording.Tasks.minutesTook(m = s / 60, s = s % 60)
-}
-
-private fun runtimeWord(runtime: String?) = when (runtime) {
-    "shell" -> Wording.Kube.shell
-    "bot" -> Wording.Sidebar.bot
-    else -> Wording.Tasks.python
 }
 
 private fun typeWord(type: String?) = when (type) {
@@ -119,7 +112,7 @@ private fun kindIcon(kind: String?) = when (kind) {
     else -> Adwaita.MediaPlaybackStart
 }
 
-/** A trigger's payload's keys (what fills a form's field). */
+/** A trigger's payload's keys (what fills an input). */
 private fun payloadKeys(kind: String) = if (kind == "git_push") listOf("repo", "branch", "before", "after", "commit", "message", "author")
     else listOf("time")
 
@@ -133,26 +126,24 @@ class TasksState(val live: Boolean = true) {
     var reason by mutableStateOf<String?>(null)
     /** list, task or run. */
     var page by mutableStateOf("list")
-    /** The task open: as listed till it's read, then with its script; its latest runs, newest first. */
+    /** The task open: as listed till it's read; its latest runs, newest first. */
     var task by mutableStateOf<Msg.Task?>(null)
     val runs = mutableStateListOf<Msg.TaskRun>()
     /** The run open, its log, its Bot's name. */
     var run by mutableStateOf<Msg.TaskRun?>(null)
     val log = mutableStateListOf<Msg.TaskLogLine>()
     var bot by mutableStateOf("")
-    /** The dialogs: the task dialog's (a new one: Msg.Task()), the run form's, the trigger dialog's, the form dialog's. */
+    /** The dialogs: the task dialog's, the run form's, the trigger dialog's, the inputs dialog's. */
     var editing by mutableStateOf<Msg.Task?>(null)
     var running by mutableStateOf<Msg.Task?>(null)
     var adding by mutableStateOf<Msg.Task?>(null)
     var forming by mutableStateOf<Msg.Task?>(null)
     /** The task whose Delete waits to be confirmed. */
     var deleting by mutableStateOf<Msg.Task?>(null)
-    /** A new task saved: its page opened when the host says its id. */
-    var openSaved = false
 }
 
-/** A task as it's sent to be saved: the whole of it (script only when it was edited). */
-private fun whole(t: Msg.Task, script: String? = null, form: List<Msg.TaskField>? = t.form,
+/** A task as it's sent to be saved: the whole of it but its script (left as it is: the Bot's to change). */
+private fun whole(t: Msg.Task, form: List<Msg.TaskField>? = t.form,
                   triggers: List<Msg.TaskTrigger>? = t.triggers): JSONObject {
     val o = JSONObject().put("name", t.name.orEmpty()).put("runtime", t.runtime ?: "python")
         .put("form", JSONArray(form.orEmpty().map { it.json() }))
@@ -160,7 +151,6 @@ private fun whole(t: Msg.Task, script: String? = null, form: List<Msg.TaskField>
         .put("fallback", t.fallback ?: true).put("paused", t.paused == true)
     t.id?.let { o.put("id", it) }
     t.timeoutS?.let { o.put("timeout_s", it) }
-    script?.let { o.put("script", it) }
     return o
 }
 
@@ -221,10 +211,7 @@ fun TasksPage(hostId: String, sid: String, here: Boolean, state: TasksState? = n
                     st.tasks.addAll(got.tasks.orEmpty())
                     st.clock = got.clock ?: st.clock
                     st.loaded = true
-                    st.task?.id?.let { id -> // (the open one as listed now, its script kept)
-                        got.tasks?.firstOrNull { it.id == id }?.let { t -> st.task = Msg.Task.from(t.json().apply {
-                            st.task?.script?.let { put("script", it) } }) }
-                    }
+                    st.task?.id?.let { id -> got.tasks?.firstOrNull { it.id == id }?.let { st.task = it } } // (as listed now)
                 }
                 Op.TASK -> {
                     val got = Msg.TaskReply.from(r)
@@ -271,13 +258,7 @@ fun TasksPage(hostId: String, sid: String, here: Boolean, state: TasksState? = n
         st.page = "run"
         readRun()
     }
-    fun save(task: JSONObject) = ask(Msg.Tasks(session = sid, set = task).json(), "save") { r ->
-        val saved = Msg.TasksReply.from(r).saved
-        if (st.openSaved && saved != null) {
-            st.openSaved = false
-            st.tasks.firstOrNull { it.id == saved }?.let { openTask(it) }
-        } else if (st.page == "task") readTask()
-    }
+    fun save(task: JSONObject) = ask(Msg.Tasks(session = sid, set = task).json(), "save") { if (st.page == "task") readTask() }
     fun runIt(t: Msg.Task, inputs: JSONObject = JSONObject(), dry: Boolean = false) =
         ask(Msg.RunTask(session = sid, id = t.id.orEmpty(), inputs = inputs, dry = dry).json(), "run") {
             load()
@@ -319,11 +300,7 @@ fun TasksPage(hostId: String, sid: String, here: Boolean, state: TasksState? = n
             when (st.page) {
                 "task" -> st.task?.let { t ->
                     TaskView(t, st.runs.toList(), offset, back = { st.page = "list"; load() }, run = { runOrAsk(t) },
-                        change = { // (its dialog once its script's read: as listed, it has none)
-                            if (t.script != null) st.editing = t
-                            else ask(Msg.TaskGet(session = sid, id = t.id.orEmpty()).json(), "load") { r ->
-                                Msg.TaskReply.from(r).task?.let { st.editing = it } }
-                        }, delete = { st.deleting = t }, addTrigger = { st.adding = t },
+                        change = { st.editing = t }, delete = { st.deleting = t }, addTrigger = { st.adding = t },
                         removeTrigger = { tr -> save(whole(t, triggers = t.triggers.orEmpty().filter { it.id != tr.id })) },
                         editForm = { st.forming = t }, openRun = { openRun(it) })
                 }
@@ -333,11 +310,6 @@ fun TasksPage(hostId: String, sid: String, here: Boolean, state: TasksState? = n
                         stop = { ask(Msg.TaskStop(session = sid, run = r.id.orEmpty()).json(), "stop") })
                 }
                 else -> Scrolled {
-                    Row(Modifier.fillMaxWidth().padding(start = 10.dp, end = 10.dp, top = 8.dp, bottom = 4.dp),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Spacer(Modifier.weight(1f))
-                        IconButton(Adwaita.ListAdd, Wording.Tasks.newTask) { st.editing = Msg.Task() }
-                    }
                     BoxedList(st.tasks.toList(), if (st.loaded || st.error == null) Wording.Tasks.noTasks else "") { t ->
                         ActionRow(t.name.orEmpty().ifBlank { Wording.Tasks.task }, null, onClick = { openTask(t) },
                             prefix = t.last?.let { { RunState(it.status) } }, suffix = {
@@ -358,13 +330,7 @@ fun TasksPage(hostId: String, sid: String, here: Boolean, state: TasksState? = n
         }
     }
     st.editing?.let { t ->
-        TaskDialog(t) { made ->
-            st.editing = null
-            if (made != null) {
-                if (t.id == null) st.openSaved = true
-                save(made)
-            }
-        }
+        TaskDialog(t) { made -> st.editing = null; if (made != null) save(made) }
     }
     st.running?.let { t ->
         RunForm(t) { inputs, dry -> st.running = null; if (inputs != null) runIt(t, inputs, dry) }
@@ -395,7 +361,8 @@ fun TasksPage(hostId: String, sid: String, here: Boolean, state: TasksState? = n
     }
 }
 
-/** A task's page: its header (back, its name, Run, Change, Delete), then its triggers, form, script and runs. */
+/** A task's page: its header (back, its name, Run, Change, Delete), then its triggers, inputs and runs, each a compact
+ * list. */
 @Composable
 private fun TaskView(t: Msg.Task, runs: List<Msg.TaskRun>, offset: Int, back: () -> Unit, run: () -> Unit, change: () -> Unit,
                      delete: () -> Unit, addTrigger: () -> Unit, removeTrigger: (Msg.TaskTrigger) -> Unit, editForm: () -> Unit,
@@ -410,7 +377,7 @@ private fun TaskView(t: Msg.Task, runs: List<Msg.TaskRun>, offset: Int, back: ()
         Scrolled {
             GroupHeading(Wording.Tasks.triggers) { IconButton(Adwaita.ListAdd, Wording.Tasks.addTrigger, onClick = addTrigger) }
             BoxedList(t.triggers.orEmpty(), Wording.Tasks.byHand) { tr ->
-                ActionRow(triggerText(tr), null, prefix = {
+                ActionRow(triggerText(tr), null, compact = true, prefix = {
                     Icon(kindIcon(tr.kind), kindWord(tr.kind), tint = c.fg, modifier = Modifier.size(16.dp.icon))
                 }, suffix = {
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -423,26 +390,17 @@ private fun TaskView(t: Msg.Task, runs: List<Msg.TaskRun>, offset: Int, back: ()
                     }
                 })
             }
-            GroupHeading(Wording.Tasks.form) { IconButton(Adwaita.DocumentEdit, Wording.Tasks.change, onClick = editForm) }
-            BoxedList(t.form.orEmpty(), Wording.Tasks.noFields) { f ->
-                ActionRow(f.label?.ifBlank { null } ?: f.name.orEmpty(), null, suffix = {
+            GroupHeading(Wording.SignalCard.inputs) { IconButton(Adwaita.DocumentEdit, Wording.Tasks.change, onClick = editForm) }
+            BoxedList(t.form.orEmpty(), Wording.SignalCard.noInputs) { f ->
+                ActionRow(f.label?.ifBlank { null } ?: f.name.orEmpty(), null, compact = true, suffix = {
                     Text(typeWord(f.type), style = Type.body, color = c.dim)
                 })
             }
-            GroupHeading(Wording.Tasks.script) {
-                Text(runtimeWord(t.runtime), style = Type.caption, color = c.dim)
-                t.version?.let { Text(it, style = Type.mono, color = c.dim) }
-            }
-            Box(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 4.dp)) {
-                CodeBlock(t.script.orEmpty(), lang = when (t.runtime) { "shell" -> "sh"; "bot" -> ""; else -> "python" },
-                    wrap = t.runtime == "bot")
-            }
             GroupHeading(Wording.Tasks.runs)
             BoxedList(runs, Wording.Tasks.noRuns) { r ->
-                val title = listOfNotNull(hostWhen(r.started?.toDouble(), r.offset?.toInt() ?: offset),
-                    r.seconds?.let { tookText(it.toDouble()) }, if (r.dry == true) Wording.Tasks.dummyAnswers else null)
-                    .joinToString(" · ")
-                ActionRow(title, null, onClick = { openRun(r) }, titleLines = 2, prefix = { RunState(r.status) }, suffix = {
+                val title = listOfNotNull(hostWhen(r.started?.toDouble(), r.offset?.toInt() ?: offset, short = true),
+                    if (r.dry == true) Wording.Tasks.dryTag else null).joinToString(" · ")
+                ActionRow(title, null, onClick = { openRun(r) }, compact = true, prefix = { RunState(r.status) }, suffix = {
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Icon(kindIcon(r.kind), kindWord(r.kind), tint = c.dim, modifier = Modifier.size(16.dp.icon))
                         r.version?.let { Text(it, style = Type.mono, color = c.dim) }
@@ -518,31 +476,18 @@ private fun Label(text: String) {
     Text(text, style = Type.body, color = LocalBaude.current.fg)
 }
 
-/** New Task, or Change Task: its name, how it runs, its script, and whether a failure's handed to the Bot. */
+/** Change Task: its name, and whether a failure's handed to the Bot. */
 @Composable
 private fun TaskDialog(t: Msg.Task, done: (JSONObject?) -> Unit) {
     val c = LocalBaude.current
-    val new = t.id == null
     var name by remember { mutableStateOf(t.name.orEmpty()) }
-    var runtime by remember { mutableStateOf(t.runtime ?: "python") }
-    var script by remember { mutableStateOf(t.script.orEmpty()) }
     var fallback by remember { mutableStateOf(t.fallback ?: true) }
-    val runtimes = listOf("python", "shell", "bot").map { runtimeWord(it) to it }
     AlertDialog(
         onDismissRequest = { done(null) },
-        title = { Text(if (new) Wording.Tasks.newHeading else Wording.Tasks.changeHeading) },
+        title = { Text(Wording.Tasks.changeHeading) },
         text = {
             Column(Modifier.heightIn(max = 520.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Field(name, { name = it }, Wording.Common.name)
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Label(Wording.Tasks.runtime)
-                    Picker(runtimeWord(runtime), Wording.Tasks.runtime, runtimes, runtime) { runtime = it }
-                }
-                Label(Wording.Tasks.script)
-                Box(Modifier.fillMaxWidth().heightIn(min = 200.dp).border(1.dp, c.rule, RoundedCornerShape(Gap.cardRadius)).padding(6.dp)) {
-                    BasicTextField(script, { script = it }, textStyle = Type.mono.copy(color = c.fg), cursorBrush = SolidColor(c.accentBg),
-                        modifier = Modifier.fillMaxWidth().heightIn(min = 188.dp))
-                }
                 Row(Modifier.fillMaxWidth().clickable { fallback = !fallback }, verticalAlignment = Alignment.CenterVertically) {
                     Text(Wording.Tasks.fallback, style = Type.body, color = c.fg, modifier = Modifier.weight(1f))
                     Switch(fallback, { fallback = it }, colors = SwitchDefaults.colors(checkedTrackColor = c.accentBg, checkedThumbColor = c.accentFg))
@@ -550,11 +495,7 @@ private fun TaskDialog(t: Msg.Task, done: (JSONObject?) -> Unit) {
             }
         },
         confirmButton = {
-            Button(Wording.Common.save, suggested = true) {
-                val made = Msg.Task(id = t.id, name = name, runtime = runtime, form = t.form, triggers = t.triggers, fallback = fallback,
-                    timeoutS = t.timeoutS, paused = t.paused)
-                done(whole(made, script = if (new || script != t.script.orEmpty()) script else null))
-            }
+            Button(Wording.Common.save, suggested = true) { done(whole(t).put("name", name).put("fallback", fallback)) }
         },
         dismissButton = { Button(Wording.Common.cancel) { done(null) } },
         containerColor = c.dialog,
@@ -696,7 +637,7 @@ private fun TriggerDialog(t: Msg.Task, clock: Msg.Clock, done: (Msg.TaskTrigger?
     )
 }
 
-/** One field of the form dialog, as it's being written. */
+/** One input in the inputs dialog, as it's being written. */
 private class FieldDraft(name: String, type: String, choices: String, default: String, val label: String?) {
     var name by mutableStateOf(name)
     var type by mutableStateOf(type)
@@ -704,7 +645,7 @@ private class FieldDraft(name: String, type: String, choices: String, default: S
     var default by mutableStateOf(default)
 }
 
-/** Form: a row for each field (its name, its type, a choice's choices, its default, remove), and Add field. */
+/** Change Inputs: a row for each input (its name, its type, a choice's choices, its default, remove), and Add input. */
 @Composable
 private fun FormDialog(t: Msg.Task, done: (List<Msg.TaskField>?) -> Unit) {
     val c = LocalBaude.current
@@ -713,14 +654,14 @@ private fun FormDialog(t: Msg.Task, done: (List<Msg.TaskField>?) -> Unit) {
     val types = listOf("text", "number", "bool", "choice").map { typeWord(it) to it }
     AlertDialog(
         onDismissRequest = { done(null) },
-        title = { Text(Wording.Tasks.form) },
+        title = { Text(Wording.Tasks.inputsHeading) },
         text = {
             Column(Modifier.heightIn(max = 520.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 for (d in drafts.toList()) Column(Modifier.fillMaxWidth().card(c), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Box(Modifier.weight(1f)) { Field(d.name, { d.name = it.filter { ch -> ch.isLetterOrDigit() || ch == '_' } }, Wording.Tasks.fieldName) }
+                        Box(Modifier.weight(1f)) { Field(d.name, { d.name = it.filter { ch -> ch.isLetterOrDigit() || ch == '_' } }, Wording.Common.name) }
                         Picker(typeWord(d.type), typeWord(d.type), types, d.type) { d.type = it }
-                        IconButton(Adwaita.ListRemove, Wording.Tasks.removeField) { drafts.remove(d) }
+                        IconButton(Adwaita.ListRemove, Wording.Tasks.removeInput) { drafts.remove(d) }
                     }
                     if (d.type == "choice") Field(d.choices, { d.choices = it }, Wording.Tasks.choices)
                     if (d.type == "bool") Row(Modifier.fillMaxWidth().clickable { d.default = (d.default != "true").toString() },
@@ -730,7 +671,7 @@ private fun FormDialog(t: Msg.Task, done: (List<Msg.TaskField>?) -> Unit) {
                             colors = SwitchDefaults.colors(checkedTrackColor = c.accentBg, checkedThumbColor = c.accentFg))
                     } else Field(d.default, { d.default = it }, "")
                 }
-                Button(Wording.Tasks.addField) { drafts.add(FieldDraft("", "text", "", "", null)) }
+                Button(Wording.Tasks.addInput) { drafts.add(FieldDraft("", "text", "", "", null)) }
             }
         },
         confirmButton = {

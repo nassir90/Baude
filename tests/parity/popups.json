@@ -46,7 +46,7 @@
     {"name": "pop-landscape-folder", "what": "Open folder… dialog, the phone on its side", "where": "Home → Open folder…, the phone landscape", "kind": "dialog", "as": "home", "steps": [["tap", "Open folder…"]], "landscape": true, "fullWidth": false},
     {"name": "pop-landscape-chat", "what": "A chat on its side, Full-width text off", "where": "A chat, the phone landscape", "kind": "menu", "as": "chat-x", "landscape": true, "fullWidth": false},
     {"name": "pop-git-branches", "what": "Git page's branch list", "where": "Git page, the branch bar", "kind": "dropdown", "as": "panel-git-branches", "page": "git", "transcript": "git.jsonl", "git": {"branches": true}},
-    {"name": "pop-task-form", "what": "Tasks → New task", "where": "Tasks → New task", "kind": "dialog", "as": "custom", "steps": [["tap", "New task"]]},
+    {"name": "pop-task-change", "what": "A task's page → Change", "where": "Tasks → a task → Change", "kind": "dialog", "as": "custom", "steps": [["tap", "Change"]]},
     {"name": "pop-task-trigger", "what": "A task's page → Add trigger", "where": "Tasks → a task → Add trigger", "kind": "dialog", "as": "custom", "steps": [["tap", "Add trigger"]]},
     {"name": "pop-task-run", "what": "Tasks → Run (a task with a form)", "where": "Tasks → a task's Run", "kind": "dialog", "as": "custom", "steps": [["tap", "Run"]]},
     {"name": "pop-mesh-machine-menu", "what": "Mesh, a machine's ⋮", "where": "Mesh, a machine's ⋮", "kind": "menu", "as": "mesh", "steps": [["tap", "Menu"]]},

@@ -1,13 +1,13 @@
 {
   "description": "The system notification an app posts when a chat finishes a turn or asks you something while you're elsewhere (the system's own banner, not drawn in the window): the picture on the left, the chat's name as its first line, what happened under it.",
-  "apps": ["baude", "phone"],
+  "apps": ["baude", "record", "phone"],
   "opens": ["a chat's turn ends or it asks a question or needs a permission answer, while its window is not in front or another chat is open"],
-  "code": ["windowsignal.py:WindowSignal.tell_desktop", "windowproc.py:WindowProc.watch_left_remote", "widgets.py:desktop_notify", "widgets.py:notification_picture", "Mesh.kt:Mesh.post", "NotificationPicture.kt:notificationPicture"],
+  "code": ["windowsignal.py:WindowSignal.tell_desktop", "windowproc.py:WindowProc.watch_left_remote", "widgets.py:desktop_notify", "widgets.py:notification_picture", "baudelib/notifier.py:Client", "baudelib/notifier.py:build", "tools/notifier/main.swift", "tools/macos-sign.sh", "Mesh.kt:Mesh.post", "NotificationPicture.kt:notificationPicture"],
   "copy": ["asks", "meta"],
   "parts": [
     {
       "name": "Picture",
-      "shows": "On the left. For a Bot: its picture, round, with the app's logo in its bottom-right corner cut out of it (tokens notification.*); for any other chat, or a Bot with no picture: the app's logo. On macOS the notification's icon is always the app it's posted as (osascript's: Script Editor), which takes no picture of its own, so a Bot's picture isn't shown there. On the phone the logo is the notification's small icon and the Bot's picture its large one."
+      "shows": "On the left. For a Bot: its picture, round, with the app's logo in its bottom-right corner cut out of it (tokens notification.*); for any other chat, or a Bot with no picture: the app's logo. On macOS the icon is the app it's posted as: Baude's or Record's notifier (an app of its own, built and signed on the Mac), whose icon is the app's logo, with a Bot's picture, round and without the logo, attached on the right; where there's no notifier yet, or macOS won't let it post, the notification is osascript's and its icon Script Editor's, with no picture. On the phone the logo is the notification's small icon and the Bot's picture its large one."
     },
     {
       "name": "Title",
@@ -19,7 +19,8 @@
       "shows": "Under the title, up to two lines (no subtitle between): what happened, the reply's first words when a turn finishes (\"Finished\" when there is nothing to say), \"Waiting for your answer: <tool>\", or \"Claude has a question for you\".",
       "copy": ["meta.finished", "asks.waiting", "asks.waiting_for_tool", "asks.has_question_for_you"],
       "actions": [
-        {"by": "click", "does": "Brings the window up with that chat open (a chat on a host has its transcript fetched first)."}
+        {"by": "click", "does": "Brings the window up with that chat open (a chat on a host has its transcript fetched first)."},
+        {"by": "Open (macOS)", "does": "The same as a click. A click on one posted before the app restarted, or by another of its processes, opens that chat in the window you were in last (a local chat's, by its session id). Once the app has quit, a click or Open starts the app on that chat (a local chat: --cwd, --resume)."}
       ]
     }
   ],
@@ -28,6 +29,7 @@
   ],
   "decisions": [
     {"said": "Replies that finish in the background should notify through the OS's notification system, not only the sidebar's dots", "rule": "Every app posts the platform's own notification when a chat finishes a turn or asks something while you're elsewhere (Settings → Notifications).", "decided": "2026-11-15", "source": [{"issue": "BaudeInternal#117"}]},
-    {"said": "Notifications waste space: the app's name on line one, the chat's name on line two and the problem cut short on line three. The left should show Baude's logo, or the Bot's picture with Baude's in its corner; the first line the chat's name; the description under it, up to two lines.", "rule": "Every app's notification is the picture (a Bot's with the app's logo in its corner, else the app's logo), the chat's or Bot's name as the title and what happened as the body, with no subtitle and no line for the app's own name.", "decided": "2026-11-25", "source": [{"issue": "BaudeInternal#230"}]}
+    {"said": "Notifications waste space: the app's name on line one, the chat's name on line two and the problem cut short on line three. The left should show Baude's logo, or the Bot's picture with Baude's in its corner; the first line the chat's name; the description under it, up to two lines.", "rule": "Every app's notification is the picture (a Bot's with the app's logo in its corner, else the app's logo), the chat's or Bot's name as the title and what happened as the body, with no subtitle and no line for the app's own name.", "decided": "2026-11-25", "source": [{"issue": "BaudeInternal#230"}]},
+    {"said": "Notifications look fine implement that. / Self signed cert and just bundle docs on how people can safely sign Baude", "rule": "On macOS each app posts through a notifier app of its own, built on the Mac and signed with a self-signed code-signing certificate that tools/macos-sign.sh makes in a keychain of its own (docs/macos-signing.md); without one, or turned away, it posts through osascript.", "decided": "2026-11-26", "source": [{"issue": "BaudeInternal#230"}, {"session": "b3845b21-55ac-4aab-a769-fb8517403c51", "message": "9ded08ec-c7a2-4519-81fe-86fadc3e21d0"}, {"session": "b3845b21-55ac-4aab-a769-fb8517403c51", "message": "05ad71e4-c5dd-4534-ac61-466aa9efbe45"}]}
   ]
 }

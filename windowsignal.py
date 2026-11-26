@@ -5,7 +5,6 @@ import html
 import os
 import re
 import weakref
-import sys
 import time
 import urllib.parse
 from baudelib.transcripts import find_session, history_items, ref_epoch
@@ -221,8 +220,12 @@ class WindowSignal:
                 else:
                     win.switch_to(lambda: win.resume_session(info))
         key, title = self.chat_key(session_id), title or wording.say("common.untitled")
-        if sys.platform == "darwin" or not (info or {}).get("bot"):  # (macOS's take no picture: desktop_notify)
-            widgets.desktop_notify(key, title, body, clicked)
+        opens = None  # (a local chat's: what starts Baude on it, for a click once this process is gone (macOS))
+        if session_id and not session_id.startswith("new-") and (info or {}).get("remote") is None:
+            cwd = (info or {}).get("cwd") or (self.cwd if here else None)
+            opens = [*(["--cwd", cwd] if cwd else []), "--resume", session_id]
+        if not (info or {}).get("bot") or not widgets.notification_pictures():  # (osascript's take none)
+            widgets.desktop_notify(key, title, body, clicked, opens=opens)
             return
 
         def pictured(tex):
@@ -230,7 +233,7 @@ class WindowSignal:
                 return
             png = tex.save_to_png_bytes().get_data() if tex is not None else None
             widgets.desktop_notify(key, title, body, clicked, picture=png and widgets.notification_picture(
-                png, widgets.notify_logo()))
+                png, widgets.notify_logo()), opens=opens)
         bot_picture(info, pictured)
 
     def seen_chat(self):

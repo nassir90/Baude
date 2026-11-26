@@ -72,7 +72,7 @@ class Stream:
     def run(self):
         why = None
         try:
-            (self.run_here if self.remote.mine else self.run_there)()
+            (self.run_here if self.remote.mine and not self.bot.get("default") else self.run_there)()
         except Exception as e:  # (said in the pane: it can be tried again)
             why = str(e) if isinstance(e, (OSError, ValueError)) else f"{type(e).__name__}: {e}"
         finally:
@@ -111,7 +111,8 @@ class Stream:
         self.ch = ch
         if self.stopped:
             return
-        ch.send({"op": "emission_watch", "req": 1, "bot": self.bot, "max_w": self.size[0], "max_h": self.size[1]})
+        whose = {"default": True} if self.bot.get("default") else {"bot": self.bot}  # (default: Emission's own window
+        ch.send({"op": "emission_watch", "req": 1, **whose, "max_w": self.size[0], "max_h": self.size[1]})  # there)
         threading.Thread(target=self.ping, daemon=True, name="browser-ping").start()
         ch.sock.settimeout(wire.SILENT_S)  # (it pings: silent this long, it's gone without saying so)
         while not self.stopped and (msg := ch.reply()) is not None:
@@ -221,13 +222,14 @@ class Asks:
             remote, bot, call, answered = asked
             try:
                 got = None
-                if remote.mine:  # (straight to its socket: no host between)
+                if remote.mine and not bot.get("default"):  # (straight to its socket: no host between)
                     try:
                         got = emissionlink.call(emissionlink.bot_profile_id(bot["id"]), call, timeout=90)
                     except (FileNotFoundError, ConnectionRefusedError):
                         got = None  # (its Emission isn't running yet: its host starts it, as for the Bot's tools)
                 if got is None:
-                    r = remote.call({"op": "emission", "bot": bot, "call": call}, timeout=120)
+                    whose = {"default": True} if bot.get("default") else {"bot": bot}
+                    r = remote.call({"op": "emission", **whose, "call": call}, timeout=120)
                     got = r.get("result") if r.get("op") == "emission" else \
                         {"error": wire.said(r) or wording.say("agent_proxy.no_answer")}
             except (OSError, ValueError) as e:
@@ -474,7 +476,8 @@ RESTORE_S = 60
 
 def remember():
     """The chats whose browsers are out, kept (browser_out): out again as Baude next starts."""
-    widgets.save_settings(browser_out=sorted(set(DISEMBODIED) | set(RESTORE["left"] or ())))
+    out = {sid for sid, w in DISEMBODIED.items() if not w.default}  # (Emission's own windows elsewhere: not kept)
+    widgets.save_settings(browser_out=sorted(out | set(RESTORE["left"] or ())))
 
 
 def baude_window(app, sid=None):
@@ -518,6 +521,17 @@ def restore_windows(win):
         GLib.timeout_add_seconds(1, look)
 
 
+def browser_window(main, remote, name):
+    """☰ → Browser on another host (remote, named name): Emission's own window there, on its Default profile, streamed
+    into a window here as a Bot's browser is (BrowserWindow: watched and driven, as that host's browser_write lets);
+    one for each host, brought to the front if it's out already."""
+    from sessionlist import host_key
+    sid = f"browser:{host_key(remote)}"
+    if (out := DISEMBODIED.get(sid)) is not None:
+        return out.present()
+    return BrowserWindow(main, {"id": sid, "default": True, "bot": {"name": name}, "remote": remote})
+
+
 class BrowserWindow(Adw.ApplicationWindow):
     """A Bot's browser out of the side panel (Disembody), in a window of its own that's an Emission window to look at
     (its bars: emissiongtk.Chrome), the Bot's browser still: the same pages and tabs, its profile, hosted or streamed as
@@ -534,7 +548,7 @@ class BrowserWindow(Adw.ApplicationWindow):
             import emissioncore
             if emission.themed_icon() is not None:
                 self.set_icon_name(emissioncore.APP_ID)
-        self.main, self.sid, self.done = main, info["id"], False
+        self.main, self.sid, self.done, self.default = main, info["id"], False, bool(info.get("default"))
         DISEMBODIED[self.sid] = self
         remember()
         for pane in list(PANES):  # (its chat's side panel page: out, now)
@@ -774,8 +788,9 @@ class BrowserPane(Gtk.Box):
         # Emission, streamed till the page is shown again)
         self.pointer_seen = None  # (the last of the Bot's pointer's moves played, as its watch numbers them)
         self.phoned = False  # (its browser on a phone, as its host lists it: said here, not watched)
-        open_home(win.get_application(), lambda bot: (
-            (i := win.sidebar.find_info(bot)) is not None and i.get("remote") is not None and i["remote"].mine))
+        if getattr(win, "sidebar", None) is not None:  # (Baude's: Record's makes no Bot's browser)
+            open_home(win.get_application(), lambda bot: (
+                (i := win.sidebar.find_info(bot)) is not None and i.get("remote") is not None and i["remote"].mine))
         self.read_only = Gtk.ToggleButton(icon_name="changes-prevent-symbolic",
                                           tooltip_text=wording.say("bot_browser.read_only"))
         self.read_only.add_css_class("flat")
@@ -1029,7 +1044,7 @@ class BrowserPane(Gtk.Box):
         self.native.set_visible(can_host(self.remote))
         self.say_status(wording.say("bot_browser.connecting"), "")
         self.pointer_seen = None  # (its moves before this watch: not played)
-        self.stream = Stream(self.remote, {"id": self.sid, "name": self.name}, self.wanted_size(), self.got_frame,
+        self.stream = Stream(self.remote, self.whose(), self.wanted_size(), self.got_frame,
                              self.set_state, self.ended)
 
     def on_phone(self):
@@ -1410,6 +1425,13 @@ class BrowserPane(Gtk.Box):
     def tab(self):
         return self.state.get("selected")
 
+    def whose(self):
+        """Whose browser this is, as a host's asked about it: the Bot's ({id, name}), or (default) Emission's own
+        window there on its Default profile (☰ → Browser on another host: browser_window)."""
+        if (self.info or {}).get("default"):
+            return {"id": self.sid, "name": self.name, "default": True}
+        return {"id": self.sid, "name": self.name}
+
     def ask(self, call, done=None):
         """call to the Bot's Emission (as its tools' are: real input there), after what was asked before it: on this
         machine straight to its socket, elsewhere through its host. Nothing, while it's read-only."""
@@ -1433,7 +1455,7 @@ class BrowserPane(Gtk.Box):
                 done(r)
         if self.here is not None and self.here.win is not None:
             return self.here.call(call, lambda r: GLib.idle_add(lambda: answered(r) and False))
-        self.asks.put(remote, {"id": sid, "name": self.name}, call, answered)
+        self.asks.put(remote, self.whose(), call, answered)
 
     def read_only_set(self, on):
         for w in self.drives:
@@ -1448,7 +1470,7 @@ class BrowserPane(Gtk.Box):
             self.sized_to = None                                    # Bot's page at its own size again)
             if on:
                 self.view_size = None  # (the page's size as it was fitted isn't what it'll be: fitted again after)
-                self.asks.put(self.remote, {"id": self.sid, "name": self.name}, {"op": "resize", "restore": True, "from_pane": True},
+                self.asks.put(self.remote, self.whose(), {"op": "resize", "restore": True, "from_pane": True},
                               lambda _r: None)
             else:
                 self.fit_page()
@@ -1639,5 +1661,5 @@ class BrowserPane(Gtk.Box):
         self.sized_to = size
         if self.view_size and tuple(self.view_size) == size:
             return
-        self.asks.put(self.remote, {"id": self.sid, "name": self.name},
+        self.asks.put(self.remote, self.whose(),
                       {"op": "resize", "width": size[0], "height": size[1], "fit": True, "from_pane": True}, lambda _r: None)

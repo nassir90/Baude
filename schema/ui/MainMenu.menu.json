@@ -150,13 +150,23 @@
       "actions": [
         {
           "by": "click",
-          "does": "Asks the host picked beside New session (this machine's if none) for Emission's window on its Default profile, on that machine's own screen (browser_open): the Emission that has the profile brought to the front as it is, else one started. What went wrong (the host not reached, refused) in a toast"
+          "does": "On this machine's own host: Emission's window on its Default profile, on this screen (browser_open), the Emission that has the profile brought to the front as it is, else one started. On another host picked beside New session: that host's Emission window on its Default profile (started there if none has it) streamed into a window here, watched and driven as a Bot's browser is, where that host's Browser (write) rule lets this member (emission_watch and emission, default); one window for each host, brought to the front on a second click. Never started where the host has no screen to show it on (no virtual display): that's said instead. Where the Default profile is a Bot's browser there (hosted in Baude, or out of sight), that's said instead of a second Emission started. A click while the last is asked does nothing. What went wrong (no screen, the host not reached, refused) in a toast"
         }
       ],
       "decisions": [
         {
           "said": "Add Emission to the family of Databases, Kubernetes, Terminal and the rest, as \"Browser\" (paraphrased)",
           "rule": "Every desktop app's main menu has Browser among the views and programs on a host, after Terminal, starting or bringing to the front Emission on that host",
+          "decided": "2026-11-26",
+          "source": [
+            {
+              "issue": "BaudeInternal#269"
+            }
+          ]
+        },
+        {
+          "said": "On a host elsewhere, Browser opens that host's Emission streamed into a Baude window, as a Bot's browser is watched; it checks for a usable display first and never starts under a virtual one (paraphrased)",
+          "rule": "☰ → Browser opens or raises Emission's own window on this machine's host; on another host it streams that host's Emission into a window here (browser_write), and says there's no screen rather than starting one under Xvfb",
           "decided": "2026-11-26",
           "source": [
             {

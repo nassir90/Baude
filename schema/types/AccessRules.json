@@ -13,7 +13,7 @@
     },
     "browser_write": {
       "$ref": "AccessRule.json",
-      "description": "Its Bots' Emission browsers driven: their tools' calls (emission), a phone showing one and answering its calls (emission_serve, emission_answer), Emission's own window brought up on its screen (browser_open), and a Bot made or driven (with Shell). Lets a member watch too."
+      "description": "Its Bots' Emission browsers driven: their tools' calls (emission), a phone showing one and answering its calls (emission_serve, emission_answer), Emission's own window brought up on its screen (browser_open), or watched and driven from elsewhere (emission_watch and emission, default), and a Bot made or driven (with Shell). Lets a member watch too."
     },
     "providers": {
       "$ref": "AccessRule.json",

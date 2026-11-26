@@ -96,13 +96,18 @@ def _memory(msg):
     return "manage_write" if msg.get("text") is not None or msg.get("seen") is not None else "manage_read"
 
 
+def _watch(msg):
+    return "browser_write" if msg.get("default") else "browser_read"  # (Emission's own window: driven, not a Bot's)
+
+
 def _tasks(msg):
     return "manage_write" if "set" in msg or "delete" in msg else "manage_read"
 
 
 OPS = {  # (the rule each op is checked for, before it's taken (a function: msg's, by its fields); FOUND's as it's found)
     **dict.fromkeys(("terminal", "terminal_in", "terminal_resize", "terminal_close", "terminals", "multiplex"), "shell"),
-    **dict.fromkeys(("emission_watch", "emission_watch_say"), "browser_read"),
+    "emission_watch": _watch,
+    "emission_watch_say": "browser_read",
     **dict.fromkeys(("emission", "emission_serve", "emission_answer", "browser_open"), "browser_write"),
     "infer": "providers",
     "files": "model_files",

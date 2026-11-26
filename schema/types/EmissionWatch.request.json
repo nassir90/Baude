@@ -15,6 +15,10 @@
       "$ref": "BotRef.json",
       "description": "The Bot."
     },
+    "default": {
+      "type": "boolean",
+      "description": "Emission's own window here watched instead of a Bot's, on its Default profile (☰ → Browser from another host): started (on this host's screen) if none has the profile; checked for browser_write."
+    },
     "max_w": {
       "type": "integer",
       "description": "The pane's width."

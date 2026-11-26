@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "One thing a pending restart waits for: a chat whose agent is running a command, or a task's run.",
+  "properties": {
+    "kind": {
+      "enum": ["chat", "task"],
+      "description": "A chat running a command, or a task running."
+    },
+    "session": {
+      "type": "string",
+      "description": "The session's id (a task's: its Bot's)."
+    },
+    "name": {
+      "type": "string",
+      "description": "The chat's title, or the task's name."
+    },
+    "what": {
+      "type": "string",
+      "description": "What it runs: the chat's oldest command."
+    }
+  },
+  "required": ["kind", "session", "name"],
+  "additionalProperties": false
+}

@@ -344,6 +344,13 @@
       ]
     },
     {
+      "name": "Daemon restart line",
+      "shows": "At the foot, under the rule and over Update, while This Mac's daemon keeps a restart (info's restart): a flat button with \"Restarting the daemon once N chats or tasks finish\", or \"Daemon restart paused\" while any app is showing what it waits for.",
+      "copy": ["hosts.restart_waiting", "hosts.restart_paused", "hosts.restart_blockers", "hosts.restart_nothing", "shared_settings.restart", "hosts.force_restart"],
+      "actions": [{"by": "click", "does": "Opens \"Waiting For\": a list of each chat running a command (a terminal icon, the chat's title) and each task running (a play icon, the task's name), or \"Nothing running\"; the restart is paused while it's open. Restart (suggested; also what closing it does) lets go of the pause, and the daemon restarts once nothing is running; Force Restart (destructive) restarts it now, what's running stopped and turns cut short."}],
+      "decisions": [{"said": "When the daemon is waiting to restart, the owner wants to see which chats, tasks or services are holding it up; while that view is open the restart is paused, with Restart and Force Restart buttons (paraphrased)", "rule": "Every app shows a host's pending daemon restart at the foot of its list; tapped or clicked, it lists what the restart waits for (each chat running a command, each task running) and the restart is paused while that view is open. Restart (or closing it) restarts once nothing is running; Force Restart restarts now. The host keeps the pending restart and its blockers and says them on the wire (info's restart), so every app shows the same", "decided": "2026-11-26", "source": [{"issue": "BaudeInternal#253"}]}]
+    },
+    {
       "name": "Update bar",
       "shows": "At the very foot, under a rule from the list, whenever a newer version is there, whether or not Auto restart on update is on: a flat button \"Update\" at the left. Tooltip: \"Waiting for:\" with bullet lines of what an automatic restart waits for, or \"A new version is ready\".",
       "copy": [

@@ -25,25 +25,43 @@ from markdownview import MarkdownView  # noqa: E402
 class UpdateBar(Gtk.Box):
     """At the foot of a sidebar, under a rule from what's listed above it: Update, while a new version's waiting to
     be restarted onto (what it waits for in its tooltip: say); clicked, on_click (restart now; asked only if that
-    stops something)."""
+    stops something). Over it, while this machine's daemon has a restart pending, a line saying so (say_restart);
+    clicked, on_restart (what it waits for: meshui.restart_dialog)."""
 
-    def __init__(self, on_click):
+    def __init__(self, on_click, on_restart=None):
         super().__init__(orientation=Gtk.Orientation.VERTICAL, visible=False)
         self.add_css_class("update-bar")
         self.append(Gtk.Separator())
+        self.restart = Gtk.Button(halign=Gtk.Align.FILL, margin_start=6, margin_end=6, margin_top=4, visible=False)
+        self.restart_label = Gtk.Label(xalign=0, wrap=True, wrap_mode=Pango.WrapMode.WORD_CHAR)
+        self.restart.set_child(self.restart_label)
+        self.restart.add_css_class("flat")
+        self.restart.connect("clicked", lambda *_: on_restart and on_restart())
+        self.append(self.restart)
         self.button = Gtk.Button(label=wording.say("update_bar.update"), halign=Gtk.Align.START, margin_start=6,
-                                 margin_end=6, margin_top=4, margin_bottom=4)
+                                 margin_end=6, margin_top=4, margin_bottom=4, visible=False)
         self.button.add_css_class("flat")
         self.button.connect("clicked", lambda *_: on_click())
         self.append(self.button)
 
     def say(self, waiting):
-        """waiting: what the restart waits for (shown in the tooltip), or None: no update waiting, no bar."""
-        self.set_visible(waiting is not None)
+        """waiting: what the restart waits for (shown in the tooltip), or None: no update waiting, no button."""
+        self.button.set_visible(waiting is not None)
         if waiting is not None:
             self.button.set_tooltip_text(
                 wording.say("update_bar.waiting_for", waits="\n".join(f"• {w}" for w in waiting)) if waiting else
                 wording.say("update_bar.ready"))
+        self.shown()
+
+    def say_restart(self, said):
+        """said: the daemon's pending restart, said (meshui.restart_said), or None: none, no line."""
+        self.restart.set_visible(said is not None)
+        if said is not None:
+            self.restart_label.set_label(said)
+        self.shown()
+
+    def shown(self):
+        self.set_visible(self.button.get_visible() or self.restart.get_visible())
 
 
 class HostState(Gtk.Revealer):

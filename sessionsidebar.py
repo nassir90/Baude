@@ -169,8 +169,9 @@ class SessionSidebar(SidebarMenu, Gtk.Box):
         self.list.connect("row-activated", self.on_activate)
         self.scroller = Gtk.ScrolledWindow(child=self.list, vexpand=True, hscrollbar_policy=Gtk.PolicyType.NEVER)
         self.append(self.scroller)
-        # (at the foot, under a rule from the chats: Update, while a new version waits: show_update_bars)
-        self.update_bar = chatparts.UpdateBar(lambda: win.get_application().update_now(win))
+        # (at the foot, under a rule from the chats: Update, while a new version waits, and This Mac's daemon's
+        # pending restart: show_update_bars)
+        self.update_bar = chatparts.UpdateBar(lambda: win.get_application().update_now(win), win.show_restart_blockers)
         self.append(self.update_bar)
         keys = Gtk.EventControllerKey()
         keys.connect("key-pressed", self.on_key)

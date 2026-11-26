@@ -146,6 +146,11 @@
       "shows": "A newer version there, whether or not Auto restart on update is on: an Update button at the foot of the left column, under the notebooks, its tooltip listing what an automatic restart is waiting for (\"a question being answered\", \"a dialog open\", \"you, using this window\"). With the setting on Record restarts itself once idle; on or off, clicking the button restarts now. When a question is being answered to Meta, the click first asks \"Restart now?\" (body \"The question being answered is stopped.\", buttons Cancel, Restart Now in red)."
     },
     {
+      "name": "daemon restart pending",
+      "decisions": [{"said": "When the daemon is waiting to restart, the owner wants to see which chats, tasks or services are holding it up; while that view is open the restart is paused, with Restart and Force Restart buttons (paraphrased)", "rule": "Every app shows a host's pending daemon restart at the foot of its list; tapped or clicked, it lists what the restart waits for (each chat running a command, each task running) and the restart is paused while that view is open. Restart (or closing it) restarts once nothing is running; Force Restart restarts now. The host keeps the pending restart and its blockers and says them on the wire (info's restart), so every app shows the same", "decided": "2026-11-26", "source": [{"issue": "BaudeInternal#253"}]}],
+      "shows": "This machine's daemon keeping a restart: over Update at the foot of the left column, \"Restarting the daemon once N chats or tasks finish\" (\"Daemon restart paused\" while any app shows what it waits for); clicked, the same \"Waiting For\" dialog as Baude's sidebar, with Restart and Force Restart."
+    },
+    {
       "name": "restarted",
       "shows": "After ☰ → Restart Record or an auto-update the window comes back as it was: the notebook, the tab, window size and place, right column width and page, what was typed in Meta's box with its caret and quote, the page's caret and an un-kept new title, and every open page, chat and Meta's own scroll position. A toast says it updated (\"Record updated\", with the count of new commits)."
     }

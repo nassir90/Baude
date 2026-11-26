@@ -71,6 +71,7 @@ gi.require_version("Graphene", "1.0")
 from gi.repository import Adw, Gdk, Gio, GLib, Gtk  # noqa: E402
 import pointers  # noqa: E402  (the pointer's shape: Record's too)
 import update  # noqa: E402  (a new version from git, restarted onto once idle: Record's too)
+import meshui  # noqa: E402  (a daemon's pending restart, said at the sidebar's foot: Record's too)
 baudelib.wire.HEAD_COMMIT = update.STARTED  # (said to the host processes it reaches: logged by one on other code)
 baudelib.wire.HEAD_CLIENT = "baude"  # (listed as Baude among the apps connected to a host)
 import widgets  # noqa: E402  (what Record draws as Baude does: the links' logos; see widgets.py)
@@ -211,9 +212,12 @@ class BaudeApp(Adw.Application):
 
     def show_update_bars(self):
         why = self.update_reasons()
+        host = local_host()
+        restart = meshui.restart_said(host.info.get("restart") if host is not None else None)
         for w in self.windows():
             if (bar := getattr(w.sidebar, "update_bar", None)) is not None:
                 bar.say(why)
+                bar.say_restart(restart)
 
     def update_now(self, win):
         """The bar clicked: restarted now. Nothing running: straight away; what's running, stopped: said first, and
@@ -223,7 +227,7 @@ class BaudeApp(Adw.Application):
         def go():
             host = local_host()
             if host is not None and host.info.get("update"):
-                host.request({"op": "quit", "restart": True})  # (it comes back as a chat wants it: local_server)
+                win.restart_host(now=True)  # (it starts again on the new version, and comes back)
             if self.updater is not None and self.updater.pending():
                 self.updater.apply(self.restart)
         if not why:

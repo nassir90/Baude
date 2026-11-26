@@ -8,13 +8,15 @@
   ],
   "code": [
     "Home.kt:UpdateBar",
+    "Home.kt:RestartBlockers",
     "Update.kt:Update",
     "Update.kt:UpdateJob",
     "Update.kt:UpdateReceiver"
   ],
   "copy": [
     "update_bar",
-    "updates"
+    "updates",
+    "hosts"
   ],
   "parts": [
     {
@@ -29,6 +31,12 @@
           "does": "installs the build over this one through Android's installer if it is ready; downloads it first if it is not, then installs. The first time, opens Android's page to allow installs from this app, and carries on as you come back. Android closes the app to replace it"
         }
       ]
+    },
+    {
+      "name": "Daemon restart line",
+      "shows": "Over Update, one line per host keeping a daemon restart, as Baude's sidebar says This Mac's (\"Restarting the daemon once N chats or tasks finish\", or \"Daemon restart paused\"); tapped, the same \"Waiting For\" dialog with Restart and Force Restart.",
+      "copy": ["hosts.restart_waiting", "hosts.restart_paused", "hosts.restart_blockers", "hosts.restart_nothing", "shared_settings.restart", "hosts.force_restart"],
+      "decisions": [{"said": "When the daemon is waiting to restart, the owner wants to see which chats, tasks or services are holding it up; while that view is open the restart is paused, with Restart and Force Restart buttons (paraphrased)", "rule": "Every app shows a host's pending daemon restart at the foot of its list; tapped or clicked, it lists what the restart waits for (each chat running a command, each task running) and the restart is paused while that view is open. Restart (or closing it) restarts once nothing is running; Force Restart restarts now. The host keeps the pending restart and its blockers and says them on the wire (info's restart), so every app shows the same", "decided": "2026-11-26", "source": [{"issue": "BaudeInternal#253"}]}]
     },
     {
       "name": "Progress",

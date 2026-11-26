@@ -1,5 +1,5 @@
 {
-  "description": "The hosts of the mesh as Baude's and Record's windows show them: each one's state, its right-click menu, and its daemon's restart.",
+  "description": "The hosts of the mesh as Baude's, Record's and the phone's windows show them: each one's state, its right-click menu, and its daemon's restart (the line at the foot of the list while one is pending, and what it waits for).",
   "messages": {
     "looking": "Looking for {$host} on the network…",
     "down": "Can't connect to {$host} at the moment",
@@ -7,7 +7,11 @@
     "deactivated": "{$host} is deactivated",
     "activate": "Activate",
     "deactivate": "Deactivate",
-    "restart_waiting": ".input {$n :number} .match $n one {{Restarting the daemon once {$n} session finishes running a command}} * {{Restarting the daemon once {$n} sessions finish running a command}}",
+    "restart_waiting": ".input {$n :number} .match $n one {{Restarting the daemon once {$n} chat or task finishes}} * {{Restarting the daemon once {$n} chats or tasks finish}}",
+    "restart_paused": "Daemon restart paused",
+    "restart_blockers": "Waiting For",
+    "restart_nothing": "Nothing running",
+    "force_restart": "Force Restart",
     "daemon_restarted": "Daemon restarted",
     "now_deactivated": "{$host} deactivated",
     "now_activated": "{$host} activated",

@@ -13,7 +13,8 @@ import uuid
 
 from baudelib import (
     access, agentproxy, autofix, deps, desktopchats, emissionlink, emissiontools, hostaccounts, hostdb, hostdocker, hostfiles, hostfixes, hostkube,
-    hostlogin, mesh, meshtools, hostterminal, multiplexlink, notes, telemetry, themes, wire, wording, worktree,
+    hostlogin, mesh, meshtools, hostterminal, multiplexlink, notes, selfupdate, telemetry, themes, wire, wording,
+    worktree,
 )
 from baudelib.serverstate import (
     APPS, BOT_PICTURE_MAX, Conn, FRAME_KEYS, _mtime, _write_json, _write_text, bot_dir, clean_env,
@@ -145,6 +146,73 @@ class ServerRunning:
                 procs.append(s.proc)
         return None, procs
 
+    # ---- a restart kept till nothing blocks it (info's restart): a head's Restart Daemon, or its own updater's
+    def blockers(self):
+        """(lock held) What a restart waits for (running, as every head lists it: RestartBlocker): each chat whose
+        agent's running a command (its oldest), then each task's run."""
+        chats = [{"kind": "chat", "session": s.id, "name": s.listing()["title"] or "", "what": cmds[0]["what"]}
+                 for s in self.sessions.values() if (cmds := s.commands())]
+        return chats + self.tasks.blocking()
+
+    def restart_state(self):
+        """(lock held) info's restart: the restart kept (RestartState), or None."""
+        p = self.pending_restart
+        if p is None:
+            return None
+        return {"by": p["by"], **({"to": p["to"]} if p.get("to") else {}), "paused": bool(self.restart_holds),
+                "blockers": self.blockers()}
+
+    def restart_when_free(self, by, to=None):
+        """A restart kept (by: head, update; to: the commit an update's onto), and gone through once nothing's running
+        and no head's holding it (_restart_watch), heads told as what it waits for changes."""
+        with self.lock:
+            p = self.pending_restart
+            self.pending_restart = {"by": p["by"] if p else by, "to": to or (p or {}).get("to")}
+            if p is None:
+                threading.Thread(target=self._restart_watch, daemon=True, name="restart").start()
+            self.changed()
+            return self.restart_state()
+
+    def drop_restart(self, by):
+        """Its updater's restart let go of (updates turned off, or the checkout moved on): one a head asked for stays."""
+        with self.lock:
+            if self.pending_restart is not None and self.pending_restart["by"] == by:
+                self.pending_restart = None
+                self.changed()
+
+    def hold_restart(self, conn, on):
+        """(lock held) A head showing what the restart waits for holds it (on), or lets go of it."""
+        was = bool(self.restart_holds)
+        (self.restart_holds.add if on else self.restart_holds.discard)(conn)
+        if was != bool(self.restart_holds):
+            self.changed()
+
+    def _restart_watch(self):
+        said = None
+        while not self.stopped.wait(0.5):
+            with self.lock:
+                if self.pending_restart is None:
+                    return
+                state = self.restart_state()
+                if state != said:
+                    said = state
+                    self.changed()
+                if state["paused"] or state["blockers"]:
+                    continue
+            if self.restart_now(force=False):
+                return
+
+    def restart_now(self, force=True):
+        """The host process stopped to start again on the code checked out (baude_headless.py's serve: restarting);
+        not force: only if nothing's running. True once it's stopping."""
+        with self.lock:
+            to = (self.pending_restart or {}).get("to")
+        to = to or selfupdate.git(selfupdate.HERE, "rev-parse", "HEAD", timeout=5) or self.commit or "here"
+        if self.shutdown(if_idle=not force, restart=to) is not None:
+            return False
+        self.log(f"restart{' forced' if force else ''}: stopping to start again")
+        return True
+
     def said_quitting(self):
         """(lock held) How far along stopping it is (quitting), to the heads attached and the menu bar's item."""
         q = self.quitting
@@ -265,6 +333,7 @@ class ServerRunning:
                     pass
             with self.lock:
                 self.conns.discard(conn)
+                self.hold_restart(conn, False)  # (a head gone: its pause with it)
                 for s in list(self.sessions.values()):
                     s.viewers.discard(conn)
                     s.live.discard(conn)
@@ -445,6 +514,19 @@ class ServerRunning:
                 threading.Thread(target=self.stop_procs, args=(procs, bool(msg.get("restart"))), daemon=True,
                                  name="quit").start()
             return None
+        if op == "restart":  # (kept till nothing blocks it, held while a head shows what that is, or now)
+            if msg["do"] == "now":
+                reply("quitting")
+                threading.Thread(target=self.restart_now, daemon=True, name="restart").start()
+                return None
+            if msg["do"] == "pause":
+                with self.lock:
+                    if self.pending_restart is not None:
+                        self.hold_restart(conn, True)
+                    return reply("restart_pending", restart=self.restart_state())
+            with self.lock:
+                self.hold_restart(conn, False)
+            return reply("restart_pending", restart=self.restart_when_free("head"))
         if op == "start":
             return self.start(msg, conn, req)
         if op == "read_file":

@@ -1,6 +1,6 @@
 """meshui — the mesh in a window: GitHub's lists watched while it's shown (watch_github), a banner while an app
-and its host process run different code (HostApart), and ☰ → Mesh: the machines, their versions, a machine
-renamed or removed (mesh_dialog).
+and its host process run different code (HostApart), a daemon's pending restart and what it waits for (restart_said,
+restart_dialog), and ☰ → Mesh: the machines, their versions, a machine renamed or removed (mesh_dialog).
 """
 import weakref
 import threading
@@ -139,6 +139,64 @@ class HostApart:
             restart_host()
         elif apart == "both":
             restart_host(then=restart_app)
+
+
+# ---- a daemon's restart, kept by it till nothing blocks it (info's restart): every head shows the same
+BLOCKER_ICONS = {"chat": "utilities-terminal-symbolic", "task": "media-playback-start-symbolic"}
+
+
+def restart_said(state):
+    """The line at the foot of a list for a host's pending restart (info's restart, RestartState), or None."""
+    if not state:
+        return None
+    if state.get("paused"):
+        return wording.say("hosts.restart_paused")
+    return wording.say("hosts.restart_waiting", n=len(state.get("blockers") or []))
+
+
+def restart_dialog(remote, parent, go):
+    """Restart Daemon: what remote's pending restart waits for (each chat running a command, each task's run), the
+    restart held while it's open (restart pause: every head shows it paused). Restart, or closing it, lets go of it:
+    it restarts once nothing's running; Force Restart restarts now, what's running stopped. go(now): what the head does
+    then (waits for it to go, and for it back). Kept up with as the host says (its info's restart)."""
+    box = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE, css_classes=["boxed-list"])
+    box.set_placeholder(Gtk.Label(label=wording.say("hosts.restart_nothing"), css_classes=["dim-label"],
+                                  margin_top=12, margin_bottom=12))
+    scroll = Gtk.ScrolledWindow(child=box, propagate_natural_height=True, max_content_height=320,
+                                hscrollbar_policy=Gtk.PolicyType.NEVER)
+    dlg = Adw.AlertDialog(heading=wording.say("hosts.restart_blockers"), extra_child=scroll,
+                          default_response="restart", close_response="restart")
+    dlg.add_response("force", wording.say("hosts.force_restart"))
+    dlg.add_response("restart", wording.say("shared_settings.restart"))
+    dlg.set_response_appearance("force", Adw.ResponseAppearance.DESTRUCTIVE)
+    dlg.set_response_appearance("restart", Adw.ResponseAppearance.SUGGESTED)
+    shown = [object()]
+
+    def draw():
+        blockers = (remote.info.get("restart") or {}).get("blockers") or []
+        if blockers == shown[0]:
+            return True
+        shown[0] = blockers
+        while (row := box.get_row_at_index(0)) is not None:
+            box.remove(row)
+        for b in blockers:
+            row = Adw.ActionRow(title=b.get("name") or b.get("what") or "", use_markup=False,
+                                tooltip_text=b.get("what") or None)
+            row.add_prefix(Gtk.Image(icon_name=BLOCKER_ICONS.get(b.get("kind"), "utilities-terminal-symbolic")))
+            box.append(row)
+        return True
+    draw()
+    tick = GLib.timeout_add(500, draw)
+
+    def answered(_d, response):
+        GLib.source_remove(tick)
+        now = response == "force"
+        remote.request({"op": "restart", "do": "now" if now else "free"}, lambda _r: None)
+        go(now)
+    dlg.connect("response", answered)
+    remote.request({"op": "restart", "do": "pause"}, lambda _r: None)
+    dlg.present(parent)
+    return dlg
 
 
 # ---- ☰ → Mesh: each machine in the mesh and each host known here, the code its daemon and the apps on it run

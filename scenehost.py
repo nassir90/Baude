@@ -351,11 +351,13 @@ class Node:
         self.slots, self.hidden, self.pick = spec.get("slots"), bool(spec.get("hidden")), spec.get("pick", "open")
         self.obj, self.face, self.widget = obj, None, None
         self.slot, self.dirty, self.paintable, self.texsize = None, True, None, None  # (slot: its picture's place)
+        self.held = None  # (GSK's texture its picture was copied from, kept till the GPU's surely done with it)
         self.alloc = self.alloc_size = None  # (the 2D transform its widget's allocated with, and its px)
         self.laid = None  # (whether it was shown, and could be pointed at, as it was laid out last)
         self.placed = None  # (its world matrix's version, the matrix, and what's worked out from it)
         self.own = None  # (where it and its parent's matrix were as that was worked out)
-        self.seen = (None, 0, True)  # (as the scene was last gone over: then, its matrix's version, whether shown)
+        self.seen = (None, 0, True, None, None, None)  # (as the scene was last gone over: then, its matrix's version,
+        # whether shown, its thing, its state's material and its own (material's names, its own or a parent's))
         self.made_by = None  # (the slots node it was made for, if any)
 
     def local(self):
@@ -438,6 +440,18 @@ def _inverse(m):
     return tuple(inv.to_float()) if ok else None
 
 
+def _rows(tex):
+    """A texture's pixels read back: RGBA8 premultiplied, rows top first, packed."""
+    tw, th = tex.get_width(), tex.get_height()
+    d = Gdk.TextureDownloader.new(tex)
+    d.set_format(Gdk.MemoryFormat.R8G8B8A8_PREMULTIPLIED)
+    data, stride = d.download_bytes()
+    raw = data.get_data()
+    return raw if stride == tw * 4 else b"".join(raw[r * stride:r * stride + tw * 4] for r in range(th))
+
+
+GL_TEXTURE_ID_AT = 0x70  # (GdkGLTexture's GL id, in its private struct, on GTK 4.24.1)
+ZERO_COPY = {"ok": None, "flipped": False}  # (whether GSK's textures are drawn from as they are: None till checked)
 VIEWS = weakref.WeakSet()  # (the scenes made, told of each move before GTK has it)
 HOOKED = []
 
@@ -447,7 +461,7 @@ def _before_gtk(surface, event):
     through GDK's own calls)."""
     gdk = _gdk()
     ptr = hash(event) & (2 ** 64 - 1)  # (PyGObject's GPointer hashes as its pointer: checked by the event's surface)
-    if gdk.gdk_event_get_surface(ptr) != C.pythonapi.PyCapsule_GetPointer(surface.__gpointer__, None):
+    if gdk.gdk_event_get_surface(ptr) != _address(surface):
         return True
     if gdk.gdk_event_get_event_type(ptr) == int(Gdk.EventType.MOTION_NOTIFY):
         x, y = C.c_double(), C.c_double()
@@ -469,6 +483,12 @@ def _gdk():
     C.pythonapi.PyCapsule_GetPointer.restype = C.c_void_p
     C.pythonapi.PyCapsule_GetPointer.argtypes = [C.py_object, C.c_char_p]
     return lib
+
+
+def _address(obj):
+    """A GObject's address."""
+    _gdk()
+    return C.pythonapi.PyCapsule_GetPointer(obj.__gpointer__, None)
 
 
 def _hook():
@@ -664,12 +684,20 @@ class SceneView(Gtk.Widget):
         return n.placed[1]
 
     def _see(self, n):
-        """n's matrix's version and whether it's shown, as of this going over (went): its matrix worked out again only
-        if it or a parent moved."""
+        """n's matrix's version, whether it's shown, its thing and its materials (as material() finds them), as of this
+        going over (went), each from its parent's: its matrix worked out again only if it or a parent moved."""
         if n.seen[0] == self.went:
             return n.seen
         p = self.nodes.get(n.parent)
-        _w, pv, pshown = self._see(p) if p is not None else (None, 0, True)
+        _w, pv, pshown, pobj, pstate, pown = self._see(p) if p is not None else (None, 0, True, None, None, None)
+        obj = n.obj if n.obj is not None else pobj
+        state = obj.get("state") if obj is not None else None
+        if obj is not None and state in n.states:
+            named = n.states[state]
+        elif n.obj is None or p is None:
+            named = pstate  # (the same thing as its parent's)
+        else:
+            named = self._state_material(p, obj)
         own = n.own
         if own is None or own[3] != pv or own[0] != n.position or own[1] != n.rotation or own[2] != n.scale:
             m = n.local()
@@ -678,8 +706,21 @@ class SceneView(Gtk.Widget):
             self.versions += 1
             n.placed = (self.versions, m, {})
             n.own = (n.position[:], n.rotation[:], n.scale[:], pv)
-        n.seen = (self.went, n.placed[0], pshown and not n.hidden)
+        n.seen = (self.went, n.placed[0], pshown and not n.hidden, obj, named, n.material or pown)
         return n.seen
+
+    def _state_material(self, at, obj):
+        while at is not None:
+            if obj.get("state") in at.states:
+                return at.states[obj["state"]]
+            at = self.nodes.get(at.parent)
+        return None
+
+    def _material(self, n):
+        """material(n), from the frame's going over."""
+        mats = self.scene.get("materials") or {}
+        _w, _v, _s, _o, named, own = n.seen
+        return mats.get(named, {}) if named else mats.get(own, {}) if own else {}
 
     def go_over(self):
         """Every node's place and whether it's shown, once a frame (and again before a click's picked)."""
@@ -1121,18 +1162,46 @@ class SceneView(Gtk.Widget):
         tex = native.get_renderer().render_texture(node, Graphene.Rect().init(0, 0, pw * PICTURE_SCALE, ph * PICTURE_SCALE))
         n.dirty = False  # (before it's put in: a redraw from now on is wanted again)
         tw, th = tex.get_width(), tex.get_height()
-        d = Gdk.TextureDownloader.new(tex)
-        d.set_format(Gdk.MemoryFormat.R8G8B8A8_PREMULTIPLIED)
-        data, stride = d.download_bytes()
-        raw = data.get_data()
-        if stride != tw * 4:
-            raw = b"".join(raw[r * stride:r * stride + tw * 4] for r in range(th))
-        self.area.make_current()
-        n.slot = self.gl.picture(n.slot, tw, th, raw, hint=self.panels)
+        gid = self._shared(tex)
+        if gid is not None:
+            self.gl.gl.Flush()  # (in GSK's context, still current: its drawing reaches the GPU before ours reads it)
+            self.area.make_current()
+            n.slot = self.gl.picture(n.slot, tw, th, source=gid, flipped=ZERO_COPY["flipped"], hint=self.panels)
+            n.held = tex  # (GSK deletes its texture as it's let go of: kept till the next picture's taken)
+        else:
+            self.area.make_current()
+            n.slot = self.gl.picture(n.slot, tw, th, _rows(tex), hint=self.panels)
         n.texsize = (pw, ph)
         self.stats["uploads"] += 1
         self.stats["upload_ms"] += (time.perf_counter() - t0) * 1000
         return n.slot
+
+    def _shared(self, tex):
+        """GSK's GL texture's id, to be drawn from without reading it back (zero copy), where it's known to be right:
+        GTK 4.24.1 alone (the id is read from GdkGLTexture's private struct), and only once the first picture's pixels
+        read in our context are the downloader's (as they are, or upside down). None: read it back."""
+        z = ZERO_COPY
+        if z["ok"] is False or not isinstance(tex, Gdk.GLTexture) or os.environ.get("SCENE_READBACK"):
+            return None
+        if (Gtk.get_major_version(), Gtk.get_minor_version(), Gtk.get_micro_version()) != (4, 24, 1):
+            z["ok"] = False
+            return None
+        gid = C.c_uint.from_address(_address(tex) + GL_TEXTURE_ID_AT).value
+        if z["ok"] is None:
+            self.gl.gl.Flush()
+            want = _rows(tex)
+            self.area.make_current()
+            got = self.gl.read(gid, tex.get_width(), tex.get_height())
+            row = tex.get_width() * 4
+            rows = lambda b: [b[i:i + row] for i in range(0, len(b), row)]  # noqa: E731
+            if got is not None and got == want:
+                z.update(ok=True, flipped=False)
+            elif got is not None and rows(got)[::-1] == rows(want):
+                z.update(ok=True, flipped=True)
+            else:
+                z["ok"] = False
+                return None
+        return gid
 
     def _pictures(self, wanted):
         """The pictures this frame makes: the panel under the pointer's first, then those with none yet (till
@@ -1169,12 +1238,13 @@ class SceneView(Gtk.Widget):
             if not n.seen[2]:
                 continue
             if n.mesh is not None:
-                mat = self.material(n)
+                mat = self._material(n)
                 tex = self._texture(mat["texture"]) if mat.get("texture") else None
                 m = mats.get(id(mat))
                 if m is None:
                     m = mats[id(mat)] = scenegl.material(mat)
-                meshes.append((self._mesh(n.mesh), tex, self.drawn(n, "model", lambda: scenegl.model(n.placed[1])) + m))
+                meshes.append((self._mesh(n.mesh), tex,
+                               self.drawn(n, "model", lambda: scenegl.model(n.placed[1])) + m + scenegl.layer()))
             elif n.panel is not None and n.face is not None and n.alloc is not None:
                 sw, sh = n.panel.get("size") or (1.6, 1.2)
                 model, c = self.drawn(n, ("panel", sw, sh), lambda: (lambda m: (scenegl.model(m), _vec(m, 0, 0, 0)))(
@@ -1189,7 +1259,11 @@ class SceneView(Gtk.Widget):
         draws = []
         for d, n, model in panels:
             if n.slot is not None:
-                draws.append((d, n.slot[0], model + scenegl.material(self.material(n), n.slot[1])))
+                mat = self._material(n)
+                m = mats.get(id(mat))
+                if m is None:
+                    m = mats[id(mat)] = scenegl.material(mat)
+                draws.append((d, n.slot[0], model + m + scenegl.layer(n.slot[1])))
         area.make_current()
         self.gl.frame(w * sc, h * sc, view, proj, eye, self.scene, meshes, draws)
         if os.environ.get("SCENE_FINISH"):  # (measuring: the GPU's work done before the frame's timed as over)

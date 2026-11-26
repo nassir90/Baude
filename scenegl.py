@@ -43,7 +43,8 @@ SIGS = {
     "glDrawArraysInstanced": (None, "u", "i", "i", "i"), "glTexBuffer": (None, "u", "u", "u"),
     "glGetUniformBlockIndex": ("u", "u", "c"), "glUniformBlockBinding": (None, "u", "u", "u"),
     "glBindBufferBase": (None, "u", "u", "u"), "glFlush": (None,),
-    "glGetTexLevelParameteriv": (None, "u", "i", "u", "pi"),
+    "glGetTexLevelParameteriv": (None, "u", "i", "u", "pi"), "glIsTexture": ("u8", "u"),
+    "glGetTexImage": (None, "u", "i", "u", "u", "p"),
 }
 TEXTURE_2D, RGBA, RGBA8, RGBA16F, UNSIGNED_BYTE, HALF_FLOAT, FLOAT = 0x0DE1, 0x1908, 0x8058, 0x881A, 0x1401, 0x140B, 0x1406
 TRIANGLES, TRIANGLE_STRIP, ARRAY_BUFFER, STATIC_DRAW = 0x0004, 0x0005, 0x8892, 0x88E4
@@ -59,6 +60,7 @@ TEXTURE_2D_ARRAY, TEXTURE_BUFFER, UNIFORM_BUFFER, RGBA32F, STREAM_DRAW = 0x8C1A,
 READ_FRAMEBUFFER, DRAW_FRAMEBUFFER, MAX_LEVEL, NEAREST = 0x8CA8, 0x8CA9, 0x813D, 0x2600
 TEXTURE_WIDTH, TEXTURE_HEIGHT = 0x1000, 0x1001
 LIGHTS_MAX = 8
+LEVELS = 6  # (a picture's mip levels: down to 1/32 of it, each copied into its layer on its own as it's made)
 
 
 class GL:
@@ -330,7 +332,7 @@ class Pictures:
 
     def __init__(self, r, w, h):
         self.r, self.w, self.h = r, w, h
-        self.levels = 1 + int(math.log2(max(w, h, 1)))
+        self.levels = min(LEVELS, 1 + int(math.log2(max(w, h, 1))))
         self.tex, self.cap, self.used, self.free = None, 0, 0, []
 
     def _alloc(self, cap):
@@ -404,15 +406,20 @@ class Pictures:
             self.tex = None
 
 
-INSTANCE = struct.Struct("12f")  # (an instance's material: color, specular; emissive, glow; shininess, layer, -, -)
+HEAD = struct.Struct("9f")  # (an instance's material: color, specular; emissive, glow; shininess; then its layer, -, -)
 FRAME = struct.Struct("16f4f4f4i32f32f")  # (the Frame block, std140)
 
 
-def material(mat, layer=0.0):
-    """A material's part of an instance (after its model's 16 floats), as the shaders take it."""
-    return INSTANCE.pack(*rgb(mat.get("color", "#ffffff")), float(mat.get("specular", 0.2)),
-                         *rgb(mat.get("emissive", "#000000")), float(mat.get("glow", 1.0)),
-                         float(mat.get("shininess", 32)), float(layer), 0.0, 0.0)
+def material(mat):
+    """A material's part of an instance (after its model's 16 floats, before layer()'s), as the shaders take it."""
+    return HEAD.pack(*rgb(mat.get("color", "#ffffff")), float(mat.get("specular", 0.2)),
+                     *rgb(mat.get("emissive", "#000000")), float(mat.get("glow", 1.0)), float(mat.get("shininess", 32)))
+
+
+@functools.lru_cache(maxsize=4096)
+def layer(n=0):
+    """An instance's last part: its picture's layer."""
+    return struct.pack("3f", float(n), 0.0, 0.0)
 
 
 def model(m):
@@ -513,6 +520,22 @@ class Renderer:
             slot = (group, group.take(hint))
         slot[0].put(slot[1], data, source, flipped)
         return slot
+
+    def read(self, tid, w, h):
+        """A w by h GL texture's level 0 read back (RGBA8 rows, GL's first row first), or None if it isn't one here."""
+        gl = self.gl
+        if not gl.IsTexture(tid):
+            return None
+        gl.ActiveTexture(TEXTURE0)
+        gl.BindTexture(TEXTURE_2D, tid)
+        iw, ih = C.c_int(), C.c_int()
+        gl.GetTexLevelParameteriv(TEXTURE_2D, 0, TEXTURE_WIDTH, C.byref(iw))
+        gl.GetTexLevelParameteriv(TEXTURE_2D, 0, TEXTURE_HEIGHT, C.byref(ih))
+        if (iw.value, ih.value) != (w, h):
+            return None
+        buf = C.create_string_buffer(w * h * 4)
+        gl.GetTexImage(TEXTURE_2D, 0, RGBA, UNSIGNED_BYTE, buf)
+        return buf.raw
 
     def free_picture(self, slot):
         if slot is not None:

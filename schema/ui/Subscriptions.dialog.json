@@ -110,7 +110,7 @@
         },
         {
           "name": "subscription card",
-          "shows": "One card per subscription, stacked: Claude's CLI default first (where the host has claude), then each account. Its name, and ⋮ on an account's card (CLI default has none). A Claude card then has its usage: for each limit, its name with its percentage at the end (\"Five Hour Limit (Resets 3:16 PM)\" … \"25%\"; \"Weekly Limit (Resets Friday 3:16 PM)\", or \"Weekly Limit (Resets 3:16 PM)\" where it resets today; the times in the viewer's local time and clock format) and a bar under them filled that far; till the page's own read answers, the host's last reading of it the same way but greyed (half opacity), and \"Checking…\" only where the host has none; \"Usage unavailable for this sign-in\" for a token account (a setup token can't read them) or the error if reading failed. A Codex card has its name and ⋮ only.",
+          "shows": "One card per subscription, stacked: the provider's CLI default first (Claude's where the host has claude, Codex's where it has codex), then each account. Its name, and ⋮ on an account's card (CLI default has none). A Claude card then has its usage: for each limit, its name with its percentage at the end (\"Five Hour Limit (Resets 3:16 PM)\" … \"25%\"; \"Weekly Limit (Resets Friday 3:16 PM)\", or \"Weekly Limit (Resets 3:16 PM)\" where it resets today; the times in the viewer's local time and clock format) and a bar under them filled that far; till the page's own read answers, the host's last reading of it the same way but greyed (half opacity), and \"Checking…\" only where the host has none; \"Usage unavailable for this sign-in\" for a token account (a setup token can't read them) or the error if reading failed. A Codex card has its usage the same way, its limits as Codex's App Server says them (its five-hour and weekly windows named as Claude's); \"Usage unavailable for this sign-in\" where its sign-in isn't a ChatGPT plan's.",
           "actions": [
             {
               "by": "click ⋮",
@@ -118,7 +118,7 @@
             },
             {
               "by": "(none)",
-              "does": "Each Claude card's usage is read from the host (accounts usage, its id; \"\" for CLI default) as the page is shown and every 30 seconds while it's shown and the app (the phone's) or window (the desktop's) is in front, one read at a time per card, the bars drawn again in place; the host reads each account's usage once per ~25 s however many clients ask, one claude at a time; every answer to accounts carries the host's last reading of each subscription with when it was read (last_usage), which the page shows greyed till its own read of that card answers"
+              "does": "Each card's usage is read from the host (accounts usage, its id; \"\" for Claude's CLI default, \"\" with provider codex for Codex's) as the page is shown and every 30 seconds while it's shown and the app (the phone's) or window (the desktop's) is in front, one read at a time per card, the bars drawn again in place; the host reads each account's usage once per ~25 s however many clients ask, one claude or codex at a time (Codex's: its App Server's account/rateLimits/read, run with the subscription's CODEX_HOME, ~/.codex for CLI default); every answer to accounts carries the host's last reading of each subscription with when it was read (last_usage), which the page shows greyed till its own read of that card answers"
             }
           ],
           "copy": [
@@ -177,6 +177,16 @@
               "source": [
                 {
                   "issue": "BaudeInternal#242"
+                }
+              ]
+            },
+            {
+              "said": "(BaudeInternal#264, paraphrased) Codex's CLI default shows no usage amounts",
+              "rule": "Every app's Subscriptions page has a card for Codex's CLI default where the host has codex, and every Codex card (CLI default and each account) shows its usage as a Claude card does: a bar per limit with its name, reset time and percentage, read the same way",
+              "decided": "2026-11-26",
+              "source": [
+                {
+                  "issue": "BaudeInternal#264"
                 }
               ]
             }

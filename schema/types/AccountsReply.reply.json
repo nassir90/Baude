@@ -52,7 +52,7 @@
       "items": {
         "$ref": "UsageLimit.json"
       },
-      "description": "usage: the subscription's limits; null where they can't be read for its sign-in (a setup token's, an API key's)."
+      "description": "usage: the subscription's limits; null where they can't be read for its sign-in (a setup token's, an API key's, a Codex sign-in that isn't a ChatGPT plan's)."
     },
     "line": {
       "type": "string",
@@ -90,7 +90,7 @@
       "additionalProperties": {
         "$ref": "UsageReading.json"
       },
-      "description": "Each Claude subscription's usage as the host last read it, by id (\"\" for the CLI's own sign-in), where that read said its limits: a client shows it greyed till its own usage read answers."
+      "description": "Each Claude and Codex subscription's usage as the host last read it, by id (\"\" for Claude's CLI's own sign-in, \"codex\" for Codex's), where that read said its limits: a client shows it greyed till its own usage read answers."
     },
     "who": {
       "type": [

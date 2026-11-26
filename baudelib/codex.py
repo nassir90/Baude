@@ -261,6 +261,35 @@ def list_models(exe, env=None, timeout=15, profile=None):
             app.p.wait()
 
 
+def rate_limits(exe, env=None, timeout=20, profile=""):
+    """A Codex subscription's (profile's; "": the CLI's own sign-in, its CODEX_HOME) rate limits as its App Server reads
+    them, without starting a thread: the snapshot's primary and secondary windows ({usedPercent, windowDurationMins,
+    resetsAt}), None where it can't say for this sign-in (an API key's, or none)."""
+    from queue import Empty, Queue
+
+    outcome = Queue()
+    app = AppServer(exe, None, env, lambda code: outcome.put(RuntimeError(f"App Server exited ({code})")),
+                    lambda _: None, profile)
+    try:
+        app.initialize(lambda: app.rpc("account/rateLimits/read", None, outcome.put, lambda _error: outcome.put(None)),
+                       lambda error: outcome.put(RuntimeError(error)))
+        try:
+            result = outcome.get(timeout=timeout)
+        except Empty:
+            raise RuntimeError("Codex rate limits timed out") from None
+        if isinstance(result, Exception):
+            raise result
+        snapshot = (result or {}).get("rateLimits")
+        return snapshot if isinstance(snapshot, dict) else None
+    finally:
+        app.kill()
+        try:
+            app.p.wait(timeout=2)
+        except subprocess.TimeoutExpired:
+            app.p.kill()
+            app.p.wait()
+
+
 class CodexProc(AppServer):
     """Translate one Codex thread to Baude's host event interface."""
 

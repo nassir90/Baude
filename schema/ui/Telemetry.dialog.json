@@ -217,7 +217,7 @@
     },
     {
       "name": "Processes",
-      "shows": "Heading \"Processes\": a row each process the host's latest sample has (its procs, as typed: app and pid), in this order, those of one app by pid: Host Process, Baude, Record, Emission, Multiplex (the phone's app, as Baude, on a phone's host). Each row: its app's logo at its start, monochrome in the row's text colour as the model logos are and as big as one (16 px; schema/icons/baude's baude-app-<app>-symbolic: the logo's shape with what's drawn on it cut out, no tile, no accent; the host process Baude's, the phone's app Baude's), the app's name, and its CPU and memory after it, dim (\"6.2% · 613 MB\"). Hidden while telemetry is off, or the sample has none.",
+      "shows": "Heading \"Processes\": a row each process the host's latest sample has (its procs, as typed: app and pid), in this order, those of one app by pid: Host Process, Baude, Record, Emission, Multiplex (the phone's app, as Baude, on a phone's host). Each row: its app's logo at its start, monochrome in the row's text colour as the model logos are and as big as one (16 px; schema/icons/baude's baude-app-<app>-symbolic: the logo's shape with what's drawn on it cut out, no tile, no accent; the host process Baude's, the phone's app Baude's), the app's name, and its CPU and memory after it, dim (\"6.2% · 613 MB\"). After the last, a Total row in bold (no logo): the processes' CPU and memory added up in the same form, a process that gave none left out of its sum; it stays at the bottom. Hidden while telemetry is off, or the sample has none.",
       "copy": [
         "side_panel.processes",
         "telemetry.host_process",
@@ -226,6 +226,7 @@
         "mesh_versions.emission",
         "deps.multiplex",
         "telemetry.cpu_rss",
+        "telemetry.total",
         "telemetry.size_gb",
         "images.size_mb"
       ],
@@ -239,6 +240,12 @@
               "issue": "BaudeInternal#261"
             }
           ]
+        },
+        {
+          "said": "Processes telemetry needs a Total row at the bottom (paraphrased)",
+          "rule": "Every app ends the Processes list with a bold Total row (no logo) that adds up the processes' CPU and memory above it, in the same form, and leaves it at the bottom",
+          "decided": "2026-11-26",
+          "source": [{"issue": "BaudeInternal#274"}]
         },
         {
           "said": "icons are not what I wanted, they should be monochrome",

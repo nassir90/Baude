@@ -224,6 +224,15 @@ private fun ProcessRow(p: Msg.TelemetryProc, n: Int?) {
             rss = saidSize(p.rss?.toLong())), style = Type.body, color = c.dim, maxLines = 1) })
 }
 
+/** The Total row ending the processes (telemetryview.proc_rows): bold, its CPU and memory the processes' added up. */
+@Composable
+private fun TotalRow(cpus: List<Double>, rsses: List<Long>) {
+    val c = LocalBaude.current
+    ActionRow(Wording.Telemetry.total, null, bold = true,
+        suffix = { Text(Wording.Telemetry.cpuRss(cpu = if (cpus.isEmpty()) "–" else String.format(Locale.ROOT, "%.1f", cpus.sum()),
+            rss = saidSize(if (rsses.isEmpty()) null else rsses.sum())), style = Type.body, color = c.fg, maxLines = 1) })
+}
+
 /** Settings → Telemetry (telemetryview.Page), Settings' fourth page: the host picked beside New session (this phone's
  * own, if it's picked), Collect Telemetry, then what that host keeps: its tokens by day over a year with the most
  * used model and effort and each model's, its machine now, its processes now, and (a computer's) line profiling with
@@ -314,7 +323,11 @@ fun TelemetryPage() {
                     val same = procs.filter { it.app == p.app }
                     p to if (same.size > 1) procs.subList(0, i).count { it.app == p.app } + 1 else null
                 }
-                BoxedList(numbered, "") { (p, n) -> ProcessRow(p, n) }
+                val cpus = procs.mapNotNull { it.cpu?.toDouble() }
+                val rsses = procs.mapNotNull { it.rss?.toLong() }
+                BoxedList(numbered + (null to null), "") { (p, n) ->
+                    if (p == null) TotalRow(cpus, rsses) else ProcessRow(p, n)
+                }
             }
         }
         if (hostId != "phone" && state != null) Profiling(state, profiles, deps, app, { app = it }, { asked++ }) { set(it) }

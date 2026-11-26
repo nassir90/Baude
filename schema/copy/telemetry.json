@@ -22,6 +22,7 @@
     "host_process": "Host Process",
     "process_n": "{$name} ({$n})",
     "cpu_rss": "{$cpu}% · {$rss}",
+    "total": "Total",
     "line_profiling": "Line Profiling",
     "process": "Process",
     "functions": "Functions",

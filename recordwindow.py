@@ -135,7 +135,7 @@ class Settings(Adw.PreferencesDialog):
         import subscriptionpage
         self.add(subscriptionpage.Page(win))
         import depsview
-        self.add(depsview.Page(win, "Record"))
+        self.add(depsview.Page(win))
         import telemetryview
         self.add(telemetryview.Page(win))
         copies, stop = json.loads(json.dumps([notebooks for _title, _action, notebooks in exports])), threading.Event()

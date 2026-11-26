@@ -1,0 +1,29 @@
+{
+  "description": "Ollama's server (settings.json's ollama_url, else OLLAMA_HOST, else 127.0.0.1:11434), which serves the Ollama models a chat can run: there when it answers, with how many models it has. Installed and not running, it's given its start command.",
+  "name": "Ollama",
+  "where": "host",
+  "needed_by": ["common.model"],
+  "group": "deps.providers",
+  "ready": "deps.running_models",
+  "detect": {
+    "macos": [{"probe": "ollama"}],
+    "linux": [{"probe": "ollama"}]
+  },
+  "installed": {
+    "macos": [{"which": "ollama"}, {"glob": "/usr/local/bin/ollama"}, {"glob": "/opt/homebrew/bin/ollama"}, {"glob": "/Applications/Ollama.app/Contents/Resources/ollama"}],
+    "linux": [{"which": "ollama"}, {"glob": "/usr/local/bin/ollama"}]
+  },
+  "install": {
+    "macos": "brew install ollama",
+    "debian": "curl -fsSL https://ollama.com/install.sh | sh",
+    "fedora": "curl -fsSL https://ollama.com/install.sh | sh",
+    "arch": "sudo pacman -S ollama"
+  },
+  "start": {
+    "macos": "ollama serve",
+    "debian": "ollama serve",
+    "fedora": "ollama serve",
+    "arch": "ollama serve"
+  },
+  "link": "https://ollama.com/download"
+}

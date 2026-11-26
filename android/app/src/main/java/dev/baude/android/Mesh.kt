@@ -16,6 +16,7 @@ import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
@@ -636,21 +637,23 @@ object Mesh {
 
     fun contact(hostId: String, sid: String): Contact? = contacts.firstOrNull { it.hostId == hostId && it.id == sid }
 
-    /** A Bot's picture, asked of its host once for each time it changes. */
-    fun picture(c: Contact) {
+    /** A Bot's picture, asked of its host once for each time it changes; then(), once it's come or couldn't be got
+     * (not if it was already asked for). */
+    fun picture(c: Contact, then: (() -> Unit)? = null) {
         if (c.pictureKey in pictures || c.session.bot?.picture == null) return
         pictures[c.pictureKey] = null
-        conns[c.hostId]?.request(Msg.BotPicture(session = c.id).json()) { r ->
+        val conn = conns[c.hostId] ?: return run { pictures.remove(c.pictureKey); then?.invoke() }
+        conn.request(Msg.BotPicture(session = c.id).json()) { r ->
             val data = Msg.BotPictureReply.from(r).picture.orEmpty()
-            if (data.isEmpty()) {
-                main.post { pictures.remove(c.pictureKey) } // (asked again next time it's drawn)
-                return@request
-            }
-            val bytes = Base64.getDecoder().decode(data)
-            val bmp = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap() ?: return@request
+            val bytes = if (data.isEmpty()) null else Base64.getDecoder().decode(data)
+            val bmp = bytes?.let { BitmapFactory.decodeByteArray(it, 0, it.size)?.asImageBitmap() }
             main.post {
-                pictures[c.pictureKey] = bmp
-                Shares.look()
+                if (bmp == null) pictures.remove(c.pictureKey) // (asked again next time it's drawn)
+                else {
+                    pictures[c.pictureKey] = bmp
+                    Shares.look()
+                }
+                then?.invoke()
             }
         }
     }
@@ -1162,9 +1165,11 @@ object Mesh {
     /** A notification for a Bot that opens its chat: what it said (one a Bot, each in place of the last), or one of
      * its asks (tag: its own, taken back once it's answered). On the lock screen, only which Bot wrote or is asking:
      * what it said shows once the phone's unlocked. */
-    private fun post(contact: Contact, text: String, tag: String?) {
+    private fun post(contact: Contact, text: String, tag: String?, asked: Boolean = false) {
         Settings.load(app)
         if (!Settings.notify.value) return // (Settings → Notifications off)
+        if (!asked && contact.session.bot?.picture != null && contact.pictureKey !in pictures) // (its picture first)
+            return picture(contact) { post(contact, text, tag, asked = true) }
         if (Build.VERSION.SDK_INT >= 33 &&
             app.checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED
         ) return
@@ -1177,6 +1182,7 @@ object Mesh {
             .setContentTitle(contact.name)
             .setContentText(text.take(200))
             .setStyle(NotificationCompat.BigTextStyle().bigText(text.take(2000)))
+            .setLargeIcon(pictures[contact.pictureKey]?.let { notificationPicture(app, it.asAndroidBitmap()) })
             .setContentIntent(pending)
             .setAutoCancel(true)
             .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)

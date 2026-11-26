@@ -28,6 +28,23 @@
     "updates",
     "fixes"
   ],
+  "phone": {
+    "does": "The pages fill the screen one at a time, switched by a bar along its bottom (icon over title), as the narrow dialog's switcher; a sideways swipe also moves to the next or previous page, the page following the finger and settling on lifting (half the width, or a flick), stopping at General and Telemetry, and the bar's raised page follows the swipe. Tapping a page in the bar slides to it",
+    "why": "One column at a time on a phone; the owner asked to swipe between the Settings pages, as between a chat's pages",
+    "decided": "2026-11-25"
+  },
+  "decisions": [
+    {
+      "said": "On a phone, swiping across Settings should move between its pages (General, Subscriptions, Dependencies, Telemetry) (paraphrased)",
+      "rule": "Every app that shows Settings' pages one at a time on a touch screen moves between them by a sideways swipe, the page following the finger, and the page switcher shows the page swiped to; tapping the switcher still switches pages",
+      "decided": "2026-11-25",
+      "source": [
+        {
+          "issue": "BaudeInternal#229"
+        }
+      ]
+    }
+  ],
   "parts": [
     {
       "name": "Subscriptions page",

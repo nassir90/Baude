@@ -3,6 +3,7 @@
   "name": "line_profiler",
   "where": "host",
   "needed_by": ["telemetry.line_profiling"],
+  "group": "telemetry.title",
   "detect": {
     "macos": [{"python": "line_profiler"}],
     "linux": [{"python": "line_profiler"}]

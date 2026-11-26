@@ -112,7 +112,7 @@ class SettingsDialog(Adw.PreferencesDialog):
         import subscriptionpage
         self.add(subscriptionpage.Page(win))
         import depsview
-        self.add(depsview.Page(win, "Baude"))
+        self.add(depsview.Page(win))
         import telemetryview
         self.add(telemetryview.Page(win))
 

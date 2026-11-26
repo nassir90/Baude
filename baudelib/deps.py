@@ -5,13 +5,18 @@ op, and a reply's missing), so the phone and another machine's apps show what th
 
 schema/deps has a file for each, named by its key: {"description", "name" (as it's shown: a program's own spelling),
 "where" ("app": the app's own process needs it, "host": the host process does), "needed_by" (the features, as the
-schema/copy keys that name them), "detect" ({"macos"|"linux": [way, …]}: any way that finds it finds it; a platform
-not there doesn't need it), "install" ({"macos"|"debian"|"fedora"|"arch": the command}), "link" (its install page),
-"no_display" (true: only a host with no display needs it)}.
-A way is {"env": VAR} (the program VAR names, if it's set and runnable), {"which": name, "not": path?} (on PATH, but
-not path: macOS's /usr/bin/git, a stub until the Command Line Tools are in), {"gi": namespace, "version": v} (a GObject
-typelib), {"python": module} (a module this Python can import), {"glob": pattern} (a runnable file there) or {"run":
-argv} (a command that succeeds).
+schema/copy keys that name them), "group" (the copy key of what Settings → Dependencies lists it under: GROUPS),
+"detect" ({"macos"|"linux": [way, …]}: any way that finds it finds it; a platform not there doesn't need it),
+"install" ({"macos"|"debian"|"fedora"|"arch": the command; a check's: the one that readies it}), "link" (its install
+page; a check has none), "no_display" (true: only a host with no display needs it), "of" (a check: the key
+of the program it's a check of, which it's left out without, and listed after), "ready" (the copy key said of it when
+it's there: deps.installed if none; given n, the count its probe found, where it takes one), "installed" and "start"
+(ways and commands: one installed and not running, Ollama, is given its start command in place of its install's)}.
+A way is {"env": VAR, "decides": true?} (the program VAR names, if it's set and runnable; decides: VAR set, even
+empty, is the only answer, as BAUDE_GH is gh's), {"which": name, "not": path?} (on PATH, but not path: macOS's
+/usr/bin/git, a stub until the Command Line Tools are in), {"gi": namespace, "version": v} (a GObject typelib),
+{"python": module} (a module this Python can import), {"glob": pattern} (a runnable file there), {"run": argv} (a command that succeeds) or {"probe": name} (PROBES': a
+count, None for not ready).
 
 Fault injection: BAUDE_HIDE_DEPS=vte,kubectl,… makes those missing, wherever they're looked for, whatever's here."""
 import glob
@@ -64,13 +69,39 @@ def hidden():
     return {n.strip() for n in os.environ.get("BAUDE_HIDE_DEPS", "").split(",") if n.strip()}
 
 
-def _found(way):
+def _path(way):
+    """The program a way finds (env, which, glob), or None."""
     if "env" in way:
         exe = os.environ.get(way["env"])
-        return bool(exe) and shutil.which(exe) is not None
+        return shutil.which(exe) if exe else None
     if "which" in way:
         exe = shutil.which(way["which"])
-        return exe is not None and exe != way.get("not")
+        return exe if exe != way.get("not") else None
+    if "glob" in way:
+        return next((p for p in sorted(glob.glob(os.path.expanduser(way["glob"]))) if os.access(p, os.X_OK)), None)
+    return None
+
+
+def _ran(argv):
+    """Did argv succeed (its answer kept RUN_KEPT_S)?"""
+    argv = tuple(argv)
+    if argv in _RUN and time.monotonic() - _RUN[argv][0] < RUN_KEPT_S:
+        return _RUN[argv][1]
+    try:
+        ok = subprocess.run(argv, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                            timeout=10).returncode == 0
+    except (OSError, subprocess.TimeoutExpired):
+        ok = False
+    _RUN[argv] = (time.monotonic(), ok)
+    return ok
+
+
+def _found(way):
+    """Does a way find it: True, False, or a probe's count (0 is found: Ollama running with no models)."""
+    if "env" in way or "which" in way or "glob" in way:
+        return _path(way) is not None
+    if "probe" in way:
+        return PROBES[way["probe"]]()
     if "gi" in way:
         try:
             import gi
@@ -80,20 +111,59 @@ def _found(way):
     if "python" in way:
         import importlib.util
         return importlib.util.find_spec(way["python"]) is not None
-    if "glob" in way:
-        return any(os.access(p, os.X_OK) for p in glob.glob(os.path.expanduser(way["glob"])))
     if "run" in way:
-        argv = tuple(way["run"])
-        if argv in _RUN and time.monotonic() - _RUN[argv][0] < RUN_KEPT_S:
-            return _RUN[argv][1]
-        try:
-            ok = subprocess.run(argv, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                                timeout=10).returncode == 0
-        except (OSError, subprocess.TimeoutExpired):
-            ok = False
-        _RUN[argv] = (time.monotonic(), ok)
-        return ok
+        return _ran(way["run"])
     return False
+
+
+def _finds(ways):
+    """What the first way that finds it gives (True, or a probe's count), None if none does."""
+    for way in ways or []:
+        if way.get("decides") and way["env"] in os.environ:
+            return True if _found(way) else None
+        got = _found(way)
+        if got is not None and got is not False:
+            return got
+    return None
+
+
+def program(key):
+    """Where a program's found (its first env, which or glob way that finds it, as present finds it), or None."""
+    for way in TABLE[key]["detect"].get(SYSTEM) or []:
+        if way.get("decides") and way["env"] in os.environ:
+            return _path(way)
+        if (path := _path(way)) is not None:
+            return path
+    return None
+
+
+def _kube_contexts():
+    import lookupkube  # (the host reads them itself: no kubectl run, nothing but names read)
+    return len([c for c in lookupkube.kube_contexts() if not c.get("cluster_only")]) or None
+
+
+def _gh_signed_in():
+    exe = program("gh")
+    return 1 if exe and _ran([exe, "auth", "token"]) else None  # (the token kept: GitHub isn't asked)
+
+
+def _ollama():
+    from baudelib import providers
+    try:
+        tags = providers.fetch(providers.ollama_url() + "/api/tags") or {}
+    except OSError as e:
+        return "deps.running_key" if str(e).startswith("401") else None  # (it answered: it wants a key)
+    except ValueError:
+        return None
+    return len([m for m in tags.get("models") or [] if isinstance(m, dict)])
+
+
+def _mlx():
+    from baudelib import models
+    return len(models.downloaded_models()) if not models.mlx_missing() else None
+
+
+PROBES = {"kube_contexts": _kube_contexts, "gh_signed_in": _gh_signed_in, "ollama": _ollama, "mlx": _mlx}
 
 
 def has_display():
@@ -107,20 +177,40 @@ def needed(key):
     return SYSTEM in d["detect"] and not (d.get("no_display") and has_display())
 
 
-def present(key):
+def _state(key):
+    """(is it there, its probe's count or None)."""
     if key in hidden():
-        return False
+        return False, None
     ways = TABLE[key]["detect"].get(SYSTEM)
-    return ways is None or not needed(key) or any(_found(w) for w in ways)
+    if ways is None or not needed(key):
+        return True, None
+    got = _finds(ways)
+    return got is not None, got if got is not True else None
+
+
+def present(key):
+    return _state(key)[0]
 
 
 def info(key, here=None):
-    """What's said of it (the wire's Dep): {dep, name, where, present, fix (this platform's command, or None), link}.
-    here: whether it's here, if the caller knows (its own import failed, say); else it's looked for."""
+    """What's said of it (the wire's Dep): {dep, name, where, present, fix (this platform's command, or None), link,
+    group, check, ready (what's said of it while it's there; "Couldn't check" when its look raised)}. here: whether
+    it's here, if the caller knows (its own import failed, say); else it's looked for."""
     d = TABLE[key]
-    here = present(key) if here is None or key in hidden() else here
-    return {"dep": key, "name": d["name"], "where": d["where"], "present": bool(here),
-            "fix": d["install"].get(platform()), "link": d.get("link")}
+    out = {"dep": key, "name": d["name"], "where": d["where"], "present": False, "fix": None,
+           "link": d.get("link"), "group": d.get("group"), "check": "of" in d, "ready": None}
+    try:
+        there, n = _state(key) if here is None or key in hidden() else (here, None)
+        fix = d["install"].get(platform())
+        if not there and d.get("start") and _finds(d.get("installed", {}).get(SYSTEM)) is not None:
+            fix = d["start"].get(platform())  # (installed, not running: started)
+    except Exception:  # noqa: BLE001 (one probe gone wrong is its row's "couldn't check", not the answer's error)
+        return {**out, "link": None, "ready": wording.say("deps.unchecked")}
+    ready = n if isinstance(n, str) else d.get("ready", "deps.installed")
+    out.update(present=bool(there), fix=fix)
+    if there:
+        out["ready"] = wording.say(ready) if wording.has(ready) else wording.say(ready, n=n or 0)
+    return out
 
 
 def missing(key, here=None):
@@ -129,9 +219,44 @@ def missing(key, here=None):
     return None if got["present"] else got
 
 
-def report(where="host"):
-    """Every dependency of this platform's that where (host, app) needs, as info gives each: a deps op's answer."""
-    return [info(k) for k, d in TABLE.items() if d["where"] == where and needed(k)]
+# (Settings → Dependencies' groups, in its order: what needs them)
+GROUPS = ("deps.providers", "deps.git_github", "window.kubernetes", "window.database_schemas", "deps.multiplex",
+          "mesh_versions.emission", "side_panel.signal", "telemetry.title")
+
+
+def report():
+    """Every dependency of this platform's, the host's and its machine's apps' own, as info gives each: a deps op's
+    answer, in Settings → Dependencies' order (by GROUPS, then by name, each check after its program). A check of a
+    program that isn't here is left out (it's installed first)."""
+    keys = [k for k in TABLE if needed(k) and "of" not in TABLE[k]]
+    keys.sort(key=lambda k: (GROUPS.index(TABLE[k]["group"]), TABLE[k]["name"].lower()))
+    out = []
+    for k in keys:
+        out.append(info(k))
+        if out[-1]["present"]:
+            out += [info(c) for c in sorted(TABLE, key=lambda c: TABLE[c]["name"].lower())
+                    if TABLE[c].get("of") == k and needed(c)]
+    return out
+
+
+def for_viewer(listed):
+    """A host's answer with the rows of what the app's own process needs (where "app": VTE, WebKit, Node) read here
+    instead, in this app's process, whichever host it asked: the same groups, each program's checks after it."""
+    units = {}
+    for dep in listed or []:
+        if dep.get("where") == "app":
+            continue
+        if dep.get("check") and units.get(dep.get("group")):
+            units[dep["group"]][-1].append(dep)
+        else:
+            units.setdefault(dep.get("group"), []).append([dep])
+    for k in TABLE:
+        if TABLE[k]["where"] == "app" and needed(k):
+            units.setdefault(TABLE[k]["group"], []).append([info(k)])
+    out = []
+    for group in sorted(units, key=lambda g: GROUPS.index(g) if g in GROUPS else len(GROUPS)):
+        out += [d for unit in sorted(units[group], key=lambda u: u[0]["name"].lower()) for d in unit]
+    return out
 
 
 def feature_name(feature):

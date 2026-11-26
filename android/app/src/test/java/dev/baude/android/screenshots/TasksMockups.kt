@@ -153,6 +153,33 @@ abstract class TasksMockups(private val theme: String) {
         shoot("senders")
     }
 
+    /** A Bot's chat asked by its task's run (a form to fill), then handed the run's failure: each heads with what the
+     * task did and a table of the run, then the script's words. */
+    @Test fun asked() {
+        val table = "| task | 6def981555c9 |\n|---|---|\n| run | 625623c87b8e486e |\n| start time | 2026-11-26 23:42:25 |\n"
+        val tail = "| version | 2009f5f91a9f |\n" +
+            "| command | /usr/bin/python3 -u /home/ada/.local/share/baude/bots/s1/tasks/scripts/2009f5f91a9f.py |\n"
+        val from = dev.baude.android.Msg.StoredSender(kind = "host", name = "Task “Deploy site”", host = "h1",
+            hostName = "workshop", session = "s1", task = "t1", run = "r3")
+        activity.setContent {
+            BaudeTheme {
+                androidx.compose.foundation.layout.Column(Modifier.fillMaxSize().background(LocalBaude.current.inside)
+                    .padding(top = 24.dp), verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(12.dp)) {
+                    dev.baude.android.Said(dev.baude.android.Line("you", "An instance of the 'Deploy site' task asks:\n\n" +
+                        table + "| duration | 0.0 s |\n" + tail + "\nWhich bucket does site go to?\n\n" +
+                        "Answer with only a JSON object with these fields:\n- bucket: one of \"staging\", \"production\""), from)
+                    dev.baude.android.Said(dev.baude.android.Line("you", "An instance of the 'Deploy site' task failed\n\n" +
+                        table + "| end time | 2026-11-26 23:42:37 |\n| duration | 12.4 s |\n" + tail +
+                        "| exit code | 3 |\n\nIt failed: exited with 3. The end of its log:\n\nsay: deploying site\n" +
+                        "err: the upload was refused: the bucket's key expired\n\nFind out why. If the script is at fault, " +
+                        "fix it with your set_task tool and run it again with run_task."), from)
+                }
+            }
+        }
+        settle()
+        shoot("asked")
+    }
+
     /** A run opened from a chat's from line (its Bot's chat, at that run), then Back: the run's own task. */
     @Test fun runBack() {
         dev.baude.android.TaskLinks.pending = listOf("h1", "s1", "t1", "r3")

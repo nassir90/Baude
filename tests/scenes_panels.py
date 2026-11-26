@@ -1526,3 +1526,49 @@ def _(app):
                "Deploy site" and tasks.runs, "its task, back")
     T.pump(1.5)
     return win
+
+
+TASK_ASKS = '''import sys
+import baudetask as task
+task.say("deploying", "site")
+got = task.ask("Which bucket does site go to?", form=[{"name": "bucket", "type": "choice",
+                                                       "choices": ["staging", "production"]}])
+task.say("bucket", got["bucket"])
+print("the upload was refused: the bucket's key expired", file=sys.stderr)
+sys.exit(3)
+'''
+
+
+@scene("57f-task-asks-bot", "A Bot's chat (Juniper's) asked by its task's run (a form to fill), then handed the run's "
+                            "failure: each message heads with what the task did and a table of its run (its task and "
+                            "run ids, times, version, the command it runs, exit code), then the script's words",
+       size=(1200 + SIDEBAR, H))
+def _(app):
+    win = network_window(app, None)
+    lab_bots(win)
+    server = NET["lab"][0]
+    bot = NET["ids"]["Write the release notes for 2.4"]
+    os.environ["FAKE_ANSWERS"] = "{}"
+    with server.lock:
+        s = server.sessions[bot]
+        st = server.tasks.store(s)
+        task, script = baude.baudelib.tasks.clean({"name": "Deploy site", "runtime": "python", "script": TASK_ASKS})
+        st.put_script(task, script)
+        st.tasks.append(task)
+        st.save()
+        rid = server.tasks.start(s, task, None, "manual", {})["id"]
+    T.wait_for(lambda: st.runs[rid]["status"] == "failed" and
+               sum(x["kind"] == "answer" for x in st.read_log(rid)) == 2, "the run asked, failed, handed over", 30)
+
+    def gone(*_):
+        with server.lock:
+            st.tasks = [t for t in st.tasks if t["id"] != task["id"]]
+            st.forget(task["id"])
+            st.save()
+    win.connect("unrealize", gone)
+    win.sidebar.on_activate(win.sidebar.list, session_row(win, bot))
+    T.wait_for(lambda: win.session_id == bot, "Juniper open")
+    T.wait_for(lambda: len(T.find(win, Gtk.Label, lambda x: x.has_css_class("sender-from") and
+                                  x.get_mapped())) >= 2, "the two asks", 20)
+    T.pump(2)
+    return win

@@ -77,7 +77,7 @@ def deploy(inputs):
         line("err", "  File \"deploy.py\", line 9, in deploy"),
         line("err", "    subprocess.run([\"make\", \"publish\"], check=True)"),
         line("err", "subprocess.CalledProcessError: Command '['make', 'publish']' returned non-zero exit status 2."),
-        line("ask", "It failed: make publish exited with 2. It's your task t1; its script (version $V) is tasks/scripts/$V.py. Find out why.", error = true),
+        line("ask", "It failed: make publish exited with 2. Find out why.", error = true),
         line("answer", "The upload's key had expired. I renewed it and ran the task again: that run finished in 51 s."))
 
     /** The list. */

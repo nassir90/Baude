@@ -23,6 +23,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
@@ -274,9 +275,11 @@ fun ChatPage(chat: Chat, name: String, attach: Boolean = true, stop: (() -> Unit
         follow = false
         list.animateScrollToItem(found.first + earlierRows(chat))
     }
-    LaunchedEffect(chat) { // (scrolled up to its first lines: what's before them read and put above, readEarlier)
+    LaunchedEffect(chat) { // (scrolled up to its first lines, its host up: what's before them read and put above, readEarlier)
         androidx.compose.runtime.snapshotFlow {
-            if (chat.loaded.value && placed && chat.earlier.value && list.firstVisibleItemIndex < 3) chat.lines.size else -1
+            Mesh.tick.value
+            val up = Mesh.conn(chat.hostId)?.state == "up"
+            if (chat.loaded.value && placed && chat.earlier.value && up && list.firstVisibleItemIndex - earlierRows(chat) < 3) chat.lines.size else -1
         }.collect { if (it >= 0) Mesh.readEarlier(chat) }
     }
     androidx.compose.runtime.DisposableEffect(chat) { // (what's read before put above: what's on screen stays there)
@@ -313,7 +316,9 @@ fun ChatPage(chat: Chat, name: String, attach: Boolean = true, stop: (() -> Unit
             val taken = reverting?.let { r -> chat.lines.indexOfFirst { it.kind == "you" && it.uuid == r.uuid }.takeIf { it >= 0 } }
             val shown = if (taken != null) chat.lines.take(taken) else chat.lines
             if (earlierRows(chat) > 0) item(key = "earlier") { // (what's before its lines, read as it's scrolled up to)
-                Box(Modifier.fillMaxWidth().padding(vertical = 8.dp), contentAlignment = Alignment.Center) { Spinner() }
+                Box(Modifier.fillMaxWidth().padding(vertical = 8.dp).height(16.dp), contentAlignment = Alignment.Center) {
+                    if (chat.readingEarlier) Spinner() // (only while it's asked for, or asked again soon)
+                }
             }
             val offered = alwaysOffered(session?.let { it.model.orEmpty() }, at)
             val askName = if (session?.bot != null) name else "Claude" // (a Bot's question: its name's)

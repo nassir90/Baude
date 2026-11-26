@@ -1489,7 +1489,8 @@ abstract class Screens(private val theme: String) {
     }
 
     /** The long chat scrolled up to its first lines with more of its transcript before them, the host slow to send
-     * it: what's before them asked for and not come yet, then come and put above, what was in view left there. */
+     * it: what's before them asked for and not come yet, the host failing it (asked again a little later, the spinner
+     * still up), then come and put above, what was in view left there. */
     @Test fun chatEarlier() {
         Mesh.close()
         dev.baude.android.ChatPlaces.keep("h1/b", androidx.compose.foundation.lazy.LazyListState(), true) // (none kept: opened at its end)
@@ -1522,11 +1523,18 @@ abstract class Screens(private val theme: String) {
         repeat(14) { drag(from = 0.25f, to = 0.85f) }
         repeat(30) { frame() }
         activity.window.decorView.captureRoboImage("build/screenshots/$theme/47b-chat-earlier-reading.png")
-        val (msg, then) = asked.last { it.first.optString("op") == "transcript" && it.first.has("limit") }
+        fun earlierAsks() = asked.filter { it.first.optString("op") == "transcript" && it.first.has("limit") }
+        val first = earlierAsks().size
+        earlierAsks().last().second(org.json.JSONObject().put("op", "error").put("error", "not connected"))
+        repeat(30) { frame() }
+        activity.window.decorView.captureRoboImage("build/screenshots/$theme/47c-chat-earlier-failed.png")
+        org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idleFor(java.time.Duration.ofSeconds(2))
+        check(earlierAsks().size == first + 1) { "asked again after a failure: ${earlierAsks().size - first}" }
+        val (msg, then) = earlierAsks().last()
         then(org.json.JSONObject().put("op", "transcript").put("offset", msg.optLong("offset"))
             .put("data", java.util.Base64.getEncoder().encodeToString(earlier)).put("next", earlier.size).put("size", earlier.size + 1000))
         repeat(30) { frame() }
-        activity.window.decorView.captureRoboImage("build/screenshots/$theme/47c-chat-earlier-read.png")
+        activity.window.decorView.captureRoboImage("build/screenshots/$theme/47d-chat-earlier-read.png")
     }
 
     /** A code block scrolled by a finger, then what you send: the end comes into view. */

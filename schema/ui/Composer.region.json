@@ -79,14 +79,56 @@
       "parts": [
         {
           "name": "markdown shown as typed",
-          "decisions": [{"said": "In every formatted input box, > shows as a quote as it does once sent", "rule": "Every app's formatted boxes (the chat's, Meta's, Send Feedback's) show a line starting with > as a quote while it's written, as a sent quote looks: a rule at its left, its text set in past it and faded, not italic, the > hidden off the caret's line", "decided": "2026-11-23", "source": [{"issue": "BaudeInternal#201"}]}],
+          "decisions": [
+            {
+              "said": "In every formatted input box, > shows as a quote as it does once sent",
+              "rule": "Every app's formatted boxes (the chat's, Meta's, Send Feedback's) show a line starting with > as a quote while it's written, as a sent quote looks: a rule at its left, its text set in past it and faded, not italic, the > hidden off the caret's line",
+              "decided": "2026-11-23",
+              "source": [
+                {
+                  "issue": "BaudeInternal#201"
+                }
+              ]
+            }
+          ],
           "shows": "The text is styled live like chat messages while still plain text: # headings at the chat's heading sizes, **bold**, *italic*, `inline code` (monospace, shaded), ``` fenced code blocks (one rounded shaded background behind all lines, fence lines dim, monospace), bullet lists with real bullets (- * + typed become • at the top level, ◦ one level in; sent back as -) with hanging indent, numbered lists, > quotes. Markdown symbols (#, **, `) are hidden except on the line the caret is on, where they show dim. @names the catalogue knows are coloured (green, bold, tinted background), and the @ search being typed too."
         }
       ],
       "decisions": [
-        {"said": "Being unable to paste images and such into the input is a massive oversight (paraphrased)", "rule": "In every app, pasting copied images or files into a message box (any paste: Ctrl+V, ⌘V, Shift+Insert, the menu's Paste) attaches them; text pastes as text", "decided": "2026-11-17", "source": [{"issue": "BaudeInternal#149"}]},
-        {"said": "Tab in the agent's box should indent (bullet points), as it does in Record; right now it's unclear what it does (paraphrased)", "rule": "In every app's message boxes Tab moves the list item (or selected items) in a level and Shift+Tab out, as on a Record page; in a code block it indents four spaces; elsewhere it moves the focus", "decided": "2026-11-18", "source": [{"issue": "BaudeInternal#162"}, {"issue": "BaudeInternal#168"}]},
-        {"said": "Across both mobile and desktop, the default height of the prompt bar bar can be shrunk. A good reference is the one that currently exists for side questions post-initial-ask. I.e. the default bar is just closely wrapperd around the \"+\" and \"Enter\" icon", "rule": "Every app's empty or one-line message box is wrapped close round its buttons: a button's height with the buttons' inset above and below (composer tokens), the same height as a side question's box under its question; it grows with the text", "decided": "2026-11-22", "source": [{"session": "f24332de-9555-4279-8489-ffa7dbcf54c9", "message": "30af64bb-6804-4040-984b-d3fd2a444e53"}]}
+        {
+          "said": "Being unable to paste images and such into the input is a massive oversight (paraphrased)",
+          "rule": "In every app, pasting copied images or files into a message box (any paste: Ctrl+V, ⌘V, Shift+Insert, the menu's Paste) attaches them; text pastes as text",
+          "decided": "2026-11-17",
+          "source": [
+            {
+              "issue": "BaudeInternal#149"
+            }
+          ]
+        },
+        {
+          "said": "Tab in the agent's box should indent (bullet points), as it does in Record; right now it's unclear what it does (paraphrased)",
+          "rule": "In every app's message boxes Tab moves the list item (or selected items) in a level and Shift+Tab out, as on a Record page; in a code block it indents four spaces; elsewhere it moves the focus",
+          "decided": "2026-11-18",
+          "source": [
+            {
+              "issue": "BaudeInternal#162"
+            },
+            {
+              "issue": "BaudeInternal#168"
+            }
+          ]
+        },
+        {
+          "said": "Across both mobile and desktop, the default height of the prompt bar bar can be shrunk. A good reference is the one that currently exists for side questions post-initial-ask. I.e. the default bar is just closely wrapperd around the \"+\" and \"Enter\" icon",
+          "rule": "Every app's empty or one-line message box is wrapped close round its buttons: a button's height with the buttons' inset above and below (composer tokens), the same height as a side question's box under its question; it grows with the text",
+          "decided": "2026-11-22",
+          "source": [
+            {
+              "session": "f24332de-9555-4279-8489-ffa7dbcf54c9",
+              "message": "30af64bb-6804-4040-984b-d3fd2a444e53"
+            }
+          ]
+        }
       ]
     },
     {
@@ -134,7 +176,19 @@
           "does": "Stops the turn (also with a revert pending); background commands and subagents go on (BackgroundTask). Enter/Ctrl+Enter with text meanwhile queues instead of stopping"
         }
       ],
-      "decisions": [{"said": "On desktop, sometimes the new narrow \"Enter\" button is not center aligned vertically please investigate and fix this", "rule": "Every app keeps the message box's buttons centred on the text's line at every text and icon size, and after the text grows or shrinks (zoom, Text size)", "decided": "2026-11-22", "source": [{"session": "b3845b21-55ac-4aab-a769-fb8517403c51", "message": "44af0a49-d47f-47d3-b127-b0863c87ad82"}]}]
+      "decisions": [
+        {
+          "said": "On desktop, sometimes the new narrow \"Enter\" button is not center aligned vertically please investigate and fix this",
+          "rule": "Every app keeps the message box's buttons centred on the text's line at every text and icon size, and after the text grows or shrinks (zoom, Text size)",
+          "decided": "2026-11-22",
+          "source": [
+            {
+              "session": "b3845b21-55ac-4aab-a769-fb8517403c51",
+              "message": "44af0a49-d47f-47d3-b127-b0863c87ad82"
+            }
+          ]
+        }
+      ]
     },
     {
       "name": "slash commands in the box",
@@ -268,7 +322,19 @@
     },
     {
       "name": "host gone or connection dropped",
-      "shows": "The send button is off (nothing to send to) while a banner above the chat says why (see Banners); the box stays editable"
+      "shows": "The send button is off (nothing to send to) while a banner above the chat says why (see Banners); the box stays editable. On an app whose link the OS closes (the phone), the send button stays on while the host isn't reached: what's sent is queued under the chat with a cloud beside it, kept on disk, and sent once the host is back (see QueuedTurn).",
+      "decisions": [
+        {
+          "said": "Nearly all of the phone's disconnects come from the screen turning off or the app being put away: design for Android closing connections, cache more, and instead of a red box show a cloud, with leeway and messages queued while the connection is down (paraphrased)",
+          "rule": "Every app whose link the OS or browser closes lets you send while a host isn't reached: the message is queued, marked as waiting for its host, and sent by itself once the host is back and the chat has caught up.",
+          "decided": "2026-11-26",
+          "source": [
+            {
+              "issue": "BaudeInternal#243"
+            }
+          ]
+        }
+      ]
     },
     {
       "name": "read-only by choice",
@@ -281,7 +347,18 @@
     {
       "name": "draft kept",
       "shows": "Each chat keeps its own draft (text, caret, attachments) while another chat is open, and over a restart; a new chat keeps one shared draft",
-      "decisions": [{"said": "Drafts are shared across chats; a draft should belong to the Bot or chat it was written in (paraphrased)", "rule": "Every app keeps each chat's (and Bot's) draft on its own: text, caret and attachments come back when the chat is opened again, and another chat's box shows its own draft or nothing", "decided": "2026-11-19", "source": [{"issue": "BaudeInternal#174"}]}]
+      "decisions": [
+        {
+          "said": "Drafts are shared across chats; a draft should belong to the Bot or chat it was written in (paraphrased)",
+          "rule": "Every app keeps each chat's (and Bot's) draft on its own: text, caret and attachments come back when the chat is opened again, and another chat's box shows its own draft or nothing",
+          "decided": "2026-11-19",
+          "source": [
+            {
+              "issue": "BaudeInternal#174"
+            }
+          ]
+        }
+      ]
     },
     {
       "name": "revert pending",

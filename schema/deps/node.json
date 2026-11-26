@@ -3,6 +3,7 @@
   "name": "Node.js",
   "where": "app",
   "needed_by": ["side_panel.signal"],
+  "group": "side_panel.signal",
   "detect": {
     "macos": [{"which": "node"}, {"glob": "~/.nvm/versions/node/v*/bin/node"}],
     "linux": [{"which": "node"}, {"glob": "~/.nvm/versions/node/v*/bin/node"}]

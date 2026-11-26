@@ -3,6 +3,7 @@
   "name": "Claude Code",
   "where": "host",
   "needed_by": ["report.claude"],
+  "group": "deps.providers",
   "detect": {
     "macos": [{"env": "BAUDE_CLAUDE"}, {"which": "claude"}, {"glob": "~/.local/bin/claude"}, {"glob": "~/Library/Application Support/Claude/claude-code/*/*/claude.app/Contents/MacOS/claude"}],
     "linux": [{"env": "BAUDE_CLAUDE"}, {"which": "claude"}, {"glob": "~/.local/bin/claude"}]

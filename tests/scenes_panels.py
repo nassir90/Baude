@@ -534,7 +534,7 @@ def lab_bots(win):
     win.connect("unrealize", lambda *_: made(False))
     made(True)
     T.wait_for(lambda: sum(win.sidebar.list.get_row_at_index(i).has_css_class("bot-row") for i in range(40)
-                           if win.sidebar.list.get_row_at_index(i) is not None) == len(BOTS), "the Bots' rows")
+                           if win.sidebar.list.get_row_at_index(i) is not None) == len(BOTS), "the Bots' rows", 30)
 
 
 @scene("55v-network-bots", "Two of lab-mac's chats made Bots: listed first, each by its picture (its initials) and its "

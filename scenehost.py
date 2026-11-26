@@ -23,10 +23,11 @@ import time
 import gi
 
 gi.require_version("Gtk", "4.0")
+gi.require_version("Adw", "1")
 gi.require_version("Gsk", "4.0")
 gi.require_version("Gdk", "4.0")
 gi.require_version("Graphene", "1.0")
-from gi.repository import Gdk, GLib, Graphene, Gsk, Gtk  # noqa: E402
+from gi.repository import Adw, Gdk, GLib, Graphene, Gsk, Gtk  # noqa: E402
 
 import scenegl  # noqa: E402
 from baudelib import themepacks  # noqa: E402
@@ -36,6 +37,7 @@ CSS = """
 """
 PICTURE_SCALE = 2  # (a panel's picture, px per widget px)
 CLAIM = 6  # (px a press on the scene moves before it turns the view)
+LISTED_TRIES = 400  # (a chat page's chat looked for in its host's list this many times, 50 ms apart, till it's there)
 STATES = {"working": "working", "waiting": "waiting", "idle": "done", "stopped": "inactive"}  # (wire → the dot's)
 
 
@@ -113,9 +115,10 @@ class World:
 # ---- the widgets a panel shows (the app gives its own: providers)
 
 class ChatPanel(Gtk.Box):
-    """The sample's chat panel, made of Baude's own parts: the chat's dot and title (the sidebar's StatusDot), its
-    messages (a user bubble, a reply, a tool card: toolcards.ToolCard) and a box to write in, live (Send puts the text
-    in as a message). The app gives a chat's own page in its place."""
+    """The sample's chat panel, where there's no app to show a chat's own page (ChatPage), made of Baude's own parts:
+    the chat's dot and title (the sidebar's StatusDot), its messages (a user bubble, a reply, a tool card:
+    toolcards.ToolCard, or one made from a tool call's {name, input, result}) and a box to write in, live (Send puts
+    the text in as a message)."""
 
     def __init__(self, obj, transcript=()):
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=8)
@@ -141,7 +144,7 @@ class ChatPanel(Gtk.Box):
                 lab.set_wrap(True)
                 self.messages.append(lab)
             elif kind == "tool":
-                self.messages.append(what)
+                self.messages.append(what if isinstance(what, Gtk.Widget) else _tool_card(what))
         box = Gtk.Box(spacing=6)
         box.add_css_class("composer-box")
         self.entry = Gtk.TextView(wrap_mode=Gtk.WrapMode.WORD_CHAR, hexpand=True, top_margin=8, bottom_margin=8,
@@ -170,6 +173,16 @@ class ChatPanel(Gtk.Box):
         self.dot.set_state(STATES.get(state, "inactive"))
 
 
+def _tool_card(call):
+    import toolcards
+    card = toolcards.ToolCard(call["name"], call.get("id") or call["name"])
+    card.set_input(call.get("input") or {})
+    if "result" in call:
+        card.set_result(call["result"], False)
+        card.set_state("done")
+    return card
+
+
 class HostPanel(Gtk.Box):
     """A host: its name and whether it's up, and its chats' rows (dot and name)."""
 
@@ -189,25 +202,142 @@ class HostPanel(Gtk.Box):
 
 
 class WindowPanel(Gtk.Box):
-    """A window's content, taken into the scene while it's shown there and given back as the panel goes."""
+    """A window's content, taken into the scene while it's shown there and given back as the panel goes (the window
+    hidden meanwhile, an empty frame otherwise, and shown again with it if it was shown). Its title buttons are hidden
+    too: on macOS a header bar's window controls (GTK's native ones) tell the window they're in how tall its title bar
+    is, by where they're drawn, so in a panel they'd set the scene's window's title bar from the panel's place, and
+    AppKit's view and GDK's surface would disagree (clicks landing off by the difference, the window given a height
+    below nothing)."""
 
     def __init__(self, window):
         super().__init__()
-        self.window, self.content = window, window.get_child()
+        self.window, self.content, self.buttons = window, window.get_child(), []
+        self.was_shown = window.get_visible()
         if self.content is not None:
+            window.set_visible(False)
             window.set_child(None)
+            self.buttons = list(_title_buttons(self.content))
+            for bar, _was in self.buttons:
+                _show_title_buttons(bar, False)
             self.append(self.content)
 
     def give_back(self):
         if self.content is not None and self.content.get_parent() is self:
             self.remove(self.content)
+            for bar, was in self.buttons:
+                _show_title_buttons(bar, was)
             self.window.set_child(self.content)
+            if self.was_shown:
+                self.window.set_visible(True)
 
 
-def default_providers(world, windows=None, transcripts=None):
-    """show → (thing → widget): the sample's. An app passes its own (its chat pages, its Meta cards)."""
+class ChatPage(Gtk.Box):
+    """A chat's own page, as Baude's window shows it: its messages and tool cards, the box to write in and the status
+    bar under it (BaudeWindow's chat page, its tabs, the chat pinned first). It's a BaudeWindow of app's, never shown,
+    that makes it: the chat opened in it as the sidebar opens one (find_info, resume_session), its page taken into the
+    panel while it's there, and the window let go of as the panel goes. sid: the chat's session, opened once its host
+    lists it."""
+
+    def __init__(self, app, sid):
+        super().__init__()
+        self.app, self.sid, self.win, self.page, self.clock, self.looked = app, sid, None, None, None, 0
+        self.connect("realize", lambda *_: self._follow())
+        self.connect("unrealize", lambda *_: self._unfollow())
+        GLib.idle_add(self._make)  # (not while the scene's laid out: a window's a lot to build)
+
+    def _make(self):
+        import argparse
+        import baudewindow
+        if self.app is None:
+            return False
+        self.win = baudewindow.BaudeWindow(self.app, argparse.Namespace(**{**vars(self.app.opts), "resume": None}))
+        self.page = self.win.tabs
+        self.win.split.set_start_child(None)
+        self.margins = [self.page.get_margin_start(), self.page.get_margin_end(), self.page.get_margin_bottom()]
+        for side in ("start", "end", "bottom"):  # (the window's frame round it isn't the panel's)
+            getattr(self.page, f"set_margin_{side}")(0)
+        self.page.set_hexpand(True)
+        self.page.set_vexpand(True)
+        self.append(self.page)
+        self._follow()
+        GLib.timeout_add(50, self._open)
+        return False
+
+    def _open(self):
+        if self.win is None:
+            return False
+        info = self.win.sidebar.find_info(self.sid)
+        if info is None:
+            self.looked += 1
+            return self.looked < LISTED_TRIES  # (not listed yet: again, for a while)
+        self.win.resume_session(info)
+        return False
+
+    def _follow(self):
+        """The window's after-layout work (the newest kept in view, a chunk of history held in place) on the clock of
+        the window the page is drawn in: its own never runs."""
+        if self.win is not None and self.clock is None and self.get_realized():
+            clock = self.get_frame_clock()
+            self.clock = (clock, clock.connect_after("layout", self.win.on_layout))
+
+    def _unfollow(self):
+        if self.clock is not None:
+            self.clock[0].disconnect(self.clock[1])
+            self.clock = None
+
+    def give_back(self):
+        """The page given back to its window, and the window let go of."""
+        self.app = None
+        self._unfollow()
+        if self.win is not None:
+            if self.page.get_parent() is self:
+                self.remove(self.page)
+                for side, px in zip(("start", "end", "bottom"), self.margins):
+                    getattr(self.page, f"set_margin_{side}")(px)
+                self.win.split.set_start_child(self.page)
+            win, self.win = self.win, None
+            if win.proc:
+                win.proc.kill()
+            win.destroy()
+
+
+def _title_buttons(widget):
+    """Each header bar (and window controls on their own) under widget, with whether it shows its title buttons."""
+    if isinstance(widget, Adw.HeaderBar):
+        yield widget, (widget.get_show_start_title_buttons(), widget.get_show_end_title_buttons())
+        return
+    if isinstance(widget, Gtk.HeaderBar):
+        yield widget, widget.get_show_title_buttons()
+        return
+    if isinstance(widget, Gtk.WindowControls):
+        yield widget, widget.get_visible()
+        return
+    child = widget.get_first_child()
+    while child is not None:
+        yield from _title_buttons(child)
+        child = child.get_next_sibling()
+
+
+def _show_title_buttons(bar, shown):
+    if isinstance(bar, Adw.HeaderBar):
+        start, end = shown if isinstance(shown, tuple) else (shown, shown)
+        bar.set_show_start_title_buttons(start)
+        bar.set_show_end_title_buttons(end)
+    elif isinstance(bar, Gtk.HeaderBar):
+        bar.set_show_title_buttons(shown)
+    else:
+        bar.set_visible(shown)
+
+
+def default_providers(world, windows=None, transcripts=None, app=None, session=None):
+    """show → (thing → widget): with app (a BaudeApp), a chat's own page (ChatPage); without, the sample's. An app
+    passes its own too (its Meta cards). transcripts: the sample's chats' (ChatPanel's), by thing; session: a chat's
+    session id (by default its id's, after its host's)."""
     windows, transcripts = windows or {}, transcripts or {}
-    return {"chat": lambda o: ChatPanel(o, transcripts.get(o["id"], ())),
+    session = session or (lambda o: o["id"].split("/", 1)[-1])
+    chat = (lambda o: ChatPage(app, session(o))) if app is not None else \
+        (lambda o: ChatPanel(o, transcripts.get(o["id"], ())))
+    return {"chat": chat,
             "host": lambda o: HostPanel(o, world),
             "window": lambda o: WindowPanel(windows[o["id"]])}
 
@@ -398,7 +528,7 @@ class SceneView(Gtk.Widget):
 
     def _drop_face(self, n):
         if n.face is not None:
-            if isinstance(n.widget, WindowPanel):
+            if isinstance(n.widget, (WindowPanel, ChatPage)):
                 n.widget.give_back()
             n.face.unparent()
             n.face = n.widget = n.paintable = None
@@ -592,6 +722,11 @@ class SceneView(Gtk.Widget):
     def do_size_allocate(self, w, h, baseline):
         t0 = time.perf_counter()
         self.area.allocate(w, h, -1, None)
+        if w < 1 or h < 1:  # (no view yet: nothing's placed through it, the panels kept out of it till there is)
+            for n in self.nodes.values():
+                if n.face is not None:
+                    n.face.set_child_visible(False)
+            return
         view, proj, px, _e = self.matrices(w, h)
         vpp = view.multiply(proj).multiply(px)
         for nid in self.order:
@@ -625,11 +760,18 @@ class SceneView(Gtk.Widget):
         return self.panel_model(n).multiply(vpp)
 
     def ray(self, x, y):
-        """The pointer's ray in the world: its origin and direction."""
+        """The pointer's ray in the world: its origin and direction; None while there's no view to cast it through
+        (the view no size yet, or its matrices singular)."""
         w, h = self.get_width(), self.get_height()
+        if w < 1 or h < 1:
+            return None
         view, proj, px, _e = self.matrices(w, h)
         ok, inv = view.multiply(proj).multiply(px).inverse()
+        if not ok:
+            return None
         a, b = _vec(inv, x, y, -1), _vec(inv, x, y, 1)
+        if abs(a[3]) < 1e-12 or abs(b[3]) < 1e-12:
+            return None
         a, b = [c / a[3] for c in a[:3]], [c / b[3] for c in b[:3]]
         d = [b[i] - a[i] for i in range(3)]
         ln = math.sqrt(sum(c * c for c in d)) or 1
@@ -637,8 +779,10 @@ class SceneView(Gtk.Widget):
 
     def hit(self, x, y):
         """The nearest node under (x, y): a panel (its px point) or a mesh: (node, distance, (px, py) or None)."""
-        o, d = self.ray(x, y)
         best = (None, math.inf, None)
+        if (ray := self.ray(x, y)) is None:
+            return best
+        o, d = ray
         for n in self.nodes.values():
             if not self.shown(n) or (n.panel is None and (n.mesh is None or n.pick == "none")):
                 continue
@@ -879,6 +1023,6 @@ class SceneView(Gtk.Widget):
 
     def do_unroot(self):
         for n in self.nodes.values():
-            if isinstance(n.widget, WindowPanel):
+            if isinstance(n.widget, (WindowPanel, ChatPage)):
                 n.widget.give_back()
         Gtk.Widget.do_unroot(self)

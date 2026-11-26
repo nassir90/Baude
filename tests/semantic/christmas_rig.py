@@ -3,9 +3,7 @@
 Baude window (the dashboard) and fixture hosts and chats as the wire has them (Info, Sessions). Import after rig."""
 import base64, io, zipfile
 from rig import *  # noqa: F401,F403
-sys.path.insert(0, os.path.join(W, "tests"))
-sys.argv = sys.argv[:1] + [a for a in sys.argv[1:] if not a.startswith("-Apple") and a != "YES"]
-import test_baude as T  # noqa: E402  (a throwaway environment, a host in this process, the fake claude)
+app()  # (rig's: a throwaway environment, a host in this process, the fake claude)
 import themelook  # noqa: E402
 from baudelib import wire  # noqa: E402
 
@@ -83,20 +81,16 @@ def install():
     return got["theme"]
 
 
-APP = None
-
-
 def dashboard():
     """A real Baude window, its content the dashboard's."""
-    global APP
-    APP = APP or T.App()
-    APP.next_size = (1280, 800)
-    return APP.window()
+    app().next_size = (1280, 800)
+    return app().window()
 
 
 def view(theme, wd, win, opened=None, trusted=True):
-    return scenehost.SceneView(json.loads(json.dumps(theme["scene"])), wd, {
-        **scenehost.default_providers(wd, windows={"w1": win}, transcripts=LETTERS)},
+    """The scene, its letters the app's own chat pages of their chats (written as sessions: rig.chat_providers)."""
+    return scenehost.SceneView(json.loads(json.dumps(theme["scene"])), wd,
+        chat_providers(wd, LETTERS, windows={"w1": win}),
         theme=themepacks_folder(theme["name"]), trusted=trusted, open=(opened.append if opened is not None else None))
 
 

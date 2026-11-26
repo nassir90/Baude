@@ -1,11 +1,8 @@
 """The Christmas scene (tests/semantic/christmas) drawn offscreen, light and dark: the room, with a real Baude window's
-content as the dashboard on the desk; a host's place, a present in it clicked open (its letter rising) and its letter
-used (a click in its box, words typed, Send clicked: NSEvents posted to the app, tests/mouse.py); the dashboard
-gone to; and a present opened from scene.json alone (its code not trusted). Writes OUT/*.png and prints RESULT.
-
-(The clicks are in a room whose desk is bare: once a Baude window's content is in the scene, NSEvents posted here
-reach it at the wrong place, which isn't pinned down. The dashboard's views are gone to as a click would go, through
-SceneView.picked.)"""
+content as the dashboard on the desk; a host's place, a present in it clicked open (its letter rising: the app's own
+chat page of its chat) and its letter used (a click in its box, words typed, Send clicked: NSEvents posted to the app,
+tests/mouse.py; the fake claude answers); the dashboard clicked and gone to; and a present opened from scene.json alone
+(its code not trusted). Writes OUT/*.png and prints RESULT."""
 from christmas_rig import *  # noqa: F401,F403
 import mouse  # noqa: E402
 OUT = os.environ.get("OUT") or "/tmp/christmas-out"
@@ -55,15 +52,16 @@ for dark in (False, True):
     res[f"letter_shown_after_{mode}"] = not v.nodes[group + "/panel"].hidden and v.nodes[gift].hidden
     frame(win, 1).save_to_png(f"{OUT}/opened-{mode}.png")
     if not dark:
-        chat = v.nodes[group + "/panel"].widget
-        x, y = true_point(v, chat.entry)
+        page = chat_page(v, "h-workshop/s3").win
+        pump(0.3)
+        x, y = true_point(v, page.input)
         hand.down(x, y); hand.up(x, y); pump(0.2)
-        res["box_focused"] = chat.entry.is_focus()
+        res["box_focused"] = page.input.is_focus()
         hand.type("Leeks too?"); pump(0.2)
-        x, y = true_point(v, chat.send)
-        hand.down(x, y); hand.up(x, y); pump(0.4)
-        last = chat.messages.get_last_child()
-        res["sent"] = last.get_label() if isinstance(last, Gtk.Label) else type(last).__name__
+        x, y = true_point(v, page.send_btn)
+        hand.down(x, y); hand.up(x, y); pump(1.5)
+        import test_baude
+        res["sent"] = "Leeks too?" in test_baude.labels_text(page.transcript)
         settle(v, 0.2)
         frame(win, 1).save_to_png(f"{OUT}/used-{mode}.png")
     res[f"code_{mode}"] = v.stats["code"]
@@ -76,8 +74,12 @@ for dark in (False, True):
     v, win = shown(dark, world(), board)
     res[f"nodes_{mode}"], res[f"lights_{mode}"] = len(v.nodes), len(v.scene["lights"])
     frame(win, 1).save_to_png(f"{OUT}/room-{mode}.png")
-    click_at(v, win, "backing", [(0.48, 0.48, 0.5), (-0.48, 0.48, 0.5), (0.49, 0, 0.5)])
+    hand = mouse.Mouse(win); fake_pointer(win, hand)
+    hand.down(20, 20); hand.up(20, 20); pump(0.2)
+    x, y = where_hit(v, win, "backing", [(0.48, 0.48, 0.5), (-0.48, 0.48, 0.5), (0.49, 0, 0.5)])
+    hand.down(x, y); hand.up(x, y); pump(0.2)
     settle(v, 3.0)
+    res[f"dashboard_clicked_{mode}"] = v.stats["code"]
     frame(win, 1).save_to_png(f"{OUT}/dashboard-{mode}.png")
     win.set_child(None); win.destroy(); pump(0.3)
 

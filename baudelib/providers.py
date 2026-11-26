@@ -105,9 +105,9 @@ def model_name(value, listed=()):
     (claude-opus-5-5 is opus, "Opus 5.5"); else as its id reads (models.id_name: claude-opus-4-7 is "Opus 4.7"); else
     its name to what serves it ("qwen3:4b" for "ollama/qwen3:4b"). Its provider and host are the provider picker's to
     say; its slug (model_slug) is shown only on hover."""
-    listed = [m for m in listed or () if isinstance(m, dict) and isinstance(m.get("value"), str) and
-              m["value"] not in DEFAULTS]
-    hit = next((m for m in listed if m["value"] == value), None) or \
+    every = [m for m in listed or () if isinstance(m, dict) and isinstance(m.get("value"), str)]
+    listed = [m for m in every if m["value"] not in DEFAULTS]  # (a default's by its own value only)
+    hit = next((m for m in every if m["value"] == value), None) or \
         next((m for m in listed if m.get("resolvedModel") == value), None) or \
         modelslib.claude_match(value, [m for m in listed if provider_of(m["value"]) is None and
                                        not m["value"].startswith("codex/")])
@@ -119,7 +119,7 @@ def model_name(value, listed=()):
                 return m["displayName"]
     if (agent := modelslib.proxied(value)) is not None:  # (another host's, run there)
         there = next((m for m in mesh_agents() if m["value"] == value), None)
-        return there["displayName"] if there else model_name(agent[1])
+        return there["displayName"] if there else model_name(agent[1], listed)
     pid = provider_of(value)
     if pid == "ollama":
         return value[len("ollama/"):]

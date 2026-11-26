@@ -6,7 +6,8 @@ token account's token replaced (token), each provider's default picked (select),
 device-code login with its CODEX_HOME, each line it writes carried back as it's written (the page to open among
 them), a code pasted on the head passed to it (code), then the end; the connection's going stops it. Every answer
 but a sign-in's lines carries the accounts and defaults as they are after it, and whether this host has claude
-(claude_cli: without it, a Claude account is a token). No GTK."""
+(claude_cli: without it, a Claude account is a token), and what's missing of a provider's program (missing: Codex's, by
+deps, which a Codex sign-in is checked against before it's run). No GTK."""
 import json
 import os
 import shutil
@@ -15,7 +16,7 @@ import tempfile
 import threading
 import uuid
 
-from baudelib import accounts, models, wording
+from baudelib import accounts, deps, wording
 from baudelib.claude import claude_env, claude_exe
 from baudelib.hostlogin import ESCAPES, NO_BROWSER, auth_status, signed_in_as
 
@@ -29,7 +30,9 @@ def claude_cli(server):
 
 
 def state(server=None):
-    return {"accounts": accounts.listing(), "defaults": accounts.defaults(), "claude_cli": bool(claude_cli(server))}
+    missing = {"codex": dep} if (dep := deps.missing("codex")) is not None else {}
+    return {"accounts": accounts.listing(), "defaults": accounts.defaults(), "claude_cli": bool(claude_cli(server)),
+            "missing": missing}
 
 
 def answer(server, conn, msg, reply):
@@ -207,13 +210,14 @@ def _sign_in(conn, msg, reply, done):
     fresh = not profile
     if fresh and not (msg.get("name") or "").strip():
         raise ValueError(wording.say("subscriptions.enter_name"))
+    deps.need("codex", "programs.codex")
     accounts.root().mkdir(mode=0o700, parents=True, exist_ok=True)
     directory = tempfile.mkdtemp(prefix="codex-", dir=accounts.root()) if fresh else accounts.codex_home(profile)
     try:
         if fresh:
             with open(os.path.join(directory, "config.toml"), "x") as config:
                 config.write('cli_auth_credentials_store = "file"\n')
-        proc = subprocess.Popen([models.codex_exe() or "codex", "-c", 'cli_auth_credentials_store="file"', "login",
+        proc = subprocess.Popen([deps.program("codex"), "-c", 'cli_auth_credentials_store="file"', "login",
                                  "--device-auth"], env={**os.environ, "CODEX_HOME": directory},
                                 stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
                                 errors="replace")

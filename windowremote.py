@@ -12,6 +12,7 @@ import threading
 import time
 import urllib.parse
 from baudelib.claude import claude_env, claude_exe, MODELS, spent_since
+from baudelib import deps  # noqa: E402  (what a program run here needs: claude for /logout)
 from baudelib import claude as claudelib  # (its ClaudeProc: Baude's is it, on the GTK main loop)
 from baudelib.transcripts import find_session, history_items, session_file
 import baudelib.client  # noqa: E402  (servers on the network and their sessions: see baudelib/client.py)
@@ -151,6 +152,7 @@ class MeshCard(ToolCard):
         if self.base == "start_subagent":
             title = (listed or {}).get("title") or self.task_title() or "Subagent"
             model = self.input.get("model") or (listed or {}).get("model")
+            slug = providerslib.model_slug(model, r.info.get("models") or [] if r is not None else []) if model else None
             if model:
                 model = providerslib.model_name(model, r.info.get("models") or [] if r is not None else [])
             bits = [f"Subagent on {host}" if host else "Subagent"] + ([model] if model else [])
@@ -177,6 +179,7 @@ class MeshCard(ToolCard):
             bits.append("its host went before it answered")
         self.title.set_markup(f"<b>{html.escape(title)}</b>")
         self.sub.set_text(" · ".join(bits))
+        self.sub.set_tooltip_text(slug if self.base == "start_subagent" else None)
         self.head_tip(listed, host)
 
     def head_tip(self, listed, host):
@@ -1194,11 +1197,14 @@ class WindowRemote:
 
         def run():
             try:
+                deps.need("claude", "report.claude")
                 r = subprocess.run([claude_exe(), "auth", "logout"], capture_output=True, text=True, timeout=60,
                                    stdin=subprocess.DEVNULL, env=claude_env())
                 said = _AUTH_ESCAPES.sub("", (r.stdout + r.stderr)).strip().splitlines()
                 text = wording.say("chat_notes.signed_out") if r.returncode == 0 else \
                     wording.say("chat_notes.sign_out_failed", why=str(said[-1] if said else r.returncode))
+            except deps.Missing as e:  # (no claude here: what to install, as Settings → Dependencies says it)
+                text = str(e)
             except (OSError, subprocess.SubprocessError) as e:
                 text = wording.say("chat_notes.sign_out_failed", why=str(e))
             GLib.idle_add(lambda: (self.note(text), self.signed_in()) and False)

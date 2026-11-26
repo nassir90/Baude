@@ -57,7 +57,7 @@ def seed(host_id):
     lines = [("baudelib/telemetry.py", 271, "sample", "stats = proc_stats(sorted(pids))", 120, 0.912),
              ("baudelib/telemetry.py", 106, "proc_stats", "text = subprocess.run([\"ps\", \"-o\", \"pid=,time=,rss=\", \"-p\",",
               120, 0.774),
-             ("baudelib/telemetry.py", 131, "memory", "text = subprocess.run([\"vm_stat\"], capture_output=True, text=True,",
+             ("baudelib/telemetry.py", 131, "_mac_memory", "if libc.host_statistics64(host, 4, ctypes.byref(vm), ctypes.byref(count)) == 0:",
               120, 0.402),
              ("baudelib/telemetry.py", 300, "_write", "f.write(\"\".join(json.dumps(r, separators=(\",\", \":\")) + \"\\n\" for r in these))",
               121, 0.051)]

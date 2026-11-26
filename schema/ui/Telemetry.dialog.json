@@ -125,12 +125,18 @@
     },
     {
       "name": "Machine",
-      "shows": "Heading \"Machine\": rows of the host's latest sample, asked again every 5 seconds while the page is shown: Load (1, 5 and 15 minutes; not on a phone), Memory (\"11.0 GB of 16.0 GB\"), then the host process, Baude and Record (the phone's app on a phone) each with its CPU and memory (\"6.2% · 613 MB\"). While telemetry is off, one dim row \"Telemetry is off\" in its place.",
+      "shows": "Heading \"Machine\": rows of the host's latest sample, asked again every 5 seconds while the page is shown: Load (1, 5 and 15 minutes; not on a phone), Memory (in use of the total, \"11.0 GB of 16.0 GB\"), Swap (in use of the total, \"1.2 GB of 3.0 GB\"; hidden where the host has no swap), Memory Pressure (the level the system gives, \"Normal\", \"Warning\" or \"Critical\", on macOS and a phone; on Linux the share of the last 10 seconds some task stalled on memory, \"1.3% Stalled\"), each only where the host could tell it, then the host process, Baude and Record (the phone's app on a phone) each with its CPU and memory (\"6.2% · 613 MB\"). While telemetry is off, one dim row \"Telemetry is off\" in its place.",
       "copy": [
         "telemetry.machine",
         "telemetry.load",
         "bot_memory.title",
         "telemetry.memory_of",
+        "telemetry.swap",
+        "telemetry.memory_pressure",
+        "telemetry.pressure_normal",
+        "telemetry.pressure_warning",
+        "telemetry.pressure_critical",
+        "telemetry.stalled",
         "telemetry.size_gb",
         "images.size_mb",
         "telemetry.host_process",
@@ -148,6 +154,16 @@
             {
               "session": "b3845b21-55ac-4aab-a769-fb8517403c51",
               "message": "41aef9c4-02f6-4496-ac8a-bb9737df5262"
+            }
+          ]
+        },
+        {
+          "said": "In telemetry we probably want to record both memory and swap (paraphrased)",
+          "rule": "Every host samples its memory in use, its swap in use of its total, and the memory pressure its system gives (macOS's pressure level, Linux's pressure stall share, a phone's low memory), with no new dependency, and every app shows them under Machine",
+          "decided": "2026-11-26",
+          "source": [
+            {
+              "issue": "BaudeInternal#236"
             }
           ]
         }

@@ -1,0 +1,8 @@
+{
+  "name": "christmas",
+  "kind": "scene",
+  "description": "A room at Christmas: each host a tree with its chats wrapped under it, each chat a letter in its present, and all of Baude on the desk's paper.",
+  "tokens": true,
+  "skin": {"css": true},
+  "scene": {"desktop": {"python": "desktop/scene.py"}}
+}

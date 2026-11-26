@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -17,6 +18,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithContent
@@ -88,9 +90,11 @@ class SceneModel(val scene: JSONObject, world: List<JSONObject>) {
     init {
         val list = scene.getJSONArray("nodes")
         for (i in 0 until list.length()) add(list.getJSONObject(i), null, null)
-        for (s in nodes.values.toList()) {
+        var at = 0
+        while (at < nodes.size) { // (slots made for a slot's thing, a host's chats, are met as they're made)
+            val s = nodes.values.elementAt(at++)
             val slots = s.slots ?: continue
-            val fits = query(world, slots)
+            val fits = query(world, slots, objOf(s))
             val p = slots.optJSONObject("panel")
             val size = p?.optJSONArray("size")
             val w = size?.optDouble(0, 1.6)?.toFloat() ?: 1.6f
@@ -124,11 +128,14 @@ class SceneModel(val scene: JSONObject, world: List<JSONObject>) {
         nodes[spec.getString("id")] = SceneNode3(spec, obj, parent ?: spec.optString("parent").ifEmpty { null })
     }
 
-    private fun query(world: List<JSONObject>, slots: JSONObject): List<JSONObject> {
+    /** The things slots are for, in their order; around: the thing the slots are in, whose fields a where's $field
+     * names (a chat's host $id). */
+    private fun query(world: List<JSONObject>, slots: JSONObject, around: JSONObject?): List<JSONObject> {
         val where = slots.optJSONObject("where")
+        fun want(k: String): String? = where!!.get(k).toString().let { v -> if (v.startsWith("$")) around?.opt(v.substring(1))?.toString() else v }
         var out = world.filter { o ->
             o.optString("kind") == slots.getString("of") &&
-                (where == null || where.keys().asSequence().all { k -> o.opt(k)?.toString().equals(where.get(k).toString(), true) })
+                (where == null || where.keys().asSequence().all { k -> o.opt(k)?.toString().equals(want(k), true) })
         }
         out = if (slots.optString("sort") == "name") out.sortedBy { it.optString("name").lowercase() }
         else out.sortedByDescending { it.optDouble("used", 0.0) }
@@ -362,7 +369,7 @@ fun SceneRoom(model: SceneModel, modifier: Modifier = Modifier, time: Float? = n
             val (cx, cy, depth) = Triple(f[0], f[1], f[2])
             val pwPx = f[5] * density
             val scale = focal / depth * f[3] / pwPx // (the widget's px → screen px at its depth)
-            Box(Modifier.zIndex(1f + k).size((f[5]).dp, (f[6]).dp).graphicsLayer {
+            Box(Modifier.zIndex(1f + k).wrapContentSize(Alignment.TopStart, unbounded = true).size((f[5]).dp, (f[6]).dp).graphicsLayer { // (its own px, though wider than the screen)
                 transformOrigin = TransformOrigin.Center
                 translationX = cx - pwPx / 2
                 translationY = cy - f[6] * density / 2

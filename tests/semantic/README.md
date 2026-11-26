@@ -10,6 +10,11 @@ tests/proto3d/fakeloc.dylib tests/proto3d/fakeloc.m`).
     N=3|50|200 GSK_RENDERER=gl run tests/semantic/perf.py  # frame time, CPU, picture uploads, N live panels
     MODE=a|a2|c N=200 GSK_RENDERER=gl run tests/semantic/gsk200.py  # where a frame of #454's stage goes
 
+    GSK_RENDERER=gl OUT=dir run tests/semantic/christmas.py   # the Christmas scene installed as its .baudetheme
+                                                         # through the host, light and dark: the room, a host's place,
+                                                         # a present opened and its letter used, the dashboard
+    SCENE=christmas [OPEN=1 N=9] GSK_RENDERER=gl run tests/semantic/perf.py  # its frames (OPEN: N letters out)
+
 A scene's chat panels are the app's own chat pages (scenehost.ChatPage): the rigs make a BaudeApp with a host in this
 process (tests/test_baude.py's App) and write each fixture chat as a session for it (rig.write_chats).
 

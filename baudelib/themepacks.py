@@ -200,9 +200,20 @@ def check_scene(doc, have):
         if n["id"] in ids:
             raise ValueError(f"nodes: another node is {n['id']} too.")
         ids[n["id"]] = n
-    slotted = [(f"{n['id']}/with[{j}] ({w['id']})", w) for n in doc["nodes"]
-               for j, w in enumerate((n.get("slots") or {}).get("with") or ())]
-    for i, (where, n) in enumerate([(f"nodes[{i}] ({n['id']})", n) for i, n in enumerate(doc["nodes"])] + slotted):
+
+    def slotted(where, n):  # (a slot's nodes, and theirs where one of them is slots: a host's chats)
+        for j, w in enumerate((n.get("slots") or {}).get("with") or ()):
+            yield f"{where}/with[{j}] ({w['id']})", w
+            yield from slotted(f"{where}/with[{j}]", w)
+
+    def counted(n):
+        slots = n.get("slots")
+        if slots is None:
+            return 1
+        return min(slots.get("limit") or NODES_MAX, NODES_MAX) * (1 + sum(counted(w) for w in slots.get("with") or ()))
+
+    top = [(f"nodes[{i}] ({n['id']})", n) for i, n in enumerate(doc["nodes"])]
+    for i, (where, n) in enumerate(top + [x for w, n in top for x in slotted(w, n)]):
         for f, k in (("position", 3), ("rotation", 3), ("scale", 3)):
             _vec(n.get(f), k, f"{where}.{f}")
         mesh = n.get("mesh")
@@ -222,9 +233,8 @@ def check_scene(doc, have):
         if (slots := n.get("slots")) is not None:
             if slots.get("panel") is None and not slots.get("with"):
                 raise ValueError(f"{where}: slots have a panel, nodes with them, or both.")
-            count += min(slots.get("limit") or NODES_MAX, NODES_MAX) * (1 + len(slots.get("with") or ()))
-        elif i < len(doc["nodes"]):
-            count += 1
+        if i < len(doc["nodes"]):
+            count += counted(n)
     for n in doc["nodes"]:
         seen, at = set(), n
         while at.get("parent") is not None:

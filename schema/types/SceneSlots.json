@@ -17,7 +17,7 @@
       "additionalProperties": {
         "type": "string"
       },
-      "description": "Only those whose fields are these (a chat's host, state, bot)."
+      "description": "Only those whose fields are these (a chat's host, state, bot). A value $field is that field of the thing the slots are in, for slots in a slot's with: a host's chats are where {host: $id}."
     },
     "sort": {
       "enum": [
@@ -60,7 +60,7 @@
       "items": {
         "$ref": "SceneNode.json"
       },
-      "description": "Nodes put in each slot's space beside its panel (a box it's in, a stand), for its thing: their ids are the slot's and theirs (<slots>/<n>/<id>), their parent the slot unless they name another of these."
+      "description": "Nodes put in each slot's space beside its panel (a box it's in, a stand), for its thing: their ids are the slot's and theirs (<slots>/<n>/<id>), their parent the slot unless they name another of these. One may be slots itself, made for each slot's thing (a host's chats in its place)."
     }
   },
   "required": [

@@ -102,6 +102,91 @@ class SceneThemeShots {
         org.robolectric.shadows.ShadowChoreographer.setFrameDelay(Duration.ofMillis(16))
         threeChats("light")
         boxesOpen()
+        for (dark in listOf(false, true)) christmas(dark)
+    }
+
+    // the Christmas scene (tests/semantic/christmas, the desktop's too): its hosts as the wire has them (Info's mesh),
+    // each with its chats (Sessions), and a window for the dashboard
+    private val xmasWorld = listOf(
+        """{"kind": "host", "id": "h-workshop", "name": "workshop", "state": "up"}""",
+        """{"kind": "host", "id": "h-attic", "name": "attic-pi", "state": "up"}""",
+        """{"kind": "host", "id": "h-studio", "name": "studio", "state": "down"}""",
+        """{"kind": "chat", "id": "h-workshop/s1", "host": "h-workshop", "name": "Fix the flaky upload", "state": "working", "used": 9}""",
+        """{"kind": "chat", "id": "h-workshop/s2", "host": "h-workshop", "name": "Tidy the release notes", "state": "waiting", "used": 8}""",
+        """{"kind": "chat", "id": "h-workshop/s3", "host": "h-workshop", "name": "Garden planner", "state": "idle", "bot": true, "used": 7}""",
+        """{"kind": "chat", "id": "h-workshop/s5", "host": "h-workshop", "name": "Card list", "state": "idle", "used": 6}""",
+        """{"kind": "chat", "id": "h-workshop/s4", "host": "h-workshop", "name": "Old notes", "state": "stopped", "used": 5}""",
+        """{"kind": "chat", "id": "h-attic/s6", "host": "h-attic", "name": "Sensor graphs", "state": "working", "used": 9}""",
+        """{"kind": "chat", "id": "h-attic/s7", "host": "h-attic", "name": "Backup check", "state": "idle", "used": 4}""",
+        """{"kind": "chat", "id": "h-studio/s8", "host": "h-studio", "name": "Mix notes", "state": "stopped", "used": 2}""",
+        """{"kind": "window", "id": "w1", "name": "Baude", "used": 9}""",
+    ).map(::JSONObject)
+
+    /** The theme's colours as its host works them out for these (baudelib.themes.colours: each libadwaita colour it
+     * sets; the frame and the inside are the sidebar's and the view's), read from its tokens.json. */
+    private fun xmasColours(dir: File): String {
+        val ctx = JSONObject(File(dir, "tokens.json").readText()).getJSONObject("modifiers").getJSONObject("theme").getJSONObject("contexts")
+        val out = JSONObject().put("name", "christmas")
+        for (mode in listOf("light", "dark")) {
+            val adw = ctx.getJSONArray(mode).getJSONObject(0).getJSONObject("libadwaita")
+            val m = JSONObject()
+            for (k in adw.keys()) m.put("libadwaita.$k", adw.getJSONObject(k).getJSONObject("\$value").getString("hex"))
+            m.put("baude.frame", m.getString("libadwaita.sidebar_bg_color")).put("baude.inside", m.getString("libadwaita.view_bg_color"))
+            out.put(mode, m)
+        }
+        return out.toString()
+    }
+
+    /** A host's card on its easel: its name and its chats' rows, of the phone's parts. */
+    @Composable
+    private fun hostCard(obj: JSONObject) {
+        val c = LocalBaude.current
+        Column(Modifier.fillMaxSize().background(c.inside).padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            BasicText(obj.getString("name"), style = Type.bold.copy(color = c.fg))
+            for (o in xmasWorld.filter { it.optString("host") == obj.getString("id") }.take(4)) Row(verticalAlignment = Alignment.CenterVertically) {
+                StatusDot(o.optString("state"), o.optString("state") == "waiting")
+                Spacer(Modifier.width(6.dp))
+                BasicText(o.getString("name"), style = Type.body.copy(color = c.fg))
+            }
+        }
+    }
+
+    /** The dashboard's stand-in (the phone has no window to give): every host and its chats, as Home lists them. */
+    @Composable
+    private fun dashboard() {
+        val c = LocalBaude.current
+        Row(Modifier.fillMaxSize().background(c.inside).padding(16.dp), horizontalArrangement = Arrangement.spacedBy(24.dp)) {
+            for (h in xmasWorld.filter { it.optString("kind") == "host" }) Box(Modifier.weight(1f)) { hostCard(h) }
+        }
+    }
+
+    private fun christmas(dark: Boolean) {
+        freshCompose()
+        val dir = File("../../tests/semantic/christmas")
+        val activity = Robolectric.buildActivity(ComponentActivity::class.java).setup().get()
+        dev.baude.android.Settings.load(activity)
+        dev.baude.android.Settings.themeColours.value = dev.baude.android.Msg.Theme.from(JSONObject(xmasColours(dir)))
+        dev.baude.android.Settings.appearance.value = if (dark) "dark" else "light"
+        val model = SceneModel(JSONObject(File(dir, "scene.json").readText()), xmasWorld)
+        val mode = if (dark) "dark" else "light"
+        activity.setContent {
+            BaudeTheme {
+                SceneRoom(model, time = 0f) { show, obj ->
+                    when (show) {
+                        "host" -> hostCard(obj)
+                        "window" -> dashboard()
+                        else -> chat(obj)
+                    }
+                }
+            }
+        }
+        settle()
+        shot(activity, "christmas-$mode")
+        val box = model.nodes.keys.first { it.endsWith("/box") && model.objOf(model.nodes.getValue(it))?.optString("id") == "h-studio/s8" } // (the middle place: what an upright phone sees)
+        model.picked(model.nodes.getValue(box)) {}
+        settle()
+        shot(activity, "christmas-opened-$mode")
+        check(!model.nodes.getValue(box.substringBeforeLast("/") + "/panel").hidden)
     }
 
     private fun boxesOpen() {

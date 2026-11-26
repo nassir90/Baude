@@ -173,6 +173,8 @@ class SessionSidebar(SidebarMenu, Gtk.Box):
         # pending restart: show_update_bars)
         self.update_bar = chatparts.UpdateBar(lambda: win.get_application().update_now(win), win.show_restart_blockers)
         self.append(self.update_bar)
+        GLib.idle_add(lambda: (win.get_application().show_update_bars([win]), False)[1]  # (a version offered before)
+                      if win.get_application() is not None else False)
         keys = Gtk.EventControllerKey()
         keys.connect("key-pressed", self.on_key)
         self.list.add_controller(keys)

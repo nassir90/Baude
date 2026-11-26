@@ -249,6 +249,7 @@ class Window(RecordHosts, Adw.ApplicationWindow, feedback.FeedbackHost, viewers.
         # machine's daemon's pending restart: show_restart)
         self.update_bar = chatparts.UpdateBar(self.update_now, self.show_restart_blockers)
         side.add_bottom_bar(self.update_bar)
+        GLib.idle_add(lambda: (self.update_waiting(None), False)[1])  # (a version offered before)
         self.left_sizes()
         # (held at its width: as it'd lay itself out, a long notebook's or page's name in full makes it wider; a name
         # too long ends in …. Not an Adw.Clamp: one takes the width the column asks for and centres it in that)
@@ -573,10 +574,15 @@ class Window(RecordHosts, Adw.ApplicationWindow, feedback.FeedbackHost, viewers.
         return why
 
     def update_waiting(self, waiting):
-        """(update.Updater's) What Update shows changed: a new version found and waiting on idle (what it waits for in
-        the tooltip), only offered (auto restart off), or none: the bar at the notebooks' foot."""
+        """(update.Updater's) What Update shows changed (waiting: a new version found and waiting on idle, what it
+        waits for in the tooltip; None: as the updater has it now): the bar at the notebooks' foot, Update, only
+        offered (auto restart off), the reason it can't be, or none."""
         u = getattr(self.get_application(), "updater", None)
-        self.update_bar.say(self.restart_blockers() if waiting else [] if u is not None and u.pending() else None)
+        if u is None:
+            return
+        waiting = u.waiting if waiting is None else waiting
+        self.update_bar.say(self.restart_blockers() if waiting else [] if u.pending() else None,
+                            u.why if not u.pending() else None, u.busy)
 
     def update_now(self):
         """The bar clicked: restarted onto the new version now (a question being answered stopped, said and asked)."""

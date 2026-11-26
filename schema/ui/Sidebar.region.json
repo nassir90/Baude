@@ -352,9 +352,12 @@
     },
     {
       "name": "Update bar",
-      "shows": "At the very foot, under a rule from the list, whenever a newer version is there, whether or not Auto restart on update is on: a flat button \"Update\" at the left. Tooltip: \"Waiting for:\" with bullet lines of what an automatic restart waits for, or \"A new version is ready\".",
+      "shows": "At the very foot, under a rule from the list, whenever a newer version is there, whether or not Auto restart on update is on: a flat button \"Update\" at the left. Tooltip: \"Waiting for:\" with bullet lines of what an automatic restart waits for, or \"A new version is ready\". Shown in every window, one opened after the version was found too. A newer version that can't be restarted onto says why in dim text in place of the button: \"Local changes in the checkout\", \"Can't fast-forward\" or \"The new version didn't start\". A checkout on a branch other than main, or following no upstream, is offered only what its upstream moved, never its own commits.",
       "copy": [
         "update_bar.update",
+        "update_bar.why_dirty",
+        "update_bar.why_diverged",
+        "update_bar.why_broken",
         "update_bar.waiting_for",
         "update_bar.ready"
       ],
@@ -366,7 +369,7 @@
       "actions": [
         {
           "by": "click",
-          "does": "Fetches the new version in if it isn't yet, checks it imports, and restarts onto it now (asking first if that would stop something running). With Auto restart on update off, this is the only way it restarts."
+          "does": "Looks at the checkout again (never a version found earlier), fetches the new version in if it isn't yet, checks it imports, and restarts onto it now (asking first if that would stop something running). A spinner shows on the button meanwhile; clicked while a look is under way, it carries on after it. With Auto restart on update off, this is the only way it restarts."
         }
       ],
       "decisions": [{"said": "Asked for the Update Available button to be white and not bold.", "rule": "Every app's Update button is in the text's own colour (white on a dark bar), not bold, not the accent.", "decided": "2026-11-12", "source": [{"issue": "BaudeInternal#48"}]}, {"said": "Even with Auto restart on update off, the Update button should always show when a newer version is there, at the foot of the sessions list or of the window (paraphrased)", "rule": "Every app looks for a newer version whether or not Auto restart on update is on, and shows Update at the foot of its sessions or notebooks list whenever one is there; with the setting off it never restarts by itself, only when Update is clicked", "decided": "2026-11-26", "source": [{"issue": "BaudeInternal#254"}]}]

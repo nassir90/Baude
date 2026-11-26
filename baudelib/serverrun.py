@@ -43,6 +43,7 @@ class ServerRunning:
             threading.Thread(target=self.answer_wait, args=(s, w), daemon=True, name="wait").start()
         with self.lock:  # (follow-ups a restart cut short: sent now, keep_follow_ups)
             self.send_follow_ups()
+            self.tasks.resume_told()  # (what chats a task's run started had still to tell their Bots: told now)
         self.log(f"serving {len(self.sessions)} sessions on {self.socket_path}, group {self.me['group']!r}"
                  + (f", commit {self.commit[:12]}" if self.commit else ""))
         while not self.stopped.is_set():
@@ -988,7 +989,8 @@ class ServerRunning:
                 return reply("bot_picture", session=s.id, picture=self.bot_picture(s))
             if op in ("tasks", "task", "run_task", "task_run", "task_stop"):  # (a Bot's tasks: baudelib.tasks)
                 try:
-                    kind, fields = self.tasks.op(s, msg)
+                    kind, fields = self.tasks.op(s, msg, by={"id": conn.member, "verified": conn.verified}
+                                                 if conn.member is not None else None)
                 except (ValueError, TypeError, OSError) as e:
                     return reply("error", error=str(e))
                 return reply(kind, **fields)

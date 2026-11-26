@@ -46,9 +46,12 @@ def log_path():
 def reach(dest=None, member=None):
     """(channel, info) for a host process: another machine's over ssh (dest: an alias, a host, user@host; its
     ~/.local/bin/baude-headless), a member of the mesh through this machine's (member: its id), else this machine's,
-    started if need be. OSError if it can't be."""
+    started if need be (inside a task's run: the host running it, BAUDE_SOCKET). OSError if it can't be."""
     if dest:
         return wire.connect_ssh(dest)
+    if os.environ.get("BAUDE_SOCKET") and os.environ.get("BAUDE_TASK_RUN"):
+        return wire.connect_mesh(member, os.environ["BAUDE_SOCKET"]) if member else \
+            wire.connect_local(os.environ["BAUDE_SOCKET"])
     if not start_here():
         raise OSError(wording.say("host_status.none_started", log=log_path()))
     return wire.connect_mesh(member) if member else wire.connect_local()

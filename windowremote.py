@@ -1176,11 +1176,13 @@ class WindowRemote:
             self.restart_claude()
 
     def restart_claude(self):
-        """The chat's claude started again (signed in or out since): Baude's own, here (restart_proc); a host process's
+        """The chat's claude started again (signed in or out since, or another account picked at its turn): Baude's own, here (restart_proc); a host process's
         (this machine's, or the one the chat runs on), stopped there, so its next message starts it again, as it's
         signed in now."""
         if self.remote is not None and self.session_id:
             self.remote.request({"op": "stop", "session": self.session_id, "restart": True})
+        else:
+            self.take_account()  # (an account picked at the turn: taken now)
         self.restart_proc(resume=True)
 
     def send_again(self, sent):

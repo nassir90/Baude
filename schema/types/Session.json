@@ -153,7 +153,11 @@
           "type": "null"
         }
       ],
-      "description": "The subscription account its agent runs under on its host, fixed as it's made (the host's default for its provider then, or as it's first written in); null for the CLI's own sign-in."
+      "description": "The subscription account its agent runs under on its host, fixed as it's made (the host's default for its provider then, or as it's first written in), or the one picked for it since (accounts' use), from the moment it's picked; null for the CLI's own sign-in, or an account since removed (account_gone)."
+    },
+    "account_gone": {
+      "type": "boolean",
+      "description": "Its subscription account was removed from its host after it was picked for it: its agent can't start till another is picked."
     },
     "held": {
       "type": "array",

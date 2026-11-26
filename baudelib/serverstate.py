@@ -243,6 +243,9 @@ class Session:
         self.env = {}             # (the environment a head on this machine gave it: its claude's, never written)
         self.always_allow = set()  # (tools a head always allows: allowed here, with or without a head; memory only)
         self.renew = False        # (a Bot changed at a turn: its agent started again once the turn's over, set_bot)
+        self.account_to = None    # (an account picked for it, not yet taken: switch_account; "": the CLI's own sign-in)
+        self.account_after_turn = False  # (that one taken once its turn and the follow-ups sent at it are answered)
+        self.sent_at_turn = False  # (its claude sent a follow-up at the turn going on: one more turn of its own to come)
         self.drop_timer, self.attached_once = None, False  # (drop_ephemeral's)
         self.app_tools = None     # (a head's own tools for its claude, start's app_tools: agentproxy.AppTools; memory only)
         # what its claude runs (commands): its Bash and PowerShell calls not answered yet, by tool_use_id (its
@@ -384,10 +387,15 @@ class Session:
     def account(self):
         """The subscription account its agent runs under here (Account's fields), or None: the CLI's own sign-in, a
         model that isn't Claude's or Codex's, or an account since removed."""
+        return accounts.account(self.profile())
+
+    def profile(self):
+        """The id of the account its agent runs under ("": the CLI's own sign-in, or a model that isn't Claude's or
+        Codex's): one picked for it, as it waits for its turn's end (account_to), else its own."""
         program = models.model_program(self.meta.get("model"))
         if program not in accounts.PROVIDERS:
-            return None
-        return accounts.account((self.meta.get("profiles") or {}).get(program, ""))
+            return ""
+        return self.account_to if self.account_to is not None else (self.meta.get("profiles") or {}).get(program, "")
 
     def listing(self):
         info = self.info or {}
@@ -410,6 +418,7 @@ class Session:
                 "fork_from": self.meta.get("fork_from"), "spawned_by": self.meta.get("spawned_by"),
                 "desktop": bool(self.meta.get("desktop")), "elsewhere": desktopchats.elsewhere(self),
                 "start_key": self.meta.get("start_key"), "account": self.account(),
+                "account_gone": bool(self.profile()) and self.account() is None,
                 "held": [{"id": h["id"], "text": h["text"], "shown": h.get("shown"), "sender": h.get("sender"),
                           "at": h.get("at")} for h in self.meta.get("held") or []],
                 "senders": self.meta.get("senders") or 0,

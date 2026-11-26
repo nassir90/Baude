@@ -1087,6 +1087,24 @@ abstract class Screens(private val theme: String) {
         withMenus("21-chat-model-picker-end")
     }
 
+    // (a chat on Claude's model whose host keeps two Claude subscriptions, Personal (the chat's) and Work: the provider
+    // picker beside the model lists them by name, pressed)
+    @Test fun chatSubscriptions() {
+        val chat = Mesh.openChat("h1", "a")
+        fill(chat)
+        val subs = listOf(Msg.Account(id = "p1", provider = "claude", name = "Personal", kind = "folder"),
+            Msg.Account(id = "w1", provider = "claude", name = "Work", kind = "folder"))
+        dev.baude.android.HostSubscriptions.listed["h1"] = subs
+        Mesh.sessions["h1"] = Mesh.sessions["h1"].orEmpty().map {
+            if (it.id == "a") Msg.Session.from(it.json().put("account", subs[0].json())) else it }
+        show { ChatShell("h1", "a", back = {}, open = { _, _ -> }, feedback = {}) }
+        laidOut()
+        screen("20s-chat-subscriptions")
+        tap("Personal")
+        laidOut()
+        withMenus("20t-chat-subscriptions-open")
+    }
+
     // (Settings → Meta's Intelligence, and the New session dialog's model, pressed: the menu under the button or, with
     // less room there than the list takes, over it; then Meta's Intelligence card as the page's last row, the list above it)
     @Test fun metaModelPicker() {

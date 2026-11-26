@@ -433,7 +433,8 @@ class HostPicker(Gtk.MenuButton):
             self.on_pick(value.get_string())
 
     def set_choices(self, hosts):
-        """hosts: [(host name, [(key, label)])], in order. The key picked stays picked if it's still there."""
+        """hosts: [(host name, [(key, label)])], in order; a host named None: its choices with no heading, each
+        shown as its label alone. The key picked stays picked if it's still there."""
         menu, self.labels = Gio.Menu(), {}
         for host, choices in hosts:
             section = Gio.Menu()
@@ -441,7 +442,7 @@ class HostPicker(Gtk.MenuButton):
                 item = Gio.MenuItem.new(label, None)
                 item.set_action_and_target_value("hostpicker.pick", GLib.Variant.new_string(key))
                 section.append_item(item)
-                self.labels[key] = f"{host} / {label}"
+                self.labels[key] = label if host is None else f"{host} / {label}"
             menu.append_section(host, section)
         self.set_menu_model(menu)
         self.select(self.value())

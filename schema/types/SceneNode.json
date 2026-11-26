@@ -36,6 +36,10 @@
       "type": "string",
       "description": "Its shape: plane (1 by 1, facing +z), box (1 by 1 by 1), cylinder (1 across, 1 high, along y), sphere (1 across), or a model in the theme's models/ (.obj)."
     },
+    "model": {
+      "type": "string",
+      "description": "A glTF binary (.glb) in the theme's models/ drawn in its mesh's place, fitted to the mesh's unit box (gfx): its mesh is still what's clicked, and what other renderers draw."
+    },
     "material": {
       "type": "string",
       "description": "Its material, by name (a panel's lights the widget's picture)."

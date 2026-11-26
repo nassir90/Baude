@@ -6,7 +6,7 @@ Imported by station_render.py and perf.py (SCENE=station)."""
 from rig import *  # noqa: F401,F403
 import datetime  # noqa: E402
 
-import chatparts, sessionlist, sessionsidebar, sidebarmenu, telemetryview  # noqa: E402,F401
+import chatparts, scenegfx, sessionlist, sessionsidebar, sidebarmenu, telemetryview  # noqa: E402,F401
 
 STATION = os.path.join(HERE, "space-station")
 HOST = "h1"
@@ -121,7 +121,7 @@ def load_station_css():
 def station_view(opened=None, theme=STATION):
     wd = world()
     windows = {"usage": usage_window()}
-    v = scenehost.SceneView(station_scene(), wd, providers(wd, windows), theme=theme, trusted=False,
+    v = scenegfx.scene_view(station_scene(), wd, providers(wd, windows), theme=theme, trusted=False,
                             open=(opened.append if opened is not None else None))
     v.windows = windows
     return v, wd

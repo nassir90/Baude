@@ -4,6 +4,7 @@ with one panel's content changing ten times a second (a tool card's output growi
 frame clock and GL run as on screen. Prints RESULT."""
 from rig import *  # noqa: F401,F403
 import math, resource, statistics
+import scenegfx  # noqa: E402
 N = int(os.environ.get("N", "3"))
 cards = {f"c{i}": make_card(i)[1] for i in range(N)}
 wd = scenehost.World([{"kind": "meta_card", "id": f"c{i}", "name": f"card {i}", "used": NOW - i} for i in range(N)])
@@ -25,7 +26,7 @@ if os.environ.get("SCENE") == "station":  # (the Space Station theme as it is, i
         scene.pop("bloom", None)
     N = None
 else:
-    v = scenehost.SceneView(scene, wd, {"meta_card": lambda o: cards[o["id"]]}, theme=SAMPLE, trusted=True)
+    v = scenegfx.scene_view(scene, wd, {"meta_card": lambda o: cards[o["id"]]}, theme=SAMPLE, trusted=True)
 if os.environ.get("RENDER_ONLY"):  # (the view still: only GL drawing each frame, no layout)
     v.advance = lambda dt: (v.stats["frames"].append(0.0), v.area.queue_render())
 if os.environ.get("LAYOUT_ONLY"):  # (layout each frame, GL not asked to draw again)
@@ -44,6 +45,9 @@ clock.connect("after-paint", lambda c: "t0" in marks and marks["frames"].append(
 def measure(seconds, during=None):
     marks["frames"].clear(); v.stats["frames"].clear(); v.stats["render_ms"].clear(); v.stats["layout_ms"].clear()
     up0, ums0 = v.stats["uploads"], v.stats["upload_ms"]
+    gfx = getattr(v, "gfx", None)  # (drawn by pygfx: its render, to the GPU's finish, and its readback, apart)
+    if gfx is not None:
+        gfx.stats["render_ms"].clear(); gfx.stats["readback_ms"].clear()
     r0, w0 = resource.getrusage(resource.RUSAGE_SELF), time.perf_counter()
     loop = GLib.MainLoop()
     if during:
@@ -60,7 +64,9 @@ def measure(seconds, during=None):
             "py_layout_ms": round(statistics.mean(v.stats["layout_ms"]), 2) if v.stats["layout_ms"] else None,
             "gl_render_ms": round(statistics.mean(v.stats["render_ms"]), 2) if v.stats["render_ms"] else None,
             "cpu_pct": round((r1.ru_utime + r1.ru_stime - r0.ru_utime - r0.ru_stime) / (w1 - w0) * 100, 1),
-            "uploads": ups, "upload_ms_each": round((v.stats["upload_ms"] - ums0) / ups, 2) if ups else None}
+            "uploads": ups, "upload_ms_each": round((v.stats["upload_ms"] - ums0) / ups, 2) if ups else None,
+            **({"gfx_render_ms": round(statistics.mean(gfx.stats["render_ms"]), 2),
+                "gfx_readback_ms": round(statistics.mean(gfx.stats["readback_ms"]), 2)} if gfx is not None and gfx.stats["render_ms"] else {})}
 if os.environ.get("SAMPLE"):  # (macOS's sample: where the main thread's time goes, C and all)
     import subprocess
     subprocess.Popen(["sample", str(os.getpid()), "2", "-file", os.environ["SAMPLE"]], stdout=subprocess.DEVNULL,
@@ -80,4 +86,4 @@ def grow():  # (a tool card's result changing: its panel's picture made again)
     else:
         target.queue_draw()
 changing = measure(3.0, grow)
-print("RESULT " + json.dumps({"n": N, "scale": win.get_scale_factor(), "bloom": "bloom" in scene, "renderer": type(win.get_renderer()).__name__, "still": still, "one_changing_10hz": changing}), flush=True)
+print("RESULT " + json.dumps({"n": N, "scale": win.get_scale_factor(), "bloom": "bloom" in scene, "renderer": type(win.get_renderer()).__name__, "scene": "gfx" if getattr(v, "gfx", None) else "gl", "still": still, "one_changing_10hz": changing}), flush=True)

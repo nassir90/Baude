@@ -1,7 +1,82 @@
 {
-  "name": "space-station",
-  "kind": "scene",
-  "description": "A basic space station: a ring, a hub and solar wings under the stars, Baude's chats, sessions, Meta's cards and a host on its decks.",
-  "tokens": true,
-  "skin": {"css": true}
+ "name": "space-station",
+ "kind": "scene",
+ "description": "A basic space station: a ring, a hub and solar wings under the stars, Baude's chats, sessions, Meta's cards and a host on its decks.",
+ "tokens": true,
+ "skin": {
+  "css": true
+ },
+ "assets": [
+  "models/corridor_window.glb",
+  "models/craft_cargoA.glb",
+  "models/hangar_roundGlass.glb",
+  "models/hangar_smallA.glb",
+  "models/satelliteDish_large.glb",
+  "textures/hull_color.jpg",
+  "textures/hull_normal.jpg",
+  "textures/hull_orm.jpg",
+  "textures/solar_color.jpg",
+  "textures/solar_normal.jpg",
+  "textures/solar_orm.jpg",
+  "textures/stars.jpg",
+  "textures/studio_small_09_1k.hdr"
+ ],
+ "credits": [
+  {
+   "files": [
+    "models/corridor_window.glb",
+    "models/craft_cargoA.glb",
+    "models/hangar_roundGlass.glb",
+    "models/hangar_smallA.glb",
+    "models/satelliteDish_large.glb"
+   ],
+   "work": "Space Kit (2.0)",
+   "author": "Kenney",
+   "source": "https://kenney.nl/assets/space-kit",
+   "license": "CC0-1.0"
+  },
+  {
+   "files": [
+    "textures/studio_small_09_1k.hdr"
+   ],
+   "work": "Studio Small 09",
+   "author": "Poly Haven",
+   "source": "https://polyhaven.com/a/studio_small_09",
+   "license": "CC0-1.0"
+  },
+  {
+   "files": [
+    "textures/stars.jpg"
+   ],
+   "work": "Rogland Clear Night",
+   "author": "Poly Haven",
+   "source": "https://polyhaven.com/a/rogland_clear_night",
+   "license": "CC0-1.0",
+   "changes": "Its sky only: the airglow taken off, turned so a point 50 degrees up is ahead and drawn in round it at half its angle (the ground and horizon left out), saved as an 8-bit JPEG."
+  },
+  {
+   "files": [
+    "textures/hull_color.jpg",
+    "textures/hull_normal.jpg",
+    "textures/hull_orm.jpg"
+   ],
+   "work": "Metal Plates 004",
+   "author": "ambientCG",
+   "source": "https://ambientcg.com/view?id=MetalPlates004",
+   "license": "CC0-1.0",
+   "changes": "The 1K set's colour and OpenGL normal maps, and its roughness and metalness packed into one image's green and blue."
+  },
+  {
+   "files": [
+    "textures/solar_color.jpg",
+    "textures/solar_normal.jpg",
+    "textures/solar_orm.jpg"
+   ],
+   "work": "Solar Panel 003",
+   "author": "ambientCG",
+   "source": "https://ambientcg.com/view?id=SolarPanel003",
+   "license": "CC0-1.0",
+   "changes": "The 1K set at 512 px, its colour brightened; its roughness and metalness packed into one image's green and blue."
+  }
+ ]
 }

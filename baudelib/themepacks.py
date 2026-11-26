@@ -32,8 +32,8 @@ LIGHTS_MAX = 8
 PRIMITIVES = ("plane", "box", "cylinder", "sphere")
 TOP = (MANIFEST, themes.CSS_FILE, themes.TOKENS_FILE, SCENE)  # (the files a theme may have at its top)
 FOLDERS = {  # (each folder a theme may have, and what may be in it)
-    "models": (".obj",),
-    "textures": (".png", ".jpg", ".jpeg", ".webp"),
+    "models": (".obj", ".glb"),
+    "textures": (".png", ".jpg", ".jpeg", ".webp", ".hdr"),
     "fonts": (".ttf", ".otf"),
     "shaders": (".glsl",),
     "desktop": (".py",),
@@ -193,8 +193,13 @@ def check_scene(doc, have):
         _vec(light.get("direction"), 3, f"lights[{i}].direction")
     materials = doc.get("materials") or {}
     for m, mat in materials.items():
-        if mat.get("texture") is not None and f"textures/{mat['texture']}" not in have:
-            raise ValueError(f"materials.{m}: there's no textures/{mat['texture']}.")
+        for f in ("texture", "normal_texture", "orm_texture"):
+            if mat.get(f) is not None and f"textures/{mat[f]}" not in have:
+                raise ValueError(f"materials.{m}: there's no textures/{mat[f]}.")
+    for f in ("environment", "backdrop"):
+        tex = (doc.get(f) or {}).get("texture")
+        if tex is not None and f"textures/{tex}" not in have:
+            raise ValueError(f"{f}: there's no textures/{tex}.")
     ids, count = {}, 0
     for n in doc["nodes"]:
         if n["id"] in ids:
@@ -206,8 +211,12 @@ def check_scene(doc, have):
         for f, k in (("position", 3), ("rotation", 3), ("scale", 3)):
             _vec(n.get(f), k, f"{where}.{f}")
         mesh = n.get("mesh")
-        if mesh is not None and mesh not in PRIMITIVES and f"models/{mesh}" not in have:
-            raise ValueError(f"{where}: its mesh is one of {', '.join(PRIMITIVES)} or a model in models/.")
+        if mesh is not None and mesh not in PRIMITIVES and (f"models/{mesh}" not in have or not mesh.endswith(".obj")):
+            raise ValueError(f"{where}: its mesh is one of {', '.join(PRIMITIVES)} or a model in models/ (.obj).")
+        if n.get("model") is not None and (f"models/{n['model']}" not in have or not n["model"].endswith(".glb")):
+            raise ValueError(f"{where}: its model is a .glb in models/.")
+        if n.get("model") is not None and mesh is None:
+            raise ValueError(f"{where}: a model is drawn in a mesh's place: give it a mesh too.")
         for m in [n.get("material")] + list((n.get("states") or {}).values()):
             if m is not None and m not in materials:
                 raise ValueError(f"{where}: there's no material {m}.")

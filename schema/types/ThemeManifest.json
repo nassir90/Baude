@@ -36,7 +36,14 @@
       "items": {
         "type": "string"
       },
-      "description": "Each file a scene or a skin uses, by its path in the folder: models/ (.obj), textures/ (.png, .jpg, .webp), fonts/ (.ttf, .otf), shaders/ (.glsl, the desktop's). Every app may read them; none is run."
+      "description": "Each file a scene or a skin uses, by its path in the folder: models/ (.obj, .glb), textures/ (.png, .jpg, .webp, .hdr), fonts/ (.ttf, .otf), shaders/ (.glsl, the desktop's). Every app may read them; none is run."
+    },
+    "credits": {
+      "type": "array",
+      "items": {
+        "$ref": "ThemeCredit.json"
+      },
+      "description": "Where the theme's files that someone else made come from, and under what licence: left out for none."
     }
   },
   "required": [

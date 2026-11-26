@@ -23,8 +23,8 @@ def ring():
     out, seg = [], 2 * math.pi * R / SEGMENTS
     for i in range(SEGMENTS):
         a = 360 * i / SEGMENTS
-        out.append({"id": f"ring/{i}", "mesh": "box", "material": "hull", "position": at(a, R),
-                    "rotation": [0, a, 0], "scale": r3([seg * 1.04, 0.5, 0.62]), "pick": "none"})
+        out.append({"id": f"ring/{i}", "mesh": "box", "model": "corridor_window.glb", "material": "module",
+                    "position": at(a, R), "rotation": [0, a + 90, 0], "scale": r3([0.62, 0.5, seg * 1.04]), "pick": "none"})
         out.append({"id": f"windows/{i}", "mesh": "box", "material": "window", "position": at(a, R + 0.315, 0.04),
                     "rotation": [0, a, 0], "scale": r3([seg * 0.7, 0.1, 0.02]), "pick": "none"})
     for i, a in enumerate((60, 140, 220, 300)):
@@ -35,7 +35,8 @@ def ring():
 
 def hub():
     return [
-        {"id": "hub", "mesh": "cylinder", "material": "hull", "scale": [1.6, 1.1, 1.6], "pick": "none"},
+        {"id": "hub", "mesh": "cylinder", "model": "hangar_roundGlass.glb", "material": "module", "scale": [1.9, 1.0, 1.65],
+         "pick": "none"},
         {"id": "hub/band", "mesh": "cylinder", "material": "accent", "position": [0, 0.1, 0], "scale": [1.72, 0.16, 1.72], "pick": "none"},
         {"id": "hub/dome", "mesh": "sphere", "material": "glass", "position": [0, 0.55, 0], "scale": [1.3, 0.8, 1.3], "pick": "none"},
         {"id": "mast", "mesh": "cylinder", "material": "hull_dark", "position": [0, 2.1, 0], "scale": [0.09, 3.0, 0.09], "pick": "none"},
@@ -58,12 +59,16 @@ def solar():
 def modules():
     """A lab module on the ring's left, a dock on its right, the lamps a pilot flies by."""
     return [
-        {"id": "lab", "mesh": "box", "material": "hull", "position": [-R - 0.55, 0.0, 0.6], "rotation": [0, -14, 0],
-         "scale": [0.9, 0.7, 1.3], "pick": "none"},
+        {"id": "lab", "mesh": "box", "model": "hangar_smallA.glb", "material": "module", "position": [-R - 0.55, 0.0, 0.6],
+         "rotation": [0, -14, 0], "scale": [1.3, 0.7, 1.3], "pick": "none"},
         {"id": "lab/light", "mesh": "box", "material": "window", "position": [-R - 0.55, 0.0, 1.26], "rotation": [0, -14, 0],
          "scale": [0.6, 0.08, 0.02], "pick": "none"},
         {"id": "dock", "mesh": "cylinder", "material": "hull", "position": [R + 0.9, 0.0, 0.0], "rotation": [0, 0, 90],
          "scale": [0.6, 1.4, 0.6], "pick": "none"},
+        {"id": "dock/craft", "mesh": "box", "model": "craft_cargoA.glb", "material": "module", "position": [R + 2.6, -0.9, -1.6],
+         "rotation": [8, -70, 4], "scale": [1.1, 0.55, 1.0], "pick": "none"},
+        {"id": "dish", "mesh": "box", "model": "satelliteDish_large.glb", "material": "module", "position": [1.2, 3.62, -0.6],
+         "rotation": [0, 200, 0], "scale": [0.55, 0.53, 0.5], "pick": "none"},
         {"id": "dock/port", "mesh": "cylinder", "material": "accent", "position": [R + 1.65, 0.0, 0.0], "rotation": [0, 0, 90],
          "scale": [0.7, 0.12, 0.7], "pick": "none"},
         {"id": "nav/port", "mesh": "sphere", "material": "nav_red", "position": [-R - 1.05, 0.42, 0.6], "scale": [0.12, 0.12, 0.12], "pick": "none"},
@@ -137,11 +142,15 @@ def panels():
 
 
 MATERIALS = {
-    "hull": {"color": "#959dab", "specular": 0.7, "shininess": 72},
+    "hull": {"color": "#c9cfd8", "specular": 0.7, "shininess": 72, "texture": "hull_color.jpg",
+             "normal_texture": "hull_normal.jpg", "orm_texture": "hull_orm.jpg", "repeat": [2, 1]},
+    "module": {"color": "#959dab", "specular": 0.7, "shininess": 72},
     "hull_dark": {"color": "#4a515e", "specular": 0.5, "shininess": 48},
     "accent": {"color": "#c96a2b", "specular": 0.6, "shininess": 64},
     "glass": {"color": "#26384f", "specular": 1.0, "shininess": 128, "emissive": "#0e1a2a"},
-    "solar": {"color": "#1d3566", "specular": 0.95, "shininess": 110},
+    "solar": {"color": "#1d3566", "specular": 0.95, "shininess": 110, "texture": "solar_color.jpg",
+              "normal_texture": "solar_normal.jpg", "orm_texture": "solar_orm.jpg", "repeat": [3, 2], "metalness": 0.0,
+              "roughness": 0.4},
     "frame": {"color": "#2c313b", "specular": 0.6, "shininess": 80},
     "window": {"color": "#ffd9a0", "emissive": "#ffd08a", "glow": 1.4},
     "beacon": {"color": "#ff4a3a", "emissive": "#ff3b2e", "glow": 3.2},
@@ -161,7 +170,10 @@ MATERIALS = {
 
 def scene():
     return {
+        "renderer": "gfx",
         "camera": {"position": [0, 3.3, 11.6], "target": [0, 0.95, 0], "fov": 42, "orbit": {"yaw": 9, "period": 48}},
+        "environment": {"texture": "studio_small_09_1k.hdr", "intensity": 0.3},
+        "backdrop": {"texture": "stars.jpg", "intensity": 0.35, "instead_of": ["star", "star_bright"]},
         "background": "#03050a",
         "ambient": "#1c2230",
         "lights": [

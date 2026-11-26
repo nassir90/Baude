@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "A scene's backdrop (gfx): an equirectangular image drawn behind everything, its middle straight ahead (-z), +y up.",
+  "properties": {
+    "texture": {
+      "type": "string",
+      "description": "An image in the theme's textures/."
+    },
+    "intensity": {
+      "type": "number",
+      "description": "How bright it's drawn: 1, left out."
+    },
+    "instead_of": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Materials whose nodes the backdrop stands for (a scene's stars): not drawn where it is."
+    }
+  },
+  "required": [
+    "texture"
+  ],
+  "additionalProperties": false
+}

@@ -175,6 +175,16 @@ An entry or a part may carry:
   app to give the page (the sample's rig without one). The owner, of the Space Station scene: "Space station UI looked
   100% different, quite concerning" (2026-11-26). Source: `[{"session": "b3845b21-55ac-4aab-a769-fb8517403c51",
   "message": "ef0e29ca-95e4-410d-8a14-fb11966725c7"}]`.
+- **A scene's look is a real renderer's, not one the app rolls itself.** A scene that says `"renderer": "gfx"` is
+  drawn on the desktop by pygfx (wgpu): physically based materials lit by its lights and by its environment (an HDR
+  image's light, reflected), a sun's shadows, its backdrop behind everything, glTF models in its meshes' places, bloom
+  from what glows, a tone curve and sRGB out, antialiased; its assets are free ones (CC0) from their makers' own sites,
+  credited in its manifest. The panels stay the widgets' own pictures, kept out of the bloom and the tone curve so
+  their text is as the widget draws it; clicks still go through the scene's own ray picking. The owner, of the Space
+  Station drawn in GL: "If I asked for a threejs render it would look better", and "you don't need to home roll an
+  attractive opengl renderer… you can probably find some online" (2026-11-26). Source: `[{"session":
+  "b3845b21-55ac-4aab-a769-fb8517403c51", "message": "ef0e29ca-95e4-410d-8a14-fb11966725c7"}, {"session":
+  "b3845b21-55ac-4aab-a769-fb8517403c51", "message": "c4e1231d-71c1-46cd-b6e6-2ae12e1be371"}]`.
 - **Apps are thin clients; the logic is in the wire.** What an app or an agent's tool does to shared things (a
   notebook's pages and the edits proposed to them, a chat, the mesh) is the host's to work out, through typed wire
   messages in schema/types; an app or an MCP server asks the host and shows its answer. An agent's interface (an MCP

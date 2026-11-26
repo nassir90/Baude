@@ -34,9 +34,11 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.repeatOnLifecycle
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextLinkStyles
@@ -274,9 +276,10 @@ private fun AccountMenu(a: Msg.Account, pick: (String) -> Unit) {
     }
 }
 
-/** A dialog's form that stays till what it sends is done: its fields, why it wasn't, and its button. */
+/** A dialog's form that stays till what it sends is done: its fields, why it wasn't, and its button (submit; none
+ * while a card in it says what can be done). */
 @Composable
-private fun Form(heading: String, submit: String, done: () -> Unit, said: String?, busy: Boolean, go: () -> Unit,
+private fun Form(heading: String, submit: String?, done: () -> Unit, said: String?, busy: Boolean, go: () -> Unit,
                  fields: @Composable () -> Unit) {
     val c = LocalBaude.current
     AlertDialog(
@@ -288,7 +291,7 @@ private fun Form(heading: String, submit: String, done: () -> Unit, said: String
                 said?.let { SelectionContainer { Text(it, style = Type.body, color = c.fg) } }
             }
         },
-        confirmButton = { Button(submit, suggested = true, enabled = !busy, onClick = go) },
+        confirmButton = { if (submit != null) Button(submit, suggested = true, enabled = !busy, onClick = go) },
         dismissButton = { Button(Wording.Common.close, onClick = done) },
         containerColor = c.dialog,
     )
@@ -377,62 +380,148 @@ private fun RemoveAccount(host: HostAccounts, a: Msg.Account, done: () -> Unit) 
     )
 }
 
-/** Add account (Codex) and Sign In Again… (a Codex account, id): an existing signed-in CODEX_HOME on the host (a new
- * account's only), or Codex's device-code sign-in run there, on a connection of its own, what it writes (the code and
- * where to enter it) said as it's written; Close lets go of it, which stops it there. name: a new account's ("" to
- * start), null for one signed in to again. */
-@Composable
-private fun CodexSignIn(host: HostAccounts, id: String?, name: String?, done: () -> Unit) {
-    var label by remember { mutableStateOf(name.orEmpty()) }
-    var home by remember { mutableStateOf("") }
-    var said by remember { mutableStateOf<String?>(null) }
-    var busy by remember { mutableStateOf(false) }
-    val conn = remember { mutableStateOf<Connection?>(null) }
-    DisposableEffect(Unit) { onDispose { conn.value?.stop() } }
-    val fresh = id == null
-    fun signIn() {
-        val lines = ArrayList<String>()
-        busy = true
-        said = Wording.Subscriptions.requestingCode
-        conn.value?.stop()
-        conn.value = Mesh.watch(host.hostId, { w, m ->
+/** Codex's device-code sign-in run on a host (codex login --device-auth, by hostaccounts' sign_in), on a connection of
+ * its own: a new account's (id null: named name, added once it's signed in) or an account's (id). Its state as the
+ * host says it (login, a ChatLogin: signing in, with the page to open and the code to enter there once codex has said
+ * them; signed in, as who; failed, with why); null till one's started, and once it's cancelled. stop() lets go of the
+ * connection, which stops it there. Compose state, changed on the main thread. */
+class CodexLogin(val host: HostAccounts, val id: String?) {
+    val name = mutableStateOf("")
+    val home = mutableStateOf("")
+    val login = mutableStateOf<Msg.ChatLogin?>(null)
+    val said = mutableStateOf<String?>(null) // (a signed-in CODEX_HOME's add: why it wasn't)
+    val busy = mutableStateOf(false)
+    val copied = mutableStateOf(false)
+    private var conn: Connection? = null
+
+    fun start() {
+        conn?.stop()
+        said.value = null
+        copied.value = false
+        login.value = Msg.ChatLogin(state = "signing_in")
+        val fresh = id == null
+        conn = Mesh.watch(host.hostId, { w, m ->
             if (m.optInt("req", -1) != REQ) return@watch
             Mesh.post {
-                if (w !== conn.value) return@post
+                if (w !== conn) return@post
                 val g = Msg.AccountsReply.from(m)
-                if (m.optString("op") == Op.ACCOUNTS && g.line != null && g.accounts == null) {
-                    lines.add(g.line)
-                    said = lines.takeLast(14).joinToString("\n")
+                if (m.optString("op") == Op.ACCOUNTS && g.login != null && g.accounts == null) {
+                    login.value = g.login
                     return@post
                 }
-                conn.value = null
+                conn = null
                 w.stop()
-                busy = false
                 val e = host.took(m)
-                if (e != null) said = e else done()
+                login.value = g.login ?: if (e == null) Msg.ChatLogin(state = "signed_in", who = g.who)
+                    else Msg.ChatLogin(state = "failed", reason = e)
             }
         }) { w ->
-            if (w !== conn.value) return@watch
-            if (w.state == "up") w.send(Msg.Accounts(req = REQ, what = "sign_in", id = id, name = label.trim().takeIf { fresh }).json())
-            else if (w.state == "down") { busy = false; said = Wording.HostStatus.connectionDropped }
+            if (w !== conn) return@watch
+            if (w.state == "up") w.send(Msg.Accounts(req = REQ, what = "sign_in", id = id, name = name.value.trim().takeIf { fresh }).json())
+            else if (w.state == "down") end(Wording.HostStatus.connectionDropped)
         }
-        if (conn.value == null) { busy = false; said = Wording.HostStatus.hostAbsent }
+        if (conn == null) end(Wording.HostStatus.hostAbsent)
     }
+
+    private fun end(why: String) {
+        conn = null
+        login.value = Msg.ChatLogin(state = "failed", reason = why)
+    }
+
+    fun cancel() {
+        stop()
+        login.value = null
+    }
+
+    fun stop() {
+        conn?.stop()
+        conn = null
+    }
+}
+
+/** Add account (Codex) and Sign In Again… (a Codex account, id): an existing signed-in CODEX_HOME on the host (a new
+ * account's only), or Codex's device-code sign-in run there (CodexLogin), as a card (CodexCard); Close lets go of it,
+ * which stops it there. name: a new account's ("" to start), null for one signed in to again. */
+@Composable
+internal fun CodexSignIn(host: HostAccounts, id: String?, name: String?, done: () -> Unit,
+                         login: CodexLogin = remember { CodexLogin(host, id).apply { this.name.value = name.orEmpty() } }) {
+    DisposableEffect(login) { onDispose { login.stop() } }
+    val fresh = id == null
+    var label by login.name
+    var home by login.home
+    val account = host.accounts.value.firstOrNull { it.id == id }?.name.orEmpty()
+    val state = login.login.value
     val go = {
         when {
             fresh && label.isBlank() -> Unit
-            fresh && home.isNotBlank() -> send(host, Msg.Accounts(what = "add", provider = "codex", name = label.trim(),
-                home = home.trim()), { busy = it }, { said = it }, done)
-            else -> signIn()
+            fresh && home.isNotBlank() -> { login.cancel(); send(host, Msg.Accounts(what = "add", provider = "codex",
+                name = label.trim(), home = home.trim()), { login.busy.value = it }, { login.said.value = it }, done) }
+            else -> login.start()
         }
     }
-    val heading = if (fresh) Wording.Subscriptions.addCodex
-        else Wording.Subscriptions.signInHeading(name = host.accounts.value.firstOrNull { it.id == id }?.name.orEmpty())
-    Form(heading, if (fresh && home.isNotBlank()) Wording.Subscriptions.useProfile else Wording.Subscriptions.deviceCode,
-        { conn.value?.stop(); done() }, said, busy, go) {
+    val heading = if (fresh) Wording.Subscriptions.addCodex else Wording.Subscriptions.signInHeading(name = account)
+    Form(heading, if (state != null) null else if (fresh && home.isNotBlank()) Wording.Subscriptions.useProfile
+        else Wording.Subscriptions.deviceCode, { login.stop(); done() }, login.said.value, login.busy.value, go) {
         if (fresh) {
-            NameField(label, { label = it }, Wording.Subscriptions.nameHint, go)
-            NameField(home, { home = it }, Wording.Subscriptions.codexHomeHint, go, focus = false)
+            val open = state == null || state.state == "failed"
+            NameField(label, { label = it }, Wording.Subscriptions.nameHint, go, enabled = open)
+            NameField(home, { home = it }, Wording.Subscriptions.codexHomeHint, go, focus = false, enabled = open)
+        }
+        if (state != null) CodexCard(login, if (fresh) label.trim() else account, go)
+    }
+}
+
+/** A Codex sign-in as a card, the way a chat's Sign in card is (LoginCard's look: the warning-bordered box, its title
+ * bold, then a line, then what can be done now): signing in, then its page's link (opened here: the host's browser
+ * isn't the phone's) and the code to enter there, large, with Copy, and Cancel; signed in, as who (else the account's
+ * name); failed, why, and Try Again (again). */
+@Composable
+private fun CodexCard(login: CodexLogin, name: String, again: () -> Unit) {
+    val c = LocalBaude.current
+    val l = login.login.value ?: return
+    val dim = c.fg.copy(alpha = c.fg.alpha * 0.6f)
+    val clip = LocalClipboardManager.current
+    Column(Modifier.fillMaxWidth().border(1.dp, c.warning, RoundedCornerShape(Gap.cardRadius))
+        .padding(horizontal = 12.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        val title = when (l.state) {
+            "signed_in" -> Wording.Subscriptions.codexSignedIn
+            "failed" -> Wording.SignIn.failed
+            else -> Wording.Subscriptions.codexSigningIn
+        }
+        SelectionContainer { Text(title, style = Type.bold, color = c.fg) }
+        val url = l.url
+        val code = l.code
+        when {
+            l.state == "signing_in" && url == null -> Text(Wording.Subscriptions.requestingCode, style = Type.body, color = dim)
+            l.state == "signing_in" && url != null -> {
+                Text(buildAnnotatedString {
+                    val (before, after) = Wording.SignIn.pageThere(link = "\u0000").split("\u0000", limit = 2).let {
+                        it[0] to it.getOrElse(1) { "" }
+                    }
+                    append(before)
+                    withLink(LinkAnnotation.Url(url, TextLinkStyles(SpanStyle(color = c.accent,
+                        textDecoration = TextDecoration.Underline)))) { append(Wording.SignIn.openPageThere) }
+                    append(after)
+                }, style = Type.body, color = c.fg)
+                // (the code a line of its own, its buttons under it: beside them, a phone's width breaks it)
+                if (code != null) SelectionContainer { Text(code, style = Type.deviceCode, color = c.fg, softWrap = false) }
+            }
+            l.state == "signed_in" -> SelectionContainer {
+                Text(l.who?.let { Wording.SignIn.asWho(who = it) } ?: name, style = Type.body, color = c.fg)
+            }
+            else -> SelectionContainer { Text(l.reason ?: Wording.Subscriptions.codexFailed, style = Type.body, color = dim) }
+        }
+        when (l.state) {
+            "signing_in" -> Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                l.code?.takeIf { l.url != null }?.let { code ->
+                    Button(if (login.copied.value) Wording.Subscriptions.codeCopied else Wording.Common.copy) {
+                        clip.setText(AnnotatedString(code))
+                        login.copied.value = true
+                    }
+                }
+                Button(Wording.Common.cancel) { login.cancel() }
+            }
+            "failed" -> Button(Wording.Common.tryAgain, suggested = true, onClick = again)
         }
     }
 }

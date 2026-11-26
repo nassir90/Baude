@@ -2,15 +2,18 @@
 mesh (Settings → Subscriptions in Baude, Record and the phone, and a chat's Sign in card): listed (list), added
 (add: a Claude token, or an existing signed-in Claude folder or CODEX_HOME), renamed (rename), removed (remove), a
 token account's token replaced (token), each provider's default picked (select), a subscription's usage read
-(usage), and a sign-in run here (sign_in): `claude auth login` with a Claude account's own folder, or Codex's
-device-code login with its CODEX_HOME, each line it writes carried back as it's written (the page to open among
-them), a code pasted on the head passed to it (code), then the end; the connection's going stops it. Every answer
-but a sign-in's lines carries the accounts and defaults as they are after it, and whether this host has claude
+(usage), and a sign-in run here (sign_in): `claude auth login` with a Claude account's own folder, each line it
+writes carried back as it's written (the page to open among them), a code pasted on the head passed to it (code),
+or Codex's device-code login with its CODEX_HOME, said as its state (login: the page to open and the code to enter
+there, once codex writes them), then the end; the connection's going stops it. Every answer
+but a sign-in's lines and states carries the accounts and defaults as they are after it, and whether this host has claude
 (claude_cli: without it, a Claude account is a token), what's missing of a provider's program (missing: Codex's, by
 deps, which a Codex sign-in is checked against before it's run), and each subscription's last read usage with when
 (last_usage: shown greyed on a client till its own read answers). No GTK."""
+import base64
 import json
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -22,6 +25,9 @@ from baudelib.claude import claude_env, claude_exe
 from baudelib.hostlogin import ESCAPES, NO_BROWSER, auth_status, signed_in_as
 
 PROMPT = "Paste code here if prompted > "  # (claude auth login's, with no line break after it)
+URL = re.compile(r"https://\S+")
+# (codex login --device-auth's one-time code, on a line of its own under "Enter this one-time code": ABCD-12345)
+DEVICE_CODE = re.compile(r"^[A-Z0-9]{3,}(?:-[A-Z0-9]{3,})+$")
 
 
 def claude_cli(server):
@@ -231,7 +237,9 @@ def _claude_sign_in(server, conn, msg, reply, done):
 
 def _sign_in(conn, msg, reply, done):
     """codex login --device-auth, into a new profile folder (a new account, named name) or an account's own (id: signed
-    in to again), one a connection."""
+    in to again), one a connection. What it says comes as the sign-in's state (login, a ChatLogin): signing_in at
+    once, then with the page to open (url) and the code to enter there (code) once codex writes them; its end says
+    signed_in (who: the account's email, as its sign-in says it) or failed (reason: what codex said last)."""
     if (proc := getattr(conn, "accounts_login", None)) is not None and proc.poll() is None:
         return done(error="this connection runs a sign-in already")
     profile = msg.get("id") or ""
@@ -256,29 +264,55 @@ def _sign_in(conn, msg, reply, done):
     conn.accounts_login = proc
     if getattr(conn, "gone", False):
         proc.terminate()
+    reply("accounts", what="sign_in", login={"state": "signing_in"})
 
     def read():
-        lines = []
+        lines, page, code, after_code, told = [], None, None, False, None
         with proc.stdout:
             for line in proc.stdout:
-                if line := ESCAPES.sub("", line).strip():
-                    lines.append(line)
-                    reply("accounts", what="sign_in", line=line)
+                if not (line := ESCAPES.sub("", line).strip()):
+                    continue
+                lines.append(line)
+                if page is None and (m := URL.search(line)):
+                    page = m.group(0).rstrip(".,)")
+                elif code is None and (DEVICE_CODE.match(line) or after_code and " " not in line):
+                    code = line
+                after_code = code is None and "code" in line.lower()
+                if page and (page, code) != told:  # (the page as soon as it's said, then with its code)
+                    told = (page, code)
+                    reply("accounts", what="sign_in", login={"state": "signing_in", "url": page,
+                                                             **({"code": code} if code else {})})
         ok = proc.wait() == 0 and os.path.isfile(os.path.join(directory, "auth.json"))
         if ok and fresh:
             try:
                 accounts.add("codex", msg.get("name"), directory)
             except ValueError as e:
                 shutil.rmtree(directory, ignore_errors=True)
-                return done(error=str(e))
+                return done(error=str(e), login={"state": "failed", "reason": str(e)})
         elif not ok and fresh:
             shutil.rmtree(directory, ignore_errors=True)
         if not ok:
-            return done(error=(lines[-1] if lines else wording.say("subscriptions.codex_failed")))
-        done(signed_in=True)
+            why = next((x for x in reversed(lines) if x.lower().startswith("error")), None) or \
+                (lines[-1] if lines and lines[-1] not in (page, code) else wording.say("subscriptions.codex_failed"))
+            return done(error=why, login={"state": "failed", "reason": why})
+        who = codex_who(directory)
+        done(signed_in=True, who=who, login={"state": "signed_in", "who": who})
 
     threading.Thread(target=read, daemon=True, name="codex-login").start()
     return None
+
+
+def codex_who(directory):
+    """Whose a CODEX_HOME's ChatGPT sign-in is: the email its auth.json's id token names, or None."""
+    try:
+        with open(os.path.join(directory, "auth.json"), encoding="utf-8") as f:
+            token = (json.load(f).get("tokens") or {}).get("id_token") or ""
+        body = token.split(".")[1]
+        claims = json.loads(base64.urlsafe_b64decode(body + "=" * (-len(body) % 4)))
+    except (OSError, ValueError, IndexError, AttributeError, TypeError):
+        return None
+    email = claims.get("email") if isinstance(claims, dict) else None
+    return email if isinstance(email, str) and email else None
 
 
 def stop(conn):

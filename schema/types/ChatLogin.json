@@ -1,12 +1,20 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
-  "description": "A chat's sign-in to Claude, as its host has it: every head draws the chat's sign-in card from this alone (LoginCard), whichever head started what's going on.",
+  "description": "A sign-in, as its host has it: a chat's to Claude, from which every head draws the chat's sign-in card alone (LoginCard), whichever head started what's going on; or a Codex account's device-code sign-in in Subscriptions (accounts sign_in's login), from which the head that asked draws its card.",
   "properties": {
     "state": {
       "type": "string",
       "enum": ["needed", "signing_in", "signed_in", "failed"],
-      "description": "needed: a turn failed for want of signing in (and every sign-in started since was cancelled); signing_in: claude auth login runs on the host for it; signed_in: it finished; failed: it ended without signing in."
+      "description": "needed: a turn failed for want of signing in (and every sign-in started since was cancelled); signing_in: claude auth login (codex login --device-auth) runs on the host for it; signed_in: it finished; failed: it ended without signing in."
+    },
+    "url": {
+      "type": "string",
+      "description": "signing_in, a Codex device-code sign-in's: the page to open, once codex has said it."
+    },
+    "code": {
+      "type": "string",
+      "description": "signing_in, a Codex device-code sign-in's: the one-time code to enter on that page."
     },
     "expired": {
       "type": "boolean",
@@ -18,7 +26,7 @@
     },
     "who": {
       "type": ["string", "null"],
-      "description": "signed_in: who as, as claude auth status says it; null if it didn't say, or the head may not read Subscriptions."
+      "description": "signed_in: who as, as claude auth status says it (Codex's: the email its sign-in names); null if it didn't say, or the head may not read Subscriptions."
     },
     "turn": {
       "type": "integer",

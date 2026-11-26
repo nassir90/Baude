@@ -178,6 +178,47 @@ abstract class Screens(private val theme: String) {
         screen("05d-subscriptions-sign-in")
     }
 
+    // (Add account (Codex) on workshop: the device-code sign-in's card at each step as the host says it: waiting for
+    // its code, the page's link and the code with Copy, signed in, failed)
+    @Test fun subscriptionsCodexSignIn() {
+        accountsFixture()
+        val host = dev.baude.android.HostAccounts(Mesh.hosts.first().id)
+        val login = dev.baude.android.CodexLogin(host, null).apply {
+            name.value = "Work"
+            this.login.value = Msg.ChatLogin(state = "signing_in")
+        }
+        show {
+            SettingsScreen({}, {}, page = 1)
+            dev.baude.android.CodexSignIn(host, null, "Work", {}, login)
+        }
+        laidOut()
+        screen("05k-codex-waiting")
+        login.login.value = Msg.ChatLogin(state = "signing_in", url = "https://auth.openai.com/codex/device", code = "KQ7M-3XWPD")
+        laidOut()
+        screen("05l-codex-code")
+        login.login.value = Msg.ChatLogin(state = "signed_in", who = "personal@example.com")
+        laidOut()
+        screen("05m-codex-signed-in")
+        login.login.value = Msg.ChatLogin(state = "failed",
+            reason = "Error logging in with device code: the device code expired before it was entered")
+        laidOut()
+        screen("05n-codex-failed")
+    }
+
+    // (Claude's chat Sign in card, to compare with Codex's: the page's link and the code box)
+    @Test fun chatLoginCard() {
+        accountsFixture()
+        val login = dev.baude.android.Login(Mesh.hosts.first().id, "s1", null, null, emptyList()).apply {
+            stage.value = "page"
+            url.value = "https://claude.ai/oauth/authorize?code=true&client_id=fixture"
+        }
+        render("05o-chat-login-card") {
+            androidx.compose.foundation.layout.Box(androidx.compose.ui.Modifier.padding(16.dp)) {
+                dev.baude.android.LoginCard(login)
+            }
+        }
+    }
+
     @Test fun subscriptionsRemove() {
         accountsFixture()
         show { SettingsScreen({}, {}, page = 1) }

@@ -238,6 +238,7 @@
       "$value": {"value": 20, "unit": "px"}
     },
     "mono": {"$description": "The phone's code.", "$type": "dimension", "$value": {"value": 13.5, "unit": "px"}},
+    "device-code": {"$description": "The phone's one-time code of a device-code sign-in (Subscriptions' Codex sign-in card), read off and typed in elsewhere.", "$type": "dimension", "$value": {"value": 26, "unit": "px"}},
     "small": {
       "$description": "A note's size (.sysnote, Meta's .meta-note), and a folder's name's (.sidebar-folder), in em.",
       "$type": "number",
@@ -247,6 +248,11 @@
       "$description": "Code's size (.mono; a file's, .code-view, and its lines' numbers', .code-gutter), in em.",
       "$type": "number",
       "$value": 0.9
+    },
+    "device-code-scale": {
+      "$description": "That one-time code's size on the desktop (.device-code), in em.",
+      "$type": "number",
+      "$value": 1.8
     },
     "semibold": {"$description": "A Bot's name (.bot-name).", "$type": "fontWeight", "$value": 600},
     "bold": {"$description": "A folder's name, a title.", "$type": "fontWeight", "$value": "bold"}

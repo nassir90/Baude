@@ -123,6 +123,20 @@
       "items": {"type": "string"},
       "description": "The chats it started on its Bot's host (start's task_run), by their ids, oldest first: they go on after it's over, their states as the sessions listing has them."
     },
+    "script": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "The path of the script it ran, on its host."
+    },
+    "entrypoint": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "What ran its script, as a command line (its script's path after it); null: a bot task's, given its Bot as a turn."
+    },
     "pid": {
       "type": [
         "integer",

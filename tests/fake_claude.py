@@ -300,7 +300,7 @@ def task_answer(n, text):
     true, "filled"), as JSON; a failure handed over whose log says HEAL ME, healed: the task's script set to one that
     asks the Bot once and ends well (mcp__mesh__set_task), and run again (mcp__mesh__run_task, not waited for); else a
     line saying it looked."""
-    healing = re.search(r"It's your task ([A-Za-z0-9_-]+);", text) if "HEAL ME" in text else None
+    healing = re.search(r"^\| task \| ([A-Za-z0-9_-]+) \|$", text, re.M) if "HEAL ME" in text else None
     if healing:
         tid = healing[1]
         mcp_tool("mesh", "set_task", {"id": tid, "script": 'import baudetask as task\n'
@@ -756,7 +756,7 @@ def main():
             if answer is not None:  # (FAKE_ANSWERS: {words in the message: the answer to it}, as a scene wants it)
                 say(answer, f"answer{turns}")
                 result(answer)
-            elif "Your task's run" in text:
+            elif re.search(r"An instance of the '.*' task (failed|asks:)", text):
                 task_answer(turns, text)
             elif "AUTOFIX" in text or "needs fixing" in text:
                 autofix(turns, text)

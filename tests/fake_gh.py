@@ -97,7 +97,7 @@ def rest(state, args):
 
 def run(state, args):
     what = args[:2]
-    if what == ["auth", "status"]:
+    if what in (["auth", "status"], ["auth", "token"]):
         return 0 if os.environ.get("FAKE_GH_SIGNED_IN", "1") == "1" else 1
     if args[:1] == ["api"] and "-i" in args:
         return rest(state, args)

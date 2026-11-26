@@ -3,6 +3,7 @@
   "name": "VTE",
   "where": "app",
   "needed_by": ["multiplex.terminal_menu", "window.kubernetes"],
+  "group": "deps.multiplex",
   "detect": {
     "macos": [{"gi": "Vte", "version": "3.91"}],
     "linux": [{"gi": "Vte", "version": "3.91"}]

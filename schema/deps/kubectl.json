@@ -3,6 +3,7 @@
   "name": "kubectl",
   "where": "host",
   "needed_by": ["window.kubernetes"],
+  "group": "window.kubernetes",
   "detect": {
     "macos": [{"env": "BAUDE_KUBECTL"}, {"which": "kubectl"}],
     "linux": [{"env": "BAUDE_KUBECTL"}, {"which": "kubectl"}]

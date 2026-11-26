@@ -455,8 +455,14 @@ class ServerRunning:
                     reply("error", error=f"{type(e).__name__}: {e}")
             threading.Thread(target=turn, daemon=True, name="autofix").start()
             return None
-        if op == "deps":  # (what this host's features need, each there or not: Settings → Dependencies)
-            return reply("deps", deps=deps.report("host"))
+        if op == "deps":  # (what this host and its machine's apps need, each there or not: Settings → Dependencies;
+            def look():   # on a thread of its own, as Ollama's asked and gh run)
+                try:
+                    reply("deps", deps=deps.report())
+                except Exception as e:  # noqa: BLE001 (anything gone wrong: still answered)
+                    reply("error", error=f"{type(e).__name__}: {e}")
+            threading.Thread(target=look, daemon=True, name="deps").start()
+            return None
         if op == "themes":  # (the themes kept here, each worked out: Settings → Theme, on every app)
             return reply("themes", themes=themes.listing())
         if op in ("theme_save", "theme_remove"):  # (Meta's create_theme and install_theme, and their undo)

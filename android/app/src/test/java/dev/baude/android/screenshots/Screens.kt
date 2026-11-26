@@ -185,7 +185,8 @@ abstract class Screens(private val theme: String) {
     }
 
     // (a host without kubectl or Docker, its own commands for them (a Debian host's): what Kubernetes and Database
-    // Schemas show in their place, and Settings → Dependencies, the host's list)
+    // Schemas show in their place, and Settings → Dependencies, the host's list under what needs each: Ollama running,
+    // gh signed out, a kubeconfig with no context)
     @Test fun missingKubectl() {
         missingFixture()
         show { dev.baude.android.KubeScreen(Mesh.hosts.first().id, {}) }
@@ -205,6 +206,9 @@ abstract class Screens(private val theme: String) {
         show { SettingsScreen({}, {}, page = 2) }
         laidOut()
         screen("40c-dependencies")
+        scrollUnder("Claude Code") // (its end: Multiplex, Emission, Signal)
+        laidOut()
+        screen("40c2-dependencies-end")
     }
 
     // (Settings → Telemetry on a host: its machine's apps' time in each place and uses of each ☰ item, as it adds
@@ -227,8 +231,10 @@ abstract class Screens(private val theme: String) {
     }
 
     private fun missingFixture() {
-        fun dep(key: String, name: String, present: Boolean, fix: String) = org.json.JSONObject().put("dep", key)
-            .put("name", name).put("where", "host").put("present", present).put("fix", fix)
+        fun dep(key: String, name: String, present: Boolean, fix: String?, group: String? = null,
+                ready: String = dev.baude.android.Wording.Deps.installed) = org.json.JSONObject().put("dep", key).put("name", name)
+            .put("where", "host").put("present", present).put("fix", fix ?: org.json.JSONObject.NULL).put("group", group ?: org.json.JSONObject.NULL)
+            .put("ready", if (present) ready else org.json.JSONObject.NULL)
         val kubectl = dep("kubectl", "kubectl", false, "sudo snap install kubectl --classic")
         val docker = dep("docker", "Docker", false, "sudo apt install docker.io")
         FixtureConnection.up(activity, Mesh.hosts.first()) { m ->
@@ -237,10 +243,21 @@ abstract class Screens(private val theme: String) {
                 "kube" -> r.put("what", m.optString("what")).put("missing", kubectl)
                 "databases" -> r.put("what", m.optString("what")).put("missing", docker)
                 "deps" -> r.put("deps", org.json.JSONArray(listOf(
-                    dep("claude", "Claude Code", true, "curl -fsSL https://claude.ai/install.sh | bash"),
-                    dep("codex", "Codex CLI", false, "npm install -g @openai/codex"), docker,
-                    dep("gh", "GitHub CLI", true, "sudo apt install gh"), dep("git", "Git", true, "sudo apt install git"),
-                    kubectl, dep("xvfb", "Xvfb", true, "sudo apt install xvfb"))))
+                    dep("claude", "Claude Code", true, "curl -fsSL https://claude.ai/install.sh | bash", "deps.providers"),
+                    dep("codex", "Codex CLI", false, "npm install -g @openai/codex", "deps.providers"),
+                    dep("ollama", "Ollama", true, "curl -fsSL https://ollama.com/install.sh | sh", "deps.providers",
+                        dev.baude.android.Wording.Deps.runningModels(n = 2)),
+                    dep("git", "Git", true, "sudo apt install git", "deps.git_github"),
+                    dep("gh", "GitHub CLI", true, "sudo apt install gh", "deps.git_github"),
+                    dep("gh_auth", "GitHub Account", false, "gh auth login", "deps.git_github").put("check", true),
+                    dep("kubectl", "kubectl", true, "sudo snap install kubectl --classic", "window.kubernetes"),
+                    dep("kubeconfig", "kubeconfig", false, null, "window.kubernetes").put("check", true)
+                        .put("link", "https://kubernetes.io/docs/concepts/configuration/organize-cluster-access-kubeconfig/"),
+                    docker.put("group", "window.database_schemas"),
+                    dep("vte", "VTE", true, "sudo apt install gir1.2-vte-3.91", "deps.multiplex").put("where", "app"),
+                    dep("xvfb", "Xvfb", true, "sudo apt install xvfb", "deps.multiplex"),
+                    dep("webkit", "WebKitGTK", true, "sudo apt install gir1.2-webkit-6.0", "mesh_versions.emission").put("where", "app"),
+                    dep("node", "Node.js", true, "sudo apt install nodejs npm", "side_panel.signal").put("where", "app"))))
                 else -> null
             }
         }

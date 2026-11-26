@@ -1,0 +1,11 @@
+{
+  "description": "macOS's own WebKit, which draws Emission's pages there (the Browser page, a Bot's browser). It comes with macOS.",
+  "name": "WebKit",
+  "where": "app",
+  "needed_by": ["bot_browser.title", "mesh_versions.emission"],
+  "group": "mesh_versions.emission",
+  "detect": {
+    "macos": [{"glob": "/System/Library/Frameworks/WebKit.framework"}]
+  },
+  "install": {}
+}

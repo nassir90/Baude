@@ -3,6 +3,7 @@
   "name": "Docker",
   "where": "host",
   "needed_by": ["window.database_schemas"],
+  "group": "window.database_schemas",
   "detect": {
     "macos": [{"which": "docker"}],
     "linux": [{"which": "docker"}]

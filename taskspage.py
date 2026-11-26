@@ -55,19 +55,20 @@ def when(t):
     return wording.say("tasks.days_at", days=said, time=t.get("at"))
 
 
-def stamp(t, clock=None):
-    """A time as the host's clock has it: HH:MM today, else its day too."""
+def stamp(t, clock=None, short=False):
+    """A time as the host's clock has it: HH:MM today, else its day too (short: without the weekday)."""
     if not t:
         return wording.say("tasks.never")
     zone = datetime.timezone(datetime.timedelta(seconds=clock["offset"])) if clock else None
     d = datetime.datetime.fromtimestamp(t, zone)
-    return d.strftime("%H:%M") if d.date() == datetime.datetime.now(zone).date() else d.strftime("%a %d %b %H:%M")
+    return d.strftime("%H:%M") if d.date() == datetime.datetime.now(zone).date() else \
+        d.strftime("%d %b %H:%M" if short else "%a %d %b %H:%M")
 
 
-def ran_at(run, clock=None):
+def ran_at(run, clock=None, short=False):
     """When a run started, as its host's clock had it then (its own offset), else as it has it now."""
     offset = run.get("offset")
-    return stamp(run.get("started"), {"offset": offset} if isinstance(offset, int) else clock)
+    return stamp(run.get("started"), {"offset": offset} if isinstance(offset, int) else clock, short)
 
 
 def took(seconds):
@@ -223,7 +224,7 @@ class TasksPage(Gtk.Box):
                 self.ask({"op": "task", "session": self.sid, "id": self.task["id"]})
         return True
 
-    def ask(self, msg, then=None):
+    def ask(self, msg):
         self.asked += 1
         sid = self.sid
         op = msg.get("op")
@@ -240,8 +241,6 @@ class TasksPage(Gtk.Box):
                 return
             self.said.set_visible(False)
             self.took(r)
-            if then is not None:
-                then(r)
         self.remote.request(msg, got)
 
     def took(self, r):
@@ -270,8 +269,8 @@ class TasksPage(Gtk.Box):
         self.stack.set_visible_child_name(name)
         self.refresh()
 
-    def save(self, task, then=None):
-        self.ask({"op": "tasks", "session": self.sid, "set": task}, then)
+    def save(self, task):
+        self.ask({"op": "tasks", "session": self.sid, "set": task})
 
     def kept(self, task, **changed):
         """task as it's sent to be set again (its script left as it is: the Bot's to change), with changed."""
@@ -378,9 +377,7 @@ class TasksPage(Gtk.Box):
             lb = self.listbox(g)
             lb.connect("row-activated", lambda _l, row: self.open_run(row.run))
             for r in self.runs:
-                title = f"{ran_at(r, self.clock)} · " + (
-                    took(r.get("seconds")) if r.get("ended") else wording.say("tasks.status", status=r["status"])) + \
-                    (f" · {wording.say('tasks.dummy_answers')}" if r.get("dry") else "")
+                title = ran_at(r, self.clock, True) + (f" · {wording.say('tasks.dry_tag')}" if r.get("dry") else "")
                 row = Adw.ActionRow(title=GLib.markup_escape_text(title), activatable=True)
                 row.run = r
                 row.add_prefix(status_icon(r))

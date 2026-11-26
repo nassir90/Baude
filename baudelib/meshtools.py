@@ -440,7 +440,8 @@ class Mesh:
         return self.request(self.local, {"op": "tasks", "session": self._bot(a)})["tasks"]
 
     def task(self, a):
-        got = self.request(self.local, {"op": "task", "session": self._bot(a), "id": a["id"]})
+        got = self.request(self.local, {"op": "task", "session": self._bot(a), "id": a["id"],
+                                       "script": True})
         return {"task": got["task"], "runs": got.get("runs") or []}
 
     def set_task(self, a):

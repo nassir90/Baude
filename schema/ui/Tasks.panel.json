@@ -151,12 +151,10 @@
         },
         {
           "name": "runs",
-          "shows": "Heading 'Runs'. Its latest runs, newest first, a compact row each: the state icon, the title '<when> · <how long>' (when: HH:MM if today, else 'Mon 03 Nov 14:00', on the host's clock as it was when the run started; how long: '12 s' or '3 min 4 s'), and at the end an icon for what started it (play by hand, alarm clock schedule, branch git push) and the version, monospace, dim. A run with dummy answers has ' · dummy answers' after that. None: the dim line 'No runs yet'.",
+          "shows": "Heading 'Runs'. Its latest runs, newest first, a compact row each: the state icon, the title '<when>' on one line (HH:MM if today, else '03 Nov 14:00', on the host's clock as it was when the run started; how long it took is on the run page), and at the end an icon for what started it (play by hand, alarm clock schedule, branch git push) and the version, monospace, dim. A run with dummy answers has ' · dry' after the title. None: the dim line 'No runs yet'.",
           "copy": [
             "tasks.no_runs",
-            "tasks.seconds",
-            "tasks.minutes_took",
-            "tasks.dummy_answers"
+            "tasks.dry_tag"
           ],
           "actions": [
             {
@@ -354,7 +352,7 @@
     },
     {
       "said": "Telemetry includes when triggers happen, how long scripts take, failures and version hashes",
-      "rule": "Every app lists a task's runs with when, how long, what started it, how it ended and the version it ran",
+      "rule": "Every app lists a task's runs with when, what started it, how it ended and the version it ran, and a run's page says how long it took",
       "decided": "2026-11-26",
       "source": [
         {
@@ -374,7 +372,7 @@
     },
     {
       "said": "For tasks UI, users probably don't need to see scripts at all these are probably going to blow up to pretty complex apps in the bot git repo.",
-      "rule": "No app shows a task's script or lets a person edit it, nor its runtime: the Bot writes and changes scripts (set_task), and a person asks the Bot to. No app makes a new task by hand either, since a task needs a script. A task's version stays on its runs and its run page; a run's log (tracebacks too) shows as it is",
+      "rule": "No app shows a task's script or lets a person edit it, nor its runtime: the Bot writes and changes scripts (set_task), and a person asks the Bot to. A task's version stays on its runs and its run page; a run's log (tracebacks too) shows as it is",
       "decided": "2026-11-26",
       "source": [
         {
@@ -428,14 +426,8 @@
         "baude",
         "phone"
       ],
-      "why": "A task needs a script, and scripts are the Bot's to write: a person asks the Bot for a new task",
-      "decided": "2026-11-26",
-      "source": [
-        {
-          "session": "b3845b21-55ac-4aab-a769-fb8517403c51",
-          "message": "21d61362-b76e-4eed-a2d6-59d2e5eb5a2d"
-        }
-      ]
+      "why": "A consequence of no scripts in the UI: the host takes no task without a script; scripts are the Bot's to write. A person asks the Bot for a new task",
+      "decided": "2026-11-26"
     }
   ]
 }

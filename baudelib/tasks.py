@@ -507,7 +507,7 @@ class Tasks:
                 task = st.find(msg.get("id"))
                 if task is None:
                     raise ValueError(wording.say("host_errors.no_task"))
-                return "task", {"session": s.id, "task": self.shown(st, task, script=True),
+                return "task", {"session": s.id, "task": self.shown(st, task, script=bool(msg.get("script"))),
                                 "runs": st.latest(task["id"]), "clock": clock()}
         if op == "run_task":
             with self.lock:

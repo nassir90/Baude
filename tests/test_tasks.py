@@ -236,7 +236,7 @@ def main():
         assert set_["op"] == "tasks", set_
         fits("TasksReply", set_)
         tid = set_["saved"]
-        got = head.ask({"op": "task", "session": sid, "id": tid})
+        got = head.ask({"op": "task", "session": sid, "id": tid, "script": True})
         assert got["op"] == "task" and got["task"]["script"] == script, got
         assert got["task"]["version"] == tasks.version_of(script)
         fits("TaskReply", got)

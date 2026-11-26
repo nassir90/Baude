@@ -957,7 +957,7 @@ abstract class Parity(private val theme: String, private val scene: String) {
                 c.shown = dev.baude.android.ShownKey("ssh-ed25519", ByteArray(51) { (it * 7 + 3).toByte() })
                 show { Home(open = { _, _ -> }, feedback = {}); dev.baude.android.HostKeyAsk() }
             }
-            "pop-task-form" -> show { dev.baude.android.TasksPage(h, first.getString("id"), true) }
+            "pop-task-change" -> show { dev.baude.android.TasksPage(h, first.getString("id"), true, TaskFixtures.page()) }
             "pop-task-trigger" -> show { dev.baude.android.TasksPage(h, first.getString("id"), true, TaskFixtures.page()) }
             "pop-task-run" -> show { dev.baude.android.TasksPage(h, first.getString("id"), true, TaskFixtures.list()) }
             else -> error("no custom scene $name")

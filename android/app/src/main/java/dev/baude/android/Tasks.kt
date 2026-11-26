@@ -1,7 +1,6 @@
 package dev.baude.android
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -79,12 +78,12 @@ fun triggerText(t: Msg.TaskTrigger): String {
 }
 
 /** A time on the host's clock (its offset): HH:MM today, else 'Mon 03 Nov 14:00'. */
-fun hostWhen(t: Double?, offset: Int): String {
+fun hostWhen(t: Double?, offset: Int, short: Boolean = false): String {
     if (t == null || t == 0.0) return Wording.Tasks.never
     val zone = TimeZone.getTimeZone("GMT").apply { rawOffset = offset * 1000 }
     val day = SimpleDateFormat("yyyyMMdd", Locale.ENGLISH).apply { timeZone = zone }
     val at = Date((t * 1000).toLong())
-    val pattern = if (day.format(at) == day.format(Date())) "HH:mm" else "EEE dd MMM HH:mm"
+    val pattern = if (day.format(at) == day.format(Date())) "HH:mm" else if (short) "dd MMM HH:mm" else "EEE dd MMM HH:mm"
     return SimpleDateFormat(pattern, Locale.ENGLISH).apply { timeZone = zone }.format(at)
 }
 
@@ -399,10 +398,9 @@ private fun TaskView(t: Msg.Task, runs: List<Msg.TaskRun>, offset: Int, back: ()
             }
             GroupHeading(Wording.Tasks.runs)
             BoxedList(runs, Wording.Tasks.noRuns) { r ->
-                val title = listOfNotNull(hostWhen(r.started?.toDouble(), r.offset?.toInt() ?: offset),
-                    r.seconds?.let { tookText(it.toDouble()) }, if (r.dry == true) Wording.Tasks.dummyAnswers else null)
-                    .joinToString(" · ")
-                ActionRow(title, null, onClick = { openRun(r) }, titleLines = 2, compact = true, prefix = { RunState(r.status) }, suffix = {
+                val title = listOfNotNull(hostWhen(r.started?.toDouble(), r.offset?.toInt() ?: offset, short = true),
+                    if (r.dry == true) Wording.Tasks.dryTag else null).joinToString(" · ")
+                ActionRow(title, null, onClick = { openRun(r) }, compact = true, prefix = { RunState(r.status) }, suffix = {
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Icon(kindIcon(r.kind), kindWord(r.kind), tint = c.dim, modifier = Modifier.size(16.dp.icon))
                         r.version?.let { Text(it, style = Type.mono, color = c.dim) }

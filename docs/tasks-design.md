@@ -128,7 +128,7 @@ events (`task_run`) on Settings → Telemetry's timeline.
 | Request | Answer | Does |
 |---|---|---|
 | `tasks {session, set?, delete?}` | `tasks {session, tasks, clock}` | a Bot's tasks, without their scripts; one made or changed (`set`, a Task with its `script`), or deleted |
-| `task {session, id}` | `task {session, task, runs}` | one task with its script, and its latest runs |
+| `task {session, id, script?}` | `task {session, task, runs}` | one task, with its script if `script` is true (the Bot's `task` tool asks; the apps don't), and its latest runs |
 | `run_task {session, id, inputs?, dry?}` | `task_started {session, run}` | run it now, by hand |
 | `task_run {session, run}` | `task_run {session, run, log}` | one run and its log |
 | `task_stop {session, run}` | `task_run` | a run stopped |

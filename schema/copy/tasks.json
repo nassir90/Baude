@@ -7,6 +7,7 @@
     "run": "Run",
     "dry_run": "Run with dummy answers",
     "dummy_answers": "dummy answers",
+    "dry_tag": "dry",
     "change": "Change",
     "turn_off": "Turn off to pause",
     "triggers": "Triggers",

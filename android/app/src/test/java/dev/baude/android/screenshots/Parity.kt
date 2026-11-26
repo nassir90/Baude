@@ -322,6 +322,7 @@ abstract class Parity(private val theme: String, private val scene: String) {
         HomePrefs.made.clear()
         HomePrefs.chatGroups.clear()
         HomePrefs.groups.clear()
+        HomePrefs.noGroups.value = false
         dev.baude.android.Find.open.clear()
         dev.baude.android.CompactFolds.open.clear()
         dev.baude.android.Viewer.state.value = null

@@ -100,9 +100,9 @@ private fun norm(k: Any?): Triple<Int, Any?, String> = when {
 /** The rows to show: those in the namespaces shown and with the filter's text in a cell, in the order sorted by. */
 fun kubeRows(st: KubeState): List<Msg.KubeRow> {
     val q = st.filter.trim().lowercase()
-    val spaced = st.nsShown.isNotEmpty() && st.tablePage?.namespaced == true
+    val ns = st.nsShown?.takeIf { st.tablePage?.namespaced == true }
     val kept = st.rows.filter { r ->
-        (!spaced || r.namespace.orEmpty() in st.nsShown) && (q.isEmpty() || r.cells.orEmpty().any { q in it.lowercase() })
+        (ns == null || r.namespace.orEmpty() in ns) && (q.isEmpty() || r.cells.orEmpty().any { q in it.lowercase() })
     }
     val i = st.sortCol
     val sign = if (st.sortDesc) -1 else 1

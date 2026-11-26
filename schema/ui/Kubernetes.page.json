@@ -63,7 +63,7 @@
         },
         {
           "name": "namespaces button",
-          "shows": "A button with a down arrow showing which namespaces are shown: \"All namespaces\", the one name, two names joined by a comma, or \"3 namespaces\" (n namespaces) from three up. Its tooltip is \"Namespaces shown (any of them at once)\", or, with more than two chosen, the full comma-joined list of names.",
+          "shows": "A button with a down arrow showing which namespaces are shown: \"All namespaces\", the one name, two names joined by a comma, or \"3 namespaces\" (n namespaces) from three up. Its tooltip is \"Namespaces shown (any of them at once)\", or, with more than two chosen, the full comma-joined list of names. With none chosen it reads \"0 namespaces\".",
           "copy": [
             "kube.all_namespaces",
             "kube.n_namespaces",
@@ -75,12 +75,12 @@
               "does": "Opens a popover: an \"All namespaces\" check, a separator, then a scrolling list (up to about 420 px tall) of a check per namespace of the cluster, sorted by name (plus any shown namespace the cluster didn't list, such as one opened from a link)."
             },
             {
-              "by": "tick \"All namespaces\"",
-              "does": "Shows every namespace's objects (clears the chosen set)."
+              "by": "click \"All namespaces\"",
+              "does": "While every namespace is shown (it and every namespace checked): unchecks them all, and no namespace's objects are shown. Otherwise: checks every namespace and shows every namespace's objects."
             },
             {
               "by": "tick or untick a namespace",
-              "does": "Adds it to or removes it from the set shown, in the order picked; the table fades and is filtered (nothing is read again). Any number can be on at once. With none ticked it is the same as All namespaces."
+              "does": "Adds it to or removes it from the set shown, in the order picked; the table fades and is filtered (nothing is read again). Any number can be on at once. Unticking one while all are shown shows all the rest; every one ticked is All namespaces (ticked too); none ticked shows no namespace's objects. Every namespace is ticked while All namespaces is (GroupByMenu.menu.json's decision of 2026-11-26)."
             }
           ]
         },

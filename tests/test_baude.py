@@ -8940,7 +8940,6 @@ def test_kube_pod_actions(app):
         kv.open()
         wait_for(lambda: kv.store.get_n_items() == 7 and not kv.loading, "the pods again")
         assert not kv.dock.get_visible()
-        assert "read-only but for the deletes you confirm" in kv.status.get_label()
         # Delete: asked first, naming it, its namespace and context; Cancel runs nothing
         dlg = ask("jobs/worker-5c4b-klmno", "kube.delete")
         body = dlg.get_body()

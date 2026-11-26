@@ -107,7 +107,6 @@ class KubeState(val hostId: String) {
     var loading by mutableStateOf(false)
     var fault by mutableStateOf<Msg.KubeFault?>(null)
     var missing by mutableStateOf<Msg.Dep?>(null) // (kubectl isn't on the host: what the page shows instead)
-    var live by mutableStateOf(false)
     var fade by mutableStateOf(false)
     var level by mutableStateOf("table") // (table, or categories)
     var folded by mutableStateOf(prefs().getStringSet("kube_folded", emptySet()).orEmpty().toSet())
@@ -271,12 +270,11 @@ class KubeState(val hostId: String) {
                 if (watch === w && g == gen) {
                     if (r.metrics != null) metrics = r.metrics
                     rowsIn(r.rows.orEmpty())
-                    if (!r.note.isNullOrEmpty()) { setNote(r.note); live = false } else live = true
+                    if (!r.note.isNullOrEmpty()) setNote(r.note)
                 }
             },
-            onEnd = { if (watch === w) { live = false; watch = null } },
-            onError = { if (watch === w) { live = false; watch = null } },
-            onUp = { up -> if (watch === w) live = up })
+            onEnd = { if (watch === w) watch = null },
+            onError = { if (watch === w) watch = null })
         watch = w
         if (!w.start()) watch = null
     }
@@ -284,7 +282,6 @@ class KubeState(val hostId: String) {
     private fun stopWatch() {
         watch?.stop()
         watch = null
-        live = false
     }
 
     /** The list read again if it isn't watched (and the pods' CPU and memory with it). */
@@ -498,8 +495,7 @@ class KubeState(val hostId: String) {
         }
     }
 
-    /** The status line: the progress; else the note, how many are shown, the context, whether it's live, the metrics and
-     * that it's read-only. */
+    /** The status line: the progress; else the note, how many are shown and the metrics. */
     fun status(shown: Int): String {
         if (missing != null) return ""
         nothing?.let { return it }
@@ -514,7 +510,7 @@ class KubeState(val hostId: String) {
         val m = if (p.resource == "pods" || p.resource == "nodes") {
             if (metrics == true) Wording.Kube.metrics(KUBE_REFRESH_S) else Wording.Kube.noMetrics
         } else null
-        return listOfNotNull(fresh, count, ctx, if (live) Wording.Kube.live else null, m, Wording.Kube.readOnly)
+        return listOfNotNull(fresh, count, m)
             .filter { it.isNotEmpty() }.joinToString(" · ")
     }
 

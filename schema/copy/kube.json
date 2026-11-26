@@ -61,8 +61,6 @@
     "count": "{$n} {$what}",
     "count_of": "{$n} {$what} of {$total}",
     "in_namespaces": "{$shown} in {$namespaces}",
-    "live": "live",
-    "read_only": "read-only but for the deletes you confirm",
     "secret_values_hidden": "Its values aren't shown.",
     "no_containers": "{$pod} has no containers to show logs of",
     "previous_run": "its previous run",

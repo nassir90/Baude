@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "One thing a pending restart waits for: a chat whose agent is running a command, a task's run, an agent run on this host for another host's chat (an Apple or pi model), or a terminal on this host that someone is attached to.",
+  "properties": {
+    "kind": {
+      "enum": ["chat", "task", "agent", "terminal"],
+      "description": "A chat running a command, a task running, an agent run for a chat elsewhere, or an attached terminal."
+    },
+    "session": {
+      "type": "string",
+      "description": "The chat's id: a chat's, a task's Bot's, or the chat elsewhere an agent run is for."
+    },
+    "host": {
+      "type": "string",
+      "description": "An agent run's: the id of the host its chat is on."
+    },
+    "task": {
+      "type": "string",
+      "description": "A task run's: its task's id."
+    },
+    "run": {
+      "type": "string",
+      "description": "A task run's: its id."
+    },
+    "terminal": {
+      "type": "string",
+      "description": "A terminal's: its id (terminal's attach)."
+    },
+    "name": {
+      "type": "string",
+      "description": "The chat's title, the task's name, the agent's model, or the terminal's title."
+    },
+    "what": {
+      "type": "string",
+      "description": "What it runs: the chat's oldest command, the agent run's chat's host, or the terminal's program."
+    }
+  },
+  "required": ["kind", "name"],
+  "additionalProperties": false
+}

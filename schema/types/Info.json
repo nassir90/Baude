@@ -83,6 +83,17 @@
       ],
       "description": "Its own updater's newer version, if it has one ready."
     },
+    "restart": {
+      "anyOf": [
+        {
+          "$ref": "RestartState.json"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Its restart, kept till nothing blocks it (restart), or null: none pending."
+    },
     "providers": {
       "type": "array",
       "items": {

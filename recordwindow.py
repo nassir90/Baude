@@ -245,8 +245,9 @@ class Window(RecordHosts, Adw.ApplicationWindow, feedback.FeedbackHost, viewers.
                                          reveal_child=not self.store.books_folded)
         books.append(self.books_reveal)
         side.set_content(books)
-        # (at the foot, under a rule from the notebooks: Update, while a new version waits: update_waiting)
-        self.update_bar = chatparts.UpdateBar(self.update_now)
+        # (at the foot, under a rule from the notebooks: Update, while a new version waits: update_waiting; and this
+        # machine's daemon's pending restart: show_restart)
+        self.update_bar = chatparts.UpdateBar(self.update_now, self.show_restart_blockers)
         side.add_bottom_bar(self.update_bar)
         GLib.idle_add(lambda: (self.update_waiting(None), False)[1])  # (a version offered before)
         self.left_sizes()

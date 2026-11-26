@@ -158,6 +158,14 @@ def _reap():
 threading.Thread(target=_reap, daemon=True, name="terminal-reaper").start()
 
 
+def blocking():
+    """Each terminal running that someone's attached to, as a pending restart lists it (RestartBlocker)."""
+    with _lock:
+        terms = list(_terms.values())
+    return [{"kind": "terminal", "terminal": t.id, "name": t.title, "what": " ".join(t.argv)}
+            for t in terms if t.viewers and t.status is None]
+
+
 def take(conn, msg):
     """A terminal request on conn (terminal, terminal_in, terminal_resize, terminal_close, terminals): None, or the
     reply's fields for an error."""

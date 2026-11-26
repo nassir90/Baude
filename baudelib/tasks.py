@@ -546,8 +546,8 @@ class Tasks:
                 return run
             st.put_run(run)
             token = secrets.token_hex(16)
-            self.running[run["id"]] = {"sid": s.id, "task": task["id"], "proc": None, "token": token, "stop": None,
-                                       "dry": dry}
+            self.running[run["id"]] = {"sid": s.id, "task": task["id"], "name": task["name"], "proc": None,
+                                       "token": token, "stop": None, "dry": dry}
         threading.Thread(target=self._run, args=(s.id, st, dict(task), run, token), daemon=True,
                          name=f"task-{run['id']}").start()
         self.server.changed()
@@ -711,6 +711,12 @@ class Tasks:
         """[{session, what}] for each run going (what a restart waits for)."""
         with self.lock:
             return [{"session": r["sid"], "what": wording.say("tasks.task_running")} for r in self.running.values()]
+
+    def blocking(self):
+        """Each run going, as a pending restart lists it (RestartBlocker): [{kind, session, task, run, name, what}]."""
+        with self.lock:
+            return [{"kind": "task", "session": r["sid"], "task": r["task"], "run": rid, "name": r.get("name") or "",
+                     "what": wording.say("tasks.task_running")} for rid, r in self.running.items()]
 
     # ---- a script's
     def held(self, msg):

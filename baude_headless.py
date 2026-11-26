@@ -136,19 +136,22 @@ def serve(args):
 def updater(server, args):
     """The host process kept up to date (once it's asked for: selfupdate.host_enabled): every CHECK_S, a look at its
     checkout (selfupdate.look: fetched and fast-forwarded; --follow-checkout, only its HEAD as Baude leaves it), and a
-    new commit that imports is restarted onto, its turns cut short, but not while a command runs: info's update says
-    what it's waiting for, and it's tried again every READY_S. Said in its log as it goes."""
+    new commit that imports is restarted onto, its turns cut short, but not while a command or a task runs, nor while a
+    head's holding it: kept as its restart (info's restart: Server.restart_when_free), and info's update says what it's
+    waiting for. Said in its log as it goes."""
     root, started, ready, waited, looked = selfupdate.HERE, server.commit, None, None, 0.0
     while not server.stopped.wait(READY_S if ready else selfupdate.CHECK_S):
         if not selfupdate.host_enabled(args.auto_update):
             if ready:
                 server.log(f"update to {ready[:12]} not waited for: updates turned off")
+                server.drop_restart("update")
             ready = waited = None
             server.set_update(None)
             continue
         if ready and time.monotonic() - looked >= selfupdate.CHECK_S and \
                 selfupdate.git(root, "rev-parse", "HEAD", timeout=5) != ready:
             ready = waited = None  # (moved on since: looked at again)
+            server.drop_restart("update")
             server.set_update(None)
         if ready is None:
             ready, looked = selfupdate.look(started, "baude_headless", root, follow=args.follow_checkout), \
@@ -157,9 +160,9 @@ def updater(server, args):
                 continue
             n = selfupdate.new_commits(started, ready, root)
             server.log(f"update: {ready[:12]}, {n} commit{'s' if n != 1 else ''} after {started[:12]}")
-        waiting = server.shutdown(if_idle=True, restart=ready)
-        if waiting is None:  # (shut down, to start again on it: serve's restart)
-            return
+            server.restart_when_free("update", ready)
+        with server.lock:
+            waiting = server.running()
         if waiting != waited:
             server.log(f"update to {ready[:12]} waiting for {len(waiting)} command{'s' if len(waiting) != 1 else ''}"
                        f": {'; '.join(w['what'] for w in waiting)}")

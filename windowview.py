@@ -1342,6 +1342,9 @@ class WindowView:
                 fold = Gtk.Expander(label=content["title"], child=MarkdownView(content["text"]))
                 fold.add_css_class("sysnote")
                 self.add(fold)
+            elif kind == "assistant" and (card := self.login_standing_in(content)) is not None:
+                self.move_login_card(card)  # (its host says the chat needs signing in: the card in its place)
+                card.stands_for = _first_text(content)
             elif kind == "assistant" and rest and rest[0]:
                 self.add(api_error_label(_first_text(content) or ""))
             elif kind == "assistant":

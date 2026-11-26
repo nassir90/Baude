@@ -17,7 +17,7 @@ import tempfile
 import threading
 import uuid
 
-from baudelib import accounts, deps, wording
+from baudelib import accounts, deps, hostlogin, wording
 from baudelib.claude import claude_env, claude_exe
 from baudelib.hostlogin import ESCAPES, NO_BROWSER, auth_status, signed_in_as
 
@@ -62,8 +62,9 @@ def answer(server, conn, msg, reply):
         if what == "rename":
             accounts.rename(profile, msg.get("name"))
             return done()
-        if what == "token":
+        if what == "token":  # (for a chat (session): its sign-in put right, on every head)
             accounts.replace_token(profile, msg.get("token"))
+            hostlogin.ended(server, hostlogin.chat_of(server, conn, msg), ("token", conn), signed_in=True)
             return done()
         if what == "remove":
             accounts.remove(profile, claude_cli(server))
@@ -80,11 +81,29 @@ def answer(server, conn, msg, reply):
             return None
         if what == "sign_in":
             if provider == "claude" or (accounts.account(profile) or {}).get("provider") == "claude":
+                done = _for_chat(server, conn, msg, done)
                 return _claude_sign_in(server, conn, msg, reply, done)
             return _sign_in(conn, msg, reply, done)
     except (ValueError, OSError) as e:
         return done(error=str(e))
     return done(error="accounts takes list, add, rename, token, remove, select, use, usage, sign_in or code")
+
+
+def _for_chat(server, conn, msg, done):
+    """A Claude account's sign-in for a chat (session, if the asker may read it): the chat's sign-in moved as it starts
+    and ends, as a login request's is (hostlogin); done, as it ends."""
+    sid, key = hostlogin.chat_of(server, conn, msg), ("accounts", conn)
+    if sid is None or ((proc := getattr(conn, "accounts_login", None)) is not None and proc.poll() is None):
+        return done
+    hostlogin.began(server, sid, key)
+
+    def ended(**extra):
+        proc = getattr(conn, "accounts_login", None)
+        cancelled = getattr(conn, "gone", False) or proc is not None and proc.returncode in (-15, 130)
+        hostlogin.ended(server, sid, key, who=extra.get("who"), signed_in=bool(extra.get("signed_in")),
+                        why=None if cancelled else extra.get("error") or wording.say("subscriptions.claude_failed"))
+        done(**extra)
+    return ended
 
 
 def _usage(server, profile, done):

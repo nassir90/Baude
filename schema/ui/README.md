@@ -155,6 +155,13 @@ An entry or a part may carry:
   Agent MCP requirements are different to that of the wire (which can be as detailed as we want). They still are
   basically thin clients." (source: BaudeInternal#200; session b3845b21-55ac-4aab-a769-fb8517403c51, message
   868770b1-06c0-44a3-bdb9-c1851cf4b39a)
+- **A chat looks the same on every head.** What a host's chat shows that isn't its transcript (a sign-in card, a
+  permission prompt and whether it's still asking) is drawn from what its host keeps and says on the wire (ChatLogin and
+  login_state, an ask listed or not), never from what one head did or worked out itself, so this machine's Baude,
+  another machine's and the phone show the same widget, live or opened later. The owner found a chat's sign-in card
+  saying it was cancelled on the host's own machine while another machine showed Claude's real error, and asked that
+  the wire and the main chat keep widgets consistent across the heads viewing a chat (2026-11-26). Source:
+  `[{"issue": "BaudeInternal#247"}]`.
 - **A pull request is a pill.** Wherever an app draws a pull request (the Git page's list and log, a reply's or
   message's GitHub pull-request link or bare #12, Signal's links, Record's chat and notes), it's a pill: git's merge
   logo, a space, then the number, never a #, coloured by where it stands (green open, grey draft or closed, red changes

@@ -12,7 +12,7 @@ import uuid
 
 from baudelib import (
     accounts, agentproxy, autofix, chattools, claude, codex, emissiontools, meshtools, models, multiplextools, notes, transcripts, wire, wording,
-    deps, desktopchats, worktree,
+    deps, desktopchats, hostlogin, worktree,
 )
 from baudelib.serverstate import (
     AGENT_TOOLS, CATALOGUE_LIMIT, CATALOGUE_WAIT_S, CHECK_SOCKET_S, CLAUDE_OPTIONS, COMMAND_TOOLS, CONTEXT_EVERY_S,
@@ -628,6 +628,8 @@ class ServerSessions:
                         conn.send(ended)
             for conn in s.live:
                 conn.send({"op": "claude", "session": s.id, "msg": msg})
+            if models.model_program(s.meta.get("model")) == "claude":  # (its sign-in: needed, or put right by a turn;
+                hostlogin.heard(self, s, msg)  # told after what claude said, so a head's card follows its turn)
             for message, said, by in told:
                 self.tell_said(s, message, said, by)
             if kind == "result" and s.codex_queue:

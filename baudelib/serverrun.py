@@ -714,7 +714,8 @@ class ServerRunning:
                 if msg.get("app_tools") and writes and s.app_tools is not None:  # (its head back: its tools carried to
                     # it again)
                     s.app_tools.bind(conn)
-                return reply("attached", session=s.listing(), asks=list(s.asks.values()), writes=writes)
+                return reply("attached", session=s.listing(), asks=list(s.asks.values()), writes=writes,
+                             login=hostlogin.attached(self, conn, s))
             if op == "detach":  # (meant: an ephemeral session its head's done with dropped at once, not after its grace;
                 s.viewers.discard(conn)  # one that only reads it isn't its head: its grace kept)
                 s.live.discard(conn)

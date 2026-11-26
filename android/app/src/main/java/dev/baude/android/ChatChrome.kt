@@ -26,8 +26,10 @@ class Chrome {
     var interrupting = 0L                           // (an interrupt waiting: its token)
     var turnSent: Pair<String, List<Picked>>? = null // (what this phone sent for the turn going, text and files: Send again's)
     var restartAfterTurn = false                    // (signed in while it ran: its claude started again once it's over)
-    var loginAsked = false                          // (the turn's sign-in card's there: one a turn)
     var loginStandsIn = false                       // (its card's in for the error the transcript has yet to give)
+    var keepsLogin = true                           // (its host keeps its sign-in, attach's answer says: else its card's
+    var loginAsked = false                          // worked out here, once a turn (loginAsked), as older hosts' heads did)
+    var loginTurns = 0L                             // (its turns that failed so, counted here: Logins.ask)
 }
 
 /** What claude's retrying, and what a host said as it stopped, per host: what it said and when (elapsed ms), kept
@@ -119,7 +121,7 @@ private fun heard(chat: Chat, m: JSONObject) {
                 text = listOf(m.opt("content"), m.opt("text")).firstNotNullOfOrNull { (it as? String)?.ifBlank { null } }.orEmpty())
                 .takeIf { it.isNotEmpty() }?.let { chat.lines.add(Line("note", it)) } // (claude_events: nothing, for the rest)
         }
-        "assistant" -> if (!c.loginAsked) loginAsk(chat, m)?.let { c.loginAsked = true; Logins.ask(chat, it) }
+        "assistant" -> if (!c.keepsLogin && !c.loginAsked) loginAsk(chat, m)?.let { c.loginAsked = true; Logins.ask(chat, it) }
     }
     if (top && type in setOf("stream_event", "assistant")) c.retrying.value = null
 }
@@ -158,7 +160,7 @@ private fun result(chat: Chat, m: JSONObject) {
         seconds = String.format(Locale.ROOT, "%.1f", m.optDouble("duration_ms", 0.0) / 1000), used = fmtTokens(used),
         written = fmtTokens(u.optInt("output_tokens")))
     if (m.optBoolean("is_error") && OVERFLOW.containsMatchIn(m.optString("result"))) c.outgrown.value = true
-    if (!c.loginAsked) loginAsk(chat, m)?.let { Logins.ask(chat, it) } // (in place of the error: a card to sign in again)
+    if (!c.keepsLogin && !c.loginAsked) loginAsk(chat, m)?.let { Logins.ask(chat, it) } // (in place of the error)
     c.loginAsked = false
     c.turnSent = null
     if (c.restartAfterTurn) { // (signed in while it ran: its claude there started again on it now)

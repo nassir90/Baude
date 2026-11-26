@@ -109,9 +109,26 @@ class WindowProc:
         widgets.toast(self, wording.say("window.transcript_copied"))
 
     def refresh_context(self):
+        if self.remote is not None:  # (a host's chat: its host asks its agent, ask_context, and lists what it said)
+            return self.show_listed_context()
         model = self.model  # (the model the answer's for: another picked while it's asked for isn't, on_model_changed)
         self.request({"subtype": "get_context_usage"},
                      lambda usage: (self.remember_context(model, usage), self.show_context(usage)))
+
+    def show_listed_context(self, again=False):
+        """A host's chat: how much of its window it's used, as its host lists it (Session's context), shown as it
+        changes; again: shown whatever was shown before (another chat opened)."""
+        listed = (self.remote.sessions.get(self.session_id) or {}) if self.remote is not None and self.session_id else {}
+        usage = listed.get("context")
+        if not isinstance(usage, dict) or (not again and (self.session_id, usage) == getattr(self, "context_listed", None)):
+            return
+        self.context_listed = (self.session_id, usage)
+        self.remember_context(self.model, usage)
+        self.show_context(usage)
+        sid = self.session_id  # (the tooltip's categories: not listed, asked of its host, which has them kept)
+        self.request({"subtype": "get_context_usage"},
+                     lambda said: self.session_id == sid and said.get("categories") and self.show_context(
+                         {**usage, "categories": said["categories"]}))
 
     CONTEXT_EVERY_MS = 1000
 

@@ -136,7 +136,6 @@ fun ChatShell(hostId: String, sid: String, back: () -> Unit, open: (String, Stri
         Mesh.listeners.add(l)
         Mesh.listeners.add(status)
         Stopping.listen()
-        refreshContext(chat)
         onDispose {
             Mesh.listeners.remove(l)
             Mesh.listeners.remove(status)
@@ -163,8 +162,7 @@ fun ChatShell(hostId: String, sid: String, back: () -> Unit, open: (String, Stri
         if (i < 0) pager.scrollToPage(1) else if (i != pager.currentPage) pager.scrollToPage(i)
     }
     val modelSet = { v: String ->
-        chat.chrome.outgrown.value = false // (another model's window: as its usage says)
-        refreshContext(chat, v)
+        chat.chrome.outgrown.value = false // (another model's window: as its usage says, its host asking once it's set)
     }
     val chatControls = @Composable { inBar: Boolean -> // (its model, effort and mode: the chat's own, as Baude's
         if (takes(at, "control"))                     // header has them, not its side panel's pages)

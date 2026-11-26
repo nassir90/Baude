@@ -34,6 +34,7 @@ FILE_LIMIT = 4 << 20
 CATALOGUE_WAIT_S = 30  # (a folder's catalogue being made: waited for this long before what there is is sent)
 CATALOGUE_LIMIT = 20000  # (files sent of a folder's, at most: its other names all are)
 RENAME_S = 15  # (what a claude asked to rename its session is given to answer: then it's done without it)
+CONTEXT_EVERY_S = 1.0  # (through a turn, its agent's asked how much of its window it's used at most this often)
 SUBAGENT_FILES = (".jsonl", ".meta.json")  # (in a subagents folder: each subagent's transcript, and what it's for)
 # (what a client may set on a session whose claude isn't running: kept for when it runs, said to be done)
 SETTINGS = {"set_model": ("model", "model"), "set_permission_mode": ("mode", "mode")}
@@ -243,6 +244,8 @@ class Session:
         self.always_allow = set()  # (tools a head always allows: allowed here, with or without a head; memory only)
         self.renew = False        # (a Bot changed at a turn: its agent started again once the turn's over, set_bot)
         self.account_to = None    # (an account picked for it, not yet taken: switch_account; "": the CLI's own sign-in)
+        self.context_asked = 0.0  # (when its agent was last asked its context's usage: ask_context)
+        self.context_soon = False  # (asked again a moment from now, through a turn)
         self.account_after_turn = False  # (that one taken once its turn and the follow-ups sent at it are answered)
         self.sent_at_turn = False  # (its claude sent a follow-up at the turn going on: one more turn of its own to come)
         self.drop_timer, self.attached_once = None, False  # (drop_ephemeral's)
@@ -413,6 +416,7 @@ class Session:
                 "commands": self.commands(), "cut": self.meta.get("cut"), "bot": self.bot_listing(),
                 "autofix": autofix.listing(self.meta.get("autofix")),
                 "acting": self.acting and self.busy and not self.asks,
+                "context": context_listing(self.meta.get("context_usage")),
                 "on_phone": self.server.phones.phone(self.id) is not None,
                 "fork_from": self.meta.get("fork_from"), "spawned_by": self.meta.get("spawned_by"),
                 "desktop": bool(self.meta.get("desktop")), "elsewhere": desktopchats.elsewhere(self),
@@ -424,6 +428,30 @@ class Session:
                 "always_allow": sorted(self.always_allow),
                 "asks": [{"request_id": rid, "tool": (m.get("request") or {}).get("tool_name"),
                           "input": _shown((m.get("request") or {}).get("input"))} for rid, m in self.asks.items()]}
+
+
+def context_listing(usage):
+    """What every head's told of a session's context (ContextUsage, as context_kept has it): its count and window,
+    without its categories (those are said to the chat that's open, on get_context_usage)."""
+    kept = context_kept(usage)
+    return None if kept is None else {k: v for k, v in kept.items() if k != "categories"}
+
+
+def context_kept(usage):
+    """What an agent said of its context (get_context_usage's answer, Codex's or pi-claude's count) as it's kept
+    (ContextUsage); None for one with neither a window nor a wish to be shown without one (a stopped one's {})."""
+    if not isinstance(usage, dict):
+        return None
+    used, total = usage.get("totalTokens"), usage.get("maxTokens")
+    total = total if isinstance(total, int) and not isinstance(total, bool) and total > 0 else None
+    if total is None and not usage.get("showWithoutLimit"):
+        return None
+    return {"totalTokens": used if isinstance(used, int) and not isinstance(used, bool) else None, "maxTokens": total,
+            "showWithoutLimit": bool(usage.get("showWithoutLimit")),
+            "categories": [{"name": c["name"], "tokens": int(c.get("tokens") or 0),
+                            "kind": c.get("kind") if isinstance(c.get("kind"), str) else None}
+                           for c in usage.get("categories") or [] if isinstance(c, dict) and
+                           isinstance(c.get("name"), str) and isinstance(c.get("tokens") or 0, (int, float))]}
 
 
 def turn_acting(msg, was, streamed=False):

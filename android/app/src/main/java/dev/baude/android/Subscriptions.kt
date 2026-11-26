@@ -424,6 +424,7 @@ class CodexLogin(val host: HostAccounts, val id: String?) {
                     login.value = g.login
                     return@post
                 }
+                if (m.optString("op") == Op.ACCOUNTS && g.line != null && g.accounts == null) return@post // (an older host's lines: not an end)
                 conn = null
                 w.stop()
                 val e = host.took(m)

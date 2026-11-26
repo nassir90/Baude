@@ -22,7 +22,7 @@ import tempfile
 import threading
 import urllib.parse
 import uuid
-from http.client import HTTPConnection
+from http.client import HTTPConnection, HTTPException, InvalidURL
 
 from baudelib import accounts, deps, hostlogin, wording
 from baudelib.claude import claude_env, claude_exe
@@ -60,7 +60,7 @@ def answer(server, conn, msg, reply):
         if what == "code":  # (a sign-in's, on this connection: no answer of its own)
             return _code(conn, msg.get("code"))
         if what == "callback":  # (a Codex browser sign-in's, on this connection: answered with the page, or why not)
-            return _callback(conn, msg.get("url"), reply)
+            return _callback(conn, msg.get("url"), reply, msg.get("cb"))
         if what == "add":
             if provider == "claude" and msg.get("folder"):
                 accounts.add("claude", msg.get("name"), _signed_in_folder(server, msg["folder"]), kind="folder")
@@ -339,20 +339,21 @@ def callback_port(page):
         return None
 
 
-def _callback(conn, address, reply):
+def _callback(conn, address, reply, cb=None):
     """The address a browser ended on after a sign-in's page (pasted on the head, or the request its browser made to
     the head's own 127.0.0.1), sent on to the browser sign-in this connection runs: requested of codex's server here,
     at its port, as the browser would have (only its path and query: never anywhere else), and what it answered
     (page: the page codex shows the browser, its own redirects back to itself followed) carried back."""
     proc, port = getattr(conn, "accounts_login", None), getattr(conn, "accounts_port", None)
+    tag = {"cb": cb} if cb is not None else {}
     try:
         sent = urllib.parse.urlsplit((address or "").strip())
     except ValueError:
         sent = None
     if proc is None or proc.poll() is not None or not port:
-        return reply("accounts", what="callback", error=wording.say("subscriptions.no_sign_in"))
+        return reply("accounts", what="callback", **tag, error=wording.say("subscriptions.no_sign_in"))
     if sent is None or not sent.path.endswith("/auth/callback") or not sent.query:
-        return reply("accounts", what="callback", error=wording.say("subscriptions.not_callback"))
+        return reply("accounts", what="callback", **tag, error=wording.say("subscriptions.not_callback"))
 
     def ask():
         path = f"/auth/callback?{sent.query}"
@@ -370,12 +371,15 @@ def _callback(conn, address, reply):
                         "127.0.0.1", "localhost") and back.port == port):
                     path = back.path + (f"?{back.query}" if back.query else "")  # (its own success page)
                     continue
-                return reply("accounts", what="callback", page={
+                return reply("accounts", what="callback", **tag, page={
                     "status": r.status, "type": kind, "body": body.decode("utf-8", "replace"),
                     **({"location": location} if location else {})})
-        except OSError as e:
-            return reply("accounts", what="callback", error=str(e) or wording.say("host_status.no_answer"))
-        reply("accounts", what="callback", error=wording.say("host_status.no_answer"))
+        except (InvalidURL, ValueError):  # (a query it can't send: a page that says so)
+            return reply("accounts", what="callback", **tag, page={
+                "status": 400, "type": "text/plain; charset=utf-8", "body": wording.say("subscriptions.not_callback")})
+        except (OSError, HTTPException) as e:
+            return reply("accounts", what="callback", **tag, error=str(e) or wording.say("host_status.no_answer"))
+        reply("accounts", what="callback", **tag, error=wording.say("host_status.no_answer"))
 
     threading.Thread(target=ask, daemon=True, name="codex-callback").start()
     return None

@@ -76,6 +76,10 @@
     "url": {
       "type": "string",
       "description": "callback: the address the browser ended on (its path and query are what's passed on)."
+    },
+    "cb": {
+      "type": "integer",
+      "description": "callback: a number of the asker's pick, carried back on its answer (one sign-in can have several callbacks waiting)."
     }
   },
   "required": [

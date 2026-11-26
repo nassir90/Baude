@@ -267,6 +267,7 @@
             "subscriptions.address_hint",
             "common.send",
             "subscriptions.checking_address",
+            "subscriptions.relay_busy",
             "subscriptions.not_callback",
             "subscriptions.no_sign_in",
             "subscriptions.device_instead",

@@ -32,6 +32,7 @@
     "code_copied": "Code copied",
     "device_instead": "Use a device code instead",
     "address_hint": "Paste the address the browser ended on",
+    "relay_busy": "Paste the address below: this computer's port for it is taken",
     "checking_address": "Checking the address…",
     "not_callback": "That isn't the address the browser ended on after signing in",
     "no_sign_in": "No Codex sign-in is waiting for that address",

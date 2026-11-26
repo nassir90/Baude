@@ -65,7 +65,7 @@ class Ask:
     callback (on its own thread); send(msg) another accounts message on it (a sign-in's code, or callback). stop() lets go of the connection, which stops a sign-in there. On the main thread."""
 
     def __init__(self, where, msg, answered, heard=None, state=None, pages=None):
-        self.ch, self.stopped, self.state, self.pages = None, False, state, pages
+        self.ch, self.stopped, self.state, self.pages, self.outstanding = None, False, state, pages, set()
         threading.Thread(target=self._run, args=(where, {"op": "accounts", "req": 1, **msg}, answered, heard),
                          daemon=True, name="accounts").start()
 
@@ -92,6 +92,7 @@ class Ask:
                     GLib.idle_add(heard, m["line"])
                 continue
             if m.get("op") == "accounts" and m.get("what") == "callback":
+                self.outstanding.discard(m.get("cb"))
                 if self.pages is not None and not self.stopped:
                     self.pages(m)
                 continue
@@ -101,14 +102,29 @@ class Ask:
                 continue
             end = m if m.get("op") == "accounts" else {"error": wire.said(m)}
             break
-        ch.close()
         self._end(answered, end or {"error": wording.say("host_status.connection_dropped")})
+        try:  # (a callback's page can come after the end: read on while one is asked and unanswered)
+            ch.sock.settimeout(15)
+            while end and self.outstanding and not self.stopped:
+                for m in ch:
+                    if m.get("req") == 1 and m.get("what") == "callback":
+                        self.outstanding.discard(m.get("cb"))
+                        if self.pages is not None and not self.stopped:
+                            self.pages(m)
+                        break
+                else:
+                    break
+        except OSError:
+            pass
+        ch.close()
 
     def _end(self, answered, reply):
         if not self.stopped:
             GLib.idle_add(answered, reply)
 
     def send(self, msg):
+        if msg.get("cb") is not None:
+            self.outstanding.add(msg["cb"])
         return self.ch is not None and not self.stopped and self.ch.send({"op": "accounts", "req": 1, **msg})
 
     def stop(self):
@@ -575,8 +591,9 @@ class Relay:
 
     def __init__(self, port, send):
         import socket
-        self.send, self.ok = send, False
+        self.send, self.ok, self.port, self.thread = send, False, port, None
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)  # (a page just relayed leaves the port in TIME_WAIT)
         try:
             self.sock.bind(("127.0.0.1", port))
             self.sock.listen(4)
@@ -584,7 +601,8 @@ class Relay:
             self.sock.close()
             return
         self.ok = True
-        threading.Thread(target=self._serve, daemon=True, name="codex-relay").start()
+        self.thread = threading.Thread(target=self._serve, daemon=True, name="codex-relay")
+        self.thread.start()
 
     def _serve(self):
         while True:
@@ -606,7 +624,11 @@ class Relay:
                     head += got
             except OSError:
                 return
-            parts = head.split(b"\r\n", 1)[0].decode("latin-1").split(" ")
+            lines = head.decode("latin-1").split("\r\n")
+            parts = lines[0].split(" ")
+            hosts = [x.split(":", 1)[1].strip() for x in lines[1:] if x.lower().startswith("host:")]
+            if hosts != [f"127.0.0.1:{self.port}"] and hosts != [f"localhost:{self.port}"]:
+                return self._answer(peer, 400, "text/plain", "Bad Request")
             path = parts[1] if len(parts) == 3 and parts[0] == "GET" else ""
             if not path.startswith("/auth/callback?"):
                 return self._answer(peer, 404, "text/plain", "Not Found")
@@ -634,9 +656,16 @@ class Relay:
             pass
 
     def stop(self):
+        import socket
         if self.ok:
             self.ok = False
+            try:
+                self.sock.shutdown(socket.SHUT_RDWR)  # (wakes an accept waiting on Linux, where close alone doesn't)
+            except OSError:
+                pass
             self.sock.close()
+            if self.thread is not threading.current_thread():
+                self.thread.join(2)
 
 
 class CodexLogin(Gtk.Box):
@@ -654,7 +683,8 @@ class CodexLogin(Gtk.Box):
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=6, visible=False)
         self.add_css_class("perm-card")
         self.page, self.submit, self.inputs = page, submit, inputs
-        self.ask, self.msg, self.name, self.opened, self.relay, self.waiting = None, None, "", None, None, []
+        self.ask, self.msg, self.name, self.opened, self.relay, self.waiting = None, None, "", None, None, {}
+        self.method, self.seq = "browser", 0
         self.title = Gtk.Label(xalign=0, wrap=True, selectable=True)
         self.body = Gtk.Label(xalign=0, wrap=True, selectable=True, visible=False)
         self.code = Gtk.Label(xalign=0, selectable=True, hexpand=True, css_classes=["device-code"])
@@ -698,7 +728,7 @@ class CodexLogin(Gtk.Box):
         """Signing in (msg: the accounts sign_in to send; method device for the device code's), for the account named
         name."""
         self.stop()
-        self.msg, self.name = {k: v for k, v in msg.items() if k != "method"}, name
+        self.msg, self.name, self.method = {k: v for k, v in msg.items() if k != "method"}, name, msg.get("method") or "browser"
         self.submit.set_visible(False)
         for w in self.inputs:
             w.set_sensitive(False)
@@ -734,6 +764,8 @@ class CodexLogin(Gtk.Box):
                 said = html.escape(wording.say("sign_in.page_there", link="\x00")).replace("\x00", link)
                 if browser and login.get("port") and self.relay is None:
                     self.relay = Relay(login["port"], self.relayed)
+                    if not self.relay.ok:
+                        self.tell(wording.say("subscriptions.relay_busy"))
             self.say(wording.say("subscriptions.codex_signing_in"), said, markup=True)
             self.code.set_text(login.get("code") or "")
             self.copy.set_label(wording.say("common.copy"))
@@ -755,9 +787,19 @@ class CodexLogin(Gtk.Box):
 
     def paste(self):
         address = self.address.get_text().strip()
-        if address and self.ask is not None and self.ask.send({"what": "callback", "url": address}):
-            self.waiting.append(lambda m: GLib.idle_add(self.pasted, m))
+        if address and self.call(address, lambda m: GLib.idle_add(self.pasted, m)):
             self.tell(wording.say("subscriptions.checking_address"))
+
+    def call(self, url, answered):
+        """An accounts callback sent on the sign-in, its answer (matched by the id it carries back) given to answered."""
+        if self.ask is None:
+            return False
+        self.seq += 1
+        self.waiting[self.seq] = answered
+        if self.ask.send({"what": "callback", "url": url, "cb": self.seq}):
+            return True
+        self.waiting.pop(self.seq, None)
+        return False
 
     def pasted(self, m):
         """The host's answer to a pasted address: nothing to say where codex took it (its end follows), else why not."""
@@ -773,15 +815,12 @@ class CodexLogin(Gtk.Box):
 
     def relayed(self, path, answered):
         """A request the browser made of this machine's 127.0.0.1, passed on to the sign-in (Relay's send)."""
-        if self.ask is None or not self.ask.send({"what": "callback", "url": path}):
-            return False
-        self.waiting.append(answered)
-        return True
+        return self.call(path, answered)
 
     def paged(self, m):
-        """An answer to a callback (Ask's thread), to whichever asked first."""
-        if self.waiting:
-            self.waiting.pop(0)(m)
+        """An answer to a callback (Ask's thread), to the one that asked it."""
+        if waiter := self.waiting.pop(m.get("cb"), None):
+            waiter(m)
 
     def answered(self, reply):
         """Its end: signed in, or why not (the fields and Try Again back, to change the name if that's why)."""
@@ -790,7 +829,7 @@ class CodexLogin(Gtk.Box):
             self.page.took(reply)
         login = reply.get("login") or ({"state": "signed_in", "who": reply.get("who")} if reply.get("signed_in") else
                                        {"state": "failed", "reason": reply.get("error"),
-                                        "method": (self.msg or {}).get("method")})
+                                        "method": self.method})
         self.show(login)
         if login.get("state") != "signed_in":
             for w in self.inputs:
@@ -811,7 +850,7 @@ class CodexLogin(Gtk.Box):
 
     def stop(self):
         self.unrelay()
-        self.waiting = []
+        self.waiting = {}
         self.opened = None
         if self.ask is not None:
             self.ask.stop()

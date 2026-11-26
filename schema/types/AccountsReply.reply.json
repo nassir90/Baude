@@ -66,6 +66,10 @@
       "$ref": "CallbackPage.json",
       "description": "callback: what the Codex sign-in's server answered the address."
     },
+    "cb": {
+      "type": "integer",
+      "description": "callback: the request's cb, carried back."
+    },
     "signed_in": {
       "type": "boolean",
       "description": "sign_in: its end, signed in."

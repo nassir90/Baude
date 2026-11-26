@@ -35,6 +35,7 @@ import androidx.lifecycle.repeatOnLifecycle
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.text.SpanStyle
@@ -55,6 +56,7 @@ class HostAccounts(val hostId: String) {
     val error = mutableStateOf<String?>(null)
     val loaded = mutableStateOf(false)
     val usage = mutableStateMapOf<String, Usage>() // (each Claude subscription's, by id: "" the CLI's own sign-in)
+    val last = mutableStateOf<Map<String, List<Limit>>>(emptyMap()) // (what the host last read of each, shown greyed till usage has it)
     val claudeCli = mutableStateOf(true) // (whether the host has claude: without it, a Claude account is a token)
     val missing = mutableStateOf<Map<String, Msg.Dep>>(emptyMap()) // (a provider's program the host lacks, by provider)
     private val reading = HashSet<String>()
@@ -80,7 +82,7 @@ class HostAccounts(val hostId: String) {
                 val limits = Msg.AccountsReply.from(r).usage?.takeIf { it.isNotEmpty() }
                 usage[id] = when {
                     error != null -> Usage(null, error)
-                    limits != null -> Usage(limits.map { Limit(it.key.orEmpty(), it.name.orEmpty(), it.percent?.toDouble() ?: 0.0, it.resets?.toDouble()) }, null)
+                    limits != null -> Usage(limits(limits), null)
                     else -> Usage(null, Wording.Subscriptions.usageUnavailable)
                 }
             }
@@ -100,10 +102,14 @@ class HostAccounts(val hostId: String) {
         g.defaults?.let { d -> defaults.value = d.keys().asSequence().associateWith { d.optString(it) } }
         g.claudeCli?.let { claudeCli.value = it }
         missing.value = g.missing.orEmpty()
+        g.lastUsage?.let { l -> last.value = l.mapValues { limits(it.value.usage.orEmpty()) } }
         loaded.value = true
         error.value = null
         return g.error?.ifBlank { null }
     }
+
+    private fun limits(u: List<Msg.UsageLimit>) =
+        u.map { Limit(it.key.orEmpty(), it.name.orEmpty(), it.percent?.toDouble() ?: 0.0, it.resets?.toDouble()) }
 
     companion object {
         const val USAGE_S = 30 // (how often a shown page reads its subscriptions' usage again)
@@ -166,8 +172,10 @@ fun SubscriptionsPage() {
                         host.ask(Msg.Accounts(what = "select", provider = provider, id = id))
                     }
                 }
-                if (provider == "claude" && host.claudeCli.value) SubscriptionCard(Wording.Subscriptions.cliDefault, null, host.usage[""], true) {}
-                for (a in mine) SubscriptionCard(a.name.orEmpty(), a, host.usage[a.id.orEmpty()], provider == "claude") { kind -> dialog = kind to a }
+                if (provider == "claude" && host.claudeCli.value)
+                    SubscriptionCard(Wording.Subscriptions.cliDefault, null, host.usage[""], host.last.value[""], true) {}
+                for (a in mine) SubscriptionCard(a.name.orEmpty(), a, host.usage[a.id.orEmpty()], host.last.value[a.id.orEmpty()],
+                    provider == "claude") { kind -> dialog = kind to a }
                 val lacks = host.missing.value[provider] // (its program isn't on the host: what Dependencies says, no account to add)
                 BoxedList(listOf(Unit), "") {
                     if (lacks != null) DepRow(lacks, depTitle(lacks, title))
@@ -195,9 +203,10 @@ fun SubscriptionsPage() {
 
 /** A subscription's card: its name and, an account's, ⋮ with what can be done to it (pick: "rename", "again" or
  * "remove"); a Claude card's usage (claude): a bar for each limit with its name and percentage over it, else what was
- * said instead (Checking… till it's first read). */
+ * said instead. Till it's first read here, what the host last read (last) greyed (Checking… where it has none). */
 @Composable
-private fun SubscriptionCard(name: String, a: Msg.Account?, usage: HostAccounts.Usage?, claude: Boolean, pick: (String) -> Unit) {
+private fun SubscriptionCard(name: String, a: Msg.Account?, usage: HostAccounts.Usage?, last: List<HostAccounts.Limit>?,
+                             claude: Boolean, pick: (String) -> Unit) {
     val c = LocalBaude.current
     val shape = RoundedCornerShape(12.dp)
     Column(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 4.dp).clip(shape).background(c.card)
@@ -207,8 +216,10 @@ private fun SubscriptionCard(name: String, a: Msg.Account?, usage: HostAccounts.
             Text(name, style = Type.body, color = c.fg, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
             if (a != null) AccountMenu(a, pick)
         }
-        if (claude) Column(Modifier.padding(end = 6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            val limits = usage?.limits
+        val stale = usage == null && last != null
+        if (claude) Column(Modifier.padding(end = 6.dp).alpha(if (stale) Tokens.Subscriptions.staleOpacity.toFloat() else 1f),
+            verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            val limits = if (stale) last else usage?.limits
             if (limits == null) Text(usage?.said ?: Wording.Subscriptions.checking, style = Type.body, color = c.dim)
             else for (l in limits) {
                 val percent = l.percent

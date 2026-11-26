@@ -6,8 +6,9 @@ token account's token replaced (token), each provider's default picked (select),
 device-code login with its CODEX_HOME, each line it writes carried back as it's written (the page to open among
 them), a code pasted on the head passed to it (code), then the end; the connection's going stops it. Every answer
 but a sign-in's lines carries the accounts and defaults as they are after it, and whether this host has claude
-(claude_cli: without it, a Claude account is a token), and what's missing of a provider's program (missing: Codex's, by
-deps, which a Codex sign-in is checked against before it's run). No GTK."""
+(claude_cli: without it, a Claude account is a token), what's missing of a provider's program (missing: Codex's, by
+deps, which a Codex sign-in is checked against before it's run), and each subscription's last read usage with when
+(last_usage: shown greyed on a client till its own read answers). No GTK."""
 import json
 import os
 import shutil
@@ -31,8 +32,9 @@ def claude_cli(server):
 
 def state(server=None):
     missing = {"codex": dep} if (dep := deps.missing("codex")) is not None else {}
+    last = {profile: {"read": round(read), "usage": _limits(limits)} for profile, (read, limits) in accounts.last_usage().items()}
     return {"accounts": accounts.listing(), "defaults": accounts.defaults(), "claude_cli": bool(claude_cli(server)),
-            "missing": missing}
+            "missing": missing, "last_usage": last}
 
 
 def answer(server, conn, msg, reply):
@@ -92,8 +94,13 @@ def _usage(server, profile, done):
         return done(error=wording.say("subscriptions.usage_failed"))
     if limits is None:
         return done(usage=None)
-    done(usage=[{"name": name.replace("_", " ").capitalize(), "key": name, "percent": round(float(percent), 1),
-                 **({"resets": resets} if resets is not None else {})} for name, percent, resets in limits])
+    done(usage=_limits(limits))
+
+
+def _limits(limits):
+    """A subscription's limits as plan_usage says them, as the wire's UsageLimits."""
+    return [{"name": name.replace("_", " ").capitalize(), "key": name, "percent": round(float(percent), 1),
+             **({"resets": resets} if resets is not None else {})} for name, percent, resets in limits]
 
 
 def _signed_in_home(location):

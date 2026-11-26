@@ -179,6 +179,7 @@ def remove(profile, exe=None):
             raise ValueError(wording.say("subscriptions.gone"))
         db.execute("DELETE FROM profiles WHERE id=?", (profile,))
         db.execute("DELETE FROM defaults WHERE profile=?", (profile,))
+    _usage_read.pop(profile, None)
     provider, folder, kind = row
     if kind == "token" or Path(folder).parent != root():
         return
@@ -345,7 +346,7 @@ def claude_launch(env, profile):
 
 
 USAGE_CACHE_S = 25  # (how long a read of a subscription's usage is kept: clients asking every 30 s share one)
-_usage_read = {}  # (profile → (when, limits))
+_usage_read = {}  # (profile → (when, limits, when in seconds since 1970))
 _usage_locks = {}  # (profile → the lock one read of it runs under)
 _usage_guard = threading.Lock()
 _usage_one_at_a_time = threading.Lock()
@@ -363,8 +364,14 @@ def plan_usage(profile, exe=None):
             return kept[1]
         with _usage_one_at_a_time:
             limits = _plan_usage(profile, exe)
-        _usage_read[profile] = (time.monotonic(), limits)
+        _usage_read[profile] = (time.monotonic(), limits, time.time())
         return limits
+
+
+def last_usage():
+    """Each subscription's (profile's) last read limits and when they were read (seconds since 1970): {profile: (read,
+    limits)}, for those whose last read said them; a client shows them till its own read answers."""
+    return {profile: (kept[2], kept[1]) for profile, kept in list(_usage_read.items()) if kept[1]}
 
 
 def _reset_time(value):

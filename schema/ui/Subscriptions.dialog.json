@@ -104,7 +104,7 @@
         },
         {
           "name": "subscription card",
-          "shows": "One card per subscription, stacked: Claude's CLI default first (where the host has claude), then each account. Its name, and ⋮ on an account's card (CLI default has none). A Claude card then has its usage: for each limit, its name with its percentage at the end (\"Five Hour Limit (Resets 3:16 PM)\" … \"25%\"; \"Weekly Limit (Resets Friday 3:16 PM)\", or \"Weekly Limit (Resets 3:16 PM)\" where it resets today; the times in the viewer's local time and clock format) and a bar under them filled that far; \"Checking…\" till it's first read; \"Usage unavailable for this sign-in\" for a token account (a setup token can't read them) or the error if reading failed. A Codex card has its name and ⋮ only.",
+          "shows": "One card per subscription, stacked: Claude's CLI default first (where the host has claude), then each account. Its name, and ⋮ on an account's card (CLI default has none). A Claude card then has its usage: for each limit, its name with its percentage at the end (\"Five Hour Limit (Resets 3:16 PM)\" … \"25%\"; \"Weekly Limit (Resets Friday 3:16 PM)\", or \"Weekly Limit (Resets 3:16 PM)\" where it resets today; the times in the viewer's local time and clock format) and a bar under them filled that far; till the page's own read answers, the host's last reading of it the same way but greyed (half opacity), and \"Checking…\" only where the host has none; \"Usage unavailable for this sign-in\" for a token account (a setup token can't read them) or the error if reading failed. A Codex card has its name and ⋮ only.",
           "actions": [
             {
               "by": "click ⋮",
@@ -112,7 +112,7 @@
             },
             {
               "by": "(none)",
-              "does": "Each Claude card's usage is read from the host (accounts usage, its id; \"\" for CLI default) as the page is shown and every 30 seconds while it's shown and the app (the phone's) or window (the desktop's) is in front, one read at a time per card, the bars drawn again in place; the host reads each account's usage once per ~25 s however many clients ask, one claude at a time"
+              "does": "Each Claude card's usage is read from the host (accounts usage, its id; \"\" for CLI default) as the page is shown and every 30 seconds while it's shown and the app (the phone's) or window (the desktop's) is in front, one read at a time per card, the bars drawn again in place; the host reads each account's usage once per ~25 s however many clients ask, one claude at a time; every answer to accounts carries the host's last reading of each subscription with when it was read (last_usage), which the page shows greyed till its own read of that card answers"
             }
           ],
           "copy": [
@@ -161,6 +161,16 @@
                 {
                   "session": "b3845b21-55ac-4aab-a769-fb8517403c51",
                   "message": "261792c7-ec64-4d01-aac0-475fd2183c0c"
+                }
+              ]
+            },
+            {
+              "said": "The subscription percentages last read should be cached, and shown a bit grey while they're read again (paraphrased)",
+              "rule": "Every app's Subscriptions page shows each Claude card's usage as its host last read it, greyed, as soon as the page opens, until the page's own read answers with the current reading; the host keeps that last reading and when it was taken, so every app (and any later one) gets it from the host rather than keeping its own; \"Checking…\" shows only where the host has never read that subscription",
+              "decided": "2026-11-26",
+              "source": [
+                {
+                  "issue": "BaudeInternal#242"
                 }
               ]
             }

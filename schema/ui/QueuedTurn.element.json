@@ -1,11 +1,12 @@
 {
-  "description": "A message written while the agent is busy with a turn: not sent yet, it waits in the queue just under the conversation (above the composer), drawn as your bubble but grey. Hovering its row shows delete, send-now and edit buttons beside it.",
+  "description": "A message written while the agent is busy with a turn: not sent yet, it waits in the queue just under the conversation (above the composer), drawn as your bubble but grey. Hovering its row shows delete, send-now and edit buttons beside it. On the phone, a message is also queued when it's sent while the chat's host isn't reached, with a small dim cloud left of its bubble till the host is back.",
   "apps": [
     "baude",
     "phone"
   ],
   "opens": [
-    "Enter in the composer (with text or attachments) while a turn runs"
+    "Enter in the composer (with text or attachments) while a turn runs",
+    "Sending while the chat's host isn't reached (the phone)"
   ],
   "code": [
     "chatparts.py:QueuedTurn",
@@ -22,10 +23,13 @@
     "windowdrafts.py:WindowDrafts.left_turn_ended",
     "Queue.kt:QueuedRow",
     "Queue.kt:Queue.sendLeft",
-    "Mesh.kt:Mesh.sendQueued"
+    "Mesh.kt:Mesh.sendQueued",
+    "Queue.kt:Queue.resend",
+    "Queue.kt:Queue.putBackTried"
   ],
   "copy": [
-    "chat_turns"
+    "chat_turns",
+    "hosts.waits_for"
   ],
   "parts": [
     {
@@ -122,5 +126,6 @@
   "scenes": [
     "46-queue-kept",
     "46b-queue-sent-elsewhere"
-  ]
+  ],
+  "decisions": [{"said": "Nearly all of the phone's disconnects come from the screen turning off or the app being put away: design for Android closing connections, cache more, and instead of a red box show a cloud, with leeway and messages queued while the connection is down (paraphrased)", "rule": "Every app that queues while its host isn't reached gives each queued message its own uuid as it's written, sends each by that uuid once the host is back and the chat's transcript has been read up to date (so one the host already took is seen and not sent), and puts a message whose link went before the host answered back in the queue by the same uuid, never in the box with a not-sent line: a host takes a message once, whatever the link did.", "decided": "2026-11-26", "source": [{"issue": "BaudeInternal#243"}]}]
 }

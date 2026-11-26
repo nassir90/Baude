@@ -189,7 +189,7 @@ object Mesh {
                         main.post { conns.values.forEach { it.resume() } }
                     }
                     override fun onBlockedStatusChanged(network: android.net.Network, blocked: Boolean) { // (Doze over,
-                        if (!blocked) main.post { conns.values.forEach { it.resume() } }                // or Data Saver)
+                        if (!blocked) main.post { conns.values.forEach { it.resume() }; PhoneLink.resume() } // or Data Saver)
                     }
                 })
         } catch (_: Exception) {
@@ -521,7 +521,7 @@ object Mesh {
                     val was = open?.takeIf { it.hostId == c.id }?.let { isWorking(it) } == true
                     sessions[c.id] = now
                     live.add(c.id)
-                    if (c.place is Place.Direct) LinkCache.keepSessions { hosts.mapNotNull { h -> sessions[h.id]?.let { h.id to it } }.toMap() }
+                    if (c.place is Place.Direct) LinkCache.keepSessions(hosts.mapNotNull { h -> sessions[h.id]?.let { h.id to it } }.toMap())
                     open?.takeIf { was && it.hostId == c.id && !isWorking(it) }?.let { Queue.flush(it) } // (a turn ended: what's queued sent)
                     Queue.sendLeft(c.id, before, now) // (and the queues of chats left at a turn that's ended)
                     Shares.look() // (its Bots, in the share sheet)
@@ -751,6 +751,7 @@ object Mesh {
         visible = now
         if (now) { // (back: each link made again now, or checked, and given its leeway again)
             conns.values.forEach { it.resume() }
+            PhoneLink.resume()
             tick.value++
             main.postDelayed({ tick.value++ }, LEEWAY_MS + 100)
         } else open?.let { LinkCache.keepChat(it) } // (what's on screen kept: Android may end the app while it's away)

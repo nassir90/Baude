@@ -17,7 +17,9 @@
     "chatparts.py:UpdateBar",
     "chatparts.py:HostState",
     "meshui.py:HostApart",
-    "chatparts.py:ShutBar"
+    "chatparts.py:ShutBar",
+    "ChatBanner.kt:Away",
+    "Mesh.kt:Mesh.reach"
   ],
   "copy": [
     "host_status",
@@ -34,11 +36,12 @@
       "parts": [
         {
           "name": "host gone",
-          "shows": "A network chat whose host is out of reach: \"Can't connect to <host> at the moment\" (\"Can't connect to <host> at the moment: <why>\" when the last try said why) for a host that is down; \"Looking for <host> on the network…\" while it is being looked for; this machine's host is called Daemon (\"Looking for daemon…\"). No button. The viewed chat is shown as it was last seen.",
+          "shows": "A network chat whose host is out of reach: \"Can't connect to <host> at the moment\" (\"Can't connect to <host> at the moment: <why>\" when the last try said why) for a host that is down; \"Looking for <host> on the network…\" while it is being looked for; this machine's host is called Daemon (\"Looking for daemon…\"). No button. The viewed chat is shown as it was last seen. Where the operating system closes the app's link while it's put away (the phone; a web version's tab), a host lost a moment ago, or being reached again after the app is brought back, shows only a dim cloud and \"Reconnecting…\" centred over the chat, no strip, for its first 30 seconds; the strip with the reason comes after that, or at once for a reason a retry won't fix (the phone's key, its sign-in, no Baude commands on the host). The send button stays on: what's sent waits in the queue (see Composer).",
           "copy": [
             "hosts.down",
             "hosts.down_because",
-            "hosts.looking"
+            "hosts.looking",
+            "hosts.reconnecting"
           ],
           "text": [
             "Looking for daemon…"
@@ -51,6 +54,16 @@
               "source": [
                 {
                   "issue": "BaudeInternal#87"
+                }
+              ]
+            },
+            {
+              "said": "Nearly all of the phone's disconnects come from the screen turning off or the app being put away: design for Android closing connections, cache more, and instead of a red box show a cloud, with leeway and messages queued while the connection is down (paraphrased)",
+              "rule": "Every app whose link the OS or browser closes while it's put away gives a lost host 30 seconds of leeway (from when it went, or from when the app is brought back, whichever is later) shown as a quiet cloud and \"Reconnecting…\", never an alarming banner, and tries the link again the moment it's brought back or its network comes back; it says it can't connect only once the host has stayed away past the leeway, or at once for a reason a retry won't fix.",
+              "decided": "2026-11-26",
+              "source": [
+                {
+                  "issue": "BaudeInternal#243"
                 }
               ]
             }
@@ -202,14 +215,15 @@
     },
     {
       "name": "host state note",
-      "shows": "Over the sidebar's chat list (not the chat column): a small outlined island, text centred and wrapped, slid down, saying why the host picked beside New session can't be reached: \"Looking for <host> on the network…\", \"Can't connect to <host> at the moment[: why]\", \"<host> is deactivated\", or its stopping/restarting line. The host's chats stay listed as they were last seen. Gone when the host is there.",
+      "shows": "Over the sidebar's chat list (not the chat column): a small outlined island, text centred and wrapped, slid down, saying why the host picked beside New session can't be reached: \"Looking for <host> on the network…\", \"Can't connect to <host> at the moment[: why]\", \"<host> is deactivated\", or its stopping/restarting line. The host's chats stay listed as they were last seen. Gone when the host is there. Where the operating system closes the app's link (the phone), a host away less than 30 seconds shows a dim cloud and \"Reconnecting…\" instead, its chats listed as they were, not dimmed.",
       "copy": [
         "hosts.looking",
         "hosts.down",
         "hosts.down_because",
         "hosts.deactivated",
         "host_status.stopping",
-        "host_status.restarting"
+        "host_status.restarting",
+        "hosts.reconnecting"
       ],
       "decisions": [
         {
@@ -219,6 +233,16 @@
           "source": [
             {
               "issue": "BaudeInternal#110"
+            }
+          ]
+        },
+        {
+          "said": "Nearly all of the phone's disconnects come from the screen turning off or the app being put away: design for Android closing connections, cache more, and instead of a red box show a cloud, with leeway and messages queued while the connection is down (paraphrased)",
+          "rule": "Every app whose link the OS closes lists a host's chats as last seen, not dimmed or crossed out, with a cloud and \"Reconnecting…\" over them, while the host has been away less than the leeway; the can't-connect island and crossed-out clouds come after it.",
+          "decided": "2026-11-26",
+          "source": [
+            {
+              "issue": "BaudeInternal#243"
             }
           ]
         }

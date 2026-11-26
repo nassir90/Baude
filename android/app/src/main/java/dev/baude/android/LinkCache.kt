@@ -12,6 +12,8 @@ object LinkCache {
     private const val CHATS = 12          // (the chats kept: those last open)
     private const val MOST = 4_000_000    // (a chat's transcript kept: its last this many bytes at most)
     private val io = java.util.concurrent.Executors.newSingleThreadExecutor()
+    private val later = java.util.concurrent.Executors.newSingleThreadScheduledExecutor()
+    private var latest: Map<String, List<Msg.Session>> = emptyMap()
     private var root: File? = null
     private var sessionsDue = false
 
@@ -39,16 +41,22 @@ object LinkCache {
 
     /** The sessions the hosts list now, kept (once every couple of seconds at most: they're listed again as any
      * changes). */
-    fun keepSessions(now: () -> Map<String, List<Msg.Session>>) {
-        if (sessionsDue || root == null) return
-        sessionsDue = true
-        Mesh.later(2_000) {
-            sessionsDue = false
-            val o = JSONObject()
-            for ((h, l) in now()) o.put(h, JSONArray(l.map { it.json() }))
-            val bytes = o.toString().toByteArray()
-            io.execute { try { write(File(root, "sessions.json"), bytes) } catch (_: Exception) {} }
+    fun keepSessions(now: Map<String, List<Msg.Session>>) {
+        root ?: return
+        synchronized(this) {
+            latest = now
+            if (sessionsDue) return
+            sessionsDue = true
         }
+        later.schedule({
+            val kept = synchronized(this) { sessionsDue = false; latest }
+            try {
+                val o = JSONObject()
+                for ((h, l) in kept) o.put(h, JSONArray(l.map { it.json() }))
+                write(File(root, "sessions.json"), o.toString().toByteArray())
+            } catch (_: Exception) {
+            }
+        }, 2, java.util.concurrent.TimeUnit.SECONDS)
     }
 
     /** A chat's transcript as it was kept: where it starts in the transcript, and its bytes from there (null: none). */

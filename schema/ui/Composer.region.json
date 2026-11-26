@@ -268,7 +268,8 @@
     },
     {
       "name": "host gone or connection dropped",
-      "shows": "The send button is off (nothing to send to) while a banner above the chat says why (see Banners); the box stays editable"
+      "shows": "The send button is off (nothing to send to) while a banner above the chat says why (see Banners); the box stays editable. On an app whose link the OS closes (the phone), the send button stays on while the host isn't reached: what's sent is queued under the chat with a cloud beside it, kept on disk, and sent once the host is back (see QueuedTurn).",
+      "decisions": [{"said": "Nearly all of the phone's disconnects come from the screen turning off or the app being put away: design for Android closing connections, cache more, and instead of a red box show a cloud, with leeway and messages queued while the connection is down (paraphrased)", "rule": "Every app whose link the OS or browser closes lets you send while a host isn't reached: the message is queued, marked as waiting for its host, and sent by itself once the host is back and the chat has caught up.", "decided": "2026-11-26", "source": [{"issue": "BaudeInternal#243"}]}]
     },
     {
       "name": "read-only by choice",

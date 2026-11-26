@@ -242,8 +242,10 @@ def seed_home_history(context="k3d-dev", minutes=30, every=10):
         samples.append((now - (n - i) * every, {ns: (t[0], t[1] * f if t[1] is not None else None, t[3],
                                                      t[4] * f if t[4] is not None else None)
                                                 for ns, t in tally["namespaces"].items()}))
+    import lookupkube
+    c = next(c for c in lookupkube.kube_contexts() if c["name"] == context and not c.get("cluster_only"))
     with hostkube._HISTORY_LOCK:
-        h = hostkube._history(context, hostkube._identities()[context], now - minutes * 60)
+        h = hostkube._HISTORY[lookupkube.kube_key(c)] = hostkube._history(c, now - minutes * 60)
         h["asked"], h["next"], h["samples"] = now, now + every, samples
 
 

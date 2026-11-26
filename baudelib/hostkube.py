@@ -178,6 +178,12 @@ def _renewed(h, c, now):
         h["fails"], h["fault"], h["next"] = 0, None, now
 
 
+def _history(c, now):
+    """A new history for context c (a kube_contexts entry), its first sample due now."""
+    return {"entry": _entry(c), "began": now, "asked": now, "next": now, "fails": 0, "fault": None, "reading": None,
+            "read": None, "samples": collections.deque()}
+
+
 def _take(key, h):
     """Read a cluster's totals for its history h (kubectl: not under the lock) and keep what h needs of them; the read.
     One read at a time for a history: one asked for while another is under way waits for it and has what it had, so
@@ -285,8 +291,7 @@ def _summary(msg):
     with _HISTORY_LOCK:
         h = _HISTORY.get(key) if key is not None else None  # (not in the kubeconfig: kubectl says so, unsampled)
         if h is None and key is not None:
-            h = _HISTORY[key] = {"entry": _entry(c), "began": now, "asked": now, "next": now, "fails": 0,
-                                 "fault": None, "reading": None, "read": None, "samples": collections.deque()}
+            h = _HISTORY[key] = _history(c, now)
         elif h is not None:
             h["asked"] = now
             _renewed(h, c, now)

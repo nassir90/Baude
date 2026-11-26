@@ -1340,18 +1340,20 @@ def _none(column, metrics):
 
 def kube_shares_other(columns, rows, title, metrics=True):
     """An "Other (n)" row (KubeShare, named ""): rows (KubeShares) added up under columns (KubeShareColumns): each
-    number's sum (None where none has one), a share the share of the sums."""
-    keys = [title.lower()]
-    for c in columns[1:]:
-        if c["kind"] == "share":
-            keys.append(None)
-            continue
-        vals = [r["keys"][len(keys)] for r in rows if len(r.get("keys") or []) > len(keys)]
-        vals = [v for v in vals if isinstance(v, (int, float))]
-        keys.append(sum(vals) if vals else None)
+    number's sum (None where none has one), a share the share of the sums over the rows that have what it's a share of
+    (used ÷ limits only over the rows with limits, top and bottom)."""
+    def key(r, i):
+        v = (r.get("keys") or [])[i] if i < len(r.get("keys") or []) else None
+        return v if isinstance(v, (int, float)) and not isinstance(v, bool) else None
+
+    def add(i, among):
+        vals = [v for v in (key(r, i) for r in among) if v is not None]
+        return sum(vals) if vals else None
+    keys = [title.lower()] + [None if c["kind"] == "share" else add(i, rows) for i, c in enumerate(columns) if i]
     for i, c in enumerate(columns):
         if c["kind"] == "share" and len(c.get("of") or []) == 2:
-            n, of = keys[c["of"][0]], keys[c["of"][1]]
+            among = [r for r in rows if key(r, c["of"][1])]
+            n, of = add(c["of"][0], among), add(c["of"][1], among)
             keys[i] = _pct(n, of) if of else None
     return {"name": "", "keys": keys,
             "cells": [title] + [kube_fmt_cell(c["kind"], n, _none(c, metrics)) for c, n in zip(columns[1:], keys[1:])]}

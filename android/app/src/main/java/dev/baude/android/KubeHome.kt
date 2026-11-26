@@ -4,8 +4,7 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectHorizontalDragGestures
-import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -108,8 +107,9 @@ private fun KubeCard(use: Msg.KubeUse, samples: KubeSamples, memory: Boolean) {
             }
         }
         if (alloc != null && alloc > 0) {
-            val over = measures.mapIndexedNotNull { i, m -> m.second?.takeIf { it > alloc }?.let { it to i } }.maxByOrNull { it.first }
-            if (over != null) Text(Wording.Kube.overAllocatable(measures[over.second].first.first, "%.1f".format(over.first / alloc)),
+            val over = measures.mapIndexedNotNull { i, m -> m.second?.takeIf { it >= alloc * 1.05 }?.let { it to i } }.maxByOrNull { it.first }
+            if (over != null) Text(Wording.Kube.overAllocatable(measures[over.second].first.first,
+                String.format(java.util.Locale.ROOT, "%.1f", over.first / alloc)), // (under 5% over: no "1.0×")
                 style = Type.body, color = c.warning)
         }
         Spark(samples, alloc, use.limits?.toDouble(), if (memory) ::kubeBytes else ::kubeCores, c.success, c.accentBg, limitsColour, c.fg)
@@ -149,40 +149,44 @@ private fun Bar(value: Double, alloc: Double, scale: Double, colour: Color, over
 class KubeSamples(val at: List<Double>, val used: List<Double?>, val requested: List<Double?>, val minutes: Int, val every: Double)
 
 /** A core count as Home shows it (kubedata.kube_fmt_cores). */
-fun kubeCores(n: Double?): String = if (n == null) "N/A" else "%.2f".format(n)
+fun kubeCores(n: Double?): String = if (n == null) "N/A" else String.format(java.util.Locale.ROOT, "%.2f", n)
 
 /** A byte count as Home shows it (kubedata.kube_fmt_bytes). */
 fun kubeBytes(n: Double?): String {
     if (n == null) return "N/A"
     var v = n
     for (unit in listOf("B", "KiB", "MiB", "GiB", "TiB")) {
-        if (v < 1024 || unit == "TiB") return if (unit == "B") "%.0f%s".format(v, unit) else "%.1f%s".format(v, unit)
+        if (v < 1024 || unit == "TiB") return String.format(java.util.Locale.ROOT, if (unit == "B") "%.0f%s" else "%.1f%s", v, unit)
         v /= 1024
     }
     return ""
 }
 
-/** The value a history's top stands for (kubehome.spark_top): allocatable (and a little) while what's used or requested
- * reaches a quarter of it; under that, the most they reached (and a little), allocatable then out of view. */
-fun sparkTop(peak: Double, allocatable: Double?): Double =
-    if (allocatable != null && allocatable > 0 && peak >= allocatable / 4) maxOf(peak, allocatable) * 1.08
-    else if (peak > 0) peak * 1.15 else 1.0
+/** The value a history's top stands for, and whether that's allocatable (kubehome.spark_top): allocatable (and a
+ * little) while what's used or requested reaches a quarter of it (once it has, till it falls under a fifth: full, how
+ * it was scaled before); under that, the most they reached (and a little), allocatable then out of view. */
+fun sparkTop(peak: Double, allocatable: Double?, full: Boolean = false): Pair<Double, Boolean> =
+    if (allocatable != null && allocatable > 0 && peak >= allocatable * (if (full) 0.2 else 0.25)) maxOf(peak, allocatable) * 1.08 to true
+    else (if (peak > 0) peak * 1.15 else 1.0) to false
 
 /** How a resource went (kubehome.KubeSpark): used a line, requested dashed, each sample at its time across the last
- * `minutes` (to the newest), so a time with none is a gap; allocatable dotted and the limits dashed across, as now, each
- * while in view (sparkTop); nothing with fewer than two samples. A finger on it (held or dragged) marks the sample
- * nearest, its time, used, requested, limits and allocatable in a bubble above. */
+ * `minutes` (to the newest), so a time with none is a gap; allocatable and the limits dashed across, as now, each
+ * while in view (sparkTop); nothing with fewer than two samples. A finger held on it (a long press, so a scroll across
+ * it shows nothing), then dragged, marks the sample nearest, its time, used, requested, limits and allocatable in a
+ * bubble above. */
 @Composable
 private fun Spark(s: KubeSamples, allocatable: Double?, limits: Double?, fmt: (Double?) -> String, usedColour: Color,
                   requestedColour: Color, limitsColour: Color, fg: Color) {
     val lines = listOf(s.requested to requestedColour, s.used to usedColour).filter { (v, _) -> v.count { it != null } >= 2 }
     if (lines.isEmpty()) return
-    val top = sparkTop(lines.flatMap { it.first }.filterNotNull().maxOrNull() ?: 0.0, allocatable)
+    val full = remember { booleanArrayOf(false) } // (how it was scaled last: sparkTop's hysteresis)
+    val (top, nowFull) = sparkTop(lines.flatMap { it.first }.filterNotNull().maxOrNull() ?: 0.0, allocatable, full[0])
+    full[0] = nowFull
     val span = 60.0 * (if (s.minutes > 0) s.minutes else 30)
     val right = s.at.lastOrNull() ?: 0.0
     var width by remember { mutableStateOf(0) }
-    var hover by remember { mutableStateOf<Int?>(null) }
-    var dragging by remember { mutableStateOf(false) }
+    var held by remember { mutableStateOf<Int?>(null) }
+    val hover = held?.let { if (s.at.isEmpty()) null else it.coerceIn(0, s.at.lastIndex) } // (the history shorter since)
     fun xOf(at: Double, w: Float) = 1f + (w - 2f) * (1.0 - (right - at) / span).toFloat()
     fun nearest(x: Float): Int? {
         if (width <= 2) return null
@@ -194,19 +198,16 @@ private fun Spark(s: KubeSamples, allocatable: Double?, limits: Double?, fmt: (D
     Box(Modifier.fillMaxWidth().padding(top = 4.dp)) {
         Canvas(Modifier.fillMaxWidth().height(48.dp).onSizeChanged { width = it.width }
             .semantics { contentDescription = Wording.Kube.historyTip(s.minutes) }
-            .pointerInput(Unit) { // (held: the drag's, once it moves sideways, keeps it till the finger's lifted)
-                detectTapGestures(onPress = { p -> hover = near(p.x); tryAwaitRelease(); if (!dragging) hover = null })
-            }
-            .pointerInput(Unit) {
-                detectHorizontalDragGestures(onDragStart = { dragging = true; hover = near(it.x) },
-                    onDragEnd = { dragging = false; hover = null }, onDragCancel = { dragging = false; hover = null }) { change, _ ->
+            .pointerInput(Unit) { // (after a long press only: a scroll across it isn't taken for pointing)
+                detectDragGesturesAfterLongPress(onDragStart = { held = near(it.x) },
+                    onDragEnd = { held = null }, onDragCancel = { held = null }) { change, _ ->
                     change.consume()
-                    hover = near(change.position.x)
+                    held = near(change.position.x)
                 }
             }) {
             fun y(v: Double) = size.height - 2f - (size.height - 4f) * (v / top).toFloat()
             for ((value, colour, dash, w) in listOf(
-                Quad(allocatable, fg.copy(alpha = 0.6f), floatArrayOf(1.dp.toPx(), 3.dp.toPx()), 1.2.dp.toPx()),
+                Quad(allocatable, fg.copy(alpha = 0.6f), floatArrayOf(4.dp.toPx(), 3.dp.toPx()), 1.2.dp.toPx()),
                 Quad(limits, limitsColour, floatArrayOf(6.dp.toPx(), 3.dp.toPx()), 1.5.dp.toPx()))) {
                 if (value != null && value > 0 && value <= top) drawLine(colour, Offset(1f, y(value)), Offset(size.width - 1f, y(value)),
                     strokeWidth = w, pathEffect = PathEffect.dashPathEffect(dash))
@@ -250,9 +251,9 @@ private fun Spark(s: KubeSamples, allocatable: Double?, limits: Double?, fmt: (D
 private data class Quad(val value: Double?, val colour: Color, val dash: FloatArray, val width: Float)
 
 /** A history sample's values (kubehome.spark_values): its time, then used, requested, limits and allocatable (the last
- * two as now). */
+ * two as now); N/A where there's none, as on the card. */
 fun sparkValues(at: Double, used: Double?, requested: Double?, limits: Double?, allocatable: Double?, fmt: (Double?) -> String): String {
-    fun say(n: Double?) = if (n == null) "–" else fmt(n)
+    fun say(n: Double?) = fmt(n)
     val time = java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.ROOT).format(java.util.Date((at * 1000).toLong()))
     return listOf(time, "${Wording.Kube.used}  ${say(used)}", "${Wording.Kube.requested}  ${say(requested)}",
         "${Wording.Kube.limits}  ${say(limits)}", "${Wording.Kube.allocatable}  ${say(allocatable)}").joinToString("\n")
@@ -274,19 +275,20 @@ private fun kubeNone(col: Msg.KubeShareColumn, metrics: Boolean) =
 private fun key(keys: JSONArray?, i: Int): Any? = keys?.opt(i)?.takeIf { it != JSONObject.NULL }
 
 /** An "Other (n)" row: rows added up under columns (kubedata.kube_shares_other): each number's sum (none where none has
- * one), a share the share of the sums. */
+ * one), a share the share of the sums over the rows that have what it's a share of (used ÷ limits only over the rows
+ * with limits, top and bottom). */
 private fun kubeOther(columns: List<Msg.KubeShareColumn>, rows: List<Msg.KubeShare>, title: String, metrics: Boolean): Msg.KubeShare {
+    fun num(r: Msg.KubeShare, i: Int) = (key(r.keys, i) as? Number)?.toDouble()
+    fun add(i: Int, among: List<Msg.KubeShare>) = among.mapNotNull { num(it, i) }.takeIf { it.isNotEmpty() }?.sum()
     val keys = ArrayList<Double?>()
     keys.add(null)
-    for (i in 1 until columns.size) {
-        val vals = rows.mapNotNull { (key(it.keys, i) as? Number)?.toDouble() }
-        keys.add(if (columns[i].kind == "share" || vals.isEmpty()) null else vals.sum())
-    }
+    for (i in 1 until columns.size) keys.add(if (columns[i].kind == "share") null else add(i, rows))
     columns.forEachIndexed { i, col ->
         val of = col.of.orEmpty()
         if (col.kind == "share" && of.size == 2) {
-            val n = keys.getOrNull(of[0].toInt())
-            val d = keys.getOrNull(of[1].toInt())
+            val among = rows.filter { (num(it, of[1].toInt()) ?: 0.0) != 0.0 }
+            val n = add(of[0].toInt(), among)
+            val d = add(of[1].toInt(), among)
             keys[i] = if (n != null && d != null && d != 0.0) 100 * n / d else null
         }
     }
@@ -305,12 +307,13 @@ private fun KubeShares(st: KubeState, columns: List<Msg.KubeShareColumn>, shares
     var rows = shares.filter { s -> q.isEmpty() || s.cells.orEmpty().any { q in it.lowercase() } }
     sort?.let { (col, desc) ->
         val (have, none) = rows.partition { key(it.keys, col) != null }
-        val sorted = have.sortedWith { a, b ->
+        val sorted = have.sortedWith { a, b -> // (stable: rows alike keep the host's order either way, as the desktop's)
             val x = key(a.keys, col)
             val y = key(b.keys, col)
-            if (x is Number && y is Number) x.toDouble().compareTo(y.toDouble()) else x.toString().compareTo(y.toString())
+            val by = if (x is Number && y is Number) x.toDouble().compareTo(y.toDouble()) else x.toString().compareTo(y.toString())
+            if (desc) -by else by
         }
-        rows = (if (desc) sorted.reversed() else sorted) + none
+        rows = sorted + none
     }
     val rest = if (rows.size > shown + 1) rows.drop(shown) else emptyList()
     val other = if (rest.isEmpty()) null else kubeOther(columns, rest, Wording.Kube.other(rest.size), metrics)

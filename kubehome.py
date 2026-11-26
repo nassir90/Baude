@@ -15,22 +15,27 @@ from widgets import accent_rgba  # noqa: E402
 MEASURES = (("requested", "kube-requested"), ("used", "kube-used"), ("limits", "kube-limits"))
 
 
-def spark_top(peak, allocatable):
-    """The value a history's top stands for: allocatable (and a little), so the lines read against what the nodes can
-    give, while what's used or requested reaches a quarter of it; under that, the most they reached (and a little),
+SPARK_FULL, SPARK_OWN = 0.25, 0.2  # (a history scaled to allocatable from a quarter of it; to its own peak again below
+# a fifth: one that hovers about a quarter doesn't flip between the two)
+
+
+def spark_top(peak, allocatable, full=False):
+    """The value a history's top stands for, and whether that's allocatable: allocatable (and a little), so the lines
+    read against what the nodes can give, while what's used or requested reaches a quarter of it (once it has, till it
+    falls under a fifth: full, how it was scaled before); under that, the most they reached (and a little),
     allocatable then out of view, so a small use's ups and downs still show."""
-    if allocatable and peak >= allocatable / 4:
-        return max(peak, allocatable) * 1.08
-    return peak * 1.15 or 1
+    if allocatable and peak >= allocatable * (SPARK_OWN if full else SPARK_FULL):
+        return max(peak, allocatable) * 1.08, True
+    return peak * 1.15 or 1, False
 
 
 class KubeSpark(Gtk.Widget):
     """How a resource went (the host's history): what's used, a line in the used bar's colour, and what's requested,
     dashed in the requested bar's, each sample at its time across the last `minutes` (to the newest), so a time with
-    none (the host off, the cluster unreachable) is a gap; across them, allocatable dotted and the limits dashed in the
-    limits bar's colour, as they are now, each while it's in view (spark_top). Hovered: a line at the sample nearest
-    the pointer, its time, used, requested, limits and allocatable in the tooltip. Nothing is drawn with fewer than two
-    samples."""
+    none (the host off, the cluster unreachable) is a gap; across them, allocatable dashed in the text's colour and
+    the limits dashed in the limits bar's, as they are now, each while it's in view (spark_top). Hovered: a line at the
+    sample nearest the pointer, its time, used, requested, limits and allocatable in the tooltip. Nothing is drawn with
+    fewer than two samples."""
     HEIGHT = 48
 
     def __init__(self):
@@ -38,7 +43,7 @@ class KubeSpark(Gtk.Widget):
         self.add_css_class("kube-spark")  # (its colour: the used bar's)
         self.samples, self.minutes, self.every = [], 30, 10
         self.allocatable = self.limits = None
-        self.fmt, self.hover = kube_fmt_cores, None
+        self.fmt, self.hover, self.full = kube_fmt_cores, None, False
         self.connect("query-tooltip", self._tip)
         motion = Gtk.EventControllerMotion()
         motion.connect("leave", lambda *_: self._hovered(None))
@@ -57,7 +62,8 @@ class KubeSpark(Gtk.Widget):
 
     def _scale(self, lines):
         peak = max([s[i] for i in lines for s in self.samples if s[i] is not None] or [0])
-        return spark_top(peak, self.allocatable)
+        top, self.full = spark_top(peak, self.allocatable, self.full)
+        return top
 
     def _x(self, at, w):
         return 1 + (w - 2) * (1 - (self.samples[-1][0] - at) / (60 * self.minutes))
@@ -96,7 +102,7 @@ class KubeSpark(Gtk.Widget):
 
         def y(v):
             return h - 2 - (h - 4) * v / top
-        for value, alpha, dash, width in ((self.allocatable, 0.6, [1, 3], 1.2), (self.limits, 0.45, [6, 3], 1.5)):
+        for value, alpha, dash, width in ((self.allocatable, 0.6, [4, 3], 1.2), (self.limits, 0.45, [6, 3], 1.5)):
             if value is not None and 0 < value <= top:
                 cr.set_source_rgba(fg.red, fg.green, fg.blue, alpha)
                 cr.set_line_width(width)
@@ -136,9 +142,9 @@ class KubeSpark(Gtk.Widget):
 
 
 def spark_values(sample, limits, allocatable, fmt):
-    """A history sample's tooltip: its time, then used, requested, limits and allocatable (the last two as now)."""
-    def say(n):
-        return "–" if n is None else fmt(n)
+    """A history sample's tooltip: its time, then used, requested, limits and allocatable (the last two as now); N/A
+    where there's none, as on the card."""
+    say = fmt
     return "\n".join([time.strftime("%H:%M:%S", time.localtime(sample[0])),
                       f"{wording.say('kube.used')}  {say(sample[1])}",
                       f"{wording.say('kube.requested')}  {say(sample[2])}",
@@ -167,26 +173,35 @@ class KubeBar(Gtk.Widget):
     def do_dispose(self):
         for part in (self.fill, self.over, self.tick):
             part.unparent()
+        Gtk.Widget.do_dispose(self)
 
     def set(self, value, allocatable, scale):
+        """What's shown changed: which parts there are (and the fill's end square where the part past allocatable meets
+        it), set here; where they go, in do_size_allocate."""
         self.value, self.allocatable, self.scale = value or 0, allocatable or 0, scale or 1
+        past = self.value > self.allocatable
+        self.fill.set_visible(min(self.value, self.allocatable) > 0)
+        self.over.set_visible(past)
+        self.tick.set_visible(self.scale > self.allocatable * 1.001)
+        (self.fill.add_css_class if past else self.fill.remove_css_class)("kube-joined")
         self.queue_allocate()
 
-    def do_measure(self, orientation, _for):
-        return (0, 0, -1, -1) if orientation == Gtk.Orientation.HORIZONTAL else (10, 10, -1, -1)
+    def do_measure(self, orientation, for_size):
+        least = 0 if orientation == Gtk.Orientation.HORIZONTAL else 10
+        for part in (self.fill, self.over):  # (the tick reaches past the bar: it's not what the bar needs)
+            least = max(least, part.measure(orientation, -1)[0])
+        return least, least, -1, -1
 
     def do_size_allocate(self, w, h, _baseline):
         def put(part, x, width, y=0, height=h):
-            part.set_visible(width >= 1)
-            if width >= 1:
-                part.allocate(round(width), height, -1, Gsk.Transform().translate(Graphene.Point().init(round(x), y)))
+            if part.get_visible():
+                width = max(round(width), part.measure(Gtk.Orientation.HORIZONTAL, height)[0])
+                height = max(height, part.measure(Gtk.Orientation.VERTICAL, width)[0])
+                part.allocate(width, height, -1, Gsk.Transform().translate(Graphene.Point().init(round(x), y)))
         within = min(self.value, self.allocatable) * w / self.scale
-        past = max(0, self.value - self.allocatable) * w / self.scale
-        (self.fill.add_css_class if past >= 1 else self.fill.remove_css_class)("kube-joined")
         put(self.fill, 0, within)
-        put(self.over, within, past)
-        put(self.tick, self.allocatable * w / self.scale - 1, 2 if self.scale > self.allocatable * 1.001 else 0, -3,
-            h + 6)
+        put(self.over, within, max(0, self.value - self.allocatable) * w / self.scale)
+        put(self.tick, self.allocatable * w / self.scale - 1, 2, -3, h + 6)
 
 
 class KubeCard(Gtk.Box):
@@ -241,7 +256,8 @@ class KubeCard(Gtk.Box):
             self.bars[i].set(value, alloc, scale)
             self.amounts[i].set_label(cells[i])
             self.shares[i].set_label(shares[i])
-        over = max(((v, MEASURES[i][0]) for i, v in enumerate(values) if alloc and (v or 0) > alloc), default=None)
+        over = max(((v, MEASURES[i][0]) for i, v in enumerate(values) if alloc and (v or 0) >= alloc * 1.05),
+                   default=None)  # (under 5% over: no "1.0×")
         self.over.set_visible(over is not None)
         if over is not None:
             self.over.set_label(wording.say("kube.over_allocatable", what=wording.say(f"kube.{over[1]}"),

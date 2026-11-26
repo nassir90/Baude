@@ -455,6 +455,8 @@ def build(app, sc):
         return scenes_chat.kube_window(app)[0]
     if name == "kubernetes-home":
         return scenes_chat.kube_home(app)[0]
+    if name == "kubernetes-home-prod":
+        return scenes_chat.kube_home(app, "prod")[0]
     if name == "kubernetes-home-crowded":
         return scenes_chat.kube_home(app, "crowded")[0]
     if name == "kubernetes-home-hover":  # (the tooltip's text is in the dump; its bubble is a surface of its own)

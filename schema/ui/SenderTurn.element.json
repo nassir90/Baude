@@ -16,7 +16,8 @@
     "windowdrafts.py:WindowDrafts.sender_bubble",
     "windowdrafts.py:WindowDrafts.senders_came",
     "baudelib/wire.py:sender_name",
-    "baudelib/autofix.py:send"
+    "baudelib/autofix.py:send",
+    "windowdrafts.py:WindowDrafts.open_sender"
   ],
   "copy": [
     "senders",
@@ -30,7 +31,7 @@
     },
     {
       "name": "from line",
-      "shows": "At the top of the bubble, right-aligned, wrapping: \"from <who>\" at 0.85em and 60% opacity. <who> is: \"<name>, a Bot\" (or \"a Bot, a Bot\" without a name); \"“<chat title>”\" (or \"a chat\"); \"subagent “<name>”\" (or \"a subagent\"); a host's name (or \"a host\"); another kind by its name (or \"another\"). For anything but a host, \" on <host>\" follows when the sender's host is known, e.g. \"from Ada, a Bot on lab-mac\".",
+      "shows": "At the top of the bubble, right-aligned, wrapping: \"from <who>\" at 0.85em and 60% opacity. <who> is: \"<name>, a Bot\" (or \"a Bot, a Bot\" without a name); \"“<chat title>”\" (or \"a chat\"); \"subagent “<name>”\" (or \"a subagent\"); a host's name (or \"a host\"); another kind by its name (or \"another\"). For anything but a host, \" on <host>\" follows when the sender's host is known, e.g. \"from Ada, a Bot on lab-mac\". When the sender names a chat (a Bot, a chat, a subagent: its session), the line is a link (underlined, link colour): it opens that chat on its host. A task's run's (a host sender naming a run: what a run sends a chat it starts, and its asks of its Bot) opens the run's Bot's chat on its Tasks page, at that run.",
       "copy": [
         "common.from_who",
         "senders.bot",
@@ -42,6 +43,12 @@
         "senders.host_unnamed",
         "senders.another",
         "senders.on"
+      ],
+      "actions": [
+        {
+          "by": "click",
+          "does": "opens the chat it's from (a task's run: its Bot's Tasks page at that run)"
+        }
       ]
     },
     {
@@ -74,7 +81,26 @@
       "said": "Sure fix (2)",
       "rule": "A message an agent outside the apps (baude-mcp's message_chat) sends a chat carries its name as the sender (as_agent) and is drawn as from it, not as the user's, as Meta's are.",
       "decided": "2026-11-25",
-      "source": [{"issue": "BaudeInternal#200"}, {"session": "b3845b21-55ac-4aab-a769-fb8517403c51", "message": "868770b1-06c0-44a3-bdb9-c1851cf4b39a"}]
+      "source": [
+        {
+          "issue": "BaudeInternal#200"
+        },
+        {
+          "session": "b3845b21-55ac-4aab-a769-fb8517403c51",
+          "message": "868770b1-06c0-44a3-bdb9-c1851cf4b39a"
+        }
+      ]
+    },
+    {
+      "said": "* Philosophy: I have a deployment tak that fallsback to a oneshot agent when teh deploy fails. But the oneshot agent spawned outside of the bot which is not ideal, and did not keep in touch with the bot either.",
+      "rule": "Every app's from line links to the chat a message is from, so a Bot told what a task's agent said can open that agent's chat, and that agent's chat can open the run that started it",
+      "decided": "2026-11-26",
+      "source": [
+        {
+          "session": "b3845b21-55ac-4aab-a769-fb8517403c51",
+          "message": "ded3957e-f255-4438-b4b3-ff7e69adeb1d"
+        }
+      ]
     }
   ],
   "scenes": []

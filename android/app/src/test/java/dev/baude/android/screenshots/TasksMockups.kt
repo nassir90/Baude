@@ -6,6 +6,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.ui.Modifier
+import androidx.compose.foundation.layout.padding
+import androidx.compose.ui.unit.dp
 import com.github.takahirom.roborazzi.captureScreenRoboImage
 import dev.baude.android.BaudeTheme
 import dev.baude.android.LocalBaude
@@ -112,6 +114,37 @@ abstract class TasksMockups(private val theme: String) {
     @Test fun run() {
         show(TaskFixtures.failedRun())
         shoot("run")
+    }
+
+    /** A run that started one-shot agents: Started, each with its state, and what the done one said. */
+    @Test fun runStarted() {
+        dev.baude.android.Mesh.sessions["h1"] = TaskFixtures.started
+        try {
+            show(TaskFixtures.startedRun())
+            shoot("run-started")
+        } finally {
+            dev.baude.android.Mesh.sessions.remove("h1")
+        }
+    }
+
+    /** A chat's messages from a task's run and from a chat it started: their lines, links to the run and the chat. */
+    @Test fun senders() {
+        activity.setContent {
+            BaudeTheme {
+                androidx.compose.foundation.layout.Column(Modifier.fillMaxSize().background(LocalBaude.current.inside)
+                    .padding(top = 24.dp), verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(12.dp)) {
+                    dev.baude.android.Said(dev.baude.android.Line("you", "The deploy of site failed at its upload. Find out why."),
+                        dev.baude.android.Msg.StoredSender(kind = "host", name = "Task “Deploy site”", host = "h1",
+                            hostName = "workshop", session = "s1", run = "r3"))
+                    dev.baude.android.Said(dev.baude.android.Line("you", "(Your task “Deploy site” started this chat in its run r3. " +
+                        "It's finished. What it said:)\n\nThe bucket's key expired yesterday. Renew it, then run the task again."),
+                        dev.baude.android.Msg.StoredSender(kind = "subagent", name = "Why the deploy failed", host = "h1",
+                            hostName = "workshop", session = "c1"))
+                }
+            }
+        }
+        settle()
+        shoot("senders")
     }
 
     @Test fun trigger() {

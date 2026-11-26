@@ -90,6 +90,24 @@ def deploy(inputs):
         page = "task"
     }
 
+    /** The chats a run of Deploy site started on its failure (one done, one still working), as h1 lists them. */
+    val started get() = listOf(
+        Msg.Session(id = "c1", title = "Why the deploy failed", state = "idle", spawnedBy = "s1",
+            taskRun = Msg.TaskRunRef(bot = "s1", task = "t1", run = "r3", name = "Deploy site")),
+        Msg.Session(id = "c2", title = "Check the release links", state = "working", spawnedBy = "s1",
+            taskRun = Msg.TaskRunRef(bot = "s1", task = "t1", run = "r3", name = "Deploy site")))
+
+    /** That run, falling back to one-shot agents: Started, and what the done one said. */
+    fun startedRun() = page().apply {
+        run = TaskFixtures.runs[1].let { Msg.TaskRun.from(it.json().put("status", "done").put("offset", 0)
+            .put("chats", org.json.JSONArray(listOf("c1", "c2")))) }
+        log.addAll(listOf(line("say", "deploying main"), line("err", "upload failed: the key has expired"),
+            Msg.TaskLogLine(at = now, kind = "agent", text = "The bucket's key expired yesterday. Renew it, then run the task again.",
+                session = "c1")))
+        bot = "Juniper"
+        page = "run"
+    }
+
     /** The run that failed, its log. */
     fun failedRun() = page().apply {
         run = TaskFixtures.runs[1].let { Msg.TaskRun.from(it.json().put("handed", true).put("exit", 2)

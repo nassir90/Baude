@@ -52,6 +52,11 @@ class ServerSessions:
         if src and cwd != os.path.realpath(src.meta["cwd"]):  # (claude finds what it resumes by its folder)
             raise ValueError(wording.say("host_errors.fork_folder", path=src.meta["cwd"]))
         model = model or (src.meta.get("model") if src else None)
+        came = None
+        if params.get("task_run") is not None:  # (a task's run's: nested under its Bot, kept in its record, judged as
+            with self.lock:                     # the member that ran it, its first turn's end told its Bot)
+                came = self.tasks.from_run(params["task_run"])
+            params = {**params, "spawned_by": came["sid"]}
         mode = params.get("mode") or "default"
         if (params.get("spawned_by") or params.get("as_meta")) and mode not in meshtools.SUBAGENT_MODES:
             mode = "auto"  # (a subagent of a chat's or Meta's: Auto at most; a program without Auto's modes,
@@ -91,7 +96,10 @@ class ServerSessions:
                 "start_key": params.get("start_key") if wire.is_id(params.get("start_key") or "") else None,
                 "draft": bool(params.get("draft")) and not (params.get("prompt") or "").strip(),
                 **({"started_by": {"id": conn.member, "verified": conn.verified}}  # (a member's: its tools judged as it)
-                   if getattr(conn, "member", None) is not None else {})}
+                   if getattr(conn, "member", None) is not None else
+                   {"started_by": came["by"]} if came and isinstance(came.get("by"), dict) else {}),
+                **({"task_run": {"bot": came["sid"], "task": came["task"], "run": came["run"], "name": came["name"]}}
+                   if came else {})}
         with self.lock:
             if self.stopped.is_set():
                 raise OSError("the host process is stopping")
@@ -114,9 +122,14 @@ class ServerSessions:
             try:
                 if src is not None:  # (who its messages were from goes with the copy of them)
                     self.copy_senders(src, s)
-                if meta["prompt"].strip():  # (from a chat whose mesh tools started it, if they did: input's as)
-                    self.ensure_proc(s)
-                    self.send_user(s, meta["prompt"], self.sent_by(conn, params) if conn is not None else None)
+                if meta["prompt"].strip():  # (from a chat whose mesh tools started it, if they did: input's as; from
+                    self.ensure_proc(s)       # a task's run, by its name, its Bot's)
+                    by = self.sent_by(conn, params) if conn is not None else None
+                    if by is None and came:
+                        by = {"kind": "host", "name": wording.say("tasks.sender", name=came["name"]),
+                              "host": self.me["id"], "host_name": self.me["name"], "session": came["sid"],
+                              "run": came["run"]}
+                    self.send_user(s, meta["prompt"], by)
             except Exception:  # (its claude couldn't start: no session, and the error's the answer)
                 if s.app_tools is not None:
                     s.app_tools.end()
@@ -129,6 +142,8 @@ class ServerSessions:
                     except OSError:
                         pass
                 raise
+            if came:
+                self.tasks.add_chat(came["run"], came["sid"], s.id)
             if conn is not None:
                 conn.send({"op": "started", "req": req, "session": s.listing(), "forked": bool(src)})
             self.log(f"started {s.id} in {cwd} ({meta['group']})")
@@ -612,6 +627,7 @@ class ServerSessions:
                     self.woken.set()  # (what Auto-fix found meanwhile: sent now)
                 s.note_written()  # (its own turn's lines: not another writer's, desktopchats.elsewhere)
                 self.tasks.turn_over(s, msg)  # (its tasks' asks it took: answered)
+                self.tasks.chat_over(s, msg.get("result"), bool(msg.get("is_error")))  # (a task's run's: its Bot told)
                 s.asks.clear()
                 if s.meta.get("context_usage") is not None:
                     self.save(s)
@@ -849,6 +865,10 @@ class ServerSessions:
         with self.lock:
             if not made or s.proc is not made[0]:
                 return  # (one let go of already: ensure_proc)
+            if s.busy and not self.stopped.is_set() and not getattr(made[0], "restarting", False):
+                self.tasks.chat_over(s, wording.say("task_notes.stopped") if getattr(made[0], "stopping", False)
+                                     else wording.say("host_errors.claude_exited", code=code), True)  # (a task's
+                # run's, stopped or gone before its turn's end: its Bot told)
             s.proc, s.busy, s.acting, s.streamed = None, False, False, False
             s.codex_queue.clear()
             s.asks.clear()

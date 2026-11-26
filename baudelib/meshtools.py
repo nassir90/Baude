@@ -112,6 +112,8 @@ class Mesh:
 
     def __init__(self, me=None, socket=None, meta=False, agent=None):
         self.me, self.meta, self.agent = me, meta, agent
+        if socket is None and not me and os.environ.get("BAUDE_TASK_RUN"):  # (inside a task's run: its host's)
+            socket = os.environ.get("BAUDE_SOCKET") or None
         self.local = {"via": "unix", "path": socket} if socket else {"via": "local"}
         self.relay = {"path": socket} if socket else {}  # (a member reached through that host process)
 
@@ -386,11 +388,13 @@ class Mesh:
         for k in ("model", "cwd"):
             if a.get(k):
                 params[k] = a[k]
+        where, wait, timeout_s = self.where(a.get("host")), a.get("wait", True), a.get("timeout_s") or WAIT_S
         if self.me:
             params["spawned_by"] = params["as"] = self.me  # (its task's from this chat: its host says so)
         elif self.meta:
             params["as_meta"] = True  # (from Meta: held to Auto at most too)
-        where, wait, timeout_s = self.where(a.get("host")), a.get("wait", True), a.get("timeout_s") or WAIT_S
+        else:  # (baude-mcp's, inside a Bot's task's run: under that Bot, and the run's on its own host)
+            params.update(wire.from_task(here=where == self.local))
         named = self.named(where)
         end, dropped = time.monotonic() + BACK_S, False
         while True:

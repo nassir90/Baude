@@ -23,6 +23,10 @@
       "type": "string",
       "description": "Its session's id, on its host."
     },
+    "run": {
+      "type": "string",
+      "description": "A task's: the id of its run, on its Bot's Tasks page (its session: that Bot's)."
+    },
     "shown": {
       "type": "string",
       "description": "What heads show of the message in place of its text: set by the host only (a held answer sent: its shown, its agent having been told more)."

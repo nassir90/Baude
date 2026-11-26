@@ -778,8 +778,9 @@ suspend fun toEnd(list: androidx.compose.foundation.lazy.LazyListState, glide: B
 val SAID_BY = Regex("""\A<baude-sender(?: [a-z_]+="[^"<>]*")*>[^<]*</baude-sender>(?:\n\n|\n|\z)""")
 
 /** A line of the chat: from (a message of yours) who it's from instead, if its host's sender store says it's
- * another's: where yours are, grey, as Baude draws it, with "from <who>" small at its top, and what the store says is
- * shown of it in place of its text if it says (shown: a held answer sent, drawn as the held one was). */
+ * another's: where yours are, grey, as Baude draws it, with "from <who>" small at its top (a link to that chat, if it
+ * names one: a task's, to its run on its Bot's Tasks page), and what the store says is shown of it in place of its
+ * text if it says (shown: a held answer sent, drawn as the held one was). */
 @Composable
 fun Said(line: Line, from: Msg.StoredSender? = null, revert: RevertOffer? = null) {
     val c = LocalBaude.current
@@ -787,7 +788,10 @@ fun Said(line: Line, from: Msg.StoredSender? = null, revert: RevertOffer? = null
         from != null -> Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
             Column(Modifier.padding(start = 48.dp).clip(RoundedCornerShape(Gap.bubbleRadius)).background(c.raised)
                 .padding(horizontal = Gap.bubbleH, vertical = Gap.bubbleV), horizontalAlignment = Alignment.End) {
-                Text(Wording.Common.fromWho(author = senderName(from)), style = Type.caption, color = c.dim)
+                val to = from.session?.ifBlank { null }?.let { sid -> from.host?.ifBlank { null }?.let { it to sid } }
+                Text(Wording.Common.fromWho(author = senderName(from)), style = Type.caption, color = if (to != null) c.accent else c.dim,
+                    textDecoration = if (to != null) androidx.compose.ui.text.style.TextDecoration.Underline else null,
+                    modifier = if (to != null) Modifier.clickable { openSender(to.first, to.second, from.run) } else Modifier)
                 SelectionContainer {
                     val shown = from.shown
                     Prose(SAID_BY.replace(shown ?: line.text, "").trim(), under = c.raised.compositeOver(c.inside))

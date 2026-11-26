@@ -424,6 +424,8 @@ class Session:
                 "context": context_listing(self.meta.get("context_usage")),
                 "on_phone": self.server.phones.phone(self.id) is not None,
                 "fork_from": self.meta.get("fork_from"), "spawned_by": self.meta.get("spawned_by"),
+                "task_run": {k: v for k, v in self.meta["task_run"].items() if k != "told"}
+                if isinstance(self.meta.get("task_run"), dict) else None,
                 "desktop": bool(self.meta.get("desktop")), "elsewhere": desktopchats.elsewhere(self),
                 "start_key": self.meta.get("start_key"), "account": self.account(),
                 "account_gone": bool(self.profile()) and self.account() is None,

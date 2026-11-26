@@ -14,9 +14,10 @@
         "say",
         "ask",
         "answer",
-        "status"
+        "status",
+        "agent"
       ],
-      "description": "What it is: the script's output or errors, a line it said, an ask of its Bot, the Bot's answer, or the run's state changing."
+      "description": "What it is: the script's output or errors, a line it said, an ask of its Bot, the Bot's answer, the run's state changing, or what a chat it started said as its first turn ended (told its Bot too)."
     },
     "text": {
       "type": "string",
@@ -34,7 +35,11 @@
         "boolean",
         "null"
       ],
-      "description": "An ask's: it was an error handed over."
+      "description": "An ask's: it was an error handed over. An agent's: the chat failed, or was stopped."
+    },
+    "session": {
+      "type": "string",
+      "description": "An agent's: the chat's id."
     }
   },
   "required": [

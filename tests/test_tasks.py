@@ -6,7 +6,9 @@ push to a repo of the run's own fires it (the payload filling its form); as its 
 Each run must end, its record and log must be as the schema has them, and the host must still answer after. Then a
 failure is healed end to end (handed to the Bot, which sets the task's script and runs it again with its own tools,
 the new run asking it), two pushes during one run are both deployed (by the run after it), a Bot's routines, kept as
-they were, are moved to tasks (twice: once only), and the script library is run outside a task. No GTK.
+they were, are moved to tasks (twice: once only), a deploy's failure falls back to one-shot agents (the library's,
+and baude-oneshot's) that nest under the Bot, are kept with the run, and are told the Bot as they finish, and the
+script library is run outside a task. No GTK.
 
     python3 tests/test_tasks.py [--rounds N] [--seed S]
 """
@@ -195,6 +197,67 @@ def pushes(head, srv, sid, repo):
     print("pushes: two during a run, deployed by the next", flush=True)
 
 
+AGENTS = '''import os, subprocess, sys
+import baudetask as task
+try:
+    raise RuntimeError("the deploy went wrong")
+except RuntimeError as e:
+    got = task.agent(f"The deploy failed: {e}. Find out why.", title="Why the deploy failed")
+    task.say("agent", got["session"], got["failed"])
+    out = subprocess.run([sys.executable, %(oneshot)r, "--title", "Look again", "Look again."], capture_output=True,
+                         text=True)
+    task.say("oneshot", out.returncode, out.stderr.strip())
+    assert out.returncode == 0
+'''
+
+
+def agents(head, srv, sid):
+    """A deploy that fails and falls back to one-shot agents (task.agent, and baude-oneshot run by the script): each
+    nests under the Bot, is kept with the run, records the run, and is told the Bot (from it) as its turn ends, the
+    run's log saying so too."""
+    oneshot = os.path.join(os.path.dirname(HERE), "baude_oneshot.py")
+    tid = head.ask({"op": "tasks", "session": sid, "set": {
+        "name": "Deploy with fallback", "runtime": "python", "fallback": False, "timeout_s": 30,
+        "script": AGENTS % {"oneshot": oneshot}}})["saved"]
+    rid = head.ask({"op": "run_task", "session": sid, "id": tid})["run"]["id"]
+    got = ended(head, sid, rid)
+    assert got["run"]["status"] == "done", got
+    chats = got["run"].get("chats") or []
+    assert len(chats) == 2, got["run"]
+    with srv.lock:
+        listed = {c: srv.sessions[c].listing() for c in chats}
+    for c in chats:
+        fits("Session", listed[c])
+        assert listed[c]["spawned_by"] == sid and listed[c]["task_run"]["run"] == rid, listed[c]
+
+    def told():  # (the Bot's own asks of its user, as it's told: refused, so it goes on to the next)
+        with srv.lock:
+            bot = srv.sessions[sid]
+            for ask in list(bot.asks):
+                srv.take_input(None, bot, {"type": "control_response", "response": {
+                    "subtype": "success", "request_id": ask, "response": {"behavior": "deny", "message": "no"}}})
+            senders = srv.senders(bot) or {}
+        return {v.get("session") for v in senders.values() if v.get("kind") == "subagent"} >= set(chats)
+    wait(told, "the Bot told what its task's agents said")
+    log = wait(lambda: [x for x in ended(head, sid, rid)["log"] if x["kind"] == "agent"] if
+               len([x for x in ended(head, sid, rid)["log"] if x["kind"] == "agent"]) == 2 else None, "the agents' log")
+    assert {x["session"] for x in log} == set(chats), log
+    # run by a member of the mesh: the chat it starts is judged as that member (its started_by), as its tools are
+    head.ask({"op": "tasks", "session": sid, "set": {
+        "id": tid, "name": "Deploy with fallback", "runtime": "python", "fallback": False, "timeout_s": 30,
+        "script": 'import baudetask as task\ntask.agent("Look into it.", wait=False)\n'}})
+    member = {"id": "member-a", "verified": True}
+    with srv.lock:
+        st = srv.tasks.store(srv.sessions[sid])
+        rid = srv.tasks.start(srv.sessions[sid], st.find(tid), None, "manual", {}, {}, by=member)["id"]
+    chat = ended(head, sid, rid)["run"]["chats"][0]
+    with srv.lock:
+        assert srv.sessions[chat].meta.get("started_by") == member, srv.sessions[chat].meta
+    assert srv.started_by(chat) == ("member-a", True)
+    head.ask({"op": "tasks", "session": sid, "delete": tid})
+    print("agents: a failure's one-shot agents nested under the Bot, kept with the run, told the Bot", flush=True)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--rounds", type=int, default=6)
@@ -236,8 +299,8 @@ def main():
         assert set_["op"] == "tasks", set_
         fits("TasksReply", set_)
         tid = set_["saved"]
-        got = head.ask({"op": "task", "session": sid, "id": tid, "script": True})
-        assert got["op"] == "task" and got["task"]["script"] == script, got
+        got = head.ask({"op": "task", "session": sid, "id": tid})
+        assert got["op"] == "task", got
         assert got["task"]["version"] == tasks.version_of(script)
         fits("TaskReply", got)
         how = rng.choice(("hand", "dry", "trigger", "stop"))
@@ -282,6 +345,7 @@ def main():
             assert head.ask({"op": "tasks", "session": sid, "delete": tid})["op"] == "tasks"
     heal(head, sid)
     pushes(head, srv, sid, repo)
+    agents(head, srv, sid)
     # a script's ops, refused without the run's token
     bad = head.ask({"op": "task_report", "run": "nope", "token": "nope", "say": "hi"})
     assert bad["op"] == "error", bad

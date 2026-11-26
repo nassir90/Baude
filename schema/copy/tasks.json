@@ -76,6 +76,12 @@
     "timed_out": "stopped after {$seconds} s",
     "task_running": "a task's run",
     "not_as_asked": "The answer wasn't as asked: {$wrong}",
-    "no_answer": "no answer in time"
+    "no_answer": "no answer in time",
+    "agent_over": ".input {$failed :string} .match $failed failed {{(Your task “{$task}” started this chat in its run {$run}. It failed. What it said last:)}} * {{(Your task “{$task}” started this chat in its run {$run}. It's finished. What it said:)}}",
+    "agent_said_nothing": "(nothing)",
+    "started_chats": "Started",
+    "agent_done": "{$name} finished",
+    "a_chat": "A chat",
+    "agent_failed": "{$name} failed"
   }
 }

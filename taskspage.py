@@ -1,7 +1,7 @@
 """A Bot's tasks, on the side panel's Tasks page (schema/ui/Tasks.panel.json, docs/tasks-design.md): scripts its host
 keeps and runs (baudelib.tasks), by hand or as their triggers fire; their scripts are the Bot's to write (its set_task
 tool). The list of them; a task's page (its triggers, inputs and runs); a run's page (its log, its asks of the Bot and
-the Bot's answers). Each read from the Bot's host and set there."""
+the Bot's answers, the chats it started and how they are). Each read from the Bot's host and set there."""
 import datetime
 import json
 import os
@@ -138,6 +138,7 @@ class TasksPage(Gtk.Box):
         self.win, self.sid, self.remote, self.asked, self.clock = win, None, None, 0, None
         self.tasks, self.task, self.runs, self.run, self.log, self.bot = [], None, [], None, [], None
         self.drawn, self.tail = None, None  # (the run drawn: (its id, how many lines, its last); the block last drawn)
+        self.chats_drawn = None  # (the chats it started, as they were drawn: chats_now's)
         self.stack = Gtk.Stack(vexpand=True, transition_type=Gtk.StackTransitionType.SLIDE_LEFT_RIGHT)
         self.append(self.stack)
         # the list
@@ -218,6 +219,11 @@ class TasksPage(Gtk.Box):
         going = any((t.get("last") or {}).get("status") in GOING for t in self.tasks)
         if shown == "run" and self.run and self.run.get("status") in GOING:
             self.ask({"op": "task_run", "session": self.sid, "run": self.run["id"]})
+        elif shown == "run" and self.run and self.run.get("chats"):
+            if self.chats_now() != self.chats_drawn:  # (how they are, as the host lists them)
+                self.draw_run()
+            if self.ticks % 5 == 0 and sum(x.get("kind") == "agent" for x in self.log) < len(self.run["chats"]):
+                self.ask({"op": "task_run", "session": self.sid, "run": self.run["id"]})  # (what they said, logged)
         if self.ticks % (5 if going else 30) == 0:
             self.ask({"op": "tasks", "session": self.sid})
             if shown == "task" and self.task and going:
@@ -419,9 +425,14 @@ class TasksPage(Gtk.Box):
         if r.get("dry"):
             facts.append(wording.say("tasks.dummy_answers"))
         facts.append(r.get("version") or "")
-        line = Gtk.Box(spacing=6)
-        line.append(status_icon(r))
-        line.append(dim(" · ".join(f for f in facts if f), wrap=True))
+        line = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=14)
+        said = Gtk.Box(spacing=6)
+        said.append(status_icon(r))
+        said.append(dim(" · ".join(f for f in facts if f), wrap=True))
+        line.append(said)
+        if (chats := self.chats_now()):
+            line.append(self.started(chats))
+        self.chats_drawn = chats
         drawn, log = self.drawn, self.log
         n = drawn[1] if drawn and drawn[0] == r["id"] and drawn[1] <= len(log) < LOG_SHOWN and \
             (drawn[1] == 0 or log[drawn[1] - 1] == drawn[2]) else None
@@ -436,9 +447,41 @@ class TasksPage(Gtk.Box):
             self.log_line(x)
         self.drawn = (r["id"], len(log), log[-1] if log else None)
 
+    def chats_now(self):
+        """The chats the run started, as its host lists them now: [(id, title, state)], those gone left out."""
+        listed = getattr(self.remote, "sessions", None) or {}
+        return [(c, listed[c].get("title") or wording.say("tasks.task"), listed[c].get("state"))
+                for c in (self.run or {}).get("chats") or () if c in listed]
+
+    def started(self, chats):
+        """Started: a row for each chat the run started, its state as the sessions list shows it (working, waiting
+        on an answer, or done: they go on after the run's over), opened as it's clicked."""
+        from sessionsidebar import StatusDot
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        h = Gtk.Label(label=wording.say("tasks.started_chats"), xalign=0)
+        h.add_css_class("heading")
+        box.append(h)
+        lb = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE)
+        lb.add_css_class("boxed-list")
+        lb.add_css_class("tasks-rows")
+        for cid, title, state in chats:
+            row = Adw.ActionRow(title=GLib.markup_escape_text(title), activatable=True)
+            row.chat = cid
+            row.add_prefix(StatusDot(state if state in ("working", "waiting") else "done"))
+            row.add_suffix(Gtk.Image(icon_name="go-next-symbolic"))
+            lb.append(row)
+        lb.connect("row-activated", lambda _l, row: self.open_chat(row.chat))
+        box.append(lb)
+        return box
+
+    def open_chat(self, cid):
+        if self.remote is not None and cid in self.remote.sessions:
+            self.win.open_mesh_chat({**self.remote.sessions[cid], "server": self.remote})
+
     def log_line(self, x):
         """One line of the run's log added: output and errors run together in a code block of their own (errors in
-        the error colour), each ask of the Bot and its answer a card, the rest plain lines."""
+        the error colour), each ask of the Bot and its answer a card, and what each chat it started said as its turn
+        ended (told the Bot too), the rest plain lines."""
         k, text = x.get("kind"), x.get("text") or ""
         if k in ("out", "err"):
             if self.tail is not None and self.tail[0] == k:
@@ -452,9 +495,12 @@ class TasksPage(Gtk.Box):
             self.tail = (k, block, [text])
             return
         self.tail = None
-        if k in ("ask", "answer"):
+        if k in ("ask", "answer", "agent"):
             bot = self.bot or wording.say("sidebar.bot")
-            head_text = wording.say("tasks.bot_answered", bot=bot) if k == "answer" else \
+            chat = ((getattr(self.remote, "sessions", None) or {}).get(x.get("session")) or {}).get("title") or \
+                wording.say("tasks.a_chat")
+            head_text = wording.say("tasks.agent_failed" if x.get("error") else "tasks.agent_done", name=chat) \
+                if k == "agent" else wording.say("tasks.bot_answered", bot=bot) if k == "answer" else \
                 wording.say("tasks.handed_bot", bot=bot) if x.get("error") else \
                 wording.say("tasks.asked_bot", bot=bot)
             card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)

@@ -22,6 +22,10 @@
     "session": {
       "type": "string",
       "description": "Its session's id, on its host."
+    },
+    "run": {
+      "type": "string",
+      "description": "A task's: the id of its run, on its Bot's Tasks page (its session: that Bot's)."
     }
   },
   "required": ["kind"],

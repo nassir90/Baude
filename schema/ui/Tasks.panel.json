@@ -167,7 +167,7 @@
     },
     {
       "name": "run page",
-      "shows": "A header row: a back button (tooltip the task's name), the title '<task> · <when>' in bold, and a Stop button (stop icon) while it's running or asking. Then one line: its state's word (or, if it failed or was stopped, why), what started it ('By hand', 'Schedule', 'Git push'), how long it took, 'dummy answers' for a run with them, and its version. Then its log, scrolling, in order: the script's output in code blocks and its errors in code blocks of their own in the error colour (consecutive lines of each together), each line it said as plain text, each ask of the Bot as a card headed 'Asked <Bot>' (or 'Handed to <Bot>' for a failure handed over) with what was asked, each answer as a card headed '<Bot> answered' with the Bot's answer, and anything else the host says of the run as plain text. Nothing says when it started or that it ended: the title and the line under it do. Read every second while it's going, the lines since added to what's drawn.",
+      "shows": "A header row: a back button (tooltip the task's name), the title '<task> · <when>' in bold, and a Stop button (stop icon) while it's running or asking. Then one line: its state's word (or, if it failed or was stopped, why), what started it ('By hand', 'Schedule', 'Git push'), how long it took, 'dummy answers' for a run with them, and its version. Then, if it started any chats (one-shot agents: baude-oneshot, the mesh tools or the script library's agent, run inside it), a group headed 'Started': a boxed row per chat, its title, its state as the sessions list draws it (working grey and pulsing, waiting yellow, else done blue: they go on after the run's over, and the run's state doesn't wait for them) and a chevron. Then its log, scrolling, in order: the script's output in code blocks and its errors in code blocks of their own in the error colour (consecutive lines of each together), each line it said as plain text, each ask of the Bot as a card headed 'Asked <Bot>' (or 'Handed to <Bot>' for a failure handed over) with what was asked, each answer as a card headed '<Bot> answered' with the Bot's answer, what each chat it started said as its first turn ended as a card headed '<chat> finished' (or '<chat> failed'), and anything else the host says of the run as plain text. Nothing says when it started or that it ended: the title and the line under it do. Read every second while it's going, the lines since added to what's drawn.",
       "copy": [
         "tasks.status",
         "tasks.asked_bot",
@@ -176,7 +176,11 @@
         "common.stop",
         "tasks.schedule",
         "tasks.git_push",
-        "tasks.by_hand"
+        "tasks.by_hand",
+        "tasks.started_chats",
+        "tasks.agent_done",
+        "tasks.agent_failed",
+        "tasks.a_chat"
       ],
       "actions": [
         {
@@ -186,6 +190,10 @@
         {
           "by": "click Stop",
           "does": "stops the run on the host"
+        },
+        {
+          "by": "click a Started row",
+          "does": "opens that chat"
         }
       ]
     },
@@ -400,6 +408,28 @@
         {
           "session": "b3845b21-55ac-4aab-a769-fb8517403c51",
           "message": "21d61362-b76e-4eed-a2d6-59d2e5eb5a2d"
+        }
+      ]
+    },
+    {
+      "said": "* We probably want some kind of environment variable given to tasks that causes baude oneshot agents spawned to nest themselves underneath the bot.\n* We also probably want oneshot agents laucnhed by the task to be associated with that task, if a task triggers a oneshot agent, there's a sense in which it's still running. Not sure wht the ideal situation is here. As somtimes if you have some complex chain of tasks, yes, indeed the first phase is not running. We don't have this yet so it should be fine.",
+      "rule": "A one-shot agent a task's run starts (baude-oneshot, the mesh tools, the script library's agent) nests under the run's Bot in every app's sessions list, is kept with the run (Started on its page) and links back to it (its first message's from line). A run is over when its script ends: the chats it started go on, their live states shown under Started",
+      "decided": "2026-11-26",
+      "source": [
+        {
+          "session": "b3845b21-55ac-4aab-a769-fb8517403c51",
+          "message": "e6cb3bcd-242c-4214-9d3f-c795ec30466b"
+        }
+      ]
+    },
+    {
+      "said": "* Philosophy: I have a deployment tak that fallsback to a oneshot agent when teh deploy fails. But the oneshot agent spawned outside of the bot which is not ideal, and did not keep in touch with the bot either.",
+      "rule": "As a chat a task's run started ends its first turn (or stops, or fails), its Bot is sent what it said, as a message from that chat whose from line links to it, and the run's log says it too",
+      "decided": "2026-11-26",
+      "source": [
+        {
+          "session": "b3845b21-55ac-4aab-a769-fb8517403c51",
+          "message": "ded3957e-f255-4438-b4b3-ff7e69adeb1d"
         }
       ]
     }

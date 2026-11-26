@@ -125,6 +125,11 @@
       ],
       "description": "Its failure was handed to its Bot."
     },
+    "chats": {
+      "type": ["array", "null"],
+      "items": {"type": "string"},
+      "description": "The chats it started on its Bot's host (start's task_run), by their ids, oldest first: they go on after it's over, their states as the sessions listing has them."
+    },
     "pid": {
       "type": [
         "integer",

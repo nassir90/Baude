@@ -1385,3 +1385,88 @@ def _(app):
     win.open_fixes()
     T.pump(0.3)
     return win
+
+
+TASK_AGENTS = '''import baudetask as task
+task.say("deploying", "site")
+task.agent("The deploy of site failed at its upload. Find out why.", title="Why the deploy failed")
+task.agent("LINGER: check the release links", wait=False, title="Check the release links")
+'''
+
+
+def task_agents(win):
+    """Juniper's task Deploy site run, falling back to two one-shot agents (task.agent): one done (what it said told
+    Juniper), one still working; both nested under Juniper and kept with the run. The run's id."""
+    server = NET["lab"][0]
+    bot = NET["ids"]["Write the release notes for 2.4"]
+    os.environ["FAKE_LINGER_S"] = "120"  # (the second agent's turn: going on as it's drawn)
+    with server.lock:
+        s = server.sessions[bot]
+        st = server.tasks.store(s)
+        task, script = baude.baudelib.tasks.clean({"name": "Deploy site", "runtime": "python", "script": TASK_AGENTS})
+        st.put_script(task, script)
+        st.tasks.append(task)
+        st.save()
+        rid = server.tasks.start(s, task, None, "manual", {})["id"]
+    T.wait_for(lambda: st.runs[rid]["status"] == "done" and len(st.runs[rid].get("chats") or ()) == 2, "the run", 30)
+    T.wait_for(lambda: any(x["kind"] == "agent" for x in st.read_log(rid)), "what the agent said, logged", 20)
+    def gone(*_):  # (for the next scene: the task, and the chats it started archived)
+        with server.lock:
+            for c in st.runs[rid].get("chats") or ():
+                server.sessions[c].meta["archived"] = True
+                server.save(server.sessions[c])
+            server.changed()
+            st.tasks = [t for t in st.tasks if t["id"] != task["id"]]
+            st.forget(task["id"])
+            st.save()
+    win.connect("unrealize", gone)
+    return bot, rid, st.runs[rid]["chats"]
+
+
+@scene("57a-task-started-chats", "A Bot's task run that started two one-shot agents: nested under the Bot in the "
+                                 "sessions list, and listed on the run's page as Started, each with its state "
+                                 "(one done, one working); what the done one said is in the log, and told the Bot",
+       size=(1200 + SIDEBAR, H))
+def _(app):
+    win = network_window(app, None)
+    lab_bots(win)
+    bot, rid, _chats = task_agents(win)
+    win.sidebar.on_activate(win.sidebar.list, session_row(win, bot))
+    T.wait_for(lambda: win.session_id == bot and win.panel.tasks.sid == bot, "Juniper open")
+    win.show_panel(True, "tasks")
+    win.panel.tasks.open_run({"id": rid, "name": "Deploy site", "status": "done"})
+    T.wait_for(lambda: win.panel.tasks.chats_drawn and len(win.panel.tasks.chats_drawn) == 2, "the run's chats")
+    T.pump(3)
+    return win
+
+
+@scene("57b-task-agent-chat", "A chat a Bot's task run started, open: its first message from the task, its line a "
+                              "link to that run on the Bot's Tasks page", size=(1200 + SIDEBAR, H))
+def _(app):
+    win = network_window(app, None)
+    lab_bots(win)
+    _bot, _rid, chats = task_agents(win)
+    T.wait_for(lambda: session_row(win, chats[0]) is not None, "the agent's row")
+    win.sidebar.on_activate(win.sidebar.list, session_row(win, chats[0]))
+    T.wait_for(lambda: win.session_id == chats[0], "the agent's chat open")
+    T.pump(1.5)
+    return win
+
+
+@scene("57c-task-agent-link", "That chat's first line clicked: the Bot's chat opened on its Tasks page, at the run "
+                              "that started it", size=(1200 + SIDEBAR, H))
+def _(app):
+    win = network_window(app, None)
+    lab_bots(win)
+    bot, rid, chats = task_agents(win)
+    T.wait_for(lambda: session_row(win, chats[0]) is not None, "the agent's row")
+    win.sidebar.on_activate(win.sidebar.list, session_row(win, chats[0]))
+    T.wait_for(lambda: win.session_id == chats[0], "the agent's chat open")
+    def links():
+        return T.find(win, Gtk.Label, lambda x: x.has_css_class("sender-from") and x.get_mapped())
+    T.wait_for(lambda: links(), "the line it's from")
+    links()[0].emit("activate-link", "sender")
+    T.wait_for(lambda: win.session_id == bot and win.panel.tasks.run and win.panel.tasks.run["id"] == rid and
+               win.panel.tasks.chats_drawn, "the run, open")
+    T.pump(2)
+    return win

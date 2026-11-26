@@ -979,7 +979,8 @@ class ServerRunning:
                 return reply("bot_picture", session=s.id, picture=self.bot_picture(s))
             if op in ("tasks", "task", "run_task", "task_run", "task_stop"):  # (a Bot's tasks: baudelib.tasks)
                 try:
-                    kind, fields = self.tasks.op(s, msg)
+                    kind, fields = self.tasks.op(s, msg, by={"id": conn.member, "verified": conn.verified}
+                                                 if conn.member is not None else None)
                 except (ValueError, TypeError, OSError) as e:
                     return reply("error", error=str(e))
                 return reply(kind, **fields)

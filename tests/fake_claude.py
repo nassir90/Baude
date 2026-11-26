@@ -232,6 +232,7 @@ def turn(n):
     stream({"type": "content_block_delta", "index": 0,
             "delta": {"type": "text_delta", "text": "Done, one file." if allowed else "OK, skipped it."}})
     out({"type": "result", "subtype": "success", "is_error": False, "session_id": SESSION,
+         "result": "Done, one file." if allowed else "OK, skipped it.",
          "total_cost_usd": 0.0125, "num_turns": 2, "duration_ms": 1500,
          "usage": {"input_tokens": 1000, "output_tokens": 50}})
 
@@ -734,7 +735,7 @@ def main():
                 out({"type": "system", "subtype": "init", "session_id": SESSION, "cwd": os.getcwd(),
                      "model": "fake-model", "tools": ["Bash", "Read"]})
         elif msg.get("type") == "user":
-            keep("user", msg["message"])
+            keep("user", msg["message"], **({"uuid": msg["uuid"]} if msg.get("uuid") else {}))  # (as claude: its uuid)
             turns += 1
             state["messages"] += 1
             text = msg["message"]["content"] if isinstance(msg["message"]["content"], str) else ""

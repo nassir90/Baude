@@ -1005,11 +1005,11 @@ _SENDER = re.compile(r'\A<baude-sender((?: [a-z_]+="[^"<>]*")*)>[^<]*</baude-sen
 
 
 def clean_sender(sender):
-    """A sender as it's kept and said ({kind, name, host, host_name, session}: words, cut short), or None if it isn't
-    one."""
+    """A sender as it's kept and said ({kind, name, host, host_name, session, run}: words, cut short), or None if it
+    isn't one."""
     if not isinstance(sender, dict):
         return None
-    out = {k: " ".join(str(sender[k]).split())[:120] for k in ("name", "host", "host_name", "session")
+    out = {k: " ".join(str(sender[k]).split())[:120] for k in ("name", "host", "host_name", "session", "run")
            if isinstance(sender.get(k), str) and sender[k].strip()}
     out["kind"] = sender.get("kind") if sender.get("kind") in SENDER_KINDS else "host"
     return out
@@ -1025,6 +1025,16 @@ def sender_name(sender):
            "host": name or wording.say("senders.host_unnamed")}.get(
         kind, name or wording.say("senders.another"))  # (a kind of a newer host's: by its name)
     return wording.say("senders.on", who=who, where=where) if where and kind != "host" else who
+
+
+def from_task(here=True):
+    """What a start made inside a task's run carries, from the run's environment (baudelib/tasks.py): its Bot, so the
+    chat nests under it (spawned_by), and, on the run's own host (here), the run itself (task_run), which keeps the
+    chat in its record and tells its Bot as the chat's first turn ends. {} outside a task's run."""
+    bot, run, token = (os.environ.get(k) for k in ("BAUDE_SPAWNED_BY", "BAUDE_TASK_RUN", "BAUDE_TASK_TOKEN"))
+    if not is_id(bot or ""):
+        return {}
+    return {"spawned_by": bot, **({"task_run": {"run": run, "token": token}} if here and run and token else {})}
 
 
 def said_by(sender, content):

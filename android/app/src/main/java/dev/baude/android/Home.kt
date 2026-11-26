@@ -441,10 +441,11 @@ fun Home(open: (String, String) -> Unit, feedback: () -> Unit, phone: () -> Unit
                 }
             }
         }
-        // (each host keeping a restart of its daemon: said at the foot too, as Baude's sidebar says This Mac's)
-        val restarts = Mesh.known().mapNotNull { (id, _, up) -> Mesh.conn(id)?.info?.restart?.takeIf { up }?.let { id to it } }
-        if (update || restarts.isNotEmpty()) UpdateBar(update, restarts, open, tool)
+        if (update) UpdateBar()
     }
+    // (each host keeping a restart of its daemon: a snackbar, as Baude toasts it)
+    val restarts = Mesh.known().mapNotNull { (id, _, up) -> Mesh.conn(id)?.info?.restart?.takeIf { up }?.let { id to it } }
+    RestartSnackbar(restarts, Modifier.align(Alignment.BottomCenter).navigationBarsPadding(), open, tool)
     SnackbarHost(snack, Modifier.align(Alignment.BottomCenter).navigationBarsPadding())
     }
     choosing?.let { h -> OpenFolder(h, done = { choosing = null }) { choosing = null; newSession(h, it) } }
@@ -537,36 +538,82 @@ private fun HostBanner(text: String) {
     }
 }
 
-/** At the foot, under a rule from the chats (Baude's UpdateBar): each host's pending daemon restart (restarts; named
- * when there's more than one), tapped: what it waits for (RestartBlockers; See Thread on one: its chat, open(host,
- * session), or its terminal, tool("terminal", host)); and Update (update), while a newer build's ready or waiting to be
+/** At the foot, under a rule from the chats (Baude's UpdateBar): Update, while a newer build's ready or waiting to be
  * downloaded (Update.kt), how much of it's come while it's downloading; tapped, installed. A newer build that can't be
  * installed over this one: why, instead. */
 @Composable
-private fun UpdateBar(update: Boolean, restarts: List<Pair<String, Msg.RestartState>>, open: (String, String) -> Unit,
-                      tool: (String, String) -> Unit) {
+private fun UpdateBar() {
     val c = LocalBaude.current
     val ctx = androidx.compose.ui.platform.LocalContext.current
-    var blockers by remember { mutableStateOf<String?>(null) } // (the host whose restart's waits are shown)
     Column(Modifier.fillMaxWidth().navigationBarsPadding()) {
         HorizontalDivider(color = c.rule)
-        for ((hostId, r) in restarts) { // (a daemon's pending restart, tapped: what it waits for)
-            val said = if (r.paused == true) Wording.Hosts.restartPaused else Wording.Hosts.restartWaiting(n = r.blockers.orEmpty().size)
-            Text(if (restarts.size > 1) Wording.Hosts.restartOn(host = Mesh.label(hostId), said = said) else said,
-                style = Type.body, color = c.fg, modifier = Modifier.padding(horizontal = 6.dp, vertical = 4.dp)
-                    .clip(RoundedCornerShape(6.dp)).clickable { blockers = hostId }.padding(horizontal = 10.dp, vertical = 7.dp))
-        }
-        if (update && Update.state.value == "downloading")
+        if (Update.state.value == "downloading")
             androidx.compose.material3.LinearProgressIndicator({ Update.progress.value }, Modifier.fillMaxWidth(),
                 color = c.accentBg, trackColor = c.rule)
-        if (update && Update.state.value == "wrong") // (a newer build that can't be installed over this one: why)
+        if (Update.state.value == "wrong") // (a newer build that can't be installed over this one: why)
             Text(Update.why.value, style = Type.caption, color = c.dim,
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 11.dp))
-        else if (update) Text(Wording.UpdateBar.update, style = Type.body, color = c.fg, modifier = Modifier.padding(horizontal = 6.dp, vertical = 4.dp)
+        else Text(Wording.UpdateBar.update, style = Type.body, color = c.fg, modifier = Modifier.padding(horizontal = 6.dp, vertical = 4.dp)
             .clip(RoundedCornerShape(6.dp)).clickable { Update.install(ctx) }.padding(horizontal = 10.dp, vertical = 7.dp))
+    }
+}
+
+/** Which hosts' pending restarts have had their snackbar (Baude's meshui.RestartToasts): each once, till it's gone;
+ * held, those a See Thread holds (said till it's dismissed, which lets go of that pause); showing, the one shown. */
+internal object RestartSnack {
+    val toasted = mutableStateListOf<String>()
+    val held = mutableStateListOf<String>()
+    var showing by mutableStateOf<String?>(null)
+}
+
+/** Each host's pending daemon restart (restarts; named when there's more than one), a snackbar at a time (Baude's
+ * toast): what it waits for, kept up as it changes, with Details: what it waits for (RestartBlockers; See Thread on
+ * one: its chat, open(host, session), or its terminal, tool("terminal", host)). Each is shown once and goes as a
+ * snackbar does (RESTART_SNACK_MS, or dismissed); the restart goes on, as it was. A See Thread holds the restart: the
+ * snackbar back, "Daemon restart paused", till it's dismissed (the pause let go of) or Details is tapped again. */
+@Composable
+private fun RestartSnackbar(restarts: List<Pair<String, Msg.RestartState>>, modifier: Modifier,
+                            open: (String, String) -> Unit, tool: (String, String) -> Unit) {
+    val c = LocalBaude.current
+    val s = RestartSnack
+    var blockers by remember { mutableStateOf<String?>(null) } // (the host whose restart's waits are shown)
+    val ids = restarts.map { it.first }
+    LaunchedEffect(ids, s.showing) { // (gone ones forgotten; none shown: a held one, else one not shown yet)
+        s.toasted.retainAll(ids)
+        s.held.retainAll(ids)
+        if (s.showing != null && s.showing !in ids) s.showing = null
+        if (s.showing == null) s.showing = s.held.firstOrNull() ?: ids.firstOrNull { it !in s.toasted }?.also { s.toasted.add(it) }
+    }
+    val id = s.showing
+    val r = restarts.firstOrNull { it.first == id }?.second
+    LaunchedEffect(id, id in s.held) {
+        if (id != null && id !in s.held) {
+            kotlinx.coroutines.delay(RESTART_SNACK_MS)
+            if (s.showing == id) s.showing = null
+        }
+    }
+    if (id != null && r != null) {
+        val said = if (r.paused == true) Wording.Hosts.restartPaused else Wording.Hosts.restartWaiting(n = r.blockers.orEmpty().size)
+        androidx.compose.material3.Snackbar(modifier.padding(12.dp),
+            action = {
+                androidx.compose.material3.TextButton({ s.showing = null; s.held.remove(id); blockers = id }) {
+                    Text(Wording.Hosts.restartDetails)
+                }
+            },
+            dismissAction = {
+                IconButton(Adwaita.WindowClose, Wording.Common.close, tint = androidx.compose.material3.SnackbarDefaults.dismissActionContentColor) {
+                    s.showing = null
+                    if (s.held.remove(id) && Mesh.conn(id)?.info?.restart != null) // (a See Thread's pause: let go of)
+                        Mesh.conn(id)?.request(Msg.Restart(`do` = "free").json()) {}
+                }
+            }) {
+            Text(if (restarts.size > 1) Wording.Hosts.restartOn(host = Mesh.label(id), said = said) else said)
+        }
     }
     blockers?.let { h ->
         RestartBlockers(h, done = { blockers = null }) { b -> // (See Thread: the restart held while it's looked at)
+            if (h !in s.held) s.held.add(h)
+            s.showing = h
             when (b.kind) {
                 "terminal" -> { Terms.wanted[h] = b.terminal.orEmpty(); tool("terminal", h) }
                 "task" -> { TaskLinks.pending = listOf(h, b.session.orEmpty(), b.task.orEmpty(), b.run.orEmpty()); open(h, b.session.orEmpty()) }
@@ -576,12 +623,15 @@ private fun UpdateBar(update: Boolean, restarts: List<Pair<String, Msg.RestartSt
     }
 }
 
+/** How long a pending restart's snackbar stays (Baude's meshui.RESTART_TOAST_S). */
+private const val RESTART_SNACK_MS = 10_000L
+
 /** What a host's pending restart waits for (Baude's meshui.restart_dialog): each chat running a command, each task's
  * run, each agent run there for a chat elsewhere, each terminal there someone's attached to; the restart held while
  * it's shown (restart pause: every app says it's paused), and again once its connection's back. Restart: it restarts
  * once nothing's running; Force Restart: now, what's running stopped. Closed, or gone from the screen otherwise, the
  * pause is let go of (restart free, only while it's still pending: never a restart of its own). See Thread on a row:
- * see(it), the restart held meanwhile (the line says it's paused; tapped, this again). */
+ * see(it), the restart held meanwhile (its snackbar says it's paused; Details, this again). */
 @Composable
 fun RestartBlockers(hostId: String, done: () -> Unit, see: (Msg.RestartBlocker) -> Unit = {}) {
     val c = LocalBaude.current

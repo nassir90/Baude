@@ -21,8 +21,8 @@
     },
     {
       "name": "hosts",
-      "shows": "\"{host} deactivated\" / \"{host} activated\"; \"{host}'s notebooks weren't listed: {why}\"; \"{host} didn't save the change: {why}\"; \"Restarting the daemon once {n} session(s) finish running a command\"; \"Daemon restarted\"; \"The daemon didn't start again: {log path} may say why\".",
-      "copy": ["hosts.restart_waiting", "hosts.daemon_restarted", "agent_proxy.no_answer"]
+      "shows": "\"{host} deactivated\" / \"{host} activated\"; \"{host}'s notebooks weren't listed: {why}\"; \"{host} didn't save the change: {why}\"; \"Restarting the daemon once {n} things are done\" with Details (RecordWindow's \"daemon restart pending\"); \"Daemon restarted\"; \"The daemon didn't start again: {log path} may say why\".",
+      "copy": ["hosts.restart_waiting", "hosts.restart_details", "hosts.daemon_restarted", "agent_proxy.no_answer"]
     },
     {
       "name": "update",

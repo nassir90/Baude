@@ -541,7 +541,9 @@ object Mesh {
                     Queue.sendLeft(c.id, left, now) // (and the queues of chats left at a turn that's ended)
                     Shares.look() // (its Bots, in the share sheet)
                     listing.server?.let { // (its mesh as it is now)
+                        val restart = c.info?.restart?.json()?.toString()
                         c.info = it
+                        if (it.restart?.json()?.toString() != restart) tick.value++ // (a pending restart's waits, drawn as they are now)
                         if (c.place is Place.Direct) {
                             infos[c.id] = it
                             meshed()

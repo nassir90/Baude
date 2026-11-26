@@ -50,6 +50,13 @@
       ]
     },
     {
+      "name": "Access…",
+      "shows": "\"Access…\", for a chat on a host that's up, just before Move to Trash…. Opens Chat Access (ChatAccess.dialog.json).",
+      "copy": ["access.access_ellipsis"],
+      "actions": [{"by": "click", "does": "Opens Chat Access."}],
+      "decisions": [{"said": "Individual chats should have override policies for agent management (paraphrased)", "rule": "A host chat's row menu has Access…, before Move to Trash…, on every app", "decided": "2026-11-26", "source": [{"issue": "BaudeInternal#231"}]}]
+    },
+    {
       "name": "Move to Trash…",
       "shows": "\"Move to Trash…\" Opens the confirmation (MoveToTrash.dialog.json). Not shown for a session on a gone host (see Delete).",
       "copy": ["trash.move_dots"],

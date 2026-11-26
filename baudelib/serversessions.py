@@ -1017,9 +1017,10 @@ class ServerSessions:
         if send:
             every, info = self.heads_listing(archived=True), self.info()
             shown = [x for x in every if not x["archived"]]
-            for c in conns:
-                if c.subscribed:
-                    c.send({"op": "sessions", "sessions": every if c.archived else shown, "server": info})
+            with self.lock:  # (each told only the chats it may manage: access)
+                told = [(c, self.shown_to(c, every if c.archived else shown)) for c in conns if c.subscribed]
+            for c, listing in told:
+                c.send({"op": "sessions", "sessions": listing, "server": info})
             self.on_change()
         if time.monotonic() - pinged >= wire.PING_S:  # (every connection: a client takes silence for gone)
             pinged = time.monotonic()

@@ -196,7 +196,8 @@ SILENT_S = CONSTANTS["SILENT_S"]  # and takes it for gone after this long withou
 OPEN_S = CONSTANTS["OPEN_S"]      # (a member of the mesh, reached through it: the tunnel's this long to open)
 UNSUPPORTED = "unsupported_operation"  # (the schema's own refusals: their codes, and what each says)
 INVALID = "invalid_data_type"
-SAID = {UNSUPPORTED: "unsupported operation", INVALID: "invalid data type"}
+DENIED = "access_denied"  # (one a host's access rules refuse: baudelib.access)
+SAID = {UNSUPPORTED: "unsupported operation", INVALID: "invalid data type", DENIED: "access denied"}
 
 
 def takes(info, op):
@@ -411,7 +412,7 @@ TAKEN = frozenset(DEFS[n]["properties"]["op"]["const"] for n in MESSAGES if KIND
 
 
 def refused(code, req=None, detail=None):
-    """One of the schema's own refusals (UNSUPPORTED, INVALID), for request req: an error, the same from every host,
+    """One of the schema's own refusals (UNSUPPORTED, INVALID, DENIED), for request req: an error, the same from every host,
     and what was wrong (detail)."""
     return {"op": "error", "req": req, "error": SAID[code], "code": code, **({"detail": detail} if detail else {})}
 

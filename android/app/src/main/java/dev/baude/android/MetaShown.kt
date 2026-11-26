@@ -153,7 +153,48 @@ object MetaSet {
                     HomePrefs.save()
                 }
             }),
-    )
+    ).apply { for (cap in PhoneAccess.CAPABILITIES) put("access_$cap", MetaAccess.setting(cap)) }
+}
+
+/** Meta's access_<capability> settings (accessview.meta_settings): the rules of the host Meta runs on, as it last
+ * said them (asked again as they're read, the answer there for the next read), each shown as its row titled
+ * "<host> / <capability>"; the user's to change. */
+object MetaAccess {
+    private val state = androidx.compose.runtime.mutableStateOf<JSONObject?>(null)
+
+    private fun ask(then: (JSONObject) -> Unit = {}) {
+        val h = metaHost() ?: return
+        Mesh.ask(h, Msg.Access().json()) { r -> r.optJSONObject("state")?.let { state.value = it }; then(r) }
+    }
+
+    private fun said(cap: String): String {
+        ask()
+        val st = state.value ?: return "unknown"
+        val rule = st.optJSONObject("rules")?.optJSONObject(cap) ?: return "unknown"
+        if (rule.optString("who") != "chosen") return rule.optString("who")
+        val names = st.optJSONArray("members")?.let { m -> (0 until m.length()).associate { m.getJSONObject(it).let { x -> x.optString("id") to x.optString("name") } } }.orEmpty()
+        val ids = rule.optJSONArray("members")?.let { m -> (0 until m.length()).map { m.optString(it) } }.orEmpty()
+        return "chosen: " + ids.joinToString(", ") { names[it] ?: it.take(8) }
+    }
+
+    fun setting(cap: String) = MetaSetting("access_$cap", {
+        Wording.Access.setting(host = state.value?.optString("host") ?: Wording.NewSession.host, capability = PhoneAccess.named(cap))
+    }, { said(cap) }, { PhoneAccess.WHO.joinToString("|") }, oneOf("access_$cap") { PhoneAccess.WHO },
+        { throw IllegalArgumentException("the user's to change: show its row") },
+        "who in the mesh may use it on the host Meta runs on; the user's to change", metaSets = false, row = { _, _ ->
+            androidx.compose.runtime.LaunchedEffect(cap) { ask() }
+            val st = state.value
+            if (st != null) {
+                AccessRule(cap, st.optJSONObject("rules")?.optJSONObject(cap), st,
+                    title = Wording.Access.setting(host = st.optString("host"), capability = PhoneAccess.named(cap))) { rule ->
+                    val h = metaHost() ?: return@AccessRule
+                    Mesh.ask(h, Msg.AccessSet(capability = cap, rule = null).json().put("rule", rule)) { r ->
+                        if (r.optString("op") == Op.ERROR) toast(Wording.Access.failed(why = Msg.Error.from(r).said.orEmpty()))
+                        r.optJSONObject("state")?.let { state.value = it }
+                    }
+                }
+            }
+        })
 }
 
 /** Meta's look for what it shows (.meta-ui): rows in a tool card's outline, no fill, a rule between them. */

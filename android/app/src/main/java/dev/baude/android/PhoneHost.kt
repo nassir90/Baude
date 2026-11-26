@@ -60,7 +60,7 @@ object PhoneHost {
     val OPS = listOf("hello", "ping", "subscribe", "start", "attach", "detach", "input", "stop", "transcript",
         "subagents", "rename", "archive", "unarchive", "delete", "always_allow", "bot", "bot_picture", "memory",
         "read_file", "catalogue", "list_dir", "senders", "telemetry", "telemetry_read", "telemetry_set", "chat_size",
-        "ephemeral", "control",
+        "access", "access_set", "ephemeral", "control",
         "set_permission_mode", "set_model")
     private val CONTROLS = setOf("control", "set_permission_mode", "set_model", "ephemeral") // (OPS' that aren't ops: the
     // control requests its agents take (control: any a claude takes, answered as a host answers them between turns), and
@@ -88,6 +88,7 @@ object PhoneHost {
             name = prefs.getString("name", null)?.ifBlank { null } ?: deviceName()
             root = File(ctx.filesDir, "phone")
             TelemetryStore.start(root, id)
+            PhoneAccess.start(root)
             for (d in listOf("sessions", "transcripts", "agents", "pictures", "trash", "senders")) File(root, d).mkdirs()
             File(root, "ephemeral").deleteRecursively() // (side questions from before: gone with the app, as with their heads)
             File(root, "ephemeral").mkdirs()
@@ -255,10 +256,16 @@ object PhoneHost {
             Op.SUBSCRIBE -> {
                 head.subscribed = true
                 head.archived = Msg.Subscribe.from(msg).archived == true
-                return reply(Op.SESSIONS, "sessions" to listing(head.archived), "server" to info())
+                return reply(Op.SESSIONS, "sessions" to listing(head.archived, head), "server" to info())
             }
         }
-        if (op == Op.START) return start(head, msg, ::reply)
+        if (op == Op.ACCESS || op == Op.ACCESS_SET) return access(head, msg, ::reply)
+        if (op == Op.START) {
+            val fork = Msg.Start.from(msg).forkFrom
+            if (!PhoneAccess.allowed(head, "spawn") || fork != null && !PhoneAccess.allowed(head, "manage", session(fork)?.meta))
+                return head.send(PhoneAccess.refused(req, if (!PhoneAccess.allowed(head, "spawn")) "spawn" else "manage"))
+            return start(head, msg, ::reply)
+        }
         if (op == Op.READ_FILE) return reply(Op.FILE, *readFile(msg))
         if (op == Op.LIST_DIR) return reply(Op.DIR, *listDir(Msg.ListDir.from(msg).path.orEmpty()))
         if (op == Op.CATALOGUE) return reply(Op.CATALOGUE, *catalogue(Msg.Catalogue.from(msg).cwd.orEmpty()))
@@ -305,6 +312,7 @@ object PhoneHost {
             else -> null
         }.orEmpty()
         val s = synchronized(lock) { sessions[sid] } ?: return reply(Op.ERROR, "error" to "no session $sid")
+        if (!PhoneAccess.allowed(head, "manage", s.meta)) return head.send(PhoneAccess.refused(req, "manage"))
         when (op) {
             Op.ATTACH -> synchronized(lock) {
                 val a = Msg.Attach.from(msg)
@@ -884,8 +892,10 @@ object PhoneHost {
             }))
     }
 
-    private fun listing(archived: Boolean): JSONArray = synchronized(lock) {
+    /** Its agents a head's told of: those it may manage (PhoneAccess). */
+    private fun listing(archived: Boolean, head: Head): JSONArray = synchronized(lock) {
         JSONArray(sessions.values.filter { (archived || !it.meta.optBoolean("archived")) && !it.meta.optBoolean("ephemeral") }
+            .filter { PhoneAccess.allowed(head, "manage", it.meta) }
             .map { listing(it) }
             .sortedByDescending { it.optDouble("said") })
     }
@@ -901,12 +911,39 @@ object PhoneHost {
                 dirty = false
                 heads.filter { it.subscribed }.toList() to info()
             }
-            for (h in to) h.send(JSONObject().put("op", Op.SESSIONS).put("sessions", listing(h.archived)).put("server", info))
+            for (h in to) h.send(JSONObject().put("op", Op.SESSIONS).put("sessions", listing(h.archived, h)).put("server", info))
             main.post { Mesh.tick.value++ }
         }, 80, TimeUnit.MILLISECONDS)
     }
 
     fun session(sid: String): PhoneSession? = synchronized(lock) { sessions[sid] }
+
+    /** access and access_set (PhoneAccess): its rules, a chat's own (session) too; set where the access rule allows. */
+    private fun access(head: Head, msg: JSONObject, reply: (String, Array<out Pair<String, Any?>>) -> Unit) {
+        val op = msg.optString("op")
+        val sid = msg.optString("session").takeIf { msg.has("session") && !msg.isNull("session") }
+        val s = sid?.let { session(it) }
+        if (sid != null && (s == null || !PhoneAccess.allowed(head, "manage", s.meta)))
+            return reply(Op.ERROR, arrayOf("error" to "no session $sid"))
+        if (op == Op.ACCESS_SET) {
+            if (!PhoneAccess.allowed(head, "access")) return head.send(PhoneAccess.refused(msg.opt("req"), "access"))
+            val rule = msg.optJSONObject("rule")
+            val done = if (s != null) {
+                val r = rule?.let { PhoneAccess.clean(it) ?: return reply(Op.ERROR, arrayOf("error" to Wording.Access.badRule)) }
+                synchronized(lock) {
+                    if (r == null) s.meta.remove("access") else s.meta.put("access", r)
+                    save(s)
+                }
+                true
+            } else PhoneAccess.set(msg.optString("capability"), rule)
+            if (!done) return reply(Op.ERROR, arrayOf("error" to Wording.Access.badRule))
+            changed()
+        }
+        val own = s?.meta?.optJSONObject("access")
+        val extra = own?.optJSONArray("members")?.let { m -> (0 until m.length()).map { m.optString(it) } }.orEmpty()
+        reply(op, arrayOf("state" to PhoneAccess.state(head, extra), "session" to (if (s != null) sid else null),
+            "chat" to (own?.let { JSONObject(it.toString()) })))
+    }
 
     private fun picture(s: PhoneSession) = File(root, "pictures/${s.id}")
 

@@ -1,0 +1,22 @@
+{
+  "description": "Access: who in the mesh may use each of a host's capabilities (Settings → Access, a chat's Access…, Meta's rows), and what a host says as it refuses one.",
+  "messages": {
+    "title": "Access",
+    "browser": "Emission Browser",
+    "model_files": "Model Files",
+    "spawn": "Agent Spawn",
+    "manage": "Agent Management",
+    "databases": "Databases",
+    "access": "Access Rules",
+    "everybody": "Everybody",
+    "nobody": "Nobody",
+    "chosen": "Chosen Members",
+    "same_as_host": "Same as Host",
+    "chat_access": "Chat Access",
+    "access_ellipsis": "Access…",
+    "no_members": "No other members",
+    "setting": "{$host} / {$capability}",
+    "bad_rule": "Not a rule: everybody, nobody, or chosen with members",
+    "failed": "Couldn't change access: {$why}"
+  }
+}

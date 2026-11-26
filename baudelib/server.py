@@ -25,7 +25,7 @@ import time
 import uuid
 
 from baudelib import (
-    accounts, codex, desktopchats, emissionlink, mesh, phonebrowser, models, notes, providers, selfupdate, telemetry, wire,
+    access, accounts, codex, desktopchats, emissionlink, mesh, phonebrowser, models, notes, providers, selfupdate, telemetry, wire,
     wording,
 )
 from baudelib.serverstate import (
@@ -133,6 +133,7 @@ class Server(ServerRunning, ServerSessions):
         self.mesh = mesh.Mesh(self)  # (the hosts it's linked to, and those they reach: mesh.py)
         self.telemetry = telemetry.Telemetry(self.state_dir, self.me["id"], changed=self.changed, log=self.log)  # (its machine's
         # chat events, samples and line profiles: baudelib/telemetry.py)
+        self.access = access.Access(self)  # (who in the mesh may use what of its: baudelib/access.py)
 
     def bind(self):
         """The socket listened on: made (again, if it's gone: its folder taken away, say), in a folder of its user's
@@ -414,3 +415,10 @@ class Server(ServerRunning, ServerSessions):
         it hasn't taken up (desktopchats), as Desktop's list was last read."""
         with self.lock:
             return self.listing(archived) + sorted(self.desktop.listings(archived), key=lambda i: -(i["said"] or 0))
+
+    def shown_to(self, conn, listing):
+        """(lock held) Of a listing, the chats conn may manage (access): those it's told of."""
+        if conn.origin is None:
+            return listing
+        return [x for x in listing if self.access.allowed(
+            conn, "manage", self.sessions.get(x["id"]) or self.desktop.chats.get(x["id"]))]

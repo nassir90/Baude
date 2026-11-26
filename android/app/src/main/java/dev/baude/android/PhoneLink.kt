@@ -291,6 +291,9 @@ object PhoneLink {
         ?: Mesh.states.values.toList().firstNotNullOfOrNull { c -> c.info?.takeIf { it.id == member } }?.name?.ifBlank { null }
         ?: member.take(8)
 
+    /** The members its links reach now, by their ids (PhoneAccess's: those a rule can name). */
+    fun members(): List<String> = reachable().toList()
+
     /** The members its links reach now, as a host process works it out (mesh.Mesh.reroute): breadth first from the
      * hosts it's linked to, through links both ends' records list. (A record a host still has of one that's gone,
      * kept a while, isn't one reached.) */

@@ -1,0 +1,116 @@
+{
+  "description": "The Settings dialog's Access page (Baude's, Record's and the phone's; on the phone the fifth page of Settings, switched to by the bar at its foot): for the host picked beside New session, who in the mesh may use each of its capabilities, as it answers access. The host enforces each rule on the wire ops the capability uses (baudelib/access.py, PhoneAccess.kt): a member it refuses is answered access_denied, and a head on the host's own machine, or over ssh, is never refused.",
+  "apps": [
+    "baude",
+    "record",
+    "phone"
+  ],
+  "opens": [
+    "Settings… → Access (the dialog's page switcher; the phone's: the bar at Settings' foot)"
+  ],
+  "code": [
+    "accessview.py:Page",
+    "accessview.py:AccessRow",
+    "baudelib/access.py:Access",
+    "baudelib/serverrun.py:ServerRunning.access_op",
+    "baudelib/serverrun.py:ServerRunning.handle",
+    "Access.kt:AccessPage",
+    "Access.kt:AccessRule",
+    "PhoneAccess.kt:PhoneAccess",
+    "PhoneHost.kt:PhoneHost",
+    "accessview.py:meta_settings",
+    "accessview.py:local_row",
+    "meta.py:shared_settings"
+  ],
+  "copy": [
+    "access",
+    "new_session",
+    "kube",
+    "deps",
+    "window"
+  ],
+  "parts": [
+    {
+      "name": "Host",
+      "shows": "Row \"Host\" with the picked host's name after it (dim), as Telemetry's.",
+      "copy": [
+        "new_session.host"
+      ]
+    },
+    {
+      "name": "Capability rows",
+      "shows": "One boxed list, a row for each capability in this order: Shell, Emission Browser, Providers, Model Files, Agent Spawn, Agent Management, Kubernetes, Databases, Access Rules. Each row is the capability's name and a dropdown after it: Everybody, Nobody or Chosen Members. With Chosen Members, a switch row for each member the host can name (those it reaches, has lately, or a rule names), on for those chosen; on the desktop they are the row's expanded rows, on the phone the rows under it, indented. With no other member: one dim row \"No other members\". Rows the asking app may not change (editable false: a member the Access Rules rule refuses) are greyed.",
+      "copy": [
+        "access.browser",
+        "access.model_files",
+        "access.spawn",
+        "access.manage",
+        "access.databases",
+        "access.access",
+        "kube.shell",
+        "deps.providers",
+        "window.kubernetes",
+        "access.everybody",
+        "access.nobody",
+        "access.chosen",
+        "access.no_members"
+      ],
+      "actions": [
+        {
+          "by": "pick in the dropdown, or switch a member",
+          "does": "Sends access_set at once (capability, rule) and shows the rule as the host answers; picking Chosen Members opens the member rows. A refusal says \"Couldn't change access: <why>\" in a toast and the row goes back to what the host has."
+        }
+      ],
+      "decisions": [
+        {
+          "said": "The owner wants to configure who may use each of a host's capabilities from the mesh: everybody, nobody, or chosen principals; shell through Multiplex, the Emission browser, providers, model files, agent spawn, managing existing agents, Kubernetes and databases (paraphrased)",
+          "rule": "Every app's Settings has an Access page after Telemetry: a row for each capability with Everybody / Nobody / Chosen Members, the members chosen by switches; the host keeps the rules and enforces them on the wire, never only in the UI",
+          "decided": "2026-11-26",
+          "source": [
+            {
+              "issue": "BaudeInternal#231"
+            }
+          ]
+        },
+        {
+          "said": "The UI for this should be in Settings (paraphrased)",
+          "rule": "Access rules are set in Settings → Access on every app, for the host picked beside New session",
+          "decided": "2026-11-26",
+          "source": [
+            {
+              "issue": "BaudeInternal#231"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Meta's rows",
+      "shows": "Meta has a setting for each capability of this machine's host (access_<capability>), in its index with the rule as it is (everybody, nobody, or chosen: the members' names). Shown under a reply (show setting:access_<capability>), it is the capability's row titled \"<host> / <capability>\" with its dropdown. Meta can't change them itself: the user changes them in the row.",
+      "copy": [
+        "access.setting"
+      ],
+      "decisions": [
+        {
+          "said": "Meta should help configure access and show UI for the altered attributes, like a row of the host and the capability with a dropdown (paraphrased)",
+          "rule": "Every app's Meta can show a host's access rule as a \"<host> / <capability>\" row with its dropdown; the rule is the user's to change there",
+          "decided": "2026-11-26",
+          "source": [
+            {
+              "issue": "BaudeInternal#231"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "states": [
+    "default: every rule Everybody (a mesh with no rules works as before)",
+    "error: the host's error in one dim row",
+    "read-only: every row greyed (editable false)",
+    "no members: \"No other members\" under Chosen Members"
+  ],
+  "scenes": [
+    "40g-access"
+  ]
+}

@@ -72,7 +72,7 @@ class SettingsDialog(Adw.PreferencesDialog):
     too, so the two agree; the handlers are given the row, never a closure over this dialog: see discard)"""
 
     def __init__(self, win):
-        super().__init__(title=wording.say("window.settings_title"))
+        super().__init__(title=wording.say("window.settings_title"), content_width=820)  # (its five pages named in full)
         page = widgets.settings_page()
         page.add(meta.settings_group(win.panel.meta))  # (Record's too, and the same settings)
         group = Adw.PreferencesGroup()
@@ -115,6 +115,8 @@ class SettingsDialog(Adw.PreferencesDialog):
         self.add(depsview.Page(win))
         import telemetryview
         self.add(telemetryview.Page(win))
+        import accessview
+        self.add(accessview.Page(win))
 
     switch = staticmethod(settings_switch)  # (widgets': Record's Settings has them too)
     size_row = staticmethod(settings_size)

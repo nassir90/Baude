@@ -12,7 +12,7 @@ import time
 import uuid
 
 from baudelib import (
-    agentproxy, autofix, deps, desktopchats, emissionlink, emissiontools, hostaccounts, hostdb, hostfiles, hostfixes, hostkube,
+    access, agentproxy, autofix, deps, desktopchats, emissionlink, emissiontools, hostaccounts, hostdb, hostfiles, hostfixes, hostkube,
     hostlogin, mesh, meshtools, hostterminal, multiplexlink, notes, routines, telemetry, themes, wire, wording, worktree,
 )
 from baudelib.serverstate import (
@@ -381,6 +381,12 @@ class ServerRunning:
             if self.quitting is not None:  # (its connections kept till its claudes have stopped, to say how far along:
                 return None  # nothing answered, as an answer would be taken for the turn's end; theirs, as it closes)
             return reply("error", error="the host process is stopping")
+        if (cap := access.OPS.get(op)) is not None and not self.access.allowed(conn, cap):
+            return conn.send(self.access.refused(req, cap))
+        if op in ("start", "task_output", "autofix") and not self.may_manage(conn, msg):  # (a chat named: forked,
+            return conn.send(self.access.refused(req, "manage"))                          # adopted, read, its Auto-fix)
+        if op in ("access", "access_set"):
+            return self.access_op(conn, msg, reply)
         if op == "hello":
             head = msg.get("commit")  # (the head's code: one on other code than this, said in the log, once each)
             if isinstance(head, str) and self.commit and head != self.commit and head not in self.heads_apart:
@@ -400,7 +406,8 @@ class ServerRunning:
                 for s in self.sessions.values():
                     self.rescan(s)
                 self.desktop.look(force=True)
-            return reply("sessions", sessions=self.heads_listing(conn.archived), server=self.info())
+                listing = self.shown_to(conn, self.heads_listing(conn.archived))
+            return reply("sessions", sessions=listing, server=self.info())
         if op == "quit":  # (the host process itself: its claudes stopped, its sessions kept for next time; a turn
             # going on cut short, and marked so)
             with self.lock:  # (if_idle, a head's restart of it: not while a command's running, which it would end)
@@ -609,6 +616,8 @@ class ServerRunning:
             where = msg.get("where") if wire.is_where(msg.get("where")) else None
             done = (self.mesh.deactivate if op == "deactivate" else self.mesh.activate)(msg.get("id"), where)
             return reply(op + "d", any=done)
+        if not self.may_manage(conn, msg):  # (every op from here on is a chat's: refused before it's touched)
+            return conn.send(self.access.refused(req, "manage"))
         with self.lock:  # (a Claude Desktop chat only listed, written in: taken up first, its folder made again below;
             # not while Desktop's writing it)
             if msg.get("session") in self.desktop.chats and desktopchats.takes_up(msg):
@@ -793,6 +802,48 @@ class ServerRunning:
                 return reply("memory", session=s.id, **mem)
         self.log(f"refused: no op {op!r} here")  # (one the schema has that no host takes here: a reply's, say)
         return conn.send(wire.refused(wire.UNSUPPORTED, req, f"no op {op!r} here"))
+
+    def may_manage(self, conn, msg):
+        """May conn manage the chat msg names (session; a start's fork_from or adopt), as access has it?"""
+        if conn.origin is None:
+            return True
+        for key in ("session", "fork_from", "adopt"):
+            if isinstance(sid := msg.get(key), str) and sid:
+                with self.lock:
+                    s = self.sessions.get(sid) or self.desktop.chats.get(sid)
+                if not self.access.allowed(conn, "manage", s):
+                    return False
+        return True
+
+    def access_op(self, conn, msg, reply):
+        """access and access_set: the host's rules, a chat's own (session) too; set from where access allows it."""
+        op, sid = msg["op"], msg.get("session")
+        with self.lock:
+            s = self.sessions.get(sid) if isinstance(sid, str) else None
+        if sid is not None and (s is None or not self.access.allowed(conn, "manage", s)):
+            return reply("error", error=f"no session {sid}")
+        if op == "access_set":
+            if not self.access.allowed(conn, "access"):
+                return conn.send(self.access.refused(msg.get("req"), "access"))
+            try:
+                if s is not None:
+                    rule = access.clean(msg["rule"]) if msg.get("rule") is not None else None
+                    with self.lock:
+                        if rule is None:
+                            s.meta.pop("access", None)
+                        else:
+                            s.meta["access"] = rule
+                        self.save(s)
+                elif msg.get("capability") is not None and msg.get("rule") is not None:
+                    self.access.set(msg["capability"], msg["rule"])
+                else:
+                    raise ValueError(wording.say("access.bad_rule"))
+            except (OSError, ValueError) as e:
+                return reply("error", error=str(e))
+            self.log(f"access: {sid or msg['capability']} set by {conn.origin or 'a head here'}")
+        own = dict(s.meta["access"]) if s is not None and s.meta.get("access") else None
+        return reply(op, state=self.access.state(conn, (own or {}).get("members") or ()),
+                     session=sid if s is not None else None, chat=own)
 
     def run_routine(self, s, r, schedule=True):
         """(under the lock) A routine's run: its Bot given a turn with what to do, as if it were said (one asked for

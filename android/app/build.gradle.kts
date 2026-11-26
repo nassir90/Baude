@@ -1368,9 +1368,10 @@ abstract class WireSchema : DefaultTask() {
 
     const val UNSUPPORTED = "unsupported_operation" // (the schema's own refusals: their codes, and what each says)
     const val INVALID = "invalid_data_type"
-    private val SAID = mapOf(UNSUPPORTED to "unsupported operation", INVALID to "invalid data type")
+    const val DENIED = "access_denied" // (one a host's access rules refuse: PhoneAccess)
+    private val SAID = mapOf(UNSUPPORTED to "unsupported operation", INVALID to "invalid data type", DENIED to "access denied")
 
-    /** One of the schema's own refusals (UNSUPPORTED, INVALID), for request req: an error, the same from every host,
+    /** One of the schema's own refusals (UNSUPPORTED, INVALID, DENIED), for request req: an error, the same from every host,
      * with what was wrong in detail. */
     fun refused(code: String, req: Any?, detail: String? = null): JSONObject = JSONObject().put("op", Op.ERROR)
         .apply { if (req != null && req != JSONObject.NULL) put("req", req) }.put("error", SAID.getValue(code)).put("code", code)

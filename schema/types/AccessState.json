@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "A host's access rules, as access and access_set answer them.",
+  "properties": {
+    "host": {
+      "type": "string",
+      "description": "The host's name."
+    },
+    "rules": {
+      "$ref": "AccessRules.json",
+      "description": "Each capability's."
+    },
+    "members": {
+      "type": "array",
+      "items": {
+        "$ref": "AccessMember.json"
+      },
+      "description": "The members its rules can name, by name."
+    },
+    "editable": {
+      "type": "boolean",
+      "description": "The connection asking may change them (access_set): a head on its machine or over ssh, else a member the access rule allows."
+    }
+  },
+  "required": [
+    "host",
+    "rules",
+    "members",
+    "editable"
+  ],
+  "additionalProperties": false
+}

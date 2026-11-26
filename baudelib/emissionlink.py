@@ -299,9 +299,9 @@ def call(pid, msg, timeout=60):
     return got
 
 
-def running_commits(timeout=2):
-    """The commit each Emission running here says its code is, one for each profile it has open (None for one that
-    doesn't say: on older code). Baude's own socket (home: it makes Bots' browsers) is Baude's, not an Emission's."""
+def running(timeout=2):
+    """What each Emission running here says it is (its info: the commit its code is, its process's pid, ...), one for
+    each profile it has open. Baude's own socket (home: it makes Bots' browsers) is Baude's, not an Emission's."""
     folder, home = os.path.dirname(profile_socket("home")), os.path.basename(profile_socket("home"))
     try:
         names = sorted(n for n in os.listdir(folder) if n.endswith(".sock") and n != home)
@@ -323,7 +323,7 @@ def running_commits(timeout=2):
         except (OSError, ValueError):
             continue  # (one gone, its socket left behind)
         if isinstance(got, dict) and not got.get("error"):
-            out.append(got["commit"] if isinstance(got.get("commit"), str) else None)
+            out.append(got)
     return out
 
 

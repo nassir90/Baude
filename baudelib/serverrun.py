@@ -34,6 +34,7 @@ class ServerRunning:
         """Take connections till it's shut down."""
         threading.Thread(target=self._watch, daemon=True, name="watch").start()
         threading.Thread(target=self._emissions, daemon=True, name="emissions").start()
+        threading.Thread(target=self._multiplexes, daemon=True, name="multiplexes").start()
         self.mesh.start()
         self.telemetry.start()
         with self.lock:  # (waits its agents were at as it last stopped, which stopped them: answered for them)

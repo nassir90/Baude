@@ -6,10 +6,14 @@
 //   in:  {"op": "post", "key", "title", "body", "open_label", "picture"?: a PNG's path, "app"?: a bundle id,
 //         "args"?: [what that app's started with to open it]}
 //        {"op": "withdraw", "key"}
-//   out: {"event": "ready"} or {"event": "refused", "error"} once, as Notification Center answers;
-//        {"event": "failed", "key", "error"}; {"event": "clicked", "key"}
-// It quits when stdin closes. Started by macOS for a click on a notification whose app isn't serving it any more, it
-// opens that app (its "app", with its "args") and quits.
+//   out: {"event": "ready"} or {"event": "refused", "error"} as Notification Center answers, and again whenever that
+//        changes (checked each time the app it serves comes to the front);
+//        {"event": "posted", "key"}; {"event": "failed", "key", "error"};
+//        {"event": "clicked", "key", "pid", "args"?}: a click on one of this app's notifications, whichever process
+//        posted it ("pid"), with what starts the app on its chat ("args": the app opens it from them when it didn't
+//        post it, or posted it before a restart)
+// It quits when stdin closes. Started by macOS for a click on a notification while nothing serves it, it opens that
+// app (its "app", with its "args") and quits.
 import AppKit
 import UserNotifications
 
@@ -25,19 +29,28 @@ func emit(_ obj: [String: Any]) {
 }
 
 final class Notifier: NSObject, NSApplicationDelegate, UNUserNotificationCenterDelegate {
-    var labels = [String: String]()
+    // (each Open button's wording, kept for the next launch: a category's registered before a click can reach it)
+    var labels = Set(UserDefaults.standard.stringArray(forKey: "labels") ?? [])
+    var allowed: Bool?
+
+    func applicationWillFinishLaunching(_ note: Notification) {
+        center.delegate = self  // (before launching ends: a click that launched this is delivered then)
+        registerCategories()
+    }
 
     func applicationDidFinishLaunching(_ note: Notification) {
-        center.delegate = self
         guard serving else {
             DispatchQueue.main.asyncAfter(deadline: .now() + 10) { NSApp.terminate(nil) }
             return
         }
         center.requestAuthorization(options: [.alert, .sound]) { ok, err in
-            DispatchQueue.main.async {
-                emit(ok ? ["event": "ready"]
-                        : ["event": "refused", "error": err.map { "\($0)" } ?? "notifications are off for this app"])
-            }
+            DispatchQueue.main.async { self.answered(ok, err.map { "\($0)" }) }
+        }
+        NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main) { note in
+            let front = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication
+            guard front?.processIdentifier == parent else { return }
+            self.recheck()
         }
         Thread.detachNewThread {
             while let line = readLine(strippingNewline: true) {
@@ -46,6 +59,20 @@ final class Notifier: NSObject, NSApplicationDelegate, UNUserNotificationCenterD
                 DispatchQueue.main.async { self.handle(msg) }
             }
             DispatchQueue.main.async { NSApp.terminate(nil) }
+        }
+    }
+
+    func answered(_ ok: Bool, _ error: String?) {
+        guard allowed != ok else { return }
+        allowed = ok
+        emit(ok ? ["event": "ready"] : ["event": "refused", "error": error ?? "notifications are off for this app"])
+    }
+
+    func recheck() {
+        // (turned on or off in System Settings → Notifications since: said as it's seen)
+        center.getNotificationSettings { s in
+            let ok = s.authorizationStatus == .authorized || s.authorizationStatus == .provisional
+            DispatchQueue.main.async { self.answered(ok, nil) }
         }
     }
 
@@ -60,18 +87,22 @@ final class Notifier: NSObject, NSApplicationDelegate, UNUserNotificationCenterD
         }
     }
 
-    func category(_ label: String) -> String {
+    func registerCategories() {
         // (one category for each Open button's wording: the button's label is the category's)
-        let id = "open:" + label
-        if labels[id] == nil {
-            labels[id] = label
-            center.setNotificationCategories(Set(labels.map { cid, title in
-                UNNotificationCategory(identifier: cid, actions: [
-                    UNNotificationAction(identifier: "open", title: title, options: [.foreground])
-                ], intentIdentifiers: [])
-            }))
+        center.setNotificationCategories(Set(labels.map { label in
+            UNNotificationCategory(identifier: "open:" + label, actions: [
+                UNNotificationAction(identifier: "open", title: label, options: [.foreground])
+            ], intentIdentifiers: [])
+        }))
+    }
+
+    func category(_ label: String) -> String {
+        if !labels.contains(label) {
+            labels.insert(label)
+            UserDefaults.standard.set(Array(labels).sorted(), forKey: "labels")
+            registerCategories()
         }
-        return id
+        return "open:" + label
     }
 
     func post(_ key: String, _ msg: [String: Any]) {
@@ -95,7 +126,7 @@ final class Notifier: NSObject, NSApplicationDelegate, UNUserNotificationCenterD
             }
         }
         center.add(UNNotificationRequest(identifier: key, content: content, trigger: nil)) { err in
-            if let err = err { emit(["event": "failed", "key": key, "error": "\(err)"]) }
+            emit(err.map { ["event": "failed", "key": key, "error": "\($0)"] } ?? ["event": "posted", "key": key])
         }
     }
 
@@ -110,9 +141,11 @@ final class Notifier: NSObject, NSApplicationDelegate, UNUserNotificationCenterD
         guard r.actionIdentifier == "open" || r.actionIdentifier == UNNotificationDefaultActionIdentifier else { return }
         let info = r.notification.request.content.userInfo
         let key = info["key"] as? String ?? r.notification.request.identifier
-        if serving && (info["pid"] as? Int) == Int(parent) {
+        if serving {  // (the app it serves opens it, whichever process posted it: open -b only brings it up)
             NSRunningApplication(processIdentifier: parent)?.activate()  // (the app in front, not this one)
-            emit(["event": "clicked", "key": key])
+            var said: [String: Any] = ["event": "clicked", "key": key, "pid": info["pid"] as? Int ?? 0]
+            if let args = info["args"] as? [String] { said["args"] = args }
+            emit(said)
             return
         }
         if let app = info["app"] as? String {

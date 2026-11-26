@@ -113,7 +113,7 @@ class BaudeApp(Adw.Application):
                     fn()
                 except Exception as e:  # (Python's Dock tile isn't worth not starting over)
                     print(f"baude: {fn.__name__}:", e, file=sys.stderr)
-            widgets.notify_as(app="Baude")
+            widgets.notify_as(app="Baude", opened=self.open_notified)
         else:
             widgets.notify_as(logo_icon())
         follow_accent()  # (the logo in the accent as it's picked: Settings → Accent Colour)
@@ -162,6 +162,21 @@ class BaudeApp(Adw.Application):
     def windows(self):
         """Baude's windows, the one you were in last first."""
         return [w for w in self.get_windows() if isinstance(w, BaudeWindow)]
+
+    def open_notified(self, args):
+        """A click on a notification this process didn't post (one from before a restart, or another Baude's): the
+        window you were in last brought up with its chat open, from the arguments it was posted with (--resume)."""
+        from baudelib.transcripts import find_session
+        if not (wins := self.windows()):
+            return
+        win = wins[0]
+        win.present()
+        sid = args[args.index("--resume") + 1] if "--resume" in args[:-1] else None
+        if sid is None or sid == win.session_id or (info := find_session(sid)) is None:
+            win.show_chat()
+            return
+        win.opening_remote = None  # (as a click on its row in the sidebar opens it: Sidebar.on_activate)
+        win.switch_to(lambda: win.resume_session(info))
 
     def idle(self):
         """Every window idle (BaudeWindow.idle): a new version can be restarted onto."""

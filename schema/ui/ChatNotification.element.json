@@ -20,7 +20,7 @@
       "copy": ["meta.finished", "asks.waiting", "asks.waiting_for_tool", "asks.has_question_for_you"],
       "actions": [
         {"by": "click", "does": "Brings the window up with that chat open (a chat on a host has its transcript fetched first)."},
-        {"by": "Open (macOS)", "does": "The same as a click. Once the app that posted it has quit, a click or Open starts the app on that chat (a local chat: --cwd, --resume)."}
+        {"by": "Open (macOS)", "does": "The same as a click. A click on one posted before the app restarted, or by another of its processes, opens that chat in the window you were in last (a local chat's, by its session id). Once the app has quit, a click or Open starts the app on that chat (a local chat: --cwd, --resume)."}
       ]
     }
   ],
@@ -30,6 +30,6 @@
   "decisions": [
     {"said": "Replies that finish in the background should notify through the OS's notification system, not only the sidebar's dots", "rule": "Every app posts the platform's own notification when a chat finishes a turn or asks something while you're elsewhere (Settings → Notifications).", "decided": "2026-11-15", "source": [{"issue": "BaudeInternal#117"}]},
     {"said": "Notifications waste space: the app's name on line one, the chat's name on line two and the problem cut short on line three. The left should show Baude's logo, or the Bot's picture with Baude's in its corner; the first line the chat's name; the description under it, up to two lines.", "rule": "Every app's notification is the picture (a Bot's with the app's logo in its corner, else the app's logo), the chat's or Bot's name as the title and what happened as the body, with no subtitle and no line for the app's own name.", "decided": "2026-11-25", "source": [{"issue": "BaudeInternal#230"}]},
-    {"said": "Notifications look fine implement that (the macOS notifier: the app's logo on the left, the Bot's picture attached, an Open button); signed with a self-signed certificate, with docs on how people can safely sign Baude", "rule": "On macOS each app posts through a notifier app of its own, built on the Mac and signed with a self-signed code-signing certificate that tools/macos-sign.sh makes in a keychain of its own (docs/macos-signing.md); without one, or turned away, it posts through osascript.", "decided": "2026-11-26", "source": [{"issue": "BaudeInternal#230"}, {"session": "b3845b21-55ac-4aab-a769-fb8517403c51", "message": "9ded08ec-c7a2-4519-81fe-86fadc3e21d0"}, {"session": "b3845b21-55ac-4aab-a769-fb8517403c51", "message": "05ad71e4-c5dd-4534-ac61-466aa9efbe45"}]}
+    {"said": "Notifications look fine implement that. / Self signed cert and just bundle docs on how people can safely sign Baude", "rule": "On macOS each app posts through a notifier app of its own, built on the Mac and signed with a self-signed code-signing certificate that tools/macos-sign.sh makes in a keychain of its own (docs/macos-signing.md); without one, or turned away, it posts through osascript.", "decided": "2026-11-26", "source": [{"issue": "BaudeInternal#230"}, {"session": "b3845b21-55ac-4aab-a769-fb8517403c51", "message": "9ded08ec-c7a2-4519-81fe-86fadc3e21d0"}, {"session": "b3845b21-55ac-4aab-a769-fb8517403c51", "message": "05ad71e4-c5dd-4534-ac61-466aa9efbe45"}]}
   ]
 }

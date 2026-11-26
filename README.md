@@ -149,8 +149,8 @@ record            # Record
 ```
 
 On macOS, Baude and Record post their notifications through a small notifier app each, with their own name and logo,
-an Open button and a Bot's picture. macOS only lets a signed app post, so run `tools/macos-sign.sh` once: it makes a
-code-signing certificate that stays on your Mac. [docs/macos-signing.md](docs/macos-signing.md) says what it makes,
+an Open button and a Bot's picture. Run `tools/macos-sign.sh` once: it makes a code-signing certificate that stays on
+your Mac, so the notifiers keep the same signature from one build to the next and macOS keeps your permission for them. [docs/macos-signing.md](docs/macos-signing.md) says what it makes,
 how to check and remove it, and how to sign with your own Apple Developer ID instead. Until then notifications come
 from Script Editor.
 

@@ -369,13 +369,16 @@ FDO = ("org.freedesktop.Notifications", "/org/freedesktop/Notifications", "org.f
 _identity = {}  # (notify_as's: the logo notifications show; the app they're posted as on macOS)
 
 
-def notify_as(svg=None, app=None):
+def notify_as(svg=None, app=None, opened=None):
     """The app's logo as an SVG file: its notifications' icon (Linux). app: its name (notifier.APPS), whose notifier
-    posts them (macOS)."""
+    posts them (macOS); opened(args), what opens a chat from the arguments a notification this process didn't post was
+    posted with (desktop_notify's opens: one posted before a restart, or by another of this app's processes)."""
     if svg is not None:
         _identity["svg"] = svg
     if app is not None:
         _identity["app"] = app
+    if opened is not None:
+        _identity["opened"] = opened
 
 
 def _notifier():
@@ -385,9 +388,11 @@ def _notifier():
     if _identity.get("client") is None:
         from baudelib import notifier
 
-        def clicked(key):
-            if (fn := _notified.pop(key, None)) is not None:
+        def clicked(key, mine, args):
+            if mine and (fn := _notified.pop(key, None)) is not None:
                 fn()
+            elif args and (opened := _identity.get("opened")) is not None:
+                opened(args)
         _identity["client"] = notifier.Client(_identity["app"], GLib.idle_add, _osascript, clicked)
     return _identity["client"]
 

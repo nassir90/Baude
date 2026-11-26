@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "A subscription's usage as its host last read it: its limits and when.",
+  "properties": {
+    "usage": {
+      "type": "array",
+      "items": {
+        "$ref": "UsageLimit.json"
+      },
+      "description": "The limits as that read said them."
+    },
+    "read": {
+      "type": "number",
+      "description": "When it was read, in seconds since 1970."
+    }
+  },
+  "required": [
+    "usage",
+    "read"
+  ],
+  "additionalProperties": false
+}

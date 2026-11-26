@@ -136,6 +136,14 @@ abstract class Screens(private val theme: String) {
         screen("05a-subscriptions")
     }
 
+    // (Settings → Subscriptions opened while each card's usage read is still out: what workshop last read of each, greyed)
+    @Test fun subscriptionsLastRead() {
+        accountsFixture(reading = true)
+        show { SettingsScreen({}, {}, page = 1) }
+        laidOut()
+        screen("05j-subscriptions-last-read")
+    }
+
     @Test fun subscriptionsPill() {
         accountsFixture()
         show { SettingsScreen({}, {}, page = 1) }
@@ -435,22 +443,28 @@ abstract class Screens(private val theme: String) {
         }
     }
 
-    private fun accountsFixture() {
+    /** workshop's accounts; reading: each usage read left unanswered, the host's last reading of each in every answer. */
+    private fun accountsFixture(reading: Boolean = false) {
         FixtureConnection.up(activity, Mesh.hosts.first()) { m ->
-            if (m.optString("op") != "accounts") null
+            if (m.optString("op") != "accounts" || (reading && m.optString("what") == "usage")) null
             else org.json.JSONObject().put("op", "accounts").put("req", m.opt("req")).put("what", m.optString("what"))
                 .put("accounts", org.json.JSONArray(listOf(HOME_ACCOUNT, WORK,
                     org.json.JSONObject().put("id", "p1").put("provider", "codex").put("name", "Personal").put("kind", "profile"))))
                 .put("defaults", org.json.JSONObject().put("claude", "w1").put("codex", "")).put("claude_cli", true)
                 .apply {
-                    if (m.optString("what") == "usage") {
-                        val (five, seven) = mapOf("w1" to (25 to 40), "h2" to (72 to 18))[m.optString("id")] ?: (5 to 12)
-                        put("usage", org.json.JSONArray(listOf(
+                    fun limits(id: String): org.json.JSONArray {
+                        val (five, seven) = mapOf("w1" to (25 to 40), "h2" to (72 to 18))[id] ?: (5 to 12)
+                        return org.json.JSONArray(listOf(
                             org.json.JSONObject().put("name", "Five hour").put("key", "five_hour").put("percent", five)
                                 .put("resets", System.currentTimeMillis() / 1000 + 3 * 3600 + 720),
                             org.json.JSONObject().put("name", "Seven day").put("key", "seven_day").put("percent", seven)
-                                .put("resets", System.currentTimeMillis() / 1000 + 3 * 86400 + 5 * 3600))))
+                                .put("resets", System.currentTimeMillis() / 1000 + 3 * 86400 + 5 * 3600)))
                     }
+                    if (m.optString("what") == "usage") put("usage", limits(m.optString("id")))
+                    if (reading) put("last_usage", org.json.JSONObject().apply {
+                        for (id in listOf("", "w1", "h2")) put(id, org.json.JSONObject().put("usage", limits(id))
+                            .put("read", System.currentTimeMillis() / 1000 - 600))
+                    })
                 }
         }
     }

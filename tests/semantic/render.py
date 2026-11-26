@@ -1,6 +1,6 @@
-"""The sample scene drawn offscreen, light and dark, at three moments of its orbit, and a chat panel used through the
-scene: a click into its box, words typed, Send clicked (NSEvents posted to the app, tests/mouse.py), the panel's
-picture made again. Writes OUT/*.png and prints RESULT."""
+"""The sample scene drawn offscreen, light and dark, at three moments of its orbit, each chat panel the app's own chat
+page of its chat (ChatPage), and one used through the scene: a click into its box, words typed, Send clicked (NSEvents
+posted to the app, tests/mouse.py; the fake claude answers), the panel's picture made again. Writes OUT/*.png and prints RESULT."""
 from rig import *  # noqa: F401,F403
 sys.path.insert(0, os.path.join(W, "tests"))
 import mouse  # noqa: E402
@@ -24,30 +24,31 @@ for dark in (False, True):
     if not dark:
         v.t = 0.0; v.advance(0); pump(0.3)
         hand = mouse.Mouse(win); fake_pointer(win, hand)
-        panels = [n for n in v.nodes.values() if n.widget is not None]
-        chat = next(n.widget for n in panels if n.widget.obj["id"] == "h1/c")
+        page = chat_page(v, "h1/c").win
+        bash_page = chat_page(v, "h1/a").win
+        pump(0.5)
         up0 = v.stats["uploads"]
-        x, y = true_point(v, chat.entry)
+        x, y = true_point(v, page.input)
         log = []
         g = Gtk.GestureClick(); g.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
-        g.connect("pressed", lambda *a: log.append(("pressed", round(a[2]), round(a[3])))); chat.entry.add_controller(g)
+        g.connect("pressed", lambda *a: log.append(("pressed", round(a[2]), round(a[3])))); page.input.add_controller(g)
         hand.down(20, 20); hand.up(20, 20); pump(0.2)  # (a first click on the scene's sky: macOS takes the first for the window)
         res["active"] = win.is_active()
         hand.down(x, y); hand.up(x, y); pump(0.2)
         picked = win.pick(*[c - o for c, o in zip((x, y), win.get_surface_transform())], Gtk.PickFlags.DEFAULT)
         res["picked_at_box"] = type(picked).__name__
-        res["box_focused"] = chat.entry.is_focus()
+        res["box_focused"] = page.input.is_focus()
         res["window_focus"] = type(win.get_focus()).__name__
         res["entry_log"] = log
         hand.type("Leeks too?"); pump(0.2)
-        buf = chat.entry.get_buffer()
+        buf = page.input.get_buffer()
         res["typed"] = buf.get_text(buf.get_start_iter(), buf.get_end_iter(), False)
-        x, y = true_point(v, chat.send)
-        hand.down(x, y); hand.up(x, y); pump(0.4)
-        res["sent_bubbles"] = [c.get_label() for c in [chat.messages.get_first_child()] + [] if c] and \
-            [w.get_label() for w in iter(lambda it=[chat.messages.get_first_child()]: (it.append(it[-1].get_next_sibling()) or it[-2]) if it[-1] else None, None) if isinstance(w, Gtk.Label)]
+        x, y = true_point(v, page.send_btn)
+        hand.down(x, y); hand.up(x, y); pump(1.5)
+        import test_baude
+        res["sent_in_transcript"] = "Leeks too?" in test_baude.labels_text(page.transcript)
         res["uploads_after_typing"] = v.stats["uploads"] - up0
-        bash = next(n.widget for n in panels if n.widget.obj["id"] == "h1/a").messages.get_last_child()
+        bash = test_baude.find(bash_page.transcript, toolcards.ToolCard)[-1]
         x, y = true_point(v, bash.output_toggle.button)
         hand.down(x, y); hand.up(x, y); pump(0.4)
         res["bash_output_opened"] = bash.output_toggle.get_expanded()

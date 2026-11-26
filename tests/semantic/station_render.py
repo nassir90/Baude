@@ -1,7 +1,8 @@
 """The Space Station scene theme, installed from its file (theme_install's themepacks.install of the folder zipped as
 space-station.baudetheme) and drawn offscreen from the installed copy, light and dark, at three moments of its orbit;
-then used through the 3D view (NSEvents posted to the app, tests/mouse.py): a click into the Garden planner's box,
-words typed, Send clicked; the Bash card's output opened; a click on a sessions row. Writes OUT/*.png, prints RESULT."""
+then used through the 3D view (NSEvents posted to the app, tests/mouse.py): a click into the Garden planner's box
+(its chat's own page), words typed, Send clicked (the fake claude answers); the Bash card's output opened; a click on a
+sessions row. Writes OUT/*.png, prints RESULT."""
 from station import *  # noqa: F401,F403
 import io, zipfile  # noqa: E401,E402
 from baudelib import themepacks, themes  # noqa: E402
@@ -46,23 +47,21 @@ for dark in (False, True):
     if not dark:
         v.t = 0.0; v.advance(0); pump(0.3)
         hand = mouse.Mouse(win); fake_pointer(win, hand)
-        chat = next(n.widget for n in panels if n.panel["show"] == "chat" and n.widget.obj["id"] == "h1/c")
+        page = chat_page(v, "h1/c").win
+        bash_page = chat_page(v, "h1/a").win
+        pump(0.5)
         hand.down(20, 20); hand.up(20, 20); pump(0.2)  # (a first click on the sky: macOS takes the first for the window)
-        x, y = true_point(v, chat.entry)
+        x, y = true_point(v, page.input)
         hand.down(x, y); hand.up(x, y); pump(0.2)
-        res["box_focused"] = chat.entry.is_focus()
+        res["box_focused"] = page.input.is_focus()
         hand.type("Leeks too?"); pump(0.2)
-        buf_ = chat.entry.get_buffer()
+        buf_ = page.input.get_buffer()
         res["typed"] = buf_.get_text(buf_.get_start_iter(), buf_.get_end_iter(), False)
-        x, y = true_point(v, chat.send)
-        hand.down(x, y); hand.up(x, y); pump(0.4)
-        labels, w = [], chat.messages.get_first_child()
-        while w is not None:
-            if isinstance(w, Gtk.Label):
-                labels.append(w.get_label())
-            w = w.get_next_sibling()
-        res["sent"] = labels[-1:] if labels else []
-        bash = next(n.widget for n in panels if n.panel["show"] == "chat" and n.widget.obj["id"] == "h1/a").messages.get_last_child()
+        x, y = true_point(v, page.send_btn)
+        hand.down(x, y); hand.up(x, y); pump(1.5)
+        import test_baude
+        res["sent"] = "Leeks too?" in test_baude.labels_text(page.transcript)
+        bash = test_baude.find(bash_page.transcript, toolcards.ToolCard)[-1]
         x, y = true_point(v, bash.output_toggle.button)
         hand.down(x, y); hand.up(x, y); pump(0.4)
         res["bash_output_opened"] = bash.output_toggle.get_expanded()

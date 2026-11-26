@@ -19,6 +19,8 @@ const val PING_MS = WireConstants.PING_S * 1000L     // (each end says something
 const val SILENT_MS = WireConstants.SILENT_S * 1000L // (silent this long, the other end's taken for gone)
 const val START_MS = 14_000L  // (connect may start the host process: up to 20 s to its hello, as Baude's 25 allow)
 const val OPEN_MS = WireConstants.OPEN_S * 1000L // (a member's tunnel has this long to open)
+const val CHECK_MS = PING_MS + 2_000L // (after the phone's slept: this long for a link to be heard from, or it's taken for gone)
+const val LEEWAY_MS = 30_000L // (a host not reached this long, the app on screen: said plainly; till then, only that it's reconnecting)
 /** msg as it goes, as wire.py's Channel.send has it: its nulls left out where its fields can't be null
  * (WireCheck.unnulled). One the wire's schema hasn't (an op, a field: WireCheck.problem) is said in the log and not
  * sent (null); a host's answer (answer true) goes as its request's INVALID refusal instead, if it has a req. */
@@ -180,7 +182,13 @@ open class Connection(
         end()
     }
 
+    /** (SystemClock.elapsedRealtime) Since when it's been without its host: since it last went, or since the app was
+     * last brought back (resume) if that's later; 0 while it's up. */
+    @Volatile var awaySince = SystemClock.elapsedRealtime()
+        private set
+
     private fun set(state: String, why: String? = null) {
+        if (state == "up") awaySince = 0L else if (awaySince == 0L) awaySince = SystemClock.elapsedRealtime()
         this.state = state
         this.why = why
         changed(this)
@@ -229,6 +237,16 @@ open class Connection(
     /** Tried again now, not after the wait (the network's back, or a member's listed again). */
     fun kick() {
         if (state == "down") wake.offer(Unit)
+    }
+
+    /** The app brought back, or the network given back after Doze: down, tried again now; up, given CHECK_MS to be
+     * heard from (its silence while the phone slept isn't held against it, and a socket the OS closed meanwhile is
+     * found out in seconds, not SILENT_MS). The time it's been away counted from now. */
+    fun resume() {
+        val now = SystemClock.elapsedRealtime()
+        if (state == "up") heardAt = maxOf(heardAt, now - SILENT_MS + CHECK_MS)
+        else awaySince = now
+        kick()
     }
 
     private class NoRoute(why: String) : Exception(why)
@@ -348,10 +366,17 @@ open class Connection(
             if (member != null) OPEN_MS else 0L              // a member's tunnel, the time it has to open)
         val pinger = thread(name = "ping-$id", isDaemon = true) {
             try {
+                var pinged = SystemClock.elapsedRealtime()
                 while (!stopped && out != null) {
-                    Thread.sleep(PING_MS)
-                    send(Msg.Ping().json())
-                    if (SystemClock.elapsedRealtime() - heardAt > SILENT_MS) { // (nothing from it: gone, whatever
+                    val before = SystemClock.elapsedRealtime()
+                    Thread.sleep(1_000)
+                    val now = SystemClock.elapsedRealtime()
+                    if (now - before > 4_000) heardAt = maxOf(heardAt, now - SILENT_MS + CHECK_MS) // (the phone slept:
+                    if (now - pinged >= PING_MS) {                                                  // a moment to hear)
+                        send(Msg.Ping().json())
+                        pinged = now
+                    }
+                    if (now - heardAt > SILENT_MS) { // (nothing from it: gone, whatever
                         said = "the host stopped answering"                   // the socket says)
                         end()
                         break

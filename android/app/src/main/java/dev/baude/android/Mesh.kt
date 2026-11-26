@@ -105,6 +105,8 @@ class Chat(hostId: String, sid: String) {
     val btw = mutableStateListOf<SideQuestion>()   // (its side questions, newest first, while it's open)
     val uses = HashMap<String, JSONObject>()       // (an Artifact or Agent call's id: the call, till its result's read)
     var offset = -1L
+    val raw = java.io.ByteArrayOutputStream() // (its transcript as read, from rawFrom (a line's start) to offset: kept,
+    var rawFrom = -1L                         // LinkCache, to show at once next time)
     var start = -1L                          // (where what's read of its transcript starts: what's before is read as
     val earlier = mutableStateOf(false)      // it's scrolled up to, readEarlier; earlier: there's some)
     var readingEarlier = false
@@ -158,6 +160,7 @@ object Mesh {
     var shown = false // (the app in front: no notification for the chat open)
     private var visible = false // (the app on screen: the chat open answers what it asks)
     private val conns = HashMap<String, Connection>()
+    private val live = HashSet<String>() // (hosts whose sessions are as they listed them on this link, not kept from before)
     private val catchUp = HashSet<String>() // (hosts back after a drop: Bots' turns that ended meanwhile, notified)
     private var started = false
 
@@ -170,6 +173,8 @@ object Mesh {
         hosts.addAll(HostStore.load(app))
         deactivated.addAll(HostStore.deactivated(app))
         Queue.loadDrafts(app.filesDir)
+        LinkCache.start(app.filesDir)
+        loadCache()
         Queue.migrateUnsent(app.filesDir) { machine, host -> // (its chat's host: the one of yours that's its machine, or the machine as a member)
             hosts.firstOrNull { machine != null && HostStore.machine(app, it) == machine }?.id
                 ?: machine?.let { "mesh:$it" } ?: moved[host] ?: host
@@ -181,12 +186,38 @@ object Mesh {
             app.getSystemService(android.net.ConnectivityManager::class.java).registerDefaultNetworkCallback(
                 object : android.net.ConnectivityManager.NetworkCallback() {
                     override fun onAvailable(network: android.net.Network) {
-                        main.post { conns.values.forEach { it.kick() } }
+                        main.post { conns.values.forEach { it.resume() } }
+                    }
+                    override fun onBlockedStatusChanged(network: android.net.Network, blocked: Boolean) { // (Doze over,
+                        if (!blocked) main.post { conns.values.forEach { it.resume() } }                // or Data Saver)
                     }
                 })
         } catch (_: Exception) {
         }
     }
+
+    /** (the app started) The sessions your hosts last listed, as LinkCache kept them: listed at once, as they were
+     * last seen, till each host's reached. */
+    private fun loadCache() {
+        for ((h, l) in LinkCache.sessions(hosts.map { it.id })) if (sessions[h] == null) sessions[h] = l
+    }
+
+    /** Whether a host's reached: "up"; "away" while it's been gone less than LEEWAY_MS (since it went, or since the app
+     * was brought back), or is being reached again, a link Android closed (Doze, a network change, the app put away)
+     * being made again; "gone" past that, or for a reason a retry won't fix (its key, its sign-in, no Baude there).
+     * Only gone is said plainly. */
+    fun reach(id: String): String {
+        val c = conns[id] ?: return "gone"
+        if (c.state == "up") return "up"
+        if (c.state == "key" || !passing(c.why)) return "gone"
+        val since = c.awaySince.takeIf { it > 0 } ?: return "away"
+        return if (android.os.SystemClock.elapsedRealtime() - since < LEEWAY_MS) "away" else "gone"
+    }
+
+    /** Is why a reason a link goes and comes back (the network, the host's machine asleep or restarting), not one that
+     * needs you (null: none said yet)? */
+    private fun passing(why: String?): Boolean = why == null || listOf("authorized_keys", "couldn't sign", "Baude commands",
+        "Baude didn't start", "key").none { why.contains(it) }
 
     // ---- hosts
 
@@ -398,6 +429,9 @@ object Mesh {
     private fun changed(c: Connection) {
         if (conns[c.id] !== c) return
         tick.value++
+        if (c.state != "up") live.remove(c.id)
+        if (c.state != "up") main.postDelayed({ tick.value++ }, LEEWAY_MS + 100) // (said plainly once it's been gone
+                                                                                 // that long)
         PhoneBrowser.changed(c)
         if (c.state == "up") {
             c.host?.let { h ->
@@ -486,6 +520,8 @@ object Mesh {
                     val before = sessions[c.id]
                     val was = open?.takeIf { it.hostId == c.id }?.let { isWorking(it) } == true
                     sessions[c.id] = now
+                    live.add(c.id)
+                    if (c.place is Place.Direct) LinkCache.keepSessions { hosts.mapNotNull { h -> sessions[h.id]?.let { h.id to it } }.toMap() }
                     open?.takeIf { was && it.hostId == c.id && !isWorking(it) }?.let { Queue.flush(it) } // (a turn ended: what's queued sent)
                     Queue.sendLeft(c.id, before, now) // (and the queues of chats left at a turn that's ended)
                     Shares.look() // (its Bots, in the share sheet)
@@ -680,6 +716,17 @@ object Mesh {
             }
         }
         open = chat
+        LinkCache.chat(hostId, sid)?.let { (from, bytes) -> // (as it was last read: shown at once, read on from its end)
+            chat.rawFrom = from
+            chat.raw.write(bytes)
+            chat.start = from
+            chat.earlier.value = from > 0
+            chat.offset = from + bytes.size
+            take(chat, parse(String(bytes, Charsets.UTF_8), cutFirst = false))
+            settle(chat.calls, session(hostId, sid)?.state)
+            settleTasks(chat)
+            chat.loaded.value = true
+        }
         attach(chat)
         senders(chat)
         read(chat)
@@ -690,6 +737,7 @@ object Mesh {
     fun close() {
         val chat = open ?: return
         Queue.keepDraft(chat)
+        LinkCache.keepChat(chat)
         conns[chat.hostId]?.send(Msg.Detach(session = chat.sid).json())
         for (q in chat.btw) if (q.sid.isNotEmpty()) // (its side questions let go of with it, as Baude's window's are)
             conns[chat.hostId]?.send(Msg.Detach(session = q.sid).json())
@@ -701,6 +749,11 @@ object Mesh {
     fun onScreen(now: Boolean) {
         if (visible == now) return
         visible = now
+        if (now) { // (back: each link made again now, or checked, and given its leeway again)
+            conns.values.forEach { it.resume() }
+            tick.value++
+            main.postDelayed({ tick.value++ }, LEEWAY_MS + 100)
+        } else open?.let { LinkCache.keepChat(it) } // (what's on screen kept: Android may end the app while it's away)
         open?.let { attach(it) }
     }
 
@@ -751,6 +804,9 @@ object Mesh {
         }
         val c = conns[chat.hostId] ?: return
         val size = session(chat.hostId, chat.sid)?.size?.toLong() ?: 0
+        if (chat.offset > 0 && chat.hostId in live && session(chat.hostId, chat.sid)?.size?.let { it.toLong() < chat.offset } == true) {
+            restart(chat) // (its transcript's shorter than what's read: made anew on its host, read anew)
+        }
         val from = if (chat.offset < 0) (size - TAIL).coerceAtLeast(0) else chat.offset
         if (chat.offset < 0 && sessions[chat.hostId] == null) return // (its size not known yet: read once it is)
         chat.reading = true
@@ -764,11 +820,15 @@ object Mesh {
             val lines = parse(text, cutFirst = chat.offset < 0 && from > 0)
             val first = if (from == 0L) 0L else bytes.indexOf('\n'.code.toByte()).let { if (it < 0) next else from + it + 1 }
             main.post {
-                if (r.optString("op") == Op.TRANSCRIPT) {
+                if (r.optString("op") == Op.TRANSCRIPT && (chat.offset < 0 || chat.offset == from)) {
                     if (chat.start < 0) {
                         chat.start = first
                         chat.earlier.value = first > 0
                     }
+                    if (chat.rawFrom < 0) {
+                        chat.rawFrom = first
+                        if (first - from < bytes.size) chat.raw.write(bytes, (first - from).toInt(), bytes.size - (first - from).toInt())
+                    } else chat.raw.write(bytes)
                     chat.offset = next
                     take(chat, lines)
                 }
@@ -780,9 +840,22 @@ object Mesh {
                     settle(chat.calls, session(chat.hostId, chat.sid)?.state)
                     settleTasks(chat)
                     chat.loaded.value = true
+                    if (open === chat && conns[chat.hostId]?.state == "up" && !isWorking(chat)) // (back, and caught up:
+                        Queue.resend(chat)                                                       // what waited for it)
                 }
             }
         }
+    }
+
+    /** A chat read again from nothing: what was read of it let go of. */
+    private fun restart(chat: Chat) {
+        chat.lines.clear()
+        chat.ends.clear()
+        chat.raw.reset()
+        chat.rawFrom = -1
+        chat.offset = -1
+        chat.start = -1
+        chat.earlier.value = false
     }
 
     /** Lines of the chat's transcript, in order, taken into what it shows and keeps. */
@@ -814,7 +887,10 @@ object Mesh {
                     chat.ends.values.removeAll { it > keep }
                 }
                 else -> {
-                    if (line.kind == "you") chat.sent.removeAll { it.id == line.uuid }
+                    if (line.kind == "you") {
+                        chat.sent.removeAll { it.id == line.uuid }
+                        if (line.uuid != null) chat.queued.removeAll { it.tried && it.uuid == line.uuid } // (taken
+                    }                                                                                    // as its link went)
                     if (line.kind == "error" && chat.chrome.loginStandsIn && needsLogin(line.text))
                         chat.chrome.loginStandsIn = false // (its sign-in card's in its place already)
                     else chat.lines.add(line)
@@ -991,7 +1067,12 @@ object Mesh {
      * said. uuid: the one it's sent by, if it was sent before (a queued message its host may not have taken). */
     fun send(chat: Chat, text: String, files: List<Picked>, keep: Boolean = true, uuid: String? = null,
              failed: (() -> Unit)? = null) {
-        val c = conns[chat.hostId]?.takeIf { it.state == "up" } ?: return
+        val c = conns[chat.hostId]?.takeIf { it.state == "up" } ?: run { // (its host went as it was written: queued,
+            if (keep && open === chat) Queue.putBackTried(chat, Queued(text, files, uuid ?: java.util.UUID.randomUUID() // to go
+                .toString(), tried = uuid != null))                                                             // once it's back)
+            else failed?.invoke()
+            return
+        }
         chat.said.value = null
         // (what it sent, text and files, sent again from a sign-in card, if the turn fails for want of it)
         chat.chrome.turnSent = if (text.isBlank() && files.isEmpty()) null else text to files
@@ -1017,7 +1098,12 @@ object Mesh {
                 c.request(Msg.Input(session = chat.sid, msg = msg).json()) { r ->
                     main.post {
                         chat.busy.value = false
-                        if (r.optString("op") == Op.ERROR) {
+                        val went = r.optString("op") == Op.ERROR && Msg.Error.from(r).error.let {
+                            it == Connection.NOT_CONNECTED || it == Connection.WENT }
+                        if (went && keep && open === chat) { // (its link went before its host answered: it may have
+                            chat.sent.remove(sent)           // been taken, so it goes again by its uuid, taken once)
+                            Queue.putBackTried(chat, Queued(text, files, id))
+                        } else if (r.optString("op") == Op.ERROR) {
                             val e = Msg.Error.from(r)
                             chat.sent.remove(sent)
                             if (keep) Queue.addDraft(chat.hostId, chat.sid, text, files)
@@ -1037,7 +1123,7 @@ object Mesh {
     /** What a chat not open was left queued, sent to it as its turn ended (Queue.sendLeft): by the uuid it keeps, so its
      * host takes it once if it's sent again; put back at the front of its queue (Queue.putBack) if it isn't taken. */
     fun sendQueued(hostId: String, sid: String, q: Queued) {
-        val back = Queued(q.text, q.files, q.uuid ?: java.util.UUID.randomUUID().toString())
+        val back = Queued(q.text, q.files, q.uuid ?: java.util.UUID.randomUUID().toString(), offline = true, tried = true)
         val c = conns[hostId]?.takeIf { it.state == "up" } ?: return Queue.putBack(hostId, sid, back)
         io.execute {
             val msg = try {

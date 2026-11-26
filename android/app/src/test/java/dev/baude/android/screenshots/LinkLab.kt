@@ -92,6 +92,7 @@ class Way {
  * ssh can't, as the phone's network is cut off in Doze); kill() drops its channel as the OS drops a phone's socket. */
 class LabHost {
     @Volatile var refuse: String? = null
+    @Volatile var slow = 0L // (ms a new channel takes to open: ssh's handshake)
     @Volatile var state = "idle"
     var title = "Tidy the release notes"
     val transcript = java.io.ByteArrayOutputStream()
@@ -139,6 +140,7 @@ class LabHost {
     /** A new channel to it: (phone → host, host → phone). */
     fun open(): Pipe {
         refuse?.let { throw IOException(it) }
+        Thread.sleep(slow)
         val up = Way()
         val down = Way()
         link = up to down
@@ -254,6 +256,12 @@ abstract class LinkLab(private val theme: String) {
         Update.state.value = ""
         Settings.split.value = false
         Queue.loadDrafts(activity.filesDir)
+        File(activity.filesDir, "link-cache").deleteRecursively()
+        try { // (what's kept on the phone, where the app keeps it)
+            val cache = Class.forName("dev.baude.android.LinkCache")
+            cache.getMethod("start", File::class.java).invoke(cache.getField("INSTANCE").get(null), activity.filesDir)
+        } catch (_: ClassNotFoundException) {
+        }
         val pair = KeyPairGenerator.getInstance("EC").apply { initialize(256) }.generateKeyPair()
         Mesh.key.value = Key(pair.private, pair.public as ECPublicKey)
         Mesh.hosts.add(host)
@@ -292,6 +300,7 @@ abstract class LinkLab(private val theme: String) {
         note("Doze: the network's cut off")
         pump(20_000)
         lab.refuse = null
+        lab.slow = 1_500
         note("Doze over")
         foreground()
         pump(300)
@@ -315,7 +324,11 @@ abstract class LinkLab(private val theme: String) {
         pump(500)
         shot("link-05-offline-sent")
         lab.refuse = null
+        lab.slow = 1_500
+        background()
         foreground()
+        pump(300)
+        shot("link-05b-offline-reconnecting")
         val back = until(40_000) { conn.state == "up" }
         note("live again after ${back} ms")
         pump(3_000)
@@ -371,7 +384,8 @@ abstract class LinkLab(private val theme: String) {
         connect()
         chat()
         pump(500)
-        Mesh.close()
+        background()
+        pump(2_500) // (what was being kept, written)
         note("process killed")
         conn.stop()
         restart()
@@ -454,8 +468,7 @@ abstract class LinkLab(private val theme: String) {
         Mesh.drafts.clear()
         watchers.clear()
         Queue.loadDrafts(activity.filesDir)
-        val load = Mesh::class.java.declaredMethods.firstOrNull { it.name == "loadCache" }
-        load?.apply { isAccessible = true }?.invoke(Mesh)
+        Mesh::class.java.declaredMethods.firstOrNull { it.name == "loadCache" }?.apply { isAccessible = true }?.invoke(Mesh)
     }
 
     private fun background() {

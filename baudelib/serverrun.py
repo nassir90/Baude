@@ -709,7 +709,7 @@ class ServerRunning:
                     s.live.add(conn)
                 if msg.get("app_tools") and s.app_tools is not None:  # (its head back: its tools carried to it again)
                     s.app_tools.bind(conn)
-                return reply("attached", session=s.listing(), asks=list(s.asks.values()))
+                return reply("attached", session=s.listing(), asks=list(s.asks.values()), login=s.login)
             if op == "detach":  # (meant: an ephemeral session its head's done with dropped at once, not after its grace)
                 s.viewers.discard(conn)
                 s.live.discard(conn)

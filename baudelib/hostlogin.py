@@ -4,6 +4,12 @@ line it writes carried back as it's written (login_said), a code pasted there pa
 signed in once it's done (login_end); the connection's going stops it. Also what's said of a turn's error that signing
 in again would fix (needs_login, login_error), the same in every app: Baude's chats and Meta, Record's chats and Meta,
 and the phone's (LocalCommands.kt); only a Claude Code session's (Codex's and pi's errors are theirs to say).
+
+A chat's sign-in (ChatLogin: needed, signing_in, signed_in, failed) is its host's to keep (Session.login): a turn that
+fails for want of it makes it needed (asked), a login request for the chat (its session) moves it as it goes, and each
+change is told every head attached to it (login_state), as attach's answer tells one attaching. Every head draws the
+chat's sign-in card from it alone, so each shows the same card, live or opened later: a sign-in cancelled goes back to
+needed, with Claude's own reason, not to a state of the head's own.
 """
 import json
 import re
@@ -23,6 +29,8 @@ NEEDS_LOGIN = re.compile(
     r"Failed to authenticate|API Error: 401\b|"
     r"\b(?:login|sign-in|session|token|credentials?)\b[^.\n]{0,40}\b(?:expired|time limit|cannot be renewed|revoked)|"
     r"\b(?:log|sign) in again", re.I)
+# (a sign-in that was there and ran out, as claude says it: not one there's never been)
+EXPIRED = re.compile(r"\b(?:expired|time limit|cannot be renewed|can't be renewed)\b", re.I)
 ESCAPES = re.compile(r"\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b\[[0-9;?]*[A-Za-z]")  # (a link's, a colour's)
 # (claude auth login run by a host opens no browser on the host's screen: claude runs BROWSER with the page's address,
 # and `true` does nothing; the address is in what it writes, for the head to open)
@@ -58,6 +66,45 @@ def reason(text):
     return re.split(r"(?<=[.!?])\s+", text, maxsplit=1)[0][:200]
 
 
+def asked(error):
+    """A chat's sign-in (ChatLogin) once a turn's failed for want of it (error: claude's words): needed, whether what
+    was there ran out (expired), and claude's own first sentence for why."""
+    return {"state": "needed", "expired": bool(EXPIRED.search(error or "")), "reason": reason(error) or None,
+            "who": None}
+
+
+def heard(server, s, msg):
+    """(lock held) What a chat's claude said, as it moves the chat's sign-in: a reply or a result saying it failed
+    for want of signing in makes it needed (not while a sign-in for it runs); a turn that ends otherwise ends it."""
+    if msg.get("type") not in ("assistant", "result") or msg.get("parent_tool_use_id"):
+        return
+    error = login_error(msg)
+    if error is not None:
+        if (s.login or {}).get("state") != "signing_in":
+            tell(server, s, asked(error))
+    elif msg.get("type") == "result" and s.login is not None and s.login.get("state") != "signing_in":
+        tell(server, s, None)
+
+
+def tell(server, s, login):
+    """(lock held) A chat's sign-in now: kept (Session.login) and told every head attached to it, if it changed."""
+    if login == s.login:
+        return
+    s.login = login
+    for conn in list(s.viewers):
+        conn.send({"op": "login_state", "session": s.id, "login": login})
+
+
+def _moved(server, sid, then):
+    """A chat's sign-in moved by its sign-in (then(before): what it is now), under the host's lock."""
+    if not sid:
+        return
+    with server.lock:
+        s = server.sessions.get(sid)
+        if s is not None:
+            tell(server, s, then(s.login))
+
+
 def auth_status(exe=None, env=None):
     """claude auth status --json: {loggedIn, email, orgName, subscriptionType, authMethod…}, or {} (it failed)."""
     try:
@@ -83,27 +130,54 @@ def start(server, conn, msg):
     if (proc := getattr(conn, "login", None)) is not None and proc.poll() is None:
         return conn.send({"op": "error", "req": req, "error": "this connection runs a sign-in already"})
     exe, env = server.exe or claude_exe(), claude_env() | (server.env or {}) | NO_BROWSER
+    sid = msg.get("session") if isinstance(msg.get("session"), str) else None
     if (dep := deps.missing("claude")) is not None:  # (no claude here: what to install, as Dependencies says it)
-        return conn.send({"op": "login_end", "req": req, "code": None, "why": deps.say(dep, "report.claude")})
+        why = deps.say(dep, "report.claude")
+        _moved(server, sid, lambda was: failed(was, why))
+        return conn.send({"op": "login_end", "req": req, "code": None, "why": why})
     try:
         proc = subprocess.Popen([exe, "auth", "login", *(msg.get("args") or [])], stdin=subprocess.PIPE,
                                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1, env=env)
     except OSError as e:
+        _moved(server, sid, lambda was: failed(was, f"couldn't start claude: {e}"))
         return conn.send({"op": "login_end", "req": req, "code": None, "why": f"couldn't start claude: {e}"})
     conn.login = proc
     if getattr(conn, "gone", False):
         proc.terminate()
     server.log("claude auth login started for a head elsewhere")
-    threading.Thread(target=_read, args=(conn, req, proc, exe, env), daemon=True, name="login").start()
+    before = {}  # (the chat's sign-in as it started: what a cancel puts back)
+
+    def starting(was):
+        before["was"] = was
+        return {**(was or {"expired": False, "reason": None}), "state": "signing_in", "who": None}
+    _moved(server, sid, starting)
+    threading.Thread(target=_read, args=(server, conn, req, proc, exe, env, sid, before), daemon=True,
+                     name="login").start()
     return None
 
 
-def _read(conn, req, proc, exe, env):
+def failed(was, why):
+    """A chat's sign-in that didn't finish (why), or, cancelled (why None), what it was before it started."""
+    return {"state": "failed", "expired": False, "reason": why, "who": None} if why else was
+
+
+def _read(server, conn, req, proc, exe, env, sid=None, before=None):
+    said = []
     for line in proc.stdout:
         conn.send({"op": "login_said", "req": req, "line": line.rstrip("\n")})
+        if (text := ESCAPES.sub("", line).replace("Paste code here if prompted > ", "").strip()) and \
+                not text.startswith("Opening browser") and "https://" not in text:
+            said.append(text)
     code = proc.wait()
     who = signed_in_as(auth_status(exe, env)) if code == 0 else None
     conn.send({"op": "login_end", "req": req, "code": code, "who": who})
+    if code == 0:
+        _moved(server, sid, lambda _was: {"state": "signed_in", "expired": False, "reason": None, "who": who})
+        return
+    cancelled = code in (-15, 130) or getattr(conn, "gone", False)
+    why = None if cancelled else next((x for x in reversed(said) if x.lower().startswith(("login failed", "error"))),
+                                      said[-1] if said else f"claude auth login ended ({code})")
+    _moved(server, sid, lambda _was: failed((before or {}).get("was"), why))
 
 
 def code(conn, msg):

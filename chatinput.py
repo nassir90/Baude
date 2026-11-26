@@ -256,16 +256,16 @@ class _HereLogin:
 class _HostLogin:
     """claude auth login run on another machine, by its host process (hostlogin there), on a connection of its own to
     it (through the mesh, if that's how it's reached), for LoginCard as _HereLogin is; stop() lets go of the
-    connection, which stops it there."""
+    connection, which stops it there. session: the chat it's for there, whose sign-in its host moves as it goes."""
 
     REQ = 1
 
-    def __init__(self, where, args, heard, done):
+    def __init__(self, where, args, heard, done, session=None):
         self.ch, self.stopped = None, False
-        threading.Thread(target=self._run, args=(where, list(args), heard, done), daemon=True,
+        threading.Thread(target=self._run, args=(where, list(args), heard, done, session), daemon=True,
                          name="host-login").start()
 
-    def _run(self, where, args, heard, done):
+    def _run(self, where, args, heard, done, session=None):
         try:
             ch, _info = wire.reach(where, timeout=10)
         except OSError as e:
@@ -276,7 +276,7 @@ class _HostLogin:
             ch.close()
         ch.sock.settimeout(wire.SILENT_S)
         ch.keep_alive()
-        ch.send({"op": "login", "req": self.REQ, "args": args})
+        ch.send({"op": "login", "req": self.REQ, "args": args, **({"session": session} if session else {})})
         end = None
         for msg in ch:
             if msg.get("req") != self.REQ:
@@ -325,25 +325,33 @@ class _AccountLogin:
 
 
 class LoginCard(Gtk.Box):
-    """Signing in to Claude in the chat, on the machine the chat runs on: claude auth login run there (this one's here;
-    another machine's by its host process: where, its wire.reach place, and host, its name). /login starts it at once;
-    a turn that failed for want of it (ask) first says so, with why and Sign in. The sign-in page opens in the browser
-    here (another machine's, its link to open); if the page shows a code instead of coming back by itself, it's pasted
-    in the box; Cancel stops it. Once it's done, who's signed in, and the chat's claude started again on it
-    (win.signed_in); retry: what the failed turn sent from here (its text and attachments), Send again to send it again
+    """Signing in to Claude in the chat, on the machine the chat runs on: claude auth login run there (Baude's own
+    chat's here; a host's chat by that host process: where, its wire.reach place, session, the chat there, and host,
+    its name if it's another machine's). What the card says is the chat's sign-in (login: ChatLogin), which a host's
+    chat has from its host, the same for every head (show); a chat of no host's (Baude's own, Meta) works it out
+    here as a host would (hostlogin.asked: ask, the failed turn's error). /login starts it at once; a turn that failed
+    for want of it first says so: that the sign-in expired, or that there's none, with Claude's reason and Sign in.
+    The sign-in page opens in the browser here (another machine's, its link to open); if the page shows a code
+    instead of coming back by itself, it's pasted in the box; Cancel stops it, and the card says again what it said
+    before it started. Once it's done, who's signed in, and the chat's claude started again on it (win.signed_in);
+    retry: what the failed turn sent from here (its text and attachments), Send again to send it again
     (win.send_again); the chat it's in is the one started again, whichever's open when it's done.
     args: claude auth login's (--console, --sso, --email …). account: the chat's Claude account (Account's fields),
     for a chat run under one, signed in to in place of the CLI's own sign-in, on its host (account_where): a folder
     account's by claude auth login with its folder (_AccountLogin), a token account's by a token from claude
     setup-token pasted in place of it, replacing that account's."""
 
-    def __init__(self, win, args=(), where=None, host=None, ask=None, retry=None, account=None, account_where=None):
+    def __init__(self, win, args=(), where=None, host=None, ask=None, retry=None, account=None, account_where=None,
+                 login=None, session=None):
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=6)
         self.add_css_class("perm-card")
         self.win, self.args, self.where, self.host, self.retry = win, list(args), where, host, retry
+        self.session = session
         self.account, self.account_where = account, account_where
         self.chat = (win.remote, win.session_id) if hasattr(win, "at_chat") else None  # (the chat it's in: signed in for)
-        self.proc, self.said, self.checking = None, [], False
+        self.proc, self.said, self.checking, self.resent = None, [], False, False
+        self.login = login if login is not None else hostlogin.asked(ask) if ask is not None else None
+        self.before = None  # (what it said as the sign-in going on from here started: put back if it's cancelled)
         self.title = sel_label("")
         self.body = sel_label("")
         self.append(self.title)
@@ -367,15 +375,55 @@ class LoginCard(Gtk.Box):
         self.resend.connect("clicked", lambda *_: self.send_again())
         self.append(self.resend)
         if account is not None and account.get("kind") == "token":
-            return self.token_box(ask)
-        if ask is None:
+            return self.token_box(ask or (self.login or {}).get("reason"))
+        if self.login is None:
             self.start()
             return
-        self.say(wording.say("subscriptions.sign_in_heading", name=account["name"]) if account is not None else
-                 wording.say("sign_in.not_signed_in_on", host=host) if host else wording.say("sign_in.not_signed_in"),
-                 hostlogin.reason(ask), dim=True)
-        self.again.set_label(wording.say("sign_in.sign_in"))
-        self.again.set_visible(True)
+        self.show(self.login)
+
+    def show(self, login):
+        """The chat's sign-in as it is now (ChatLogin; its host's, for a host's chat): what the card says, the same on
+        every head. One going on from here says how it goes itself (heard, done)."""
+        if self.proc is not None or (self.account or {}).get("kind") == "token":
+            self.login = login if login is not None else self.login
+            return
+        if login is None:  # (nothing to sign in for: a /login stopped, from another head; else the card as it was)
+            if (self.login or {}).get("state") == "signing_in":
+                self.login = None
+                self.say(wording.say("sign_in.cancelled"))
+                self.again.set_visible(True)
+            return
+        self.login = login
+        state = login.get("state")
+        self.row.set_visible(False)
+        self.again.set_visible(False)
+        self.resend.set_visible(False)
+        if state == "needed":
+            if self.account is not None:
+                title = wording.say("subscriptions.sign_in_heading", name=self.account["name"])
+            elif login.get("expired"):
+                title = wording.say("sign_in.expired_on", host=self.host) if self.host else \
+                    wording.say("sign_in.expired")
+            else:
+                title = wording.say("sign_in.not_signed_in_on", host=self.host) if self.host else \
+                    wording.say("sign_in.not_signed_in")
+            self.say(title, login.get("reason") or "", dim=True)
+            self.again.set_label(wording.say("sign_in.sign_in"))
+            self.again.set_visible(True)
+        elif state == "signing_in":  # (from another head: its page and its code are its own)
+            self.say(wording.say("sign_in.signing_in"))
+        elif state == "signed_in":
+            who = login.get("who")
+            self.say(wording.say("sign_in.signed_in"), wording.say("sign_in.as_who", who=who) if who else
+                     wording.say("sign_in.who_unknown"), dim=not who)
+            self.resend.set_visible(self.can_resend())
+        elif state == "failed":
+            self.say(wording.say("sign_in.failed"), login.get("reason") or "", dim=True)
+            self.again.set_label(wording.say("common.try_again"))
+            self.again.set_visible(True)
+
+    def can_resend(self):
+        return bool(self.retry) and not self.resent and (self.chat is None or self.win.at_chat(self.chat))
 
     def token_box(self, ask):
         """A chat under a Claude account: its token box (the account's name, why it failed if it did), Save replacing
@@ -399,7 +447,7 @@ class LoginCard(Gtk.Box):
                 return
             row.set_visible(False)
             self.say(wording.say("subscriptions.token_saved"), self.account["name"])
-            self.resend.set_visible(bool(self.retry) and (self.chat is None or self.win.at_chat(self.chat)))
+            self.resend.set_visible(self.can_resend())
             self.win.signed_in(self.chat) if self.chat is not None else self.win.signed_in()
 
         def send(*_):
@@ -423,12 +471,12 @@ class LoginCard(Gtk.Box):
         self.row.set_visible(True)
         self.again.set_visible(False)
         self.again.set_label(wording.say("common.try_again"))
-        self.said = []
+        self.said, self.before = [], self.login
         try:
             if self.account is not None:
                 self.proc = _AccountLogin(self.account_where, self.account["id"], self.heard, self.done)
             elif self.where is not None:
-                self.proc = _HostLogin(self.where, self.args, self.heard, self.done)
+                self.proc = _HostLogin(self.where, self.args, self.heard, self.done, self.session)
             else:
                 self.proc = _HereLogin(self.args, self.heard, self.done)
         except deps.Missing as e:  # (no claude here: what to install, as Settings → Dependencies says it)
@@ -440,18 +488,22 @@ class LoginCard(Gtk.Box):
 
     def heard(self, proc, line):
         """A line from claude auth login: the sign-in page's address shown as a link; anything else kept, for if it
-        fails."""
+        fails. A host's on this machine opens no browser (hostlogin.NO_BROWSER): the page is opened from here."""
         if proc is not self.proc:
             return False
         # (its prompt has no line break: what it says next, "Login failed: …", comes on the prompt's line)
         line = _AUTH_ESCAPES.sub("", line).replace("Paste code here if prompted > ", "").strip()
         if m := re.search(r"https://\S+", line):
-            url = html.escape(m.group(0).rstrip(".,)"))
-            if self.where is None:
-                link = f"<a href=\"{url}\">{html.escape(wording.say('sign_in.open_page'))}</a>"
+            url = m.group(0).rstrip(".,)")
+            here = self.where is None or (self.host is None and wire.is_local(self.where))
+            if here and self.where is not None and not getattr(proc, "opened", False):
+                proc.opened = True
+                Gtk.UriLauncher(uri=url).launch(self.get_root(), None, None)
+            if here:
+                link = f"<a href=\"{html.escape(url)}\">{html.escape(wording.say('sign_in.open_page'))}</a>"
                 said = html.escape(wording.say("sign_in.browser_opened", link="\x00")).replace("\x00", link)
             else:  # (another machine's: its browser isn't here, nor maybe anywhere: the page opened here)
-                link = f"<a href=\"{url}\">{html.escape(wording.say('sign_in.open_page_there'))}</a>"
+                link = f"<a href=\"{html.escape(url)}\">{html.escape(wording.say('sign_in.open_page_there'))}</a>"
                 said = html.escape(wording.say("sign_in.page_there", link="\x00")).replace("\x00", link)
             self.body.set_markup(said)
             self.body.set_visible(True)
@@ -475,31 +527,38 @@ class LoginCard(Gtk.Box):
             self.proc.stop()
 
     def done(self, proc, problem=None, code=None, who=None):
-        """It's finished: signed in (who as), or why not, with Try Again."""
+        """It's finished: signed in (who as); cancelled, the card as it was before it started (a failed turn's: that
+        it needs signing in, and why), as its host says it too; or why not, with Try Again."""
         if proc is not None and proc is not self.proc:
             return False
         self.proc = None
         self.row.set_visible(False)
         if code == 0:
             return self.signed_in(who)
+        if code in (-15, 130) and not problem:
+            if self.before is not None:
+                self.show(self.before)
+            else:  # (/login, stopped: nothing to sign in for)
+                self.say(wording.say("sign_in.cancelled"))
+                self.again.set_visible(True)
+            return False
         why = problem or next((x for x in reversed(self.said) if x.lower().startswith(("login failed", "error"))),
                               None) or (self.said[-1] if self.said else None)
-        cancelled = code in (-15, 130) and not problem
-        self.say(wording.say("sign_in.cancelled") if cancelled else wording.say("sign_in.failed"),
-                 why if why and code != -15 else "", dim=True)
+        self.say(wording.say("sign_in.failed"), why or "", dim=True)
         self.again.set_visible(True)
         return False
 
     def signed_in(self, who):
         self.say(wording.say("sign_in.signed_in"), wording.say("sign_in.as_who", who=who) if who else
                  wording.say("sign_in.who_unknown"), dim=not who)
-        self.resend.set_visible(bool(self.retry) and (self.chat is None or self.win.at_chat(self.chat)))
+        self.resend.set_visible(self.can_resend())
         self.win.signed_in(self.chat) if self.chat is not None else self.win.signed_in()
         return False
 
     def send_again(self):
         """Send again: what the failed turn sent, sent again (once the chat's claude has started on the new sign-in)."""
         if self.retry and self.win.send_again(self.retry):
+            self.resent = True
             self.resend.set_visible(False)
 
 

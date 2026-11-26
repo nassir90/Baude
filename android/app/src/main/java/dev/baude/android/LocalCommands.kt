@@ -1,7 +1,5 @@
 package dev.baude.android
 
-import org.json.JSONObject
-
 /** What typed is, if Baude handles it itself and never sends it (BaudeWindow.on_send's /new, /clear, /cd and the
  * rest): the ones that go even when the box couldn't send (context exhausted, its host gone). */
 fun isLocal(typed: String): Boolean {
@@ -19,23 +17,6 @@ private val NEEDS_LOGIN = Regex("Please run /login|\\brun /login\\b|claude (?:au
     "\\b(?:log|sign) in again", RegexOption.IGNORE_CASE)
 
 fun needsLogin(text: String?): Boolean = !text.isNullOrEmpty() && NEEDS_LOGIN.containsMatchIn(text)
-
-/** The error of a message of claude's that signing in again would fix (hostlogin.login_error), or null: a turn's
- * result, if it's an error; the message it writes in place of a reply, said to be the sign-in's or saying so. */
-fun loginError(m: JSONObject): String? {
-    if (m.optString("type") == "result") {
-        val text = m.optString("result")
-        return text.takeIf { m.optBoolean("is_error") && needsLogin(it) }
-    }
-    if (m.optString("type") != "assistant" || m.str("parent_tool_use_id") != null) return null
-    val message = m.optJSONObject("message") ?: JSONObject()
-    val failed = m.optString("error") == "authentication_failed"
-    if (!(m.optBoolean("isApiErrorMessage") || m.optBoolean("is_api_error_message") ||
-            message.optString("model") == "<synthetic>" || failed)) return null
-    val text = message.optJSONArray("content").list().filter { it.optString("type") == "text" }
-        .joinToString("") { it.optString("text") }.trim()
-    return if (failed || needsLogin(text)) text.ifEmpty { m.optString("error") } else null
-}
 
 /** A sign-in error as its card says why (hostlogin.reason): its first sentence. */
 fun loginReason(text: String): String =

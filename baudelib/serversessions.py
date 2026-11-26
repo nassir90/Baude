@@ -12,7 +12,7 @@ import uuid
 
 from baudelib import (
     accounts, agentproxy, autofix, chattools, claude, codex, emissiontools, meshtools, models, multiplextools, notes, transcripts, wire, wording,
-    deps, desktopchats, worktree,
+    deps, desktopchats, hostlogin, worktree,
 )
 from baudelib.serverstate import (
     AGENT_TOOLS, CATALOGUE_LIMIT, CATALOGUE_WAIT_S, CHECK_SOCKET_S, CLAUDE_OPTIONS, COMMAND_TOOLS, CONTEXT_EVERY_S,
@@ -592,6 +592,8 @@ class ServerSessions:
                 self.changed()
             if kind in ("assistant", "user", "system", "result") and self.track(s, msg):
                 self.changed()
+            if models.model_program(s.meta.get("model")) == "claude":  # (its sign-in: needed, or put right by a turn)
+                hostlogin.heard(self, s, msg)
             if kind == "result" and s.id in self.cutting and self.stopped.is_set() and msg.get("subtype") == "success":
                 self.cutting.discard(s.id)  # (it ended as it was stopped: not cut after all)
                 s.meta.pop("cut", None)

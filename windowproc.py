@@ -476,6 +476,8 @@ class WindowProc:
             self.pending.clear()
             for msg in list(self.proc.asks.values()):  # (what it's waiting on an answer to)
                 self.h_control_request(msg)
+            if getattr(self.proc, "login", None) is not None:  # (its sign-in, as its host has it: its card)
+                self.h_login({"login": self.proc.login, "attached": True})
         self.update_status()
         self.update_banner()
 

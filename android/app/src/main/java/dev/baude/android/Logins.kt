@@ -26,28 +26,59 @@ import androidx.compose.ui.unit.dp
 import org.json.JSONObject
 
 /** Signing in to Claude from a chat, on the machine the chat runs on (Baude's LoginCard): claude auth login run there
- * by its host process (hostlogin), on a connection of its own to it. A turn that failed for want of it (why: its
- * error) first says so, with Sign in; /login starts it at once. What it says comes as it's said: the sign-in page's
- * address, a link to open here; a code that page shows is pasted in the card and passed to it; Cancel lets go of the
- * connection, which stops it there. Once it's signed in: who as, the chat's claude there started again on it, and
- * Send again for what this phone sent for the failed turn (retry). stage: ask, starting, page, checking, signed,
- * failed, cancelled. Compose state, changed on the main thread. */
-class Login(val hostId: String, val sid: String, val why: String?, val retry: Pair<String, List<Picked>>?, private val args: List<String>) {
+ * by its host process (hostlogin), on a connection of its own to it, for the chat (its session). What the card says
+ * is the chat's sign-in as its host has it (host: ChatLogin, told as login_state), the same on every head: a turn
+ * that failed for want of it says so (that its sign-in expired, or that there's none, with claude's reason) with Sign
+ * in; /login starts it at once. What a sign-in from here says comes as it's said: the sign-in page's address, a link
+ * to open here; a code that page shows is pasted in the card and passed to it; Cancel lets go of the connection,
+ * which stops it there, and the card says again what it said before. Once it's signed in: who as, the chat's claude
+ * there started again on it, and Send again for what this phone sent for the failed turn (retry). stage: ask,
+ * elsewhere (another head signing in), starting, page, checking, signed, failed, cancelled. Compose state, changed
+ * on the main thread. */
+class Login(val hostId: String, val sid: String, first: Msg.ChatLogin?, val retry: Pair<String, List<Picked>>?, private val args: List<String>) {
     val key = java.util.UUID.randomUUID().toString()
     /** The chat's Claude account, for a chat run under one, signed in to in place of the CLI's own sign-in, on its
      * host: a folder account's by claude auth login run there with its folder (hostaccounts' sign_in), a token
      * account's by a token from claude setup-token pasted in place of it, replacing that account's (saveToken). */
     val account = Mesh.session(hostId, sid)?.account?.takeIf { it.provider == "claude" && it.kind in listOf("token", "folder") }
     val token = account?.takeIf { it.kind == "token" }
-    val stage = mutableStateOf(if (why != null || token != null) "ask" else "starting")
+    val host = mutableStateOf(first) // (the chat's sign-in, as its host has it)
+    val why: String? get() = host.value?.reason
+    val stage = mutableStateOf(if (first != null || token != null) "ask" else "starting")
     val url = mutableStateOf<String?>(null)
     val said = mutableStateOf<String?>(null) // (failed: why; signed: who as)
+    private var before: Msg.ChatLogin? = null // (what it said as a sign-in from here started: put back if cancelled)
     val resent = mutableStateOf(false)
     private val lines = ArrayList<String>()
     private var conn: Connection? = null
 
+    init {
+        first?.let { hostSaid(it) }
+    }
+
+    /** The chat's sign-in as its host has it now: what the card says, unless a sign-in from here is going on (it
+     * says how that goes itself). */
+    fun hostSaid(l: Msg.ChatLogin?) {
+        if (conn != null || token != null) {
+            if (l != null) host.value = l
+            return
+        }
+        if (l == null) { // (nothing to sign in for: a /login stopped, from another head)
+            if (stage.value == "elsewhere") stage.value = "cancelled"
+            return
+        }
+        host.value = l
+        when (l.state) {
+            "needed" -> stage.value = "ask"
+            "signing_in" -> stage.value = "elsewhere"
+            "signed_in" -> { stage.value = "signed"; said.value = l.who }
+            "failed" -> { stage.value = "failed"; said.value = l.reason }
+        }
+    }
+
     fun start() {
         conn?.stop()
+        before = host.value
         lines.clear()
         url.value = null
         said.value = null
@@ -55,7 +86,7 @@ class Login(val hostId: String, val sid: String, val why: String?, val retry: Pa
         conn = Mesh.watch(hostId, { c, m -> heard(c, m) }) { c ->
             if (c !== conn) return@watch
             if (c.state == "up") c.send(if (account != null) Msg.Accounts(req = REQ, what = "sign_in", id = account.id).json()
-                else Msg.Login(req = REQ, args = args).json())
+                else Msg.Login(req = REQ, args = args, session = sid).json())
             else if (c.state == "down") end(null, Wording.HostStatus.connectionDropped)
         }
         if (conn == null) end(null, Wording.HostStatus.hostAbsent)
@@ -105,8 +136,15 @@ class Login(val hostId: String, val sid: String, val why: String?, val retry: Pa
 
     fun cancel() {
         stop()
-        stage.value = "cancelled"
+        back()
+    }
+
+    /** Cancelled: the card as it was before the sign-in from here started (a failed turn's: that it needs signing
+     * in, and why), as its host says it too; a /login's, cancelled. */
+    private fun back() {
+        val was = before
         said.value = null
+        if (was != null) hostSaid(was) else stage.value = "cancelled"
     }
 
     private fun stop() {
@@ -117,9 +155,9 @@ class Login(val hostId: String, val sid: String, val why: String?, val retry: Pa
 
     private fun end(code: Int?, why: String?) {
         stop()
-        val cancelled = (code == -15 || code == 130) && why.isNullOrEmpty()
-        stage.value = if (cancelled) "cancelled" else "failed"
-        said.value = if (cancelled) null else why?.ifBlank { null }
+        if ((code == -15 || code == 130) && why.isNullOrEmpty()) return back()
+        stage.value = "failed"
+        said.value = why?.ifBlank { null }
             ?: lines.lastOrNull { it.lowercase().startsWith("login failed") || it.lowercase().startsWith("error") }
             ?: lines.lastOrNull()
     }
@@ -162,15 +200,20 @@ class Login(val hostId: String, val sid: String, val why: String?, val retry: Pa
     }
 }
 
-/** The chats' sign-in cards, by their key (a "login" line's text). */
+/** The chats' sign-in cards, by their key (a "login" line's text), and each chat's own (the last made in it). */
 object Logins {
     val all = mutableStateMapOf<String, Login>()
+    private val ofChat = HashMap<String, String>()
 
-    /** A turn that failed for want of signing in (why: its error): its card, in place of the error (the transcript's
-     * line for it, if it's in already; else the line it gives later isn't drawn: loginStandsIn). */
-    fun ask(chat: Chat, why: String) {
-        val login = Login(chat.hostId, chat.sid, why, chat.chrome.turnSent, emptyList())
-        all[login.key] = login
+    /** A chat's sign-in as its host has it (login_state, or attach's answer): said in its card, the same on every
+     * head; a card made if it has none, in place of the failed turn's error (the transcript's line for it, if it's in
+     * already; else the line it gives later isn't drawn: loginStandsIn). */
+    fun hostSaid(chat: Chat, l: Msg.ChatLogin?) {
+        val mine = ofChat["${chat.hostId}/${chat.sid}"]?.let { k -> all[k]?.takeIf { chat.lines.any { it.kind == "login" && it.text == k } } }
+        if (mine != null) return mine.hostSaid(l)
+        l ?: return
+        val login = Login(chat.hostId, chat.sid, l, chat.chrome.turnSent, emptyList())
+        add(chat, login)
         val line = Line("login", login.key)
         val at = chat.lines.indexOfLast { it.kind == "error" && needsLogin(it.text) }
         if (at >= 0 && at > chat.lines.indexOfLast { it.kind == "you" }) chat.lines[at] = line
@@ -183,9 +226,14 @@ object Logins {
     /** /login: its card, signing in at once. */
     fun start(chat: Chat, args: List<String>) {
         val login = Login(chat.hostId, chat.sid, null, null, args)
-        all[login.key] = login
+        add(chat, login)
         chat.lines.add(Line("login", login.key))
         if (login.token == null) login.start()
+    }
+
+    private fun add(chat: Chat, login: Login) {
+        all[login.key] = login
+        ofChat["${chat.hostId}/${chat.sid}"] = login.key
     }
 }
 
@@ -206,7 +254,8 @@ fun LoginCard(login: Login) {
             else -> null
         } ?: when (stage) {
             "ask" -> login.account?.let { Wording.Subscriptions.signInHeading(name = it.name.orEmpty()) }
-                ?: Wording.SignIn.notSignedInOn(host = Mesh.label(login.hostId))
+                ?: if (login.host.value?.expired == true) Wording.SignIn.expiredOn(host = Mesh.label(login.hostId))
+                else Wording.SignIn.notSignedInOn(host = Mesh.label(login.hostId))
             "signed" -> Wording.SignIn.signedIn
             "failed" -> Wording.SignIn.failed
             "cancelled" -> Wording.SignIn.cancelled

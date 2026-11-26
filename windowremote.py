@@ -41,7 +41,7 @@ from startup import trace  # noqa: E402
 from toolcards import (  # noqa: E402
     QuestionForm, StatusSlot, ToolCard, ended_by_stop, summarize_tool, tool_display, tool_input_view,
 )
-from chatinput import LoginCard, _AUTH_ESCAPES  # noqa: E402
+from chatinput import LoginCard, _AUTH_ESCAPES, needs_login  # noqa: E402
 from sessionlist import (  # noqa: E402
     HERE_HOST, THIS_MACHINE, _HOST_APART, _LOCAL_SERVER, cached_session_info, chat_group, chat_groups, host_apart,
     host_key, is_desktop, local_host, made_groups, main_folder, network, on_main, remote_info, remote_name,
@@ -394,6 +394,8 @@ class WindowRemote:
                 ((listed.get("size") or 0) != self.remote.mirrored(self.session_id) or
                  self.remote.subagents_behind(self.session_id)):
             self.sync_remote(self.remote, self.session_id)
+        if listed and self.proc is not None and getattr(self.proc, "session", None) == self.session_id:
+            self.withdraw_asks({a.get("request_id") for a in listed.get("asks") or []})
         if listed and self.missing_session == self.session_id:  # (its host has it again: attached again, below)
             self.missing_session = self.missing_reason = None
         if self.proc is None and self.resume_pending and self.remote.state == "alive" and \
@@ -1148,17 +1150,57 @@ class WindowRemote:
                           if name == "AskUserQuestion"
                           else wording.say("asks.waiting_for_tool", tool=name or wording.say("asks.a_tool")))
 
-    def sign_in(self, args=(), ask=None):
-        """/login (or a turn that failed for want of it: ask, its error): claude auth login on the machine the chat runs
-        on, as a card (LoginCard): this one's here; another's by its host process there."""
+    def sign_in(self, args=(), ask=None, login=None):
+        """/login (or a turn that failed for want of it: ask, its error; a host's chat's sign-in as its host has it:
+        login): claude auth login on the machine the chat runs on, as a card (LoginCard): Baude's own chat's here; a
+        host's chat's by that host process, for the chat, so its host has the card's state for every head. One card a
+        chat: what its host says of its sign-in after is said in that card (h_login)."""
         elsewhere = self.remote is not None and not self.remote.local
         account = self.chat_account_info()  # (a chat under a Claude account: that account signed in to there instead)
-        self.add(LoginCard(self, args, where=self.remote.where if elsewhere else None,
-                           host=remote_name(self.remote) if elsewhere else None, ask=ask,
-                           retry=getattr(self, "turn_sent", None) if ask is not None else None,
-                           account=account if (account or {}).get("kind") in ("token", "folder") else None,
-                           account_where=self.remote.where if self.remote is not None else {"via": "local"}))
+        card = LoginCard(self, args, where=self.remote.where if self.remote is not None else None,
+                         host=remote_name(self.remote) if elsewhere else None, ask=ask, login=login,
+                         session=self.session_id if self.remote is not None else None,
+                         retry=getattr(self, "turn_sent", None) if ask is not None or login is not None else None,
+                         account=account if (account or {}).get("kind") in ("token", "folder") else None,
+                         account_where=self.remote.where if self.remote is not None else {"via": "local"})
+        self.login_card = card
+        self.add(card)
         self.stick_bottom = True
+        return card
+
+    def h_login(self, msg):
+        """A host's chat's sign-in, as its host has it (login_state, or attach's answer): said in the chat's sign-in
+        card, the same on every head; a card made if there's none, in place of the failed turn's error line."""
+        login, card = msg.get("login"), getattr(self, "login_card", None)
+        if card is not None and card.get_root() is self and card.chat == (self.remote, self.session_id):
+            card.show(login)
+            return
+        if login is None:
+            return
+        self.drop_login_line()
+        self.login_asked = True
+        self.sign_in(login=login).from_host = True
+
+    def drop_login_line(self):
+        """The last turn's error, drawn from history, when it's one signing in again would fix (claude's line for it,
+        or its words drawn as a reply): its sign-in card goes in its place (as it does in a live turn's)."""
+        child = self.transcript.get_last_child()
+        while child is not None and not child.get_visible():
+            child = child.get_prev_sibling()
+        text = child.get_text() if isinstance(child, Gtk.Label) else getattr(child, "text", None)
+        if child is not None and isinstance(text, str) and needs_login(text):
+            self.transcript.remove(child)
+
+    def login_standing_in(self, content):
+        """The chat's sign-in card, if its host says the chat needs signing in and content (a message of claude's,
+        drawn from history after the card was made) is the error it stands in for; else None."""
+        card = getattr(self, "login_card", None)
+        if card is None or not getattr(card, "from_host", False) or card.get_parent() is None or \
+                card.chat != (self.remote, self.session_id) or (card.login or {}).get("state") != "needed":
+            return None
+        text = "".join(c.get("text", "") for c in content if isinstance(c, dict) and c.get("type") == "text") \
+            if isinstance(content, list) else str(content or "")
+        return card if needs_login(text) else None
 
     def at_chat(self, chat):
         """Whether chat (a sign-in card's, its host and session) is the one open."""
@@ -1216,9 +1258,25 @@ class WindowRemote:
 
     def login_prompt(self, why):
         """A turn that failed for want of signing in (why: its error): said in a card in place of the error, with Sign
-        in, on whichever machine the chat runs on (sign_in); once a turn."""
+        in, on whichever machine the chat runs on (sign_in); once a turn. A host's chat's is its host's to say
+        (login_state: h_login), so every head shows the same card."""
         self.login_asked = True
-        self.sign_in(ask=why)
+        if self.remote is None:
+            self.sign_in(ask=why)
+
+    def withdraw_asks(self, listed):
+        """A host's chat's asks as its host lists them (listed: their request ids): one asked here that it doesn't
+        list any more was answered on another head (or can't be now), so it isn't waiting on you here either, as on
+        every head."""
+        withdraw = getattr(self.proc, "withdraw", None) or {}
+        seen = self.proc.__dict__.setdefault("asks_listed", set())  # (one not listed yet may be in a listing on its
+        seen |= listed & set(withdraw)  # way: only one its host has listed, then doesn't, is answered)
+        for rid in [r for r in withdraw if r in seen and r not in listed]:
+            seen.discard(rid)
+            if rid in self.proc.asks:
+                withdraw.pop(rid)()
+            else:
+                withdraw.pop(rid)
 
     def permission_card(self, rid, name, inp, tool_use_id):
         """Asks whether to allow a call: in the call's own card, when it's in the chat (ToolCard.ask); else (no card for
@@ -1305,6 +1363,15 @@ class WindowRemote:
                 b.add_css_class(css)
             b.connect("clicked", decide, beh, always)
             row.append(b)
+        def withdrawn():  # (answered on another head: its host lists it no more; the buttons go, as there)
+            proc.asks.pop(rid, None)
+            if card is not None:
+                card.answered()
+            elif box.get_parent() is not None:
+                box.get_parent().remove(box)
+            self.waiting_cards.discard(waiting)
+            self.update_session_state()
+        proc.withdraw = {**getattr(proc, "withdraw", {}), rid: withdrawn}
         if card is not None:
             # (however it stops asking, answered or not, it isn't waiting on you any more; the window held weakly, as the
             # card's listeners outlive its handlers)

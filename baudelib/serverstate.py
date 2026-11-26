@@ -225,6 +225,7 @@ class Session:
         self.proc = None
         self.viewers, self.live = set(), set()  # attached Conns; those that see what claude says as it says it
         self.asks = {}            # claude's request id -> a can_use_tool it sent, not answered yet
+        self.login = None         # (its sign-in, as every head's card draws it: ChatLogin, hostlogin; memory only)
         self.busy = False         # at a turn
         self.turn_began = None    # (when its turn going on began: autofix.turn_over's)
         self.acting = False       # at a turn's tools: a tool call begun, no text begun since (turn_acting)

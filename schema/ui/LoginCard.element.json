@@ -1,5 +1,5 @@
 {
-  "description": "Signing in to Claude from the chat, on the machine the chat runs on: a turn of a Claude Code chat (or of Meta, which is a Claude Code session of this machine's) that fails for want of it (claude's sign-in ran out, was revoked, or isn't there) shows an amber-bordered card in place of its error, with Sign in; /login (or Sign in) runs claude auth login there and shows its progress in that card, and once it's signed in the failed turn can be sent again, with the attachments it had (what's attached since stays). This machine's chats sign in here; another machine's (and every chat on the phone) sign in by that machine's host process, through the mesh if that's how it's reached (the login request).",
+  "description": "Signing in to Claude from the chat, on the machine the chat runs on: a turn of a Claude Code chat (or of Meta, which is a Claude Code session of this machine's) that fails for want of it (claude's sign-in ran out, was revoked, or isn't there) shows an amber-bordered card in place of its error, with Sign in; /login (or Sign in) runs claude auth login there and shows its progress in that card, and once it's signed in the failed turn can be sent again, with the attachments it had (what's attached since stays). Baude's own chats (and Meta's) sign in here; a host's chats (this machine's host's too, and every chat on the phone) sign in by that host process, through the mesh if that's how it's reached (the login request, for the chat). What a host's chat's card says is the chat's sign-in as its host keeps it (ChatLogin: needed, signing in, signed in, failed), told every head attached to it (login_state, and attach's answer), so every head (this machine's, another machine's, the phone) shows the same card, live or opened later.",
   "apps": [
     "baude",
     "record",
@@ -7,7 +7,7 @@
   ],
   "opens": [
     "/login (optionally with claude auth login's arguments) sent in the composer",
-    "A turn whose result is an error that signing in again would fix, or whose reply claude wrote in its place saying so (error authentication_failed, or text matching hostlogin.NEEDS_LOGIN: \"Please run /login\", \"claude auth login\", \"Invalid API key\", \"OAuth token has expired\", \"Failed to authenticate\", \"Not logged in\", \"login … time limit / cannot be renewed\", authentication_error, API Error: 401…); once a turn, live only (an old one in history keeps its red line); a Codex or pi chat's keeps its own error"
+    "A turn whose result is an error that signing in again would fix, or whose reply claude wrote in its place saying so (error authentication_failed, or text matching hostlogin.NEEDS_LOGIN: \"Please run /login\", \"claude auth login\", \"Invalid API key\", \"OAuth token has expired\", \"Failed to authenticate\", \"Not logged in\", \"login … time limit / cannot be renewed\", authentication_error, API Error: 401…); once a turn; a host's chat's when its host says the chat's sign-in is needed (one opened later too: its history's error line gives way to the card), Baude's own chat's live only (an old one in history keeps its red line); a Codex or pi chat's keeps its own error"
   ],
   "code": [
     "chatinput.py:LoginCard",
@@ -23,14 +23,22 @@
     "windowremote.py:WindowRemote.login_prompt",
     "windowremote.py:WindowRemote.send_again",
     "windowremote.py:WindowRemote.restart_claude",
-    "windowremote.py:WindowRemote.sign_out"
+    "windowremote.py:WindowRemote.sign_out",
+    "baudelib/hostlogin.py:asked",
+    "baudelib/hostlogin.py:heard",
+    "baudelib/hostlogin.py:tell",
+    "chatinput.py:LoginCard.show",
+    "windowremote.py:WindowRemote.h_login",
+    "windowremote.py:WindowRemote.drop_login_line",
+    "Logins.kt:Login.hostSaid",
+    "Logins.kt:Logins.hostSaid"
   ],
   "copy": [
     "sign_in",
     "common",
     "subscriptions"
   ],
-  "decisions": [{"said": "(review of PR 423, the coordinator's decision) Meta runs under the default account, but its Sign in card signed in the CLI's own login, so a failed account sign-in couldn't be fixed from Meta", "rule": "Every app's Meta (Baude's and Record's) signs in, from its sign-in card, to the Claude account Meta runs under (this machine's default for Claude), as a chat's card does for the chat's account; the CLI's own sign-in only when that default is the CLI's own", "decided": "2026-11-25", "source": [{"session": "b3845b21-55ac-4aab-a769-fb8517403c51"}]}, {"said": "(review of PR 420, the coordinator's decision) a profile chat's sign-in must replace that profile's token, not the CLI default's", "rule": "Every app's sign-in card, in a chat under a Claude token account (Session.account kind token), shows \"Replace the token for <name>\", why the turn failed, a password entry (the setup-token placeholder) and Save, which replaces that account's token on the chat's host and starts its claude again on it (\"Token replaced\"); claude auth login is never run for it", "decided": "2026-11-25", "source": [{"session": "b3845b21-55ac-4aab-a769-fb8517403c51", "message": "ac03d59c-4c08-4acd-87a6-78a79a1e0dc9"}]}, {"said": "claude auth login with a profile dir should pre preferred over oauth.", "rule": "Every app's sign-in card, in a chat under a Claude folder account (Session.account kind folder), says \"Sign in to <name> again\" and why the turn failed; Sign in runs claude auth login on the chat's host with that account's folder (never the CLI's own sign-in), with the page's link and the code box the card has for any sign-in, then starts the chat's claude again on it", "decided": "2026-11-25", "source": [{"session": "b3845b21-55ac-4aab-a769-fb8517403c51", "message": "7d38ce29-c6e4-4827-b56a-d688129471eb"}]}, {"said": "Gracefully handle:\n> \"Failed to authenticate: this login reached its time limit and cannot be renewed. Run `claude auth login` to sign in again, or use `claude setup-token` and set CLAUDE_CODE_OAUTH_TOKEN for unattended jobs\" -- I had to SSH into my compuetr to fix this", "rule": "Every app shows a Claude Code chat's turn that fails for want of a sign-in (one that ran out, including a login that reached its time limit) as the Sign in card in place of the error; Sign in runs claude auth login on the machine the chat runs on, through that machine's host for another machine's chats and the phone's, so no one has to log into that machine to recover", "decided": "2026-11-22", "source": [{"session": "f24332de-9555-4279-8489-ffa7dbcf54c9", "message": "30af64bb-6804-4040-984b-d3fd2a444e53"}]}],
+  "decisions": [{"said": "(review of PR 423, the coordinator's decision) Meta runs under the default account, but its Sign in card signed in the CLI's own login, so a failed account sign-in couldn't be fixed from Meta", "rule": "Every app's Meta (Baude's and Record's) signs in, from its sign-in card, to the Claude account Meta runs under (this machine's default for Claude), as a chat's card does for the chat's account; the CLI's own sign-in only when that default is the CLI's own", "decided": "2026-11-25", "source": [{"session": "b3845b21-55ac-4aab-a769-fb8517403c51"}]}, {"said": "(review of PR 420, the coordinator's decision) a profile chat's sign-in must replace that profile's token, not the CLI default's", "rule": "Every app's sign-in card, in a chat under a Claude token account (Session.account kind token), shows \"Replace the token for <name>\", why the turn failed, a password entry (the setup-token placeholder) and Save, which replaces that account's token on the chat's host and starts its claude again on it (\"Token replaced\"); claude auth login is never run for it", "decided": "2026-11-25", "source": [{"session": "b3845b21-55ac-4aab-a769-fb8517403c51", "message": "ac03d59c-4c08-4acd-87a6-78a79a1e0dc9"}]}, {"said": "claude auth login with a profile dir should pre preferred over oauth.", "rule": "Every app's sign-in card, in a chat under a Claude folder account (Session.account kind folder), says \"Sign in to <name> again\" and why the turn failed; Sign in runs claude auth login on the chat's host with that account's folder (never the CLI's own sign-in), with the page's link and the code box the card has for any sign-in, then starts the chat's claude again on it", "decided": "2026-11-25", "source": [{"session": "b3845b21-55ac-4aab-a769-fb8517403c51", "message": "7d38ce29-c6e4-4827-b56a-d688129471eb"}]}, {"said": "Gracefully handle:\n> \"Failed to authenticate: this login reached its time limit and cannot be renewed. Run `claude auth login` to sign in again, or use `claude setup-token` and set CLAUDE_CODE_OAUTH_TOKEN for unattended jobs\" -- I had to SSH into my compuetr to fix this", "rule": "Every app shows a Claude Code chat's turn that fails for want of a sign-in (one that ran out, including a login that reached its time limit) as the Sign in card in place of the error; Sign in runs claude auth login on the machine the chat runs on, through that machine's host for another machine's chats and the phone's, so no one has to log into that machine to recover", "decided": "2026-11-22", "source": [{"session": "f24332de-9555-4279-8489-ffa7dbcf54c9", "message": "30af64bb-6804-4040-984b-d3fd2a444e53"}]}, {"said": "(BaudeInternal#247, paraphrased) the same chat's sign-in card said \"Sign-in cancelled, try again\" on the host's own machine and Claude's real error (the login reached its time limit and can't be renewed) on another; the wire and the chat should keep widgets the same on every head viewing a chat", "rule": "Every app draws a host's chat's sign-in card from the chat's sign-in as its host keeps it (ChatLogin), never from what that head did itself: the host makes it needed when a turn fails for want of signing in, moves it as a sign-in for the chat starts, finishes, fails or is cancelled, and tells every head attached (login_state, attach's answer). A sign-in that ran out says so plainly (\"Claude Code's sign-in expired\", on <host> for another machine's), with Claude's own first sentence for why and Sign in; a cancelled sign-in puts back what the card said before it started, never a \"cancelled\" of one head's own", "decided": "2026-11-26", "source": [{"issue": "BaudeInternal#247"}]}],
   "parts": [
     {
       "name": "card",
@@ -100,12 +108,24 @@
       ]
     },
     {
+      "name": "expired",
+      "shows": "A sign-in that was there and ran out (claude's words say it expired, reached its time limit or can't be renewed): \"Claude Code's sign-in expired\" (another machine's chat: \"Claude Code's sign-in on <host> expired\") / dimmed the error's first sentence, and Sign in.",
+      "copy": [
+        "sign_in.expired",
+        "sign_in.expired_on"
+      ]
+    },
+    {
       "name": "starting",
       "shows": "\"Signing in to Claude…\" / dimmed \"Starting the sign-in…\", and the code row.",
       "copy": [
         "sign_in.signing_in",
         "sign_in.starting"
       ]
+    },
+    {
+      "name": "signing in on another head",
+      "shows": "\"Signing in to Claude…\" alone: the page's link and the code row are the head's that started it; once it ends, every head's card says how (signed in, failed, or as it was before, cancelled)."
     },
     {
       "name": "the page's link",
@@ -135,14 +155,14 @@
     },
     {
       "name": "failed",
-      "shows": "\"Sign-in didn't finish\" / dimmed reason (what claude auth login said last, or why the machine couldn't be reached), and Try Again.",
+      "shows": "\"Sign-in didn't finish\" / dimmed reason (what claude auth login said last, or why the machine couldn't be reached), and Try Again; on every head, as the chat's host says it.",
       "copy": [
         "sign_in.failed"
       ]
     },
     {
       "name": "cancelled",
-      "shows": "\"Sign-in cancelled\" and Try Again.",
+      "shows": "What the card said before the sign-in started (expired, or not signed in, with Claude's reason, and Sign in), on every head; a /login with no failed turn before it: \"Sign-in cancelled\" and Try Again.",
       "copy": [
         "sign_in.cancelled"
       ]

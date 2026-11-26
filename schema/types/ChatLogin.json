@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "A chat's sign-in to Claude, as its host has it: every head draws the chat's sign-in card from this alone (LoginCard), whichever head started what's going on.",
+  "properties": {
+    "state": {
+      "type": "string",
+      "enum": ["needed", "signing_in", "signed_in", "failed"],
+      "description": "needed: a turn failed for want of signing in (and a sign-in started since was cancelled); signing_in: claude auth login runs on the host for it; signed_in: it finished; failed: it ended without signing in."
+    },
+    "expired": {
+      "type": "boolean",
+      "description": "needed because the sign-in there was ran out (expired, reached its time limit, can't be renewed), not because there's none."
+    },
+    "reason": {
+      "type": ["string", "null"],
+      "description": "needed: the first sentence of Claude's own error; failed: why the sign-in didn't finish."
+    },
+    "who": {
+      "type": ["string", "null"],
+      "description": "signed_in: who as, as claude auth status says it; null if it didn't say."
+    }
+  },
+  "required": ["state"],
+  "additionalProperties": false
+}

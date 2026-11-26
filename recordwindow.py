@@ -245,10 +245,11 @@ class Window(RecordHosts, Adw.ApplicationWindow, feedback.FeedbackHost, viewers.
                                          reveal_child=not self.store.books_folded)
         books.append(self.books_reveal)
         side.set_content(books)
-        # (at the foot, under a rule from the notebooks: Update, while a new version waits: update_waiting; and this
-        # machine's daemon's pending restart: show_restart)
-        self.update_bar = chatparts.UpdateBar(self.update_now, self.show_restart_blockers)
+        # (at the foot, under a rule from the notebooks: Update, while a new version waits: update_waiting; each
+        # host's pending daemon restart, toasted: show_restart)
+        self.update_bar = chatparts.UpdateBar(self.update_now)
         side.add_bottom_bar(self.update_bar)
+        self.restart_toasts = meshui.RestartToasts(self, self.show_restart_blockers)
         GLib.idle_add(lambda: (self.update_waiting(None), False)[1])  # (a version offered before)
         self.left_sizes()
         # (held at its width: as it'd lay itself out, a long notebook's or page's name in full makes it wider; a name

@@ -37,6 +37,13 @@
       },
       "description": "Each column's tooltip, or empty (an age's: its time in full)."
     },
+    "filters": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "What each column's filter goes by, where it isn't the column's text, else empty (a container's Status: its state, Running or Exited, where the text says for how long)."
+    },
     "actions": {
       "type": "array",
       "items": {

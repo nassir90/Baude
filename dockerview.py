@@ -26,7 +26,7 @@ from codeview import CodeView  # noqa: E402
 from baudelib import tokens, wire, wording  # noqa: E402
 import kubehost  # noqa: E402
 from kubedock import KubeDock, LogsTab, ShellTab  # noqa: E402
-from kubeview import KubeRow, _KUBE_ORDER, kube_order  # noqa: E402
+from kubeview import ColumnFilters, KubeRow, _KUBE_ORDER, kube_order  # noqa: E402
 import viewwindow  # noqa: E402
 
 REFRESH_S = 10  # (the list read again this often while the view's open, as the Kubernetes view's unwatched ones)
@@ -194,6 +194,7 @@ class DockerView(Gtk.Box):
         self.page = {"title": "Running", "key": "running", "what": "running containers"}
         self.table_page = self.table_cols = None
         self.store = self.filter = self.selection = self.table = None
+        self.col_filters = ColumnFilters("docker_hidden", self.refilter)  # (a column's values, ticked: kubeview's)
         self.generation, self.loading, self.timer, self.syncing, self.note = 0, False, None, False, None
         self.fault = None
         self.found = weakref.WeakKeyDictionary()
@@ -567,6 +568,8 @@ class DockerView(Gtk.Box):
         self.selection.set_selected(Gtk.INVALID_LIST_POSITION)
         self.selection.connect("notify::selected-item", self.on_select)
         cv.set_model(self.selection)
+        self.col_filters.attach(cv, [(col.get("title") or "", col.get("kind")) for col in cols], page["key"],
+                                self.store, self.shows)
         if columns:
             first = next((c for c, col in zip(columns, cols) if col.get("kind") == "name"), columns[0])
             cv.sort_by_column(first, Gtk.SortType.ASCENDING)
@@ -646,6 +649,10 @@ class DockerView(Gtk.Box):
         return Gtk.ColumnViewColumn(title="", factory=f, resizable=False)
 
     def row_visible(self, row, _data=None):
+        return self.shows(row) and self.col_filters.visible(row)
+
+    def shows(self, row):
+        """Whether the filter box keeps a row."""
         text = self.search.get_text().strip().lower()
         return not text or any(text in t.lower() for t in row.texts)
 

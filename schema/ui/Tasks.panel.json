@@ -192,7 +192,7 @@
     },
     {
       "name": "run page",
-      "shows": "A header row: a back button (tooltip the task's name), the title '<task> · <when>' in bold, and a Stop button (stop icon) while it's running or asking. Then one line: its state's word (or, if it failed or was stopped, why), what started it ('By hand', 'Schedule', 'Git push'), how long it took, and its version. Then its log, scrolling, in order: the script's output in code blocks and its errors in code blocks of their own in the error colour (consecutive lines of each together), each line it said as plain text, each ask of the Bot as a card headed 'Asked <Bot>' (or 'Handed to <Bot>' for a failure handed over) with what was asked, each answer as a card headed '<Bot> answered' with the Bot's answer, and anything else the host says of the run as plain text. Nothing says when it started or that it ended: the title and the line under it do. Read every second while it's going, the lines since added to what's drawn.",
+      "shows": "A header row: a back button (tooltip the task's name), the title '<task> · <when>' in bold, and a Wrap toggle (text-wrap icon, tooltip 'Wrap long lines', drawn pressed while on), and a Stop button (stop icon) while it's running or asking. Then one line: its state's word (or, if it failed or was stopped, why), what started it ('By hand', 'Schedule', 'Git push'), how long it took, and its version. Then its log, scrolling, in order: the script's output in code blocks and its errors in code blocks of their own in the error colour (consecutive lines of each together; their long lines wrapped at the page's width while Wrap is on, else scrolled sideways), each line it said as plain text, each ask of the Bot as a card headed 'Asked <Bot>' (or 'Handed to <Bot>' for a failure handed over) with what was asked, each answer as a card headed '<Bot> answered' with the Bot's answer, and anything else the host says of the run as plain text. Nothing says when it started or that it ended: the title and the line under it do. Read every second while it's going, the lines since added to what's drawn.",
       "copy": [
         "tasks.status",
         "tasks.asked_bot",
@@ -201,7 +201,8 @@
         "common.stop",
         "tasks.schedule",
         "tasks.git_push",
-        "tasks.by_hand"
+        "tasks.by_hand",
+        "code_view.wrap"
       ],
       "actions": [
         {
@@ -211,6 +212,22 @@
         {
           "by": "click Stop",
           "does": "stops the run on the host"
+        },
+        {
+          "by": "click Wrap",
+          "does": "wraps the output and error blocks' long lines at the page's width, or scrolls them sideways again; remembered across sessions (setting task_log_wrap, on until turned off)"
+        }
+      ],
+      "decisions": [
+        {
+          "said": "A task run's terminal-style logs need a word-wrap mode (paraphrased)",
+          "rule": "Every app's run page has a Wrap toggle for its output and error blocks, as the Kubernetes logs have one: on, long lines wrap at the page's width; off, they scroll sideways. It's on until turned off, and remembered (task_log_wrap)",
+          "decided": "2026-11-26",
+          "source": [
+            {
+              "issue": "BaudeInternal#265"
+            }
+          ]
         }
       ]
     },

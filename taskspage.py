@@ -16,7 +16,7 @@ from baudelib import wire, wording  # noqa: E402
 from baudelib.tasks import LOG_SHOWN, MAX_EVERY, MIN_EVERY, number_of  # noqa: E402
 from markdownview import CodeBlock  # noqa: E402
 from panels import natural_height  # noqa: E402
-from widgets import Spinner, themed_icon  # noqa: E402
+from widgets import Spinner, load_settings, save_settings, themed_icon  # noqa: E402
 
 PAGE = wording.say("tasks.title")
 DAY_NAMES = tuple(wording.say(f"tasks.{d}") for d in ("mon", "tue", "wed", "thu", "fri", "sat", "sun"))
@@ -139,6 +139,7 @@ class TasksPage(Gtk.Box):
         self.win, self.sid, self.remote, self.asked, self.clock = win, None, None, 0, None
         self.tasks, self.task, self.runs, self.run, self.log, self.bot = [], None, [], None, [], None
         self.drawn, self.tail = None, None  # (the run drawn: (its id, how many lines, its last); the block last drawn)
+        self.wrap = load_settings().get("task_log_wrap", True) is not False  # (its output and errors wrapped)
         self.stack = Gtk.Stack(vexpand=True, transition_type=Gtk.StackTransitionType.SLIDE_LEFT_RIGHT)
         self.append(self.stack)
         # the list
@@ -414,6 +415,11 @@ class TasksPage(Gtk.Box):
             return
         self.run_title.set_label(f"{r.get('name') or wording.say('tasks.task')} · {ran_at(r, self.clock)}")
         self.run_box.back.set_tooltip_text(r.get("name") or wording.say("tasks.task"))
+        wrap = Gtk.ToggleButton(icon_name="baude-wrap-symbolic", tooltip_text=wording.say("code_view.wrap"),
+                                active=self.wrap, valign=Gtk.Align.CENTER, css_classes=["flat"])
+        wrap.connect("toggled", lambda b: self.set_wrap(b.get_active()))
+        head.append(wrap)
+        self.wrap_button = wrap
         if r.get("status") in GOING:
             head.append(flat("media-playback-stop-symbolic", wording.say("common.stop"),
                              lambda: self.ask({"op": "task_stop", "session": self.sid, "run": r["id"]})))
@@ -440,6 +446,15 @@ class TasksPage(Gtk.Box):
             self.log_line(x)
         self.drawn = (r["id"], len(log), log[-1] if log else None)
 
+    def set_wrap(self, on):
+        """The run's output and errors wrapped, or scrolled sideways: kept, and the log drawn again."""
+        if on == self.wrap:
+            return
+        self.wrap = on
+        save_settings(task_log_wrap=on)
+        self.drawn = None
+        self.draw_run()
+
     def log_line(self, x):
         """One line of the run's log added: output and errors run together in a code block of their own (errors in
         the error colour), each ask of the Bot and its answer a card, the rest plain lines."""
@@ -449,7 +464,7 @@ class TasksPage(Gtk.Box):
                 self.tail[2].append(text)
                 self.tail[1].set_code("\n".join(self.tail[2]))
                 return
-            block = CodeBlock(text)
+            block = CodeBlock(text, wrap=self.wrap)
             if k == "err":
                 block.label.add_css_class("error")
             self.run_body.append(block)

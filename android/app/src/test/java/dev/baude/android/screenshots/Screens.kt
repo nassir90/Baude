@@ -326,7 +326,9 @@ abstract class Screens(private val theme: String) {
                         .apply { if (k == "turn_ended") put("seconds", 131.4) } }))
                 "metrics" -> out.put("metrics", org.json.JSONArray(listOf(org.json.JSONObject().put("at", now)
                     .put("load", org.json.JSONArray(listOf(2.41, 2.10, 1.98))).put("memory_total", 17_179_869_184L)
-                    .put("memory_used", 11_811_160_064L).put("procs", org.json.JSONArray(listOf(
+                    .put("memory_used", 11_811_160_064L).put("memory_available", 5_368_709_120L)
+                    .put("swap_total", 3_221_225_472L).put("swap_used", 1_288_490_188L).put("memory_pressure", "normal")
+                    .put("memory_stall", org.json.JSONObject.NULL).put("procs", org.json.JSONArray(listOf(
                         org.json.JSONObject().put("app", "host").put("pid", 101).put("cpu", 1.4).put("rss", 148_897_792L),
                         org.json.JSONObject().put("app", "baude").put("pid", 102).put("cpu", 6.2).put("rss", 642_777_088L),
                         org.json.JSONObject().put("app", "record").put("pid", 103).put("cpu", 0.3).put("rss", 231_735_296L)))))))
@@ -334,8 +336,8 @@ abstract class Screens(private val theme: String) {
                     .put("from", now - 60).put("app", "host").put("lines", org.json.JSONArray(listOf(
                         org.json.JSONObject().put("file", "baudelib/telemetry.py").put("line", 271).put("function", "sample")
                             .put("code", "stats = proc_stats(sorted(pids))").put("hits", 120).put("seconds", 0.912),
-                        org.json.JSONObject().put("file", "baudelib/telemetry.py").put("line", 131).put("function", "memory")
-                            .put("code", "text = subprocess.run([\"vm_stat\"], capture_output=True, text=True,")
+                        org.json.JSONObject().put("file", "baudelib/telemetry.py").put("line", 131).put("function", "_mac_memory")
+                            .put("code", "if libc.host_statistics64(host, 4, ctypes.byref(vm), ctypes.byref(count)) == 0:")
                             .put("hits", 120).put("seconds", 0.402)))))))
             }
             out

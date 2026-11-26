@@ -1,16 +1,18 @@
 """telemetry — a host's: what the apps on its machine saw done in chats (the telemetry op's events, each kept as it's
-told, at its own time), samples of its machine every SAMPLE_S (load, memory, its own and each app's CPU and memory),
-and line profiles (lineprofile: its own, and those its apps send), while it's on; all read back over a stretch by
-telemetry_read, from any member of the mesh, and switched by telemetry_set (Settings → Telemetry, any head). Kept in
-the host's state folder only, telemetry/<events|metrics|profiles>/YYYY-MM-DD.jsonl (the day of each line's time, this
-machine's), and telemetry/state.json (on, and what each process profiles). Nothing here sends it anywhere else.
+told, at its own time), samples of its machine every SAMPLE_S (load, memory, swap, memory pressure, its own and each
+app's CPU and memory), and line profiles (lineprofile: its own, and those its apps send), while it's on; all read
+back over a stretch by telemetry_read, from any member of the mesh, and switched by telemetry_set (Settings →
+Telemetry, any head). Kept in the host's state folder only, telemetry/<events|metrics|profiles>/YYYY-MM-DD.jsonl (the
+day of each line's time, this machine's), and telemetry/state.json (on, and what each process profiles). Nothing here
+sends it anywhere else.
 
 Chat sizes aren't kept: chat_size works one out from a chat's transcript as it is when it's asked. gather() pulls every
 host's into one, by their times. No GTK, no dependency but line_profiler's (lineprofile's, optional)."""
+import ctypes
+import ctypes.util
 import datetime
 import json
 import os
-import re
 import subprocess
 import sys
 import threading
@@ -76,7 +78,6 @@ def profile_of(p, app):
 # ---- the machine, sampled
 _CLK = os.sysconf("SC_CLK_TCK") if hasattr(os, "sysconf") and sys.platform != "darwin" else 100
 _PAGE = os.sysconf("SC_PAGE_SIZE") if hasattr(os, "sysconf") else 4096
-_MEM_TOTAL = []
 
 
 def _ps_time(text):
@@ -118,30 +119,95 @@ def proc_stats(pids):
     return out
 
 
-def memory():
-    """(total, used) bytes of this machine's memory, either None if it can't be told."""
-    if sys.platform == "darwin":
-        if not _MEM_TOTAL:
-            try:
-                _MEM_TOTAL.append(int(subprocess.run(["sysctl", "-n", "hw.memsize"], capture_output=True, text=True,
-                                                     timeout=5).stdout.strip()))
-            except (OSError, ValueError, subprocess.TimeoutExpired):
-                _MEM_TOTAL.append(None)
-        try:
-            text = subprocess.run(["vm_stat"], capture_output=True, text=True, timeout=5).stdout
-        except (OSError, subprocess.TimeoutExpired):
-            return _MEM_TOTAL[0], None
-        page = int(m.group(1)) if (m := re.search(r"page size of (\d+)", text)) else _PAGE
-        pages = {k.strip(): int(v.strip().rstrip(".")) for k, v in
-                 (line.split(":", 1) for line in text.splitlines()[1:] if ":" in line) if v.strip().rstrip(".").isdigit()}
-        used = sum(pages.get(k, 0) for k in ("Pages active", "Pages wired down", "Pages occupied by compressor"))
-        return _MEM_TOTAL[0], used * page
+_PRESSURES = {1: "normal", 2: "warning", 4: "critical"}  # (macOS's kern.memorystatus_vm_pressure_level, dispatch's)
+
+
+class _VMStats(ctypes.Structure):
+    """The head of macOS's struct vm_statistics64 (mach/vm_statistics.h), as host_statistics64 fills it."""
+    _fields_ = [(n, ctypes.c_uint32) for n in ("free", "active", "inactive", "wire")] + \
+        [(n, ctypes.c_uint64) for n in ("zero_fill", "reactivations", "pageins", "pageouts", "faults", "cow_faults",
+                                        "lookups", "hits", "purges")] + \
+        [(n, ctypes.c_uint32) for n in ("purgeable", "speculative")] + \
+        [(n, ctypes.c_uint64) for n in ("decompressions", "compressions", "swapins", "swapouts")] + \
+        [(n, ctypes.c_uint32) for n in ("compressor", "throttled", "external", "internal")] + \
+        [("uncompressed_in_compressor", ctypes.c_uint64)]
+
+
+class _SwapUsage(ctypes.Structure):
+    """macOS's struct xsw_usage (sys/sysctl.h), vm.swapusage's."""
+    _fields_ = [("total", ctypes.c_uint64), ("avail", ctypes.c_uint64), ("used", ctypes.c_uint64),
+                ("pagesize", ctypes.c_uint32), ("encrypted", ctypes.c_int32)]
+
+
+_MAC = []  # (libSystem and this host's port, found once)
+
+
+def _mac():
+    if not _MAC:
+        libc = ctypes.CDLL(ctypes.util.find_library("c"), use_errno=True)
+        libc.mach_host_self.restype = ctypes.c_uint32
+        _MAC.append((libc, libc.mach_host_self()))
+    return _MAC[0]
+
+
+def _sysctl(name, value):
+    """value filled from macOS's sysctl name; False if it can't be read."""
+    libc = _mac()[0]
+    size = ctypes.c_size_t(ctypes.sizeof(value))
+    return libc.sysctlbyname(name.encode(), ctypes.byref(value), ctypes.byref(size), None, ctypes.c_size_t(0)) == 0
+
+
+def _mac_memory():
+    total, page, level = ctypes.c_uint64(), ctypes.c_uint64(), ctypes.c_uint32()
+    if not _sysctl("hw.memsize", total) or not _sysctl("hw.pagesize", page):
+        return {}
+    out = {"memory_total": total.value}
+    libc, host = _mac()
+    vm = _VMStats()
+    count = ctypes.c_uint32(ctypes.sizeof(vm) // 4)
+    if libc.host_statistics64(host, 4, ctypes.byref(vm), ctypes.byref(count)) == 0:  # (HOST_VM_INFO64)
+        # Activity Monitor's Memory Used: app memory (anonymous, less purgeable), wired and compressed
+        used = (max(0, vm.internal - vm.purgeable) + vm.wire + vm.compressor) * page.value
+        out.update(memory_used=used, memory_available=max(0, total.value - used))
+    swap = _SwapUsage()
+    if _sysctl("vm.swapusage", swap):
+        out.update(swap_total=swap.total, swap_used=swap.used)
+    if _sysctl("kern.memorystatus_vm_pressure_level", level):
+        out["memory_pressure"] = _PRESSURES.get(level.value)
+    return out
+
+
+def _linux_memory():
+    out = {}
     try:
         with open("/proc/meminfo") as f:
             info = {k: int(v.split()[0]) * 1024 for k, v in (line.split(":", 1) for line in f if ":" in line)}
-        return info.get("MemTotal"), info["MemTotal"] - info["MemAvailable"]
+        out.update(memory_total=info["MemTotal"], memory_available=info["MemAvailable"],
+                   memory_used=info["MemTotal"] - info["MemAvailable"])
+        if "SwapTotal" in info:
+            out.update(swap_total=info["SwapTotal"], swap_used=info["SwapTotal"] - info.get("SwapFree", 0))
     except (OSError, KeyError, ValueError):
-        return None, None
+        pass
+    try:  # (PSI: missing before 4.20, off with psi=0 or without CONFIG_PSI)
+        with open("/proc/pressure/memory") as f:
+            some = dict(kv.split("=") for kv in f.readline().split()[1:])
+        out["memory_stall"] = float(some["avg10"])
+    except (OSError, KeyError, ValueError):
+        pass
+    return out
+
+
+def memory():
+    """This machine's memory, swap and memory pressure, as a TelemetrySample's fields (each None if it can't be
+    told): bytes in use and available (used and available make the total), swap in use of its total, macOS's
+    pressure level and Linux's share of the last 10 seconds some task stalled waiting on memory (PSI's some avg10)."""
+    out = dict.fromkeys(("memory_total", "memory_used", "memory_available", "swap_total", "swap_used",
+                         "memory_pressure", "memory_stall"))
+    try:
+        out.update(_mac_memory() if sys.platform == "darwin" else _linux_memory())
+    except (OSError, AttributeError, TypeError, ValueError):
+        pass
+    return out
 
 
 class Telemetry:
@@ -312,8 +378,7 @@ class Telemetry:
             load = [round(x, 2) for x in os.getloadavg()]
         except OSError:
             load = None
-        total, used = memory()
-        return {"at": round(now, 3), "load": load, "memory_total": total, "memory_used": used, "procs": procs}
+        return {"at": round(now, 3), "load": load, **memory(), "procs": procs}
 
     def _sampling(self):
         profiled = time.monotonic()

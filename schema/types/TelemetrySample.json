@@ -29,7 +29,42 @@
         "integer",
         "null"
       ],
-      "description": "Its memory in use, in bytes."
+      "description": "Its memory in use, in bytes (macOS: Activity Monitor's Memory Used, app memory, wired and compressed; Linux and a phone: the total less what's available)."
+    },
+    "memory_available": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "description": "Its memory available to start new work without swapping, in bytes (Linux's MemAvailable, Android's availMem; macOS: the total less what's in use)."
+    },
+    "swap_total": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "description": "Its swap, in bytes (macOS grows it as it's needed; a phone's is zram)."
+    },
+    "swap_used": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "description": "Its swap in use, in bytes."
+    },
+    "memory_pressure": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "How pressed for memory the system says it is: \"normal\", \"warning\" or \"critical\" (macOS's memory pressure level; a phone's low memory: critical, else normal); null where it has no level (Linux)."
+    },
+    "memory_stall": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "description": "The share of the last 10 seconds, in percent, some task stalled waiting on memory (Linux's pressure stall information, some avg10); null where it has none."
     },
     "procs": {
       "type": "array",

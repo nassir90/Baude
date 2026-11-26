@@ -288,6 +288,12 @@ def said_size(n):
     return wording.say("images.size_mb", mb=f"{n / (1 << 20):.0f}")
 
 
+def said_pressure(s):
+    if s.get("memory_pressure"):
+        return wording.say(f"telemetry.pressure_{s['memory_pressure']}")
+    return wording.say("telemetry.stalled", percent=f"{s['memory_stall']:.1f}")
+
+
 def said_event(e):
     if e.get("kind") == "turn_ended" and isinstance(e.get("seconds"), (int, float)):
         return wording.say("telemetry.turn_ended_in", time=said_time(e["seconds"]))
@@ -536,6 +542,13 @@ class Page(Adw.PreferencesPage):
         if s.get("memory_total"):
             rows.append(row(wording.say("bot_memory.title"), wording.say(
                 "telemetry.memory_of", used=said_size(s.get("memory_used")), total=said_size(s["memory_total"]))))
+        if s.get("memory_available") is not None:
+            rows.append(row(wording.say("telemetry.available"), said_size(s["memory_available"])))
+        if s.get("swap_total") is not None:
+            rows.append(row(wording.say("telemetry.swap"), wording.say(
+                "telemetry.memory_of", used=said_size(s.get("swap_used")), total=said_size(s["swap_total"]))))
+        if s.get("memory_pressure") or s.get("memory_stall") is not None:
+            rows.append(row(wording.say("telemetry.memory_pressure"), said_pressure(s)))
         for p in sorted(s.get("procs") or [], key=lambda p: (list(APP_NAMES).index(p["app"]) - 4) % 4):
             rows.append(row(wording.say(APP_NAMES[p["app"]]), wording.say(
                 "telemetry.cpu_rss", cpu="–" if p.get("cpu") is None else f"{p['cpu']:.1f}", rss=said_size(p.get("rss")))))

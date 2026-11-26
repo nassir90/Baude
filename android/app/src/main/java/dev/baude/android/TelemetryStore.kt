@@ -117,7 +117,7 @@ object TelemetryStore {
         }
     }
 
-    /** One sample: the phone's memory, and this app's process (its host too) CPU and memory. No load average: Android
+    /** One sample: the phone's memory, swap and low memory, and this app's process (its host too) CPU and memory. No load average: Android
      * keeps it from apps. */
     private fun sampleNow() {
         try {
@@ -133,12 +133,24 @@ object TelemetryStore {
             (PhoneHost.ctx.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager).getMemoryInfo(mem)
             val proc = JSONObject().put("app", "phone").put("pid", Process.myPid()).put("cpu", pct ?: JSONObject.NULL)
                 .put("rss", rss ?: JSONObject.NULL)
+            val swap = swap()
             write("metrics", listOf(JSONObject().put("at", now / 1000.0).put("load", JSONObject.NULL)
                 .put("memory_total", mem.totalMem).put("memory_used", mem.totalMem - mem.availMem)
+                .put("memory_available", mem.availMem)
+                .put("swap_total", swap?.first ?: JSONObject.NULL).put("swap_used", swap?.second ?: JSONObject.NULL)
+                .put("memory_pressure", if (mem.lowMemory) "critical" else "normal").put("memory_stall", JSONObject.NULL)
                 .put("procs", JSONArray().put(proc))))
         } catch (_: Exception) {
         }
     }
+
+    /** The phone's swap (zram), total and in use, in bytes, from /proc/meminfo; null if it can't be read. */
+    private fun swap(): Pair<Long, Long>? = try {
+        val kb = File("/proc/meminfo").readLines().mapNotNull { l ->
+            l.split(":", limit = 2).takeIf { it.size == 2 }?.let { (k, v) -> v.trim().split(" ")[0].toLongOrNull()?.let { k to it * 1024 } }
+        }.toMap()
+        kb["SwapTotal"]?.let { t -> t to t - (kb["SwapFree"] ?: 0L) }
+    } catch (_: Exception) { null }
 
     /** kind's rows from start to end, the earliest first, the latest limit of them (0: all). */
     @Synchronized

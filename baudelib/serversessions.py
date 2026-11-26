@@ -359,7 +359,8 @@ class ServerSessions:
             s.meta.pop("cut", None)  # (carried on, or something else said: not cut any more)
             if s.meta.pop("draft", None) and not s.meta.get("prompt"):  # (written in: a session of its own from now on,
                 s.meta["prompt"] = _said(msg)                           # listed and kept, titled by what was said)
-                if s.proc is None and not s.meta.get("fork_from") and not s.meta.get("spawned_by"):  # (its account: the default as it's first written in, picked since it was made too)
+                if s.proc is None and not s.meta.get("fork_from") and not s.meta.get("spawned_by") and \
+                        not s.meta.get("account_picked"):  # (its account: the default as it's first written in, picked since it was made too; one picked for it kept)
                     s.meta["profiles"] = accounts.defaults()
             at_turn = s.busy
             self.ensure_proc(s).send(msg)
@@ -595,6 +596,8 @@ class ServerSessions:
                     self.save(s)
                 self.changed()
                 self.telemetry.turn(s.id, msg, s.meta.get("model"), s.meta.get("effort"), s.turn_began)
+                if getattr(s, "account_after_turn", False) and s.proc is proc:  # (another account picked mid-turn)
+                    self.restart_agent(s)
                 ended = {"op": "turn_ended", "session": s.id, "result": msg.get("result"),
                          "is_error": bool(msg.get("is_error")), "cost": msg.get("total_cost_usd"),
                          "turns": msg.get("num_turns"), "duration_ms": msg.get("duration_ms")}
@@ -891,12 +894,48 @@ class ServerSessions:
             return
         write(False)
 
+    def use_account(self, sid, profile):
+        """A chat goes on under another of its host's accounts for its model's provider (profile; "": the CLI's own
+        sign-in): its agent started again under it, resuming the chat, now or, mid-turn, once the turn's over.
+        ValueError for a chat that isn't here, or an account that isn't one for its model."""
+        with self.lock:
+            s = self.sessions.get(sid) if isinstance(sid, str) else None
+            program = models.model_program(s.meta.get("model")) if s is not None else None
+            if program not in accounts.PROVIDERS:
+                raise ValueError(wording.say("subscriptions.no_account_here"))
+            if profile and (accounts.account(profile) or {}).get("provider") != program:
+                raise ValueError(wording.say("subscriptions.gone"))
+            profiles = s.meta.setdefault("profiles", {})
+            was = profiles.get(program, "")
+            if was == profile:
+                return
+            if program == "codex":
+                accounts.carry_codex_thread(s.meta.get("cli_id"), was, profile)
+            else:
+                accounts.use_claude_session(s.id, profile)
+            profiles[program] = profile
+            s.meta["account_picked"] = True  # (not the default's as it's first written in: default_changed)
+            if s.proc is not None and s.busy:
+                s.account_after_turn = True
+            elif s.proc is not None:
+                self.restart_agent(s)
+            self.save(s)
+            self.changed()
+
+    def restart_agent(self, s):
+        """(lock held) A session's agent stopped to be started again by what's sent it next (ensure_proc), those
+        attached not told it went: under another account, say."""
+        s.account_after_turn = False
+        s.proc.stopping = s.proc.restarting = True
+        s.proc.kill()
+
     def default_changed(self, provider, profile):
         """A provider's default account picked: the new chats not written in yet, with no agent running, take it, as
         each would as it's first written in (take_input)."""
         with self.lock:
             for s in self.sessions.values():
-                if s.meta.get("draft") and s.proc is None and not s.meta.get("fork_from") and not s.meta.get("spawned_by"):
+                if s.meta.get("draft") and s.proc is None and not s.meta.get("fork_from") and \
+                        not s.meta.get("spawned_by") and not s.meta.get("account_picked"):
                     s.meta.setdefault("profiles", {})[provider] = profile
                     self.save(s)
         self.changed()

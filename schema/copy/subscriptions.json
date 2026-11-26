@@ -46,6 +46,9 @@
     "claude_failed": "Claude Code did not complete sign-in",
     "no_claude": "Claude Code isn't installed on this host",
     "not_signed_in_folder": "That folder isn't signed in to Claude",
-    "token_saved": "Token replaced"
+    "token_saved": "Token replaced",
+    "no_account_here": "This chat's model runs on no subscription",
+    "account_tip": "Subscription this chat runs on",
+    "account_note": "subscription → {$name}"
   }
 }

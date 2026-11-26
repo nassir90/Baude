@@ -936,11 +936,94 @@ class WindowDrafts:
         self.provider_dd.set_visible(bool(self.alike_keys))  # (Claude's: none)
         self.provider_dd.set_tooltip_text(wording.say("chat_header.provider_tip_only") if one else
                                           wording.say("chat_header.provider_tip"))
+        if not self.alike_keys:
+            self.sync_accounts(shown)
         self.ctx_box.window_changed()  # (no session's said what it's used yet: this model's window)
+
+    # ---- a chat on Claude's or Codex's model whose host keeps more than one subscription account for it: each is a
+    # provider in the provider picker, by its name alone (an account is its host's: never another's), the chat's own
+    # picked. Picking another goes on with the chat under it (accounts' use: its agent started again, resuming it,
+    # once its turn's over; a Claude Desktop chat's own claude, here, started again under it)
+    ACCOUNTS_S = 30  # (s a host's accounts, as it last listed them, are taken as they are)
+    ACCOUNT = "account|"  # (a provider picker key that's an account: its id after it)
+
+    def host_accounts(self):
+        """The subscription accounts of the chat's host, as it last listed them ([] till it has), listed again once
+        they're ACCOUNTS_S old; the pickers synced as an answer changes them."""
+        host = self.remote
+        if host is None:
+            from baudelib import accounts
+            try:
+                return accounts.listing()
+            except OSError:
+                return []
+        said = getattr(host, "accounts_said", None)
+        if (said is None or GLib.get_monotonic_time() / 1e6 - said[0] >= self.ACCOUNTS_S) and \
+                not getattr(host, "accounts_asking", False):
+            host.accounts_asking = True
+
+            def answered(reply, host=host, was=said):
+                host.accounts_asking = False
+                listed = [a for a in reply.get("accounts") or [] if isinstance(a, dict) and a.get("id")]
+                host.accounts_said = (GLib.get_monotonic_time() / 1e6, listed)
+                if (was or (0, []))[1] != listed and self.remote is host and self.get_application() is not None:
+                    self.sync_providers()
+            host.request({"op": "accounts", "what": "list"}, answered)
+        return said[1] if said else []
+
+    def sync_accounts(self, shown):
+        """The provider picker as the chat's subscription accounts: shown (its model) Claude's or Codex's, and its host
+        keeping more than one account for it; else left as sync_providers left it."""
+        program = model_program(shown or self.model)
+        if program not in ("claude", "codex") or not self.session_id:
+            return
+        mine = [a for a in self.host_accounts() if a.get("provider") == program]
+        if len(mine) < 2:
+            return
+        on = (self.chat_account_info() or {}).get("id") or ""
+        choices = [(self.ACCOUNT + a["id"], a["name"]) for a in mine]
+        if not on:  # (the CLI's own sign-in, which it's on: listed too)
+            choices.append((self.ACCOUNT, wording.say("subscriptions.cli_default")))
+        self.provider_dd.set_choices([(None, choices)])
+        self.provider_dd.select(self.ACCOUNT + on)
+        self.provider_dd.set_sensitive(True)
+        self.provider_dd.set_visible(True)
+        self.provider_dd.set_tooltip_text(wording.say("subscriptions.account_tip"))
+
+    def use_account(self, profile):
+        """The chat goes on under another of its host's accounts (profile; "": the CLI's own sign-in)."""
+        name = next((a["name"] for a in self.host_accounts() if a["id"] == profile), None) or \
+            wording.say("subscriptions.cli_default")
+        if self.remote is None:  # (a Claude Desktop chat's own claude, here: started again under it, resuming it)
+            from baudelib import accounts
+            accounts.use_claude_session(self.session_id, profile)
+            self.note(wording.say("subscriptions.account_note", name=name))
+            if getattr(self, "busy", False) and self.proc is not None:
+                self.restart_after_turn = True
+            else:
+                self.restart_proc(resume=True)
+            self.sync_providers()
+            return
+
+        def answered(reply):
+            if reply.get("error") or reply.get("op") == "error":
+                self.note(reply.get("error") or wording.say("subscriptions.gone"))
+            else:
+                self.note(wording.say("subscriptions.account_note", name=name))
+                listed = self.remote.sessions.get(self.session_id) if self.remote is not None else None
+                if isinstance(listed, dict):  # (as its host lists it next: taken now)
+                    listed["account"] = next((a for a in self.host_accounts() if a["id"] == profile), None)
+            self.sync_providers()
+        self.remote.request({"op": "accounts", "what": "use", "session": self.session_id, "id": profile}, answered)
 
     def on_provider_changed(self, key):
         """Another provider of the chat's model picked (alike_keys): the chat's model is its copy there, as a model
-        picked is; mid-turn, once the turn's over. Its own picked back: no move, one waiting dropped."""
+        picked is; mid-turn, once the turn's over. Its own picked back: no move, one waiting dropped. An account
+        picked (sync_accounts): the chat goes on under it."""
+        if key.startswith(self.ACCOUNT):
+            if key[len(self.ACCOUNT):] != ((self.chat_account_info() or {}).get("id") or ""):
+                self.use_account(key[len(self.ACCOUNT):])
+            return
         self.move_after_turn = None
         value = getattr(self, "alike_keys", {}).get(key)
         if value is not None and value != self.model:

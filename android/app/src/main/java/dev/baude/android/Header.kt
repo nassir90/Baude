@@ -274,6 +274,23 @@ fun copiesOf(hostId: String, model: String?): List<Copy> {
     return all.filter { sameModel(it, now) }
 }
 
+/** Each host's subscription accounts as it last listed them (accounts list; windowdrafts.host_accounts), listed
+ * again once they're ACCOUNTS_MS old: what a chat's provider picker lists for a Claude or Codex model. */
+object HostSubscriptions {
+    private const val ACCOUNTS_MS = 30_000L
+    val listed = mutableStateMapOf<String, List<Msg.Account>>()
+    private val asked = HashMap<String, Long>()
+
+    fun ask(hostId: String) {
+        val now = System.currentTimeMillis()
+        if (now - (asked[hostId] ?: 0L) < ACCOUNTS_MS) return
+        asked[hostId] = now
+        Mesh.ask(hostId, Msg.Accounts(what = "list").json()) { r ->
+            if (r.optString("op") == Op.ACCOUNTS) Msg.AccountsReply.from(r).accounts?.let { listed[hostId] = it }
+        }
+    }
+}
+
 /** Model changes waiting for a turn's end (Baude's move_after_turn): (host, session) -> the value to move to, and
  * how that chat moves (its own). Made once its turn ends, or, its host back after a drop, at once if it's not at one. */
 object Moves {
@@ -358,14 +375,33 @@ fun ChatControls(hostId: String, sid: String, said: (String) -> Unit, open: (Str
         "model" -> s.model
         "effort" -> s.effort
         "mode" -> s.mode
+        "account" -> s.account?.id.orEmpty()
         else -> null
-    }?.ifBlank { null }
+    }?.ifBlank { if (k == "account") "" else null }
     val model = asked["model"] ?: listed("model")
     val choices = meshModels(hostId, model)
     val now = chosen(choices, model ?: defaultModel(hostId))
     val prog = program(now?.value ?: model)
+    androidx.compose.runtime.LaunchedEffect(hostId, prog) { if (prog == "claude" || prog == "codex") HostSubscriptions.ask(hostId) }
     ControlsRow(inBar) {
         val copies = copiesOf(hostId, model)
+        val mine = HostSubscriptions.listed[hostId].orEmpty().filter { it.provider == prog }
+        if (copies.isEmpty() && (prog == "claude" || prog == "codex") && mine.size > 1) { // (its host's subscriptions
+            // for its model's provider: each a provider, by its name alone, as Baude's sync_accounts lists them)
+            val on = asked["account"] ?: listed("account").orEmpty()
+            val subs = mine.map { it.name.orEmpty() to it.id.orEmpty() } +
+                (if (on.isEmpty()) listOf(Wording.Subscriptions.cliDefault to "") else emptyList())
+            fun named(id: String) = subs.firstOrNull { it.second == id }?.first ?: Wording.Subscriptions.cliDefault
+            Picker(middleCut(named(on)), Wording.Subscriptions.accountTip, subs, on) { v ->
+                if (v == on) return@Picker
+                asked["account"] = v
+                Mesh.ask(hostId, Msg.Accounts(what = "use", session = sid, id = v).json()) { r ->
+                    val e = if (r.optString("op") == Op.ERROR) Msg.Error.from(r).said else Msg.AccountsReply.from(r).error
+                    if (!e.isNullOrBlank()) { asked.remove("account"); said(e) }
+                    else said(Wording.Subscriptions.accountNote(name = named(v)))
+                }
+            }
+        }
         if (copies.isNotEmpty()) { // (where the chat's model runs: each copy of it in the mesh, by host and provider)
             val face = copies.firstOrNull { it.value == model }?.let { "${it.host} / ${it.provider}" }?.let(::middleCut)
                 ?: Wording.MetaSettings.provider

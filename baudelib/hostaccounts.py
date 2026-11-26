@@ -67,6 +67,9 @@ def answer(server, conn, msg, reply):
             accounts.select(provider, profile)
             server.default_changed(provider, profile)
             return done()
+        if what == "use":
+            server.use_account(msg.get("session"), profile)
+            return done()
         if what == "usage":
             threading.Thread(target=_usage, args=(server, profile, done), daemon=True, name="usage").start()
             return None
@@ -76,7 +79,7 @@ def answer(server, conn, msg, reply):
             return _sign_in(conn, msg, reply, done)
     except (ValueError, OSError) as e:
         return done(error=str(e))
-    return done(error="accounts takes list, add, rename, token, remove, select, usage, sign_in or code")
+    return done(error="accounts takes list, add, rename, token, remove, select, use, usage, sign_in or code")
 
 
 def _usage(server, profile, done):

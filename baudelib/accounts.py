@@ -432,6 +432,29 @@ def claude_session_profile(session):
     return ""
 
 
+def use_claude_session(session, profile):
+    """A chat run by claude here goes on under another account from now on (profile; "": the CLI's own sign-in)."""
+    if session:
+        with database() as db:
+            db.execute("INSERT OR REPLACE INTO sessions VALUES (?,?)", (session, profile))
+
+
+def carry_codex_thread(thread, was, now):
+    """A Codex chat's thread (its rollout file) copied from the CODEX_HOME of the account it ran under (was; "": the
+    CLI's own) to that of the account it goes on under (now), where it isn't already, so Codex there resumes it."""
+    def home(profile):
+        return Path(codex_home(profile)) if profile else \
+            Path(os.environ.get("CODEX_HOME") or os.path.expanduser("~/.codex"))
+    if not thread or was == now:
+        return
+    source, target = home(was), home(now)
+    for found in (source / "sessions").glob(f"**/rollout-*{thread}.jsonl"):
+        to = target / found.relative_to(source)
+        if not to.exists():
+            to.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(found, to)
+
+
 def remember_claude_session(session, profile):
     if profile and session:
         with database() as db:

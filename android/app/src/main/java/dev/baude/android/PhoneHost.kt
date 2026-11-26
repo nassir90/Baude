@@ -23,7 +23,8 @@ abstract class Head {
     open val verified: Boolean get() = true // (a tunnel's: false, unsigned by a member with no key pinned here)
     @Volatile var subscribed = false
     @Volatile var archived = false
-    @Volatile var answers = true // (what its agents ask, answered by it, as attach says: ask_timeout's wait runs on without)
+    val mute: MutableSet<String> = java.util.concurrent.ConcurrentHashMap.newKeySet() // (the agents it's attached to whose
+    // asks it won't answer, as attach says: ask_timeout's wait runs on without it)
     abstract fun send(msg: JSONObject)
 }
 
@@ -341,24 +342,27 @@ object PhoneHost {
             else -> null
         }.orEmpty()
         val s = synchronized(lock) { sessions[sid] } ?: return reply(Op.ERROR, "error" to "no session $sid")
-        val side = PhoneAccess.side(op, msg) // (reading it, or changing it: its own rules first)
+        val side = PhoneAccess.side(op, msg, synchronized(lock) { s.alwaysAllow + ASK_TOOL }) // (reading it, or changing
+        // it: its own rules first)
         if (!PhoneAccess.allowed(head, side, s.meta)) return head.send(PhoneAccess.refused(req, side))
         needs(head, op, msg, s)?.let { return head.send(PhoneAccess.refused(req, it)) }
         when (op) {
             Op.ATTACH -> synchronized(lock) {
                 val a = Msg.Attach.from(msg)
-                head.answers = (a.answers ?: true) && PhoneAccess.allowed(head, "manage_write", s.meta) // (one that only
-                // reads: answers nothing)
+                val writes = PhoneAccess.allowed(head, "manage_write", s.meta) // (one that only reads: answers nothing)
+                if (writes && a.answers != false) head.mute.remove(s.id) else head.mute.add(s.id)
                 s.viewers.add(head)
                 if (a.live == true) s.live.add(head)
-                for (t in a.alwaysAllow.orEmpty()) if (t != ASK_TOOL) s.alwaysAllow.add(t)
-                reply(Op.ATTACHED, "session" to listing(s), "asks" to JSONArray(s.asks.values.toList()))
+                if (writes) for (t in a.alwaysAllow.orEmpty()) if (t != ASK_TOOL) s.alwaysAllow.add(t)
+                reply(Op.ATTACHED, "session" to listing(s), "asks" to JSONArray(s.asks.values.toList()), "writes" to writes)
             }
             Op.DETACH -> {
                 val last = synchronized(lock) {
                     s.viewers.remove(head)
                     s.live.remove(head)
-                    s.meta.optBoolean("ephemeral") && s.viewers.isEmpty()
+                    head.mute.remove(s.id)
+                    s.meta.optBoolean("ephemeral") && s.viewers.isEmpty() && PhoneAccess.allowed(head, "manage_write", s.meta)
+                    // (one that only reads it isn't its head: left for its head's going)
                 }
                 if (last) drop(s)
             }
@@ -461,7 +465,7 @@ object PhoneHost {
         val bot = s.meta.optJSONObject("bot") != null
         return when (op) {
             Op.ALWAYS_ALLOW -> PhoneAccess.firstRefused(head, "shell")
-            Op.ATTACH -> if (Msg.Attach.from(msg).alwaysAllow.isNullOrEmpty()) null else PhoneAccess.firstRefused(head, "shell")
+            Op.ATTACH -> if (PhoneAccess.addsTools(msg, s.alwaysAllow + ASK_TOOL)) PhoneAccess.firstRefused(head, "shell") else null
             Op.BOT -> if (msg.optJSONObject("bot") != null) PhoneAccess.firstRefused(head, "shell", "browser_write") else null
             Op.INPUT -> {
                 val m = Msg.Input.from(msg).msg ?: JSONObject()
@@ -778,7 +782,7 @@ object PhoneHost {
             val due = synchronized(lock) {
                 when {
                     rid !in s.asks -> null
-                    s.viewers.any { it.answers } -> false
+                    s.viewers.any { s.id !in it.mute } -> false
                     else -> true
                 }
             }

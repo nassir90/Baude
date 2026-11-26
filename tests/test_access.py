@@ -63,7 +63,7 @@ STARTS = {"terminal", "terminal_in", "multiplex", "emission", "emission_watch", 
           "autofix", "held", "memory", "tasks", "rename", "bot", "always_allow", "waits_on", "attach",
           "emission_watch_say", "emission_answer", "terminal_resize", "terminal_close", "detach", "quit", "link",
           "unlink", "deactivate", "activate", "accounts", "login", "login_code", "telemetry_set", "theme_save",
-          "theme_remove", "feedback"}
+          "theme_remove", "feedback", "fixes"}
 FOLDERS = ("read_file", "git", "signal_names", "catalogue")  # (a chat's folder's, the chat optional: tried apart)
 STRANGER = "00000000-0000-4000-8000-000000000000"
 
@@ -95,8 +95,8 @@ def request(op, rng, sid):
     if op == "start":
         msg.update(fork_from=sid) if rng.random() < 0.5 else None
     if rng.random() < 0.5:  # (the fields that make one of a chat's a change to it)
-        msg.update({"attach": {"always_allow": ["Read"]}, "memory": {"text": "x"},
-                    "tasks": {"delete": "x"}}.get(op, {}))
+        msg.update({"attach": {"always_allow": ["Read"]}, "memory": {"text": "x"}, "autofix": {"on": True},
+                    "tasks": {"delete": "x"}, "notes": {"action": "write"}}.get(op, {}))
     return msg
 
 
@@ -106,15 +106,26 @@ def letting(rules, member):
     return {r: v or r.endswith("_read") and lets[r.removesuffix("_read") + "_write"] for r, v in lets.items()}
 
 
-def expected(msg, lets, chat):
-    """Would the rules let a member send msg (the host's: lets; the chat's, its own first: chat)?"""
-    op, rule = msg["op"], access.rule_of(msg)
+def expected(msg, lets, chat, session):
+    """Would the rules let a member send msg (the host's: lets; the chat's, its own first: chat; session: the chat, as
+    the host has it)?"""
+    op = msg["op"]
+    adds = bool(set(msg.get("always_allow") or ()) - session.always_allow)  # (an attach's: only tools not allowed yet)
+    rule = ("manage_write" if adds else "manage_read") if op == "attach" else access.rule_of(msg)
     if op not in access.FOUND:
         return lets[rule] and (op != "start" or "fork_from" not in msg or chat["manage_read"])
     extra = {"always_allow": lets["shell"], "run_task": lets["shell"], "waits_on": False,  # (waits_on: its agent's only)
              "bot": msg.get("bot") is None or lets["shell"] and lets["browser_write"],
-             "attach": not msg.get("always_allow") or lets["shell"]}
+             "attach": not adds or lets["shell"]}
     return chat[rule] and extra.get(op, True)
+
+
+def chat_letting(own, host, member):
+    """Whom a chat's rules let in (own: its own, host: the host's, by name): each side its own or the host's, a write
+    only for one its read lets in too."""
+    read = access.lets(own.get("manage_read", host["manage_read"]), member)
+    return {"manage_read": read,
+            "manage_write": read and access.lets(own.get("manage_write", host["manage_write"]), member)}
 
 
 def random_rule(rng, member):
@@ -236,6 +247,32 @@ def main():
     req += 1
     assert ask(watcher, {"op": "subscribe"}, req)["op"] == "sessions"
     watched = heard(watcher)  # (a member's, subscribed: what it's told of the chat's turns)
+    for name, rule in (("manage_write", {"who": "nobody"}), ("manage_read", {"who": "everybody"})):
+        req += 1
+        assert ask(direct, {"op": "access_set", "capability": name, "rule": rule}, req)["op"] == "access_set"
+    for back in (False, True):  # (a chat's own read, no own write; the host's write widened after: the chat's write
+        if back:                  # still within its read; and so with its own write set, then back to the host's)
+            req += 1
+            ask(direct, {"op": "access_set", "session": chat.id, "capability": "manage_write",
+                         "rule": {"who": "chosen", "members": [other.me["id"]]}}, req)
+        req += 1
+        ask(direct, {"op": "access_set", "session": chat.id, "capability": "manage_read",
+                     "rule": {"who": "chosen", "members": [STRANGER]}}, req)
+        req += 1
+        ask(direct, {"op": "access_set", "session": chat.id, "capability": "manage_write", "rule": None}, req)
+        req += 1
+        ask(direct, {"op": "access_set", "capability": "manage_write", "rule": {"who": "everybody"}}, req)
+        for msg in ({"op": "transcript", "session": chat.id}, {"op": "rename", "session": chat.id, "title": "x"},
+                    {"op": "attach", "session": chat.id}):
+            req += 1
+            assert ask(member, msg, req).get("code") == wire.DENIED, f"{msg['op']} let through past the chat's read"
+        req += 1
+        assert chat.id not in {x["id"] for x in ask(member, {"op": "subscribe"}, req)["sessions"]}
+        req += 1
+        ask(direct, {"op": "access_set", "capability": "manage_write", "rule": {"who": "nobody"}}, req)
+    for name in access.rules_of("manage"):
+        req += 1
+        ask(direct, {"op": "access_set", "session": chat.id, "capability": name, "rule": None}, req)
     refused, let, forgeries = 0, 0, 0
     for n in range(args.rounds):
         rules = {}
@@ -263,10 +300,14 @@ def main():
             own = rng.choice([None, None, random_rule(rng, other.me["id"])])
             got = ask(direct, {"op": "access_set", "session": chat.id, "capability": name, "rule": own}, req)
             assert got["op"] == "access_set", got
+        for name in rng.sample(access.rules_of("manage"), rng.randint(0, 2)):  # (the host's changed after the chat's)
+            req += 1
+            got = ask(direct, {"op": "access_set", "capability": name, "rule": random_rule(rng, other.me["id"])}, req)
+            assert got["op"] == "access_set", got
         host_rules = {name: asked.access.rule(name) for name in access.RULES}
         lets = letting(host_rules, other.me["id"])
         own = access.own_rules(asked.sessions[chat.id].meta)
-        chat_lets = letting({r: own.get(r, host_rules[r]) for r in access.rules_of("manage")}, other.me["id"])
+        chat_lets = chat_letting(own, host_rules, other.me["id"])
         chat_let = chat_lets["manage_read"]
         ops = [op for op in access.OPS if op not in FOLDERS]
         rng.shuffle(ops)
@@ -274,8 +315,8 @@ def main():
             msg = request(op, rng, chat.id)
             if wire.problems(msg, ("request",)):  # (one the schema won't take as made: the schema's refusal first)
                 continue
-            cap = access.rule_of(msg)
-            allowed = expected(msg, lets, chat_lets)
+            cap = access.rule_of(msg, chat)
+            allowed = expected(msg, lets, chat_lets, chat)
             if allowed and op in STARTS:
                 continue
             req += 1
@@ -317,7 +358,7 @@ def main():
             req += 1
             listed = ask(ch, {"op": "subscribe"}, req)
             shown = chat.id in {x["id"] for x in listed["sessions"]}
-            everybody = any(own.get(r, host_rules[r])["who"] == "everybody" for r in access.rules_of("manage"))
+            everybody = own.get("manage_read", host_rules["manage_read"])["who"] == "everybody"
             assert shown == everybody, f"round {n}: an unverified member's listing: {shown}, {own}"
             req += 1
             assert (ask(ch, {"op": "access_set", "capability": "shell", "rule": asked.access.rule("shell")}, req)

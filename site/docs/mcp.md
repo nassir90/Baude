@@ -1181,6 +1181,7 @@ attach's answer.
 |---|---|---|---|
 | `session` | Session |  | The session, as it's listed now. |
 | `asks` | array of object |  | What it's asking, not answered yet: its agent's control requests (can_use_tool) as they came. |
+| `writes` | boolean |  | Whether the head may change the chat (Agent Management's write, the chat's own first): false, it only reads it, and answers none of its asks. |
 
 #### `autofix` (AutofixReply)
 
@@ -2046,7 +2047,7 @@ A tunnel's there.
 
 #### AccessChat
 
-A chat's own rules for managing it, each going before its host's of the same name; one not there is the host's.
+A chat's own rules for managing it, each going before its host's of the same name; one not there is the host's. Checked as a pair: write lets in only those read does, whatever the host's rules are.
 
 | Field | Type | Required | What it is |
 |---|---|---|---|
@@ -2077,21 +2078,21 @@ A host's rule for each of its capabilities, by name: a capability split into wha
 
 | Field | Type | Required | What it is |
 |---|---|---|---|
-| `shell` | AccessRule | yes | A shell on its machine: its terminals (terminal ops) and Multiplex's, through a Bot's terminal tools (multiplex). Not split: what a shell shows is whatever it runs, so watching one is using it. |
+| `shell` | AccessRule | yes | A shell on its machine: its terminals (terminal ops) and Multiplex's, through a Bot's terminal tools (multiplex). |
 | `browser_read` | AccessRule | yes | Its Bots' Emission browsers watched: the watch stream (emission_watch) and what the pane says back on it (emission_watch_say). |
 | `browser_write` | AccessRule | yes | Its Bots' Emission browsers driven: their tools' calls (emission), a phone showing one and answering its calls (emission_serve, emission_answer), and a Bot made or driven (with Shell). Lets a member watch too. |
-| `providers` | AccessRule | yes | Its inference providers' models, run through the mesh (infer). Not split: running a model is its one use. |
-| `model_files` | AccessRule | yes | Its models' files, read through the mesh (files). Not split: nothing writes them through the mesh. |
-| `spawn` | AccessRule | yes | New chats and agents started on it (start, agent). Not split: starting one is its one use. |
-| `manage_read` | AccessRule | yes | Its chats as they are, read: listed (and told of their turns' ends), attached to and watched, their transcripts, sizes, subagents, senders, a Bot's picture, memory and tasks read, their folders read (read_file, list_dir, git, signal_names, catalogue), forked from. A chat's own rule (AccessChat's manage_read) goes before this. |
-| `manage_write` | AccessRule | yes | Its chats as they are, changed: written in, held messages sent or dropped, asks answered, stopped, renamed, archived, deleted, their folders moved, tools allowed always, made Bots, their Auto-fix, a Bot's memory written and tasks set, run and stopped, a chat adopted, moved to another subscription (with Subscriptions' write). Lets a member read them too. A chat's own rule (AccessChat's manage_write) goes before this. |
+| `providers` | AccessRule | yes | Its inference providers' models, run through the mesh (infer). |
+| `model_files` | AccessRule | yes | Its models' files, read through the mesh (files). |
+| `spawn` | AccessRule | yes | New chats and agents started on it (start, agent). |
+| `manage_read` | AccessRule | yes | Its chats as they are, read: listed (and told of their turns' ends), attached to and watched, their transcripts, sizes, subagents, senders, a Bot's picture, memory and tasks read, their Auto-fix as it is, their folders read (read_file, list_dir, git, signal_names, catalogue), forked from; Record's notebooks here listed, and the edits waiting on their pages (notes, edits). A chat's own rule (AccessChat's manage_read) goes before this. |
+| `manage_write` | AccessRule | yes | Its chats as they are, changed: written in, held messages sent or dropped, asks answered, stopped, renamed, archived, deleted, their folders moved, tools allowed always (attach's only where it adds some, its env only where it changes it), made Bots, their Auto-fix turned on or off, a Bot's memory written and tasks set, run and stopped, a chat adopted, moved to another subscription (with Subscriptions' write); Record's notebooks here written, and edits to their pages proposed, revised, withdrawn, decided and adopted (notes' write, edit_*). Lets a member read them too. A chat's own rule (AccessChat's manage_write) goes before this. |
 | `kube_read` | AccessRule | yes | Its machine's Kubernetes clusters read: contexts, lists, YAML, owners (kube) and logs and watches (kube_follow), and the clusters' parts of @. |
 | `kube_write` | AccessRule | yes | Its machine's Kubernetes clusters changed: a pod deleted (kube's delete). Lets a member read them too. |
-| `databases` | AccessRule | yes | Its machine's databases (databases). Not split: the host only reads them (servers, schemas, rows). |
+| `databases` | AccessRule | yes | Its machine's databases (databases). |
 | `subscriptions_read` | AccessRule | yes | Its subscription accounts read: listed, and their usage (accounts' list and usage). |
 | `subscriptions_write` | AccessRule | yes | Its subscription accounts changed: added, renamed, a token replaced, removed (signed out), a provider's default picked, a chat moved to one (with the chat's Agent Management write too), signed in to (accounts' sign_in and code, login, login_code). Lets a member read them too. |
-| `access_read` | AccessRule | yes | These rules read (access). |
-| `access_write` | AccessRule | yes | These rules changed (access_set), and the host itself: stopped, linked and unlinked, deactivated, its telemetry, themes and feedback (quit, link, unlink, deactivate, activate, telemetry_set, theme_save, theme_remove, feedback). Lets a member read them too. A head on its own machine, or one over ssh, may always. |
+| `access_read` | AccessRule | yes | These rules read (access), and the host's own: its telemetry (telemetry_read) and its Ongoing Feedback listed (fixes' list and shot). |
+| `access_write` | AccessRule | yes | These rules changed (access_set), and the host itself: stopped, linked and unlinked, deactivated, its telemetry, themes and feedback (quit, link, unlink, deactivate, activate, telemetry_set, theme_save, theme_remove, feedback), its Ongoing Feedback acted on (fixes' merge, discard, reopen, reply, fix, stop). Lets a member read them too. A head on its own machine, or one over ssh, may always. |
 
 #### AccessState
 
@@ -2221,6 +2222,27 @@ A commit, as git's log has it.
 | `files` | integer |  | How many files it changed. |
 | `added` | integer |  | Lines it put in. |
 | `removed` | integer |  | Lines it took out. |
+
+#### ContextCategory
+
+One kind of what a session's context holds (ContextUsage's categories): the system prompt, tools, messages, free space.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `name` | string | yes | What it is, as its agent names it. |
+| `tokens` | integer | yes | The tokens it takes up. |
+| `kind` | string/null |  | Its agent's kind for it (deferred: not in the context yet, left out of the count shown). |
+
+#### ContextUsage
+
+How much of its context window a session's agent last said it's used (Claude Code's get_context_usage answer, Codex's token count, pi-claude's count of what it sends), kept by its host: asked of its agent as it starts, through a turn while a chat has it open (at most once a second), as the turn ends, after a compaction and after its model's changed, and kept while its agent's stopped; given another model's window (or none) if one's picked while it's stopped. Every app's context meter shows it.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `totalTokens` | integer/null |  | The tokens its conversation takes up now; null where its agent hasn't said. |
+| `maxTokens` | integer/null |  | Its model's window, in tokens; null or 0 where its agent doesn't know it. |
+| `showWithoutLimit` | boolean |  | Shown though there's no window (Codex's before it says one): the tokens used alone. |
+| `categories` | array of ContextCategory |  | What the tokens are, as its agent splits them (its meter's tooltip). Left out of a session's listing: the chat that's open asks for them (get_context_usage). |
 
 #### DbColumn
 
@@ -2765,6 +2787,7 @@ A session as a host lists it.
 | `bot` | BotListing? |  | A Bot's; null for a chat. |
 | `autofix` | AutofixPull? |  | Its Auto-fix: the pull request its host follows for it; null while it's off. |
 | `acting` | boolean |  | Whether its turn is at its tools: from a tool call's start till text starts after it, the turn ends or its agent goes; only while it's working, not asking. |
+| `context` | ContextUsage? |  | How much of its context window its agent last said it's used, kept while its agent's stopped; null till it's said. |
 | `on_phone` | boolean |  | A Bot's browser is on a phone now. |
 | `fork_from` | string/null |  | The session it was forked from. |
 | `spawned_by` | string/null |  | The chat whose mesh tools started it (start's spawned_by). |

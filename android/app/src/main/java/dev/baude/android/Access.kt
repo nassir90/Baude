@@ -42,14 +42,18 @@ fun AccessRule(cap: String, own: JSONObject?, state: JSONObject, chat: Boolean =
     val names = PhoneAccess.rulesOf(cap)
     val rules = state.optJSONObject("rules")
     if (names.any { rules?.optJSONObject(it) == null }) return
-    fun ruleNamed(name: String): JSONObject? = if (chat) own?.optJSONObject(name) else rules?.optJSONObject(name)
+    val host = names.associateWith { rules!!.getJSONObject(it) }
+    val checked = if (!chat) host else PhoneAccess.chatRules( // (a chat's: as it's checked, its write within its read)
+        names.filter { own?.optJSONObject(it) != null }.associateWith { own!!.getJSONObject(it) }, host)
+    fun ruleNamed(name: String): JSONObject? = if (chat && own?.optJSONObject(name) == null) null else checked[name]
     Column(Modifier.alpha(if (state.optBoolean("editable")) 1f else 0.5f)) {
-        if (names.size == 1) RuleRow(names[0], title ?: PhoneAccess.named(cap), false, ruleNamed(names[0]), state, chat) { set(names[0], it) }
+        if (names.size == 1) RuleRow(names[0], title ?: PhoneAccess.named(cap), false, ruleNamed(names[0]), checked[names[0]], state,
+            chat) { set(names[0], it) }
         else {
             Text(title ?: PhoneAccess.named(cap), style = Type.body, color = c.fg, maxLines = 1, overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.padding(start = 12.dp, end = 12.dp, top = 10.dp))
             for (n in names) RuleRow(n, if (n.endsWith("_read")) Wording.Access.read else Wording.Access.write, true,
-                ruleNamed(n), state, chat) { set(n, it) }
+                ruleNamed(n), checked[n], state, chat) { set(n, it) }
         }
     }
 }
@@ -57,11 +61,10 @@ fun AccessRule(cap: String, own: JSONObject?, state: JSONObject, chat: Boolean =
 /** One rule's row (name: the rule's), titled title (line: a split capability's Read or Write, dim, in under its name),
  * the button naming who it lets in after it. */
 @Composable
-private fun RuleRow(name: String, title: String, line: Boolean, rule: JSONObject?, state: JSONObject, chat: Boolean,
-                    set: (JSONObject?) -> Unit) {
+private fun RuleRow(name: String, title: String, line: Boolean, rule: JSONObject?, hostRule: JSONObject?, state: JSONObject,
+                    chat: Boolean, set: (JSONObject?) -> Unit) {
     val c = LocalBaude.current
     val editable = state.optBoolean("editable")
-    val hostRule = state.optJSONObject("rules")?.optJSONObject(name)
     val same = chat && rule == null
     val members = state.optJSONArray("members")?.let { m -> (0 until m.length()).map { m.getJSONObject(it) } }.orEmpty()
     val names = members.associate { it.optString("id") to it.optString("name") }

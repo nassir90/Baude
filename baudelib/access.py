@@ -5,7 +5,8 @@ with the host's own admin), each everybody, nobody or the members chosen, by the
 tunnel's origin: Conn's). A capability whose ops part into reading and changing (SPLIT) has two rules, <cap>_read and
 <cap>_write, and write lets a member read too: a member let write is let read, and the rules are kept so read's lets in
 everyone write's does (set). The rest have one (RULES: every rule's name, as the wire's AccessRules has them). A chat
-may have rules of its own for managing it, kept in its meta (access: AccessChat's), which go before the host's.
+may have rules of its own for managing it, kept in its meta (access: AccessChat's), which go before the host's, its
+write never letting in one its read doesn't (chat_rules).
 
 Who's asking is Conn's member: a tunnel's origin, as its open was signed (mesh.Mesh.opener), or, for a connection a
 chat's own tools make on its host's socket (hello's as), the member that started that chat (its meta's started_by), so
@@ -53,8 +54,38 @@ def _accounts(msg):
     return "subscriptions_read" if msg.get("what") in ("list", "usage") else "subscriptions_write"
 
 
-def _attach(msg):  # (tools allowed always, or the head's environment for its claude: a change to the chat)
-    return "manage_write" if msg.get("always_allow") or msg.get("env") else "manage_read"
+def _attach(msg, session=None):  # (tools allowed always it doesn't allow yet, or the head's environment for its claude
+    # other than it has: a change to the chat (session: as it's found); the same again, only a look)
+    return "manage_write" if adds_tools(msg, session) or changes_env(msg, session) else "manage_read"
+
+
+def adds_tools(msg, session=None):
+    """Does an attach's always_allow name tools session doesn't already allow always?"""
+    tools = msg.get("always_allow")
+    if not isinstance(tools, list):
+        return bool(tools)
+    return bool({t for t in tools if isinstance(t, str)} - set(getattr(session, "always_allow", None) or ()))
+
+
+def changes_env(msg, session=None):
+    """Does an attach's env set session's claude's environment to other than it is (an empty one: no)?"""
+    env = msg.get("env")
+    if not isinstance(env, dict):
+        return bool(env)
+    from baudelib.serverstate import clean_env
+    return bool(env) and clean_env(env) != (getattr(session, "env", None) or {})
+
+
+def _autofix(msg):
+    return "manage_write" if msg.get("on") is not None else "manage_read"
+
+
+def _fixes(msg):
+    return "access_read" if msg.get("what") in ("list", "shot") else "access_write"
+
+
+def _notes(msg):
+    return "manage_write" if msg.get("action") == "write" else "manage_read"
 
 
 def _memory(msg):
@@ -78,6 +109,11 @@ OPS = {  # (the rule each op is checked for, before it's taken (a function: msg'
     "accounts": _accounts,  # (a chat moved to one: its manage_write too)
     **dict.fromkeys(("login", "login_code"), "subscriptions_write"),
     "access": "access_read",
+    "telemetry_read": "access_read",  # (the host's own, as telemetry_set's)
+    "fixes": _fixes,  # (Ongoing Feedback, acted on with the host's gh: the host's own, as feedback's)
+    "notes": _notes,  # (Record's notebooks here, and the edits waiting on their pages: as its chats' are)
+    "edits": "manage_read",
+    **dict.fromkeys(("edit_propose", "edit_revise", "edit_withdraw", "edit_decide", "edit_adopt"), "manage_write"),
     **dict.fromkeys(("access_set", "quit", "link", "unlink", "deactivate", "activate", "telemetry_set", "theme_save",
                      "theme_remove", "feedback"), "access_write"),  # (the rules, and the host's own)
     "list_dir": "manage_read",  # (any folder's entries: as much as a chat's, which could list them)
@@ -87,9 +123,12 @@ OPS = {  # (the rule each op is checked for, before it's taken (a function: msg'
     "attach": _attach,
     "memory": _memory,
     "tasks": _tasks,
+    "autofix": _autofix,  # (no on: only as it is)
     **dict.fromkeys(("input", "held", "stop", "rename", "archive", "unarchive", "delete", "set_cwd", "always_allow",
-                     "bot", "autofix", "run_task", "task_stop", "waits_on"), "manage_write"),
+                     "bot", "run_task", "task_stop", "waits_on"), "manage_write"),
 }
+CHATLESS = frozenset(("list_dir", "notes", "edits", "edit_propose", "edit_revise", "edit_withdraw", "edit_decide",
+                      "edit_adopt"))  # (Agent Management's, but no chat's: checked as they come)
 DEFAULTS = {"access_write": NOBODY}  # (a rule not set, if it isn't everybody's)
 SAFE_MODES = (None, "default", "plan", "acceptEdits")  # (permission modes that ask before a command's run)
 SHELL_TOOLS = ("Bash", "PowerShell")  # (tools that run commands: approving one, or allowing it always, is a shell's worth)
@@ -100,13 +139,16 @@ FILE = "access.json"
 MEMBERS_MAX = 256
 
 
-def rule_of(msg):
-    """The rule msg's op is checked for (OPS'), or None for one no rule guards."""
+def rule_of(msg, session=None):
+    """The rule msg's op is checked for (OPS'; session: the chat it's to, as it's found), or None for one no rule
+    guards."""
     r = OPS.get(msg.get("op"))
+    if r is _attach:
+        return r(msg, session)
     return r(msg) if callable(r) else r
 
 
-FOUND = frozenset(op for op in OPS if op != "list_dir" and capability(rule_of({"op": op})) == "manage")  # (a chat's)
+FOUND = frozenset(op for op in OPS if op not in CHATLESS and capability(rule_of({"op": op})) == "manage")  # (a chat's)
 
 
 def named(rule):
@@ -169,6 +211,13 @@ def kept_together(rules, name, base=None):
     return rules
 
 
+def chat_rules(own, host):
+    """A chat's rules for managing it, as they're checked (own: own_rules', host: the host's, by name): each side its
+    own or the host's as it is now, write narrowed to those read lets in, so write never lets in one read doesn't."""
+    read = own.get("manage_read") or host["manage_read"]
+    return {"manage_read": dict(read), "manage_write": narrower(own.get("manage_write") or host["manage_write"], read)}
+
+
 def own_rules(meta):
     """A chat's own rules (its meta's access), by name: one kept before Agent Management was split, both sides'."""
     own = (meta or {}).get("access") if isinstance(meta, dict) else None
@@ -222,9 +271,12 @@ class Access:
             return True
         if not getattr(conn, "verified", True):  # (not known to be who it says: nobody a rule could choose)
             member = ""
-        own = own_rules(getattr(session, "meta", None)) if capability(name) == "manage" and session is not None else {}
+        if capability(name) == "manage" and session is not None:  # (its write within its read: chat_rules)
+            with self.lock:
+                host = {r: self.rules[r] for r in rules_of("manage")}
+            return lets(chat_rules(own_rules(getattr(session, "meta", None)), host)[name], member)
         sides = (name, capability(name) + "_write") if name.endswith("_read") else (name,)
-        return any(lets(own[r] if r in own else self.rule(r), member) for r in sides)
+        return any(lets(self.rule(r), member) for r in sides)
 
     def needs(self, conn, msg, session):
         """What else than manage_write a chat's op asks of a member (session: the chat's), as it would let it run commands
@@ -237,7 +289,8 @@ class Access:
         op, meta = msg.get("op"), getattr(session, "meta", None) or {}
         caps = []
         inner = msg.get("msg") if isinstance(msg.get("msg"), dict) else {}
-        if op == "always_allow" or op in ("attach", "start") and (msg.get("always_allow") or msg.get("env")):
+        if op == "always_allow" or op == "start" and (msg.get("always_allow") or msg.get("env")) or \
+                op == "attach" and (adds_tools(msg, session) or changes_env(msg, session)):
             caps.append("shell")  # (an environment's a command's worth too: one that names a library to load)
         if op == "start" and (msg.get("mode") not in SAFE_MODES or msg.get("ask_default") == "allow" or
                               any(t.split("(")[0] in SHELL_TOOLS for t in msg.get("allowed_tools") or ()
@@ -291,12 +344,16 @@ class Access:
 
     def set_own(self, meta, name, rule):
         """A chat's own rule name (manage_read or manage_write) set in its meta (rule None: the host's again), its
-        other side kept with it: ValueError if it can't be."""
+        other side kept with it (read the host's again: its own write narrowed to it): ValueError if it can't be.
+        Whatever's kept, it's checked as chat_rules has it."""
         if name not in rules_of("manage"):
             raise ValueError(wording.say("access.bad_rule"))
         own = own_rules(meta)
         if rule is None:
             own.pop(name, None)
+            if name == "manage_read" and "manage_write" in own:
+                with self.lock:
+                    own["manage_write"] = narrower(own["manage_write"], self.rules["manage_read"])
         else:
             own[name] = clean(rule)
             with self.lock:

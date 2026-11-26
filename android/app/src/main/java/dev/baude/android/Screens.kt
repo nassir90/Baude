@@ -106,7 +106,8 @@ fun ChatPage(chat: Chat, name: String, attach: Boolean = true, stop: (() -> Unit
     val session = Mesh.session(at, sid)
     val working = isWorking(chat)
     val readOnly = Settings.isReadOnly(sid) || isArchived(at, sid) || // (archived: till it's unarchived)
-        session?.elsewhere == true // (Claude Desktop's, Desktop writing it now: till it's done, ChatBanner says so)
+        session?.elsewhere == true || // (Claude Desktop's, Desktop writing it now: till it's done, ChatBanner says so)
+        !chat.chrome.writes.value // (its host lets this phone only read it)
     var text by androidx.compose.runtime.saveable.rememberSaveable(at, sid) { mutableStateOf("") }
     val files = chat.files
     val pick = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
@@ -608,21 +609,23 @@ fun Asked(chat: Chat, ask: Ask, alwaysOffered: Boolean, name: String = "Claude")
 fun AskButtons(chat: Chat, ask: Ask, alwaysOffered: Boolean, name: String = "Claude") {
     val c = LocalBaude.current
     val questions = ask.input.optJSONArray("questions")
+    val writes = chat.chrome.writes.value // (its host lets this phone only read it: nothing to answer with)
     if (ask.tool == "AskUserQuestion" && questions != null) {
         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Questions(questions, answer = { Mesh.answer(chat, ask, allow = true, answers = it) },
-                skip = { Mesh.answer(chat, ask, allow = false) })
+                skip = { Mesh.answer(chat, ask, allow = false) }, enabled = writes)
         }
         return
     }
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Button(Wording.Common.allow, suggested = true) { Mesh.answer(chat, ask, allow = true) }
+            Button(Wording.Common.allow, suggested = true, enabled = writes) { Mesh.answer(chat, ask, allow = true) }
             // (a plan's agreed to each time)
-            if (alwaysOffered && ask.tool != "ExitPlanMode") Button(Wording.Asks.alwaysAllow(tool = toolDisplay(ask.tool).first)) {
+            if (alwaysOffered && ask.tool != "ExitPlanMode") Button(Wording.Asks.alwaysAllow(tool = toolDisplay(ask.tool).first),
+                enabled = writes) {
                 Mesh.answer(chat, ask, allow = true, always = true)
             }
-            Button(Wording.Common.deny, destructive = true) { Mesh.answer(chat, ask, allow = false) }
+            Button(Wording.Common.deny, destructive = true, enabled = writes) { Mesh.answer(chat, ask, allow = false) }
         }
     }
 }
@@ -630,7 +633,7 @@ fun AskButtons(chat: Chat, ask: Ask, alwaysOffered: Boolean, name: String = "Cla
 /** claude's questions (AskUserQuestion), as Baude's QuestionForm: each its options (one picked, or several if it
  * says so) and Other, to write your own. Answer sends {question: what's picked, comma-joined}; Skip, none. */
 @Composable
-fun Questions(questions: org.json.JSONArray, answer: (org.json.JSONObject) -> Unit, skip: () -> Unit) {
+fun Questions(questions: org.json.JSONArray, answer: (org.json.JSONObject) -> Unit, skip: () -> Unit, enabled: Boolean = true) {
     val c = LocalBaude.current
     val qs = (0 until questions.length()).mapNotNull { questions.optJSONObject(it) }.filter { it.optString("question").isNotBlank() }
     val picked = remember { mutableStateListOf<Set<String>>().apply { repeat(qs.size) { add(emptySet()) } } }
@@ -671,8 +674,8 @@ fun Questions(questions: org.json.JSONArray, answer: (org.json.JSONObject) -> Un
         }
     }
     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-        Button(Wording.Asks.answer, suggested = true, enabled = ready()) { if (ready()) answer(answers()) }
-        Button(Wording.Asks.skip, onClick = skip)
+        Button(Wording.Asks.answer, suggested = true, enabled = enabled && ready()) { if (ready()) answer(answers()) }
+        Button(Wording.Asks.skip, enabled = enabled, onClick = skip)
     }
 }
 

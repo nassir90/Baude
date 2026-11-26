@@ -1299,6 +1299,7 @@ class WindowRemote:
             row.set_orientation(Gtk.Orientation.VERTICAL)
             row.append(QuestionForm(inp["questions"], lambda answers: decide(None, "answer", answers),
                                     lambda: decide(None, "deny")))
+        row.set_sensitive(self.writes_chat())  # (one its host lets this head only read: nothing to answer with)
         for label, beh, always, css in choices:
             b = Gtk.Button(label=label)
             if css:

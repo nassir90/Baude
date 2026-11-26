@@ -5,7 +5,7 @@
   "properties": {
     "shell": {
       "$ref": "AccessRule.json",
-      "description": "A shell on its machine: its terminals (terminal ops) and Multiplex's, through a Bot's terminal tools (multiplex). Not split: what a shell shows is whatever it runs, so watching one is using it."
+      "description": "A shell on its machine: its terminals (terminal ops) and Multiplex's, through a Bot's terminal tools (multiplex)."
     },
     "browser_read": {
       "$ref": "AccessRule.json",
@@ -17,23 +17,23 @@
     },
     "providers": {
       "$ref": "AccessRule.json",
-      "description": "Its inference providers' models, run through the mesh (infer). Not split: running a model is its one use."
+      "description": "Its inference providers' models, run through the mesh (infer)."
     },
     "model_files": {
       "$ref": "AccessRule.json",
-      "description": "Its models' files, read through the mesh (files). Not split: nothing writes them through the mesh."
+      "description": "Its models' files, read through the mesh (files)."
     },
     "spawn": {
       "$ref": "AccessRule.json",
-      "description": "New chats and agents started on it (start, agent). Not split: starting one is its one use."
+      "description": "New chats and agents started on it (start, agent)."
     },
     "manage_read": {
       "$ref": "AccessRule.json",
-      "description": "Its chats as they are, read: listed (and told of their turns' ends), attached to and watched, their transcripts, sizes, subagents, senders, a Bot's picture, memory and tasks read, their folders read (read_file, list_dir, git, signal_names, catalogue), forked from. A chat's own rule (AccessChat's manage_read) goes before this."
+      "description": "Its chats as they are, read: listed (and told of their turns' ends), attached to and watched, their transcripts, sizes, subagents, senders, a Bot's picture, memory and tasks read, their Auto-fix as it is, their folders read (read_file, list_dir, git, signal_names, catalogue), forked from; Record's notebooks here listed, and the edits waiting on their pages (notes, edits). A chat's own rule (AccessChat's manage_read) goes before this."
     },
     "manage_write": {
       "$ref": "AccessRule.json",
-      "description": "Its chats as they are, changed: written in, held messages sent or dropped, asks answered, stopped, renamed, archived, deleted, their folders moved, tools allowed always, made Bots, their Auto-fix, a Bot's memory written and tasks set, run and stopped, a chat adopted, moved to another subscription (with Subscriptions' write). Lets a member read them too. A chat's own rule (AccessChat's manage_write) goes before this."
+      "description": "Its chats as they are, changed: written in, held messages sent or dropped, asks answered, stopped, renamed, archived, deleted, their folders moved, tools allowed always (attach's only where it adds some, its env only where it changes it), made Bots, their Auto-fix turned on or off, a Bot's memory written and tasks set, run and stopped, a chat adopted, moved to another subscription (with Subscriptions' write); Record's notebooks here written, and edits to their pages proposed, revised, withdrawn, decided and adopted (notes' write, edit_*). Lets a member read them too. A chat's own rule (AccessChat's manage_write) goes before this."
     },
     "kube_read": {
       "$ref": "AccessRule.json",
@@ -45,7 +45,7 @@
     },
     "databases": {
       "$ref": "AccessRule.json",
-      "description": "Its machine's databases (databases). Not split: the host only reads them (servers, schemas, rows)."
+      "description": "Its machine's databases (databases)."
     },
     "subscriptions_read": {
       "$ref": "AccessRule.json",
@@ -57,11 +57,11 @@
     },
     "access_read": {
       "$ref": "AccessRule.json",
-      "description": "These rules read (access)."
+      "description": "These rules read (access), and the host's own: its telemetry (telemetry_read) and its Ongoing Feedback listed (fixes' list and shot)."
     },
     "access_write": {
       "$ref": "AccessRule.json",
-      "description": "These rules changed (access_set), and the host itself: stopped, linked and unlinked, deactivated, its telemetry, themes and feedback (quit, link, unlink, deactivate, activate, telemetry_set, theme_save, theme_remove, feedback). Lets a member read them too. A head on its own machine, or one over ssh, may always."
+      "description": "These rules changed (access_set), and the host itself: stopped, linked and unlinked, deactivated, its telemetry, themes and feedback (quit, link, unlink, deactivate, activate, telemetry_set, theme_save, theme_remove, feedback), its Ongoing Feedback acted on (fixes' merge, discard, reopen, reply, fix, stop). Lets a member read them too. A head on its own machine, or one over ssh, may always."
     }
   },
   "required": [

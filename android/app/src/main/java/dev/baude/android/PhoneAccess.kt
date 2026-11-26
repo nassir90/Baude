@@ -29,15 +29,20 @@ object PhoneAccess {
     /** The capability a rule's for: kube_write's kube. */
     fun capability(rule: String): String = rule.removeSuffix("_read").removeSuffix("_write")
 
-    /** The rule each of a chat's ops this host takes is checked for, by its fields (access.OPS'). */
-    fun side(op: String, msg: JSONObject): String = when (op) {
-        Op.ATTACH -> if (Msg.Attach.from(msg).alwaysAllow.isNullOrEmpty()) "manage_read" else "manage_write"
+    /** The rule each of a chat's ops this host takes is checked for, by its fields (access.OPS'; allowed: the tools
+     * the chat allows always already, an attach naming only those being a look). */
+    fun side(op: String, msg: JSONObject, allowed: Set<String> = emptySet()): String = when (op) {
+        Op.ATTACH -> if (addsTools(msg, allowed)) "manage_write" else "manage_read"
         Op.MEMORY -> if (msg.has("text") && !msg.isNull("text") || msg.has("seen") && !msg.isNull("seen")) "manage_write"
             else "manage_read"
         Op.DETACH, Op.TRANSCRIPT, Op.CHAT_SIZE, Op.SUBAGENTS, Op.SENDERS, Op.BOT_PICTURE, Op.READ_FILE, Op.LIST_DIR,
         Op.CATALOGUE -> "manage_read"
         else -> "manage_write" // (input, stop, rename, archive, unarchive, delete, always_allow, bot)
     }
+
+    /** Does an attach's always_allow name tools the chat doesn't allow always yet (allowed)? */
+    fun addsTools(msg: JSONObject, allowed: Set<String>): Boolean =
+        Msg.Attach.from(msg).alwaysAllow.orEmpty().any { it !in allowed }
 
     @Synchronized fun start(root: File) {
         file = File(root, "access.json")
@@ -81,7 +86,7 @@ object PhoneAccess {
     }
 
     /** A rule letting in only those both a and b do. */
-    private fun narrower(a: JSONObject, b: JSONObject): JSONObject {
+    fun narrower(a: JSONObject, b: JSONObject): JSONObject {
         val wa = a.optString("who")
         val wb = b.optString("who")
         if (wa == "everybody" || wb == "nobody") return JSONObject(b.toString())
@@ -114,16 +119,24 @@ object PhoneAccess {
         return rulesOf("manage").filter { a.has(it) }.associateWithTo(LinkedHashMap()) { clean(a.optJSONObject(it)) ?: nobody() }
     }
 
+    /** A chat's rules for managing it as they're checked (mine: own's; host: the host's, by name), access.chat_rules':
+     * each side its own or the host's as it is now, write narrowed to those read lets in. */
+    fun chatRules(mine: Map<String, JSONObject>, host: Map<String, JSONObject>): Map<String, JSONObject> {
+        val read = mine["manage_read"] ?: host["manage_read"] ?: JSONObject().put("who", "everybody")
+        val write = mine["manage_write"] ?: host["manage_write"] ?: JSONObject().put("who", "everybody")
+        return mapOf("manage_read" to JSONObject(read.toString()), "manage_write" to narrower(write, read))
+    }
+
     /** Of rules, the first head may not use (allowed's), if there's one. */
     fun firstRefused(head: Head, vararg names: String): String? = names.firstOrNull { !allowed(head, it) }
 
-    /** May head use what rule name guards? A chat's own rules (meta: its meta) go before the host's for manage's; one
-     * let write is let read. */
+    /** May head use what rule name guards? A chat's own rules (meta: its meta) go before the host's for manage's,
+     * its write within its read (chatRules); one let write is let read. */
     @Synchronized fun allowed(head: Head, name: String, meta: JSONObject? = null): Boolean {
         val member = (head.origin ?: return true).takeIf { head.verified }
-        val mine = if (capability(name) == "manage") own(meta) else emptyMap()
+        if (capability(name) == "manage" && meta != null) return lets(chatRules(own(meta), rules)[name], member)
         val sides = if (name.endsWith("_read")) listOf(name, capability(name) + "_write") else listOf(name)
-        return sides.any { lets(mine[it] ?: rules[it], member) }
+        return sides.any { lets(rules[it], member) }
     }
 
     fun refused(req: Any?, name: String): JSONObject = WireCheck.refused(WireCheck.DENIED, req, named(name)).put("denied", name)
@@ -149,11 +162,15 @@ object PhoneAccess {
     }
 
     /** A chat's own rule name (manage_read or manage_write) set in its meta (rule null: the host's again), its other
-     * side kept with it: false if it isn't one. */
+     * side kept with it (read the host's again: its own write narrowed to it): false if it isn't one. Whatever's kept,
+     * it's checked as chatRules has it. */
     @Synchronized fun setOwn(meta: JSONObject, name: String, rule: JSONObject?): Boolean {
         if (name !in rulesOf("manage")) return false
         val mine = own(meta)
-        if (rule == null) mine.remove(name) else {
+        if (rule == null) {
+            mine.remove(name)
+            if (name == "manage_read") mine["manage_write"]?.let { mine["manage_write"] = narrower(it, rules.getValue("manage_read")) }
+        } else {
             mine[name] = clean(rule) ?: return false
             keptTogether(mine, name, rules)
         }

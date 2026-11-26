@@ -987,8 +987,9 @@ class RemoteProc(claude.ClaudeProc):
             self.dispatch(lambda: done(r))  # (held refused before it went: answered at once)
         self.listing = reply.get("session") or {}
         self.asks = {m["request_id"]: m for m in reply.get("asks") or [] if m.get("request_id")}
+        self.writes = reply.get("writes") is not False  # (false: its host lets this head only read it)
         threading.Thread(target=self._read_remote, daemon=True, name=f"remote-proc-{session_id}").start()
-        self.init_rid = self.control({"subtype": "initialize", "hooks": None})
+        self.init_rid = self.control({"subtype": "initialize", "hooks": None}) if self.writes else None
 
     def _read_remote(self):
         for msg in self.ch:
@@ -1018,7 +1019,8 @@ class RemoteProc(claude.ClaudeProc):
             self.dispatch(lambda: self.on_exit(code))
 
     def send(self, obj):
-        self.ch.send({"op": "input", "session": self.session, "msg": obj})
+        if self.writes:  # (one only read here: nothing of this head's goes to its claude)
+            self.ch.send({"op": "input", "session": self.session, "msg": obj})
 
     def held(self, held_id, send, done):
         """A message its host holds for it (held) sent (send) or dropped, on this connection, so what its claude says

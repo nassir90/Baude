@@ -129,10 +129,11 @@ class _Rules:
         has = all(state["rules"].get(name) is not None for name in self.buttons)
         self.set_visible(has)
         if has:
-            for name, b in self.buttons.items():
-                host_rule = state["rules"][name]
-                b.show((reply.get("chat") or {}).get(name) if self.chat else host_rule, state["members"],
-                       state["editable"], host_rule)
+            own = reply.get("chat") or {}
+            checked = access.chat_rules(own, state["rules"]) if self.chat else state["rules"]  # (a chat's: as it's
+            for name, b in self.buttons.items():  # checked, its write within its read)
+                b.show((checked[name] if name in own else None) if self.chat else checked[name], state["members"],
+                       state["editable"], checked[name])
         return False
 
 

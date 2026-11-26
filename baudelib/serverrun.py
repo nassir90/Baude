@@ -694,16 +694,19 @@ class ServerRunning:
                 return conn.send(self.access.refused(req, "manage_write"))
             if op == "attach":
                 writes = self.access.allowed(conn, "manage_write", s)  # (one that only reads: answers nothing)
-                conn.answers = writes and msg.get("answers", True) is not False  # (false: it won't answer what's asked)
+                if writes and msg.get("answers", True) is not False:  # (false: it won't answer what's asked)
+                    conn.mute.discard(s.id)
+                else:
+                    conn.mute.add(s.id)
                 s.attached_once = True
                 if s.drop_timer is not None:  # (a head back on it: not dropped after all)
                     s.drop_timer.cancel()
                     s.drop_timer = None
-                if isinstance(msg.get("always_allow"), list):  # (tools a head always allows: added to those allowed
-                    s.always_allow |= {t for t in msg["always_allow"] if isinstance(t, str)}  # here, kept in memory)
-                    self.changed()
-                if isinstance(msg.get("env"), dict):  # (a head here: its claude's environment, from its next start)
-                    s.env = clean_env(msg["env"])
+                if isinstance(msg.get("always_allow"), list) and writes:  # (tools a head always allows: added to
+                    s.always_allow |= {t for t in msg["always_allow"] if isinstance(t, str)}  # those allowed here,
+                    self.changed()  # kept in memory)
+                if isinstance(msg.get("env"), dict) and writes:  # (a head here: its claude's environment, from its
+                    s.env = clean_env(msg["env"])  # next start)
                 s.viewers.add(conn)
                 autofix.held(self, s, conn)  # (Auto-fix stopped while nobody was here: said now)
                 if msg.get("live"):
@@ -711,11 +714,12 @@ class ServerRunning:
                 if msg.get("app_tools") and writes and s.app_tools is not None:  # (its head back: its tools carried to
                     # it again)
                     s.app_tools.bind(conn)
-                return reply("attached", session=s.listing(), asks=list(s.asks.values()))
-            if op == "detach":  # (meant: an ephemeral session its head's done with dropped at once, not after its grace)
-                s.viewers.discard(conn)
+                return reply("attached", session=s.listing(), asks=list(s.asks.values()), writes=writes)
+            if op == "detach":  # (meant: an ephemeral session its head's done with dropped at once, not after its grace;
+                s.viewers.discard(conn)  # one that only reads it isn't its head: its grace kept)
                 s.live.discard(conn)
-                self.drop_ephemeral(s, meant=True)
+                conn.mute.discard(s.id)
+                self.drop_ephemeral(s, meant=self.access.allowed(conn, "manage_write", s))
                 return None
             if op == "input":
                 try:
@@ -859,15 +863,15 @@ class ServerRunning:
         Agent Management (access.OPS) for the rest."""
         if conn.member is None:
             return None
-        side = access.rule_of(msg)
-        side = "manage_write" if msg.get("op") == "accounts" else side if access.capability(side or "") == "manage" \
-            else "manage_read"
         for key in ("session", "fork_from", "adopt"):
             if isinstance(sid := msg.get(key), str) and sid:
                 with self.lock:
                     s = self.sessions.get(sid) or self.desktop.chats.get(sid)
-                if not self.access.allowed(conn, want := "manage_write" if key == "adopt" else side, s):
-                    return want
+                side = access.rule_of(msg, s)
+                side = "manage_write" if msg.get("op") == "accounts" or key == "adopt" else side \
+                    if access.capability(side or "") == "manage" else "manage_read"
+                if not self.access.allowed(conn, side, s):
+                    return side
         return None
 
     def access_op(self, conn, msg, reply):

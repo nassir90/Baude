@@ -106,7 +106,8 @@ class ServerSessions:
             self.sessions[s.id] = s
             self.save(s)
             if conn is not None and params.get("attach"):
-                conn.answers = params.get("answers", True) is not False
+                if params.get("answers", True) is False:
+                    conn.mute.add(s.id)
                 s.attached_once = True
                 s.viewers.add(conn)
                 s.live.add(conn)
@@ -709,7 +710,7 @@ class ServerSessions:
             with self.lock:
                 if rid not in s.asks or proc is not s.proc:
                     return
-                if any(v.answers for v in s.viewers):  # (someone's there who answers: given as long again)
+                if any(s.id not in v.mute for v in s.viewers):  # (someone's there who answers: given as long again)
                     return self.ask_timer(s, proc, rid)
                 ask = s.asks.pop(rid)
                 allow = s.meta.get("ask_default") == "allow"

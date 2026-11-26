@@ -461,6 +461,7 @@ abstract class Screens(private val theme: String) {
                         org.json.JSONObject().put("app", "baude").put("pid", 102).put("cpu", 6.2).put("rss", 642_777_088L),
                         org.json.JSONObject().put("app", "record").put("pid", 103).put("cpu", 0.3).put("rss", 231_735_296L),
                         org.json.JSONObject().put("app", "emission").put("pid", 104).put("cpu", 3.8).put("rss", 412_090_368L),
+                        org.json.JSONObject().put("app", "emission").put("pid", 106).put("cpu", 1.1).put("rss", 389_021_696L),
                         org.json.JSONObject().put("app", "multiplex").put("pid", 105).put("cpu", 0.6).put("rss", 98_566_144L)))))))
                 "profiles" -> out.put("profiles", org.json.JSONArray(listOf(org.json.JSONObject().put("at", now - 30)
                     .put("from", now - 60).put("app", "host").put("lines", org.json.JSONArray(listOf(

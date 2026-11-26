@@ -372,29 +372,43 @@ def model_row(value, models, *values):
     return r
 
 
-def logo(app):
+def logo(app, svgs):
     """The logo of a process's app (APP_LOGOS), LOGO_PX square: Baude's and Record's in the accent picked, as their
-    launchers draw them."""
+    launchers draw them. svgs: {logo: its SVG} of this build of the rows, made as it's asked for (the settings are
+    read once for them)."""
     from baudelib import applist, icons
     import widgets
-    name = APP_LOGOS[app]
-    svg = widgets.logo(name) if name in ("baude", "record") else icons.svg("apps", name)
-    key = (name, svg)
+    name = APP_LOGOS.get(app, "baude")
+    if name not in svgs:
+        svgs[name] = widgets.logo(name) if name in ("baude", "record") else icons.svg("apps", name)
+    key = (name, svgs[name])
     if key not in _LOGOS:
         from gi.repository import Gdk
-        _LOGOS[key] = Gdk.Texture.new_from_bytes(GLib.Bytes.new(applist.icon_png(svg, LOGO_PX * 4, mac=False)))
+        _LOGOS[key] = Gdk.Texture.new_from_bytes(GLib.Bytes.new(applist.icon_png(key[1], LOGO_PX * 4, mac=False)))
     return Gtk.Image(paintable=_LOGOS[key], pixel_size=LOGO_PX)
 
 
 _LOGOS = {}  # ((logo, its SVG): its texture, drawn once)
 
 
-def proc_row(p):
-    """A process's row: its app's logo, its name, and its CPU and memory after them."""
-    r = row(wording.say(APP_NAMES[p["app"]]), wording.say(
-        "telemetry.cpu_rss", cpu="–" if p.get("cpu") is None else f"{p['cpu']:.1f}", rss=said_size(p.get("rss"))))
-    r.add_prefix(logo(p["app"]))
-    return r
+def proc_rows(procs):
+    """The rows of procs (sorted): each's app's logo, its name (numbered where the app has several: "Emission (2)"),
+    and its CPU and memory after them."""
+    svgs, count, seen = {}, {}, {}
+    for p in procs:
+        count[p.get("app")] = count.get(p.get("app"), 0) + 1
+    rows = []
+    for p in procs:
+        app = p.get("app")
+        name = wording.say(APP_NAMES[app]) if app in APP_NAMES else str(app)
+        if count[app] > 1:
+            seen[app] = seen.get(app, 0) + 1
+            name = wording.say("telemetry.process_n", name=name, n=seen[app])
+        r = row(name, wording.say(
+            "telemetry.cpu_rss", cpu="–" if p.get("cpu") is None else f"{p['cpu']:.1f}", rss=said_size(p.get("rss"))))
+        r.add_prefix(logo(app, svgs))
+        rows.append(r)
+    return rows
 
 
 def row(title, *values, sensitive=True, mono=False):
@@ -575,7 +589,7 @@ class Page(Adw.PreferencesPage):
         procs = sorted((p for p in s.get("procs") or [] if p.get("app") in APP_NAMES),
                        key=lambda p: (list(APP_NAMES).index(p["app"]), p.get("pid") or 0))
         if procs:
-            self.group("processes", wording.say("side_panel.processes"), [proc_row(p) for p in procs])
+            self.group("processes", wording.say("side_panel.processes"), proc_rows(procs))
         else:
             self.drop("processes")
         return False

@@ -1,7 +1,7 @@
 """telemetry — a host's: what the apps on its machine saw done in chats (the telemetry op's events, each kept as it's
-told, at its own time), samples of its machine every SAMPLE_S (load, memory, swap, memory pressure, its own and each
-app's on it CPU and memory: Baude's, Record's, Emission's, Multiplex's), and line profiles (lineprofile: its own, and those its apps send), while it's on; all read
-back over a stretch by telemetry_read, from any member of the mesh, and switched by telemetry_set (Settings →
+told, at its own time), samples of its machine every SAMPLE_S (load, memory, swap, memory pressure, and the CPU and memory of
+its own process and of each app's on it: Baude's, Record's, Emission's, Multiplex's), and line profiles (lineprofile:
+its own, and those its apps send), while it's on; all read back over a stretch by telemetry_read, from any member of the mesh, and switched by telemetry_set (Settings →
 Telemetry, any head). Kept in the host's state folder only, telemetry/<events|metrics|profiles>/YYYY-MM-DD.jsonl (the
 day of each line's time, this machine's), and telemetry/state.json (on, and what each process profiles). Nothing here
 sends it anywhere else.
@@ -88,6 +88,30 @@ def _ps_time(text):
     for part in rest.split(":"):
         total = total * 60 + float(part)
     return total + (int(days) * 86400 if days else 0)
+
+
+def commands(pids):
+    """{pid: its command line} of those still running."""
+    out = {}
+    if not pids:
+        return out
+    if sys.platform == "darwin":
+        for pid in pids:
+            try:
+                text = subprocess.run(["ps", "-o", "command=", "-p", str(pid)], capture_output=True, text=True,
+                                      timeout=5).stdout.strip()
+            except (OSError, subprocess.TimeoutExpired):
+                continue
+            if text:
+                out[pid] = text
+        return out
+    for pid in pids:
+        try:
+            with open(f"/proc/{pid}/cmdline", "rb") as f:
+                out[pid] = f.read().replace(b"\0", b" ").decode("utf-8", "replace")
+        except OSError:
+            continue
+    return out
 
 
 def proc_stats(pids):
@@ -358,12 +382,15 @@ class Telemetry:
     # ---- sampling
     def sample(self, now=None):
         """One sample of the machine and its processes (a TelemetrySample)."""
-        now = time.time() if now is None else now
         try:
             found = {pid: app for pid, app in self.found().items() if app in PROCS}
         except Exception as e:  # noqa: BLE001 (what couldn't be found: sampled without it)
             self.log(f"telemetry: {type(e).__name__}: {e}")
             found = {}
+        cmds = commands(sorted(found))
+        found = {pid: app for pid, app in found.items() if app in cmds.get(pid, "").lower()}  # (a pid a
+        # process left, taken by another: not sampled as it)
+        now = time.time() if now is None else now
         with self.lock:
             pids = {**found, **self.pids}
         stats = proc_stats(sorted(pids))

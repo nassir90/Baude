@@ -233,8 +233,9 @@ private fun AppLogo(name: String, size: androidx.compose.ui.unit.Dp) {
                 val mode = if (clear) BlendMode.Clear else BlendMode.SrcOver
                 sh.fill?.let { drawPath(logoPath(sh.d), colour(it), sh.alpha, blendMode = mode) }
                 sh.stroke?.let { drawPath(logoPath(sh.d), colour(it), sh.alpha, Stroke(sh.width,
-                    cap = if (sh.round) StrokeCap.Round else StrokeCap.Butt,
-                    join = if (sh.round) StrokeJoin.Round else StrokeJoin.Miter), blendMode = mode) }
+                    cap = when (sh.cap) { "round" -> StrokeCap.Round; "square" -> StrokeCap.Square; else -> StrokeCap.Butt },
+                    join = when (sh.join) { "round" -> StrokeJoin.Round; "bevel" -> StrokeJoin.Bevel; else -> StrokeJoin.Miter }),
+                    blendMode = mode) }
             }
             for (sh in logo.shapes) {
                 if (sh.cut.isEmpty()) { draw(sh); continue }
@@ -247,11 +248,13 @@ private fun AppLogo(name: String, size: androidx.compose.ui.unit.Dp) {
     }
 }
 
-/** A process's row (telemetryview.proc_row): its app's logo, its name, its CPU and memory after them. */
+/** A process's row (telemetryview.proc_rows): its app's logo, its name (numbered where its app has several), its CPU
+ * and memory after them. */
 @Composable
-private fun ProcessRow(p: Msg.TelemetryProc) {
+private fun ProcessRow(p: Msg.TelemetryProc, n: Int?) {
     val c = LocalBaude.current
-    ActionRow(APP_NAMES[p.app]?.invoke() ?: p.app.orEmpty(), null,
+    val name = APP_NAMES[p.app]?.invoke() ?: p.app.orEmpty()
+    ActionRow(if (n == null) name else Wording.Telemetry.processN(name = name, n = n), null,
         prefix = { AppLogo(APP_LOGOS[p.app] ?: "baude", 16.dp.icon) },
         suffix = { Text(Wording.Telemetry.cpuRss(cpu = p.cpu?.let { String.format(Locale.ROOT, "%.1f", it.toDouble()) } ?: "–",
             rss = saidSize(p.rss?.toLong())), style = Type.body, color = c.dim, maxLines = 1) })
@@ -343,7 +346,11 @@ fun TelemetryPage() {
                 .sortedWith(compareBy({ order.indexOf(it.app) }, { it.pid?.toLong() ?: 0L }))
             if (procs.isNotEmpty()) {
                 Heading(Wording.SidePanel.processes)
-                BoxedList(procs, "") { ProcessRow(it) }
+                val numbered = procs.mapIndexed { i, p ->
+                    val same = procs.filter { it.app == p.app }
+                    p to if (same.size > 1) procs.subList(0, i).count { it.app == p.app } + 1 else null
+                }
+                BoxedList(numbered, "") { (p, n) -> ProcessRow(p, n) }
             }
         }
         if (hostId != "phone" && state != null) Profiling(state, profiles, deps, app, { app = it }, { asked++ }) { set(it) }

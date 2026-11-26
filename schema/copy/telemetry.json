@@ -20,6 +20,7 @@
     "stalled": "{$percent}% Stalled",
     "size_gb": "{$gb} GB",
     "host_process": "Host Process",
+    "process_n": "{$name} ({$n})",
     "cpu_rss": "{$cpu}% · {$rss}",
     "line_profiling": "Line Profiling",
     "process": "Process",

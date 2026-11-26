@@ -974,10 +974,10 @@ abstract class BaudeIcons : DefaultTask() {
         out.append("package dev.baude.android\n\n")
         out.append("/** The apps' logos (schema/icons/apps), in their colours, on a 128 square. */\n")
         out.append("object AppLogos {\n")
-        out.append("    /** A shape: its path, its fill or its stroke (#AARRGGBB), the stroke's width and whether its caps and joins are\n")
-        out.append("     * round, its opacity, and what's cut from it (a mask's black). */\n")
+        out.append("    /** A shape: its path, its fill or its stroke (#AARRGGBB), the stroke's width, cap (round, square or butt) and\n")
+        out.append("     * join (round, bevel or miter), its opacity, and what's cut from it (a mask's black). */\n")
         out.append("    class Shape(val d: String, val fill: Long? = null, val stroke: Long? = null, val width: Float = 1f,\n")
-        out.append("                val round: Boolean = false, val alpha: Float = 1f, val cut: List<Shape> = emptyList())\n\n")
+        out.append("                val cap: String = \"butt\", val join: String = \"miter\", val alpha: Float = 1f, val cut: List<Shape> = emptyList())\n\n")
         out.append("    /** A logo: its tile's colour (its first rect's: what an accent recolours) and its shapes, in order. */\n")
         out.append("    class Logo(val tile: Long, val shapes: List<Shape>)\n\n")
         out.append("    /** Each logo, by its file's name. */\n")
@@ -1000,7 +1000,10 @@ abstract class BaudeIcons : DefaultTask() {
                 val args = arrayListOf("\"$d\"")
                 hex(mine["fill"] ?: if (mine["stroke"] == null) "#000" else null)?.let { args.add("fill = $it") }
                 hex(mine["stroke"])?.let { args.add("stroke = $it"); args.add("width = ${num(mine["stroke-width"] ?: "1")}f") }
-                if (mine["stroke-linecap"] == "round" || mine["stroke-linejoin"] == "round") args.add("round = true")
+                if (mine["stroke"] != null) {
+                    mine["stroke-linecap"]?.takeIf { it in setOf("round", "square", "butt") }?.let { args.add("cap = \"$it\"") }
+                    mine["stroke-linejoin"]?.takeIf { it in setOf("round", "bevel", "miter") }?.let { args.add("join = \"$it\"") }
+                }
                 mine["opacity"]?.let { args.add("alpha = ${num(it)}f") }
                 val ref = e.attr("mask")
                 if (ref != null) {

@@ -78,11 +78,18 @@ def grow():  # (a tool card's result changing: its panel's picture made again)
         target.set_result(f"{k[0]} passed", False)
     elif hasattr(target, "said"):
         target.said(f"{k[0]}")
+    elif isinstance(target, Gtk.Label):
+        target.set_label(f"{k[0]} passed")
     else:
         target.queue_draw()
 if XMAS:
     pump(0.5)
-    shown = [n.widget for n in v.nodes.values() if n.widget is not None and hasattr(n.widget, "said")]
-    target = shown[0] if shown else next(n.widget for n in v.nodes.values() if n.widget is not None)
+    shown = [n.widget for n in v.nodes.values() if isinstance(n.widget, scenehost.ChatPage) and v.shown(n)]
+    if shown:  # (a letter's chat page: its status line changing)
+        import test_baude
+        test_baude.wait_for(lambda: shown[0].win is not None, "the letter's page")
+        target = shown[0].win.status
+    else:
+        target = next(n.widget for n in v.nodes.values() if n.widget is not None)
 changing = measure(3.0, grow)
 print("RESULT " + json.dumps({"n": N, "scene": "christmas" if XMAS else "grid", "nodes": len(v.nodes), "panels": sum(n.face is not None and v.shown(n) for n in v.nodes.values()), "scale": win.get_scale_factor(), "bloom": "bloom" in scene, "renderer": type(win.get_renderer()).__name__, "still": still, "one_changing_10hz": changing}), flush=True)

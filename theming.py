@@ -125,6 +125,9 @@ def _settings_read():
 CSS = tokens.css("""
 .update-bar button { font-weight: normal; }  /* (the text's own colour: white on a dark sidebar, as its rows are) */
 .cut-note { margin-top: 2px; }
+/* (☰'s usage row: its words the menu's, in line with its items') */
+.baude-menu-usage { font-weight: normal; padding-left: 28px; }
+.baude-menu-usage .heading { font-weight: bold; }
 .cut-note button { min-height: 0; padding: 1px 8px; font-size: 0.9em; }
 /* One look for Baude and Record: the frame round the work (the bars, the lists on the left, the panels on the
    right: one colour, no lines between them), the inside where it's read and written (a box set into the frame),

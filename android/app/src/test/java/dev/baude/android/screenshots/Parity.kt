@@ -244,6 +244,18 @@ abstract class Parity(private val theme: String, private val scene: String) {
         }
         if (op == "kube" || op == "databases" || op == "docker") return hostAnswer(msg)
         when (op) {
+            "accounts" -> { // (the host's Claude subscriptions: Work the current one, its usage, as hostaccounts says them)
+                val now = System.currentTimeMillis() / 1000
+                fun limits(five: Int, week: Int) = JSONArray(listOf(
+                    JSONObject().put("name", "Five hour").put("key", "five_hour").put("percent", five).put("resets", now + 2 * 3600),
+                    JSONObject().put("name", "Seven day").put("key", "seven_day").put("percent", week).put("resets", now + 3 * 86400)))
+                return reply("what" to msg.optString("what"),
+                    "accounts" to JSONArray(listOf(JSONObject().put("id", "w1").put("provider", "claude").put("name", "Work")
+                        .put("kind", "folder"))),
+                    "defaults" to JSONObject().put("claude", "w1").put("codex", ""), "claude_cli" to true,
+                    "last_usage" to JSONObject().put("w1", JSONObject().put("usage", limits(38, 61)).put("read", now - 600)),
+                    "usage" to if (msg.optString("what") == "usage") limits(42, 63) else null)
+            }
             "transcript" -> {
                 val from = msg.optLong("offset", 0).coerceIn(0, shown.size.toLong()).toInt()
                 val part = shown.copyOfRange(from, shown.size)

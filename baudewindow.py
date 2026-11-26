@@ -263,6 +263,8 @@ class BaudeWindow(WindowView, WindowProc, WindowDrafts, WindowSignal, WindowRemo
         tools.append(wording.say("window.database_schemas"), "win.dbschema")
         tools.append(wording.say("multiplex.terminal_menu"), "win.terminal")
         menu.append_section(None, tools)
+        usage = Gio.Menu()  # (the current subscription's usage: subscriptionpage.attach_menu_usage)
+        menu.append_section(None, usage)
         app_menu = Gio.Menu()
         item = Gio.MenuItem.new(wording.say("window.settings"), "win.settings")
         item.set_attribute_value("accel", GLib.Variant.new_string(SETTINGS_KEY))  # (its key, shown beside it)
@@ -279,6 +281,8 @@ class BaudeWindow(WindowView, WindowProc, WindowDrafts, WindowSignal, WindowRemo
         self.main_menu = menu
         menu_btn = Gtk.MenuButton(icon_name="open-menu-symbolic", menu_model=menu,
                                   tooltip_text=wording.say("chat_header.menu"))
+        import subscriptionpage
+        subscriptionpage.attach_menu_usage(self, menu_btn, usage)  # (the current subscription's usage, Record's too)
         self.signal_btn = Gtk.MenuButton(icon_name=themed_icon("insert-link-symbolic", "emblem-symbolic-link-symbolic"),
                                          popover=self.signal_menu())
         header.pack_end(menu_btn)

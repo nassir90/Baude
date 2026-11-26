@@ -17,7 +17,7 @@ class MainActivity : ComponentActivity() {
     private val screen = mutableStateOf<List<String>>(listOf("contacts"))
 
     /** The screens laid over a chat, opened with its host and session: back goes to the chat. */
-    private val OVER = setOf("feedback", "settings", "changelog", "mesh", "fixes", "databases", "kubernetes", "docker", "terminal")
+    private val OVER = setOf("feedback", "settings", "subscriptions", "changelog", "mesh", "fixes", "databases", "kubernetes", "docker", "terminal")
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -55,9 +55,9 @@ class MainActivity : ComponentActivity() {
                     }
                     "phone" -> PhoneScreen(::back, open = { go(listOf("chat", "phone", it)) })
                     "feedback" -> FeedbackScreen(feedbackContext(now), ::back)
-                    "settings" -> SettingsScreen(::back, feedback = {
+                    "settings", "subscriptions" -> SettingsScreen(::back, feedback = {
                         go(if (now.size == 3) listOf("feedback", now[1], now[2]) else listOf("feedback"))
-                    }, chat = now.drop(1))
+                    }, chat = now.drop(1), page = if (now[0] == "subscriptions") 1 else 0)
                     "changelog" -> ChangelogScreen(null, ::back)
                     "mesh" -> MeshScreen(::back)
                     "databases" -> DatabaseScreen(now[1], ::back)
@@ -69,7 +69,7 @@ class MainActivity : ComponentActivity() {
                         feedback = { go(listOf("feedback")) }, phone = { go(listOf("phone")) },
                         settings = { go(listOf("settings")) }, mesh = { go(listOf("mesh")) },
                         changelog = { go(listOf("changelog")) }, fixes = { go(listOf("fixes")) },
-                        tool = { screen, host -> go(listOf(screen, host)) },
+                        tool = { screen, host -> go(listOf(screen, host)) }, subscriptions = { go(listOf("subscriptions")) },
                         note = { if (Shares.pending.value != null) ShareBanner(::back) })
                 }
                 HostKeyAsk()

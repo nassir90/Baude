@@ -1087,7 +1087,7 @@ class FeedbackHost:
         dialogs = [d for d in self.get_dialogs() if not isinstance(d, (FeedbackDialog, RegionEditor))]
         if dialogs:
             return dialogs[-1]
-        return next((v for v in (self.lightbox, self.terminal, self.kube, self.schema) if v.get_visible() and
+        return next((v for v in (self.lightbox, self.terminal, self.kube, self.docker, self.schema) if v.get_visible() and
                      v.get_root() is self), None)  # (a view out in a window of its own isn't over this one)
 
     def start_feedback_capture(self, dialog):

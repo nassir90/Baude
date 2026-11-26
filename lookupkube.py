@@ -439,7 +439,8 @@ def _docker(*args, stdin=None, timeout=30):
     if "docker" in deps.hidden():  # (fault injection: as if it weren't there)
         raise RuntimeError("docker: not found")
     try:
-        p = subprocess.run(["docker", *args], input=stdin, capture_output=True, text=True, timeout=timeout)
+        p = subprocess.run([deps.program("docker") or "docker", *args], input=stdin, capture_output=True, text=True,
+                           timeout=timeout)
     except (OSError, subprocess.TimeoutExpired) as e:
         raise RuntimeError(f"docker: {e}") from e
     if p.returncode:

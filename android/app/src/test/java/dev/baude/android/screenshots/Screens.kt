@@ -223,6 +223,44 @@ abstract class Screens(private val theme: String) {
         screen("40b-missing-docker")
     }
 
+    // (☰ → Docker on workshop: colima's running containers (a Compose project, shop, and a redis), a row inspected as
+    // YAML, the categories, and Remove… asked first)
+    @Test fun docker() {
+        dockerFixture()
+        show { dev.baude.android.DockerScreen(Mesh.hosts.first().id, {}) }
+        laidOut()
+        screen("41a-docker")
+    }
+
+    @Test fun dockerInspect() {
+        dockerFixture()
+        show { dev.baude.android.DockerScreen(Mesh.hosts.first().id, {}) }
+        laidOut()
+        tap("shop-api-1")
+        laidOut()
+        screen("41b-docker-inspect")
+    }
+
+    @Test fun dockerCategories() {
+        dockerFixture()
+        show { dev.baude.android.DockerScreen(Mesh.hosts.first().id, {}) }
+        laidOut()
+        tap(dev.baude.android.Wording.Browser.back)
+        laidOut()
+        screen("41c-docker-categories")
+    }
+
+    @Test fun dockerRemove() {
+        dockerFixture()
+        show { dev.baude.android.DockerScreen(Mesh.hosts.first().id, {}) }
+        laidOut()
+        tap(dev.baude.android.Wording.Common.removeEllipsis)
+        laidOut()
+        tap(dev.baude.android.Wording.Common.removeEllipsis, nth = 4)
+        laidOut()
+        screen("41d-docker-remove")
+    }
+
     @Test fun dependencies() {
         missingFixture()
         show { SettingsScreen({}, {}, page = 2) }
@@ -432,6 +470,44 @@ abstract class Screens(private val theme: String) {
             }
             out
         }
+    }
+
+    private fun dockerFixture() {
+        fun j(vararg kv: Pair<String, Any?>) = org.json.JSONObject().apply { for ((k, v) in kv) put(k, v ?: org.json.JSONObject.NULL) }
+        fun a(vararg v: Any?) = org.json.JSONArray(v.toList())
+        val shell = a("docker", "--context", "colima", "exec", "-it", "x", "sh")
+        fun ctr(name: String, image: String, status: String, tone: String, ports: String, project: String, age: String, secs: Int,
+                running: Boolean = true) = j("id" to name, "name" to name, "cells" to a(name, image, status, ports, project, age),
+            "keys" to a(name, image, status, ports, project, secs), "tones" to a("", "", tone, "", "", ""), "tips" to a("", "", "", "", "", ""),
+            "actions" to (if (running) a("stop", "restart", "remove") else a("start", "remove")), "logs" to true,
+            "shell" to if (running) shell else a(), "running" to running)
+        val rows = a(ctr("shop-api-1", "shop/api:1.4", "Up 2 hours", "ok", "0.0.0.0:8080->80/tcp", "shop", "2h05m", 7500),
+            ctr("shop-db-1", "postgres:16", "Up 2 hours (healthy)", "ok", "5432/tcp", "shop", "2h06m", 7560),
+            ctr("shop-worker-1", "shop/worker:1.4", "Restarting (1) 4 seconds ago", "warn", "", "shop", "2h05m", 7500),
+            ctr("cache", "redis:7", "Up 3 days", "ok", "6379/tcp", "", "3d", 264000))
+        fun page(t: String, k: String, w: String) = j("title" to t, "key" to k, "what" to w)
+        val sections = a(j("title" to "Containers", "icon" to "baude-kube-workloads-symbolic",
+                "pages" to a(page("Running", "running", "running containers"), page("All", "containers", "containers"))),
+            j("title" to "Images", "icon" to "package-x-generic-symbolic", "pages" to a(page("Images", "images", "images"))),
+            j("title" to "Volumes", "icon" to "baude-kube-storage-symbolic", "pages" to a(page("Volumes", "volumes", "volumes"))),
+            j("title" to "Networks", "icon" to "baude-kube-network-symbolic", "pages" to a(page("Networks", "networks", "networks"))),
+            j("title" to "Compose Projects", "icon" to "view-grid-symbolic", "pages" to a(page("Compose Projects", "compose", "Compose projects"))))
+        val cols = a(j("title" to "Name", "kind" to "name"), j("title" to "Image"), j("title" to "Status", "kind" to "status"),
+            j("title" to "Ports"), j("title" to "Project"), j("title" to "Age", "kind" to "age"))
+        val yaml = "- Id: 3f9c2a1b7d4e8f60\n  Name: /shop-api-1\n  State:\n    Status: running\n    Running: true\n" +
+            "  Config:\n    Image: shop/api:1.4\n    Env:\n      - \"PORT=80\"\n    Labels:\n      com.docker.compose.project: shop\n"
+        FixtureConnection.up(activity, Mesh.hosts.first()) { m ->
+            if (m.optString("op") != "docker") null
+            else org.json.JSONObject().put("op", "docker").put("req", m.opt("req")).put("what", m.optString("what")).apply {
+                when (m.optString("what")) {
+                    "contexts" -> put("contexts", a(j("name" to "colima", "current" to true), j("name" to "default", "current" to false)))
+                        .put("sections", sections)
+                    "list" -> put("columns", cols).put("rows", rows)
+                    "inspect" -> put("text", yaml).put("file", "inspect.yaml")
+                }
+            }
+        }
+        Mesh.app.getSharedPreferences("settings", android.content.Context.MODE_PRIVATE).edit().putString("docker_inspect", "yaml").apply()
     }
 
     private fun missingFixture() {

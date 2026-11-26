@@ -148,7 +148,7 @@ object PhoneAccess {
         return if (cap == name) said
             else Wording.Access.side(capability = said, side = if (name.endsWith("_read")) Wording.Access.read else Wording.Access.write)
     }
-    private val COPY = mapOf("shell" to "kube.shell", "providers" to "deps.providers", "kube" to "window.kubernetes",
+    private val COPY = mapOf("shell" to "kube.shell", "providers" to "deps.providers", "kube" to "window.kubernetes", "docker" to "window.docker",
         "subscriptions" to "subscriptions.title")
 
     /** Rule name set and kept, its other side kept with it: false if it isn't one. */

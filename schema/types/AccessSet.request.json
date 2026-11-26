@@ -28,6 +28,8 @@
             "manage_write",
             "kube_read",
             "kube_write",
+            "docker_read",
+            "docker_write",
             "databases",
             "subscriptions_read",
             "subscriptions_write",

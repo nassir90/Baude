@@ -282,7 +282,7 @@ class Window(RecordHosts, Adw.ApplicationWindow, feedback.FeedbackHost, viewers.
         view.append(wording.say("meta_settings.full_width"), "win.fullwidth")
         menu.append_section(None, view)
         tools = Gio.Menu()  # (Baude's views over the window; Files and Git are in the right bar, code in tabs)
-        for title, page in ((wording.say("window.kubernetes"), "kube"),
+        for title, page in ((wording.say("window.kubernetes"), "kube"), (wording.say("window.docker"), "docker"),
                             (wording.say("window.database_schemas"), "db")):
             tools.append(title, f"win.viewer::{page}")
         tools.append(wording.say("multiplex.terminal_menu"), "win.viewer::terminal")
@@ -340,7 +340,7 @@ class Window(RecordHosts, Adw.ApplicationWindow, feedback.FeedbackHost, viewers.
         keys = Gtk.ShortcutController(scope=Gtk.ShortcutScope.GLOBAL)  # (as Baude's: its keys for the same things)
         # (as Baude's, before the focused widget, as macOS's text boxes take Ctrl+B / Ctrl+F as Emacs's back / forward;
         # ⌘F too, as Ctrl+F: the find bar of the text the focus is in first, else what's over it, else the tab's)
-        find = lambda: find_in_focus(self) or self.kube.find() or self.schema.start_find() or \
+        find = lambda: find_in_focus(self) or self.kube.find() or self.docker.find() or self.schema.start_find() or \
             ((chat := chatfind.ChatFind.for_focus(self)) is not None and chat.open()) or self.find_in_code()
         widgets.first_keys(self, (("<Control>b F9", lambda: self.left_slide.toggle()),
                                   (" ".join(m + "f" for m in widgets.ZOOM_MODS), find)))
@@ -439,7 +439,7 @@ class Window(RecordHosts, Adw.ApplicationWindow, feedback.FeedbackHost, viewers.
             if os.path.exists(chat.get("path") or ""):
                 self.open_chat(chat["path"], select=False, present=False)
         self.apply_full_width(self.store.full_width)
-        self.connect("close-request", lambda *_: self.store.save_now() and False)
+        self.connect("close-request", self._closing)
         self.connect("notify::is-active", Window._activated)  # (a plain function: no closure over the window)
         self.store.sender = self.send_notes
         self.host_dd.set_choices(self.note_hosts())
@@ -453,6 +453,11 @@ class Window(RecordHosts, Adw.ApplicationWindow, feedback.FeedbackHost, viewers.
         theming.warm_shaders(self)  # (after its first frame)
 
     BOOKS_WIDTH = DiaryEditor.PAGES_WIDTH  # the notebooks' column, in px: the pages' column's width
+
+    def _closing(self, *_):
+        self.kube.close()
+        self.docker.close()  # (their timers and follows stop with the window)
+        return self.store.save_now() and False
 
     def _side_moving(self, on):
         """A side bar's started moving (sliding, or dragged), or it's still again. A chat read in the tab shown (Reader)
@@ -713,7 +718,7 @@ class Window(RecordHosts, Adw.ApplicationWindow, feedback.FeedbackHost, viewers.
     def capture_areas(self):
         """The window's parts, by name, for the text a feedback capture records."""
         areas = {self.notebook_list: "notebooks", self.pages.index: "pages", self.chat: "conversation",
-                 self.kube: "Kubernetes", self.schema: "databases", self.lightbox: "image",
+                 self.kube: "Kubernetes", self.docker: "Docker", self.schema: "databases", self.lightbox: "image",
                  self.terminal: "terminal"}
         for child in self.tabs.children():
             if isinstance(child, DiaryEditor):

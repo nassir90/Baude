@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "A Docker context the host can reach: one of docker context ls, or Colima's or Podman's socket found besides.",
+  "properties": {
+    "name": {
+      "type": "string",
+      "description": "Its name."
+    },
+    "current": {
+      "type": "boolean",
+      "description": "docker's current context."
+    }
+  },
+  "required": [
+    "name"
+  ],
+  "additionalProperties": false
+}

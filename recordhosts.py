@@ -808,6 +808,8 @@ class RecordHosts:
         """☰ → Kubernetes…, Databases… or Terminal (over the window), or a page of the right bar's (files, git)."""
         if page == "kube":
             self.kube.open()
+        elif page == "docker":
+            self.docker.open()
         elif page == "db":
             self.schema.open()
         elif page == "terminal":

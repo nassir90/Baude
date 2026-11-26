@@ -46,6 +46,7 @@ from pickers import PALETTE_KEY, HostPicker  # noqa: E402,F401
 from theming import settings_size, settings_switch  # noqa: E402,F401
 from codeview import find_in_focus  # noqa: E402,F401
 from kubeview import KubeView  # noqa: E402,F401
+from dockerview import DockerView  # noqa: E402
 import terminalpane  # noqa: E402  (☰ → Terminal: Record's too)
 from schemaview import SchemaView  # noqa: E402,F401
 from startup import LAUNCHER, apply_scales, record_item, take_restart_state  # noqa: E402
@@ -258,6 +259,7 @@ class BaudeWindow(WindowView, WindowProc, WindowDrafts, WindowSignal, WindowRemo
         menu.append_section(None, view)
         tools = Gio.Menu()
         tools.append(wording.say("window.kubernetes"), "win.kube")
+        tools.append(wording.say("window.docker"), "win.docker")
         tools.append(wording.say("window.database_schemas"), "win.dbschema")
         tools.append(wording.say("multiplex.terminal_menu"), "win.terminal")
         menu.append_section(None, tools)
@@ -306,6 +308,9 @@ class BaudeWindow(WindowView, WindowProc, WindowDrafts, WindowSignal, WindowRemo
         kube = Gio.SimpleAction.new("kube", None)
         kube.connect("activate", lambda *_: self.kube.open())
         self.add_action(kube)
+        docker = Gio.SimpleAction.new("docker", None)
+        docker.connect("activate", lambda *_: self.docker.open())
+        self.add_action(docker)
         terminal = Gio.SimpleAction.new("terminal", None)  # (a terminal on the host picked in the sidebar)
         terminal.connect("activate", lambda *_: self.terminal.open())
         self.add_action(terminal)
@@ -534,10 +539,12 @@ class BaudeWindow(WindowView, WindowProc, WindowDrafts, WindowSignal, WindowRemo
         self.lightbox = lightbox.Lightbox(self)
         self.schema = SchemaView(self)
         self.kube = KubeView(self)
+        self.docker = DockerView(self)
         self.terminal = terminalpane.TerminalView(self, self.terminal_host)  # (☰ → Terminal: over it, as Kubernetes)
         host = Gtk.Overlay(child=self.toasts)
         host.add_overlay(self.schema)
         host.add_overlay(self.kube)
+        host.add_overlay(self.docker)
         host.add_overlay(self.terminal)
         host.add_overlay(self.lightbox)
         self.repaint, self.repaint_wait = Repaint(), None
@@ -578,7 +585,8 @@ class BaudeWindow(WindowView, WindowProc, WindowDrafts, WindowSignal, WindowRemo
         # too; and past those, the chat the focus is in (Meta, a side question, a subagent), else the main chat
         widgets.first_keys(self, (("<Control>b F9", lambda: self.sidebar_slide.toggle()),
                                   (" ".join(m + "f" for m in widgets.ZOOM_MODS),
-                                   lambda: find_in_focus(self) or self.kube.find() or self.schema.start_find() or
+                                   lambda: find_in_focus(self) or self.kube.find() or self.docker.find() or
+                                   self.schema.start_find() or
                                    self.find_in_chat())))
         import telemetryview
         telemetryview.watch(self, "baude", network())  # (its chats' activity, told to this machine's host)
@@ -676,7 +684,8 @@ class BaudeWindow(WindowView, WindowProc, WindowDrafts, WindowSignal, WindowRemo
         """The window's parts, by name, for the text a capture records."""
         return {self.sidebar: "sidebar", self.scroller: "chat", self.panel: "side panel",
                 self.composer_box: "input box", self.status.get_parent(): "status bar", self.header_bar: "header",
-                self.banner: "banner", self.kube: "Kubernetes", self.schema: "databases", self.lightbox: "image",
+                self.banner: "banner", self.kube: "Kubernetes", self.docker: "Docker",
+                self.schema: "databases", self.lightbox: "image",
                 self.terminal: "terminal"}
 
     def restart_state(self):

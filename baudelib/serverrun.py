@@ -12,7 +12,7 @@ import time
 import uuid
 
 from baudelib import (
-    access, agentproxy, autofix, deps, desktopchats, emissionlink, emissiontools, hostaccounts, hostdb, hostfiles, hostfixes, hostkube,
+    access, agentproxy, autofix, deps, desktopchats, emissionlink, emissiontools, hostaccounts, hostdb, hostdocker, hostfiles, hostfixes, hostkube,
     hostlogin, mesh, meshtools, hostterminal, multiplexlink, notes, telemetry, themes, wire, wording, worktree,
 )
 from baudelib.serverstate import (
@@ -253,6 +253,7 @@ class ServerRunning:
             conn.gone = True  # (a relay starting meanwhile: let go of as it would be)
             self.phones.gone(conn)
             hostkube.stop(conn)  # (its pod logs and watches: kubectl ended with it)
+            hostdocker.stop(conn)  # (its containers' logs: docker ended with it)
             hostterminal.gone(conn)  # (its terminal: left running a while, to be attached to again)
             hostlogin.stop(conn)  # (a sign-in it ran: stopped)
             hostaccounts.stop(conn)  # (a Codex sign-in it ran: stopped)
@@ -529,10 +530,10 @@ class ServerRunning:
                     reply("error", error=f"{type(e).__name__}: {e}")
             threading.Thread(target=tell, daemon=True, name="telemetry").start()
             return None
-        if op in ("kube", "databases"):  # (the clusters and databases here, read for a head elsewhere: hostkube, hostdb)
-            def read():
+        if op in ("kube", "databases", "docker"):  # (the clusters, databases and Docker here, for a head anywhere:
+            def read():                            # hostkube, hostdb, hostdocker)
                 try:
-                    reply(op, **(hostkube if op == "kube" else hostdb).answer(self, msg))
+                    reply(op, **{"kube": hostkube, "databases": hostdb, "docker": hostdocker}[op].answer(self, msg))
                 except Exception as e:  # noqa: BLE001 (anything gone wrong: still answered)
                     reply("error", error=f"{type(e).__name__}: {e}")
             threading.Thread(target=read, daemon=True, name=op).start()
@@ -608,6 +609,10 @@ class ServerRunning:
             return hostlogin.start(self, conn, msg)
         if op == "login_code":
             return hostlogin.code(conn, msg)
+        if op == "docker_follow":  # (a container's or a Compose project's log followed: on this connection, ended
+            threading.Thread(target=hostdocker.follow, args=(self, conn, msg), daemon=True,  # with it)
+                             name="docker-follow").start()
+            return None
         if op == "kube_follow":  # (a pod's log followed, or a kind's list watched, for a head elsewhere: on this
             threading.Thread(target=hostkube.follow, args=(self, conn, msg), daemon=True,  # connection, ended with it)
                              name="kube-follow").start()

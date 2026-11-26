@@ -1,0 +1,78 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "docker's answer: contexts {contexts, sections}; list {columns, rows}; inspect {text, file}; start, stop, restart and remove {said}; fault when Docker can't be reached; missing when there's no docker.",
+  "properties": {
+    "op": {
+      "const": "docker",
+      "description": "What it is."
+    },
+    "req": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "what": {
+      "type": "string",
+      "description": "What was done."
+    },
+    "error": {
+      "type": "string",
+      "description": "What's wrong with the request."
+    },
+    "fault": {
+      "$ref": "DockerFault.json",
+      "description": "Docker can't be reached: why."
+    },
+    "contexts": {
+      "type": "array",
+      "items": {
+        "$ref": "DockerContext.json"
+      },
+      "description": "contexts: docker's contexts, and Colima's and Podman's found besides."
+    },
+    "sections": {
+      "type": "array",
+      "items": {
+        "$ref": "DockerSection.json"
+      },
+      "description": "contexts: the sidebar's categories."
+    },
+    "columns": {
+      "type": "array",
+      "items": {
+        "$ref": "DockerColumn.json"
+      },
+      "description": "list: the page's columns."
+    },
+    "rows": {
+      "type": "array",
+      "items": {
+        "$ref": "DockerRow.json"
+      },
+      "description": "list: the objects."
+    },
+    "text": {
+      "type": "string",
+      "description": "inspect: what docker inspect says of it."
+    },
+    "file": {
+      "type": "string",
+      "description": "inspect: what it is called, for its highlighting."
+    },
+    "said": {
+      "type": "string",
+      "description": "start, stop, restart, remove: what docker said."
+    },
+    "missing": {
+      "$ref": "Dep.json",
+      "description": "docker isn't on the host: the Docker view shows this in its place."
+    }
+  },
+  "required": [
+    "op"
+  ],
+  "additionalProperties": false
+}

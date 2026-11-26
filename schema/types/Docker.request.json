@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "Docker's containers, images, volumes, networks and Compose projects on the host, read and acted on through its docker CLI: its contexts and the sidebar's categories (contexts), a category's objects (list), an object inspected (inspect), and a container or Compose project started, stopped, restarted or removed (start, stop, restart, remove; an image, a volume or a network removed).",
+  "properties": {
+    "op": {
+      "const": "docker",
+      "description": "What it is."
+    },
+    "req": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "what": {
+      "enum": [
+        "contexts",
+        "list",
+        "inspect",
+        "start",
+        "stop",
+        "restart",
+        "remove"
+      ],
+      "description": "What to do."
+    },
+    "context": {
+      "type": "string",
+      "description": "The context, by its name, as contexts lists it."
+    },
+    "page": {
+      "type": "string",
+      "description": "list, inspect and the actions: the category's page, by its key."
+    },
+    "id": {
+      "type": "string",
+      "description": "inspect and the actions: the object, by its id (a Compose project's, its name)."
+    },
+    "format": {
+      "enum": [
+        "json",
+        "yaml"
+      ],
+      "description": "inspect: as JSON (the default) or YAML."
+    }
+  },
+  "required": [
+    "op"
+  ],
+  "additionalProperties": false
+}

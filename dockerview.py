@@ -612,10 +612,8 @@ class DockerView(Gtk.Box):
 
         def setup(_f, item):
             box = Gtk.Box(spacing=2, halign=Gtk.Align.END)
-            logs = Gtk.Button(icon_name="baude-logs-symbolic", tooltip_text=wording.say("kube.logs"),
-                              action_name="docker.logs")
-            shell = Gtk.Button(icon_name="utilities-terminal-symbolic", tooltip_text=wording.say("kube.shell"),
-                               action_name="docker.shell")
+            logs = Gtk.Button(icon_name="baude-logs-symbolic", tooltip_text=wording.say("kube.logs"))
+            shell = Gtk.Button(icon_name="utilities-terminal-symbolic", tooltip_text=wording.say("kube.shell"))
             more = Gtk.MenuButton(icon_name="view-more-symbolic")
             for b in (logs, shell, more):
                 b.add_css_class("flat")
@@ -628,8 +626,9 @@ class DockerView(Gtk.Box):
             key = GLib.Variant("s", obj["id"])
             logs = box.get_first_child()
             shell, more = logs.get_next_sibling(), box.get_last_child()
-            logs.set_action_target_value(key)
-            shell.set_action_target_value(key)
+            for b, name in ((logs, "docker.logs"), (shell, "docker.shell")):
+                b.set_action_target_value(key)
+                b.set_action_name(name)
             logs.set_opacity(1 if obj.get("logs") else 0)
             logs.set_can_target(bool(obj.get("logs")))
             shell.set_opacity(1 if obj.get("shell") else 0)

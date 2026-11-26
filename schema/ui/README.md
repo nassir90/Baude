@@ -57,7 +57,7 @@ An entry or a part may carry:
 - **A closed window leaves nothing listening.** Anything an entry draws that follows the theme (dark or light, the accent) stops following it when its window closes; the owner found Baude and Record growing in memory the longer they run (2026-11-24). Source: `[{"issue": "BaudeInternal#213"}]`.
 - **What closes is freed.** A closed window, a closed tab (a file's code, a chat, a page of notes, the Feedback tab) and a closed dialog are freed with everything they hold, as are a list's rows when it's filled again (a notebook's pages as another notebook is picked), and changing the accent doesn't keep each logo drawn for it; the owner found Baude and Record growing in memory the longer they run (2026-11-24). Source: `[{"issue": "BaudeInternal#213"}]`.
 - **A view out in its own window uses that window's title bar.** A view that moves out to a window of its own
-  (Kubernetes, Database Schemas, and any view built like them; viewwindow.Out and ViewWindow on the desktop) puts
+  (Kubernetes, Docker, Database Schemas, and any view built like them; viewwindow.Out and ViewWindow on the desktop) puts
   its bar's controls in that window's header bar, beside the window's own controls, with no empty band above the
   view; back over the window it came from, its bar is as it was. The owner found an empty band at the top of the
   Kubernetes view moved out (2026-11-26). Source: `[{"issue": "BaudeInternal#250"}]`.

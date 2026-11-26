@@ -719,6 +719,28 @@ def _(app):
     return win
 
 
+@scene("38f-docker-out", "Docker moved out to a window of its own: its bar that window's header bar",
+       size=(1200 + SIDEBAR, H))
+def _(app):
+    win, dv = docker_window(app, "images")
+    dv.out.out()
+    T.pump(0.5)
+    win.connect("destroy", lambda *_: dv.out.window is not None and dv.out.window.close())
+    return dv.out.window
+
+
+@scene("38f-docker-not-running", "Docker on a context whose daemon isn't running: why, the command that starts it with "
+                                 "Copy, Try Again, and docker's output folded away", size=(1200 + SIDEBAR, H))
+def _(app):
+    win, dv = docker_window(app, "compose")
+    dv.syncing = True
+    dv.context_dd.set_selected(1)
+    dv.syncing = False
+    dv.switch_context("default")
+    T.wait_for(lambda: dv.table_stack.get_visible_child_name() == "error", "why")
+    return win
+
+
 @scene("38f-docker-remove", "Docker: Remove… on a running container, asked first: what it is, the context, and what "
                             "goes with it", size=(1200 + SIDEBAR, H))
 def _(app):

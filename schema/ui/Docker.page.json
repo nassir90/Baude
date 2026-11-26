@@ -67,6 +67,25 @@
           "copy": [
             "common.read_again"
           ]
+        },
+        {
+          "name": "Move to Its Own Window",
+          "shows": "As the Kubernetes view's: the view moves to a window of its own, all of it as it was; its bar becomes that window's header bar, beside the window's own controls, with no band above the view, leaving out Move to Its Own Window, its × and the traffic lights' room. Closing that window puts it back over the window it came from.",
+          "copy": [
+            "common.move_out"
+          ],
+          "decisions": [
+            {
+              "said": "The Kubernetes view out in its own window should use the window's top bar, not leave a band of empty space at the top (paraphrased)",
+              "rule": "In every app, a view moved out to a window of its own puts its bar's controls in that window's title bar or header bar, with nothing empty above the view",
+              "decided": "2026-11-26",
+              "source": [
+                {
+                  "issue": "BaudeInternal#250"
+                }
+              ]
+            }
+          ]
         }
       ]
     },

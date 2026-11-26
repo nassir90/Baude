@@ -101,16 +101,20 @@ An entry or a part may carry:
     "94fe8190-5ead-48a2-bfe8-83493bb7bbad"}, {"session": "b3845b21-55ac-4aab-a769-fb8517403c51", "message":
     "96b6b609-ce76-4e05-ac4f-d263c29199e9"}]`.
 - **A missing dependency is shown one way.** Where a feature needs a program or library that isn't there
-  (schema/deps: VTE, WebKitGTK, kubectl, Docker, Claude Code, Codex CLI, Git, GitHub CLI, Node.js, Xvfb), every app
+  (schema/deps: VTE, WebKitGTK, kubectl, Docker, Claude Code, Codex CLI, Git, GitHub CLI, Node.js, Xvfb, …), every app
   shows the same thing in the feature's place, never a toast alone, a raw error or nothing: a package icon
   (`package-x-generic-symbolic`), "<Feature> needs <dependency>" ("Git isn't installed" where they share a name), the
   command that installs it on that machine in monospace with Copy (else its install page), and Try Again, or Restart
   for the app's own library (loaded as it starts). A host's are the host's to say (its deps request, a reply's
   `missing`), so the phone and another machine's apps show what that host lacks with that host's command; where only a
   line fits (a chat's note, stderr, Signal's note) it's that sentence with the command. Settings → Dependencies lists
-  them all (Dependencies.dialog.json). `BAUDE_HIDE_DEPS=kubectl,…` makes any of them missing, to see each case. The
-  owner asked for proper guidance for installing what Baude depends on and for how it behaves without it (2026-11-22).
-  Source: `[{"issue": "BaudeInternal#184"}, {"issue": "BaudeInternal#183"}, {"session": "f1afb37a-90af-47d8-8693-d537464b4022", "message": "a1bc42a8-97d0-4dad-98b0-d3a42bfa155e"}]`.
+  them all, as the host says them, under what needs each (Providers, Git and GitHub, Kubernetes, …), with the checks
+  of what's installed beside them (a kubeconfig with a context, gh signed in, Ollama running and its models, MLX's
+  models), each not ready shown as a missing one is, with its fix (Dependencies.dialog.json). `BAUDE_HIDE_DEPS=kubectl,…`
+  makes any of them missing, to see each case. The owner asked for proper guidance for installing what Baude depends
+  on and for how it behaves without it (2026-11-22), and for the page grouped by what needs each, with readiness and
+  the providers' status (2026-11-25).
+  Source: `[{"issue": "BaudeInternal#184"}, {"issue": "BaudeInternal#183"}, {"session": "f1afb37a-90af-47d8-8693-d537464b4022", "message": "a1bc42a8-97d0-4dad-98b0-d3a42bfa155e"}, {"issue": "BaudeInternal#227"}]`.
 - **What an app records of its use stays on the user's machines.** Every app counts the time each place is on screen
   (a main tab, a side panel page, a view over the window, a dialog, a phone screen or page), only while it's in front and
   was used in the last minute, and the uses of each menu item, named by schema/copy keys so every app's add up alike

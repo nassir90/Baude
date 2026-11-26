@@ -1,0 +1,15 @@
+{
+  "description": "mlx-vlm's server (mlx_vlm.server), which pi-claude serves MLX's models with on macOS: there when it's installed, with how many of the models are downloaded.",
+  "name": "MLX",
+  "where": "host",
+  "needed_by": ["common.model"],
+  "group": "deps.providers",
+  "ready": "deps.models",
+  "detect": {
+    "macos": [{"probe": "mlx"}]
+  },
+  "install": {
+    "macos": "uv tool install mlx-vlm"
+  },
+  "link": "https://github.com/Blaizzy/mlx-vlm"
+}

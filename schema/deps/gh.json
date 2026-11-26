@@ -3,9 +3,10 @@
   "name": "GitHub CLI",
   "where": "host",
   "needed_by": ["lookup.pull_requests", "fixes.send_feedback"],
+  "group": "deps.git_github",
   "detect": {
-    "macos": [{"env": "BAUDE_GH"}, {"which": "gh"}, {"glob": "/opt/homebrew/bin/gh"}, {"glob": "/usr/local/bin/gh"}],
-    "linux": [{"env": "BAUDE_GH"}, {"which": "gh"}, {"glob": "/opt/homebrew/bin/gh"}, {"glob": "/usr/local/bin/gh"}]
+    "macos": [{"env": "BAUDE_GH", "decides": true}, {"which": "gh"}, {"glob": "/opt/homebrew/bin/gh"}, {"glob": "/usr/local/bin/gh"}],
+    "linux": [{"env": "BAUDE_GH", "decides": true}, {"which": "gh"}, {"glob": "/opt/homebrew/bin/gh"}, {"glob": "/usr/local/bin/gh"}]
   },
   "install": {
     "macos": "brew install gh",

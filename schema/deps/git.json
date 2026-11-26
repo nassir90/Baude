@@ -3,6 +3,7 @@
   "name": "Git",
   "where": "host",
   "needed_by": ["git.title"],
+  "group": "deps.git_github",
   "detect": {
     "macos": [{"which": "git", "not": "/usr/bin/git"}, {"run": ["xcode-select", "-p"]}],
     "linux": [{"which": "git"}]

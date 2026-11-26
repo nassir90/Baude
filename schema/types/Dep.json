@@ -27,14 +27,32 @@
         "string",
         "null"
       ],
-      "description": "The command that installs it on that machine, or null (another Linux: link)."
+      "description": "The command that installs it on that machine (a check's: readies it; Ollama installed and not running: starts it), or null (another Linux: link)."
     },
     "link": {
       "type": [
         "string",
         "null"
       ],
-      "description": "Its install page."
+      "description": "Its install page (none for a check)."
+    },
+    "group": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "The schema/copy key of what Settings → Dependencies lists it under (deps.providers, window.kubernetes, …)."
+    },
+    "check": {
+      "type": "boolean",
+      "description": "It's a check of an installed program (kubeconfig, GitHub Account): it has no page of its own."
+    },
+    "ready": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "What's said of it while it's there (Installed, Signed in, Running, 3 models), as its host says it; \"Couldn't check\" when looking raised; null when it isn't there."
     }
   },
   "required": [

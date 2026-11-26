@@ -1,5 +1,5 @@
 {
-  "description": "The Settings dialog's Dependencies page (Baude's, Record's and the phone's; on the phone the third page of Settings, switched to by the bar at its foot): the programs the host picked beside New session needs for its features, each Installed or the command that installs it on that host, as its deps request says (schema/deps lists them, how each is looked for on macOS and Linux, and its install command per platform); then the app's own (VTE, WebKitGTK on Linux, Node.js), looked for by the app.",
+  "description": "The Settings dialog's Dependencies page (Baude's, Record's and the phone's; on the phone the third page of Settings, switched to by the bar at its foot): what the host picked beside New session and its machine's apps need, and the checks of what's installed (a kubeconfig's contexts, gh signed in, Ollama running and its models, MLX's models), each with what's said of it while it's there or the command that installs or readies it on that host, under a heading for what needs it. All of it but the libraries the app itself runs is the host's deps request's answer (schema/deps lists them, how each is looked for on macOS and Linux, its group, and its command per platform), so every app shows the same for the same host. The rows for what the app's own process needs (VTE, WebKit and WebKitGTK, Node.js: where \"app\" in schema/deps) are the viewing app's own look, not the host's, on Baude and Record, under the same groups; the phone runs none of them and shows none.",
   "apps": [
     "baude",
     "record",
@@ -10,9 +10,11 @@
   ],
   "code": [
     "depsview.py:Page",
+    "depsview.py:grouped",
     "depsview.py:row",
     "depsview.py:ask",
     "baudelib/deps.py:report",
+    "baudelib/deps.py:PROBES",
     "baudelib/serverrun.py:ServerRunning.handle",
     "Deps.kt:DepsPage",
     "Deps.kt:DepRow",
@@ -21,7 +23,10 @@
   "copy": [
     "deps",
     "new_session",
-    "common"
+    "common",
+    "window",
+    "mesh_versions",
+    "side_panel"
   ],
   "parts": [
     {
@@ -32,21 +37,32 @@
       ]
     },
     {
-      "name": "host's dependencies",
-      "shows": "A boxed list, a row each, in schema/deps' order: the program's name (its own spelling: kubectl), then \"Installed\" (dim), or the command that installs it on that host (monospace; the phone's wraps to two lines) with a Copy button, or, on a Linux host with no command for its distribution, an Install Page link. The host's error, if it can't be asked, in the list's place.",
+      "name": "groups",
+      "shows": "A heading and a boxed list for each thing that needs them, in this order, a group shown only when it has a row on that host: Providers (Claude Code, Codex CLI, MLX on macOS, Ollama), Git and GitHub (Git, GitHub CLI, GitHub Account), Kubernetes (kubectl, kubeconfig), Database Schemas (Docker), Multiplex (VTE; Xvfb on a Linux host with no display), Emission (WebKitGTK on Linux, WebKit on macOS), Signal (Node.js). In a group, rows go by name, a check (kubeconfig, GitHub Account) right after its program, and left out while its program isn't installed. The host's error, if it can't be asked, in the groups' place.",
       "copy": [
-        "deps.installed",
-        "deps.install_page",
-        "common.copy"
+        "deps.providers",
+        "deps.git_github",
+        "window.kubernetes",
+        "window.database_schemas",
+        "deps.multiplex",
+        "mesh_versions.emission",
+        "side_panel.signal"
       ]
     },
     {
-      "name": "app's dependencies",
-      "apps": [
-        "baude",
-        "record"
-      ],
-      "shows": "A group titled with the app's name (Baude, Record): the libraries and programs the app itself needs, rows as above. The phone has none, so shows none."
+      "name": "dependency row",
+      "shows": "The program's name (its own spelling: kubectl), then, while it's there, what the host says of it (dim): \"Installed\", \"Signed in\" (GitHub Account), \"2 contexts\" (kubeconfig), \"Running, 3 models\" (Ollama), \"2 models\" (MLX, the downloaded ones); else the command that installs it on that host, or readies it (gh auth login; ollama serve for an Ollama that's installed and not running), in monospace (the phone's wraps to two lines) with a Copy button; else, with no command, an Install Page link for a program, and nothing more for a check (kubeconfig, GitHub Account: its status only); \"Couldn't check\" when looking at it failed, and \"Running, needs a key\" for an Ollama that wants a key.",
+      "copy": [
+        "deps.installed",
+        "deps.signed_in",
+        "deps.contexts",
+        "deps.running_models",
+        "deps.models",
+        "deps.install_page",
+        "deps.unchecked",
+        "deps.running_key",
+        "common.copy"
+      ]
     }
   ],
   "decisions": [
@@ -59,9 +75,52 @@
           "issue": "BaudeInternal#184"
         }
       ]
+    },
+    {
+      "said": "Dependencies should say more than installed: whether a kubeconfig is set up and gh is signed in; VTE belongs under Multiplex, Emission needs its own section, Claude Code and Codex go under Providers with MLX's and Ollama's status (paraphrased)",
+      "rule": "Every app groups Settings → Dependencies by what needs each dependency (Providers, Git and GitHub, Kubernetes, Database Schemas, Multiplex, Emission, Signal), lists readiness checks beside installs (a kubeconfig with a context, gh signed in, Ollama running with its model count, MLX's model count), each not ready with its fix shown as a missing install's is, and reads all of it from the host",
+      "decided": "2026-11-25",
+      "source": [
+        {
+          "issue": "BaudeInternal#227"
+        }
+      ]
     }
   ],
   "scenes": [
-    "39d-dependencies"
+    "39d-dependencies",
+    "39g-dependencies-end"
+  ],
+  "removed": [
+    {
+      "name": "kubeconfig Setup Page link",
+      "apps": [
+        "baude",
+        "record",
+        "phone"
+      ],
+      "why": "Owner: \"Drop the kubeconfig setup page nobody is clickigng that shit\". A check with no command shows its status only.",
+      "decided": "2026-11-26",
+      "source": [
+        {
+          "session": "b3845b21-55ac-4aab-a769-fb8517403c51",
+          "message": "5ef83a33-dbac-443f-b71a-8a85548cd3c2"
+        }
+      ]
+    },
+    {
+      "name": "app's dependencies group",
+      "apps": [
+        "baude",
+        "record"
+      ],
+      "why": "The owner asked for the page grouped by what needs each dependency (VTE under Multiplex, an Emission section, Claude Code and Codex under Providers) rather than by host and app; the libraries an app runs itself are listed under those groups, as the viewing app finds them.",
+      "decided": "2026-11-25",
+      "source": [
+        {
+          "issue": "BaudeInternal#227"
+        }
+      ]
+    }
   ]
 }

@@ -730,7 +730,7 @@ private fun Body(st: KubeState) {
                 if (y != null) YamlLevel(st, y)
                 else {
                     val shown = remember(st.rows, st.nsShown, st.filter, st.sortCol, st.sortDesc, st.tablePage, st.columns,
-                        st.colFilters.hidden) {
+                        st.colFilters.hidden, st.nodes) {
                         kubeRows(st)
                     }
                     Box(Modifier.weight(1f).fillMaxWidth().alpha(if (st.fade) 0.4f else 1f)) {

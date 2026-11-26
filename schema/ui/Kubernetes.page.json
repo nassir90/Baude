@@ -358,7 +358,7 @@
         },
         {
           "name": "column filter",
-          "shows": "On a column whose values are words (not a name, age or containers column; one that sorts by its text, not a number, size or time; each value with a letter in it and at most 40 characters), with 30 or fewer different values and some value shared by more than one row (any number for a status column), hovering its heading shows a funnel button at the heading's right end. While the column filters, the funnel stays, in the accent. A value hidden but not in the list now stays hidden, listed with a count of 0.",
+          "shows": "On a column whose values are words (not a name, age or containers column; one that sorts by its text, not a number, size or time; each value with a letter in it and at most 40 characters), with 30 or fewer different values and some value shared by more than one row (any number for a status column), hovering its heading shows a funnel button at the heading's right end. While the column filters, the funnel stays, in the accent. A value hidden but not in the list now stays hidden, listed with a count of 0; a value with a count of 0 is greyed (dim) but can still be ticked. A filter on a column the table doesn't show (the Node column on a cluster of one node) hides nothing until the column is back.",
           "copy": [
             "kube.filter_column",
             "kube.value_count",
@@ -384,6 +384,17 @@
                 {
                   "session": "b3845b21-55ac-4aab-a769-fb8517403c51",
                   "message": "4a7c7159-3e78-447c-b165-0adab4d6d27f"
+                }
+              ]
+            },
+            {
+              "said": "UX -- in the filter column fileds with no elements should be slighlt grayed out but still clickavble",
+              "rule": "In every app's column filter, a value no row has (a count of 0) is drawn greyed, as a dim label, and stays a check that can be ticked or unticked.",
+              "decided": "2026-11-26",
+              "source": [
+                {
+                  "session": "b3845b21-55ac-4aab-a769-fb8517403c51",
+                  "message": "d58d44a8-1c67-40ed-9a24-27be89804cb4"
                 }
               ]
             }

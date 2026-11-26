@@ -21,16 +21,23 @@ private const val FILTER_LONGEST = 40
 /** Whether a column offers a filter (kubeview.kube_filterable): it isn't a name, age or containers column, it sorts by
  * its text (not a number or a time), each of its values has a letter in it and is a word or a few, it has FILTER_MOST
  * or fewer of them, and some value is had by more than one row (empty cells aside), but for a status column. One that's
- * filtered keeps its button. values: the column's value for each row; keys: what each row sorts by. */
-fun filterable(kind: String?, values: List<String>, keys: List<Any?>, filtered: Boolean): Boolean {
+ * filtered keeps its button. Of n rows, value(r) is row r's value in the column and key(r) what it sorts by; the rows
+ * are read only until the column has more than FILTER_MOST values. */
+fun filterable(kind: String?, n: Int, value: (Int) -> String, key: (Int) -> Any?, filtered: Boolean): Boolean {
     if (filtered) return true
-    if (kind == "name" || kind == "age" || kind == "containers" || values.isEmpty()) return false
-    if (keys.any { it != null && it != JSONObject.NULL && it != "" && it !is String }) return false
-    val words = values.filter { it.isNotEmpty() }
-    val seen = words.toSet()
-    if (seen.isEmpty() || seen.size > FILTER_MOST) return false
-    if (seen.any { v -> v.length > FILTER_LONGEST || v.none { it.isLetter() } }) return false
-    return kind == "status" || seen.size < words.size
+    if (kind == "name" || kind == "age" || kind == "containers" || n == 0) return false
+    val seen = HashSet<String>()
+    var words = 0
+    for (r in 0 until n) {
+        val k = key(r)
+        if (k != null && k != JSONObject.NULL && k != "" && k !is String) return false
+        val v = value(r)
+        if (v.isEmpty()) continue
+        if (v.length > FILTER_LONGEST || v.none { it.isLetter() }) return false
+        words++
+        if (seen.add(v) && seen.size > FILTER_MOST) return false
+    }
+    return seen.isNotEmpty() && (kind == "status" || seen.size < words)
 }
 
 /** A table's column filters (kubeview.ColumnFilters): the values hidden of each column, by title, for the kind shown,
@@ -53,9 +60,10 @@ class ColumnFilters(private val setting: String) {
         }?.filterValues { it.isNotEmpty() }.orEmpty()
     }
 
-    /** Whether the filters (but skip's column) keep a row, whose value in column i is value(i). */
+    /** Whether the filters (but skip's column) keep a row, whose value in column i is value(i). titles: the columns
+     * in the table, by title ("" for one not in it, whose filter doesn't hide anything while it's away). */
     fun keeps(titles: List<String>, value: (Int) -> String, skip: Int = -1): Boolean = titles.indices.none { i ->
-        i != skip && hidden[titles[i]]?.contains(value(i)) == true
+        i != skip && titles[i].isNotEmpty() && hidden[titles[i]]?.contains(value(i)) == true
     }
 
     /** A column's values hidden, and remembered. */
@@ -103,7 +111,10 @@ fun FilterMark(title: String, filtering: Boolean, onClick: () -> Unit) {
 @Composable
 fun FilterMenu(open: Boolean, dismiss: () -> Unit, f: ColumnFilters, title: String, rows: () -> List<Pair<String, Boolean>>) {
     Popover(open, dismiss, ticks = Ticks.START) {
-        val (items, shown) = f.checks(title, rows())
-        MenuChecks(Wording.Fixes.all, items, shown, { f.pick(title, items.map { it.first }, it) })
+        val listed = rows()
+        val (items, shown) = f.checks(title, listed)
+        val had = listed.filter { it.second }.map { it.first }.toSet()
+        MenuChecks(Wording.Fixes.all, items, shown, { f.pick(title, items.map { it.first }, it) },
+            dimmed = items.map { it.first }.filter { it !in had }.toSet())
     }
 }

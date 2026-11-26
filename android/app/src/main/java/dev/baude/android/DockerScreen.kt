@@ -554,14 +554,17 @@ private fun DockerTable(st: DockerState, rows: List<Msg.DockerRow>) {
     val density = LocalDensity.current
     val filters = remember(st.rows, cols, st.colFilters.hidden) { // (which columns offer a filter: filterable)
         cols.indices.map { i ->
-            filterable(cols[i].kind, st.rows.map { dockerValue(it, i) }, st.rows.map { it.keys?.opt(i) },
+            val all = st.rows
+            filterable(cols[i].kind, all.size, { dockerValue(all[it], i) }, { all[it].keys?.opt(i) },
                 !st.colFilters.hidden[cols[i].title.orEmpty()].isNullOrEmpty())
         }
     }
-    val widths = remember(rows, cols, filters) {
+    var open by remember(st.tablePage?.key) { mutableStateOf<String?>(null) } // (the column whose checks are open)
+    val marked = cols.indices.filter { i -> cols[i].title.orEmpty().let { !st.colFilters.hidden[it].isNullOrEmpty() || it == open } }
+    val widths = remember(rows, cols, marked) {
         cols.indices.map { i ->
             var w = with(density) { measure.measure(cols[i].title.orEmpty(), Type.bold, softWrap = false).size.width.toDp() } + 12.dp +
-                if (filters[i]) 16.dp.icon + 4.dp else 0.dp // (room for its funnel)
+                if (i in marked) 16.dp.icon + 4.dp else 0.dp // (room for its funnel)
             for (r in rows) w = maxOf(w, with(density) {
                 measure.measure(r.cells.orEmpty().getOrElse(i) { "" }, Type.body, softWrap = false).size.width.toDp()
             } + 12.dp)
@@ -577,19 +580,18 @@ private fun DockerTable(st: DockerState, rows: List<Msg.DockerRow>) {
             for (i in cols.indices) {
                 val title = titles[i]
                 val filtering = !st.colFilters.hidden[title].isNullOrEmpty()
-                var open by remember(st.tablePage?.key, title) { mutableStateOf(false) }
                 Box(Modifier.width(widths[i])) {
                     Row(Modifier.fillMaxWidth().combinedClickable(
                         onClick = { if (st.sortCol == i) st.sortDesc = !st.sortDesc else { st.sortCol = i; st.sortDesc = false } },
-                        onLongClick = if (filters[i]) ({ open = true }) else null)
+                        onLongClick = if (filters[i]) ({ open = title }) else null)
                         .padding(horizontal = 6.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
                         Text(title, style = Type.bold, color = c.fg, maxLines = 1, overflow = TextOverflow.Ellipsis,
                             modifier = Modifier.weight(1f, fill = false))
                         if (st.sortCol == i) Icon(if (st.sortDesc) Adwaita.PanDown else Adwaita.GoUp, null, tint = c.fg,
                             modifier = Modifier.size(16.dp.icon))
-                        if (filtering || open) Box(Modifier.padding(start = 4.dp)) { FilterMark(title, filtering) { open = true } }
+                        if (i in marked) Box(Modifier.padding(start = 4.dp)) { FilterMark(title, filtering) { open = title } }
                     }
-                    FilterMenu(open, { open = false }, st.colFilters, title) {
+                    FilterMenu(open == title, { open = null }, st.colFilters, title) {
                         st.rows.map { r -> dockerValue(r, i) to (dockerShows(st, r) &&
                             st.colFilters.keeps(titles, { dockerValue(r, it) }, skip = i)) }
                     }

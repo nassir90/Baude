@@ -298,6 +298,7 @@ class KubeSquares(Gtk.Widget):
 # A column a filter is offered on: words (not numbers, sizes or times), few of them. More values than this and the column
 # is a list to search (the filter box), not one to tick through; a value longer than this is a sentence, not a word.
 KUBE_FILTER_MOST, KUBE_FILTER_LONGEST = 30, 40
+KUBE_FILTER_NEVER = ("name", "age", "containers")  # (the kinds of column never offered one)
 
 
 def kube_filter_value(texts, by, i):
@@ -314,7 +315,7 @@ def kube_filterable(kind, values, keys, filtered=False):
     values: the column's value for each row (kube_filter_value); keys: what each row sorts by."""
     if filtered:
         return True
-    if kind in ("name", "age", "containers") or not values:
+    if kind in KUBE_FILTER_NEVER or not values:
         return False
     if any(k not in (None, "") and not isinstance(k, str) for k in keys):
         return False
@@ -336,7 +337,7 @@ class ColumnFilters:
 
     def __init__(self, setting, changed):
         self.setting, self.changed = setting, changed
-        self.kind, self.titles, self.kinds, self.hidden, self.buttons = None, [], [], {}, {}
+        self.kind, self.titles, self.kinds, self.hidden, self.buttons, self.columns = None, [], [], {}, {}, []
         self.store, self.others, self.queued = None, (lambda row: True), False
 
     def queue(self):
@@ -350,6 +351,8 @@ class ColumnFilters:
         the view's other filters (namespaces, the filter box) keep a row."""
         self.kind, self.store, self.others = kind, store, others
         self.titles, self.kinds = [t for t, _k in cols], [k for _t, k in cols]
+        model = cv.get_columns()
+        self.columns = [model.get_item(n) for n in range(model.get_n_items())]
         saved = (load_settings().get(self.setting) or {}).get(kind) or {}
         self.hidden = {t: set(v) for t, v in saved.items() if v}
         self.buttons = {}
@@ -369,6 +372,12 @@ class ColumnFilters:
                 btn.add_css_class("kube-col-filter")
                 btn.pick = pick
                 btn.set_create_popup_func(lambda b, i=i: self.fill(i))
+                # (the heading's own click claims a press on its way back up, to sort by the column on release, and its
+                # drag moves the column: the funnel's press is taken on the way down, before either sees it)
+                press = Gtk.GestureClick(propagation_phase=Gtk.PropagationPhase.CAPTURE)
+                press.connect("pressed", lambda g, *_a, b=btn: (g.set_state(Gtk.EventSequenceState.CLAIMED),
+                                                                 b.popup()))
+                btn.add_controller(press)
                 for signal in ("show", "closed"):
                     btn.get_popover().connect(signal, lambda _p, b=btn: self.mark(b))
                 box.append(Gtk.Box(hexpand=True))
@@ -379,12 +388,28 @@ class ColumnFilters:
     def value(self, row, i):
         return kube_filter_value(row.texts, row.obj.get("filters") if isinstance(row.obj, dict) else None, i)
 
+    def shown(self, i):
+        """Whether column i is in the table (the Node column is only on a cluster of more than one node)."""
+        return i >= len(self.columns) or self.columns[i].get_visible()
+
     def visible(self, row, skip=None):
-        """Whether the column filters (but skip's) keep a row."""
+        """Whether the column filters (but skip's, and those of a column not in the table) keep a row."""
         for i, name in enumerate(self.titles):
-            if i != skip and (gone := self.hidden.get(name)) and self.value(row, i) in gone:
+            if i != skip and (gone := self.hidden.get(name)) and self.value(row, i) in gone and self.shown(i):
                 return False
         return True
+
+    def column(self, rows, i):
+        """Column i's values and sort keys, row by row, up to the row that brings it past KUBE_FILTER_MOST values."""
+        values, keys, seen = [], [], set()
+        for r in rows:
+            v = self.value(r, i)
+            values.append(v)
+            keys.append(r.keys[i] if i < len(r.keys) else None)
+            seen.add(v)
+            if len(seen) > KUBE_FILTER_MOST + 1:  # (one more for the empty value)
+                break
+        return values, keys
 
     def rows(self):
         return [self.store.get_item(n) for n in range(self.store.get_n_items())] if self.store is not None else []
@@ -393,16 +418,17 @@ class ColumnFilters:
         """The buttons shown on the columns that offer a filter (as the rows are now), marked on those filtering."""
         rows = self.rows()
         for i, btn in self.buttons.items():
-            name = self.titles[i]
-            btn.set_visible(kube_filterable(self.kinds[i], [self.value(r, i) for r in rows],
-                                            [r.keys[i] if i < len(r.keys) else None for r in rows],
-                                            bool(self.hidden.get(name))))
+            filtered = bool(self.hidden.get(self.titles[i]))
+            btn.set_visible(filtered or self.kinds[i] not in KUBE_FILTER_NEVER and
+                            kube_filterable(self.kinds[i], *self.column(rows, i)))
             self.mark(btn)
             if btn.get_popover().get_visible():
                 self.fill(i)
 
     def mark(self, btn):
-        i = next(k for k, b in self.buttons.items() if b is btn)
+        i = next((k for k, b in self.buttons.items() if b is btn), None)
+        if i is None:  # (a button of a table since built again)
+            return
         for css, on in (("kube-col-filtering", bool(self.hidden.get(self.titles[i]))),
                         ("kube-col-open", btn.get_popover().get_visible())):
             (btn.add_css_class if on else btn.remove_css_class)(css)
@@ -418,7 +444,8 @@ class ColumnFilters:
         gone = self.hidden.get(name) or set()
         values = sorted(set(counts) | gone, key=lambda v: (v == "", v.lower()))
         btn.pick.fill([(v, wording.say("kube.value_count", value=v or wording.say("kube.no_value"), n=counts.get(v, 0)))
-                       for v in values], [v for v in values if v not in gone] if gone else None)
+                       for v in values], [v for v in values if v not in gone] if gone else None,
+                      dimmed={v for v in values if not counts.get(v)})
         self.mark(btn)
 
     def pick(self, i, keys):
@@ -915,8 +942,10 @@ class KubeView(Gtk.Box):
         a link, say)."""
         self.page_rows[id(KUBE_NODES)].set_visible(self.node_count > 1 or self.page is KUBE_NODES)
         for c in getattr(self, "columns", None) or []:
-            if c.get_title() == "Node":
+            if c.get_title() == "Node" and c.get_visible() != (self.node_count > 1):
                 c.set_visible(self.node_count > 1)
+                if self.col_filters.hidden.get("Node"):  # (its filter goes with it, and comes back with it)
+                    self.refilter()
 
     def on_side(self, _box, row):
         if row is None or self.syncing or not hasattr(row, "page"):

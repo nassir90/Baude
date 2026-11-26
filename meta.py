@@ -1136,4 +1136,5 @@ def shared_settings(win, chat, app, zoom_default):
                 bool, note=f"on Claude's models, {NAME} runs shell commands and edits files, from its next message; "
                 "the user's to turn on or off", meta_sets=False),
     ]
-    return {s.name: s for s in out}
+    import accessview
+    return {s.name: s for s in out} | accessview.meta_settings()

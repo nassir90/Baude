@@ -1,0 +1,63 @@
+{
+  "description": "A chat's Access…: its own rule for who in the mesh may manage it (list, read, write in, stop, rename, archive, delete it), which goes before its host's Agent Management rule. Title \"Chat Access\", the chat's title (a Bot's name) under it.",
+  "apps": [
+    "baude",
+    "phone"
+  ],
+  "opens": [
+    "session row right-click → Access… (a chat on a host that's up)",
+    "phone: session row long-press → Access…"
+  ],
+  "code": [
+    "accessview.py:chat_dialog",
+    "sidebarmenu.py:SidebarMenu.ask_access",
+    "Access.kt:ChatAccess",
+    "SessionMenu.kt:SessionMenu"
+  ],
+  "copy": [
+    "access",
+    "common"
+  ],
+  "parts": [
+    {
+      "name": "Agent Management row",
+      "shows": "The capability's row as Settings → Access has it, its dropdown with Same as Host first, then Everybody, Nobody, Chosen Members (and the member switches). On the phone the name sits on a line above the dropdown.",
+      "copy": [
+        "access.manage",
+        "access.same_as_host",
+        "access.everybody",
+        "access.nobody",
+        "access.chosen",
+        "access.no_members"
+      ],
+      "actions": [
+        {
+          "by": "pick or switch",
+          "does": "Sends access_set {session, rule} at once (Same as Host: rule null, the host's rule again)."
+        }
+      ],
+      "decisions": [
+        {
+          "said": "Existing agent management, with individual chats able to override the policy (paraphrased)",
+          "rule": "Every app that lists a host's chats with a row menu offers Access… on a chat, setting that chat's own manage rule, kept by its host and enforced there",
+          "decided": "2026-11-26",
+          "source": [
+            {
+              "issue": "BaudeInternal#231"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Close",
+      "shows": "\"Close\": the dialog has nothing to save, each change is sent as it is made.",
+      "copy": [
+        "common.close"
+      ]
+    }
+  ],
+  "scenes": [
+    "40h-chat-access"
+  ]
+}

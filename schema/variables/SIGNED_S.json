@@ -1,0 +1,4 @@
+{
+  "description": "A tunnel's open: signed this near now, in seconds, either way, or it's closed where it's opened to.",
+  "const": 300
+}

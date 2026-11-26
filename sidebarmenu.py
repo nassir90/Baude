@@ -65,6 +65,9 @@ class SidebarMenu:
             items[1:1] = [(wording.say("sidebar.bot_settings_ellipsis"), "make_bot"),
                                 (wording.say("sidebar.unbot"), "unbot")] if info.get("bot") else \
                 [(wording.say("sidebar.make_bot_ellipsis"), "make_bot")]
+        if info.get("remote") is not None and not info.get("dead") and info["remote"].state == "alive" and \
+                info.get("taken_up") is not False:  # (who in the mesh may manage it; a Claude Desktop chat only listed:
+            items.insert(len(items) - 1, (wording.say("access.access_ellipsis"), "access"))  # the host's rule)
         for label, action in items:
             if action is None:
                 menu.append_submenu(label, self.group_submenu(info))
@@ -203,6 +206,13 @@ class SidebarMenu:
         self.dialog = dlg
         dlg.present(self.win)
         entry.grab_focus()
+
+    def ask_access(self, info):
+        """Access…: a chat's own rule for who in the mesh may manage it, on its host (accessview.chat_dialog)."""
+        if info is not None and info.get("remote") is not None:
+            import accessview
+            bot = info.get("bot") or {}
+            accessview.chat_dialog(self.win, info["remote"], info["id"], bot.get("name") or info.get("title"))
 
     def unbot(self, info):
         """Turn Back into a Chat: listed as a chat; its memory and picture kept on its host, for if it's made a Bot again."""

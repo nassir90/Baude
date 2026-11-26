@@ -20,6 +20,8 @@
     "no_such_host": "no such host",
     "deactivated_here": "{$host} is deactivated here",
     "not_in_mesh": "{$host} isn't in the mesh now",
-    "none_started": "no host process here, and none could be started (see {$log})"
+    "none_started": "no host process here, and none could be started (see {$log})",
+    "another_key": "{$host} has another key than the one it was first linked with: unlink it to link it again",
+    "unsigned": "not signed by the member it says it's from"
   }
 }

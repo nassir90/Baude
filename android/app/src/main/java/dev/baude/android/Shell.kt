@@ -297,8 +297,12 @@ private const val GRIP = 16f          // (the rule's width to a finger)
 @Composable
 fun BottomBar(pages: List<Page>, current: Int, modifier: Modifier = Modifier, pick: (Int) -> Unit) {
     val c = LocalBaude.current
+    val scroll = rememberScrollState()
+    LaunchedEffect(current, scroll.maxValue) { // (the page shown in view, where they don't all fit)
+        if (pages.size > 1) scroll.animateScrollTo(scroll.maxValue * current / (pages.size - 1))
+    }
     Box(modifier.fillMaxWidth().background(c.frame).navigationBarsPadding(), contentAlignment = Alignment.Center) {
-        Row(Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 6.dp, vertical = 6.dp),
+        Row(Modifier.horizontalScroll(scroll).padding(horizontal = 6.dp, vertical = 6.dp),
             horizontalArrangement = Arrangement.spacedBy(2.dp)) {
             pages.forEachIndexed { i, p ->
                 val on = i == current

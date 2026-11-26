@@ -250,6 +250,51 @@ abstract class Screens(private val theme: String) {
         screen("40f-telemetry-no-profiler")
     }
 
+    // (Settings → Access on a host: each capability's rule, Chosen Members with a switch for each member it knows of)
+    @Test fun access() {
+        accessFixture()
+        show { SettingsScreen({}, {}, page = 4) }
+        laidOut()
+        screen("40g-access")
+    }
+
+    // (a chat's Access…: its own rule for managing it, Chosen Members picked)
+    @Test fun chatAccess() {
+        accessFixture()
+        show { dev.baude.android.ChatAccess(Item("h1", Mesh.sessions.getValue("h1")[1], 0)) {} }
+        laidOut()
+        screen("40h-chat-access")
+    }
+
+    // (Meta's row for a capability of the host it runs on, as show setting:access_providers draws it under a reply)
+    @Test fun metaAccess() {
+        accessFixture()
+        dev.baude.android.Meta.host.value = Mesh.hosts.first().id
+        show { dev.baude.android.MetaBoxed(listOf(Unit)) { dev.baude.android.MetaSet.ALL.getValue("access_providers").row(null, null) } }
+        laidOut()
+        screen("40i-meta-access")
+    }
+
+    /** A host answering access and access_set as one with members studio and pixel-9 would. */
+    private fun accessFixture() {
+        val studio = "5b168c62-bc6e-4150-8d6f-de1c2fade4f3"
+        val pixel = "9c0e7a11-4f2d-4b8e-a3c5-2d7e9f1b6a40"
+        fun rule(who: String, vararg m: String) = org.json.JSONObject().put("who", who)
+            .apply { if (who == "chosen") put("members", org.json.JSONArray(m.toList())) }
+        val rules = org.json.JSONObject().put("shell", rule("nobody")).put("browser", rule("chosen", studio))
+            .put("providers", rule("everybody")).put("model_files", rule("chosen", studio, pixel)).put("spawn", rule("everybody"))
+            .put("manage", rule("everybody")).put("kube", rule("nobody")).put("databases", rule("everybody"))
+            .put("access", rule("nobody"))
+        val state = org.json.JSONObject().put("host", "workshop").put("rules", rules).put("editable", true)
+            .put("members", org.json.JSONArray(listOf(org.json.JSONObject().put("id", pixel).put("name", "pixel-9"),
+                org.json.JSONObject().put("id", studio).put("name", "studio"))))
+        FixtureConnection.up(activity, Mesh.hosts.first()) { m ->
+            if (m.optString("op") != "access") return@up null
+            org.json.JSONObject().put("op", "access").put("req", m.opt("req")).put("state", state)
+                .apply { if (m.has("session")) put("session", m.get("session")).put("chat", rule("chosen", studio)) }
+        }
+    }
+
     private fun telemetryFixture(profiler: Boolean = true) {
         FixtureConnection.up(activity, Mesh.hosts.first()) { m ->
             if (m.optString("op") == "deps") return@up org.json.JSONObject().put("op", "deps").put("req", m.opt("req"))

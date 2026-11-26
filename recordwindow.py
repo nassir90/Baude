@@ -72,7 +72,7 @@ class Settings(Adw.PreferencesDialog):
     takes at once (Code Font from the next start) and is kept."""
 
     def __init__(self, win):
-        super().__init__(title=wording.say("window.settings_title"))
+        super().__init__(title=wording.say("window.settings_title"), content_width=820)  # (its five pages named in full)
         page = widgets.settings_page()
         page.add(meta.settings_group(win.chat))  # (Baude's too, and the same settings)
         group = Adw.PreferencesGroup()
@@ -138,6 +138,8 @@ class Settings(Adw.PreferencesDialog):
         self.add(depsview.Page(win))
         import telemetryview
         self.add(telemetryview.Page(win))
+        import accessview
+        self.add(accessview.Page(win))
         copies, stop = json.loads(json.dumps([notebooks for _title, _action, notebooks in exports])), threading.Event()
         self.connect("closed", lambda *_: stop.set())  # (nothing to say them to: no more reading large chats)
         threading.Thread(target=Settings._work_out_sizes, args=([self], copies, stop), daemon=True).start()

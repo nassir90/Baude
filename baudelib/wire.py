@@ -196,7 +196,8 @@ SILENT_S = CONSTANTS["SILENT_S"]  # and takes it for gone after this long withou
 OPEN_S = CONSTANTS["OPEN_S"]      # (a member of the mesh, reached through it: the tunnel's this long to open)
 UNSUPPORTED = "unsupported_operation"  # (the schema's own refusals: their codes, and what each says)
 INVALID = "invalid_data_type"
-SAID = {UNSUPPORTED: "unsupported operation", INVALID: "invalid data type"}
+DENIED = "access_denied"  # (one a host's access rules refuse: baudelib.access)
+SAID = {UNSUPPORTED: "unsupported operation", INVALID: "invalid data type", DENIED: "access denied"}
 
 
 def takes(info, op):
@@ -411,7 +412,7 @@ TAKEN = frozenset(DEFS[n]["properties"]["op"]["const"] for n in MESSAGES if KIND
 
 
 def refused(code, req=None, detail=None):
-    """One of the schema's own refusals (UNSUPPORTED, INVALID), for request req: an error, the same from every host,
+    """One of the schema's own refusals (UNSUPPORTED, INVALID, DENIED), for request req: an error, the same from every host,
     and what was wrong (detail)."""
     return {"op": "error", "req": req, "error": SAID[code], "code": code, **({"detail": detail} if detail else {})}
 
@@ -830,11 +831,12 @@ def own_dir(path):
     return path
 
 
-def _hello(ch, timeout, what, here=False):
-    """(channel, the server's info) past hello, or OSError: what didn't answer. here: by its socket, on its machine."""
+def _hello(ch, timeout, what, here=False, as_=None):
+    """(channel, the server's info) past hello, or OSError: what didn't answer. here: by its socket, on its machine;
+    as_: from that chat there (a chat's own tools: hello's as)."""
     ch.sock.settimeout(timeout)
     ch.send({"op": "hello", "client": HEAD_CLIENT, "version": VERSION, **({"commit": HEAD_COMMIT} if HEAD_COMMIT else {}),
-             **({"here": True} if here else {})})
+             **({"here": True} if here else {}), **({"as": as_} if as_ else {})})
     reply = ch.reply()
     if not reply or reply.get("op") != "hello":
         ch.close()
@@ -853,8 +855,9 @@ def own_socket(path):
         raise OSError(f"{path} isn't this user's own: not connected to")
 
 
-def connect_local(path=None, timeout=5.0):
-    """A Channel to the host process listening on a Unix socket (this machine's, socket_path(), if none's given)."""
+def connect_local(path=None, timeout=5.0, as_=None):
+    """A Channel to the host process listening on a Unix socket (this machine's, socket_path(), if none's given); as_:
+    hello's as."""
     path = path or socket_path()
     own_socket(path)
     sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
@@ -864,7 +867,7 @@ def connect_local(path=None, timeout=5.0):
     except OSError:
         sock.close()
         raise
-    return _hello(Channel.over(sock), timeout, path, here=True)
+    return _hello(Channel.over(sock), timeout, path, here=True, as_=as_)
 
 
 def is_dest(dest):
@@ -968,12 +971,13 @@ def connect_mesh(host, path=None, timeout=5.0, as_=None, meta=False, agent=None)
 
 def reach(where, timeout=5.0, as_=None, meta=False, agent=None):
     """(channel, info) for a host process wherever it is (where: see this module's docstring); as_, meta, agent:
-    through the mesh, relay's as, as_meta and as_agent (on this machine, a request's own says it)."""
+    through the mesh, relay's as, as_meta and as_agent (on this machine, as_ is hello's as; a request's own says the
+    rest)."""
     via = (where or {}).get("via")
     if via == "local":
-        return connect_local(None, timeout)
+        return connect_local(None, timeout, as_)
     if via == "unix":
-        return connect_local(where["path"], timeout)
+        return connect_local(where["path"], timeout, as_)
     if via == "ssh":
         return connect_ssh(where["dest"], bool(where.get("strict")), max(timeout, 3.0))
     if via == "mesh":

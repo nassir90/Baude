@@ -992,6 +992,7 @@ object Mesh {
         chat.said.value = null
         // (what it sent, text and files, sent again from a sign-in card, if the turn fails for want of it)
         chat.chrome.turnSent = if (text.isBlank() && files.isEmpty()) null else text to files
+        Telemetry.sent(chat)
         Shares.used(chat)
         chat.busy.value = true
         val id = uuid ?: java.util.UUID.randomUUID().toString()

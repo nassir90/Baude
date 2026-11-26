@@ -1,0 +1,87 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "Something done in a chat, as an app saw it happen: kept by its machine's host as it's told (telemetry), read back with telemetry_read. A chat is named by its host's id and its session's id, so what every host keeps can be put together.",
+  "properties": {
+    "at": {
+      "type": "number",
+      "description": "When, in seconds since the epoch (to the millisecond)."
+    },
+    "app": {
+      "enum": [
+        "host",
+        "baude",
+        "record",
+        "phone"
+      ],
+      "description": "What saw it: Baude, Record, the phone's app, or the chat's host itself (a turn's end, as it ran there: what tokens are added up from)."
+    },
+    "kind": {
+      "enum": [
+        "chat_opened",
+        "chat_front",
+        "chat_left",
+        "turn_sent",
+        "turn_ended"
+      ],
+      "description": "What happened: a chat opened in a window or screen; a chat came in front (its window or screen in front, showing it); it stopped being in front; a turn sent in it; a turn of it ended."
+    },
+    "host": {
+      "type": "string",
+      "description": "The id of the host the chat is on."
+    },
+    "session": {
+      "type": "string",
+      "description": "The chat's session id."
+    },
+    "seconds": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "description": "A turn_ended's: how long the turn took."
+    },
+    "turn": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "A turn_ended's: the id of the turn's result, so a turn two apps saw end is counted once."
+    },
+    "model": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "A turn_ended's: the model it ran on."
+    },
+    "effort": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "A turn_ended's: the effort it ran at."
+    },
+    "tokens_in": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "description": "A turn_ended's: the tokens it read (input, cache reads and writes)."
+    },
+    "tokens_out": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "description": "A turn_ended's: the tokens it wrote."
+    }
+  },
+  "required": [
+    "at",
+    "kind",
+    "host",
+    "session"
+  ],
+  "additionalProperties": false
+}

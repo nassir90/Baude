@@ -1,5 +1,5 @@
 {
-  "description": "Baude's Settings dialog: a General page of settings, a Subscriptions page (the Claude and Codex accounts of the host picked beside New session), a Dependencies page (what that host and the app need, each there or not) and a Telemetry page (what that host's machine's apps were used for), each applied as it is changed and kept in settings.json (shared with Record, which has its own Settings dialog with the same rows). Title \"Settings\".",
+  "description": "Baude's Settings dialog: a General page of settings, a Subscriptions page (the Claude and Codex accounts of the host picked beside New session), a Dependencies page (what that host and the app need, each there or not) and a Telemetry page (what that host keeps: its turns' tokens, its machine, its chats' activity, line profiles), each applied as it is changed and kept in settings.json (shared with Record, which has its own Settings dialog with the same rows). Title \"Settings\".",
   "apps": [
     "baude"
   ],
@@ -56,7 +56,7 @@
     },
     {
       "name": "Telemetry page",
-      "shows": "The dialog's fourth page, after Dependencies: what the host picked beside New session says its machine's apps were used for. Described in Telemetry.dialog.json.",
+      "shows": "The dialog's fourth page, after Dependencies: what the host picked beside New session keeps of its turns, its machine, its chats' activity and its line profiles. Described in Telemetry.dialog.json.",
       "copy": [
         "telemetry.title"
       ],

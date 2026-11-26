@@ -11,7 +11,7 @@ from baudelib import transcripts, wording
 
 LOOK_S = 5  # (Desktop's list read again this often, at most, while a head's attached)
 LIVE_S = 60  # (a Desktop chat written this recently, not by the host: Claude Desktop's at it, livefeed's LIVE_SECONDS)
-READS = frozenset({"attach", "detach", "transcript", "subagents", "senders", "stop"})  # (ops a chat listed only is
+READS = frozenset({"attach", "detach", "transcript", "subagents", "senders", "stop", "chat_size"})  # (ops a chat listed only is
 # read by, as it is: anything else takes it up first, takes_up)
 
 

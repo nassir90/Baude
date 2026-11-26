@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "A day's tokens, from the turns that ended in it.",
+  "properties": {
+    "day": {
+      "type": "string",
+      "description": "The day, YYYY-MM-DD, the host's time."
+    },
+    "tokens": {
+      "type": "integer",
+      "description": "Tokens read and written."
+    },
+    "turns": {
+      "type": "integer",
+      "description": "Turns that ended."
+    }
+  },
+  "required": [
+    "day",
+    "tokens",
+    "turns"
+  ],
+  "additionalProperties": false
+}

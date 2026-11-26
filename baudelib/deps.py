@@ -10,7 +10,8 @@ not there doesn't need it), "install" ({"macos"|"debian"|"fedora"|"arch": the co
 "no_display" (true: only a host with no display needs it)}.
 A way is {"env": VAR} (the program VAR names, if it's set and runnable), {"which": name, "not": path?} (on PATH, but
 not path: macOS's /usr/bin/git, a stub until the Command Line Tools are in), {"gi": namespace, "version": v} (a GObject
-typelib), {"glob": pattern} (a runnable file there) or {"run": argv} (a command that succeeds).
+typelib), {"python": module} (a module this Python can import), {"glob": pattern} (a runnable file there) or {"run":
+argv} (a command that succeeds).
 
 Fault injection: BAUDE_HIDE_DEPS=vte,kubectl,… makes those missing, wherever they're looked for, whatever's here."""
 import glob
@@ -76,6 +77,9 @@ def _found(way):
             return way["version"] in gi.Repository.get_default().enumerate_versions(way["gi"])
         except (ImportError, AttributeError):
             return False
+    if "python" in way:
+        import importlib.util
+        return importlib.util.find_spec(way["python"]) is not None
     if "glob" in way:
         return any(os.access(p, os.X_OK) for p in glob.glob(os.path.expanduser(way["glob"])))
     if "run" in way:

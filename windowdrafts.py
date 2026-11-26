@@ -22,6 +22,7 @@ from gi.repository import Gio, GLib, Gtk, Pango  # noqa: E402
 
 import meta  # noqa: E402  (Meta, the helper in the side panel: Record's too; see meta.py)
 import widgets  # noqa: E402  (what Record draws as Baude does: the links' logos; see widgets.py)
+import telemetryview  # noqa: E402  (its chats' activity, told to this machine's host)
 from chatparts import SenderTurn, UserTurn  # noqa: E402
 from widgets import discard, load_settings, save_settings  # noqa: E402,F401
 from markdownview import ARTIFACT_TITLES, GIT_SCHEME, MarkdownView  # noqa: E402,F401
@@ -1123,6 +1124,7 @@ class WindowDrafts:
                 widgets.withdraw_notification(self.chat_key(None))
                 self.allowed_in(msg.get("session_id")).update(self.always_allowed.pop(None, ()))
             self.session_id = msg.get("session_id")
+            telemetryview.look(self)
             if new_id:
                 if self.session_id and (self.signal_pending is not None or self.session_id not in
                                         (load_settings().get("signal_chats") or {})):

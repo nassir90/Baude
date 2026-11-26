@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
-  "description": "What an app on this machine was used for since it last said (about a minute): kept by its host, on that machine only (its state folder's telemetry/, a file a day), for Settings → Telemetry. Sent by an app to its own machine's host only (the phone's to its own host), never on to another.",
+  "description": "An app's telemetry, told to its own machine's host as it happens (the phone's app to its own host), never on to another: what was done in chats, and what it profiled. Kept on that machine only (its state folder's telemetry/), while the host's telemetry is on. Its process id is how the host samples it.",
   "properties": {
     "op": {
       "const": "telemetry",
@@ -22,55 +22,40 @@
       ],
       "description": "The app it's of: Baude, Record, or the phone's app."
     },
-    "seconds": {
-      "type": "object",
-      "propertyNames": {
-        "enum": [
-          "chats.chat",
-          "meta.code",
-          "telemetry.notes",
-          "window.ongoing_feedback",
-          "window.kubernetes",
-          "window.database_schemas",
-          "multiplex.terminal_menu",
-          "images.untitled",
-          "window.settings_title",
-          "changelog.title",
-          "mesh_versions.title",
-          "fixes.send_feedback",
-          "telemetry.home_screen",
-          "this_phone.title",
-          "meta_settings.title",
-          "bot_memory.title",
-          "bot_browser.title",
-          "routines.title",
-          "side_panel.subagents",
-          "side_panel.processes",
-          "side_panel.side_questions",
-          "side_panel.artifacts",
-          "lookup.files",
-          "git.title",
-          "side_panel.signal"
-        ]
-      },
-      "additionalProperties": {
-        "type": "number",
-        "minimum": 0
-      },
-      "description": "Seconds each place was on screen in a window in front, with input in the last minute: by place, the schema/copy key that names it (a main view, a side panel page, a view over the window, a dialog; one of each may be on screen at once)."
+    "pid": {
+      "type": "integer",
+      "description": "The app's process id."
     },
-    "uses": {
-      "type": "object",
-      "additionalProperties": {
-        "type": "integer",
-        "minimum": 0
+    "events": {
+      "type": "array",
+      "items": {
+        "$ref": "TelemetryEvent.json"
       },
-      "description": "Times each menu item or action was used: by the schema/copy key of the menu item's words where it has one (window.settings, …), else its action's name (win.export)."
+      "description": "What happened since it last told (each at its own time)."
+    },
+    "profile": {
+      "anyOf": [
+        {
+          "$ref": "TelemetryProfile.json"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "What it profiled since it last told, if it's profiling."
+    },
+    "profile_error": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Why it isn't profiling what it's told to, if it isn't."
     }
   },
   "required": [
     "op",
-    "app"
+    "app",
+    "pid"
   ],
   "additionalProperties": false
 }

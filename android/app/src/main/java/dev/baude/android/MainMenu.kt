@@ -26,7 +26,6 @@ fun MainMenu(sections: List<List<MenuItem>>) {
                 if (i > 0) MenuDivider()
                 for (item in items) MenuChoice(item.label, item.checked == true, enabled = item.enabled) {
                     open = false
-                    Telemetry.used(item.label) // (its uses counted, by its words' key)
                     item.go()
                 }
             }

@@ -1,198 +1,277 @@
-"""What Baude and Record record of their own use, and show of it (baudelib.telemetry, the telemetry op; the phone's
-Telemetry.kt the same): Recorder, one an app, adding up the time each place is on screen (counted only while one of
-its windows is in front and input came in the last IDLE_S) and the uses of each Gio action (the window's and the
-app's, however they're activated: a menu item, a button with an action name, a shortcut), told to this machine's
-host about once a minute and as the app quits. Nothing is sent anywhere else. watch(win, app) is the one hook a
-window needs. Only an action with a menu item is counted (by the item's words), as the phone counts ☰ items. Page is Settings → Telemetry: the host picked beside New session's, added up over a period."""
+"""What Baude and Record tell their machine's host of chats as it happens (baudelib.telemetry, the telemetry op; the
+phone's Telemetry.kt the same), and Settings → Telemetry, which shows what a host keeps. Recorder, one an app: while
+that host's telemetry is on (its Info's telemetry, followed as it changes), each chat opened, coming in front or
+leaving it, each turn sent and each turn's end (how long it took, its model and effort, its tokens), by its host's id
+and its session's id, told at once with its own time; and line profiles of what the host says this app profiles
+(lineprofile), every PROFILE_S. While it's off nothing is looked at or sent. Nothing is sent anywhere but this
+machine's host. watch(win, app, network) is the one hook a window needs; look, turn_sent and turn_ended are the
+chat's."""
+import datetime
 import os
-import threading
 import time
 import weakref
 
-from gi.repository import Adw, GLib, Gio, Gtk
+from gi.repository import Adw, GLib, Gtk
 
-from baudelib import telemetry, wire, wording
+from baudelib import lineprofile, wording
 
-TICK_S = 5  # (how often the place on screen is looked at)
-IDLE_S = 60  # (no input this long: nobody's looking, and nothing's counted)
-TELL_S = 60  # (how often what's added up is told to the host)
-QUIT_S = 1  # (the longest the host is waited for as the app quits)
-OVERLAYS = (("lightbox", "images.untitled"), ("terminal", "multiplex.terminal_menu"), ("kube", "window.kubernetes"),
-            ("schema", "window.database_schemas"))  # (views over the whole window, the topmost first)
-TABS = {"chat": "chats.chat", "note": "telemetry.notes", "gone": "telemetry.notes", "code": "meta.code",
-        "fixes": "window.ongoing_feedback"}  # (a main tab, by its key's kind: panels.MainTabs)
-APP_NAMES = {"baude": "Baude", "record": "Record", "phone": "Baude"}
-PERIODS = (("sidebar.today", 1), ("telemetry.last_7_days", 7), ("telemetry.last_30_days", 30))
+PROFILE_S = 30  # (how often what's profiled here is told)
+QUEUE_MAX = 1000  # (events kept for a host that isn't there yet)
+APP_NAMES = {"baude": "mesh_versions.baude", "record": "mesh_versions.record", "phone": "mesh_versions.baude",
+             "host": "telemetry.host_process"}
+PROFILED = ("host", "baude", "record")
+WEEKS = 53  # (the tokens' grid: a year, a column a week)
+EVENTS_SHOWN = 12
+LINES_SHOWN = 10
+REFRESH_S = 5  # (the machine's rows asked for again while the page is shown)
 _RECORDER = []
 
 
-def places(win):
-    """The places of win on screen (schema/copy keys: telemetry.PLACES): a dialog over it alone; else a view over it
-    alone; else the main tab's and the side panel's page."""
-    dialog = win.get_visible_dialog() if isinstance(win, Adw.ApplicationWindow) else None
-    if dialog is not None and (key := wording.key_of(dialog.get_title() or "")) in telemetry.PLACES:
-        return [key]
-    for attr, key in OVERLAYS:
-        if (w := getattr(win, attr, None)) is not None and w.get_mapped():
-            return [key]
-    out = []
+def chat_of(win):
+    """(host id, session id) of the chat a Baude window shows, or None (a new chat nothing's been sent in)."""
+    sid = getattr(win, "session_id", None)
+    if not sid or not _RECORDER:
+        return None
+    r = getattr(win, "remote", None)
+    if not (r is not None and sid in r.sessions or getattr(win, "chat_sent", False)
+            or getattr(win, "session_title", None)):
+        return None
+    host = (r.info.get("id") or r.key) if r is not None else _RECORDER[0].local_id()
+    return (host, sid) if host else None
+
+
+def chats_in(win):
+    """The chats open in win (a set of (host, session)) and the one in front, if win is: Baude's its one chat, shown
+    on its Chat tab; Record's each chat's tab."""
     tabs = getattr(win, "tabs", None)
-    if tabs is not None and tabs.get_mapped() and (shown := tabs.current()) is not None:
-        kind = getattr(shown, "tab_key", None)
-        if (key := TABS.get(kind if isinstance(kind, str) else (kind or (None,))[0])) is not None:
-            out.append(key)
-    for stack in (getattr(getattr(win, "panel", None), "stack", None), getattr(win, "right_stack", None)):
-        if isinstance(stack, Adw.ViewStack) and stack.get_mapped() and (page := stack.get_visible_child()) is not None:
-            if (key := wording.key_of(stack.get_page(page).get_title() or "")) in telemetry.PLACES and key not in out:
-                out.append(key)
-    return out
-
-
-def _labels(model, out, changed=None):
-    """Each action a menu model's items name, its item's words (the first one's, for an action with targets);
-    changed (if given) is told when a model walked changes."""
-    if changed is not None:
-        changed(model)
-    for i in range(model.get_n_items()):
-        action = model.get_item_attribute_value(i, "action", None)
-        label = model.get_item_attribute_value(i, "label", None)
-        if action is not None and label is not None:
-            out.setdefault(action.get_string(), label.get_string())
-        for link in ("section", "submenu"):
-            if (inner := model.get_item_link(i, link)) is not None:
-                _labels(inner, out, changed)
+    if tabs is None:
+        return set(), None
+    if hasattr(win, "session_id"):
+        chat = chat_of(win)
+        front = chat if chat and win.is_active() and tabs.current() is tabs.get("chat") else None
+        return ({chat} if chat else set()), front
+    rec = _RECORDER[0] if _RECORDER else None
+    open_ = {}
+    for key in list(tabs.pages):
+        if isinstance(key, tuple) and key[:1] == ("chat",) and isinstance(key[1], str) and rec is not None:
+            if (chat := rec.chat_at(key[1])) is not None:
+                open_[key] = chat
+    shown = tabs.current()
+    key = getattr(shown, "tab_key", None)
+    front = open_.get(key) if win.is_active() and key in open_ else None
+    return set(open_.values()), front
 
 
 class Recorder:
-    """An app's: what it's been used for since it last told its host (seconds by place, uses by action's name)."""
+    """An app's: what it tells its machine's host of chats, and its own line profiling, as that host says."""
 
-    def __init__(self, app, name):
-        self.app, self.name = app, name
+    def __init__(self, app, name, network):
+        self.app, self.name, self.network = app, name, network
+        self.on, self.host_pid, self.host_id = False, None, None
+        self.queue, self.sending = [], False
         self.windows = weakref.WeakSet()
-        self.hooked = weakref.WeakKeyDictionary()  # (an action group: the names of its actions counted)
-        self.seconds, self.uses, self.held = {}, {}, {}  # (uses by action's name; held: told, not kept, by key)
-        self.nomenu, self.labels, self.stale, self.watched = set(), {}, True, weakref.WeakSet()  # (action name: its item's words)
-        self.input_at, self.ticked, self.told = 0.0, time.monotonic(), time.monotonic()
-        self.hook(app, "app")
-        app.connect("shutdown", lambda *_: self.tell(wait=True))
-        GLib.timeout_add_seconds(TICK_S, self.tick)
+        self.opened = weakref.WeakKeyDictionary()  # (a window: the chats open in it, as last looked)
+        self.front = None  # (the chat in front, in which window: (win ref, chat))
+        self.sent_at = {}  # (a chat: when its turn was sent here)
+        self.profiler, self.profile_timer, self.told_error = lineprofile.Profiler(name), None, None
+        network.listen(self.heard)
+        app.connect("shutdown", lambda *_: self.quit())
+        self.heard()
+
+    def local_id(self):
+        here = self.network.here_alive()
+        if here is not None and here.info.get("id"):
+            self.host_id = here.info["id"]
+        return self.host_id
+
+    def chat_at(self, path):
+        """A transcript's chat, Record's tab of it: (its host's id, its id). One under the network's mirrors is
+        that host's; any other, this machine's."""
+        sid = os.path.basename(path).removesuffix(".jsonl")
+        home = os.path.join(self.network.home, "")
+        if path.startswith(home):
+            return path[len(home):].split(os.sep, 1)[0], sid
+        host = self.local_id()
+        return (host, sid) if host else None
+
+    def heard(self):
+        """The hosts changed: this machine's host's telemetry followed (switched on, off; what this app profiles)."""
+        here = self.network.here_alive()
+        if here is None:
+            return
+        self.host_id = here.info.get("id") or self.host_id
+        t = here.info.get("telemetry") or {}
+        on, pid = bool(t.get("on")), here.info.get("pid")
+        if on != self.on:
+            self.on = on
+            if on:
+                self.hello()
+                for win in list(self.windows):
+                    self.look(win)
+            else:
+                self.queue.clear()
+                self.opened.clear()
+                self.front, self.sent_at = None, {}
+        elif on and pid != self.host_pid:
+            self.hello()  # (a host started again: its samples of this process begin again)
+        self.host_pid = pid
+        functions = next((p.get("functions") or [] for p in t.get("profiling") or [] if p.get("app") == self.name), [])
+        if functions != self.profiler.functions:
+            self.profile(functions)
 
     def watch(self, win):
         self.windows.add(win)
-        seen = Gtk.EventControllerLegacy(propagation_phase=Gtk.PropagationPhase.CAPTURE)
-        seen.connect("event", self.heard)
-        win.add_controller(seen)
-        self.hook(win, "win")
-        self.stale = True
+        GLib.idle_add(lambda: self.look(win) and False)
+        win.connect("notify::is-active", lambda w, _p: self.look(w))
+        if (tabs := getattr(win, "tabs", None)) is not None:
+            tabs.view.connect("notify::selected-page", lambda *_: self.look(win))
+            for sig in ("page-attached", "page-detached"):
+                tabs.view.connect(sig, lambda *_: GLib.idle_add(lambda: self.look(win) and False))
+        win.connect("destroy", lambda w: self.look(w, gone=True))
 
-    def heard(self, _controller, _event):
-        self.input_at = time.monotonic()
+    # ---- chats
+    def look(self, win, gone=False):
+        """win looked at again: a chat opened in it since, and the chat in front, if it's changed, told."""
+        if not self.on:
+            return
+        open_, front = (set(), None) if gone else chats_in(win)
+        before = self.opened.get(win, set())
+        for chat in open_ - before:
+            self.event("chat_opened", chat)
+        self.opened[win] = open_
+        was = self.front
+        if front is not None:
+            if was is None or was[1] != front:
+                if was is not None:
+                    self.event("chat_left", was[1])
+                self.event("chat_front", front)
+                self.front = (weakref.ref(win), front)
+        elif was is not None and was[0]() in (win, None):
+            self.event("chat_left", was[1])
+            self.front = None
+
+    def turn_sent(self, win):
+        if not self.on:
+            return
+        self.look(win)
+        if (chat := chat_of(win)) is not None:
+            self.sent_at[chat] = time.time()
+            self.event("turn_sent", chat)
+        else:
+            self.sent_at[("", id(win))] = time.time()  # (a new chat's: its id comes with its first message)
+
+    def turn_ended(self, win, msg, model=None, effort=None):
+        """A turn's result: how long it took (from its sending here, else as it says), its model and effort, its
+        tokens."""
+        if not self.on or (chat := chat_of(win)) is None:
+            return
+        self.look(win)
+        sent = self.sent_at.pop(chat, None) or self.sent_at.pop(("", id(win)), None)
+        r = getattr(win, "remote", None)
+        model = model or ((r.sessions.get(chat[1]) or {}).get("model") if r is not None else None)  # (its default's,
+        # as its host lists it)
+        u = msg.get("usage") if isinstance(msg.get("usage"), dict) else {}
+        took = time.time() - sent if sent else (msg["duration_ms"] / 1000 if isinstance(
+            msg.get("duration_ms"), (int, float)) else None)
+        self.event("turn_ended", chat, seconds=round(took, 3) if took is not None else None,
+                   turn=msg.get("uuid") if isinstance(msg.get("uuid"), str) else None,
+                   model=model if isinstance(model, str) else None, effort=effort if isinstance(effort, str) else None,
+                   tokens_in=sum(int(u.get(k) or 0) for k in ("input_tokens", "cache_read_input_tokens",
+                                                              "cache_creation_input_tokens")),
+                   tokens_out=int(u.get("output_tokens") or 0))
+
+    def event(self, kind, chat, **more):
+        e = {"at": round(time.time(), 3), "kind": kind, "host": chat[0], "session": chat[1],
+             **{k: v for k, v in more.items() if v is not None}}
+        self.queue = (self.queue + [e])[-QUEUE_MAX:]
+        if not self.sending:
+            self.sending = True
+            GLib.idle_add(self.tell)
+
+    # ---- telling the host
+    def hello(self):
+        """The host told this app's process id (sampled from now), with nothing else."""
+        self.send({}, lambda _ok: None)
+
+    def tell(self):
+        events, self.queue = self.queue, []
+        if not events:
+            self.sending = False
+            return False
+
+        def done(ok):
+            if not ok:  # (kept, for when the host's there)
+                self.queue = (events + self.queue)[-QUEUE_MAX:]
+            self.sending = False
+            if ok and self.queue:
+                self.sending = True
+                GLib.idle_add(self.tell)
+        self.send({"events": events}, done)
         return False
 
-    def hook(self, group, prefix):
-        """group's actions (an app's, a window's) counted as they're used, those added since too: a stateless one as
-        it's activated, a stateful one (a toggle) as its state changes (anything connected to its activate would stop
-        GIO changing the state)."""
-        names = self.hooked.setdefault(group, set())
-        for name in group.list_actions():
-            if name not in names and isinstance(action := group.lookup_action(name), Gio.SimpleAction):
-                names.add(name)
-                action.connect("activate" if action.get_state_type() is None else "notify::state", self.used,
-                               f"{prefix}.{name}")
+    def send(self, more, done, wait=False):
+        msg = {"op": "telemetry", "app": self.name, "pid": os.getpid(), **more}
+        if self.profiler.error != self.told_error:
+            msg["profile_error"] = self.told_error = self.profiler.error
+        here = self.network.here_alive()
+        if here is None:
+            return done(False)
+        if wait:
+            return done(here.call(msg, timeout=1).get("op") == "telemetry_kept")
+        here.request(msg, lambda r: done(r.get("op") == "telemetry_kept"))
 
-    def used(self, _action, _arg, name):
-        self.uses[name] = self.uses.get(name, 0) + 1
+    # ---- profiling
+    def profile(self, functions):
+        last = self.profiler.set(functions)
+        if self.profile_timer is not None:
+            GLib.source_remove(self.profile_timer)
+            self.profile_timer = None
+        if functions:
+            self.profile_timer = GLib.timeout_add_seconds(PROFILE_S, self.profiled)
+        self.send({"profile": last} if last else {}, lambda _ok: None)
 
-    def menus_changed(self, model):
-        if model not in self.watched:
-            self.watched.add(model)
-            model.connect("items-changed", lambda *_: setattr(self, "stale", True))
-
-    def walk_menus(self):
-        """labels read again from the menus on screen (and the app's bar)."""
-        from widgets import walk
-        labels = {}
-        for win in list(self.windows):
-            for w in walk(win):
-                if isinstance(w, (Gtk.MenuButton, Gtk.PopoverMenu)) and (model := w.get_menu_model()) is not None:
-                    _labels(model, labels, self.menus_changed)
-        if (bar := self.app.get_menubar()) is not None:
-            _labels(bar, labels, self.menus_changed)
-        self.labels, self.stale = labels, False
-
-    def tick(self):
-        now = time.monotonic()
-        step, self.ticked = min(now - self.ticked, 2 * TICK_S), now
-        shown = next((w for w in list(self.windows) if w.is_active()), None)
-        if shown is not None and now - self.input_at < IDLE_S:
-            for place in places(shown):
-                self.seconds[place] = self.seconds.get(place, 0) + step
-        for win in list(self.windows):
-            self.hook(win, "win")
-        self.hook(self.app, "app")
-        if now - self.told >= TELL_S:
-            self.tell()
+    def profiled(self):
+        if (p := self.profiler.snapshot()) is not None or self.profiler.error != self.told_error:
+            self.send({"profile": p} if p else {}, lambda _ok: None)
         return True
 
-    def names(self):
-        """uses, each by its menu item's schema/copy key; one with no menu item (or words that aren't a key) isn't
-        counted. The menus are walked only when they've changed or an action not seen in them was used."""
-        if self.uses and (self.stale or any(n not in self.labels and n not in self.nomenu for n in self.uses)):
-            self.walk_menus()
-            self.nomenu = {n for n in self.uses if n not in self.labels}
-        out = dict(self.held)
-        for name, n in self.uses.items():
-            if key := wording.key_of(self.labels.get(name, "")):
-                out[key] = out.get(key, 0) + n
-        return out
-
-    def tell(self, wait=False):
-        """What's been added up, told to this machine's host (on a thread of its own; wait: here, as the app quits),
-        and forgotten here once it's kept there. Kept here till then if the host isn't running."""
-        self.told = time.monotonic()
-        seconds = {p: round(s, 1) for p, s in self.seconds.items() if s >= 0.5}
-        uses = self.names()
-        if not seconds and not uses:
-            return
-        self.seconds, self.uses, self.held = {}, {}, {}
-        msg = {"op": "telemetry", "app": self.name, "seconds": seconds, "uses": uses}
-        if wait:
-            return self.send(msg, QUIT_S)  # (the quit isn't held up for a host that isn't answering)
-        threading.Thread(target=self.send, args=(msg,), daemon=True, name="telemetry").start()
-
-    def send(self, msg, timeout=5):
-        kept = False
-        try:
-            if os.path.exists(wire.socket_path()):  # (not started for this: told once it's there)
-                ch, _info = wire.reach({"via": "local"}, timeout=timeout)
-                try:
-                    ch.sock.settimeout(timeout)
-                    ch.send({**msg, "req": 1})
-                    kept = next((m.get("op") == "telemetry_kept" for m in ch if m.get("req") == 1), False)
-                finally:
-                    ch.close()
-        except (OSError, ValueError):
-            pass
-        if not kept:
-            GLib.idle_add(self.keep_back, msg)
-
-    def keep_back(self, msg):
-        """A telling the host didn't take: added back, to be told next time."""
-        for p, s in msg["seconds"].items():
-            self.seconds[p] = self.seconds.get(p, 0) + s
-        for n, c in msg["uses"].items():
-            self.held[n] = self.held.get(n, 0) + c
-        return False
+    def quit(self):
+        """As the app quits: what's left told (the host waited for a moment at most)."""
+        for win in list(self.windows):
+            self.look(win, gone=True)
+        last = self.profiler.set([])
+        events, self.queue = self.queue, []
+        if self.on and (events or last):
+            try:
+                self.send({"events": events, **({"profile": last} if last else {})}, lambda _ok: None, wait=True)
+            except (OSError, ValueError):
+                pass
 
 
-def watch(win, name):
-    """win's use recorded (name: the app's, "baude" or "record"): its places, its actions, the app's."""
+def watch(win, name, network):
+    """win's chats told to this machine's host (name: the app's, "baude" or "record"; network: its hosts)."""
     if not _RECORDER:
-        _RECORDER.append(Recorder(win.get_application(), name))
+        _RECORDER.append(Recorder(win.get_application(), name, network))
     _RECORDER[0].watch(win)
 
 
-def said(seconds):
+def look(win):
+    if _RECORDER:
+        _RECORDER[0].look(win)
+
+
+def turn_sent(win):
+    if _RECORDER:
+        _RECORDER[0].turn_sent(win)
+
+
+def turn_ended(win, msg, model=None, effort=None):
+    if _RECORDER:
+        _RECORDER[0].turn_ended(win, msg, model, effort)
+
+
+# ---- Settings → Telemetry
+def said_time(seconds):
     s = int(round(seconds))
     if s < 60:
         return wording.say("time.seconds", seconds=s)
@@ -201,14 +280,115 @@ def said(seconds):
     return wording.say("time.hours_minutes", hours=s // 3600, minutes=s % 3600 // 60)
 
 
-def named(key):
-    """A place's or use's words: its schema/copy message, else its name as it is (an action's)."""
-    return wording.say(key) if wording.has(key) else key
+def said_size(n):
+    if n is None:
+        return "–"
+    if n >= 1 << 30:
+        return wording.say("telemetry.size_gb", gb=f"{n / (1 << 30):.1f}")
+    return wording.say("images.size_mb", mb=f"{n / (1 << 20):.0f}")
+
+
+def said_event(e):
+    if e.get("kind") == "turn_ended" and isinstance(e.get("seconds"), (int, float)):
+        return wording.say("telemetry.turn_ended_in", time=said_time(e["seconds"]))
+    return wording.say(f"telemetry.{e.get('kind')}")
+
+
+def tokens(n):
+    from chatparts import fmt_tokens
+    return fmt_tokens(int(n))
+
+
+def levels(days):
+    """Each day's level in the grid, 0 (none) to 4, by its share of the busiest day's tokens."""
+    most = max((d["tokens"] for d in days), default=0)
+    return {d["day"]: (0 if not d["tokens"] or not most else min(4, 1 + int(4 * d["tokens"] / (most + 1))))
+            for d in days}
+
+
+class TokenGrid(Gtk.DrawingArea):
+    """A year of tokens, a square a day, a column a week (Sunday at the top), today's the last; each as dark as its
+    day's share of the busiest day's, in the accent colour; none, faint. Its tooltip says the day's."""
+
+    GAP = 3
+
+    def __init__(self):
+        super().__init__(hexpand=True, has_tooltip=True, margin_top=12, margin_bottom=12, margin_start=12,
+                         margin_end=12)
+        self.days, self.level = {}, {}
+        self.set_draw_func(self.draw)
+        self.connect("query-tooltip", self.tip)
+        self.set_content_height(7 * 14)
+
+    def show(self, days):
+        self.days = {d["day"]: d for d in days}
+        self.level = levels(days)
+        self.queue_draw()
+
+    def cell(self):
+        return max(4, min(14, (self.get_width() - (WEEKS - 1) * self.GAP) // WEEKS))
+
+    def first(self):
+        today = datetime.date.today()
+        return today - datetime.timedelta(days=(WEEKS - 1) * 7 + (today.weekday() + 1) % 7)
+
+    def draw(self, _area, cr, width, _height):
+        size, start, today = self.cell(), self.first(), datetime.date.today()
+        if self.get_content_height() != 7 * (size + self.GAP) - self.GAP:  # (as tall as its squares, at this width)
+            GLib.idle_add(lambda: self.set_content_height(7 * (size + self.GAP) - self.GAP) and False)
+        accent = Adw.StyleManager.get_default().get_accent_color_rgba()
+        fg = self.get_color()
+        left = max(0, (width - (WEEKS * size + (WEEKS - 1) * self.GAP)) // 2)
+        for i in range(WEEKS * 7):
+            day = start + datetime.timedelta(days=i)
+            if day > today:
+                break
+            level = self.level.get(day.isoformat(), 0)
+            if level:
+                cr.set_source_rgba(accent.red, accent.green, accent.blue, (0.25, 0.45, 0.7, 1.0)[level - 1])
+            else:
+                cr.set_source_rgba(fg.red, fg.green, fg.blue, 0.08)
+            x, y = left + i // 7 * (size + self.GAP), i % 7 * (size + self.GAP)
+            cr.rectangle(x, y, size, size)
+            cr.fill()
+
+    def tip(self, _w, x, y, _kb, tooltip):
+        size = self.cell()
+        left = max(0, (self.get_width() - (WEEKS * size + (WEEKS - 1) * self.GAP)) // 2)
+        col, row = int((x - left) // (size + self.GAP)), int(y // (size + self.GAP))
+        if not (0 <= col < WEEKS and 0 <= row < 7):
+            return False
+        day = self.first() + datetime.timedelta(days=col * 7 + row)
+        if day > datetime.date.today():
+            return False
+        d = self.days.get(day.isoformat()) or {"tokens": 0}
+        tooltip.set_text(wording.say("telemetry.day_tokens", day=day.strftime("%a %-d %b %Y"), tokens=tokens(d["tokens"])))
+        return True
+
+
+def effort_said(effort):
+    key = f"mode_effort.effort_{effort}"
+    return wording.say(key) if effort and wording.has(key) else effort or "–"
+
+
+def model_name(value, models):
+    return next((m.get("displayName") for m in models if m.get("value") == value and m.get("displayName")), value)
+
+
+def row(title, *values, sensitive=True, mono=False):
+    r = Adw.ActionRow(title=GLib.markup_escape_text(title), sensitive=sensitive)
+    if mono:
+        r.add_css_class("monospace")
+    for v in values:
+        if v:
+            r.add_suffix(Gtk.Label(label=v, css_classes=["dim-label", "numeric"]))
+    return r
 
 
 class Page(Adw.PreferencesPage):
-    """Settings → Telemetry: the host picked beside New session (as Dependencies has it), a Period, then for each app
-    of that host's machine its time in each place and its uses of each item, the most first."""
+    """Settings → Telemetry: the host picked beside New session (as Dependencies has it), Collect Telemetry, then what
+    that host keeps: its tokens by day over a year with the most used model and effort and each model's, its machine
+    now, its chats' latest activity, and line profiling (which process, what's profiled, its top lines)."""
 
     def __init__(self, win):
         super().__init__(title=wording.say("telemetry.title"), icon_name="document-open-recent-symbolic")
@@ -217,48 +397,260 @@ class Page(Adw.PreferencesPage):
             if isinstance(clamp, Adw.Clamp):
                 clamp.set_maximum_size(100_000)
                 clamp.set_tightening_threshold(100_000)
+        self.win = win
         self.where, host = win.terminal_host()
         top = Adw.PreferencesGroup()
         name = Adw.ActionRow(title=wording.say("new_session.host"))
         name.add_suffix(Gtk.Label(label=host, css_classes=["dim-label"]))
         top.add(name)
-        self.period = Adw.ComboRow(title=wording.say("telemetry.period"),
-                                   model=Gtk.StringList.new([wording.say(k) for k, _ in PERIODS]), selected=1)
-        self.period.connect("notify::selected", lambda *_: self.ask())
-        top.add(self.period)
+        self.collect = Adw.SwitchRow(title=wording.say("telemetry.collect"), sensitive=False)
+        self.collect.connect("notify::active", lambda *_: self.switched())
+        top.add(self.collect)
         self.add(top)
-        self.groups = []
+        self.state, self.taking, self.groups, self.shown_app = None, False, {}, "host"
+        self.grid = TokenGrid()
+        self.refresh = GLib.timeout_add_seconds(REFRESH_S, self.tick)
+        self.connect("destroy", lambda *_: GLib.source_remove(self.refresh))
         self.ask()
 
-    def ask(self):
+    def tick(self):
+        if self.get_mapped() and self.state and self.state.get("on"):
+            self.read({"from": time.time() - 3 * REFRESH_S, "what": ["metrics"], "limit": 1}, self.took_metrics)
+        return True
+
+    def read(self, msg, done):
         import depsview
-        days = PERIODS[self.period.get_selected()][1]
-        depsview.ask(self.where, lambda reply: self.took(days, reply), {"op": "telemetry_read", "days": days})
+        depsview.ask(self.where, done, {"op": "telemetry_read", **msg})
 
-    def took(self, days, reply):
-        if PERIODS[self.period.get_selected()][1] != days:
-            return False  # (another period picked since)
-        for g in self.groups:
+    def set(self, msg):
+        import depsview
+        depsview.ask(self.where, lambda r: r.get("state") and self.took_state(r), {"op": "telemetry_set", **msg})
+
+    def ask(self):
+        now = time.time()
+        self.read({"from": now - (WEEKS * 7 + 7) * 86400, "what": ["usage"]}, self.took_usage)
+        self.read({"from": now - 86400, "what": ["events"], "limit": 4 * EVENTS_SHOWN}, self.took_events)
+        self.read({"from": now - 60, "what": ["metrics"], "limit": 1}, self.took_metrics)
+        self.read({"from": now - 3600, "what": ["profiles"], "limit": 500}, self.took_profiles)
+
+    def group(self, key, title, rows=(), at=None):
+        """The group key (made, or emptied), titled, with rows."""
+        g = self.groups.get(key)
+        if g is not None:
             self.remove(g)
-        self.groups = []
+        g = Adw.PreferencesGroup(title=GLib.markup_escape_text(title) if title else None)
+        for r in rows:
+            g.add(r)
+        self.groups[key] = g
+        self.add(g)
+        order = ["error", "tokens", "models", "machine", "chats", "profiling", "lines"]
+        for k in order[order.index(key) + 1:]:  # (kept in their order however they're answered)
+            if (later := self.groups.get(k)) is not None:
+                self.remove(later)
+                self.add(later)
+        return g
 
-        def group(title, rows):
-            g = Adw.PreferencesGroup(title=GLib.markup_escape_text(title) if title else None)
-            for words, value in rows:
-                row = Adw.ActionRow(title=GLib.markup_escape_text(words), sensitive=value is not None)
-                if value is not None:
-                    row.add_suffix(Gtk.Label(label=value, css_classes=["dim-label", "numeric"]))
-                g.add(row)
-            self.add(g)
-            self.groups.append(g)
-        times, uses = reply.get("times") or [], reply.get("uses") or []
-        if reply.get("error") or not times and not uses:
-            group(None, [(reply.get("error") or wording.say("telemetry.nothing"), None)])
-            return False
-        for app in telemetry.APPS:
-            app_name = APP_NAMES[app]
-            if rows := [(named(t["place"]), said(t["seconds"])) for t in times if t["app"] == app]:
-                group(wording.say("telemetry.screen_time", app=app_name), rows)
-            if rows := [(named(u["name"]), str(u["count"])) for u in uses if u["app"] == app]:
-                group(wording.say("telemetry.used", app=app_name), rows)
+    def failed(self, reply):
+        if reply.get("error"):
+            self.group("error", None, [row(reply["error"], sensitive=False)])
+            return True
         return False
+
+    def took_state(self, reply):
+        self.state = reply.get("state") or self.state
+        if self.state is None:
+            return False
+        self.taking = True
+        self.collect.set_active(bool(self.state.get("on")))
+        self.collect.set_sensitive(True)
+        self.taking = False
+        if not self.state.get("on"):
+            self.group("machine", None, [row(wording.say("telemetry.off"), sensitive=False)])
+        self.show_profiling()
+        return False
+
+    def switched(self):
+        if not self.taking:
+            self.collect.set_sensitive(False)
+            self.set({"on": self.collect.get_active()})
+
+    def took_usage(self, reply):
+        if self.failed(reply):
+            return False
+        self.took_state(reply)
+        u = reply.get("usage") or {"days": [], "models": [], "combos": []}
+        self.grid.show(u["days"])
+        models = self.host_models()
+        g = self.group("tokens", wording.say("telemetry.tokens_by_day"))
+        box = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE, css_classes=["boxed-list"])
+        grid_row = Gtk.ListBoxRow(activatable=False, child=self.grid)
+        if self.grid.get_parent() is not None:
+            self.grid.get_parent().set_child(None)
+            grid_row.set_child(self.grid)
+        box.append(grid_row)
+        if u["combos"]:
+            c = u["combos"][0]
+            box.append(row(wording.say("telemetry.most_used"),
+                           wording.say("telemetry.model_effort", model=model_name(c["model"], models),
+                                       effort=effort_said(c.get("effort")))))
+        g.add(box)
+        self.group("models", wording.say("telemetry.models") if u["models"] else None,
+                   [row(model_name(m["model"], models),
+                        wording.say("telemetry.turns_tokens", turns=m["turns"], tokens=tokens(m["tokens"])))
+                    for m in u["models"]])
+        return False
+
+    def host_models(self):
+        r = self.host_remote()
+        return (r.info.get("models") or []) if r is not None else []
+
+    def host_remote(self):
+        net = client_network(self.win)
+        if net is None:
+            return None
+        if self.where.get("via") == "local":
+            return net.here_alive()
+        return next((r for r in net.alive() if r.key == self.where.get("host")), None)
+
+    def took_metrics(self, reply):
+        if self.failed(reply):
+            return False
+        self.took_state(reply)
+        if not self.state or not self.state.get("on"):
+            return False
+        samples = reply.get("metrics") or []
+        if not samples:
+            return False
+        s = samples[-1]
+        rows = []
+        if s.get("load"):
+            rows.append(row(wording.say("telemetry.load"), " · ".join(f"{x:.2f}" for x in s["load"])))
+        if s.get("memory_total"):
+            rows.append(row(wording.say("bot_memory.title"), wording.say(
+                "telemetry.memory_of", used=said_size(s.get("memory_used")), total=said_size(s["memory_total"]))))
+        for p in sorted(s.get("procs") or [], key=lambda p: (list(APP_NAMES).index(p["app"]) - 4) % 4):
+            rows.append(row(wording.say(APP_NAMES[p["app"]]), wording.say(
+                "telemetry.cpu_rss", cpu="–" if p.get("cpu") is None else f"{p['cpu']:.1f}", rss=said_size(p.get("rss")))))
+        self.group("machine", wording.say("telemetry.machine"), rows)
+        return False
+
+    def took_events(self, reply):
+        if self.failed(reply):
+            return False
+        self.took_state(reply)
+        events = shown_events(reply.get("events") or [])
+        if not events:
+            self.group("chats", wording.say("telemetry.chat_activity"),
+                       [row(wording.say("telemetry.nothing"), sensitive=False)])
+            return False
+        titles = chat_titles(self.win)
+        self.group("chats", wording.say("telemetry.chat_activity"), [
+            row(titles.get((e["host"], e["session"])) or e["session"][:8], said_event(e),
+                datetime.datetime.fromtimestamp(e["at"]).strftime("%H:%M:%S")) for e in events])
+        return False
+
+    def took_profiles(self, reply):
+        if self.failed(reply):
+            return False
+        self.profiles = reply.get("profiles") or []
+        self.took_state(reply)
+        return False
+
+    def show_profiling(self):
+        if self.state is None:
+            return
+        if not self.state.get("line_profiler"):
+            import depsview
+            depsview.ask(self.where, self.took_deps)
+            return
+        if "profiling" in self.groups and getattr(self, "profiling_shown", None) == (
+                self.shown_app, repr(self.state.get("profiling"))):
+            return self.show_lines()
+        self.profiling_shown = (self.shown_app, repr(self.state.get("profiling")))
+        mine = next((p for p in self.state.get("profiling") or [] if p["app"] == self.shown_app), {"functions": []})
+        process = Adw.ComboRow(title=wording.say("telemetry.process"), model=Gtk.StringList.new(
+            [wording.say(APP_NAMES[a]) for a in PROFILED]), selected=PROFILED.index(self.shown_app))
+        process.connect("notify::selected", lambda r, _p: self.picked(PROFILED[r.get_selected()]))
+        entry = Adw.EntryRow(title=wording.say("telemetry.functions"), text=", ".join(mine["functions"]),
+                             show_apply_button=True)
+        entry.connect("apply", lambda e: self.set({"app": self.shown_app, "functions": [
+            f.strip() for f in e.get_text().split(",") if f.strip()]}))
+        on = Adw.SwitchRow(title=wording.say("telemetry.line_profiling"), active=bool(mine["functions"]),
+                           sensitive=bool(mine["functions"] or entry.get_text().strip()))
+        entry.connect("changed", lambda e: on.set_sensitive(bool(mine["functions"] or e.get_text().strip())))
+        on.connect("notify::active", lambda r, _p: r.get_active() != bool(mine["functions"]) and self.set({
+            "app": self.shown_app, "functions": [f.strip() for f in entry.get_text().split(",") if f.strip()]
+            if r.get_active() else []}))
+        rows = [on, process, entry]
+        if mine.get("error"):
+            rows.append(row(mine["error"], sensitive=False))
+        self.group("profiling", None, rows)
+        self.show_lines()
+
+    def picked(self, app):
+        self.shown_app = app
+        GLib.idle_add(lambda: self.show_profiling() and False)
+
+    def show_lines(self):
+        """The process picked's lines profiled in the last hour, added up, the most time first."""
+        lines = {}
+        for p in getattr(self, "profiles", []):
+            if p.get("app") != self.shown_app:
+                continue
+            for x in p.get("lines") or []:
+                k = (x["file"], x["line"])
+                got = lines.setdefault(k, {**x, "hits": 0, "seconds": 0.0})
+                got["hits"] += x["hits"]
+                got["seconds"] += x["seconds"]
+        top = sorted(lines.values(), key=lambda x: -x["seconds"])[:LINES_SHOWN]
+        g = self.group("lines", wording.say("telemetry.top_lines") if top else None)
+        for x in top:
+            r = row(f"{os.path.basename(x['file'])}:{x['line']}  {x.get('code') or x['function']}",
+                    wording.say("telemetry.hits_seconds", hits=f"{x['hits']:,}", seconds=f"{x['seconds']:.3f}"),
+                    mono=True)
+            r.set_title_lines(1)
+            r.set_tooltip_text(f"{x['file']}:{x['line']} ({x['function']})")
+            g.add(r)
+
+    def took_deps(self, reply):
+        import depsview
+        dep = next((d for d in reply.get("deps") or [] if d.get("dep") == "line_profiler"), None)
+        if dep is not None and not dep.get("present"):  # (as every feature without what it needs shows it)
+            missing = depsview.Missing(again=self.ask)
+            missing.set_vexpand(False)
+            missing.set_propagate_natural_height(True)
+            missing.set_min_content_height(260)  # (its whole box: a scroller in the page gets none of its own)
+            missing.show(dep, "telemetry.line_profiling")
+            self.group("profiling", None, [missing])
+            self.group("lines", None)
+        return False
+
+
+def shown_events(events):
+    """The latest first, a turn's end once: the host's own (it ran there) left out where an app saw it end too."""
+    seen = [e for e in events if e.get("app") != "host"]
+    out = seen + [e for e in events if e.get("app") == "host" and not any(
+        x["kind"] == e["kind"] and x["session"] == e["session"] and abs(x["at"] - e["at"]) < 10 for x in seen)]
+    return sorted(out, key=lambda e: -e["at"])[:EVENTS_SHOWN]
+
+
+def client_network(win):
+    """The window's app's hosts (Baude's sessionlist.network, Record's recordstore.network)."""
+    try:
+        if hasattr(win, "session_id"):
+            import sessionlist
+            return sessionlist.network()
+        import recordstore
+        return recordstore.network()
+    except (ImportError, AttributeError):
+        return None
+
+
+def chat_titles(win):
+    """{(host id, session id): title} of every chat the window's app knows."""
+    net = client_network(win)
+    if net is None:
+        return {}
+    return {(r.info.get("id") or r.key, sid): s.get("title") for r in net.alive()
+            for sid, s in r.sessions.items() if isinstance(s, dict) and s.get("title")}
+

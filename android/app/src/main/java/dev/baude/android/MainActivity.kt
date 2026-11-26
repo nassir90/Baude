@@ -44,7 +44,7 @@ class MainActivity : ComponentActivity() {
         setContent {
             BaudeTheme {
                 val now = screen.value
-                SideEffect { Telemetry.screen = now } // (the place on screen, for Telemetry: this screen's, a chat's pages')
+                SideEffect { Telemetry.screen = now } // (the screen shown, for Telemetry: a chat's, its host and session)
                 // (Hosts too: back to the home screen; something shared, not sent: back to the app it's from)
                 BackHandler(now[0] != "contacts" || Shares.pending.value != null) { back() }
                 when (now[0]) {
@@ -170,15 +170,5 @@ class MainActivity : ComponentActivity() {
         super.onPause()
         Mesh.shown = false
         Telemetry.paused()
-    }
-
-    override fun dispatchTouchEvent(ev: android.view.MotionEvent): Boolean {
-        Telemetry.touched() // (someone's here: the screen's time counted)
-        return super.dispatchTouchEvent(ev)
-    }
-
-    override fun dispatchKeyEvent(event: android.view.KeyEvent): Boolean {
-        Telemetry.touched()
-        return super.dispatchKeyEvent(event)
     }
 }

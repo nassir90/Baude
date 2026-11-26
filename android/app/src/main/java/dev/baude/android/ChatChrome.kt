@@ -161,6 +161,7 @@ private fun loginAsk(chat: Chat, m: JSONObject): String? =
  * of; the context asked again. */
 private fun result(chat: Chat, m: JSONObject) {
     val c = chat.chrome
+    Telemetry.ended(chat, m)
     c.cost.value += spentSince(c, m)
     val u = m.optJSONObject("usage") ?: JSONObject()
     val used = u.optInt("input_tokens") + u.optInt("cache_read_input_tokens") + u.optInt("cache_creation_input_tokens")

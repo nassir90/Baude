@@ -573,7 +573,7 @@ class BaudeWindow(WindowView, WindowProc, WindowDrafts, WindowSignal, WindowRemo
                                    lambda: find_in_focus(self) or self.kube.find() or self.schema.start_find() or
                                    self.find_in_chat())))
         import telemetryview
-        telemetryview.watch(self, "baude")  # (its places on screen and its actions' uses, told to this machine's host)
+        telemetryview.watch(self, "baude", network())  # (its chats' activity, told to this machine's host)
         ctrl_scroll = Gtk.EventControllerScroll(flags=Gtk.EventControllerScrollFlags.VERTICAL)
         ctrl_scroll.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
         ctrl_scroll.connect("scroll", self.on_ctrl_scroll)

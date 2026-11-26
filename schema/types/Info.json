@@ -112,6 +112,10 @@
         "type": "string"
       },
       "description": "The ops it takes, given by a host that takes only part of the wire (a phone's), with what its sessions take besides (start's ephemeral; control requests: control, set_permission_mode, set_model)."
+    },
+    "telemetry": {
+      "$ref": "TelemetryState.json",
+      "description": "Its telemetry state: the apps on its machine tell it telemetry only while it's on, and profile what it says."
     }
   },
   "required": ["id"],

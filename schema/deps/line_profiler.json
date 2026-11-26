@@ -1,0 +1,15 @@
+{
+  "description": "line_profiler (4 or later), which times each line of the functions profiled from Settings → Telemetry or telemetry_set, in the host process and in Baude and Record. Nothing else needs it: without it, nothing is profiled.",
+  "name": "line_profiler",
+  "where": "host",
+  "needed_by": ["telemetry.line_profiling"],
+  "detect": {
+    "macos": [{"python": "line_profiler"}],
+    "linux": [{"python": "line_profiler"}]
+  },
+  "install": {
+    "macos": "python3 -m pip install --user --break-system-packages line_profiler",
+    "debian": "sudo apt install python3-line-profiler"
+  },
+  "link": "https://github.com/pyutils/line_profiler"
+}

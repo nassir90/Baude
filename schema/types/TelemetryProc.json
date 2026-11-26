@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "A process's use of its machine, in one sample.",
+  "properties": {
+    "app": {
+      "enum": [
+        "host",
+        "baude",
+        "record",
+        "phone"
+      ],
+      "description": "Which: the host process, Baude, Record, or the phone's app (its host too)."
+    },
+    "pid": {
+      "type": "integer",
+      "description": "Its process id."
+    },
+    "cpu": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "description": "Its CPU since the sample before, in percent of one core (null in its first sample)."
+    },
+    "rss": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "description": "Its resident memory, in bytes."
+    }
+  },
+  "required": [
+    "app",
+    "pid"
+  ],
+  "additionalProperties": false
+}

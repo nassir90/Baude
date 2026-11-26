@@ -26,6 +26,7 @@ from gi.repository import Gdk, Gio, GLib, GObject, Gtk  # noqa: E402
 
 import meta  # noqa: E402  (Meta, the helper in the side panel: Record's too; see meta.py)
 import widgets  # noqa: E402  (what Record draws as Baude does: the links' logos; see widgets.py)
+import telemetryview  # noqa: E402  (its chats' activity, told to this machine's host)
 import composerview  # noqa: E402
 from composerview import ComposerMarkdown  # noqa: E402,F401
 from chatparts import (  # noqa: E402  (a message of yours, its revert button: Meta's and side questions' too)
@@ -1352,6 +1353,7 @@ class WindowProc:
         self.stick_bottom, self.restore_scroll = True, None  # (what you sent in view, whatever place was held)
         self.proc.stop_asked = False  # (a new turn: a stop asked of the last isn't this one's)
         self.proc.user(self.user_content(text, atts), said)
+        telemetryview.turn_sent(self)
         self.set_busy(True)
 
     def chat_begun(self):

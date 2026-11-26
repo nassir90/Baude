@@ -30,9 +30,11 @@ TYPES = tuple(wire.DEFS["TaskField"]["properties"]["type"]["enum"])
 TASKS_MAX, FIELDS_MAX, TRIGGERS_MAX = 50, 30, 10
 SCRIPT_MAX = 256 * 1024
 RUNS_KEPT, RUNS_SHOWN, LOG_SHOWN = 100, 50, 2000
+CHATS_KEPT = 50  # (the chats a run started, kept in its record: the latest)
 LOG_MAX = 4 * 1024 * 1024  # (a run's log, at most: what's written after, dropped)
 TIMEOUT_S, TIMEOUT_MAX = 3600, 24 * 3600
 ASK_S = 3600  # (an ask of its Bot waited for this long, at most)
+RETELL_S = 5  # (a chat's report its Bot couldn't take: tried again after this long)
 GRACE_S = 5  # (a run stopped: its script's given this long to stop, then killed)
 MIN_EVERY, MAX_EVERY = 5, 60 * 24 * 31  # (a schedule's minutes: no more often than 5, no less often than a month)
 POLL_S, POLL_MIN, POLL_MAX = 30, 10, 3600  # (a git push trigger's looks at its branch)
@@ -446,6 +448,7 @@ class Tasks:
         self.waiting = {}  # (a Bot's session id: the ask sent it, waiting on its turn's end)
         self.polled = {}  # ((sid, trigger id): when it was last looked at)
         self.turns = {}  # (a Bot's session id: held while one ask of it waits on its turn: one at a time)
+        self.tellers = set()  # (the chats a run started whose reports are being given their Bots: _tell)
 
     # ---- kept
     def store(self, s):
@@ -482,9 +485,9 @@ class Tasks:
             return {"session": s.id, "tasks": [self.shown(st, t) for t in st.tasks], "clock": clock(),
                     **({"saved": saved} if saved else {})}
 
-    def op(self, s, msg):
-        """(server's lock held) tasks, task, run_task, task_run, task_stop for the Bot s: (the answer's op, its fields),
-        or ValueError, what's wrong."""
+    def op(self, s, msg, by=None):
+        """(server's lock held) tasks, task, run_task, task_run, task_stop for the Bot s (by: the member asking, as a
+        chat's started_by has it, or None: a head here): (the answer's op, its fields), or ValueError, what's wrong."""
         op = msg["op"]
         if not s.meta.get("bot"):
             raise ValueError(wording.say("host_errors.tasks_bot_only"))
@@ -527,7 +530,7 @@ class Tasks:
                 if task is None or s.meta.get("archived"):
                     raise ValueError(wording.say("host_errors.no_task"))
             inputs = msg.get("inputs") if isinstance(msg.get("inputs"), dict) else {}
-            run = self.start(s, task, None, "manual", {}, inputs)
+            run = self.start(s, task, None, "manual", {}, inputs, by=by)
             return "task_started", {"session": s.id, "run": run}
         with self.lock:
             run = st.runs.get(msg.get("run"))
@@ -539,8 +542,10 @@ class Tasks:
                                 "bot": (s.meta.get("bot") or {}).get("name")}
 
     # ---- run
-    def start(self, s, task, trigger, kind, payload, given=None):
+    def start(self, s, task, trigger, kind, payload, given=None, by=None):
         """(server's lock held) A run of task begun (or, one of it running already, kept as skipped): its record.
+        by: the member that ran it by hand (None: a head here, or the Bot's own tools on this host; a trigger's: the
+        Bot's own starter's): what the chats it starts are judged as.
         ValueError: its form can't be filled."""
         st = self.store(s)
         fills = (trigger or {}).get("fills")
@@ -559,7 +564,8 @@ class Tasks:
             st.put_run(run)
             token = secrets.token_hex(16)
             self.running[run["id"]] = {"sid": s.id, "task": task["id"], "name": task["name"], "proc": None,
-                                       "token": token, "stop": None}
+                                       "token": token, "stop": None,
+                                       "by": by if kind == "manual" else s.meta.get("started_by")}
         threading.Thread(target=self._run, args=(s.id, st, dict(task), run, token), daemon=True,
                          name=f"task-{run['id']}").start()
         self.server.changed()
@@ -585,7 +591,7 @@ class Tasks:
                 text, failed = self.ask(run["id"], st.script(task), task["name"])
                 error = wording.say("tasks.bot_failed") if failed else None
             else:
-                code, error = self._script(st, task, run, token, self._cwd(sid, st))
+                code, error = self._script(sid, st, task, run, token, self._cwd(sid, st))
         except Exception as e:  # noqa: BLE001 (said in its run, and on the page)
             error = f"{type(e).__name__}: {e}"
         with self.lock:
@@ -619,12 +625,14 @@ class Tasks:
             st.put_run(run)
             return run
 
-    def _script(self, st, task, run, token, cwd):
-        """A python or shell task's script run: (its exit code, why it failed or None). Stopped or out of time: its
-        process group told to stop, and killed after GRACE_S whether or not its script's gone."""
+    def _script(self, sid, st, task, run, token, cwd):
+        """A python or shell task's script run (its Bot's, sid: the chats it starts nested under it, BAUDE_SPAWNED_BY):
+        (its exit code, why it failed or None). Stopped or out of time: its process group told to stop, and killed
+        after GRACE_S whether or not its script's gone."""
         path = st.script_path(task)
         argv = [sys.executable, "-u", path] if task["runtime"] == "python" else ["/bin/sh", path]
         env = {**os.environ, "BAUDE_SOCKET": os.path.abspath(self.server.socket_path), "BAUDE_TASK_RUN": run["id"],
+               "BAUDE_SPAWNED_BY": sid,
                "BAUDE_TASK_TOKEN": token, "BAUDE_TASK_INPUTS": json.dumps(run["inputs"]),
                "BAUDE_TASK_PAYLOAD": json.dumps(run["payload"] or {}), "BAUDE_TASK_NAME": task["name"],
                "BAUDE_WIRE_VERSION": str(wire.VERSION),
@@ -814,7 +822,9 @@ class Tasks:
                     try:
                         srv.take_input(None, s, {"type": "user", "uuid": str(uuid.uuid4()),
                                                  "message": {"role": "user", "content": said}},
-                                       {"kind": "host", "name": wording.say("tasks.sender", name=name)})
+                                       {"kind": "host", "name": wording.say("tasks.sender", name=name),
+                                        "host": srv.me["id"], "host_name": srv.me["name"], "session": sid,
+                                        "task": held.get("task") or "", "run": rid})
                     except Exception as e:  # noqa: BLE001 (Elsewhere, or its agent not started)
                         with self.lock:
                             self.waiting[sid].remove(wait)
@@ -846,6 +856,147 @@ class Tasks:
             for w in self.waiting.pop(s.id, []):
                 w["text"], w["failed"] = str(msg.get("result") or ""), bool(msg.get("is_error"))
                 w["done"].set()
+
+    # ---- the chats a run starts
+    def from_run(self, given):
+        """(server's lock held) The run going that a start names (its task_run: {run, token}, from the run's
+        environment), as a chat it starts takes it: {sid, task, run, name, by}; ValueError if it names none going,
+        or its token's wrong."""
+        if not isinstance(given, dict):
+            raise ValueError(wording.say("host_errors.no_run"))
+        got = self.held(given)
+        if got is None:
+            raise ValueError(wording.say("host_errors.no_run"))
+        held = got[0]
+        return {"sid": held["sid"], "task": held["task"], "run": given["run"], "name": held.get("name") or "",
+                "by": held.get("by")}
+
+    def add_chat(self, rid, sid, chat):
+        """(server's lock held) chat, started by the run rid of the Bot sid: kept in its record (chats)."""
+        with self.lock:
+            st = self.stores.get(sid)
+            if st is None or rid not in st.runs:
+                return
+            self._update(st, rid, chats=[*(st.runs[rid].get("chats") or []), chat][-CHATS_KEPT:])
+
+    def chat_over(self, s, result=None, over="finished"):
+        """(server's lock held) s, a chat a task's run started, at a turn's end (result: what it said; over: finished,
+        or stopped or failed: interrupted, an error, or its agent ended before its turn did): its Bot told, as a
+        message from it whose sender says the run and how it ended (once the Bot's idle, between its tasks' asks), and
+        the run's log told too. Until the first turn that finishes: what s says after is its own chat's. What's to be
+        told is kept in s's meta (task_run's pending) till its Bot's taken it, so a restart of the host sends it
+        then (resume_told)."""
+        came = s.meta.get("task_run")
+        if not isinstance(came, dict) or came.get("ended") or came.get("told"):
+            return
+        bot = self.server.sessions.get(came.get("bot"))
+        if bot is None:
+            return
+        text = str(result or "").strip() or wording.say("tasks.agent_said_nothing")
+        over = over if over in wire.SENDER_OVER else "failed"
+        st = self.store(bot)
+        if came.get("run") in st.runs:
+            st.log(came["run"], "agent", text, session=s.id, over=over, error=over != "finished" or None)
+        came["pending"] = [*(came.get("pending") or []), {"id": str(uuid.uuid4()), "text": text, "over": over}]
+        if over == "finished":
+            came["ended"] = True
+        self.server.save(s)
+        self.telling(s.id)
+
+    def resume_told(self):
+        """(server's lock held) What chats a task's run started had still to tell their Bots as the host last stopped
+        (task_run's pending): told now."""
+        for s in list(self.server.sessions.values()):
+            if isinstance(s.meta.get("task_run"), dict) and s.meta["task_run"].get("pending"):
+                self.telling(s.id)
+
+    def telling(self, cid):
+        """(server's lock held) The chat cid's pending reports given its Bot, on a thread of its own (one per chat:
+        each in turn, oldest first)."""
+        with self.lock:
+            if cid in self.tellers:
+                return
+            self.tellers.add(cid)
+        threading.Thread(target=self._tell, args=(cid,), daemon=True, name=f"task-told-{cid[:8]}").start()
+
+    def _tell(self, cid):
+        """The chat cid's pending reports given its Bot, each as a message from cid, once the Bot's idle and no ask of
+        its tasks is waiting on it (one at a time: ask's turn, taken for each look only), oldest first; each let go of
+        once it's taken (its uuid the report's: taken once, even if it's sent again after a restart). The Bot busy
+        past ASK_S: said on the run, and still waited for; one it can't take (Elsewhere, its agent not starting):
+        said on the run, and tried again after RETELL_S. Gone, the chat or its Bot: let go of. The host stopping:
+        kept, for its next start."""
+        srv, said, at, begun, retry = self.server, set(), None, 0.0, 0.0
+        try:
+            while not srv.stopped.is_set():
+                with srv.lock:
+                    c = srv.sessions.get(cid)
+                    came = c.meta.get("task_run") if c is not None and not c.deleting else None
+                    pending = came.get("pending") if isinstance(came, dict) else None
+                    if not pending:
+                        return
+                    b = srv.sessions.get(came.get("bot"))
+                    if b is None or b.deleting:  # (no Bot to tell)
+                        came["pending"] = None
+                        srv.save(c)
+                        return
+                    report = pending[0]
+                    if report.get("id") != at:
+                        at, begun, retry = report.get("id"), time.monotonic(), 0.0
+                    with self.lock:
+                        turn = self.turns.setdefault(b.id, threading.Lock())
+                if time.monotonic() < retry or not turn.acquire(timeout=0.25):
+                    time.sleep(0.25)
+                    continue
+                try:
+                    with srv.lock:
+                        c, b = srv.sessions.get(cid), srv.sessions.get(came.get("bot"))
+                        if c is not None and b is not None and not c.deleting and not b.deleting and \
+                                not b.busy and not b.codex_queue and not b.meta.get("archived"):
+                            sender = {"kind": "subagent", "name": c.listing().get("title") or "",
+                                      "host": srv.me["id"], "host_name": srv.me["name"], "session": cid,
+                                      "bot": b.id, "task": came.get("task") or "", "task_name": came.get("name") or "",
+                                      "run": came.get("run") or "", "over": report.get("over") or "finished"}
+                            try:
+                                srv.take_input(None, b, {"type": "user", "uuid": report["id"], "message": {
+                                    "role": "user", "content": report["text"]}}, sender)
+                            except Exception as e:  # noqa: BLE001 (Elsewhere, or its agent not started: again)
+                                srv.log(f"telling {b.id} what {cid} said: {e}")
+                                if ("error", at) not in said:
+                                    said.add(("error", at))
+                                    self._said(b, came, wording.say("tasks.agent_not_told", bot=self._bot(b),
+                                                                    name=sender["name"], error=str(e)))
+                                retry = time.monotonic() + RETELL_S
+                            else:
+                                came["pending"] = [r for r in came.get("pending") or [] if r.get("id") != at] or None
+                                srv.save(c)
+                                continue
+                        elif c is not None and b is not None and time.monotonic() - begun > ASK_S and \
+                                ("busy", at) not in said:
+                            said.add(("busy", at))
+                            self._said(b, came, wording.say("tasks.agent_waiting", bot=self._bot(b),
+                                                            name=c.listing().get("title") or ""))
+                finally:
+                    turn.release()
+                time.sleep(0.25)
+        finally:
+            with self.lock:
+                self.tellers.discard(cid)
+            with srv.lock:  # (one more come as it let go: told too)
+                c = srv.sessions.get(cid)
+                came = c.meta.get("task_run") if c is not None else None
+                if not srv.stopped.is_set() and isinstance(came, dict) and came.get("pending"):
+                    self.telling(cid)
+
+    def _said(self, bot, came, text):
+        """(server's lock held) A line on the run of the Bot bot that came names (a chat it started's task_run)."""
+        st = self.store(bot)
+        if came.get("run") in st.runs:
+            st.log(came["run"], "status", text)
+
+    @staticmethod
+    def _bot(bot):
+        return (bot.meta.get("bot") or {}).get("name") or wording.say("sidebar.bot")
 
     # ---- due
     def due(self, block=False):

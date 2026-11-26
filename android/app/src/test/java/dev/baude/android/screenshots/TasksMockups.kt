@@ -6,6 +6,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.ui.Modifier
+import androidx.compose.foundation.layout.padding
+import androidx.compose.ui.unit.dp
 import com.github.takahirom.roborazzi.captureScreenRoboImage
 import dev.baude.android.BaudeTheme
 import dev.baude.android.LocalBaude
@@ -113,6 +115,54 @@ abstract class TasksMockups(private val theme: String) {
     @Test fun run() {
         show(TaskFixtures.failedRun())
         shoot("run")
+    }
+
+    /** A run that started one-shot agents: Started, each with its state, and what the done one said. */
+    @Test fun runStarted() {
+        dev.baude.android.Mesh.sessions["h1"] = TaskFixtures.started
+        try {
+            show(TaskFixtures.startedRun())
+            shoot("run-started")
+        } finally {
+            dev.baude.android.Mesh.sessions.remove("h1")
+        }
+    }
+
+    /** A chat's messages from a task's run and from chats it started: the agent's chat's first message (from the task,
+     * a link to its run), and the Bot's chat told what two of them said (finished, failed): only their words, the
+     * chat and the run linked in the from line. */
+    @Test fun senders() {
+        fun told(chat: String, title: String, over: String) = dev.baude.android.Msg.StoredSender(kind = "subagent",
+            name = title, host = "h1", hostName = "workshop", session = chat, bot = "s1", task = "t1",
+            taskName = "Deploy site", run = "r3", over = over)
+        activity.setContent {
+            BaudeTheme {
+                androidx.compose.foundation.layout.Column(Modifier.fillMaxSize().background(LocalBaude.current.inside)
+                    .padding(top = 24.dp), verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(12.dp)) {
+                    dev.baude.android.Said(dev.baude.android.Line("you", "The deploy of site failed at its upload. Find out why."),
+                        dev.baude.android.Msg.StoredSender(kind = "host", name = "Task “Deploy site”", host = "h1",
+                            hostName = "workshop", session = "s1", task = "t1", run = "r3"))
+                    dev.baude.android.Said(dev.baude.android.Line("you", "The bucket's key expired yesterday. Renew it, then run the task again."),
+                        told("c1", "Why the deploy failed", "finished"))
+                    dev.baude.android.Said(dev.baude.android.Line("you", "Failed to authenticate: this login reached its time limit."),
+                        told("c2", "Renew the upload key", "failed"))
+                }
+            }
+        }
+        settle()
+        shoot("senders")
+    }
+
+    /** A run opened from a chat's from line (its Bot's chat, at that run), then Back: the run's own task. */
+    @Test fun runBack() {
+        dev.baude.android.TaskLinks.pending = listOf("h1", "s1", "t1", "r3")
+        val st = TaskFixtures.list()
+        show(st)
+        tap("Deploy site")
+        st.runs.addAll(TaskFixtures.runs) // (as its host would answer: no host here)
+        androidx.compose.runtime.snapshots.Snapshot.sendApplyNotifications()
+        settle()
+        shoot("run-back")
     }
 
     /** The run's log with Wrap turned off: its long lines scrolled sideways. */

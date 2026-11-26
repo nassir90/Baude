@@ -73,6 +73,14 @@
     "timed_out": "stopped after {$seconds} s",
     "task_running": "a task's run",
     "not_as_asked": "The answer wasn't as asked: {$wrong}",
-    "no_answer": "no answer in time"
+    "no_answer": "no answer in time",
+    "agent_said_nothing": "(nothing)",
+    "started_chats": "Started",
+    "agent_done": "{$name} finished",
+    "a_chat": "A chat",
+    "agent_failed": "{$name} failed",
+    "agent_stopped": "{$name} stopped",
+    "agent_waiting": "Still waiting to tell {$bot} what {$name} said: {$bot} has been busy for an hour",
+    "agent_not_told": "Couldn't tell {$bot} what {$name} said yet: {$error}"
   }
 }

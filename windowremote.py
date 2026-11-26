@@ -31,6 +31,7 @@ from gi.repository import Adw, Gdk, GLib, Gtk, Pango  # noqa: E402
 import pointers  # noqa: E402  (the pointer's shape: Record's too)
 from livefeed import LIVE_SECONDS  # noqa: E402
 import meta  # noqa: E402  (Meta, the helper in the side panel: Record's too; see meta.py)
+import meshui  # noqa: E402  (a daemon's pending restart and what it waits for: Record's too)
 import metalook  # noqa: E402
 import widgets  # noqa: E402  (what Record draws as Baude does: the links' logos; see widgets.py)
 import telemetryview  # noqa: E402  (its chats' activity, told to this machine's host)
@@ -656,41 +657,80 @@ class WindowRemote:
             app = self.get_application()
             _HOST_APART[0].act(said[0], app.restart, lambda then=None: self.restart_host(then=then))
 
-    def restart_host(self, waited=0, then=None):
-        """This Mac's host process stopped and started again (a newer one, after an update): once no command's running
-        there (the host says: quit if_idle), as stopping it would stop that; a turn that's only the model writing is
-        cut short, said so (cut), and carried on with Continue. Its claudes stop, their transcripts kept, and each of
-        its sessions resumes as it's next written to (the windows on them reattach as it's back). then: what's done
-        once it's gone, in place of starting it again (Baude restarted too: the new Baude starts it)."""
+    def restart_host(self, then=None, now=False):
+        """This Mac's host process stopped and started again (a newer one, after an update): kept by it as its restart
+        (restart free) till nothing it runs blocks it (meshui.restart_dialog says what), as stopping it would stop
+        that; now: at once, those stopped. Every head shows it pending at its list's foot (meshui.restart_lines). A
+        turn that's only the model writing is cut short, said so (cut), and carried on with Continue. Its claudes
+        stop, their transcripts kept, and each of its sessions resumes as it's next written to (the windows on them
+        reattach as it's back). then: what's done once it's gone, in place of waiting for it back (Baude restarted
+        too: the new Baude reaches it). One on older code is asked as it was then (meshui.ask_restart)."""
         r = local_host()
         if r is None:  # (none running: started, as the restart would)
             if then is not None:
                 return then()
             return self.local_server(lambda _r: toast(self.sidebar, wording.say("hosts.daemon_restarted")), quiet=True)
-        busy = {c.get("session") for c in (r.info.get("update") or {}).get("waiting") or ()} - {None}  # (its say)
+        meshui.ask_restart(r, now, lambda text: toast(self.sidebar, text),
+                           lambda grace: self.wait_host_gone(r, then, grace))
 
-        def later(n):
-            if not waited:
-                toast(self.sidebar, wording.say("hosts.restart_waiting", n=n))
-            GLib.timeout_add_seconds(5, lambda: self.restart_host(waited + 5, then) and False)
+    def wait_host_gone(self, r, then=None, grace=5):
+        """r (This Mac's host process) restarting: once it's gone, then(), or it back (local_server), said; given up
+        on if, grace seconds on, its restart's dropped and it's still there. One wait at a time."""
+        r.restart_until = max(getattr(r, "restart_until", 0), time.monotonic() + grace)
+        if getattr(r, "restart_waited", False):
+            return
+        r.restart_waited = True
 
-        def answered(reply):
-            if reply.get("op") == "busy":
-                return later(len(reply.get("sessions") or []) or 1)
-            end = time.monotonic() + 15
-
-            def gone():  # (the old one gone: a new one, started as any is: local_server)
-                if r.state == "alive" and time.monotonic() < end:
-                    return True
-                if then is not None:
-                    then()
-                    return False
-                self.local_server(lambda _r: toast(self.sidebar, wording.say("hosts.daemon_restarted")), quiet=True)
+        def gone():  # (the old one gone: the new one, as it started itself, reached as any is: local_server)
+            if r.state == "alive" and (r.info.get("restart") or time.monotonic() < r.restart_until):
+                return True
+            r.restart_waited = False
+            if r.state == "alive":
                 return False
-            GLib.timeout_add(250, gone)
-        if busy:
-            return later(len(busy))
-        r.request({"op": "quit", "if_idle": True, "restart": True}, answered)
+            if then is not None:
+                then()
+                return False
+            self.local_server(lambda _r: toast(self.sidebar, wording.say("hosts.daemon_restarted")), quiet=True)
+            return False
+        GLib.timeout_add(250, gone)
+
+    def show_restart_blockers(self, key=None):
+        """A line at the sidebar's foot clicked (key: its host's): what that daemon's restart waits for
+        (meshui.restart_dialog), the restart held meanwhile; See Thread on one shows it (see_blocker)."""
+        r = next((r for r in network().alive() if r.key == key), None) if key is not None else local_host()
+        if r is None or not r.info.get("restart"):
+            return
+
+        def ask(now):
+            if r.mine:
+                return self.restart_host(now=now)
+            meshui.ask_restart(r, now, lambda text: toast(self.sidebar, text))
+        meshui.restart_dialog(r, self, ask, lambda b: self.see_blocker(r, b))
+
+    def see_blocker(self, r, b):
+        """What r's restart waits for, shown (See Thread): a chat, opened (an agent run's: the chat on its host it's
+        for); a task's run, its Bot's chat opened on its Tasks page, at that run; a terminal, ☰ → Terminal on it."""
+        if b.get("kind") == "terminal":
+            return self.terminal.show(r.where, remote_name(r), b["terminal"])
+        sid = b.get("session")
+        on = next((x for x in network().remotes() if x.info.get("id") == b["host"]), None) if b.get("host") else r
+        on = on if on is not None and sid in on.sessions else network().find(sid)
+        if on is None:
+            return
+        self.open_mesh_chat({**on.sessions[sid], "server": on})
+        if b.get("kind") != "task" or not b.get("run"):
+            return
+        tasks, end = self.panel.tasks, time.monotonic() + 10
+
+        def at_run():  # (once the chat's open, its Tasks page reading its Bot's: the run)
+            if tasks.sid != sid:
+                return time.monotonic() < end
+            self.show_panel(True, "tasks")
+            if b.get("task"):
+                tasks.open_task(b["task"])
+            tasks.open_run({"id": b["run"], "name": b.get("name"), "status": "running"})
+            return False
+        GLib.timeout_add(100, at_run)
 
     def local_server(self, then, wait_s=20, quiet=False):
         """This machine's host process (local_host), which runs every chat of Baude's: then(it), on the main loop, once

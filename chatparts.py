@@ -26,18 +26,23 @@ class UpdateBar(Gtk.Box):
     """At the foot of a sidebar, under a rule from what's listed above it: Update, while a new version's there to be
     restarted onto (what an automatic restart waits for in its tooltip: say); clicked, on_click (restart now; asked
     only if that stops something). While it's fetched in and checked, a spinner on the button; a newer version that
-    can't be restarted onto says why instead of the button."""
+    can't be restarted onto says why instead of the button. Over it, while this machine's daemon has a restart
+    pending, a line saying so, and one for each other host with one (say_restart); clicked, on_restart(its key) (what
+    it waits for: meshui.restart_dialog)."""
 
-    def __init__(self, on_click):
+    def __init__(self, on_click, on_restart=None):
         super().__init__(orientation=Gtk.Orientation.VERTICAL, visible=False)
         self.add_css_class("update-bar")
         self.append(Gtk.Separator())
+        self.on_restart, self.restart_lines = on_restart, None
+        self.restart = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, visible=False)  # (a line per host: say_restart)
+        self.append(self.restart)
         self.spinner = Gtk.Spinner(visible=False)
         row = Gtk.Box(spacing=6)
         row.append(self.spinner)
         row.append(Gtk.Label(label=wording.say("update_bar.update")))
         self.button = Gtk.Button(child=row, halign=Gtk.Align.START, margin_start=6, margin_end=6, margin_top=4,
-                                 margin_bottom=4)
+                                 margin_bottom=4, visible=False)
         self.button.add_css_class("flat")
         self.button.connect("clicked", lambda *_: on_click())
         self.append(self.button)
@@ -50,7 +55,6 @@ class UpdateBar(Gtk.Box):
         """waiting: what the restart waits for (shown in the tooltip), or None: no update waiting, no bar. why: that
         a newer version can't be restarted onto ("dirty", "diverged", "broken"), said in place of the button. busy:
         Update's clicked and being fetched in and checked."""
-        self.set_visible(waiting is not None or why is not None)
         self.button.set_visible(why is None and waiting is not None)
         self.reason.set_visible(why is not None)
         if why is not None:
@@ -61,6 +65,27 @@ class UpdateBar(Gtk.Box):
             self.button.set_tooltip_text(
                 wording.say("update_bar.waiting_for", waits="\n".join(f"• {w}" for w in waiting)) if waiting else
                 wording.say("update_bar.ready"))
+        self.shown()
+
+    def say_restart(self, lines):
+        """lines: each host's pending daemon restart, [(its key, said: meshui.restart_said)]; none, no line. Each
+        clicked: on_restart(key)."""
+        lines = [x for x in lines or () if x[1]]
+        if lines != self.restart_lines:
+            self.restart_lines = lines
+            while (c := self.restart.get_first_child()) is not None:
+                self.restart.remove(c)
+            for key, said in lines:
+                b = Gtk.Button(halign=Gtk.Align.FILL, margin_start=6, margin_end=6, margin_top=4,
+                               child=Gtk.Label(label=said, xalign=0, wrap=True, wrap_mode=Pango.WrapMode.WORD_CHAR))
+                b.add_css_class("flat")
+                b.connect("clicked", lambda _b, key=key: self.on_restart and self.on_restart(key))
+                self.restart.append(b)
+        self.restart.set_visible(bool(lines))
+        self.shown()
+
+    def shown(self):
+        self.set_visible(self.button.get_visible() or self.reason.get_visible() or self.restart.get_visible())
 
 
 class HostState(Gtk.Revealer):

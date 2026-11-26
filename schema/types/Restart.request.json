@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "The host process's restart, as a head asks for it: once nothing's running (its pending restart, info's restart, kept by the host), now, or held while this head shows what it waits for.",
+  "properties": {
+    "op": {
+      "const": "restart",
+      "description": "What it is."
+    },
+    "req": {
+      "type": ["integer", "null"],
+      "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "do": {
+      "enum": ["free", "now", "pause"],
+      "description": "free: restart once no chat's running a command and no task's running (and this head's pause let go of); now: restart at once, what's running stopped and turns cut short; pause: no restart while this head holds it (till it says free, or its connection goes)."
+    }
+  },
+  "required": ["op", "do"],
+  "additionalProperties": false
+}

@@ -120,8 +120,8 @@ OPS = {  # (the rule each op is checked for, before it's taken (a function: msg'
     "notes": _notes,  # (Record's notebooks here, and the edits waiting on their pages: as its chats' are)
     "edits": "manage_read",
     **dict.fromkeys(("edit_propose", "edit_revise", "edit_withdraw", "edit_decide", "edit_adopt"), "manage_write"),
-    **dict.fromkeys(("access_set", "quit", "link", "unlink", "deactivate", "activate", "telemetry_set", "theme_save",
-                     "theme_remove", "feedback"), "access_write"),  # (the rules, and the host's own)
+    **dict.fromkeys(("access_set", "quit", "restart", "link", "unlink", "deactivate", "activate", "telemetry_set",
+                     "theme_save", "theme_remove", "feedback"), "access_write"),  # (the rules, and the host's own)
     "list_dir": "manage_read",  # (any folder's entries: as much as a chat's, which could list them)
     # (a chat's, or a chat's folder's: checked as it's found)
     **dict.fromkeys(("detach", "transcript", "chat_size", "subagents", "senders", "bot_picture", "task", "task_run",

@@ -5,9 +5,12 @@ cards3d's GLCards: there's no PyOpenGL. Runs inside a Gtk.GLArea's render; nothi
 
 GSK can't do this itself on this GTK: GskGLShader (its custom shader node) is deprecated since 4.16 and the renderer
 4.24 draws with refuses it ("The renderer does not support gl shaders"), and GSK has no depth buffer or lights."""
+import array
 import ctypes as C
+import functools
 import math
 import os
+import struct
 
 SIGS = {
     "glCreateShader": ("u", "u"), "glShaderSource": (None, "u", "i", "pp", "p"), "glCompileShader": (None, "u"),
@@ -16,7 +19,7 @@ SIGS = {
     "glUniform1f": (None, "i", "f"), "glUniform2f": (None, "i", "f", "f"), "glUniform3f": (None, "i", "f", "f", "f"),
     "glUniform4f": (None, "i", "f", "f", "f", "f"), "glUniform1i": (None, "i", "i"), "glUniform4fv": (None, "i", "i", "fp"),
     "glGenVertexArrays": (None, "i", "pu"), "glBindVertexArray": (None, "u"), "glGenBuffers": (None, "i", "pu"),
-    "glBindBuffer": (None, "u", "u"), "glBufferData": (None, "u", "l", "fp", "u"), "glDeleteBuffers": (None, "i", "pu"),
+    "glBindBuffer": (None, "u", "u"), "glBufferData": (None, "u", "l", "p", "u"), "glDeleteBuffers": (None, "i", "pu"),
     "glDeleteVertexArrays": (None, "i", "pu"),
     "glEnableVertexAttribArray": (None, "u"), "glVertexAttribPointer": (None, "u", "i", "u", "u8", "i", "p"),
     "glGenTextures": (None, "i", "pu"), "glBindTexture": (None, "u", "u"), "glDeleteTextures": (None, "i", "pu"),
@@ -32,6 +35,15 @@ SIGS = {
     "glBindRenderbuffer": (None, "u", "u"), "glRenderbufferStorage": (None, "u", "u", "i", "i"),
     "glFramebufferRenderbuffer": (None, "u", "u", "u", "u"), "glDeleteRenderbuffers": (None, "i", "pu"),
     "glCheckFramebufferStatus": ("u", "u"), "glGenerateMipmap": (None, "u"),
+    "glTexImage3D": (None, "u", "i", "i", "i", "i", "i", "i", "u", "u", "p"),
+    "glTexSubImage3D": (None, "u", "i", "i", "i", "i", "i", "i", "i", "u", "u", "p"),
+    "glFramebufferTextureLayer": (None, "u", "u", "u", "i", "i"),
+    "glCopyTexSubImage3D": (None, "u", "i", "i", "i", "i", "i", "i", "i", "i"),
+    "glBlitFramebuffer": (None, "i", "i", "i", "i", "i", "i", "i", "i", "u", "u"),
+    "glDrawArraysInstanced": (None, "u", "i", "i", "i"), "glTexBuffer": (None, "u", "u", "u"),
+    "glGetUniformBlockIndex": ("u", "u", "c"), "glUniformBlockBinding": (None, "u", "u", "u"),
+    "glBindBufferBase": (None, "u", "u", "u"), "glFlush": (None,),
+    "glGetTexLevelParameteriv": (None, "u", "i", "u", "pi"),
 }
 TEXTURE_2D, RGBA, RGBA8, RGBA16F, UNSIGNED_BYTE, HALF_FLOAT, FLOAT = 0x0DE1, 0x1908, 0x8058, 0x881A, 0x1401, 0x140B, 0x1406
 TRIANGLES, TRIANGLE_STRIP, ARRAY_BUFFER, STATIC_DRAW = 0x0004, 0x0005, 0x8892, 0x88E4
@@ -43,6 +55,9 @@ VERTEX_SHADER, FRAGMENT_SHADER, COMPILE_STATUS, LINK_STATUS = 0x8B31, 0x8B30, 0x
 FRAMEBUFFER, FRAMEBUFFER_BINDING, COLOR_ATTACHMENT0, DEPTH_ATTACHMENT, RENDERBUFFER, DEPTH24 = \
     0x8D40, 0x8CA6, 0x8CE0, 0x8D00, 0x8D41, 0x81A6
 TEXTURE0 = 0x84C0
+TEXTURE_2D_ARRAY, TEXTURE_BUFFER, UNIFORM_BUFFER, RGBA32F, STREAM_DRAW = 0x8C1A, 0x8C2A, 0x8A11, 0x8814, 0x88E0
+READ_FRAMEBUFFER, DRAW_FRAMEBUFFER, MAX_LEVEL, NEAREST = 0x8CA8, 0x8CA9, 0x813D, 0x2600
+TEXTURE_WIDTH, TEXTURE_HEIGHT = 0x1000, 0x1001
 LIGHTS_MAX = 8
 
 
@@ -59,7 +74,6 @@ class GL:
         for name, (ret, *args) in SIGS.items():
             fn = C.CFUNCTYPE(kinds[ret], *[kinds[a] for a in args])(C.c_void_p.in_dll(lib, "epoxy_" + name).value)
             setattr(self, name[2:], fn)
-        self.calls = 0
 
     def program(self, vert, frag, attribs=("pos", "nrm", "uv")):
         prog = self.CreateProgram()
@@ -196,11 +210,19 @@ def bounds(verts):
 
 # ---- shaders
 
+FRAME_BLOCK = """layout(std140) uniform Frame {
+    mat4 viewproj; vec4 eye; vec4 ambient; ivec4 counts; vec4 lpos[8]; vec4 lcol[8];
+};
+"""
 LIT_VERT = """#version 150
 in vec3 pos; in vec3 nrm; in vec2 uv;
-uniform mat4 model; uniform mat4 viewproj;
+""" + FRAME_BLOCK + """uniform samplerBuffer inst; uniform int base;
 out vec3 wpos; out vec3 wnrm; out vec2 tuv;
+flat out vec4 kd; flat out vec4 ke; flat out vec4 kx;
 void main() {
+    int i = (base + gl_InstanceID) * 7;  // (an instance: its model's 4 columns, then its material's 3 texels)
+    mat4 model = mat4(texelFetch(inst, i), texelFetch(inst, i + 1), texelFetch(inst, i + 2), texelFetch(inst, i + 3));
+    kd = texelFetch(inst, i + 4); ke = texelFetch(inst, i + 5); kx = texelFetch(inst, i + 6);
     vec4 w = model * vec4(pos, 1.0);
     wpos = w.xyz; wnrm = mat3(transpose(inverse(model))) * nrm; tuv = uv;
     gl_Position = viewproj * w;
@@ -208,20 +230,19 @@ void main() {
 """
 LIT_FRAG = """#version 150
 in vec3 wpos; in vec3 wnrm; in vec2 tuv;
-uniform vec3 color; uniform vec3 emissive; uniform float specular; uniform float shininess; uniform float glow;
-uniform vec3 ambient; uniform vec3 eye; uniform int nlights;
-uniform vec4 lpos[8]; uniform vec4 lcol[8];
-uniform sampler2D tex; uniform int textured;
+flat in vec4 kd; flat in vec4 ke; flat in vec4 kx;  // (color, specular; emissive, glow; shininess, picture's layer)
+""" + FRAME_BLOCK + """uniform sampler2D tex; uniform sampler2DArray pics; uniform int mode;  // (0 plain, 1 tex, 2 a picture)
 out vec4 frag;
 void main() {
-    vec4 base = textured == 1 ? texture(tex, tuv) : vec4(1.0);  // (premultiplied: a panel's picture)
+    vec4 base = mode == 2 ? texture(pics, vec3(tuv, kx.y)) : mode == 1 ? texture(tex, tuv) : vec4(1.0);
+    // (premultiplied: a panel's picture)
     if (base.a < 0.004) discard;
-    vec3 albedo = base.rgb * color;
+    vec3 albedo = base.rgb * kd.rgb;
     vec3 n = normalize(wnrm);
-    vec3 v = normalize(eye - wpos);
+    vec3 v = normalize(eye.xyz - wpos);
     if (dot(n, v) < 0.0) n = -n;  // (a panel or a plane seen from behind is lit as its front)
-    vec3 lit = ambient * albedo;
-    for (int i = 0; i < nlights; i++) {
+    vec3 lit = ambient.rgb * albedo;
+    for (int i = 0; i < counts.x; i++) {
         vec3 l; float fall = 1.0;
         if (lpos[i].w > 0.0) {
             vec3 d = lpos[i].xyz - wpos; float dist = length(d); l = d / dist;
@@ -231,10 +252,10 @@ void main() {
         }
         float diff = max(dot(n, l), 0.0);
         vec3 h = normalize(l + v);
-        float spec = diff > 0.0 ? pow(max(dot(n, h), 0.0), shininess) * specular : 0.0;
+        float spec = diff > 0.0 ? pow(max(dot(n, h), 0.0), kx.x) * kd.a : 0.0;
         lit += (albedo * diff + vec3(spec) * base.a) * lcol[i].rgb * fall;
     }
-    lit += emissive * (textured == 1 ? base.rgb : vec3(1.0)) * glow;
+    lit += ke.rgb * (mode != 0 ? base.rgb : vec3(1.0)) * ke.a;
     frag = vec4(lit, base.a);
 }
 """
@@ -267,12 +288,7 @@ void main() {
 }
 """
 
-
-def floats(m):
-    """A Graphene.Matrix as GL takes it (16 floats, as glUniformMatrix4fv wants them for GLSL's m * v)."""
-    return (C.c_float * 16)(*m.to_float())
-
-
+@functools.lru_cache(maxsize=1024)
 def rgb(hexcolour, scale=1.0):
     h = (hexcolour or "#000000").lstrip("#")
     return tuple(int(h[i:i + 2], 16) / 255 * scale for i in (0, 2, 4))
@@ -308,9 +324,107 @@ class Target:
             gl.DeleteRenderbuffers(1, C.byref(C.c_uint(self.rb)))
 
 
+class Pictures:
+    """Panels' pictures of one size: the layers of one array texture, each mipmapped on its own (so a picture made
+    again costs its own levels, not every panel's), the array grown as more are wanted and the layers kept."""
+
+    def __init__(self, r, w, h):
+        self.r, self.w, self.h = r, w, h
+        self.levels = 1 + int(math.log2(max(w, h, 1)))
+        self.tex, self.cap, self.used, self.free = None, 0, 0, []
+
+    def _alloc(self, cap):
+        gl = self.r.gl
+        gl.ActiveTexture(TEXTURE0 + 1)
+        t = C.c_uint()
+        gl.GenTextures(1, C.byref(t))
+        gl.BindTexture(TEXTURE_2D_ARRAY, t.value)
+        for lv in range(self.levels):
+            gl.TexImage3D(TEXTURE_2D_ARRAY, lv, RGBA8, max(1, self.w >> lv), max(1, self.h >> lv), cap, 0, RGBA,
+                          UNSIGNED_BYTE, None)
+        gl.TexParameteri(TEXTURE_2D_ARRAY, MIN_FILTER, LINEAR_MIPMAP_LINEAR)
+        gl.TexParameteri(TEXTURE_2D_ARRAY, MAG_FILTER, LINEAR)
+        gl.TexParameteri(TEXTURE_2D_ARRAY, WRAP_S, CLAMP)
+        gl.TexParameteri(TEXTURE_2D_ARRAY, WRAP_T, CLAMP)
+        gl.TexParameteri(TEXTURE_2D_ARRAY, MAX_LEVEL, self.levels - 1)
+        return t.value
+
+    def take(self, hint=0):
+        """A layer for a picture (the array grown, its pictures copied over, if it's full)."""
+        if self.free:
+            return self.free.pop()
+        if self.used == self.cap:
+            cap = max(self.used + 1, hint, self.cap + self.cap // 2, 8)
+            tex, gl = self._alloc(cap), self.r.gl
+            if self.tex is not None:
+                gl.BindFramebuffer(READ_FRAMEBUFFER, self.r.copy_fbo)
+                for layer in range(self.used):
+                    gl.FramebufferTextureLayer(READ_FRAMEBUFFER, COLOR_ATTACHMENT0, self.tex, 0, layer)
+                    gl.CopyTexSubImage3D(TEXTURE_2D_ARRAY, 0, 0, 0, layer, 0, 0, self.w, self.h)
+                gl.GenerateMipmap(TEXTURE_2D_ARRAY)  # (once, as it grows)
+                gl.delete_texture(self.tex)
+            gl.ActiveTexture(TEXTURE0)
+            self.tex, self.cap = tex, cap
+        self.used += 1
+        return self.used - 1
+
+    def give(self, layer):
+        self.free.append(layer)
+
+    def put(self, layer, data=None, source=None, flipped=False):
+        """A layer's picture: data (rows of RGBA8, premultiplied, top first) or a GL texture of the size (another
+        context's, shared, upside down if flipped). It's put in a texture of its own first (made again each time, so
+        the GPU's never waited for), mipmapped there, and each level copied into the layer on the GPU."""
+        gl, r = self.r.gl, self.r
+        out = C.c_int(0)
+        gl.GetIntegerv(FRAMEBUFFER_BINDING, C.byref(out))
+        gl.ActiveTexture(TEXTURE0)
+        st = r.staging(self.w, self.h, data)
+        if data is None:
+            gl.BindFramebuffer(READ_FRAMEBUFFER, r.copy_fbo)
+            gl.FramebufferTexture2D(READ_FRAMEBUFFER, COLOR_ATTACHMENT0, TEXTURE_2D, source, 0)
+            gl.BindFramebuffer(DRAW_FRAMEBUFFER, r.put_fbo)
+            gl.FramebufferTexture2D(DRAW_FRAMEBUFFER, COLOR_ATTACHMENT0, TEXTURE_2D, st, 0)
+            gl.BlitFramebuffer(0, 0, self.w, self.h, 0, self.h if flipped else 0, self.w, 0 if flipped else self.h,
+                               COLOR_BUFFER_BIT, NEAREST)
+        gl.GenerateMipmap(TEXTURE_2D)
+        gl.BindFramebuffer(READ_FRAMEBUFFER, r.copy_fbo)
+        gl.ActiveTexture(TEXTURE0 + 1)  # (the unit the shader reads pictures from: the array's copied into there)
+        gl.BindTexture(TEXTURE_2D_ARRAY, self.tex)
+        for lv in range(self.levels):
+            gl.FramebufferTexture2D(READ_FRAMEBUFFER, COLOR_ATTACHMENT0, TEXTURE_2D, st, lv)
+            gl.CopyTexSubImage3D(TEXTURE_2D_ARRAY, lv, 0, 0, layer, 0, 0, max(1, self.w >> lv), max(1, self.h >> lv))
+        gl.ActiveTexture(TEXTURE0)
+        gl.FramebufferTexture2D(READ_FRAMEBUFFER, COLOR_ATTACHMENT0, TEXTURE_2D, 0, 0)
+        gl.BindFramebuffer(FRAMEBUFFER, out.value)
+
+    def drop(self):
+        if self.tex is not None:
+            self.r.gl.delete_texture(self.tex)
+            self.tex = None
+
+
+INSTANCE = struct.Struct("12f")  # (an instance's material: color, specular; emissive, glow; shininess, layer, -, -)
+FRAME = struct.Struct("16f4f4f4i32f32f")  # (the Frame block, std140)
+
+
+def material(mat, layer=0.0):
+    """A material's part of an instance (after its model's 16 floats), as the shaders take it."""
+    return INSTANCE.pack(*rgb(mat.get("color", "#ffffff")), float(mat.get("specular", 0.2)),
+                         *rgb(mat.get("emissive", "#000000")), float(mat.get("glow", 1.0)),
+                         float(mat.get("shininess", 32)), float(layer), 0.0, 0.0)
+
+
+def model(m):
+    """A Graphene.Matrix as an instance's model (its 4 columns as GLSL's mat4 takes them, for m * v)."""
+    return array.array("f", m.to_float()).tobytes()
+
+
 class Renderer:
-    """Draws a frame: what SceneView hands it (draws: each mesh or panel with its model matrix, material and texture;
-    the camera; the lights), into the GLArea's own framebuffer, with bloom."""
+    """Draws a frame: what SceneView hands it (meshes and panels, each an instance: its model matrix and material,
+    packed; the camera; the lights), into the GLArea's own framebuffer, with bloom. Each frame's instances go to the GPU
+    in one buffer, and the frame's lights and camera in one uniform buffer: a draw for each mesh and texture, and one
+    for each run of panels (far first) whose pictures share an array."""
 
     def __init__(self):
         self.gl = gl = GL()
@@ -318,13 +432,44 @@ class Renderer:
         self.bright = gl.program(QUAD_VERT, BRIGHT_FRAG, ("pos",))
         self.blur = gl.program(QUAD_VERT, BLUR_FRAG, ("pos",))
         self.compose = gl.program(QUAD_VERT, COMPOSE_FRAG, ("pos",))
-        self.loc = {n: gl.GetUniformLocation(self.lit, n.encode()) for n in (
-            "model", "viewproj", "color", "emissive", "specular", "shininess", "glow", "ambient", "eye", "nlights",
-            "lpos", "lcol", "tex", "textured")}
+        u = lambda prog, name: gl.GetUniformLocation(prog, name.encode())  # noqa: E731
+        self.loc = {n: u(self.lit, n) for n in ("inst", "base", "tex", "pics", "mode")}
+        self.bright_loc = (u(self.bright, "threshold"), u(self.bright, "src"))
+        self.blur_loc = (u(self.blur, "step"), u(self.blur, "src"))
+        self.compose_loc = (u(self.compose, "scene"), u(self.compose, "bloom"), u(self.compose, "strength"))
+        gl.UseProgram(self.lit)
+        gl.Uniform1i(self.loc["tex"], 0)
+        gl.Uniform1i(self.loc["pics"], 1)
+        gl.Uniform1i(self.loc["inst"], 2)
+        gl.UniformBlockBinding(self.lit, gl.GetUniformBlockIndex(self.lit, b"Frame"), 0)
+        self.ubo, self.ibo = self._buffer(), self._buffer()
+        gl.BindBuffer(UNIFORM_BUFFER, self.ubo)
+        gl.BufferData(UNIFORM_BUFFER, FRAME.size, None, STREAM_DRAW)
+        gl.BindBufferBase(UNIFORM_BUFFER, 0, self.ubo)
+        gl.BindBuffer(TEXTURE_BUFFER, self.ibo)
+        gl.BufferData(TEXTURE_BUFFER, 112, None, STREAM_DRAW)
+        t = C.c_uint()
+        gl.GenTextures(1, C.byref(t))
+        self.itex = t.value
+        gl.BindTexture(TEXTURE_BUFFER, self.itex)
+        gl.TexBuffer(TEXTURE_BUFFER, RGBA32F, self.ibo)
+        self.copy_fbo, self.put_fbo = self._fbo(), self._fbo()
+        self.staged = {}  # ((w, h) → a texture a picture's put in first)
         self.meshes = {}  # (name → (vao, count, bounds))
         self.quad = self.mesh("_quad", [x for p in ((-1, -1), (1, -1), (-1, 1), (1, 1)) for x in (p[0], p[1], 0, 0, 0, 1, 0, 0)])
         self.targets, self.size = None, None
         self.textures = {}  # (asset path → GL id)
+        self.pictures = {}  # ((w, h) → Pictures)
+
+    def _buffer(self):
+        b = C.c_uint()
+        self.gl.GenBuffers(1, C.byref(b))
+        return b.value
+
+    def _fbo(self):
+        f = C.c_uint()
+        self.gl.GenFramebuffers(1, C.byref(f))
+        return f.value
 
     def mesh(self, name, verts):
         if name in self.meshes:
@@ -343,6 +488,36 @@ class Renderer:
         self.meshes[name] = (vao.value, len(verts) // 8, bounds(verts))
         return self.meshes[name]
 
+    def staging(self, w, h, data):
+        """The texture a w by h picture's put in first, bound: data in it (its storage made again, the last picture's
+        let go of as the GPU's done with it), or storage alone."""
+        tid = self.staged.get((w, h))
+        if tid is None:
+            tid = self.staged[(w, h)] = self.gl.texture(None, w, h, mipmap=True)
+        self.gl.BindTexture(TEXTURE_2D, tid)
+        if data is not None:
+            self.gl.TexImage2D(TEXTURE_2D, 0, RGBA8, w, h, 0, RGBA, UNSIGNED_BYTE, data)
+        return tid
+
+    def picture(self, slot, w, h, data=None, source=None, flipped=False, hint=0):
+        """A panel's picture put in (data: w by h RGBA8 rows, premultiplied, top first; or source, a GL texture id
+        of another context's, shared, drawn upside down if flipped): in its own layer of the array for its size.
+        slot: where its last one is ((Pictures, layer), or None); returns where this one is."""
+        if slot is not None and (slot[0].w, slot[0].h) != (w, h):
+            self.free_picture(slot)
+            slot = None
+        if slot is None:
+            group = self.pictures.get((w, h))
+            if group is None:
+                group = self.pictures[(w, h)] = Pictures(self, w, h)
+            slot = (group, group.take(hint))
+        slot[0].put(slot[1], data, source, flipped)
+        return slot
+
+    def free_picture(self, slot):
+        if slot is not None:
+            slot[0].give(slot[1])
+
     def _targets(self, w, h):
         if self.size == (w, h):
             return
@@ -353,14 +528,52 @@ class Renderer:
         self.targets = [Target(self.gl, w, h, True), Target(self.gl, hw, hh, False), Target(self.gl, hw, hh, False)]
         self.size = (w, h)
 
-    def frame(self, w, h, view, proj, eye, scene, draws):
-        """One frame, w by h device pixels: draws each (vao name, model Graphene.Matrix, material dict, GL texture id or
-        None, sort depth or None for opaque); scene: background, ambient, lights, bloom."""
+    def frame(self, w, h, view, proj, eye, scene, meshes, panels):
+        """One frame, w by h device pixels. meshes: (mesh name, GL texture id or None, instance) each, opaque; panels:
+        (distance from the eye, Pictures, instance) each, drawn far first; an instance: model() then material()'s
+        bytes. scene: background, ambient, lights, bloom."""
         gl = self.gl
         out = C.c_int(0)
         gl.GetIntegerv(FRAMEBUFFER_BINDING, C.byref(out))  # (the GLArea's: drawn into last)
         self._targets(w, h)
         main, half_a, half_b = self.targets
+        runs, chunks, at = [], [], 0  # (each draw: vao, count, mode, texture, first instance, instances)
+        groups = {}
+        for mesh, tex, inst in meshes:
+            groups.setdefault((mesh, tex or 0), []).append(inst)
+        for (mesh, tex), insts in groups.items():
+            vao, count, _b = self.meshes[mesh]
+            runs.append((vao, count, 1 if tex else 0, tex, at, len(insts)))
+            chunks += insts
+            at += len(insts)
+        panels.sort(key=lambda p: -p[0])
+        pvao, pcount, _b = self.meshes["plane"]
+        for _d, pics, inst in panels:
+            if runs and runs[-1][3] == pics.tex and runs[-1][2] == 2 and runs[-1][4] + runs[-1][5] == at:
+                r = runs[-1]
+                runs[-1] = (*r[:5], r[5] + 1)
+            else:
+                runs.append((pvao, pcount, 2, pics.tex, at, 1))
+            chunks.append(inst)
+            at += 1
+        lights = scene.get("lights") or []
+        pos, col = [0.0] * (4 * LIGHTS_MAX), [0.0] * (4 * LIGHTS_MAX)
+        nl = 0
+        for light in lights[:LIGHTS_MAX]:
+            k = light.get("intensity", 1.0)
+            if light.get("type") == "directional":
+                pos[nl * 4:nl * 4 + 4] = list(light.get("direction") or (0, -1, 0)) + [0.0]
+            else:
+                pos[nl * 4:nl * 4 + 4] = list(light.get("position") or (0, 3, 0)) + [float(light.get("range", 10.0))]
+            col[nl * 4:nl * 4 + 4] = list(rgb(light.get("color", "#ffffff"), k)) + [1.0]
+            nl += 1
+        block = FRAME.pack(*view.multiply(proj).to_float(), *eye, 1.0, *rgb(scene.get("ambient", "#202020")), 1.0,
+                           nl, 0, 0, 0, *pos, *col)
+        gl.BindBuffer(UNIFORM_BUFFER, self.ubo)
+        gl.BufferData(UNIFORM_BUFFER, FRAME.size, block, STREAM_DRAW)
+        data = b"".join(chunks)
+        gl.BindBuffer(TEXTURE_BUFFER, self.ibo)
+        gl.BufferData(TEXTURE_BUFFER, max(len(data), 112), data or None, STREAM_DRAW)
         gl.BindFramebuffer(FRAMEBUFFER, main.fbo)
         gl.Viewport(0, 0, w, h)
         gl.ClearColor(*rgb(scene.get("background", "#000000")), 1)
@@ -371,77 +584,50 @@ class Renderer:
         gl.BlendFunc(ONE, ONE_MINUS_SRC_ALPHA)
         gl.UseProgram(self.lit)
         L = self.loc
-        vp = view.multiply(proj)
-        gl.UniformMatrix4fv(L["viewproj"], 1, 0, (C.c_float * 16)(*vp.to_float()))
-        gl.Uniform3f(L["ambient"], *rgb(scene.get("ambient", "#202020")))
-        gl.Uniform3f(L["eye"], *eye)
-        lights = scene.get("lights") or []
-        pos, col = [], []
-        for light in lights[:LIGHTS_MAX]:
-            k = light.get("intensity", 1.0)
-            if light.get("type") == "directional":
-                pos += list(light.get("direction") or (0, -1, 0)) + [0.0]
-            else:
-                pos += list(light.get("position") or (0, 3, 0)) + [float(light.get("range", 10.0))]
-            col += list(rgb(light.get("color", "#ffffff"), k)) + [1.0]
-        n = len(pos) // 4
-        gl.Uniform1i(L["nlights"], n)
-        if n:
-            gl.Uniform4fv(L["lpos"], n, (C.c_float * len(pos))(*pos))
-            gl.Uniform4fv(L["lcol"], n, (C.c_float * len(col))(*col))
-        gl.Uniform1i(L["tex"], 0)
-        gl.ActiveTexture(TEXTURE0)
-        opaque = [d for d in draws if d[4] is None]
-        clear = sorted((d for d in draws if d[4] is not None), key=lambda d: -d[4])  # (far first)
-        last_mat, last_tex, last_vao = None, -1, None  # (what's set already: not set again)
-        for mesh, model, mat, tex, _depth in opaque + clear:
-            vao, count, _b = self.meshes[mesh]
-            gl.UniformMatrix4fv(L["model"], 1, 0, model)
-            if mat is not last_mat:
-                gl.Uniform3f(L["color"], *rgb(mat.get("color", "#ffffff")))
-                gl.Uniform3f(L["emissive"], *rgb(mat.get("emissive", "#000000")))
-                gl.Uniform1f(L["specular"], float(mat.get("specular", 0.2)))
-                gl.Uniform1f(L["shininess"], float(mat.get("shininess", 32)))
-                gl.Uniform1f(L["glow"], float(mat.get("glow", 1.0)))
-                last_mat = mat
-            if (tex or 0) != last_tex:
-                gl.Uniform1i(L["textured"], 1 if tex else 0)
-                if tex:
-                    gl.BindTexture(TEXTURE_2D, tex)
-                last_tex = tex or 0
+        gl.ActiveTexture(TEXTURE0 + 2)
+        gl.BindTexture(TEXTURE_BUFFER, self.itex)
+        last_mode, last_tex, last_vao = None, None, None  # (what's set already: not set again)
+        for vao, count, mode, tex, first, n in runs:
+            if mode != last_mode:
+                gl.Uniform1i(L["mode"], mode)
+                last_mode = mode
+            if mode and tex != last_tex:
+                gl.ActiveTexture(TEXTURE0 + (1 if mode == 2 else 0))
+                gl.BindTexture(TEXTURE_2D_ARRAY if mode == 2 else TEXTURE_2D, tex)
+                last_tex = tex
             if vao != last_vao:
                 gl.BindVertexArray(vao)
                 last_vao = vao
-            gl.DrawArrays(TRIANGLES, 0, count)
+            gl.Uniform1i(L["base"], first)
+            gl.DrawArraysInstanced(TRIANGLES, 0, count, n)
+        gl.ActiveTexture(TEXTURE0)
         gl.Disable(DEPTH_TEST)
         gl.Disable(BLEND)
         bloom = scene.get("bloom")
-        qvao = self.quad[0]
-        gl.BindVertexArray(qvao)
+        gl.BindVertexArray(self.quad[0])
         if bloom:
             gl.BindFramebuffer(FRAMEBUFFER, half_a.fbo)
             gl.Viewport(0, 0, half_a.w, half_a.h)
             gl.UseProgram(self.bright)
-            gl.Uniform1f(gl.GetUniformLocation(self.bright, b"threshold"), float(bloom.get("threshold", 1.0)))
-            gl.Uniform1i(gl.GetUniformLocation(self.bright, b"src"), 0)
+            gl.Uniform1f(self.bright_loc[0], float(bloom.get("threshold", 1.0)))
+            gl.Uniform1i(self.bright_loc[1], 0)
             gl.BindTexture(TEXTURE_2D, main.tex)
             gl.DrawArrays(TRIANGLE_STRIP, 0, 4)
             gl.UseProgram(self.blur)
-            step = gl.GetUniformLocation(self.blur, b"step")
-            gl.Uniform1i(gl.GetUniformLocation(self.blur, b"src"), 0)
+            gl.Uniform1i(self.blur_loc[1], 0)
             spread = max(0.5, float(bloom.get("radius", 4)) / 4)
             for _ in range(3):
                 for src, dst, d in ((half_a, half_b, (spread / half_a.w, 0)), (half_b, half_a, (0, spread / half_a.h))):
                     gl.BindFramebuffer(FRAMEBUFFER, dst.fbo)
-                    gl.Uniform2f(step, *d)
+                    gl.Uniform2f(self.blur_loc[0], *d)
                     gl.BindTexture(TEXTURE_2D, src.tex)
                     gl.DrawArrays(TRIANGLE_STRIP, 0, 4)
         gl.BindFramebuffer(FRAMEBUFFER, out.value)
         gl.Viewport(0, 0, w, h)
         gl.UseProgram(self.compose)
-        gl.Uniform1i(gl.GetUniformLocation(self.compose, b"scene"), 0)
-        gl.Uniform1i(gl.GetUniformLocation(self.compose, b"bloom"), 1)
-        gl.Uniform1f(gl.GetUniformLocation(self.compose, b"strength"), float((bloom or {}).get("strength", 0.0)))
+        gl.Uniform1i(self.compose_loc[0], 0)
+        gl.Uniform1i(self.compose_loc[1], 1)
+        gl.Uniform1f(self.compose_loc[2], float((bloom or {}).get("strength", 0.0)))
         gl.ActiveTexture(TEXTURE0)
         gl.BindTexture(TEXTURE_2D, main.tex)
         gl.ActiveTexture(TEXTURE0 + 1)

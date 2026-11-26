@@ -89,7 +89,7 @@
         },
         {
           "said": "The Access Rules capability defaults to Nobody: only local and ssh heads change rules until members are listed (paraphrased)",
-          "rule": "Access Rules starts at Nobody; every other capability, Subscriptions included, at Everybody",
+          "rule": "Access Rules starts at Nobody; every other capability at Everybody",
           "decided": "2026-11-26",
           "source": [
             {

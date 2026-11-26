@@ -180,7 +180,7 @@ def main():
     args = ap.parse_args()
     seed = args.seed if args.seed is not None else random.randrange(1 << 30)
     rng = random.Random(seed)
-    print(f"seed {seed}")
+    print(f"seed {seed}", flush=True)
     asked, other = host("asked"), host("other")
     other.mesh.link({"via": "unix", "path": asked.socket_path})
     wait(lambda: other.me["id"] in asked.mesh.hops and asked.me["id"] in other.mesh.hops, "the two linked")
@@ -331,7 +331,7 @@ def main():
         for ch in (member, direct):
             req += 1
             assert ask(ch, {"op": "hello"}, req)["op"] == "hello"
-    print(f"ok: {args.rounds} rounds, {refused} refused, {let} let through, {forgeries} opens forged")
+    print(f"ok: {args.rounds} rounds, {refused} refused, {let} let through, {forgeries} opens forged", flush=True)
     for ch in (member, direct, watcher, as_mchat):
         ch.close()
     for s in (other, asked):

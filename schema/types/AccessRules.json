@@ -37,7 +37,7 @@
     },
     "subscriptions": {
       "$ref": "AccessRule.json",
-      "description": "Its subscription accounts: listed, added, renamed, removed (signed out), each provider's default picked, a chat moved to one (with the chat's manage rule too), their usage read, and signed in to (accounts, login, login_code)."
+      "description": "Its subscription accounts: listed, added, renamed, removed (signed out), each provider's default picked, a chat moved to one (with the chat's manage rule too), their usage read, and signed in to (accounts, login, login_code), a token account's token being added with them."
     },
     "access": {
       "$ref": "AccessRule.json",

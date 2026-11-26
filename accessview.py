@@ -107,8 +107,10 @@ class AccessRow(Adw.ActionRow):
             self.show(self.rule, self.members, self.button.get_sensitive(), self.host_rule)
             return False
         state = reply["state"]
-        self.show(reply.get("chat") if self.chat else state["rules"][self.cap], state["members"], state["editable"],
-                  state["rules"][self.cap])
+        host_rule = state["rules"].get(self.cap)
+        self.set_visible(host_rule is not None)
+        if host_rule is not None:
+            self.show(reply.get("chat") if self.chat else host_rule, state["members"], state["editable"], host_rule)
         return False
 
 
@@ -227,7 +229,9 @@ def look(force=False):
 
 def rule_said(state, cap):
     """cap's rule in a host's state, as Meta reads it: everybody, nobody, or chosen: the members' names."""
-    rule = state["rules"][cap]
+    rule = state["rules"].get(cap)
+    if rule is None:
+        return "unknown"
     if rule["who"] != "chosen":
         return rule["who"]
     names = {m["id"]: m["name"] for m in state["members"]}
@@ -250,16 +254,19 @@ def narrower(new, old):
 
 
 def parse(value, cap):
-    """(host's (id, name, where) or None for this machine's, rule) of what Meta gave: "[<host>:] <who>[: names]"."""
+    """(host's (id, name, where) or None for this machine's, rule) of what Meta gave: "[<host>:] <who>[: names]"
+    (unknown: rule None, that host's left as it is)."""
     parts = [p.strip() for p in str(value).split(":")]
     known = hosts()
     host = None
-    if parts and parts[0].lower() not in WHO:
+    if parts and parts[0].lower() not in WHO + ("unknown",):
         host = next((h for h in known if h[1].lower() == parts[0].lower() or h[0] == parts[0]), None)
         if host is None:
             raise ValueError(f"No host {parts[0]!r}: they're {', '.join(h[1] for h in known) or 'not known yet'}.")
         parts = parts[1:]
     who = (parts[0] if parts else "").lower()
+    if who == "unknown":
+        return host, None
     if who not in WHO:
         raise ValueError(f"access_{cap} is [<host>:] everybody, nobody, or chosen: <members>.")
     rule = {"who": who}
@@ -291,7 +298,10 @@ def narrow(cap, value):
         if not r or r.get("op") == "error":
             raise ValueError(wire.said(r) or "the host didn't answer")
         return r
-    old = ask({"op": "access"})["state"]["rules"][cap]
+    state = ask({"op": "access"})["state"]
+    old = state["rules"].get(cap)
+    if rule is None or old is None:
+        return f"{state['host']}: {rule_said(state, cap)}"
     if not narrower(rule, old):
         raise ValueError(f"Only the user widens a rule: show setting:access_{cap} for them to.")
     state = ask({"op": "access_set", "capability": cap, "rule": rule})["state"]

@@ -178,17 +178,18 @@ fun MenuChoice(label: String, on: Boolean, enabled: Boolean = true, textColor: C
  * → Groups have them (Baude's pickers.CheckList): those checked are shown, in the order checked. Every one shown is
  * every one checked (null), the one over them checked too; tapping that one checks every one, or unchecks every one
  * (an empty list) while they all are. items: (key, label); pick(the keys shown, null for every one); onLongClick(key):
- * one pressed and held; heading: the one over them reads as a section heading (the menu's "Group by"), its check kept. */
+ * one pressed and held; heading: the one over them reads as a section heading (the menu's "Group by"), its check kept;
+ * dimmed: the keys whose labels are greyed (a column filter's values no row has), still there to tap. */
 @Composable
 fun MenuChecks(allLabel: String, items: List<Pair<String, String>>, shown: List<String>?, pick: (List<String>?) -> Unit,
-               onLongClick: ((String) -> Unit)? = null, heading: Boolean = false) {
+               onLongClick: ((String) -> Unit)? = null, heading: Boolean = false, dimmed: Set<String> = emptySet()) {
     val keys = items.map { it.first }
     MenuCheck(allLabel, shown == null, heading = heading) { pick(if (shown == null) emptyList() else null) }
     MenuDivider()
     Column(Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState())) {
         for ((key, label) in items) {
             val on = shown == null || key in shown
-            MenuCheck(label, on, onLongClick = onLongClick?.let { { it(key) } }) {
+            MenuCheck(label, on, onLongClick = onLongClick?.let { { it(key) } }, dim = key in dimmed) {
                 val next = (shown ?: keys).filter { it != key } + if (on) emptyList() else listOf(key)
                 pick(if (next.isNotEmpty() && next.toSet().containsAll(keys)) null else next)
             }
@@ -200,14 +201,14 @@ fun MenuChecks(allLabel: String, items: List<Pair<String, String>>, shown: List<
  * outline when off. heading: its label as MenuHeading's. */
 @Composable
 fun MenuCheck(label: String, on: Boolean, heading: Boolean = false, onLongClick: (() -> Unit)? = null,
-              onClick: () -> Unit) {
+              dim: Boolean = false, onClick: () -> Unit) {
     val c = LocalBaude.current
     MenuLine(true, onLongClick, onClick) {
         val box = Modifier.size(16.dp.icon).clip(RoundedCornerShape(3.dp))
         if (on) Box(box.background(c.accentBg), contentAlignment = Alignment.Center) {
             Icon(Adwaita.ObjectSelect, null, tint = c.accentFg, modifier = Modifier.size(14.dp.icon))
         } else Box(box.border(1.dp, c.dim, RoundedCornerShape(3.dp)))
-        Text(label, style = if (heading) Type.folder else Type.body, color = if (heading) c.dim else c.fg, maxLines = 1,
+        Text(label, style = if (heading) Type.folder else Type.body, color = if (heading || dim) c.dim else c.fg, maxLines = 1,
             overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
     }
 }

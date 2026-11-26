@@ -81,6 +81,8 @@
     {"name": "databases", "what": "Database Schemas on the fixture database, fitted", "inventory": ["DatabaseSchemas.page"]},
     {"name": "kubernetes", "what": "Kubernetes on the fake cluster k3d-dev, its pods by CPU", "inventory": ["Kubernetes.page", "KubernetesPodMenu.menu"]},
     {"name": "kubernetes-home", "what": "Kubernetes' Home on the fake cluster k3d-dev: CPU and memory requested, used and limits against allocatable, half an hour's history, by namespace", "inventory": ["Kubernetes.page"]},
+    {"name": "kubernetes-column-filter", "what": "Kubernetes on k3d-dev, its pods with Status filtered to hide Succeeded and Failed (remembered from the settings): Status's filter open, Namespace's heading hovered, its filter button showing", "inventory": ["Kubernetes.page"]},
+    {"name": "docker-column-filter", "what": "Docker on the fake colima, all its containers with Status filtered to hide Exited (remembered from the settings)", "inventory": ["Docker.page"]},
     {"name": "kubernetes-shell", "what": "Kubernetes on k3d-dev, a shell in the pod api-6f7c-mnopq docked under the table (tests/fake_kubectl.py's sh), ls typed in it", "inventory": ["Kubernetes.page"]},
     {"name": "kubernetes-dock", "what": "Kubernetes on k3d-dev, the dock's tabs: worker-5c4b-klmno's logs and a shell in api-6f7c-mnopq (picked, ls typed in it)", "inventory": ["Kubernetes.page"]},
     {"name": "kubernetes-contexts", "what": "Kubernetes on k3d-dev, its kubeconfig grown to 27 contexts by a tool making test clusters (slices): the context picker open, a search over them and their groups by prefix", "inventory": ["Kubernetes.page"]},

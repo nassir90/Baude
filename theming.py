@@ -408,6 +408,13 @@ columnview.kube-table > header { background: @baude_raised;
                                  box-shadow: inset 0 -1px @baude_rule; }
 columnview.kube-table > listview > row > cell { padding-top: {kube.row-pad}; padding-bottom: {kube.row-pad}; }
 .kube-row-btn, .kube-row-btn > button { padding: 0 4px; min-height: 0; min-width: 0; }
+/* a column's filter (kubeview.ColumnFilters): at its heading's right end, seen while the heading's hovered, kept (in
+   the accent) while it filters or its checks are open */
+.kube-col-filter > button { padding: 0 2px; min-height: 0; min-width: 0; margin: -2px 0; }
+.kube-col-filter { opacity: 0; }
+columnview > header > button:hover .kube-col-filter, .kube-col-filter.kube-col-filtering,
+.kube-col-filter.kube-col-open { opacity: 1; }
+.kube-col-filter.kube-col-filtering > button { color: @accent_color; }
 .kube-side-head { font-weight: bold; font-size: 0.85em; opacity: 0.7; }
 /* the side panel's page names (Subagents, Processes, Side questions, Artifacts…): libadwaita draws them bold */
 .side-panel viewswitcher button label { font-weight: normal; }

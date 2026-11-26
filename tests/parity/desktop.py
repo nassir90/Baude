@@ -455,6 +455,18 @@ def build(app, sc):
         return scenes_chat.kube_window(app)[0]
     if name == "kubernetes-home":
         return scenes_chat.kube_home(app)[0]
+    if name == "kubernetes-column-filter":
+        baude.save_settings(kube_hidden={"pods": {"Status": ["Failed", "Succeeded"]}})
+        win, kv = scenes_chat.kube_window(app)
+        T.pump(0.3)
+        filters = kv.col_filters
+        hovered = filters.buttons[filters.titles.index("Namespace")].get_parent().get_parent()
+        hovered.set_state_flags(Gtk.StateFlags.PRELIGHT, False)  # (the pointer over its heading)
+        filters.buttons[filters.titles.index("Status")].popup()
+        return win
+    if name == "docker-column-filter":
+        baude.save_settings(docker_hidden={"containers": {"Status": ["Exited"]}})
+        return scenes_chat.docker_window(app, page="containers")[0]
     if name == "kubernetes-shell":
         win, kv = scenes_chat.kube_window(app)
         T.pump(0.3)

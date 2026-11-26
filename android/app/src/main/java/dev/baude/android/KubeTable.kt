@@ -97,12 +97,23 @@ private fun norm(k: Any?): Triple<Int, Any?, String> = when {
     else -> Triple(1, null, k.toString())
 }
 
-/** The rows to show: those in the namespaces shown and with the filter's text in a cell, in the order sorted by. */
-fun kubeRows(st: KubeState): List<Msg.KubeRow> {
+/** The columns' titles for ColumnFilters.keeps: "" for the Node column on a cluster of one node, which isn't shown. */
+fun kubeTitles(st: KubeState): List<String> =
+    st.columns.map { col -> col.title.orEmpty().takeIf { it != "Node" || st.nodes > 1 }.orEmpty() }
+
+/** Whether the namespaces shown and the filter's text keep a row (the column filters aside). */
+fun kubeShows(st: KubeState, r: Msg.KubeRow): Boolean {
     val q = st.filter.trim().lowercase()
     val ns = st.nsShown?.takeIf { st.tablePage?.namespaced == true }
+    return (ns == null || r.namespace.orEmpty() in ns) && (q.isEmpty() || r.cells.orEmpty().any { q in it.lowercase() })
+}
+
+/** The rows to show: those in the namespaces shown, with the filter's text in a cell and the values the column filters
+ * keep, in the order sorted by. */
+fun kubeRows(st: KubeState): List<Msg.KubeRow> {
+    val titles = kubeTitles(st)
     val kept = st.rows.filter { r ->
-        (ns == null || r.namespace.orEmpty() in ns) && (q.isEmpty() || r.cells.orEmpty().any { q in it.lowercase() })
+        kubeShows(st, r) && st.colFilters.keeps(titles, { r.cells.orEmpty().getOrElse(it) { "" } })
     }
     val i = st.sortCol
     val sign = if (st.sortDesc) -1 else 1
@@ -201,7 +212,16 @@ fun KubeTable(st: KubeState, rows: List<Msg.KubeRow>) {
     val q = st.filter.trim().lowercase()
     val here = cols.indices.filter { cols[it].title != "Node" || st.nodes > 1 }
     val resized = remember(page.resource, cols.map { it.title }) { mutableStateMapOf<Int, Dp>() }
-    val natural = remember(rows, cols) {
+    val filters = remember(st.rows, cols, st.colFilters.hidden) { // (which columns offer a filter: filterable)
+        here.associateWith { i ->
+            val all = st.rows
+            filterable(cols[i].kind, all.size, { all[it].cells.orEmpty().getOrElse(i) { "" } }, { all[it].keys?.opt(i) },
+                !st.colFilters.hidden[cols[i].title.orEmpty()].isNullOrEmpty())
+        }
+    }
+    var open by remember(page.resource) { mutableStateOf<String?>(null) } // (the column whose checks are open)
+    val marked = here.filter { i -> cols[i].title.orEmpty().let { !st.colFilters.hidden[it].isNullOrEmpty() || it == open } }
+    val natural = remember(rows, cols, marked) {
         fun wide(text: String, bold: Boolean) = with(density) {
             measure.measure(text, if (bold) Type.bold else Type.body, softWrap = false).size.width.toDp()
         }
@@ -214,7 +234,7 @@ fun KubeTable(st: KubeState, rows: List<Msg.KubeRow>) {
                 else -> FIXED[title]?.dp
             }
             fixed ?: run {
-                var w = wide(title, true) + 12.dp
+                var w = wide(title, true) + 12.dp + if (i in marked) 16.dp.icon + 4.dp else 0.dp // (room for its funnel)
                 if (col.kind == "containers") {
                     val most = rows.maxOfOrNull { it.containers.orEmpty().size } ?: 0
                     w = maxOf(w, k.square * most + k.squareGap * maxOf(0, most - 1) + 12.dp)
@@ -238,13 +258,23 @@ fun KubeTable(st: KubeState, rows: List<Msg.KubeRow>) {
         val scroll = rememberScrollState()
         Column {
             Row(Modifier.horizontalScroll(scroll).width(total).background(c.raised)) {
+                val titles = kubeTitles(st)
                 for (i in here) {
                     val title = cols[i].title.orEmpty()
-                    Box(Modifier.width(wide(i)).height(IntrinsicSize.Min).clickable { if (st.sortCol == i) st.sortDesc = !st.sortDesc else { st.sortCol = i; st.sortDesc = false } }) {
+                    val filtering = !st.colFilters.hidden[title].isNullOrEmpty()
+                    val offers = filters.getValue(i)
+                    Box(Modifier.width(wide(i)).height(IntrinsicSize.Min).combinedClickable(
+                        onClick = { if (st.sortCol == i) st.sortDesc = !st.sortDesc else { st.sortCol = i; st.sortDesc = false } },
+                        onLongClick = if (offers) ({ open = title }) else null)) {
                         Row(Modifier.padding(horizontal = 6.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
                             Text(title, style = Type.bold, color = c.fg, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
                             if (st.sortCol == i) Icon(if (st.sortDesc) Adwaita.PanDown else Adwaita.GoUp, null, tint = c.fg,
                                 modifier = Modifier.size(16.dp.icon))
+                            if (i in marked) Box(Modifier.padding(start = 4.dp)) { FilterMark(title, filtering) { open = title } }
+                        }
+                        FilterMenu(open == title, { open = null }, st.colFilters, title) {
+                            st.rows.map { r -> r.cells.orEmpty().getOrElse(i) { "" } to (kubeShows(st, r) &&
+                                st.colFilters.keeps(titles, { r.cells.orEmpty().getOrElse(it) { "" } }, skip = i)) }
                         }
                         Box(Modifier.align(Alignment.CenterEnd).width(6.dp).fillMaxHeight().pointerInput(i) {
                             detectHorizontalDragGestures { _, d -> resized[i] = maxOf(30.dp, wide(i) + with(density) { d.toDp() }) }

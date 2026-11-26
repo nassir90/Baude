@@ -246,11 +246,15 @@ def _age(at, now):
             lookup.full_time(at) if at is not None else "")
 
 
-def _row(id_, name, cols, cells, actions=(), logs=False, shell=(), running=False):
-    """A row: cells as (text, key, tone, tip) by column."""
-    return {"id": id_, "name": name, "cells": [c[0] for c in cells], "keys": [c[1] for c in cells],
-            "tones": [c[2] for c in cells], "tips": [c[3] for c in cells], "actions": list(actions), "logs": logs,
-            "shell": list(shell), "running": running}
+def _row(id_, name, cols, cells, actions=(), logs=False, shell=(), running=False, filters=None):
+    """A row: cells as (text, key, tone, tip) by column; filters: what a column's filter goes by for a cell, by column,
+    where it isn't the cell's text ("" where it is)."""
+    row = {"id": id_, "name": name, "cells": [c[0] for c in cells], "keys": [c[1] for c in cells],
+           "tones": [c[2] for c in cells], "tips": [c[3] for c in cells], "actions": list(actions), "logs": logs,
+           "shell": list(shell), "running": running}
+    if filters:
+        row["filters"] = list(filters)
+    return row
 
 
 def _containers(args, everything, now):
@@ -270,7 +274,8 @@ def _containers(args, everything, now):
             (name, name, "", ""), (c.get("Image") or "", c.get("Image") or "", "", ""),
             (status, status, _tone(state, status), ""), (ports, ports, "", ""), (project, project, "", ""),
             (age, key, "", tip)], actions, logs=True,
-            shell=[_docker(), *args, "exec", "-it", cid, *SHELL] if running else (), running=running))
+            shell=[_docker(), *args, "exec", "-it", cid, *SHELL] if running else (), running=running,
+            filters=["", "", state.capitalize(), "", "", ""]))  # (its Status filtered by its state: Up 3 hours, Running)
     return cols, rows
 
 

@@ -87,9 +87,9 @@ class CheckList(Gtk.Box):
                                        propagate_natural_height=True, propagate_natural_width=True,
                                        max_content_height=max_height))
 
-    def fill(self, items, shown):
-        """items: [(key, label)], in order; shown: the keys checked (None: every one). Built again only when the items
-        change."""
+    def fill(self, items, shown, dimmed=()):
+        """items: [(key, label)], in order; shown: the keys checked (None: every one); dimmed: the keys whose labels are
+        greyed (a column filter's values no row has), still there to check. Built again only when the items change."""
         if items != self.items:
             child = self.list.get_first_child()
             while child is not None:
@@ -106,6 +106,9 @@ class CheckList(Gtk.Box):
                     right.connect("pressed", lambda _g, _n, x, y, c=check: self.menu(c.key, c, x, y))
                     check.add_controller(right)
                 self.list.append(check)
+        for key, check in self.checks.items():
+            if isinstance(label := check.get_last_child(), Gtk.Label):
+                (label.add_css_class if key in dimmed else label.remove_css_class)("dim-label")
         self.sync(shown)
 
     def keys(self):

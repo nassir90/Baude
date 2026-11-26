@@ -429,7 +429,17 @@ private fun TaskView(t: Msg.Task, runs: List<Msg.TaskRun>, offset: Int, back: ()
     }
 }
 
-/** A run's page: its header (back, '<task> · <when>', Stop while it's going), one line of its facts (why it failed in
+/** Whether a run's output and errors wrap at the page's width (setting task_log_wrap, as Baude's: on unless turned off). */
+internal object LogWrap {
+    private fun prefs() = Mesh.app.getSharedPreferences("settings", android.content.Context.MODE_PRIVATE)
+    var on by mutableStateOf(prefs().getBoolean("task_log_wrap", true))
+    fun toggle() {
+        on = !on
+        prefs().edit().putBoolean("task_log_wrap", on).apply()
+    }
+}
+
+/** A run's page: its header (back, '<task> · <when>', Wrap, Stop while it's going), one line of its facts (why it failed in
  * place of its state, if it did), and its log: the script's output and its errors each in code blocks of their own
  * (errors in the error colour), its asks of the Bot and the Bot's answers as cards, the rest as plain lines. */
 @Composable
@@ -438,6 +448,9 @@ private fun RunView(r: Msg.TaskRun, log: List<Msg.TaskLogLine>, bot: String, tas
     val c = LocalBaude.current
     Column(Modifier.fillMaxSize()) {
         PageHeader(task, "$task · ${hostWhen(r.started?.toDouble(), r.offset?.toInt() ?: offset)}", back) {
+            IconButton(Adwaita.Wrap, Wording.CodeView.wrap, background = if (LogWrap.on) c.fg.copy(alpha = 0.10f) else null) {
+                LogWrap.toggle()
+            }
             if (going(r.status)) IconButton(Adwaita.MediaPlaybackStop, Wording.Common.stop, onClick = stop)
         }
         Text(listOfNotNull(r.error?.ifBlank { null } ?: Wording.Tasks.status(status = r.status.orEmpty()), kindWord(r.kind),
@@ -457,7 +470,7 @@ private fun RunView(r: Msg.TaskRun, log: List<Msg.TaskLogLine>, bot: String, tas
             for (p in parts) {
                 val l = p.first()
                 when (l.kind) {
-                    "out", "err" -> LogBlock(p)
+                    "out", "err" -> LogBlock(p, LogWrap.on)
                     "ask", "answer" -> Column(Modifier.fillMaxWidth().card(c), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         Text(when {
                             l.kind == "answer" -> Wording.Tasks.botAnswered(bot = bot)
@@ -475,14 +488,15 @@ private fun RunView(r: Msg.TaskRun, log: List<Msg.TaskLogLine>, bot: String, tas
     }
 }
 
-/** A run's output, or its errors, a code block's panel (errors in the error colour). */
+/** A run's output, or its errors, a code block's panel (errors in the error colour): its lines wrapped at its width,
+ * or scrolled sideways. */
 @Composable
-private fun LogBlock(lines: List<Msg.TaskLogLine>) {
+private fun LogBlock(lines: List<Msg.TaskLogLine>, wrap: Boolean) {
     val c = LocalBaude.current
     Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(Gap.codeRadius)).background(c.raised.compositeOver(c.inside))
-        .horizontalScroll(rememberScrollState()).padding(horizontal = 8.dp, vertical = 6.dp)) {
+        .then(if (wrap) Modifier else Modifier.horizontalScroll(rememberScrollState())).padding(horizontal = 8.dp, vertical = 6.dp)) {
         Column {
-            for (l in lines) Text(l.text.orEmpty(), style = Type.mono, color = if (l.kind == "err") c.error else c.fg, softWrap = false)
+            for (l in lines) Text(l.text.orEmpty(), style = Type.mono, color = if (l.kind == "err") c.error else c.fg, softWrap = wrap)
         }
     }
 }

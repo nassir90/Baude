@@ -172,6 +172,7 @@ row.entry.focused, row.spin.focused, editablelabel:focus-within { outline: none;
 .perm-card { border: 1px solid @warning_color; border-radius: {radius.card}; padding: 8px 12px; }
 .thinking { opacity: 0.62; }  /* Claude's narration between steps: part of the conversation, quieter */
 .mono { font-family: monospace; font-size: {font.mono-scale}em; }
+.device-code { font-family: monospace; font-size: {font.device-code-scale}em; font-weight: bold; letter-spacing: 0.08em; }  /* (a device-code sign-in's one-time code: read off, typed in elsewhere) */
 .statusbar { padding: 4px 10px; font-size: 0.85em; opacity: 0.75; }
 .statusbar .chat-host { padding: 0 5px; border-radius: 4px; background: alpha(currentColor, 0.1); }
 .sysnote { font-size: {font.small}em; opacity: 0.6; }

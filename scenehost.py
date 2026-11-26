@@ -9,16 +9,23 @@ How a panel stays live (cards3d's container, #454):
   perspective divide; through an affine one it's exact, so a click lands on the button drawn under it.
 - GTK never draws the panels itself: GL does, each from its picture (the widget rendered by the window's GSK renderer,
   read back and given to GL), made again only after the widget redraws (its WidgetPaintable's invalidate-contents).
-- Depth is honoured for input as for drawing: on each pointer move the pointer's ray is met with every panel and every
-  pickable mesh; only the nearest panel takes events (can_target), so a panel behind a wall can't be clicked.
+- Depth is honoured for input as for drawing: on each pointer move (before GTK picks the move's widget), and once a
+  frame as the view or the panels move, the pointer's ray is met with every panel and every pickable mesh; only the
+  nearest panel takes events (can_target), so a panel behind a wall can't be clicked.
+- A frame's work is kept small: only the panel under the pointer is fitted again as things move (the others are laid
+  out once, and again only as they're made, shown or resized); each node's world matrix is kept till it or a parent
+  moves; the panels are drawn instanced (scenegl), and a frame makes at most a couple of pictures again.
 
 What the scene is given is SceneObject.json's things (World): chats with their state, hosts, Meta cards, windows. A
 node's panel shows one; slots make a panel (and their `with` nodes) for each that fits. A theme's desktop code
 (desktop/scene.py) is run only once trusted (themepacks.trusted), and gets a SceneAPI, nothing else of the app's."""
+import ctypes as C
+import functools
 import importlib.util
 import math
 import os
 import time
+import weakref
 
 import gi
 
@@ -27,7 +34,7 @@ gi.require_version("Adw", "1")
 gi.require_version("Gsk", "4.0")
 gi.require_version("Gdk", "4.0")
 gi.require_version("Graphene", "1.0")
-from gi.repository import Adw, Gdk, GLib, Graphene, Gsk, Gtk  # noqa: E402
+from gi.repository import Adw, Gdk, GLib, GObject, Graphene, Gsk, Gtk  # noqa: E402
 
 import scenegl  # noqa: E402
 from baudelib import themepacks  # noqa: E402
@@ -36,6 +43,8 @@ CSS = """
 .scene-panel { background-color: @view_bg_color; color: @view_fg_color; border-radius: 10px; }
 """
 PICTURE_SCALE = 2  # (a panel's picture, px per widget px)
+REPICTURED = 2  # (a frame makes at most this many panels' pictures again; the rest wait for the next frames)
+FIRST_PICTURES_MS = 8  # (and makes panels' first pictures till this long has gone)
 CLAIM = 6  # (px a press on the scene moves before it turns the view)
 LISTED_TRIES = 400  # (a chat page's chat looked for in its host's list this many times, 50 ms apart, till it's there)
 STATES = {"working": "working", "waiting": "waiting", "idle": "done", "stopped": "inactive"}  # (wire → the dot's)
@@ -358,9 +367,14 @@ class Node:
         self.states, self.panel = dict(spec.get("states") or {}), spec.get("panel")
         self.slots, self.hidden, self.pick = spec.get("slots"), bool(spec.get("hidden")), spec.get("pick", "open")
         self.obj, self.face, self.widget = obj, None, None
-        self.tex, self.dirty, self.paintable, self.texsize = None, True, None, None
+        self.slot, self.dirty, self.paintable, self.texsize = None, True, None, None  # (slot: its picture's place)
+        self.held = None  # (GSK's texture its picture was copied from, kept till the GPU's surely done with it)
         self.alloc = self.alloc_size = None  # (the 2D transform its widget's allocated with, and its px)
-        self.placed = None  # (its world matrix, by where it and its parents are, and what's worked out from it)
+        self.laid = None  # (whether it was shown, and could be pointed at, as it was laid out last)
+        self.placed = None  # (its world matrix's version, the matrix, and what's worked out from it)
+        self.own = None  # (where it and its parent's matrix were as that was worked out)
+        self.seen = (None, 0, True, None, None, None)  # (as the scene was last gone over: then, its matrix's version,
+        # whether shown, its thing, its state's material and its own (material's names, its own or a parent's))
         self.made_by = None  # (the slots node it was made for, if any)
 
     def local(self):
@@ -414,7 +428,7 @@ class SceneAPI:
 
     def show(self, nid, shown=True):
         self._v.nodes[nid].hidden = not shown
-        self._v.queue_allocate()
+        self._v.changed()
 
     def open(self, obj):
         self._v.open(obj)
@@ -435,6 +449,70 @@ class SceneAPI:
 def _vec(m, x, y, z, w=1.0):
     v = m.transform_vec4(Graphene.Vec4().init(x, y, z, w))
     return v.get_x(), v.get_y(), v.get_z(), v.get_w()
+
+
+def _inverse(m):
+    """m's inverse as 16 floats, row by row (a point's a row times it), or None if it has none."""
+    ok, inv = m.inverse()
+    return tuple(inv.to_float()) if ok else None
+
+
+def _rows(tex):
+    """A texture's pixels read back: RGBA8 premultiplied, rows top first, packed."""
+    tw, th = tex.get_width(), tex.get_height()
+    d = Gdk.TextureDownloader.new(tex)
+    d.set_format(Gdk.MemoryFormat.R8G8B8A8_PREMULTIPLIED)
+    data, stride = d.download_bytes()
+    raw = data.get_data()
+    return raw if stride == tw * 4 else b"".join(raw[r * stride:r * stride + tw * 4] for r in range(th))
+
+
+GL_TEXTURE_ID_AT = 0x70  # (GdkGLTexture's GL id, in its private struct, on GTK 4.24.1)
+ZERO_COPY = {"ok": None, "flipped": False}  # (whether GSK's textures are drawn from as they are: None till checked)
+VIEWS = weakref.WeakSet()  # (the scenes made, told of each move before GTK has it)
+HOOKED = []
+
+
+def _before_gtk(surface, event):
+    """GDK's event signal, before GTK's handler picks the widget a move is for (the event a bare pointer here: read
+    through GDK's own calls)."""
+    gdk = _gdk()
+    ptr = hash(event) & (2 ** 64 - 1)  # (PyGObject's GPointer hashes as its pointer: checked by the event's surface)
+    if gdk.gdk_event_get_surface(ptr) != _address(surface):
+        return True
+    if gdk.gdk_event_get_event_type(ptr) == int(Gdk.EventType.MOTION_NOTIFY):
+        x, y = C.c_double(), C.c_double()
+        if gdk.gdk_event_get_position(ptr, C.byref(x), C.byref(y)):
+            for v in list(VIEWS):
+                v._moved(surface, x.value, y.value)
+    return True
+
+
+@functools.cache
+def _gdk():
+    path = next((p for p in ("/opt/homebrew/lib/libgtk-4.1.dylib", "/usr/local/lib/libgtk-4.1.dylib")
+                 if os.path.exists(p)), "libgtk-4.so.1")
+    lib = C.CDLL(path)
+    lib.gdk_event_get_event_type.restype, lib.gdk_event_get_event_type.argtypes = C.c_int, [C.c_void_p]
+    lib.gdk_event_get_surface.restype, lib.gdk_event_get_surface.argtypes = C.c_void_p, [C.c_void_p]
+    lib.gdk_event_get_position.restype = C.c_bool
+    lib.gdk_event_get_position.argtypes = [C.c_void_p, C.POINTER(C.c_double), C.POINTER(C.c_double)]
+    C.pythonapi.PyCapsule_GetPointer.restype = C.c_void_p
+    C.pythonapi.PyCapsule_GetPointer.argtypes = [C.py_object, C.c_char_p]
+    return lib
+
+
+def _address(obj):
+    """A GObject's address."""
+    _gdk()
+    return C.pythonapi.PyCapsule_GetPointer(obj.__gpointer__, None)
+
+
+def _hook():
+    """_before_gtk hooked into GDK's event signal, once (a surface made: its class is there)."""
+    if not HOOKED:
+        GObject.add_emission_hook(Gdk.Surface, "event", _before_gtk)
+        HOOKED.append(True)
 
 
 def fitted(m, w, h, pointer):
@@ -477,6 +555,11 @@ class SceneView(Gtk.Widget):
         self.nodes, self.order = {}, []
         self.frame_hooks, self.pick_hooks, self.world_hooks = [], [], []
         self.pointer, self.target, self.drag = None, None, None
+        self.refit = False  # (the panel under the pointer's to be fitted again)
+        self.can, self.picked_at = None, None  # (the panel that can be pointed at; the view as it was last picked in)
+        self.picked_in = None  # (the frame it was last picked in)
+        self.went, self.versions, self.current = 0, 0, False  # (go_over's count; matrices' versions; gone over since)
+        self.panels = 0  # (panels drawn last frame)
         self.yaw, self.pitch, self.dolly = 0.0, 0.0, 1.0  # (the user's turn of the view, on top of its orbit)
         self.stats = {"uploads": 0, "upload_ms": 0.0, "frames": [], "render_ms": [], "layout_ms": [], "code": None}
         self.area = Gtk.GLArea(can_target=False)
@@ -490,8 +573,9 @@ class SceneView(Gtk.Widget):
             self.add_node(spec)
         world.listeners.append(self.sync)
         self.sync()
-        motion = Gtk.EventControllerMotion()
-        motion.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
+        VIEWS.add(self)
+        self.connect("realize", lambda *_: _hook())
+        motion = Gtk.EventControllerMotion()  # (after GTK's pick: a move _moved has had already picks nothing again)
         motion.connect("motion", lambda _c, x, y: self.point_at(x, y))
         motion.connect("leave", lambda _c: self.left())
         self.add_controller(motion)
@@ -516,7 +600,7 @@ class SceneView(Gtk.Widget):
         self.order.append(n.id)
         if n.panel is not None and n.obj is None and n.panel.get("of"):
             n.obj = self.world.get(n.panel["of"]) if n.panel["of"] != "first" else None
-        self.queue_allocate()
+        self.changed()
         return n
 
     def remove_node(self, nid):
@@ -525,17 +609,27 @@ class SceneView(Gtk.Widget):
         n = self.nodes.pop(nid)
         self.order.remove(nid)
         self._drop_face(n)
+        self.changed()
+
+    def changed(self):
+        """Nodes made, gone, shown or hidden between frames: gone over again, and laid out."""
+        self.current = False
+        self.queue_allocate()
 
     def _drop_face(self, n):
+        if self.target is n:
+            self.target, self.refit = None, True
+        if self.can is n:
+            self.can = None
         if n.face is not None:
             if isinstance(n.widget, (WindowPanel, ChatPage)):
                 n.widget.give_back()
             n.face.unparent()
             n.face = n.widget = n.paintable = None
-            if n.tex and self.gl is not None:
-                self.area.make_current()
-                self.gl.gl.delete_texture(n.tex)
-            n.tex = None
+            n.laid = n.alloc = n.alloc_size = None
+            if n.slot is not None and self.gl is not None:
+                self.gl.free_picture(n.slot)
+            n.slot = None
 
     def obj_of(self, n):
         while n is not None:
@@ -584,7 +678,7 @@ class SceneView(Gtk.Widget):
                 n.widget.show_state(self.obj_of(n).get("state"))
         for fn in self.world_hooks:
             fn(SceneAPI(self).world)
-        self.queue_allocate()
+        self.changed()
 
     def _lay_out(self, s, groups):
         p = s.slots.get("panel") or {}
@@ -606,23 +700,60 @@ class SceneView(Gtk.Widget):
 
     def world_matrix(self, n):
         """n's space → the world: its own place, then each parent's; kept till one of them moves."""
-        chain, at = [], n
-        while at is not None:
-            chain.append((tuple(at.position), tuple(at.rotation), tuple(at.scale)))
-            at = self.nodes.get(at.parent)
-        key = tuple(chain)
-        if n.placed is None or n.placed[0] != key:
-            m = n.local()
-            p = self.nodes.get(n.parent)
-            while p is not None:
-                m = m.multiply(p.local())
-                p = self.nodes.get(p.parent)
-            n.placed = (key, m, {})
+        self.went += 1
+        self._see(n)
         return n.placed[1]
+
+    def _see(self, n):
+        """n's matrix's version, whether it's shown, its thing and its materials (as material() finds them), as of this
+        going over (went), each from its parent's: its matrix worked out again only if it or a parent moved."""
+        if n.seen[0] == self.went:
+            return n.seen
+        p = self.nodes.get(n.parent)
+        _w, pv, pshown, pobj, pstate, pown = self._see(p) if p is not None else (None, 0, True, None, None, None)
+        obj = n.obj if n.obj is not None else pobj
+        state = obj.get("state") if obj is not None else None
+        if obj is not None and state in n.states:
+            named = n.states[state]
+        elif n.obj is None or p is None:
+            named = pstate  # (the same thing as its parent's)
+        else:
+            named = self._state_material(p, obj)
+        own = n.own
+        if own is None or own[3] != pv or own[0] != n.position or own[1] != n.rotation or own[2] != n.scale:
+            m = n.local()
+            if p is not None:
+                m = m.multiply(p.placed[1])
+            self.versions += 1
+            n.placed = (self.versions, m, {})
+            n.own = (n.position[:], n.rotation[:], n.scale[:], pv)
+        n.seen = (self.went, n.placed[0], pshown and not n.hidden, obj, named, n.material or pown)
+        return n.seen
+
+    def _state_material(self, at, obj):
+        while at is not None:
+            if obj.get("state") in at.states:
+                return at.states[obj["state"]]
+            at = self.nodes.get(at.parent)
+        return None
+
+    def _material(self, n):
+        """material(n), from the frame's going over."""
+        mats = self.scene.get("materials") or {}
+        _w, _v, _s, _o, named, own = n.seen
+        return mats.get(named, {}) if named else mats.get(own, {}) if own else {}
+
+    def go_over(self):
+        """Every node's place and whether it's shown, once a frame (and again before a click's picked)."""
+        self.went += 1
+        for n in self.nodes.values():
+            self._see(n)
+        self.current = True
 
     def drawn(self, n, kind, make):
         """Something of n's worked out from where it is (its model matrix as GL takes it, its centre): kept with it."""
-        self.world_matrix(n)
+        if n.seen[0] != self.went:
+            self.world_matrix(n)
         kept = n.placed[2]
         if kind not in kept:
             kept[kind] = make()
@@ -664,7 +795,8 @@ class SceneView(Gtk.Widget):
             n.widget.set_vexpand(True)
             face.append(n.widget)
             face.set_parent(self)
-            n.face = face
+            face.set_can_target(False)
+            n.face, n.laid = face, None
             n.paintable = Gtk.WidgetPaintable.new(face)
             n.paintable.connect("invalidate-contents", lambda *_: self._dirty(n))
             n.dirty = True
@@ -720,37 +852,75 @@ class SceneView(Gtk.Widget):
         return 200, 800, -1, -1
 
     def do_size_allocate(self, w, h, baseline):
+        """Each panel laid out as it's made, shown or hidden, or its size or its widget's changes (GTK asks only
+        then): at its px, with a transform fitted where the pointer is for the panel under it. As the view or a panel
+        moves, only that one's fitted again (refit), from the frame's tick."""
         t0 = time.perf_counter()
         self.area.allocate(w, h, -1, None)
         if w < 1 or h < 1:  # (no view yet: nothing's placed through it, the panels kept out of it till there is)
             for n in self.nodes.values():
                 if n.face is not None:
                     n.face.set_child_visible(False)
+                    n.laid = None
             return
-        view, proj, px, _e = self.matrices(w, h)
-        vpp = view.multiply(proj).multiply(px)
+        if not self.current:
+            self.go_over()
+        vpp, self.can = None, None
         for nid in self.order:
             n = self.nodes[nid]
             if n.panel is None:
                 continue
-            show = self.shown(n)
+            show = n.seen[2]
             face = self.face(n) if show else n.face
             if face is None:
+                n.laid = (show, False)  # (nothing to show yet: laid out again as the world changes)
                 continue
-            face.set_child_visible(show)
+            live = self.target is n
+            if n.laid != (show, live):
+                face.set_child_visible(show)
+                face.set_can_target(live)
+                n.laid = (show, live)
             if not show:
                 continue
+            if live:
+                self.can = n
             pw, ph = self.panel_px(n)
-            live = self.target is n
             if live or n.alloc is None or n.alloc_size != (pw, ph):
                 if n.alloc_size != (pw, ph):
                     face.measure(Gtk.Orientation.HORIZONTAL, -1)
                     face.measure(Gtk.Orientation.VERTICAL, pw)
+                if vpp is None:
+                    view, proj, px, _e = self.matrices(w, h)
+                    vpp = view.multiply(proj).multiply(px)
                 n.alloc = fitted(self.stage_matrix(n, vpp), pw, ph, self.pointer if live else None)
                 n.alloc_size = (pw, ph)
-            face.allocate(pw, ph, -1, n.alloc)  # (unchanged but for the panel under the pointer: GTK skips the rest)
-            face.set_can_target(live)
+            face.allocate(pw, ph, -1, n.alloc)  # (GTK does nothing more for one whose size and transform are as they were)
+        self.refit = False
         self.stats["layout_ms"].append((time.perf_counter() - t0) * 1000)
+
+    def _refit(self):
+        """The panel under the pointer made the one that can be pointed at, and fitted again where the pointer is now,
+        alone (the view or it moved, or the pointer did)."""
+        self.refit = False
+        n, was = self.target or None, self.can
+        if was is not None and was is not n:
+            if was.face is not None:
+                was.face.set_can_target(False)
+            if was.laid is not None:
+                was.laid = (was.laid[0], False)
+            self.can = None
+        if n is None or n.face is None or n.alloc is None or n.laid is None or not n.laid[0]:
+            return
+        pw, ph = self.panel_px(n)
+        if n.alloc_size != (pw, ph):
+            self.queue_allocate()
+            return
+        n.alloc = fitted(self.stage_matrix(n), pw, ph, self.pointer)
+        n.face.allocate(pw, ph, -1, n.alloc)
+        if not n.laid[1]:
+            n.face.set_can_target(True)
+            n.laid = (True, True)
+        self.can = n
 
     def stage_matrix(self, n, vpp=None):
         """n's panel's px → the view's px, through the camera as it is now (with the perspective divide)."""
@@ -782,15 +952,23 @@ class SceneView(Gtk.Widget):
         best = (None, math.inf, None)
         if (ray := self.ray(x, y)) is None:
             return best
-        o, d = ray
+        if not self.current:
+            self.go_over()
+        (ox, oy, oz), (dx, dy, dz) = ray
         for n in self.nodes.values():
-            if not self.shown(n) or (n.panel is None and (n.mesh is None or n.pick == "none")):
+            if not n.seen[2] or (n.panel is None and (n.mesh is None or n.pick == "none")):
                 continue
-            m = self.panel_model(n) if n.panel is not None else self.world_matrix(n)
-            ok, inv = m.inverse()
-            if not ok:
+            kind = ("inverse", tuple(n.panel.get("px") or ()), tuple(n.panel.get("size") or ())) if n.panel else "inverse"
+            inv = self.drawn(n, kind, lambda: _inverse(self.panel_model(n) if n.panel is not None else n.placed[1]))
+            if inv is None:
                 continue
-            lo, ld = _vec(inv, *o), _vec(inv, *d, 0.0)
+            (a0, a1, a2, a3, b0, b1, b2, b3, c0, c1, c2, c3, e0, e1, e2, e3) = inv  # (rows: a point's a row times it)
+            lw = ox * a3 + oy * b3 + oz * c3 + e3
+            if abs(lw) < 1e-12:
+                continue
+            lo = ((ox * a0 + oy * b0 + oz * c0 + e0) / lw, (ox * a1 + oy * b1 + oz * c1 + e1) / lw,
+                  (ox * a2 + oy * b2 + oz * c2 + e2) / lw)
+            ld = (dx * a0 + dy * b0 + dz * c0, dx * a1 + dy * b1 + dz * c1, dx * a2 + dy * b2 + dz * c2)
             if n.panel is not None:
                 if abs(ld[2]) < 1e-9:
                     continue
@@ -819,15 +997,47 @@ class SceneView(Gtk.Widget):
         return (-0.5, -0.5, -0.5), (0.5, 0.5, 0.5)
 
     def point_at(self, x, y):
+        """The pointer's moved to (x, y): what's under it picked, and the panel there fitted, before GTK picks the
+        move's widget (_moved, from GDK's event signal): so GTK gives the move, and a press after it, to the widget
+        drawn under the pointer. GDK gives a frame one move at most (the rest it folds into it), and a move to
+        where the last pick was, with the view as it was, picks nothing again."""
+        if (x, y) == self.pointer and self.picked_at == self._view_now():
+            return
         self.pointer = (x, y)
-        self.target = self.hit(x, y)[0]
+        self.pick()
+        if self.refit:
+            self._refit()
+
+    def _moved(self, surface, x, y):
+        native = self.get_native()
+        if native is None or native.get_surface() != surface:
+            return
+        tx, ty = native.get_surface_transform()
+        ok, p = native.compute_point(self, Graphene.Point().init(x - tx, y - ty))
+        if ok and 0 <= p.x < self.get_width() and 0 <= p.y < self.get_height():
+            self.point_at(p.x, p.y)
+
+    def _frame(self):
+        clock = self.get_frame_clock()
+        return clock.get_frame_counter() if clock is not None else None
+
+    def pick(self):
+        """What's under the pointer now: the nearest panel takes events, alone (none if a mesh is nearer)."""
+        self.picked_in = self._frame()
+        self.picked_at = self._view_now()
+        was = self.target
+        self.target = self.hit(*self.pointer)[0]
         if self.target is not None and self.target.panel is None:
             self.target = False  # (a mesh: no panel takes it)
-        self.queue_allocate()
+        self.refit = self.refit or self.target is not was or bool(self.target)
+
+    def _view_now(self):
+        """What what's under a still pointer depends on: the camera, the view's size, and where each node is."""
+        cam = self.scene["camera"]
+        return self.eye(), tuple(cam["target"]), cam.get("fov"), self.versions, self.get_width(), self.get_height()
 
     def left(self):
-        self.pointer = self.target = None
-        self.queue_allocate()
+        self.pointer, self.target, self.refit = None, None, True
 
     def _drag_begin(self, gesture, x, y):
         self.drag = (x, y, self.yaw, self.pitch, False)
@@ -841,7 +1051,6 @@ class SceneView(Gtk.Widget):
         gesture.set_state(Gtk.EventSequenceState.CLAIMED)
         self.drag = (x, y, yaw, pitch, True)
         self.yaw, self.pitch = yaw - ox * 0.25, pitch + oy * 0.2
-        self.queue_allocate()
 
     def _drag_end(self, gesture, ox, oy):
         if self.drag is not None and not self.drag[4]:
@@ -850,11 +1059,11 @@ class SceneView(Gtk.Widget):
 
     def _zoom(self, dy):
         self.dolly = max(0.3, min(3.0, self.dolly * (1.1 ** dy)))
-        self.queue_allocate()
         return True
 
     def picked(self, x, y):
         """A click on the scene (not on a widget in it): the node under it does what its pick says."""
+        self.current = False
         n = self.hit(x, y)[0]
         if n is None or n.panel is not None:
             return
@@ -868,7 +1077,7 @@ class SceneView(Gtk.Widget):
                     k.hidden = False
         elif n.pick == "open" and self.obj_of(n) is not None:
             self.open(self.obj_of(n))
-        self.queue_allocate()
+        self.changed()
 
     def open(self, obj):
         self.opened(obj)
@@ -912,6 +1121,7 @@ class SceneView(Gtk.Widget):
         dt, self.last = (0.0 if self.last is None else min(now - self.last, 0.05)), now
         if self.running:
             self.advance(dt)
+        self.follow_pointer()
         return True
 
     def advance(self, dt):
@@ -923,11 +1133,20 @@ class SceneView(Gtk.Widget):
             except Exception as e:  # noqa: BLE001
                 self.stats["code"] = f"failed: {type(e).__name__}: {e}"
                 self.frame_hooks.remove(fn)
-        if self.pointer is not None:  # (what's under a still pointer changes as the view turns)
-            self.point_at(*self.pointer)
-        self.queue_allocate()  # (laid out once, in the frame's layout phase)
+        self.go_over()
         self.area.queue_render()
         self.stats["frames"].append((time.perf_counter() - t0) * 1000)
+
+    def follow_pointer(self):
+        """Once a frame, in its tick: what's under the pointer picked again if it moved, or the view or a panel did,
+        and the panel under it fitted where it is."""
+        if self.pointer is not None and self.picked_in != self._frame():
+            if not self.current:
+                self.go_over()
+            if self._view_now() != self.picked_at:
+                self.pick()
+        if self.refit:
+            self._refit()
 
     # ---- drawing
     def do_snapshot(self, s):
@@ -949,10 +1168,9 @@ class SceneView(Gtk.Widget):
         return name
 
     def picture(self, n):
-        """n's panel's picture in GL, made again if its widget redrew since."""
+        """n's panel's picture made again (its widget drawn by the window's renderer, read back) and put in GL: where
+        it is (n.slot)."""
         pw, ph = self.panel_px(n)
-        if not n.dirty and n.tex is not None and n.texsize == (pw, ph):
-            return n.tex
         t0 = time.perf_counter()
         sn = Gtk.Snapshot()
         sn.scale(PICTURE_SCALE, PICTURE_SCALE)
@@ -961,53 +1179,118 @@ class SceneView(Gtk.Widget):
         node = sn.to_node()
         native = self.get_native()
         if node is None or native is None:
-            return n.tex
+            return n.slot
         tex = native.get_renderer().render_texture(node, Graphene.Rect().init(0, 0, pw * PICTURE_SCALE, ph * PICTURE_SCALE))
-        d = Gdk.TextureDownloader.new(tex)
-        d.set_format(Gdk.MemoryFormat.R8G8B8A8_PREMULTIPLIED)
-        data, stride = d.download_bytes()
+        n.dirty = False  # (before it's put in: a redraw from now on is wanted again)
         tw, th = tex.get_width(), tex.get_height()
-        raw = data.get_data()
-        if stride != tw * 4:
-            raw = b"".join(raw[r * stride:r * stride + tw * 4] for r in range(th))
-        self.area.make_current()
-        n.tex = self.gl.gl.texture(raw, tw, th, n.tex, mipmap=True)
-        n.texsize, n.dirty = (pw, ph), False
+        gid = self._shared(tex)
+        if gid is not None:
+            self.gl.gl.Flush()  # (in GSK's context, still current: its drawing reaches the GPU before ours reads it)
+            self.area.make_current()
+            n.slot = self.gl.picture(n.slot, tw, th, source=gid, flipped=ZERO_COPY["flipped"], hint=self.panels)
+            n.held = tex  # (GSK deletes its texture as it's let go of: kept till the next picture's taken)
+        else:
+            self.area.make_current()
+            n.slot = self.gl.picture(n.slot, tw, th, _rows(tex), hint=self.panels)
+        n.texsize = (pw, ph)
         self.stats["uploads"] += 1
         self.stats["upload_ms"] += (time.perf_counter() - t0) * 1000
-        return n.tex
+        return n.slot
+
+    def _shared(self, tex):
+        """GSK's GL texture's id, to be drawn from without reading it back (zero copy), where it's known to be right:
+        GTK 4.24.1 alone (the id is read from GdkGLTexture's private struct), and only once the first picture's pixels
+        read in our context are the downloader's (as they are, or upside down). None: read it back."""
+        z = ZERO_COPY
+        if z["ok"] is False or not isinstance(tex, Gdk.GLTexture) or os.environ.get("SCENE_READBACK"):
+            return None
+        if (Gtk.get_major_version(), Gtk.get_minor_version(), Gtk.get_micro_version()) != (4, 24, 1):
+            z["ok"] = False
+            return None
+        gid = C.c_uint.from_address(_address(tex) + GL_TEXTURE_ID_AT).value
+        if z["ok"] is None:
+            self.gl.gl.Flush()
+            want = _rows(tex)
+            self.area.make_current()
+            got = self.gl.read(gid, tex.get_width(), tex.get_height())
+            row = tex.get_width() * 4
+            rows = lambda b: [b[i:i + row] for i in range(0, len(b), row)]  # noqa: E731
+            if got is not None and got == want:
+                z.update(ok=True, flipped=False)
+            elif got is not None and rows(got)[::-1] == rows(want):
+                z.update(ok=True, flipped=True)
+            else:
+                z["ok"] = False
+                return None
+        return gid
+
+    def _pictures(self, wanted):
+        """The pictures this frame makes: the panel under the pointer's first, then those with none yet (till
+        FIRST_PICTURES_MS has gone), then the nearest of those made again (REPICTURED at most); the rest are left for
+        the next frames, drawn meanwhile from what they had."""
+        t0, again = time.perf_counter(), 0
+        live = self.target or None
+        wanted.sort(key=lambda w: (w[1] is not live, w[1].slot is not None, w[0]))
+        for _d, n in wanted:
+            if n is not live:
+                if n.slot is None and (time.perf_counter() - t0) * 1000 > FIRST_PICTURES_MS:
+                    break
+                if n.slot is not None:
+                    if again >= REPICTURED:
+                        break
+                    again += 1
+            self.picture(n)
 
     def _render(self, area, _ctx):
         if self.gl is None:
             return True
         t0 = time.perf_counter()
+        if not self.current:
+            self.go_over()
         w, h = self.get_width(), self.get_height()
         sc = area.get_scale_factor()
         view, proj, _px, eye = self.matrices(w, h)
-        draws = []
+        meshes, panels, wanted, mats, stale = [], [], [], {}, False
+        ex, ey, ez = eye
         for nid in self.order:
             n = self.nodes[nid]
-            if not self.shown(n):
+            if n.panel is not None and (n.laid[0] if n.laid else False) != n.seen[2]:
+                stale = True  # (shown or hidden since it was laid out)
+            if not n.seen[2]:
                 continue
             if n.mesh is not None:
-                tex = None
-                mat = self.material(n)
-                if mat.get("texture"):
-                    tex = self._texture(mat["texture"])
-                model = self.drawn(n, "model", lambda: scenegl.floats(self.world_matrix(n)))
-                draws.append((self._mesh(n.mesh), model, mat, tex, None))
+                mat = self._material(n)
+                tex = self._texture(mat["texture"]) if mat.get("texture") else None
+                m = mats.get(id(mat))
+                if m is None:
+                    m = mats[id(mat)] = scenegl.material(mat)
+                meshes.append((self._mesh(n.mesh), tex,
+                               self.drawn(n, "model", lambda: scenegl.model(n.placed[1])) + m + scenegl.layer()))
             elif n.panel is not None and n.face is not None and n.alloc is not None:
-                tex = self.picture(n)
-                if tex is None:
-                    continue
                 sw, sh = n.panel.get("size") or (1.6, 1.2)
-                model, c = self.drawn(n, ("panel", sw, sh), lambda: (lambda m: (scenegl.floats(m), _vec(m, 0, 0, 0)))(
-                    Graphene.Matrix().init_scale(sw, sh, 1).multiply(self.world_matrix(n))))
-                draws.append(("plane", model, self.material(n), tex, math.dist(c[:3], eye)))
+                model, c = self.drawn(n, ("panel", sw, sh), lambda: (lambda m: (scenegl.model(m), _vec(m, 0, 0, 0)))(
+                    Graphene.Matrix().init_scale(sw, sh, 1).multiply(n.placed[1])))
+                d = math.sqrt((c[0] - ex) ** 2 + (c[1] - ey) ** 2 + (c[2] - ez) ** 2)
+                if n.dirty or n.slot is None or n.texsize != tuple(self.panel_px(n)):
+                    wanted.append((d, n))
+                panels.append((d, n, model))
+        self.panels = len(panels)
+        if wanted:
+            self._pictures(wanted)
+        draws = []
+        for d, n, model in panels:
+            if n.slot is not None:
+                mat = self._material(n)
+                m = mats.get(id(mat))
+                if m is None:
+                    m = mats[id(mat)] = scenegl.material(mat)
+                draws.append((d, n.slot[0], model + m + scenegl.layer(n.slot[1])))
         area.make_current()
-        self.gl.frame(w * sc, h * sc, view, proj, eye, self.scene, draws)
+        self.gl.frame(w * sc, h * sc, view, proj, eye, self.scene, meshes, draws)
         if os.environ.get("SCENE_FINISH"):  # (measuring: the GPU's work done before the frame's timed as over)
             self.gl.gl.Finish()
+        if stale:
+            self.changed()
         self.stats["render_ms"].append((time.perf_counter() - t0) * 1000)
         return True
 

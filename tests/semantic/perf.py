@@ -40,6 +40,10 @@ if os.environ.get("LAYOUT_ONLY"):  # (layout each frame, GL not asked to draw ag
 win = window(v, 1250, 760)
 macos.in_unseen(win)
 pump(1.5)
+for _ in range(400):  # (each panel's pictures made before it's measured: a frame makes a few)
+    if all(n.slot is not None and not n.dirty for n in v.nodes.values() if n.face is not None and v.shown(n)):
+        break
+    pump(0.025)
 clock = win.get_frame_clock()
 marks = {"frames": []}
 clock.connect("before-paint", lambda c: marks.__setitem__("t0", time.perf_counter()))

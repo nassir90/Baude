@@ -161,6 +161,10 @@ An entry or a part may carry:
   the desktop apps its theme.css and GTK theme too, and its code (desktop/*.py, given the scene's SceneAPI, and
   shaders/*.glsl), only once its host's user has trusted that code as it is (theme_trust: its sha256; changed, it's
   not run till it's trusted again, and the scene's drawn from its data alone). The phone never runs a theme's code.
+  Anyone on the mesh may trust a theme's code (theme_trust is taken from any of the mesh's apps and heads, as every
+  other request is): `{"said": "Anyone on the mesh", "rule": "Any member of the mesh may trust a theme's code on any
+  host; no app or host asks for more than its being in the mesh", "decided": "2026-11-26", "source": [{"session":
+  "b3845b21-55ac-4aab-a769-fb8517403c51", "message": "368e4c39-2ac3-4d3f-8367-b69de411b295"}]}`.
   The owner: "If both of these can be done, and they can be distributed as some kind of plugin, we can merge the
   semantic "theme" framework. Ontologically we want this to meld with the work we did on the windows XP themes and
   such too" (2026-11-26). Source: `[{"session": "b3845b21-55ac-4aab-a769-fb8517403c51", "message":

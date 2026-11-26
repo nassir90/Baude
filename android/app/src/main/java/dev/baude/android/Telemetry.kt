@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.material3.Icon
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
@@ -34,15 +35,8 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.graphics.BlendMode
-import androidx.compose.ui.graphics.Paint
 import androidx.compose.ui.graphics.SolidColor
-import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.graphics.StrokeJoin
-import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.graphics.drawscope.scale
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -159,9 +153,9 @@ object Telemetry {
 private val APP_NAMES = linkedMapOf("host" to { Wording.Telemetry.hostProcess }, "baude" to { Wording.MeshVersions.baude },
     "record" to { Wording.MeshVersions.record }, "emission" to { Wording.MeshVersions.emission },
     "multiplex" to { Wording.Deps.multiplex }, "phone" to { Wording.MeshVersions.baude })
-/** Each process's app's logo (AppLogos: schema/icons/apps), as telemetryview.APP_LOGOS. */
-private val APP_LOGOS = mapOf("host" to "baude", "baude" to "baude", "record" to "record", "emission" to "emission-16",
-    "multiplex" to "multiplex-16", "phone" to "baude")
+/** Each process's app's logo (schema/icons/baude's baude-app-<logo>-symbolic), as telemetryview.APP_LOGOS. */
+private val APP_LOGOS = mapOf("host" to Adwaita.AppBaude, "baude" to Adwaita.AppBaude, "record" to Adwaita.AppRecord,
+    "emission" to Adwaita.AppEmission, "multiplex" to Adwaita.AppMultiplex, "phone" to Adwaita.AppBaude)
 private val PROFILED = listOf("host", "baude", "record")
 private const val WEEKS = 53
 
@@ -218,36 +212,6 @@ private fun valueRow(title: String, value: String?, slug: String? = null): @Comp
     }
 }
 
-private val logoPaths = HashMap<String, androidx.compose.ui.graphics.Path>()
-private fun logoPath(d: String) = logoPaths.getOrPut(d) { androidx.compose.ui.graphics.vector.PathParser().parsePathString(d).toPath() }
-
-/** An app's logo (AppLogos), size square: Baude's and Record's tile in the accent picked, as telemetryview.logo. */
-@Composable
-private fun AppLogo(name: String, size: androidx.compose.ui.unit.Dp) {
-    val logo = AppLogos.all[name] ?: return
-    val accent = Settings.ACCENTS[Settings.accent.value]?.takeIf { name == "baude" || name == "record" }
-    fun colour(argb: Long) = if (accent != null && argb == logo.tile) accent else androidx.compose.ui.graphics.Color(argb)
-    Canvas(Modifier.size(size)) {
-        scale(this.size.width / 128f, Offset.Zero) {
-            fun draw(sh: AppLogos.Shape, clear: Boolean = false) {
-                val mode = if (clear) BlendMode.Clear else BlendMode.SrcOver
-                sh.fill?.let { drawPath(logoPath(sh.d), colour(it), sh.alpha, blendMode = mode) }
-                sh.stroke?.let { drawPath(logoPath(sh.d), colour(it), sh.alpha, Stroke(sh.width,
-                    cap = when (sh.cap) { "round" -> StrokeCap.Round; "square" -> StrokeCap.Square; else -> StrokeCap.Butt },
-                    join = when (sh.join) { "round" -> StrokeJoin.Round; "bevel" -> StrokeJoin.Bevel; else -> StrokeJoin.Miter }),
-                    blendMode = mode) }
-            }
-            for (sh in logo.shapes) {
-                if (sh.cut.isEmpty()) { draw(sh); continue }
-                drawContext.canvas.saveLayer(Rect(Offset.Zero, Size(128f, 128f)), Paint()) // (its cuts show what's under it)
-                draw(sh)
-                sh.cut.forEach { draw(it, clear = true) }
-                drawContext.canvas.restore()
-            }
-        }
-    }
-}
-
 /** A process's row (telemetryview.proc_rows): its app's logo, its name (numbered where its app has several), its CPU
  * and memory after them. */
 @Composable
@@ -255,7 +219,7 @@ private fun ProcessRow(p: Msg.TelemetryProc, n: Int?) {
     val c = LocalBaude.current
     val name = APP_NAMES[p.app]?.invoke() ?: p.app.orEmpty()
     ActionRow(if (n == null) name else Wording.Telemetry.processN(name = name, n = n), null,
-        prefix = { AppLogo(APP_LOGOS[p.app] ?: "baude", 16.dp.icon) },
+        prefix = { Icon(APP_LOGOS[p.app] ?: Adwaita.AppBaude, null, tint = c.fg, modifier = Modifier.size(16.dp.icon)) },
         suffix = { Text(Wording.Telemetry.cpuRss(cpu = p.cpu?.let { String.format(Locale.ROOT, "%.1f", it.toDouble()) } ?: "–",
             rss = saidSize(p.rss?.toLong())), style = Type.body, color = c.dim, maxLines = 1) })
 }

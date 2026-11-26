@@ -19,8 +19,8 @@ PROFILE_S = 30  # (how often what's profiled here is told)
 QUEUE_MAX = 1000  # (events kept for a host that isn't there yet)
 APP_NAMES = {"host": "telemetry.host_process", "baude": "mesh_versions.baude", "record": "mesh_versions.record",
              "emission": "mesh_versions.emission", "multiplex": "deps.multiplex", "phone": "mesh_versions.baude"}
-APP_LOGOS = {"host": "baude", "baude": "baude", "record": "record", "emission": "emission-16",
-             "multiplex": "multiplex-16", "phone": "baude"}  # (schema/icons/apps: each process's app's logo)
+APP_LOGOS = {"host": "baude", "baude": "baude", "record": "record", "emission": "emission", "multiplex": "multiplex",
+             "phone": "baude"}  # (each process's app's logo: schema/icons/baude's baude-app-<logo>-symbolic)
 LOGO_PX = 16  # (as big as a model's logo)
 PROFILED = ("host", "baude", "record")
 WEEKS = 53  # (the tokens' grid: a year, a column a week)
@@ -372,29 +372,17 @@ def model_row(value, models, *values):
     return r
 
 
-def logo(app, svgs):
-    """The logo of a process's app (APP_LOGOS), LOGO_PX square: Baude's and Record's in the accent picked, as their
-    launchers draw them. svgs: {logo: its SVG} of this build of the rows, made as it's asked for (the settings are
-    read once for them)."""
-    from baudelib import applist, icons
+def logo(app):
+    """The logo of a process's app (APP_LOGOS), LOGO_PX square, in the row's text colour as the model logos are."""
     import widgets
-    name = APP_LOGOS.get(app, "baude")
-    if name not in svgs:
-        svgs[name] = widgets.logo(name) if name in ("baude", "record") else icons.svg("apps", name)
-    key = (name, svgs[name])
-    if key not in _LOGOS:
-        from gi.repository import Gdk
-        _LOGOS[key] = Gdk.Texture.new_from_bytes(GLib.Bytes.new(applist.icon_png(key[1], LOGO_PX * 4, mac=False)))
-    return Gtk.Image(paintable=_LOGOS[key], pixel_size=LOGO_PX)
-
-
-_LOGOS = {}  # ((logo, its SVG): its texture, drawn once)
+    widgets.ensure_icons()
+    return Gtk.Image(icon_name=f"baude-app-{APP_LOGOS.get(app, 'baude')}-symbolic", pixel_size=LOGO_PX)
 
 
 def proc_rows(procs):
     """The rows of procs (sorted): each's app's logo, its name (numbered where the app has several: "Emission (2)"),
     and its CPU and memory after them."""
-    svgs, count, seen = {}, {}, {}
+    count, seen = {}, {}
     for p in procs:
         count[p.get("app")] = count.get(p.get("app"), 0) + 1
     rows = []
@@ -406,7 +394,7 @@ def proc_rows(procs):
             name = wording.say("telemetry.process_n", name=name, n=seen[app])
         r = row(name, wording.say(
             "telemetry.cpu_rss", cpu="–" if p.get("cpu") is None else f"{p['cpu']:.1f}", rss=said_size(p.get("rss"))))
-        r.add_prefix(logo(app, svgs))
+        r.add_prefix(logo(app))
         rows.append(r)
     return rows
 

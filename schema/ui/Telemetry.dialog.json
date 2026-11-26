@@ -217,7 +217,7 @@
     },
     {
       "name": "Processes",
-      "shows": "Heading \"Processes\": a row each process the host's latest sample has (its procs, as typed: app and pid), in this order, those of one app by pid: Host Process, Baude, Record, Emission, Multiplex (the phone's app, as Baude, on a phone's host). Each row: its app's logo at its start, as big as a model's logo (16 px; Baude's and Record's in the accent picked, as their launchers draw them; the host process Baude's, the phone's app Baude's), the app's name, and its CPU and memory after it, dim (\"6.2% · 613 MB\"). Hidden while telemetry is off, or the sample has none.",
+      "shows": "Heading \"Processes\": a row each process the host's latest sample has (its procs, as typed: app and pid), in this order, those of one app by pid: Host Process, Baude, Record, Emission, Multiplex (the phone's app, as Baude, on a phone's host). Each row: its app's logo at its start, monochrome in the row's text colour as the model logos are and as big as one (16 px; schema/icons/baude's baude-app-<app>-symbolic: the logo's shape with what's drawn on it cut out, no tile, no accent; the host process Baude's, the phone's app Baude's), the app's name, and its CPU and memory after it, dim (\"6.2% · 613 MB\"). Hidden while telemetry is off, or the sample has none.",
       "copy": [
         "side_panel.processes",
         "telemetry.host_process",
@@ -232,11 +232,22 @@
       "decisions": [
         {
           "said": "Processes is a section of its own showing the Baude processes open, Record's, Emission's and Multiplex's and so on, each with its app's logo to its left about the size of the model logos (paraphrased)",
-          "rule": "Every host samples every process of Baude's apps on its machine: those that tell it telemetry (Baude, Record, the phone's app) and those it finds itself (each Emission, by its info's pid, and each Multiplex window, by multiplexlink's sockets); every app lists them under Processes, each with its app's logo (schema/icons/apps) at a model logo's size, its name, CPU and memory",
+          "rule": "Every host samples every process of Baude's apps on its machine: those that tell it telemetry (Baude, Record, the phone's app) and those it finds itself (each Emission, by its info's pid, and each Multiplex window, by multiplexlink's sockets); every app lists them under Processes, each with its app's logo at a model logo's size, its name, CPU and memory",
           "decided": "2026-11-26",
           "source": [
             {
               "issue": "BaudeInternal#261"
+            }
+          ]
+        },
+        {
+          "said": "icons are not what I wanted, they should be monochrome",
+          "rule": "Every app draws each process's logo as a symbolic icon in the row's text colour, as the model logos are drawn (schema/icons/baude's baude-app-<app>-symbolic: the app's logo shape with what's drawn on it cut out), never the coloured logo or one tinted in the accent",
+          "decided": "2026-11-26",
+          "source": [
+            {
+              "session": "b3845b21-55ac-4aab-a769-fb8517403c51",
+              "message": "ae00d4f1-22a6-4e1f-afe6-1ef28e5f464a"
             }
           ]
         }

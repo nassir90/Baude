@@ -18,6 +18,7 @@ import metalook  # noqa: E402
 import imageviews  # noqa: E402
 import markdownview  # noqa: E402
 import chatparts  # noqa: E402
+import meshui  # noqa: E402  (each host's pending daemon restart, toasted)
 import pickers  # noqa: E402
 from widgets import Ticker  # noqa: E402,F401
 from pickers import ChoiceDropDown  # noqa: E402  (a dropdown over (value, label): Record's hosts too)
@@ -169,10 +170,11 @@ class SessionSidebar(SidebarMenu, Gtk.Box):
         self.list.connect("row-activated", self.on_activate)
         self.scroller = Gtk.ScrolledWindow(child=self.list, vexpand=True, hscrollbar_policy=Gtk.PolicyType.NEVER)
         self.append(self.scroller)
-        # (at the foot, under a rule from the chats: Update, while a new version waits, and This Mac's daemon's
-        # pending restart: show_update_bars)
-        self.update_bar = chatparts.UpdateBar(lambda: win.get_application().update_now(win), win.show_restart_blockers)
+        # (at the foot, under a rule from the chats: Update, while a new version waits: show_update_bars; each host's
+        # pending daemon restart, toasted: show_update_bars too)
+        self.update_bar = chatparts.UpdateBar(lambda: win.get_application().update_now(win))
         self.append(self.update_bar)
+        self.restart_toasts = meshui.RestartToasts(win, win.show_restart_blockers)
         GLib.idle_add(lambda: (win.get_application().show_update_bars([win]), False)[1]  # (a version offered before)
                       if win.get_application() is not None else False)
         keys = Gtk.EventControllerKey()

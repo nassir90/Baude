@@ -94,7 +94,7 @@
       "actions": [
         {
           "by": "click",
-          "does": "asks this machine's host process to stop and start again once no command is running on it (it answers busy while one is; asked again every 5 s). A model turn going on is cut short (\"Cut short by a restart\", with Continue). Its chats are kept and resume as they're next written to. Toast \"Restarting the daemon once N sessions finish running a command\" while it waits, \"Daemon restarted\" once the new one is there. With no host process running, one is started."
+          "does": "asks this machine's host process to stop and start again once no command is running on it (it answers busy while one is; asked again every 5 s). A model turn going on is cut short (\"Cut short by a restart\", with Continue). Its chats are kept and resume as they're next written to. Toast \"Restarting the daemon once N things are done\" with Details while it waits (Sidebar's \"Daemon restart toast\"), \"Daemon restarted\" once the new one is there. With no host process running, one is started."
         }
       ]
     },

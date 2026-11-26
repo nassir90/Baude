@@ -15,6 +15,7 @@ import math
 import os
 import re
 import secrets
+import shlex
 import signal
 import subprocess
 import sys
@@ -309,6 +310,37 @@ def pushed(t):
                   "author": said[0], "message": said[1] if len(said) > 1 else ""}
 
 
+def runner(task):
+    """What a python or shell task's script is run with (its path after it), else []: a bot task's is a turn."""
+    return {"python": [sys.executable, "-u"], "shell": ["/bin/sh"]}.get(task["runtime"], [])
+
+
+def command(task, path):
+    """What a run of task runs, its script at path, as a command line (None: a bot task's, given its Bot as a turn)."""
+    return shlex.join([*runner(task), path]) if runner(task) else None
+
+
+def asked_head(name, tid, run, error):
+    """What an ask of a run's Bot starts with: the task (name) failed, or asks, then a table of the run (its task's
+    id tid, its record run): its ids, when it started (and ended), how long it's taken, the version, the command it
+    runs, its exit code; a row left out that isn't known (an ask's run hasn't ended, nor has a failure it
+    hands over itself)."""
+    def at(t):
+        zone = datetime.timezone(datetime.timedelta(seconds=run.get("offset") or 0))
+        return datetime.datetime.fromtimestamp(t, zone).strftime("%Y-%m-%d %H:%M:%S")
+    started, ended = run.get("started"), run.get("ended")
+    seconds = run.get("seconds") if ended else time.time() - started if started else None
+    rows = [("task", tid), ("run", run.get("id")), ("started", started and at(started)),
+            ("ended", ended and at(ended)),
+            ("duration", seconds is not None and wording.say("tasks.asked_seconds", seconds=round(seconds, 1))),
+            ("version", run.get("version")), ("command", run.get("command")), ("exit", run.get("exit"))]
+    rows = [(wording.say(f"tasks.asked_{k}"), str(v).replace("|", "\\|").replace("\n", " "))
+            for k, v in rows if v is not None and v is not False and v != ""]
+    lines = [f"| {k} | {v} |" for k, v in rows]
+    return "\n".join([wording.say("tasks.asked", name=name, error="error" if error else "ask"), "",
+                      lines[0], "|---|---|", *lines[1:]])
+
+
 def reap(run, folder):
     """A run's script's process group, left running by a host that was killed as it ran: killed, if it's still that
     run's (one of its processes runs the run's script)."""
@@ -555,7 +587,8 @@ class Tasks:
         now = time.time()
         run = {"id": uuid.uuid4().hex[:16], "task": task["id"], "name": task["name"], "version": task["version"],
                "trigger": (trigger or {}).get("id"), "kind": kind, "payload": payload or None, "inputs": inputs,
-               "status": "running", "started": now, "offset": clock()["offset"], "asks": 0}
+               "status": "running", "started": now, "offset": clock()["offset"], "asks": 0,
+               "command": command(task, st.script_path(task))}
         with self.lock:
             if self.going(s.id, task["id"]):
                 run.update(status="skipped", ended=now, seconds=0, error=wording.say("tasks.still_running"))
@@ -613,8 +646,7 @@ class Tasks:
         if hand:
             tail = "\n".join(f"{x['kind']}: {x['text']}" for x in st.read_log(run["id"], 40))
             try:
-                self.ask(run["id"], wording.say("tasks.handed", error=error, version=task["version"], id=task["id"],
-                                                path=st.script_path(task), log=tail), task["name"], error=True,
+                self.ask(run["id"], wording.say("tasks.handed", error=error, log=tail), task["name"], error=True,
                          held={"sid": sid, "task": task["id"], "stop": None})
             except Exception as e:  # noqa: BLE001
                 st.log(run["id"], "status", f"{type(e).__name__}: {e}")
@@ -630,7 +662,7 @@ class Tasks:
         (its exit code, why it failed or None). Stopped or out of time: its process group told to stop, and killed
         after GRACE_S whether or not its script's gone."""
         path = st.script_path(task)
-        argv = [sys.executable, "-u", path] if task["runtime"] == "python" else ["/bin/sh", path]
+        argv = [*runner(task), path]
         env = {**os.environ, "BAUDE_SOCKET": os.path.abspath(self.server.socket_path), "BAUDE_TASK_RUN": run["id"],
                "BAUDE_SPAWNED_BY": sid,
                "BAUDE_TASK_TOKEN": token, "BAUDE_TASK_INPUTS": json.dumps(run["inputs"]),
@@ -808,8 +840,8 @@ class Tasks:
         if live:
             self._update(st, rid, status="asking", asks=(st.runs[rid].get("asks") or 0) + 1)
         wait = {"run": rid, "done": threading.Event(), "text": None, "failed": False}
-        said = wording.say("tasks.asked", run=rid, error="error" if error else "ask") + "\n\n" + text + \
-            ("\n\n" + form_said(form) if form else "")
+        said = asked_head(name, held.get("task") or "", st.runs.get(rid) or {"id": rid}, error) + "\n\n" + \
+            text + ("\n\n" + form_said(form) if form else "")
         srv, sent = self.server, False
         while not sent:  # (sent once its Bot's idle: its next turn's end is this one's)
             with srv.lock:

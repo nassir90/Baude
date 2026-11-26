@@ -27,7 +27,7 @@ _CUSTOM = {}  # (context, definition) -> the page its objects have
 BATCH_S = 0.1   # a log's lines are sent this often at most
 WATCH_S = 1.0   # a watch's changes are sent this often at most
 HISTORY_S = 30 * 60  # Home's history goes back this far
-IDLE_S = 30 * 60  # a context Home hasn't been read for in this long is no longer sampled, and its history let go
+IDLE_S = 24 * 60 * 60  # a context Home hasn't been read for in a day is no longer sampled, and its history let go
 # context -> {"asked": when Home last read it, "tried": when a sample was last taken (or tried), "read": (when, its
 # last kd.kube_summary_read) or None, "samples": deque of
 # (when, {namespace: (cpu requested, cpu used, memory requested, memory used)})}: from the first time Home is read for
@@ -158,7 +158,7 @@ def _take(context):
 
 def _sampling():
     """A sample of each context Home has been read for every KUBE_REFRESH_S, till the process ends; a context not
-    read for IDLE_S is let go. (A sample that can't be read is a gap in its history.)"""
+    read for IDLE_S (a day) is let go. (A sample that can't be read is a gap in its history.)"""
     while True:
         time.sleep(1)
         now = time.time()

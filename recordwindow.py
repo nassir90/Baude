@@ -248,6 +248,7 @@ class Window(RecordHosts, Adw.ApplicationWindow, feedback.FeedbackHost, viewers.
         # (at the foot, under a rule from the notebooks: Update, while a new version waits: update_waiting)
         self.update_bar = chatparts.UpdateBar(self.update_now)
         side.add_bottom_bar(self.update_bar)
+        GLib.idle_add(lambda: (self.update_waiting(None), False)[1])  # (a version offered before)
         self.left_sizes()
         # (held at its width: as it'd lay itself out, a long notebook's or page's name in full makes it wider; a name
         # too long ends in …. Not an Adw.Clamp: one takes the width the column asks for and centres it in that)
@@ -572,16 +573,22 @@ class Window(RecordHosts, Adw.ApplicationWindow, feedback.FeedbackHost, viewers.
         return why
 
     def update_waiting(self, waiting):
-        """(update.Updater's) A new version found and waiting on idle, or not: the bar at the notebooks' foot."""
-        self.update_bar.say(self.restart_blockers() if waiting else None)
+        """(update.Updater's) What Update shows changed (waiting: a new version found and waiting on idle, what it
+        waits for in the tooltip; None: as the updater has it now): the bar at the notebooks' foot, Update, only
+        offered (auto restart off), the reason it can't be, or none."""
+        u = getattr(self.get_application(), "updater", None)
+        if u is None:
+            return
+        waiting = u.waiting if waiting is None else waiting
+        self.update_bar.say(self.restart_blockers() if waiting else [] if u.pending() else None,
+                            u.why if not u.pending() else None, u.busy)
 
     def update_now(self):
         """The bar clicked: restarted onto the new version now (a question being answered stopped, said and asked)."""
         u = getattr(self.get_application(), "updater", None)
-        if u is None or not u.ready:
+        if u is None or not u.pending():
             return
-        go = lambda: self.restart({"from": u.started, "to": u.ready,  # noqa: E731
-                                   "commits": update.new_commits(u.started, u.ready, u.root)})
+        go = lambda: u.apply(self.restart)  # noqa: E731
         if self.chat.ask is None:
             return go()
         dlg = Adw.AlertDialog(heading=wording.say("window.restart_now_heading"),

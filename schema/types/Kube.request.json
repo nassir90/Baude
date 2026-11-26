@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
-  "description": "A cluster's objects as Freelens lists them, read through the host's kubeconfig and kubectl: its contexts (contexts), one connected to (connect), a kind's objects (list), an object's YAML (yaml), what controls an object (owner), a pod deleted (delete), the whole stack's CPU and memory (summary, a read as list is). Secrets' values are never read.",
+  "description": "A cluster's objects as Freelens lists them, read through the host's kubeconfig and kubectl: its contexts (contexts), whether a context is still there as the head knows it (check: answered removed, or with nothing else; kubectl isn't run), one connected to (connect), a kind's objects (list), an object's YAML (yaml), what controls an object (owner), a pod deleted (delete), the whole stack's CPU and memory (summary, a read as list is). Secrets' values are never read.",
   "properties": {
     "op": {
       "const": "kube",
@@ -17,6 +17,7 @@
     "what": {
       "enum": [
         "contexts",
+        "check",
         "connect",
         "list",
         "yaml",

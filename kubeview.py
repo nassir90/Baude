@@ -34,8 +34,8 @@ from gi.repository import Adw, Gdk, GdkPixbuf, Gio, GLib, GObject, Graphene, Gsk
 
 import lookup  # noqa: E402,F401
 from lookupkube import (  # noqa: E402,F401  (⌘K's engine: what a folder has)
-    _km, _ks, kube_config_broken, kube_contexts, kube_contexts_watch, kube_fault, kube_fmt_age, kube_get, kube_key,
-    kube_local, kube_removed, kube_run, kube_seconds, kube_tool, kubeconfig_paths,
+    KUBE_BROKEN_TRIES, _km, _ks, kube_config_broken, kube_contexts, kube_contexts_watch, kube_fault, kube_fmt_age,
+    kube_get, kube_key, kube_local, kube_removed, kube_run, kube_seconds, kube_target, kube_tool, kubeconfig_paths,
 )
 from widgets import (  # noqa: E402,F401
     WorkerPool, ensure_icons, find_label, full_time, inside, load_settings, paned_grip, pretty_path, save_settings,
@@ -490,6 +490,7 @@ class KubeView(Gtk.Box):
         self.pending_pick = None  # (name, namespace) to select once the page is in (an owner clicked)
         # the page's objects by uid, as last read or watched; how its rows were made (now, metrics); the watch
         self.objects, self.ctx, self.watch, self.watch_fails = {}, {"now": 0, "metrics": None, "node_metrics": None}, None, 0
+        self.watch_broken = 0  # (watches run again at once for a kubeconfig caught half written: KUBE_BROKEN_TRIES)
         self.metrics_note, self.node_count, self.note, self.dialog = "", 0, None, None
         self.found = weakref.WeakKeyDictionary()  # the table's labels and their text (find_label)
         self.host = kubehost.Host(None, {"via": "local"}, wording.say("senders.local"))  # (where it reads: open)
@@ -762,7 +763,7 @@ class KubeView(Gtk.Box):
         if host.here:
             if (missing := deps.missing("kubectl")) is not None:
                 return self.show_missing(missing)
-            contexts = [c for c in kube_contexts() if not c.get("cluster_only")]
+            contexts = [c for c in kube_contexts(wait=False) if not c.get("cluster_only")]
             where = ", ".join(pretty_path(p) for p in kubeconfig_paths()) or wording.say("kube.no_kubeconfig")
             self._contexts(host, contexts, where, context, namespace)
             return
@@ -908,7 +909,7 @@ class KubeView(Gtk.Box):
         at again."""
         if gen == self.generation and self.context is not None:
             if self.host.here:
-                self.set_contexts([c for c in kube_contexts() if not c.get("cluster_only")])
+                self.set_contexts([c for c in kube_contexts(wait=False) if not c.get("cluster_only")])
             self.cluster_removed()
         return False
 
@@ -1156,12 +1157,13 @@ class KubeView(Gtk.Box):
     def go_to_owner(self, kind, name, ns):
         """Show what controls an object (a pod's Controlled By, clicked): a ReplicaSet's Deployment, a Job's CronJob,
         when it has one; its page, with it selected (its YAML beside the table)."""
-        context = self.context
+        context, gen = self.context, self.generation
         self.say(wording.say("kube.finding", kind=kind, name=name))
         if not self.host.here:
             return self.host.ask("kube", {"what": "owner", "context": context, "server": self.server, "kind": kind,
                                           "name": name, "namespace": ns or None},
-                                 lambda r: self._go_to(context, r.get("kind") or kind, r.get("name") or name, ns))
+                                 lambda r: self._removed(gen) if r.get("removed") else
+                                 self._go_to(context, r.get("kind") or kind, r.get("name") or name, ns))
 
         def work():
             k, n = kind, name
@@ -1352,7 +1354,7 @@ class KubeView(Gtk.Box):
             elif have is None or (_km(o).get("resourceVersion") != _km(have).get("resourceVersion")
                                   if _km(o).get("resourceVersion") else o != have):
                 self.objects[key], changed = o, True
-        self.watch_fails = 0
+        self.watch_fails = self.watch_broken = 0
         if changed:
             self.show_rows(page, kube_rows(page, list(self.objects.values()), dict(self.ctx, now=time.time()),
                                            self.table_cols))
@@ -1362,7 +1364,7 @@ class KubeView(Gtk.Box):
         """A watched list's rows as another host sent them, as it changed (with why it's read, not watched, if so)."""
         if w is not self.watch or gen != self.generation:
             return
-        self.watch_fails = 0
+        self.watch_fails = self.watch_broken = 0
         self.show_rows(page, kubehost.rows(r.get("rows")))
         self.ctx = self.host_ctx(r.get("metrics"))
         if r.get("note"):
@@ -1371,16 +1373,32 @@ class KubeView(Gtk.Box):
 
     def _watch_ended(self, w, gen, page, code, said, removed=False):
         """The watch ended (the API server ends them after a while; or it failed): watched again after a second, or
-        after 5 s if it failed (Freelens' retry), at once if kubectl read a kubeconfig caught half written; after three
-        failures in a row, read every KUBE_REFRESH_S instead. Its context gone from the kubeconfig: removed."""
+        after 5 s if it failed (Freelens' retry), at once (twice at most) if kubectl read a kubeconfig caught half
+        written; after three failures in a row, read every KUBE_REFRESH_S instead. Its context gone from the
+        kubeconfig: removed (looked up off the main thread: kube_removed waits for a file being written)."""
         if w is not self.watch:
             return
         self.watch = None
         if gen != self.generation or not self.get_visible():
             return
-        if removed or code and self.host.here and kube_removed(self.key()):
+        if removed:
             return self._removed(gen)
-        if code and not w.seen and kube_config_broken(said):
+        if code and self.host.here:
+            key = self.key()
+
+            def work():
+                gone = kube_removed(key)
+                GLib.idle_add(lambda: (self._removed(gen) if gone else self._watch_again(w, gen, page, code, said))
+                              and False)
+            KUBE_POOL.submit(work)
+            return
+        self._watch_again(w, gen, page, code, said)
+
+    def _watch_again(self, w, gen, page, code, said):
+        if gen != self.generation or self.watch is not None or not self.get_visible():
+            return
+        if code and not w.seen and self.watch_broken < KUBE_BROKEN_TRIES and kube_config_broken(said):
+            self.watch_broken += 1
             GLib.timeout_add(300, lambda: self.watch is None and self.watch_page(gen, page) and False)
             return
         if code and not w.seen:
@@ -1432,7 +1450,7 @@ class KubeView(Gtk.Box):
         self.table_stack.set_visible_child_name("table")
         if self.table_page is not page or self.table_cols is not columns:  # (or another cluster's printer columns)
             self.build_table(page, columns)
-        self.objects, self.ctx, self.watch_fails = {kube_uid(o): o for o in items}, ctx, 0
+        self.objects, self.ctx, self.watch_fails, self.watch_broken = {kube_uid(o): o for o in items}, ctx, 0, 0
         self.show_rows(page, rows)
         self.watch_page(gen, page)
         if page is KUBE_PODS or page["resource"] == "nodes":
@@ -1867,7 +1885,7 @@ class KubeView(Gtk.Box):
         def work():
             if kube_removed((context, server)):
                 return GLib.idle_add(self._removed, gen)
-            GLib.idle_add(self._deleted, context, kube_delete(context, ns, name, force))
+            GLib.idle_add(self._deleted, context, kube_delete(context, ns, name, force, server))
         KUBE_POOL.submit(work)
 
     def _deleted(self, context, said):

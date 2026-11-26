@@ -34,7 +34,7 @@ from gi.repository import Adw, Gdk, GdkPixbuf, Gio, GLib, GObject, Graphene, Gsk
 import lookup  # noqa: E402,F401
 from lookup import find_spans  # noqa: E402,F401  (⌘K's engine: what a folder has)
 from lookupkube import (  # noqa: E402,F401
-    PG_LISTS, arango_eval, at_once, db_index, db_names, kube_contexts, kube_contexts_watch, kube_key, kube_local,
+    PG_LISTS, arango_eval, at_once, db_index, db_names, kube_contexts_kept, kube_contexts_watch, kube_key, kube_local,
     pg_databases_cached, pg_query, pg_servers_cached,
 )
 from widgets import (  # noqa: E402,F401
@@ -701,7 +701,9 @@ class SchemaView(Gtk.Box):
 
     def watch_clusters(self):
         """The host's local Kubernetes clusters followed while the view's open (its kubeconfig's contexts whose API
-        server is on it, as tools add and delete them): the servers in their pods looked for again as they change."""
+        server is on it, as tools add and delete them): the servers in their pods looked for again as they change.
+        Another host's followed again a while after its connection drops (the servers looked for again then: a
+        cluster may have come or gone meanwhile)."""
         self.unwatch_clusters()
         host, self.clusters = self.host, None
 
@@ -714,11 +716,18 @@ class SchemaView(Gtk.Box):
                 self.servers_again()
             self.clusters = local
         if host.here:
+            kept = kube_contexts_kept()  # (nothing read here: the watcher tells of them, read on its thread, if not)
+            self.clusters = None if kept is None else sorted(
+                kube_key(c) for c in kept if kube_local(c.get("server")) and not c.get("cluster_only"))
             self.following = kube_contexts_watch(lambda contexts: GLib.idle_add(lambda: changed(contexts) and False))
-            self.clusters = sorted(kube_key(c) for c in kube_contexts()
-                                   if kube_local(c.get("server")) and not c.get("cluster_only"))
             return
-        self.following = kubehost.Follow(host.where, {"what": "contexts"}, lambda *_: None,
+
+        def ended(f, *_):
+            if f is self.following:
+                self.following = None
+                GLib.timeout_add_seconds(5, lambda: (self.get_visible() and self.host is host and self.following is None
+                                                     and (self.watch_clusters(), self.servers_again()), False)[1])
+        self.following = kubehost.Follow(host.where, {"what": "contexts"}, ended,
                                          on_contexts=lambda f, r: f is self.following and changed(r.get("contexts") or []))
 
     def unwatch_clusters(self):

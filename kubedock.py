@@ -4,17 +4,18 @@ the strip's end, its log or terminal inside under it. A tab whose cluster goes f
 (gone). On this machine kubectl runs here; on another host, there (its
 host process: kubehost.Follow for a log, a hosted terminal for a shell)."""
 import os
+import threading
 import time
 
 import gi  # noqa: E402
 
 gi.require_version("Gtk", "4.0")
-from gi.repository import Gdk, Gtk, Pango  # noqa: E402
+from gi.repository import Gdk, GLib, Gtk, Pango  # noqa: E402
 
 from baudelib import tokens, wire, wording  # noqa: E402
 from codeview import CodeView  # noqa: E402
 from kubedata import KUBE_LOG_LINES, KUBE_LOG_TAIL  # noqa: E402
-from lookupkube import kube_config_broken, kube_removed, kube_tool  # noqa: E402
+from lookupkube import kube_config_broken, kube_removed, kube_target, kube_tool  # noqa: E402
 from pickers import ellipsize_dropdown  # noqa: E402
 from widgets import INSIDE_GAP, inside, load_settings, save_settings  # noqa: E402
 
@@ -72,6 +73,24 @@ class DockTab(Gtk.Box):
     def key(self):
         """Its context as kube_removed takes it: with its server, when the view knew it."""
         return (self.pod_key[0], self.server) if self.server is not None else self.pod_key[0]
+
+    def target(self):
+        """kubectl's arguments for its cluster: its context, and the server the view knew it by (kube_target)."""
+        return kube_target(self.pod_key[0], self.server)
+
+    def still_there(self, then):
+        """then(gone) on the main thread once it's known whether its cluster is still in the kubeconfig: here, looked
+        up off the main thread (kube_removed waits for a file being written); on another host, asked of it."""
+        if self.host.here:
+            key = self.key()
+
+            def work():
+                gone = kube_removed(key)
+                GLib.idle_add(lambda: then(gone) and False)
+            threading.Thread(target=work, daemon=True, name="kube-removed").start()
+        else:
+            self.host.ask("kube", {"what": "check", "context": self.pod_key[0], "server": self.server or ""},
+                          lambda r: then(bool(r.get("removed"))))
 
     def again(self, code, said):
         """Whether what it ran is run once more, having failed at once: kubectl read a kubeconfig caught half written
@@ -141,7 +160,7 @@ class LogsTab(DockTab):
         self.began = time.monotonic()
         if self.host.here:
             from kubeview import KubeLogTail
-            args = ["--context", context, "logs", "--previous" if previous else "-f", f"--tail={KUBE_LOG_TAIL}",
+            args = [*self.target(), "logs", "--previous" if previous else "-f", f"--tail={KUBE_LOG_TAIL}",
                     "-n", ns, pod, "-c", container]
             try:
                 self.tail = KubeLogTail(args, self._text, lambda t, code: self._end(t, code, ""))
@@ -184,7 +203,10 @@ class LogsTab(DockTab):
         if self.host.here and code:  # (what kubectl said is in the log: its own last lines)
             b = self.logs.buffer
             said = b.get_text(b.get_start_iter(), b.get_end_iter(), False)[-2000:] if b.get_line_count() < 50 else ""
-            removed = kube_removed(self.key())
+            return self.still_there(lambda gone: self.tail is None and self._ended(code, said, gone))
+        self._ended(code, said, removed)
+
+    def _ended(self, code, said, removed):
         if removed:
             return self.gone()
         if self.again(code, said):
@@ -226,13 +248,14 @@ class ShellTab(DockTab):
 
     def __init__(self, dock, host, context, namespace, pod, containers, pick, server=None):
         super().__init__(dock, host, context, namespace, pod, server)
-        self.containers, self.term = containers, None
+        self.containers, self.term, self.starting = containers, None, None
         self.slot = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, vexpand=True)
         self.append(self.slot)
         self.pick(containers, pick)
 
     def start(self):
-        """kubectl exec -it in the container picked: bash if it has it, else sh. The one before is ended first."""
+        """kubectl exec -it in the container picked: bash if it has it, else sh. The one before is ended first. Only
+        while its cluster is still in the kubeconfig (as it was shown: its server too), and only on that server."""
         import multiplexterm
         self.stop()
         i = self.container.get_selected()
@@ -245,8 +268,21 @@ class ShellTab(DockTab):
                 missing.show(dep, "multiplex.terminal_menu")
                 self.slot.append(missing)
             return
+        self.starting = token = object()
+
+        def checked(gone):
+            if token is not self.starting or self.term is not None:  # (stopped, or started again, meanwhile)
+                return
+            self.starting = None
+            if gone:
+                return self.gone()
+            self._open(i)
+        self.still_there(checked)
+
+    def _open(self, i):
+        import multiplexterm
         context, ns, pod = self.pod_key
-        args = ["--context", context, "exec", "-it", "-n", ns, pod, "-c", self.containers[i], "--", *SHELL]
+        args = [*self.target(), "exec", "-it", "-n", ns, pod, "-c", self.containers[i], "--", *SHELL]
         title = f"{pod} · {ns} · {context}"
         if self.host.here:
             term = multiplexterm.Terminal([kube_tool("kubectl"), *args], title=title, on_exit=self._end)
@@ -280,6 +316,7 @@ class ShellTab(DockTab):
         self.state.set_label(wording.say("kube.removed_state"))
 
     def stop(self):
+        self.starting = None
         if self.term is not None:
             import multiplexterm
             self.term.stop()

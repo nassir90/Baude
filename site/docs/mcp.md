@@ -647,11 +647,11 @@ An agent's program stopped.
 
 #### `kube` (Kube)
 
-A cluster's objects as Freelens lists them, read through the host's kubeconfig and kubectl: its contexts (contexts), one connected to (connect), a kind's objects (list), an object's YAML (yaml), what controls an object (owner), a pod deleted (delete), the whole stack's CPU and memory (summary, a read as list is). Secrets' values are never read.
+A cluster's objects as Freelens lists them, read through the host's kubeconfig and kubectl: its contexts (contexts), whether a context is still there as the head knows it (check: answered removed, or with nothing else; kubectl isn't run), one connected to (connect), a kind's objects (list), an object's YAML (yaml), what controls an object (owner), a pod deleted (delete), the whole stack's CPU and memory (summary, a read as list is). Secrets' values are never read.
 
 | Field | Type | Required | What it is |
 |---|---|---|---|
-| `what` | `contexts` \| `connect` \| `list` \| `yaml` \| `owner` \| `summary` \| `delete` |  | What to do. |
+| `what` | `contexts` \| `check` \| `connect` \| `list` \| `yaml` \| `owner` \| `summary` \| `delete` |  | What to do. |
 | `context` | string |  | The kubeconfig context. |
 | `server` | string |  | The context's server as the head knows it (KubeContext's): a context of that name with another server is another cluster, and the request is answered removed. |
 | `page` | string |  | list, yaml: the kind's page, by its resource. |
@@ -2468,6 +2468,7 @@ An object's row.
 | `keys` | array of any |  | Each column's sort key: a number or text. |
 | `tones` | array of string |  | Each column's tone (ok, warn, bad), or empty. |
 | `tips` | array of string |  | Each column's tooltip, or empty (an age's: its time in full). |
+| `filters` | array of string |  | What each column's filter goes by, where it isn't the column's text, else empty (a container's Status: its state, Running or Exited, where the text says for how long). |
 | `actions` | array of string |  | What can be done to it as it is: start, stop, restart, remove. |
 | `logs` | boolean |  | It has a log to follow (docker_follow). |
 | `shell` | array of string |  | A running container's: the command that opens a shell in it (bash if it has it, else sh), for a terminal on the host; else empty. |

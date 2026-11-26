@@ -76,6 +76,11 @@
               "does": "Moves through the contexts shown; Enter picks the highlighted one."
             }
           ],
+          "phone": {
+            "does": "Tapped, the context list opens in the page, in the table's place, with Back (not as a popup): the same list, search and groups, the picked one ticked; picking one shows it, picking the one shown goes back to its table.",
+            "why": "a list of 27 and more contexts with a search needs the page's height, which a popup on a phone doesn't have",
+            "decided": "2026-11-26"
+          },
           "decisions": [
             {
               "said": "Also btw, we now have external services live modifying the kubeconfig to create and delete clusters (slices) for testing.",
@@ -613,7 +618,7 @@
         },
         {
           "name": "shell tab",
-          "shows": "A shell in a pod (its row's shell button; a new tab each time). Its controls at the strip's end: a small dim state text (empty while it runs, \"kubectl exited with <code>\" once it ends), a container picker of the pod's running containers (not init containers). Inside under the strip (without VTE in the app: the missing-dependency state, \"Terminal needs VTE\", its install command with Copy, and Restart), a Multiplex terminal running kubectl exec -it in the container (on the host the view reads, run there by its host process when that's another host, with the kubectl that host is set to use): bash if the container has it, else sh. Its text in the window's light or dark colours. Its edges glow in the accent while a Bot is at its terminal tools there, as Emission's page does.",
+          "shows": "A shell in a pod (its row's shell button; a new tab each time). Its controls at the strip's end: a small dim state text (empty while it runs, \"kubectl exited with <code>\" once it ends), a container picker of the pod's running containers (not init containers). Inside under the strip (without VTE in the app: the missing-dependency state, \"Terminal needs VTE\", its install command with Copy, and Restart), a Multiplex terminal running kubectl exec -it in the container (on the host the view reads, run there by its host process when that's another host, with the kubectl that host is set to use): bash if the container has it, else sh. It starts (and starts again) only once the host says the cluster is still the one shown, its server too, and kubectl exec is pointed at that server, so a shell never opens in a cluster deleted and made again under the same context name; one that fails within its first seconds on a kubeconfig caught half written is run once more. Its text in the window's light or dark colours. Its edges glow in the accent while a Bot is at its terminal tools there, as Emission's page does.",
           "copy": [
             "kube.shell",
             "kube.container",
@@ -665,7 +670,7 @@
     },
     {
       "name": "live updating",
-      "shows": "While the view is open the list is watched (kubectl get --watch) so rows appear, change and go as the cluster changes; where a watch isn't possible the list is read again every 10 s. Pods' and Nodes' CPU and memory are read again every 10 s. A row selected stays selected through a refresh (and its YAML stays unless the object's version changed). Home is read again every 10 s. The host's kubeconfig files (every file in KUBECONFIG, else ~/.kube/config) are looked at every second by their inode, size and modification time (a stat each), read once they have stopped changing, and the contexts pushed to every app showing the view (kube_follow contexts). A kubectl call that read a kubeconfig half written is run once more; one whose context has gone is answered as removed. Database Schemas follows the same list: its server picker is looked for again when a local cluster is added or deleted, keeping the diagram shown while its server is still there.",
+      "shows": "While the view is open the list is watched (kubectl get --watch) so rows appear, change and go as the cluster changes; where a watch isn't possible the list is read again every 10 s. Pods' and Nodes' CPU and memory are read again every 10 s. A row selected stays selected through a refresh (and its YAML stays unless the object's version changed). Home is read again every 10 s. The host's kubeconfig files (every file in KUBECONFIG, else ~/.kube/config) are looked at every second by their inode, size and modification time (a stat each), read once they have stopped changing, and the contexts pushed to every app showing the view (kube_follow contexts). A kubectl call that read a kubeconfig half written is run once more (a watch, twice at most, then it counts as failed); one whose context has gone is answered as removed. Pod deletes and logs, like shells, are pointed at the server the context was shown with. Home's history is kept per cluster (name and server) and dropped when the context goes or its server changes. Database Schemas follows the same list: its server picker is looked for again when a local cluster is added or deleted, keeping the diagram shown while its server is still there.",
       "decisions": [
         {
           "said": "Also btw, we now have external services live modifying the kubeconfig to create and delete clusters (slices) for testing.",

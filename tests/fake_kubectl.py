@@ -6,7 +6,7 @@ is logged ($FAKE_KUBECTL_LOG), so the tests can check which commands ran (only r
 confirm), and that a Secret's values were never asked for. A test can hold a context's answers back, or take its
 cluster down ($FAKE_KUBECTL_HOLD). With $KUBECONFIG, its contexts are the ones there are, as a test adds and deletes
 them (each but prod a cluster like k3d-dev); a context that isn't there, or a file cut off as it's written, fails as
-kubectl does.
+kubectl does, and so does --server naming another server than its cluster's (nothing answers there).
 
 `logs` prints a few lines of a pod's container (its previous run's with --previous); with -f it then waits to be
 stopped, printing a line every $FAKE_KUBECTL_FOLLOW seconds if that's set (and never for more than two minutes).
@@ -412,12 +412,12 @@ def watch(resource, context):
 
 def kubeconfig_contexts():
     """The contexts named in $KUBECONFIG's files, as kubectl reads them (each but prod a cluster like k3d-dev: a test
-    can add and delete contexts as tools do); None without a $KUBECONFIG file; (path, line) for a file that can't be
-    read as YAML (one cut off as it's written)."""
+    can add and delete contexts as tools do), with their clusters' servers: {name: server}; None without a $KUBECONFIG
+    file; (path, line) for a file that can't be read as YAML (one cut off as it's written)."""
     import re
     if not os.environ.get("KUBECONFIG"):
         return None
-    names, read = [], False
+    contexts, servers, read = {}, {}, False
     for path in os.environ["KUBECONFIG"].split(os.pathsep):
         try:
             with open(path) as f:
@@ -425,17 +425,24 @@ def kubeconfig_contexts():
         except OSError:
             continue
         read = True
-        section = None
+        section, item = None, {}
         for n, line in enumerate(text.splitlines(), 1):
             if line.strip() and not re.match(r"^\s*(- )?[\w.@/:-]+:( .*)?$|^\s*- [^:]+$", line):
                 return path, n
             if not line.startswith((" ", "-")):
                 section = line.split(":")[0]
-            elif section == "contexts" and (m := re.match(r"^(?:- |  )name: (\S+)$", line)):
-                names.append(m.group(1))
+                continue
+            if line.startswith("-"):
+                item = {}
+            if m := re.match(r"^\s*(?:- )?(name|server|cluster): (\S+)$", line):
+                item[m.group(1)] = m.group(2)
+            if "name" in item and section == "clusters" and "server" in item:
+                servers[item["name"]] = item["server"]
+            elif "name" in item and section == "contexts":
+                contexts[item["name"]] = item.get("cluster")
         if text and not text.endswith("\n"):
             return path, len(text.splitlines())
-    return names if read else None
+    return {name: servers.get(cluster) for name, cluster in contexts.items()} if read else None
 
 
 def main():
@@ -447,10 +454,15 @@ def main():
                          "status": "deployed", "chart": "web-1.2.0", "app_version": "1.2.0"}]))
     context = args[args.index("--context") + 1] if "--context" in args else "k3d-dev"
     known = kubeconfig_contexts()
-    if known is not None and not isinstance(known, list):  # (a kubeconfig caught half written)
+    if known is not None and not isinstance(known, dict):  # (a kubeconfig caught half written)
         fail(f'error: error loading config file "{known[0]}": yaml: line {known[1]}: could not find expected \':\'')
     if context not in (known if known is not None else ("k3d-dev", "prod")):
         fail(f"error: context was not found for specified context: {context}")
+    server = next((a.split("=", 1)[1] for a in args if a.startswith("--server=")), None)
+    if server is not None:  # (a cluster deleted, or made again elsewhere: nothing answers at the server asked for)
+        args = [a for a in args if not a.startswith("--server=")]
+        if known is not None and known.get(context) != server:
+            fail(f"Unable to connect to the server: dial tcp {server.split('//')[-1]}: connect: connection refused")
     # a test's folder ($FAKE_KUBECTL_HOLD): a file named after the context holds its answers back while it's there;
     # one named <context>.down makes it a cluster that doesn't answer at all
     if hold := os.environ.get("FAKE_KUBECTL_HOLD"):

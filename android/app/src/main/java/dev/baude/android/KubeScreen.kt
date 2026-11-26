@@ -143,6 +143,7 @@ class KubeState(val hostId: String) {
 
     fun open(context: String?, page: String?, search: String?, namespace: String?) {
         missing = null
+        stopped = false
         kube(hostId, Msg.Kube(what = "contexts")) { r ->
             r.missing?.let { return@kube lacks(it) }
             takeContexts(r.contexts.orEmpty())
@@ -231,6 +232,7 @@ class KubeState(val hostId: String) {
         for (t in docks) when (t) {
             is LogsShown -> if (t.context == name) { t.tail?.stop(); t.tail = null; t.state = Wording.Kube.removedState }
             is ShellShown -> if (t.context == name) {
+                t.starting = null
                 t.term?.let { term ->
                     if (term.ended == null) term.feed("\r\n\r\n${Wording.Kube.removedShell(name)}\r\n".toByteArray())
                     term.close()
@@ -527,8 +529,10 @@ class KubeState(val hostId: String) {
         val kind = row.ownerKind.orEmpty()
         val name = row.ownerName.orEmpty()
         progress = Wording.Kube.finding(kind, name)
+        val g = gen
         kube(hostId, Msg.Kube(what = "owner", context = ctx, server = server, kind = kind, name = name,
             namespace = row.namespace.orEmpty())) { r ->
+            if (r.removed == true) return@kube gone(g)
             if (ctx != context) return@kube
             goTo(r.resource.orEmpty(), r.kind ?: kind, r.name ?: name, row.namespace.orEmpty())
         }
@@ -553,7 +557,9 @@ class KubeState(val hostId: String) {
         val ctx = context ?: return
         if (p.resource == "namespaces") return setNamespace(row.name)
         if (p.resource != "customresourcedefinitions") return
+        val g = gen
         kube(hostId, Msg.Kube(what = "list", context = ctx, server = server, crd = row.name)) { r ->
+            if (r.removed == true) return@kube gone(g)
             val made = r.page ?: return@kube
             if (allPages().none { it.resource == made.resource }) added = added + made
             page = allPages().first { it.resource == made.resource }
@@ -621,17 +627,44 @@ class KubeState(val hostId: String) {
         val names = row.containers.orEmpty().filter { it.init != true }.mapNotNull { it.name }
         if (names.isEmpty()) return setNote(Wording.Kube.noContainers(row.name.orEmpty()))
         ShellShown(ctx, row.namespace.orEmpty(), row.name.orEmpty(), names,
-            row.default?.takeIf { it in names } ?: names.first()).also { docks.add(it); picked = it; startShell(it) }
+            row.default?.takeIf { it in names } ?: names.first(), server.orEmpty())
+            .also { docks.add(it); picked = it; startShell(it) }
     }
 
-    /** kubectl exec -it in the container picked: bash if it has it, else sh. The one before is ended first. */
+    /** kubectl exec -it in the container picked: bash if it has it, else sh. The one before is ended first. Only once
+     * the host says its cluster's still there as it was shown (its server too: kube's check), and only on that server
+     * (kubectl's --server); failed at once on a kubeconfig caught half written, run once more (kubedock's again). */
     fun startShell(s: ShellShown) {
         s.term?.close()
-        val argv = listOf("kubectl", "--context", s.context, "exec", "-it", "-n", s.namespace, s.pod, "-c", s.container, "--",
-            "sh", "-c", "command -v bash >/dev/null 2>&1 && exec bash || exec sh")
+        s.term = null
         s.state = ""
+        val token = Any().also { s.starting = it }
+        kube(hostId, Msg.Kube(what = "check", context = s.context, server = s.server)) { r ->
+            if (s.starting !== token || s !in docks) return@kube
+            s.starting = null
+            if (r.removed == true) {
+                if (s.context == context && s.server == server.orEmpty()) clusterRemoved() else s.state = Wording.Kube.removedState
+                return@kube
+            }
+            openShell(s)
+        }
+    }
+
+    private fun openShell(s: ShellShown) {
+        val target = listOf("--context", s.context) + (if (s.server.isNotEmpty()) listOf("--server=${s.server}") else emptyList())
+        val argv = listOf("kubectl") + target + listOf("exec", "-it", "-n", s.namespace, s.pod, "-c", s.container, "--",
+            "sh", "-c", "command -v bash >/dev/null 2>&1 && exec bash || exec sh")
+        val began = System.currentTimeMillis()
         s.term = HostTerm(hostId, argv, "${s.pod} · ${s.namespace} · ${s.context}").also { t ->
-            t.onEnd = { code -> if (s.term === t) s.state = Wording.Kube.kubectlExited(code) }
+            t.onEnd = { code ->
+                if (s.term === t) {
+                    if (code != 0 && !s.retried && System.currentTimeMillis() - began < 3_000 &&
+                        KUBE_BROKEN.containsMatchIn(t.screen.text(all = true))) {
+                        s.retried = true
+                        startShell(s)
+                    } else s.state = Wording.Kube.kubectlExited(code)
+                }
+            }
             Terms.add(t)
         }
     }
@@ -690,6 +723,8 @@ class KubeState(val hostId: String) {
     companion object {
         private val nsByContext = HashMap<String, List<String>?>() // (memory only, as the desktop's)
         private val CLIMB = mapOf("ReplicaSet" to "replicasets", "Job" to "jobs")
+        /** What kubectl says of a kubeconfig it can't read (lookupkube._KUBE_BROKEN): one caught half written. */
+        private val KUBE_BROKEN = Regex("error loading config file", RegexOption.IGNORE_CASE)
 
         private fun prefs() = Mesh.app.getSharedPreferences("settings", Context.MODE_PRIVATE)
         /** A host's shells, kept while its page is made again. */

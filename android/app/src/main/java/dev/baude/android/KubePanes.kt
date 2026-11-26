@@ -68,10 +68,14 @@ class LogsShown(val context: String, val namespace: String, val pod: String, val
 /** A shell in a pod shown: whose, its running containers, the one picked, its terminal, and what it's doing (empty
  * while it runs, or how kubectl ended). */
 class ShellShown(val context: String, val namespace: String, val pod: String, val containers: List<String>,
-                 container: String) {
+                 container: String, val server: String = "") {
     var container by mutableStateOf(container)
     var term by mutableStateOf<HostTerm?>(null)
     var state by mutableStateOf("")
+    /** The start asked for while the host's asked whether its cluster's still there (KubeState.startShell). */
+    var starting: Any? = null
+    /** Run once more already, having failed at once on a kubeconfig caught half written. */
+    var retried = false
 }
 
 /** An object's YAML in the table's place: its name and a × to hide it, then the YAML with the names in it as links. */

@@ -276,7 +276,7 @@ abstract class Screens(private val theme: String) {
         screen("40g-access")
     }
 
-    // (a chat's Access…: its own rule for managing it, Chosen Members picked)
+    // (a chat's Access…: its own rules for managing it, Read its own, Write the host's)
     @Test fun chatAccess() {
         accessFixture()
         show { dev.baude.android.ChatAccess(Item("h1", Mesh.sessions.getValue("h1")[1], 0)) {} }
@@ -294,12 +294,23 @@ abstract class Screens(private val theme: String) {
         screen("40g-access-open")
     }
 
-    // (a chat's members opened: Same as Host over them)
+    // (a chat's own Read (pixel-9), its Write the host's, the host's Write widened to everybody: Write opened, as
+    // it's checked, pixel-9 only)
+    @Test fun chatAccessWriteWidened() {
+        accessFixture(write = "everybody")
+        show { dev.baude.android.ChatAccess(Item("h1", Mesh.sessions.getValue("h1")[1], 0)) {} }
+        laidOut()
+        tap(dev.baude.android.Wording.Access.sameAsHost)
+        layOut()
+        screen("40m-chat-access-write-widened")
+    }
+
+    // (a chat's Read opened: Same as Host over its members)
     @Test fun chatAccessOpen() {
         accessFixture()
         show { dev.baude.android.ChatAccess(Item("h1", Mesh.sessions.getValue("h1")[1], 0)) {} }
         laidOut()
-        tap("studio")
+        tap("pixel-9")
         layOut()
         screen("40h-chat-access-open")
     }
@@ -311,6 +322,15 @@ abstract class Screens(private val theme: String) {
         show { dev.baude.android.MetaBoxed(listOf(Unit)) { dev.baude.android.MetaSet.ALL.getValue("access_providers").row(null, null) } }
         laidOut()
         screen("40i-meta-access")
+    }
+
+    // (Meta's row for one side of a split capability, as show setting:access_kube_write draws it: Read and Write both)
+    @Test fun metaAccessSplit() {
+        accessFixture()
+        dev.baude.android.Meta.host.value = Mesh.hosts.first().id
+        show { dev.baude.android.MetaBoxed(listOf(Unit)) { dev.baude.android.MetaSet.ALL.getValue("access_kube_write").row(null, null) } }
+        laidOut()
+        screen("40l-meta-access-split")
     }
 
     // (Meta's set_setting narrowing one host's rule, of two: that host's row alone under the reply)
@@ -342,22 +362,26 @@ abstract class Screens(private val theme: String) {
     }
 
     /** A host answering access and access_set as one with members studio and pixel-9 would. */
-    private fun accessFixture(host: Host = Mesh.hosts.first(), name: String = "workshop", spawn: String = "everybody") {
+    private fun accessFixture(host: Host = Mesh.hosts.first(), name: String = "workshop", spawn: String = "everybody",
+                              write: String = "nobody") {
         val studio = "5b168c62-bc6e-4150-8d6f-de1c2fade4f3"
         val pixel = "9c0e7a11-4f2d-4b8e-a3c5-2d7e9f1b6a40"
         fun rule(who: String, vararg m: String) = org.json.JSONObject().put("who", who)
             .apply { if (who == "chosen") put("members", org.json.JSONArray(m.toList())) }
-        val rules = org.json.JSONObject().put("shell", rule("nobody")).put("browser", rule("chosen", studio))
-            .put("providers", rule("everybody")).put("model_files", rule("chosen", studio, pixel)).put("spawn", rule(spawn))
-            .put("manage", rule("everybody")).put("kube", rule("nobody")).put("databases", rule("everybody"))
-            .put("subscriptions", rule("everybody")).put("access", rule("nobody"))
+        val rules = org.json.JSONObject().put("shell", rule("nobody")).put("browser_read", rule("chosen", studio))
+            .put("browser_write", rule("nobody")).put("providers", rule("everybody"))
+            .put("model_files", rule("chosen", studio, pixel)).put("spawn", rule(spawn))
+            .put("manage_read", rule(if (write == "everybody") "everybody" else "chosen", studio)).put("manage_write", rule(write)).put("kube_read", rule("everybody"))
+            .put("kube_write", rule("nobody")).put("databases", rule("everybody")).put("subscriptions_read", rule("everybody"))
+            .put("subscriptions_write", rule("everybody")).put("access_read", rule("everybody")).put("access_write", rule("nobody"))
         val state = org.json.JSONObject().put("host", name).put("rules", rules).put("editable", true)
             .put("members", org.json.JSONArray(listOf(org.json.JSONObject().put("id", pixel).put("name", "pixel-9"),
                 org.json.JSONObject().put("id", studio).put("name", "studio"))))
         FixtureConnection.up(activity, host) { m ->
             if (m.optString("op") != "access") return@up null
             org.json.JSONObject().put("op", "access").put("req", m.opt("req")).put("state", state)
-                .apply { if (m.has("session")) put("session", m.get("session")).put("chat", rule("chosen", studio)) }
+                .apply { if (m.has("session")) put("session", m.get("session"))
+                    .put("chat", org.json.JSONObject().put("manage_read", rule("chosen", pixel))) }
         }
     }
 
@@ -981,6 +1005,20 @@ abstract class Screens(private val theme: String) {
         tap("Menu")
         layOut()
         screen("10d-chat-archived")
+    }
+    /** A chat its host lets this phone only read, a permission asked in it, its ☰ open: no text box, the ask's buttons
+     * greyed, Read-only session checked and greyed. */
+    @Test fun chatReadOnlyMember() {
+        val chat = Mesh.openChat("h1", "a")
+        fill(chat)
+        chat.chrome.writes.value = false
+        chat.asks.add(dev.baude.android.Ask("perm-ro", "Bash", org.json.JSONObject().put("command", "make release"), null))
+        show { ChatShell("h1", "a", back = {}, open = { _, _ -> }, feedback = {}, first = "chat") }
+        laidOut()
+        screen("10e-chat-read-only-member")
+        tap("Menu")
+        layOut()
+        screen("10f-chat-read-only-member-menu")
     }
     @Test fun chatMeta() = chatAt("11-chat-meta", "meta")
     @Test fun chatSubagents() = chatAt("12-chat-subagents", "agents")

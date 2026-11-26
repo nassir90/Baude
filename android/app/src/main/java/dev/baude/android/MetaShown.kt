@@ -154,12 +154,13 @@ object MetaSet {
                     HomePrefs.save()
                 }
             }),
-    ).apply { for (cap in PhoneAccess.CAPABILITIES) put("access_$cap", MetaAccess.setting(cap)) }
+    ).apply { for (rule in PhoneAccess.RULES) put("access_$rule", MetaAccess.setting(rule)) }
 }
 
-/** Meta's access_<capability> settings (accessview.meta_settings): the rules of every host the phone reaches that has
- * them, as each last said them (asked again as they're read, the answers there for the next read), said
- * "<host>: <rule>; ..." and shown as a row for each host, titled "<host> / <capability>". Meta may set a rule itself
+/** Meta's access_<rule> settings (accessview.meta_settings: each of PhoneAccess.RULES, a split capability's read and
+ * write each a setting): the rules of every host the phone reaches that has them, as each last said them (asked again
+ * as they're read, the answers there for the next read), said "<host>: <rule>; ..." and shown as a row for each host,
+ * titled "<host> / <capability>" (its capability's: both rules of a split one). Meta may set a rule itself
  * only to a narrower one ("<host>: <who>[: names]", or "<who>" for the host Meta runs on); a wider one is the user's,
  * on its row. Nothing here waits for a host: each is asked, and its answer kept, off the main thread. */
 object MetaAccess {
@@ -276,9 +277,10 @@ object MetaAccess {
                 if (only != null && h !in only) continue
                 androidx.compose.runtime.LaunchedEffect(h, cap) { ask(h) }
                 val st = states[h] ?: continue
-                AccessRule(cap, st.optJSONObject("rules")?.optJSONObject(cap), st,
-                    title = Wording.Access.setting(host = st.optString("host"), capability = PhoneAccess.named(cap))) { rule ->
-                    send(h, cap, rule)
+                val whole = PhoneAccess.capability(cap)
+                AccessRule(whole, null, st,
+                    title = Wording.Access.setting(host = st.optString("host"), capability = PhoneAccess.named(whole))) { name, rule ->
+                    send(h, name, rule)
                 }
             }
         }

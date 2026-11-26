@@ -204,7 +204,7 @@ Baude's apps, `baude-mcp` and the phone talk to a host process in JSON, one obje
 
 #### `access` (Access)
 
-A host's access rules, and a chat's own if session's given.
+A host's access rules, and a chat's own if session's given (refused from a member access_read doesn't allow).
 
 | Field | Type | Required | What it is |
 |---|---|---|---|
@@ -212,11 +212,11 @@ A host's access rules, and a chat's own if session's given.
 
 #### `access_set` (AccessSet)
 
-One of a host's access rules set (capability), or a chat's own rule for managing it (session; rule null: the host's again). Refused (access_denied) from a member the access rule doesn't allow.
+One of a host's access rules set (capability: the rule's name), or a chat's own rule for managing it (session; capability manage_read or manage_write; rule null: the host's again). Refused (access_denied) from a member the access_write rule doesn't allow.
 
 | Field | Type | Required | What it is |
 |---|---|---|---|
-| `capability` | any |  | The capability whose rule it is. |
+| `capability` | any |  | The rule's name (AccessRules'): a chat's, manage_read or manage_write. |
 | `session` | string/null |  | A chat of the host's: its own rule. |
 | `rule` | AccessRule? |  | The rule (null, for a chat: the host's). |
 
@@ -1108,7 +1108,7 @@ access's answer.
 |---|---|---|---|
 | `state` | AccessState | yes | The host's rules now. |
 | `session` | string/null |  | The chat asked about. |
-| `chat` | AccessRule? |  | That chat's own rule for managing it (null: the host's manage rule). |
+| `chat` | AccessChat? |  | That chat's own rules for managing it (null, or a side not there: the host's). |
 
 #### `access_set` (AccessSetReply)
 
@@ -1118,7 +1118,7 @@ access_set's answer: the rules as they are now.
 |---|---|---|---|
 | `state` | AccessState | yes | The host's rules now. |
 | `session` | string/null |  | The chat asked about. |
-| `chat` | AccessRule? |  | That chat's own rule for managing it (null: the host's manage rule). |
+| `chat` | AccessChat? |  | That chat's own rules for managing it (null, or a side not there: the host's). |
 
 #### `accounts` (AccountsReply)
 
@@ -1181,6 +1181,7 @@ attach's answer.
 |---|---|---|---|
 | `session` | Session |  | The session, as it's listed now. |
 | `asks` | array of object |  | What it's asking, not answered yet: its agent's control requests (can_use_tool) as they came. |
+| `writes` | boolean |  | Whether the head may change the chat (Agent Management's write, the chat's own first): false, it only reads it, and answers none of its asks. |
 
 #### `autofix` (AutofixReply)
 
@@ -1362,14 +1363,14 @@ emission_watch's answer: it's watched: emission_frame follows, many, till emissi
 
 #### `error` (Error)
 
-Anything wrong, with the request's req. A request whose op the host doesn't take is answered with code unsupported_operation (error "unsupported operation"), and one whose fields aren't as the schema has them with code invalid_data_type (error "invalid data type"): the same from every host, what was wrong in detail. One a host's access rules refuse is answered with code access_denied (error "access denied"), denied naming the capability.
+Anything wrong, with the request's req. A request whose op the host doesn't take is answered with code unsupported_operation (error "unsupported operation"), and one whose fields aren't as the schema has them with code invalid_data_type (error "invalid data type"): the same from every host, what was wrong in detail. One a host's access rules refuse is answered with code access_denied (error "access denied"), denied naming the rule.
 
 | Field | Type | Required | What it is |
 |---|---|---|---|
 | `error` | string | yes | What's wrong. |
 | `code` | `unsupported_operation` \| `invalid_data_type` \| `access_denied` |  | One of the schema's own refusals. |
 | `detail` | string |  | A refusal's: what was wrong (the op, or the field and why), for a person to read; code, not this, says which refusal it is. |
-| `denied` | `shell` \| `browser` \| `providers` \| `model_files` \| `spawn` \| `manage` \| `kube` \| `databases` \| `subscriptions` \| `access` |  | access_denied's: the capability refused. |
+| `denied` | `shell` \| `browser_read` \| `browser_write` \| `providers` \| `model_files` \| `spawn` \| `manage_read` \| `manage_write` \| `kube_read` \| `kube_write` \| `databases` \| `subscriptions_read` \| `subscriptions_write` \| `access_read` \| `access_write` |  | access_denied's: the rule refused (AccessRules'): a capability, or one side of one split into read and write. |
 | `plain` | boolean |  | Said for the user as it is. |
 | `gone` | GoneFolder |  | A session's folder gone and not made again. |
 | `missing` | Dep |  | What a chat's program needs that the host hasn't (claude, codex): error says what to install. |
@@ -2044,6 +2045,15 @@ A tunnel's there.
 
 ### Entities
 
+#### AccessChat
+
+A chat's own rules for managing it, each going before its host's of the same name; one not there is the host's. Checked as a pair: write lets in only those read does, whatever the host's rules are.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `manage_read` | AccessRule |  | Who may read it. |
+| `manage_write` | AccessRule |  | Who may change it (and read it). |
+
 #### AccessMember
 
 A member a rule can name: one the host reaches, has lately, or a rule names.
@@ -2064,20 +2074,25 @@ Who in the mesh may use one of a host's capabilities: every member, none, or tho
 
 #### AccessRules
 
-A host's rule for each of its capabilities, by name: everybody's where none's set.
+A host's rule for each of its capabilities, by name: a capability split into what reads and what changes has two, <capability>_read and <capability>_write (write lets a member read too); one with nothing to split has one. Everybody's where none's set, but access_write's, nobody's.
 
 | Field | Type | Required | What it is |
 |---|---|---|---|
 | `shell` | AccessRule | yes | A shell on its machine: its terminals (terminal ops) and Multiplex's, through a Bot's terminal tools (multiplex). |
-| `browser` | AccessRule | yes | Its Bots' Emission browsers: their tools' calls (emission), watching one (emission_watch) and a phone showing one (emission_serve). |
+| `browser_read` | AccessRule | yes | Its Bots' Emission browsers watched: the watch stream (emission_watch) and what the pane says back on it (emission_watch_say). |
+| `browser_write` | AccessRule | yes | Its Bots' Emission browsers driven: their tools' calls (emission), a phone showing one and answering its calls (emission_serve, emission_answer), and a Bot made or driven (with Shell). Lets a member watch too. |
 | `providers` | AccessRule | yes | Its inference providers' models, run through the mesh (infer). |
 | `model_files` | AccessRule | yes | Its models' files, read through the mesh (files). |
 | `spawn` | AccessRule | yes | New chats and agents started on it (start, agent). |
-| `manage` | AccessRule | yes | Its chats as they are: listed, read, written in, stopped, renamed, archived, deleted, a Bot's tasks and memory. A chat's own rule (Access's chat) goes before this. |
-| `kube` | AccessRule | yes | Its machine's Kubernetes clusters (kube, kube_follow). |
+| `manage_read` | AccessRule | yes | Its chats as they are, read: listed (and told of their turns' ends), attached to and watched, their transcripts, sizes, subagents, senders, a Bot's picture, memory and tasks read, their Auto-fix as it is, their folders read (read_file, list_dir, git, signal_names, catalogue), forked from; Record's notebooks here listed, and the edits waiting on their pages (notes, edits). A chat's own rule (AccessChat's manage_read) goes before this. |
+| `manage_write` | AccessRule | yes | Its chats as they are, changed: written in, held messages sent or dropped, asks answered, stopped, renamed, archived, deleted, their folders moved, tools allowed always (attach's only where it adds some, its env only where it changes it), made Bots, their Auto-fix turned on or off, a Bot's memory written and tasks set, run and stopped, a chat adopted, moved to another subscription (with Subscriptions' write); Record's notebooks here written, and edits to their pages proposed, revised, withdrawn, decided and adopted (notes' write, edit_*). Lets a member read them too. A chat's own rule (AccessChat's manage_write) goes before this. |
+| `kube_read` | AccessRule | yes | Its machine's Kubernetes clusters read: contexts, lists, YAML, owners (kube) and logs and watches (kube_follow), and the clusters' parts of @. |
+| `kube_write` | AccessRule | yes | Its machine's Kubernetes clusters changed: a pod deleted (kube's delete). Lets a member read them too. |
 | `databases` | AccessRule | yes | Its machine's databases (databases). |
-| `subscriptions` | AccessRule | yes | Its subscription accounts: listed, added, renamed, removed (signed out), each provider's default picked, a chat moved to one (with the chat's manage rule too), their usage read, and signed in to (accounts, login, login_code), a token account's token being added with them. |
-| `access` | AccessRule | yes | These rules changed (access_set), and the host itself: stopped, linked and unlinked, deactivated, its telemetry, themes and feedback (quit, link, unlink, deactivate, activate, telemetry_set, theme_save, theme_remove, feedback). A head on its own machine, or one over ssh, may always. |
+| `subscriptions_read` | AccessRule | yes | Its subscription accounts read: listed, and their usage (accounts' list and usage). |
+| `subscriptions_write` | AccessRule | yes | Its subscription accounts changed: added, renamed, a token replaced, removed (signed out), a provider's default picked, a chat moved to one (with the chat's Agent Management write too), signed in to (accounts' sign_in and code, login, login_code). Lets a member read them too. |
+| `access_read` | AccessRule | yes | These rules read (access), and the host's own: its telemetry (telemetry_read) and its Ongoing Feedback listed (fixes' list and shot). |
+| `access_write` | AccessRule | yes | These rules changed (access_set), and the host itself: stopped, linked and unlinked, deactivated, its telemetry, themes and feedback (quit, link, unlink, deactivate, activate, telemetry_set, theme_save, theme_remove, feedback), its Ongoing Feedback acted on (fixes' merge, discard, reopen, reply, fix, stop). Lets a member read them too. A head on its own machine, or one over ssh, may always. |
 
 #### AccessState
 
@@ -2088,7 +2103,7 @@ A host's access rules, as access and access_set answer them.
 | `host` | string | yes | The host's name. |
 | `rules` | AccessRules | yes | Each capability's. |
 | `members` | array of AccessMember | yes | The members its rules can name, by name. |
-| `editable` | boolean | yes | The connection asking may change them (access_set): a head on its machine or over ssh, else a member the access rule allows. |
+| `editable` | boolean | yes | The connection asking may change them (access_set): a head on its machine or over ssh, else a member the access_write rule allows. |
 
 #### Account
 
@@ -2207,6 +2222,27 @@ A commit, as git's log has it.
 | `files` | integer |  | How many files it changed. |
 | `added` | integer |  | Lines it put in. |
 | `removed` | integer |  | Lines it took out. |
+
+#### ContextCategory
+
+One kind of what a session's context holds (ContextUsage's categories): the system prompt, tools, messages, free space.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `name` | string | yes | What it is, as its agent names it. |
+| `tokens` | integer | yes | The tokens it takes up. |
+| `kind` | string/null |  | Its agent's kind for it (deferred: not in the context yet, left out of the count shown). |
+
+#### ContextUsage
+
+How much of its context window a session's agent last said it's used (Claude Code's get_context_usage answer, Codex's token count, pi-claude's count of what it sends), kept by its host: asked of its agent as it starts, through a turn while a chat has it open (at most once a second), as the turn ends, after a compaction and after its model's changed, and kept while its agent's stopped; given another model's window (or none) if one's picked while it's stopped. Every app's context meter shows it.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `totalTokens` | integer/null |  | The tokens its conversation takes up now; null where its agent hasn't said. |
+| `maxTokens` | integer/null |  | Its model's window, in tokens; null or 0 where its agent doesn't know it. |
+| `showWithoutLimit` | boolean |  | Shown though there's no window (Codex's before it says one): the tokens used alone. |
+| `categories` | array of ContextCategory |  | What the tokens are, as its agent splits them (its meter's tooltip). Left out of a session's listing: the chat that's open asks for them (get_context_usage). |
 
 #### DbColumn
 
@@ -2751,6 +2787,7 @@ A session as a host lists it.
 | `bot` | BotListing? |  | A Bot's; null for a chat. |
 | `autofix` | AutofixPull? |  | Its Auto-fix: the pull request its host follows for it; null while it's off. |
 | `acting` | boolean |  | Whether its turn is at its tools: from a tool call's start till text starts after it, the turn ends or its agent goes; only while it's working, not asking. |
+| `context` | ContextUsage? |  | How much of its context window its agent last said it's used, kept while its agent's stopped; null till it's said. |
 | `on_phone` | boolean |  | A Bot's browser is on a phone now. |
 | `fork_from` | string/null |  | The session it was forked from. |
 | `spawned_by` | string/null |  | The chat whose mesh tools started it (start's spawned_by). |

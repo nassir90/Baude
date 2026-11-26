@@ -20,7 +20,7 @@
     },
     "editable": {
       "type": "boolean",
-      "description": "The connection asking may change them (access_set): a head on its machine or over ssh, else a member the access rule allows."
+      "description": "The connection asking may change them (access_set): a head on its machine or over ssh, else a member the access_write rule allows."
     }
   },
   "required": [

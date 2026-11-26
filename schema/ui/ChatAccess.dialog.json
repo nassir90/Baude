@@ -1,5 +1,5 @@
 {
-  "description": "A chat's Access…: its own rule for who in the mesh may manage it (list, read, write in, stop, rename, archive, delete it), which goes before its host's Agent Management rule. Title \"Chat Access\", the chat's title (a Bot's name) under it.",
+  "description": "A chat's Access…: its own rules for who in the mesh may read it (list, attach, read its transcript and folder) and write it (send to it, answer it, stop, rename, archive, delete it), which go before its host's Agent Management rules. Title \"Chat Access\", the chat's title (a Bot's name) under it.",
   "apps": [
     "baude",
     "phone"
@@ -21,19 +21,21 @@
   "parts": [
     {
       "name": "Agent Management row",
-      "shows": "The capability's row as Settings → Access has it: its button names who may (Same as Host while the chat has no rule of its own) and opens a check \"Same as Host\" above the Settings checklist (Everybody over a check per member). While Same as Host is checked, the list shows the host's rule. On the phone the name sits on a line above the button.",
+      "shows": "The capability's row as Settings → Access has it: \"Agent Management\" over two lines, Read and Write, each with its button naming who may (Same as Host while the chat has no rule of its own for that side). A button opens a check \"Same as Host\" above the Settings checklist (Everybody over a check per member). While Same as Host is checked, the list shows the host's rule for that side.",
       "copy": [
         "access.manage",
         "access.same_as_host",
         "access.everybody",
         "access.nobody",
         "access.n_members",
-        "access.no_members"
+        "access.no_members",
+        "access.read",
+        "access.write"
       ],
       "actions": [
         {
           "by": "check or uncheck",
-          "does": "Sends access_set {session, rule} at once: a member or Everybody checked or unchecked gives the chat its own rule (Same as Host goes off); unchecking Same as Host keeps the host's rule as the chat's own; checking it sends rule null, the host's rule again."
+          "does": "Sends access_set {session, capability: manage_read or manage_write, rule} at once: a member or Everybody checked or unchecked gives the chat its own rule for that side (Same as Host goes off); unchecking Same as Host keeps the host's rule as the chat's own; checking it sends rule null, the host's rule again. The host keeps the sides together as Settings' are: a member given Write is added to the chat's Read, one taken out of Read is taken out of its Write."
         }
       ],
       "decisions": [
@@ -54,6 +56,16 @@
           "source": [
             {
               "issue": "BaudeInternal#238"
+            }
+          ]
+        },
+        {
+          "said": "Access policies should be split into read and write where that applies (paraphrased)",
+          "rule": "A chat's own Agent Management rules are split as the host's are: Read and Write, each Same as Host or its own",
+          "decided": "2026-11-26",
+          "source": [
+            {
+              "issue": "BaudeInternal#246"
             }
           ]
         }

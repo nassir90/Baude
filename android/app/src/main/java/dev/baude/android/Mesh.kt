@@ -793,8 +793,11 @@ object Mesh {
             if (r.optString("op") == Op.ERROR && Msg.Error.from(r).said.orEmpty().startsWith("no session"))
                 main.post { chat.chrome.missing.value = true } // (its host there, but with no such session)
             if (r.optString("op") != Op.ATTACHED) return@request
-            main.post { chat.chrome.missing.value = false }
             val attached = Msg.Attached.from(r)
+            main.post {
+                chat.chrome.missing.value = false
+                chat.chrome.writes.value = attached.writes != false
+            }
             val asks = attached.asks.orEmpty().mapNotNull(Ask::of)
             main.post {
                 if (open !== chat) return@post

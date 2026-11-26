@@ -106,7 +106,8 @@ class ServerSessions:
             self.sessions[s.id] = s
             self.save(s)
             if conn is not None and params.get("attach"):
-                conn.answers = params.get("answers", True) is not False
+                if params.get("answers", True) is False:
+                    conn.mute.add(s.id)
                 s.attached_once = True
                 s.viewers.add(conn)
                 s.live.add(conn)
@@ -625,7 +626,7 @@ class ServerSessions:
                 for conn in self.conns:  # (as it happens: a turn too short for a sessions listing to see isn't missed;
                     # an archived session's to those who see archived ones; to those it's listed for: access)
                     if conn.subscribed and (conn.archived or not s.meta.get("archived")) and \
-                            self.access.allowed(conn, "manage", s):
+                            self.access.allowed(conn, "manage_read", s):
                         conn.send(ended)
             for conn in s.live:
                 conn.send({"op": "claude", "session": s.id, "msg": msg})
@@ -711,7 +712,7 @@ class ServerSessions:
             with self.lock:
                 if rid not in s.asks or proc is not s.proc:
                     return
-                if any(v.answers for v in s.viewers):  # (someone's there who answers: given as long again)
+                if any(s.id not in v.mute for v in s.viewers):  # (someone's there who answers: given as long again)
                     return self.ask_timer(s, proc, rid)
                 ask = s.asks.pop(rid)
                 allow = s.meta.get("ask_default") == "allow"

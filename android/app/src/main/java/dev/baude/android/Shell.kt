@@ -216,7 +216,7 @@ fun ChatShell(hostId: String, sid: String, back: () -> Unit, open: (String, Stri
                 if (bot != null) PhoneBrowserButton(at, sid, name) // (Phone Use: a Bot's browser on this phone)
                 if (wide) IconButton(Adwaita.SidebarShowRight, Wording.SidePanel.toggleTip,
                     background = if (split) c.fg.copy(alpha = 0.10f) else null, onClick = toggle)
-                ChatMenu(at, sid, feedback, screen)
+                ChatMenu(at, sid, feedback, screen, writes = chat.chrome.writes.value)
             })
         androidx.compose.runtime.CompositionLocalProvider(LocalChatPlace provides place) {
         if (split) SideBySide(Modifier.weight(1f).fillMaxWidth(), close = toggle, chat = { Page("chat", true, false) }) {

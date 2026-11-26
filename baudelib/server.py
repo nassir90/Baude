@@ -420,8 +420,8 @@ class Server(ServerRunning, ServerSessions):
             return self.listing(archived) + sorted(self.desktop.listings(archived), key=lambda i: -(i["said"] or 0))
 
     def shown_to(self, conn, listing):
-        """(lock held) Of a listing, the chats conn may manage (access): those it's told of."""
+        """(lock held) Of a listing, the chats conn may read (access manage_read): those it's told of."""
         if conn.member is None:
             return listing
         return [x for x in listing if self.access.allowed(
-            conn, "manage", self.sessions.get(x["id"]) or self.desktop.chats.get(x["id"]))]
+            conn, "manage_read", self.sessions.get(x["id"]) or self.desktop.chats.get(x["id"]))]

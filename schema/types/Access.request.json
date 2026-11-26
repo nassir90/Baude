@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
-  "description": "A host's access rules, and a chat's own if session's given.",
+  "description": "A host's access rules, and a chat's own if session's given (refused from a member access_read doesn't allow).",
   "properties": {
     "op": {
       "const": "access",

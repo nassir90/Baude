@@ -32,6 +32,10 @@
         }
       ],
       "description": "Its sign-in, if a turn failed for want of it and that's not been put right yet (ChatLogin): the sign-in card every head draws."
+    },
+    "writes": {
+      "type": "boolean",
+      "description": "Whether the head may change the chat (Agent Management's write, the chat's own first): false, it only reads it, and answers none of its asks."
     }
   },
   "required": ["op"],

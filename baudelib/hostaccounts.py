@@ -195,6 +195,8 @@ def _claude_sign_in(server, conn, msg, reply, done):
             except ValueError as e:
                 discard()
                 return done(error=str(e))
+        else:
+            accounts.forget_usage(profile)
         done(signed_in=True, who=who)
 
     def discard():

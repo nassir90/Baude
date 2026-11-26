@@ -179,7 +179,7 @@ def remove(profile, exe=None):
             raise ValueError(wording.say("subscriptions.gone"))
         db.execute("DELETE FROM profiles WHERE id=?", (profile,))
         db.execute("DELETE FROM defaults WHERE profile=?", (profile,))
-    _usage_read.pop(profile, None)
+    _drop_usage(profile, gone=True)
     provider, folder, kind = row
     if kind == "token" or Path(folder).parent != root():
         return
@@ -364,14 +364,37 @@ def plan_usage(profile, exe=None):
             return kept[1]
         with _usage_one_at_a_time:
             limits = _plan_usage(profile, exe)
-        _usage_read[profile] = (time.monotonic(), limits, time.time())
+        with _usage_guard:
+            if _usage_locks.get(profile) is lock:  # (not an account removed while this read ran)
+                _usage_read[profile] = (time.monotonic(), limits, time.time())
         return limits
+
+
+def forget_usage(profile):
+    """The kept reading of a subscription's usage dropped (after a sign-in as someone else), once a read running now is
+    done: the next ask reads afresh."""
+    _drop_usage(profile)
+
+
+def _drop_usage(profile, gone=False):
+    with _usage_guard:
+        lock = _usage_locks.get(profile)
+    if lock is None:
+        with _usage_guard:
+            _usage_read.pop(profile, None)
+        return
+    with lock:
+        with _usage_guard:
+            _usage_read.pop(profile, None)
+            if gone:
+                _usage_locks.pop(profile, None)
 
 
 def last_usage():
     """Each subscription's (profile's) last read limits and when they were read (seconds since 1970): {profile: (read,
     limits)}, for those whose last read said them; a client shows them till its own read answers."""
-    return {profile: (kept[2], kept[1]) for profile, kept in list(_usage_read.items()) if kept[1]}
+    with _usage_guard:
+        return {profile: (kept[2], kept[1]) for profile, kept in _usage_read.items() if kept[1]}
 
 
 def _reset_time(value):

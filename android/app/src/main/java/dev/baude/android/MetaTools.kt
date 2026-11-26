@@ -339,6 +339,7 @@ object MetaTools {
             "show_groups" -> {
                 val l = d.optJSONArray(if (undo) "from" else "to").strings()
                 HomePrefs.groups.clear(); HomePrefs.groups.addAll(l)
+                if (!undo) HomePrefs.allIfEvery()
                 HomePrefs.noGroups.value = undo && d.optBoolean("from_none")
                 finish(null)
             }

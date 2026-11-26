@@ -73,6 +73,7 @@ object Groups {
     fun putIn(g: String) {
         if ((HomePrefs.groups.isNotEmpty() || HomePrefs.noGroups.value) && g !in HomePrefs.groups) {
             HomePrefs.groups.add(g)
+            HomePrefs.allIfEvery()
             HomePrefs.noGroups.value = false
             HomePrefs.save()
         }

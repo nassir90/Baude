@@ -8219,11 +8219,15 @@ def test_kube_view(app):
         kv.ns_all.set_active(True)  # (All namespaces: every one checked)
         wait_for(lambda: len(rows()) == 7, "every namespace's pods")
         assert kv.ns_label.get_label() == "All namespaces" and all(c.get_active() for c in kv.ns_checks.values())
+        links = [b for b in find(kv.table, Gtk.Button) if b.has_css_class("kube-link") and b.ns == "jobs"]
+        links[0].emit("clicked")
+        wait_for(lambda: len(rows()) == 3, "only jobs' pods")
+        kv.ns_all.set_active(True)
+        wait_for(lambda: len(rows()) == 7, "every namespace's pods, again")
         kv.ns_all.set_active(False)  # (unchecked: every one unchecked, none shown)
         wait_for(lambda: len(rows()) == 0, "no namespace's pods")
         assert kv.ns_shown == [] and not any(c.get_active() for c in kv.ns_checks.values())
-        links = [b for b in find(kv.table, Gtk.Button) if b.has_css_class("kube-link") and b.ns == "jobs"]
-        links[0].emit("clicked")
+        kv.ns_checks["jobs"].set_active(True)
         wait_for(lambda: len(rows()) == 3, "only jobs' pods")
         # Ctrl+F: the filter, focused, its text selected to type over; not the find bar of the Code page under the view
         assert win.show_code(code_file, 1) and win.tabs.current() is win.code_page
@@ -8630,6 +8634,8 @@ def test_kube_switch_fade(app):
         # another namespace: no read (the list is every namespace's), but the same fade, swapped once faded
         kv.side.select_row(kv.page_rows[id(baude.KUBE_PODS)])
         wait_for(lambda: kv.table_page is baude.KUBE_PODS and not faded(), "the pods again")
+        kv.ns_all.set_active(False)
+        wait_for(lambda: len(rows()) == 0, "none shown")
         seen, refilter = [], kv.refilter
         kv.refilter = lambda: (seen.append(faded()), refilter())
         kv.ns_checks["jobs"].set_active(True)

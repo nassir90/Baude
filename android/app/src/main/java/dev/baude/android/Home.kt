@@ -86,6 +86,14 @@ object HomePrefs {
     val chatGroups = androidx.compose.runtime.mutableStateMapOf<String, String>() // ("host/session": its group here)
     private var ctx: Context? = null
 
+    /** The groups picked among names, none when they're every one (all shown, as Baude's picked() and filtered()). */
+    fun pickedOf(names: List<String>): List<String>? = groups.filter { it in names }.let { p -> if (p.toSet().containsAll(names)) null else p.ifEmpty { null } }
+
+    /** groups cleared if they name every group (and No group): all of them, so groups made later are shown too. */
+    fun allIfEvery() {
+        if (groups.isNotEmpty() && groups.toSet().containsAll(Groups.names() + "")) groups.clear()
+    }
+
     fun load(c: Context) {
         if (ctx != null) return
         ctx = c.applicationContext
@@ -736,9 +744,10 @@ private fun ViewMenu(snack: SnackbarHostState) {
             // (Groups: a square check each and one over them all, its label a heading, as the Kubernetes page's Namespaces)
             val names = Groups.names() + ""
             MenuChecks(Wording.Sidebar.groups, names.map { it to it.ifEmpty { Wording.Sidebar.noGroup } },
-                if (HomePrefs.noGroups.value) emptyList() else HomePrefs.groups.filter { it in names }.ifEmpty { null }, { next ->
+                if (HomePrefs.noGroups.value) emptyList() else HomePrefs.pickedOf(names), { next ->
                     HomePrefs.groups.clear()
                     if (next != null) HomePrefs.groups.addAll(next)
+                    HomePrefs.allIfEvery()
                     HomePrefs.noGroups.value = next?.isEmpty() == true
                     HomePrefs.save()
                 }, onLongClick = { g -> if (g.isNotEmpty() && g != Wording.Sidebar.desktopGroup) held = g }, heading = true) // (No group's

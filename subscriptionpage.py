@@ -6,9 +6,10 @@ Token…, Remove…; a Claude card with its usage as a bar per limit, read every
 account (where the host lacks the provider's program, what Settings → Dependencies says of it instead: depsview.row).
 A Claude account is signed in to with claude auth login run on
 the host with the account's own folder: the page to open shown as a link, and a box for the code it shows. Where the
-host has no claude, it's a token from claude setup-token. A Codex account is signed in to with codex login
---device-auth run on the host, as a card (CodexLogin): its page's link and the code to enter there, as the host says
-them. Also the chat's Sign in card's token box for a chat under a
+host has no claude, it's a token from claude setup-token. A Codex account is signed in to with codex login run
+on the host, as a card (CodexLogin): the browser's by default (its page's link; for another machine's host, the
+address the browser ends on passed back to it), or the device code's (its page's link and the code to enter there),
+as the host says them. Also the chat's Sign in card's token box for a chat under a
 token account (replace_token)."""
 import html
 import os
@@ -60,11 +61,11 @@ def limit_label(key, name, resets):
 class Ask:
     """One accounts request to a host (where), on a connection of its own (through the mesh, if that's how it's
     reached): answered(reply) once its answer comes (an error's too, as {"error": …}); heard(line) for each line a
-    sign-in writes, state(login) for each state a Codex sign-in says (ChatLogin); send(msg) another accounts message
-    on it (a sign-in's code). stop() lets go of the connection, which stops a sign-in there. On the main thread."""
+    sign-in writes, state(login) for each state a Codex sign-in says (ChatLogin), pages(reply) for each answer to a
+    callback (on its own thread); send(msg) another accounts message on it (a sign-in's code, or callback). stop() lets go of the connection, which stops a sign-in there. On the main thread."""
 
-    def __init__(self, where, msg, answered, heard=None, state=None):
-        self.ch, self.stopped, self.state = None, False, state
+    def __init__(self, where, msg, answered, heard=None, state=None, pages=None):
+        self.ch, self.stopped, self.state, self.pages = None, False, state, pages
         threading.Thread(target=self._run, args=(where, {"op": "accounts", "req": 1, **msg}, answered, heard),
                          daemon=True, name="accounts").start()
 
@@ -89,6 +90,10 @@ class Ask:
             if m.get("op") == "accounts" and "line" in m and "accounts" not in m:
                 if heard is not None and not self.stopped:
                     GLib.idle_add(heard, m["line"])
+                continue
+            if m.get("op") == "accounts" and m.get("what") == "callback":
+                if self.pages is not None and not self.stopped:
+                    self.pages(m)
                 continue
             if m.get("op") == "accounts" and "login" in m and "accounts" not in m:
                 if self.state is not None and not self.stopped:
@@ -532,11 +537,11 @@ def add_claude_token(page):
 
 def add_codex(page):
     dialog, form, status, submit, say = _form(page, wording.say("subscriptions.add_codex"),
-                                              wording.say("subscriptions.device_code"))
+                                              wording.say("sign_in.sign_in"))
     name = Gtk.Entry(placeholder_text=wording.say("subscriptions.name_hint"))
     home = Gtk.Entry(placeholder_text=wording.say("subscriptions.codex_home_hint"))
     home.connect("changed", lambda e: submit.set_label(wording.say("subscriptions.use_profile") if e.get_text().strip()
-                                                       else wording.say("subscriptions.device_code")))
+                                                       else wording.say("sign_in.sign_in")))
 
     def save(*_):
         label = name.get_text().strip()
@@ -562,20 +567,94 @@ def open_page(widget, url):
     Gtk.UriLauncher(uri=url).launch(widget.get_root(), None, None)
 
 
+class Relay:
+    """This machine's 127.0.0.1 at a port, while a Codex browser sign-in on another machine's host runs: the page there
+    sends the browser back to that host's own 127.0.0.1 at it, which is this machine's here, so each request the
+    browser makes to it is passed on to the sign-in (send(path, answered): accounts callback on its connection) and
+    its page given back. ok False where the port's taken here (the address pasted instead, then)."""
+
+    def __init__(self, port, send):
+        import socket
+        self.send, self.ok = send, False
+        self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        try:
+            self.sock.bind(("127.0.0.1", port))
+            self.sock.listen(4)
+        except OSError:
+            self.sock.close()
+            return
+        self.ok = True
+        threading.Thread(target=self._serve, daemon=True, name="codex-relay").start()
+
+    def _serve(self):
+        while True:
+            try:
+                peer, _ = self.sock.accept()
+            except OSError:
+                return
+            threading.Thread(target=self._one, args=(peer,), daemon=True, name="codex-relay-1").start()
+
+    def _one(self, peer):
+        import queue
+        with peer:
+            peer.settimeout(30)
+            head = b""
+            try:
+                while b"\r\n\r\n" not in head and len(head) < 65536:
+                    if not (got := peer.recv(4096)):
+                        return
+                    head += got
+            except OSError:
+                return
+            parts = head.split(b"\r\n", 1)[0].decode("latin-1").split(" ")
+            path = parts[1] if len(parts) == 3 and parts[0] == "GET" else ""
+            if not path.startswith("/auth/callback?"):
+                return self._answer(peer, 404, "text/plain", "Not Found")
+            answers = queue.Queue()
+            if not self.send(path, answers.put):
+                return self._answer(peer, 502, "text/plain", wording.say("host_status.connection_dropped"))
+            try:
+                m = answers.get(timeout=150)
+            except queue.Empty:
+                return self._answer(peer, 504, "text/plain", wording.say("host_status.no_answer"))
+            if (page := m.get("page")) is None:
+                return self._answer(peer, 502, "text/plain", m.get("error") or wording.say("host_status.no_answer"))
+            self._answer(peer, page["status"], page.get("type") or "text/html; charset=utf-8", page.get("body") or "",
+                         page.get("location"))
+
+    @staticmethod
+    def _answer(peer, status, kind, body, location=None):
+        data = body.encode("utf-8")
+        head = f"HTTP/1.1 {status} {'OK' if status == 200 else 'Found' if location else 'Error'}\r\n" \
+               f"Content-Type: {kind}\r\nContent-Length: {len(data)}\r\nConnection: close\r\n" + \
+               (f"Location: {location}\r\n" if location else "") + "\r\n"
+        try:
+            peer.sendall(head.encode("latin-1", "replace") + data)
+        except OSError:
+            pass
+
+    def stop(self):
+        if self.ok:
+            self.ok = False
+            self.sock.close()
+
+
 class CodexLogin(Gtk.Box):
-    """Codex's device-code sign-in run on the host (codex login --device-auth, by hostaccounts), in a dialog's form, as
-    a card the way a chat's Sign in card is (LoginCard's look: the warning-bordered box, a bold title, a line, then
-    what can be done now), drawn from its state as the host says it (ChatLogin): signing in, and once codex has said
-    them, its page's link (opened at once where the host is this machine's, whose browser is here) and the code to
-    enter there, large, with Copy; signed in, as who; or failed, with why and Try Again (again: the dialog's own
-    button's). Cancel lets go of its connection, which stops it there, and gives the dialog back its fields and
-    button (submit, inputs)."""
+    """Codex's sign-in run on the host (codex login, by hostaccounts), in a dialog's form, as a card the way a chat's
+    Sign in card is (LoginCard's look: the warning-bordered box, a bold title, a line, then what can be done now),
+    drawn from its state as the host says it (ChatLogin). The browser's by default: its page's link, opened at once
+    where the host is this machine's (its browser is here, and the page sends it back to codex there); for another
+    machine's, the address the browser ends on is passed to the host, by this machine's 127.0.0.1 at the port taken
+    for it while it runs (Relay) or pasted (a box and Send), and "Use a device code instead". The device code's: its
+    page's link and the code to enter there, large, with Copy. Then signed in, as who; or failed, with why and Try
+    Again (again: the dialog's own button's). Cancel lets go of its connection, which stops it there, and gives the
+    dialog back its fields and button (submit, inputs)."""
 
     def __init__(self, page, submit, inputs, again):
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=6, visible=False)
         self.add_css_class("perm-card")
         self.page, self.submit, self.inputs = page, submit, inputs
-        self.ask, self.name, self.url, self.opened = None, "", None, None
+        self.ask, self.msg, self.name, self.opened, self.relay, self.waiting = None, None, "", None, None, []
         self.title = Gtk.Label(xalign=0, wrap=True, selectable=True)
         self.body = Gtk.Label(xalign=0, wrap=True, selectable=True, visible=False)
         self.code = Gtk.Label(xalign=0, selectable=True, hexpand=True, css_classes=["device-code"])
@@ -584,12 +663,24 @@ class CodexLogin(Gtk.Box):
         self.code_row = Gtk.Box(spacing=12, visible=False)
         self.code_row.append(self.code)
         self.code_row.append(self.copy)
-        self.cancel = Gtk.Button(label=wording.say("common.cancel"), halign=Gtk.Align.START)
+        self.address = Gtk.Entry(hexpand=True, placeholder_text=wording.say("subscriptions.address_hint"))
+        self.address.connect("activate", lambda *_: self.paste())
+        send = Gtk.Button(label=wording.say("common.send"))
+        send.connect("clicked", lambda *_: self.paste())
+        self.paste_row = Gtk.Box(spacing=6, visible=False)
+        self.paste_row.append(self.address)
+        self.paste_row.append(send)
+        self.note = Gtk.Label(xalign=0, wrap=True, selectable=True, visible=False)
+        self.device = Gtk.Button(label=wording.say("subscriptions.device_instead"), visible=False)
+        self.device.connect("clicked", lambda *_: self.start({**self.msg, "method": "device"}, self.name))
+        self.cancel = Gtk.Button(label=wording.say("common.cancel"))
         self.cancel.connect("clicked", lambda *_: self.cancelled())
-        self.again = Gtk.Button(label=wording.say("common.try_again"), halign=Gtk.Align.START, visible=False,
-                                css_classes=["suggested-action"])
+        self.again = Gtk.Button(label=wording.say("common.try_again"), visible=False, css_classes=["suggested-action"])
         self.again.connect("clicked", again)
-        for w in (self.title, self.body, self.code_row, self.cancel, self.again):
+        buttons = Gtk.Box(spacing=6, halign=Gtk.Align.START)
+        for w in (self.again, self.device, self.cancel):
+            buttons.append(w)
+        for w in (self.title, self.body, self.code_row, self.paste_row, self.note, buttons):
             self.append(w)
 
     def say(self, title, body="", dim=False, markup=False):
@@ -598,41 +689,55 @@ class CodexLogin(Gtk.Box):
         self.body.set_markup(f"<span alpha='60%'>{text}</span>" if dim and text else text)
         self.body.set_visible(bool(body))
 
+    def tell(self, text):
+        """What became of a pasted address (dimmed), or nothing."""
+        self.note.set_markup(f"<span alpha='60%'>{html.escape(text)}</span>" if text else "")
+        self.note.set_visible(bool(text))
+
     def start(self, msg, name):
-        """Signing in (msg: the accounts sign_in to send), for the account named name."""
+        """Signing in (msg: the accounts sign_in to send; method device for the device code's), for the account named
+        name."""
         self.stop()
-        self.name, self.url = name, None
+        self.msg, self.name = {k: v for k, v in msg.items() if k != "method"}, name
         self.submit.set_visible(False)
         for w in self.inputs:
             w.set_sensitive(False)
         self.set_visible(True)
-        self.show({"state": "signing_in"})
-        self.ask = Ask(self.page.where, msg, self.answered, state=self.show)
+        self.address.set_text("")
+        self.tell("")
+        self.show({"state": "signing_in", "method": msg.get("method") or "browser"})
+        self.ask = Ask(self.page.where, msg, self.answered, state=self.show, pages=self.paged)
 
     def show(self, login):
         """The sign-in as the host says it now (ChatLogin)."""
-        state = login.get("state")
+        state, url, browser = login.get("state"), login.get("url"), login.get("method") != "device"
         self.code_row.set_visible(False)
+        self.paste_row.set_visible(state == "signing_in" and browser and bool(url) and not self.page.here)
+        if not self.paste_row.get_visible():
+            self.tell("")
         self.cancel.set_visible(state == "signing_in")
         self.again.set_visible(state == "failed")
-        if state == "signing_in" and not login.get("url"):
-            self.say(wording.say("subscriptions.codex_signing_in"), wording.say("subscriptions.requesting_code"),
-                     dim=True)
+        self.device.set_visible(browser and state in ("signing_in", "failed"))
+        if state == "signing_in" and not url:
+            self.say(wording.say("subscriptions.codex_signing_in"),
+                     wording.say("sign_in.starting" if browser else "subscriptions.requesting_code"), dim=True)
         elif state == "signing_in":
-            url = login["url"]
             if self.page.here and self.opened != url:
                 self.opened = url
-                open_page(self, url)
+                if not login.get("opened"):  # (codex opened it itself, on macOS: not twice)
+                    open_page(self, url)
             if self.page.here:
                 link = f"<a href=\"{html.escape(url)}\">{html.escape(wording.say('sign_in.open_page'))}</a>"
                 said = html.escape(wording.say("sign_in.browser_opened", link="\x00")).replace("\x00", link)
             else:  # (another machine's: its browser isn't here, nor maybe anywhere: the page opened here)
                 link = f"<a href=\"{html.escape(url)}\">{html.escape(wording.say('sign_in.open_page_there'))}</a>"
                 said = html.escape(wording.say("sign_in.page_there", link="\x00")).replace("\x00", link)
+                if browser and login.get("port") and self.relay is None:
+                    self.relay = Relay(login["port"], self.relayed)
             self.say(wording.say("subscriptions.codex_signing_in"), said, markup=True)
             self.code.set_text(login.get("code") or "")
             self.copy.set_label(wording.say("common.copy"))
-            self.code_row.set_visible(bool(login.get("code")))
+            self.code_row.set_visible(not browser and bool(login.get("code")))
         elif state == "signed_in":
             who = login.get("who")
             self.say(wording.say("subscriptions.codex_signed_in"),
@@ -640,11 +745,43 @@ class CodexLogin(Gtk.Box):
         else:
             self.say(wording.say("sign_in.failed"), login.get("reason") or wording.say("subscriptions.codex_failed"),
                      dim=True)
+        if state != "signing_in" or not browser:
+            self.unrelay()
         return False
 
     def copied(self):
         self.get_clipboard().set(self.code.get_text())
         self.copy.set_label(wording.say("subscriptions.code_copied"))
+
+    def paste(self):
+        address = self.address.get_text().strip()
+        if address and self.ask is not None and self.ask.send({"what": "callback", "url": address}):
+            self.waiting.append(lambda m: GLib.idle_add(self.pasted, m))
+            self.tell(wording.say("subscriptions.checking_address"))
+
+    def pasted(self, m):
+        """The host's answer to a pasted address: nothing to say where codex took it (its end follows), else why not."""
+        page = m.get("page") or {}
+        if m.get("error"):
+            self.tell(m["error"])
+        elif page.get("status", 200) >= 400 and (page.get("type") or "").startswith("text/plain"):
+            self.tell(page.get("body") or "")
+        else:
+            self.address.set_text("")
+            self.tell("")
+        return False
+
+    def relayed(self, path, answered):
+        """A request the browser made of this machine's 127.0.0.1, passed on to the sign-in (Relay's send)."""
+        if self.ask is None or not self.ask.send({"what": "callback", "url": path}):
+            return False
+        self.waiting.append(answered)
+        return True
+
+    def paged(self, m):
+        """An answer to a callback (Ask's thread), to whichever asked first."""
+        if self.waiting:
+            self.waiting.pop(0)(m)
 
     def answered(self, reply):
         """Its end: signed in, or why not (the fields and Try Again back, to change the name if that's why)."""
@@ -652,7 +789,8 @@ class CodexLogin(Gtk.Box):
         if "accounts" in reply:
             self.page.took(reply)
         login = reply.get("login") or ({"state": "signed_in", "who": reply.get("who")} if reply.get("signed_in") else
-                                       {"state": "failed", "reason": reply.get("error")})
+                                       {"state": "failed", "reason": reply.get("error"),
+                                        "method": (self.msg or {}).get("method")})
         self.show(login)
         if login.get("state") != "signed_in":
             for w in self.inputs:
@@ -666,7 +804,15 @@ class CodexLogin(Gtk.Box):
         for w in self.inputs:
             w.set_sensitive(True)
 
+    def unrelay(self):
+        if self.relay is not None:
+            self.relay.stop()
+            self.relay = None
+
     def stop(self):
+        self.unrelay()
+        self.waiting = []
+        self.opened = None
         if self.ask is not None:
             self.ask.stop()
             self.ask = None
@@ -712,7 +858,7 @@ def sign_in_again(page, account):
         dialog.present(page)
         return dialog
     dialog, form, status, submit, say = _form(page, wording.say("subscriptions.sign_in_heading", name=account["name"]),
-                                              wording.say("subscriptions.device_code"))
+                                              wording.say("sign_in.sign_in"))
     if (dep := page.missing.get("codex")) is not None:  # (its program isn't on the host: nothing to sign in with)
         from depsview import row
         rows = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE, css_classes=["boxed-list"])

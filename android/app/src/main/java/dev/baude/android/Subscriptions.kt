@@ -6,6 +6,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
@@ -380,11 +382,14 @@ private fun RemoveAccount(host: HostAccounts, a: Msg.Account, done: () -> Unit) 
     )
 }
 
-/** Codex's device-code sign-in run on a host (codex login --device-auth, by hostaccounts' sign_in), on a connection of
- * its own: a new account's (id null: named name, added once it's signed in) or an account's (id). Its state as the
- * host says it (login, a ChatLogin: signing in, with the page to open and the code to enter there once codex has said
- * them; signed in, as who; failed, with why); null till one's started, and once it's cancelled. stop() lets go of the
- * connection, which stops it there. Compose state, changed on the main thread. */
+/** Codex's sign-in run on a host (codex login, by hostaccounts' sign_in), on a connection of its own: a new account's
+ * (id null: named name, added once it's signed in) or an account's (id); the browser's (method browser, the default)
+ * or the device code's (device). Its state as the host says it (login, a ChatLogin: signing in, with the page to open,
+ * and the device code's code to enter there, once codex has said them; signed in, as who; failed, with why); null till
+ * one's started, and once it's cancelled. The browser's page sends the browser back to the host's own 127.0.0.1, which
+ * the phone's isn't: the address it ends on is pasted (address) and passed to the host (paste: callback), and what
+ * became of it said (note). stop() lets go of the connection, which stops it there. Compose state, changed on the main
+ * thread. */
 class CodexLogin(val host: HostAccounts, val id: String?) {
     val name = mutableStateOf("")
     val home = mutableStateOf("")
@@ -392,19 +397,29 @@ class CodexLogin(val host: HostAccounts, val id: String?) {
     val said = mutableStateOf<String?>(null) // (a signed-in CODEX_HOME's add: why it wasn't)
     val busy = mutableStateOf(false)
     val copied = mutableStateOf(false)
+    val address = mutableStateOf("")
+    val note = mutableStateOf<String?>(null)
     private var conn: Connection? = null
 
-    fun start() {
+    fun start(method: String = "browser") {
         conn?.stop()
         said.value = null
         copied.value = false
-        login.value = Msg.ChatLogin(state = "signing_in")
+        address.value = ""
+        note.value = null
+        login.value = Msg.ChatLogin(state = "signing_in", method = method)
         val fresh = id == null
         conn = Mesh.watch(host.hostId, { w, m ->
             if (m.optInt("req", -1) != REQ) return@watch
             Mesh.post {
                 if (w !== conn) return@post
                 val g = Msg.AccountsReply.from(m)
+                if (m.optString("op") == Op.ACCOUNTS && g.what == "callback") { // (a pasted address: codex's end follows, else why not)
+                    val page = g.page
+                    note.value = g.error ?: page?.body?.takeIf { (page.status?.toInt() ?: 0) >= 400 && page.type.orEmpty().startsWith("text/plain") }
+                    if (note.value == null) address.value = ""
+                    return@post
+                }
                 if (m.optString("op") == Op.ACCOUNTS && g.login != null && g.accounts == null) {
                     login.value = g.login
                     return@post
@@ -413,11 +428,12 @@ class CodexLogin(val host: HostAccounts, val id: String?) {
                 w.stop()
                 val e = host.took(m)
                 login.value = g.login ?: if (e == null) Msg.ChatLogin(state = "signed_in", who = g.who)
-                    else Msg.ChatLogin(state = "failed", reason = e)
+                    else Msg.ChatLogin(state = "failed", reason = e, method = method)
             }
         }) { w ->
             if (w !== conn) return@watch
-            if (w.state == "up") w.send(Msg.Accounts(req = REQ, what = "sign_in", id = id, name = name.value.trim().takeIf { fresh }).json())
+            if (w.state == "up") w.send(Msg.Accounts(req = REQ, what = "sign_in", id = id, name = name.value.trim().takeIf { fresh },
+                method = method).json())
             else if (w.state == "down") end(Wording.HostStatus.connectionDropped)
         }
         if (conn == null) end(Wording.HostStatus.hostAbsent)
@@ -426,6 +442,12 @@ class CodexLogin(val host: HostAccounts, val id: String?) {
     private fun end(why: String) {
         conn = null
         login.value = Msg.ChatLogin(state = "failed", reason = why)
+    }
+
+    fun paste() {
+        val w = conn ?: return
+        if (address.value.isNotBlank() && w.send(Msg.Accounts(req = REQ, what = "callback", url = address.value.trim()).json()))
+            note.value = Wording.Subscriptions.checkingAddress
     }
 
     fun cancel() {
@@ -461,7 +483,7 @@ internal fun CodexSignIn(host: HostAccounts, id: String?, name: String?, done: (
     }
     val heading = if (fresh) Wording.Subscriptions.addCodex else Wording.Subscriptions.signInHeading(name = account)
     Form(heading, if (state != null) null else if (fresh && home.isNotBlank()) Wording.Subscriptions.useProfile
-        else Wording.Subscriptions.deviceCode, { login.stop(); done() }, login.said.value, login.busy.value, go) {
+        else Wording.SignIn.signIn, { login.stop(); done() }, login.said.value, login.busy.value, go) {
         if (fresh) {
             val open = state == null || state.state == "failed"
             NameField(label, { label = it }, Wording.Subscriptions.nameHint, go, enabled = open)
@@ -473,14 +495,17 @@ internal fun CodexSignIn(host: HostAccounts, id: String?, name: String?, done: (
 
 /** A Codex sign-in as a card, the way a chat's Sign in card is (LoginCard's look: the warning-bordered box, its title
  * bold, then a line, then what can be done now): signing in, then its page's link (opened here: the host's browser
- * isn't the phone's) and the code to enter there, large, with Copy, and Cancel; signed in, as who (else the account's
- * name); failed, why, and Try Again (again). */
+ * isn't the phone's); the browser's with a box for the address the browser ends on (Send), and "Use a device code
+ * instead"; the device code's with the code to enter there, large, with Copy; and Cancel. Signed in, as who (else the
+ * account's name); failed, why, and Try Again (again; and the device code's way, where the browser's failed). */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun CodexCard(login: CodexLogin, name: String, again: () -> Unit) {
     val c = LocalBaude.current
     val l = login.login.value ?: return
     val dim = c.fg.copy(alpha = c.fg.alpha * 0.6f)
     val clip = LocalClipboardManager.current
+    val browser = l.method != "device"
     Column(Modifier.fillMaxWidth().border(1.dp, c.warning, RoundedCornerShape(Gap.cardRadius))
         .padding(horizontal = 12.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         val title = when (l.state) {
@@ -492,7 +517,8 @@ private fun CodexCard(login: CodexLogin, name: String, again: () -> Unit) {
         val url = l.url
         val code = l.code
         when {
-            l.state == "signing_in" && url == null -> Text(Wording.Subscriptions.requestingCode, style = Type.body, color = dim)
+            l.state == "signing_in" && url == null ->
+                Text(if (browser) Wording.SignIn.starting else Wording.Subscriptions.requestingCode, style = Type.body, color = dim)
             l.state == "signing_in" && url != null -> {
                 Text(buildAnnotatedString {
                     val (before, after) = Wording.SignIn.pageThere(link = "\u0000").split("\u0000", limit = 2).let {
@@ -503,25 +529,36 @@ private fun CodexCard(login: CodexLogin, name: String, again: () -> Unit) {
                         textDecoration = TextDecoration.Underline)))) { append(Wording.SignIn.openPageThere) }
                     append(after)
                 }, style = Type.body, color = c.fg)
+                if (browser) {
+                    var address by login.address
+                    NameField(address, { address = it }, Wording.Subscriptions.addressHint, login::paste, focus = false)
+                    Button(Wording.Common.send, onClick = login::paste)
+                    login.note.value?.let { SelectionContainer { Text(it, style = Type.body, color = dim) } }
+                }
                 // (the code a line of its own, its buttons under it: beside them, a phone's width breaks it)
-                if (code != null) SelectionContainer { Text(code, style = Type.deviceCode, color = c.fg, softWrap = false) }
+                else if (code != null) SelectionContainer { Text(code, style = Type.deviceCode, color = c.fg, softWrap = false) }
             }
             l.state == "signed_in" -> SelectionContainer {
                 Text(l.who?.let { Wording.SignIn.asWho(who = it) } ?: name, style = Type.body, color = c.fg)
             }
             else -> SelectionContainer { Text(l.reason ?: Wording.Subscriptions.codexFailed, style = Type.body, color = dim) }
         }
+        // (a phone's width wraps "Use a device code instead" onto a line of its own)
         when (l.state) {
-            "signing_in" -> Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                l.code?.takeIf { l.url != null }?.let { code ->
+            "signing_in" -> FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                l.code?.takeIf { l.url != null && !browser }?.let { code ->
                     Button(if (login.copied.value) Wording.Subscriptions.codeCopied else Wording.Common.copy) {
                         clip.setText(AnnotatedString(code))
                         login.copied.value = true
                     }
                 }
+                if (browser) Button(Wording.Subscriptions.deviceInstead) { login.start("device") }
                 Button(Wording.Common.cancel) { login.cancel() }
             }
-            "failed" -> Button(Wording.Common.tryAgain, suggested = true, onClick = again)
+            "failed" -> FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Button(Wording.Common.tryAgain, suggested = true, onClick = again)
+                if (browser) Button(Wording.Subscriptions.deviceInstead) { login.start("device") }
+            }
         }
     }
 }

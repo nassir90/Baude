@@ -245,25 +245,31 @@
     },
     {
       "name": "Add Codex account dialog",
-      "shows": "Heading \"Add Codex account\"; \"Account name\"; \"Existing signed-in CODEX_HOME (optional)\"; its button Sign in with device code (Use signed-in profile once a folder is typed); Close. Sign in with device code runs codex login --device-auth on the host with a new CODEX_HOME of the account's own, shown as the Codex sign-in card, the fields greyed while it runs; the account is added once it's signed in. Close stops it.",
+      "shows": "Heading \"Add Codex account\"; \"Account name\"; \"Existing signed-in CODEX_HOME (optional)\"; its button Sign in (Use signed-in profile once a folder is typed); Close. Sign in runs codex login on the host with a new CODEX_HOME of the account's own (the browser's sign-in; the device code's on \"Use a device code instead\", or by itself where the browser's can't listen), shown as the Codex sign-in card, the fields greyed while it runs; the account is added once it's signed in. Close stops it.",
       "copy": [
         "subscriptions.add_codex",
         "subscriptions.codex_home_hint",
-        "subscriptions.device_code",
-        "subscriptions.use_profile",
-        "subscriptions.requesting_code"
+        "sign_in.sign_in",
+        "subscriptions.use_profile"
       ],
       "parts": [
         {
           "name": "Codex sign-in card",
-          "shows": "In the dialog, under its fields, once Sign in with device code is pressed (the dialog's own button gone while it's there): the card a chat's Sign in card is (LoginCard's: warning-bordered, a bold title, a line, then what can be done now), drawn from the sign-in's state as the host says it (accounts sign_in's login, a ChatLogin). Waiting: \"Signing in to Codex…\" / dimmed \"Requesting a device code…\", and Cancel. Once codex has said them: the page's link, as Claude's card has it (where the host is this machine's, the page opened in its browser at once: \"A browser window should have opened to sign in. If it didn't, open the sign-in page.\"; another machine's and the phone's: \"Open the sign-in page to sign in.\"), then the one-time code large (bold monospace, .device-code: 1.8em; the phone's 26 px), selectable, with Copy beside it (\"Code copied\" once pressed), and Cancel. Signed in: \"Signed in to Codex\" / \"as <email>\" (the email its sign-in names; else the account's name); the dialog stays till Close. Failed: \"Sign-in didn't finish\" / dimmed what codex said last (an error line, else \"The Codex CLI did not complete sign-in\"), and Try Again; the fields can be changed again first.",
+          "shows": "In the dialog, under its fields, once Sign in is pressed (the dialog's own button gone while it's there): the card a chat's Sign in card is (LoginCard's: warning-bordered, a bold title, a line, then what can be done now), drawn from the sign-in's state as the host says it (accounts sign_in's login, a ChatLogin). The browser's, by default (codex login): waiting, \"Signing in to Codex…\" / dimmed \"Starting the sign-in…\"; once codex has said its page, the page's link as Claude's card has it: where the host is this machine's, the page opened in its browser at once (by codex itself on macOS, else by the app) and \"A browser window should have opened to sign in. If it didn't, open the sign-in page.\"; another machine's and the phone's, \"Open the sign-in page to sign in.\" and a box \"Paste the address the browser ended on\" with Send (that address passed to the host, which asks codex's server on its own 127.0.0.1 for it; \"Checking the address…\", then why not, dimmed, if it wasn't taken). On Baude and Record, for another machine's host, this machine's 127.0.0.1 at the port codex took (1455, else 1457) is passed on to the host the same way while it runs, so the browser's own way back reaches it and nothing need be pasted (where that port's taken here, the box is the way). Under it, \"Use a device code instead\" and Cancel. The device code's (codex login --device-auth: on that button, or by itself where codex can't listen on either port): waiting, dimmed \"Requesting a device code…\"; then its page's link the same way, the one-time code large (bold monospace, .device-code: 1.8em; the phone's 26 px), selectable, with Copy beside it (\"Code copied\" once pressed), and Cancel. Signed in: \"Signed in to Codex\" / \"as <email>\" (the email its sign-in names; else the account's name); the dialog stays till Close. Failed: \"Sign-in didn't finish\" / dimmed what codex said last (an error line, else \"The Codex CLI did not complete sign-in\"), and Try Again (the browser's again), with \"Use a device code instead\" where the browser's failed; the fields can be changed again first.",
           "copy": [
             "subscriptions.codex_signing_in",
+            "sign_in.starting",
             "subscriptions.requesting_code",
             "sign_in.browser_opened",
             "sign_in.open_page",
             "sign_in.page_there",
             "sign_in.open_page_there",
+            "subscriptions.address_hint",
+            "common.send",
+            "subscriptions.checking_address",
+            "subscriptions.not_callback",
+            "subscriptions.no_sign_in",
+            "subscriptions.device_instead",
             "common.copy",
             "subscriptions.code_copied",
             "common.cancel",
@@ -283,6 +289,14 @@
               "does": "Puts the code on the clipboard; the button says \"Code copied\""
             },
             {
+              "by": "paste the address and click Send (or press Enter)",
+              "does": "Passes the address the browser ended on to the host's sign-in, which requests it of codex's server on the host's 127.0.0.1; codex finishes, and the card says signed in or failed"
+            },
+            {
+              "by": "click Use a device code instead",
+              "does": "Stops the browser's sign-in and starts codex login --device-auth in its place"
+            },
+            {
               "by": "click Cancel",
               "does": "Lets go of the sign-in's connection, which stops codex login on the host (a new account's folder removed); the card goes and the dialog's fields and button come back"
             },
@@ -299,6 +313,17 @@
               "source": [
                 {
                   "issue": "BaudeInternal#262"
+                }
+              ]
+            },
+            {
+              "said": "Device code honestly seems like the \"oauth-token\" like approach, somethign to fallback to but not default",
+              "rule": "A Codex sign-in is codex login's browser sign-in by default, as Claude's is claude auth login; the device code (a beta that has to be switched on in ChatGPT's security settings) is the fallback: \"Use a device code instead\" in the card, and by itself where the browser's can't listen. For a host on another machine, the browser's way back to codex's 127.0.0.1 is passed on to the host: by this machine's own 127.0.0.1 where it can, else by pasting the address the browser ended on",
+              "decided": "2026-11-26",
+              "source": [
+                {
+                  "session": "b3845b21-55ac-4aab-a769-fb8517403c51",
+                  "message": "bbf948bf-6104-465a-81a6-e58398927218"
                 }
               ]
             }
@@ -324,7 +349,7 @@
     },
     {
       "name": "Sign In Again dialog",
-      "shows": "Heading \"Sign in to <name> again\". A Claude folder account's: Sign in, then the sign-in page's link and the code box, as Add Claude account's. Codex's: Sign in with device code, then the Codex sign-in card (Add Codex account's), or, where the host lacks codex, its Dependencies row (\"Codex CLI isn't installed\", the install command with Copy) in place of the button. Close.",
+      "shows": "Heading \"Sign in to <name> again\". A Claude folder account's: Sign in, then the sign-in page's link and the code box, as Add Claude account's. Codex's: Sign in, then the Codex sign-in card (Add Codex account's), or, where the host lacks codex, its Dependencies row (\"Codex CLI isn't installed\", the install command with Copy) in place of the button. Close.",
       "copy": [
         "subscriptions.sign_in_heading",
         "deps.copied"

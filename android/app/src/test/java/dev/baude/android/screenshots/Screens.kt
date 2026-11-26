@@ -178,31 +178,45 @@ abstract class Screens(private val theme: String) {
         screen("05d-subscriptions-sign-in")
     }
 
-    // (Add account (Codex) on workshop: the device-code sign-in's card at each step as the host says it: waiting for
-    // its code, the page's link and the code with Copy, signed in, failed)
+    // (Add account (Codex) on workshop: the sign-in's card at each step as the host says it: the browser's, waiting
+    // and then its page's link with the box for the address the browser ended on; that address not taken; the device
+    // code's, waiting and then with its code; signed in; failed)
     @Test fun subscriptionsCodexSignIn() {
         accountsFixture()
         val host = dev.baude.android.HostAccounts(Mesh.hosts.first().id)
         val login = dev.baude.android.CodexLogin(host, null).apply {
             name.value = "Work"
-            this.login.value = Msg.ChatLogin(state = "signing_in")
+            this.login.value = Msg.ChatLogin(state = "signing_in", method = "browser")
         }
         show {
             SettingsScreen({}, {}, page = 1)
             dev.baude.android.CodexSignIn(host, null, "Work", {}, login)
         }
         laidOut()
-        screen("05k-codex-waiting")
-        login.login.value = Msg.ChatLogin(state = "signing_in", url = "https://auth.openai.com/codex/device", code = "KQ7M-3XWPD")
+        screen("05k-codex-browser-waiting")
+        login.login.value = Msg.ChatLogin(state = "signing_in", method = "browser", port = 1455,
+            url = "https://auth.openai.com/oauth/authorize?response_type=code&client_id=app_fixture&redirect_uri=http%3A%2F%2F127.0.0.1%3A1455%2Fauth%2Fcallback&state=st4te")
         laidOut()
-        screen("05l-codex-code")
-        login.login.value = Msg.ChatLogin(state = "signed_in", who = "personal@example.com")
+        screen("05l-codex-browser-paste")
+        login.address.value = "https://chatgpt.com/"
+        login.note.value = "That isn't the address the browser ended on after signing in"
         laidOut()
-        screen("05m-codex-signed-in")
-        login.login.value = Msg.ChatLogin(state = "failed",
-            reason = "Error logging in with device code: the device code expired before it was entered")
+        screen("05m-codex-browser-wrong-address")
+        login.address.value = ""
+        login.note.value = null
+        login.login.value = Msg.ChatLogin(state = "signing_in", method = "device")
         laidOut()
-        screen("05n-codex-failed")
+        screen("05n-codex-device-waiting")
+        login.login.value = Msg.ChatLogin(state = "signing_in", method = "device", url = "https://auth.openai.com/codex/device", code = "KQ7M-3XWPD")
+        laidOut()
+        screen("05o-codex-device-code")
+        login.login.value = Msg.ChatLogin(state = "signed_in", method = "browser", who = "personal@example.com")
+        laidOut()
+        screen("05p-codex-signed-in")
+        login.login.value = Msg.ChatLogin(state = "failed", method = "browser",
+            reason = "Error logging in: OAuth callback error: access_denied")
+        laidOut()
+        screen("05q-codex-failed")
     }
 
     // (Claude's chat Sign in card, to compare with Codex's: the page's link and the code box)
@@ -212,7 +226,7 @@ abstract class Screens(private val theme: String) {
             stage.value = "page"
             url.value = "https://claude.ai/oauth/authorize?code=true&client_id=fixture"
         }
-        render("05o-chat-login-card") {
+        render("05r-chat-login-card") {
             androidx.compose.foundation.layout.Box(androidx.compose.ui.Modifier.padding(16.dp)) {
                 dev.baude.android.LoginCard(login)
             }

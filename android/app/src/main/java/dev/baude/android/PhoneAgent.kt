@@ -260,6 +260,7 @@ object PhoneAgent {
     fun turn(s: PhoneSession) {
         val began = System.currentTimeMillis()
         var steps = 0
+        val tokens = LongArray(2) // (the turn's, in and out, every answer's added up: its telemetry's)
         var calls = 0
         var result = ""
         var error = false
@@ -322,6 +323,8 @@ object PhoneAgent {
                 }
                 uses.forEach { blocks.put(JSONObject(it.toString()).apply { remove("_cut") }) }
                 val usage = answer.usage
+                tokens[0] += (usage?.optLong("prompt_tokens") ?: 0).coerceAtLeast(0)
+                tokens[1] += (usage?.optLong("completion_tokens") ?: 0).coerceAtLeast(0)
                 PhoneHost.said(s, "assistant", JSONObject().put("id", if (streaming) mid else answer.id.ifBlank { mid })
                     .put("type", "message").put("role", "assistant").put("model", model)
                     .put("content", blocks).put("stop_reason", if (uses.isEmpty()) "end_turn" else "tool_use")
@@ -388,7 +391,7 @@ object PhoneAgent {
             result = why
             error = true
         } finally {
-            PhoneHost.ended(s, result, error, steps, System.currentTimeMillis() - began)
+            PhoneHost.ended(s, result, error, steps, System.currentTimeMillis() - began, tokens[0], tokens[1])
         }
     }
 

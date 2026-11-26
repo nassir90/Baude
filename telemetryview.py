@@ -408,6 +408,7 @@ class Page(Adw.PreferencesPage):
         top.add(self.collect)
         self.add(top)
         self.state, self.taking, self.groups, self.shown_app = None, False, {}, "host"
+        self.deps_for, self.missing_shown, self.lines_shown, self.sampled, self.ticks = (), None, None, None, 0
         self.grid = TokenGrid()
         self.refresh = GLib.timeout_add_seconds(REFRESH_S, self.tick)
         self.connect("destroy", lambda *_: GLib.source_remove(self.refresh))
@@ -415,7 +416,13 @@ class Page(Adw.PreferencesPage):
 
     def tick(self):
         if self.get_mapped() and self.state and self.state.get("on"):
-            self.read({"from": time.time() - 3 * REFRESH_S, "what": ["metrics"], "limit": 1}, self.took_metrics)
+            now = time.time()
+            self.read({"from": max(self.sampled or 0, now - 3 * REFRESH_S), "what": ["metrics"], "limit": 1},
+                      self.took_metrics)
+            self.ticks += 1
+            if self.ticks % (PROFILE_S // REFRESH_S) == 0 and any(
+                    p.get("functions") for p in self.state.get("profiling") or []):
+                self.read({"from": now - 3600, "what": ["profiles"], "limit": 500}, self.took_profiles)
         return True
 
     def read(self, msg, done):
@@ -522,6 +529,7 @@ class Page(Adw.PreferencesPage):
         if not samples:
             return False
         s = samples[-1]
+        self.sampled = s.get("at")
         rows = []
         if s.get("load"):
             rows.append(row(wording.say("telemetry.load"), " · ".join(f"{x:.2f}" for x in s["load"])))
@@ -560,13 +568,17 @@ class Page(Adw.PreferencesPage):
         if self.state is None:
             return
         if not self.state.get("line_profiler"):
-            import depsview
-            depsview.ask(self.where, self.took_deps)
+            if self.deps_for != (self.where.get("host"), False):  # (asked again only as line_profiler comes or goes)
+                self.deps_for = (self.where.get("host"), False)
+                import depsview
+                depsview.ask(self.where, self.took_deps)
             return
+        self.deps_for, self.missing_shown = (self.where.get("host"), True), None
+        on = bool(self.state.get("on"))
         if "profiling" in self.groups and getattr(self, "profiling_shown", None) == (
-                self.shown_app, repr(self.state.get("profiling"))):
+                self.shown_app, repr(self.state.get("profiling")), on):
             return self.show_lines()
-        self.profiling_shown = (self.shown_app, repr(self.state.get("profiling")))
+        self.profiling_shown = (self.shown_app, repr(self.state.get("profiling")), on)
         mine = next((p for p in self.state.get("profiling") or [] if p["app"] == self.shown_app), {"functions": []})
         process = Adw.ComboRow(title=wording.say("telemetry.process"), model=Gtk.StringList.new(
             [wording.say(APP_NAMES[a]) for a in PROFILED]), selected=PROFILED.index(self.shown_app))
@@ -575,9 +587,11 @@ class Page(Adw.PreferencesPage):
                              show_apply_button=True)
         entry.connect("apply", lambda e: self.set({"app": self.shown_app, "functions": [
             f.strip() for f in e.get_text().split(",") if f.strip()]}))
-        on = Adw.SwitchRow(title=wording.say("telemetry.line_profiling"), active=bool(mine["functions"]),
-                           sensitive=bool(mine["functions"] or entry.get_text().strip()))
-        entry.connect("changed", lambda e: on.set_sensitive(bool(mine["functions"] or e.get_text().strip())))
+        collecting = on
+        on = Adw.SwitchRow(title=wording.say("telemetry.line_profiling"), active=collecting and bool(mine["functions"]),
+                           sensitive=collecting and bool(mine["functions"] or entry.get_text().strip()))
+        entry.connect("changed", lambda e: on.set_sensitive(
+            collecting and bool(mine["functions"] or e.get_text().strip())))
         on.connect("notify::active", lambda r, _p: r.get_active() != bool(mine["functions"]) and self.set({
             "app": self.shown_app, "functions": [f.strip() for f in entry.get_text().split(",") if f.strip()]
             if r.get_active() else []}))
@@ -603,6 +617,9 @@ class Page(Adw.PreferencesPage):
                 got["hits"] += x["hits"]
                 got["seconds"] += x["seconds"]
         top = sorted(lines.values(), key=lambda x: -x["seconds"])[:LINES_SHOWN]
+        if "lines" in self.groups and self.lines_shown == (self.shown_app, repr(top)):
+            return
+        self.lines_shown = (self.shown_app, repr(top))
         g = self.group("lines", wording.say("telemetry.top_lines") if top else None)
         for x in top:
             r = row(f"{os.path.basename(x['file'])}:{x['line']}  {x.get('code') or x['function']}",
@@ -616,14 +633,23 @@ class Page(Adw.PreferencesPage):
         import depsview
         dep = next((d for d in reply.get("deps") or [] if d.get("dep") == "line_profiler"), None)
         if dep is not None and not dep.get("present"):  # (as every feature without what it needs shows it)
-            missing = depsview.Missing(again=self.ask)
+            if self.missing_shown == repr(dep) and "profiling" in self.groups:
+                return False
+            self.missing_shown = repr(dep)
+            missing = depsview.Missing(again=self.again)
             missing.set_vexpand(False)
             missing.set_propagate_natural_height(True)
             missing.set_min_content_height(260)  # (its whole box: a scroller in the page gets none of its own)
             missing.show(dep, "telemetry.line_profiling")
             self.group("profiling", None, [missing])
             self.group("lines", None)
+            self.lines_shown = None
         return False
+
+    def again(self):
+        """Missing's Check again: line_profiler looked for again there, and everything asked again."""
+        self.deps_for = ()
+        self.ask()
 
 
 def shown_events(events):

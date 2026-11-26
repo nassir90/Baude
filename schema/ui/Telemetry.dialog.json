@@ -43,7 +43,7 @@
     },
     {
       "name": "Collect Telemetry",
-      "shows": "A switch row \"Collect Telemetry\", on while the host keeps chat events and samples its machine (the host's own state, kept in its state folder; on unless switched off).",
+      "shows": "A switch row \"Collect Telemetry\", on while the host keeps chat events and samples its machine (the host's own state, kept in its state folder; on unless switched off). The host keeps events 400 days (the tokens' grid is a year), samples 7 days and profiles 30 days.",
       "copy": [
         "telemetry.collect"
       ],
@@ -103,7 +103,7 @@
     },
     {
       "name": "Models",
-      "shows": "Heading \"Models\", a row each model that ran a turn in the year, the most turns first: its name, and \"600 Turns · 280.8M\" after it, dim.",
+      "shows": "Heading \"Models\", a row each model that ran a turn in the year, the most turns first: its name, and \"600 Turns · 280.8M\" after it (\"1 Turn\" for one), dim.",
       "copy": [
         "telemetry.models",
         "telemetry.turns_tokens",
@@ -184,7 +184,7 @@
     },
     {
       "name": "Line Profiling",
-      "shows": "A boxed list: a switch row \"Line Profiling\" (on while the process picked profiles something), \"Process\" with a picker (Host Process, Baude, Record), \"Functions\" (an entry: dotted names of functions and modules, comma-separated), and, where a name isn't found, its error in one dim row. Then \"Top Lines\": the picked process's 10 lines that took longest in the last hour, the file's name and line number and the line's code in monospace, and \"120 Hits · 0.912s\" after it (the phone: its time alone). Without line_profiler on that host: one row, line_profiler and the command that installs it with Copy, as Dependencies has it. Not on the phone's own host (no Python there).",
+      "shows": "A boxed list: a switch row \"Line Profiling\" (on while the process picked profiles something; off and greyed out while telemetry is off), \"Process\" with a picker (Host Process, Baude, Record), \"Functions\" (an entry: dotted names of functions and modules, comma-separated), and, where a name isn't found, its error in one dim row. Then \"Top Lines\": the picked process's 10 lines that took longest in the last hour (read again every 30 seconds while a process profiles, as its profiles are taken), the file's name and line number and the line's code in monospace, and \"120 Hits · 0.912s\" after it (the phone: its time alone). Without line_profiler on that host: one row, line_profiler and the command that installs it with Copy, as Dependencies has it (pip of the host's own Python, --user, and --break-system-packages only where that Python is externally managed). Not on the phone's own host (no Python there).",
       "copy": [
         "telemetry.line_profiling",
         "telemetry.process",

@@ -724,7 +724,7 @@ object PhoneHost {
     /** Its turn's over: its result said (to those attached live, and as turn_ended to every head subscribed), and what
      * was sent meanwhile taken now, in a turn of its own (in the same hold of the lock, so no other turn starts
      * between). */
-    fun ended(s: PhoneSession, result: String, error: Boolean, turns: Int, ms: Long) {
+    fun ended(s: PhoneSession, result: String, error: Boolean, turns: Int, ms: Long, tokensIn: Long = 0, tokensOut: Long = 0) {
         val stopped = s.cancel
         tell(s, JSONObject().put("type", "result").put("subtype", if (error) "error_during_execution" else "success")
             .put("is_error", error).put("result", result).put("num_turns", turns).put("duration_ms", ms)
@@ -750,7 +750,7 @@ object PhoneHost {
             if (s.deleted) emptyList() else heads.filter { it.subscribed && (it.archived || !s.meta.optBoolean("archived")) }
         }
         if (!s.meta.optBoolean("ephemeral")) TelemetryStore.turn(s.id, ms / 1000.0, s.meta.optString("model").ifEmpty { null },
-            s.meta.optString("effort").ifEmpty { null })
+            s.meta.optString("effort").ifEmpty { null }, tokensIn, tokensOut)
         val end = Msg.TurnEnded(session = s.id, result = result, isError = error, cost = 0, turns = turns,
             durationMs = ms).json()
         for (h in subscribed) h.send(end)

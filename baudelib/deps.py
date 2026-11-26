@@ -7,7 +7,8 @@ schema/deps has a file for each, named by its key: {"description", "name" (as it
 "where" ("app": the app's own process needs it, "host": the host process does), "needed_by" (the features, as the
 schema/copy keys that name them), "group" (the copy key of what Settings → Dependencies lists it under: GROUPS),
 "detect" ({"macos"|"linux": [way, …]}: any way that finds it finds it; a platform not there doesn't need it),
-"install" ({"macos"|"debian"|"fedora"|"arch": the command; a check's: the one that readies it}), "link" (its install
+"install" ({"macos"|"debian"|"fedora"|"arch": the command; a check's: the one that readies it. {python} in it is
+this Python, {managed} --break-system-packages where it's externally managed (PEP 668's marker, outside a venv)}), "link" (its install
 page; a check has none), "no_display" (true: only a host with no display needs it), "of" (a check: the key
 of the program it's a check of, which it's left out without, and listed after), "ready" (the copy key said of it when
 it's there: deps.installed if none; given n, the count its probe found, where it takes one), "installed" and "start"
@@ -22,9 +23,11 @@ Fault injection: BAUDE_HIDE_DEPS=vte,kubectl,… makes those missing, wherever t
 import glob
 import json
 import os
+import shlex
 import shutil
 import subprocess
 import sys
+import sysconfig
 import time
 
 from baudelib import wording
@@ -63,6 +66,16 @@ def platform():
         if name in DISTROS:
             return DISTROS[name]
     return None
+
+
+def _filled(fix):
+    """An install command with this Python's own put in ({python}, {managed}: TABLE's)."""
+    if not fix or "{" not in fix:
+        return fix
+    managed = sys.prefix == sys.base_prefix and os.path.exists(
+        os.path.join(sysconfig.get_path("stdlib"), "EXTERNALLY-MANAGED"))
+    return fix.replace("{python}", shlex.quote(sys.executable)).replace(
+        "{managed}", "--break-system-packages " if managed else "")
 
 
 def hidden():
@@ -207,7 +220,7 @@ def info(key, here=None):
     except Exception:  # noqa: BLE001 (one probe gone wrong is its row's "couldn't check", not the answer's error)
         return {**out, "link": None, "ready": wording.say("deps.unchecked")}
     ready = n if isinstance(n, str) else d.get("ready", "deps.installed")
-    out.update(present=bool(there), fix=fix)
+    out.update(present=bool(there), fix=_filled(fix))
     if there:
         out["ready"] = wording.say(ready) if wording.has(ready) else wording.say(ready, n=n or 0)
     return out

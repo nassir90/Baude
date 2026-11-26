@@ -249,7 +249,8 @@ fun TelemetryPage() {
     }
     LaunchedEffect(hostId) {
         while (true) {
-            read(System.currentTimeMillis() / 1000.0 - 60, "metrics", 1) { metrics = it }
+            val since = metrics?.let { Msg.TelemetryReadReply.from(it).metrics.orEmpty().lastOrNull()?.at?.toDouble() } ?: 0.0
+            read(maxOf(since, System.currentTimeMillis() / 1000.0 - 60), "metrics", 1) { metrics = it }
             delay(5_000)
         }
     }
@@ -257,6 +258,13 @@ fun TelemetryPage() {
     val error = replies.firstOrNull { it.optString("op") == Op.ERROR }
     val state = replies.firstOrNull { it.optString("op") == Op.TELEMETRY_READ }?.let { Msg.TelemetryReadReply.from(it).state }
     fun set(msg: Msg.TelemetrySet) = Mesh.ask(hostId, msg.json()) { asked++ }
+    val profiling = state?.on == true && state.profiling.orEmpty().any { it.functions.orEmpty().isNotEmpty() }
+    LaunchedEffect(hostId, asked, profiling) { // (its top lines read again as often as they're taken, while it profiles)
+        while (profiling) {
+            delay(30_000)
+            read(System.currentTimeMillis() / 1000.0 - 3600, "profiles", 500) { profiles = it }
+        }
+    }
     LaunchedEffect(hostId, state?.lineProfiler) {
         if (state != null && state.lineProfiler == false && hostId != "phone")
             Mesh.ask(hostId, Msg.Deps().json()) { r -> deps = Msg.DepsReply.from(r).deps?.firstOrNull { it.dep == "line_profiler" } }
@@ -333,7 +341,8 @@ private fun Profiling(state: Msg.TelemetryState, profiles: JSONObject?, dep: Msg
     var text by remember(app, functions) { mutableStateOf(functions.joinToString(", ")) }
     fun named() = text.split(",").map { it.trim() }.filter { it.isNotEmpty() }
     BoxedList(listOfNotNull<@Composable () -> Unit>(
-        { SwitchRow(Wording.Telemetry.lineProfiling, null, functions.isNotEmpty(), enabled = functions.isNotEmpty() || named().isNotEmpty()) {
+        { SwitchRow(Wording.Telemetry.lineProfiling, null, state.on == true && functions.isNotEmpty(),
+            enabled = state.on == true && (functions.isNotEmpty() || named().isNotEmpty())) {
             set(Msg.TelemetrySet(app = app, functions = if (it) named() else emptyList())) } },
         { Choice(Wording.Telemetry.process, PROFILED, app, { APP_NAMES.getValue(it)() }) { pick(it) } },
         {

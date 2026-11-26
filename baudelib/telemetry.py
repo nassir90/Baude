@@ -20,7 +20,7 @@ from baudelib import deps, lineprofile, wire
 
 SAMPLE_S = 5  # (how often the machine is sampled while it's on)
 PROFILE_S = 30  # (how often what's profiled is saved)
-KEEP_DAYS = {"events": 400, "metrics": 30, "profiles": 30}  # (events back a year: the tokens' grid)
+KEEP_DAYS = {"events": 400, "metrics": 7, "profiles": 30}  # (events back a year: the tokens' grid)
 LIMIT = 5000  # (telemetry_read's most of each, the latest kept)
 EVENTS_MAX = 1000  # (one telling's)
 APPS = tuple(wire.DEFS["Telemetry"]["properties"]["app"]["enum"])
@@ -336,8 +336,12 @@ class Telemetry:
             day = last - datetime.timedelta(days=KEEP_DAYS[kind])
         while day <= last:
             try:
-                with open(os.path.join(self.dir, kind, f"{day.isoformat()}.jsonl"), encoding="utf-8") as f:
-                    lines = f.readlines()
+                path = os.path.join(self.dir, kind, f"{day.isoformat()}.jsonl")
+                if kind == "metrics":  # (written in time order: only its end since start read, as the page's tick is)
+                    lines = tail_since(path, start)
+                else:
+                    with open(path, encoding="utf-8") as f:
+                        lines = f.readlines()
             except OSError:
                 lines = []
             for line in lines:
@@ -365,6 +369,27 @@ class Telemetry:
         if "usage" in what:
             out["usage"] = usage(self.rows("events", start, end, 0))
         return out
+
+
+def tail_since(path, start, block=1 << 16):
+    """A file of rows in time order, its lines from the first at start or later (and a few before), read from its
+    end back only as far as that."""
+    with open(path, "rb") as f:
+        end = f.seek(0, os.SEEK_END)
+        at, buf = end, b""
+        while at > 0:
+            at, block = max(0, end - block), block * 2
+            f.seek(at)
+            buf = f.read(end - at)
+            parts = buf.split(b"\n", 2)
+            first = parts[1] if at and len(parts) > 1 else parts[0]  # (a whole line: the block's first may be cut)
+            try:
+                if json.loads(first).get("at", start) < start:
+                    break
+            except (ValueError, AttributeError):
+                continue
+    lines = buf.decode("utf-8", "replace").splitlines(keepends=True)
+    return lines[1:] if at else lines
 
 
 def usage(events):
@@ -437,7 +462,8 @@ def gather(start, end=None, what=("events", "metrics", "profiles", "usage"), tim
     """Every host's telemetry in the mesh (this machine's host's members, and it), pulled by telemetry_read from here
     and put together: {"hosts": {id: reply or {"error"}}, "events": [...], "metrics": [...], "profiles": [...],
     "usage": ...}, each row with its host's id, the earliest first; usage added up over every host's events, each turn
-    once."""
+    once. Every host's asked at once, and what hasn't answered within timeout (all told) is an error."""
+    deadline = time.monotonic() + timeout
     ch, info = wire.reach({"via": "local"}, timeout=timeout)
     ch.close()
     wheres = [({"via": "local"}, info.get("id"))] + [
@@ -446,25 +472,33 @@ def gather(start, end=None, what=("events", "metrics", "profiles", "usage"), tim
     replies, ask = {}, {"op": "telemetry_read", "from": start, "to": end, "what": [w for w in what if w != "usage"]
                         + (["events"] if "usage" in what and "events" not in what else []), "req": 1}
 
+    lock, done = threading.Lock(), [False]
+
     def one(where, hid):
         try:
-            c, _ = wire.reach(where, timeout=timeout)
+            c, _ = wire.reach(where, timeout=max(1, deadline - time.monotonic()))
             try:
-                c.sock.settimeout(timeout)
+                c.sock.settimeout(max(1, deadline - time.monotonic()))
                 c.send(ask)
-                replies[hid] = next((m for m in c if m.get("req") == 1), {"error": "no answer"})
+                got = next((m for m in c if m.get("req") == 1), {"error": "no answer"})
             finally:
                 c.close()
         except (OSError, ValueError) as e:
-            replies[hid] = {"error": str(e)}
+            got = {"error": str(e)}
+        with lock:
+            if not done[0]:  # (an answer after gather's returned: dropped)
+                replies[hid] = got
     threads = [threading.Thread(target=one, args=w, daemon=True) for w in wheres]
     for t in threads:
         t.start()
     for t in threads:
-        t.join(timeout + 5)
-    out = {"hosts": replies}
+        t.join(max(0, deadline - time.monotonic()))
+    with lock:
+        done[0] = True
+        hosts = {hid: replies.get(hid) or {"error": "no answer"} for _, hid in wheres}
+    out = {"hosts": hosts}
     for kind in ("events", "metrics", "profiles"):
-        out[kind] = sorted(({**r, "from_host": hid} for hid, rep in replies.items() for r in rep.get(kind) or []),
+        out[kind] = sorted(({**r, "from_host": hid} for hid, rep in hosts.items() for r in rep.get(kind) or []),
                            key=lambda r: r["at"])
     if "usage" in what:
         out["usage"] = usage(out["events"])

@@ -9,8 +9,10 @@
     "linux": [{"python": "line_profiler"}]
   },
   "install": {
-    "macos": "python3 -m pip install --user --break-system-packages line_profiler",
-    "debian": "sudo apt install python3-line-profiler"
+    "macos": "{python} -m pip install --user {managed}line_profiler",
+    "debian": "{python} -m pip install --user {managed}line_profiler",
+    "fedora": "{python} -m pip install --user {managed}line_profiler",
+    "arch": "{python} -m pip install --user {managed}line_profiler"
   },
   "link": "https://github.com/pyutils/line_profiler"
 }

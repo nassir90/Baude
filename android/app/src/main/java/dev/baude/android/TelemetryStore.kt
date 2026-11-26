@@ -91,11 +91,11 @@ object TelemetryStore {
     }
 
     /** A turn of one of this phone's sessions ended: the host's own turn_ended (what tokens are added up from). */
-    fun turn(session: String, seconds: Double, model: String?, effort: String?) {
+    fun turn(session: String, seconds: Double, model: String?, effort: String?, tokensIn: Long, tokensOut: Long) {
         if (!on) return
         event(JSONObject().put("at", System.currentTimeMillis() / 1000.0).put("kind", "turn_ended").put("host", hostId)
             .put("session", session).put("seconds", seconds).put("model", model ?: JSONObject.NULL)
-            .put("effort", effort ?: JSONObject.NULL).put("tokens_in", 0).put("tokens_out", 0), "phone")
+            .put("effort", effort ?: JSONObject.NULL).put("tokens_in", tokensIn).put("tokens_out", tokensOut), "phone")
             ?.let { write("events", listOf(it.put("app", "host"))) }
     }
 

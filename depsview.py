@@ -27,7 +27,7 @@ class Missing(Gtk.ScrolledWindow):
         self.title = Gtk.Label(wrap=True, justify=Gtk.Justification.CENTER)
         self.title.add_css_class("title-3")
         box.append(self.title)
-        self.fix = Gtk.Label(selectable=True, xalign=0)
+        self.fix = Gtk.Label(selectable=True, xalign=0, wrap=True, wrap_mode=Pango.WrapMode.WORD_CHAR)
         self.fix.add_css_class("mono")
         copy = Gtk.Button(icon_name="edit-copy-symbolic", tooltip_text=wording.say("common.copy"),
                           valign=Gtk.Align.CENTER)

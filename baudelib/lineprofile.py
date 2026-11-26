@@ -7,6 +7,7 @@ import atexit
 import importlib
 import linecache
 import os
+import queue
 import sys
 import threading
 import time
@@ -43,15 +44,46 @@ def resolve(name):
 
 class Profiler:
     """One process's: what it's told to profile (functions), and line_profiler's LineProfiler timing them since the
-    last snapshot. error: why it isn't profiling what it's told to (line_profiler isn't here; a name isn't found)."""
+    last snapshot. error: why it isn't profiling what it's told to (line_profiler isn't here; a name isn't found).
+    line_profiler counts its enabling and disabling per thread, and a count left on another thread leaves it timing
+    the whole process: so every switch of it is made on one thread of the Profiler's own (worker), whoever asks."""
 
     def __init__(self, app):
         self.app, self.functions, self.error = app, [], None
         self.lp, self.since, self.lock = None, None, threading.Lock()
+        self.jobs, self.worker = queue.Queue(), None
+
+    def _on_worker(self, fn, timeout=None):
+        """fn() run on the worker thread (started the first time), its result returned or its exception raised."""
+        if threading.current_thread() is self.worker:
+            return fn()
+        with self.lock:
+            if self.worker is None:
+                self.worker = threading.Thread(target=self._work, daemon=True, name=f"lineprofile-{self.app}")
+                self.worker.start()
+        box, done = {}, threading.Event()
+        self.jobs.put((fn, box, done))
+        done.wait(timeout)
+        if "error" in box:
+            raise box["error"]
+        return box.get("value")
+
+    def _work(self):
+        while True:
+            fn, box, done = self.jobs.get()
+            try:
+                box["value"] = fn()
+            except BaseException as e:  # noqa: BLE001 (raised again on the asker's thread)
+                box["error"] = e
+            finally:
+                done.set()
 
     def set(self, functions):
         """Profile these (none: off). What was timed so far is returned (snapshot's), not lost."""
         functions = [f for f in dict.fromkeys(f.strip() for f in functions or [] if isinstance(f, str)) if f]
+        return self._on_worker(lambda: self._set(functions))
+
+    def _set(self, functions):
         with self.lock:
             if functions == self.functions and (self.lp is not None or not functions):
                 return None
@@ -59,6 +91,10 @@ class Profiler:
             self.functions, self.error = functions, None
             if functions:
                 self._start()
+            else:
+                monitoring = getattr(sys, "monitoring", None)
+                assert monitoring is None or monitoring.get_tool(monitoring.PROFILER_ID) != "line_profiler", \
+                    "line_profiler still registered after profiling's off"
             return last
 
     def _start(self):
@@ -89,11 +125,14 @@ class Profiler:
         self.lp, self.since = lp, time.time()
         if not getattr(self, "exiting", False):
             self.exiting = True
-            atexit.register(lambda: self.lp is not None and self.lp.disable_by_count())
+            atexit.register(lambda: self._on_worker(lambda: self.lp is not None and self.lp.disable_by_count(), 2))
 
     def snapshot(self):
         """What's been timed since the last snapshot (a TelemetryProfile), or None if nothing's being profiled or
         nothing ran; profiling goes on."""
+        return self._on_worker(self._locked_take)
+
+    def _locked_take(self):
         with self.lock:
             return self._take(restart=True)
 

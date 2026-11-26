@@ -140,7 +140,7 @@ SAFE_MODES = (None, "default", "plan", "acceptEdits")  # (permission modes that 
 SHELL_TOOLS = ("Bash", "PowerShell")  # (tools that run commands: approving one, or allowing it always, is a shell's worth)
 COPY = {cap: f"access.{cap}" for cap in CAPABILITIES} | {  # (each capability's name, as every app says it)
     "shell": "kube.shell", "providers": "deps.providers", "kube": "window.kubernetes",
-    "docker": "window.docker", "subscriptions": "subscriptions.title"}
+    "docker": "window.docker", "databases": "window.database_schemas", "subscriptions": "subscriptions.title"}
 FILE = "access.json"
 MEMBERS_MAX = 256
 

@@ -63,7 +63,7 @@
     },
     "missing": {
       "$ref": "Dep.json",
-      "description": "servers: no server was found and Docker isn't on the host: Database Schemas shows this in its place."
+      "description": "servers: no server was found and Docker isn't on the host: Databases shows this in its place."
     }
   },
   "required": ["op"],

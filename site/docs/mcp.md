@@ -87,7 +87,7 @@ One of your tasks: its script, triggers and form, and its latest runs (when, wha
 
 ### `set_task`
 
-Make one of your tasks, or change one (by its id; a field left out kept as it was, but triggers and form, given, are given whole). A Python script imports baudetask: baudetask.inputs (its form, filled), baudetask.payload (its trigger's event), say(text) (a line in its log), ask(text, form=None) (asks you: your answer, or the form's values), fallback(error), and @baudetask.main (an exception handed to you). A shell script gets its inputs as $BAUDE_IN_<FIELD>. A trigger's payload fills a field of the same name, or the one fills maps it to. Saving a new script makes a new version; run it dry first (run_task's dry) to check it.
+Make one of your tasks, or change one (by its id; a field left out kept as it was, but triggers and form, given, are given whole). A Python script imports baudetask: baudetask.inputs (its form, filled), baudetask.payload (its trigger's event), say(text) (a line in its log), ask(text, form=None) (asks you: your answer, or the form's values), fallback(error), and @baudetask.main (an exception handed to you). A shell script gets its inputs as $BAUDE_IN_<FIELD>. A trigger's payload fills a field of the same name, or the one fills maps it to. Saving a new script makes a new version; run it with dummy answers first (run_task's dry) to check its asks.
 
 | Field | Type | Required | What it is |
 |---|---|---|---|
@@ -105,7 +105,7 @@ Make one of your tasks, or change one (by its id; a field left out kept as it wa
 
 ### `run_task`
 
-Run one of your tasks now, its form filled with inputs (the rest by default). dry: its asks answered by a dummy agent (each field's default, first choice, 0, false or ""), its failure not handed to you: to test a workflow and check its format. Waits for the run to end (wait false: at once) and gives its record and log.
+Run one of your tasks now, its form filled with inputs (the rest by default). dry: its script runs as it is, side effects and all, but its asks are answered by a dummy agent (each field's default, first choice, 0, false or "") and its failure isn't handed to you: to check its asks' format. Your own task's run is started and given at once (wait true: waited for until it ends or asks you, as you can only answer once this turn's over); another Bot's is waited for until it ends (wait false: at once). Gives its record and log; task_run reads it again.
 
 | Field | Type | Required | What it is |
 |---|---|---|---|
@@ -801,7 +801,7 @@ One of a Bot's tasks run now, by hand.
 | `session` | string | yes | The session's id. |
 | `id` | string | yes | The task's id. |
 | `inputs` | object |  | Its form, filled. |
-| `dry` | boolean |  | A dry run: its asks answered by a dummy agent, its failure not handed over. |
+| `dry` | boolean |  | Run with dummy answers: the script runs as it is, side effects and all, its asks answered by a dummy agent, its failure not handed over. |
 
 #### `senders` (SendersOp)
 
@@ -902,7 +902,7 @@ One of a Bot's tasks, its script and latest runs.
 
 #### `task_ask` (TaskAsk)
 
-A running script asks its Bot (on the host's own socket, with its run's token): something it can't decide, or (error) a failure handed over. Answered once the Bot's turn ends (a dry run's: by a dummy agent, at once).
+A running script asks its Bot (on the host's own socket, with its run's token): something it can't decide, or (error) a failure handed over. Sent the Bot as a turn of its own once it's idle, answered as that turn ends (refused, as a failure, for a task whose failures aren't handed over; with dummy answers: by a dummy agent, at once).
 
 | Field | Type | Required | What it is |
 |---|---|---|---|
@@ -1368,7 +1368,7 @@ Anything wrong, with the request's req. A request whose op the host doesn't take
 | `error` | string | yes | What's wrong. |
 | `code` | `unsupported_operation` \| `invalid_data_type` \| `access_denied` |  | One of the schema's own refusals. |
 | `detail` | string |  | A refusal's: what was wrong (the op, or the field and why), for a person to read; code, not this, says which refusal it is. |
-| `denied` | `shell` \| `browser` \| `providers` \| `model_files` \| `spawn` \| `manage` \| `kube` \| `databases` \| `access` |  | access_denied's: the capability refused. |
+| `denied` | `shell` \| `browser` \| `providers` \| `model_files` \| `spawn` \| `manage` \| `kube` \| `databases` \| `subscriptions` \| `access` |  | access_denied's: the capability refused. |
 | `plain` | boolean |  | Said for the user as it is. |
 | `gone` | GoneFolder |  | A session's folder gone and not made again. |
 | `missing` | Dep |  | What a chat's program needs that the host hasn't (claude, codex): error says what to install. |
@@ -2075,7 +2075,8 @@ A host's rule for each of its capabilities, by name: everybody's where none's se
 | `manage` | AccessRule | yes | Its chats as they are: listed, read, written in, stopped, renamed, archived, deleted, a Bot's tasks and memory. A chat's own rule (Access's chat) goes before this. |
 | `kube` | AccessRule | yes | Its machine's Kubernetes clusters (kube, kube_follow). |
 | `databases` | AccessRule | yes | Its machine's databases (databases). |
-| `access` | AccessRule | yes | These rules changed (access_set). A head on its own machine, or one over ssh, may always. |
+| `subscriptions` | AccessRule | yes | Its subscription accounts: listed, added, renamed, removed (signed out), each provider's default picked, a chat moved to one (with the chat's manage rule too), their usage read, and signed in to (accounts, login, login_code), a token account's token being added with them. |
+| `access` | AccessRule | yes | These rules changed (access_set), and the host itself: stopped, linked and unlinked, deactivated, its telemetry, themes and feedback (quit, link, unlink, deactivate, activate, telemetry_set, theme_save, theme_remove, feedback). A head on its own machine, or one over ssh, may always. |
 
 #### AccessState
 
@@ -2875,15 +2876,18 @@ A task's run: what started it, what it was given, how it went (a run's record is
 | `kind` | `manual` \| `schedule` \| `git_push` | yes | What started it. |
 | `payload` | object/null |  | The trigger's event. |
 | `inputs` | object/null |  | Its form as filled. |
-| `dry` | boolean/null |  | A dry run: its asks answered by a dummy agent, not its Bot. |
+| `dry` | boolean/null |  | Run with dummy answers: its script run as it is, side effects and all, its asks answered by a dummy agent, not its Bot. |
 | `status` | `running` \| `asking` \| `done` \| `failed` \| `stopped` \| `skipped` | yes | How it is, or ended. |
 | `started` | number | yes | When it started. |
+| `offset` | integer/null |  | How far ahead of UTC its host's clock was as it started (seconds): its times shown as they were there. |
 | `ended` | number/null |  | When it ended. |
 | `seconds` | number/null |  | How long it took. |
 | `exit` | integer/null |  | Its script's exit code. |
 | `error` | string/null |  | Why it failed or was skipped. |
 | `asks` | integer/null |  | How many times it asked its Bot. |
 | `handed` | boolean/null |  | Its failure was handed to its Bot. |
+| `pid` | integer/null |  | Its script's process id, as it runs. |
+| `pgid` | integer/null |  | Its script's process group, as it runs: what's left of it killed as its host starts again, if its host was killed as it ran. |
 
 #### TaskTrigger
 

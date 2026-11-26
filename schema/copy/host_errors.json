@@ -16,6 +16,7 @@
     "tasks_bot_only": "tasks are a Bot's",
     "task_limit": "set is a task (a Bot has 50 at most)",
     "no_task": "no such task (or its Bot's archived)",
+    "task_no_fallback": "this task's failures aren't handed to its Bot",
     "no_run": "no such run going",
     "bot_needs_name": "a Bot has a name",
     "picture_too_big": "the picture is too big (2 MB at most)",

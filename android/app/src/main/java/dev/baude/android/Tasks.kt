@@ -145,6 +145,8 @@ class TasksState(val live: Boolean = true) {
     var running by mutableStateOf<Msg.Task?>(null)
     var adding by mutableStateOf<Msg.Task?>(null)
     var forming by mutableStateOf<Msg.Task?>(null)
+    /** The task whose Delete waits to be confirmed. */
+    var deleting by mutableStateOf<Msg.Task?>(null)
     /** A new task saved: its page opened when the host says its id. */
     var openSaved = false
 }
@@ -317,10 +319,11 @@ fun TasksPage(hostId: String, sid: String, here: Boolean, state: TasksState? = n
             when (st.page) {
                 "task" -> st.task?.let { t ->
                     TaskView(t, st.runs.toList(), offset, back = { st.page = "list"; load() }, run = { runOrAsk(t) },
-                        change = { st.editing = t }, delete = {
-                            ask(Msg.Tasks(session = sid, delete = t.id.orEmpty()).json(), "delete")
-                            st.page = "list"
-                        }, addTrigger = { st.adding = t },
+                        change = { // (its dialog once its script's read: as listed, it has none)
+                            if (t.script != null) st.editing = t
+                            else ask(Msg.TaskGet(session = sid, id = t.id.orEmpty()).json(), "load") { r ->
+                                Msg.TaskReply.from(r).task?.let { st.editing = it } }
+                        }, delete = { st.deleting = t }, addTrigger = { st.adding = t },
                         removeTrigger = { tr -> save(whole(t, triggers = t.triggers.orEmpty().filter { it.id != tr.id })) },
                         editForm = { st.forming = t }, openRun = { openRun(it) })
                 }
@@ -375,6 +378,21 @@ fun TasksPage(hostId: String, sid: String, here: Boolean, state: TasksState? = n
     st.forming?.let { t ->
         FormDialog(t) { made -> st.forming = null; if (made != null) save(whole(t, form = made)) }
     }
+    st.deleting?.let { t ->
+        AlertDialog(
+            onDismissRequest = { st.deleting = null },
+            title = { Text(Wording.Tasks.deleteHeading(name = t.name.orEmpty().ifBlank { Wording.Tasks.task })) },
+            confirmButton = {
+                Button(Wording.Common.delete, destructive = true) {
+                    st.deleting = null
+                    ask(Msg.Tasks(session = sid, delete = t.id.orEmpty()).json(), "delete")
+                    st.page = "list"
+                }
+            },
+            dismissButton = { Button(Wording.Common.cancel) { st.deleting = null } },
+            containerColor = c.dialog,
+        )
+    }
 }
 
 /** A task's page: its header (back, its name, Run, Change, Delete), then its triggers, form, script and runs. */
@@ -421,8 +439,9 @@ private fun TaskView(t: Msg.Task, runs: List<Msg.TaskRun>, offset: Int, back: ()
             }
             GroupHeading(Wording.Tasks.runs)
             BoxedList(runs, Wording.Tasks.noRuns) { r ->
-                val title = listOfNotNull(hostWhen(r.started?.toDouble(), offset), r.seconds?.let { tookText(it.toDouble()) },
-                    if (r.dry == true) Wording.Tasks.dryRun else null).joinToString(" · ")
+                val title = listOfNotNull(hostWhen(r.started?.toDouble(), r.offset?.toInt() ?: offset),
+                    r.seconds?.let { tookText(it.toDouble()) }, if (r.dry == true) Wording.Tasks.dummyAnswers else null)
+                    .joinToString(" · ")
                 ActionRow(title, null, onClick = { openRun(r) }, titleLines = 2, prefix = { RunState(r.status) }, suffix = {
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Icon(kindIcon(r.kind), kindWord(r.kind), tint = c.dim, modifier = Modifier.size(16.dp.icon))
@@ -435,26 +454,27 @@ private fun TaskView(t: Msg.Task, runs: List<Msg.TaskRun>, offset: Int, back: ()
     }
 }
 
-/** A run's page: its header (back, '<task> · <when>', Stop while it's going), one line of its facts, and its log: the
- * script's output and errors in code blocks, what it said as plain lines, its asks of the Bot and the Bot's answers as
- * cards, its state's changes dim. */
+/** A run's page: its header (back, '<task> · <when>', Stop while it's going), one line of its facts (why it failed in
+ * place of its state, if it did), and its log: the script's output and its errors each in code blocks of their own
+ * (errors in the error colour), its asks of the Bot and the Bot's answers as cards, the rest as plain lines. */
 @Composable
 private fun RunView(r: Msg.TaskRun, log: List<Msg.TaskLogLine>, bot: String, task: String, offset: Int, back: () -> Unit,
                     stop: () -> Unit) {
     val c = LocalBaude.current
     Column(Modifier.fillMaxSize()) {
-        PageHeader(task, "$task · ${hostWhen(r.started?.toDouble(), offset)}", back) {
+        PageHeader(task, "$task · ${hostWhen(r.started?.toDouble(), r.offset?.toInt() ?: offset)}", back) {
             if (going(r.status)) IconButton(Adwaita.MediaPlaybackStop, Wording.Common.stop, onClick = stop)
         }
-        Text(listOfNotNull(Wording.Tasks.status(status = r.status.orEmpty()), kindWord(r.kind),
-            r.seconds?.let { tookText(it.toDouble()) }, r.version).joinToString(" · "),
+        Text(listOfNotNull(r.error?.ifBlank { null } ?: Wording.Tasks.status(status = r.status.orEmpty()), kindWord(r.kind),
+            r.seconds?.let { tookText(it.toDouble()) }, if (r.dry == true) Wording.Tasks.dummyAnswers else null, r.version)
+            .joinToString(" · "),
             style = Type.caption, color = c.dim, modifier = Modifier.padding(start = 10.dp, end = 10.dp, bottom = 6.dp))
-        // (consecutive output and errors together, as one block)
+        // (consecutive output lines together as one block, consecutive errors as another)
         val parts = mutableListOf<List<Msg.TaskLogLine>>()
         for (l in log) {
             val prev = parts.lastOrNull()
             val block = l.kind == "out" || l.kind == "err"
-            if (block && prev != null && prev.first().kind.let { it == "out" || it == "err" }) parts[parts.size - 1] = prev + l
+            if (block && prev != null && prev.first().kind == l.kind) parts[parts.size - 1] = prev + l
             else parts.add(listOf(l))
         }
         Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 10.dp, vertical = 4.dp),
@@ -463,7 +483,6 @@ private fun RunView(r: Msg.TaskRun, log: List<Msg.TaskLogLine>, bot: String, tas
                 val l = p.first()
                 when (l.kind) {
                     "out", "err" -> LogBlock(p)
-                    "say" -> Text(l.text.orEmpty(), style = Type.body, color = c.fg)
                     "ask", "answer" -> Column(Modifier.fillMaxWidth().card(c), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         Text(when {
                             l.kind == "answer" -> Wording.Tasks.botAnswered(bot = bot)
@@ -473,7 +492,7 @@ private fun RunView(r: Msg.TaskRun, log: List<Msg.TaskLogLine>, bot: String, tas
                         val values = l.values?.takeIf { it.length() > 0 }
                         Text(l.text.orEmpty().ifBlank { values?.toString(1).orEmpty() }, style = Type.body, color = c.fg)
                     }
-                    else -> Text(l.text.orEmpty(), style = Type.caption, color = c.dim)
+                    else -> Text(l.text.orEmpty(), style = Type.body, color = c.fg)
                 }
             }
             Spacer(Modifier.padding(bottom = 6.dp))
@@ -481,7 +500,7 @@ private fun RunView(r: Msg.TaskRun, log: List<Msg.TaskLogLine>, bot: String, tas
     }
 }
 
-/** A run's output and errors, a code block's panel with each line in its colour (errors the error colour). */
+/** A run's output, or its errors, a code block's panel (errors in the error colour). */
 @Composable
 private fun LogBlock(lines: List<Msg.TaskLogLine>) {
     val c = LocalBaude.current
@@ -589,13 +608,15 @@ private fun RunForm(t: Msg.Task, done: (JSONObject?, Boolean) -> Unit) {
                         else -> { Label(label); Field(values[i], { values[i] = it }, "") }
                     }
                 }
+                // (stacked, as the desktop's alert stacks them when they don't fit side by side)
+                Column(Modifier.fillMaxWidth().padding(top = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(Wording.Tasks.run, suggested = true, modifier = Modifier.fillMaxWidth()) { done(filled(), false) }
+                    Button(Wording.Tasks.dryRun, modifier = Modifier.fillMaxWidth()) { done(filled(), true) }
+                    Button(Wording.Common.cancel, modifier = Modifier.fillMaxWidth()) { done(null, false) }
+                }
             }
         },
-        confirmButton = {
-            Button(Wording.Tasks.dryRun) { done(filled(), true) }
-            Button(Wording.Tasks.run, suggested = true) { done(filled(), false) }
-        },
-        dismissButton = { Button(Wording.Common.cancel) { done(null, false) } },
+        confirmButton = {},
         containerColor = c.dialog,
     )
 }
@@ -666,7 +687,8 @@ private fun TriggerDialog(t: Msg.Task, clock: Msg.Clock, done: (Msg.TaskTrigger?
                 val map = fields.associateWith { from(it) }.filterValues { it.isNotEmpty() }
                 done(if (kind == "git_push") Msg.TaskTrigger(kind = kind, repo = repo, branch = branch.ifBlank { "main" }, fills = map)
                     else if (atTime) Msg.TaskTrigger(kind = kind, at = at, days = days.sorted(), fills = map)
-                    else Msg.TaskTrigger(kind = kind, every = (count.toIntOrNull() ?: 1) * if (hours) 60 else 1, fills = map))
+                    else Msg.TaskTrigger(kind = kind, fills = map, every = (count.toIntOrNull() ?: 1).let { n -> // (as the host takes it)
+                        if (hours) n.coerceIn(1, 744) * 60 else n.coerceIn(5, 44640) }))
             }
         },
         dismissButton = { Button(Wording.Common.cancel) { done(null) } },

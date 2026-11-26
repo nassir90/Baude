@@ -78,6 +78,8 @@
         "tasks.run",
         "tasks.change",
         "common.delete",
+        "tasks.delete_heading",
+        "common.cancel",
         "tasks.triggers",
         "tasks.form",
         "tasks.script",
@@ -94,11 +96,11 @@
         },
         {
           "by": "click Change",
-          "does": "opens the Change Task dialog"
+          "does": "opens the Change Task dialog, once the task's script is read"
         },
         {
           "by": "click Delete",
-          "does": "deletes the task on the host (no confirmation) and goes back to the list"
+          "does": "asks 'Delete <task>?' (Cancel, Delete in red, Cancel the default); Delete deletes the task on the host, with its runs and the scripts only it ran, and goes back to the list"
         }
       ],
       "parts": [
@@ -165,12 +167,12 @@
         },
         {
           "name": "runs",
-          "shows": "Heading 'Runs'. Its latest runs, newest first: the state icon, the title '<when> · <how long>' (when: HH:MM if today, else 'Mon 03 Nov 14:00', host clock; how long: '12 s' or '3 min 4 s'), and at the end an icon for what started it (play by hand, alarm clock schedule, branch git push) and the version, monospace, dim. A dry run's title ends ' · Dry run'. None: the dim line 'No runs yet'.",
+          "shows": "Heading 'Runs'. Its latest runs, newest first: the state icon, the title '<when> · <how long>' (when: HH:MM if today, else 'Mon 03 Nov 14:00', on the host's clock as it was when the run started; how long: '12 s' or '3 min 4 s'), and at the end an icon for what started it (play by hand, alarm clock schedule, branch git push) and the version, monospace, dim. A run with dummy answers has ' · dummy answers' after that. None: the dim line 'No runs yet'.",
           "copy": [
             "tasks.no_runs",
             "tasks.seconds",
             "tasks.minutes_took",
-            "tasks.dry_run"
+            "tasks.dummy_answers"
           ],
           "actions": [
             {
@@ -183,7 +185,7 @@
     },
     {
       "name": "run page",
-      "shows": "A header row: a back button (tooltip the task's name), the title '<task> · <when>' in bold, and a Stop button (stop icon) while it's running or asking. Then one line: its state's word, what started it ('By hand', 'Schedule', 'Git push'), how long it took and its version. Then its log, scrolling, in order: the script's output and errors in code blocks (consecutive lines together; errors in the error colour), each line it said as plain text, each ask of the Bot as a card headed 'Asked <Bot>' (or 'Handed to <Bot>' for a failure handed over) with what was asked, each answer as a card headed '<Bot> answered' with the Bot's answer, and the run's state changes as dim lines. Read every second while it's going.",
+      "shows": "A header row: a back button (tooltip the task's name), the title '<task> · <when>' in bold, and a Stop button (stop icon) while it's running or asking. Then one line: its state's word (or, if it failed or was stopped, why), what started it ('By hand', 'Schedule', 'Git push'), how long it took, 'dummy answers' for a run with them, and its version. Then its log, scrolling, in order: the script's output in code blocks and its errors in code blocks of their own in the error colour (consecutive lines of each together), each line it said as plain text, each ask of the Bot as a card headed 'Asked <Bot>' (or 'Handed to <Bot>' for a failure handed over) with what was asked, each answer as a card headed '<Bot> answered' with the Bot's answer, and anything else the host says of the run as plain text. Nothing says when it started or that it ended: the title and the line under it do. Read every second while it's going, the lines since added to what's drawn.",
       "copy": [
         "tasks.status",
         "tasks.asked_bot",
@@ -241,7 +243,7 @@
     },
     {
       "name": "run form",
-      "shows": "An alert dialog headed 'Run <task>' with one control per field: text field, number box, switch, or drop-down of its choices, each labelled, filled with its default; buttons Cancel, Dry run and Run (suggested).",
+      "shows": "An alert dialog headed 'Run <task>' with one control per field: text field, number box, switch, or drop-down of its choices, each labelled, filled with its default; buttons Cancel, Run with dummy answers and Run (suggested).",
       "copy": [
         "tasks.run_heading",
         "common.cancel",
@@ -254,14 +256,14 @@
           "does": "runs it with the form as filled"
         },
         {
-          "by": "click Dry run",
-          "does": "runs it with its asks answered by a dummy agent and its failure not handed to the Bot"
+          "by": "click Run with dummy answers",
+          "does": "runs the script as it is, side effects and all, with its asks answered by a dummy agent and its failure not handed to the Bot"
         }
       ]
     },
     {
       "name": "trigger dialog",
-      "shows": "An alert dialog headed 'Add Trigger', Cancel and Save. A drop-down Schedule / Git push. Schedule: 'Every' or 'At a time of day'; every: a number and minutes / hours (5 minutes to a month); at: 'Times in <zone>' (or 'Times on the host's clock'), an HH:MM field and seven day toggles Mon to Sun. Git push: 'Repository folder' (a path on the host) and 'Branch' (main). Then, if the task has fields, 'Fills' and one drop-down per field, '<field> from', with 'nothing' and the trigger's payload keys (schedule: time; git push: repo, branch, before, after, commit, message, author), set to the key of the field's own name if there is one.",
+      "shows": "An alert dialog headed 'Add Trigger', Cancel and Save. A drop-down Schedule / Git push. Schedule: 'Every' or 'At a time of day'; every: a number and minutes / hours (5 to 44640 minutes, 1 to 744 hours: what the host takes); at: 'Times in <zone>' (or 'Times on the host's clock'), an HH:MM field and seven day toggles Mon to Sun. Git push: 'Repository folder' (a path on the host) and 'Branch' (main). Then, if the task has fields, 'Fills' and one drop-down per field, '<field> from', with 'nothing' and the trigger's payload keys (schedule: time; git push: repo, branch, before, after, commit, message, author), set to the key of the field's own name if there is one.",
       "copy": [
         "tasks.trigger_heading",
         "tasks.schedule",
@@ -384,7 +386,7 @@
     },
     {
       "said": "Test a workflow with a dummy agent and check the format is correct",
-      "rule": "Every app's run form offers a Dry run, its asks answered by a dummy agent",
+      "rule": "Every app's run form offers Run with dummy answers: the script runs as it is, its asks answered by a dummy agent",
       "decided": "2026-11-26",
       "source": [
         {

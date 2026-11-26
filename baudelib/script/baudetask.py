@@ -10,14 +10,14 @@ it can be copied anywhere.
     answer = task.ask("Which of these is the release?")    # its Bot asked: what it said
     plan = task.ask("Resolve this conflict: ...", form=[{"name": "keep", "type": "choice",
                                                          "choices": ["ours", "theirs"]}])  # {"keep": "ours"}
-    task.fallback(error)   # a failure handed to its Bot: what it said
+    task.fallback(error)   # a failure handed to its Bot mid-run (if the task's failures are): what it said
 
-    @task.main             # run with the inputs; an exception's traceback handed to the Bot, the run failed
-    def deploy(inputs): ...
+    @task.main             # run with the inputs; an exception's traceback printed, the run failed (and handed to
+    def deploy(inputs): ...  # the Bot by its host once it's over, if the task's failures are)
 
-Run outside a task (no BAUDE_TASK_RUN), or in a dry run, its asks are answered by a dummy agent: each field its
-default, its first choice, 0, false or "". Inputs then come from BAUDE_TASK_INPUTS, or a JSON object as the first
-argument."""
+Run outside a task (no BAUDE_TASK_RUN), or run with dummy answers, its asks are answered by a dummy agent: each field
+its default, its first choice, 0, false or "" (the script itself runs as it is, side effects and all). Inputs then
+come from BAUDE_TASK_INPUTS, or a JSON object as the first argument."""
 import json
 import os
 import socket
@@ -121,17 +121,14 @@ def fallback(error):
 
 
 def main(fn):
-    """fn run with the inputs, as the script's main: an exception's handed to the Bot (fallback) and the run fails."""
+    """fn run with the inputs, as the script's main: an exception's traceback printed and the run failed. Its host
+    hands the failure, with the end of the run's log, to the Bot once the run's over (if the task's failures are), so
+    the Bot may run the task again as it's handed it."""
     try:
         fn(inputs)
     except SystemExit:
         raise
-    except BaseException as e:  # noqa: BLE001
+    except BaseException:  # noqa: BLE001
         traceback.print_exc()
-        try:
-            said = fallback(e)
-            print(f"the Bot: {said}", file=sys.stderr)
-        except Exception as again:  # noqa: BLE001
-            print(f"couldn't hand it to the Bot: {again}", file=sys.stderr)
         sys.exit(1)
     return fn

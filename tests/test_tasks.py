@@ -4,7 +4,9 @@ a head on its socket. Each round makes a task (Python, shell, or the Bot's own p
 by hand, its form filled at random; dry (its asks answered by the dummy agent); failing (handed to its Bot); as a git
 push to a repo of the run's own fires it (the payload filling its form); as its schedule comes due; stopped midway.
 Each run must end, its record and log must be as the schema has them, and the host must still answer after. Then a
-Bot's routines, kept as they were, are moved to tasks, and the script library is run outside a task. No GTK.
+failure is healed end to end (handed to the Bot, which sets the task's script and runs it again with its own tools,
+the new run asking it), two pushes during one run are both deployed (by the run after it), a Bot's routines, kept as
+they were, are moved to tasks (twice: once only), and the script library is run outside a task. No GTK.
 
     python3 tests/test_tasks.py [--rounds N] [--seed S]
 """
@@ -133,6 +135,66 @@ def git(repo, *args):
     subprocess.run(["git", "-C", repo, *args], check=True, capture_output=True)
 
 
+def runs_of(head, sid, tid):
+    return head.ask({"op": "task", "session": sid, "id": tid})["runs"]
+
+
+def heal(head, sid):
+    """A failure handed to the Bot (the fake claude) as the run's over: it sets the task's script and runs it again
+    in that turn, not waiting on it; the new run's ask waits for that turn's end, answered by a turn of its own."""
+    tid = head.ask({"op": "tasks", "session": sid, "set": {
+        "name": "Heal", "runtime": "python", "fallback": True, "timeout_s": 20,
+        "script": 'print("HEAL ME")\nraise SystemExit(3)\n'}})["saved"]
+    first = head.ask({"op": "run_task", "session": sid, "id": tid})["run"]
+    failed = ended(head, sid, first["id"])
+    assert failed["run"]["status"] == "failed" and failed["run"]["handed"], failed["run"]
+    healed = wait(lambda: next((r for r in runs_of(head, sid, tid) if r["id"] != first["id"]
+                                and r["status"] == "done"), None), "the healed run", 60)
+    assert healed["version"] != first["version"] and healed["kind"] == "manual", healed
+    log = ended(head, sid, healed["id"])["log"]
+    assert any(x["kind"] == "answer" and "Looked into it" in x["text"] for x in log), log
+    handed = wait(lambda: [x for x in ended(head, sid, first["id"])["log"] if x["kind"] == "answer"],
+                  "the hand-off's answer")
+    assert "Healed" in handed[0]["text"], handed
+    assert not any(r["status"] == "skipped" for r in runs_of(head, sid, tid))
+    print("healed: failed, handed over, set, run again, done", flush=True)
+
+
+def pushes(head, srv, sid, repo):
+    """Two pushes while a push's run is going: both deployed, by one run after it (from the head it ran to the
+    latest)."""
+    tid = head.ask({"op": "tasks", "session": sid, "set": {
+        "name": "Deploy", "runtime": "python", "fallback": False, "timeout_s": 20,
+        "script": 'import time\nimport baudetask as task\ntask.say("deploying", task.payload["after"])\n'
+                  'time.sleep(3)\n',
+        "triggers": [{"kind": "git_push", "repo": repo, "branch": "main", "poll_s": 10}]}})["saved"]
+
+    def head_of():
+        return subprocess.run(["git", "-C", repo, "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
+    srv.tasks.polled.clear()
+    srv.tasks.due(block=True)  # (its first look: the head seen)
+    git(repo, "commit", "-q", "--allow-empty", "-m", "deploy a")
+    a = head_of()
+    srv.tasks.polled.clear()
+    srv.tasks.due(block=True)
+    first = wait(lambda: next((r for r in runs_of(head, sid, tid) if r["kind"] == "git_push"), None), "a's run")
+    assert first["payload"]["after"] == a and first["status"] == "running", first
+    for m in ("deploy b", "deploy c"):
+        git(repo, "commit", "-q", "--allow-empty", "-m", m)
+        srv.tasks.polled.clear()
+        srv.tasks.due(block=True)
+    c = head_of()
+    assert [r["id"] for r in runs_of(head, sid, tid)] == [first["id"]]
+    ended(head, sid, first["id"])
+    srv.tasks.due(block=True)
+    second = wait(lambda: next((r for r in runs_of(head, sid, tid) if r["id"] != first["id"]), None), "c's run")
+    assert second["payload"]["after"] == c and second["payload"]["before"] == a, second
+    ended(head, sid, second["id"])
+    assert len(runs_of(head, sid, tid)) == 2 and not any(r["status"] == "skipped" for r in runs_of(head, sid, tid))
+    head.ask({"op": "tasks", "session": sid, "delete": tid})
+    print("pushes: two during a run, deployed by the next", flush=True)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--rounds", type=int, default=6)
@@ -181,10 +243,10 @@ def main():
         how = rng.choice(("hand", "dry", "trigger", "stop"))
         if how == "trigger" and trigger == "git_push":
             srv.tasks.polled.clear()
-            srv.tasks.due()  # (its first look: the head seen, nothing fired)
+            srv.tasks.due(block=True)  # (its first look: the head seen, nothing fired)
             git(repo, "commit", "-q", "--allow-empty", "-m", f"push {n}")
             srv.tasks.polled.clear()
-            srv.tasks.due()
+            srv.tasks.due(block=True)
             run = wait(lambda: next((r for r in head.ask({"op": "task", "session": sid, "id": tid})["runs"]
                                      if r["kind"] == "git_push"), None), "a push's run")
             assert run["payload"]["message"] == f"push {n}" and run["inputs"].get("branch", "main") == "main", run
@@ -192,7 +254,7 @@ def main():
             with srv.lock:
                 st = srv.tasks.store(srv.sessions[sid])
                 st.find(tid)["triggers"][0]["next"] = time.time() - 1
-            srv.tasks.due()
+            srv.tasks.due(block=True)
             run = wait(lambda: next((r for r in head.ask({"op": "task", "session": sid, "id": tid})["runs"]
                                      if r["kind"] == "schedule"), None), "a schedule's run")
         else:
@@ -218,6 +280,8 @@ def main():
         assert head.ask({"op": "tasks", "session": sid})["op"] == "tasks"  # (the host still answering)
         if rng.random() < 0.3:
             assert head.ask({"op": "tasks", "session": sid, "delete": tid})["op"] == "tasks"
+    heal(head, sid)
+    pushes(head, srv, sid, repo)
     # a script's ops, refused without the run's token
     bad = head.ask({"op": "task_report", "run": "nope", "token": "nope", "say": "hi"})
     assert bad["op"] == "error", bad
@@ -230,6 +294,12 @@ def main():
     old = next(t for t in listed["tasks"] if t["name"] == "Old")
     assert old["runtime"] == "bot" and old["triggers"][0]["every"] == 60, old
     assert "routines" not in srv.sessions[sid].meta
+    with srv.lock:  # (moved again, as if the host was killed before the routines were dropped: not twice)
+        srv.sessions[sid].meta["routines"] = [{"id": "r1", "name": "Old", "prompt": "Do the old thing", "every": 60,
+                                               "paused": False, "last": None, "next": time.time() + 600}]
+        srv.tasks.stores.pop(sid, None)
+    listed = head.ask({"op": "tasks", "session": sid})
+    assert sum(t["name"] == "Old" for t in listed["tasks"]) == 1, listed
     # the library outside a task: a dummy agent's answers
     out = subprocess.run([sys.executable, "-c", "import baudetask as t; print(t.ask('x', form=[{'name': 'a', "
                           "'type': 'choice', 'choices': ['p', 'q']}]))"], capture_output=True, text=True,

@@ -296,8 +296,17 @@ def result(text):
 
 def task_answer(n, text):
     """A task's script asking its Bot (baudelib/tasks.py): a form's fields filled (the last of a choice's choices, 7,
-    true, "filled"), as JSON; else a line saying it looked."""
-    if "JSON object" in text:
+    true, "filled"), as JSON; a failure handed over whose log says HEAL ME, healed: the task's script set to one that
+    asks the Bot once and ends well (mcp__mesh__set_task), and run again (mcp__mesh__run_task, not waited for); else a
+    line saying it looked."""
+    healing = re.search(r"It's your task ([A-Za-z0-9_-]+);", text) if "HEAL ME" in text else None
+    if healing:
+        tid = healing[1]
+        mcp_tool("mesh", "set_task", {"id": tid, "script": 'import baudetask as task\n'
+                                                           'task.say("healed:", task.ask("Healed. Fine now?"))\n'})
+        mcp_tool("mesh", "run_task", {"id": tid})
+        answer = "Healed: fixed its script and ran it again."
+    elif "JSON object" in text:
         values = {}
         for m in re.finditer(r"^- ([A-Za-z_][A-Za-z0-9_]*): (.*)$", text, re.M):
             kind = m[2]
@@ -573,8 +582,13 @@ def mcp(method, params=None):
 def chat_tool(name, args):
     """A call to the chat's own tools (baudelib.chattools), through the server --mcp-config names (inline JSON, as the
     host gives it), started for the call, as Claude Code would."""
+    return mcp_tool("chat", name, args)
+
+
+def mcp_tool(which, name, args):
+    """A call to one of the servers --mcp-config names (which: chat, mesh, ...), started for the call."""
     cfg = arg("--mcp-config") or "{}"
-    server = json.loads(cfg if cfg.lstrip().startswith("{") else open(cfg).read())["mcpServers"]["chat"]
+    server = json.loads(cfg if cfg.lstrip().startswith("{") else open(cfg).read())["mcpServers"][which]
     p = subprocess.Popen([server["command"], *server["args"]], stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True,
                          env={**os.environ, **(server.get("env") or {})})
     calls = [("initialize", {"protocolVersion": "2025-06-18", "capabilities": {}}),

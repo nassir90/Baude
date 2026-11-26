@@ -13,6 +13,7 @@ gi.require_version("Adw", "1")
 from gi.repository import Adw, GLib, Gtk, Pango  # noqa: E402
 
 from baudelib import wire, wording  # noqa: E402
+from baudelib.tasks import LOG_SHOWN, MAX_EVERY, MIN_EVERY  # noqa: E402
 from markdownview import CodeBlock  # noqa: E402
 from panels import natural_height  # noqa: E402
 from widgets import Spinner, themed_icon  # noqa: E402
@@ -62,6 +63,12 @@ def stamp(t, clock=None):
     zone = datetime.timezone(datetime.timedelta(seconds=clock["offset"])) if clock else None
     d = datetime.datetime.fromtimestamp(t, zone)
     return d.strftime("%H:%M") if d.date() == datetime.datetime.now(zone).date() else d.strftime("%a %d %b %H:%M")
+
+
+def ran_at(run, clock=None):
+    """When a run started, as its host's clock had it then (its own offset), else as it has it now."""
+    offset = run.get("offset")
+    return stamp(run.get("started"), {"offset": offset} if isinstance(offset, int) else clock)
 
 
 def took(seconds):
@@ -130,6 +137,7 @@ class TasksPage(Gtk.Box):
         super().__init__(orientation=Gtk.Orientation.VERTICAL)
         self.win, self.sid, self.remote, self.asked, self.clock = win, None, None, 0, None
         self.tasks, self.task, self.runs, self.run, self.log, self.bot = [], None, [], None, [], None
+        self.drawn, self.tail = None, None  # (the run drawn: (its id, how many lines, its last); the block last drawn)
         self.stack = Gtk.Stack(vexpand=True, transition_type=Gtk.StackTransitionType.SLIDE_LEFT_RIGHT)
         self.append(self.stack)
         # the list
@@ -335,10 +343,8 @@ class TasksPage(Gtk.Box):
         self.task_title.set_label(t.get("name") or wording.say("tasks.task"))
         self.task_box.back.set_tooltip_text(PAGE)
         head.append(flat("media-playback-start-symbolic", wording.say("tasks.run"), lambda: self.start(t)))
-        head.append(flat("document-edit-symbolic", wording.say("tasks.change"), lambda: self.edit(t)))
-        head.append(flat("user-trash-symbolic", wording.say("common.delete"),
-                         lambda: self.ask({"op": "tasks", "session": self.sid, "delete": t["id"]},
-                                          lambda _r: self.go("list"))))
+        head.append(flat("document-edit-symbolic", wording.say("tasks.change"), lambda: self.change(t)))
+        head.append(flat("user-trash-symbolic", wording.say("common.delete"), lambda: self.delete(t)))
         # triggers
         g = self.group(wording.say("tasks.triggers"),
                        flat("list-add-symbolic", wording.say("tasks.add_trigger"), lambda: self.add_trigger(t)))
@@ -383,9 +389,9 @@ class TasksPage(Gtk.Box):
             lb = self.listbox(g)
             lb.connect("row-activated", lambda _l, row: self.open_run(row.run))
             for r in self.runs:
-                title = f"{stamp(r['started'], self.clock)} · " + (
+                title = f"{ran_at(r, self.clock)} · " + (
                     took(r.get("seconds")) if r.get("ended") else wording.say("tasks.status", status=r["status"])) + \
-                    (f" · {wording.say('tasks.dry_run')}" if r.get("dry") else "")
+                    (f" · {wording.say('tasks.dummy_answers')}" if r.get("dry") else "")
                 row = Adw.ActionRow(title=GLib.markup_escape_text(title), activatable=True)
                 row.run = r
                 row.add_prefix(status_icon(r))
@@ -397,78 +403,110 @@ class TasksPage(Gtk.Box):
 
     # ---- a run's page
     def open_run(self, run):
-        self.run, self.log = run, []
+        self.run, self.log, self.drawn = run, [], None
         self.draw_run()
         self.stack.set_visible_child_name("run")
         self.ask({"op": "task_run", "session": self.sid, "run": run["id"]})
 
     def draw_run(self):
-        while (c := self.run_body.get_first_child()) is not None:
-            self.run_body.remove(c)
+        """The run's header and facts drawn again, and its log's lines since it was last drawn added (all of it
+        drawn again only for another run, or a log cut at its start)."""
         head = self.run_box.head
         while (c := head.get_last_child()) is not self.run_title:
             head.remove(c)
         r = self.run
         if r is None:
+            while (c := self.run_body.get_first_child()) is not None:
+                self.run_body.remove(c)
+            self.drawn = None
             return
-        self.run_title.set_label(f"{r.get('name') or wording.say('tasks.task')} · {stamp(r['started'], self.clock)}")
+        self.run_title.set_label(f"{r.get('name') or wording.say('tasks.task')} · {ran_at(r, self.clock)}")
         self.run_box.back.set_tooltip_text(r.get("name") or wording.say("tasks.task"))
         if r.get("status") in GOING:
             head.append(flat("media-playback-stop-symbolic", wording.say("common.stop"),
                              lambda: self.ask({"op": "task_stop", "session": self.sid, "run": r["id"]})))
         kind = {"manual": "tasks.by_hand", "schedule": "tasks.schedule", "git_push": "tasks.git_push"}
-        facts = [wording.say("tasks.status", status=r["status"]), wording.say(kind.get(r.get("kind"), "tasks.by_hand"))]
+        facts = [r.get("error") or wording.say("tasks.status", status=r["status"]),
+                 wording.say(kind.get(r.get("kind"), "tasks.by_hand"))]
         if r.get("ended"):
             facts.append(took(r.get("seconds")))
+        if r.get("dry"):
+            facts.append(wording.say("tasks.dummy_answers"))
         facts.append(r.get("version") or "")
         line = Gtk.Box(spacing=6)
         line.append(status_icon(r))
         line.append(dim(" · ".join(f for f in facts if f), wrap=True))
-        self.run_body.append(line)
-        bot = self.bot or wording.say("sidebar.bot")
-        lines, kind_of = [], None
+        drawn, log = self.drawn, self.log
+        n = drawn[1] if drawn and drawn[0] == r["id"] and drawn[1] <= len(log) < LOG_SHOWN and \
+            (drawn[1] == 0 or log[drawn[1] - 1] == drawn[2]) else None
+        if n is None:
+            while (c := self.run_body.get_first_child()) is not None:
+                self.run_body.remove(c)
+            self.tail, n = None, 0
+        else:
+            self.run_body.remove(self.run_body.get_first_child())
+        self.run_body.prepend(line)
+        for x in log[n:]:
+            self.log_line(x)
+        self.drawn = (r["id"], len(log), log[-1] if log else None)
 
-        def flush():
-            if lines:
-                block = CodeBlock("\n".join(lines))
-                if kind_of == "err":
-                    block.label.add_css_class("error")
-                self.run_body.append(block)
-                lines.clear()
-        for x in self.log:
-            k = x.get("kind")
-            if k in ("out", "err"):
-                if k != kind_of:
-                    flush()
-                kind_of = k
-                lines.append(x.get("text") or "")
-                continue
-            flush()
-            kind_of = None
-            if k == "say":
-                self.run_body.append(Gtk.Label(label=x.get("text") or "", xalign=0, wrap=True, selectable=True,
-                                               wrap_mode=Pango.WrapMode.WORD_CHAR))
-            elif k in ("ask", "answer"):
-                head_text = wording.say("tasks.bot_answered", bot=bot) if k == "answer" else \
-                    wording.say("tasks.handed_bot", bot=bot) if x.get("error") else \
-                    wording.say("tasks.asked_bot", bot=bot)
-                card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
-                card.add_css_class("card")
-                inner = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4, margin_start=10, margin_end=10,
-                                margin_top=8, margin_bottom=8)
-                h = Gtk.Label(label=head_text, xalign=0)
-                h.add_css_class("heading")
-                inner.append(h)
-                text = json.dumps(x["values"], ensure_ascii=False) if x.get("values") else x.get("text") or ""
-                inner.append(Gtk.Label(label=text, xalign=0, wrap=True, selectable=True,
+    def log_line(self, x):
+        """One line of the run's log added: output and errors run together in a code block of their own (errors in
+        the error colour), each ask of the Bot and its answer a card, the rest plain lines."""
+        k, text = x.get("kind"), x.get("text") or ""
+        if k in ("out", "err"):
+            if self.tail is not None and self.tail[0] == k:
+                self.tail[2].append(text)
+                self.tail[1].set_code("\n".join(self.tail[2]))
+                return
+            block = CodeBlock(text)
+            if k == "err":
+                block.label.add_css_class("error")
+            self.run_body.append(block)
+            self.tail = (k, block, [text])
+            return
+        self.tail = None
+        if k in ("ask", "answer"):
+            bot = self.bot or wording.say("sidebar.bot")
+            head_text = wording.say("tasks.bot_answered", bot=bot) if k == "answer" else \
+                wording.say("tasks.handed_bot", bot=bot) if x.get("error") else \
+                wording.say("tasks.asked_bot", bot=bot)
+            card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+            card.add_css_class("card")
+            inner = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4, margin_start=10, margin_end=10,
+                            margin_top=8, margin_bottom=8)
+            h = Gtk.Label(label=head_text, xalign=0)
+            h.add_css_class("heading")
+            inner.append(h)
+            said = json.dumps(x["values"], ensure_ascii=False) if x.get("values") else text
+            inner.append(Gtk.Label(label=said, xalign=0, wrap=True, selectable=True,
+                                   wrap_mode=Pango.WrapMode.WORD_CHAR))
+            card.append(inner)
+            self.run_body.append(card)
+            return
+        self.run_body.append(Gtk.Label(label=text, xalign=0, wrap=True, selectable=True,
                                        wrap_mode=Pango.WrapMode.WORD_CHAR))
-                card.append(inner)
-                self.run_body.append(card)
-            else:
-                self.run_body.append(dim(x.get("text") or "", wrap=True))
-        flush()
 
     # ---- dialogs
+    def change(self, t):
+        """t changed: its dialog opened once its script's read (the page drawn from the list has none yet)."""
+        if t.get("script") is not None:
+            return self.edit(t)
+        self.ask({"op": "task", "session": self.sid, "id": t["id"]}, lambda r: self.edit(r["task"]))
+
+    def delete(self, t):
+        """t deleted, once that's confirmed: its runs and scripts too."""
+        name = t.get("name") or wording.say("tasks.task")
+        dlg = Adw.AlertDialog(heading=wording.say("tasks.delete_heading", name=name), close_response="cancel",
+                              default_response="cancel")
+        dlg.add_response("cancel", wording.say("common.cancel"))
+        dlg.add_response("delete", wording.say("common.delete"))
+        dlg.set_response_appearance("delete", Adw.ResponseAppearance.DESTRUCTIVE)
+        dlg.connect("response", lambda _d, r: r == "delete" and self.ask(
+            {"op": "tasks", "session": self.sid, "delete": t["id"]}, lambda _r: self.go("list")))
+        dlg.present(self.win)
+        return dlg
+
     def edit(self, t):
         """A task made, or (t) changed: its name, how it runs, its script, whether its failures go to the Bot."""
         t = t or {}
@@ -543,10 +581,12 @@ class TasksPage(Gtk.Box):
         how = Gtk.DropDown.new_from_strings([wording.say("tasks.every"), wording.say("tasks.at_a_time")])
         sched.append(how)
         every = Gtk.Box(spacing=6)
-        amount = Gtk.SpinButton.new_with_range(1, 744, 1)
+        amount = Gtk.SpinButton.new_with_range(1, MAX_EVERY // 60, 1)
         amount.set_value(1)
         unit = Gtk.DropDown.new_from_strings([wording.say("tasks.minutes"), wording.say("tasks.hours")])
         unit.set_selected(1)
+        unit.connect("notify::selected", lambda *_: amount.set_range(*((1, MAX_EVERY // 60) if unit.get_selected()
+                                                                       else (MIN_EVERY, MAX_EVERY))))
         every.append(amount)
         every.append(unit)
         sched.append(every)

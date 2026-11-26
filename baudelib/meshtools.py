@@ -70,7 +70,7 @@ SCHEMAS = {
                  "form=None) (asks you: your answer, or the form's values), fallback(error), and @baudetask.main (an "
                  "exception handed to you). A shell script gets its inputs as $BAUDE_IN_<FIELD>. A trigger's payload "
                  "fills a field of the same name, or the one fills maps it to. Saving a new script makes a new "
-                 "version; run it dry first (run_task's dry) to check it.",
+                 "version; run it with dummy answers first (run_task's dry) to check its asks.",
                  {"session": BOT, "id": {"type": "string", "description": "A task's id, to change it"},
                   "name": {"type": "string"},
                   "runtime": {"type": "string", "enum": ["python", "shell", "bot"],
@@ -87,10 +87,12 @@ SCHEMAS = {
                   "fallback": {"type": "boolean", "description": "A failed run is handed to you (default true)"},
                   "timeout_s": {"type": "integer"}, "paused": {"type": "boolean"},
                   "delete": {"type": "boolean", "description": "Delete the task (id)"}}, []),
-    "run_task": ("Run one of your tasks now, its form filled with inputs (the rest by default). dry: its asks answered "
-                 "by a dummy agent (each field's default, first choice, 0, false or \"\"), its failure not handed to "
-                 "you: to test a workflow and check its format. Waits for the run to end (wait false: at once) and "
-                 "gives its record and log.",
+    "run_task": ("Run one of your tasks now, its form filled with inputs (the rest by default). dry: its script runs "
+                 "as it is, side effects and all, but its asks are answered by a dummy agent (each field's default, "
+                 "first choice, 0, false or \"\") and its failure isn't handed to you: to check its asks' format. "
+                 "Your own task's run is started and given at once (wait true: waited for until it ends or asks you, "
+                 "as you can only answer once this turn's over); another Bot's is waited for until it ends (wait "
+                 "false: at once). Gives its record and log; task_run reads it again.",
                  {"session": BOT, "id": {"type": "string"}, "inputs": {"type": "object"}, "dry": {"type": "boolean"},
                   "wait": {"type": "boolean"}}, ["id"]),
     "task_run": ("One run of one of your tasks, and its log.", {"session": BOT, "run": {"type": "string"}}, ["run"]),
@@ -459,10 +461,11 @@ class Mesh:
         sid = self._bot(a)
         run = self.request(self.local, {"op": "run_task", "session": sid, "id": a["id"],
                                         "inputs": a.get("inputs") or {}, "dry": bool(a.get("dry"))})["run"]
+        own = sid == self.me  # (its asks are this turn's to answer, once it's over: never waited on in it)
         end = time.monotonic() + WAIT_MAX_S
-        while a.get("wait", True) is not False and time.monotonic() < end:
+        while a.get("wait", not own) is True and time.monotonic() < end:
             got = self.task_run({"session": sid, "run": run["id"]})
-            if got["run"]["status"] not in ("running", "asking"):
+            if got["run"]["status"] not in ("running", "asking") or own and got["run"]["status"] == "asking":
                 return got
             time.sleep(1)
         return self.task_run({"session": sid, "run": run["id"]})

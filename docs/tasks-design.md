@@ -18,10 +18,11 @@ A task belongs to one Bot and is kept on that Bot's host, in the Bot's folder (`
 | `form` | fields `{name, label?, type: text, number, bool or choice, choices?, default?, required?}` |
 | `triggers` | below |
 | `fallback` | true: a failed run (non-zero exit, timeout) is handed to the Bot with its log |
-| `timeout_s` | the most a run may take (default an hour); it's killed after |
+| `timeout_s` | the most a run may take (default an hour); it's stopped after |
 | `paused` | its triggers don't fire; it can still be run by hand |
 
-A script runs with the Bot's folder as its working directory and gets its run in its environment:
+A script runs with the Bot's folder as its working directory (its worktree made again from its branch first, if it's
+gone, as for a message), in a process group of its own, and gets its run in its environment:
 `BAUDE_SOCKET`, `BAUDE_TASK_RUN`, `BAUDE_TASK_TOKEN`, `BAUDE_TASK_INPUTS` (the filled form, JSON),
 `BAUDE_TASK_PAYLOAD` (the trigger's event, JSON) and `BAUDE_IN_<FIELD>` for each input, for shell scripts.
 `baudelib/script/` is on its `PYTHONPATH`, so a Python script does `import baudetask`.
@@ -43,16 +44,24 @@ if the payload has a key of that name, else its default.
 
 `git_push` is built the way `script` triggers will be: a poll that's given its last state (the head it saw) and
 returns events and its new state. A push seen while the host was off fires once when it's back. The first poll only
-records the head. A run already going when a trigger fires: that event is recorded as a `skipped` run.
+records the head. A schedule that comes due while a run of its task is going is recorded as a `skipped` run. A push
+seen while a run is going isn't marked seen: once that run ends the branch is looked at again, and one run takes every
+push since (its payload's `before` the head last run, `after` the head now).
 
 ## A run
 
 `running` → (`asking` while it waits on its Bot) → `done` | `failed` | `stopped` | `skipped`.
 
 Each run is kept as `runs/<id>.json` with a log `runs/<id>.log` (JSON lines `{at, kind, text, values?}`, kinds `out`,
-`err`, `say`, `ask`, `answer`, `status`). The latest 100 runs of each Bot are kept. A run records: task, version,
-trigger (`{id, kind}`, `manual` for by hand), payload, inputs, `dry`, started, ended, seconds, exit code, error, asks,
-and `handed` (its failure given to the Bot).
+`err`, `say`, `ask`, `answer`, `status`). The latest 100 runs of each task are kept. A run records: task, version,
+trigger (`{id, kind}`, `manual` for by hand), payload, inputs, `dry`, started (and the host's UTC offset then, so its
+time reads as it did there), ended, seconds, exit code, error, asks, `handed` (its failure given to the Bot), and its
+script's `pid` and `pgid`.
+
+Stopped, or out of time, a run's process group is sent SIGTERM and, 5 s on, SIGKILL, whether or not the script itself
+has exited by then. A host killed as a run went (no chance to stop it) finds the run still `running` as it starts: the
+run's process group, if one of its processes still runs that script, is killed, and the run is kept as `stopped`, so
+two runs of one task never overlap.
 
 ## Asking the Bot, and the fallback
 
@@ -70,21 +79,27 @@ except Conflict as e:
     apply(plan["keep"])
 ```
 
-- `ask(text, form=None)` sends `task_ask`. The host gives the Bot a turn (from the task, by its name) and answers with
-  the turn's result: its text, or, with a form, the values it parsed from the Bot's JSON and checked against the
+- `ask(text, form=None)` sends `task_ask`. The host gives the Bot a turn of its own (from the task, by its name): it
+  waits until the Bot is idle and then sends it, one ask of a Bot at a time, so the turn that ends next is that ask's,
+  never a user's turn or one a stopped run's ask left going. It answers with the turn's result: its text, or, with a form, the values it parsed from the Bot's JSON and checked against the
   form. A reply that doesn't fit is sent back to the Bot once with what was wrong (a format check); still wrong, the
   ask fails. The run is `asking` meanwhile.
-- `fallback(error)` is an ask that says it's an error: the Bot gets the error and the log so far.
-- `@task.main` runs a function with the inputs; an exception goes to `fallback` with its traceback, and the run fails
-  with the Bot's answer in its log.
+- `fallback(error)` is an ask that says it's an error: the Bot gets the error and the log so far. The host refuses it
+  for a task whose `fallback` is off.
+- `@task.main` runs a function with the inputs; an exception's traceback is printed and the script exits 1, so the run
+  fails and the host hands it over (below).
 - Any runtime, Python or not: with `fallback` on, a run that exits non-zero or times out is handed to the Bot by the
-  host (its exit, version and the log's last lines, and where the script is), and the Bot's answer goes in the log.
+  host (its exit, the task's id, its version and the log's last lines, and where the script is), and the Bot's answer
+  goes in the log. The run is over first: kept as `failed` and no longer running before the Bot's turn is sent, so the
+  Bot may run the task again in that turn.
 
 ## Self-healing (later; most of it falls out)
 
 The Bot can already read and change its tasks with its MCP tools (`tasks`, `task`, `set_task`, `run_task`,
 `task_run`). A failure handed to it says which task and version failed and how; the Bot fixes the script with
-`set_task`, which makes a new version, and reruns it with `run_task`. Missing: a trigger that fails to parse (a web
+`set_task`, which makes a new version, and reruns it with `run_task`. A Bot's `run_task` of its own task starts the run
+and returns at once (its `wait` defaults to false, and even waiting it returns as soon as the run asks the Bot), since
+the Bot can only answer the run's asks once its turn is over. Missing: a trigger that fails to parse (a web
 trigger) raising itself the same way, and the host rerunning the event that failed once the new version is saved.
 
 ## Bot git repos (later)
@@ -93,12 +108,13 @@ Each Bot gets a git repo in its folder for its tools; a task's script is a file 
 The host serves the repo to the Bot's working folder; a push to it is a `git_push` trigger on the Bot's own repo that
 redeploys its tasks, so the Bot's fix-and-push is the deploy.
 
-## Simulating: dry runs and the dummy agent
+## Simulating: runs with dummy answers
 
-`run_task` with `dry: true` runs the script with its asks answered by a **dummy agent**: each form field gets its
-default, the first choice, `0`, `false` or `""`, and a plain ask gets a fixed line. Nothing reaches the Bot and a failure
-isn't handed over, so "test this workflow with a dummy agent and check the format" is one dry run, and the run's log
-shows what each ask would have sent. Later: the dummy given a script of answers, and a Bot told to run its own
+`run_task` with `dry: true` (the apps' **Run with dummy answers**) runs the script as it is, side effects and all, with
+its asks answered by a **dummy agent**: each form field gets its default, the first choice, `0`, `false` or `""`, and a
+plain ask gets a fixed line. Nothing reaches the Bot and a failure isn't handed over, so "test this workflow with a
+dummy agent and check the format" is one such run, and the run's log shows what each ask would have sent. Chose naming
+it for what it does over skipping side effects: the host can't tell which of a script's steps have side effects. Later: the dummy given a script of answers, and a Bot told to run its own
 workflows dry before saving them.
 
 ## Telemetry
@@ -134,15 +150,17 @@ as it asks about Bash.
 ## Routines
 
 A Bot's routines move to tasks the first time its host reads its tasks: each becomes a `bot` task with the routine's
-prompt as its script and its schedule as a `schedule` trigger (next and last kept). The `routines` and `run_routine`
-ops, and the Routines page, are gone; the Tasks page takes their place.
+prompt as its script and its schedule as a `schedule` trigger (next and last kept). Each task takes its routine's id,
+so a host killed between saving the tasks and dropping the routines moves them over again without making any twice.
+The `routines` and `run_routine` ops, and the Routines page, are gone; the Tasks page takes their place.
 
 ## Screens
 
 Side panel → Tasks (a Bot's chat), on Baude and the phone:
 
 - **Tasks list**: each task's name, its last run's state, a switch (paused or not) and Run; + makes one.
-- **A task**: Run (its form first, if it has fields), Change, Delete; its triggers (+ adds one); its form; its script
+- **A task**: Run (its form first, if it has fields), Change, Delete (confirmed; its runs and the scripts only it ran
+  go too); its triggers (+ adds one); its form; its script
   and version; its runs, newest first.
 - **A run**: its state, trigger, version, time and length; its log, each ask and answer as a hand-off to the Bot.
 - **Adding a trigger**: its kind, its settings, and which payload key fills each form field.
@@ -150,7 +168,7 @@ Side panel → Tasks (a Bot's chat), on Baude and the phone:
 ## In this PR
 
 Tasks as scripts run by the host (python, shell, bot); manual, schedule and git push triggers; payloads filling
-forms; `baudetask` (say, ask, fallback, main) over the wire; dry runs with the dummy agent; the host's fallback for
+forms; `baudetask` (say, ask, fallback, main) over the wire; runs with dummy answers; the host's fallback for
 failed runs; runs and logs; the Bot's task tools; Routines moved over; the Tasks page on Baude and the phone; a test
 that runs tasks through the wire.
 

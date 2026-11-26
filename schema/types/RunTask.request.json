@@ -28,7 +28,7 @@
     },
     "dry": {
       "type": "boolean",
-      "description": "A dry run: its asks answered by a dummy agent, its failure not handed over."
+      "description": "Run with dummy answers: the script runs as it is, side effects and all, its asks answered by a dummy agent, its failure not handed over."
     }
   },
   "required": [

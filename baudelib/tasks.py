@@ -32,6 +32,7 @@ RUNS_KEPT, RUNS_SHOWN, LOG_SHOWN = 100, 50, 2000
 LOG_MAX = 4 * 1024 * 1024  # (a run's log, at most: what's written after, dropped)
 TIMEOUT_S, TIMEOUT_MAX = 3600, 24 * 3600
 ASK_S = 3600  # (an ask of its Bot waited for this long, at most)
+GRACE_S = 5  # (a run stopped: its script's given this long to stop, then killed)
 MIN_EVERY, MAX_EVERY = 5, 60 * 24 * 31  # (a schedule's minutes: no more often than 5, no less often than a month)
 POLL_S, POLL_MIN, POLL_MAX = 30, 10, 3600  # (a git push trigger's looks at its branch)
 DAYS = (0, 1, 2, 3, 4, 5, 6)
@@ -259,8 +260,11 @@ def form_said(form):
 
 
 def from_routine(r):
-    """(a task, its script) for a routine as it was kept (a Bot's prompt on a schedule)."""
-    trigger = {"id": _id(), "kind": "schedule", "next": r.get("next")}
+    """(a task, its script) for a routine as it was kept (a Bot's prompt on a schedule): its id the routine's (or, if
+    that's no id, one made from it), so one moved over again is the same task."""
+    tid = r["id"] if wire.is_id(r.get("id")) else \
+        hashlib.sha256(json.dumps(r, sort_keys=True, default=str).encode()).hexdigest()[:12]
+    trigger = {"id": tid[:10] + "-s", "kind": "schedule", "next": r.get("next")}
     if r.get("every"):
         trigger["every"] = r["every"]
     else:
@@ -268,7 +272,7 @@ def from_routine(r):
     if trigger["next"] is None:
         trigger["next"] = next_run(trigger, time.time())
     prompt = str(r.get("prompt") or "")
-    return {"id": _id(r.get("id")), "name": r.get("name") or "Task", "runtime": "bot", "version": version_of(prompt),
+    return {"id": tid, "name": r.get("name") or "Task", "runtime": "bot", "version": version_of(prompt),
             "form": [], "triggers": [trigger], "fallback": False, "timeout_s": TIMEOUT_S,
             "paused": bool(r.get("paused"))}, prompt
 
@@ -292,6 +296,24 @@ def pushed(t):
                   "author": said[0], "message": said[1] if len(said) > 1 else ""}
 
 
+def reap(run, folder):
+    """A run's script's process group, left running by a host that was killed as it ran: killed, if it's still that
+    run's (one of its processes runs the run's script)."""
+    pgid, mark = run.get("pgid"), os.path.join(folder, "scripts", f"{run.get('version')}.")
+    if not isinstance(pgid, int) or pgid <= 1:
+        return
+    try:
+        listed = subprocess.run(["ps", "-A", "-o", "pgid=,command="], capture_output=True, text=True,
+                                timeout=10).stdout
+    except (OSError, subprocess.SubprocessError):
+        return
+    if any(line.split(None, 1)[0] == str(pgid) and mark in line for line in listed.splitlines() if line.strip()):
+        try:
+            os.killpg(pgid, signal.SIGKILL)
+        except OSError:
+            pass
+
+
 class Store:
     """One Bot's tasks, as they're kept in its folder (folder: <bot_dir>/tasks)."""
 
@@ -304,7 +326,8 @@ class Store:
         runs = os.path.join(folder, "runs")
         for n in sorted(os.listdir(runs)) if os.path.isdir(runs) else ():
             if n.endswith(".json") and isinstance(r := _read_json(os.path.join(runs, n)), dict) and r.get("id"):
-                if r.get("status") in ("running", "asking"):  # (its host stopped as it ran)
+                if r.get("status") in ("running", "asking"):  # (its host stopped as it ran: what it left, stopped)
+                    reap(r, folder)
                     r.update(status="stopped", ended=r.get("ended") or r["started"],
                              error=r.get("error") or wording.say("tasks.host_stopped"))
                 self.runs[r["id"]] = r
@@ -343,16 +366,33 @@ class Store:
         from baudelib.serverstate import _write_json
         self.runs[run["id"]] = run
         _write_json(os.path.join(self.folder, "runs", f"{run['id']}.json"), run)
-        if len(self.runs) > RUNS_KEPT:  # (the oldest that are over, gone)
-            for old in sorted(self.runs.values(), key=lambda r: r["started"])[:len(self.runs) - RUNS_KEPT]:
-                if old["status"] in ("running", "asking"):
-                    continue
-                self.runs.pop(old["id"], None)
-                for ext in ("json", "log"):
-                    try:
-                        os.unlink(os.path.join(self.folder, "runs", f"{old['id']}.{ext}"))
-                    except OSError:
-                        pass
+        mine = [r for r in self.runs.values() if r["task"] == run["task"]]
+        if len(mine) > RUNS_KEPT:  # (the task's oldest that are over, gone)
+            self.drop([r for r in sorted(mine, key=lambda r: r["started"])[:len(mine) - RUNS_KEPT]
+                       if r["status"] not in ("running", "asking")])
+
+    def drop(self, runs):
+        for old in runs:
+            self.runs.pop(old["id"], None)
+            for ext in ("json", "log"):
+                try:
+                    os.unlink(os.path.join(self.folder, "runs", f"{old['id']}.{ext}"))
+                except OSError:
+                    pass
+
+    def forget(self, tid):
+        """A deleted task's runs (but those going) and the scripts nothing kept now ran or runs, gone."""
+        self.drop([r for r in list(self.runs.values())
+                   if r["task"] == tid and r["status"] not in ("running", "asking")])
+        used = {f"{t['version']}.{EXT[t['runtime']]}" for t in self.tasks} | \
+            {r.get("version") for r in self.runs.values()}
+        folder = os.path.join(self.folder, "scripts")
+        for n in os.listdir(folder) if os.path.isdir(folder) else ():
+            if n not in used and n.split(".")[0] not in used:
+                try:
+                    os.unlink(os.path.join(folder, n))
+                except OSError:
+                    pass
 
     def log(self, rid, kind, text, **more):
         path = os.path.join(self.folder, "runs", f"{rid}.log")
@@ -391,9 +431,9 @@ class Tasks:
         self.lock = threading.RLock()  # (taken after the server's lock, never before)
         self.stores = {}  # (a Bot's session id: its Store)
         self.running = {}  # (a run's id: {sid, task, proc, token, stop})
-        self.waiting = {}  # (a Bot's session id: its asks waiting on its turn's end, in the order sent)
+        self.waiting = {}  # (a Bot's session id: the ask sent it, waiting on its turn's end)
         self.polled = {}  # ((sid, trigger id): when it was last looked at)
-        self.turns = {}  # (a Bot's session id: held while one of its runs' asks waits on its turn: one at a time)
+        self.turns = {}  # (a Bot's session id: held while one ask of it waits on its turn: one at a time)
 
     # ---- kept
     def store(self, s):
@@ -405,9 +445,11 @@ class Tasks:
                 st = self.stores[s.id] = Store(os.path.join(bot_dir(self.server.state_dir, s.id), "tasks"))
             if s.meta.get("routines"):
                 for r in s.meta["routines"]:
-                    if isinstance(r, dict) and len(st.tasks) < TASKS_MAX:
-                        task, prompt = from_routine(r)
-                        st.put_script(task, prompt)
+                    if not isinstance(r, dict):
+                        continue
+                    task, prompt = from_routine(r)
+                    if st.find(task["id"]) is None and len(st.tasks) < TASKS_MAX:  # (moved before, the host killed
+                        st.put_script(task, prompt)                               # before they were dropped: once)
                         st.tasks.append(task)
                 st.save()
                 s.meta.pop("routines", None)
@@ -439,8 +481,12 @@ class Tasks:
             saved = None
             if "set" in msg or "delete" in msg:
                 with self.lock:
-                    if "delete" in msg:
+                    if "delete" in msg:  # (its runs going stopped; its runs and scripts gone)
+                        for rid, held in list(self.running.items()):
+                            if held["sid"] == s.id and held["task"] == msg["delete"]:
+                                self.stop(rid, wording.say("task_notes.stopped"))
                         st.tasks = [t for t in st.tasks if t["id"] != msg["delete"]]
+                        st.forget(msg["delete"])
                     else:
                         given = msg["set"] if isinstance(msg["set"], dict) else None
                         old = st.find(given.get("id")) if given else None
@@ -492,9 +538,9 @@ class Tasks:
         now = time.time()
         run = {"id": uuid.uuid4().hex[:16], "task": task["id"], "name": task["name"], "version": task["version"],
                "trigger": (trigger or {}).get("id"), "kind": kind, "payload": payload or None, "inputs": inputs,
-               "dry": dry or None, "status": "running", "started": now, "asks": 0}
+               "dry": dry or None, "status": "running", "started": now, "offset": clock()["offset"], "asks": 0}
         with self.lock:
-            if any(r["sid"] == s.id and r["task"] == task["id"] for r in self.running.values()):
+            if self.going(s.id, task["id"]):
                 run.update(status="skipped", ended=now, seconds=0, error=wording.say("tasks.still_running"))
                 st.put_run(run)
                 return run
@@ -502,47 +548,61 @@ class Tasks:
             token = secrets.token_hex(16)
             self.running[run["id"]] = {"sid": s.id, "task": task["id"], "proc": None, "token": token, "stop": None,
                                        "dry": dry}
-        st.log(run["id"], "status", wording.say("tasks.started_by", kind=kind, version=task["version"]))
-        cwd = s.meta.get("cwd") if isinstance(s.meta.get("cwd"), str) and os.path.isdir(s.meta["cwd"]) else st.folder
-        threading.Thread(target=self._run, args=(s.id, st, dict(task), run, token, cwd), daemon=True,
+        threading.Thread(target=self._run, args=(s.id, st, dict(task), run, token), daemon=True,
                          name=f"task-{run['id']}").start()
         self.server.changed()
         return dict(run)
 
-    def _run(self, sid, st, task, run, token, cwd):
+    def going(self, sid, tid):
+        with self.lock:
+            return any(r["sid"] == sid and r["task"] == tid for r in self.running.values())
+
+    def _cwd(self, sid, st):
+        """Where a Bot's run runs: its folder (its worktree made again first, if it's gone), else its tasks'."""
+        self.server.restore_folder(None, sid)
+        with self.server.lock:
+            s = self.server.sessions.get(sid)
+            cwd = s.meta.get("cwd") if s is not None else None
+        return cwd if isinstance(cwd, str) and os.path.isdir(cwd) else st.folder
+
+    def _run(self, sid, st, task, run, token):
         error, code = None, None
         try:
             if task["runtime"] == "bot" and run.get("dry"):  # (what it'd be given, and the dummy's answer)
                 st.log(run["id"], "ask", st.script(task))
                 st.log(run["id"], "answer", DUMMY)
             elif task["runtime"] == "bot":
+                self._cwd(sid, st)
                 text, failed = self.ask(run["id"], st.script(task), task["name"])
                 error = wording.say("tasks.bot_failed") if failed else None
             else:
-                code, error = self._script(st, task, run, token, cwd)
+                code, error = self._script(st, task, run, token, self._cwd(sid, st))
         except Exception as e:  # noqa: BLE001 (said in its run, and on the page)
             error = f"{type(e).__name__}: {e}"
         with self.lock:
             held = self.running.get(run["id"]) or {}
             stopped = held.get("stop")
-        if error and not stopped and task.get("fallback") and task["runtime"] != "bot" and not held.get("dry") \
-                and not st.runs[run["id"]].get("handed"):
-            tail = "\n".join(f"{x['kind']}: {x['text']}" for x in st.read_log(run["id"], 40))
-            self._update(st, run["id"], handed=True)
-            try:
-                self.ask(run["id"], wording.say("tasks.handed", error=error, version=task["version"],
-                                                path=st.script_path(task), log=tail), task["name"], error=True)
-            except Exception as e:  # noqa: BLE001
-                st.log(run["id"], "status", f"{type(e).__name__}: {e}")
+        hand = bool(error and not stopped and task.get("fallback") and task["runtime"] != "bot" and
+                    not held.get("dry") and not st.runs[run["id"]].get("handed"))
         ended = time.time()
         status = "stopped" if stopped else "failed" if error else "done"
         self._update(st, run["id"], status=status, ended=ended, seconds=round(ended - run["started"], 3), exit=code,
-                     error=stopped or error)
-        st.log(run["id"], "status", stopped or error or wording.say("tasks.finished"))
-        with self.lock:
+                     error=stopped or error, handed=hand or None)
+        with self.lock:  # (over before it's handed on: the Bot may run it again as it's handed it)
             self.running.pop(run["id"], None)
+            for key in [k for k in self.polled if k[0] == sid]:  # (its branches looked at again now: a push
+                self.polled.pop(key)                               # while it ran, run after it)
         self.server.log(f"task {task['name']!r} of {sid}: {status}" + (f" ({error})" if error else ""))
         self.server.changed()
+        self.server.woken.set()
+        if hand:
+            tail = "\n".join(f"{x['kind']}: {x['text']}" for x in st.read_log(run["id"], 40))
+            try:
+                self.ask(run["id"], wording.say("tasks.handed", error=error, version=task["version"], id=task["id"],
+                                                path=st.script_path(task), log=tail), task["name"], error=True,
+                         held={"sid": sid, "task": task["id"], "stop": None})
+            except Exception as e:  # noqa: BLE001
+                st.log(run["id"], "status", f"{type(e).__name__}: {e}")
 
     def _update(self, st, rid, **fields):
         with self.lock:
@@ -551,7 +611,8 @@ class Tasks:
             return run
 
     def _script(self, st, task, run, token, cwd):
-        """A python or shell task's script run: (its exit code, why it failed or None)."""
+        """A python or shell task's script run: (its exit code, why it failed or None). Stopped or out of time: its
+        process group told to stop, and killed after GRACE_S whether or not its script's gone."""
         path = st.script_path(task)
         argv = [sys.executable, "-u", path] if task["runtime"] == "python" else ["/bin/sh", path]
         env = {**os.environ, "BAUDE_SOCKET": os.path.abspath(self.server.socket_path), "BAUDE_TASK_RUN": run["id"],
@@ -563,11 +624,14 @@ class Tasks:
             env["BAUDE_TASK_DRY"] = "1"
         for k, v in run["inputs"].items():
             env[f"BAUDE_IN_{k.upper()}"] = v if isinstance(v, str) else json.dumps(v)
-        p = subprocess.Popen(argv, cwd=cwd, env=env, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
-                             stderr=subprocess.PIPE, start_new_session=True)
         with self.lock:
-            if run["id"] in self.running:
-                self.running[run["id"]]["proc"] = p
+            held = self.running.get(run["id"])
+            if held is None or held.get("stop"):
+                return None, None
+            p = subprocess.Popen(argv, cwd=cwd, env=env, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                                 stderr=subprocess.PIPE, start_new_session=True)
+            held["proc"] = p
+        self._update(st, run["id"], pid=p.pid, pgid=p.pid)
 
         def read(pipe, kind):
             for line in iter(pipe.readline, b""):
@@ -576,41 +640,65 @@ class Tasks:
                    threading.Thread(target=read, args=(p.stderr, "err"), daemon=True)]
         for t in readers:
             t.start()
-        try:
-            code = p.wait(timeout=task["timeout_s"])
-            error = None if code == 0 else wording.say("tasks.exited", code=code)
-        except subprocess.TimeoutExpired:
+        end, code, timed_out = time.monotonic() + task["timeout_s"], None, False
+        while code is None and not held.get("stop"):
+            try:
+                code = p.wait(timeout=0.25)
+            except subprocess.TimeoutExpired:
+                if time.monotonic() > end:
+                    timed_out = True
+                    break
+        if timed_out or held.get("stop"):  # (its script gone already or not: its group's what's killed)
             self._kill(p)
-            code, error = p.wait(), wording.say("tasks.timed_out", seconds=task["timeout_s"])
-        for t in readers:
-            t.join(timeout=5)
+            code = p.wait()
+            error = wording.say("tasks.timed_out", seconds=task["timeout_s"]) if timed_out else None
+        else:
+            error = None if code == 0 else wording.say("tasks.exited", code=code)
+        for t in readers:  # (stopped: every process that held its output killed, so they end)
+            t.join(timeout=2 * GRACE_S if timed_out or held.get("stop") else 5)
         return code, error
 
     @staticmethod
     def _kill(p):
+        """A script's process group told to stop, then, GRACE_S on, killed (its script gone by then or not)."""
         try:
             os.killpg(p.pid, signal.SIGTERM)
-            p.wait(timeout=5)
-        except (OSError, subprocess.TimeoutExpired):
+        except OSError:
+            pass
+        try:
+            p.wait(timeout=GRACE_S)
+        except subprocess.TimeoutExpired:
+            pass
+        end = time.monotonic() + GRACE_S
+        while time.monotonic() < end:  # (its script gone: the rest of its group given what's left of the time)
             try:
-                os.killpg(p.pid, signal.SIGKILL)
+                os.killpg(p.pid, 0)
             except OSError:
-                pass
+                return
+            time.sleep(0.1)
+        try:
+            os.killpg(p.pid, signal.SIGKILL)
+        except OSError:
+            pass
 
     def stop(self, rid, why):
-        """A run stopped (why: said in it)."""
+        """A run stopped (why: said in it): its script told to stop at once (killed by its run's thread), an ask it
+        waits on, or waits to make, let go of."""
         with self.lock:
             held = self.running.get(rid)
             if held is None:
                 return
             held["stop"] = why
             p = held["proc"]
-            for w in self.waiting.get(held["sid"], []):  # (an ask it waits on: let go of)
+            for w in self.waiting.get(held["sid"], []):
                 if w["run"] == rid:
                     w["text"], w["failed"] = why, True
                     w["done"].set()
         if p is not None:
-            threading.Thread(target=self._kill, args=(p,), daemon=True).start()
+            try:
+                os.killpg(p.pid, signal.SIGTERM)
+            except OSError:
+                pass
 
     def stop_all(self):
         """Every run stopped: the host's going."""
@@ -640,7 +728,8 @@ class Tasks:
         got[1].log(msg["run"], "say", msg.get("say") or "")
 
     def script_ask(self, msg):
-        """task_ask's answer (text, values), once its Bot's turn ends: ValueError if it can't be."""
+        """task_ask's answer (text, values), once its Bot's turn ends: ValueError if it can't be (a failure handed
+        over by a task whose failures aren't handed to its Bot, too)."""
         got = self.held(msg)
         if got is None:
             raise ValueError(wording.say("host_errors.no_run"))
@@ -648,9 +737,11 @@ class Tasks:
         form = [clean_field(f) for f in msg.get("form") or []] if isinstance(msg.get("form"), list) else []
         text = str(msg.get("text") or "")
         with self.lock:
-            task = st.find(held["task"]) or {"name": "Task"}
-        if msg.get("error"):  # (the script's handed its failure over: the host doesn't again)
-            self._update(st, msg["run"], handed=True)
+            task = st.find(held["task"]) or {"name": "Task", "fallback": False}
+        if msg.get("error"):
+            if not task.get("fallback"):
+                raise ValueError(wording.say("host_errors.task_no_fallback"))
+            self._update(st, msg["run"], handed=True)  # (the script's handed its failure over: the host doesn't again)
         if held["dry"]:
             st.log(msg["run"], "ask", text, error=bool(msg.get("error")) or None)
             values = dummy(form) if form else None
@@ -671,75 +762,88 @@ class Tasks:
         st.log(msg["run"], "answer", json.dumps(values), values=values)
         return said, values
 
-    def ask(self, rid, text, name, form=None, error=False):
-        """(what the Bot said, failed) for text given a run's Bot as a turn, from its task (name), waited for till the
-        turn ends; the ask and its answer in the run's log. One run's ask of a Bot at a time: each turn answers one."""
+    def ask(self, rid, text, name, form=None, error=False, held=None):
+        """(what the Bot said, failed) for text given a run's Bot as a turn of its own, from its task (name), waited
+        for till that turn ends; the ask and its answer in the run's log. held: an ended run's (its failure handed
+        on), else the run's as it's going. One ask of a Bot at a time, each sent as it's idle: the turn it ends
+        is that ask's, not one going on as it was sent (a user's, a stopped run's)."""
+        live = held is None
         with self.lock:
-            held = self.running.get(rid)
+            held = self.running.get(rid) if live else held
             turn = self.turns.setdefault(held["sid"], threading.Lock()) if held else None
         if held is None:
             return wording.say("host_errors.no_run"), True
-        with turn:
-            return self._ask(rid, held, text, name, form, error)
+        end = time.monotonic() + ASK_S
+        while not turn.acquire(timeout=0.25):  # (stopped meanwhile: let go of at once)
+            if held.get("stop") or time.monotonic() > end:
+                return held.get("stop") or wording.say("tasks.no_answer"), True
+        try:
+            return self._ask(rid, held, text, name, form, error, live, end)
+        finally:
+            turn.release()
 
-    def _ask(self, rid, held, text, name, form, error):
+    def _ask(self, rid, held, text, name, form, error, live, end):
         with self.lock:
             st = self.stores.get(held["sid"])
-            if rid not in self.running or st is None or held.get("stop"):
+            if live and rid not in self.running or st is None or held.get("stop"):
                 return held.get("stop") or wording.say("host_errors.no_run"), True
         sid = held["sid"]
         st.log(rid, "ask", text, error=error or None)
-        self._update(st, rid, status="asking", asks=(st.runs[rid].get("asks") or 0) + 1)
-        wait = {"run": rid, "done": threading.Event(), "text": None, "failed": False, "skip": 0}
+        if live:
+            self._update(st, rid, status="asking", asks=(st.runs[rid].get("asks") or 0) + 1)
+        wait = {"run": rid, "done": threading.Event(), "text": None, "failed": False}
         said = wording.say("tasks.asked", run=rid, error="error" if error else "ask") + "\n\n" + text + \
             ("\n\n" + form_said(form) if form else "")
-        srv = self.server
-        with srv.lock:
-            s = srv.sessions.get(sid)
-            if s is None or s.deleting or s.meta.get("archived"):
-                return wording.say("host_errors.no_task"), True
-            before = len(s.codex_queue)
-            with self.lock:
-                self.waiting.setdefault(sid, []).append(wait)
-            try:
-                srv.take_input(None, s, {"type": "user", "uuid": str(uuid.uuid4()),
-                                         "message": {"role": "user", "content": said}},
-                               {"kind": "host", "name": wording.say("tasks.sender", name=name)})
-            except Exception as e:  # noqa: BLE001 (Elsewhere, or its agent not started)
-                with self.lock:
-                    self.waiting[sid].remove(wait)
-                st.log(rid, "answer", str(e))
-                return str(e), True
-            wait["skip"] = len(s.codex_queue) - before  # (held for the turn going on: answered by the one after)
-        wait["done"].wait(ASK_S)
+        srv, sent = self.server, False
+        while not sent:  # (sent once its Bot's idle: its next turn's end is this one's)
+            with srv.lock:
+                s = srv.sessions.get(sid)
+                if s is None or s.deleting or s.meta.get("archived"):
+                    return wording.say("host_errors.no_task"), True
+                if not s.busy and not s.codex_queue:
+                    with self.lock:
+                        self.waiting.setdefault(sid, []).append(wait)
+                    try:
+                        srv.take_input(None, s, {"type": "user", "uuid": str(uuid.uuid4()),
+                                                 "message": {"role": "user", "content": said}},
+                                       {"kind": "host", "name": wording.say("tasks.sender", name=name)})
+                    except Exception as e:  # noqa: BLE001 (Elsewhere, or its agent not started)
+                        with self.lock:
+                            self.waiting[sid].remove(wait)
+                        st.log(rid, "answer", str(e))
+                        return str(e), True
+                    sent = True
+                    continue
+            if held.get("stop") or time.monotonic() > end:
+                wait["text"], wait["failed"] = held.get("stop") or wording.say("tasks.no_answer"), True
+                break
+            time.sleep(0.25)
+        if sent:
+            wait["done"].wait(max(0.0, end - time.monotonic()))
         with self.lock:
             if wait in self.waiting.get(sid, []):
                 self.waiting[sid].remove(wait)
-        if not wait["done"].is_set():
+        if not wait["done"].is_set() and not wait["failed"]:
             wait["text"], wait["failed"] = wording.say("tasks.no_answer"), True
         if not form or wait["failed"]:
             st.log(rid, "answer", wait["text"] or "", error=wait["failed"] or None)
-        if rid in self.running:
+        if live and rid in self.running:
             self._update(st, rid, status="running")
         return wait["text"] or "", wait["failed"]
 
     def turn_over(self, s, msg):
-        """(server's lock held) s's turn ended (its result, msg): the asks it took, answered with what it said."""
+        """(server's lock held) s's turn ended (its result, msg): the ask it was sent for, answered with what it
+        said."""
         with self.lock:
-            for w in list(self.waiting.get(s.id, [])):
-                if w["skip"]:
-                    w["skip"] -= 1
-                    continue
+            for w in self.waiting.pop(s.id, []):
                 w["text"], w["failed"] = str(msg.get("result") or ""), bool(msg.get("is_error"))
                 w["done"].set()
-                self.waiting[s.id].remove(w)
-                break
 
     # ---- due
-    def due(self):
+    def due(self, block=False):
         """Triggers due now fired (each Bot's whose tasks aren't paused, not archived, not being deleted, the host
-        not stopping): schedules come due, branches pushed to. When the next one's due (seconds from now), or None
-        if there's none."""
+        not stopping): schedules come due; branches pushed to, looked at on a thread of their own (block: on this
+        one). When the next one's due (seconds from now), or None if there's none."""
         srv, now, soonest, looks = self.server, time.time(), None, []
         with srv.lock:
             if srv.stopped.is_set():
@@ -770,6 +874,7 @@ class Tasks:
                                 at = self.polled.get((s.id, t["id"]), 0) + t.get("poll_s", POLL_S)
                                 if at <= now:
                                     looks.append((s.id, task["id"], t["id"], dict(t)))
+                                    self.polled[(s.id, t["id"])] = now
                                     at = now + t.get("poll_s", POLL_S)
                                 wait = at - now
                             else:
@@ -777,8 +882,17 @@ class Tasks:
                             soonest = wait if soonest is None else min(soonest, wait)
                     if changed:
                         st.save()
-        for sid, tid, trid, t in looks:  # (not under the lock: git)
-            self.polled[(sid, trid)] = time.time()
+        if looks and block:
+            self.look(looks)
+        elif looks:
+            threading.Thread(target=self.look, args=(looks,), daemon=True, name="task-git").start()
+        return soonest
+
+    def look(self, looks):
+        """Git push triggers' branches looked at (not under the lock: git), each moved since it was seen a run of its
+        task, but not while one's going: its head's seen as that run starts, the pushes meanwhile run after it."""
+        srv = self.server
+        for sid, tid, trid, t in looks:
             try:
                 head, payload = pushed(t)
                 error = None
@@ -792,7 +906,9 @@ class Tasks:
                 with self.lock:
                     task = st.find(tid)
                     trig = next((x for x in (task or {}).get("triggers") or [] if x["id"] == trid), None)
-                    if trig is None:
+                    if trig is None or trig.get("seen") != t.get("seen"):  # (gone, or looked at since)
+                        continue
+                    if payload is not None and self.going(sid, tid):
                         continue
                     if trig.get("seen") != head or trig.get("error") != error:
                         trig["seen"] = head
@@ -808,4 +924,3 @@ class Tasks:
                                 trig["error"] = str(e)
                         st.save()
                         srv.changed()
-        return soonest

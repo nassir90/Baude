@@ -65,7 +65,6 @@ def deploy(inputs):
 
     /** Run r3's log: output, an error, and the failure handed to Juniper with its answer. */
     val failedLog get() = listOf(
-        line("status", "started on its schedule, version $V"),
         line("say", "deploying main"),
         line("out", "Already on 'main'"),
         line("out", "Your branch is up to date with 'origin/main'."),
@@ -74,9 +73,8 @@ def deploy(inputs):
         line("err", "Traceback (most recent call last):"),
         line("err", "  File \"deploy.py\", line 9, in deploy"),
         line("err", "subprocess.CalledProcessError: Command '['make', 'publish']' returned non-zero exit status 2."),
-        line("ask", "It failed: make publish exited with 2. Its script (version $V) is tasks/scripts/$V.py. Find out why.", error = true),
-        line("answer", "The upload's key had expired. I renewed it and ran the task again: that run finished in 51 s."),
-        line("status", "failed"))
+        line("ask", "It failed: make publish exited with 2. It's your task t1; its script (version $V) is tasks/scripts/$V.py. Find out why.", error = true),
+        line("answer", "The upload's key had expired. I renewed it and ran the task again: that run finished in 51 s."))
 
     /** The list. */
     fun list() = TasksState(live = false).apply {
@@ -95,7 +93,7 @@ def deploy(inputs):
     /** The run that failed, its log. */
     fun failedRun() = page().apply {
         run = TaskFixtures.runs[1].let { Msg.TaskRun.from(it.json().put("handed", true).put("exit", 2)
-            .put("error", "exited with 2")) }
+            .put("error", "exited with 2").put("offset", 0)) }
         log.addAll(failedLog)
         bot = "Juniper"
         page = "run"

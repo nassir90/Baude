@@ -121,6 +121,18 @@ abstract class TasksMockups(private val theme: String) {
         tap(Wording.Tasks.gitPush)
         shoot("trigger")
     }
+
+    @Test fun runForm() {
+        show(TaskFixtures.page())
+        tap(Wording.Tasks.run)
+        shoot("run-form")
+    }
+
+    @Test fun delete() {
+        show(TaskFixtures.page())
+        tap(Wording.Common.delete)
+        shoot("delete")
+    }
 }
 
 @RunWith(RobolectricTestRunner::class)

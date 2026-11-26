@@ -59,7 +59,7 @@
         "boolean",
         "null"
       ],
-      "description": "A dry run: its asks answered by a dummy agent, not its Bot."
+      "description": "Run with dummy answers: its script run as it is, side effects and all, its asks answered by a dummy agent, not its Bot."
     },
     "status": {
       "enum": [
@@ -75,6 +75,13 @@
     "started": {
       "type": "number",
       "description": "When it started."
+    },
+    "offset": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "description": "How far ahead of UTC its host's clock was as it started (seconds): its times shown as they were there."
     },
     "ended": {
       "type": [
@@ -117,6 +124,20 @@
         "null"
       ],
       "description": "Its failure was handed to its Bot."
+    },
+    "pid": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "description": "Its script's process id, as it runs."
+    },
+    "pgid": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "description": "Its script's process group, as it runs: what's left of it killed as its host starts again, if its host was killed as it ran."
     }
   },
   "required": [

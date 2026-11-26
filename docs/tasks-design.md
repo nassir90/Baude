@@ -1,7 +1,7 @@
 # Tasks
 
 A Bot's Routines become **Tasks**: scripts a Bot's host keeps and runs, started by **triggers** (a schedule, a git
-push, by hand, later a web page or an Emission page), with a **form** that a trigger's event, a person or the Bot fills,
+push, by hand, later a web page or an Emission page), with **inputs** that a trigger's event, a person or the Bot fills,
 and the Bot behind them as the fallback for errors and the handler for steps a script can't decide. Everything goes
 over the wire, so a head, the phone, a Bot's MCP tools and a plain script all drive tasks the same way.
 
@@ -15,7 +15,7 @@ A task belongs to one Bot and is kept on that Bot's host, in the Bot's folder (`
 | `runtime` | `python` (the host's Python 3), `shell` (`/bin/sh`), or `bot`: the script is a prompt the Bot is given as a turn (what a Routine was) |
 | `script` | its text; kept content-addressed as `scripts/<version>.<ext>`, every version kept |
 | `version` | the first 12 hex of the script's SHA-256; every run records the version it ran |
-| `form` | fields `{name, label?, type: text, number, bool or choice, choices?, default?, required?}` |
+| `form` | its inputs, each `{name, label?, type: text, number, bool or choice, choices?, default?, required?}` |
 | `triggers` | below |
 | `fallback` | true: a failed run (non-zero exit, timeout) is handed to the Bot with its log |
 | `timeout_s` | the most a run may take (default an hour); it's stopped after |
@@ -23,19 +23,19 @@ A task belongs to one Bot and is kept on that Bot's host, in the Bot's folder (`
 
 A script runs with the Bot's folder as its working directory (its worktree made again from its branch first, if it's
 gone, as for a message), in a process group of its own, and gets its run in its environment:
-`BAUDE_SOCKET`, `BAUDE_TASK_RUN`, `BAUDE_TASK_TOKEN`, `BAUDE_TASK_INPUTS` (the filled form, JSON),
+`BAUDE_SOCKET`, `BAUDE_TASK_RUN`, `BAUDE_TASK_TOKEN`, `BAUDE_TASK_INPUTS` (the inputs as filled, JSON),
 `BAUDE_TASK_PAYLOAD` (the trigger's event, JSON) and `BAUDE_IN_<FIELD>` for each input, for shell scripts.
 `baudelib/script/` is on its `PYTHONPATH`, so a Python script does `import baudetask`.
 
 ## Triggers
 
 A trigger is a small program that turns the world into events. Each event has a **payload**, an object, and fires one
-run. The payload fills the form: a field takes `payload[fills[field]]` if the trigger maps it, else `payload[field]`
+run. The payload fills the inputs: an input takes `payload[fills[field]]` if the trigger maps it, else `payload[field]`
 if the payload has a key of that name, else its default.
 
 | Kind | Config | Payload | In this PR |
 |---|---|---|---|
-| `manual` | none: every task can be run by hand, with the form filled in | the form as filled | yes |
+| `manual` | none: every task can be run by hand, with its inputs filled in | the inputs as filled | yes |
 | `schedule` | `every` minutes (5 to a month), or `at` HH:MM on `days` (host clock) | `{time}` | yes |
 | `git_push` | `repo` (a folder on the host), `branch`, `poll_s` | `{repo, branch, before, after, commit, message, author}` | yes, by polling the branch head |
 | `web` | `url`, `poll_s`, a parser script | what the parser prints | later |
@@ -158,12 +158,16 @@ The `routines` and `run_routine` ops, and the Routines page, are gone; the Tasks
 
 Side panel → Tasks (a Bot's chat), on Baude and the phone:
 
-- **Tasks list**: each task's name, its last run's state, a switch (paused or not) and Run; + makes one.
-- **A task**: Run (its form first, if it has fields), Change, Delete (confirmed; its runs and the scripts only it ran
-  go too); its triggers (+ adds one); its form; its script
-  and version; its runs, newest first.
+- **Tasks list**: each task's name, its last run's state, a switch (paused or not) and Run. The Bot makes tasks, as a
+  person asks it to.
+- **A task**: Run (its inputs first, if it has any), Change (its name, and whether failures go to the Bot), Delete
+  (confirmed; its runs and the scripts only it ran go too); its triggers (+ adds one); its inputs (Change Inputs); its
+  runs, newest first, with the version each ran. Triggers, inputs and runs are compact rows.
 - **A run**: its state, trigger, version, time and length; its log, each ask and answer as a hand-off to the Bot.
-- **Adding a trigger**: its kind, its settings, and which payload key fills each form field.
+- **Adding a trigger**: its kind, its settings, and which payload key fills each input.
+
+No screen shows a task's script or lets a person edit it, nor its runtime: scripts grow into whole programs in the
+Bot's repo, and they're the Bot's to write and change (`set_task`). To change a task's script, a person asks the Bot.
 
 ## In this PR
 

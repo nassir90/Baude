@@ -62,16 +62,18 @@ fun <T> BoxedList(rows: List<T>, empty: String, row: @Composable (T) -> Unit) {
     }
 }
 
-/** A row of a boxed list (Adw.ActionRow): what's before it, its title and subtitle, what's after. */
+/** A row of a boxed list (Adw.ActionRow): what's before it, its title and subtitle, what's after. compact: a dense
+ * list's row, a menu's row high (Popups.row), its buttons filling it and its text a little in from its edges. */
 @Composable
 fun ActionRow(title: String, subtitle: String?, onClick: (() -> Unit)? = null, prefix: (@Composable () -> Unit)? = null,
-              suffix: (@Composable () -> Unit)? = null, titleLines: Int = 1) {
+              suffix: (@Composable () -> Unit)? = null, titleLines: Int = 1, compact: Boolean = false) {
     val c = LocalBaude.current
-    Row(Modifier.fillMaxWidth().heightIn(min = 50.dp).then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
-        .padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically,
+    Row(Modifier.fillMaxWidth().heightIn(min = if (compact) Popups.row else 50.dp)
+        .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
+        .padding(horizontal = 12.dp, vertical = if (compact) 0.dp else 8.dp), verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp)) {
         prefix?.invoke()
-        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Column(Modifier.weight(1f).padding(vertical = if (compact) 4.dp else 0.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             Text(title, style = Type.body, color = c.fg, maxLines = titleLines, overflow = TextOverflow.Ellipsis)
             if (!subtitle.isNullOrBlank()) Text(subtitle, style = Type.caption, color = c.dim, maxLines = 2,
                 overflow = TextOverflow.Ellipsis)

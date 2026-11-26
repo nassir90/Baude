@@ -1,5 +1,5 @@
 {
-  "description": "A Bot's tasks, a page of the right-hand side panel: scripts the Bot's host keeps and runs (Python, shell, or a prompt the Bot is given as a turn), by hand or as a trigger fires (a schedule, a git push to a branch of a repo on the host), each run given its form filled by hand or by the trigger's event, the Bot asked mid-run when the script can't decide and handed a failed run. The page goes from the list of tasks to a task's page to a run's log, each with a back button. Only exists while the open chat is a Bot; otherwise the tab is hidden, and if it was shown the panel falls back to Meta. docs/tasks-design.md has the model and the wire.",
+  "description": "A Bot's tasks, a page of the right-hand side panel: scripts the Bot's host keeps and runs (Python, shell, or a prompt the Bot is given as a turn), by hand or as a trigger fires (a schedule, a git push to a branch of a repo on the host), each run given its inputs filled by hand or by the trigger's event, the Bot asked mid-run when the script can't decide and handed a failed run. A task's script is the Bot's to write (its set_task tool); no app shows or edits it, and a person changes it by asking the Bot. The page goes from the list of tasks to a task's page to a run's log, each with a back button. Only exists while the open chat is a Bot; otherwise the tab is hidden, and if it was shown the panel falls back to Meta. docs/tasks-design.md has the model and the wire.",
   "apps": [
     "baude",
     "phone"
@@ -12,7 +12,7 @@
     "taskspage.py:TasksPage.draw_list",
     "taskspage.py:TasksPage.open_task",
     "taskspage.py:TasksPage.open_run",
-    "taskspage.py:TasksPage.edit",
+    "taskspage.py:TasksPage.change",
     "taskspage.py:TasksPage.run_form",
     "taskspage.py:TasksPage.add_trigger",
     "taskspage.py:TasksPage.edit_form",
@@ -21,7 +21,8 @@
   ],
   "copy": [
     "tasks",
-    "common"
+    "common",
+    "signal_card"
   ],
   "parts": [
     {
@@ -33,16 +34,9 @@
     },
     {
       "name": "list",
-      "shows": "The first view. A row at the top with empty space at the left and a flat + button at the right (tooltip 'New task'), then a boxed list of the Bot's tasks in the order its host keeps them, scrolling, no selection. Empty: the centred dim text 'No tasks yet'. Read when the chat is opened, when a turn of the Bot ends, every 30 seconds while the page is shown (5 while a run is going), and after each change here.",
+      "shows": "The first view: a boxed list of the Bot's tasks in the order its host keeps them, scrolling, no selection. Empty: the centred dim text 'No tasks yet'. No app makes a task here: the Bot makes its tasks (set_task), as a person asks it to. Read when the chat is opened, when a turn of the Bot ends, every 30 seconds while the page is shown (5 while a run is going), and after each change here.",
       "copy": [
-        "tasks.new_task",
         "tasks.no_tasks"
-      ],
-      "actions": [
-        {
-          "by": "click +",
-          "does": "opens the New Task dialog"
-        }
       ],
       "parts": [
         {
@@ -64,7 +58,7 @@
             },
             {
               "by": "click Run",
-              "does": "runs it now; a task with form fields opens the run form first"
+              "does": "runs it now; a task with inputs opens the run form first"
             }
           ]
         }
@@ -72,7 +66,7 @@
     },
     {
       "name": "task page",
-      "shows": "A header row: a back button (tooltip 'Tasks'), the task's name in bold (ellipsized), then flat buttons Run (play), Change (pencil) and Delete (trash). Below it, scrolling, four groups each with its heading: 'Triggers', 'Form', 'Script', 'Runs'. Read when opened, every 5 seconds while a run is going, and after each change here.",
+      "shows": "A header row: a back button (tooltip 'Tasks'), the task's name in bold (ellipsized), then flat buttons Run (play), Change (pencil) and Delete (trash). Below it, scrolling, three groups each with its heading: 'Triggers', 'Inputs', 'Runs'. Each group's rows are a dense list's: Baude's as compact as the sessions list (at least 26 px, 1 px above and below, their buttons 24 px), the phone's a menu's row high (popup.row, 34), its buttons filling it. No script and no runtime: the run page's version, and a failed run's log, are all of the script a person sees. Read when opened, every 5 seconds while a run is going, and after each change here.",
       "copy": [
         "tasks.title",
         "tasks.run",
@@ -81,8 +75,7 @@
         "tasks.delete_heading",
         "common.cancel",
         "tasks.triggers",
-        "tasks.form",
-        "tasks.script",
+        "signal_card.inputs",
         "tasks.runs"
       ],
       "actions": [
@@ -96,7 +89,7 @@
         },
         {
           "by": "click Change",
-          "does": "opens the Change Task dialog, once the task's script is read"
+          "does": "opens the Change Task dialog"
         },
         {
           "by": "click Delete",
@@ -106,7 +99,7 @@
       "parts": [
         {
           "name": "triggers",
-          "shows": "Heading 'Triggers' with a flat + at its right (tooltip 'Add trigger'). One row per trigger: an icon (alarm clock for a schedule, branch for a git push), the title saying what fires it ('weekdays at 09:00', 'every 2 hours', 'push to main in ~/site'), a warning icon with the trigger's last error as its tooltip if it has one, and a remove button (minus; tooltip 'Remove trigger'). No triggers: the dim line 'By hand' (every task can be run by hand).",
+          "shows": "Heading 'Triggers' with a flat + at its right (tooltip 'Add trigger'). One compact row per trigger: an icon (alarm clock for a schedule, branch for a git push), the title saying what fires it ('weekdays at 09:00', 'every 2 hours', 'push to main in ~/site'), a warning icon with the trigger's last error as its tooltip if it has one, and a remove button (minus; tooltip 'Remove trigger'). No triggers: the dim line 'By hand' (every task can be run by hand).",
           "copy": [
             "tasks.add_trigger",
             "tasks.remove_trigger",
@@ -139,11 +132,11 @@
           ]
         },
         {
-          "name": "form",
-          "shows": "Heading 'Form' with a flat pencil at its right (tooltip 'Change'). One row per field: title its label (or name), at the end its type in dim text (Text, Number, Yes or no, Choice). No fields: the dim line 'No fields'.",
+          "name": "inputs",
+          "shows": "Heading 'Inputs' with a flat pencil at its right (tooltip 'Change'). One compact row per input: title its label (or name), at the end its type in dim text (Text, Number, Yes or no, Choice). No inputs: the dim line 'No inputs'.",
           "copy": [
-            "tasks.form",
-            "tasks.no_fields",
+            "signal_card.inputs",
+            "signal_card.no_inputs",
             "tasks.text",
             "tasks.number",
             "tasks.yes_no",
@@ -152,22 +145,13 @@
           "actions": [
             {
               "by": "click the pencil",
-              "does": "opens the form dialog"
+              "does": "opens the Change Inputs dialog"
             }
           ]
         },
         {
-          "name": "script",
-          "shows": "Heading 'Script' with, at its right, how it runs (Python, Shell or Bot) and its version (12 hex, monospace, dim). Under it the script in a code block (highlighted as Python or shell; a Bot task's prompt as plain text).",
-          "copy": [
-            "tasks.python",
-            "kube.shell",
-            "sidebar.bot"
-          ]
-        },
-        {
           "name": "runs",
-          "shows": "Heading 'Runs'. Its latest runs, newest first: the state icon, the title '<when> · <how long>' (when: HH:MM if today, else 'Mon 03 Nov 14:00', on the host's clock as it was when the run started; how long: '12 s' or '3 min 4 s'), and at the end an icon for what started it (play by hand, alarm clock schedule, branch git push) and the version, monospace, dim. A run with dummy answers has ' · dummy answers' after that. None: the dim line 'No runs yet'.",
+          "shows": "Heading 'Runs'. Its latest runs, newest first, a compact row each: the state icon, the title '<when> · <how long>' (when: HH:MM if today, else 'Mon 03 Nov 14:00', on the host's clock as it was when the run started; how long: '12 s' or '3 min 4 s'), and at the end an icon for what started it (play by hand, alarm clock schedule, branch git push) and the version, monospace, dim. A run with dummy answers has ' · dummy answers' after that. None: the dim line 'No runs yet'.",
           "copy": [
             "tasks.no_runs",
             "tasks.seconds",
@@ -216,16 +200,10 @@
     },
     {
       "name": "task dialog",
-      "shows": "An alert dialog headed 'New Task' (or 'Change Task'), Cancel and Save (suggested). Content (scrolls, 520 px at most): a 'Name' field; 'Runs as' with a drop-down Python / Shell / Bot; the label 'Script' over a monospace multi-line box (at least 200 px tall); a switch row 'Hand failures to the Bot' (on for a new task).",
+      "shows": "An alert dialog headed 'Change Task', Cancel and Save (suggested). Content: a 'Name' field and a switch row 'Hand failures to the Bot'. Neither the script nor how it runs: those are the Bot's to change.",
       "copy": [
-        "tasks.new_heading",
         "tasks.change_heading",
         "common.name",
-        "tasks.runtime",
-        "tasks.python",
-        "kube.shell",
-        "sidebar.bot",
-        "tasks.script",
         "tasks.fallback",
         "common.cancel",
         "common.save"
@@ -233,7 +211,7 @@
       "actions": [
         {
           "by": "click Save",
-          "does": "saves it on the host (a new script makes a new version); a new task's page opens"
+          "does": "saves its name and fallback on the host, its script, runtime, inputs and triggers as they are"
         },
         {
           "by": "click Cancel / key Esc",
@@ -243,7 +221,7 @@
     },
     {
       "name": "run form",
-      "shows": "An alert dialog headed 'Run <task>' with one control per field: text field, number box, switch, or drop-down of its choices, each labelled, filled with its default; buttons Cancel, Run with dummy answers and Run (suggested).",
+      "shows": "An alert dialog headed 'Run <task>' with one control per input: text field, number box, switch, or drop-down of its choices, each labelled, filled with its default; buttons Cancel, Run with dummy answers and Run (suggested).",
       "copy": [
         "tasks.run_heading",
         "common.cancel",
@@ -253,7 +231,7 @@
       "actions": [
         {
           "by": "click Run",
-          "does": "runs it with the form as filled"
+          "does": "runs it with its inputs as filled"
         },
         {
           "by": "click Run with dummy answers",
@@ -263,7 +241,7 @@
     },
     {
       "name": "trigger dialog",
-      "shows": "An alert dialog headed 'Add Trigger', Cancel and Save. A drop-down Schedule / Git push. Schedule: 'Every' or 'At a time of day'; every: a number and minutes / hours (5 to 44640 minutes, 1 to 744 hours: what the host takes); at: 'Times in <zone>' (or 'Times on the host's clock'), an HH:MM field and seven day toggles Mon to Sun. Git push: 'Repository folder' (a path on the host) and 'Branch' (main). Then, if the task has fields, 'Fills' and one drop-down per field, '<field> from', with 'nothing' and the trigger's payload keys (schedule: time; git push: repo, branch, before, after, commit, message, author), set to the key of the field's own name if there is one.",
+      "shows": "An alert dialog headed 'Add Trigger', Cancel and Save. A drop-down Schedule / Git push. Schedule: 'Every' or 'At a time of day'; every: a number and minutes / hours (5 to 44640 minutes, 1 to 744 hours: what the host takes); at: 'Times in <zone>' (or 'Times on the host's clock'), an HH:MM field and seven day toggles Mon to Sun. Git push: 'Repository folder' (a path on the host) and 'Branch' (main). Then, if the task has inputs, 'Fills' and one drop-down per input, '<input> from', with 'nothing' and the trigger's payload keys (schedule: time; git push: repo, branch, before, after, commit, message, author), set to the key of the input's own name if there is one.",
       "copy": [
         "tasks.trigger_heading",
         "tasks.schedule",
@@ -289,18 +267,18 @@
       ]
     },
     {
-      "name": "form dialog",
-      "shows": "An alert dialog headed 'Form', Cancel and Save. One row per field: a name field, a type drop-down (Text, Number, Yes or no, Choice), a 'Choices, comma-separated' field shown for a choice, a 'Default' field, and a remove button (tooltip 'Remove field'); under them an 'Add field' button.",
+      "name": "inputs dialog",
+      "shows": "An alert dialog headed 'Change Inputs', Cancel and Save. One row per input: a 'Name' field, a type drop-down (Text, Number, Yes or no, Choice), a 'Choices, comma-separated' field shown for a choice, a 'Default' field, and a remove button (tooltip 'Remove input'); under them an 'Add input' button.",
       "copy": [
-        "tasks.form",
-        "tasks.field_name",
+        "tasks.inputs_heading",
+        "common.name",
         "tasks.text",
         "tasks.number",
         "tasks.yes_no",
         "tasks.choice",
         "tasks.choices",
-        "tasks.remove_field",
-        "tasks.add_field",
+        "tasks.remove_input",
+        "tasks.add_input",
         "common.cancel",
         "common.save",
         "meta_settings.effort_default"
@@ -366,7 +344,7 @@
     },
     {
       "said": "Input forms that triggers populate, and that the Bot can fill",
-      "rule": "Every app shows a task's form, fills it before a run by hand, and lets a trigger map its payload onto the fields",
+      "rule": "Every app shows a task's inputs, fills them before a run by hand, and lets a trigger map its payload onto them",
       "decided": "2026-11-26",
       "source": [
         {
@@ -391,6 +369,71 @@
       "source": [
         {
           "issue": "BaudeInternal#241"
+        }
+      ]
+    },
+    {
+      "said": "For tasks UI, users probably don't need to see scripts at all these are probably going to blow up to pretty complex apps in the bot git repo.",
+      "rule": "No app shows a task's script or lets a person edit it, nor its runtime: the Bot writes and changes scripts (set_task), and a person asks the Bot to. No app makes a new task by hand either, since a task needs a script. A task's version stays on its runs and its run page; a run's log (tracebacks too) shows as it is",
+      "decided": "2026-11-26",
+      "source": [
+        {
+          "session": "b3845b21-55ac-4aab-a769-fb8517403c51",
+          "message": "21d61362-b76e-4eed-a2d6-59d2e5eb5a2d"
+        }
+      ]
+    },
+    {
+      "said": "Form should be \"Inputs\" really",
+      "rule": "Every app calls a task's fields its Inputs: the task page's group, its dialog (Change Inputs), its rows and buttons (Add input, Remove input). The wire keeps the field's name, form",
+      "decided": "2026-11-26",
+      "source": [
+        {
+          "session": "b3845b21-55ac-4aab-a769-fb8517403c51",
+          "message": "21d61362-b76e-4eed-a2d6-59d2e5eb5a2d"
+        }
+      ]
+    },
+    {
+      "said": "Form row height should ne narrower as should triggrs and runs",
+      "rule": "Every app draws a task's Inputs, Triggers and Runs as dense lists: each app's compact row (Baude's as the sessions list's, 26 px; the phone's a menu's, 34), not a full list row",
+      "decided": "2026-11-26",
+      "source": [
+        {
+          "session": "b3845b21-55ac-4aab-a769-fb8517403c51",
+          "message": "21d61362-b76e-4eed-a2d6-59d2e5eb5a2d"
+        }
+      ]
+    }
+  ],
+  "removed": [
+    {
+      "name": "Script group on a task's page, and the script and runtime in the task dialog",
+      "apps": [
+        "baude",
+        "phone"
+      ],
+      "why": "The owner: \"users probably don't need to see scripts at all these are probably going to blow up to pretty complex apps in the bot git repo.\" Scripts are the Bot's to write (set_task)",
+      "decided": "2026-11-26",
+      "source": [
+        {
+          "session": "b3845b21-55ac-4aab-a769-fb8517403c51",
+          "message": "21d61362-b76e-4eed-a2d6-59d2e5eb5a2d"
+        }
+      ]
+    },
+    {
+      "name": "New task button (+) on the tasks list, and the New Task dialog",
+      "apps": [
+        "baude",
+        "phone"
+      ],
+      "why": "A task needs a script, and scripts are the Bot's to write: a person asks the Bot for a new task",
+      "decided": "2026-11-26",
+      "source": [
+        {
+          "session": "b3845b21-55ac-4aab-a769-fb8517403c51",
+          "message": "21d61362-b76e-4eed-a2d6-59d2e5eb5a2d"
         }
       ]
     }

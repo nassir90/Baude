@@ -25,12 +25,12 @@ import time
 import uuid
 
 from baudelib import (
-    access, accounts, codex, desktopchats, emissionlink, mesh, phonebrowser, models, notes, providers, selfupdate, tasks,
-    telemetry, toolnames, wire,
+    access, accounts, codex, desktopchats, emissionlink, mesh, multiplexlink, phonebrowser, models, notes, providers,
+    selfupdate, tasks, telemetry, toolnames, wire,
     wording,
 )
 from baudelib.serverstate import (
-    AlreadyRunning, DRAFT_S, EMISSIONS_S, EPHEMERAL_S, EXIT_S, IDLE_S, Session, _read_json, _write_json, bot_dir,
+    AlreadyRunning, DRAFT_S, EMISSIONS_S, MULTIPLEX_S, EPHEMERAL_S, EXIT_S, IDLE_S, Session, _read_json, _write_json, bot_dir,
     kept_sessions, lock_path, state_home, trash,
 )
 from baudelib.serverrun import ServerRunning
@@ -135,8 +135,11 @@ class Server(ServerRunning, ServerSessions):
         self.autofix_reading = set()  # (chats whose pull request Auto-fix is reading now: autofix.due)
         self.following = set()  # ((session, the one it waits on): waits of its agent's answered for it, answer_wait)
         self.mesh = mesh.Mesh(self)  # (the hosts it's linked to, and those they reach: mesh.py)
-        self.telemetry = telemetry.Telemetry(self.state_dir, self.me["id"], changed=self.changed, log=self.log)  # (its machine's
-        # chat events, samples and line profiles: baudelib/telemetry.py)
+        self.multiplex_pids = set()  # (the processes of this machine's Multiplex windows, likewise)
+        self.emission_pids = set()  # (the processes of this machine's Emissions, as they last said: sampled too)
+        self.telemetry = telemetry.Telemetry(self.state_dir, self.me["id"], changed=self.changed, log=self.log,
+                                             found=self.found_procs)  # (its machine's chat events, samples and line
+        # profiles: baudelib/telemetry.py)
         self.access = access.Access(self)  # (who in the mesh may use what of its: baudelib/access.py)
         self.tasks = tasks.Tasks(self)  # (its Bots' tasks: baudelib/tasks.py)
 
@@ -288,13 +291,37 @@ class Server(ServerRunning, ServerSessions):
             self.mesh.republish()
 
     def _emissions(self):
-        """This machine's Emissions, and the code each runs, asked every EMISSIONS_S (they're no heads: the host
-        process reaches them, emissionlink)."""
-        while not self.stopped.wait(EMISSIONS_S):
-            found = [{"client": "emission", "commit": c} for c in emissionlink.running_commits()]
+        """This machine's Emissions, and the code each runs, asked at once and then every EMISSIONS_S (they're no
+        heads: the host process reaches them, emissionlink)."""
+        while True:
+            infos = emissionlink.running()
+            self.emission_pids = {i["pid"] for i in infos if isinstance(i.get("pid"), int) and i["pid"] > 0}
+            found = [{"client": "emission", "commit": i["commit"] if isinstance(i.get("commit"), str) else None}
+                     for i in infos]
             if found != self.emissions:
                 self.emissions = found
                 self.heads_look()
+            if self.stopped.wait(EMISSIONS_S):
+                return
+
+    def _multiplexes(self):
+        """The processes of this machine's Multiplex windows, asked at once and then every MULTIPLEX_S, each
+        briefly (those of Baude's and Record's own, already sampled, aren't asked)."""
+        while True:
+            try:
+                skip = set(self.telemetry.pids)
+                infos = [i for _path, i in multiplexlink.processes(timeout=1, skip=skip) if isinstance(i, dict)]
+                self.multiplex_pids = {i["pid"] for i in infos if i.get("app") == "multiplex"
+                                       and isinstance(i.get("pid"), int) and i["pid"] > 0}
+            except Exception as e:  # noqa: BLE001 (what couldn't be found: the next time's)
+                self.log(f"multiplex: {type(e).__name__}: {e}")
+            if self.stopped.wait(MULTIPLEX_S):
+                return
+
+    def found_procs(self):
+        """{pid: app} of this machine's processes that tell it no telemetry of their own, for its samples: its
+        Emissions' and Multiplex's windows' (as they last said)."""
+        return {**dict.fromkeys(self.multiplex_pids, "multiplex"), **dict.fromkeys(self.emission_pids, "emission")}
 
     def mesh_changed(self):
         """The mesh changed (a member came or went, a link's state, a provider): heads hear, with its info. (Never with

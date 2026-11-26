@@ -1,6 +1,6 @@
 """scenes_telemetry — tests/screenshots.py's scenes of telemetry (baudelib.telemetry, telemetryview): Settings →
-Telemetry, what this machine's host keeps: its turns' tokens by day, the models used, its machine now, its chats'
-latest activity, and line profiling."""
+Telemetry, what this machine's host keeps: its turns' tokens by day, the models used, its machine and its processes
+now, and line profiling."""
 import datetime
 import json
 import os
@@ -83,9 +83,9 @@ def settings(app, profile=True, scrolled=False):
     import telemetryview
     page = next(p for p in T.find(dialog, telemetryview.Page))
     dialog.set_visible_page(page)
-    T.wait_for(lambda: {"tokens", "machine", "chats", "profiling"} <= set(page.groups), "the host's telemetry", 30)
+    T.wait_for(lambda: {"tokens", "machine", "processes", "profiling"} <= set(page.groups), "the host's telemetry", 30)
     T.pump(0.5)
-    if scrolled:  # (its foot: the machine, the chats, line profiling)
+    if scrolled:  # (its foot: the machine, the processes, line profiling)
         from gi.repository import Gtk
         sw = T.find(page, Gtk.ScrolledWindow)[0]
         adj = sw.get_vadjustment()
@@ -98,14 +98,14 @@ def settings(app, profile=True, scrolled=False):
 
 @scene("39g-telemetry", "Settings → Telemetry: the host picked beside New session (this machine's here), Collect "
                         "Telemetry, its tokens by day over a year, the most used model and effort, each model's turns, "
-                        "its machine now, its chats' latest activity, and line profiling with its top lines",
+                        "its machine and its processes now, and line profiling with its top lines",
        size=(1200 + SIDEBAR, H + 100))
 def _(app):
     return settings(app)
 
 
-@scene("39g-telemetry-foot", "Settings → Telemetry scrolled to its foot: its machine now, its chats' latest "
-                             "activity, line profiling with its top lines", size=(1200 + SIDEBAR, H + 100))
+@scene("39g-telemetry-foot", "Settings → Telemetry scrolled to its foot: its machine and its processes now, "
+                             "line profiling with its top lines", size=(1200 + SIDEBAR, H + 100))
 def _(app):
     return settings(app, scrolled=True)
 

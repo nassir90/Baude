@@ -381,7 +381,7 @@ def logo(app):
 
 def proc_rows(procs):
     """The rows of procs (sorted): each's app's logo, its name (numbered where the app has several: "Emission (2)"),
-    and its CPU and memory after them."""
+    and its CPU and memory after them; then a bold Total row, its CPU and memory the processes' added up."""
     count, seen = {}, {}
     for p in procs:
         count[p.get("app")] = count.get(p.get("app"), 0) + 1
@@ -396,16 +396,22 @@ def proc_rows(procs):
             "telemetry.cpu_rss", cpu="–" if p.get("cpu") is None else f"{p['cpu']:.1f}", rss=said_size(p.get("rss"))))
         r.add_prefix(logo(app))
         rows.append(r)
+    cpus = [p["cpu"] for p in procs if p.get("cpu") is not None]
+    rsses = [p["rss"] for p in procs if p.get("rss") is not None]
+    rows.append(row(wording.say("telemetry.total"), wording.say(
+        "telemetry.cpu_rss", cpu=f"{sum(cpus):.1f}" if cpus else "–", rss=said_size(sum(rsses) if rsses else None)),
+        bold=True))
     return rows
 
 
-def row(title, *values, sensitive=True, mono=False):
-    r = Adw.ActionRow(title=GLib.markup_escape_text(title), sensitive=sensitive)
+def row(title, *values, sensitive=True, mono=False, bold=False):
+    esc = GLib.markup_escape_text(title)
+    r = Adw.ActionRow(title=f"<b>{esc}</b>" if bold else esc, sensitive=sensitive)
     if mono:
         r.add_css_class("monospace")
     for v in values:
         if v:
-            r.add_suffix(Gtk.Label(label=v, css_classes=["dim-label", "numeric"]))
+            r.add_suffix(Gtk.Label(label=v, css_classes=["numeric"] if bold else ["dim-label", "numeric"]))
     return r
 
 

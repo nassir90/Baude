@@ -263,14 +263,18 @@ private fun UsageBars(usage: HostAccounts.Usage?, last: List<HostAccounts.Limit>
 
 /** ⋮'s usage row (subscriptionpage.MenuUsage): the current Claude subscription on the host picked beside New session (the
  * one a new chat there takes), its name, then its limits as its Subscriptions card has them, read as ⋮ opens (again once
- * USAGE_S has passed); the host's last reading greyed till then. Nothing where the host has no Claude subscription. Its
- * menu item opens Settings → Subscriptions as it's tapped (MainMenu). */
+ * USAGE_S has passed, after an answer or an error); the host's last reading greyed till then. Nothing where the host has
+ * no Claude subscription, its rule above it (the menu's, between sections) left out with it. Tapped, go: Settings →
+ * Subscriptions. */
 @Composable
-fun MenuUsage() {
+fun MenuUsage(go: () -> Unit) {
     val c = LocalBaude.current
     val hostId = picked()?.takeIf { it != "phone" } ?: Mesh.hosts.firstOrNull()?.id ?: return
     val host = MenuUsageHosts.of(hostId)
     LaunchedEffect(hostId) {
+        val now = System.currentTimeMillis()
+        if (host.error.value != null && now - (MenuUsageHosts.listedAt[hostId] ?: 0L) < HostAccounts.USAGE_S * 1000L) return@LaunchedEffect
+        MenuUsageHosts.listedAt[hostId] = now
         Mesh.ask(hostId, Msg.Accounts(what = "list").json()) { r ->
             host.took(r)?.let { e -> host.error.value = e }
             val id = MenuUsageHosts.profile(host) ?: return@ask
@@ -285,7 +289,9 @@ fun MenuUsage() {
     val id = MenuUsageHosts.profile(host)
     if (host.error.value == null && id == null) return
     val name = host.accounts.value.firstOrNull { it.provider == "claude" && it.id.orEmpty() == id }?.name ?: Wording.Subscriptions.cliDefault
-    Column(Modifier.fillMaxWidth().padding(start = menuTextStart(), end = Popups.inset, top = 8.dp, bottom = 8.dp),
+    MenuDivider()
+    Column(Modifier.fillMaxWidth().clickable(onClick = go)
+        .padding(start = menuTextStart(), end = Popups.inset, top = 8.dp, bottom = 8.dp),
         verticalArrangement = Arrangement.spacedBy(6.dp)) {
         val error = host.error.value
         if (error != null) Text(error, style = Type.body, color = c.dim)
@@ -301,6 +307,7 @@ fun MenuUsage() {
 object MenuUsageHosts {
     private val hosts = HashMap<String, HostAccounts>()
     val readAt = HashMap<String, Long>()
+    val listedAt = HashMap<String, Long>() // (when each host's list was last asked: after an error, not again till USAGE_S)
     fun of(id: String) = hosts.getOrPut(id) { HostAccounts(id) }
 
     /** The current Claude subscription's id ("" the CLI's own sign-in), or null where the host has none. */

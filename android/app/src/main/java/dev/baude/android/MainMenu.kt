@@ -1,23 +1,22 @@
 package dev.baude.android
 
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 
 /** An item of the main menu: its label, a check mark where it's a toggle (checked: whether it's on; null: it isn't
  * one), whether it can be picked (greyed if not), and what it does. */
 class MenuItem(val label: String, val checked: Boolean? = null, val enabled: Boolean = true,
-               val content: (@Composable () -> Unit)? = null, val go: () -> Unit)
+               val content: (@Composable (go: () -> Unit) -> Unit)? = null, val go: () -> Unit)
 
 /** ☰'s main menu, as the header bar's: sections of one-line items with a rule between them (as Baude's and Record's:
  * the chat's, the view's, the views over the window, the app's); with a toggle among them every item has a column for
- * its check mark before it. An empty section isn't shown. */
+ * its check mark before it. An empty section isn't shown; a section that opens with a drawn item (content) draws its own
+ * rule, and none where it draws nothing. */
 @Composable
 fun MainMenu(sections: List<List<MenuItem>>) {
     var open by remember { mutableStateOf(false) }
@@ -26,10 +25,10 @@ fun MainMenu(sections: List<List<MenuItem>>) {
         IconButton(Adwaita.ViewMore, Wording.ChatHeader.menu) { open = true }
         Popover(open, { open = false }, ticks = if (shown.flatten().any { it.checked != null }) Ticks.START else Ticks.NONE) {
             shown.forEachIndexed { i, items ->
-                if (i > 0) MenuDivider()
+                if (i > 0 && items.first().content == null) MenuDivider()
                 for (item in items) {
                     val content = item.content
-                    if (content != null) Box(Modifier.clickable { open = false; item.go() }) { content() }
+                    if (content != null) content { open = false; item.go() }
                     else MenuChoice(item.label, item.checked == true, enabled = item.enabled) {
                         open = false
                         item.go()
@@ -112,7 +111,7 @@ fun HomeMenu(settings: () -> Unit, changelog: () -> Unit, mesh: () -> Unit, feed
 }
 
 /** ☰'s usage row (MenuUsage): the current subscription's usage; tapped, Settings → Subscriptions (go). */
-private fun usage(go: () -> Unit) = MenuItem(Wording.Subscriptions.title, content = { MenuUsage() }, go = go)
+private fun usage(go: () -> Unit) = MenuItem(Wording.Subscriptions.title, content = { MenuUsage(it) }, go = go)
 
 /** Whether a chat is archived on its host: read-only till it's unarchived (baudewindow's chat_archived). */
 fun isArchived(hostId: String, sid: String) = sid.isNotEmpty() && Mesh.session(hostId, sid)?.archived == true

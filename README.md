@@ -148,6 +148,12 @@ baude             # in the current folder
 record            # Record
 ```
 
+On macOS, Baude and Record post their notifications through a small notifier app each, with their own name and logo,
+an Open button and a Bot's picture. macOS only lets a signed app post, so run `tools/macos-sign.sh` once: it makes a
+code-signing certificate that stays on your Mac. [docs/macos-signing.md](docs/macos-signing.md) says what it makes,
+how to check and remove it, and how to sign with your own Apple Developer ID instead. Until then notifications come
+from Script Editor.
+
 Record, the second app, keeps notebooks of wiki pages in your own words, with Meta beside them, and reads a Claude
 Code chat beside your notes.
 

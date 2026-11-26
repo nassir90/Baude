@@ -359,18 +359,42 @@ _watch = {"monitor": None, "seen": None, "listeners": [], "wait": None}
 
 # ---- desktop notifications: a reply finished (or a question asked) where you aren't looking, said by the desktop's
 # own notifications: on Linux GLib's (Gio.Notification) or org.freedesktop.Notifications' over D-Bus (_gio_notifies),
-# on macOS Notification Center's, through osascript. Settings → Notifications, in Baude and Record both.
+# on macOS Notification Center's, through the app's notifier (baudelib/notifier.py), else osascript. Settings →
+# Notifications, in Baude and Record both.
 _notified = {}  # (a notification's key: what a click on it does)
 _fdo = {"ids": {}, "keys": {}, "subscribed": False}  # (org.freedesktop.Notifications': key → its id, and back)
 FDO = ("org.freedesktop.Notifications", "/org/freedesktop/Notifications", "org.freedesktop.Notifications")
 
 
-_identity = {}  # (notify_as's: the logo notifications show)
+_identity = {}  # (notify_as's: the logo notifications show; the app they're posted as on macOS)
 
 
-def notify_as(svg):
-    """The app's logo as an SVG file: its notifications' icon (Linux)."""
-    _identity["svg"] = svg
+def notify_as(svg=None, app=None):
+    """The app's logo as an SVG file: its notifications' icon (Linux). app: its name (notifier.APPS), whose notifier
+    posts them (macOS)."""
+    if svg is not None:
+        _identity["svg"] = svg
+    if app is not None:
+        _identity["app"] = app
+
+
+def _notifier():
+    """This app's notifier client (macOS), or None: none named (notify_as)."""
+    if sys.platform != "darwin" or _identity.get("app") is None:
+        return None
+    if _identity.get("client") is None:
+        from baudelib import notifier
+
+        def clicked(key):
+            if (fn := _notified.pop(key, None)) is not None:
+                fn()
+        _identity["client"] = notifier.Client(_identity["app"], GLib.idle_add, _osascript, clicked)
+    return _identity["client"]
+
+
+def notification_pictures():
+    """Whether a notification can show a Bot's picture: on Linux, or through the app's notifier on macOS."""
+    return sys.platform != "darwin" or ((c := _notifier()) is not None and c.usable())
 
 
 NOTIFY_PICTURE_PX = tokens.px("notification.picture")  # (a Bot's picture as its notification shows it, square)
@@ -485,22 +509,33 @@ def macos_notification(title, body):
     return f"display notification {quote(body)} with title {quote(title)}"
 
 
-def desktop_notify(key, title, body="", clicked=None, picture=None):
+def _osascript(_key, title, body):
+    """A notification posted through osascript (macOS), credited to Script Editor: a click there opens Script Editor."""
+    try:
+        subprocess.Popen(["osascript", "-e", macos_notification(title, body)], stdin=subprocess.DEVNULL,
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+    except OSError:
+        pass
+
+
+def desktop_notify(key, title, body="", clicked=None, picture=None, opens=None):
     """A desktop notification, key's (one key, one notification: a newer one takes the older's place): title the
-    chat's name, body what happened; clicked(), run when it's clicked (Linux); picture, a Bot's
-    (notification_picture's file), its icon in place of the app's logo (Linux). Nothing when Notifications is off. On
-    macOS osascript's, credited to Script Editor (the apps run in Python's bundle, not one of their own): a click there
-    opens Script Editor."""
+    chat's name, body what happened; clicked(), run when it's clicked; picture, a Bot's (notification_picture's
+    file), its icon in place of the app's logo (Linux) or attached beside the app's (macOS). Nothing when Notifications
+    is off. On macOS the app's notifier posts it, with an Open button (opens: the arguments that start the app on
+    that chat, for a click once this process is gone); without one, or turned away, osascript does."""
     if not notifications_on():
         return
     body = " ".join((body or "").split())
     body = body[:157] + "…" if len(body) > 160 else body
     if sys.platform == "darwin":
-        try:
-            subprocess.Popen(["osascript", "-e", macos_notification(title, body)], stdin=subprocess.DEVNULL,
-                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
-        except OSError:
-            pass
+        client = _notifier()
+        _notified[key] = clicked or (lambda: None)
+        from baudelib.notifier import launcher_id
+        if client is None or not client.post(key, title, body, wording.say("common.open"), picture,
+                                             launcher_id(client.name), opens):
+            _notified.pop(key, None)
+            _osascript(key, title, body)
         return
     app = Gio.Application.get_default()
     if app is None:
@@ -544,7 +579,10 @@ def withdraw_notification(key):
     if (nid := _fdo["ids"].pop(key, None)) is not None:
         _fdo["keys"].pop(nid, None)
         _fdo_call("CloseNotification", GLib.Variant("(u)", (nid,)))
-    elif sys.platform != "darwin" and (app := Gio.Application.get_default()) is not None:
+    elif sys.platform == "darwin":
+        if (client := _notifier()) is not None:
+            client.withdraw(key)
+    elif (app := Gio.Application.get_default()) is not None:
         app.withdraw_notification(key)
 
 

@@ -1041,6 +1041,15 @@ class WindowProc:
         return False
 
     def on_send(self):
+        """Enter (or Send): what's written sent, queued or done. The box emptied by it is a send of its own
+        (enter_id): its host's draft emptied for it, and nothing written before it saved back (draft_typed)."""
+        self.enter_id = str(uuid.uuid4())
+        try:
+            self.send_box()
+        finally:
+            self.enter_id = None
+
+    def send_box(self):
         buf = self.input.get_buffer()
         typed = buf.get_text(buf.get_start_iter(), buf.get_end_iter(), True).strip()
         if self.composer_box.gates and not self.busy and not (typed in ("/clear", "/new", "/cd", "/login", "/logout") or

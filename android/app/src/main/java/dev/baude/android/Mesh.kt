@@ -143,6 +143,10 @@ class Chat(hostId: String, sid: String) {
     var draftTries = 0      // (saves made again since one was last taken)
     var draftRestoring = false // (what was kept here going back in the box: not written now)
     var putText = ""        // (the box's text as it was last put there, not written: markdown)
+    var draftEpoch = 0L     // (the last epoch of it its host's said, or this box's own send's, to come: Mesh.boxSent)
+    var draftBase = ""      // (what its host had in it as this box's typing began)
+    var draftTypedIn = 0L   // (the epoch what's in the box was written in)
+    var draftSent: Pair<String, Long>? = null // (this box's send, its save not taken yet: its id, and the epoch before it)
     var sender: ((String, List<Picked>) -> Unit)? = null // (one that's sent its own way: Meta's)
     val chrome = Chrome() // (what its status bar, banner and stop button keep)
 
@@ -799,6 +803,9 @@ object Mesh {
             chat.draft.value = d.text.ifBlank { null }
             chat.draftDirty = d.dirty && d.text.isNotBlank()
             chat.draftRestoring = d.text.isNotBlank()
+            chat.draftEpoch = d.epoch
+            chat.draftTypedIn = d.epoch
+            chat.draftBase = d.base
             chat.files.addAll(d.files)
             chat.queued.addAll(d.queue) // (its queue under it again; its ↑ and stop for the turn going on, if one is)
             if (isWorking(chat)) {
@@ -892,7 +899,11 @@ object Mesh {
     // had it after this box's. Typing its host never took is never replaced by another's write: a save it refused as
     // too long (DRAFT_CHARS_MAX) stays this box's, not saved again, another's write held as before; one it couldn't
     // be given is saved again DRAFT_RETRY_MS later, twice as long each time, DRAFT_RETRIES times (WindowDrafts' too),
-    // another's write held meanwhile, and as the chat's attached again. Only a dirty copy kept here is ever saved
+    // another's write held meanwhile, and as the chat's attached again. Each send that empties the box is one of its
+    // own (boxSent): its save empties its host's draft and starts the draft's next epoch. Nothing written before a
+    // send comes back: its host refuses a save of an earlier epoch (stale_draft), and every box drops a write of one;
+    // typing here from before another head's send keeps only what was typed here, what its host had then (and has
+    // sent) taken out of it (rebase). Only a dirty copy kept here is ever saved
     // over its host's as the chat's opened. What's attached stays this phone's (Queue's drafts)
 
     const val DRAFT_SAVE_MS = 400L
@@ -927,8 +938,12 @@ object Mesh {
             }
             return
         }
+        if (chat.draftDirty && box != d.text.orEmpty() && chat.draftTypedIn < (d.epoch?.toLong() ?: 0L)) return rebase(chat, d)
         chat.draftRev = d.rev?.toLong() ?: 0L
         chat.draftText = d.text.orEmpty()
+        chat.draftEpoch = d.epoch?.toLong() ?: 0L
+        chat.draftBase = d.text.orEmpty()
+        chat.draftTypedIn = chat.draftEpoch
         if (chat.draftDirty && box != chat.draftText) return saveDraft(chat, box)
         chat.draftDirty = false
         if (box != chat.draftText) {
@@ -960,21 +975,44 @@ object Mesh {
         chat.draftText = markdown
         chat.draftFailed = false
         chat.draftFlight++
-        c.request(Msg.DraftSave(session = chat.sid, text = markdown, head = chat.head).json()) { r ->
+        val sent = chat.draftSent?.takeIf { markdown.isBlank() }
+        c.request(Msg.DraftSave(session = chat.sid, text = markdown, head = chat.head, epoch = sent?.second ?: chat.draftTypedIn,
+            sent = sent?.first).json()) { r ->
             main.post {
                 chat.draftFlight--
                 val took = r.optString("op") == Op.DRAFT_SAVED
-                if (took) chat.draftRev = maxOf(chat.draftRev, Msg.DraftSaved.from(r).draft?.rev?.toLong() ?: 0L)
+                val stale = r.optString("code") == WireCheck.STALE
+                val back = if (took) Msg.DraftSaved.from(r).draft else null
+                val again = sent != null && back != null && back.head != chat.head // (that send's own, made again: its host's
+                if (back != null && !again) back.let { d -> // draft now, which another head may have written, comes in below
+                    chat.draftRev = maxOf(chat.draftRev, d.rev?.toLong() ?: 0L)
+                    if ((d.epoch?.toLong() ?: 0L) >= chat.draftEpoch) {
+                        chat.draftEpoch = d.epoch?.toLong() ?: 0L
+                        chat.draftBase = d.text.orEmpty()
+                    }
+                }
+                if ((took || stale) && sent != null && chat.draftSent == sent) chat.draftSent = null
+                if (stale && open === chat) { // (written before a send since: its host's draft in, and only what was typed here)
+                    val d = Msg.Error.from(r).draft
+                    if (d != null && (d.epoch?.toLong() ?: 0L) >= chat.draftEpoch && (d.rev?.toLong() ?: 0L) >= chat.draftRev) rebase(chat, d)
+                    return@post
+                }
                 if (open !== chat) { // (left: what was kept of it clean, if this was what it had)
                     val kept = drafts[key]
                     if (took && kept != null && toMarkdown(kept.text) == markdown)
-                        Queue.setDraft(key, Draft(kept.text, kept.files, kept.queue, kept.upto, kept.hold, dirty = false))
+                        Queue.setDraft(key, Draft(kept.text, kept.files, kept.queue, kept.upto, kept.hold, dirty = false,
+                            epoch = kept.epoch, base = kept.base))
+                    return@post
+                }
+                if (again) {
+                    if (chat.draftFlight == 0 && !chat.draftTyping && boxMarkdown(chat) == markdown) chat.draftDirty = false
+                    draftIn(chat, back)
                     return@post
                 }
                 if (!took) { // (not kept there: still dirty, this box's, and held against others'. Too long: stays so, as
                     chat.draftText = null // its host will never take it. Else saved again soon, and as it's opened or attached)
                     if (chat.draftFlight == 0 && !chat.draftTyping && boxMarkdown(chat) == markdown &&
-                        r.optString("code") != WireCheck.INVALID) {
+                        r.optString("code") != WireCheck.INVALID && !stale) {
                         chat.draftFailed = true
                         retryDraft(chat, markdown)
                     }
@@ -1010,6 +1048,57 @@ object Mesh {
         draftIn(chat, held)
     }
 
+    /** (the box written in from base, its host's draft then, as typed; its draft emptied by a send since, now what it
+     * has) What the box keeps: now, and what was typed here into base (the part base's start and end don't share),
+     * not base's own text, sent (WindowDrafts.after_send). */
+    fun afterSend(base: String, typed: String, now: String): String {
+        val most = minOf(base.length, typed.length)
+        var start = 0
+        while (start < most && base[start] == typed[start]) start++
+        var end = 0
+        while (end < most - start && base[base.length - 1 - end] == typed[typed.length - 1 - end]) end++
+        val mine = if (base.isEmpty()) typed else typed.substring(start, typed.length - end).trim()
+        return listOf(now, mine).filter { it.isNotBlank() }.joinToString("\n\n")
+    }
+
+    /** (d: its host's draft, of an epoch after this box's typing: a send emptied it since) The box: d's text, and what
+     * was typed here (afterSend); saved a moment later if that's more than d's. */
+    fun rebase(chat: Chat, d: Msg.ChatDraft) {
+        val text = d.text.orEmpty()
+        val keep = afterSend(chat.draftBase, boxMarkdown(chat), text)
+        val epoch = d.epoch?.toLong() ?: 0L
+        chat.draftRev = maxOf(chat.draftRev, d.rev?.toLong() ?: 0L)
+        chat.draftEpoch = epoch
+        chat.draftBase = text
+        chat.draftTypedIn = epoch
+        chat.draftText = text
+        chat.draftHeld = null
+        chat.draftFailed = false
+        chat.draftTries = 0
+        chat.draftTyping = false
+        if (boxMarkdown(chat) != keep) {
+            chat.draft.value = null
+            chat.boxText.value = keep
+        }
+        chat.draftDirty = keep != text
+        if (chat.draftDirty) main.postDelayed({
+            if (open === chat && chat.draftDirty && boxMarkdown(chat) == keep) saveDraft(chat, keep)
+        }, DRAFT_SAVE_MS)
+    }
+
+    /** (Send, or a command run, emptying chat's box) A send of its own: its host's draft emptied for it at once, and
+     * the next epoch begun here, so nothing written before it is saved back. */
+    fun boxSent(chat: Chat) {
+        if (!keepsDraft(chat) || chat.reverting != null) return
+        chat.draftSent = java.util.UUID.randomUUID().toString() to chat.draftEpoch
+        chat.draftEpoch++
+        chat.draftBase = ""
+        chat.draftTypedIn = chat.draftEpoch
+        chat.draftDirty = true
+        chat.draftTyping = false
+        saveDraft(chat, "")
+    }
+
     /** (the chat being left) Dirty typing saved to its host now. */
     fun flushDraft(chat: Chat) {
         chat.draftTyping = false
@@ -1020,17 +1109,24 @@ object Mesh {
      * this box is dirty or saving (held: put in after, if its host had it after this box's). */
     fun draftIn(chat: Chat, d: Msg.ChatDraft?) {
         val rev = d?.rev?.toLong() ?: return
-        if (!chat.draftOpen || rev <= chat.draftRev) return // (one seen already, or older than one that has been)
+        val epoch = d.epoch?.toLong() ?: 0L
+        if (!chat.draftOpen || epoch < chat.draftEpoch) return // (from before a send: what was sent, never back)
+        if (rev <= chat.draftRev) return // (one seen already, or older than one that has been)
         if (d.head == chat.head) { // (this box's own save, back)
             chat.draftRev = rev
+            chat.draftEpoch = epoch
             return
         }
+        if (epoch > chat.draftTypedIn && (chat.draftDirty || chat.draftTyping) && chat.reverting == null) return rebase(chat, d)
         if (chat.draftFlight > 0 || chat.draftTyping || chat.draftDirty || chat.reverting != null) {
             if ((chat.draftHeld?.rev?.toLong() ?: -1L) < rev) chat.draftHeld = d
             return
         }
         chat.draftRev = rev
         chat.draftText = d.text.orEmpty()
+        chat.draftEpoch = epoch
+        chat.draftBase = d.text.orEmpty()
+        chat.draftTypedIn = epoch
         if (boxMarkdown(chat) != chat.draftText) {
             chat.draft.value = null
             chat.boxText.value = chat.draftText
@@ -1445,8 +1541,9 @@ object Mesh {
 
     /** A chat's draft: what's written, its files, and its queue (Queue.draftOf). */
     class Draft(val text: String, val files: List<Picked>, val queue: List<Queued> = emptyList(), val upto: Int? = null,
-                val hold: Boolean = false, val dirty: Boolean = false) { // (dirty: its text written here, its host's
-        // answer to its save not come as it was left)
+                val hold: Boolean = false, val dirty: Boolean = false, val epoch: Long = 0L, val base: String = "") {
+        // (dirty: its text written here, its host's answer to its save not come as it was left; epoch: the epoch it
+        // was written in, base: what its host had in it as the typing began (Mesh.afterSend))
         val empty get() = text.isBlank() && files.isEmpty() && queue.isEmpty()
     }
     val drafts = HashMap<String, Draft>() // (a chat left, "host/session": what was written and queued there, as it has them again)

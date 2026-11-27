@@ -144,12 +144,13 @@ class WindowDrafts:
         chat's typing not yet saved goes to its host first (flush_host_draft); dirty: its host hadn't taken it yet."""
         text, atts = widgets.typed_text(self.input), list(self.attachments)
         dirty = self.flush_host_draft()
+        epoch, base = (self.hd.get("typed_in", 0), self.hd.get("base", "")) if self.hd_open() else (0, "")
         self.hd = {"sid": None}  # (its host's draft no longer this box's)
         if text.strip() or atts or queue:
             draft = {"text": text, "caret": widgets.caret_of(self.input), "attachments": atts, "dirty": dirty,
-                     **({"queue": queue} if queue else {})}
+                     "epoch": epoch, "base": base, **({"queue": queue} if queue else {})}
             if (other := self.DRAFTS.pop(key, None)) is not None:
-                draft = self.join_drafts(other, draft)
+                draft = {**self.join_drafts(other, draft), "epoch": epoch, "base": base}
                 draft["dirty"] = dirty or bool(other.get("dirty"))
             self.DRAFTS[key] = draft
             while len(self.DRAFTS) > self.MAX_DRAFTS:  # (the longest left go)
@@ -175,12 +176,18 @@ class WindowDrafts:
     # is never replaced by another's write: a save it refused as too long (DRAFT_CHARS_MAX) stays this box's, not
     # saved again, another's write held as before; one it couldn't be given is saved again DRAFT_RETRY_MS later, twice
     # as long each time, DRAFT_RETRIES times, another's write held meanwhile, and as the chat's attached again.
+    # Each Enter that empties the box is a send of its own (enter_id): its save empties its host's draft and starts
+    # the draft's next epoch. Nothing written before a send comes back: its host refuses a save of an earlier epoch
+    # (stale_draft), and every box drops a write of one; typing here from before another head's send keeps only
+    # what was typed here, what its host had then (and has sent) taken out of it (rebase).
     # Only a dirty copy kept here is ever saved over its host's as the chat's opened. What's attached stays this app's (files on this
     # machine: DRAFTS)
     DRAFT_SAVE_MS, DRAFT_RETRY_MS, DRAFT_RETRIES = 400, 1000, 3
     hd = {"sid": None}  # (the open chat's: {sid, rev (the last its host's said), text (the markdown it has), dirty,
     # flight (saves on their way), held (another's, held), failed (its last save not given to its host, nothing typed
-    # since: saved again), tries (saves made again since one was last taken)})
+    # since: saved again), tries (saves made again since one was last taken), epoch (the last its host's said, or
+    # this box's own send's, to come), base (what its host had in it as this box's typing began), typed_in (the epoch
+    # what's in the box was written in), sent ((id, epoch before it): this box's send, its save not taken yet)})
     draft_timer = draft_retry = None
 
     @property
@@ -212,7 +219,7 @@ class WindowDrafts:
         self.drop_draft_timer()
         dirty = bool(local and local.get("dirty"))
         self.hd = {"sid": self.session_id, "rev": 0, "text": None, "flight": 0, "held": None, "dirty": dirty,
-                   "failed": False, "tries": 0}
+                   "failed": False, "tries": 0, "epoch": 0, "base": "", "typed_in": 0, "sent": None}
         if self.draft_host() is None:
             return
         d = getattr(self.proc, "draft", None) if isinstance(self.proc, baudelib.client.RemoteProc) else None
@@ -222,7 +229,11 @@ class WindowDrafts:
                 self.save_host_draft()
             return
         self.host_queue_in(getattr(self.proc, "queue", None))  # (its queue, its host's)
-        self.hd.update(rev=d.get("rev") or 0, text=d.get("text") or "")
+        epoch = d.get("epoch") or 0
+        self.hd.update(rev=d.get("rev") or 0, text=d.get("text") or "", epoch=epoch, base=d.get("text") or "",
+                       typed_in=epoch)
+        if dirty and (local.get("epoch") or 0) < epoch:  # (typed before a send since: only what was typed here)
+            self.set_box(self.after_send(local.get("base") or "", self.box_markdown(), self.hd["text"]))
         if dirty and self.box_markdown() != self.hd["text"]:
             return self.save_host_draft()
         self.hd["dirty"] = False
@@ -281,10 +292,17 @@ class WindowDrafts:
         self.drop_draft_timer()
         if self.reverting is not None or not self.hd_open():
             return
-        text = self.box_markdown()
-        self.hd.update(failed=False, tries=0)
-        if text == self.hd["text"]:
-            self.hd["dirty"] = False
+        text, hd = self.box_markdown(), self.hd
+        hd.update(failed=False, tries=0)
+        if text.strip():
+            hd.update(sent=None, typed_in=hd["epoch"])
+        elif getattr(self, "enter_id", None) and (hd["sent"] or (None,))[0] != self.enter_id:  # (emptied by a
+            hd.update(sent=(self.enter_id, hd["epoch"]), epoch=hd["epoch"] + 1, base="")  # send: the next epoch's,
+            hd["typed_in"] = hd["epoch"]  # and nothing from before it written back)
+        else:
+            hd["typed_in"] = hd["epoch"]
+        if text == hd["text"] and not hd["sent"]:
+            hd["dirty"] = False
             return self.release_held()
         self.hd["dirty"] = True
         if self.draft_host() is None:
@@ -317,16 +335,34 @@ class WindowDrafts:
         hd, sid, text = self.hd, self.session_id, self.box_markdown()
         hd["text"], hd["failed"] = text, False
         hd["flight"] += 1
+        sent = hd["sent"] if not text.strip() else None
+        msg = {"op": "draft_save", "session": sid, "text": text, "head": self.draft_head,
+               "epoch": sent[1] if sent else hd["typed_in"], **({"sent": sent[0]} if sent else {})}
 
         def done(reply):
             hd["flight"] -= 1
             took = reply.get("op") == "draft_saved"
-            if took:
-                hd["rev"] = max(hd["rev"], reply["draft"]["rev"])
+            stale = reply.get("code") == wire.STALE and isinstance(reply.get("draft"), dict)
+            again = took and sent and reply["draft"].get("head") != self.draft_head  # (that send's own, made again:
+            if took and not again:  # its host's draft now, which another head may have written: that's come in below)
+                d = reply["draft"]
+                hd["rev"] = max(hd["rev"], d["rev"])
+                if (d.get("epoch") or 0) >= hd.get("epoch", 0):
+                    hd.update(epoch=d.get("epoch") or 0, base=d.get("text") or "")
+            if (took or stale) and sent and hd.get("sent") == sent:
+                hd["sent"] = None
             if self.hd is not hd:  # (left: what was kept of it clean, if this was what it had)
                 if took and (d := self.DRAFTS.get(sid)) is not None and \
                         ComposerMarkdown.to_markdown(d["text"]) == text:
                     d["dirty"] = False
+                return
+            if again:
+                if not hd["flight"] and self.draft_timer is None and self.box_markdown() == text:
+                    hd["dirty"] = False
+                return self.host_draft_in(reply["draft"])
+            if stale:  # (written before a send since: its host's draft in, and only what was typed here: rebase)
+                if (reply["draft"].get("epoch") or 0) >= hd["epoch"] and (reply["draft"].get("rev") or 0) >= hd["rev"]:
+                    self.rebase(reply["draft"])
                 return
             if not took:  # (not kept there: still dirty, this box's, and held against others'. Too long: stays so, as
                 hd["text"] = None  # its host will never take it. Else saved again soon, and as it's opened or attached)
@@ -339,7 +375,7 @@ class WindowDrafts:
             if not hd["flight"] and self.draft_timer is None and self.box_markdown() == text:
                 hd["dirty"] = False
                 self.release_held()
-        r.request({"op": "draft_save", "session": sid, "text": text, "head": self.draft_head}, done)
+        r.request(msg, done)
 
     def retry_host_draft(self, text):
         """(a save of text its host didn't take) Saved again in a while, unless it's been tried DRAFT_RETRIES times, or
@@ -370,19 +406,56 @@ class WindowDrafts:
         self.host_draft_in(msg.get("draft"))
 
     def host_draft_in(self, d):
+        """Its host's draft (another head's write, or as it's attached again) in the box, unless it's from before a
+        send this box knows of. One of a later epoch than this box's typing: its own typing kept, and only that
+        (rebase); else held while this box is dirty or saving."""
         hd = self.hd
-        if not isinstance(d, dict) or not self.hd_open() or (d.get("rev") or 0) <= hd["rev"]:
+        if not isinstance(d, dict) or not self.hd_open() or (d.get("epoch") or 0) < hd["epoch"]:
+            return  # (from before a send: what was sent, never back)
+        if (d.get("rev") or 0) <= hd["rev"]:
             return  # (one seen already, or older than one that has been)
+        epoch = d.get("epoch") or 0
         if d.get("head") == self.draft_head:  # (this box's own save, back)
-            hd["rev"] = d["rev"]
+            hd.update(rev=d["rev"], epoch=epoch)
             return
+        if epoch > hd["typed_in"] and (hd["dirty"] or self.draft_timer is not None) and self.reverting is None:
+            return self.rebase(d)
         if hd["flight"] or hd["dirty"] or self.draft_timer is not None or \
                 self.reverting is not None:
             if hd["held"] is None or d["rev"] > hd["held"]["rev"]:  # (this box's own goes after, unless its host had
                 hd["held"] = d                                      # this after it)
             return
-        hd["rev"] = d["rev"]
+        hd.update(rev=max(hd["rev"], d["rev"]), epoch=epoch, base=d.get("text") or "", typed_in=epoch)
         self.put_host_text(d.get("text") or "")
+
+    @staticmethod
+    def after_send(base, typed, now):
+        """(the box written in from base, its host's draft then, as typed; its draft emptied by a send since, now
+        what it has) What the box keeps: now, and what was typed here into base (the part base's start and end
+        don't share), not base's own text, sent."""
+        start, most = 0, min(len(base), len(typed))
+        while start < most and base[start] == typed[start]:
+            start += 1
+        end = 0
+        while end < most - start and base[-1 - end] == typed[-1 - end]:
+            end += 1
+        mine = typed[start:len(typed) - end].strip() if base else typed
+        return "\n\n".join(p for p in (now, mine) if p.strip())
+
+    def rebase(self, d):
+        """(d: its host's draft, of an epoch after this box's typing: a send emptied it since) The box: d's text, and
+        what was typed here (after_send); saved a moment later if that's more than d's."""
+        hd, text = self.hd, d.get("text") or ""
+        keep = self.after_send(hd["base"], self.box_markdown(), text)
+        self.drop_draft_timer()
+        epoch = d.get("epoch") or 0
+        hd.update(rev=max(hd["rev"], d["rev"]), epoch=epoch, base=text, typed_in=epoch, text=text, held=None,
+                  failed=False, tries=0)
+        if self.box_markdown() != keep:
+            self.set_box(keep, [len(keep)] * 2)
+        hd["dirty"] = keep != text
+        if hd["dirty"] and self.draft_host() is not None:
+            self.draft_timer = GLib.timeout_add(self.DRAFT_SAVE_MS, self.draft_due)
 
     # ---- a host's chat's queue: kept by its host (hostqueue), the same in every head that opens the chat, on any
     # machine. What's queued here is added there, and what's sent, edited or deleted here dropped there; its host

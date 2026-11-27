@@ -205,6 +205,11 @@ class ChatDraft(Obj):
             revision than).
         head (string or None): The box that wrote it (draft_save's head): what that box knows as its own save,
             coming back.
+        epoch (integer): How many times it's been emptied by a send (none: 0): one more with every send, never
+            less. A save written before the last send (its epoch less) is refused, and a head drops a draft of
+            an epoch less than one it's seen, so what was sent never comes back.
+        sent (string or None): The send that last emptied it (draft_save's sent): the same send's save, made
+            again, empties it once.
         at (number or None): When it was written, epoch seconds.
     """
 
@@ -2327,8 +2332,9 @@ class Error(Obj):
     host's access rules refuse is answered with code access_denied (error "access denied"), denied naming the rule.
 
         error (string): What's wrong.
-        code ('unsupported_operation' | 'invalid_data_type' | 'access_denied'): One of the schema's own
-            refusals.
+        code ('unsupported_operation' | 'invalid_data_type' | 'access_denied' | 'stale_draft'): One of the
+            schema's own refusals; stale_draft: a draft_save written before the draft's last send (its epoch
+            less than its host's), not kept.
         detail (string): A refusal's: what was wrong (the op, or the field and why), for a person to read; code,
             not this, says which refusal it is.
         denied ('shell' | 'browser_read' | 'browser_write' | 'providers' | 'model_files' | 'spawn' |
@@ -2340,13 +2346,14 @@ class Error(Obj):
         gone (GoneFolder): A session's folder gone and not made again.
         missing (Dep): What a chat's program needs that the host hasn't (claude, codex): error says what to
             install.
-        session (string): memory's refusal: the session.
+        draft (ChatDraft): stale_draft's: the draft as its host keeps it.
+        session (string): memory's refusal, and stale_draft's: the session.
         text (string): memory's refusal: the memory as the Bot left it.
         seen (string or None): memory's refusal: what the user's accepted of it.
         mtime (number or None): memory's refusal: its mtime (ns; a phone's, seconds).
         path (string): memory's refusal: where it is.
     """
-    _refs = {"gone": "GoneFolder", "missing": "Dep"}
+    _refs = {"gone": "GoneFolder", "missing": "Dep", "draft": "ChatDraft"}
 
 
 class FeedbackFiled(Obj):
@@ -4006,18 +4013,25 @@ class Ops(Area):
         """
         return self._call("docker_follow", {"what": what, "context": context, "page": page, "id": id}, host, Obj)
 
-    def draft_save(self, *, session=None, text=None, head=None, host=None):
+    def draft_save(self, *, session=None, text=None, epoch=None, sent=None, head=None, host=None):
         """draft_save (DraftSave): A chat's draft written (a change to the chat: Agent Management's write), kept by its
         host as the newest whatever was there (the last write wins), and told every other head attached to it
         (draft_changed). Sent a moment after typing stops, as the chat's left, and at once as the box is emptied by
-        sending.
+        sending (sent). One written before the draft's last send is refused (stale_draft), its draft as kept now
+        with it.
 
             session (string): The session's id.
             text (string): What's written in its box now (empty: nothing, as once it's sent).
+            epoch (integer): The draft's epoch its text was written in (ChatDraft's epoch, as this head last had
+                it): one less than its host's now (a send's emptied it since), and it's refused (stale_draft),
+                so what was sent isn't written back.
+            sent (string or None): A send's id, of the head's own pick (one each Enter): the box emptied by
+                sending what was in it. The draft emptied, and its epoch one more.
             head (string or None): The box writing it, an id of the head's own pick (one each window or chat
                 page): carried in the draft as it's told, so the box knows its own save.
         """
-        return self._call("draft_save", {"session": session, "text": text, "head": head}, host, Obj)
+        return self._call("draft_save", {"session": session, "text": text, "epoch": epoch, "sent": sent,
+                                         "head": head}, host, Obj)
 
     def edit_adopt(self, *, edits=None, host=None):
         """edit_adopt (EditAdopt): Edits waiting on this host's notebooks that another machine's Record kept (Meta's,

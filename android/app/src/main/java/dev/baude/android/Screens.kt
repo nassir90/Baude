@@ -135,6 +135,7 @@ fun ChatPage(chat: Chat, name: String, attach: Boolean = true, stop: (() -> Unit
         chat.typed = text          // once as the box empties)
         val markdown = toMarkdown(text)
         if (chat.sender != null || chat.reverting != null) return@LaunchedEffect
+        if (chat.boxText.value != null) return@LaunchedEffect // (its host's draft not in the box yet: what's there isn't it)
         if (markdown == chat.draftText) { // (written back to what its host has)
             chat.draftTyping = false
             if (chat.draftFlight == 0) {
@@ -144,6 +145,8 @@ fun ChatPage(chat: Chat, name: String, attach: Boolean = true, stop: (() -> Unit
             return@LaunchedEffect
         }
         if (markdown == chat.putText) return@LaunchedEffect // (as it was put there, not written)
+        chat.draftTypedIn = chat.draftEpoch // (written in the epoch its host's last said, or after this box's own send)
+        if (markdown.isNotBlank()) chat.draftSent = null
         chat.draftDirty = true
         chat.draftFailed = false
         chat.draftTries = 0
@@ -458,7 +461,7 @@ fun ChatPage(chat: Chat, name: String, attach: Boolean = true, stop: (() -> Unit
             val sendable = ready || (chat.sender == null && isLocal(text))
             val send = {
                 val typed = text.trim()
-                val local = host && localCommand(chat, typed, busy, { text = ""; marks.at = -1 }, openPage, open)
+                val local = host && localCommand(chat, typed, busy, { Mesh.boxSent(chat); text = ""; marks.at = -1 }, openPage, open)
                 if (!local) {
                     val r = reverting
                     val markdown = toMarkdown(text)
@@ -468,6 +471,7 @@ fun ChatPage(chat: Chat, name: String, attach: Boolean = true, stop: (() -> Unit
                     } else if (r != null) commitRevert(chat, r, markdown, files.toList()) { ok -> if (ok) text = "" }
                     else {
                         Queue.submit(chat, busy, markdown, files.toList())
+                        Mesh.boxSent(chat) // (a send of its own: its host's draft emptied, and nothing from before it back)
                         text = ""
                         files.clear()
                     }

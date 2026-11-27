@@ -109,6 +109,15 @@ SCHEMAS = {
                  {"session": BOT, "id": {"type": "string"}, "inputs": {"type": "object"},
                   "wait": {"type": "boolean"}}, ["id"]),
     "task_run": ("One run of one of your tasks, and its log.", {"session": BOT, "run": {"type": "string"}}, ["run"]),
+    "answer_task": ("Answer an ask of one of your tasks' runs whose message says to answer with this tool "
+                    "(mcp__mesh__answer_task); the run's id is in its table. With a form, answer is an object of its "
+                    "fields (the ask lists them); with none, text. Its run goes on as soon as you've answered: what "
+                    "you say besides is only commentary. A wrong answer is refused with what's wrong: call it again. "
+                    "A message from a task that doesn't say to use this tool is answered in your reply, not with it.",
+                    {"session": BOT, "run": {"type": "string", "description": "The asking run's id (its table's run)"},
+                     "answer": {"type": "object", "description": "The form's fields, by name: each a text, number, "
+                                                                 "true or false, or one of a choice's choices"},
+                     "text": {"type": "string", "description": "The answer to an ask with no form"}}, ["run"]),
 }
 ASKED = ("set_task", "run_task")  # (run code on the host: asked about as Bash is, by the chat's permission mode)
 
@@ -493,6 +502,12 @@ class Mesh:
         got = self.request(self.local, {"op": "task_run", "session": self._bot(a), "run": a["run"]})
         return {"run": got["run"], "log": got.get("log") or []}
 
+    def answer_task(self, a):
+        msg = {"op": "answer_task", "session": self._bot(a), "run": a["run"],
+               **{k: a[k] for k in ("answer", "text") if k in a}}
+        got = self.request(self.local, msg)
+        return {k: got[k] for k in ("task", "run", "values", "text") if k in got}
+
     def chats(self, a):
         out = []
         for s in self.sessions(self.where(a.get("host"))):
@@ -639,11 +654,12 @@ def listed(schemas=None, server=NAME):
             for n, (d, props, req) in (schemas or SCHEMAS).items()]
 
 
-def serve(me=None, rfile=None, wfile=None, socket=None, meta=False):
+def serve(me=None, rfile=None, wfile=None, socket=None, meta=False, only=None):
     """The MCP server: a message a line on rfile (stdin), its answers on wfile (stdout), till rfile ends; each call on
-    a thread of its own (a subagent's answer can take a while: another call meanwhile is answered)."""
+    a thread of its own (a subagent's answer can take a while: another call meanwhile is answered). only: the tools
+    it has, by name (None: all)."""
     mesh = Mesh(me, socket, meta)
-    serve_tools(NAME, SCHEMAS, lambda name, args: mesh.hosts() if name == "hosts" else getattr(mesh, name)(args),
+    serve_tools(NAME, {n: v for n, v in SCHEMAS.items() if only is None or n in only}, lambda name, args: mesh.hosts() if name == "hosts" else getattr(mesh, name)(args),
                 rfile, wfile)
 
 

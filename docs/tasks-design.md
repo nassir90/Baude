@@ -117,10 +117,16 @@ except Conflict as e:
 
 - `ask(text, form=None)` sends `task_ask`. The host gives the Bot a turn of its own (from the task, by its name): it
   waits until the Bot is idle and then sends it, one ask of a Bot at a time, so the turn that ends next is that ask's,
-  never a user's turn or one a stopped run's ask left going. It answers with the turn's result: its text, or, with a form, the values it parsed from the Bot's JSON and checked against the
-  form. A reply that doesn't fit is sent back to the Bot once with what was wrong (a format check); still wrong, the
-  ask fails. The run is `asking` meanwhile ("Waiting for input"): it waits up to 7 days (`ASK_S`), its `timeout_s`
-  clock stopped, and the script pings the host so the connection stays up however long the answer takes.
+  never a user's turn or one a stopped run's ask left going. The message ends by telling the Bot to answer with its
+  `answer_task` tool (`{run, answer}`, `answer` an object of the form's fields, listed; `{run, text}` for an ask with
+  no form). The run goes on as soon as the tool's called, not at the turn's end: the turn's text is only commentary,
+  shown in the chat as any other. An answer that doesn't fit the form is refused to the tool with what was wrong, so
+  the Bot can call it again. A turn that ends without the tool is reminded once; ending without it again, the ask
+  fails (said as refused if the tool was called and refused). A Bot whose agent has no mesh tools (an Apple model) is
+  asked for a JSON object of the fields in its reply instead, checked the same way, sent back once if it doesn't fit.
+  The run is `asking` meanwhile ("Waiting for input"): it waits up to 7 days (`ASK_S`), its `timeout_s` clock
+  stopped, and the script pings the host so the connection stays up however long the answer takes. The reminder is
+  a message of its own, marked as waiting for the answer as the ask was.
 - `fallback(error)` is an ask that says it's an error: the Bot gets the error and the log so far. The host refuses it
   for a task whose `notify_failure` is off.
 - `@task.main` runs a function with the inputs; an exception's traceback is printed and the script exits 1, so the run
@@ -164,6 +170,7 @@ events (`task_run`) on Settings → Telemetry's timeline.
 | `task_choices {session, type}` | `task_choices {session, type, choices}` | what a variable of that type could be bound to here |
 | `task_report {run, token, say?}` | `task_reported` | a script's line in its run's log |
 | `task_ask {run, token, text, form?, error?}` | `task_answer {text, values?}` | a script asks its Bot (above) |
+| `answer_task {session, run, answer?, text?}` | `task_answered {session, run, task, values?, text?}` | the Bot (or someone who can manage it) answers the ask of its run that's waiting on it |
 
 Entities: `Task`, `TaskField`, `TaskTrigger`, `TaskVariable`, `TaskBinding`, `TaskChoice`, `TaskRun`, `TaskLogLine`. `task_report` and `task_ask` are a running
 script's: taken only on the host's own socket, with the run's token.
@@ -176,6 +183,10 @@ runs is managing the chat. Chose Shell over a new Tasks capability because a tas
 who may run a shell may already write and run any script, and anyone who may not shouldn't be able to through a task.
 The Bot's own `set_task` and `run_task` tools aren't on its always-allowed list, so its permission mode asks about them
 as it asks about Bash.
+
+Answering an ask (`answer_task`) is managing the Bot's chat (Manage write): the host takes it only for an ask of that
+run that's waiting on that Bot, so the Bot's own tool (on its host's socket) and anyone who may manage the Bot can
+answer, and no one else.
 
 ## Routines
 

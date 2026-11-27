@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
-  "description": "A running script asks its Bot (on the host's own socket, with its run's token): something it can't decide, or (error) a failure handed over. Sent the Bot as a turn of its own once it's idle, answered as that turn ends (refused, as a failure, for a task whose failures aren't handed over).",
+  "description": "A running script asks its Bot (on the host's own socket, with its run's token): something it can't decide, or (error) a failure handed over. Sent the Bot as a turn of its own once it's idle, answered as the Bot calls its answer_task tool (answer_task); a turn that ends without it reminded once, then failed (refused, as a failure, for a task whose failures aren't handed over too).",
   "properties": {
     "op": {
       "const": "task_ask",

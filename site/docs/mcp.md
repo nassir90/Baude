@@ -124,6 +124,17 @@ One run of one of your tasks, and its log.
 | `session` | string |  | A Bot's session id (yours if none's given) |
 | `run` | string | yes |  |
 
+### `answer_task`
+
+Answer an ask of one of your tasks' runs whose message says to answer with this tool (mcp__mesh__answer_task); the run's id is in its table. With a form, answer is an object of its fields (the ask lists them); with none, text. Its run goes on as soon as you've answered: what you say besides is only commentary. A wrong answer is refused with what's wrong: call it again. A message from a task that doesn't say to use this tool is answered in your reply, not with it.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `session` | string |  | A Bot's session id (yours if none's given) |
+| `run` | string | yes | The asking run's id (its table's run) |
+| `answer` | object |  | The form's fields, by name: each a text, number, true or false, or one of a choice's choices |
+| `text` | string |  | The answer to an ask with no form |
+
 ### `list_notebooks`
 
 Record's notebooks on a host: each one's name and how many pages it has.
@@ -275,6 +286,17 @@ Tools allowed whenever a session's agent asks for them, a head attached or not (
 | `tools` | array of string |  | These in place of any there were. |
 | `add` | array of string |  | These added to them. |
 
+#### `answer_task` (AnswerTask)
+
+An ask of one of a Bot's tasks' runs (task_ask) answered: the Bot's answer_task tool's, or anyone's who may manage the Bot. Taken only for an ask of that run that's waiting on that Bot; the run goes on at once. Refused, with what's wrong, if it doesn't fit the ask's form.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `session` | string | yes | The Bot's session id: the one the ask's waiting on. |
+| `run` | string | yes | The asking run's id. |
+| `answer` | object |  | An ask with a form: its fields' values, by name. |
+| `text` | string |  | An ask with no form: the answer. |
+
 #### `archive` (Archive)
 
 A session archived: its agent stopped, and it's listed only to those subscribed with archived.
@@ -416,6 +438,16 @@ A container's or a Compose project's log, followed (logs): one a connection, the
 | `context` | string |  | The context, by its name. |
 | `page` | string |  | The category's page, by its key: a container's or a Compose project's. |
 | `id` | string |  | The container's id, or the Compose project's name. |
+
+#### `draft_save` (DraftSave)
+
+A chat's draft written (a change to the chat: Agent Management's write), kept by its host as the newest whatever was there (the last write wins), and told every other head attached to it (draft_changed). Sent a moment after typing stops, as the chat's left, and at once as the box is emptied by sending.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `session` | string | yes | The session's id. |
+| `text` | string | yes | What's written in its box now (empty: nothing, as once it's sent). |
+| `head` | string/null |  | The box writing it, an id of the head's own pick (one each window or chat page): carried in the draft as it's told, so the box knows its own save. |
 
 #### `edit_adopt` (EditAdopt)
 
@@ -969,7 +1001,7 @@ One of a Bot's tasks, its script and latest runs.
 
 #### `task_ask` (TaskAsk)
 
-A running script asks its Bot (on the host's own socket, with its run's token): something it can't decide, or (error) a failure handed over. Sent the Bot as a turn of its own once it's idle, answered as that turn ends (refused, as a failure, for a task whose failures aren't handed over).
+A running script asks its Bot (on the host's own socket, with its run's token): something it can't decide, or (error) a failure handed over. Sent the Bot as a turn of its own once it's idle, answered as the Bot calls its answer_task tool (answer_task); a turn that ends without it reminded once, then failed (refused, as a failure, for a task whose failures aren't handed over too).
 
 | Field | Type | Required | What it is |
 |---|---|---|---|
@@ -1254,6 +1286,7 @@ attach's answer.
 | `asks` | array of object |  | What it's asking, not answered yet: its agent's control requests (can_use_tool) as they came. |
 | `login` | ChatLogin? |  | Its sign-in, if a turn failed for want of it and that's not been put right yet (ChatLogin): the sign-in card every head draws. |
 | `writes` | boolean |  | Whether the head may change the chat (Agent Management's write, the chat's own first): false, it only reads it, and answers none of its asks. |
+| `draft` | ChatDraft? |  | Its draft, as its host keeps it (draft_save); null if none's been written, or the head may only read the chat. |
 
 #### `autofix` (AutofixReply)
 
@@ -1415,6 +1448,15 @@ docker_follow logs: more of the log.
 | Field | Type | Required | What it is |
 |---|---|---|---|
 | `text` | string |  | The lines. |
+
+#### `draft_saved` (DraftSaved)
+
+draft_save's answer.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `session` | string | yes | The session's id. |
+| `draft` | ChatDraft | yes | Its draft as kept now. |
 
 #### `edit` (EditReply)
 
@@ -1881,6 +1923,18 @@ task_ask's answer: the Bot's.
 | `text` | string | yes | What it said. |
 | `values` | object/null |  | A form's values, as the Bot filled them. |
 
+#### `task_answered` (TaskAnswered)
+
+answer_task's answer: the ask answered, its run going on.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `session` | string | yes | The Bot's session id. |
+| `run` | string | yes | The run's id. |
+| `task` | string | yes | The run's task, by its name. |
+| `values` | object |  | A form's values, as they were taken (checked against its fields). |
+| `text` | string |  | The answer to an ask with no form. |
+
 #### `task_reported` (TaskReported)
 
 task_report's answer.
@@ -2048,6 +2102,15 @@ What a session's agent says, as it says it (claude's stream-json); to those atta
 |---|---|---|---|
 | `session` | string | yes | The session's id. |
 | `msg` | object |  | A stream-json message. |
+
+#### `draft_changed` (DraftChanged)
+
+A chat's draft written by a head (draft_save): told every other head attached to it that may write it, as attach's answer tells one attaching.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `session` | string | yes | The session's id. |
+| `draft` | ChatDraft | yes | Its draft now. |
 
 #### `emission_call` (EmissionCall)
 
@@ -2360,6 +2423,17 @@ What a Codex browser sign-in's server on the host answered the address a browser
 | `type` | string |  | Its Content-Type. |
 | `body` | string | yes | The page. |
 | `location` | string |  | Where it sends the browser on to, if it does (a page of OpenAI's). |
+
+#### ChatDraft
+
+A chat's draft, as its host keeps it: the text written in its box and not sent, the same on every head that opens the chat, on any machine. Only the text: what's attached is a file on the head's own machine, kept there.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `text` | string | yes | What's written (empty once it's sent). |
+| `rev` | integer | yes | Its revision: one more with every save, never less (a head drops one it's seen a later revision than). |
+| `head` | string/null |  | The box that wrote it (draft_save's head): what that box knows as its own save, coming back. |
+| `at` | number/null |  | When it was written, epoch seconds. |
 
 #### ChatLogin
 
@@ -3080,6 +3154,7 @@ One thing a pending restart waits for: a chat whose agent is running a command, 
 | `run` | string |  | A task run's: its id. |
 | `terminal` | string |  | A terminal's: its id (terminal's attach). |
 | `name` | string | yes | The chat's title, the task's name, the agent's model, or the terminal's title. |
+| `waiting` | boolean |  | A task run's: true while it waits for input (an ask of its Bot, asking); a restart would stop it. |
 | `what` | string |  | What it runs: the chat's oldest command, the agent run's chat's host, or the terminal's program. |
 
 #### RestartState
@@ -3154,6 +3229,7 @@ A session as a host lists it.
 | `on_phone` | boolean |  | A Bot's browser is on a phone now. |
 | `fork_from` | string/null |  | The session it was forked from. |
 | `spawned_by` | string/null |  | The chat whose mesh tools started it (start's spawned_by), or the Bot whose task's run started it. |
+| `task_asks` | array of string |  | A Bot's: the uuids of the messages its tasks' runs have sent it as asks, each run waiting for input (asking) till the turn that message began ends. Empty for every other. |
 | `task_run` | TaskRunRef? |  | The task's run that started it (start's task_run), on its Bot's host. |
 | `desktop` | boolean |  | Claude Desktop's: a chat in Claude Desktop's own list on its host's machine. Every app lists it in the Desktop group. |
 | `taken_up` | boolean |  | false for a Claude Desktop chat its host only lists: nothing of it runs on the host till it's written in, which takes it up (as adopt does). Missing for every other. |
@@ -3296,6 +3372,7 @@ A task's run: what started it, what it was given, how it went (a run's record is
 | `seconds` | number/null |  | How long it took. |
 | `exit` | integer/null |  | Its script's exit code. |
 | `error` | string/null |  | Why it failed or was skipped. |
+| `skips` | integer/null |  | A skipped run's: how many firings it stands for (its trigger fired again while the same run went on: one record, not one each). |
 | `asks` | integer/null |  | How many times it asked its Bot. |
 | `handed` | boolean/null |  | Its failure was handed to its Bot. |
 | `chats` | array/null of string |  | The chats it started on its Bot's host (start's task_run), by their ids, oldest first: they go on after it's over, their states as the sessions listing has them. |
@@ -3600,6 +3677,7 @@ Somewhere wire.reach can go: this machine's host process, one listening on anoth
 | `BATCH_MAX` | `25` | A browser batch's actions, at most. |
 | `BOT_PICTURE_MAX` | `2097152` | A Bot's picture, as bot sends it, at most, in bytes. |
 | `DEFAULT_WINDOW` | `32768` | A model's context window, in tokens, where its server or settings don't say one. |
+| `DRAFT_CHARS_MAX` | `200000` | A chat's draft, as draft_save sends it, at most, in characters: a longer one is refused, and stays the head's own. |
 | `EPHEMERAL_S` | `1` | A side question whose head's gone (or detached): gone this soon, in seconds. |
 | `FRAME_QUALITY` | `72` | A watched browser's frames' JPEG quality (emission_frame). |
 | `GRACE_MAX_S` | `86400` | start's grace, at most, in seconds. |
@@ -3616,6 +3694,6 @@ Somewhere wire.reach can go: this machine's host process, one listening on anoth
 | `TERMINAL_KEEP_S` | `600` | A terminal (terminal op) no connection is attached to now: its program kept running this long to be attached to again, in seconds. |
 | `TERMINAL_KEPT_BYTES` | `262144` | What a terminal (terminal op) wrote lately, kept to show again on attach: this many bytes at most. |
 | `TTL` | `16` | A tunnel's passed through at most this many hosts (open's ttl). |
-| `VERSION` | `24` | The wire's version, as a host's hello says it. |
+| `VERSION` | `28` | The wire's version, as a host's hello says it. |
 | `ZOOM_MAX` | `1568` | A browser zoom's longest side, in pixels. |
 | `ZOOM_QUALITY` | `90` | A browser zoom's JPEG quality. |

@@ -3,6 +3,7 @@ package dev.baude.android.screenshots
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.ui.Modifier
@@ -190,9 +191,18 @@ abstract class TasksMockups(private val theme: String) {
         shoot("senders")
     }
 
-    /** A Bot's chat asked by its task's run (a form to fill), then handed the run's failure: each heads with what the
-     * task did and a table of the run, then the script's words. */
-    @Test fun asked() {
+    /** A Bot's chat asked by its task's run (a form to fill), answered with its answer_task tool (the Answered card), then
+     * handed the run's failure: each heads with what the task did and a table of the run, then the script's words. The
+     * Bot's first turn answers in words only, so it's reminded, then answers with the tool. */
+    @Test fun asked() = asked(false)
+
+    /** asked, as it is while the run waits on the reminder (its from line says so), before the tool's answer. */
+    @Test fun reminded() = asked(true)
+
+    private fun asked(waiting: Boolean) {
+        val answer = dev.baude.android.Call("a1", dev.baude.android.ANSWER_TASK,
+            org.json.JSONObject("""{"run": "625623c87b8e486e", "answer": {"bucket": "staging"}}"""))
+        answer.result("""{"task": "Deploy site", "run": "625623c87b8e486e", "values": {"bucket": "staging"}}""", false, emptyList())
         val table = "| task | 6def981555c9 |\n|---|---|\n| run | 625623c87b8e486e |\n| start time | 2026-11-26 23:42:25 |\n"
         val tail = "| version | 2009f5f91a9f |\n" +
             "| command | /usr/bin/python3 -u /home/ada/.local/share/baude/bots/s1/tasks/scripts/2009f5f91a9f.py |\n"
@@ -201,12 +211,27 @@ abstract class TasksMockups(private val theme: String) {
         activity.setContent {
             BaudeTheme {
                 androidx.compose.foundation.layout.Column(Modifier.fillMaxSize().background(LocalBaude.current.inside)
+                    .verticalScroll(androidx.compose.foundation.rememberScrollState(Int.MAX_VALUE)) // (its end: the answer)
                     .padding(top = 24.dp), verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(12.dp)) {
                     dev.baude.android.Said(dev.baude.android.Line("you", "An instance of the 'Deploy site' task asks:\n\n" +
                         table + "| duration | 0.0 s |\n" + tail + "\nWhich bucket does site go to?\n\n" +
-                        "Answer with only a JSON object with these fields:\n- bucket: one of \"staging\", \"production\""), from,
-                        waits = true)
-                    dev.baude.android.Said(dev.baude.android.Line("you", "An instance of the 'Deploy site' task failed\n\n" +
+                        "Answer with your mcp__mesh__answer_task tool, these fields in its answer:\n- bucket: one of \"staging\", \"production\""), from)
+                    androidx.compose.foundation.layout.Box(Modifier.padding(horizontal = 12.dp)) {
+                        dev.baude.android.Prose("Staging, I'd say: production deploys wait for the release.")
+                    }
+                    dev.baude.android.Said(dev.baude.android.Line("you", "You haven't answered run 625623c87b8e486e with " +
+                        "your mcp__mesh__answer_task tool, and the task's waiting on it. Answer with the tool now.\n\n" +
+                        "Answer with your mcp__mesh__answer_task tool, these fields in its answer:\n- bucket: one of " +
+                        "\"staging\", \"production\""), from, waits = waiting)
+                    if (!waiting) {
+                        androidx.compose.foundation.layout.Box(Modifier.padding(horizontal = 12.dp)) {
+                            dev.baude.android.ToolCard(answer, null, {}, null)
+                        }
+                        androidx.compose.foundation.layout.Box(Modifier.padding(horizontal = 12.dp)) {
+                            dev.baude.android.Prose("Answered: staging.")
+                        }
+                    }
+                    if (!waiting) dev.baude.android.Said(dev.baude.android.Line("you", "An instance of the 'Deploy site' task failed\n\n" +
                         table + "| end time | 2026-11-26 23:42:37 |\n| duration | 12.4 s |\n" + tail +
                         "| exit code | 3 |\n\nIt failed: exited with 3. The end of its log:\n\nsay: deploying site\n" +
                         "err: the upload was refused: the bucket's key expired\n\nFind out why. If the script is at fault, " +
@@ -215,7 +240,7 @@ abstract class TasksMockups(private val theme: String) {
             }
         }
         settle()
-        shoot("asked")
+        shoot(if (waiting) "reminded" else "asked")
     }
 
     /** A Bot's chat told its task's run finished (Notify on graceful exit): the same heading and table, the end of its output. */

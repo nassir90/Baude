@@ -27,6 +27,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -511,6 +512,7 @@ private fun RemoveAccount(host: HostAccounts, a: Msg.Account, done: () -> Unit) 
 class CodexLogin(val host: HostAccounts, val id: String?) {
     val name = mutableStateOf("")
     val home = mutableStateOf("")
+    val existing = mutableStateOf(false) // (Existing folder picked over New login)
     val login = mutableStateOf<Msg.ChatLogin?>(null)
     val said = mutableStateOf<String?>(null) // (a signed-in CODEX_HOME's add: why it wasn't)
     val busy = mutableStateOf(false)
@@ -565,6 +567,7 @@ class CodexLogin(val host: HostAccounts, val id: String?) {
 
     fun paste() {
         val w = conn ?: return
+        if (note.value == Wording.Subscriptions.checkingAddress) return // (one address checked at a time)
         if (address.value.isNotBlank() && w.send(Msg.Accounts(req = REQ, what = "callback", url = address.value.trim()).json()))
             note.value = Wording.Subscriptions.checkingAddress
     }
@@ -590,25 +593,46 @@ internal fun CodexSignIn(host: HostAccounts, id: String?, name: String?, done: (
     val fresh = id == null
     var label by login.name
     var home by login.home
+    var existing by login.existing
+    var empty by remember { mutableStateOf(0) } // (Existing folder's box, focused again each time it's found empty)
     val account = host.accounts.value.firstOrNull { it.id == id }?.name.orEmpty()
     val state = login.login.value
     val go = {
         when {
             fresh && label.isBlank() -> Unit
-            fresh && home.isNotBlank() -> { login.cancel(); send(host, Msg.Accounts(what = "add", provider = "codex",
+            fresh && existing && home.isBlank() -> { empty += 1 }
+            fresh && existing -> if (home.isNotBlank()) { login.cancel(); send(host, Msg.Accounts(what = "add", provider = "codex",
                 name = label.trim(), home = home.trim()), { login.busy.value = it }, { login.said.value = it }, done) }
             else -> login.start()
         }
     }
     val heading = if (fresh) Wording.Subscriptions.addCodex else Wording.Subscriptions.signInHeading(name = account)
-    Form(heading, if (state != null) null else if (fresh && home.isNotBlank()) Wording.Subscriptions.useProfile
+    Form(heading, if (state != null) null else if (fresh && existing) Wording.Subscriptions.useProfile
         else Wording.SignIn.signIn, { login.stop(); done() }, login.said.value, login.busy.value, go) {
         if (fresh) {
             val open = state == null || state.state == "failed"
             NameField(label, { label = it }, Wording.Subscriptions.nameHint, go, enabled = open)
-            NameField(home, { home = it }, Wording.Subscriptions.codexHomeHint, go, focus = false, enabled = open)
+            NewOrExisting(existing, open) {
+                existing = it
+                if (state?.state == "failed") login.cancel() // (the dialog's own button back in place of Try Again)
+            }
+            if (existing) key(empty) { NameField(home, { home = it }, Wording.Subscriptions.codexHomeHint, go, enabled = open) }
         }
         if (state != null) CodexCard(login, if (fresh) label.trim() else account, go)
+    }
+}
+
+/** An Add account dialog's choice between a new login and an existing signed-in folder on the host, as two segments
+ * (New login first), the folder's box under it only where Existing folder's picked (subscriptionpage._Source). */
+@Composable
+private fun NewOrExisting(existing: Boolean, enabled: Boolean, pick: (Boolean) -> Unit) {
+    val c = LocalBaude.current
+    Row(Modifier.fillMaxWidth().alpha(if (enabled) 1f else 0.5f).clip(RoundedCornerShape(8.dp)).background(c.fg.copy(alpha = 0.08f))) {
+        for ((label, on) in listOf(Wording.Subscriptions.newLogin to false, Wording.Subscriptions.existingFolder to true))
+            Box(Modifier.weight(1f).background(if (existing == on) c.fg.copy(alpha = 0.15f) else androidx.compose.ui.graphics.Color.Transparent)
+                .clickable(enabled = enabled) { pick(on) }.padding(vertical = 8.dp), contentAlignment = Alignment.Center) {
+                Text(label, style = Type.bold, color = c.fg)
+            }
     }
 }
 
@@ -651,7 +675,8 @@ private fun CodexCard(login: CodexLogin, name: String, again: () -> Unit) {
                 if (browser) {
                     var address by login.address
                     NameField(address, { address = it }, Wording.Subscriptions.addressHint, login::paste, focus = false)
-                    Button(Wording.Common.send, onClick = login::paste)
+                    Button(Wording.Common.`continue`, suggested = true,
+                        enabled = address.isNotBlank() && login.note.value != Wording.Subscriptions.checkingAddress, onClick = login::paste)
                     login.note.value?.let { SelectionContainer { Text(it, style = Type.body, color = dim) } }
                 }
                 // (the code a line of its own, its buttons under it: beside them, a phone's width breaks it)
@@ -666,7 +691,7 @@ private fun CodexCard(login: CodexLogin, name: String, again: () -> Unit) {
         when (l.state) {
             "signing_in" -> FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 l.code?.takeIf { l.url != null && !browser }?.let { code ->
-                    Button(if (login.copied.value) Wording.Subscriptions.codeCopied else Wording.Common.copy) {
+                    Button(if (login.copied.value) Wording.Subscriptions.codeCopied else Wording.Common.copy, suggested = true) {
                         clip.setText(AnnotatedString(code))
                         login.copied.value = true
                     }
@@ -683,25 +708,32 @@ private fun CodexCard(login: CodexLogin, name: String, again: () -> Unit) {
 }
 
 /** claude auth login run on a host with a Claude account's own folder (hostaccounts' sign_in), on a connection of its
- * own: a new account's (id null: named name, added once it's signed in) or an account's (id). The page to open (url)
- * as the host passes it on, a code that page shows sent to it on the same connection (paste), what to say (said);
- * stop() lets go of the connection, which stops it there. Compose state, changed on the main thread. */
+ * own: a new account's (id null: named name, added once it's signed in) or an account's (id). Signing in (active): the
+ * page to open (url) as the host passes it on, a code that page shows sent to it on the same connection (paste), and
+ * what claude says of it (note); its end: done, else why not (failed). stop() lets go of the connection, which stops it
+ * there. Compose state, changed on the main thread. */
 class ClaudeLogin(val host: HostAccounts, val id: String?) {
     val name = mutableStateOf("")
     val folder = mutableStateOf("")
+    val existing = mutableStateOf(false) // (Existing folder picked over New login)
     val code = mutableStateOf("")
     val url = mutableStateOf<String?>(null)
-    val said = mutableStateOf<String?>(null)
+    val active = mutableStateOf(false)
+    val failed = mutableStateOf<String?>(null)
+    val note = mutableStateOf<String?>(null)
+    val said = mutableStateOf<String?>(null) // (a signed-in folder's add: why it wasn't)
     val busy = mutableStateOf(false)
     private var conn: Connection? = null
     private var checking = false
 
     fun start(done: () -> Unit) {
-        val lines = ArrayList<String>()
         checking = false
-        busy.value = true
+        active.value = true
+        failed.value = null
+        note.value = null
+        said.value = null
+        code.value = ""
         url.value = null
-        said.value = Wording.SignIn.starting
         conn?.stop()
         val fresh = id == null
         conn = Mesh.watch(host.hostId, { w, m ->
@@ -711,24 +743,17 @@ class ClaudeLogin(val host: HostAccounts, val id: String?) {
                 val g = Msg.AccountsReply.from(m)
                 if (m.optString("op") == Op.ACCOUNTS && g.line != null && g.accounts == null) {
                     val found = Regex("https://\\S+").find(g.line)
-                    if (found != null) {
-                        url.value = found.value.trimEnd('.', ',', ')')
-                        said.value = null
-                    } else if (!g.line.startsWith("Opening browser")) {
-                        lines.add(g.line)
-                        if (checking) { // (what claude says of a pasted code: "Invalid code…", and it asks again)
-                            checking = false
-                            said.value = g.line
-                        }
+                    if (found != null) url.value = found.value.trimEnd('.', ',', ')')
+                    else if (!g.line.startsWith("Opening browser") && checking) {
+                        checking = false // (what claude says of a pasted code: "Invalid code…", and it asks again)
+                        note.value = g.line
                     }
                     return@post
                 }
                 conn = null
                 w.stop()
-                busy.value = false
-                url.value = null
                 val e = host.took(m)
-                if (e != null) said.value = e else done()
+                if (e != null) end(e) else { active.value = false; done() }
             }
         }) { w ->
             if (w !== conn) return@watch
@@ -740,9 +765,11 @@ class ClaudeLogin(val host: HostAccounts, val id: String?) {
     }
 
     private fun end(why: String) {
-        busy.value = false
+        conn = null
+        active.value = false
         url.value = null
-        said.value = why
+        note.value = null
+        failed.value = why
     }
 
     fun paste() {
@@ -750,8 +777,16 @@ class ClaudeLogin(val host: HostAccounts, val id: String?) {
         if (code.value.isNotBlank() && w.send(Msg.Accounts(req = REQ, what = "code", code = code.value.trim()).json())) {
             code.value = ""
             checking = true
-            said.value = Wording.SignIn.checkingCode
+            note.value = Wording.SignIn.checkingCode
         }
+    }
+
+    fun cancel() {
+        stop()
+        active.value = false
+        failed.value = null
+        url.value = null
+        note.value = null
     }
 
     fun stop() {
@@ -760,46 +795,77 @@ class ClaudeLogin(val host: HostAccounts, val id: String?) {
     }
 }
 
-/** Add account (Claude, on a host with claude) and Sign In Again… (a folder account, id): an existing signed-in Claude
- * folder on the host (a new account's only), or claude auth login run there with the account's own folder
- * (ClaudeLogin): the page to open shown as a link, a box for the code that page may show; Close stops it. */
+/** Add account (Claude, on a host with claude) and Sign In Again… (a folder account, id): New login (claude auth login
+ * run there with the account's own folder: ClaudeLogin, as a card, ClaudeCard) or, a new account's only, Existing
+ * folder (a signed-in Claude folder on the host); Close stops it. */
 @Composable
 internal fun ClaudeSignIn(host: HostAccounts, id: String?, done: () -> Unit, login: ClaudeLogin = remember { ClaudeLogin(host, id) }) {
-    val c = LocalBaude.current
     DisposableEffect(login) { onDispose { login.stop() } }
     val fresh = id == null
     var name by login.name
     var folder by login.folder
-    var code by login.code
+    var existing by login.existing
+    var empty by remember { mutableStateOf(0) } // (Existing folder's box, focused again each time it's found empty)
+    val carded = login.active.value || login.failed.value != null
     val go = {
         when {
             fresh && name.isBlank() -> Unit
-            fresh && folder.isNotBlank() -> send(host, Msg.Accounts(what = "add", provider = "claude", name = name.trim(),
-                folder = folder.trim()), { login.busy.value = it }, { login.said.value = it }, done)
+            fresh && existing && folder.isBlank() -> { empty += 1 }
+            fresh && existing -> if (folder.isNotBlank()) { login.cancel(); send(host, Msg.Accounts(what = "add", provider = "claude",
+                name = name.trim(), folder = folder.trim()), { login.busy.value = it }, { login.said.value = it }, done) }
             else -> login.start(done)
         }
     }
     val heading = if (fresh) Wording.Subscriptions.addClaude
         else Wording.Subscriptions.signInHeading(name = host.accounts.value.firstOrNull { it.id == id }?.name.orEmpty())
-    Form(heading, if (fresh && folder.isNotBlank()) Wording.Subscriptions.useFolder else Wording.SignIn.signIn,
+    Form(heading, if (carded) null else if (fresh && existing) Wording.Subscriptions.useFolder else Wording.SignIn.signIn,
         { login.stop(); done() }, login.said.value, login.busy.value, go) {
         if (fresh) {
-            NameField(name, { name = it }, Wording.Subscriptions.nameHint, go)
-            NameField(folder, { folder = it }, Wording.Subscriptions.claudeFolderHint, go, focus = false)
+            val open = !login.active.value
+            NameField(name, { name = it }, Wording.Subscriptions.nameHint, go, enabled = open)
+            NewOrExisting(existing, open) {
+                existing = it
+                if (login.failed.value != null) login.cancel() // (the dialog's own button back in place of Try Again)
+            }
+            if (existing) key(empty) { NameField(folder, { folder = it }, Wording.Subscriptions.claudeFolderHint, go, enabled = open) }
         }
-        login.url.value?.let { link ->
-            Text(buildAnnotatedString {
-                val (before, after) = Wording.SignIn.pageThere(link = "\u0000").split("\u0000", limit = 2).let {
-                    it[0] to it.getOrElse(1) { "" }
-                }
-                append(before)
-                withLink(LinkAnnotation.Url(link, TextLinkStyles(SpanStyle(color = c.accent,
-                    textDecoration = TextDecoration.Underline)))) { append(Wording.SignIn.openPageThere) }
-                append(after)
-            }, style = Type.body, color = c.fg)
-            NameField(code, { code = it }, Wording.SignIn.codeHint, login::paste, focus = false)
-            Button(Wording.Common.send, onClick = login::paste)
+        if (carded) ClaudeCard(login, go)
+    }
+}
+
+/** A Claude sign-in as a card, the way Codex's is (CodexCard): signing in, starting; then the page's link and the box
+ * for the code it may show with Continue, the one button that moves it on, and what claude said of it; Cancel. Failed:
+ * why, and Try Again (again). */
+@Composable
+private fun ClaudeCard(login: ClaudeLogin, again: () -> Unit) {
+    val c = LocalBaude.current
+    val dim = c.fg.copy(alpha = c.fg.alpha * 0.6f)
+    val failed = login.failed.value
+    Column(Modifier.fillMaxWidth().border(1.dp, c.warning, RoundedCornerShape(Gap.cardRadius))
+        .padding(horizontal = 12.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        SelectionContainer { Text(if (failed != null) Wording.SignIn.failed else Wording.SignIn.signingIn, style = Type.bold, color = c.fg) }
+        val link = login.url.value
+        when {
+            failed != null -> SelectionContainer { Text(failed, style = Type.body, color = dim) }
+            link == null -> Text(Wording.SignIn.starting, style = Type.body, color = dim)
+            else -> {
+                Text(buildAnnotatedString {
+                    val (before, after) = Wording.SignIn.pageThere(link = "\u0000").split("\u0000", limit = 2).let {
+                        it[0] to it.getOrElse(1) { "" }
+                    }
+                    append(before)
+                    withLink(LinkAnnotation.Url(link, TextLinkStyles(SpanStyle(color = c.accent,
+                        textDecoration = TextDecoration.Underline)))) { append(Wording.SignIn.openPageThere) }
+                    append(after)
+                }, style = Type.body, color = c.fg)
+                var code by login.code
+                NameField(code, { code = it }, Wording.SignIn.codeHint, login::paste, focus = false)
+                Button(Wording.Common.`continue`, suggested = true, enabled = code.isNotBlank(), onClick = login::paste)
+                login.note.value?.let { SelectionContainer { Text(it, style = Type.body, color = dim) } }
+            }
         }
+        if (failed != null) Button(Wording.Common.tryAgain, suggested = true, onClick = again)
+        else Button(Wording.Common.cancel) { login.cancel() }
     }
 }
 

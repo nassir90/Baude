@@ -192,7 +192,7 @@
     },
     {
       "name": "Add Claude account dialog",
-      "shows": "On a host with claude: heading \"Add Claude account\"; \"Account name\"; \"Existing signed-in Claude folder (optional)\"; its button Sign in (Use signed-in folder once a folder is typed); Close. Sign in runs claude auth login on the host with a new folder of the account's own: \"Open the sign-in page to sign in.\" (a link to the page the host was given), then a box \"If the page shows a code, paste it here\" and Send, which passes the code to the login on the host; what claude says of a pasted code (\"Invalid code…\") replaces \"Checking the code…\"; the dialog closes once it's signed in, and says why if it isn't. Close stops it. On a host without claude: \"Account name\", a password entry whose placeholder is \"Paste the token from claude setup-token\", Save account, Close.",
+      "shows": "On a host with claude: heading \"Add Claude account\"; \"Account name\"; a two-way switcher, New login (picked) and Existing folder; under Existing folder only, \"Signed-in Claude folder\"; the accent button Sign in (Use signed-in folder under Existing folder); Close. Sign in runs claude auth login on the host with a new folder of the account's own, shown as the Claude sign-in card (the button gone, the fields and switcher greyed while it runs): \"Signing in to Claude…\" / dimmed \"Starting the sign-in…\" and Cancel; once the host has the page, \"Open the sign-in page to sign in.\" (a link), a box \"If the page shows a code, paste it here\" with Continue (the accent button, usable once a code is typed), which passes the code to the login on the host, and under it, dimmed, \"Checking the code…\" then what claude says of it (\"Invalid code…\"); Cancel. The dialog closes once it's signed in; else the card says \"Sign-in didn't finish\" / dimmed why, with Try Again (the accent button) and the fields usable again; picking the other tab then lets go of the card and puts the dialog's own button back. Cancel stops it and gives back the fields and button; Close stops it. On a host without claude: \"Account name\", a password entry whose placeholder is \"Paste the token from claude setup-token\", Save account, Close.",
       "copy": [
         "subscriptions.add_claude",
         "subscriptions.name_hint",
@@ -207,10 +207,16 @@
         "sign_in.code_hint",
         "sign_in.checking_code",
         "sign_in.starting",
-        "common.send",
         "subscriptions.claude_failed",
         "subscriptions.no_claude",
-        "subscriptions.not_signed_in_folder"
+        "subscriptions.not_signed_in_folder",
+        "subscriptions.new_login",
+        "subscriptions.existing_folder",
+        "common.continue",
+        "common.cancel",
+        "common.try_again",
+        "sign_in.signing_in",
+        "sign_in.failed"
       ],
       "decisions": [
         {
@@ -228,17 +234,19 @@
     },
     {
       "name": "Add Codex account dialog",
-      "shows": "Heading \"Add Codex account\"; \"Account name\"; \"Existing signed-in CODEX_HOME (optional)\"; its button Sign in (Use signed-in profile once a folder is typed); Close. Sign in runs codex login on the host with a new CODEX_HOME of the account's own (the browser's sign-in; the device code's on \"Use a device code instead\", or by itself where the browser's can't listen), shown as the Codex sign-in card, the fields greyed while it runs; the account is added once it's signed in. Close stops it.",
+      "shows": "Heading \"Add Codex account\"; \"Account name\"; a two-way switcher, New login (picked) and Existing folder; under Existing folder only, \"Signed-in CODEX_HOME\"; the accent button Sign in (Use signed-in profile under Existing folder); Close. Sign in runs codex login on the host with a new CODEX_HOME of the account's own (the browser's sign-in; the device code's on \"Use a device code instead\", or by itself where the browser's can't listen), shown as the Codex sign-in card, the fields and switcher greyed while it runs; the account is added once it's signed in. Close stops it.",
       "copy": [
         "subscriptions.add_codex",
         "subscriptions.codex_home_hint",
         "sign_in.sign_in",
-        "subscriptions.use_profile"
+        "subscriptions.use_profile",
+        "subscriptions.new_login",
+        "subscriptions.existing_folder"
       ],
       "parts": [
         {
           "name": "Codex sign-in card",
-          "shows": "In the dialog, under its fields, once Sign in is pressed (the dialog's own button gone while it's there): the card a chat's Sign in card is (LoginCard's: warning-bordered, a bold title, a line, then what can be done now), drawn from the sign-in's state as the host says it (accounts sign_in's login, a ChatLogin). The browser's, by default (codex login): waiting, \"Signing in to Codex…\" / dimmed \"Starting the sign-in…\"; once codex has said its page, the page's link as Claude's card has it: where the host is this machine's, the page opened in its browser at once (by codex itself on macOS, else by the app) and \"A browser window should have opened to sign in. If it didn't, open the sign-in page.\"; another machine's and the phone's, \"Open the sign-in page to sign in.\" and a box \"Paste the address the browser ended on\" with Send (that address passed to the host, which asks codex's server on its own 127.0.0.1 for it; \"Checking the address…\", then why not, dimmed, if it wasn't taken). On Baude and Record, for another machine's host, this machine's 127.0.0.1 at the port codex took (1455, else 1457) is passed on to the host the same way while it runs, so the browser's own way back reaches it and nothing need be pasted (where that port's taken here, the box is the way). Under it, \"Use a device code instead\" and Cancel. The device code's (codex login --device-auth: on that button, or by itself where codex can't listen on either port): waiting, dimmed \"Requesting a device code…\"; then its page's link the same way, the one-time code large (bold monospace, .device-code: 1.8em; the phone's 26 px), selectable, with Copy beside it (\"Code copied\" once pressed), and Cancel. Signed in: \"Signed in to Codex\" / \"as <email>\" (the email its sign-in names; else the account's name); the dialog stays till Close. Failed: \"Sign-in didn't finish\" / dimmed what codex said last (an error line, else \"The Codex CLI did not complete sign-in\"), and Try Again (the browser's again), with \"Use a device code instead\" where the browser's failed; the fields can be changed again first.",
+          "shows": "In the dialog, under its fields, once Sign in is pressed (the dialog's own button gone while it's there): the card a chat's Sign in card is (LoginCard's: warning-bordered, a bold title, a line, then what can be done now), drawn from the sign-in's state as the host says it (accounts sign_in's login, a ChatLogin). The browser's, by default (codex login): waiting, \"Signing in to Codex…\" / dimmed \"Starting the sign-in…\"; once codex has said its page, the page's link as Claude's card has it: where the host is this machine's, the page opened in its browser at once (by codex itself on macOS, else by the app) and \"A browser window should have opened to sign in. If it didn't, open the sign-in page.\"; another machine's and the phone's, \"Open the sign-in page to sign in.\" and a box \"Paste the address the browser ended on\" with Continue (the accent button, usable once an address is typed, and not while \"Checking the address…\" shows) (that address passed to the host, which asks codex's server on its own 127.0.0.1 for it; \"Checking the address…\", then why not, dimmed, if it wasn't taken). On Baude and Record, for another machine's host, this machine's 127.0.0.1 at the port codex took (1455, else 1457) is passed on to the host the same way while it runs, so the browser's own way back reaches it and nothing need be pasted (where that port's taken here, the box is the way). Under it, \"Use a device code instead\" and Cancel. The device code's (codex login --device-auth: on that button, or by itself where codex can't listen on either port): waiting, dimmed \"Requesting a device code…\"; then its page's link the same way, the one-time code large (bold monospace, .device-code: 1.8em; the phone's 26 px), selectable, with Copy (the accent button) beside it (\"Code copied\" once pressed), and Cancel. Signed in: \"Signed in to Codex\" / \"as <email>\" (the email its sign-in names; else the account's name); the dialog stays till Close. Failed: \"Sign-in didn't finish\" / dimmed what codex said last (an error line, else \"The Codex CLI did not complete sign-in\"), and Try Again (the browser's again), with \"Use a device code instead\" where the browser's failed; the fields can be changed again first.",
           "copy": [
             "subscriptions.codex_signing_in",
             "sign_in.starting",
@@ -248,7 +256,7 @@
             "sign_in.page_there",
             "sign_in.open_page_there",
             "subscriptions.address_hint",
-            "common.send",
+            "common.continue",
             "subscriptions.checking_address",
             "subscriptions.relay_busy",
             "subscriptions.not_callback",
@@ -273,7 +281,7 @@
               "does": "Puts the code on the clipboard; the button says \"Code copied\""
             },
             {
-              "by": "paste the address and click Send (or press Enter)",
+              "by": "paste the address and click Continue (or press Enter)",
               "does": "Passes the address the browser ended on to the host's sign-in, which requests it of codex's server on the host's 127.0.0.1; codex finishes, and the card says signed in or failed"
             },
             {
@@ -333,7 +341,7 @@
     },
     {
       "name": "Sign In Again dialog",
-      "shows": "Heading \"Sign in to <name> again\". A Claude folder account's: Sign in, then the sign-in page's link and the code box, as Add Claude account's. Codex's: Sign in, then the Codex sign-in card (Add Codex account's), or, where the host lacks codex, its Dependencies row (\"Codex CLI isn't installed\", the install command with Copy) in place of the button. Close.",
+      "shows": "Heading \"Sign in to <name> again\". A Claude folder account's: Sign in, then the Claude sign-in card, as Add Claude account's. Codex's: Sign in, then the Codex sign-in card (Add Codex account's), or, where the host lacks codex, its Dependencies row (\"Codex CLI isn't installed\", the install command with Copy) in place of the button. Close.",
       "copy": [
         "subscriptions.sign_in_heading",
         "deps.copied"
@@ -450,6 +458,26 @@
       "source": [
         {
           "issue": "BaudeInternal#226"
+        }
+      ]
+    },
+    {
+      "said": "(BaudeInternal#279, paraphrased) Claude's sign-in shows Send beside Sign In, which is redundant; once sign-in has started, Sign In should give way to the next step (Continue, the accent button, where a code is needed), as Codex's does; both sign-in flows should make sense",
+      "rule": "Every app's Claude and Codex sign-ins (Add account, Sign In Again, and a chat's Sign in card) go one step at a time, the same shape for both: the dialog's own button (Sign in, or Use signed-in folder/profile) goes once sign-in starts, and the sign-in shows as a card (a bold title, a line, then what can be done now). At each step at most one button is the accent one, labelled for what it does next: Continue beside the code box (Claude, shown once the page's link is) or the address box (Codex), usable once something is typed and not while what was sent is checked; Copy beside a device code; Try Again once it failed; changing New login / Existing folder after a failure puts the dialog's own button back in its place. No two buttons do the same thing; Cancel, Use a device code instead and Close are never the accent one. While the sign-in only waits on the browser, no button is the accent one",
+      "decided": "2026-11-27",
+      "source": [
+        {
+          "issue": "BaudeInternal#279"
+        }
+      ]
+    },
+    {
+      "said": "(BaudeInternal#279, paraphrased) the existing folder path box is always shown though it's rarely filled in; a tab-like choice between New login and an existing folder would be better",
+      "rule": "Every app's Add account dialog (Claude's on a host with claude, and Codex's) puts a two-way switcher under the account name: New login (first, picked when it opens) and Existing folder; the folder's path box shows only under Existing folder, and the dialog's button says Sign in or Use signed-in folder/profile to match; with Existing folder picked and its box empty, the button focuses the box",
+      "decided": "2026-11-27",
+      "source": [
+        {
+          "issue": "BaudeInternal#279"
         }
       ]
     }

@@ -198,20 +198,45 @@ abstract class Screens(private val theme: String) {
         withMenus("05b-subscriptions-menu")
     }
 
+    // (Add account (Claude) on workshop, each step: New login, Existing folder, starting, the page's link with the code
+    // box, a code typed, what claude said of it, failed)
     @Test fun subscriptionsSignIn() {
         accountsFixture()
         val host = dev.baude.android.HostAccounts(Mesh.hosts.first().id)
-        val login = dev.baude.android.ClaudeLogin(host, null).apply {
-            name.value = "Work"
-            url.value = "https://claude.ai/oauth/authorize?code=true&client_id=fixture&state=fixture"
-            busy.value = true
-        }
+        val login = dev.baude.android.ClaudeLogin(host, null).apply { name.value = "Work" }
         show {
             SettingsScreen({}, {}, page = 1)
             dev.baude.android.ClaudeSignIn(host, null, {}, login)
         }
         laidOut()
+        screen("05c-subscriptions-claude-new-login")
+        login.existing.value = true
+        login.folder.value = "/srv/claude-work"
+        laidOut()
+        screen("05c-subscriptions-claude-existing")
+        login.existing.value = false
+        login.active.value = true
+        laidOut()
+        screen("05d-subscriptions-sign-in-starting")
+        login.url.value = "https://claude.ai/oauth/authorize?code=true&client_id=fixture&state=fixture"
+        laidOut()
         screen("05d-subscriptions-sign-in")
+        login.code.value = "fixture-code"
+        laidOut()
+        screen("05d-subscriptions-sign-in-code")
+        login.code.value = ""
+        login.note.value = "Invalid code, try again"
+        laidOut()
+        screen("05d-subscriptions-sign-in-invalid")
+        login.active.value = false
+        login.url.value = null
+        login.note.value = null
+        login.failed.value = "Login failed: Invalid code"
+        laidOut()
+        screen("05d-subscriptions-sign-in-failed")
+        tap("Existing folder") // (the dialog's own button back in place of Try Again)
+        laidOut()
+        screen("05d-subscriptions-sign-in-failed-then-folder")
     }
 
     // (Add account (Codex) on workshop: the sign-in's card at each step as the host says it: the browser's, waiting
@@ -220,14 +245,19 @@ abstract class Screens(private val theme: String) {
     @Test fun subscriptionsCodexSignIn() {
         accountsFixture()
         val host = dev.baude.android.HostAccounts(Mesh.hosts.first().id)
-        val login = dev.baude.android.CodexLogin(host, null).apply {
-            name.value = "Work"
-            this.login.value = Msg.ChatLogin(state = "signing_in", method = "browser")
-        }
+        val login = dev.baude.android.CodexLogin(host, null).apply { name.value = "Work" }
         show {
             SettingsScreen({}, {}, page = 1)
             dev.baude.android.CodexSignIn(host, null, "Work", {}, login)
         }
+        laidOut()
+        screen("05k-codex-new-login")
+        login.existing.value = true
+        login.home.value = "/srv/codex-work"
+        laidOut()
+        screen("05k-codex-existing")
+        login.existing.value = false
+        login.login.value = Msg.ChatLogin(state = "signing_in", method = "browser")
         laidOut()
         screen("05k-codex-browser-waiting")
         login.login.value = Msg.ChatLogin(state = "signing_in", method = "browser", port = 1455,
@@ -259,14 +289,17 @@ abstract class Screens(private val theme: String) {
     @Test fun chatLoginCard() {
         accountsFixture()
         val login = dev.baude.android.Login(Mesh.hosts.first().id, "s1", null, null, emptyList()).apply {
-            stage.value = "page"
-            url.value = "https://claude.ai/oauth/authorize?code=true&client_id=fixture"
+            stage.value = "starting"
         }
-        render("05r-chat-login-card") {
+        render("05r-chat-login-card-starting") {
             androidx.compose.foundation.layout.Box(androidx.compose.ui.Modifier.padding(16.dp)) {
                 dev.baude.android.LoginCard(login)
             }
         }
+        login.stage.value = "page"
+        login.url.value = "https://claude.ai/oauth/authorize?code=true&client_id=fixture"
+        laidOut()
+        activity.window.decorView.captureRoboImage("build/screenshots/$theme/05r-chat-login-card.png")
     }
 
     @Test fun subscriptionsRemove() {

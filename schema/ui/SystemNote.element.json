@@ -31,7 +31,7 @@
   "states": [
     {
       "name": "resumed",
-      "shows": "\"— Resumed —\" where you first wrote to a past session you opened (not on opening it), above your message; \"— Resumed from network error —\" / \"— Resumed from claude binary error —\" when the chat's claude had gone and was started again.",
+      "shows": "\"— Resumed —\" where you first wrote to a past session you opened (not on opening it), above your message, only when its agent is started again for it (a host chat whose agent is still running, at a turn or between turns, is attached to with no mark); \"— Resumed from network error —\" / \"— Resumed from claude binary error —\" when the chat's claude had gone and was started again.",
       "copy": [
         "chat_notes.resumed",
         "chat_notes.resumed_from"
@@ -44,6 +44,16 @@
           "source": [
             {
               "issue": "BaudeInternal#75"
+            }
+          ]
+        },
+        {
+          "said": "Chats kept showing a '— Resumed —' mark, after which nothing seemed to be happening (paraphrased)",
+          "rule": "Every app marks '— Resumed —' only where a chat's agent was started again on its conversation. Opening a chat mid-turn, or writing in one whose agent is still running on its host, attaches to that agent and puts no mark.",
+          "decided": "2026-11-27",
+          "source": [
+            {
+              "issue": "BaudeInternal#308"
             }
           ]
         }

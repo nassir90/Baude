@@ -1,5 +1,5 @@
 {
-  "description": "The Settings dialog's Telemetry page (Baude's, Record's and the phone's; on the phone the fourth page of Settings, switched to by the bar at its foot): for the host picked beside New session, whether it collects telemetry, then what it keeps, as it answers telemetry_read: its turns' tokens by day over a year, the most used model and effort and each model's turns, its machine now, its processes now, the errors its machine's processes had, and line profiling of its processes (a switch, and their top lines).",
+  "description": "The Settings dialog's Telemetry page (Baude's, Record's and the phone's; on the phone the fourth page of Settings, switched to by the bar at its foot): for the host picked beside New session, whether it collects telemetry, then what it keeps, as it answers telemetry_read: its turns' tokens by day over a year, the most used model and effort and each model's turns, its machine now, its processes now, what was used most and what was slowest, the errors its machine's processes had, and line profiling of its processes (a switch, and their top lines).",
   "apps": [
     "baude",
     "record",
@@ -42,7 +42,17 @@
     "baudelib/serverrun.py:ServerRunning.wire_errored",
     "baudelib/client.py:Remote.request",
     "PhoneErrors.kt:PhoneErrors",
-    "Telemetry.kt:errorExpander"
+    "Telemetry.kt:errorExpander",
+    "baudelib/counters.py:Counters",
+    "baudelib/funccount.py:switch",
+    "baudelib/uiindex.py:index",
+    "uitrack.py:look",
+    "uitrack.py:counts_now",
+    "telemetryview.py:count_row",
+    "baudelib/telemetry.py:counted",
+    "baudelib/telemetry.py:Telemetry.flush_counts",
+    "PhoneCounts.kt:PhoneCounts",
+    "Telemetry.kt:CountRow"
   ],
   "copy": [
     "telemetry",
@@ -103,11 +113,23 @@
         {
           "said": "Sreen time is a pretty useless metric, how is that going to help me make the app better (in isolation)",
           "rule": "No app counts time on screen per place or menu uses; what's kept is a log of events, each with its own time, that can be put together with the host's samples and profiles",
+          "superseded": "2026-11-27",
           "decided": "2026-11-26",
           "source": [
             {
               "session": "b3845b21-55ac-4aab-a769-fb8517403c51",
               "message": "41aef9c4-02f6-4496-ac8a-bb9737df5262"
+            }
+          ]
+        },
+        {
+          "said": "Well, yes, counters are good",
+          "rule": "A screen (a page, dialog, side panel's page or tab; never a region only the focus is in) is counted when it's opened, with its time in front while someone's at the machine, as one field of its count in Most Used: counting how many times it's used is what the time is for, and time on screen is never shown on its own as a measure. Supersedes the decision that no app counts time on screen",
+          "decided": "2026-11-27",
+          "source": [
+            {
+              "session": "221e1c29-56d7-48bf-a2dc-7a2b37ccd685",
+              "message": "4d4c11e9-63d0-4c6d-ba40-6c8dc5ead7c9"
             }
           ]
         },
@@ -321,6 +343,54 @@
             }
           ]
         }
+      ]
+    },
+    {
+      "name": "Most Used",
+      "shows": "Heading \"Most Used\": the 10 things the user used most on that host's machine in the last 7 days, across Baude, Record and the phone's app (buttons and rows, menu items, screens), the most times first, read again every 30 seconds while the page is shown. Each row: its process's app's logo, its name by schema/ui (\"Composer.region · send button\", a screen as its entity, \"Telemetry.dialog\"), and after it, dim, a screen's time in front (\"6m 50s\") and how many times (\"212 Times\"); its kind and full name on hover. Hidden while nothing's counted.",
+      "copy": [
+        "telemetry.most_used",
+        "telemetry.error_times",
+        "time.hours_minutes",
+        "time.minutes_seconds",
+        "time.seconds"
+      ],
+      "decisions": [
+        {
+          "said": "Measure the raw number of invocations and a trivial index of the invocations that doesn't require searching with a model.",
+          "rule": "Every process counts how many times each thing in it is used or run, and how long it took: a button or row (its click till the app is free again), a menu item, a screen or tab (opened, and its time in front while someone's at the machine), a wire op its host answered, a main-loop callback, a function of Baude's own code (its calls and time in all, by module:function, only while line profiling is on, to aim it: counting costs about half a microsecond a call), a program started; each keyed by its schema/ui entity and part (the index is the spec), an op by its name, a callback by its function's; kept as a row a process a minute (nothing while nothing's counted), read by telemetry_read (each minute's, or added up)",
+          "decided": "2026-11-27",
+          "source": [
+            {
+              "session": "221e1c29-56d7-48bf-a2dc-7a2b37ccd685",
+              "message": "30cf308b-147c-4860-a1c0-9ac81ad796f4"
+            },
+            {
+              "session": "221e1c29-56d7-48bf-a2dc-7a2b37ccd685",
+              "message": "4d4c11e9-63d0-4c6d-ba40-6c8dc5ead7c9"
+            }
+          ]
+        },
+        {
+          "said": "Well, yes, counters are good",
+          "rule": "Counting costs nothing while nothing happens: a count is a number added to in memory as a thing is used, told once a minute; nothing polls for it",
+          "decided": "2026-11-27",
+          "source": [
+            {
+              "session": "221e1c29-56d7-48bf-a2dc-7a2b37ccd685",
+              "message": "4d4c11e9-63d0-4c6d-ba40-6c8dc5ead7c9"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Slowest",
+      "shows": "Heading \"Slowest\": the 10 things that took longest each time they ran in the last 7 days (buttons, rows and menu items by their click's time, wire ops, main-loop callbacks), the longest first. Each row: its process's app's logo, its name (an op's or callback's in monospace), and \"16.0 ms Each\" and how many times after it, dim. Hidden while nothing's counted.",
+      "copy": [
+        "telemetry.slowest",
+        "telemetry.average_ms",
+        "telemetry.error_times"
       ]
     },
     {

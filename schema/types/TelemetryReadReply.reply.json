@@ -50,6 +50,20 @@
       },
       "description": "The errors of the processes on its machine that happened in the stretch, the last to happen first."
     },
+    "counters": {
+      "type": "array",
+      "items": {
+        "$ref": "TelemetryCounters.json"
+      },
+      "description": "Its processes' counts, a row a process a minute."
+    },
+    "counted": {
+      "type": "array",
+      "items": {
+        "$ref": "TelemetryCount.json"
+      },
+      "description": "Its processes' counts added up over the stretch, by process, kind and name, the most times first."
+    },
     "usage": {
       "anyOf": [
         {

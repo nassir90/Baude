@@ -1291,16 +1291,17 @@ An app's telemetry, told to its own machine's host as it happens (the phone's ap
 | `commit` | string/null |  | The commit the app runs (its first 12 characters), as it started: kept on each of its rows. |
 | `wire` | integer/null |  | The wire's version the app speaks: kept on each of its rows. |
 | `errors` | array of TelemetryError |  | Its errors since it last told, each once by its fingerprint with how many times it happened (added to what the host keeps of it). |
+| `counters` | TelemetryCounters? |  | What it counted since it last told them (about once a minute). |
 
 #### `telemetry_read` (TelemetryRead)
 
-A host's telemetry over a stretch: its chat events, its samples, its line profiles, and its turns added up, its errors; its telemetry state with it. Any member of the mesh may ask any other: one machine pulls every host's and puts them together by their times.
+A host's telemetry over a stretch: its chat events, its samples, its line profiles, and its turns added up, its errors, its processes' counts (each minute's, or added up); its telemetry state with it. Any member of the mesh may ask any other: one machine pulls every host's and puts them together by their times.
 
 | Field | Type | Required | What it is |
 |---|---|---|---|
 | `from` | number | yes | From, in seconds since the epoch. |
 | `to` | number/null |  | To (null: now). |
-| `what` | array of `events` \| `metrics` \| `profiles` \| `usage` \| `errors` |  | What's wanted (none: only the state). |
+| `what` | array of `events` \| `metrics` \| `profiles` \| `usage` \| `errors` \| `counters` \| `counted` |  | What's wanted (none: only the state). |
 | `limit` | integer/null |  | The most events, samples and profiles each (the latest kept; default 5000). |
 
 #### `telemetry_set` (TelemetrySet)
@@ -2313,6 +2314,8 @@ telemetry_read's answer, each list the earliest first (errors the latest first).
 | `metrics` | array of TelemetrySample |  | Its samples. |
 | `profiles` | array of TelemetryProfile |  | Its line profiles. |
 | `errors` | array of TelemetryError |  | The errors of the processes on its machine that happened in the stretch, the last to happen first. |
+| `counters` | array of TelemetryCounters |  | Its processes' counts, a row a process a minute. |
+| `counted` | array of TelemetryCount |  | Its processes' counts added up over the stretch, by process, kind and name, the most times first. |
 | `usage` | TelemetryUsage? |  | Its turns added up. |
 
 #### `telemetry_set` (TelemetrySetReply)
@@ -3954,6 +3957,32 @@ A variable a task declares: a name its script reads it by (baudetask.vars), and 
 | `name` | string | yes | Its name, as its row and the script say it ("Translation Model"). |
 | `type` | `model` \| `decider` \| `host` \| `browser_host` \| `terminal_host` \| `kube_context` \| `pod` \| `container` \| `database` \| `text` | yes | What it's bound to: a model (with its effort), a decider (decide's), a host of the mesh (one to browse on, one to run terminals on), a Kubernetes context, a pod, a container, a database, or text. What's offered as it's bound is the host's own of that type; any text can be given all the same. |
 | `description` | string/null |  | What it's for, as its Bot said. |
+
+#### TelemetryCount
+
+How many times one thing in a process was used or ran over a stretch, and how long it took.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `app` | `host` \| `baude` \| `record` \| `phone` \| `emission` |  | The process (a telemetry_read's counted: added up over the stretch, by process, kind and name). |
+| `kind` | `part` \| `menu` \| `screen` \| `op` \| `callback` \| `function` \| `subprocess` | yes | What it is: a button or row used (part), a menu's item picked (menu), a screen opened (a page, a dialog, a side panel's page: screen), a wire op a host answered (op), a main-loop callback (callback), a function of Baude's own code (function), a program started (subprocess). |
+| `name` | string | yes | Which, by the index every app shares: a part or menu item as Entity.kind/part name (schema/ui's: "Composer.region/send button"; Entity.kind/(what tells it apart) where it isn't one of its entity's parts), a screen as its entity ("Telemetry.dialog"), an op by its name, a callback by its function's (module.Class.method), a function as module:function ("baudelib.telemetry:Telemetry.flush_counts"), a program by its file's name. |
+| `count` | integer | yes | Times. |
+| `seconds` | number | yes | Their time added up: a part's or menu item's from its click till the app was free again (its handlers, and what they drew at once); a screen's in front, with someone at the machine; an op's handling; a callback's running; a function's running, added up (its calls' time with theirs in it); 0 for a program. |
+| `max` | number/null |  | The longest of them (a screen's: its longest stretch in front). |
+
+#### TelemetryCounters
+
+A process's counts over a stretch (about a minute): what was used and run in it, each once with its count and time. Kept by its machine's host as it's told, read back with telemetry_read.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `at` | number | yes | When the stretch ended, in seconds since the epoch. |
+| `from` | number | yes | When it began. |
+| `app` | `host` \| `baude` \| `record` \| `phone` \| `emission` | yes | The process counted. |
+| `counts` | array of TelemetryCount | yes | Each thing used or run in it, the most times first. |
+| `commit` | string/null |  | The commit the process runs (its first 12 characters). |
+| `wire` | integer/null |  | The wire's version it speaks. |
 
 #### TelemetryCrumb
 

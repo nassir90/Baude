@@ -343,7 +343,8 @@ class WindowDrafts:
             hd["flight"] -= 1
             took = reply.get("op") == "draft_saved"
             stale = reply.get("code") == wire.STALE and isinstance(reply.get("draft"), dict)
-            if took:
+            again = took and sent and reply["draft"].get("head") != self.draft_head  # (that send's own, made again:
+            if took and not again:  # its host's draft now, which another head may have written: that's come in below)
                 d = reply["draft"]
                 hd["rev"] = max(hd["rev"], d["rev"])
                 if (d.get("epoch") or 0) >= hd.get("epoch", 0):
@@ -355,6 +356,10 @@ class WindowDrafts:
                         ComposerMarkdown.to_markdown(d["text"]) == text:
                     d["dirty"] = False
                 return
+            if again:
+                if not hd["flight"] and self.draft_timer is None and self.box_markdown() == text:
+                    hd["dirty"] = False
+                return self.host_draft_in(reply["draft"])
             if stale:  # (written before a send since: its host's draft in, and only what was typed here: rebase)
                 if (reply["draft"].get("epoch") or 0) >= hd["epoch"] and (reply["draft"].get("rev") or 0) >= hd["rev"]:
                     self.rebase(reply["draft"])

@@ -135,6 +135,7 @@ fun ChatPage(chat: Chat, name: String, attach: Boolean = true, stop: (() -> Unit
         chat.typed = text          // once as the box empties)
         val markdown = toMarkdown(text)
         if (chat.sender != null || chat.reverting != null) return@LaunchedEffect
+        if (chat.boxText.value != null) return@LaunchedEffect // (its host's draft not in the box yet: what's there isn't it)
         if (markdown == chat.draftText) { // (written back to what its host has)
             chat.draftTyping = false
             if (chat.draftFlight == 0) {

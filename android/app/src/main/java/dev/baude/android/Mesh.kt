@@ -803,6 +803,9 @@ object Mesh {
             chat.draft.value = d.text.ifBlank { null }
             chat.draftDirty = d.dirty && d.text.isNotBlank()
             chat.draftRestoring = d.text.isNotBlank()
+            chat.draftEpoch = d.epoch
+            chat.draftTypedIn = d.epoch
+            chat.draftBase = d.base
             chat.files.addAll(d.files)
             chat.queued.addAll(d.queue) // (its queue under it again; its ↑ and stop for the turn going on, if one is)
             if (isWorking(chat)) {
@@ -935,6 +938,7 @@ object Mesh {
             }
             return
         }
+        if (chat.draftDirty && box != d.text.orEmpty() && chat.draftTypedIn < (d.epoch?.toLong() ?: 0L)) return rebase(chat, d)
         chat.draftRev = d.rev?.toLong() ?: 0L
         chat.draftText = d.text.orEmpty()
         chat.draftEpoch = d.epoch?.toLong() ?: 0L
@@ -978,7 +982,9 @@ object Mesh {
                 chat.draftFlight--
                 val took = r.optString("op") == Op.DRAFT_SAVED
                 val stale = r.optString("code") == WireCheck.STALE
-                if (took) Msg.DraftSaved.from(r).draft?.let { d ->
+                val back = if (took) Msg.DraftSaved.from(r).draft else null
+                val again = sent != null && back != null && back.head != chat.head // (that send's own, made again: its host's
+                if (back != null && !again) back.let { d -> // draft now, which another head may have written, comes in below
                     chat.draftRev = maxOf(chat.draftRev, d.rev?.toLong() ?: 0L)
                     if ((d.epoch?.toLong() ?: 0L) >= chat.draftEpoch) {
                         chat.draftEpoch = d.epoch?.toLong() ?: 0L
@@ -994,7 +1000,13 @@ object Mesh {
                 if (open !== chat) { // (left: what was kept of it clean, if this was what it had)
                     val kept = drafts[key]
                     if (took && kept != null && toMarkdown(kept.text) == markdown)
-                        Queue.setDraft(key, Draft(kept.text, kept.files, kept.queue, kept.upto, kept.hold, dirty = false))
+                        Queue.setDraft(key, Draft(kept.text, kept.files, kept.queue, kept.upto, kept.hold, dirty = false,
+                            epoch = kept.epoch, base = kept.base))
+                    return@post
+                }
+                if (again) {
+                    if (chat.draftFlight == 0 && !chat.draftTyping && boxMarkdown(chat) == markdown) chat.draftDirty = false
+                    draftIn(chat, back)
                     return@post
                 }
                 if (!took) { // (not kept there: still dirty, this box's, and held against others'. Too long: stays so, as
@@ -1529,8 +1541,9 @@ object Mesh {
 
     /** A chat's draft: what's written, its files, and its queue (Queue.draftOf). */
     class Draft(val text: String, val files: List<Picked>, val queue: List<Queued> = emptyList(), val upto: Int? = null,
-                val hold: Boolean = false, val dirty: Boolean = false) { // (dirty: its text written here, its host's
-        // answer to its save not come as it was left)
+                val hold: Boolean = false, val dirty: Boolean = false, val epoch: Long = 0L, val base: String = "") {
+        // (dirty: its text written here, its host's answer to its save not come as it was left; epoch: the epoch it
+        // was written in, base: what its host had in it as the typing began (Mesh.afterSend))
         val empty get() = text.isBlank() && files.isEmpty() && queue.isEmpty()
     }
     val drafts = HashMap<String, Draft>() // (a chat left, "host/session": what was written and queued there, as it has them again)

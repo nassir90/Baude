@@ -17,7 +17,7 @@ import threading
 import time
 import urllib.parse
 
-from baudelib import claude, mesh, selfupdate, toolnames, wire, wording
+from baudelib import claude, errorbook, mesh, selfupdate, toolnames, wire, wording
 
 FORGET_S = 7 * 86400
 RETRY_S = (1, 2, 5, 10, 30)  # a dead host is tried again after these, then every last one
@@ -116,6 +116,18 @@ def stopping_line(name, restart, left, total):
         wording.say("host_status.stopping", host=name)
 
 
+
+FAILS = {"input": "send", "start": "send", "held": "send", "queue": "send", "draft_save": "draft_save"}  # (the
+# requests whose error is an error of the user's: a message not sent, a draft not saved)
+
+
+def _noting(kind, op, reply):
+    def noted(r):
+        if r.get("op") == "error":
+            errorbook.note(kind, op, r.get("error") or "", key=r.get("code"), wire_op=op, code=r.get("code"))
+        reply(r)
+    return noted
+
 class Remote:
     """One host: where it is (where: wire.reach's), its info (as hello says), its sessions (as it lists them), and
     whether it's there. found_by: "local" (this machine's socket), "hand" (or, kept from before, "network" or
@@ -136,6 +148,7 @@ class Remote:
         self.senders = {}  # session id -> (its listed senders revision, {uuid: sender}): its sender store, as fetched
         self.fetching = set()  # (sessions whose sender stores are being fetched: sync_senders)
         self.ended = {}  # session id -> its last turn's end it's told of (turn_ended: {uuid, size, at: monotonic})
+        self.inbox = {}  # ask id -> its asks of a person waiting or stopped, as it says (inbox, inbox_changed)
         self.seen = cached.get("seen") or 0.0  # when it last said anything
         self.by_hand = bool(cached.get("by_hand"))  # (given by hand: kept, whether it's been reached or not)
         self.found_by = cached.get("found_by") or found_by
@@ -249,6 +262,7 @@ class Remote:
         ch.keep_alive()
         ch.refused_here = self.answered  # (a request refused before it went: answered at once, its reader in readline)
         ch.send({"op": "subscribe", "archived": True})  # (Baude lists those archived too: under Archived)
+        self.request({"op": "inbox"}, self.took_inbox)  # (its asks of a person, then each as it changes)
         for msg in ch:
             self.seen = time.time()
             op = msg.get("op")
@@ -278,6 +292,14 @@ class Remote:
                                  "restart": bool(msg.get("restart")),
                                  "at": self.stopping["at"] if self.stopping else time.monotonic()}
                 self.network.changed()
+            elif op == "inbox_changed":  # (an ask raised, put anew, answered or gone: every head told, as a draft's)
+                ask = msg.get("ask") or {}
+                if wire.is_id(ask.get("id") or ""):
+                    if msg.get("removed") or ask.get("status") not in ("waiting", "stopped"):
+                        self.inbox.pop(ask["id"], None)
+                    else:
+                        self.inbox[ask["id"]] = ask
+                    self.network.changed()
             elif op == "turn_ended":  # (said before any listing has it: what a notification of it is known by)
                 if wire.is_id(msg.get("uuid") or "") and isinstance(msg.get("size"), int):
                     self.ended[msg.get("session")] = {"uuid": msg["uuid"], "size": msg["size"], "at": time.monotonic()}
@@ -289,6 +311,12 @@ class Remote:
         ch.close()
         for done in calls.values():
             done({"op": "error", "error": "the server's gone"})
+
+    def took_inbox(self, reply):
+        """inbox's answer: its asks as they are now (a host that has no Inbox: none)."""
+        if reply.get("op") == "inbox_reply":
+            self.inbox = {a["id"]: a for a in reply.get("asks") or [] if wire.is_id(a.get("id") or "")}
+            self.network.changed()
 
     def said_stopping(self, name):
         """What it says as it stops (stopping: how many processes it has still to stop), as a banner says it, under
@@ -306,8 +334,11 @@ class Remote:
 
     def request(self, msg, done=None):
         """Send a request; done(reply) through dispatch (an error reply if the server isn't there, or the schema's
-        refusal of it, at once, if it isn't one the schema has)."""
+        refusal of it, at once, if it isn't one the schema has). A message not sent, or a draft not saved, kept as
+        an error of this process's (errorbook's)."""
         reply = (lambda r: self.network.dispatch(lambda: done(r))) if done else (lambda r: None)
+        if (kind := FAILS.get(msg.get("op"))) is not None:
+            reply = _noting(kind, msg["op"], reply)
         with self.lock:
             ch = self.ch
             req = next(self.reqs)
@@ -958,6 +989,10 @@ class Network:
                     out.add(r.info["group"])
                 out.update(s.get("group") for s in r.sessions.values() if s.get("group"))
         return sorted(out, key=str.lower)
+
+    def asks(self):
+        """Every host's asks of a person it's told of (the Inbox), each with its host (server)."""
+        return [{**a, "server": r} for r in self.remotes() for a in r.inbox.values()]
 
     def sessions(self, group=None):
         """Every host's sessions (of a group, if given), each with "server": the Remote it's on."""

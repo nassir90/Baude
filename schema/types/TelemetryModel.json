@@ -20,13 +20,38 @@
     },
     "tokens": {
       "type": "integer",
-      "description": "Their tokens, read and written."
+      "description": "Every token of theirs: input, cache writes and reads, output, and input_with_cache."
+    },
+    "input": {
+      "type": "integer",
+      "description": "Input tokens sent that weren't read from a cache or written to one."
+    },
+    "cache_write": {
+      "type": "integer",
+      "description": "Input tokens written to a cache."
+    },
+    "cache_read": {
+      "type": "integer",
+      "description": "Input tokens read from a cache."
+    },
+    "output": {
+      "type": "integer",
+      "description": "Tokens written."
+    },
+    "input_with_cache": {
+      "type": "integer",
+      "description": "Input tokens of turns kept before their tokens were told apart, cache reads and writes among them."
     }
   },
   "required": [
     "model",
     "turns",
-    "tokens"
+    "tokens",
+    "input",
+    "cache_write",
+    "cache_read",
+    "output",
+    "input_with_cache"
   ],
   "additionalProperties": false
 }

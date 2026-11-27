@@ -1,0 +1,72 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "A running task's script raises an ask of a person (on the host's own socket, with its run's token): kept, and in the Inbox of every head that may manage its Bot till it's answered, withdrawn or its run ends. Answered as a button's pressed (inbox_wait).",
+  "properties": {
+    "op": {
+      "const": "inbox_raise",
+      "description": "What it is."
+    },
+    "req": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "run": {
+      "type": "string",
+      "description": "The asking run's id (BAUDE_TASK_RUN): a task's script's."
+    },
+    "token": {
+      "type": "string",
+      "description": "Its run's token (BAUDE_TASK_TOKEN)."
+    },
+    "title": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "What it's called in the Inbox's list (its body's first line, if none)."
+    },
+    "body": {
+      "type": "string",
+      "description": "What it says: Markdown, as a message is written. ![alt](name) on a line of its own, or alone in a table's cell, shows one of its pictures there (by its name)."
+    },
+    "pictures": {
+      "type": [
+        "array",
+        "null"
+      ],
+      "items": {
+        "$ref": "InboxPictureData.json"
+      },
+      "description": "Its pictures, each by the name its body and buttons use."
+    },
+    "buttons": {
+      "type": "array",
+      "items": {
+        "$ref": "InboxButton.json"
+      },
+      "description": "What may be pressed: each tells the task, with the form's values."
+    },
+    "form": {
+      "type": [
+        "array",
+        "null"
+      ],
+      "items": {
+        "$ref": "TaskField.json"
+      },
+      "description": "Fields to fill (as a task's form has them): their values go with the button pressed."
+    }
+  },
+  "required": [
+    "op",
+    "run",
+    "token",
+    "body",
+    "buttons"
+  ],
+  "additionalProperties": false
+}

@@ -146,6 +146,28 @@ Answer an ask of one of your tasks' runs whose message says to answer with this 
 | `answer` | object |  | The form's fields, by name: each a text, number, true or false, or one of a choice's choices |
 | `text` | string |  | The answer to an ask with no form |
 
+### `answer_ask`
+
+Answer an ask in a person's Inbox whose message says to answer with this tool (mcp__mesh__answer_ask): press one of its buttons, by its index, with its form's values. An ask sent to you is answered at once: its task is told, and the ask leaves every Inbox. One of your own task's is only proposed: the person sees your answer and confirms it. A wrong answer is refused with what's wrong: call it again.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `ask` | string | yes | The ask's id (its message says it) |
+| `button` | integer | yes | The button's index (its message lists them) |
+| `values` | object |  | The form's fields, by name: each a text, number, true or false, or one of a choice's choices |
+
+### `revise_ask`
+
+Put a new version of an ask your task raised in a person's Inbox (its message says its id): what it says, its buttons, its form. A field left out stays as it was. The person sees it at once.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `ask` | string | yes | The ask's id |
+| `title` | string |  | What it's called in the Inbox's list |
+| `body` | string |  | What it says, in Markdown; ![alt](name) shows one of its pictures |
+| `buttons` | array of object |  | Its buttons, each {label, style?: primary\|secondary\|blue\|teal\|green\|yellow\|orange\|red\|pink\|purple\|slate, picture?: a picture's name} |
+| `form` | array of object |  | Its form's fields, each {name, type: text\|number\|bool\|choice, label?, choices?, default?, required?} |
+
 ### `list_notebooks`
 
 Record's notebooks on a host: each one's name and how many pages it has.
@@ -558,7 +580,7 @@ A Bot's browser tool's request (baudelib.emissiontools) to the Emission that has
 | Field | Type | Required | What it is |
 |---|---|---|---|
 | `bot` | BotRef |  | The Bot. |
-| `default` | boolean |  | The call is to Emission's own window here on its Default profile instead of a Bot's (☰ → Browser from another host, watched): what a Browser pane does (tabs, navigate, new_tab, close_tab, select_tab, click, hover, drag, type, key, scroll, answer_prompt), nothing else. |
+| `default` | boolean |  | The call is to Emission's own window here on its Default profile instead of a Bot's (☰ → Browser from another host, watched): what a Browser pane does (tabs, navigate, new_tab, close_tab, select_tab, click, hover, drag, type, key, scroll, answer_prompt, copy, paste), nothing else. |
 | `call` | object |  | The tool's request. |
 
 #### `emission_answer` (EmissionAnswer)
@@ -691,6 +713,110 @@ A line for an agent's program's stdin.
 | Field | Type | Required | What it is |
 |---|---|---|---|
 | `line` | string |  | The line. |
+
+#### `inbox` (Inbox)
+
+The host's asks waiting (and those stopped, till they're removed) of the Bots the head may manage: the Inbox. Changes come as inbox_changed to a head that's subscribed.
+
+#### `inbox_picture` (InboxPictureGet)
+
+One of an ask's pictures, its bytes.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `ask` | string | yes | The ask's id. |
+| `version` | integer | yes | Its version (1 for the first). |
+| `name` | string | yes | The picture's name. |
+
+#### `inbox_press` (InboxPress)
+
+A button of a waiting ask pressed, with its form's values: its task told (inbox_wait), and the ask out of every Inbox. A person's (a head's), or a Bot's (its answer_ask tool: as: its own session id): one of an ask sent to that Bot answers it, one of the Bot's own task's is a proposal for the person to confirm.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `ask` | string | yes | The ask's id. |
+| `button` | integer | yes | The button's index. |
+| `values` | object/null |  | The form's values, by its fields' names. |
+| `as` | string/null |  | A Bot answering it: its own session id. |
+| `version` | integer/null |  | The version (its n) it was pressed on: refused if the ask has a newer one. |
+
+#### `inbox_raise` (InboxRaise)
+
+A running task's script raises an ask of a person (on the host's own socket, with its run's token): kept, and in the Inbox of every head that may manage its Bot till it's answered, withdrawn or its run ends. Answered as a button's pressed (inbox_wait).
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `run` | string | yes | The asking run's id (BAUDE_TASK_RUN): a task's script's. |
+| `token` | string | yes | Its run's token (BAUDE_TASK_TOKEN). |
+| `title` | string/null |  | What it's called in the Inbox's list (its body's first line, if none). |
+| `body` | string | yes | What it says: Markdown, as a message is written. ![alt](name) on a line of its own, or alone in a table's cell, shows one of its pictures there (by its name). |
+| `pictures` | array/null of InboxPictureData |  | Its pictures, each by the name its body and buttons use. |
+| `buttons` | array of InboxButton | yes | What may be pressed: each tells the task, with the form's values. |
+| `form` | array/null of TaskField |  | Fields to fill (as a task's form has them): their values go with the button pressed. |
+
+#### `inbox_remove` (InboxRemove)
+
+A stopped ask taken out of every Inbox (and off the host).
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `ask` | string | yes | The ask's id. |
+
+#### `inbox_revise` (InboxRevise)
+
+A new version of a waiting ask: its task's script's (run, token), or the asking Bot's (its own tools, sent a message from the ask's box). A script's on an ask that's been pressed opens it again, waiting. Fields left out are the last version's.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `ask` | string | yes | The ask's id. |
+| `run` | string/null |  | The asking run's id: a script's. |
+| `token` | string/null |  | Its run's token: a script's. |
+| `title` | string/null |  | What it's called in the Inbox's list (its body's first line, if none). |
+| `body` | string/null |  | What it says now (Markdown). |
+| `pictures` | array/null of InboxPictureData |  | Its pictures, each by the name its body and buttons use. |
+| `buttons` | array/null of InboxButton |  | Its buttons now. |
+| `form` | array/null of TaskField |  | Fields to fill (as a task's form has them): their values go with the button pressed. |
+
+#### `inbox_route` (InboxRoute)
+
+A waiting ask handed on: model, a model of the host's asked to answer it (its answer shown for confirming: proposal); bot, a Bot sent it to answer (its answer_ask tool). Neither: a model's answer let go of.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `ask` | string | yes | The ask's id. |
+| `model` | string/null |  | A model's value, as the host lists it. |
+| `effort` | string/null |  | Its effort. |
+| `bot` | string/null |  | A Bot's session id, on this host. |
+
+#### `inbox_say` (InboxSay)
+
+What a person wrote in an ask's box, sent the asking task's Bot as a message (with the ask): it may answer the ask or put a new version of it.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `ask` | string | yes | The ask's id. |
+| `text` | string | yes | What they wrote. |
+
+#### `inbox_wait` (InboxWait)
+
+A task's script's ask's answer (run, token), waited for: till it's answered (or withdrawn, or its run's stopped), or timeout seconds (0: as it is now, a poll).
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `ask` | string | yes | The ask's id. |
+| `run` | string | yes | The asking run's id (BAUDE_TASK_RUN): a task's script's. |
+| `token` | string | yes | Its run's token (BAUDE_TASK_TOKEN). |
+| `timeout` | number/null |  | How long to wait, in seconds (0: not at all; none: till it's answered). |
+
+#### `inbox_withdraw` (InboxWithdraw)
+
+A waiting ask taken back by its task's script (run, token): out of every Inbox.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `ask` | string | yes | The ask's id. |
+| `run` | string | yes | The asking run's id (BAUDE_TASK_RUN): a task's script's. |
+| `token` | string | yes | Its run's token (BAUDE_TASK_TOKEN). |
 
 #### `infer` (Infer)
 
@@ -1157,21 +1283,24 @@ An app's telemetry, told to its own machine's host as it happens (the phone's ap
 
 | Field | Type | Required | What it is |
 |---|---|---|---|
-| `app` | `baude` \| `record` \| `phone` | yes | The app it's of: Baude, Record, or the phone's app. |
+| `app` | `baude` \| `record` \| `phone` \| `emission` | yes | The app it's of: Baude, Record, the phone's app, or Emission (its errors only). |
 | `pid` | integer | yes | The app's process id. |
 | `events` | array of TelemetryEvent |  | What happened since it last told (each at its own time). |
 | `profile` | TelemetryProfile? |  | What it profiled since it last told, if it's profiling. |
 | `profile_error` | string/null |  | Why it isn't profiling what it's told to, if it isn't. |
+| `commit` | string/null |  | The commit the app runs (its first 12 characters), as it started: kept on each of its rows. |
+| `wire` | integer/null |  | The wire's version the app speaks: kept on each of its rows. |
+| `errors` | array of TelemetryError |  | Its errors since it last told, each once by its fingerprint with how many times it happened (added to what the host keeps of it). |
 
 #### `telemetry_read` (TelemetryRead)
 
-A host's telemetry over a stretch: its chat events, its samples, its line profiles, and its turns added up; its telemetry state with it. Any member of the mesh may ask any other: one machine pulls every host's and puts them together by their times.
+A host's telemetry over a stretch: its chat events, its samples, its line profiles, and its turns added up, its errors; its telemetry state with it. Any member of the mesh may ask any other: one machine pulls every host's and puts them together by their times.
 
 | Field | Type | Required | What it is |
 |---|---|---|---|
 | `from` | number | yes | From, in seconds since the epoch. |
 | `to` | number/null |  | To (null: now). |
-| `what` | array of `events` \| `metrics` \| `profiles` \| `usage` |  | What's wanted (none: only the state). |
+| `what` | array of `events` \| `metrics` \| `profiles` \| `usage` \| `errors` |  | What's wanted (none: only the state). |
 | `limit` | integer/null |  | The most events, samples and profiles each (the latest kept; default 5000). |
 
 #### `telemetry_set` (TelemetrySet)
@@ -1777,6 +1906,50 @@ The host's answer to hello.
 |---|---|---|---|
 | `server` | Info |  | What the host is. |
 
+#### `inbox_answered` (InboxAnswered)
+
+inbox_wait's answer: the ask as it is.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `ask` | string | yes | The ask's id. |
+| `status` | `waiting` \| `answered` \| `withdrawn` \| `stopped` | yes | Its status (waiting: not answered within the timeout). |
+| `answer` | InboxAnswer? |  | How it was answered. |
+
+#### `inbox_done` (InboxDone)
+
+inbox_withdraw's, inbox_press's, inbox_route's, inbox_say's and inbox_remove's answer: done.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `ask` | string | yes | The ask's id. |
+
+#### `inbox_picture_data` (InboxPictureReply)
+
+inbox_picture's answer.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `mime` | string | yes | What it is. |
+| `data` | string | yes | Its bytes, base64. |
+
+#### `inbox_raised` (InboxRaised)
+
+inbox_raise's and inbox_revise's answer.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `ask` | string | yes | The ask's id. |
+| `version` | integer | yes | Its version now (1 for the first). |
+
+#### `inbox_reply` (InboxReply)
+
+inbox's answer.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `asks` | array of InboxAsk | yes | The asks, oldest first. |
+
 #### `infer_data` (InferData)
 
 infer's and files's answer: some of its body.
@@ -2130,7 +2303,7 @@ telemetry's answer: kept.
 
 #### `telemetry_read` (TelemetryReadReply)
 
-telemetry_read's answer, each list the earliest first.
+telemetry_read's answer, each list the earliest first (errors the latest first).
 
 | Field | Type | Required | What it is |
 |---|---|---|---|
@@ -2139,6 +2312,7 @@ telemetry_read's answer, each list the earliest first.
 | `events` | array of TelemetryEvent |  | Its chat events. |
 | `metrics` | array of TelemetrySample |  | Its samples. |
 | `profiles` | array of TelemetryProfile |  | Its line profiles. |
+| `errors` | array of TelemetryError |  | The errors of the processes on its machine that happened in the stretch, the last to happen first. |
 | `usage` | TelemetryUsage? |  | Its turns added up. |
 
 #### `telemetry_set` (TelemetrySetReply)
@@ -2310,6 +2484,15 @@ A session's agent stopped.
 | `session` | string | yes | The session's id. |
 | `code` | integer/null |  | Its exit code. |
 | `stopped` | boolean |  | Told to (stop). |
+
+#### `inbox_changed` (InboxChanged)
+
+An ask raised, put anew, answered, withdrawn, stopped, routed or removed: told every subscribed head that may manage its Bot, as a draft's change is. One that's answered, withdrawn or removed (removed: true) leaves every Inbox.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `ask` | InboxAsk | yes | The ask as it is now. |
+| `removed` | boolean/null |  | It's gone from the host (a stopped one removed). |
 
 #### `login_state` (LoginState)
 
@@ -2980,6 +3163,98 @@ A host process as it says it is on a link (mesh._hello_of).
 | `bonjour` | string |  | Its name on the local network, if it said one. |
 | `dial` | boolean |  | false: it can't be linked to, only from (a phone, with no sshd). |
 | `key` | string |  | Its key (Ed25519's public half, in base64): what signs the tunnels it opens. |
+
+#### InboxAnswer
+
+How an ask was answered: the button pressed and the form's values.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `button` | integer | yes | The button's index. |
+| `label` | string | yes | The button's label. |
+| `values` | object | yes | The form's values, checked against its fields. |
+| `by` | string/null |  | A Bot's name, if a Bot answered it (sent to it, or the asking task's); none: a person. |
+| `at` | number | yes | When (seconds since the epoch). |
+
+#### InboxAsk
+
+A task's ask of a person, kept by its host (state folder's inbox/) till it's answered or its task withdraws it: across the host's restarts, stopped (its run gone) then, struck through and its buttons off. Every head that may manage the asking Bot is told it as it changes (inbox_changed).
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `id` | string | yes | The ask's id. |
+| `session` | string | yes | The asking task's Bot's session id. |
+| `bot` | string/null |  | That Bot's name. |
+| `task` | string | yes | The task's id. |
+| `task_name` | string | yes | The task's name. |
+| `run` | string | yes | The asking run's id. |
+| `at` | number | yes | When it was raised (seconds since the epoch). |
+| `status` | `waiting` \| `answered` \| `withdrawn` \| `stopped` | yes | waiting: for an answer; answered (answer: how); withdrawn: its task took it back; stopped: its run ended (or its host restarted) with it unanswered. |
+| `versions` | array of InboxVersion | yes | Every version of it, oldest first: the last is what's answered. |
+| `proposal` | InboxProposal? |  | A model's answer waiting to be confirmed, if one was asked for. |
+| `sent_to` | string/null |  | The Bot it's been sent to answer (its session id), till it does. |
+| `sent_to_name` | string/null |  | That Bot's name. |
+| `answer` | InboxAnswer? |  | How it was answered. |
+
+#### InboxButton
+
+One of an ask's buttons, as its task gives it: pressing it tells the task, with the form's values. Sized to its label, wrapping with the others as a whole.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `label` | string | yes | What it says. |
+| `style` | `primary` \| `secondary` \| `blue` \| `teal` \| `green` \| `yellow` \| `orange` \| `red` \| `pink` \| `purple` \| `slate` |  | How it's drawn: primary (the accent), secondary (plain, the default), or one of the accent palette's colours (schema/tokens accent.*). |
+| `picture` | string/null |  | One of the ask's pictures, by its name, drawn over its label: a picture button. |
+
+#### InboxPicture
+
+One of an ask's version's pictures, as it's listed: its bytes are fetched by its name (inbox_picture).
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `name` | string | yes | Its name, as the body and buttons use it. |
+| `mime` | string | yes | What it is (image/png, image/jpeg, ...). |
+| `size` | integer | yes | How many bytes it is. |
+| `width` | integer/null |  | Its width in pixels, if it could be read. |
+| `height` | integer/null |  | Its height in pixels, if it could be read. |
+
+#### InboxPictureData
+
+A picture given with an ask (inbox_raise, inbox_revise): its bytes.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `name` | string | yes | Its name, as the body and buttons use it (letters, digits, . _ -). |
+| `mime` | string/null |  | What it is (found from its bytes, if none). |
+| `data` | string | yes | Its bytes, base64. |
+
+#### InboxProposal
+
+A model's, or the asking Bot's, answer to an ask (Route to → Have a model answer; a Bot's answer_ask after the person wrote to it): shown for the person to confirm or change, taking effect only as they press a button.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `model` | string | yes | The model's value (a Bot's: its name). |
+| `name` | string | yes | The model or Bot, as it's named. |
+| `status` | `answering` \| `ready` \| `failed` | yes | answering: it's being asked; ready: its answer's here; failed: it couldn't answer (text: why). |
+| `button` | integer/null |  | The button it would press (its index), once it's answered. |
+| `values` | object/null |  | The form's values as it would fill them. |
+| `text` | string/null |  | Why, in a line or two (or why it failed). |
+
+#### InboxVersion
+
+One version of an ask: as its task raised it, or as it (or its Bot) put it anew.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `n` | integer |  | Its number among the ask's versions, from 1, kept as older ones go. |
+| `at` | number | yes | When it came (seconds since the epoch). |
+| `by` | string/null |  | A Bot's name, if a Bot put it; none: the task. |
+| `title` | string/null |  | What it's called in the Inbox's list. |
+| `body` | string | yes | What it says (Markdown). |
+| `pictures` | array of InboxPicture | yes | Its pictures. |
+| `buttons` | array of InboxButton | yes | Its buttons. |
+| `form` | array of TaskField | yes | Its form's fields. |
 
 #### Info
 
@@ -3680,6 +3955,18 @@ A variable a task declares: a name its script reads it by (baudetask.vars), and 
 | `type` | `model` \| `decider` \| `host` \| `browser_host` \| `terminal_host` \| `kube_context` \| `pod` \| `container` \| `database` \| `text` | yes | What it's bound to: a model (with its effort), a decider (decide's), a host of the mesh (one to browse on, one to run terminals on), a Kubernetes context, a pod, a container, a database, or text. What's offered as it's bound is the host's own of that type; any text can be given all the same. |
 | `description` | string/null |  | What it's for, as its Bot said. |
 
+#### TelemetryCrumb
+
+Something the user did in an app, a few kept before an error (its breadcrumbs): what was on screen and the part used, by their schema/ui names.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `at` | number | yes | When, in seconds since the epoch. |
+| `action` | `click` \| `menu` \| `open` | yes | What was done: a button or row clicked (or activated from the keyboard), a menu's item picked, or a screen opened (a tab, a page, a dialog, a side panel's page). |
+| `screen` | string/null |  | The schema/ui entity it was on ("Telemetry.dialog"), null where it has none. |
+| `part` | string/null |  | The entity's part used, by its name there ("Collect Telemetry"), null where it isn't one of its parts. |
+| `widget` | string/null |  | What was used where it isn't a part schema/ui names: its copy key, else its icon's name, else its kind of widget. |
+
 #### TelemetryDay
 
 A day's tokens, from the turns that ended in it.
@@ -3687,8 +3974,40 @@ A day's tokens, from the turns that ended in it.
 | Field | Type | Required | What it is |
 |---|---|---|---|
 | `day` | string | yes | The day, YYYY-MM-DD, the host's time. |
-| `tokens` | integer | yes | Tokens read and written. |
+| `tokens` | integer | yes | Every token of them: input, cache writes and reads, output, and input_with_cache. |
 | `turns` | integer | yes | Turns that ended. |
+| `input` | integer | yes | Input tokens sent that weren't read from a cache or written to one. |
+| `cache_write` | integer | yes | Input tokens written to a cache. |
+| `cache_read` | integer | yes | Input tokens read from a cache. |
+| `output` | integer | yes | Tokens written. |
+| `input_with_cache` | integer | yes | Input tokens of turns kept before their tokens were told apart, cache reads and writes among them. |
+
+#### TelemetryError
+
+An error a process on a host's machine had, kept by that host by its fingerprint (its kind and type and where it was raised): how many times, when first and last, the code it was on, what was on screen and the user's last actions before it.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `app` | `host` \| `baude` \| `record` \| `phone` \| `emission` | yes | The process it was in: the host's, Baude's, Record's, the phone's app, or Emission's. |
+| `kind` | `exception` \| `thread` \| `callback` \| `log` \| `wire` \| `agent_exit` \| `draft_save` \| `send` \| `page_load` \| `crash` | yes | What it was: an exception nothing caught (on the main thread; on another thread; in a main-loop callback, which carries on), a critical or warning GLib or GTK logged, an error answered on the wire, an agent that exited by itself with a code other than 0, a draft its host didn't save, a message not sent, a page Emission couldn't load, or the phone's app crashing. |
+| `fingerprint` | string | yes | What it's kept by: its kind, its type and the frame of Baude's own code it was raised in (its file and function), or for one without a stack what tells it apart (the op and code, a log's domain and its message with numbers taken out). |
+| `type` | string | yes | The exception's class, the log's domain and level, the op, the agent's program. |
+| `message` | string | yes | What it said, its first line (the last time). |
+| `file` | string/null |  | The file it was raised in, under the checkout, relative to it. |
+| `line` | integer/null |  | Its line there. |
+| `function` | string/null |  | The function. |
+| `stack` | array of string |  | Its frames (file:line function), the innermost last, at most 20 (the last time). |
+| `count` | integer | yes | Times it happened. |
+| `first` | number | yes | When it first happened, in seconds since the epoch. |
+| `last` | number | yes | When it last happened. |
+| `commit` | string/null |  | The commit the process ran the last time (its first 12 characters). |
+| `wire` | integer/null |  | The wire's version it spoke the last time. |
+| `first_commit` | string/null |  | The commit it ran the first time. |
+| `screen` | string/null |  | The schema/ui entity on screen as it happened ("Telemetry.dialog"), the last time; null in a process with no screen. |
+| `part` | string/null |  | The entity's part the user had just used, by its name there, if one was used just before. |
+| `wire_op` | string/null |  | The wire op it happened answering (a wire error's, an exception in a host's op). |
+| `code` | string/integer/null |  | A wire error's code (Error's), an agent's exit code. |
+| `crumbs` | array of TelemetryCrumb |  | The user's last actions before it (at most 8), the earliest first, the last time. |
 
 #### TelemetryEvent
 
@@ -3705,8 +4024,13 @@ Something done in a chat, as an app saw it happen: kept by its machine's host as
 | `turn` | string/null |  | A turn_ended's: the id of the turn's result, so a turn two apps saw end is counted once. |
 | `model` | string/null |  | A turn_ended's: the model it ran on. |
 | `effort` | string/null |  | A turn_ended's: the effort it ran at. |
-| `tokens_in` | integer/null |  | A turn_ended's: the tokens it read (input, cache reads and writes). |
-| `tokens_out` | integer/null |  | A turn_ended's: the tokens it wrote. |
+| `tokens_input` | integer/null |  | A turn_ended's: the input tokens it sent that weren't read from a cache or written to one. |
+| `tokens_cache_write` | integer/null |  | A turn_ended's: the input tokens it wrote to a cache. |
+| `tokens_cache_read` | integer/null |  | A turn_ended's: the input tokens it read from a cache (each call of the turn's, counted each time it's read). |
+| `tokens_out` | integer/null |  | A turn_ended's: the tokens it wrote (thinking among them). |
+| `tokens_in` | integer/null |  | An older turn_ended's, kept before its tokens were told apart: every input token, cache reads and writes among them. Events told now leave it out. |
+| `commit` | string/null |  | The commit the app that saw it runs (its first 12 characters), as it started. |
+| `wire` | integer/null |  | The wire's version the app that saw it speaks. |
 
 #### TelemetryFront
 
@@ -3739,7 +4063,12 @@ A model's turns, or a model and effort's.
 | `model` | string | yes | The model. |
 | `effort` | string/null |  | The effort (null: a model's turns at any effort). |
 | `turns` | integer | yes | Turns that ended on it. |
-| `tokens` | integer | yes | Their tokens, read and written. |
+| `tokens` | integer | yes | Every token of theirs: input, cache writes and reads, output, and input_with_cache. |
+| `input` | integer | yes | Input tokens sent that weren't read from a cache or written to one. |
+| `cache_write` | integer | yes | Input tokens written to a cache. |
+| `cache_read` | integer | yes | Input tokens read from a cache. |
+| `output` | integer | yes | Tokens written. |
+| `input_with_cache` | integer | yes | Input tokens of turns kept before their tokens were told apart, cache reads and writes among them. |
 
 #### TelemetryProc
 
@@ -3762,6 +4091,8 @@ What line_profiler timed in a process over a stretch (saved every 30 seconds whi
 | `from` | number | yes | When it began. |
 | `app` | `host` \| `baude` \| `record` | yes | The process profiled: the host's, Baude's or Record's. |
 | `lines` | array of TelemetryLine | yes | Its lines that ran, the most time first (at most 200). |
+| `commit` | string/null |  | The commit the process profiled runs (its first 12 characters), as it started. |
+| `wire` | integer/null |  | The wire's version the process profiled speaks. |
 
 #### TelemetryProfiling
 
@@ -3789,6 +4120,8 @@ A host's machine and its processes, sampled every few seconds while telemetry is
 | `memory_pressure` | string/null |  | How pressed for memory the system says it is: "normal", "warning" or "critical" (macOS's memory pressure level; a phone's low memory: critical, else normal); null where it has no level (Linux). |
 | `memory_stall` | number/null |  | The share of the last 10 seconds, in percent, some task stalled waiting on memory (Linux's pressure stall information, some avg10); null where it has none. |
 | `procs` | array of TelemetryProc | yes | The host process, each app on its machine that told it telemetry (Baude, Record, the phone's app), and each Emission and Multiplex running there (the host finds those itself). |
+| `commit` | string/null |  | The commit the host runs (its first 12 characters), as it started. |
+| `wire` | integer/null |  | The wire's version the host speaks. |
 
 #### TelemetryState
 
@@ -3976,6 +4309,6 @@ Somewhere wire.reach can go: this machine's host process, one listening on anoth
 | `TERMINAL_KEEP_S` | `600` | A terminal (terminal op) no connection is attached to now: its program kept running this long to be attached to again, in seconds. |
 | `TERMINAL_KEPT_BYTES` | `262144` | What a terminal (terminal op) wrote lately, kept to show again on attach: this many bytes at most. |
 | `TTL` | `16` | A tunnel's passed through at most this many hosts (open's ttl). |
-| `VERSION` | `38` | The wire's version, as a host's hello says it. |
+| `VERSION` | `43` | The wire's version, as a host's hello says it. |
 | `ZOOM_MAX` | `1568` | A browser zoom's longest side, in pixels. |
 | `ZOOM_QUALITY` | `90` | A browser zoom's JPEG quality. |

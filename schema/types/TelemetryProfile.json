@@ -25,6 +25,20 @@
         "$ref": "TelemetryLine.json"
       },
       "description": "Its lines that ran, the most time first (at most 200)."
+    },
+    "commit": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "The commit the process profiled runs (its first 12 characters), as it started."
+    },
+    "wire": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "description": "The wire's version the process profiled speaks."
     }
   },
   "required": [

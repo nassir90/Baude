@@ -23,9 +23,14 @@ import java.util.concurrent.TimeUnit
 object TelemetryStore {
     private const val SAMPLE_S = 5L
     private const val LIMIT = 5000
-    private val KEEP = mapOf("events" to 400L, "metrics" to 30L, "profiles" to 30L)
+    private const val ERRORS_KEPT = 1000 // (errors kept: the latest by when they last happened)
+    private val KEEP = mapOf("events" to 400L, "metrics" to 30L, "profiles" to 30L, "errors" to 90L)
     private val KINDS = setOf("chat_opened", "chat_front", "chat_left", "turn_sent", "turn_ended")
     private val APPS = setOf("baude", "record", "phone")
+    /** A turn's tokens, each kind apart (telemetry.TOKENS), and usage's names for an event's tokens (telemetry._KINDS). */
+    val TOKENS = arrayOf("tokens_input", "tokens_cache_write", "tokens_cache_read", "tokens_out")
+    private val NAMES = mapOf("tokens_input" to "input", "tokens_cache_write" to "cache_write",
+        "tokens_cache_read" to "cache_read", "tokens_out" to "output", "tokens_in" to "input_with_cache")
     private val work = Executors.newSingleThreadScheduledExecutor { r -> Thread(r, "telemetry").apply { isDaemon = true } }
     private var sampling: ScheduledFuture<*>? = null
     private var root: File? = null
@@ -38,14 +43,21 @@ object TelemetryStore {
     // chat_front said, till its chat_left: Info's front)
 
     private fun dir() = File(root!!, "telemetry")
+    /** The version of this app's code, on each row it makes (telemetry.version's): its commit and wire version. */
+    private val ver = JSONObject().put("commit", BuildConfig.COMMIT.take(12).ifEmpty { null } ?: JSONObject.NULL)
+        .put("wire", WireConstants.VERSION)
+    private var errs: LinkedHashMap<String, JSONObject>? = null // (errors.json's, as read: by process and fingerprint)
+    private val LATEST = listOf("message", "file", "line", "function", "stack", "commit", "wire", "screen", "part",
+        "wire_op", "code", "crumbs") // (an error's, as it was the last time)
 
-    /** As PhoneHost starts: its state read, and sampling started if it's on. */
+    /** As PhoneHost starts: its state read, sampling started if it's on, and a crash as the app last went kept. */
     @Synchronized
     fun start(phoneRoot: File, id: String) {
         root = phoneRoot
         hostId = id
         on = try { JSONObject(File(dir(), "state.json").readText()).optBoolean("on", true) } catch (_: Exception) { true }
         if (on) run()
+        PhoneErrors.crashed()?.let { if (on) keepErrors(listOf(it), "phone", null) }
     }
 
     private fun run() {
@@ -76,7 +88,11 @@ object TelemetryStore {
     fun keep(msg: JSONObject) {
         if (!on) return
         val app = msg.optString("app").takeIf { it in APPS } ?: return
-        val rows = msg.optJSONArray("events").list().take(1000).mapNotNull { e -> event(e, app) }
+        val told = JSONObject().put("commit", msg.optString("commit").takeIf { !msg.isNull("commit") && it.isNotEmpty() }?.take(12)
+            ?: JSONObject.NULL).put("wire", (msg.opt("wire") as? Number)?.toInt() ?: JSONObject.NULL)
+        msg.optJSONArray("errors")?.let { keepErrors(it.list(), app, told) }
+        val rows = msg.optJSONArray("events").list().take(1000).mapNotNull { e -> event(e, app)?.also { r ->
+            r.put("commit", told.get("commit")).put("wire", told.get("wire")) } }
         write("events", rows)
         if (follow(rows)) PhoneHost.changed() // (every head told: none notifies of the chat in front)
     }
@@ -93,6 +109,51 @@ object TelemetryStore {
         return front != before
     }
 
+    /** Errors told (telemetry.Telemetry.keep_errors, the same): each added to what's kept of it, by its process and
+     * fingerprint, written at once (they're few). told: the telling's version, for one that doesn't say its own. */
+    @Synchronized
+    fun keepErrors(errors: List<JSONObject>, app: String, told: JSONObject?) {
+        val kept = errors()
+        for (e in errors.take(500)) {
+            val fp = e.optString("fingerprint").takeIf { it.isNotEmpty() } ?: continue
+            if (e.optString("type").isEmpty() || e.optInt("count", 0) < 1 || e.opt("first") !is Number || e.opt("last") !is Number) continue
+            val r = JSONObject(e.toString()).put("app", app)
+            if (told != null && (r.isNull("commit") || !r.has("commit")) && (r.isNull("wire") || !r.has("wire")))
+                r.put("commit", told.opt("commit")).put("wire", told.opt("wire"))
+            if (!r.has("first_commit") || r.isNull("first_commit")) r.put("first_commit", r.opt("commit") ?: JSONObject.NULL)
+            val key = "$app:$fp"
+            val got = kept[key]
+            if (got == null) { kept[key] = r; continue }
+            if (r.getDouble("last") >= got.getDouble("last")) for (k in LATEST) got.put(k, r.opt(k) ?: JSONObject.NULL)
+            got.put("count", got.getInt("count") + r.getInt("count")).put("first", minOf(got.getDouble("first"), r.getDouble("first")))
+                .put("last", maxOf(got.getDouble("last"), r.getDouble("last")))
+        }
+        val old = System.currentTimeMillis() / 1000.0 - KEEP.getValue("errors") * 86400
+        kept.entries.removeAll { it.value.optDouble("last", 0.0) < old }
+        if (kept.size > ERRORS_KEPT) kept.entries.sortedByDescending { it.value.optDouble("last", 0.0) }.drop(ERRORS_KEPT)
+            .forEach { kept.remove(it.key) }
+        if (root == null) return
+        dir().mkdirs()
+        val tmp = File(dir(), "errors.json.tmp")
+        tmp.writeText(JSONObject().put("errors", JSONArray(kept.values.toList())).toString())
+        tmp.renameTo(File(dir(), "errors.json"))
+    }
+
+    private fun errors(): LinkedHashMap<String, JSONObject> = errs ?: LinkedHashMap<String, JSONObject>().also { m ->
+        try {
+            JSONObject(File(dir(), "errors.json").readText()).optJSONArray("errors").list()
+                .forEach { m["${it.optString("app")}:${it.optString("fingerprint")}"] = it }
+        } catch (_: Exception) {
+        }
+        errs = m
+    }
+
+    /** The errors that happened from start to end, the last to happen first, the latest limit of them. */
+    @Synchronized
+    fun errorRows(start: Double, end: Double, limit: Int): List<JSONObject> = errors().values
+        .filter { it.optDouble("last") >= start && it.optDouble("first") <= end }.sortedByDescending { it.optDouble("last") }
+        .take(limit)
+
     /** The chats in front on this phone now (Info's front, a TelemetryFront each): what no head notifies of. */
     fun fronts(): JSONArray = JSONArray(listOfNotNull(front).map { (h, s) -> JSONObject().put("host", h).put("session", s) })
 
@@ -105,16 +166,16 @@ object TelemetryStore {
             .put("host", host.take(200)).put("session", session.take(200))
         for (k in listOf("turn", "model", "effort")) e.optString(k).takeIf { !e.isNull(k) && it.isNotEmpty() }?.let { out.put(k, it.take(200)) }
         (e.opt("seconds") as? Number)?.toDouble()?.takeIf { it >= 0 }?.let { out.put("seconds", Math.round(it * 1000) / 1000.0) }
-        for (k in listOf("tokens_in", "tokens_out")) (e.opt(k) as? Number)?.toLong()?.takeIf { it >= 0 }?.let { out.put(k, it) }
+        for (k in listOf(*TOKENS, "tokens_in")) (e.opt(k) as? Number)?.toLong()?.takeIf { it >= 0 }?.let { out.put(k, it) }
         return out
     }
 
     /** A turn of one of this phone's sessions ended: the host's own turn_ended (what tokens are added up from). */
-    fun turn(session: String, seconds: Double, model: String?, effort: String?, tokensIn: Long, tokensOut: Long) {
+    fun turn(session: String, seconds: Double, model: String?, effort: String?, tokens: LongArray) {
         if (!on) return
         event(JSONObject().put("at", System.currentTimeMillis() / 1000.0).put("kind", "turn_ended").put("host", hostId)
             .put("session", session).put("seconds", seconds).put("model", model ?: JSONObject.NULL)
-            .put("effort", effort ?: JSONObject.NULL).put("tokens_in", tokensIn).put("tokens_out", tokensOut), "phone")
+            .put("effort", effort ?: JSONObject.NULL).apply { TOKENS.forEachIndexed { i, k -> put(k, tokens[i]) } }, "phone")
             ?.let { write("events", listOf(it.put("app", "host"))) }
     }
 
@@ -123,6 +184,7 @@ object TelemetryStore {
     @Synchronized
     private fun write(kind: String, rows: List<JSONObject>) {
         if (rows.isEmpty() || root == null) return
+        for (r in rows) if (!r.has("wire")) r.put("commit", ver.get("commit")).put("wire", ver.get("wire")) // (the host's own)
         val where = File(dir(), kind).apply { mkdirs() }
         for ((d, these) in rows.groupBy { day(it.getDouble("at")) })
             File(where, "$d.jsonl").appendText(these.joinToString("") { "$it\n" })
@@ -200,32 +262,52 @@ object TelemetryStore {
         val out = arrayListOf<Pair<String, Any?>>("host" to hostId, "state" to state())
         for (kind in listOf("events", "metrics", "profiles")) if (kind in what) out.add(kind to JSONArray(rows(kind, start, end, limit)))
         if ("usage" in what) out.add("usage" to usage(rows("events", start, end, 0)))
+        if ("errors" in what) out.add("errors" to JSONArray(errorRows(start, end, limit)))
         return out.toTypedArray()
+    }
+
+    /** A turn's result's tokens, each kind apart, as TOKENS (telemetry.tokens_of, the same). */
+    fun tokensOf(m: JSONObject): LongArray {
+        val byModel = m.optJSONObject("model_usage_since_last_result")
+        val (parts, keys) = if (byModel != null)
+            byModel.keys().asSequence().mapNotNull { byModel.optJSONObject(it) }.toList() to
+                listOf("inputTokens", "cacheCreationInputTokens", "cacheReadInputTokens", "outputTokens")
+        else listOfNotNull(m.optJSONObject("usage")) to
+            listOf("input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens", "output_tokens")
+        return LongArray(4) { i -> parts.sumOf { (it.opt(keys[i]) as? Number)?.toLong()?.coerceAtLeast(0) ?: 0 } }
     }
 
     /** The hosts' own turn_ended events added up (telemetry.usage, the same). */
     fun usage(events: List<JSONObject>): JSONObject {
         val seen = HashSet<String>()
-        val days = sortedMapOf<String, LongArray>()
-        val models = HashMap<Pair<String, String?>, LongArray>()
-        val combos = HashMap<Pair<String, String?>, LongArray>()
+        val days = sortedMapOf<String, HashMap<String, Long>>()
+        val models = HashMap<Pair<String, String?>, HashMap<String, Long>>()
+        val combos = HashMap<Pair<String, String?>, HashMap<String, Long>>()
+        fun add(t: HashMap<String, Long>, e: JSONObject) {
+            t["turns"] = (t["turns"] ?: 0) + 1
+            for ((field, name) in NAMES) {
+                val n = (e.opt(field) as? Number)?.toLong()?.takeIf { it > 0 } ?: continue
+                t[name] = (t[name] ?: 0) + n
+                t["tokens"] = (t["tokens"] ?: 0) + n
+            }
+        }
         for (e in events) {
             if (e.optString("kind") != "turn_ended" || e.optString("app") != "host") continue
             val key = "${e.optString("host")}/${e.optString("session")}/${e.optString("turn").ifEmpty { Math.round(e.getDouble("at")).toString() }}"
             if (!seen.add(key)) continue
-            val tokens = e.optLong("tokens_in") + e.optLong("tokens_out")
-            days.getOrPut(day(e.getDouble("at")).toString()) { LongArray(2) }.let { it[0] += tokens; it[1] += 1 }
+            add(days.getOrPut(day(e.getDouble("at")).toString()) { HashMap() }, e)
             val model = e.optString("model").takeIf { !e.isNull("model") && it.isNotEmpty() } ?: continue
             val effort = e.optString("effort").takeIf { !e.isNull("effort") && it.isNotEmpty() }
-            models.getOrPut(model to null) { LongArray(2) }.let { it[0] += 1; it[1] += tokens }
-            combos.getOrPut(model to effort) { LongArray(2) }.let { it[0] += 1; it[1] += tokens }
+            add(models.getOrPut(model to null) { HashMap() }, e)
+            add(combos.getOrPut(model to effort) { HashMap() }, e)
         }
-        fun ranked(t: Map<Pair<String, String?>, LongArray>) = JSONArray(t.entries.sortedWith(compareBy(
-            { -it.value[0] }, { -it.value[1] }, { it.key.toString() })).map {
-            JSONObject().put("model", it.key.first).put("effort", it.key.second ?: JSONObject.NULL)
-                .put("turns", it.value[0]).put("tokens", it.value[1]) })
-        return JSONObject().put("days", JSONArray(days.map { (d, v) ->
-            JSONObject().put("day", d).put("tokens", v[0]).put("turns", v[1]) }))
+        fun counts(o: JSONObject, t: Map<String, Long>) = o.apply {
+            for (k in listOf("turns", "tokens", *NAMES.values.toTypedArray())) put(k, t[k] ?: 0L)
+        }
+        fun ranked(t: Map<Pair<String, String?>, HashMap<String, Long>>) = JSONArray(t.entries.sortedWith(compareBy(
+            { -(it.value["turns"] ?: 0) }, { -(it.value["tokens"] ?: 0) }, { it.key.toString() })).map {
+            counts(JSONObject().put("model", it.key.first).put("effort", it.key.second ?: JSONObject.NULL), it.value) })
+        return JSONObject().put("days", JSONArray(days.map { (d, v) -> counts(JSONObject().put("day", d), v) }))
             .put("models", ranked(models)).put("combos", ranked(combos))
     }
 

@@ -63,7 +63,7 @@ object PhoneHost {
         "subagents", "rename", "archive", "unarchive", "delete", "always_allow", "bot", "bot_picture", "memory",
         "read_file", "catalogue", "list_dir", "senders", "telemetry", "telemetry_read", "telemetry_set", "chat_size",
         "access", "access_set", "seen", "draft_save", "queue", "ephemeral", "control",
-        "set_permission_mode", "set_model")
+        "set_permission_mode", "set_model", "inbox")
     private val CONTROLS = setOf("control", "set_permission_mode", "set_model", "ephemeral") // (OPS' that aren't ops: the
     // control requests its agents take (control: any a claude takes, answered as a host answers them between turns), and
     // start's ephemeral)
@@ -92,6 +92,8 @@ object PhoneHost {
             id = prefs.getString("id", null) ?: UUID.randomUUID().toString().also { prefs.edit().putString("id", it).apply() }
             name = prefs.getString("name", null)?.ifBlank { null } ?: deviceName()
             root = File(ctx.filesDir, "phone")
+            PhoneErrors.install(ctx.filesDir)
+            PhoneErrors.wake = { Telemetry.errorsSoon() }
             TelemetryStore.start(root, id)
             PhoneAccess.start(root)
             for (d in listOf("sessions", "transcripts", "agents", "pictures", "trash", "senders")) File(root, d).mkdirs()
@@ -258,6 +260,7 @@ object PhoneHost {
         WireCheck.refusal(JSONObject(msg.toString()), TAKES)?.let { return head.send(it) }
         when (op) {
             Op.HELLO -> return reply(Op.HELLO, "server" to info())
+            Op.INBOX -> return reply(Op.INBOX_REPLY, "asks" to org.json.JSONArray()) // (this phone runs no tasks: none)
             Op.SUBSCRIBE -> {
                 head.subscribed = true
                 head.archived = Msg.Subscribe.from(msg).archived == true
@@ -941,11 +944,12 @@ object PhoneHost {
      * manage it), and what
      * was sent meanwhile taken now, in a turn of its own (in the same hold of the lock, so no other turn starts
      * between). */
-    fun ended(s: PhoneSession, result: String, error: Boolean, turns: Int, ms: Long, tokensIn: Long = 0, tokensOut: Long = 0) {
+    fun ended(s: PhoneSession, result: String, error: Boolean, turns: Int, ms: Long, tokens: LongArray = LongArray(4)) {
         val stopped = s.cancel
         tell(s, JSONObject().put("type", "result").put("subtype", if (error) "error_during_execution" else "success")
             .put("is_error", error).put("result", result).put("num_turns", turns).put("duration_ms", ms)
-            .put("total_cost_usd", 0).put("session_id", s.id).put("usage", JSONObject()))
+            .put("total_cost_usd", 0).put("session_id", s.id).put("usage", JSONObject().put("input_tokens", tokens[0])
+                .put("cache_creation_input_tokens", tokens[1]).put("cache_read_input_tokens", tokens[2]).put("output_tokens", tokens[3])))
         val subscribed = synchronized(lock) {
             s.acting = false
             s.asks.clear()
@@ -969,7 +973,7 @@ object PhoneHost {
                 PhoneAccess.allowed(it, "manage_read", s.meta) } // (told only those it's listed to)
         }
         if (!s.meta.optBoolean("ephemeral")) TelemetryStore.turn(s.id, ms / 1000.0, s.meta.optString("model").ifEmpty { null },
-            s.meta.optString("effort").ifEmpty { null }, tokensIn, tokensOut)
+            s.meta.optString("effort").ifEmpty { null }, tokens)
         val kept = synchronized(lock) { if (s.deleted) null else turnEnd(s) }
         val end = Msg.TurnEnded(session = s.id, uuid = kept?.uuid, size = kept?.size, result = result, isError = error,
             cost = 0, turns = turns, durationMs = ms).json()

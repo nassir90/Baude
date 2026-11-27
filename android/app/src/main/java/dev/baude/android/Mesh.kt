@@ -465,6 +465,7 @@ object Mesh {
         if (conns[c.id] !== c) return
         tick.value++
         if (c.state != "up") live.remove(c.id)
+        if (c.state == "down") Inbox.down(c)
         if (c.state != "up") main.postDelayed({ tick.value++ }, LEEWAY_MS + 100) // (said plainly once it's been gone
                                                                                  // that long)
         PhoneBrowser.changed(c)
@@ -498,7 +499,12 @@ object Mesh {
     }?.id
 
     /** A request to a host, its reply on the main thread (an error one if it isn't connected). */
-    fun ask(hostId: String, msg: JSONObject, then: (JSONObject) -> Unit) {
+    fun ask(hostId: String, msg: JSONObject, answered: (JSONObject) -> Unit) {
+        val then = PhoneErrors.FAILS[msg.optString("op")]?.let { kind -> { r: JSONObject ->
+            if (r.optString("op") == Op.ERROR) PhoneErrors.note(kind, msg.optString("op"), r.optString("error"),
+                r.optString("code").ifEmpty { null }, msg.optString("op"), r.opt("code")?.takeIf { it != JSONObject.NULL })
+            answered(r)
+        } } ?: answered
         val c = conns[hostId]
         if (c == null) {
             then(Msg.Error(error = "the server isn't there").json())
@@ -581,6 +587,7 @@ object Mesh {
                     }
                     if (catchUp.remove(c.id) && before != null) missed(c, before, now)
                     asked(c, before, now)
+                    Inbox.listed(c) // (its asks of a person, once each link: then kept as inbox_changed says)
                     withdrawSeen(c.id, now)
                     listedAt[c.id] = android.os.SystemClock.elapsedRealtime()
                     open?.let {
@@ -606,6 +613,7 @@ object Mesh {
                     }
                 }
                 Op.TURN_ENDED -> ended(c, msg)
+                Op.INBOX_CHANGED -> Inbox.changed(c.id, Msg.InboxChanged.from(msg))
                 Op.LOGIN_STATE -> open?.let { // (the open chat's sign-in, as its host has it: its card, as on every head)
                     val said = Msg.LoginState.from(msg)
                     if (it.hostId == c.id && it.sid == said.session.orEmpty()) main.post { if (open === it) Logins.hostSaid(it, said.login) }

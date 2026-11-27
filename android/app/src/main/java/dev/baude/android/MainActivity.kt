@@ -65,13 +65,15 @@ class MainActivity : ComponentActivity() {
                     "kubernetes" -> KubeScreen(now[1], ::back)
                     "docker" -> DockerScreen(now[1], ::back)
                     "terminal" -> TerminalScreen(now[1], ::back)
+                    "inbox" -> InboxScreen(::back, open = { h, s -> go(listOf("chat", h, s)) }, ask = { h, id -> go(listOf("ask", h, id)) })
+                    "ask" -> androidx.compose.runtime.key(now[1], now[2]) { AskScreen(now[1], now[2], ::back) }
                     "fixes" -> FixesScreen(::back, feedback = { go(listOf("feedback") + now.drop(1) + "fixes") })
                     else -> Home(open = { h, s -> go(listOf("chat", h, s)) },
                         feedback = { go(listOf("feedback")) }, phone = { go(listOf("phone")) },
                         settings = { go(listOf("settings")) }, mesh = { go(listOf("mesh")) },
                         changelog = { go(listOf("changelog")) }, fixes = { go(listOf("fixes")) },
                         tool = { screen, host -> go(listOf(screen, host)) }, subscriptions = { go(listOf("subscriptions")) },
-                        note = { if (Shares.pending.value != null) ShareBanner(::back) })
+                        inbox = { go(listOf("inbox")) }, note = { if (Shares.pending.value != null) ShareBanner(::back) })
                 }
                 HostKeyAsk()
             }
@@ -132,6 +134,10 @@ class MainActivity : ComponentActivity() {
         }
         if (now[0] in OVER && now.size == 4) { // (another host's, opened over a chat: back to that chat)
             screen.value = listOf("chat", now[2], now[3])
+            return
+        }
+        if (now[0] == "ask") { // (an ask opened from the Inbox: back to it)
+            screen.value = listOf("inbox")
             return
         }
         if (now[0] == "chat") Mesh.close()

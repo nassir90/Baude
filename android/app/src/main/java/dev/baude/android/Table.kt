@@ -40,6 +40,8 @@ fun MarkdownTable(rows: List<List<String>>, color: Color, under: Color) {
     val density = LocalDensity.current
     val bold = Type.body.copy(fontWeight = FontWeight.Bold)
     val cells = rows.mapIndexed { r, row -> List(columns) { col -> rememberInline(row.getOrElse(col) { "" }) } }
+    val pics = LocalMarkdownPictures.current // (a cell that's only a picture: the picture, where an ask's body has them)
+    val shown = rows.map { row -> List(columns) { col -> pics?.let { imageOnly(row.getOrElse(col) { "" }) } } }
     BoxWithConstraints(Modifier.padding(vertical = 2.dp)) {
         val available = maxWidth
         fun natural(text: AnnotatedString, head: Boolean): Dp {
@@ -49,7 +51,8 @@ fun MarkdownTable(rows: List<List<String>>, color: Color, under: Color) {
             }.also { widthCache.put(key, it) }
         }
         val long = (0 until columns).filter { col -> rows.any { it.getOrElse(col) { "" }.length > Tokens.Markdown.tableWrapChars } }
-        val widths = (0 until columns).map { col -> cells.indices.maxOf { r -> natural(cells[r][col], r == 0) } }
+        val widths = (0 until columns).map { col -> cells.indices.maxOf { r ->
+            shown[r][col]?.let { pics!!.cellWidth(it.second) } ?: natural(cells[r][col], r == 0) } }
         val least = with(density) { measure.measure("0".repeat(12), Type.body).size.width.toDp() }
         val shortSum = (0 until columns).filter { it !in long }.sumOf { widths[it].value.toDouble() }.dp
         val share = if (long.isEmpty()) 0.dp else (available - 4.dp - shortSum) / long.size - 26.dp
@@ -65,7 +68,10 @@ fun MarkdownTable(rows: List<List<String>>, color: Color, under: Color) {
                         Row(Modifier.background(if (head) c.raised.compositeOver(under) else Color.Transparent)) {
                             row.forEachIndexed { col, text ->
                                 val w = if (col in long) maxOf(least, minOf(share, widths[col])) else widths[col]
-                                Text(text, style = if (head) bold else Type.body, color = color, inlineContent = RefIcons.inline,
+                                val pic = shown[r][col]
+                                if (pic != null) Box(Modifier.width(w + 24.dp).padding(horizontal = 12.dp, vertical = 4.dp)) {
+                                    pics!!.Cell(pic.first, pic.second)
+                                } else Text(text, style = if (head) bold else Type.body, color = color, inlineContent = RefIcons.inline,
                                     modifier = Modifier.width(w + 24.dp).padding(horizontal = 12.dp, vertical = if (head) 5.dp else 4.dp))
                             }
                         }

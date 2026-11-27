@@ -1,11 +1,13 @@
 """telemetry — a host's: what the apps on its machine saw done in chats (the telemetry op's events, each kept as it's
 told, at its own time), samples of its machine every SAMPLE_S (load, memory, swap, memory pressure, and the CPU and memory of
 its own process and of each app's on it: Baude's, Record's, Emission's, Multiplex's), and line profiles (lineprofile:
-its own, and those its apps send), while it's on; all read back over a stretch by telemetry_read, from any member of the
+its own, and those its apps send), and the errors of every process on its machine (errorbook's: its own, and those its
+apps tell it), each row with the commit and wire version of the code that made it, while it's on; all read back over a stretch by telemetry_read, from any member of the
 mesh, and switched by telemetry_set (Settings → Telemetry, any head). Line profiling is switched on and off there too;
 what each process profiles is lineprofile.DEFAULTS unless telemetry_set names others for it (python3 -m
 baudelib.telemetry profile, from any member of the mesh). Kept in the host's state folder only,
-telemetry/<events|metrics|profiles>/YYYY-MM-DD.jsonl (the day of each line's time, this machine's), and
+telemetry/<events|metrics|profiles>/YYYY-MM-DD.jsonl (the day of each line's time, this machine's),
+telemetry/errors.json (each error once, by its process and fingerprint), and
 telemetry/state.json (on, line profiling on, and what's named in place of a process's defaults). Nothing here sends it
 anywhere else.
 
@@ -21,11 +23,14 @@ import sys
 import threading
 import time
 
-from baudelib import deps, lineprofile, wire
+from baudelib import deps, errorbook, lineprofile, wire
 
 SAMPLE_S = 5  # (how often the machine is sampled while it's on)
 PROFILE_S = 30  # (how often what's profiled is saved)
-KEEP_DAYS = {"events": 400, "metrics": 7, "profiles": 30}  # (events back a year: the tokens' grid)
+KEEP_DAYS = {"events": 400, "metrics": 7, "profiles": 30, "errors": 90}  # (events back a year: the tokens' grid;
+# an error since it last happened)
+ERRORS_FLUSH_S = 1  # (errors written this long after one comes, those meanwhile with it)
+ERRORS_KEPT = 1000  # (errors kept: the latest by when they last happened)
 LIMIT = 5000  # (telemetry_read's most of each, the latest kept)
 EVENTS_MAX = 1000  # (one telling's)
 APPS = tuple(wire.DEFS["Telemetry"]["properties"]["app"]["enum"])
@@ -36,7 +41,16 @@ WHAT = tuple(wire.DEFS["TelemetryRead"]["properties"]["what"]["items"]["enum"])
 TEXT_MAX = 200
 _EVENT_TEXT = ("host", "session", "turn", "model", "effort")
 _EVENT_NUM = ("seconds",)
-_EVENT_INT = ("tokens_in", "tokens_out")
+TOKENS = ("tokens_input", "tokens_cache_write", "tokens_cache_read", "tokens_out")  # (a turn's, each kind apart)
+_EVENT_INT = (*TOKENS, "tokens_in")
+_KINDS = {"tokens_input": "input", "tokens_cache_write": "cache_write", "tokens_cache_read": "cache_read",
+          "tokens_out": "output", "tokens_in": "input_with_cache"}  # (an event's tokens: usage's names for them)
+ERROR_APPS = tuple(wire.DEFS["TelemetryError"]["properties"]["app"]["enum"])
+_ERROR_TEXT = ("file", "function", "commit", "first_commit", "screen", "part", "wire_op")
+_ERROR_LATEST = ("message", "file", "line", "function", "stack", "commit", "wire", "screen", "part", "wire_op", "code",
+                 "crumbs")  # (an error's, as it was the last time)
+CRUMB_ACTIONS = tuple(wire.DEFS["TelemetryCrumb"]["properties"]["action"]["enum"])
+CRUMBS_MAX = 8
 
 
 def folder(state_dir):
@@ -47,11 +61,35 @@ def _num(v):
     return isinstance(v, (int, float)) and not isinstance(v, bool)
 
 
-def event_of(e, app):
+def version(commit, wire_version):
+    """A row's version fields: the commit (its first 12 characters) and wire version of the code that made it."""
+    return {"commit": commit[:12] if isinstance(commit, str) and commit else None,
+            "wire": wire_version if isinstance(wire_version, int) and not isinstance(wire_version, bool) else None}
+
+
+def tokens_of(msg):
+    """A turn's result's tokens, each kind apart (TOKENS): input not read from a cache, written to it, read from it,
+    and output. Claude Code's model_usage_since_last_result where it has it (every call since its previous result,
+    subagents' and compaction's too, each call on one result only), else its usage (the turn's main loop's calls);
+    the agents Baude runs in its place (Codex, pi, Apple, the phone's) say a turn's in usage's shape."""
+    by_model = msg.get("model_usage_since_last_result")
+    if isinstance(by_model, dict):
+        parts = [m for m in by_model.values() if isinstance(m, dict)]
+        keys = ("inputTokens", "cacheCreationInputTokens", "cacheReadInputTokens", "outputTokens")
+    else:
+        parts = [msg["usage"]] if isinstance(msg.get("usage"), dict) else []
+        keys = ("input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens", "output_tokens")
+    out = {}
+    for name, key in zip(TOKENS, keys):
+        out[name] = sum(max(0, int(p[key])) for p in parts if _num(p.get(key)))
+    return out
+
+
+def event_of(e, app, ver=None):
     """A told event as it's kept (what isn't as the wire has it left out), or None."""
     if not isinstance(e, dict) or e.get("kind") not in KINDS or not _num(e.get("at")):
         return None
-    out = {"at": round(float(e["at"]), 3), "app": app, "kind": e["kind"]}
+    out = {"at": round(float(e["at"]), 3), "app": app, "kind": e["kind"], **(ver or {})}
     for k in _EVENT_TEXT:
         if isinstance(e.get(k), str) and e[k]:
             out[k] = e[k][:TEXT_MAX]
@@ -66,7 +104,7 @@ def event_of(e, app):
     return out
 
 
-def profile_of(p, app):
+def profile_of(p, app, ver=None):
     """A told profile as it's kept, or None."""
     if not isinstance(p, dict) or not _num(p.get("at")) or not _num(p.get("from")) or not isinstance(p.get("lines"), list):
         return None
@@ -76,7 +114,41 @@ def profile_of(p, app):
              for x in p["lines"][:lineprofile.LINES_MAX] if isinstance(x, dict) and isinstance(x.get("file"), str)
              and isinstance(x.get("line"), int) and isinstance(x.get("function"), str)
              and isinstance(x.get("hits"), int) and _num(x.get("seconds"))]
-    return {"at": float(p["at"]), "from": float(p["from"]), "app": app, "lines": lines} if lines else None
+    return {"at": float(p["at"]), "from": float(p["from"]), "app": app, "lines": lines, **(ver or {})} if lines else None
+
+
+def _text(v, n=TEXT_MAX):
+    return v[:n] if isinstance(v, str) and v else None
+
+
+def crumb_of(c):
+    if not isinstance(c, dict) or not _num(c.get("at")) or c.get("action") not in CRUMB_ACTIONS:
+        return None
+    return {"at": round(float(c["at"]), 3), "action": c["action"],
+            **{k: _text(c.get(k)) for k in ("screen", "part", "widget")}}
+
+
+def error_of(e, app, ver=None):
+    """A told error as it's kept (what isn't as the wire has it left out), or None. ver: its telling's version,
+    for one that doesn't say its own."""
+    if not isinstance(e, dict) or e.get("kind") not in errorbook.KINDS or not all(
+            isinstance(e.get(k), str) and e[k] for k in ("fingerprint", "type")) or not _num(e.get("first")) \
+            or not _num(e.get("last")) or not isinstance(e.get("count"), int) or e["count"] < 1:
+        return None
+    app = e["app"] if e.get("app") in ERROR_APPS and app == "host" else app
+    out = {"app": app, "kind": e["kind"], "fingerprint": e["fingerprint"][:TEXT_MAX], "type": e["type"][:TEXT_MAX],
+           "message": _text(e.get("message"), errorbook.TEXT_MAX) or "", "count": e["count"],
+           "first": round(float(e["first"]), 3), "last": round(float(e["last"]), 3),
+           **{k: _text(e.get(k)) for k in _ERROR_TEXT},
+           "line": e["line"] if isinstance(e.get("line"), int) and not isinstance(e["line"], bool) else None,
+           "wire": e["wire"] if isinstance(e.get("wire"), int) and not isinstance(e["wire"], bool) else None,
+           "code": e["code"] if isinstance(e.get("code"), (str, int)) and not isinstance(e["code"], bool) else None,
+           "stack": [x[:TEXT_MAX] for x in e.get("stack") or [] if isinstance(x, str)][-errorbook.STACK_MAX:],
+           "crumbs": [c for c in (crumb_of(x) for x in (e.get("crumbs") or [])[-CRUMBS_MAX:]) if c]}
+    if ver and out["commit"] is None and out["wire"] is None:
+        out.update(ver)
+    out["first_commit"] = out["first_commit"] or out["commit"]
+    return out
 
 
 # ---- the machine, sampled
@@ -243,8 +315,9 @@ class Telemetry:
     telemetry, which its machine's apps follow); found() is {pid: app} of the processes on its machine that tell it
     nothing but are sampled too (Emission's, Multiplex's), asked each sample."""
 
-    def __init__(self, state_dir, host_id, changed=lambda: None, log=lambda _line: None, found=dict):
+    def __init__(self, state_dir, host_id, changed=lambda: None, log=lambda _line: None, found=dict, commit=None):
         self.dir, self.host_id, self.changed, self.log, self.found = folder(state_dir), host_id, changed, log, found
+        self.ver = version(commit, wire.VERSION)  # (on each row the host makes itself)
         self.lock, self.wake = threading.Lock(), threading.Event()
         self.pids = {os.getpid(): "host"}  # (the processes sampled: the host's, and each app's that's told it)
         self.fronts = {}  # (an app's process: the chat in front in it, (host, session), as its last chat_front said)
@@ -264,9 +337,14 @@ class Telemetry:
         self.named = {a: [f for f in named[a] if isinstance(f, str)] for a in PROFILED
                       if isinstance(named.get(a), list)}  # (what's named in place of a process's defaults)
         self.thread = None
+        self.errors_lock, self.errs, self.errors_due = threading.Lock(), None, None  # (errors.json's, as read;
+        # its write waited for)
+        self.book = errorbook.BOOK.claim("host", self._book_woke)  # (this process's own errors: the host's, unless
+        # an app in it took them first)
 
     def start(self):
         """Sampling (and the host's own profiling) started, if it's on."""
+        errorbook.install()
         self._profile_host()
         self._run()
 
@@ -290,6 +368,7 @@ class Telemetry:
         self.wake.set()
         if (last := self.profiler.set([])) is not None:
             self._write("profiles", [last])
+        self._flush_errors()
 
     # ---- its state
     def state(self):
@@ -346,12 +425,17 @@ class Telemetry:
                 self.changed()
         if not self.on:
             return
-        events = [e for e in (event_of(x, app) for x in (msg.get("events") or [])[:EVENTS_MAX]) if e]
+        ver = version(msg.get("commit"), msg.get("wire"))
+        if msg.get("errors"):
+            self.keep_errors(msg["errors"], app, ver)
+        if app not in PROFILED and app not in ("phone",):  # (Emission's: its errors only)
+            return
+        events = [e for e in (event_of(x, app, ver) for x in (msg.get("events") or [])[:EVENTS_MAX]) if e]
         if events:
             self._write("events", events)
             if isinstance(msg.get("pid"), int) and self._front(msg["pid"], events):
                 self.changed()
-        if app in PROFILED and (p := profile_of(msg.get("profile"), app)) is not None:
+        if app in PROFILED and (p := profile_of(msg.get("profile"), app, ver)) is not None:
             self._write("profiles", [p])
 
     def turn(self, session_id, msg, model, effort, began):
@@ -359,15 +443,12 @@ class Telemetry:
         model, effort and tokens, whichever app (or none) sent it. What tokens are added up from (usage)."""
         if not self.on:
             return
-        u = msg.get("usage") if isinstance(msg.get("usage"), dict) else {}
         now = time.time()
         took = now - began if isinstance(began, (int, float)) and began else (
             msg["duration_ms"] / 1000 if _num(msg.get("duration_ms")) else None)
         e = event_of({"at": now, "kind": "turn_ended", "host": self.host_id, "session": session_id,
                       "seconds": took, "turn": msg.get("uuid"), "model": model, "effort": effort,
-                      "tokens_in": sum(int(u.get(k) or 0) for k in ("input_tokens", "cache_read_input_tokens",
-                                                                    "cache_creation_input_tokens")),
-                      "tokens_out": int(u.get("output_tokens") or 0)}, "host")
+                      **tokens_of(msg)}, "host", self.ver)
         if e is not None:
             self._write("events", [e])
 
@@ -387,7 +468,96 @@ class Telemetry:
         with self.lock:
             return [{"host": h, "session": s} for h, s in sorted(set(self.fronts.values()))]
 
+    # ---- errors
+    def note(self, err):
+        """An error of the host's own (errorbook.of_note's or of_exception's), kept as one happening now."""
+        if self.on:
+            now = time.time()
+            self.keep_errors([{**err, "count": 1, "first": now, "last": now}], "host", self.ver)
+
+    def _book_woke(self):
+        """This process's errorbook has one: taken soon, with those meanwhile."""
+        self._errors_soon()
+
+    def keep_errors(self, errors, app, ver):
+        """Errors told (an app's, or the host's own): each added to what's kept of it, by its process and
+        fingerprint; written soon."""
+        rows = [r for r in (error_of(e, app, ver) for e in errors[:errorbook.PENDING_MAX]) if r]
+        if not rows:
+            return
+        with self.errors_lock:
+            errs = self._errors()
+            for r in rows:
+                key = f"{r['app']}:{r['fingerprint']}"
+                got = errs.get(key)
+                if got is None:
+                    errs[key] = r
+                    continue
+                if r["last"] >= got["last"]:
+                    got.update({k: r[k] for k in _ERROR_LATEST})
+                got.update(count=got["count"] + r["count"], first=min(got["first"], r["first"]),
+                           last=max(got["last"], r["last"]))
+            self._cap_errors()
+        self._errors_soon()
+
+    def _cap_errors(self):
+        """(errors_lock held) Only the latest ERRORS_KEPT by when they last happened kept."""
+        if len(self.errs) > ERRORS_KEPT:
+            keep = sorted(self.errs.items(), key=lambda kv: -kv[1]["last"])[:ERRORS_KEPT]
+            self.errs = dict(keep)
+
+    def _errors(self):
+        """(errors_lock held) What's kept, read the first time."""
+        if self.errs is None:
+            try:
+                with open(os.path.join(self.dir, "errors.json"), encoding="utf-8") as f:
+                    kept = json.load(f).get("errors")
+            except (OSError, ValueError, AttributeError):
+                kept = None
+            self.errs = {f"{e['app']}:{e['fingerprint']}": e for e in kept or []
+                         if isinstance(e, dict) and isinstance(e.get("fingerprint"), str) and e.get("app")}
+        return self.errs
+
+    def _errors_soon(self):
+        with self.errors_lock:
+            if self.errors_due is None:
+                self.errors_due = threading.Timer(ERRORS_FLUSH_S, self._flush_errors)
+                self.errors_due.daemon = True
+                self.errors_due.start()
+
+    def _flush_errors(self):
+        """This process's errors taken (the host's), and what's kept written, those not seen in KEEP_DAYS gone."""
+        if self.book and (own := errorbook.BOOK.take()) and self.on:
+            self.keep_errors(own, "host", self.ver)
+        with self.errors_lock:
+            if self.errors_due is not None:
+                self.errors_due.cancel()
+            self.errors_due = None
+            if self.errs is None:
+                return
+            old = time.time() - KEEP_DAYS["errors"] * 86400
+            self.errs = {k: e for k, e in self.errs.items() if e["last"] >= old}
+            self._cap_errors()
+            try:
+                os.makedirs(self.dir, mode=0o700, exist_ok=True)
+                tmp = os.path.join(self.dir, "errors.json.tmp")
+                with open(tmp, "w", encoding="utf-8") as f:
+                    json.dump({"errors": list(self.errs.values())}, f, separators=(",", ":"))
+                os.replace(tmp, os.path.join(self.dir, "errors.json"))
+            except OSError as e:
+                self.log(f"telemetry: errors not written: {e}")
+
+    def error_rows(self, start, end, limit=LIMIT):
+        """The errors that happened from start to end, the last to happen first, the latest limit of them."""
+        with self.errors_lock:
+            rows = [dict(e) for e in self._errors().values() if e["last"] >= start and e["first"] <= end]
+        rows.sort(key=lambda e: -e["last"])
+        return rows[:limit] if limit else rows
+
     def _write(self, kind, rows):
+        for r in rows:
+            if "wire" not in r:  # (the host's own: its code's)
+                r.update(self.ver)
         by_day = {}
         for r in rows:
             by_day.setdefault(datetime.date.fromtimestamp(r["at"]), []).append(r)
@@ -511,6 +681,8 @@ class Telemetry:
                 out[kind] = self.rows(kind, start, end, limit)
         if "usage" in what:
             out["usage"] = usage(self.rows("events", start, end, 0))
+        if "errors" in what:
+            out["errors"] = self.error_rows(start, end, limit)
         return out
 
 
@@ -537,9 +709,19 @@ def tail_since(path, start, block=1 << 16):
 
 def usage(events):
     """The hosts' own turn_ended events added up (TelemetryUsage): tokens by day, by model, by model and effort, each
-    turn once (by its host, session and result's id). An app's turn_ended is the same turn seen there: not counted
-    again."""
+    turn once (by its host, session and result's id), each kind of token apart (input, cache writes, cache reads,
+    output; an event kept before they were told apart, its tokens_in as input_with_cache), tokens all of them. An
+    app's turn_ended is the same turn seen there: not counted again."""
     seen, days, models, combos = set(), {}, {}, {}
+
+    def add(table, k, e):
+        t = table.setdefault(k, {"turns": 0, "tokens": 0, **{v: 0 for v in _KINDS.values()}})
+        t["turns"] += 1
+        for field, name in _KINDS.items():
+            n = e.get(field)
+            if isinstance(n, int) and not isinstance(n, bool) and n > 0:
+                t[name] += n
+                t["tokens"] += n
     for e in events:
         if e.get("kind") != "turn_ended" or e.get("app") != "host":
             continue
@@ -547,20 +729,16 @@ def usage(events):
         if key in seen:
             continue
         seen.add(key)
-        tokens = (e.get("tokens_in") or 0) + (e.get("tokens_out") or 0)
-        day = datetime.date.fromtimestamp(e["at"]).isoformat()
-        d = days.setdefault(day, [0, 0])
-        d[0], d[1] = d[0] + tokens, d[1] + 1
+        add(days, datetime.date.fromtimestamp(e["at"]).isoformat(), e)
         if e.get("model"):
-            for table, k in ((models, (e["model"], None)), (combos, (e["model"], e.get("effort")))):
-                m = table.setdefault(k, [0, 0])
-                m[0], m[1] = m[0] + 1, m[1] + tokens
+            add(models, (e["model"], None), e)
+            add(combos, (e["model"], e.get("effort")), e)
 
     def ranked(table):
-        return [{"model": m, "effort": eff, "turns": t, "tokens": tok}
-                for (m, eff), (t, tok) in sorted(table.items(), key=lambda kv: (-kv[1][0], -kv[1][1], str(kv[0])))]
-    return {"days": [{"day": d, "tokens": t, "turns": n} for d, (t, n) in sorted(days.items())],
-            "models": ranked(models), "combos": ranked(combos)}
+        return [{"model": m, "effort": eff, **t}
+                for (m, eff), t in sorted(table.items(), key=lambda kv: (-kv[1]["turns"], -kv[1]["tokens"], str(kv[0])))]
+    return {"days": [{"day": d, **t} for d, t in sorted(days.items())], "models": ranked(models),
+            "combos": ranked(combos)}
 
 
 def chat_size(path):
@@ -639,16 +817,20 @@ def ask_every(ask, timeout=20, host=None):
         return {hid: replies.get(hid) or {"error": "no answer"} for _, hid in wheres}
 
 
-def gather(start, end=None, what=("events", "metrics", "profiles", "usage"), timeout=20):
+def gather(start, end=None, what=("events", "metrics", "profiles", "usage", "errors"), timeout=20):
     """Every host's telemetry in the mesh (ask_every's), pulled by telemetry_read from here and put together:
-    {"hosts": {id: reply or {"error"}}, "events": [...], "metrics": [...], "profiles": [...], "usage": ...}, each row
-    with its host's id, the earliest first; usage added up over every host's events, each turn once."""
+    {"hosts": {id: reply or {"error"}}, "events": [...], "metrics": [...], "profiles": [...], "usage": ...,
+    "errors": [...]}, each row with its host's id, the earliest first (errors the latest first); usage added up over
+    every host's events, each turn once."""
     hosts = ask_every({"op": "telemetry_read", "from": start, "to": end, "what": [w for w in what if w != "usage"]
                        + (["events"] if "usage" in what and "events" not in what else [])}, timeout)
     out = {"hosts": hosts}
     for kind in ("events", "metrics", "profiles"):
         out[kind] = sorted(({**r, "from_host": hid} for hid, rep in hosts.items() for r in rep.get(kind) or []),
                            key=lambda r: r["at"])
+    if "errors" in what:
+        out["errors"] = sorted(({**r, "from_host": hid} for hid, rep in hosts.items() for r in rep.get("errors") or []),
+                               key=lambda r: -r["last"])
     if "usage" in what:
         out["usage"] = usage(out["events"])
     if "events" not in what:
@@ -657,11 +839,15 @@ def gather(start, end=None, what=("events", "metrics", "profiles", "usage"), tim
 
 
 def main(argv):
-    """python3 -m baudelib.telemetry [hours]: every host's last hours, as JSON. python3 -m baudelib.telemetry profile
+    """python3 -m baudelib.telemetry [hours]: every host's last hours, as JSON. python3 -m baudelib.telemetry errors
+    [hours]: every host's errors in its last hours (default a week), the latest first. python3 -m baudelib.telemetry profile
     [--host ID] [--on | --off] [APP [NAME ...] | APP --default]: line profiling switched, or what APP's process
     profiles named (NAME: a function or module's dotted name; none: nothing) or its defaults again, on every host in
     the mesh (or ID's only); each host's telemetry state after it, as JSON."""
     import argparse
+    if argv[:1] == ["errors"]:
+        hours = float(argv[1]) if len(argv) > 1 else 24 * 7
+        return json.dump(gather(time.time() - hours * 3600, what=("errors",))["errors"], sys.stdout, indent=1)
     if argv[:1] != ["profile"]:
         hours = float(argv[0]) if argv else 1
         return json.dump(gather(time.time() - hours * 3600), sys.stdout, indent=1)

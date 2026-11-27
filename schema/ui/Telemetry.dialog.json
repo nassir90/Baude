@@ -1,5 +1,5 @@
 {
-  "description": "The Settings dialog's Telemetry page (Baude's, Record's and the phone's; on the phone the fourth page of Settings, switched to by the bar at its foot): for the host picked beside New session, whether it collects telemetry, then what it keeps, as it answers telemetry_read: its turns' tokens by day over a year, the most used model and effort and each model's turns, its machine now, its processes now, and line profiling of its processes (a switch, and their top lines).",
+  "description": "The Settings dialog's Telemetry page (Baude's, Record's and the phone's; on the phone the fourth page of Settings, switched to by the bar at its foot): for the host picked beside New session, whether it collects telemetry, then what it keeps, as it answers telemetry_read: its turns' tokens by day over a year, the most used model and effort and each model's turns, its machine now, its processes now, the errors its machine's processes had, and line profiling of its processes (a switch, and their top lines).",
   "apps": [
     "baude",
     "record",
@@ -27,7 +27,22 @@
     "baudelib/server.py:Server.found_procs",
     "baudelib/emissionlink.py:running",
     "Telemetry.kt:ProcessRow",
-    "Telemetry.kt:AppLogo"
+    "Telemetry.kt:AppLogo",
+    "telemetryview.py:model_expander",
+    "telemetryview.py:token_rows",
+    "baudelib/telemetry.py:tokens_of",
+    "baudelib/codex.py:turn_usage",
+    "Telemetry.kt:modelExpander",
+    "telemetryview.py:error_row",
+    "baudelib/errorbook.py:Book",
+    "uitrack.py:install",
+    "uitrack.py:part_of",
+    "uitrack.py:screen",
+    "baudelib/telemetry.py:Telemetry.keep_errors",
+    "baudelib/serverrun.py:ServerRunning.wire_errored",
+    "baudelib/client.py:Remote.request",
+    "PhoneErrors.kt:PhoneErrors",
+    "Telemetry.kt:errorExpander"
   ],
   "copy": [
     "telemetry",
@@ -39,7 +54,8 @@
     "mode_effort",
     "tokens",
     "deps",
-    "side_panel"
+    "side_panel",
+    "meta"
   ],
   "parts": [
     {
@@ -120,13 +136,23 @@
     },
     {
       "name": "Tokens by Day",
-      "shows": "Heading \"Tokens by Day\", then a boxed list: a grid of a year of days like GitHub's contributions (a square a day, a column a week, Sunday at the top, today's the last), each square as dark as its day's share of the busiest day's tokens in the accent colour, a day without turns faint; its tooltip (desktop) the day and its tokens. Under it a row \"Most Used\" with the model and effort with the most turns (\"Opus 4.7 · High effort\").",
+      "shows": "Heading \"Tokens by Day\", then a boxed list: a grid of a year of days like GitHub's contributions (a square a day, a column a week, Sunday at the top, today's the last), each square as dark as its day's share of the busiest day's tokens (every kind added up, cache reads among them, the one figure older turns and newer share) in the accent colour, a day without turns faint; its tooltip (desktop) the day and its tokens each kind apart (\"Thu 26 Nov 2026: 1.2k In · 40k Cache Writes · 3.1M Cache Reads · 12k Out\", an older day's \"600M In With Cache · 1.3M Out\"). Under it a row \"Most Used\" with the model and effort with the most turns (\"Opus 4.7 · High effort\"), then a row each kind of token over the year, its count after it, dim: Input (not read from a cache or written to one), Cache Writes, Cache Reads, Output, and, only where there are some, Input With Cache (Older Turns): the input of turns kept before the kinds were told apart, cache among it, shown as it was kept.",
       "copy": [
         "telemetry.tokens_by_day",
         "telemetry.day_tokens",
         "telemetry.most_used",
         "telemetry.model_effort",
-        "mode_effort.effort_high"
+        "mode_effort.effort_high",
+        "meta.input",
+        "telemetry.cache_write",
+        "telemetry.cache_read",
+        "meta.output",
+        "telemetry.input_with_cache",
+        "telemetry.day_input",
+        "telemetry.day_cache_write",
+        "telemetry.day_cache_read",
+        "telemetry.day_output",
+        "telemetry.day_input_with_cache"
       ],
       "decisions": [
         {
@@ -138,17 +164,33 @@
               "issue": "BaudeInternal#228"
             }
           ]
+        },
+        {
+          "said": "Telemetry's tokens are overstated: cache reads (and cache writes) are counted as input, so a day reads hundreds of millions of tokens in against a million out (paraphrased)",
+          "rule": "Every host keeps each turn's tokens each kind apart (input not read from a cache or written to one, cache writes, cache reads, output), each turn once, from what its agent says of that turn alone (Claude Code's tokens since its previous result, a Codex thread's totals' difference over the turn, pi's and the phone's own turn's), and every app shows them apart; turns kept before then show their input as kept, marked as having cache in it, never added to Input",
+          "decided": "2026-11-27",
+          "source": [
+            {
+              "session": "221e1c29-56d7-48bf-a2dc-7a2b37ccd685",
+              "message": "30cf308b-147c-4860-a1c0-9ac81ad796f4"
+            }
+          ]
         }
       ]
     },
     {
       "name": "Models",
-      "shows": "Heading \"Models\", a row each model that ran a turn in the year, the most turns first: its name (as every app names it; its slug on hover, a long-press on the phone), and \"600 Turns · 280.8M\" after it (\"1 Turn\" for one), dim.",
+      "shows": "Heading \"Models\", a row each model that ran a turn in the year, the most turns first: its name (as every app names it; its slug on hover, a long-press on the phone), and \"600 Turns\" after it (\"1 Turn\" for one), dim, and an arrow; opened (a click, a tap), a row each kind of token of its turns as under Tokens by Day: Input, Cache Writes, Cache Reads, Output, and Input With Cache (Older Turns) where it has some.",
       "copy": [
         "telemetry.models",
-        "telemetry.turns_tokens",
         "tokens.millions",
-        "tokens.thousands"
+        "tokens.thousands",
+        "telemetry.turns",
+        "meta.input",
+        "telemetry.cache_write",
+        "telemetry.cache_read",
+        "meta.output",
+        "telemetry.input_with_cache"
       ],
       "decisions": [
         {
@@ -160,6 +202,23 @@
               "issue": "BaudeInternal#235"
             }
           ]
+        },
+        {
+          "said": "Usage by model is overstated the same way: cache reads counted as input (paraphrased)",
+          "rule": "Every app shows each model's tokens each kind apart, opened from its row, as Tokens by Day shows the year's",
+          "decided": "2026-11-27",
+          "source": [
+            {
+              "session": "221e1c29-56d7-48bf-a2dc-7a2b37ccd685",
+              "message": "30cf308b-147c-4860-a1c0-9ac81ad796f4"
+            }
+          ]
+        }
+      ],
+      "actions": [
+        {
+          "by": "click (a model's row; a tap on the phone)",
+          "does": "Opens or closes its tokens, a row each kind"
         }
       ]
     },
@@ -265,6 +324,54 @@
       ]
     },
     {
+      "name": "Errors",
+      "shows": "Heading \"Errors\": the errors the processes on the host's machine had in the last 7 days (the host process, Baude, Record, the phone's app, Emission), the last to happen first, at most 20, read again every 30 seconds while the page is shown. Each an expander row: its process's app's logo, \"Type: message\" on one line, and how long ago it last happened and how many times (\"4m ago  3 Times\", \"Once\") after it, dim. Opened, a row each of what's known of it: Raised In (file:line and function, monospace), Answering (the wire op and its code: an error answered, a message not sent, a draft not saved), Exit Code (an agent's), On Screen (the schema/ui entity and part, \"Composer.region · send button\"), the user's last actions before it (on the phone from its shared rows and buttons, named by the same schema/ui parts), the latest first (Clicked, Picked From a Menu, Opened, each with its entity and part and how long ago), Code Version (commit · Wire 43) and First Happened (for one that happened more than once). With none, one dim row \"No Errors\".",
+      "copy": [
+        "telemetry.errors",
+        "telemetry.no_errors",
+        "telemetry.error_times",
+        "telemetry.error_where",
+        "telemetry.error_op",
+        "telemetry.error_code",
+        "telemetry.error_screen",
+        "telemetry.action_click",
+        "telemetry.action_menu",
+        "telemetry.action_open",
+        "telemetry.error_version",
+        "telemetry.version_of",
+        "telemetry.error_first",
+        "time.minutes_ago"
+      ],
+      "decisions": [
+        {
+          "said": "Record the errors that happen during program execution.",
+          "rule": "Every host keeps each error of every process on its machine once, by its fingerprint (its kind, its type and the file and function of the frame of Baude's own code it was raised in (not its line), or for one without a stack its op and code or its message's shape), with how many times it happened, when first and last, the commit and wire version it ran, the schema/ui screen and part it happened on and the user's last 8 actions before it; caught where they happen: an exception nothing caught on any thread or in a main-loop callback, GLib's and GTK's criticals and warnings, an error answered on the wire (with its op and code), an agent exiting by itself with a code other than 0, a message not sent or a draft not saved, a page Emission couldn't load, the phone's app crashing (kept as it starts again); every app shows them under Errors, and telemetry_read gives them to any member of the mesh",
+          "decided": "2026-11-27",
+          "source": [
+            {
+              "session": "221e1c29-56d7-48bf-a2dc-7a2b37ccd685",
+              "message": "30cf308b-147c-4860-a1c0-9ac81ad796f4"
+            },
+            {
+              "session": "221e1c29-56d7-48bf-a2dc-7a2b37ccd685",
+              "message": "4d4c11e9-63d0-4c6d-ba40-6c8dc5ead7c9"
+            }
+          ]
+        },
+        {
+          "said": "Yep, unifying schema/ui and telemetry is a pretty good idea as it points to homogenous UI ontology",
+          "rule": "An error's screen, part and breadcrumbs are named by schema/ui's entity and part names (\"Composer.region\", \"send button\"), never by a widget's own text; where a widget isn't a part of its entity, its copy key, icon or kind is said instead",
+          "decided": "2026-11-27",
+          "source": [
+            {
+              "session": "221e1c29-56d7-48bf-a2dc-7a2b37ccd685",
+              "message": "4d4c11e9-63d0-4c6d-ba40-6c8dc5ead7c9"
+            }
+          ]
+        }
+      ]
+    },
+    {
       "name": "Line Profiling",
       "shows": "A boxed list: a switch row \"Line Profiling\" (on while that host's processes profile; off unless switched on; off and greyed out while telemetry is off), then, for a process that can't profile one of its functions (a name not found), its error in one dim row with its app's logo. Then \"Top Lines\": the 10 lines that took longest in the last hour across the host process, Baude and Record (read again every 30 seconds while it profiles, as its profiles are taken), each with its process's app's logo, the file's name and line number and the line's code in monospace, and \"120 Hits · 0.912s\" after it (the phone: its time alone). What each process profiles is Baude's developers' pick, shipped with the code (lineprofile.DEFAULTS), unless telemetry_set from any member of the mesh names others for it on that host (python3 -m baudelib.telemetry profile); nothing on the page names or edits them. Without line_profiler on that host: one row, line_profiler and the command that installs it with Copy, as Dependencies has it (pip of the host's own Python, --user, and --break-system-packages only where that Python is externally managed). Not on the phone's own host (no Python there).",
       "copy": [
@@ -307,7 +414,11 @@
           "said": "Editing a Telemetry text field near the foot of Settings scrolls the page up to its start (paraphrased)",
           "rule": "Every app keeps every text row on a Settings page where it is while the page refreshes or the host answers: the row isn't taken out and put back, so it keeps its focus, its caret and what's typed, and the page stays where it's scrolled to",
           "decided": "2026-11-27",
-          "source": [{"issue": "BaudeInternal#286"}]
+          "source": [
+            {
+              "issue": "BaudeInternal#286"
+            }
+          ]
         }
       ]
     }
@@ -316,7 +427,8 @@
     "off: Collect Telemetry off, \"Telemetry is off\" in the machine's place",
     "empty: no turns in the year: the grid all faint, no Most Used or Models",
     "error: the host's error in one dim row",
-    "no line_profiler: its install row in Line Profiling's place"
+    "no line_profiler: its install row in Line Profiling's place",
+    "no errors: one dim row \"No Errors\" under Errors"
   ],
   "removed": [
     {
@@ -371,6 +483,7 @@
     "39g-telemetry-foot",
     "39h-telemetry-no-profiler",
     "40d-telemetry",
-    "40e-telemetry-foot"
+    "40e-telemetry-foot",
+    "40d2-telemetry-models"
   ]
 }

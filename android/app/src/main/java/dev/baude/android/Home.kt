@@ -359,13 +359,14 @@ fun sections(query: String): List<Section> {
     return out
 }
 
-/** The home screen: Baude's whole sidebar. New session (on the host picked beside it), search, the sessions of every
+/** The home screen: Baude's whole sidebar. New session (on the host picked beside it), search, the Inbox, the sessions of every
  * host (or one) grouped as Baude groups them: Bots first, each folder, archived folded; ⋮ to group by day and pick
  * groups. */
 @Composable
 fun Home(open: (String, String) -> Unit, feedback: () -> Unit, phone: () -> Unit = {},
          settings: () -> Unit = {}, mesh: () -> Unit = {}, changelog: () -> Unit = {}, fixes: () -> Unit = {},
-         tool: (String, String) -> Unit = { _, _ -> }, subscriptions: () -> Unit = {}, note: @Composable () -> Unit = {}) {
+         tool: (String, String) -> Unit = { _, _ -> }, subscriptions: () -> Unit = {}, inbox: () -> Unit = {},
+         note: @Composable () -> Unit = {}) {
     val c = LocalBaude.current
     val ctx = androidx.compose.ui.platform.LocalContext.current
     LaunchedEffect(Unit) { HomePrefs.load(ctx) }
@@ -417,6 +418,7 @@ fun Home(open: (String, String) -> Unit, feedback: () -> Unit, phone: () -> Unit
                 SearchField(query, { query = it }, Wording.Sidebar.search, Modifier.weight(1f))
                 ViewMenu(snack)
             }
+            InboxRow(inbox) // (right under the search: what's waiting on you, Inbox.kt)
         }
         val said = hostState(picked())
         val away = picked()?.let { !off(it) && Mesh.reach(it) == "away" } == true && said != null
@@ -810,7 +812,7 @@ private fun Modifier.pressed(at: (Offset) -> Unit, onClick: () -> Unit, onLong: 
 /** A chat's row (Baude's session_row): its title on one line, nested under its parent with its parents' lines
  * (underBot: the top one comes down from a Bot's picture), its status dot; a long-press: its menu. A host that's gone or deactivated: its title dim, and a crossed-out cloud if it's gone. */
 @Composable
-private fun SessionRow(item: Item, through: Set<Int>, underBot: Boolean, onClick: () -> Unit) {
+internal fun SessionRow(item: Item, through: Set<Int>, underBot: Boolean, tag: String? = null, onClick: () -> Unit) {
     val c = LocalBaude.current
     val s = item.s
     val off = off(item.hostId)
@@ -830,6 +832,7 @@ private fun SessionRow(item: Item, through: Set<Int>, underBot: Boolean, onClick
                 maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
             if (dead) Icon(Adwaita.NoConnection, Wording.Sidebar.noConnection, tint = c.dim, modifier = Modifier.size(16.dp.icon))
             else HeldTag(s)
+            tag?.let { RowTag(it) }
             StatusDot(if (dead || off) "" else Mesh.dot(s), !dead && !off && (!s.asks.isNullOrEmpty() || s.state == "waiting"))
             MarkNote(mark)
         }
@@ -843,7 +846,7 @@ private val BOT_START = 4.dp
 /** A Bot's row (Baude's bot_row): its picture, its name (nothing else of its chat's), its status dot; a long-press: its
  * menu. kids: the line to the chats under it starts under its picture. */
 @Composable
-private fun BotRow(item: Item, kids: Boolean, onClick: () -> Unit) {
+internal fun BotRow(item: Item, kids: Boolean, tag: String? = null, onClick: () -> Unit) {
     val c = LocalBaude.current
     val contact = Contact(item.hostId, item.s)
     var menu by remember { mutableStateOf(false) }
@@ -863,6 +866,7 @@ private fun BotRow(item: Item, kids: Boolean, onClick: () -> Unit) {
             Text(markedName(contact.name, mark?.how, mark != null), style = Type.bold, color = c.fg, maxLines = 1,
                 overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
             HeldTag(item.s)
+            tag?.let { RowTag(it) }
             StatusDot(Mesh.dot(item.s), contact.asking)
             MarkNote(mark)
         }

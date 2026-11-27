@@ -1,0 +1,37 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "A waiting ask taken back by its task's script (run, token): out of every Inbox.",
+  "properties": {
+    "op": {
+      "const": "inbox_withdraw",
+      "description": "What it is."
+    },
+    "req": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "ask": {
+      "type": "string",
+      "description": "The ask's id."
+    },
+    "run": {
+      "type": "string",
+      "description": "The asking run's id (BAUDE_TASK_RUN): a task's script's."
+    },
+    "token": {
+      "type": "string",
+      "description": "Its run's token (BAUDE_TASK_TOKEN)."
+    }
+  },
+  "required": [
+    "op",
+    "ask",
+    "run",
+    "token"
+  ],
+  "additionalProperties": false
+}

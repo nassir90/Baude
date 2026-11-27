@@ -1,0 +1,101 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "A task's ask of a person, kept by its host (state folder's inbox/) till it's answered or its task withdraws it: across the host's restarts, stopped (its run gone) then, struck through and its buttons off. Every head that may manage the asking Bot is told it as it changes (inbox_changed).",
+  "properties": {
+    "id": {
+      "type": "string",
+      "description": "The ask's id."
+    },
+    "session": {
+      "type": "string",
+      "description": "The asking task's Bot's session id."
+    },
+    "bot": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "That Bot's name."
+    },
+    "task": {
+      "type": "string",
+      "description": "The task's id."
+    },
+    "task_name": {
+      "type": "string",
+      "description": "The task's name."
+    },
+    "run": {
+      "type": "string",
+      "description": "The asking run's id."
+    },
+    "at": {
+      "type": "number",
+      "description": "When it was raised (seconds since the epoch)."
+    },
+    "status": {
+      "enum": [
+        "waiting",
+        "answered",
+        "withdrawn",
+        "stopped"
+      ],
+      "description": "waiting: for an answer; answered (answer: how); withdrawn: its task took it back; stopped: its run ended (or its host restarted) with it unanswered."
+    },
+    "versions": {
+      "type": "array",
+      "items": {
+        "$ref": "InboxVersion.json"
+      },
+      "description": "Every version of it, oldest first: the last is what's answered."
+    },
+    "proposal": {
+      "anyOf": [
+        {
+          "$ref": "InboxProposal.json"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "A model's answer waiting to be confirmed, if one was asked for."
+    },
+    "sent_to": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "The Bot it's been sent to answer (its session id), till it does."
+    },
+    "sent_to_name": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "That Bot's name."
+    },
+    "answer": {
+      "anyOf": [
+        {
+          "$ref": "InboxAnswer.json"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "How it was answered."
+    }
+  },
+  "required": [
+    "id",
+    "session",
+    "task",
+    "task_name",
+    "run",
+    "at",
+    "status",
+    "versions"
+  ],
+  "additionalProperties": false
+}

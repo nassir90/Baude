@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "A task's script's ask's answer (run, token), waited for: till it's answered (or withdrawn, or its run's stopped), or timeout seconds (0: as it is now, a poll).",
+  "properties": {
+    "op": {
+      "const": "inbox_wait",
+      "description": "What it is."
+    },
+    "req": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "ask": {
+      "type": "string",
+      "description": "The ask's id."
+    },
+    "run": {
+      "type": "string",
+      "description": "The asking run's id (BAUDE_TASK_RUN): a task's script's."
+    },
+    "token": {
+      "type": "string",
+      "description": "Its run's token (BAUDE_TASK_TOKEN)."
+    },
+    "timeout": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "description": "How long to wait, in seconds (0: not at all; none: till it's answered)."
+    }
+  },
+  "required": [
+    "op",
+    "ask",
+    "run",
+    "token"
+  ],
+  "additionalProperties": false
+}

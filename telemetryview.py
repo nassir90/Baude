@@ -11,9 +11,10 @@ import os
 import time
 import weakref
 
-from gi.repository import Adw, GLib, Gtk
+from gi.repository import Adw, GLib, Gtk, Pango
 
-from baudelib import lineprofile, providers, wording
+from baudelib import errorbook, lineprofile, providers, telemetry, wire, wording
+import uitrack
 import widgets
 
 PROFILE_S = 30  # (how often what's profiled here is told)
@@ -28,7 +29,10 @@ LOGO_PX = 16  # (as big as a model's logo)
 PROFILED = ("host", "baude", "record")
 WEEKS = 53  # (the tokens' grid: a year, a column a week)
 LINES_SHOWN = 10
-GROUPS = ("error", "tokens", "models", "machine", "processes", "profiling", "lines")  # (the page's, in this order)
+GROUPS = ("error", "tokens", "models", "machine", "processes", "errors", "profiling", "lines")  # (the page's, in
+# this order)
+ERRORS_SHOWN = 20  # (the latest to happen)
+ERRORS_DAYS = 7
 REFRESH_S = 5  # (the machine's rows asked for again while the page is shown)
 _RECORDER = []
 
@@ -81,6 +85,8 @@ class Recorder:
         self.sent_at = {}  # (a chat: when its turn was sent here)
         self.profiler, self.profile_timer, self.told_error = lineprofile.Profiler(name), None, None
         self.away_timer = None  # (looking at whether anyone's at the chat in front, while it's on)
+        self.errors_due, self.known = False, False  # (this process's errors to be told in a moment; whether its
+        # host's telemetry is known: errors before it held, not dropped)
         network.listen(self.heard)
         app.connect("shutdown", lambda *_: self.quit())
         self.heard()
@@ -107,17 +113,20 @@ class Recorder:
         if here is None:
             return
         self.host_id = here.info.get("id") or self.host_id
+        self.known = True
         t = here.info.get("telemetry") or {}
         on, pid = bool(t.get("on")), here.info.get("pid")
         if on != self.on:
             self.on = on
             if on:
                 self.hello()
+                self.errors_soon()
                 for win in list(self.windows):
                     self.look(win)
                 self.away_timer = GLib.timeout_add_seconds(AWAY_LOOK_S, self.look_away)
             else:
                 self.queue.clear()
+                errorbook.BOOK.take()
                 self.opened.clear()
                 self.front, self.sent_at = None, {}
                 if self.away_timer is not None:
@@ -201,15 +210,28 @@ class Recorder:
         r = getattr(win, "remote", None)
         model = model or ((r.sessions.get(chat[1]) or {}).get("model") if r is not None else None)  # (its default's,
         # as its host lists it)
-        u = msg.get("usage") if isinstance(msg.get("usage"), dict) else {}
         took = time.time() - sent if sent else (msg["duration_ms"] / 1000 if isinstance(
             msg.get("duration_ms"), (int, float)) else None)
         self.event("turn_ended", chat, seconds=round(took, 3) if took is not None else None,
                    turn=msg.get("uuid") if isinstance(msg.get("uuid"), str) else None,
                    model=model if isinstance(model, str) else None, effort=effort if isinstance(effort, str) else None,
-                   tokens_in=sum(int(u.get(k) or 0) for k in ("input_tokens", "cache_read_input_tokens",
-                                                              "cache_creation_input_tokens")),
-                   tokens_out=int(u.get("output_tokens") or 0))
+                   **telemetry.tokens_of(msg))
+
+    def errors_soon(self):
+        """(any thread) This process has an error: told in a moment, with any meanwhile."""
+        if not self.errors_due:
+            self.errors_due = True
+            GLib.timeout_add(1000, self.tell_errors)
+
+    def tell_errors(self):
+        self.errors_due = False
+        if not self.on:
+            if self.known:
+                errorbook.BOOK.take()
+        elif not self.sending:
+            self.sending = True
+            self.tell()
+        return False
 
     def event(self, kind, chat, **more):
         e = {"at": round(time.time(), 3), "kind": kind, "host": chat[0], "session": chat[1],
@@ -226,22 +248,25 @@ class Recorder:
 
     def tell(self):
         events, self.queue = self.queue, []
-        if not events:
+        errors = errorbook.BOOK.take()
+        if not events and not errors:
             self.sending = False
             return False
 
         def done(ok):
             if not ok:  # (kept, for when the host's there)
                 self.queue = (events + self.queue)[-QUEUE_MAX:]
+                errorbook.BOOK.give_back(errors)
             self.sending = False
             if ok and self.queue:
                 self.sending = True
                 GLib.idle_add(self.tell)
-        self.send({"events": events}, done)
+        self.send({"events": events, **({"errors": errors} if errors else {})}, done)
         return False
 
     def send(self, more, done, wait=False):
-        msg = {"op": "telemetry", "app": self.name, "pid": os.getpid(), **more}
+        msg = {"op": "telemetry", "app": self.name, "pid": os.getpid(), "commit": (wire.HEAD_COMMIT or "")[:12] or None,
+               "wire": wire.VERSION, **more}
         if self.profiler.error != self.told_error:
             msg["profile_error"] = self.told_error = self.profiler.error
         here = self.network.here_alive()
@@ -272,9 +297,11 @@ class Recorder:
             self.look(win, gone=True)
         last = self.profiler.set([])
         events, self.queue = self.queue, []
-        if self.on and (events or last):
+        errors = errorbook.BOOK.take()
+        if self.on and (events or last or errors):
             try:
-                self.send({"events": events, **({"profile": last} if last else {})}, lambda _ok: None, wait=True)
+                self.send({"events": events, **({"profile": last} if last else {}),
+                           **({"errors": errors} if errors else {})}, lambda _ok: None, wait=True)
             except (OSError, ValueError):
                 pass
 
@@ -283,6 +310,7 @@ def watch(win, name, network):
     """win's chats told to this machine's host (name: the app's, "baude" or "record"; network: its hosts)."""
     if not _RECORDER:
         _RECORDER.append(Recorder(win.get_application(), name, network))
+        uitrack.install(name, _RECORDER[0].errors_soon)
     _RECORDER[0].watch(win)
 
 
@@ -320,6 +348,26 @@ def said_pressure(s):
 def tokens(n):
     from chatparts import fmt_tokens
     return fmt_tokens(int(n))
+
+
+KINDS = {"input": "meta.input", "cache_write": "telemetry.cache_write", "cache_read": "telemetry.cache_read",
+         "output": "meta.output", "input_with_cache": "telemetry.input_with_cache"}  # (usage's tokens, each kind apart,
+# in the order they're shown, and their names)
+
+
+def said_tokens(t):
+    """A day's or a model's tokens, each kind apart ("1.2M In · 30M Cache Reads · 50k Out"): those it has; an older
+    turn's input, cache among it, as that."""
+    return " · ".join(wording.say(f"telemetry.day_{k}", tokens=tokens(t[k]))
+                      for k in ("input_with_cache", "input", "cache_write", "cache_read", "output")
+                      if t.get(k) or k == "output")
+
+
+def token_rows(t):
+    """A row each kind of token, t's count of it after its name: input, cache writes, cache reads, output, and (only
+    where there are some) older turns' input with their cache in it."""
+    return [row(wording.say(name), tokens(t.get(k) or 0)) for k, name in KINDS.items()
+            if k != "input_with_cache" or t.get(k)]
 
 
 def levels(days):
@@ -384,8 +432,8 @@ class TokenGrid(Gtk.DrawingArea):
         day = self.first() + datetime.timedelta(days=col * 7 + row)
         if day > datetime.date.today():
             return False
-        d = self.days.get(day.isoformat()) or {"tokens": 0}
-        tooltip.set_text(wording.say("telemetry.day_tokens", day=day.strftime("%a %-d %b %Y"), tokens=tokens(d["tokens"])))
+        d = self.days.get(day.isoformat()) or {}
+        tooltip.set_text(wording.say("telemetry.day_tokens", day=day.strftime("%a %-d %b %Y"), tokens=said_tokens(d)))
         return True
 
 
@@ -394,10 +442,15 @@ def effort_said(effort):
     return wording.say(key) if effort and wording.has(key) else effort or "–"
 
 
-def model_row(value, models, *values):
-    """A row named for a model, as every app names it (providers.model_name), its slug on hover."""
-    r = row(providers.model_name(value, models) or "–", *values)
+def model_expander(m, models):
+    """A model's row, named as every app names it (providers.model_name), its slug on hover, its turns after it;
+    opened, its tokens, a row each kind (token_rows)."""
+    value = m["model"]
+    r = Adw.ExpanderRow(title=GLib.markup_escape_text(providers.model_name(value, models) or "–"))
     r.set_tooltip_text(providers.model_slug(value, models) if isinstance(value, str) else None)
+    r.add_suffix(Gtk.Label(label=wording.say("telemetry.turns", turns=m["turns"]), css_classes=["dim-label", "numeric"]))
+    for t in token_rows(m):
+        r.add_row(t)
     return r
 
 
@@ -433,14 +486,85 @@ def proc_rows(procs):
     return rows
 
 
-def row(title, *values, sensitive=True, mono=False, bold=False, visible=True):
+def where_said(screen, part):
+    """A schema/ui entity and its part, as an error's screen and part say them."""
+    return " · ".join(x for x in (screen, part) if x) or "–"
+
+
+def fit_row(title, *values, **kw):
+    return row(title, *values, fit=True, **kw)
+
+
+class ErrorRow(Adw.ExpanderRow):
+    """An error: its process's logo, its type and message, how long ago it last happened and how many times; opened,
+    where it was raised, what was on screen, the user's last actions before it, and the code it ran. set(e) brings it
+    up to date where it is (opened stays opened)."""
+
+    def __init__(self, e):
+        super().__init__()
+        self.set_title_lines(1)
+        self.add_prefix(logo(e.get("app")))
+        self.ago, self.times = (Gtk.Label(css_classes=["dim-label", "numeric"]) for _ in range(2))
+        self.add_suffix(self.ago)
+        self.add_suffix(self.times)
+        self.details, self.shown = [], None
+        self.set(e)
+
+    def set(self, e):
+        self.set_title(GLib.markup_escape_text(f"{e['type']}: {e['message']}" if e.get("message") and
+                                               e["message"] != e["type"] else e["type"]))
+        self.ago.set_label(widgets.time_ago(e.get("last") or 0))
+        self.times.set_label(wording.say("telemetry.error_times", count=e.get("count") or 1))
+        self.set_tooltip_text(e.get("message") or None)
+        lines = error_lines(e)
+        if lines != self.shown:
+            self.shown = lines
+            for r in self.details:
+                self.remove(r)
+            self.details = [fit_row(*line, mono=mono) for *line, mono in lines]
+            for r in self.details:
+                self.add_row(r)
+
+
+def error_lines(e):
+    """What an error says of itself opened: ([title, values...], monospace) for each row."""
+    out = []
+    if e.get("file"):
+        out.append((wording.say("telemetry.error_where"),
+                    f"{e['file']}:{e.get('line')}" + (f" {e['function']}" if e.get("function") else ""), True))
+    if e.get("wire_op"):
+        out.append((wording.say("telemetry.error_op"), str(e["wire_op"]) + (
+            f" · {e['code']}" if e.get("code") is not None else ""), False))
+    elif e.get("code") is not None:
+        out.append((wording.say("telemetry.error_code"), str(e["code"]), False))
+    if e.get("screen") or e.get("part"):
+        out.append((wording.say("telemetry.error_screen"), where_said(e.get("screen"), e.get("part")), False))
+    for c in reversed(e.get("crumbs") or []):
+        key = f"telemetry.action_{c.get('action')}"
+        out.append((wording.say(key) if wording.has(key) else str(c.get("action")),
+                    where_said(c.get("screen"), c.get("part") or c.get("widget")), widgets.time_ago(c["at"]), False))
+    if e.get("commit") or e.get("wire") is not None:
+        out.append((wording.say("telemetry.error_version"), wording.say(
+            "telemetry.version_of", commit=e.get("commit") or "–", wire=str(e.get("wire") or "–")), True))
+    if (first := e.get("first")) and e.get("count", 1) > 1:
+        out.append((wording.say("telemetry.error_first"), widgets.time_ago(first), False))
+    return out
+
+
+def row(title, *values, sensitive=True, mono=False, bold=False, visible=True, fit=False):
+    """A row: its title, its values after it (dim); fit: each value cut short with … where the row hasn't room."""
     esc = GLib.markup_escape_text(title)
     r = Adw.ActionRow(title=f"<b>{esc}</b>" if bold else esc, sensitive=sensitive, visible=visible)
     if mono:
         r.add_css_class("monospace")
     for v in values:
         if v:
-            r.add_suffix(Gtk.Label(label=v, css_classes=["numeric"] if bold else ["dim-label", "numeric"]))
+            label = Gtk.Label(label=v, css_classes=["numeric"] if bold else ["dim-label", "numeric"])
+            if fit:
+                label.set_ellipsize(Pango.EllipsizeMode.MIDDLE)
+                label.set_max_width_chars(60)
+                label.set_tooltip_text(v)
+            r.add_suffix(label)
     return r
 
 
@@ -475,6 +599,7 @@ class Page(Adw.PreferencesPage):
             self.add(self.made[key])
         self.state, self.taking, self.groups, self.profiling_rows = None, False, {}, None
         self.deps_for, self.missing_shown, self.lines_shown, self.sampled, self.ticks = (), None, None, None, 0
+        self.error_rows = {}  # (the Errors group's rows, by app and fingerprint)
         self.grid = TokenGrid()
         self.refresh = GLib.timeout_add_seconds(REFRESH_S, self.tick)
         self.connect("destroy", lambda *_: GLib.source_remove(self.refresh))
@@ -486,9 +611,50 @@ class Page(Adw.PreferencesPage):
             self.read({"from": max(self.sampled or 0, now - 3 * REFRESH_S), "what": ["metrics"], "limit": 1},
                       self.took_metrics)
             self.ticks += 1
-            if self.ticks % (PROFILE_S // REFRESH_S) == 0 and self.state.get("line_profiling"):
-                self.read({"from": now - 3600, "what": ["profiles"], "limit": 500}, self.took_profiles)
+            if self.ticks % (PROFILE_S // REFRESH_S) == 0:
+                self.read_errors()
+                if self.state.get("line_profiling"):
+                    self.read({"from": now - 3600, "what": ["profiles"], "limit": 500}, self.took_profiles)
         return True
+
+    def read_errors(self):
+        self.read({"from": time.time() - ERRORS_DAYS * 86400, "what": ["errors"], "limit": ERRORS_SHOWN},
+                  self.took_errors)
+
+    def took_errors(self, reply):
+        if self.failed(reply):
+            return False
+        self.took_state(reply)
+        errors = reply.get("errors") or []
+        self.show_errors(errors)
+        return False
+
+    def show_errors(self, errors):
+        """The Errors group's rows brought up to date in place, by app and fingerprint: those that are still there are
+        kept (opened stays opened, the page stays where it's scrolled), the new added, the gone removed."""
+        g, have, title = self.made["errors"], self.error_rows, wording.say("telemetry.errors")
+        if not errors:
+            have.clear()
+            self.group("errors", title, [row(wording.say("telemetry.no_errors"), sensitive=False)])
+            return
+        if not have:  # (what was there was the placeholder, or nothing)
+            self.group("errors", title)
+        keys = [f"{e.get('app')}:{e.get('fingerprint')}" for e in errors]
+        for k in [k for k in have if k not in keys]:
+            g.remove(have.pop(k))
+        for k, e in zip(keys, errors):
+            if k in have:
+                have[k].set(e)
+            else:
+                have[k] = ErrorRow(e)
+        want = [have[k] for k in keys]
+        shown = [r for r in self.rows["errors"] if r in want]
+        if shown != want:
+            for r in shown:
+                g.remove(r)
+            for r in want:
+                g.add(r)
+        self.rows["errors"] = want
 
     def read(self, msg, done):
         import depsview
@@ -503,6 +669,7 @@ class Page(Adw.PreferencesPage):
         self.read({"from": now - (WEEKS * 7 + 7) * 86400, "what": ["usage"]}, self.took_usage)
         self.read({"from": now - 60, "what": ["metrics"], "limit": 1}, self.took_metrics)
         self.read({"from": now - 3600, "what": ["profiles"], "limit": 500}, self.took_profiles)
+        self.read_errors()
 
     def group(self, key, title, rows=()):
         """The group key shown, titled, with rows (in place of those it had)."""
@@ -569,11 +736,11 @@ class Page(Adw.PreferencesPage):
                                    effort=effort_said(c.get("effort"))))
             most.set_tooltip_text(providers.model_slug(c["model"], models) if isinstance(c["model"], str) else None)
             box.append(most)
+        for r in token_rows({k: sum(d.get(k) or 0 for d in u["days"]) for k in KINDS}):
+            box.append(r)
         self.group("tokens", wording.say("telemetry.tokens_by_day"), [box])
         self.group("models", wording.say("telemetry.models") if u["models"] else None,
-                   [model_row(m["model"], models,
-                              wording.say("telemetry.turns_tokens", turns=m["turns"], tokens=tokens(m["tokens"])))
-                    for m in u["models"]])
+                   [model_expander(m, models) for m in u["models"]])
         return False
 
     def host_models(self):

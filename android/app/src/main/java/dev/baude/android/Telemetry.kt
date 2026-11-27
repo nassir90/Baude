@@ -4,6 +4,7 @@ import android.os.Handler
 import android.os.Looper
 import android.os.Process
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -30,9 +31,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.delay
@@ -52,11 +55,27 @@ object Telemetry {
     private var opened: Pair<String, String>? = null
     private var front: Pair<String, String>? = null
     private val sentAt = HashMap<Pair<String, String>, Long>()
+    private var errorsDue = false
     var screen: List<String> = listOf("contacts") // (MainActivity's: the screen shown)
         set(v) {
             field = v
+            PhoneErrors.shown(v)
             look()
         }
+
+    /** (any thread) This app has an error (PhoneErrors' wake): told in a moment, with any meanwhile. */
+    fun errorsSoon() {
+        main.post {
+            if (!errorsDue) {
+                errorsDue = true
+                main.postDelayed({
+                    errorsDue = false
+                    if (!TelemetryStore.on) PhoneErrors.take()
+                    else if (!sending) { sending = true; tell() }
+                }, 1000)
+            }
+        }
+    }
 
     private fun hostOf(id: String) = Mesh.hostIdOf(id) ?: id // (a connection's: the id of the host it's to)
 
@@ -104,21 +123,21 @@ object Telemetry {
         if (!TelemetryStore.on) return
         val key = hostOf(chat.hostId) to chat.sid
         val sent = sentAt.remove(key)
-        val u = m.optJSONObject("usage") ?: JSONObject()
+        val t = TelemetryStore.tokensOf(m)
         val listed = Mesh.session(chat.hostId, chat.sid)
         event("turn_ended", key, seconds = sent?.let { (System.currentTimeMillis() - it) / 1000.0 }
             ?: m.optDouble("duration_ms", -1.0).takeIf { it >= 0 }?.let { it / 1000 },
             turn = m.optString("uuid").ifEmpty { null }, model = listed?.model, effort = listed?.effort,
-            tokensIn = u.optLong("input_tokens") + u.optLong("cache_read_input_tokens") + u.optLong("cache_creation_input_tokens"),
-            tokensOut = u.optLong("output_tokens"))
+            tokens = t)
     }
 
     private fun event(kind: String, chat: Pair<String, String>, seconds: Double? = null, turn: String? = null,
-                      model: String? = null, effort: String? = null, tokensIn: Long? = null, tokensOut: Long? = null) {
+                      model: String? = null, effort: String? = null, tokens: LongArray? = null) {
         if (chat.first.isEmpty() || chat.second.isEmpty()) return
         queue.add(Msg.TelemetryEvent(at = System.currentTimeMillis() / 1000.0, kind = kind, host = chat.first,
             session = chat.second, seconds = seconds?.let { Math.round(it * 1000) / 1000.0 }, turn = turn, model = model,
-            effort = effort, tokensIn = tokensIn, tokensOut = tokensOut))
+            effort = effort, tokensInput = tokens?.get(0), tokensCacheWrite = tokens?.get(1), tokensCacheRead = tokens?.get(2),
+            tokensOut = tokens?.get(3)))
         if (queue.size > 1000) queue.subList(0, queue.size - 1000).clear()
         if (!sending) {
             sending = true
@@ -129,13 +148,19 @@ object Telemetry {
     private fun tell() {
         val events = ArrayList(queue)
         queue.clear()
-        if (events.isEmpty()) {
+        val errors = PhoneErrors.take()
+        if (events.isEmpty() && errors.isEmpty()) {
             sending = false
             return
         }
-        val msg = Msg.Telemetry(app = "phone", pid = Process.myPid(), events = events).json()
+        val msg = Msg.Telemetry(app = "phone", pid = Process.myPid(), events = events,
+            commit = BuildConfig.COMMIT.take(12).ifEmpty { null }, wire = WireConstants.VERSION).json()
+        if (errors.isNotEmpty()) msg.put("errors", org.json.JSONArray(errors))
         Mesh.ask("phone", msg) { r ->
-            if (r.optString("op") != "telemetry_kept") queue.addAll(0, events) // (kept: told next time)
+            if (r.optString("op") != "telemetry_kept") { // (kept: told next time)
+                queue.addAll(0, events)
+                PhoneErrors.giveBack(errors)
+            }
             sending = false
             if (r.optString("op") == "telemetry_kept" && queue.isNotEmpty()) {
                 sending = true
@@ -164,13 +189,13 @@ private fun pressureSaid(s: Msg.TelemetrySample): String? =
     s.memoryPressure?.let { Wording.byKey["telemetry.pressure_$it"] ?: it }
         ?: s.memoryStall?.let { Wording.Telemetry.stalled(percent = String.format(Locale.ROOT, "%.1f", it.toDouble())) }
 
-private fun tokens(n: Long) = fmtTokens(n.coerceAtMost(Int.MAX_VALUE.toLong()).toInt())
+private fun tokens(n: Long) = fmtTokens(n)
 
 private fun effortSaid(e: String?) = e?.let { Wording.byKey["mode_effort.effort_$it"] ?: it } ?: "–"
 
 /** Each day's level in the grid, 0 to 4 (telemetryview.levels). */
 private fun levels(days: List<Msg.TelemetryDay>): Map<String, Int> {
-    val most = days.maxOfOrNull { it.tokens?.toLong() ?: 0 } ?: 0
+    val most = days.maxOfOrNull { it.tokens?.toLong() ?: 0L } ?: 0
     return days.associate { d ->
         val t = d.tokens?.toLong() ?: 0
         d.day.orEmpty() to if (t == 0L || most == 0L) 0 else minOf(4, 1 + (4 * t / (most + 1)).toInt())
@@ -199,11 +224,93 @@ private fun TokenGrid(days: List<Msg.TelemetryDay>) {
     }
 }
 
-private fun valueRow(title: String, value: String?, slug: String? = null): @Composable () -> Unit = {
+/** usage's tokens, each kind apart, in the order they're shown (telemetryview.KINDS): input, cache writes, cache
+ * reads, output, and older turns' input with their cache in it. */
+private fun kinds(input: Long?, cacheWrite: Long?, cacheRead: Long?, output: Long?, inputWithCache: Long?) = listOf(
+    Wording.Meta.input to (input ?: 0L), Wording.Telemetry.cacheWrite to (cacheWrite ?: 0L),
+    Wording.Telemetry.cacheRead to (cacheRead ?: 0L), Wording.Meta.output to (output ?: 0L),
+    Wording.Telemetry.inputWithCache to (inputWithCache ?: 0L))
+
+/** A row each kind of token (telemetryview.token_rows), the older turns' only where there are some. */
+private fun tokenRows(k: List<Pair<String, Long>>): List<@Composable () -> Unit> =
+    k.filterIndexed { i, (_, n) -> i < 4 || n > 0 }.map { (name, n) -> valueRow(name, tokens(n)) }
+
+/** A model's row (telemetryview.model_expander): its name, its slug on a long-press, its turns after it; tapped,
+ * opened to its tokens, a row each kind, as Adw.ExpanderRow is. */
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+private fun modelExpander(m: Msg.TelemetryModel, name: String, slug: String?): @Composable () -> Unit = {
+    val c = LocalBaude.current
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    var open by remember(m.model) { mutableStateOf(false) }
+    Column {
+        Box(Modifier.combinedClickable(onClick = { open = !open }, onLongClick = slug?.let { { showSlug(ctx, it) } })) {
+            ActionRow(name, null, suffix = {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(Wording.Telemetry.turns(turns = m.turns?.toLong() ?: 0), style = Type.body, color = c.dim, maxLines = 1)
+                    Icon(Adwaita.PanDown, null, tint = c.dim, modifier = Modifier.size(16.dp.icon).rotate(if (open) 180f else 0f))
+                }
+            })
+        }
+        if (open) for (r in tokenRows(kinds(m.input?.toLong(), m.cacheWrite?.toLong(), m.cacheRead?.toLong(),
+                m.output?.toLong(), m.inputWithCache?.toLong()))) {
+            Box(Modifier.fillMaxWidth().height(1.dp).background(c.rule))
+            r()
+        }
+    }
+}
+
+private const val ERRORS_SHOWN = 20
+private const val ERRORS_DAYS = 7
+
+private fun whereSaid(screen: String?, part: String?) = listOfNotNull(screen, part).joinToString(" · ").ifEmpty { "–" }
+
+/** An error (telemetryview.error_row): its process's logo, its type and message, how long ago it last happened and how
+ * many times; tapped, opened to where it was raised, what was on screen, the user's last actions before it and the
+ * code it ran, as Adw.ExpanderRow is. */
+private fun errorExpander(e: Msg.TelemetryError): @Composable () -> Unit = {
+    val c = LocalBaude.current
+    var open by remember(e.fingerprint, e.app) { mutableStateOf(false) }
+    val title = if (!e.message.isNullOrEmpty() && e.message != e.type) "${e.type}: ${e.message}" else e.type.orEmpty()
+    Column {
+        ActionRow(title, null, onClick = { open = !open },
+            prefix = { Icon(APP_LOGOS[e.app] ?: Adwaita.AppBaude, null, tint = c.fg, modifier = Modifier.size(16.dp.icon)) },
+            suffix = {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(ago(e.last?.toLong() ?: 0L), style = Type.body, color = c.dim, maxLines = 1)
+                    Text(Wording.Telemetry.errorTimes(count = e.count?.toLong() ?: 1L), style = Type.body, color = c.dim, maxLines = 1)
+                    Icon(Adwaita.PanDown, null, tint = c.dim, modifier = Modifier.size(16.dp.icon).rotate(if (open) 180f else 0f))
+                }
+            })
+        if (open) {
+            val rows = ArrayList<@Composable () -> Unit>()
+            e.file?.let { rows.add(valueRow(Wording.Telemetry.errorWhere, "$it:${e.line}" + (e.function?.let { f -> " $f" } ?: ""))) }
+            if (e.wireOp != null) rows.add(valueRow(Wording.Telemetry.errorOp, e.wireOp + (e.code?.let { " · $it" } ?: "")))
+            else e.code?.let { rows.add(valueRow(Wording.Telemetry.errorCode, it.toString())) }
+            if (e.screen != null || e.part != null) rows.add(valueRow(Wording.Telemetry.errorScreen, whereSaid(e.screen, e.part)))
+            for (k in e.crumbs.orEmpty().reversed()) rows.add(valueRow(Wording.byKey["telemetry.action_${k.action}"] ?: k.action.orEmpty(),
+                whereSaid(k.screen, k.part ?: k.widget), ago = ago(k.at?.toLong() ?: 0L)))
+            if (e.commit != null || e.wire != null) rows.add(valueRow(Wording.Telemetry.errorVersion,
+                Wording.Telemetry.versionOf(commit = e.commit ?: "–", wire = e.wire?.toString() ?: "–")))
+            if ((e.count?.toLong() ?: 1L) > 1) e.first?.let { rows.add(valueRow(Wording.Telemetry.errorFirst, ago(it.toLong()))) }
+            for (r in rows) {
+                Box(Modifier.fillMaxWidth().height(1.dp).background(c.rule))
+                r()
+            }
+        }
+    }
+}
+
+private fun valueRow(title: String, value: String?, slug: String? = null, ago: String? = null): @Composable () -> Unit = {
     val c = LocalBaude.current
     val ctx = androidx.compose.ui.platform.LocalContext.current
     Box(if (slug == null) Modifier else Modifier.pointerInput(slug) { detectTapGestures(onLongPress = { showSlug(ctx, slug) }) }) {
-        ActionRow(title, null, suffix = { value?.let { Text(it, style = Type.body, color = c.dim, maxLines = 1) } })
+        ActionRow(title, null, suffix = {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                value?.let { Text(it, style = Type.body, color = c.dim, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.widthIn(max = 170.dp)) }
+                ago?.let { Text(it, style = Type.body, color = c.dim, maxLines = 1) }
+            }
+        })
     }
 }
 
@@ -240,6 +347,7 @@ fun TelemetryPage() {
     var usage by remember(hostId, asked) { mutableStateOf<JSONObject?>(null) }
     var metrics by remember(hostId) { mutableStateOf<JSONObject?>(null) }
     var profiles by remember(hostId, asked) { mutableStateOf<JSONObject?>(null) }
+    var errors by remember(hostId, asked) { mutableStateOf<JSONObject?>(null) }
     var deps by remember(hostId) { mutableStateOf<Msg.Dep?>(null) }
     fun read(from: Double, what: String, limit: Int?, then: (JSONObject) -> Unit) =
         Mesh.ask(hostId, Msg.TelemetryRead(from = from, what = listOf(what), limit = limit).json(), then)
@@ -247,6 +355,10 @@ fun TelemetryPage() {
         val now = System.currentTimeMillis() / 1000.0
         read(now - (WEEKS * 7 + 7) * 86400.0, "usage", null) { usage = it }
         read(now - 3600, "profiles", 500) { profiles = it }
+        while (true) { // (its errors read again every 30 seconds, as the desktop's are)
+            read(System.currentTimeMillis() / 1000.0 - ERRORS_DAYS * 86400.0, "errors", ERRORS_SHOWN) { errors = it }
+            delay(30_000)
+        }
     }
     LaunchedEffect(hostId) {
         while (true) {
@@ -284,16 +396,16 @@ fun TelemetryPage() {
             val models = models(hostId)
             fun named(v: String?) = modelName(v, models).orEmpty()
             Heading(Wording.Telemetry.tokensByDay)
-            BoxedList(listOfNotNull<@Composable () -> Unit>({ TokenGrid(u.days.orEmpty()) },
+            val days = u.days.orEmpty()
+            BoxedList(listOfNotNull<@Composable () -> Unit>({ TokenGrid(days) },
                 u.combos.orEmpty().firstOrNull()?.let { top -> valueRow(Wording.Telemetry.mostUsed,
                     Wording.Telemetry.modelEffort(model = named(top.model), effort = effortSaid(top.effort)),
-                    top.model?.let { modelSlug(it, models) }) }), "") { it() }
+                    top.model?.let { modelSlug(it, models) }) }) + tokenRows(kinds(days.sumOf { it.input?.toLong() ?: 0L },
+                days.sumOf { it.cacheWrite?.toLong() ?: 0L }, days.sumOf { it.cacheRead?.toLong() ?: 0L },
+                days.sumOf { it.output?.toLong() ?: 0L }, days.sumOf { it.inputWithCache?.toLong() ?: 0L })), "") { it() }
             if (u.models.orEmpty().isNotEmpty()) {
                 Heading(Wording.Telemetry.models)
-                BoxedList(u.models.orEmpty(), "") { m ->
-                    valueRow(named(m.model), Wording.Telemetry.turnsTokens(turns = m.turns?.toLong() ?: 0,
-                        tokens = tokens(m.tokens?.toLong() ?: 0)), m.model?.let { modelSlug(it, models) })()
-                }
+                BoxedList(u.models.orEmpty(), "") { m -> modelExpander(m, named(m.model), m.model?.let { modelSlug(it, models) })() }
             }
         }
         if (state?.on == false) BoxedList(listOf(Wording.Telemetry.off), "") { ActionRow(it, null) }
@@ -323,6 +435,12 @@ fun TelemetryPage() {
                     if (p == null) TotalRow(cpus, rsses) else ProcessRow(p, n)
                 }
             }
+        }
+        errors?.takeIf { it.optString("op") == Op.TELEMETRY_READ }?.let { r ->
+            val list = Msg.TelemetryReadReply.from(r).errors.orEmpty()
+            Heading(Wording.Telemetry.errors)
+            if (list.isEmpty()) BoxedList(listOf(Wording.Telemetry.noErrors), "") { ActionRow(it, null) }
+            else BoxedList(list, "") { e -> errorExpander(e)() }
         }
         if (hostId != "phone" && state != null) Profiling(state, profiles, deps, { asked++ }) { set(it) }
     }

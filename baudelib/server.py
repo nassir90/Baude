@@ -25,7 +25,7 @@ import time
 import uuid
 
 from baudelib import (
-    access, accounts, codex, deciders, desktopchats, emissionlink, mesh, multiplexlink, phonebrowser, models, notes, providers,
+    access, accounts, codex, deciders, desktopchats, emissionlink, inbox, mesh, multiplexlink, phonebrowser, models, notes, providers,
     selfupdate, tasks, telemetry, toolnames, wire,
     wording,
 )
@@ -140,10 +140,11 @@ class Server(ServerRunning, ServerSessions):
         self.multiplex_pids = set()  # (the processes of this machine's Multiplex windows, likewise)
         self.emission_pids = set()  # (the processes of this machine's Emissions, as they last said: sampled too)
         self.telemetry = telemetry.Telemetry(self.state_dir, self.me["id"], changed=self.changed, log=self.log,
-                                             found=self.found_procs)  # (its machine's chat events, samples and line
+                                             found=self.found_procs, commit=self.commit)  # (its machine's chat events, samples and line
         # profiles: baudelib/telemetry.py)
         self.access = access.Access(self)  # (who in the mesh may use what of its: baudelib/access.py)
         self.tasks = tasks.Tasks(self)  # (its Bots' tasks: baudelib/tasks.py)
+        self.inbox = inbox.Inbox(self)  # (what its Bots' tasks ask of a person: baudelib/inbox.py)
         self.settle_bot_folders()  # (each Bot's folder by its name)
 
     def bind(self):

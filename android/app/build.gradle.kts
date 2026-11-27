@@ -685,6 +685,57 @@ androidComponents {
     onVariants { variant -> variant.sources.java?.addGeneratedSourceDirectory(baudeCopy, BaudeCopy::outputDir) }
 }
 
+/** schema/ui's parts as Kotlin made as the app's built (dev.baude.android.UiParts, in build/generated: never kept): for
+ * each copy key, the entities and parts of them that show it, so a tap on a row or button is named as the desktop
+ * names it (PhoneErrors' breadcrumbs). */
+abstract class BaudeUi : DefaultTask() {
+    @get:InputDirectory abstract val ui: DirectoryProperty
+    @get:OutputDirectory abstract val outputDir: DirectoryProperty
+
+    private fun quote(text: String) = text.replace("\\", "\\\\").replace("\"", "\\\"").replace("$", "\\$")
+
+    @TaskAction
+    fun write() {
+        val byKey = sortedMapOf<String, MutableSet<Pair<String, String>>>()
+        fun parts(entity: String, items: Any?) {
+            for (p in items as? List<*> ?: return) {
+                val part = p as? Map<*, *> ?: continue
+                val name = part["name"] as? String
+                if (name != null) for (k in part["copy"] as? List<*> ?: emptyList<Any>())
+                    if (k is String) byKey.getOrPut(k) { linkedSetOf() }.add(entity to name)
+                parts(entity, part["parts"])
+            }
+        }
+        val files = ui.get().asFile.listFiles { f -> f.name.endsWith(".json") && !f.name.startsWith(".") }!!.sortedBy { it.name }
+        for (f in files) {
+            @Suppress("UNCHECKED_CAST")
+            val doc = groovy.json.JsonSlurper().parse(f) as Map<String, Any?>
+            parts(f.name.removeSuffix(".json"), doc["parts"])
+        }
+        val out = StringBuilder()
+        out.append("// Made from schema/ui as the app's built (build.gradle.kts's baudeUi): never edited, never kept.\n")
+        out.append("package dev.baude.android\n\n")
+        out.append("object UiParts {\n")
+        out.append("    /** Each copy key (\"group.key\") to the (entity, part) pairs of schema/ui that show it. */\n")
+        out.append("    val byKey: Map<String, List<Pair<String, String>>> by lazy {\n        mapOf(\n")
+        for ((k, v) in byKey) out.append("            \"${quote(k)}\" to listOf(" +
+            v.joinToString(", ") { pair -> "\"${quote(pair.first)}\" to \"${quote(pair.second)}\"" } + "),\n")
+        out.append("        )\n    }\n}\n")
+        val dir = outputDir.get().asFile.resolve("dev/baude/android")
+        dir.mkdirs()
+        dir.resolve("UiParts.kt").writeText(out.toString())
+    }
+}
+
+val baudeUi = tasks.register<BaudeUi>("baudeUi") {
+    ui.set(rootProject.layout.projectDirectory.dir("../schema/ui"))
+    outputDir.set(layout.buildDirectory.dir("generated/baudeUi"))
+}
+
+androidComponents {
+    onVariants { variant -> variant.sources.java?.addGeneratedSourceDirectory(baudeUi, BaudeUi::outputDir) }
+}
+
 /** schema/icons as the app's built (in build/generated: never kept): the symbolic sets the phone draws, adwaita
  * (GNOME's Adwaita icons) and baude (Baude's own), as dev.baude.android.Adwaita, an ImageVector each by its name
  * (go-previous-symbolic.svg: Adwaita.GoPrevious; baude-return-symbolic.svg: Adwaita.Return), its 16-square drawing in

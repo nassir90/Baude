@@ -11,7 +11,7 @@ import time
 import uuid
 
 from baudelib import (
-    accounts, agentproxy, autofix, chattools, claude, codex, emissiontools, meshtools, models, multiplextools, notes, transcripts, wire, wording,
+    accounts, agentproxy, autofix, chattools, claude, codex, emissiontools, errorbook, meshtools, models, multiplextools, notes, transcripts, wire, wording,
     deps, desktopchats, hostlogin, hostqueue, hostresume, toolnames, worktree,
 )
 from baudelib.serverstate import (
@@ -309,9 +309,10 @@ class ServerSessions:
                 recover_empty=bool(s.meta.get("cli_id")) and self.codex_empty_thread(s), instructions=told,
                 servers={meshtools.NAME: {"command": sys.executable, "args": [
                     agentproxy.HEADLESS, "mesh-tools", "--socket", os.path.abspath(self.socket_path), "--only",
-                    "answer_task"], "env": {"BAUDE_SESSION": s.id},
-                    "enabled_tools": ["answer_task"],  # (never asked about: Codex's own per-tool approval)
-                    "tools": {"answer_task": {"approval_mode": "approve"}}}} if s.meta.get("bot") else None)
+                    ",".join(meshtools.BOT_ANSWERS)], "env": {"BAUDE_SESSION": s.id},
+                    "enabled_tools": list(meshtools.BOT_ANSWERS),  # (never asked about: Codex's own per-tool approval)
+                    "tools": {t: {"approval_mode": "approve"} for t in meshtools.BOT_ANSWERS}}}
+                if s.meta.get("bot") else None)
         else:
             s.proc = kind(
                 lambda p, m: self.from_claude(s, p, m), lambda code: self.claude_exited(s, made, code), s.meta["cwd"],
@@ -718,6 +719,7 @@ class ServerSessions:
                     self.woken.set()  # (what Auto-fix found meanwhile: sent now)
                 s.note_written()  # (its own turn's lines: not another writer's, desktopchats.elsewhere)
                 self.tasks.turn_over(s, msg)  # (its tasks' asks it took: answered)
+                self.inbox.turn_over(s, msg)  # (a model asked to answer an ask of the Inbox: its answer)
                 self.tasks.chat_over(s, msg.get("result"), "stopped" if msg.get("subtype") == "error_during_execution"
                                      else "failed" if msg.get("is_error") else "finished")  # (a task's run's: its Bot
                 # told)
@@ -974,6 +976,7 @@ class ServerSessions:
                                      "stopped" if stopping else "failed")  # (a task's run's, stopped or gone before
                 # its turn's end: its Bot told)
             self.tasks.agent_gone(s)  # (its tasks' asks it took, never answered now: failed, not left waiting)
+            self.inbox.agent_gone(s)  # (a model asked to answer an ask, gone first: failed)
             s.proc, s.busy, s.acting, s.streamed = None, False, False, False
             s.acting_by.clear()
             s.asks.clear()
@@ -991,6 +994,11 @@ class ServerSessions:
             if not self.stopped.is_set():
                 self.drop_waits(s)
                 self.account_after(s)  # (an account picked at a turn it ended with: taken now)
+            if code not in (0, None) and not getattr(made[0], "restarting", False) and not getattr(
+                    made[0], "stopping", False) and not self.stopped.is_set():  # (gone by itself: an error of its)
+                program = models.model_program(s.meta.get("model")) or "claude"
+                self.telemetry.note(errorbook.of_note("agent_exit", program, wording.say(
+                    "host_errors.claude_exited", code=code), key=f"{program}:{code}", code=code))
             if not getattr(made[0], "restarting", False) and not self.stopped.is_set():  # (the host stopping: said
                 # as that, said_quitting)
                 stopped = {"stopped": True} if getattr(made[0], "stopping", False) else {}  # (told to: op stop)

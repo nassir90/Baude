@@ -1,0 +1,152 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "An error a process on a host's machine had, kept by that host by its fingerprint (its kind and type and where it was raised): how many times, when first and last, the code it was on, what was on screen and the user's last actions before it.",
+  "properties": {
+    "app": {
+      "enum": [
+        "host",
+        "baude",
+        "record",
+        "phone",
+        "emission"
+      ],
+      "description": "The process it was in: the host's, Baude's, Record's, the phone's app, or Emission's."
+    },
+    "kind": {
+      "enum": [
+        "exception",
+        "thread",
+        "callback",
+        "log",
+        "wire",
+        "agent_exit",
+        "draft_save",
+        "send",
+        "page_load",
+        "crash"
+      ],
+      "description": "What it was: an exception nothing caught (on the main thread; on another thread; in a main-loop callback, which carries on), a critical or warning GLib or GTK logged, an error answered on the wire, an agent that exited by itself with a code other than 0, a draft its host didn't save, a message not sent, a page Emission couldn't load, or the phone's app crashing."
+    },
+    "fingerprint": {
+      "type": "string",
+      "description": "What it's kept by: its kind, its type and the frame of Baude's own code it was raised in (its file and function), or for one without a stack what tells it apart (the op and code, a log's domain and its message with numbers taken out)."
+    },
+    "type": {
+      "type": "string",
+      "description": "The exception's class, the log's domain and level, the op, the agent's program."
+    },
+    "message": {
+      "type": "string",
+      "description": "What it said, its first line (the last time)."
+    },
+    "file": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "The file it was raised in, under the checkout, relative to it."
+    },
+    "line": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "description": "Its line there."
+    },
+    "function": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "The function."
+    },
+    "stack": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Its frames (file:line function), the innermost last, at most 20 (the last time)."
+    },
+    "count": {
+      "type": "integer",
+      "description": "Times it happened."
+    },
+    "first": {
+      "type": "number",
+      "description": "When it first happened, in seconds since the epoch."
+    },
+    "last": {
+      "type": "number",
+      "description": "When it last happened."
+    },
+    "commit": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "The commit the process ran the last time (its first 12 characters)."
+    },
+    "wire": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "description": "The wire's version it spoke the last time."
+    },
+    "first_commit": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "The commit it ran the first time."
+    },
+    "screen": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "The schema/ui entity on screen as it happened (\"Telemetry.dialog\"), the last time; null in a process with no screen."
+    },
+    "part": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "The entity's part the user had just used, by its name there, if one was used just before."
+    },
+    "wire_op": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "The wire op it happened answering (a wire error's, an exception in a host's op)."
+    },
+    "code": {
+      "type": [
+        "string",
+        "integer",
+        "null"
+      ],
+      "description": "A wire error's code (Error's), an agent's exit code."
+    },
+    "crumbs": {
+      "type": "array",
+      "items": {
+        "$ref": "TelemetryCrumb.json"
+      },
+      "description": "The user's last actions before it (at most 8), the earliest first, the last time."
+    }
+  },
+  "required": [
+    "app",
+    "kind",
+    "fingerprint",
+    "type",
+    "message",
+    "count",
+    "first",
+    "last"
+  ],
+  "additionalProperties": false
+}

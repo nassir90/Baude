@@ -115,6 +115,13 @@
       },
       "description": "The subscriptions whose auto-disable is on, by usage key: disabled as they're exhausted."
     },
+    "auto_resume": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "The subscriptions whose Auto Resume on Reset is on, by usage key: a chat of theirs a usage limit stopped is sent a message to carry on once the limit resets."
+    },
     "last_usage": {
       "type": "object",
       "additionalProperties": {

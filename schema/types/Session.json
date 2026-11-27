@@ -187,6 +187,10 @@
       "type": "boolean",
       "description": "The subscription it runs on (its account, or its provider's CLI's own sign-in) is disabled on its host (accounts' disable, or auto_disable as it's exhausted): its agent stopped, nothing sent to it nor started, every app's send button off and its banner saying so, till it's enabled or another's picked."
     },
+    "resume_at": {
+      "type": ["number", "null"],
+      "description": "When its host sends it a message to carry on (seconds since 1970): its last turn was stopped by a usage limit and the subscription it runs on has Auto Resume on Reset on (accounts' auto_resume), so it's resumed a minute after the limit resets. Null once anything's sent to it, it's cancelled (resume_cancel), or the subscription's disabled or no longer resumes its chats."
+    },
     "held": {
       "type": "array",
       "items": {

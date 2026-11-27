@@ -12,7 +12,7 @@ import uuid
 
 from baudelib import (
     accounts, agentproxy, autofix, chattools, claude, codex, emissiontools, meshtools, models, multiplextools, notes, transcripts, wire, wording,
-    deps, desktopchats, hostlogin, hostqueue, toolnames, worktree,
+    deps, desktopchats, hostlogin, hostqueue, hostresume, toolnames, worktree,
 )
 from baudelib.serverstate import (
     AGENT_TOOLS, CATALOGUE_LIMIT, CATALOGUE_WAIT_S, CHECK_SOCKET_S, CLAUDE_OPTIONS, COMMAND_TOOLS, CONTEXT_EVERY_S,
@@ -446,6 +446,7 @@ class ServerSessions:
             if conn is not None and wire.clean_sender(sender) is None:  # (its user wrote in it from a head: what it
                 self.saw(s)  # last said has been seen; not a follow-up kept over a restart, sent by the host itself)
             s.meta.pop("cut", None)  # (carried on, or something else said: not cut any more)
+            s.meta.pop("resume_at", None)  # (and not resumed after a limit: it's going on now)
             if s.meta.pop("draft", None) and not s.meta.get("prompt"):  # (written in: a session of its own from now on,
                 s.meta["prompt"] = _said(msg)                           # listed and kept, titled by what was said)
                 if s.proc is None and not s.meta.get("fork_from") and not s.meta.get("spawned_by") and \
@@ -711,6 +712,7 @@ class ServerSessions:
                 told, s.queued = s.queued, []
                 s.busy, s.used, s.acting = False, time.time(), False
                 s.acting_by.clear()
+                hostresume.turn_over(self, s, proc, msg)  # (a usage limit stopped it: resumed as it resets, if it's to be)
                 autofix.turn_over(s, s.turn_began, time.time())  # (its own comments on the pull request: not sent it)
                 if (s.meta.get("autofix") or {}).get("waiting"):
                     self.woken.set()  # (what Auto-fix found meanwhile: sent now)
@@ -1200,11 +1202,13 @@ class ServerSessions:
                     s.proc.stopping, s.proc.restarting = True, False
                     s.proc.kill()
                     self.log(f"{s.id}: its subscription's disabled: its agent stopped")
+                hostresume.drop(self, s)  # (not resumed onto it)
             self.changed()
 
     def subscription_switched(self):
         """A subscription's switches changed (enabled again, auto-disable turned on or off): listed so."""
         with self.lock:
+            hostresume.switched(self)  # (resumes no longer wanted let go of)
             self.changed()
 
     def switch_account(self, s):
@@ -1317,6 +1321,8 @@ class ServerSessions:
                 if (soon := self.autofix_due()) is not None:
                     waits.append(min(soon, 60))  # (looked at again each minute: a machine asleep meanwhile isn't
                     # counted by the clock it waits on)
+                if (soon := self.resume_due()) is not None:
+                    waits.append(min(soon, 60))
                 if not running and self.exit_s:
                     waits.append(quiet + self.exit_s - time.monotonic())
                 elif running:
@@ -1328,7 +1334,7 @@ class ServerSessions:
                     now_running = any(s.proc is not None for s in self.sessions.values())
                 if not now_running and self.exit_s and time.monotonic() - quiet >= self.exit_s and not self.conns \
                         and not self.mesh.links and not self.mesh.outs and self.tasks.due() is None \
-                        and self.autofix_due() is None:  # (linked,
+                        and self.autofix_due() is None and self.resume_due() is None:  # (linked,
                     # or making links: the mesh's members may want it; a task to run or a branch to watch: it's to be here)
                     self.log(f"nothing running and nobody here for {self.exit_s / 3600:g} h: going")
                     threading.Thread(target=self.shutdown, daemon=True, name="exit").start()
@@ -1337,6 +1343,7 @@ class ServerSessions:
                 return
             if attached:
                 self.tasks.due()
+                self.resume_due()
             if time.monotonic() - checked > (10 if attached else CHECK_SOCKET_S - 1):
                 checked = time.monotonic()
                 self.still_bound()
@@ -1353,6 +1360,14 @@ class ServerSessions:
             return autofix.due(self)
         except Exception as e:  # noqa: BLE001 (looked at again next time)
             self.log(f"auto-fix: {type(e).__name__}: {e}")
+            return 60
+
+    def resume_due(self):
+        """hostresume.due, for the watch: whatever goes wrong with it said, not the watch's end."""
+        try:
+            return hostresume.due(self)
+        except Exception as e:  # noqa: BLE001 (looked at again next time)
+            self.log(f"resuming: {type(e).__name__}: {e}")
             return 60
 
     def stoppable(self, s):

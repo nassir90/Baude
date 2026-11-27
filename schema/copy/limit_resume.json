@@ -1,0 +1,9 @@
+{
+  "description": "A chat whose turn a usage limit stopped, to be carried on by its host once the limit resets (the subscription's Auto Resume on Reset): the line at its end, its Cancel (common.cancel), and what's sent it then.",
+  "messages": {
+    "line": "Resumes at {$time}",
+    "line_day": "Resumes {$day} at {$time}",
+    "message": "Continue where you left off: the usage limit has reset.",
+    "not_cancelled": "Not cancelled: {$why}"
+  }
+}

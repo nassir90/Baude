@@ -327,6 +327,7 @@ class CodexProc(AppServer):
         self.thread = self.turn = None
         self.last_text = ""
         self.starting = self.interrupting = False
+        self.limits = self.limit_reset = None  # (its last rate-limit snapshot; when a limit that stopped its turn resets)
         super().__init__(exe, cwd, env, lambda code: self.dispatch(on_exit, code),
                          lambda line: self.emit("_stderr", text=line), profile)
         params = {"cwd": cwd, **permission_params(self.mode, read_only=self.read_only)}
@@ -424,9 +425,16 @@ class CodexProc(AppServer):
             turn = params["turn"]
             status = turn.get("status")
             error = (turn.get("error") or {}).get("message") or (status if status != "completed" else None)
+            if error and status != "interrupted" and (
+                    "usageLimitExceeded" in json.dumps((turn.get("error") or {}).get("codexErrorInfo")) or
+                    isinstance(self.limits, dict) and self.limits.get("rateLimitReachedType")):
+                from baudelib import hostresume  # (a usage limit stopped it: till when, for hostresume)
+                self.limit_reset = hostresume.codex_reset(self.limits)
             self.finish(error, turn.get("durationMs"), interrupted=status == "interrupted")
         elif method == "account/rateLimits/updated":  # (its subscription's limits, as a turn's answer said them)
             snapshot = params.get("rateLimits")
+            if isinstance(snapshot, dict) and snapshot.get("limitId") in (None, "codex"):
+                self.limits = snapshot  # (its default bucket's latest: when a limit that stops a turn resets)
             key = accounts.usage_key("codex", self.profile)
             try:
                 if isinstance(snapshot, dict) and accounts.codex_exhausted(snapshot) and \

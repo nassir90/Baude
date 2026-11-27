@@ -63,6 +63,7 @@ def database():
             db.execute("CREATE TABLE IF NOT EXISTS defaults (provider TEXT PRIMARY KEY, profile TEXT)")
             db.execute("CREATE TABLE IF NOT EXISTS sessions (session TEXT PRIMARY KEY, profile TEXT)")
             db.execute("CREATE TABLE IF NOT EXISTS switches (key TEXT PRIMARY KEY, disabled INTEGER, auto INTEGER)")
+            db.execute("CREATE TABLE IF NOT EXISTS resumes (key TEXT PRIMARY KEY)")  # (Auto Resume on Reset's: on)
             yield db
     finally:
         db.close()
@@ -81,7 +82,8 @@ def _known():
             sessions = dict(db.execute("SELECT session,profile FROM sessions"))
             switches = {k: {"disabled": bool(d), "auto_disable": bool(a)}
                         for k, d, a in db.execute("SELECT key,disabled,auto FROM switches")}
-        _cache.update(mtime=mtime, sessions=sessions, switches=switches,
+            resumes = {k for (k,) in db.execute("SELECT key FROM resumes")}
+        _cache.update(mtime=mtime, sessions=sessions, switches=switches, resumes=resumes,
                       accounts={i: {"id": i, "provider": p, "name": n, "kind": k} for i, p, n, k, _c in rows},
                       folders={i: c for i, _p, _n, k, c in rows if k == "folder"})
     return _cache["accounts"], _cache["sessions"], _cache["folders"]
@@ -101,6 +103,24 @@ def switches():
 def disabled(key):
     """Whether a subscription (its usage key) is disabled: its chats' agents stopped, and nothing sent to them."""
     return switches().get(key, {}).get("disabled", False)
+
+
+def auto_resume(key=None):
+    """Whether a subscription (usage key) resumes its chats a usage limit stopped once the limit resets (Auto Resume
+    on Reset); key None: the usage keys of every one that does."""
+    _known()
+    on = _cache.get("resumes", set())
+    return set(on) if key is None else key in on
+
+
+def set_auto_resume(key, on):
+    """A subscription's (usage key's) Auto Resume on Reset turned on or off."""
+    check_key(key)
+    with database() as db:
+        if on:
+            db.execute("INSERT OR REPLACE INTO resumes VALUES (?)", (key,))
+        else:
+            db.execute("DELETE FROM resumes WHERE key=?", (key,))
 
 
 def check_key(key):
@@ -317,6 +337,7 @@ def remove(profile, exe=None):
         db.execute("DELETE FROM profiles WHERE id=?", (profile,))
         db.execute("DELETE FROM defaults WHERE profile=?", (profile,))
         db.execute("DELETE FROM switches WHERE key=?", (profile,))
+        db.execute("DELETE FROM resumes WHERE key=?", (profile,))
     _drop_usage(profile, gone=True)
     provider, folder, kind = row
     if kind == "token" or Path(folder).parent != root():

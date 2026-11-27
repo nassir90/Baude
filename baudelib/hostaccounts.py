@@ -2,7 +2,8 @@
 mesh (Settings → Subscriptions in Baude, Record and the phone, and a chat's Sign in card): listed (list), added
 (add: a Claude token or API key, a Codex API key, or an existing signed-in Claude folder or CODEX_HOME), renamed (rename), removed (remove), a
 token account's token replaced (token), a subscription disabled or enabled again (disable: its chats' agents stopped,
-nothing sent to them) or set to disable itself as it's exhausted (auto_disable), a chat moved onto another (use: once it's on it, kept as the one a new
+nothing sent to them) or set to disable itself as it's exhausted (auto_disable) or to resume its chats a usage limit
+stopped as it resets (auto_resume: hostresume), a chat moved onto another (use: once it's on it, kept as the one a new
 chat on its provider's models takes, accounts.selected), a subscription's usage read (usage; a setup token's, which can't be asked, as its chats' turns last
 said it, with when: as_of), and a sign-in run here (sign_in): `claude auth login` with a Claude account's own folder, each line it
 writes carried back as it's written (the page to open among them), a code pasted on the head passed to it (code),
@@ -49,7 +50,8 @@ def state(server=None):
     return {"accounts": accounts.listing(), "defaults": accounts.defaults(), "claude_cli": bool(claude_cli(server)),
             "missing": missing, "last_usage": last, "codex_usage": True,
             "disabled": sorted(k for k, v in switches.items() if v["disabled"]),
-            "auto_disable": sorted(k for k, v in switches.items() if v["auto_disable"])}
+            "auto_disable": sorted(k for k, v in switches.items() if v["auto_disable"]),
+            "auto_resume": sorted(accounts.auto_resume())}
 
 
 def answer(server, conn, msg, reply):
@@ -101,6 +103,11 @@ def answer(server, conn, msg, reply):
             else:
                 getattr(server, "subscription_switched", lambda: None)()
             return done()
+        if what == "auto_resume":  # (its chats a usage limit stopped carried on as it resets: hostresume)
+            key = accounts.usage_key((accounts.account(profile) or {}).get("provider", provider or "claude"), profile)
+            accounts.set_auto_resume(key, bool(msg.get("on")))
+            getattr(server, "subscription_switched", lambda: None)()
+            return done()
         if what == "use":
             server.use_account(msg.get("session"), profile)
             return done()
@@ -115,8 +122,8 @@ def answer(server, conn, msg, reply):
             return _sign_in(conn, msg, reply, done)
     except (ValueError, OSError) as e:
         return done(error=str(e))
-    return done(error="accounts takes list, add, rename, token, remove, disable, auto_disable, use, usage, sign_in, code "
-                      "or callback")
+    return done(error="accounts takes list, add, rename, token, remove, disable, auto_disable, auto_resume, use, usage, "
+                      "sign_in, code or callback")
 
 
 def _for_chat(server, conn, msg, done):

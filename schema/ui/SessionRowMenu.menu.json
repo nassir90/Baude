@@ -17,16 +17,17 @@
     },
     {
       "name": "Bot items",
-      "shows": "Only for a top-level session on a host that is alive, supports Bots, and runs a model of Claude's or pi's program (not a fork): either \"Make Bot…\" (a plain chat) or both \"Bot Settings…\" and \"Turn Back into a Chat\" (a Bot). They sit right after Rename…, before Move to Group.",
+      "shows": "Only for a top-level session on a host that is alive, supports Bots, and runs a model of Claude's, pi's or Codex's program (not a fork): either \"Make Bot…\" (a plain chat) or both \"Bot Settings…\" and \"Turn Back into a Chat\" (a Bot). They sit right after Rename…, before Move to Group.",
       "copy": ["sidebar.make_bot_ellipsis", "sidebar.bot_settings_ellipsis", "sidebar.unbot"],
       "actions": [
         {"by": "click Make Bot… / Bot Settings…", "does": "Opens the Make Bot / Bot Settings dialog (BotSettings.dialog.json)."},
         {"by": "click Turn Back into a Chat", "does": "The host lists it as a plain chat again; its memory and picture stay on the host for if it is made a Bot again."}
-      ]
+      ],
+      "decisions": [{"said": "Can a codex agent become a bot? … Yes", "rule": "Every app offers Make Bot…, Bot Settings… and Turn Back into a Chat on a Codex chat as on a Claude or pi one; a Codex Bot is told its name and memory, has Baude's chat tools and the mesh's tools, and may write its memory's folder without being asked", "decided": "2026-11-27", "source": [{"session": "221e1c29-56d7-48bf-a2dc-7a2b37ccd685", "message": "ceb54a99-30f3-4f30-9321-ef6ef10ed186"}, {"session": "221e1c29-56d7-48bf-a2dc-7a2b37ccd685", "message": "ec231658-1ba1-47f8-8a4f-3dbbeb9634b5"}]}]
     },
     {
       "name": "Rotate",
-      "shows": "\"Rotate\", for a Bot on a host that's up and takes rotate, whatever its model: right after Bot Settings… (before Turn Back into a Chat), or right after Rename… for a Bot that has no other Bot items (a Codex Bot's). No confirmation, as Archive has none. Left out while the Bot is working or waiting, as Archive is.",
+      "shows": "\"Rotate\", for a Bot on a host that's up and takes rotate, whatever its model: right after Bot Settings… (before Turn Back into a Chat), or right after Rename… for a Bot that has no other Bot items. No confirmation, as Archive has none. Left out while the Bot is working or waiting, as Archive is.",
       "copy": ["sidebar.rotate", "trash.host_refused"],
       "actions": [
         {"by": "click", "does": "Its host archives the Bot's conversation as a past thread named \"<Bot name> / <its title>\" (its date if it has no title), and the Bot carries on in a new, empty chat with a new agent. The Bot keeps its id, name, picture, memory, tasks and their runs, browser, rules and the chats it started, and its place in the list: it isn't moved up till something's said in its new chat. A window or phone with the Bot open shows the new, empty chat. The past thread is listed under Archived and found by a search (by the Bot's name or its title); opened, it is read-only, as every archived chat is; it isn't a Bot. A Bot at a turn, asking, running a command or agent in the background, or answering one of its tasks' asks is refused: \"<host> didn't rotate it: <why>\" in a toast."}

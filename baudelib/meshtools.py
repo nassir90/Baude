@@ -153,8 +153,6 @@ SCHEMAS = {
                                                              "choice, label?, choices?, default?, required?}",
                              "items": {"type": "object"}}}, ["ask"]),
 }
-BOT_ANSWERS = ("answer_task", "answer_ask", "revise_ask")  # (a Bot's answers to its tasks and the Inbox: a Codex
-# Bot's only mesh tools)
 ASKED = ("set_task", "run_task")  # (run code on the host: asked about as Bash is, by the chat's permission mode)
 
 

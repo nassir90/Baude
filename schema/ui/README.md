@@ -77,8 +77,8 @@ An entry or a part may carry:
 - **A Bot knows itself by its Name, and gets its tools as it's made.** Every host keeps a Bot's folder (its memory,
   picture and tasks) under the Bot's name, moved as it's renamed, so what its agent is told of itself and its folder
   says the name, never its chat's id. A chat made a Bot while its agent runs is given a Bot's tools and told who it
-  is without being started again, where its agent can take tools as it runs (Claude Code's); another (pi's) is started
-  again for them after its turn. The owner asked that Bots refer to themselves by name, not id, and that the research
+  is without being started again, where its agent can take tools as it runs (Claude Code's); another (pi's, Codex's) is started
+  again for them after its turn, its conversation going on. The owner asked that Bots refer to themselves by name, not id, and that the research
   on adding MCP tools to a running chat be used for a chat made a Bot (2026-11-27). Source:
   `[{"issue": "BaudeInternal#288"}]`.
 - **A picture is set into the page.** Wherever an app shows someone's or a Bot's picture, or their initials on a colour

@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -26,6 +27,7 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
@@ -438,14 +440,26 @@ private fun AskPictures(content: @Composable () -> Unit) {
     }
 }
 
-/** The pictures of the ask version a picture's key names ("ask:host/ask/version/name"), as the large view has them. */
+/** The pictures of the ask version a picture's key names ("ask:host/ask/version/name"), as the large view has them:
+ * those its body shows, in its order, then its picture buttons', each named by its alt text or its button's label. */
 private fun askItems(key: String): List<ViewItem> {
     val k = key.removePrefix("ask:")
-    val prefix = k.substringBeforeLast("/") + "/"
-    return Inbox.pictures.filterKeys { it.startsWith(prefix) }.map { (pk, p) ->
-        ViewItem("ask:$pk", p.bytes, null, null, pk.substringAfterLast("/"), null)
+    val version = k.substringBeforeLast("/")
+    val ask = version.substringBeforeLast("/")
+    val n = version.substringAfterLast("/").toIntOrNull() ?: 0
+    val v = Inbox.asks.firstNotNullOfOrNull { (h, l) -> l.firstOrNull { Inbox.key(h, it.id) == ask } }?.versions?.getOrNull(n - 1)
+    val named = LinkedHashMap<String, String>()
+    if (v != null) {
+        for (m in MD_IMAGE.findAll(v.body.orEmpty())) named.putIfAbsent(m.groupValues[2], m.groupValues[1].ifBlank { m.groupValues[2] })
+        for (b in v.buttons.orEmpty()) b.picture?.ifBlank { null }?.let { named.putIfAbsent(it, b.label.orEmpty().ifBlank { it }) }
+    }
+    if (k.substringAfterLast("/") !in named) named[k.substringAfterLast("/")] = k.substringAfterLast("/")
+    return named.mapNotNull { (name, title) ->
+        Inbox.pictures["$version/$name"]?.let { ViewItem("ask:$version/$name", it.bytes, null, null, title, null) }
     }
 }
+
+private val MD_IMAGE = Regex("!\\[([^\\]]*)\\]\\(([^)\\s]+)\\)")
 
 private fun openAskPicture(key: String) {
     val items = askItems(key)
@@ -517,15 +531,25 @@ private fun AskView(host: String, a: Msg.InboxAsk, inList: Boolean, under: Color
         a.proposal?.takeIf { live || it.status == "answering" && !stopped }?.let { Proposal(host, id, it, v) }
         if (!v.form.isNullOrEmpty()) FormRows(v, values, enabled = live)
         val suggested = a.proposal?.takeIf { it.status == "ready" }?.button?.toInt()
-        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp),
-            itemVerticalAlignment = Alignment.CenterVertically) {
-            v.buttons.orEmpty().forEachIndexed { i, b ->
-                AskButton(host, id, at + 1, v, b, enabled = live, suggested = live && suggested == i) {
-                    Mesh.ask(host, Msg.InboxPress(ask = id, button = i, version = v.n, values = Inbox.sent(v, values)).json()) { r ->
-                        refused(r)?.let(::toast) ?: answered()
-                    }
+        val press = { i: Int ->
+            Mesh.ask(host, Msg.InboxPress(ask = id, button = i, version = v.n, values = Inbox.sent(v, values)).json()) { r ->
+                refused(r)?.let(::toast) ?: answered()
+            }
+        }
+        val (withPictures, plain) = v.buttons.orEmpty().withIndex().partition { !it.value.picture.isNullOrBlank() }
+        if (withPictures.isNotEmpty()) BoxWithConstraints(Modifier.fillMaxWidth()) {
+            val cols = ((maxWidth + PICTURE_GAP) / (PICTURE_BUTTON + PICTURE_GAP)).toInt().coerceIn(1, PICTURE_ROW)
+            val cell = (maxWidth - PICTURE_GAP * (cols - 1)) / cols
+            Column(verticalArrangement = Arrangement.spacedBy(PICTURE_GAP)) {
+                for (row in withPictures.chunked(cols)) Row(horizontalArrangement = Arrangement.spacedBy(PICTURE_GAP)) {
+                    for ((i, b) in row) PictureButton(host, id, at + 1, v, b, enabled = live, suggested = live && suggested == i,
+                        modifier = Modifier.width(cell)) { press(i) }
                 }
             }
+        }
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp),
+            itemVerticalAlignment = Alignment.CenterVertically) {
+            for ((i, b) in plain) AskButton(b, enabled = live, suggested = live && suggested == i) { press(i) }
             Box(Modifier.weight(1f), contentAlignment = Alignment.CenterEnd) { RouteTo(host, a, enabled = live) }
         }
     }
@@ -661,37 +685,60 @@ private fun buttonColours(style: String?): Pair<Color, Color> {
     }
 }
 
-/** One of the ask's buttons, sized to its label: its style's colours; a picture button, its picture over its label;
- * suggested (a model would press it), ringed in the accent. */
+/** One of the ask's buttons, sized to its label (wide: as wide as what it's in): its style's colours; suggested (a
+ * model would press it), ringed in the accent. */
 @Composable
-private fun AskButton(host: String, id: String, version: Int, v: Msg.InboxVersion, b: Msg.InboxButton, enabled: Boolean,
-                      suggested: Boolean, onClick: () -> Unit) {
+private fun AskButton(b: Msg.InboxButton, enabled: Boolean, suggested: Boolean, wide: Boolean = false, onClick: () -> Unit) {
     val c = LocalBaude.current
     val (fill, text) = buttonColours(b.style)
     val shape = RoundedCornerShape(8.dp)
     val ring = if (suggested) Modifier.border(2.dp, c.accent, RoundedCornerShape(10.dp)).padding(3.dp) else Modifier
-    val pic = b.picture?.ifBlank { null }
-    Box(ring.alpha(if (enabled) 1f else 0.4f)) {
-        if (pic == null) Box(Modifier.clip(shape).background(fill).clickable(enabled = enabled, onClick = onClick)
-            .padding(horizontal = 14.dp, vertical = 8.dp), contentAlignment = Alignment.Center) {
-            Text(b.label.orEmpty(), style = Type.bold, color = text)
-        } else Column(Modifier.width(PICTURE_BUTTON + 12.dp).clip(shape).background(fill).clickable(enabled = enabled, onClick = onClick)
-            .padding(6.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            val k = "${Inbox.key(host, id)}/$version/$pic"
-            LaunchedEffect(k) { Inbox.fetch(host, id, version, pic) }
-            val got = Inbox.pictures[k]
-            val m = v.pictures.orEmpty().firstOrNull { it.name == pic }
-            val ratio = got?.let { it.bitmap.height.toFloat() / it.bitmap.width }
-                ?: m?.let { p -> p.width?.toFloat()?.takeIf { it > 0 }?.let { w -> p.height?.toFloat()?.takeIf { it > 0 }?.div(w) } } ?: 1f
-            val box = Modifier.width(PICTURE_BUTTON).height(PICTURE_BUTTON * ratio).clip(RoundedCornerShape(6.dp))
-            if (got != null) Image(got.bitmap, null, contentScale = ContentScale.FillBounds, modifier = box)
-            else Box(box.background(c.raised))
-            Text(b.label.orEmpty(), style = Type.caption.copy(fontWeight = FontWeight.Bold), color = text, textAlign = TextAlign.Center)
+    val width = if (wide) Modifier.fillMaxWidth() else Modifier
+    Box(width.then(ring).alpha(if (enabled) 1f else 0.4f)) {
+        Box(width.clip(shape).background(fill)
+            .clickable(enabled = enabled, onClick = onClick).padding(horizontal = 14.dp, vertical = 8.dp), contentAlignment = Alignment.Center) {
+            Text(b.label.orEmpty(), style = Type.bold, color = text, textAlign = TextAlign.Center)
         }
     }
 }
 
-private val PICTURE_BUTTON = 80.dp
+/** A picture button, as wide as it's given: its picture (a tap opens it in the large view, with the ask's other
+ * pictures either side; a magnifier in its corner says so) over the button with its label, which presses it. */
+@Composable
+private fun PictureButton(host: String, id: String, version: Int, v: Msg.InboxVersion, b: Msg.InboxButton, enabled: Boolean,
+                          suggested: Boolean, modifier: Modifier, onClick: () -> Unit) {
+    val c = LocalBaude.current
+    val pic = b.picture.orEmpty()
+    val k = "${Inbox.key(host, id)}/$version/$pic"
+    LaunchedEffect(k) { Inbox.fetch(host, id, version, pic) }
+    val got = Inbox.pictures[k]
+    val m = v.pictures.orEmpty().firstOrNull { it.name == pic }
+    val ratio = (got?.let { it.bitmap.height.toFloat() / it.bitmap.width }
+        ?: m?.let { p -> p.width?.toFloat()?.takeIf { it > 0 }?.let { w -> p.height?.toFloat()?.takeIf { it > 0 }?.div(w) } } ?: 1f)
+        .coerceIn(0.2f, PICTURE_TALL)
+    val frameShape = RoundedCornerShape(12.dp)
+    Column(modifier, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        val frame = Modifier.fillMaxWidth().aspectRatio(1f / ratio).clip(frameShape).background(c.raised)
+            .border(1.dp, c.fg.copy(alpha = 0.12f), frameShape)
+        if (got == null) Box(frame)
+        else ImageTouch("ask:$k") {
+            Box(frame) {
+                Image(got.bitmap, b.label.orEmpty().ifBlank { Wording.Inbox.picture }, contentScale = ContentScale.Fit,
+                    modifier = Modifier.fillMaxSize())
+                Box(Modifier.align(Alignment.TopEnd).padding(6.dp).clip(CircleShape).background(Color.Black.copy(alpha = 0.55f))
+                    .padding(4.dp)) {
+                    Icon(Adwaita.SystemSearch, null, tint = Color.White, modifier = Modifier.size(14.dp))
+                }
+            }
+        }
+        AskButton(b, enabled = enabled, suggested = suggested, wide = true, onClick = onClick)
+    }
+}
+
+private val PICTURE_BUTTON = 150.dp // (a picture button, at least, wide: as many to a row as fit, PICTURE_ROW at most)
+private const val PICTURE_ROW = 2
+private val PICTURE_GAP = 10.dp
+private const val PICTURE_TALL = 1.25f // (a picture button's picture, at most, this many times as tall as it's wide)
 
 /** Route to…: a flat menu button; its menu "Have a model answer" (the ask's host's models, as the model picker lists
  * them) and "Send to a Bot" (that host's Bots, with their pictures). */

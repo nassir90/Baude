@@ -101,6 +101,20 @@
       },
       "description": "What the host lacks of a provider's program, by provider (codex: its Codex CLI, as deps says it); a provider that's there isn't in it. Shown in place of Add account."
     },
+    "disabled": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "The subscriptions disabled on the host, by usage key (an account's id, \"\" for Claude's CLI's own sign-in, \"codex\" for Codex's): their chats can't send."
+    },
+    "auto_disable": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "The subscriptions whose auto-disable is on, by usage key: disabled as they're exhausted."
+    },
     "last_usage": {
       "type": "object",
       "additionalProperties": {

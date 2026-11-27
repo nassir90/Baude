@@ -525,13 +525,22 @@ class Tasks:
         self.checked = None  # (when every task's bound variables were last looked at: monotonic; None, never)
 
     # ---- kept
+    def moved(self, s, folder):
+        """(server's lock held) s's Bot's folder moved: its Store, if it's open, goes on in folder (its tasks/)."""
+        with self.lock:
+            st = self.stores.get(s.id)
+            if st is not None:
+                for key in [k for k in self.warned if k[0] == st.folder]:
+                    self.warned[(folder, key[1])] = self.warned.pop(key)
+                st.folder = folder
+
     def store(self, s):
         """(server's lock held) s's Store, its routines moved over first if it has any."""
         from baudelib.serverstate import bot_dir
         with self.lock:
             st = self.stores.get(s.id)
             if st is None:
-                st = self.stores[s.id] = Store(os.path.join(bot_dir(self.server.state_dir, s.id), "tasks"))
+                st = self.stores[s.id] = Store(os.path.join(bot_dir(self.server.state_dir, s.meta), "tasks"))
             if s.meta.get("routines"):
                 for r in s.meta["routines"]:
                     if not isinstance(r, dict):
@@ -1111,7 +1120,7 @@ class Tasks:
                 break
             reminded = True  # (its turn ended without the tool: told once more, then it's failed)
             wait["done"].clear()
-            said = wording.say("tasks.answer_reminder", run=rid) + "\n\n" + form_said(form)
+            said = wording.say("tasks.answer_reminder", run=rid)
             wait["said"] = str(uuid.uuid4())  # (a message of its own: its from line says the run waits on it)
         if tool and not wait["answered"] and not wait["failed"]:
             wait["text"], wait["failed"] = wording.say("tasks.answer_refused", wrong=wait["refused"]) \

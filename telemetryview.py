@@ -13,7 +13,8 @@ import weakref
 
 from gi.repository import Adw, GLib, Gtk
 
-from baudelib import lineprofile, providers, wording
+from baudelib import errorbook, lineprofile, providers, wire, wording
+import uitrack
 import widgets
 
 PROFILE_S = 30  # (how often what's profiled here is told)
@@ -81,6 +82,8 @@ class Recorder:
         self.sent_at = {}  # (a chat: when its turn was sent here)
         self.profiler, self.profile_timer, self.told_error = lineprofile.Profiler(name), None, None
         self.away_timer = None  # (looking at whether anyone's at the chat in front, while it's on)
+        self.errors_due, self.known = False, False  # (this process's errors to be told in a moment; whether its
+        # host's telemetry is known: errors before it held, not dropped)
         network.listen(self.heard)
         app.connect("shutdown", lambda *_: self.quit())
         self.heard()
@@ -107,17 +110,20 @@ class Recorder:
         if here is None:
             return
         self.host_id = here.info.get("id") or self.host_id
+        self.known = True
         t = here.info.get("telemetry") or {}
         on, pid = bool(t.get("on")), here.info.get("pid")
         if on != self.on:
             self.on = on
             if on:
                 self.hello()
+                self.errors_soon()
                 for win in list(self.windows):
                     self.look(win)
                 self.away_timer = GLib.timeout_add_seconds(AWAY_LOOK_S, self.look_away)
             else:
                 self.queue.clear()
+                errorbook.BOOK.take()
                 self.opened.clear()
                 self.front, self.sent_at = None, {}
                 if self.away_timer is not None:
@@ -211,6 +217,22 @@ class Recorder:
                                                               "cache_creation_input_tokens")),
                    tokens_out=int(u.get("output_tokens") or 0))
 
+    def errors_soon(self):
+        """(any thread) This process has an error: told in a moment, with any meanwhile."""
+        if not self.errors_due:
+            self.errors_due = True
+            GLib.timeout_add(1000, self.tell_errors)
+
+    def tell_errors(self):
+        self.errors_due = False
+        if not self.on:
+            if self.known:
+                errorbook.BOOK.take()
+        elif not self.sending:
+            self.sending = True
+            self.tell()
+        return False
+
     def event(self, kind, chat, **more):
         e = {"at": round(time.time(), 3), "kind": kind, "host": chat[0], "session": chat[1],
              **{k: v for k, v in more.items() if v is not None}}
@@ -226,22 +248,25 @@ class Recorder:
 
     def tell(self):
         events, self.queue = self.queue, []
-        if not events:
+        errors = errorbook.BOOK.take()
+        if not events and not errors:
             self.sending = False
             return False
 
         def done(ok):
             if not ok:  # (kept, for when the host's there)
                 self.queue = (events + self.queue)[-QUEUE_MAX:]
+                errorbook.BOOK.give_back(errors)
             self.sending = False
             if ok and self.queue:
                 self.sending = True
                 GLib.idle_add(self.tell)
-        self.send({"events": events}, done)
+        self.send({"events": events, **({"errors": errors} if errors else {})}, done)
         return False
 
     def send(self, more, done, wait=False):
-        msg = {"op": "telemetry", "app": self.name, "pid": os.getpid(), **more}
+        msg = {"op": "telemetry", "app": self.name, "pid": os.getpid(), "commit": (wire.HEAD_COMMIT or "")[:12] or None,
+               "wire": wire.VERSION, **more}
         if self.profiler.error != self.told_error:
             msg["profile_error"] = self.told_error = self.profiler.error
         here = self.network.here_alive()
@@ -272,9 +297,11 @@ class Recorder:
             self.look(win, gone=True)
         last = self.profiler.set([])
         events, self.queue = self.queue, []
-        if self.on and (events or last):
+        errors = errorbook.BOOK.take()
+        if self.on and (events or last or errors):
             try:
-                self.send({"events": events, **({"profile": last} if last else {})}, lambda _ok: None, wait=True)
+                self.send({"events": events, **({"profile": last} if last else {}),
+                           **({"errors": errors} if errors else {})}, lambda _ok: None, wait=True)
             except (OSError, ValueError):
                 pass
 
@@ -283,6 +310,7 @@ def watch(win, name, network):
     """win's chats told to this machine's host (name: the app's, "baude" or "record"; network: its hosts)."""
     if not _RECORDER:
         _RECORDER.append(Recorder(win.get_application(), name, network))
+        uitrack.install(name, _RECORDER[0].errors_soon)
     _RECORDER[0].watch(win)
 
 

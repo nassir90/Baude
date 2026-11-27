@@ -75,6 +75,20 @@
         "null"
       ],
       "description": "A turn_ended's: the tokens it wrote."
+    },
+    "commit": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "The commit the app that saw it runs (its first 12 characters), as it started."
+    },
+    "wire": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "description": "The wire's version the app that saw it speaks."
     }
   },
   "required": [

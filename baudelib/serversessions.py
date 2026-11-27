@@ -11,7 +11,7 @@ import time
 import uuid
 
 from baudelib import (
-    accounts, agentproxy, autofix, chattools, claude, codex, emissiontools, meshtools, models, multiplextools, notes, transcripts, wire, wording,
+    accounts, agentproxy, autofix, chattools, claude, codex, emissiontools, errorbook, meshtools, models, multiplextools, notes, transcripts, wire, wording,
     deps, desktopchats, hostlogin, hostqueue, hostresume, toolnames, worktree,
 )
 from baudelib.serverstate import (
@@ -991,6 +991,11 @@ class ServerSessions:
             if not self.stopped.is_set():
                 self.drop_waits(s)
                 self.account_after(s)  # (an account picked at a turn it ended with: taken now)
+            if code not in (0, None) and not getattr(made[0], "restarting", False) and not getattr(
+                    made[0], "stopping", False) and not self.stopped.is_set():  # (gone by itself: an error of its)
+                program = models.model_program(s.meta.get("model")) or "claude"
+                self.telemetry.note(errorbook.of_note("agent_exit", program, wording.say(
+                    "host_errors.claude_exited", code=code), key=f"{program}:{code}", code=code))
             if not getattr(made[0], "restarting", False) and not self.stopped.is_set():  # (the host stopping: said
                 # as that, said_quitting)
                 stopped = {"stopped": True} if getattr(made[0], "stopping", False) else {}  # (told to: op stop)

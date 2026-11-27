@@ -17,7 +17,7 @@ import threading
 import time
 import urllib.parse
 
-from baudelib import claude, mesh, selfupdate, toolnames, wire, wording
+from baudelib import claude, errorbook, mesh, selfupdate, toolnames, wire, wording
 
 FORGET_S = 7 * 86400
 RETRY_S = (1, 2, 5, 10, 30)  # a dead host is tried again after these, then every last one
@@ -115,6 +115,18 @@ def stopping_line(name, restart, left, total):
     return wording.say("host_status.restarting", host=name) if restart else \
         wording.say("host_status.stopping", host=name)
 
+
+
+FAILS = {"input": "send", "start": "send", "held": "send", "queue": "send", "draft_save": "draft_save"}  # (the
+# requests whose error is an error of the user's: a message not sent, a draft not saved)
+
+
+def _noting(kind, op, reply):
+    def noted(r):
+        if r.get("op") == "error":
+            errorbook.note(kind, op, r.get("error") or "", key=r.get("code"), wire_op=op, code=r.get("code"))
+        reply(r)
+    return noted
 
 class Remote:
     """One host: where it is (where: wire.reach's), its info (as hello says), its sessions (as it lists them), and
@@ -306,8 +318,11 @@ class Remote:
 
     def request(self, msg, done=None):
         """Send a request; done(reply) through dispatch (an error reply if the server isn't there, or the schema's
-        refusal of it, at once, if it isn't one the schema has)."""
+        refusal of it, at once, if it isn't one the schema has). A message not sent, or a draft not saved, kept as
+        an error of this process's (errorbook's)."""
         reply = (lambda r: self.network.dispatch(lambda: done(r))) if done else (lambda r: None)
+        if (kind := FAILS.get(msg.get("op"))) is not None:
+            reply = _noting(kind, msg["op"], reply)
         with self.lock:
             ch = self.ch
             req = next(self.reqs)

@@ -3,6 +3,10 @@
   "type": "object",
   "description": "One version of an ask: as its task raised it, or as it (or its Bot) put it anew.",
   "properties": {
+    "n": {
+      "type": "integer",
+      "description": "Its number among the ask's versions, from 1, kept as older ones go."
+    },
     "at": {
       "type": "number",
       "description": "When it came (seconds since the epoch)."

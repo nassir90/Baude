@@ -104,10 +104,8 @@ object MetaTools {
         tool("unarchive_chats", "Bring archived chats back to the list.", listOf("chats"), JSONObject().put("chats", strs())),
         tool("delete_chats", "Delete chats of this machine's own: their transcripts go to Baude's trash, and undo brings " +
             "them back. Not a host's session, nor the chat open.", listOf("chats"), JSONObject().put("chats", strs())),
-        tool("read_ask", "The ask open in the Inbox (or last opened): its task's body, buttons (by index), form fields and " +
-            "their values now, its task, run log and the asking Bot's latest messages.", emptyList(), JSONObject()),
-        tool("fill_ask", "Fill fields of the ask open in the Inbox for the person to check: values {field: value}. It never " +
-            "presses a button; returns what didn't fit.", listOf("values"), JSONObject().put("values", obj())),
+        tool("read_ask", Wording.Inbox.readAskTool, emptyList(), JSONObject()),
+        tool("fill_ask", Wording.Inbox.fillAskTool, listOf("values"), JSONObject().put("values", obj())),
     ))
 
     /** A JSON-RPC line from Meta's claude: its answer, to then (null for a notification). */

@@ -1036,6 +1036,18 @@ abstract class Screens(private val theme: String) {
         dev.baude.android.InboxScreen({}, { _, _ -> }, { _, _ -> })
     }
 
+    @Test fun inboxAskedAgainAfterReconnect() {
+        val asked = ArrayList<String>()
+        val c = FixtureConnection(activity, Mesh.hosts.first()) { m -> asked.add(m.optString("op")); null }
+        dev.baude.android.Inbox.clear()
+        dev.baude.android.Inbox.listed(c)
+        dev.baude.android.Inbox.listed(c)
+        check(asked == listOf("inbox")) { "$asked" }
+        dev.baude.android.Inbox.down(c)
+        dev.baude.android.Inbox.listed(c)
+        check(asked == listOf("inbox", "inbox")) { "$asked" }
+    }
+
     /** workshop's Bots Juniper and Fern (Fern at a turn), "Fix the flaky upload" asking to run Bash, and five asks of
      * their tasks (the desktop's example asks: a deploy with its home page, a review with a note to write, three logos to
      * pick, a morning digest and a limit's six coloured buttons and its form); stopped: the deploy one's task gone;

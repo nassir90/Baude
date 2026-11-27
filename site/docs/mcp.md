@@ -148,7 +148,7 @@ Answer an ask of one of your tasks' runs whose message says to answer with this 
 
 ### `answer_ask`
 
-Answer an ask in a person's Inbox whose message says to answer with this tool (mcp__mesh__answer_ask): press one of its buttons, by its index, with its form's values. It takes effect at once: its task is told, and the ask leaves every Inbox. A wrong answer is refused with what's wrong: call it again.
+Answer an ask in a person's Inbox whose message says to answer with this tool (mcp__mesh__answer_ask): press one of its buttons, by its index, with its form's values. An ask sent to you is answered at once: its task is told, and the ask leaves every Inbox. One of your own task's is only proposed: the person sees your answer and confirms it. A wrong answer is refused with what's wrong: call it again.
 
 | Field | Type | Required | What it is |
 |---|---|---|---|
@@ -730,7 +730,7 @@ One of an ask's pictures, its bytes.
 
 #### `inbox_press` (InboxPress)
 
-A button of a waiting ask pressed, with its form's values: its task told (inbox_wait), and the ask out of every Inbox. A person's (a head's), or a Bot's (its answer_ask tool: as: its own session id, the ask sent it or its own task's).
+A button of a waiting ask pressed, with its form's values: its task told (inbox_wait), and the ask out of every Inbox. A person's (a head's), or a Bot's (its answer_ask tool: as: its own session id): one of an ask sent to that Bot answers it, one of the Bot's own task's is a proposal for the person to confirm.
 
 | Field | Type | Required | What it is |
 |---|---|---|---|
@@ -738,6 +738,7 @@ A button of a waiting ask pressed, with its form's values: its task told (inbox_
 | `button` | integer | yes | The button's index. |
 | `values` | object/null |  | The form's values, by its fields' names. |
 | `as` | string/null |  | A Bot answering it: its own session id. |
+| `version` | integer/null |  | The version (its n) it was pressed on: refused if the ask has a newer one. |
 
 #### `inbox_raise` (InboxRaise)
 
@@ -763,7 +764,7 @@ A stopped ask taken out of every Inbox (and off the host).
 
 #### `inbox_revise` (InboxRevise)
 
-A new version of a waiting ask: its task's script's (run, token), or the asking Bot's (its own tools, sent a message from the ask's box). Fields left out are the last version's.
+A new version of a waiting ask: its task's script's (run, token), or the asking Bot's (its own tools, sent a message from the ask's box). A script's on an ask that's been pressed opens it again, waiting. Fields left out are the last version's.
 
 | Field | Type | Required | What it is |
 |---|---|---|---|
@@ -3225,12 +3226,12 @@ A picture given with an ask (inbox_raise, inbox_revise): its bytes.
 
 #### InboxProposal
 
-A model's answer to an ask (Route to → Have a model answer): shown for the person to confirm or change, taking effect only as they press a button.
+A model's, or the asking Bot's, answer to an ask (Route to → Have a model answer; a Bot's answer_ask after the person wrote to it): shown for the person to confirm or change, taking effect only as they press a button.
 
 | Field | Type | Required | What it is |
 |---|---|---|---|
-| `model` | string | yes | The model's value. |
-| `name` | string | yes | The model, as it's named. |
+| `model` | string | yes | The model's value (a Bot's: its name). |
+| `name` | string | yes | The model or Bot, as it's named. |
 | `status` | `answering` \| `ready` \| `failed` | yes | answering: it's being asked; ready: its answer's here; failed: it couldn't answer (text: why). |
 | `button` | integer/null |  | The button it would press (its index), once it's answered. |
 | `values` | object/null |  | The form's values as it would fill them. |
@@ -3242,6 +3243,7 @@ One version of an ask: as its task raised it, or as it (or its Bot) put it anew.
 
 | Field | Type | Required | What it is |
 |---|---|---|---|
+| `n` | integer |  | Its number among the ask's versions, from 1, kept as older ones go. |
 | `at` | number | yes | When it came (seconds since the epoch). |
 | `by` | string/null |  | A Bot's name, if a Bot put it; none: the task. |
 | `title` | string/null |  | What it's called in the Inbox's list. |
@@ -4245,6 +4247,6 @@ Somewhere wire.reach can go: this machine's host process, one listening on anoth
 | `TERMINAL_KEEP_S` | `600` | A terminal (terminal op) no connection is attached to now: its program kept running this long to be attached to again, in seconds. |
 | `TERMINAL_KEPT_BYTES` | `262144` | What a terminal (terminal op) wrote lately, kept to show again on attach: this many bytes at most. |
 | `TTL` | `16` | A tunnel's passed through at most this many hosts (open's ttl). |
-| `VERSION` | `40` | The wire's version, as a host's hello says it. |
+| `VERSION` | `39` | The wire's version, as a host's hello says it. |
 | `ZOOM_MAX` | `1568` | A browser zoom's longest side, in pixels. |
 | `ZOOM_QUALITY` | `90` | A browser zoom's JPEG quality. |

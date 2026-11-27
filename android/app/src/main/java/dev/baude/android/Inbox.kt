@@ -80,7 +80,7 @@ class AskPicture(val bitmap: ImageBitmap, val bytes: ByteArray)
  * opened), which Meta reads and fills (MetaTools' read_ask, fill_ask). Compose's state, changed on the main thread. */
 object Inbox {
     val asks = mutableStateMapOf<String, List<Msg.InboxAsk>>() // (a connection's id: its host's asks, waiting or stopped)
-    private val asked = java.util.WeakHashMap<Connection, Boolean>() // (the links asked for their asks: once each)
+    private val asked = java.util.Collections.synchronizedMap(java.util.WeakHashMap<Connection, Boolean>()) // (the links asked for their asks: once each time one's up)
     private val forms = HashMap<String, SnapshotStateMap<String, Any>>() // ("host/ask": its form's values, text or on/off)
     val pictures = mutableStateMapOf<String, AskPicture>() // ("host/ask/version/name")
     private val fetching = HashSet<String>()
@@ -109,6 +109,12 @@ object Inbox {
                 else asks[id] = Msg.InboxReply.from(r).asks.orEmpty().filter(::kept)
             }
         }
+    }
+
+    /** (a link went down) Its asks asked for again once it's up: it comes back as the same connection, and what changed
+     * while it was away isn't told. */
+    fun down(c: Connection) {
+        asked.remove(c)
     }
 
     /** An ask as its host says it is now: answered, withdrawn or removed, out; else put in (or in its place). A model's
@@ -186,6 +192,19 @@ object Inbox {
         return wrong
     }
 
+    /** A picture's bytes drawn no bigger than the display needs (its sides halved while both stay over it), so a huge
+     * one can't run the app out of memory; null if they aren't a picture. */
+    fun decoded(bytes: ByteArray): android.graphics.Bitmap? {
+        val o = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, o)
+        if (o.outWidth <= 0 || o.outHeight <= 0) return null
+        val screen = android.content.res.Resources.getSystem().displayMetrics
+        val px = maxOf(screen.widthPixels, screen.heightPixels)
+        var sample = 1
+        while (minOf(o.outWidth, o.outHeight) / (sample * 2) >= px) sample *= 2
+        return BitmapFactory.decodeByteArray(bytes, 0, bytes.size, BitmapFactory.Options().apply { inSampleSize = sample })
+    }
+
     /** One of an ask's pictures, fetched once (inbox_picture) and kept. */
     fun fetch(host: String, id: String, version: Int, name: String) {
         val k = "${key(host, id)}/$version/$name"
@@ -195,7 +214,7 @@ object Inbox {
             fetching.remove(k)
             val bytes = if (r.optString("op") != Op.INBOX_PICTURE_DATA) null
                 else try { Base64.getDecoder().decode(Msg.InboxPictureReply.from(r).data.orEmpty()) } catch (_: Exception) { null }
-            val bmp = bytes?.let { BitmapFactory.decodeByteArray(it, 0, it.size) }
+            val bmp = bytes?.let(::decoded)
             if (bytes == null || bmp == null) failed[k] = true else pictures[k] = AskPicture(bmp.asImageBitmap(), bytes)
         }
     }
@@ -502,7 +521,7 @@ private fun AskView(host: String, a: Msg.InboxAsk, inList: Boolean, under: Color
             itemVerticalAlignment = Alignment.CenterVertically) {
             v.buttons.orEmpty().forEachIndexed { i, b ->
                 AskButton(host, id, at + 1, v, b, enabled = live, suggested = live && suggested == i) {
-                    Mesh.ask(host, Msg.InboxPress(ask = id, button = i, values = Inbox.sent(v, values)).json()) { r ->
+                    Mesh.ask(host, Msg.InboxPress(ask = id, button = i, version = v.n, values = Inbox.sent(v, values)).json()) { r ->
                         refused(r)?.let(::toast) ?: answered()
                     }
                 }

@@ -57,10 +57,7 @@ a host's sessions) to Baude's trash, where undo finds them; a host's session you
 the list is grouped (by folder, by the day each chat was made, or by the day it was last used) is the setting \
 group_by.
 
-Inbox: tasks ask the user things there (a deploy to approve, a choice to make), each ask a message with a form and the \
-task's buttons. read_ask reads the ask the user has selected (its body, buttons, form and the values in it now, its \
-task's run log and its Bot's chat); fill_ask fills its form for them to check. Pressing a button answers it: that's \
-always the user's to do, never yours."""
+""" + wording.say("inbox.meta_prompt")
 
 BAUDE_TOOLS = [
     {"name": "highlight_chats", "description": "Highlight chats in the left bar, changing nothing, to show the user "
@@ -87,12 +84,9 @@ BAUDE_TOOLS = [
     {"name": "unarchive_chats", "description": "Bring archived chats back to the list.",
      "inputSchema": {"type": "object", "required": ["chats"], "properties": {
          "chats": {"type": "array", "items": {"type": "string"}}}}},
-    {"name": "read_ask", "description": "The ask the user has selected in the Inbox (its tab, or the one last touched in "
-     "the list): its body, buttons (by index), form fields and the values in them now, its task, the end of its run's "
-     "log and of its Bot's chat.",
+    {"name": "read_ask", "description": wording.say("inbox.read_ask_tool"),
      "inputSchema": {"type": "object", "properties": {}}},
-    {"name": "fill_ask", "description": "Fill fields of the selected ask's form for the user to check: values "
-     "{field: value}. It never presses a button (that answers the ask: the user's to do). Returns what didn't fit.",
+    {"name": "fill_ask", "description": wording.say("inbox.fill_ask_tool"),
      "inputSchema": {"type": "object", "required": ["values"], "properties": {"values": {"type": "object"}}}},
     {"name": "delete_chats", "description": "Delete chats of this machine's own: their transcripts go to Baude's "
      "trash, and undo brings them back. Not a host's session, nor the chat open.",

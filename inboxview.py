@@ -619,7 +619,8 @@ class AskView(Gtk.Box):
     def press(self, i):
         if not self.live():
             return
-        self.request({"op": "inbox_press", "ask": self.ask["id"], "button": i, "values": self.values()})
+        self.request({"op": "inbox_press", "ask": self.ask["id"], "button": i, "values": self.values(),
+                      "version": self.ask["versions"][self.shown_n - 1].get("n")})
 
 
 class AskCard(Gtk.Box):

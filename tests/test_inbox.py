@@ -68,6 +68,15 @@ except task.Unanswered as e:
     task.say("[withdrawn]", e.status)
 ''' % SHOT
 
+AGAIN = r'''import baudetask as task
+asked = task.inbox("Which logo?", ["A", "None, try again"])
+first = asked.wait()
+task.say("[first]", first["label"])
+asked.revise(body="Another round", buttons=["B", "C"])
+second = asked.wait()
+task.say("[second]", second["label"])
+'''
+
 LEFT = r'''import baudetask as task
 asked = task.inbox("Morning digest", ["Dismiss"])
 task.say("[left]", asked.id)
@@ -157,13 +166,32 @@ def main():
     print(f"  sent to Fern: {head.ask({'op': 'inbox_route', 'ask': ask['id'], 'bot': fern})['op']}", flush=True)
     print(f"  written to the Bot: {head.ask({'op': 'inbox_say', 'ask': ask['id'], 'text': 'Is staging up?'})['op']}",
           flush=True)
+    mine = head.ask({"op": "inbox_press", "ask": ask["id"], "button": 1, "as": sid})  # (the asking Bot's: a proposal)
+    assert mine["op"] == "inbox_done", mine
+    now = next(a for a in asks(head) if a["id"] == ask["id"])
+    assert now["status"] == "waiting" and now["proposal"]["status"] == "ready" and now["proposal"]["button"] == 1, now
+    print(f"  the Bot's answer: a proposal ({now['proposal']['name']})", flush=True)
+    assert head.ask({"op": "inbox_revise", "ask": ask["id"], "body": "Staging has run **2.6**."})["op"] != "error"
+    old = head.ask({"op": "inbox_press", "ask": ask["id"], "button": 0, "version": 1})
+    assert old["op"] == "error", old
+    print(f"  a press on an old version: {wire.said(old)}", flush=True)
     bad = head.ask({"op": "inbox_press", "ask": ask["id"], "button": 9})
     print(f"  a button it hasn't: {wire.said(bad)}", flush=True)
-    got = head.ask({"op": "inbox_press", "ask": ask["id"], "button": 0, "values": {"note": "ship it", "cap": "25"}})
+    got = head.ask({"op": "inbox_press", "ask": ask["id"], "button": 0, "version": 2,
+                    "values": {"note": "ship it", "cap": "25"}})
     assert got["op"] == "inbox_done", got
     run = ended(head, sid, rid)
     assert run["run"]["status"] == "done", run["run"]
     assert not any(a["id"] == ask["id"] for a in asks(head))
+
+    rid = start(head, sid, "Logo again", AGAIN)
+    again = wait(lambda: next((a for a in asks(head) if a["run"] == rid), None), "the ask listed")
+    assert head.ask({"op": "inbox_press", "ask": again["id"], "button": 1, "version": 1})["op"] == "inbox_done"
+    reopened = wait(lambda: next((a for a in asks(head) if a["id"] == again["id"] and len(a["versions"]) == 2
+                                  and a["status"] == "waiting" and a["answer"] is None), None), "the ask reopened")
+    print(f"  pressed, then revised: waiting again with {len(reopened['versions'])} versions", flush=True)
+    assert head.ask({"op": "inbox_press", "ask": again["id"], "button": 0, "version": 2})["op"] == "inbox_done"
+    assert ended(head, sid, rid)["run"]["status"] == "done"
 
     rid = start(head, sid, "Kestrel logo", WITHDRAWN)
     assert ended(head, sid, rid)["run"]["status"] == "done"

@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
-  "description": "A button of a waiting ask pressed, with its form's values: its task told (inbox_wait), and the ask out of every Inbox. A person's (a head's), or a Bot's (its answer_ask tool: as: its own session id, the ask sent it or its own task's).",
+  "description": "A button of a waiting ask pressed, with its form's values: its task told (inbox_wait), and the ask out of every Inbox. A person's (a head's), or a Bot's (its answer_ask tool: as: its own session id): one of an ask sent to that Bot answers it, one of the Bot's own task's is a proposal for the person to confirm.",
   "properties": {
     "op": {
       "const": "inbox_press",
@@ -35,6 +35,13 @@
         "null"
       ],
       "description": "A Bot answering it: its own session id."
+    },
+    "version": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "description": "The version (its n) it was pressed on: refused if the ask has a newer one."
     }
   },
   "required": [

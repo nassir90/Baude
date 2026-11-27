@@ -130,9 +130,10 @@ SCHEMAS = {
                                                                  "true or false, or one of a choice's choices"},
                      "text": {"type": "string", "description": "The answer to an ask with no form"}}, ["run"]),
     "answer_ask": ("Answer an ask in a person's Inbox whose message says to answer with this tool "
-                   "(mcp__mesh__answer_ask): press one of its buttons, by its index, with its form's values. It takes "
-                   "effect at once: its task is told, and the ask leaves every Inbox. A wrong answer is refused with "
-                   "what's wrong: call it again.",
+                   "(mcp__mesh__answer_ask): press one of its buttons, by its index, with its form's values. An ask "
+                   "sent to you is answered at once: its task is told, and the ask leaves every Inbox. One of your own "
+                   "task's is only proposed: the person sees your answer and confirms it. A wrong answer is refused "
+                   "with what's wrong: call it again.",
                    {"ask": {"type": "string", "description": "The ask's id (its message says it)"},
                     "button": {"type": "integer", "description": "The button's index (its message lists them)"},
                     "values": {"type": "object", "description": "The form's fields, by name: each a text, number, "
@@ -573,7 +574,7 @@ class Mesh:
     def answer_ask(self, a):
         self.request(self.local, {"op": "inbox_press", "ask": a["ask"], "button": a["button"],
                                   "values": a.get("values") or {}, "as": self.me})
-        return {"ask": a["ask"], "answered": True}
+        return {"ask": a["ask"]}
 
     def revise_ask(self, a):
         got = self.request(self.local, {"op": "inbox_revise", "ask": a["ask"],

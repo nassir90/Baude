@@ -686,11 +686,11 @@ class InboxPictureData(Obj):
 
 
 class InboxProposal(Obj):
-    """A model's answer to an ask (Route to → Have a model answer): shown for the person to confirm or change, taking
-    effect only as they press a button.
+    """A model's, or the asking Bot's, answer to an ask (Route to → Have a model answer; a Bot's answer_ask after the
+    person wrote to it): shown for the person to confirm or change, taking effect only as they press a button.
 
-        model (string): The model's value.
-        name (string): The model, as it's named.
+        model (string): The model's value (a Bot's: its name).
+        name (string): The model or Bot, as it's named.
         status ('answering' | 'ready' | 'failed'): answering: it's being asked; ready: its answer's here;
             failed: it couldn't answer (text: why).
         button (integer or None): The button it would press (its index), once it's answered.
@@ -702,6 +702,7 @@ class InboxProposal(Obj):
 class InboxVersion(Obj):
     """One version of an ask: as its task raised it, or as it (or its Bot) put it anew.
 
+        n (integer): Its number among the ask's versions, from 1, kept as older ones go.
         at (number): When it came (seconds since the epoch).
         by (string or None): A Bot's name, if a Bot put it; none: the task.
         title (string or None): What it's called in the Inbox's list.
@@ -4082,17 +4083,21 @@ class Ops(Area):
         """
         return self._call("inbox_picture", {"ask": ask, "version": version, "name": name}, host, Obj)
 
-    def inbox_press(self, *, ask=None, button=None, values=None, as_=None, host=None):
+    def inbox_press(self, *, ask=None, button=None, values=None, as_=None, version=None, host=None):
         """inbox_press (InboxPress): A button of a waiting ask pressed, with its form's values: its task told
         (inbox_wait), and the ask out of every Inbox. A person's (a head's), or a Bot's (its answer_ask tool: as:
-        its own session id, the ask sent it or its own task's).
+        its own session id): one of an ask sent to that Bot answers it, one of the Bot's own task's is a proposal
+        for the person to confirm.
 
             ask (string): The ask's id.
             button (integer): The button's index.
             values (object or None): The form's values, by its fields' names.
             as (string or None): A Bot answering it: its own session id.
+            version (integer or None): The version (its n) it was pressed on: refused if the ask has a newer
+                one.
         """
-        return self._call("inbox_press", {"ask": ask, "button": button, "values": values, "as": as_}, host, Obj)
+        return self._call("inbox_press", {"ask": ask, "button": button, "values": values, "as": as_,
+                                          "version": version}, host, Obj)
 
     def inbox_raise(self, *, run=None, token=None, title=None, body=None, pictures=None, buttons=None, form=None,
                     host=None):
@@ -4124,7 +4129,8 @@ class Ops(Area):
     def inbox_revise(self, *, ask=None, run=None, token=None, title=None, body=None, pictures=None, buttons=None,
                      form=None, host=None):
         """inbox_revise (InboxRevise): A new version of a waiting ask: its task's script's (run, token), or the asking
-        Bot's (its own tools, sent a message from the ask's box). Fields left out are the last version's.
+        Bot's (its own tools, sent a message from the ask's box). A script's on an ask that's been pressed opens it
+        again, waiting. Fields left out are the last version's.
 
             ask (string): The ask's id.
             run (string or None): The asking run's id: a script's.

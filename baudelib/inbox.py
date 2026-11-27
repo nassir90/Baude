@@ -4,8 +4,9 @@ may manage the asking Bot is told it, and told again as it changes (inbox_change
 ask answered on one device leaves every Inbox. A person answers by pressing one of its buttons (inbox_press, the
 form's values with it), has a model of the host answer it for them to confirm (inbox_route model: its proposal), sends
 it to a Bot to answer (inbox_route bot: the Bot's answer_ask tool), or writes to the asking task's Bot (inbox_say),
-which may answer it or put a new version of it (revise_ask). The script waits for the answer, or polls it
-(inbox_wait), and may put a new version of it (inbox_revise) or withdraw it (inbox_withdraw).
+which may propose an answer (its answer_ask: for the person to confirm) or put a new version of it (revise_ask). The
+script waits for the answer, or polls it (inbox_wait), and may put a new version of it (inbox_revise: one that's been
+pressed is open again, waiting) or withdraw it (inbox_withdraw).
 
 Kept in the host's state folder, inbox/: asks.json (the asks), pictures/<sha256's first 16 hex> (each picture's bytes,
 once however many versions show it). Asks persist across the host's restarts: one waiting as the host stopped (or as
@@ -30,6 +31,7 @@ BUTTONS_MAX = 30
 LABEL_MAX = 200
 PICTURES_MAX = 24
 PICTURE_MAX = wire.CONSTANTS["IMAGE_BYTES_MAX"]  # (one picture's bytes, at most)
+FRESH_S = 120  # (seconds a picture just kept is safe from save() while its ask is made)
 VERSIONS_MAX = 50  # (an ask's versions kept: the oldest go, its first kept)
 TEXT_MAX = 20_000  # (what a person writes to the asking Bot)
 _NAME = re.compile(r"[A-Za-z0-9_][A-Za-z0-9_.-]{0,99}")
@@ -119,6 +121,7 @@ class Inbox:
         self.lock = threading.RLock()  # (taken after the server's lock, never before)
         self.cv = threading.Condition(self.lock)  # (an ask changed: inbox_wait's waits look again)
         self.folder = os.path.join(server.state_dir, "inbox")
+        self.fresh = {}  # (pictures just kept and not yet in an ask: sha: when, so save() leaves them)
         self.proposing = {}  # (the start_key of a model's session asked to answer an ask: that ask's id)
         kept = _read_json(os.path.join(self.folder, "asks.json")) or {}
         self.asks = {}
@@ -139,14 +142,16 @@ class Inbox:
         from baudelib.serverstate import _write_json
         with self.lock:
             _write_json(os.path.join(self.folder, "asks.json"), {"asks": list(self.asks.values())})
-            used = {p["sha"] for a in self.asks.values() for v in a["versions"] for p in v["pictures"]}
-        folder = os.path.join(self.folder, "pictures")
-        for n in os.listdir(folder) if os.path.isdir(folder) else ():
-            if n not in used:
-                try:
-                    os.unlink(os.path.join(folder, n))
-                except OSError:
-                    pass
+            now = time.monotonic()
+            self.fresh = {k: t for k, t in self.fresh.items() if now - t < FRESH_S}
+            used = {p["sha"] for a in self.asks.values() for v in a["versions"] for p in v["pictures"]} | set(self.fresh)
+            folder = os.path.join(self.folder, "pictures")
+            for n in os.listdir(folder) if os.path.isdir(folder) else ():
+                if n not in used:
+                    try:
+                        os.unlink(os.path.join(folder, n))
+                    except OSError:
+                        pass
 
     def _picture(self, p, at=None):
         """A picture given ({name, mime?, data}): its bytes kept, its listing ({name, mime, size, width, height,
@@ -165,11 +170,13 @@ class Inbox:
             raise ValueError(wording.say("inbox.bad_picture", name=name))
         sha = hashlib.sha256(data).hexdigest()[:16]
         path = os.path.join(self.folder, "pictures", sha)
-        if not os.path.exists(path):
-            os.makedirs(os.path.dirname(path), mode=0o700, exist_ok=True)
-            with open(path + ".tmp", "wb") as f:
-                f.write(data)
-            os.replace(path + ".tmp", path)
+        with self.lock:
+            self.fresh[sha] = time.monotonic()
+            if not os.path.exists(path):
+                os.makedirs(os.path.dirname(path), mode=0o700, exist_ok=True)
+                with open(path + ".tmp", "wb") as f:
+                    f.write(data)
+                os.replace(path + ".tmp", path)
         w, h = size_of(data, mime)
         return {"name": name, "mime": mime, "size": len(data), "width": w, "height": h, "sha": sha}
 
@@ -212,7 +219,7 @@ class Inbox:
         if not isinstance(form, list) or len(form) > FIELDS_MAX:
             raise ValueError(f"a form has {FIELDS_MAX} fields at most")
         form = [clean_field(f) for f in form]
-        return {"at": time.time(), "by": by, "title": " ".join(title.split())[:TITLE_MAX] if isinstance(title, str)
+        return {"n": (last.get("n") or 0) + 1 if last else 1, "at": time.time(), "by": by, "title": " ".join(title.split())[:TITLE_MAX] if isinstance(title, str)
                 and title.strip() else None, "body": body[:BODY_MAX], "pictures": pictures, "buttons": clean,
                 "form": form}
 
@@ -369,6 +376,8 @@ class Inbox:
             if ask["status"] != "waiting":
                 raise ValueError(wording.say("inbox.not_waiting"))
             v = ask["versions"][-1]
+            if msg.get("version") is not None and msg["version"] != v.get("n", len(ask["versions"])):
+                raise ValueError(wording.say("inbox.changed"))
             n = msg.get("button")
             if not isinstance(n, int) or isinstance(n, bool) or not 0 <= n < len(v["buttons"]):
                 raise ValueError(wording.say("inbox.no_button", n=str(n)))
@@ -378,13 +387,18 @@ class Inbox:
                 values, wrong = answered(given, v["form"])
                 if wrong:
                     raise ValueError(wrong)
-            ask.update(status="answered", proposal=None, sent_to=None, sent_to_name=None,
-                       answer={"button": n, "label": v["buttons"][n]["label"], "values": values, "by": by,
-                               "at": time.time()})
+            if by is not None and msg["as"] != ask.get("sent_to"):  # (the asking Bot's, after a person wrote to it:
+                ask["proposal"] = {"model": by, "name": by, "status": "ready", "button": n,  # a proposal, for the
+                                   "values": values, "text": None}  # person to confirm, as a model's is)
+                done = None
+            else:
+                done = ask["answer"] = {"button": n, "label": v["buttons"][n]["label"], "values": values, "by": by,
+                                        "at": time.time()}
+                ask.update(status="answered", proposal=None, sent_to=None, sent_to_name=None)
         self.save()
         st = self.server.tasks.stores.get(ask["session"])
-        if st is not None and ask["run"] in st.runs:
-            st.log(ask["run"], "answer", ask["answer"]["label"] + (" " + json.dumps(values) if values else ""),
+        if done is not None and st is not None and ask["run"] in st.runs:
+            st.log(ask["run"], "answer", done["label"] + (" " + json.dumps(values) if values else ""),
                    values=values or None)
         self.tell(ask)
         return {"ask": ask["id"]}
@@ -399,15 +413,15 @@ class Inbox:
             ask, s = self._find(conn, msg)
             by = ((s.meta.get("bot") or {}).get("name") if s is not None else None) or None
         with self.lock:
-            if ask["status"] != "waiting":
+            reopens = msg.get("run") is not None and ask["status"] == "answered"  # (its run asks again: one ask)
+            if ask["status"] != "waiting" and not reopens:
                 raise ValueError(wording.say("inbox.not_waiting"))
-        version = self.version(msg, ask["versions"][-1], by)
-        with self.lock:
+            version = self.version(msg, ask["versions"][-1], by)
             ask["versions"] = [*ask["versions"], version]
             if len(ask["versions"]) > VERSIONS_MAX:
                 ask["versions"] = ask["versions"][:1] + ask["versions"][-(VERSIONS_MAX - 1):]
-            ask["proposal"] = None  # (answered for the version before: asked again, if it's wanted)
-            n = len(ask["versions"])
+            ask.update(status="waiting", answer=None, proposal=None)  # (answered for the version before: asked again,
+            n = len(ask["versions"])  # if it's wanted)
         self.save()
         self.tell(ask)
         return {"ask": ask["id"], "version": n}

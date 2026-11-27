@@ -465,6 +465,7 @@ object Mesh {
         if (conns[c.id] !== c) return
         tick.value++
         if (c.state != "up") live.remove(c.id)
+        if (c.state == "down") Inbox.down(c)
         if (c.state != "up") main.postDelayed({ tick.value++ }, LEEWAY_MS + 100) // (said plainly once it's been gone
                                                                                  // that long)
         PhoneBrowser.changed(c)

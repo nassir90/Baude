@@ -81,7 +81,7 @@
         },
         {
           "by": "pick a Bot",
-          "does": "The ask is sent to that Bot, which answers it with its answer_ask tool (its answer takes effect); the ask stays, \"Sent to <Bot>\", till it does."
+          "does": "The ask is sent to that Bot, which answers it with its answer_ask tool (the one way a Bot's answer takes effect without the person pressing); the ask stays, \"Sent to <Bot>\", till it does."
         }
       ]
     },
@@ -104,7 +104,7 @@
       "actions": [
         {
           "by": "send",
-          "does": "What's written goes to the asking task's Bot as a message, with the ask; the Bot may answer the ask (answer_ask) or put a new version of it (revise_ask), which shows here at once."
+          "does": "What's written goes to the asking task's Bot as a message, with the ask; the Bot may propose an answer (answer_ask: shown over the buttons as a model's is, for the person to confirm, never pressing for them) or put a new version of it (revise_ask), which shows here at once."
         }
       ]
     }
@@ -138,7 +138,7 @@
     },
     {
       "said": "A living, versioned artefact with buttons that evolve it, messages to agents, closing with the deterministic task.",
-      "rule": "Every app shows an ask's versions, its buttons and a message box to the asking task's Bot.",
+      "rule": "Every app shows an ask's versions, its buttons and a message box to the asking task's Bot. A press answers the version it was pressed on, and the host refuses it once the ask has a newer one; the task may put a new version of an ask that was pressed, which opens the same ask again, waiting, with its History.",
       "decided": "2026-11-27",
       "source": [
         {

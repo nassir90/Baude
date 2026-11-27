@@ -481,12 +481,13 @@
               ]
             },
             {
-              "said": "The chat header's (top bar's) Bot picture size was fine before; it is mostly the main page (home list) that had to change.",
+              "said": "uhh too bar size was fine... it's mostly main page size that hae to change",
               "rule": "The phone's chat header keeps its Bot picture and the gap to its title at the desktop's 32px and 8px as plain dp, the size it had before the Bot pictures were sized to their text. Only the home list's Bot rows (and the Bots page, Inbox and Bot Settings) follow the larger, text-matched size.",
               "decided": "2026-11-27",
               "source": [
                 {
-                  "session": "221e1c29-56d7-48bf-a2dc-7a2b37ccd685"
+                  "session": "221e1c29-56d7-48bf-a2dc-7a2b37ccd685",
+                  "message": "a9e7d2bf-5677-453f-807b-a312d6aab8cd"
                 }
               ]
             }

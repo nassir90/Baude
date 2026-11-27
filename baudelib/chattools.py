@@ -6,6 +6,7 @@ as mcp__chat__<tool>. The Inbox's (ask_user, revise_ask, withdraw_ask, read_ask)
 (baudelib/inbox.py), raised by the chat's model itself, answered back into the chat."""
 import base64
 import os
+import stat
 
 from baudelib import meshtools, wire
 
@@ -53,7 +54,7 @@ SCHEMAS |= {
     "revise_ask": ("Put a new version of one of this chat's asks (ask_user's): what it says, its pictures, its "
                    "buttons, its form; a field left out stays as it was (pictures given replace them all). The person "
                    "sees it at once, with the versions before under History. One already answered is open again, "
-                   "waiting.",
+                   "waiting; if its answer hadn't come to you yet, it's given as answered.",
                    {"ask": _ASK, "title": _TITLE, "body": _BODY, "buttons": _BUTTONS, "form": _FORM,
                     "pictures": _PICTURES}, ["ask"]),
     "withdraw_ask": ("Take back one of this chat's asks that's still waiting: it leaves the person's Inbox.",
@@ -111,7 +112,8 @@ class Chat:
         self._mine()
         msg = {"op": "inbox_revise", "ask": args.get("ask"), **_ask_fields(args, self.folder)}
         got = self.mesh.request(self.mesh.local, msg, timeout=60)
-        return {"ask": got["ask"], "version": got.get("version")}
+        return {"ask": got["ask"], "version": got.get("version"),
+                **({"answered": got["answered"]} if got.get("answered") else {})}
 
     def withdraw_ask(self, args):
         got = self.mesh.request(self.mesh.local, {"op": "inbox_withdraw", "session": self._mine(),
@@ -161,10 +163,14 @@ def _picture(p, base):
     path = os.path.expanduser(path)
     path = path if os.path.isabs(path) else os.path.join(base(), path)
     try:
-        if os.path.getsize(path) > PICTURE_MAX:
+        fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK)  # (a FIFO's open doesn't wait for a writer)
+        with os.fdopen(fd, "rb") as f:
+            if not stat.S_ISREG(os.fstat(fd).st_mode):
+                raise ValueError(f"{name}: not a regular file")
+            data = f.read(PICTURE_MAX + 1)
+        if len(data) > PICTURE_MAX:
             raise ValueError(f"{name}: larger than {PICTURE_MAX} bytes")
-        with open(path, "rb") as f:
-            return {"name": name, "data": base64.b64encode(f.read()).decode()}
+        return {"name": name, "data": base64.b64encode(data).decode()}
     except OSError as e:
         raise ValueError(f"{name}: {e.strerror or e}") from None
 

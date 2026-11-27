@@ -720,6 +720,50 @@ def mcp_tool(which, name, args):
     return got["result"]["content"][0]["text"]
 
 
+def chat_tool_interruptible(name, args, how=None):
+    """A call to the chat's own tools that an interrupt cuts short: its tools told the call's cancelled (as claude
+    tells an MCP server), or, how "kill", their process killed; None then. Else what it gave."""
+    cfg = arg("--mcp-config") or "{}"
+    server = json.loads(cfg if cfg.lstrip().startswith("{") else open(cfg).read())["mcpServers"]["chat"]
+    p = subprocess.Popen([server["command"], *server["args"]], stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True,
+                         env={**os.environ, **(server.get("env") or {})})
+    got = []
+    for i, (method, params) in enumerate((("initialize", {"protocolVersion": "2025-06-18", "capabilities": {}}),
+                                          ("tools/call", {"name": name, "arguments": args})), 1):
+        p.stdin.write(json.dumps({"jsonrpc": "2.0", "id": i, "method": method, "params": params}) + "\n")
+        p.stdin.flush()
+        if i == 1:
+            p.stdout.readline()
+    reader = threading.Thread(target=lambda: got.append(p.stdout.readline()), daemon=True)
+    reader.start()
+    while reader.is_alive():
+        line = next_line(0.2)
+        if line == "":
+            sys.exit(0)
+        if not line:
+            continue
+        record(line)
+        msg = json.loads(line)
+        if msg.get("type") == "control_request":
+            control(msg)
+            if msg["request"].get("subtype") == "interrupt":
+                if how == "kill":
+                    p.kill()
+                else:
+                    p.stdin.write(json.dumps({"jsonrpc": "2.0", "method": "notifications/cancelled",
+                                              "params": {"requestId": 2, "reason": "interrupted"}}) + "\n")
+                    p.stdin.flush()
+                    reader.join(2)  # (a call cancelled isn't answered: it's let go of)
+                    p.stdin.close()
+                record("CHAT TOOL cancelled" + (" and answered" if got and got[0] else ""))
+                return None
+        elif msg.get("type") == "user":
+            keep_queued(msg)
+    p.stdin.close()
+    p.wait(10)
+    return json.loads(got[0])["result"]["content"][0]["text"]
+
+
 def chat_tool_turn(n, text):
     """"CHAT TOOL <name> <json>": one of the chat's own tools (baudelib.chattools) called with those arguments, as an
     agent calls it (mcp__chat__<name>), what it gave said back."""
@@ -729,7 +773,13 @@ def chat_tool_turn(n, text):
     out({"type": "assistant", "parent_tool_use_id": None, "session_id": SESSION, "message": {
         "id": f"msg{n}t", "model": "fake", "role": "assistant", "content": [
             {"type": "tool_use", "id": tid, "name": f"mcp__chat__{name}", "input": args}]}})
-    said = chat_tool(name, args)
+    how = args.pop("_fake", None)  # ("kill": the tools' process killed by an interrupt, not told it's cancelled)
+    said = chat_tool_interruptible(name, args, how)
+    if said is None:  # (an interrupt took the turn: stopped, as claude 2.1's is)
+        out({"type": "result", "subtype": "error_during_execution", "is_error": True, "session_id": SESSION,
+             "total_cost_usd": 0.001, "num_turns": 1, "duration_ms": 300,
+             "usage": {"input_tokens": 10, "output_tokens": 5}})
+        return
     record(f"CHAT TOOL {name} {' '.join(said.split())}")
     out({"type": "user", "parent_tool_use_id": None, "session_id": SESSION, "message": {"role": "user", "content": [
         {"type": "tool_result", "tool_use_id": tid, "content": said}]}})

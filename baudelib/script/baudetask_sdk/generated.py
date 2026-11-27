@@ -2507,7 +2507,10 @@ class InboxRaised(Obj):
 
         ask (string): The ask's id.
         version (integer): Its version now (1 for the first).
+        answered (InboxAnswer or None): A revised chat's ask's answer to the version before, if its chat hadn't
+            been told it yet.
     """
+    _refs = {"answered": "InboxAnswer"}
 
 
 class InboxReply(Obj):

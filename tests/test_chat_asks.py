@@ -40,7 +40,7 @@ with open(FAKE, "w") as f:
 os.chmod(FAKE, 0o755)
 os.environ["BAUDE_CLAUDE"] = FAKE
 
-from baudelib import wire  # noqa: E402
+from baudelib import accounts, chattools, wire  # noqa: E402
 from baudelib.server import Server  # noqa: E402
 
 PNG = base64.b64decode(  # (a 2×1 picture)
@@ -136,6 +136,27 @@ def asks(head):
     return head.ask({"op": "inbox"})["asks"]
 
 
+def stopped_wait(head, srv, sid, how):
+    """The chat's model waits on an ask (wait_s); its turn's stopped meanwhile (how: its tools told the call's
+    cancelled, or their process killed); then the person presses a button: the answer reaches the chat as a message."""
+    body = f"Stopped ({how})?"
+    args = {"body": body, "buttons": ["Yes", "No"], "wait_s": 120, **({"_fake": "kill"} if how == "kill" else {})}
+    say(head, sid, f"CHAT TOOL ask_user {json.dumps(args)}")
+    aid = wait(lambda: next((a["id"] for a in asks(head) if a["versions"][-1]["body"] == body), None), "the ask")
+    wait(lambda: srv.inbox.waiters.get(aid), "the model waiting on it")
+    with srv.lock:  # (as a head's Stop interrupts it)
+        srv.sessions[sid].proc.send({"type": "control_request", "request_id": "int-" + how,
+                                     "request": {"subtype": "interrupt"}})
+    idle(srv, sid)
+    wait(lambda: not srv.inbox.waiters.get(aid), "its wait ended")
+    mark = len(log())
+    assert head.ask({"op": "inbox_press", "ask": aid, "button": 1})["op"] == "inbox_done"
+    wait(lambda: told(mark, aid), "the answer sent into the chat after the stop")
+    idle(srv, sid)
+    wait(lambda: not srv.inbox.asks[aid].get("_tell"), "the answer marked told")
+    print(f"  stopped during a wait ({how}), then pressed: the message arrived", flush=True)
+
+
 def main():
     alpha = host("alpha")
     head = Head(alpha.socket_path)
@@ -213,6 +234,55 @@ def main():
     assert got["status"] == "answered", got
     time.sleep(2)
     assert not told(mark, got["ask"]), "a waited answer was sent as a message too"
+
+    stopped_wait(head, alpha, sid, "cancelled")
+    stopped_wait(head, alpha, sid, "kill")
+
+    off = [False]
+    real_disabled = accounts.disabled
+    accounts.disabled = lambda key: off[0] or real_disabled(key)
+    try:
+        got = tool(head, alpha, sid, "ask_user", {"body": "Subscription off?", "buttons": ["Yes", "No"]})
+        held = got["ask"]
+        off[0] = True
+        mark = len(log())
+        assert head.ask({"op": "inbox_press", "ask": held, "button": 0})["op"] == "inbox_done"
+        alpha.woken.set()
+        time.sleep(3)
+        assert alpha.inbox.asks[held].get("_tell") and not told(mark, held), "an answer lost with its subscription off"
+        off[0] = False
+        alpha.woken.set()
+        wait(lambda: told(mark, held), "the answer sent once the subscription's on again")
+        idle(alpha, sid)
+        assert not alpha.inbox.asks[held].get("_tell")
+        print("  subscription off, then pressed: delivered once it was on again", flush=True)
+
+        got = tool(head, alpha, sid, "ask_user", {"body": "Revised before told?", "buttons": ["Yes", "No"]})
+        again = got["ask"]
+        off[0] = True
+        mark = len(log())
+        assert head.ask({"op": "inbox_press", "ask": again, "button": 1})["op"] == "inbox_done"
+        revised = chattools.Chat(sid, alpha.socket_path).revise_ask({"ask": again, "body": "Revised before told? Now."})
+        print(f"  revise of an undelivered answered ask: {revised}", flush=True)
+        assert revised["version"] == 2 and revised["answered"]["label"] == "No", revised
+        assert not alpha.inbox.asks[again].get("_tell")
+        off[0] = False
+        alpha.woken.set()
+        time.sleep(3)
+        assert not told(mark, again), "an answer given in the revise's reply sent as well"
+    finally:
+        accounts.disabled = real_disabled
+
+    began = time.monotonic()
+    fifo = os.path.join(TMP, "pic.fifo")
+    os.mkfifo(fifo)
+    for path in ("/dev/zero", fifo, FOLDER):
+        try:
+            chattools._picture({"name": "z.png", "path": path}, lambda: FOLDER)
+            raise AssertionError(f"{path} taken as a picture")
+        except ValueError as e:
+            print(f"  picture {os.path.basename(path)}: {e}", flush=True)
+    assert time.monotonic() - began < 5, "a picture path hung"
 
     got = tool(head, alpha, sid, "ask_user", {"title": "Ship it on Monday?", "body": "### Monday?\n\nOr Tuesday.",
                                               "buttons": [{"label": "Monday", "style": "green"}, "Tuesday"]})

@@ -154,6 +154,8 @@ class Inbox:
         self.fresh = {}  # (pictures just kept and not yet in an ask: sha: when, so save() leaves them)
         self.proposing = {}  # (the start_key of a model's session asked to answer an ask: that ask's id)
         self.waiters = {}  # (a chat's ask's id: how many of its model's inbox_waits wait on it, which it's told by)
+        self.turns = {}  # (a chat's id: how many of its turns have ended, or its agent gone: a wait ends with its turn)
+        self.untold = {}  # (a chat's ask's id: why it couldn't be sent its answer, as last logged)
         kept = _read_json(os.path.join(self.folder, "asks.json")) or {}
         self.asks = {}
         for a in kept.get("asks") or []:
@@ -403,13 +405,15 @@ class Inbox:
                                                      else WAIT_MAX_S)))
         except (TypeError, ValueError):
             timeout = 0.0
-        end, told = time.monotonic() + timeout, False
+        end, told, sid = time.monotonic() + timeout, False, ask["session"]
         with self.lock:
+            began = self.turns.get(sid, 0)
             self.waiters[ask["id"]] = self.waiters.get(ask["id"], 0) + 1
             try:
-                while ask["status"] == "waiting" and time.monotonic() < end:
+                while ask["status"] == "waiting" and time.monotonic() < end and self._live(conn, sid, began):
                     self.cv.wait(max(0.0, min(0.5, end - time.monotonic())))
-                told = bool(ask.pop("_tell", None))
+                if self._live(conn, sid, began):  # (its call's still there to be answered: told, if it's answered)
+                    told = bool(ask.pop("_tell", None))
                 out = {"ask": ask["id"], "status": ask["status"], "answer": ask.get("answer"),
                        "version": len(ask["versions"])}
             finally:
@@ -418,7 +422,19 @@ class Inbox:
                     del self.waiters[ask["id"]]
         if told:
             self.save()
+        elif ask.get("_tell"):
+            self.server.woken.set()  # (its call's gone with its turn: what's still to be told, sent now)
         return out
+
+    def _live(self, conn, sid, began):
+        """(lock held) Whether a wait begun at turn began of chat sid still has its model's call to answer: its tools'
+        connection's still there and its turn, or its agent, hasn't ended."""
+        return not getattr(conn, "gone", False) and self.turns.get(sid, 0) == began
+
+    def _ended(self, sid):
+        with self.lock:
+            self.turns[sid] = self.turns.get(sid, 0) + 1
+            self.cv.notify_all()  # (its waits end)
 
     def chat_gone(self, sid):
         """A chat archived or deleted: its asks still waiting, stopped; those it's done with, let go of."""
@@ -452,19 +468,26 @@ class Inbox:
                 s = srv.sessions.get(a["session"])
                 if s is not None and not s.deleting and not s.meta.get("archived") and s.busy:
                     continue
-                with self.lock:
-                    if not a.pop("_tell", None):
-                        continue
-                sent = True
                 if s is None or s.deleting or s.meta.get("archived"):
+                    with self.lock:
+                        sent = bool(a.pop("_tell", None)) or sent  # (nobody to tell)
                     continue
-                try:
-                    srv.take_input(None, s, {"type": "user", "uuid": str(uuid.uuid4()),
+                if s.subscription_off():
+                    continue  # (kept: told once it's on again)
+                said_id = str(uuid.uuid5(uuid.NAMESPACE_OID, f"{a['id']} {(a.get('answer') or {}).get('at')}"))
+                try:  # (its uuid the answer's: one taken already isn't taken twice)
+                    srv.take_input(None, s, {"type": "user", "uuid": said_id,
                                              "message": {"role": "user", "content": answer_said(a)}},
                                    {"kind": "host", "name": wording.say("inbox.title"), "host": srv.me["id"],
                                     "host_name": srv.me["name"], "session": s.id})
-                except Exception as e:  # noqa: BLE001 (Elsewhere, its subscription off, or its agent not started)
-                    srv.log(f"telling {s.id} its ask {a['id']} was answered: {e}")
+                except Exception as e:  # noqa: BLE001 (Elsewhere, or its agent not started: kept, tried again)
+                    if self.untold.get(a["id"]) != str(e):
+                        self.untold[a["id"]] = str(e)
+                        srv.log(f"telling {s.id} its ask {a['id']} was answered: {e}")
+                    continue
+                with self.lock:
+                    self.untold.pop(a["id"], None)
+                    sent = bool(a.pop("_tell", None)) or sent
         if sent:
             self.save()
 
@@ -571,6 +594,7 @@ class Inbox:
         own = msg.get("run") is not None or is_chats(ask) and conn.acting == ask["session"] and conn.task is None
         with self.lock:
             reopens = own and ask["status"] == "answered"  # (its run, or its chat, asks again: one ask)
+            before = ask.get("answer") if reopens and ask.get("_tell") else None  # (an answer it wasn't told yet)
             if ask["status"] != "waiting" and not reopens:
                 raise ValueError(wording.say("inbox.not_waiting"))
             version = self.version(msg, ask["versions"][-1], by)
@@ -582,7 +606,7 @@ class Inbox:
             n = len(ask["versions"])
         self.save()
         self.tell(ask)
-        return {"ask": ask["id"], "version": n}
+        return {"ask": ask["id"], "version": n, **({"answered": before} if before else {})}
 
     def remove(self, conn, msg):
         ask, _s = self._find(conn, msg)
@@ -725,7 +749,8 @@ class Inbox:
 
     def turn_over(self, s, msg):
         """(server's lock held) A session's turn ended: one asked to answer an ask, its answer taken, and let go of; a
-        chat with an answer to be told, told it now it's idle (the watch woken: deliver)."""
+        chat with an answer to be told, told it now it's idle (the watch woken: deliver). Its model's waits end."""
+        self._ended(s.id)
         with self.lock:
             aid = self.proposing.pop(s.meta.get("start_key") or "", None)
             if any(a.get("_tell") and a["session"] == s.id for a in self.asks.values()):
@@ -738,7 +763,9 @@ class Inbox:
         self.server.drop_ephemeral(s)
 
     def agent_gone(self, s):
-        """(server's lock held) A session asked to answer an ask ended before it answered: failed."""
+        """(server's lock held) A session asked to answer an ask ended before it answered: failed; its model's waits
+        on its own asks end."""
+        self._ended(s.id)
         with self.lock:
             aid = self.proposing.pop(s.meta.get("start_key") or "", None)
         if aid is not None:

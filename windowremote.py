@@ -428,6 +428,7 @@ class WindowRemote:
         for card in self.mesh_cards:  # (the chats they started or messaged: as their hosts list them now)
             card.refresh_header()
         self.sender_waits()  # (a task's ask its run waits on: said on its from line, while it waits)
+        self.refresh_inbox()  # (the Inbox: its count, its tab and each ask's, as the hosts say them)
         self.show_held()
         self.show_listed_context()
         if self.remote is None and self.proc is not None and not self.busy \

@@ -28,6 +28,7 @@
     "remove_image_body": "It's pulled or built again the next time it's needed. Docker won't remove one a container uses.",
     "remove_volume_body": "Everything in it is deleted. Docker won't remove one a container uses.",
     "remove_network_body": "Docker won't remove one a container is attached to.",
-    "remove_compose_body": "Its containers and networks are stopped and removed (docker compose down). Its volumes are kept."
+    "remove_compose_body": "Its containers and networks are stopped and removed (docker compose down). Its volumes are kept.",
+    "exec_timed_out": "\n(stopped after {$seconds} s)"
   }
 }

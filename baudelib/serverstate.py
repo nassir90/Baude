@@ -199,6 +199,7 @@ class Conn:
         self.member, self.verified = origin, verified  # (who the access rules judge it as: a tunnel's origin, or the
         # member that started the chat whose own tools it is (hello's as); verified: by its key, mesh.Mesh.opener)
         self.acting = None  # (the chat here whose own tools it is, as its hello said)
+        self.task = None  # (a task's script's: {run, bot: {id, name}}, its run's Bot's from its hello on)
         self.archived = False  # (subscribed to archived sessions too)
         self.writer = threading.Thread(target=self._write, daemon=True, name="client-out")
         self.writer.start()

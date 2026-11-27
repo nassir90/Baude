@@ -5,7 +5,7 @@
   "properties": {
     "shell": {
       "$ref": "AccessRule.json",
-      "description": "A shell on its machine: its terminals (terminal ops) and Multiplex's, through a Bot's terminal tools (multiplex)."
+      "description": "A shell on its machine: its terminals (terminal ops) and Multiplex's, through a Bot's terminal tools (multiplex), and a command run in a pod's or a container's (kube's and docker's exec)."
     },
     "browser_read": {
       "$ref": "AccessRule.json",
@@ -37,15 +37,15 @@
     },
     "kube_read": {
       "$ref": "AccessRule.json",
-      "description": "Its machine's Kubernetes clusters read: contexts, lists, YAML, owners (kube) and logs and watches (kube_follow), and the clusters' parts of @."
+      "description": "Its machine's Kubernetes clusters read: contexts, lists, YAML, owners, a pod's log (kube) and logs and watches (kube_follow), and the clusters' parts of @."
     },
     "kube_write": {
       "$ref": "AccessRule.json",
-      "description": "Its machine's Kubernetes clusters changed: a pod deleted (kube's delete). Lets a member read them too."
+      "description": "Its machine's Kubernetes clusters changed: a pod deleted, objects applied (kube's delete, apply). Lets a member read them too."
     },
     "docker_read": {
       "$ref": "AccessRule.json",
-      "description": "Its machine's Docker read: contexts, lists, an object inspected (docker) and logs (docker_follow). A shell in a container is a terminal: Shell's."
+      "description": "Its machine's Docker read: contexts, lists, an object inspected, a log as it is now (docker) and logs (docker_follow). A shell in a container is a terminal: Shell's."
     },
     "docker_write": {
       "$ref": "AccessRule.json",
@@ -53,7 +53,7 @@
     },
     "databases": {
       "$ref": "AccessRule.json",
-      "description": "Its machine's databases (databases)."
+      "description": "Its machine's databases, read (databases): their schemas, a table's rows, a query run read-only."
     },
     "subscriptions_read": {
       "$ref": "AccessRule.json",

@@ -168,6 +168,18 @@ def pg_rows(server, database, schema, table, limit=50):
     return pg_mask(json.loads(pg_query(server, database, sql) or "[]"))
 
 
+def pg_select(server, database, sql, limit):
+    """A query's rows ([{column: value}], limit of them at most), read-only as pg_query runs it; values of
+    secret-looking columns hidden. One statement that reads: it's run as a subquery, so another kind fails."""
+    if server.get("engine") == "arango":
+        raise ValueError(wording.say("databases.query_postgres"))
+    sql = (sql or "").strip().rstrip(";").strip()
+    if not sql:
+        raise ValueError(wording.say("databases.query_empty"))
+    wrapped = f"select coalesce(json_agg(r), '[]') from (select * from (\n{sql}\n) q limit {int(limit)}) r"
+    return pg_mask(json.loads(pg_query(server, database, wrapped) or "[]"))
+
+
 def pg_mask(rows):
     """Rows with the values of secret-looking columns (password, token, api_key, hash...) hidden."""
     return [{k: ("•••" if PG_SECRET.search(k) and v is not None else v) for k, v in row.items()} for row in rows]

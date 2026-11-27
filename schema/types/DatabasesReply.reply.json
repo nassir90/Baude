@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
-  "description": "databases' answer: servers {servers, databases}; schema {tables, links, took}; rows {rows}.",
+  "description": "databases' answer: servers {servers, databases}; schema {tables, links, took}; rows and query {rows}.",
   "properties": {
     "op": {
       "const": "databases",
@@ -59,7 +59,7 @@
       "items": {
         "type": "object"
       },
-      "description": "rows: the first rows, each {column: value}; objects and lists as JSON text."
+      "description": "rows: the first rows; query: its rows (QUERY_ROWS_MAX at most); each {column: value}, objects and lists as JSON text."
     },
     "missing": {
       "$ref": "Dep.json",

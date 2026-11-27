@@ -46,12 +46,14 @@ EVERYBODY = {"who": "everybody"}
 NOBODY = {"who": "nobody"}
 
 
-def _kube(msg):
-    return "kube_write" if msg.get("what") == "delete" else "kube_read"
+def _kube(msg):  # (a command run in a pod: a shell's worth)
+    return "shell" if msg.get("what") == "exec" else "kube_write" if msg.get("what") in ("delete", "apply") else \
+        "kube_read"
 
 
-def _docker(msg):
-    return "docker_write" if msg.get("what") in ("start", "stop", "restart", "remove") else "docker_read"
+def _docker(msg):  # (a command run in a container: a shell's worth)
+    return "shell" if msg.get("what") == "exec" else \
+        "docker_write" if msg.get("what") in ("start", "stop", "restart", "remove") else "docker_read"
 
 
 def _accounts(msg):

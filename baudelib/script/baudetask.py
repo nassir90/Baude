@@ -29,11 +29,13 @@ import threading
 import time
 import traceback
 
-__all__ = ["inputs", "payload", "run", "say", "ask", "fallback", "agent", "main", "Refused"]
+__all__ = ["inputs", "payload", "run", "say", "ask", "fallback", "agent", "main", "Refused",
+           *(SDK := ("emission", "terminal", "kube", "docker", "db", "chats", "subagents", "ops", "hosts", "models"))]
 
 run = os.environ.get("BAUDE_TASK_RUN")
 _DENIED = "Nobody was there to ask (a task's agent)."
 _PING_S = 5  # (a wait this long without a word: the host told it's still here; it takes 16 s of silence for gone)
+_IDLE_S = 10  # (a connection that's said nothing for this long between requests: another made for the next)
 
 
 def _json_env(name, argv_at=None):
@@ -98,6 +100,9 @@ class _Wire:
 
     def request(self, msg, waits=False):
         """The host's answer to msg. waits: one that may take days (an ask, answered as its Bot's turn ends)."""
+        if self.sock is not None and msg.get("op") != "hello" and time.monotonic() - self.sent > _IDLE_S:
+            self.sock.close()  # (quiet so long the host may have let go of it: another)
+            self.sock, self.buf = None, b""
         if self.sock is None and msg.get("op") != "hello":
             self.connect()
         self.req += 1
@@ -216,3 +221,12 @@ def main(fn):
         traceback.print_exc()
         sys.exit(1)
     return fn
+
+
+def __getattr__(name):
+    """The SDK's (baudetask_sdk: emission, terminal, kube, docker, db, chats, subagents, ops, hosts, models), loaded as
+    it's first used."""
+    if name in SDK:
+        import baudetask_sdk
+        return getattr(baudetask_sdk, name)
+    raise AttributeError(f"module 'baudetask' has no attribute {name!r}")

@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
-  "description": "Docker's containers, images, volumes, networks and Compose projects on the host, read and acted on through its docker CLI: its contexts and the sidebar's categories (contexts), a category's objects (list), an object inspected (inspect), and a container or Compose project started, stopped, restarted or removed (start, stop, restart, remove; an image, a volume or a network removed).",
+  "description": "Docker's containers, images, volumes, networks and Compose projects on the host, read and acted on through its docker CLI: its contexts and the sidebar's categories (contexts), a category's objects (list), an object inspected (inspect), a container's or Compose project's log as it is now (logs), a command run in a running container (exec: no terminal, its output when it ends), and a container or Compose project started, stopped, restarted or removed (start, stop, restart, remove; an image, a volume or a network removed).",
   "properties": {
     "op": {
       "const": "docker",
@@ -22,7 +22,9 @@
         "start",
         "stop",
         "restart",
-        "remove"
+        "remove",
+        "logs",
+        "exec"
       ],
       "description": "What to do."
     },
@@ -32,11 +34,11 @@
     },
     "page": {
       "type": "string",
-      "description": "list, inspect and the actions: the category's page, by its key."
+      "description": "list, inspect, logs, exec and the actions: the category's page, by its key."
     },
     "id": {
       "type": "string",
-      "description": "inspect and the actions: the object, by its id (a Compose project's, its name)."
+      "description": "inspect, logs, exec and the actions: the object, by its id (a Compose project's, its name)."
     },
     "format": {
       "enum": [
@@ -44,6 +46,21 @@
         "yaml"
       ],
       "description": "inspect: as JSON (the default) or YAML."
+    },
+    "tail": {
+      "type": "integer",
+      "description": "logs: its last this many lines (the Docker view's number if none)."
+    },
+    "command": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "exec: what's run, its argv (docker exec, with no terminal and nothing on its stdin)."
+    },
+    "timeout": {
+      "type": "number",
+      "description": "exec: seconds it may run (60 if none; 600 at most): then it's stopped."
     }
   },
   "required": [

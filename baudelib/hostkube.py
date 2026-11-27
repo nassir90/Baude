@@ -1,6 +1,6 @@
 """hostkube — the clusters this host's kubeconfig reaches, read for a head elsewhere (the phone's Kubernetes page): the
 desktop's own functions (kubedata), kubectl's answers as Freelens' pages and columns. Each kind's objects, an object's
-YAML, what controls an object, a pod deleted once it's asked, the whole stack's CPU and memory (kube); a pod's log followed and a kind's list watched,
+YAML, what controls an object, a pod deleted once it's asked, objects applied, a pod's log as it is, the whole stack's CPU and memory (kube); a pod's log followed and a kind's list watched,
 on a connection of its own (follow); the kubeconfig's contexts, sent again as tools add and delete clusters (follow's
 contexts). Secrets' values are never read, and kubectl is only ever given the arguments these
 build. No GTK."""
@@ -153,7 +153,7 @@ def _connect(context):
 def _list(msg):
     context, page = msg.get("context"), _page(msg)
     try:
-        items = kd.kube_list(context, page)
+        items = kd.kube_list(context, page, msg.get("selector") if isinstance(msg.get("selector"), str) else None)
     except (RuntimeError, ValueError) as e:
         return _failed(e, context)
     columns = kd.kube_page_columns(context, page, items=items)
@@ -366,7 +366,43 @@ def _server(msg):
     return msg.get("server") if isinstance(msg.get("server"), str) else None
 
 
-ARGS = ("context", "namespace", "name", "pod", "container", "kind", "page", "crd")
+def _applied(msg):
+    """kubectl apply of a manifest (YAML or JSON, on its stdin): what it said."""
+    manifest = msg.get("manifest")
+    if not isinstance(manifest, str) or not manifest.strip():
+        raise ValueError("kube's apply needs a manifest")
+    namespace = msg.get("namespace") or ""
+    args = [*lookupkube.kube_target(msg["context"], _server(msg)), "apply", "-f", "-",
+            *(["-n", namespace] if namespace else [])]
+    return {"said": lookupkube.kube_run("kubectl", args, timeout=120, input=manifest).strip()}
+
+
+def _log(msg):
+    """A pod's log as it is now (its previous run's, with previous): its last tail lines, not followed."""
+    namespace, name = msg.get("namespace") or "", msg.get("name")
+    if not isinstance(name, str) or not name or not namespace:
+        raise ValueError("kube's logs needs a pod's namespace and name")
+    tail = msg.get("tail") if isinstance(msg.get("tail"), int) and msg["tail"] > 0 else kd.KUBE_LOG_TAIL
+    args = [*lookupkube.kube_target(msg["context"], _server(msg)), "logs", f"--tail={tail}", "-n", namespace, name,
+            *(["-c", msg["container"]] if msg.get("container") else []), *(["--previous"] if msg.get("previous") else [])]
+    return {"text": lookupkube.kube_run("kubectl", args, timeout=60)}
+
+
+def _exec(msg):
+    """A command run in a pod's container (kubectl exec, no terminal): {text, status}."""
+    from baudelib import hostdocker
+    namespace, name, command = msg.get("namespace") or "", msg.get("name"), msg.get("command")
+    if not isinstance(name, str) or not name or not namespace:
+        raise ValueError("kube's exec needs a pod's namespace and name")
+    if not isinstance(command, list) or not command or not all(isinstance(c, str) for c in command):
+        raise ValueError("kube's exec needs a command: its argv")
+    return hostdocker.run_command([lookupkube.kube_tool("kubectl"), *lookupkube.kube_target(msg["context"], _server(msg)),
+                                   "exec", "-n", namespace, name,
+                                   *(["-c", msg["container"]] if msg.get("container") else []), "--", *command],
+                                  msg.get("timeout"))
+
+
+ARGS = ("context", "namespace", "name", "pod", "container", "kind", "page", "crd", "selector")
 
 
 def _unsafe(msg):
@@ -406,11 +442,17 @@ def answer(server, msg):
         if what == "delete":
             return {"what": what, "said": kd.kube_delete(context, msg.get("namespace"), msg.get("name"),
                                                           bool(msg.get("force")), _server(msg))}
+        if what == "apply":
+            return {"what": what, **_applied(msg)}
+        if what == "logs":
+            return {"what": what, **_log(msg)}
+        if what == "exec":
+            return {"what": what, **_exec(msg)}
     except (RuntimeError, ValueError, OSError) as e:
         if getattr(e, "removed", False):
             return {"what": what, "removed": True}
         return {"what": what, "error": str(e)}
-    return {"what": what, "error": "kube takes contexts, check, connect, list, yaml, owner, summary or delete"}
+    return {"what": what, "error": "kube takes contexts, check, connect, list, yaml, owner, summary, delete, apply, logs or exec"}
 
 
 # ---------------------------------------------------------------- following

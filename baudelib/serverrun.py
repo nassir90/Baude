@@ -362,6 +362,9 @@ class ServerRunning:
                     if (refused := wire.refusal(msg)) is not None:
                         conn.send(refused)
                         continue
+                    if msg["op"] == "relay" and conn.task is not None:  # (a task's script's: from its run's Bot)
+                        msg = {**msg, "as": conn.task["bot"]["id"]}
+                        msg.pop("as_meta", None), msg.pop("as_agent", None)
                     if conn.member is not None or msg["op"] == "relay" and self.started_by(msg.get("as")):  # (a
                         # member's, or a chat a member started: what's relayed from here is this host's, and a join is
                         # a host's own; neither borrowed)
@@ -538,10 +541,20 @@ class ServerRunning:
             if self.quitting is not None:  # (its connections kept till its claudes have stopped, to say how far along:
                 return None  # nothing answered, as an answer would be taken for the turn's end; theirs, as it closes)
             return reply("error", error="the host process is stopping")
-        if op == "hello" and conn.origin is None and wire.is_id(msg.get("as") or ""):  # (a chat's own tools: judged
-            conn.acting = msg["as"]                                                       # as the member that started it)
+        if op == "hello" and conn.origin is None and conn.task is None and isinstance(msg.get("task"), dict):
+            if (bot := self.tasks.bot_of(msg["task"])) is None:  # (a task's script: its run's Bot's from now on)
+                return conn.send(wire.refused(wire.DENIED, req, wording.say("host_errors.no_task_token")))
+            conn.task, conn.acting = {"run": msg["task"]["run"], "bot": bot}, bot["id"]
+            if (by := self.started_by(bot["id"])) is not None:  # (judged as the Bot's own tools are)
+                conn.member, conn.verified = by
+        elif op == "hello" and conn.origin is None and conn.task is None and wire.is_id(msg.get("as") or ""):  # (a
+            conn.acting = msg["as"]                          # chat's own tools: judged as the member that started it)
             if (by := self.started_by(msg["as"])) is not None:
                 conn.member, conn.verified = by
+        if conn.task is not None and op in ("emission", "multiplex", "emission_watch"):  # (a task's: its Bot's own
+            if msg.get("default"):                                     # browser and terminals, never another's)
+                return conn.send(wire.refused(wire.DENIED, req, wording.say("host_errors.task_default_browser")))
+            msg = {**msg, "bot": dict(conn.task["bot"])}
         if (cap := access.rule_of(msg)) is not None and op not in access.FOUND and not self.access.allowed(conn, cap):
             return conn.send(self.access.refused(req, cap))  # (a chat's: as it's found, its own rules first)
         if (op in ("start", "task_output", "autofix", "git", "signal_names") or op == "accounts" and

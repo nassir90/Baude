@@ -4,7 +4,8 @@ its own process and of each app's on it: Baude's, Record's, Emission's, Multiple
 its own, and those its apps send), and the errors of every process on its machine (errorbook's: its own, and those its
 apps tell it), each row with the commit and wire version of the code that made it, while it's on; all read back over a stretch by telemetry_read, from any member of the
 mesh, and switched by telemetry_set (Settings → Telemetry, any head). Line profiling is switched on and off there too;
-what each process profiles is lineprofile.DEFAULTS unless telemetry_set names others for it (python3 -m
+what each process profiles is picked from what its counts show took the user's time (baudelib.aim, again every
+aim.ROTATE_S) unless telemetry_set names others for it (python3 -m
 baudelib.telemetry profile, from any member of the mesh). Kept in the host's state folder only,
 telemetry/<events|metrics|profiles>/YYYY-MM-DD.jsonl (the day of each line's time, this machine's),
 telemetry/errors.json (each error once, by its process and fingerprint), and
@@ -23,7 +24,7 @@ import sys
 import threading
 import time
 
-from baudelib import counters, deps, errorbook, lineprofile, uiindex, wire
+from baudelib import aim, counters, deps, errorbook, lineprofile, uiindex, wire
 
 SAMPLE_S = 5  # (how often the machine is sampled while it's on)
 PROFILE_S = 30  # (how often what's profiled is saved)
@@ -115,7 +116,13 @@ def profile_of(p, app, ver=None):
              for x in p["lines"][:lineprofile.LINES_MAX] if isinstance(x, dict) and isinstance(x.get("file"), str)
              and isinstance(x.get("line"), int) and isinstance(x.get("function"), str)
              and isinstance(x.get("hits"), int) and _num(x.get("seconds"))]
-    return {"at": float(p["at"]), "from": float(p["from"]), "app": app, "lines": lines, **(ver or {})} if lines else None
+    picked = [{"function": str(x["function"])[:TEXT_MAX], "kind": x["kind"], "name": str(x["name"])[:TEXT_MAX],
+               "count": x["count"], "seconds": float(x["seconds"])}
+              for x in (p.get("picked") or [])[:aim.CANDIDATES] if isinstance(x, dict) and isinstance(x.get("function"), str)
+              and x.get("kind") in ("handler", "callback", "op") and isinstance(x.get("name"), str)
+              and isinstance(x.get("count"), int) and _num(x.get("seconds"))]
+    return {"at": float(p["at"]), "from": float(p["from"]), "app": app, "lines": lines, "picked": picked,
+            **(ver or {})} if lines else None
 
 
 def _text(v, n=TEXT_MAX):
@@ -381,6 +388,7 @@ class Telemetry:
         self.named = {a: [f for f in named[a] if isinstance(f, str)] for a in PROFILED
                       if isinstance(named.get(a), list)}  # (what's named in place of a process's defaults)
         self.thread = None
+        self.picked, self.profiled_picks = {}, []  # (what each process's counts picked: aim's; the host's own now)
         self.errors_lock, self.errs, self.errors_due = threading.Lock(), None, None  # (errors.json's, as read;
         # its write waited for)
         self.counters = counters.Counters()  # (its wire ops'; this process's own, COUNTERS, too where it has the book)
@@ -394,13 +402,29 @@ class Telemetry:
         self._run()
 
     def functions(self, app):
-        """What app's process profiles while line profiling's on: what telemetry_set named for it, else the defaults."""
-        return list(self.named[app] if app in self.named else lineprofile.DEFAULTS[app])
+        """What app's process profiles while line profiling's on: what telemetry_set named for it, else what its
+        counts picked (aim's), else the developers' pick."""
+        if app in self.named:
+            return list(self.named[app])
+        return [p["function"] for p in self.picked.get(app) or []] or aim.defaults(app)
+
+    def aim(self, now=None):
+        """What each process profiles picked again from the last day's counts (while line profiling's on): its
+        apps told (Info's telemetry) if it's changed."""
+        now = time.time() if now is None else now
+        rows = counted(self.rows("counters", now - aim.SINCE_S, now, 0))
+        picked = {a: aim.picks(a, rows, now) for a in PROFILED}
+        if picked != self.picked:
+            self.picked = picked
+            self._profile_host()
+            self.changed()
 
     def _profile_host(self):
         """The host's own profiler following the state: its functions while telemetry and line profiling are on."""
+        picked = self.profiled_picks
+        self.profiled_picks = [] if "host" in self.named else list(self.picked.get("host") or [])
         if (last := self.profiler.set(self.functions("host") if self.on and self.profiling else [])) is not None:
-            self._write("profiles", [last])
+            self._write("profiles", [{**last, "picked": picked}])
 
     def _run(self):
         with self.lock:
@@ -430,6 +454,7 @@ class Telemetry:
     def state(self):
         """As the wire's TelemetryState has it."""
         profiling = [{"app": a, "functions": self.functions(a), "default": a not in self.named,
+                      "picked": [] if a in self.named else list(self.picked.get(a) or []),
                       "error": self.profiler.error if a == "host" else self.errors.get(a)} for a in PROFILED]
         return {"on": self.on, "line_profiler": self.has_lp, "line_profiling": self.profiling, "profiling": profiling}
 
@@ -448,6 +473,8 @@ class Telemetry:
                     self.fronts.clear()
         if isinstance(msg.get("line_profiling"), bool):
             self.profiling = msg["line_profiling"]
+            if self.profiling:
+                self.aim()
         app = msg.get("app")
         if app in PROFILED and msg.get("default") is True:
             self.named.pop(app, None)
@@ -680,16 +707,20 @@ class Telemetry:
 
     def _sampling(self):
         profiled = counted_at = time.monotonic()
+        aimed = int(time.time() // aim.ROTATE_S)
         while not self.wake.wait(SAMPLE_S):
             try:
                 if time.monotonic() - counted_at >= counters.FLUSH_S:
                     counted_at = time.monotonic()
                     self.flush_counts()
+                if self.profiling and int(time.time() // aim.ROTATE_S) != aimed:
+                    aimed = int(time.time() // aim.ROTATE_S)
+                    self.aim()
                 self._write("metrics", [self.sample()])
                 if time.monotonic() - profiled >= PROFILE_S:
                     profiled = time.monotonic()
                     if (p := self.profiler.snapshot()) is not None:
-                        self._write("profiles", [p])
+                        self._write("profiles", [{**p, "picked": list(self.profiled_picks)}])
             except Exception as e:  # noqa: BLE001 (a sample gone wrong: said, and the next one taken)
                 self.log(f"telemetry: {type(e).__name__}: {e}")
 

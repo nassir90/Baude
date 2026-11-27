@@ -51,6 +51,7 @@
     "version_of": "{$commit} · Wire {$wire}",
     "error_first": "First Happened",
     "slowest": "Slowest",
-    "average_ms": "{$ms} ms Each"
+    "average_ms": "{$ms} ms Each",
+    "picked_by": "Picked by {$name}: {$seconds}s in the Last Day"
   }
 }

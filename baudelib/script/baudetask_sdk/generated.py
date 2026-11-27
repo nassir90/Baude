@@ -1507,10 +1507,11 @@ class TelemetryCount(Obj):
 
         app ('host' | 'baude' | 'record' | 'phone' | 'emission'): The process (a telemetry_read's counted: added
             up over the stretch, by process, kind and name).
-        kind ('part' | 'menu' | 'screen' | 'op' | 'callback' | 'subprocess'): What it is: a button or row used
-            (part), a menu's item picked (menu), a screen opened (a page, a dialog, a side panel's page:
-            screen), a wire op a host answered (op), a main-loop callback (callback), a program started
-            (subprocess).
+        kind ('part' | 'menu' | 'screen' | 'op' | 'callback' | 'handler' | 'subprocess'): What it is: a button
+            or row used (part), a menu's item picked (menu), a screen opened (a page, a dialog, a side panel's
+            page: screen), a wire op a host answered (op), a main-loop callback (callback), a function connected
+            to a button, row or menu item, run as it was used (handler: by its name, with its click's time), a
+            program started (subprocess).
         name (string): Which, by the index every app shares: a part or menu item as Entity.kind/part name
             (schema/ui's: "Composer.region/send button"; Entity.kind/(what tells it apart) where it isn't one of
             its entity's parts), a screen as its entity ("Telemetry.dialog"), an op by its name, a callback by
@@ -1677,6 +1678,18 @@ class TelemetryModel(Obj):
     """
 
 
+class TelemetryPick(Obj):
+    """A function line profiling was aimed at, and the count that picked it: what took the user's time most.
+
+        function (string): What's profiled, by its dotted name.
+        kind ('handler' | 'callback' | 'op'): The count that picked it: a button's, row's or menu item's handler
+            (handler), a main-loop callback (callback), a wire op the host answered (op).
+        name (string): The count's name (the handler's or callback's function, the op).
+        count (integer): Its times in the stretch it was picked from (the last day).
+        seconds (number): Its time added up in that stretch: what it was picked by, the most first.
+    """
+
+
 class TelemetryProc(Obj):
     """A process's use of its machine, in one sample.
 
@@ -1699,8 +1712,10 @@ class TelemetryProfile(Obj):
         lines (array of TelemetryLine): Its lines that ran, the most time first (at most 200).
         commit (string or None): The commit the process profiled runs (its first 12 characters), as it started.
         wire (integer or None): The wire's version the process profiled speaks.
+        picked (array of TelemetryPick): What its counts picked it to profile over the stretch, each with the
+            count that picked it (none: named by telemetry_set, or the developers' pick).
     """
-    _refs = {"lines": "TelemetryLine"}
+    _refs = {"lines": "TelemetryLine", "picked": "TelemetryPick"}
 
 
 class TelemetryProfiling(Obj):
@@ -1708,12 +1723,16 @@ class TelemetryProfiling(Obj):
 
         app ('host' | 'baude' | 'record'): The process: the host's, Baude's or Record's.
         functions (array of string): What's profiled: functions (module.function, module.Class.method) and
-            modules (every function in it); its defaults unless others are named.
-        default (boolean): They're its defaults (lineprofile.DEFAULTS, Baude's own pick), not named by
-            telemetry_set.
+            modules (every function in it): what telemetry_set named for it, else what its counts picked
+            (picked), else Baude's developers' pick (lineprofile.DEFAULTS) till there are counts.
+        default (boolean): Nothing's named for it by telemetry_set: what it profiles is picked by its counts (or
+            the developers' pick, before there are any).
         error (string or None): Why it isn't profiling what it's told to (a name not found; line_profiler not
             installed).
+        picked (array of TelemetryPick): What its counts picked for it now, each with the count that picked it
+            (none while something's named, or nothing's counted yet).
     """
+    _refs = {"picked": "TelemetryPick"}
 
 
 class TelemetrySample(Obj):
@@ -2973,7 +2992,7 @@ TYPES = {"AccessChat": AccessChat, "AccessMember": AccessMember, "AccessRule": A
          "TelemetryCount": TelemetryCount, "TelemetryCounters": TelemetryCounters, "TelemetryCrumb": TelemetryCrumb,
          "TelemetryDay": TelemetryDay, "TelemetryError": TelemetryError, "TelemetryEvent": TelemetryEvent,
          "TelemetryFront": TelemetryFront, "TelemetryLine": TelemetryLine, "TelemetryModel": TelemetryModel,
-         "TelemetryProc": TelemetryProc, "TelemetryProfile": TelemetryProfile,
+         "TelemetryPick": TelemetryPick, "TelemetryProc": TelemetryProc, "TelemetryProfile": TelemetryProfile,
          "TelemetryProfiling": TelemetryProfiling, "TelemetrySample": TelemetrySample,
          "TelemetryState": TelemetryState, "TelemetryUsage": TelemetryUsage, "TerminalInfo": TerminalInfo,
          "Theme": Theme, "ThemeFiles": ThemeFiles, "ToolNames": ToolNames, "TurnEnd": TurnEnd, "Update": Update,

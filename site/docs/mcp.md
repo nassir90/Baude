@@ -3965,7 +3965,7 @@ How many times one thing in a process was used or ran over a stretch, and how lo
 | Field | Type | Required | What it is |
 |---|---|---|---|
 | `app` | `host` \| `baude` \| `record` \| `phone` \| `emission` |  | The process (a telemetry_read's counted: added up over the stretch, by process, kind and name). |
-| `kind` | `part` \| `menu` \| `screen` \| `op` \| `callback` \| `subprocess` | yes | What it is: a button or row used (part), a menu's item picked (menu), a screen opened (a page, a dialog, a side panel's page: screen), a wire op a host answered (op), a main-loop callback (callback), a program started (subprocess). |
+| `kind` | `part` \| `menu` \| `screen` \| `op` \| `callback` \| `handler` \| `subprocess` | yes | What it is: a button or row used (part), a menu's item picked (menu), a screen opened (a page, a dialog, a side panel's page: screen), a wire op a host answered (op), a main-loop callback (callback), a function connected to a button, row or menu item, run as it was used (handler: by its name, with its click's time), a program started (subprocess). |
 | `name` | string | yes | Which, by the index every app shares: a part or menu item as Entity.kind/part name (schema/ui's: "Composer.region/send button"; Entity.kind/(what tells it apart) where it isn't one of its entity's parts), a screen as its entity ("Telemetry.dialog"), an op by its name, a callback by its function's (module.Class.method), a program by its file's name. |
 | `count` | integer | yes | Times. |
 | `seconds` | number | yes | Their time added up: a part's or menu item's from its click till the app was free again (its handlers, and what they drew at once); a screen's in front, with someone at the machine; an op's handling; a callback's running; 0 for a program. |
@@ -4099,6 +4099,18 @@ A model's turns, or a model and effort's.
 | `output` | integer | yes | Tokens written. |
 | `input_with_cache` | integer | yes | Input tokens of turns kept before their tokens were told apart, cache reads and writes among them. |
 
+#### TelemetryPick
+
+A function line profiling was aimed at, and the count that picked it: what took the user's time most.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `function` | string | yes | What's profiled, by its dotted name. |
+| `kind` | `handler` \| `callback` \| `op` | yes | The count that picked it: a button's, row's or menu item's handler (handler), a main-loop callback (callback), a wire op the host answered (op). |
+| `name` | string | yes | The count's name (the handler's or callback's function, the op). |
+| `count` | integer | yes | Its times in the stretch it was picked from (the last day). |
+| `seconds` | number | yes | Its time added up in that stretch: what it was picked by, the most first. |
+
 #### TelemetryProc
 
 A process's use of its machine, in one sample.
@@ -4122,6 +4134,7 @@ What line_profiler timed in a process over a stretch (saved every 30 seconds whi
 | `lines` | array of TelemetryLine | yes | Its lines that ran, the most time first (at most 200). |
 | `commit` | string/null |  | The commit the process profiled runs (its first 12 characters), as it started. |
 | `wire` | integer/null |  | The wire's version the process profiled speaks. |
+| `picked` | array of TelemetryPick |  | What its counts picked it to profile over the stretch, each with the count that picked it (none: named by telemetry_set, or the developers' pick). |
 
 #### TelemetryProfiling
 
@@ -4130,9 +4143,10 @@ What a process profiles while line profiling's on.
 | Field | Type | Required | What it is |
 |---|---|---|---|
 | `app` | `host` \| `baude` \| `record` | yes | The process: the host's, Baude's or Record's. |
-| `functions` | array of string | yes | What's profiled: functions (module.function, module.Class.method) and modules (every function in it); its defaults unless others are named. |
-| `default` | boolean | yes | They're its defaults (lineprofile.DEFAULTS, Baude's own pick), not named by telemetry_set. |
+| `functions` | array of string | yes | What's profiled: functions (module.function, module.Class.method) and modules (every function in it): what telemetry_set named for it, else what its counts picked (picked), else Baude's developers' pick (lineprofile.DEFAULTS) till there are counts. |
+| `default` | boolean | yes | Nothing's named for it by telemetry_set: what it profiles is picked by its counts (or the developers' pick, before there are any). |
 | `error` | string/null |  | Why it isn't profiling what it's told to (a name not found; line_profiler not installed). |
+| `picked` | array of TelemetryPick |  | What its counts picked for it now, each with the count that picked it (none while something's named, or nothing's counted yet). |
 
 #### TelemetrySample
 

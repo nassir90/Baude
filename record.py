@@ -72,6 +72,8 @@ from baudelib.notes import data_dir, socket_path  # noqa: E402,F401
 import update  # noqa: E402  (a new version from git, restarted onto once idle, as Baude's: beside this file)
 baudelib.wire.HEAD_COMMIT = update.STARTED  # (said to the host processes it reaches: logged by one on other code)
 baudelib.wire.HEAD_CLIENT = "record"  # (listed as Record among the apps connected to a host)
+import uitrack  # noqa: E402  (what's used and run counted from here on: telemetry's)
+uitrack.prepare()
 from recordstore import APP_ID, apps_place, install, logo, noun, restart_path, uninstall  # noqa: E402
 from recordui import CSS, UNEXPLAINED  # noqa: E402
 from recordwindow import Window  # noqa: E402

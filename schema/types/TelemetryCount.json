@@ -20,9 +20,10 @@
         "screen",
         "op",
         "callback",
+        "handler",
         "subprocess"
       ],
-      "description": "What it is: a button or row used (part), a menu's item picked (menu), a screen opened (a page, a dialog, a side panel's page: screen), a wire op a host answered (op), a main-loop callback (callback), a program started (subprocess)."
+      "description": "What it is: a button or row used (part), a menu's item picked (menu), a screen opened (a page, a dialog, a side panel's page: screen), a wire op a host answered (op), a main-loop callback (callback), a function connected to a button, row or menu item, run as it was used (handler: by its name, with its click's time), a program started (subprocess)."
     },
     "name": {
       "type": "string",

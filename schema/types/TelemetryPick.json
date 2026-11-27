@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "A function line profiling was aimed at, and the count that picked it: what took the user's time most.",
+  "properties": {
+    "function": {
+      "type": "string",
+      "description": "What's profiled, by its dotted name."
+    },
+    "kind": {
+      "enum": [
+        "handler",
+        "callback",
+        "op"
+      ],
+      "description": "The count that picked it: a button's, row's or menu item's handler (handler), a main-loop callback (callback), a wire op the host answered (op)."
+    },
+    "name": {
+      "type": "string",
+      "description": "The count's name (the handler's or callback's function, the op)."
+    },
+    "count": {
+      "type": "integer",
+      "description": "Its times in the stretch it was picked from (the last day)."
+    },
+    "seconds": {
+      "type": "number",
+      "description": "Its time added up in that stretch: what it was picked by, the most first."
+    }
+  },
+  "required": [
+    "function",
+    "kind",
+    "name",
+    "count",
+    "seconds"
+  ],
+  "additionalProperties": false
+}

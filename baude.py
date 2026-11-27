@@ -74,6 +74,8 @@ import update  # noqa: E402  (a new version from git, restarted onto once idle: 
 import meshui  # noqa: E402  (a daemon's pending restart, toasted: Record's too)
 baudelib.wire.HEAD_COMMIT = update.STARTED  # (said to the host processes it reaches: logged by one on other code)
 baudelib.wire.HEAD_CLIENT = "baude"  # (listed as Baude among the apps connected to a host)
+import uitrack  # noqa: E402  (what's used and run counted from here on: telemetry's)
+uitrack.prepare()
 import widgets  # noqa: E402  (what Record draws as Baude does: the links' logos; see widgets.py)
 import memreport  # noqa: E402  (what it holds, in its debug report)
 import pickers  # noqa: E402

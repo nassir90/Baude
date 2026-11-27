@@ -636,10 +636,11 @@ def bot_picture(info, then):
 
 def can_be_bot(info):
     """Can a chat be made a Bot (or is one, its settings changeable): one on a host that's there and takes bot, on a
-    model whose program's told who it is (claude's, pi's), not a fork (a Bot's a top-level chat); a Bot on any model."""
+    model whose program's told who it is and given a Bot's tools (claude's, pi's, codex's), not a fork (a Bot's a
+    top-level chat); a Bot on any model."""
     r = info.get("remote")
     return r is not None and not info.get("dead") and r.state == "alive" and baudelib.wire.takes(r.info, "bot") and \
-        (bool(info.get("bot")) or modelslib.model_program(info.get("model")) in ("claude", "pi"))
+        (bool(info.get("bot")) or modelslib.model_program(info.get("model")) in ("claude", "pi", "codex"))
 
 
 def can_rotate(info):

@@ -1607,6 +1607,16 @@ Work's weekly limit ran out at 09:12. Three chats are running on it; they stop a
         screen("09c-home-session-menu")
     }
 
+    @Test fun homeCodexSessionMenu() { // (a Codex chat's long-press menu: Make Bot… too)
+        Mesh.sessions["h1"] = Mesh.sessions["h1"].orEmpty().map {
+            if (it.title == "Why the build is slow") Msg.Session.from(it.json().put("model", "codex/default")) else it
+        }
+        show { HomeScreen() }
+        tap("Why the build is slow", long = true)
+        layOut()
+        screen("09c-home-codex-session-menu")
+    }
+
     // (a Bot's long-press menu: Rotate after Bot Settings…; then, rotated, its new chat empty, and a search finding its past
     // thread under Archived)
     @Test fun homeBotMenu() {

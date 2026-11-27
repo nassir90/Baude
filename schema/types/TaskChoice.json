@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
-  "description": "One thing a task's variable could be bound to, as its host offers it (task_choices): its own models, the mesh's hosts, its kubeconfig's contexts, the workloads running in its local clusters, its Docker containers, the databases running on it (what ⌘K lists).",
+  "description": "One thing a task's variable could be bound to, as its host offers it (task_choices): its own models, the mesh's hosts, its kubeconfig's contexts, the workloads running in its local clusters, its Docker containers, the databases running on it (what ⌘K lists), its deciders and the mesh's.",
   "properties": {
     "binding": {
       "$ref": "TaskBinding.json",

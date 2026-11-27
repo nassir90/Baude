@@ -5,7 +5,7 @@
   "properties": {
     "value": {
       "type": "string",
-      "description": "What it is: a model's value, a decision model's URL, a host's id or name, a context's, pod's, container's or database's name, or the text."
+      "description": "What it is: a model's value, a decider's value (what decide's model takes), a host's id or name, a context's, pod's, container's or database's name, or the text."
     },
     "label": {
       "type": [
@@ -33,7 +33,7 @@
         "string",
         "null"
       ],
-      "description": "A decision model's: the model its endpoint is asked for."
+      "description": "A decider's: the model it serves, as it said."
     },
     "context": {
       "type": [

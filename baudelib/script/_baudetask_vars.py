@@ -43,7 +43,7 @@ class Model(Bound):
 
 
 class Decider(Bound):
-    """A decision model's endpoint: its URL, and model (what it's asked for there)."""
+    """A decider: its value (what decide(model=) takes), and model (the model it serves, if it said)."""
     type, FIELDS = "decider", ("model",)
 
 

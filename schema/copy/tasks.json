@@ -108,7 +108,7 @@
     "variables": "Variables",
     "not_bound": "Not bound",
     "bind_heading": "Bind {$name}",
-    "decider": "Decision model",
+    "decider": "Decider",
     "browser_host": "Browser host",
     "terminal_host": "Terminal host",
     "kube_context": "Kubernetes context",
@@ -124,6 +124,7 @@
     "variable_warning": "{$name}: {$warning}",
     "no_variable": "No such variable",
     "variable_needs_name": "A variable needs a name",
-    "variables_one_name": "Two variables have one name"
+    "variables_one_name": "Two variables have one name",
+    "no_decider": "No such decider"
   }
 }

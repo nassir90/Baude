@@ -1,18 +1,16 @@
 """A task's variables (docs/tasks-design.md): names a task declares, each with a type (a model and its effort, a
-decision model's endpoint, a host of the mesh, a Kubernetes context, pod, container or database, or text), bound once
+decider, a host of the mesh, a Kubernetes context, pod, container or database, or text), bound once
 for the task, by its Bot (set_task) or a person (its page), unlike its form's inputs, which each run fills. What's
 offered as one's bound is what this host has of that type, from the lists ⌘K lists (its models, the mesh's hosts, its
-kubeconfig's contexts, the workloads in its local clusters, its Docker containers, the databases running here); any
+kubeconfig's contexts, the workloads in its local clusters, its Docker containers, the databases running here, its deciders); any
 text is taken all the same, for a flaky one. One bound to what isn't there now (a model not served, a host out of
 reach, a pod gone) is warned of: on the task's page, and in a run's log as it starts. The run starts all the same, its
 script told each one's warning (baudetask.vars) and left to decide what to do: nothing's put in its place. No GTK."""
 import os
 import re
-import socket
 import sys
 import threading
 import time
-import urllib.parse
 
 from baudelib import wire, wording
 
@@ -23,7 +21,6 @@ NAME_MAX, DESCRIPTION_MAX, VALUE_MAX = 60, 300, 500
 LISTS_S = 15  # (what's here of each type, looked at again after this long, at most: its choices and warnings)
 CHECK_S = 60  # (every bound variable of every task looked at again this often, for its warning)
 CHOICES_MAX = 400
-REACH_S = 2  # (a decision model's endpoint: how long its port's waited for)
 HOSTS = ("host", "browser_host", "terminal_host")
 KUBE = ("kube_context", "pod")
 _NAME = re.compile(r"[^\x00-\x1f\x7f]{1,%d}" % NAME_MAX)
@@ -158,10 +155,15 @@ class Lists:
         return {"items": out}
 
     def _deciders(self):
-        """This host's providers' endpoints (Ollama's, an endpoint's), what a decision model may be served by."""
-        return {"items": [{"value": p["base_url"], "label": p.get("name") or p["base_url"]}
-                          for p in self.server.mesh.providers_here() if p.get("base_url")]}
-
+        """The deciders this host knows (baudelib/deciders.py, as its deciders op lists them): its own, then the mesh's
+        members', each by its value (what decide's model takes) and whether it answered when last looked at."""
+        srv = self.server
+        out = [{"value": d["value"], "label": d.get("name") or d["value"], "detail": d.get("model") or None,
+                "gone": not d.get("reachable")} for d in srv.deciders.listing()]
+        for _member, name, decs in srv.mesh.member_deciders():
+            out += [{"value": f"{name}/{d['id']}", "label": f"{name}/{d.get('name') or d['id']}",
+                     "detail": d.get("model") or name, "gone": not d.get("reachable")} for d in decs]
+        return {"items": out}
 
 LIST_OF = {"model": "models", "decider": "deciders", "host": "hosts", "browser_host": "hosts",
            "terminal_host": "hosts", "kube_context": "contexts", "pod": "pods", "container": "containers",
@@ -179,23 +181,11 @@ def choices(lists, kind):
         b = {k: it[k] for k in FIELDS if isinstance(it.get(k), str) and it[k]}
         if kind in HOSTS and it.get("label"):  # (a host's kept by its name, as a person types it)
             b = {"value": it["label"], "label": it["label"]}
-        detail = wording.say("tasks.out_of_reach") if it.get("gone") else it.get("detail")
+        detail = wording.say("tasks.unreachable" if kind == "decider" else "tasks.out_of_reach") \
+            if it.get("gone") else it.get("detail")
         out.append({"binding": b, **({"detail": detail} if detail else {}),
                     **({"efforts": it["efforts"]} if it.get("efforts") else {})})
     return out[:CHOICES_MAX]
-
-
-def _reached(url):
-    """Is something listening where url says (its host and port), within REACH_S?"""
-    p = urllib.parse.urlparse(url if "://" in url else "http://" + url)
-    if not p.hostname:
-        return False
-    try:
-        port = p.port or (443 if p.scheme == "https" else 80)
-        socket.create_connection((p.hostname, port), timeout=REACH_S).close()
-        return True
-    except (OSError, ValueError):
-        return False
 
 
 def warning(server, lists, kind, b):
@@ -210,12 +200,14 @@ def warning(server, lists, kind, b):
         except Exception:  # noqa: BLE001 (a provider's look gone wrong: not said to be missing)
             ok = True
         return None if ok else wording.say("tasks.model_missing")
-    if kind == "decider":
-        return None if _reached(value) else wording.say("tasks.unreachable")
     got = lists.get(LIST_OF[kind])
     if got.get("error") is not None:
         return None
     items = got.get("items") or []
+    if kind == "decider":  # (one of the host's deciders, by its value, that answered when last looked at)
+        hit = next((it for it in items if it["value"] == value), None)
+        return wording.say("tasks.no_decider") if hit is None else wording.say("tasks.unreachable") \
+            if hit.get("gone") else None
     if kind in HOSTS:
         hit = next((it for it in items if value in (it["value"], it.get("label"))), None)
         return wording.say("tasks.no_host") if hit is None else wording.say("tasks.out_of_reach") \

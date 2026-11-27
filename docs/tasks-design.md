@@ -35,19 +35,19 @@ variables, `{name: {type, binding, warning?}}`.
 ## Variables
 
 A task declares variables, each a name ("Translation Model"), a type and an optional description: `model` (a model's
-value, its effort, the host serving it), `decider` (a decision model's endpoint: its URL and model), `host`,
+value, its effort, the host serving it), `decider` (a decider, as decide's `model` names it), `host`,
 `browser_host`, `terminal_host` (a host of the mesh), `kube_context`, `pod`, `container`, `database`, `text`. Unlike the
 form's inputs, which each run fills, a variable is bound once for the task: by its Bot (`set_task`'s `bindings`) or by
 a person on the task's page (`task_bind`, needing manage write on the Bot's chat, as its other changes do).
 
 Binding offers what the task's host has of that type (`task_choices`), from the lists ⌘K lists: its models (as its
 hello lists them, and other hosts' run here), the mesh's hosts, its kubeconfig's contexts, the workloads in its local
-clusters, its Docker containers, the databases running on it, and its providers' endpoints for a decider. Any text is
+clusters, its Docker containers, the databases running on it, and the deciders it knows (its own and the mesh's members') for a decider. Any text is
 taken instead, for a flaky entity. Clusters' choices need Kubernetes read, Docker's Docker read and databases'
 Databases, as the catalogue's do.
 
 The host looks at every bound variable every minute, at once as one's bound, and as a run starts: a model it can't run
-(not served, no account), a decider's endpoint not reachable, a host not in the mesh or out of reach, a context gone,
+(not served, no account), a decider that didn't answer when last looked at, a host not in the mesh or out of reach, a context gone,
 a pod or container not running, a database gone. Each is a warning on the variable's row and its task's row, and the
 first lines of the run's log (kind `warning`). The run starts all the same: nothing is put in its place, and the script
 decides what to do with `baudetask.vars`:

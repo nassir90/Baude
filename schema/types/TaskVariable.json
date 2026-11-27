@@ -20,7 +20,7 @@
         "database",
         "text"
       ],
-      "description": "What it's bound to: a model (with its effort), a decision model's endpoint, a host of the mesh (one to browse on, one to run terminals on), a Kubernetes context, a pod, a container, a database, or text. What's offered as it's bound is the host's own of that type; any text can be given all the same."
+      "description": "What it's bound to: a model (with its effort), a decider (decide's), a host of the mesh (one to browse on, one to run terminals on), a Kubernetes context, a pod, a container, a database, or text. What's offered as it's bound is the host's own of that type; any text can be given all the same."
     },
     "description": {
       "type": [

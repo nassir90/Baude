@@ -150,6 +150,8 @@ def control_reply(req):
         return {"applied": {"model": state["model"], "effort": state["effort"]}}
     if sub == "get_context_usage":
         return context_usage()
+    if sub == "background_tasks":
+        return move_to_background(req.get("tool_use_id"))
     if sub == "rename_session" and (folder := kept_in()) is not None:  # (written in the transcript, then answered)
         with open(os.path.join(folder, f"{SESSION}.jsonl"), "a") as f:
             f.write(json.dumps({"type": "custom-title", "customTitle": req.get("title"), "sessionId": SESSION}) + "\n")
@@ -434,6 +436,50 @@ def background_command(n, delay):
     if delay is not None:
         TASKS[tid]["timer"] = threading.Timer(delay, done)
         TASKS[tid]["timer"].start()
+
+
+def long_command(n):
+    """"LONGRUN": a Bash call that runs (task_started, in the foreground) until it's moved to the background
+    (background_tasks) or the turn's interrupted."""
+    tid, tool = f"fg{n}", f"toolu_fg{n}"
+    out_file = os.path.join(tempfile.gettempdir(), f"fake-claude-{os.getpid()}-{tid}.output")
+    with open(out_file, "w") as f:
+        f.write("running the test suite…\n")
+    cmd = {"command": "pytest tests/ -x", "description": "Run the test suite"}
+    say("Running the whole test suite.", f"pre{tid}")
+    out({"type": "assistant", "parent_tool_use_id": None, "session_id": SESSION, "message": {
+        "id": f"m{tid}", "model": "fake", "role": "assistant",
+        "content": [{"type": "tool_use", "id": tool, "name": "Bash", "input": cmd}]}})
+    TASKS[tid] = {"tool_use_id": tool, "type": "local_bash", "output_file": out_file, "foreground": True,
+                  "summary": 'Background command "Run the test suite" completed (exit code 0)',
+                  "followup": "The test suite finished: **412 passed**."}
+    system("task_started", task_id=tid, tool_use_id=tool, description=cmd["description"], task_type="local_bash",
+           is_backgrounded=False)
+    state["open_turn"] = n
+
+
+def move_to_background(tool_use_id):
+    """background_tasks, as claude 2.1 answers it: each foreground call (or the one tool_use_id names) moved to the
+    background, its result saying so, and the turn going on; {backgrounded} only when one was named."""
+    moved = [tid for tid, t in TASKS.items() if t.get("foreground") and tool_use_id in (None, t["tool_use_id"])]
+
+    def go():
+        for tid in moved:
+            t = TASKS[tid]
+            t["foreground"] = False
+            system("task_updated", task_id=tid, patch={"is_backgrounded": True})
+            out({"type": "user", "session_id": SESSION, "message": {"role": "user", "content": [
+                {"type": "tool_result", "tool_use_id": t["tool_use_id"], "content":
+                 f"Command was manually backgrounded by user with ID: {tid}. Output is being written to: "
+                 f"{t['output_file']}"}]}})
+            t["timer"] = threading.Timer(float(os.environ.get("FAKE_MOVED_S") or 1.5), finish_task, (tid,))
+            t["timer"].start()
+        say("The suite's running in the background; I'll pick it up when it ends.", f"moved{moved[0]}")
+        state.pop("open_turn", None)
+        result("moved")
+    if moved:
+        threading.Timer(0.05, go).start()
+    return {} if tool_use_id is None else {"backgrounded": bool(moved)}
 
 
 def interrupted():
@@ -882,6 +928,8 @@ def main():
                 autofix(turns, text)
             elif "EXPIRED" in text:
                 expired(turns)
+            elif "LONGRUN" in text:
+                long_command(turns)
             elif "BACKGROUND" in text:
                 background_command(turns, delay)
             elif "QUESTION" in text or "QUESTION" in json.dumps(msg["message"]["content"]):

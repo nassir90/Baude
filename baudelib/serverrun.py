@@ -13,12 +13,12 @@ import time
 import uuid
 
 from baudelib import (
-    access, agentproxy, autofix, deciders, deps, desktopchats, emissionlink, emissiontools, hostaccounts, hostdb, hostdocker, hostfiles, hostfixes, hostkube,
+    access, accounts, agentproxy, autofix, deciders, deps, desktopchats, emissionlink, emissiontools, hostaccounts, hostdb, hostdocker, hostfiles, hostfixes, hostkube,
     hostlogin, hostqueue, mesh, meshtools, models, hostterminal, multiplexlink, notes, selfupdate, telemetry, themes,
     wire, wording, worktree,
 )
 from baudelib.serverstate import (
-    APPS, BOT_PICTURE_MAX, Conn, FRAME_KEYS, Session, _mtime, _write_json, _write_text, bot_dir, clean_env,
+    APPS, BOT_PICTURE_MAX, Conn, FRAME_KEYS, Session, _mtime, _write_json, _write_text, bot_dir, bot_folder_name, clean_env,
 )
 
 
@@ -164,15 +164,13 @@ class ServerRunning:
         return None, procs
 
     def keep_follow_ups(self):
-        """(lock held) Each session's follow-ups sent at a turn a restart cuts short (queued, codex_queue): kept in its
+        """(lock held) Each session's follow-ups sent at a turn a restart cuts short (queued): kept in its
         meta (follow_ups), and sent once it's started again (send_follow_ups), not lost with its claude."""
         for s in self.sessions.values():
-            held = [{"message": m, "uuid": u} for m, u, _by in s.queued] + \
-                [{"message": m.get("message") or {}, "uuid": m.get("uuid")} for m, _by in s.codex_queue]
+            held = [{"message": m, "uuid": u} for m, u, _by in s.queued]
             if held:
                 s.meta["follow_ups"] = (s.meta.get("follow_ups") or []) + held
                 s.queued = []
-                s.codex_queue.clear()
                 self.save(s)
 
     def send_follow_ups(self):
@@ -382,6 +380,8 @@ class ServerRunning:
                                "gone": {"why": e.why, "folder": e.folder}})
                 except deps.Missing as e:  # (a program a chat runs isn't here: what to install, said as it is)
                     conn.send({"op": "error", "req": msg.get("req"), "error": str(e), "plain": True, "missing": e.dep})
+                except accounts.Disabled as e:  # (a chat on a disabled subscription: said as it is)
+                    conn.send({"op": "error", "req": msg.get("req"), "error": str(e), "plain": True})
                 except Exception as e:  # (one bad request doesn't end the connection)
                     conn.send({"op": "error", "req": msg.get("req"), "error": f"{type(e).__name__}: {e}"})
         finally:
@@ -998,7 +998,7 @@ class ServerRunning:
             if op == "input":
                 try:
                     self.take_input(conn, s, msg.get("msg") or {}, self.sent_by(conn, msg))
-                except desktopchats.Elsewhere as e:
+                except (desktopchats.Elsewhere, accounts.Disabled) as e:
                     return reply("error", error=str(e), plain=True)
                 return reply("accepted", session=s.id) if req is not None else None
             if op == "stop":  # (restart: started again with the next message, those attached not told it went)
@@ -1073,12 +1073,13 @@ class ServerRunning:
                 return reply(kind, **fields)
             if op == "bot":  # (made a Bot, renamed or its picture changed; or, bot None, a chat again)
                 return reply("bot_set", session=self.set_bot(s, msg.get("bot")))
-            if op == "rotate":  # (a Bot's conversation archived as a past thread of its own; the Bot goes on afresh)
-                try:
-                    thread = self.rotate(s)
+            if op == "rotate":  # (a Bot's conversation archived as a past thread of its own; the Bot goes on afresh,
+                try:              # on model if it's given)
+                    thread = self.rotate(s) if msg.get("model") is None else \
+                        self.rotate_to(s, msg["model"], msg.get("effort"))
                 except (OSError, ValueError) as e:
                     return reply("error", error=str(e), plain=True)
-                return reply("rotated", session=s.listing(), thread=thread.listing())
+                return reply("rotated", session=s.listing(), thread=thread.listing() if thread is not None else None)
             if op == "held":  # (a message held for it: dropped, or sent as its user's input would be, and dropped then,
                 # at once: kept if it can't be)
                 held = s.meta.get("held") or []
@@ -1090,7 +1091,7 @@ class ServerRunning:
                         self.take_input(conn, s, {"type": "user", "message": {"role": "user", "content": h["text"]}},
                                         h.get("sender"), h["shown"] if isinstance(h.get("shown"), str) else
                                         meshtools.shown_of_told(h.get("text") or ""))
-                    except desktopchats.Elsewhere as e:  # (kept: sent once it's quiet)
+                    except (desktopchats.Elsewhere, accounts.Disabled) as e:  # (kept: sent once it's quiet)
                         return reply("error", error=str(e), plain=True)
                 s.meta["held"] = [x for x in held if x is not h] or None
                 self.save(s)
@@ -1232,35 +1233,117 @@ class ServerRunning:
 
     def set_bot(self, s, bot):
         """(under the lock) A chat made a Bot (bot: {name, picture: base64 or None to keep it, or "" to drop it}), its
-        name or picture changed, or (bot None) a chat again, its memory and picture kept in case it's made one again."""
-        folder = bot_dir(self.state_dir, s.id)
+        name or picture changed, or (bot None) a chat again, its memory and picture kept in case it's made one again.
+        Its folder named after it (name_bot_folder). A chat made one has its agent given a Bot's tools as it runs
+        (grow_agent), where its program takes them so; another change to what it's told, or one that can't, has its
+        agent started again (renew_agent)."""
+        was = s.meta.get("bot")
         if bot is None:
             s.meta.pop("bot", None)
         else:
             if not isinstance(bot, dict) or not str(bot.get("name") or "").strip():
                 raise ValueError(wording.say("host_errors.bot_needs_name"))
-            os.makedirs(folder, mode=0o700, exist_ok=True)
-            s.meta["bot"] = {"name": " ".join(str(bot["name"]).split())[:80],
-                             "since": (s.meta.get("bot") or {}).get("since") or time.time()}
+            name = " ".join(str(bot["name"]).split())[:80]
+            data = base64.b64decode(bot["picture"]) if bot.get("picture") else None
+            if data is not None and len(data) > BOT_PICTURE_MAX:
+                raise ValueError(wording.say("host_errors.picture_too_big"))
+            if was and name != was.get("name") and getattr(s, "proc", None) is not None and s.busy:
+                s.bot_rename = True  # (its agent goes on writing its memory where it began the turn: moved as it ends)
+                folder = bot_dir(self.state_dir, s.meta)
+            else:
+                folder = self.name_bot_folder(s, name)
+            s.meta["bot"] = {"name": name, "since": (was or {}).get("since") or time.time()}
             if not os.path.exists(os.path.join(folder, "memory.md")):  # (and nothing in it accepted yet: all the Bot
-                for name in ("memory.md", "memory.seen.md"):              # writes is shown as its changes)
-                    with open(os.path.join(folder, name), "w") as f:
+                for n in ("memory.md", "memory.seen.md"):                 # writes is shown as its changes)
+                    with open(os.path.join(folder, n), "w") as f:
                         f.write("")
             pic = os.path.join(folder, "picture")
             if bot.get("picture") == "":
                 if os.path.exists(pic):
                     os.remove(pic)
-            elif bot.get("picture"):
-                data = base64.b64decode(bot["picture"])
-                if len(data) > BOT_PICTURE_MAX:
-                    raise ValueError(wording.say("host_errors.picture_too_big"))
+            elif data is not None:
                 with open(pic + ".new", "wb") as f:
                     f.write(data)
                 os.replace(pic + ".new", pic)
         self.save(s)
-        self.renew_agent(s)
+        now = s.meta.get("bot")
+        if (was or {}).get("name") != (now or {}).get("name"):
+            s.bot_note = None  # (what it was to be told, with the name and folder it had)
+            if not (was is None and self.grow_agent(s)):
+                self.renew_agent(s)  # (its picture alone: nothing its agent's told)
         self.changed()
         return s.listing()
+
+    def name_bot_folder(self, s, name):
+        """(under the lock) A Bot's folder (bot_dir) named after it (serverstate.bot_folder_name), as it's named:
+        the one it has moved there, or made; a number after the name if another Bot's has it. Left where it is if it
+        can't be moved. Its tasks' store goes on in it where it is now."""
+        old, base = bot_dir(self.state_dir, s.meta), bot_folder_name(name)
+        mine = (s.meta.get("bot_folder") or "").casefold()
+        taken = {(o.meta.get("bot_folder") or "").casefold() for o in self.sessions.values() if o is not s}
+        bots = os.path.join(self.state_dir, "bots")
+        for n in range(1, 100):
+            want = base if n == 1 else f"{base} {n}"
+            if want.casefold() == mine and os.path.isdir(old):
+                return old  # (named so already)
+            if want.casefold() not in taken and not os.path.lexists(os.path.join(bots, want)):
+                break
+        else:
+            want = wire.safe_name(s.id)
+        new = os.path.join(bots, want)
+        before = {k: s.meta.get(k) for k in ("bot_folder", "bot_moving")}
+        try:
+            os.makedirs(bots, mode=0o700, exist_ok=True)
+            if os.path.isdir(old):
+                s.meta["bot_folder"], s.meta["bot_moving"] = want, os.path.basename(old)
+                self.save(s)  # (the name it's to have kept first: a crash between this and the move is mended as the host starts)
+                os.rename(old, new)
+            else:
+                os.makedirs(new, mode=0o700)
+        except OSError as e:
+            self.log(f"{s.id}: its Bot's folder not named {want}: {e}")
+            for k, v in before.items():
+                s.meta.pop(k, None) if v is None else s.meta.__setitem__(k, v)
+            try:
+                self.save(s)
+                os.makedirs(old, mode=0o700, exist_ok=True)
+            except OSError:
+                pass
+            return old
+        s.meta["bot_folder"] = want
+        s.meta.pop("bot_moving", None)
+        self.tasks.moved(s, os.path.join(new, "tasks"))
+        return new
+
+    def move_bot_folder(self, s):
+        """(under the lock) A Bot's folder moved to its name's, now its agent's turn is over (set_bot)."""
+        if s.bot_rename and s.meta.get("bot"):
+            s.bot_rename = False
+            self.name_bot_folder(s, s.meta["bot"]["name"])
+            try:
+                self.save(s)
+            except OSError as e:
+                self.log(f"{s.id}: {e}")
+
+    def settle_bot_folders(self):
+        """(as the host starts) Each Bot's folder named after it, a Bot's kept by its session's id till now too; one a
+        crash left between saving its folder's name and moving it, moved. Never stops the host."""
+        bots = os.path.join(self.state_dir, "bots")
+        for s in list(self.sessions.values()):
+            if not s.meta.get("bot"):
+                continue
+            try:
+                if s.meta.get("bot_moving"):
+                    new, old = (os.path.join(bots, s.meta.get(k) or "") for k in ("bot_folder", "bot_moving"))
+                    if os.path.isdir(old) and not os.path.lexists(new):
+                        os.rename(old, new)
+                    s.meta.pop("bot_moving", None)
+                    self.save(s)
+                if not s.meta.get("bot_folder"):
+                    self.name_bot_folder(s, s.meta["bot"].get("name") or "Bot")
+                    self.save(s)
+            except OSError as e:
+                self.log(f"{s.id}: its Bot's folder not settled: {e}")
 
     # (what a Bot's conversation was, its thread's; what the Bot is, kept: the rest of its meta)
     THREAD_KEYS = ("path", "cli_id", "title", "prompt", "said", "written", "cut", "context_usage", "codex_started",
@@ -1275,21 +1358,15 @@ class ServerRunning:
         one left half done is undone or finished as the host next starts (settle_rotations), or at once if a step
         fails here. The thread: the new session, as it's kept."""
         bot = s.meta.get("bot")
-        if not bot:
-            raise ValueError(wording.say("host_errors.not_a_bot"))
-        if s.busy or s.asks or s.queued or s.codex_queue:
-            raise ValueError(wording.say("host_errors.at_a_turn"))
-        if s.commands() or s.background_agents:
-            raise ValueError(wording.say("host_errors.background_running"))
-        if self.tasks.asking(s.id):
-            raise ValueError(wording.say("host_errors.task_asking"))
+        self.can_rotate(s)
         if s.transcript() is None:
             raise ValueError(wording.say("host_errors.nothing_to_rotate"))
         self.rescan(s)  # (its title as its transcript has it now)
         listed = s.listing()
         meta = copy.deepcopy(s.meta)
         for key in ("bot", "autofix", "held", "waits_on", "follow_ups", "routines", "task_run", "spawned_by",
-                    "start_key", "rotated", "last_thread", "composer", "queue"):  # (the Bot's draft stays the Bot's)
+                    "start_key", "rotated", "last_thread", "composer", "bot_folder", "bot_moving", "queue"):  # (the Bot's draft, and its
+            # folder, stay the Bot's)
             meta.pop(key, None)
         title = listed.get("title") or time.strftime("%-d %b %Y", time.localtime(listed.get("created") or time.time()))
         meta.update(id=str(uuid.uuid4()), archived=True, thread_of=s.id, title=f"{bot['name']} / {title}",
@@ -1313,8 +1390,8 @@ class ServerRunning:
                 s.meta["seen"] = dict(ended)
             if models.model_program(s.meta.get("model")) != "codex":  # (claude, pi: a conversation of a new id;
                 s.meta["cli_id"] = str(uuid.uuid4())                  # Codex names its own thread as it starts)
-            s.meta.update(said=time.time(), rotated=time.time(), senders=(s.meta.get("senders") or 0) + 1,
-                          last_thread=thread.id)
+            s.meta.update(said=listed.get("said"), rotated=time.time(), senders=(s.meta.get("senders") or 0) + 1,
+                          last_thread=thread.id)  # (its place in the list kept: what's next said in it moves it up)
             self.save(s)  # (3: the Bot afresh: from here the thread's its own)
         except Exception:
             s.meta = was
@@ -1340,6 +1417,52 @@ class ServerRunning:
         s.reverting.clear()
         self.rescan(s)
         self.log(f"rotated {s.id}: its conversation archived as {thread.id}")
+        self.changed()
+        return thread
+
+    def can_rotate(self, s):
+        """(under the lock) Refused (ValueError) if a session can't be rotated now: it isn't a Bot, or it's at a turn,
+        asking, running commands or agents in the background, or a task's ask waits on it."""
+        if not s.meta.get("bot"):
+            raise ValueError(wording.say("host_errors.not_a_bot"))
+        if s.busy or s.asks or s.queued:
+            raise ValueError(wording.say("host_errors.at_a_turn"))
+        if s.commands() or s.background_agents:
+            raise ValueError(wording.say("host_errors.background_running"))
+        if self.tasks.asking(s.id):
+            raise ValueError(wording.say("host_errors.task_asking"))
+
+    def rotate_to(self, s, model, effort=None):
+        """(under the lock) A Bot moved onto any model, of whatever program: its conversation rotated (rotate) if
+        anything's been said in it, and the Bot carried on afresh on model, at effort if its program has one, its
+        memory telling it who it is. Refused (ValueError) as rotate is, or for a model this host can't run. The
+        thread: its past one, None if there was nothing to rotate."""
+        if not isinstance(model, str) or not model.strip():
+            raise ValueError("model is a model's name")
+        if not self.can_run(model):
+            raise ValueError(wording.say("host_errors.cant_run", host=self.me["name"], model=model))
+        self.can_rotate(s)
+        thread = self.rotate(s) if s.transcript() is not None else None
+        was = models.model_program(s.meta.get("model"))
+        run = models.launch(model, s.meta.get("mode"), effort if isinstance(effort, str) and effort else
+                            s.meta.get("effort"))
+        if run["program"] == "codex":
+            run["effort"] = models.codex_effort(self.codex_models(s.meta.get("profiles", {}).get("codex", "")),
+                                                model, run["effort"])
+        s.meta.update(model=model, mode=run["mode"], effort=run["effort"])
+        if run["program"] != was:  # (a conversation of the new program's: Codex names its own thread as it starts)
+            for key in ("cli_id", "path", "codex_started", "context_usage", "init"):
+                s.meta.pop(key, None)
+            if run["program"] != "codex":
+                s.meta["cli_id"] = str(uuid.uuid4())
+        self.save(s)
+        if s.proc is not None:  # (its agent between turns, the old model's: let go of, as rotate does)
+            old, s.proc = s.proc, None
+            old.stopping = True
+            s.forget_commands()
+            old.kill()
+            self.drop_routes(s)
+        self.log(f"moved {s.id} onto {model}")
         self.changed()
         return thread
 
@@ -1391,17 +1514,17 @@ class ServerRunning:
         s.proc.close_stdin()
 
     def edits_memory(self, s, request):
-        """Is what a Bot's agent asks to do an edit of a file in its own folder (its memory's)?"""
+        """Is what a Bot's agent asks to do a read or an edit of a file in its own folder (its memory's)?"""
         path = (request.get("input") or {}).get("file_path")
-        if not s.meta.get("bot") or request.get("tool_name") not in ("Edit", "MultiEdit", "Write") or \
+        if not s.meta.get("bot") or request.get("tool_name") not in ("Read", "Edit", "MultiEdit", "Write") or \
                 not isinstance(path, str) or not path:
             return False
-        folder = os.path.realpath(bot_dir(self.state_dir, s.id))
+        folder = os.path.realpath(bot_dir(self.state_dir, s.meta))
         path = os.path.realpath(os.path.join(s.meta.get("cwd") or "/", os.path.expanduser(path)))
         return path.startswith(folder + os.sep)
 
     def bot_picture(self, s):
-        pic = os.path.join(bot_dir(self.state_dir, s.id), "picture")
+        pic = os.path.join(bot_dir(self.state_dir, s.meta), "picture")
         if not os.path.exists(pic):
             return None
         with open(pic, "rb") as f:
@@ -1414,7 +1537,7 @@ class ServerRunning:
         else nothing's written and it's {refused: why, text, seen, mtime, path}, the memory as the Bot left it."""
         if not s.meta.get("bot"):
             raise ValueError(wording.say("host_errors.not_a_bot"))
-        folder = bot_dir(self.state_dir, s.id)
+        folder = bot_dir(self.state_dir, s.meta)
         path, seen_path = os.path.join(folder, "memory.md"), os.path.join(folder, "memory.seen.md")
         if text is not None:
             if "base_mtime" in base and _mtime(path) != base["base_mtime"]:

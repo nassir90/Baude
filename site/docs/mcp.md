@@ -1155,13 +1155,15 @@ A host's telemetry over a stretch: its chat events, its samples, its line profil
 
 #### `telemetry_set` (TelemetrySet)
 
-A host's telemetry switched on or off, or what a process on its machine profiles set, at run time: kept by the host, and told to its machine's apps (Info's telemetry).
+A host's telemetry switched on or off, its line profiling switched on or off, or what a process on its machine profiles named (or its defaults again), at run time: kept by the host, and told to its machine's apps (Info's telemetry).
 
 | Field | Type | Required | What it is |
 |---|---|---|---|
 | `on` | boolean/null |  | Telemetry on or off (null: as it is). |
-| `app` | any |  | The process whose profiling is set: the host's, Baude's or Record's (null: none). |
-| `functions` | array/null of string |  | What it profiles: functions and modules by their dotted names; empty: off. |
+| `line_profiling` | boolean/null |  | Line profiling on or off: the host's process, Baude's and Record's each profiling what it's told to while telemetry's on too (null: as it is). |
+| `app` | any |  | The process whose profiled functions are named or put back to its defaults: the host's, Baude's or Record's (null: none). |
+| `functions` | array/null of string |  | What app's process profiles in place of its defaults: functions and modules by their dotted names; empty: nothing (null: as it is). |
+| `default` | boolean/null |  | True: what app's process profiles is its defaults again (Baude's own pick, lineprofile.DEFAULTS), what was named in their place dropped. |
 
 #### `terminal` (Terminal)
 
@@ -2977,6 +2979,7 @@ What a host is, as its hello says (and sessions carries).
 | `phone` | boolean |  | A phone's host. |
 | `ops` | array of string |  | The ops it takes, given by a host that takes only part of the wire (a phone's), with what its sessions take besides (start's ephemeral; control requests: control, set_permission_mode, set_model). |
 | `telemetry` | TelemetryState |  | Its telemetry state: the apps on its machine tell it telemetry only while it's on, and profile what it says. |
+| `front` | array of TelemetryFront |  | The chats in front on its machine now, as its apps' telemetry says (each one's last chat_front, till its chat_left or the app's gone): none while its telemetry's off. No head notifies of a chat in front on any machine of the mesh. |
 | `tool_names` | ToolNames |  | How its MCP tools are named: what every head shows for one ("Mesh / Tasks"). |
 
 #### KubeColumn
@@ -3660,7 +3663,7 @@ Something done in a chat, as an app saw it happen: kept by its machine's host as
 |---|---|---|---|
 | `at` | number | yes | When, in seconds since the epoch (to the millisecond). |
 | `app` | `host` \| `baude` \| `record` \| `phone` |  | What saw it: Baude, Record, the phone's app, or the chat's host itself (a turn's end, as it ran there: what tokens are added up from). |
-| `kind` | `chat_opened` \| `chat_front` \| `chat_left` \| `turn_sent` \| `turn_ended` | yes | What happened: a chat opened in a window or screen; a chat came in front (its window or screen in front, showing it); it stopped being in front; a turn sent in it; a turn of it ended. |
+| `kind` | `chat_opened` \| `chat_front` \| `chat_left` \| `turn_sent` \| `turn_ended` | yes | What happened: a chat opened in a window or screen; a chat came in front (its window or screen in front, showing it, with someone at the machine); it stopped being in front (or nobody's at the machine now); a turn sent in it; a turn of it ended. |
 | `host` | string | yes | The id of the host the chat is on. |
 | `session` | string | yes | The chat's session id. |
 | `seconds` | number/null |  | A turn_ended's: how long the turn took. |
@@ -3669,6 +3672,15 @@ Something done in a chat, as an app saw it happen: kept by its machine's host as
 | `effort` | string/null |  | A turn_ended's: the effort it ran at. |
 | `tokens_in` | integer/null |  | A turn_ended's: the tokens it read (input, cache reads and writes). |
 | `tokens_out` | integer/null |  | A turn_ended's: the tokens it wrote. |
+
+#### TelemetryFront
+
+A chat in front on a host's machine: shown in one of its apps' windows or screens, that in front, with someone at the machine.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `host` | string | yes | The id of the host the chat is on. |
+| `session` | string | yes | The chat's session id. |
 
 #### TelemetryLine
 
@@ -3718,12 +3730,13 @@ What line_profiler timed in a process over a stretch (saved every 30 seconds whi
 
 #### TelemetryProfiling
 
-What a process is told to profile.
+What a process profiles while line profiling's on.
 
 | Field | Type | Required | What it is |
 |---|---|---|---|
 | `app` | `host` \| `baude` \| `record` | yes | The process: the host's, Baude's or Record's. |
-| `functions` | array of string | yes | What's profiled: functions (module.function, module.Class.method) and modules (every function in it); none: off. |
+| `functions` | array of string | yes | What's profiled: functions (module.function, module.Class.method) and modules (every function in it); its defaults unless others are named. |
+| `default` | boolean | yes | They're its defaults (lineprofile.DEFAULTS, Baude's own pick), not named by telemetry_set. |
 | `error` | string/null |  | Why it isn't profiling what it's told to (a name not found; line_profiler not installed). |
 
 #### TelemetrySample
@@ -3744,11 +3757,12 @@ A host's machine and its processes, sampled every few seconds while telemetry is
 
 #### TelemetryState
 
-A host's telemetry: on or off, and what each process on its machine profiles.
+A host's telemetry: on or off, line profiling on or off, and what each process on its machine profiles.
 
 | Field | Type | Required | What it is |
 |---|---|---|---|
 | `on` | boolean | yes | Events kept and the machine sampled. |
+| `line_profiling` | boolean | yes | Line profiling on: each process profiles its functions while telemetry's on too (off unless switched on). |
 | `line_profiler` | boolean | yes | line_profiler is installed for the host's Python. |
 | `profiling` | array of TelemetryProfiling | yes | Each process's: the host's, Baude's, Record's. |
 
@@ -3919,7 +3933,10 @@ Somewhere wire.reach can go: this machine's host process, one listening on anoth
 | `OPEN_S` | `20` | A member of the mesh, reached through it: its tunnel has this long to open, in seconds. |
 | `PING_S` | `5` | A connection's ends each say something at least this often (ping), in seconds. |
 | `QUERY_ROWS_MAX` | `1000` | A database query's rows, at most (databases' query): the rest aren't read. |
+<<<<<<< ours
 | `QUEUE_CHARS_MAX` | `8000000` | A chat's queue, as its host keeps it, at most, in characters of JSON (its messages' pictures and documents too): a message that would take it past this is refused, and stays the head's own. |
+=======
+>>>>>>> theirs
 | `SHOT_MAX` | `1024` | A browser screenshot's longest side, in pixels. |
 | `SHOT_QUALITY` | `82` | A browser screenshot's JPEG quality. |
 | `SIGNED_S` | `300` | A tunnel's open: signed this near now, in seconds, either way, or it's closed where it's opened to. |
@@ -3927,6 +3944,10 @@ Somewhere wire.reach can go: this machine's host process, one listening on anoth
 | `TERMINAL_KEEP_S` | `600` | A terminal (terminal op) no connection is attached to now: its program kept running this long to be attached to again, in seconds. |
 | `TERMINAL_KEPT_BYTES` | `262144` | What a terminal (terminal op) wrote lately, kept to show again on attach: this many bytes at most. |
 | `TTL` | `16` | A tunnel's passed through at most this many hosts (open's ttl). |
+<<<<<<< ours
 | `VERSION` | `35` | The wire's version, as a host's hello says it. |
+=======
+| `VERSION` | `34` | The wire's version, as a host's hello says it. |
+>>>>>>> theirs
 | `ZOOM_MAX` | `1568` | A browser zoom's longest side, in pixels. |
 | `ZOOM_QUALITY` | `90` | A browser zoom's JPEG quality. |

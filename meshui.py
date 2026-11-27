@@ -281,9 +281,9 @@ def restart_dialog(remote, parent, ask, see=None, held=None):
     on a row: see(blocker) shows it, the restart held meanwhile (held(): its toast says it's paused; Details, this
     again; dismissed, let go of: let_go_held). Its rows are drawn again as the host says what it waits for (its info's
     restart, pushed as that changes), looked at every 500 ms; parent closed, it goes, its pause with it."""
-    box = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE, css_classes=["boxed-list"])
-    box.set_placeholder(Gtk.Label(label=wording.say("hosts.restart_nothing"), css_classes=["dim-label"],
-                                  margin_top=12, margin_bottom=12))
+    box = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE, css_classes=["boxed-list"], valign=Gtk.Align.START)
+    nothing = Gtk.Label(label=wording.say("hosts.restart_nothing"), css_classes=["dim-label"], margin_top=12,
+                        margin_bottom=12)
     scroll = Gtk.ScrolledWindow(child=box, propagate_natural_height=True, max_content_height=320,
                                 hscrollbar_policy=Gtk.PolicyType.NEVER, width_request=560)
     dlg = Adw.AlertDialog(heading=wording.say("hosts.restart_blockers"), extra_child=scroll,
@@ -313,6 +313,8 @@ def restart_dialog(remote, parent, ask, see=None, held=None):
         shown[0] = blockers
         while (row := box.get_row_at_index(0)) is not None:
             box.remove(row)
+        box.set_placeholder(None if blockers else nothing)  # (kept out while there are rows: the last row's the list's
+        # last child then, its foot rounded with no rule under it)
         for b in blockers:
             title = b.get("name") or b.get("what") or ""
             row = Adw.ActionRow(title=title, title_lines=1, use_markup=False,

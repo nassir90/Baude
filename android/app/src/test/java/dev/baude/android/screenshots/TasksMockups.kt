@@ -220,9 +220,8 @@ abstract class TasksMockups(private val theme: String) {
                         dev.baude.android.Prose("Staging, I'd say: production deploys wait for the release.")
                     }
                     dev.baude.android.Said(dev.baude.android.Line("you", "You haven't answered run 625623c87b8e486e with " +
-                        "your mcp__mesh__answer_task tool, and the task's waiting on it. Answer with the tool now.\n\n" +
-                        "Answer with your mcp__mesh__answer_task tool, these fields in its answer:\n- bucket: one of " +
-                        "\"staging\", \"production\""), from, waits = waiting)
+                        "your mcp__mesh__answer_task tool, and the task's waiting on it. Answer with the tool now."), from,
+                        waits = waiting)
                     if (!waiting) {
                         androidx.compose.foundation.layout.Box(Modifier.padding(horizontal = 12.dp)) {
                             dev.baude.android.ToolCard(answer, null, {}, null)

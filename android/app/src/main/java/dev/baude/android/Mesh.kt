@@ -1385,6 +1385,16 @@ object Mesh {
         }
     }
 
+    /** The id of the host a connection's to (this phone's own host's too), if it's known. */
+    fun hostIdOf(connId: String): String? = if (connId == "phone") PhoneHost.id else machine(connId)
+
+    /** Is a chat (its connection's id, its session's) in front of you on any machine of the mesh, this phone too, as
+     * each host says of its own machine's apps (Info's front, from their telemetry)? */
+    fun inFront(connId: String, sid: String): Boolean {
+        val host = hostIdOf(connId) ?: return false
+        return conns.values.any { c -> c.state == "up" && c.info?.front.orEmpty().any { it.host == host && it.session == sid } }
+    }
+
     /** The machine a connection's to (its id, as the mesh knows it), if it's known: this phone's agents, none. */
     private fun machine(connId: String): String? = when {
         connId == "phone" -> null
@@ -1723,6 +1733,7 @@ object Mesh {
     private fun post(contact: Contact, text: String, tag: String?, asked: Boolean = false, end: Msg.TurnEnd? = null) {
         Settings.load(app)
         if (!Settings.notify.value) return // (Settings → Notifications off)
+        if (inFront(contact.hostId, contact.id)) return // (in front of you on a machine of the mesh)
         if (end != null && seenPast(session(contact.hostId, contact.id), end.size?.toLong() ?: 0)) return // (seen
         // already, elsewhere)
         if (!asked && contact.session.bot?.picture != null && contact.pictureKey !in pictures) // (its picture first)

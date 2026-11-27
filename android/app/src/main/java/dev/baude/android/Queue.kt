@@ -107,16 +107,11 @@ object Queue {
         chat.send(text, files, turns.singleOrNull()?.uuid)
     }
 
-    /** ↑ on a queued message: it and those before it sent together, now, or once the interrupted turn has ended. */
-    fun sendNow(chat: Chat, q: Queued, working: Boolean) {
-        if (working) {
-            val now = chat.queueUpto
-            if (now == null || chat.queued.indexOf(q) > chat.queued.indexOf(now)) chat.queueUpto = q
-            interrupt(chat)
-        } else {
-            chat.queueUpto = q
-            flush(chat)
-        }
+    /** ↑ on a queued message: it and those before it sent together, now: to the turn going on, which takes it in and
+     * goes on (as Baude's send_at_turn), or as a turn of its own. */
+    fun sendNow(chat: Chat, q: Queued) {
+        chat.queueUpto = q
+        flush(chat)
     }
 
     /** A queued message taken out (✕, or its revert): out of its host's queue too, if it has it. */
@@ -340,7 +335,7 @@ private fun Revealed(shown: Boolean, modifier: Modifier, buttons: @Composable ()
  * no to, sent by itself: a warning beside it, saying why; it goes again only by ↑. */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun QueuedRow(chat: Chat, q: Queued, working: Boolean) {
+fun QueuedRow(chat: Chat, q: Queued) {
     val c = LocalBaude.current
     var shown by remember { mutableStateOf(false) }
     val level = rememberLastLine()
@@ -356,7 +351,7 @@ fun QueuedRow(chat: Chat, q: Queued, working: Boolean) {
             TurnButton(Wording.ChatTurns.queuedDelete, { Queue.drop(chat, q) }) {
                 Icon(Adwaita.WindowClose, null, tint = c.dim, modifier = Modifier.size(12.dp.icon))
             }
-            TurnButton(Wording.ChatTurns.queuedSendNow, { Queue.sendNow(chat, q, working) }) { UpArrow() }
+            TurnButton(Wording.ChatTurns.queuedSendNow, { Queue.sendNow(chat, q) }) { UpArrow() }
             TurnButton(Wording.ChatTurns.queuedEdit, {
                 Queue.drop(chat, q)
                 chat.edit.value = q.text
@@ -405,12 +400,14 @@ fun Held(chat: Chat, h: Msg.HeldMessage, working: Boolean) {
     }
 }
 
-/** A held message's ↑: refused, and why, as a toast, while a turn runs or its host isn't there. */
+/** A held message's ↑: refused, and why, as a toast, while a turn runs, its host isn't there or its subscription's
+ * disabled. */
 private fun heldSend(ctx: Context, chat: Chat, h: Msg.HeldMessage, working: Boolean) {
     val why = when {
         working -> Wording.HeldSend.afterTurn
         Mesh.conn(chat.hostId) == null -> Wording.HeldSend.whileNoHost
         Mesh.conn(chat.hostId)?.state != "up" -> Wording.HeldSend.whileDown
+        subscriptionOff(chat) -> Wording.HeldSend.whileDisabled
         else -> null
     }
     if (why != null) Toast.makeText(ctx, why, Toast.LENGTH_SHORT).show() else Mesh.held(chat, h.id.orEmpty(), true)

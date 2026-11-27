@@ -5,6 +5,7 @@
     "while_exhausted": "It can't be sent while this chat's context is exhausted: pick a model with a bigger window, or clear it",
     "while_down": "It can't be sent while the connection to this chat's host is down",
     "while_no_host": "It can't be sent while this chat's host isn't there",
+    "while_disabled": "It can't be sent while this chat's subscription is disabled",
     "while_other": "It can't be sent while nothing can be sent in this chat",
     "not_sent": "Not sent: {$why}",
     "not_deleted": "Not deleted: {$why}"

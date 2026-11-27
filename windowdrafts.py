@@ -31,7 +31,7 @@ from markdownview import ARTIFACT_TITLES, GIT_SCHEME, MarkdownView  # noqa: E402
 from codeview import CodePage  # noqa: E402,F401
 from startup import LAUNCHER  # noqa: E402
 from signalrefs import TOOL_NAMES  # noqa: E402
-from toolcards import ARTIFACT_URL, STOP_SAID_RE, ThinkingView, ToolCard, api_error_label  # noqa: E402
+from toolcards import ARTIFACT_URL, STOP_SAID_RE, ThinkingView, ToolCard, api_error_label, tool_label  # noqa: E402
 from baudelib.hostlogin import login_error  # noqa: E402
 from chatinput import Attachment, attachment_widget  # noqa: E402
 from sessionlist import HERE_HOST, THIS_MACHINE, local_host, main_folder, network, on_main, remote_name  # noqa: E402
@@ -965,6 +965,15 @@ class WindowDrafts:
                 self.sync_providers()
             return
         self.outgrown = False  # (another model's window: as its usage says)
+        if self.remote is not None and model_program(value) != model_program(was) and self.bot_name() and \
+                baudelib.wire.takes(self.remote.info, "rotate"):
+            if getattr(self, "busy", False) and self.proc is not None:  # (rotated once the turn's over)
+                self.move_after_turn = (self.proc, value)
+                self.sync_providers()
+                return
+            self.sync_providers()  # (its own model till the host's moved it)
+            self.remote_rotate_to(value)  # (a Bot: its conversation rotated, and it goes on afresh on the one picked)
+            return
         if self.remote is not None and model_program(value) != model_program(was):
             self.sync_providers()  # (this one goes on with its own model: the one picked is the new session's)
             self.remote_new_conversation(value)  # (a network session: a new one, on its server)
@@ -1764,6 +1773,28 @@ class WindowDrafts:
         self.request({"subtype": "stop_task", "task_id": task_id}, lambda _r: None)
         self.note(wording.say("side_panel.stop_requested", task=self.tasks.get(task_id, {}).get("description") or task_id))
 
+    def offers_background(self):
+        """Whether the open chat's agent moves a command or subagent it's running to the background when asked: only
+        Claude Code does (background_tasks); Codex, pi and Apple's model have no way to."""
+        return model_program(self.model) == "claude"
+
+    def send_to_background(self, card):
+        """A card's Background: its command or subagent moved to the background (Claude Code's background_tasks, by
+        its call), where it goes on, its result saying so (task_from_result) and its end told as a task's; the turn
+        goes on, so what's sent at it reaches the agent. Said in the chat if it can't be."""
+        def done(r):
+            if not (r or {}).get("backgrounded", True):  # (it ended, or its task wasn't one yet: nothing to move)
+                card.moved(False)
+                self.note(wording.say("tool_calls.not_moved", what=tool_label(card.name)))
+
+        def refused(why):
+            card.moved(False)
+            self.note(wording.say("tool_calls.not_moved_why", why=why))
+        if not self.proc or not self.busy:
+            return
+        card.moved(True)
+        self.request({"subtype": "background_tasks", "tool_use_id": card.tool_id}, done, refused)
+
     def place_split(self):
         """Give the panel the width it was dragged to when it opens, else about a third of the window."""
         width = self.split.get_width() or self.get_width()
@@ -1923,8 +1954,8 @@ class WindowDrafts:
                 self.orphan_results[c.get("tool_use_id")] = c
             if isinstance(c, dict) and c.get("type") == "tool_result" and c.get("tool_use_id") in self.tool_cards:
                 card = self.tool_cards[c["tool_use_id"]]
-                if from_file:
-                    self.task_from_result(card, c.get("content"))  # before: the card waits on it
+                if from_file or card.moving:  # (one moved to the background as it ran: its result says it's a task)
+                    self.task_from_result(card, c.get("content"), from_file)  # before: the card waits on it
                 card.set_result(c.get("content"), c.get("is_error", False))
                 if card.task is None and self.task_lines:  # (its task's ending drawn before it: a later part)
                     self.card_task(card)

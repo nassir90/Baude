@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "A chat in front on a host's machine: shown in one of its apps' windows or screens, that in front, with someone at the machine.",
+  "properties": {
+    "host": {
+      "type": "string",
+      "description": "The id of the host the chat is on."
+    },
+    "session": {
+      "type": "string",
+      "description": "The chat's session id."
+    }
+  },
+  "required": [
+    "host",
+    "session"
+  ],
+  "additionalProperties": false
+}

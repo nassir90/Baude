@@ -34,6 +34,8 @@ object TelemetryStore {
     private var cpuBefore: Pair<Long, Long>? = null // (when, this process's CPU ms: the sample before's)
     @Volatile var on = true
         private set
+    @Volatile private var front: Pair<String, String>? = null // (this phone's app's chat in front, as its last
+    // chat_front said, till its chat_left: Info's front)
 
     private fun dir() = File(root!!, "telemetry")
 
@@ -61,7 +63,7 @@ object TelemetryStore {
         m.on?.let { now ->
             if (now != on) {
                 on = now
-                if (on) run() else { sampling?.cancel(false); sampling = null; cpuBefore = null }
+                if (on) run() else { sampling?.cancel(false); sampling = null; cpuBefore = null; front = null }
             }
         }
         dir().mkdirs()
@@ -75,7 +77,23 @@ object TelemetryStore {
         val app = msg.optString("app").takeIf { it in APPS } ?: return
         val rows = msg.optJSONArray("events").list().take(1000).mapNotNull { e -> event(e, app) }
         write("events", rows)
+        if (follow(rows)) PhoneHost.changed() // (every head told: none notifies of the chat in front)
     }
+
+    /** The chat in front followed through what's told: whether it's changed. */
+    @Synchronized
+    private fun follow(rows: List<JSONObject>): Boolean {
+        val before = front
+        for (e in rows) {
+            val chat = e.getString("host") to e.getString("session")
+            if (e.getString("kind") == "chat_front") front = chat
+            else if (e.getString("kind") == "chat_left" && front == chat) front = null
+        }
+        return front != before
+    }
+
+    /** The chats in front on this phone now (Info's front, a TelemetryFront each): what no head notifies of. */
+    fun fronts(): JSONArray = JSONArray(listOfNotNull(front).map { (h, s) -> JSONObject().put("host", h).put("session", s) })
 
     private fun event(e: JSONObject, app: String): JSONObject? {
         val kind = e.optString("kind").takeIf { it in KINDS } ?: return null

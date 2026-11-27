@@ -213,6 +213,10 @@ def warning(server, lists, kind, b):
         return wording.say("tasks.no_host") if hit is None else wording.say("tasks.out_of_reach") \
             if hit.get("gone") else None
     if kind == "pod":
+        look = lists._lookup()
+        if b.get("context") and not any(c.get("name") == b["context"] and look.kube_local(c.get("server"))
+                                        for c in look.kube_contexts()):
+            return None  # (a remote cluster's pods aren't looked at here: nothing to say)
         hit = any(it["value"] == value and (not b.get("context") or it.get("context") == b["context"]) and
                   (not b.get("namespace") or it.get("namespace") == b["namespace"]) for it in items)
         return None if hit else wording.say("tasks.not_running")

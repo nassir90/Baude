@@ -370,7 +370,8 @@ fun ChatPage(chat: Chat, name: String, attach: Boolean = true, stop: (() -> Unit
             val offered = alwaysOffered(session?.let { it.model.orEmpty() }, at)
             val askName = if (session?.bot != null) name else "Claude" // (a Bot's question: its name's)
             drawn(shown, chat.calls, asking = { call -> chat.asks.firstOrNull { it.toolUseId == call.id } },
-                answer = { AskButtons(chat, it, offered, askName) }, view = { chat.showAgent.value = it.id }) { line ->
+                answer = { AskButtons(chat, it, offered, askName) }, view = { chat.showAgent.value = it.id },
+                background = if (working && program(session?.model) == "claude") { call -> moveToBackground(chat, call) } else null) { line ->
                 val uuid = line.uuid
                 androidx.compose.runtime.CompositionLocalProvider(LocalFindLine provides line) {
                 Said(line, uuid?.let { chat.senders[it] }.takeIf { line.kind == "you" },
@@ -392,7 +393,7 @@ fun ChatPage(chat: Chat, name: String, attach: Boolean = true, stop: (() -> Unit
             }
             val held = session?.held.orEmpty().filter { it.id.orEmpty() !in chat.holding }
             items(held, key = { "held:" + it.id.orEmpty() }) { h -> Held(chat, h, working) }
-            items(chat.queued.toList(), key = { "queued:" + System.identityHashCode(it) }) { QueuedRow(chat, it, isWorking(chat)) }
+            items(chat.queued.toList(), key = { "queued:" + System.identityHashCode(it) }) { QueuedRow(chat, it) }
             if (session?.cut != null && chat.sender == null) item(key = "cut-short") { CutShortLine(chat) }
         }
         SummaryPin(list, Gap.chatH + side, Modifier.align(Alignment.TopStart))

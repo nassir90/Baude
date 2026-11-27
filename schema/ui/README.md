@@ -240,3 +240,8 @@ An entry or a part may carry:
   state, its Dependencies row, or the same in a line: "Codex CLI isn't installed: npm install -g @openai/codex"),
   never the run's OS error ("No such file or directory"). The owner found Subscriptions showing that raw error while
   Dependencies already knew codex wasn't installed (2026-11-26). Source: `[{"issue": "BaudeInternal#234"}]`.
+- **A text row stays put while it's typed in.** A page that refreshes or takes the host's answer (Settings →
+  Telemetry every few seconds, Dependencies' Deciders as one's added) changes its other rows and groups in place: it
+  never takes out and puts back the text row being typed in or the group holding it, so the row keeps its focus, its
+  caret and what's typed, and the page stays where it's scrolled to. The owner found a text change at the foot of
+  Settings → Telemetry jumping the page back to its top (2026-11-27). Source: `[{"issue": "BaudeInternal#286"}]`.

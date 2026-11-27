@@ -41,6 +41,13 @@
         "null"
       ],
       "description": "The wire's version it speaks."
+    },
+    "span": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "description": "A rolled-up row's: the seconds it stands for (3600: a row an hour, after a week), its counts added up (null: a row a minute, as told)."
     }
   },
   "required": [

@@ -79,7 +79,7 @@
     },
     {
       "name": "Collect Telemetry",
-      "shows": "A switch row \"Collect Telemetry\", on while the host keeps chat events and samples its machine (the host's own state, kept in its state folder; on unless switched off). The host keeps events 400 days (the tokens' grid is a year), samples 7 days and profiles 30 days.",
+      "shows": "A switch row \"Collect Telemetry\", on while the host keeps chat events and samples its machine (the host's own state, kept in its state folder; on unless switched off). The host keeps events 400 days (the tokens' grid is a year), samples 90 days (a row a minute after a day, a row an hour after a week), counts 90 days (a row an hour after a week), errors 90 days since they last happened, and profiles 30 days.",
       "copy": [
         "telemetry.collect"
       ],
@@ -125,7 +125,7 @@
         },
         {
           "said": "Store chat activity yes with timestamps",
-          "rule": "Every app keeps each chat opened, chat in front, chat left, turn sent and turn ended (with how long it took, its model, effort and tokens) by the chat's host id and session id; the chat's host keeps each of its turns' ends too. A chat's size, messages and images are never kept: chat_size works them out from its transcript when they're asked for",
+          "rule": "Every app keeps each chat opened, chat in front, chat left and turn sent by the chat's host id and session id; a turn's end (how long it took, its model, effort and tokens) is kept once, by the chat's host. A chat's size, messages and images are never kept: chat_size works them out from its transcript when they're asked for",
           "decided": "2026-11-26",
           "source": [
             {
@@ -141,6 +141,28 @@
           "source": [
             {
               "issue": "BaudeInternal#261"
+            }
+          ]
+        },
+        {
+          "said": "You can build this",
+          "rule": "One source for each fact: a turn's end is kept once, by the host that ran it (no app tells it too), and a model has one name in every event and in usage (the id the turn ran on, claude-opus-5-5, never its alias opus; an alias kept before is counted as the latest id of its family)",
+          "decided": "2026-11-27",
+          "source": [
+            {
+              "session": "221e1c29-56d7-48bf-a2dc-7a2b37ccd685",
+              "message": "4d4c11e9-63d0-4c6d-ba40-6c8dc5ead7c9"
+            }
+          ]
+        },
+        {
+          "said": "You can build this",
+          "rule": "Nothing kept is cut short silently: old samples are rolled up (a row a minute after a day, a row an hour after a week; counts a row an hour after a week) in place of a cap on rows, and a telemetry_read whose limit cut a list says so in its truncated",
+          "decided": "2026-11-27",
+          "source": [
+            {
+              "session": "221e1c29-56d7-48bf-a2dc-7a2b37ccd685",
+              "message": "4d4c11e9-63d0-4c6d-ba40-6c8dc5ead7c9"
             }
           ]
         }
@@ -236,7 +258,7 @@
     },
     {
       "name": "Machine",
-      "shows": "Heading \"Machine\": rows of the host's latest sample, asked again every 5 seconds while the page is shown: Load (1, 5 and 15 minutes; not on a phone), Memory (in use of the total, \"11.0 GB of 16.0 GB\"), Swap (in use of the total, \"1.2 GB of 3.0 GB\"; hidden where the host has no swap), Memory Pressure (the level the system gives, \"Normal\", \"Warning\" or \"Critical\", on macOS and a phone; on Linux the share of the last 10 seconds some task stalled on memory, \"1.3% Stalled\"), each only where the host could tell it. While telemetry is off, one dim row \"Telemetry is off\" in its place.",
+      "shows": "Heading \"Machine\": rows of the host's latest sample (the machine sampled every 5 seconds with someone at it, every 30 with nobody), asked again every 5 seconds while the page is shown: Load (1, 5 and 15 minutes; not on a phone), Memory (in use of the total, \"11.0 GB of 16.0 GB\"), Swap (in use of the total, \"1.2 GB of 3.0 GB\"; hidden where the host has no swap), Memory Pressure (the level the system gives, \"Normal\", \"Warning\" or \"Critical\", on macOS and a phone; on Linux the share of the last 10 seconds some task stalled on memory, \"1.3% Stalled\"), each only where the host could tell it. While telemetry is off, one dim row \"Telemetry is off\" in its place.",
       "copy": [
         "telemetry.machine",
         "telemetry.load",
@@ -255,7 +277,7 @@
       "decisions": [
         {
           "said": "Yes store system metrics",
-          "rule": "Every host samples its machine's load and memory and its own and each app's CPU and memory every 5 seconds while telemetry is on, with no new dependency, and keeps them timestamped for a month",
+          "rule": "Every host samples its machine's load and memory every 5 seconds and its own and each app's CPU and memory every 30 seconds while telemetry is on and someone's at the machine (every 30 seconds and every 2 minutes with nobody), with no new dependency and no program started to do it (macOS's libproc and sysctl, Linux's /proc), and keeps them timestamped, rolled up as they age",
           "decided": "2026-11-26",
           "source": [
             {
@@ -283,12 +305,23 @@
               "issue": "BaudeInternal#261"
             }
           ]
+        },
+        {
+          "said": "You can build this",
+          "rule": "Sampling costs next to nothing: no program is started for a sample, the machine's numbers are taken often and each process's less often, and both less often again while nobody's at the machine",
+          "decided": "2026-11-27",
+          "source": [
+            {
+              "session": "221e1c29-56d7-48bf-a2dc-7a2b37ccd685",
+              "message": "4d4c11e9-63d0-4c6d-ba40-6c8dc5ead7c9"
+            }
+          ]
         }
       ]
     },
     {
       "name": "Processes",
-      "shows": "Heading \"Processes\": a row each process the host's latest sample has (its procs, as typed: app and pid), in this order, those of one app by pid: Host Process, Baude, Record, Emission, Multiplex (the phone's app, as Baude, on a phone's host). Each row: its app's logo at its start, monochrome in the row's text colour as the model logos are and as big as one (16 px; schema/icons/baude's baude-app-<app>-symbolic: the logo's shape with what's drawn on it cut out, no tile, no accent; the host process Baude's, the phone's app Baude's), the app's name, and its CPU and memory after it, dim (\"6.2% · 613 MB\"). After the last, a Total row in bold (no logo): the processes' CPU and memory added up in the same form, a process that gave none left out of its sum; it stays at the bottom. Hidden while telemetry is off, or the sample has none.",
+      "shows": "Heading \"Processes\": a row each process the host's latest sample with its processes has (they're taken every 30 seconds) (its procs, as typed: app and pid), in this order, those of one app by pid: Host Process, Baude, Record, Emission, Multiplex (the phone's app, as Baude, on a phone's host). Each row: its app's logo at its start, monochrome in the row's text colour as the model logos are and as big as one (16 px; schema/icons/baude's baude-app-<app>-symbolic: the logo's shape with what's drawn on it cut out, no tile, no accent; the host process Baude's, the phone's app Baude's), the app's name, and its CPU and memory after it, dim (\"6.2% · 613 MB\"). After the last, a Total row in bold (no logo): the processes' CPU and memory added up in the same form, a process that gave none left out of its sum; it stays at the bottom. Hidden while telemetry is off, or the sample has none.",
       "copy": [
         "side_panel.processes",
         "telemetry.host_process",

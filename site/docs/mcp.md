@@ -1302,7 +1302,7 @@ A host's telemetry over a stretch: its chat events, its samples, its line profil
 | `from` | number | yes | From, in seconds since the epoch. |
 | `to` | number/null |  | To (null: now). |
 | `what` | array of `events` \| `metrics` \| `profiles` \| `usage` \| `errors` \| `counters` \| `counted` |  | What's wanted (none: only the state). |
-| `limit` | integer/null |  | The most events, samples and profiles each (the latest kept; default 5000). |
+| `limit` | integer/null |  | The most events, samples, profiles, counts and errors each (default 5000): what's cut is said in the answer's truncated. |
 
 #### `telemetry_set` (TelemetrySet)
 
@@ -2317,6 +2317,7 @@ telemetry_read's answer, each list the earliest first (errors the latest first).
 | `counters` | array of TelemetryCounters |  | Its processes' counts, a row a process a minute. |
 | `counted` | array of TelemetryCount |  | Its processes' counts added up over the stretch, by process, kind and name, the most times first. |
 | `usage` | TelemetryUsage? |  | Its turns added up. |
+| `truncated` | array of `events` \| `metrics` \| `profiles` \| `counters` \| `errors` \| `counted` |  | Each list cut short by limit (the latest kept): a read is never cut short without saying so. |
 
 #### `telemetry_set` (TelemetrySetReply)
 
@@ -3983,6 +3984,7 @@ A process's counts over a stretch (about a minute): what was used and run in it,
 | `counts` | array of TelemetryCount | yes | Each thing used or run in it, the most times first. |
 | `commit` | string/null |  | The commit the process runs (its first 12 characters). |
 | `wire` | integer/null |  | The wire's version it speaks. |
+| `span` | number/null |  | A rolled-up row's: the seconds it stands for (3600: a row an hour, after a week), its counts added up (null: a row a minute, as told). |
 
 #### TelemetryCrumb
 
@@ -4150,7 +4152,7 @@ What a process profiles while line profiling's on.
 
 #### TelemetrySample
 
-A host's machine and its processes, sampled every few seconds while telemetry is on.
+A host's machine sampled while telemetry is on: every 5 seconds with someone at it (every 30 with nobody), its processes with it every 30 seconds (every 2 minutes with nobody); older ones rolled up, a row a minute after a day and a row an hour after a week.
 
 | Field | Type | Required | What it is |
 |---|---|---|---|
@@ -4162,9 +4164,10 @@ A host's machine and its processes, sampled every few seconds while telemetry is
 | `swap_used` | integer/null |  | Its swap in use, in bytes. |
 | `memory_pressure` | string/null |  | How pressed for memory the system says it is: "normal", "warning" or "critical" (macOS's memory pressure level; a phone's low memory: critical, else normal); null where it has no level (Linux). |
 | `memory_stall` | number/null |  | The share of the last 10 seconds, in percent, some task stalled waiting on memory (Linux's pressure stall information, some avg10); null where it has none. |
-| `procs` | array of TelemetryProc | yes | The host process, each app on its machine that told it telemetry (Baude, Record, the phone's app), and each Emission and Multiplex running there (the host finds those itself). |
+| `procs` | array of TelemetryProc |  | The host process, each app on its machine that told it telemetry (Baude, Record, the phone's app), and each Emission and Multiplex running there (the host finds those itself). Left out of a sample its processes weren't taken in. |
 | `commit` | string/null |  | The commit the host runs (its first 12 characters), as it started. |
 | `wire` | integer/null |  | The wire's version the host speaks. |
+| `span` | number/null |  | A rolled-up row's: the seconds it stands for (60, 3600), from at on, its numbers their mean, its pressure the worst (null: one sample). |
 
 #### TelemetryState
 

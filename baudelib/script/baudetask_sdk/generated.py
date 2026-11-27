@@ -1534,6 +1534,8 @@ class TelemetryCounters(Obj):
         counts (array of TelemetryCount): Each thing used or run in it, the most times first.
         commit (string or None): The commit the process runs (its first 12 characters).
         wire (integer or None): The wire's version it speaks.
+        span (number or None): A rolled-up row's: the seconds it stands for (3600: a row an hour, after a week),
+            its counts added up (null: a row a minute, as told).
     """
     _refs = {"counts": "TelemetryCount"}
 
@@ -1736,7 +1738,9 @@ class TelemetryProfiling(Obj):
 
 
 class TelemetrySample(Obj):
-    """A host's machine and its processes, sampled every few seconds while telemetry is on.
+    """A host's machine sampled while telemetry is on: every 5 seconds with someone at it (every 30 with nobody), its
+    processes with it every 30 seconds (every 2 minutes with nobody); older ones rolled up, a row a minute after a
+    day and a row an hour after a week.
 
         at (number): When, in seconds since the epoch.
         load (array or None of number): The machine's load average over 1, 5 and 15 minutes (null where it has
@@ -1755,9 +1759,11 @@ class TelemetrySample(Obj):
             on memory (Linux's pressure stall information, some avg10); null where it has none.
         procs (array of TelemetryProc): The host process, each app on its machine that told it telemetry (Baude,
             Record, the phone's app), and each Emission and Multiplex running there (the host finds those
-            itself).
+            itself). Left out of a sample its processes weren't taken in.
         commit (string or None): The commit the host runs (its first 12 characters), as it started.
         wire (integer or None): The wire's version the host speaks.
+        span (number or None): A rolled-up row's: the seconds it stands for (60, 3600), from at on, its numbers
+            their mean, its pressure the worst (null: one sample).
     """
     _refs = {"procs": "TelemetryProc"}
 
@@ -2859,6 +2865,8 @@ class TelemetryReadReply(Obj):
         counted (array of TelemetryCount): Its processes' counts added up over the stretch, by process, kind and
             name, the most times first.
         usage (TelemetryUsage or None): Its turns added up.
+        truncated (array of 'events' | 'metrics' | 'profiles' | 'counters' | 'errors' | 'counted'): Each list
+            cut short by limit (the latest kept): a read is never cut short without saying so.
     """
     _refs = {"state": "TelemetryState", "events": "TelemetryEvent", "metrics": "TelemetrySample",
              "profiles": "TelemetryProfile", "errors": "TelemetryError", "counters": "TelemetryCounters",
@@ -4864,7 +4872,8 @@ class Ops(Area):
             to (number or None): To (null: now).
             what (array of 'events' | 'metrics' | 'profiles' | 'usage' | 'errors' | 'counters' | 'counted'):
                 What's wanted (none: only the state).
-            limit (integer or None): The most events, samples and profiles each (the latest kept; default 5000).
+            limit (integer or None): The most events, samples, profiles, counts and errors each (default 5000):
+                what's cut is said in the answer's truncated.
         """
         return self._call("telemetry_read", {"from": from_, "to": to, "what": what,
                                              "limit": limit}, host, TelemetryReadReply)

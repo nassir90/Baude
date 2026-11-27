@@ -1252,8 +1252,6 @@ class WindowRemote:
         return listed.get("state") not in (None, "stopped")
 
     def h_result(self, msg):
-        telemetryview.turn_ended(self, msg, self.model, self.local_effort if model_program(self.model) == "pi" else
-                                 self.effort)
         self.compact_ended()
         if self.send_after_result is not None:  # (the turn a revert stopped, ended: what's in the box sent, after this)
             GLib.idle_add(self.send_reverted)

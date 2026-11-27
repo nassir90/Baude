@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
-  "description": "A host's telemetry: on or off, and what each process on its machine profiles.",
+  "description": "A host's telemetry: on or off, line profiling on or off, and what each process on its machine profiles.",
   "properties": {
     "on": {
       "type": "boolean",
@@ -10,6 +10,10 @@
     "line_profiler": {
       "type": "boolean",
       "description": "line_profiler is installed for the host's Python."
+    },
+    "line_profiling": {
+      "type": "boolean",
+      "description": "Line profiling on: each process profiles its functions while telemetry's on too (off unless switched on)."
     },
     "profiling": {
       "type": "array",
@@ -22,6 +26,7 @@
   "required": [
     "on",
     "line_profiler",
+    "line_profiling",
     "profiling"
   ],
   "additionalProperties": false

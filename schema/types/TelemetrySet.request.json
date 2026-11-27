@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
-  "description": "A host's telemetry switched on or off, or what a process on its machine profiles set, at run time: kept by the host, and told to its machine's apps (Info's telemetry).",
+  "description": "A host's telemetry switched on or off, its line profiling switched on or off, or what a process on its machine profiles named (or its defaults again), at run time: kept by the host, and told to its machine's apps (Info's telemetry).",
   "properties": {
     "op": {
       "const": "telemetry_set",
@@ -21,6 +21,13 @@
       ],
       "description": "Telemetry on or off (null: as it is)."
     },
+    "line_profiling": {
+      "type": [
+        "boolean",
+        "null"
+      ],
+      "description": "Line profiling on or off: the host's process, Baude's and Record's each profiling what it's told to while telemetry's on too (null: as it is)."
+    },
     "app": {
       "anyOf": [
         {
@@ -34,7 +41,7 @@
           "type": "null"
         }
       ],
-      "description": "The process whose profiling is set: the host's, Baude's or Record's (null: none)."
+      "description": "The process whose profiled functions are named or put back to its defaults: the host's, Baude's or Record's (null: none)."
     },
     "functions": {
       "type": [
@@ -44,7 +51,14 @@
       "items": {
         "type": "string"
       },
-      "description": "What it profiles: functions and modules by their dotted names; empty: off."
+      "description": "What app's process profiles in place of its defaults: functions and modules by their dotted names; empty: nothing (null: as it is)."
+    },
+    "default": {
+      "type": [
+        "boolean",
+        "null"
+      ],
+      "description": "True: what app's process profiles is its defaults again (Baude's own pick, lineprofile.DEFAULTS), what was named in their place dropped."
     }
   },
   "required": [

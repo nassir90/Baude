@@ -123,7 +123,6 @@ class Recorder:
         on, pid = bool(t.get("on")), here.info.get("pid")
         if on != self.on:
             self.on = on
-            funccount.switch(on)
             if on:
                 uitrack.counts_now()  # (what was counted till now: not kept)
                 self.hello()
@@ -153,6 +152,7 @@ class Recorder:
         self.host_pid = pid
         functions = next((p.get("functions") or [] for p in t.get("profiling") or [] if p.get("app") == self.name),
                          []) if on and t.get("line_profiling") else []
+        funccount.switch(bool(on and t.get("line_profiling")))  # (counted only to aim line profiling)
         if functions != self.profiler.functions:
             self.profile(functions)
 

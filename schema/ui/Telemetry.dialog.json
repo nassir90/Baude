@@ -358,7 +358,7 @@
       "decisions": [
         {
           "said": "Measure the raw number of invocations and a trivial index of the invocations that doesn't require searching with a model.",
-          "rule": "Every process counts how many times each thing in it is used or run, and how long it took: a button or row (its click till the app is free again), a menu item, a screen or tab (opened, and its time in front while someone's at the machine), a wire op its host answered, a main-loop callback, a function of Baude's own code (its calls and time in all, by module:function, while telemetry is on), a program started; each keyed by its schema/ui entity and part (the index is the spec), an op by its name, a callback by its function's; kept as a row a process a minute (nothing while nothing's counted), read by telemetry_read (each minute's, or added up)",
+          "rule": "Every process counts how many times each thing in it is used or run, and how long it took: a button or row (its click till the app is free again), a menu item, a screen or tab (opened, and its time in front while someone's at the machine), a wire op its host answered, a main-loop callback, a function of Baude's own code (its calls and time in all, by module:function, only while line profiling is on, to aim it: counting costs about half a microsecond a call), a program started; each keyed by its schema/ui entity and part (the index is the spec), an op by its name, a callback by its function's; kept as a row a process a minute (nothing while nothing's counted), read by telemetry_read (each minute's, or added up)",
           "decided": "2026-11-27",
           "source": [
             {

@@ -3,7 +3,7 @@ by "module:function" (counters' "function" kind). PEP 669 (sys.monitoring): a fu
 told to two small callbacks, and a function of anything else (the standard library, vendor/, tests, the telemetry's
 own code) is answered DISABLE the first time, so the interpreter never tells of it again. A thread keeps its own
 numbers; drain() gives what's been counted since it was last asked, from every thread. Switched on and off with the
-machine's telemetry, and off always by BAUDE_FUNCTION_COUNTS=0. No GTK."""
+machine's line profiling (counted to aim it), and off always by BAUDE_FUNCTION_COUNTS=0. No GTK."""
 import os
 import sys
 import threading

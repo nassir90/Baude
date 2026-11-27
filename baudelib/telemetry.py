@@ -391,7 +391,6 @@ class Telemetry:
     def start(self):
         """Sampling (and the host's own profiling) started, if it's on."""
         errorbook.install()
-        funccount.switch(self.on)
         self._profile_host()
         self._run()
 
@@ -400,7 +399,9 @@ class Telemetry:
         return list(self.named[app] if app in self.named else lineprofile.DEFAULTS[app])
 
     def _profile_host(self):
-        """The host's own profiler following the state: its functions while telemetry and line profiling are on."""
+        """The host's own profiler following the state: its functions while telemetry and line profiling are on (and
+        the functions counted, to aim it, in the same time)."""
+        funccount.switch(self.on and self.profiling)
         if (last := self.profiler.set(self.functions("host") if self.on and self.profiling else [])) is not None:
             self._write("profiles", [last])
 
@@ -441,7 +442,6 @@ class Telemetry:
         self.has_lp = deps.present("line_profiler")
         if isinstance(msg.get("on"), bool) and msg["on"] != self.on:
             self.on = msg["on"]
-            funccount.switch(self.on)
             if self.on:
                 self._run()
             else:

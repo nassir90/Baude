@@ -128,6 +128,17 @@ class Chat(hostId: String, sid: String) {
     var stopAsked = false                     // (the turn was stopped: its queue stays)
     val edit = mutableStateOf<String?>(null)  // (a queued message's revert: text for the box, before what's written)
     var typed = ""                            // (what's in the box, kept as it's written)
+    val boxText = mutableStateOf<String?>(null) // (text for the box in place of what's there: its host's draft)
+    val head = java.util.UUID.randomUUID().toString() // (its box, as its draft's saves name it: draft_save's head)
+    var draftOpen = false   // (its host's draft taken as it's attached: saved from then on, Mesh.saveDraft)
+    var draftRev = 0L       // (the last revision of it its host's said)
+    var draftText: String? = null // (the markdown its host has, as far as is known here)
+    var draftFlight = 0     // (saves on their way)
+    var draftTyping = false // (typed, its save not sent yet)
+    var draftHeld: Msg.ChatDraft? = null // (another head's, come while this one's own was waiting: Mesh.draftIn)
+    var draftDirty = false  // (written here, not taken by its host yet: Mesh's drafts)
+    var draftRestoring = false // (what was kept here going back in the box: not written now)
+    var putText = ""        // (the box's text as it was last put there, not written: markdown)
     var sender: ((String, List<Picked>) -> Unit)? = null // (one that's sent its own way: Meta's)
     val chrome = Chrome() // (what its status bar, banner and stop button keep)
 
@@ -595,6 +606,10 @@ object Mesh {
                     val said = Msg.LoginState.from(msg)
                     if (it.hostId == c.id && it.sid == said.session.orEmpty()) main.post { if (open === it) Logins.hostSaid(it, said.login) }
                 }
+                Op.DRAFT_CHANGED -> open?.let { // (the open chat's draft, another head's write)
+                    val said = Msg.DraftChanged.from(msg)
+                    if (it.hostId == c.id && it.sid == said.session.orEmpty()) main.post { if (open === it) draftIn(it, said.draft) }
+                }
                 Op.EMISSION_CALL -> PhoneBrowser.called(c, msg) // (a Bot's browser tools, for its browser here)
                 Op.EMISSION_UNSERVED -> PhoneBrowser.unserved(c, msg)
                 Op.CLAUDE -> open?.let {
@@ -766,6 +781,8 @@ object Mesh {
         }
         Queue.takeDraft(hostId, sid, machine(hostId))?.let { d ->
             chat.draft.value = d.text.ifBlank { null }
+            chat.draftDirty = d.dirty && d.text.isNotBlank()
+            chat.draftRestoring = d.text.isNotBlank()
             chat.files.addAll(d.files)
             chat.queued.addAll(d.queue) // (its queue under it again; its ↑ and stop for the turn going on, if one is)
             if (isWorking(chat)) {
@@ -803,6 +820,7 @@ object Mesh {
 
     fun close() {
         val chat = open ?: return
+        flushDraft(chat)
         Queue.keepDraft(chat)
         LinkCache.keepChat(chat)
         conns[chat.hostId]?.send(Msg.Detach(session = chat.sid).json())
@@ -837,6 +855,7 @@ object Mesh {
                 chat.chrome.missing.value = false
                 chat.chrome.writes.value = attached.writes != false
                 chat.chrome.keepsLogin = r.has("login") // (an older host's doesn't: the card worked out here)
+                if (open === chat && attached.writes != false) draftAttached(chat, attached.draft)
             }
             val asks = attached.asks.orEmpty().mapNotNull(Ask::of)
             main.post {
@@ -845,6 +864,134 @@ object Mesh {
                 chat.asks.addAll(asks)
                 attached.login?.let { Logins.hostSaid(chat, it) } // (its sign-in, as its host has it: its card)
             }
+        }
+    }
+
+    // ---- a chat's draft: its text kept by its host (draft_save), the same on every head that opens it, on any
+    // machine. What's written here that its host hasn't taken yet is dirty: typed, pasted or put in by hand, till its
+    // host answers a save of that very text. Saved DRAFT_SAVE_MS after typing stops, at once as the box is emptied
+    // (sent, queued) and as the chat's left; another head's save comes as draft_changed. The last write wins: one
+    // that comes while this box is dirty or has a save on its way is held, and put in once it's neither, if its host
+    // had it after this box's. Only a dirty copy kept here is ever saved over its host's as the chat's opened. What's
+    // attached stays this phone's (Queue's drafts)
+
+    const val DRAFT_SAVE_MS = 400L
+
+    /** Does chat's host keep its draft for it (a host's chat, not a new one nor a Claude Desktop chat, this phone let
+     * write it, its host's draft taken)? */
+    fun keepsDraft(chat: Chat) = chat.sender == null && chat.draftOpen && chat.chrome.writes.value &&
+        session(chat.hostId, chat.sid)?.let { it.draft != true && it.desktop != true } != false && conns[chat.hostId] != null
+
+    /** What chat's box has, as its host keeps it (markdown, as it's sent). */
+    fun boxMarkdown(chat: Chat) = toMarkdown(chat.boxText.value // (its host's, on its way into the box)
+        ?: listOf(chat.typed, chat.draft.value.orEmpty()).filter { it.isNotBlank() }.joinToString("\n"))
+
+    /** (attached) Its host's draft in the box as the chat's opened, unless what was kept here is dirty (saved to it
+     * instead), or its host has none (what's here saved to it); attached again (its host back), what's dirty saved,
+     * else what its host has had since. */
+    private fun draftAttached(chat: Chat, d: Msg.ChatDraft?) {
+        val listed = session(chat.hostId, chat.sid)
+        if (chat.sender != null || listed?.draft == true || listed?.desktop == true) return
+        val box = boxMarkdown(chat)
+        if (chat.draftOpen) {
+            if (chat.draftDirty) saveDraft(chat, box) else draftIn(chat, d)
+            return
+        }
+        chat.draftOpen = true
+        if (d == null) {
+            if (box.isNotBlank()) {
+                chat.draftDirty = true
+                saveDraft(chat, box)
+            }
+            return
+        }
+        chat.draftRev = d.rev?.toLong() ?: 0L
+        chat.draftText = d.text.orEmpty()
+        if (chat.draftDirty && box != chat.draftText) return saveDraft(chat, box)
+        chat.draftDirty = false
+        if (box != chat.draftText) {
+            chat.draft.value = null
+            chat.boxText.value = chat.draftText
+        }
+    }
+
+    /** Where offset at in old is in new, the change between them the part neither's start nor end shares. */
+    fun movedOffset(old: String, new: String, at: Int): Int {
+        val most = minOf(old.length, new.length)
+        var start = 0
+        while (start < most && old[start] == new[start]) start++
+        var end = 0
+        while (end < most - start && old[old.length - 1 - end] == new[new.length - 1 - end]) end++
+        return when {
+            at <= start -> at
+            at >= old.length - end -> (at + new.length - old.length).coerceIn(0, new.length)
+            else -> new.length - end
+        }
+    }
+
+    /** What's in chat's box (markdown) saved to its host: clean once its host's taken that very text and nothing's
+     * been typed since. */
+    fun saveDraft(chat: Chat, markdown: String) {
+        val c = conns[chat.hostId] ?: return
+        if (!keepsDraft(chat)) return
+        val key = "${chat.hostId}/${chat.sid}"
+        chat.draftText = markdown
+        chat.draftFlight++
+        c.request(Msg.DraftSave(session = chat.sid, text = markdown, head = chat.head).json()) { r ->
+            main.post {
+                chat.draftFlight--
+                val took = r.optString("op") == Op.DRAFT_SAVED
+                if (took) chat.draftRev = maxOf(chat.draftRev, Msg.DraftSaved.from(r).draft?.rev?.toLong() ?: 0L)
+                if (open !== chat) { // (left: what was kept of it clean, if this was what it had)
+                    val kept = drafts[key]
+                    if (took && kept != null && toMarkdown(kept.text) == markdown)
+                        Queue.setDraft(key, Draft(kept.text, kept.files, kept.queue, kept.upto, kept.hold, dirty = false))
+                    return@post
+                }
+                if (!took) { // (not kept there: still dirty, saved again as it's opened or attached)
+                    chat.draftText = null
+                    return@post
+                }
+                if (chat.draftFlight == 0 && !chat.draftTyping && boxMarkdown(chat) == markdown) {
+                    chat.draftDirty = false
+                    releaseHeld(chat)
+                }
+            }
+        }
+    }
+
+    /** Another head's write held while this box was dirty or saving, put in now it's neither. */
+    fun releaseHeld(chat: Chat) {
+        val held = chat.draftHeld ?: return
+        if (chat.draftFlight > 0 || chat.draftTyping || chat.draftDirty) return
+        chat.draftHeld = null
+        draftIn(chat, held)
+    }
+
+    /** (the chat being left) Dirty typing saved to its host now. */
+    fun flushDraft(chat: Chat) {
+        chat.draftTyping = false
+        if (chat.reverting == null && chat.draftDirty && keepsDraft(chat)) saveDraft(chat, boxMarkdown(chat))
+    }
+
+    /** Another head's write of chat's draft (draft_changed), or its host's as it's attached again: in the box, unless
+     * this box is dirty or saving (held: put in after, if its host had it after this box's). */
+    fun draftIn(chat: Chat, d: Msg.ChatDraft?) {
+        val rev = d?.rev?.toLong() ?: return
+        if (!chat.draftOpen || rev <= chat.draftRev) return // (one seen already, or older than one that has been)
+        if (d.head == chat.head) { // (this box's own save, back)
+            chat.draftRev = rev
+            return
+        }
+        if (chat.draftFlight > 0 || chat.draftTyping || chat.draftDirty || chat.reverting != null) {
+            if ((chat.draftHeld?.rev?.toLong() ?: -1L) < rev) chat.draftHeld = d
+            return
+        }
+        chat.draftRev = rev
+        chat.draftText = d.text.orEmpty()
+        if (boxMarkdown(chat) != chat.draftText) {
+            chat.draft.value = null
+            chat.boxText.value = chat.draftText
         }
     }
 
@@ -1153,7 +1300,8 @@ object Mesh {
 
     /** A chat's draft: what's written, its files, and its queue (Queue.draftOf). */
     class Draft(val text: String, val files: List<Picked>, val queue: List<Queued> = emptyList(), val upto: Int? = null,
-                val hold: Boolean = false) {
+                val hold: Boolean = false, val dirty: Boolean = false) { // (dirty: its text written here, its host's
+        // answer to its save not come as it was left)
         val empty get() = text.isBlank() && files.isEmpty() && queue.isEmpty()
     }
     val drafts = HashMap<String, Draft>() // (a chat left, "host/session": what was written and queued there, as it has them again)

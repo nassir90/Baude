@@ -71,6 +71,8 @@ abstract class RestartMockups(private val theme: String) {
             paused = paused, blockers = listOf(
                 Msg.RestartBlocker(kind = "chat", session = "s1", name = "Refactor settings", what = "npm test -- --watch=false"),
                 Msg.RestartBlocker(kind = "task", session = "s2", task = "t1", run = "r1", name = "Nightly deploy", what = "a task's run"),
+                Msg.RestartBlocker(kind = "task", session = "s2", task = "t2", run = "r2", name = "Release notes",
+                    what = "a task's run, waiting for input", waiting = true),
                 Msg.RestartBlocker(kind = "agent", session = "s3", host = "h2", name = "apple-foundation",
                     what = "Running apple-foundation for a chat on build-box"),
                 Msg.RestartBlocker(kind = "terminal", terminal = "abc123", name = "zsh", what = "/bin/zsh -l"))))

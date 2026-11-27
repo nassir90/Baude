@@ -166,18 +166,19 @@ class TasksState(val live: Boolean = true) {
 
 /** A task as it's sent to be saved: the whole of it but its script (left as it is: the Bot's to change). */
 private fun whole(t: Msg.Task, form: List<Msg.TaskField>? = t.form,
-                  triggers: List<Msg.TaskTrigger>? = t.triggers, fallback: Boolean = t.fallback ?: true): JSONObject {
+                  triggers: List<Msg.TaskTrigger>? = t.triggers, failure: Boolean = t.notifyFailure ?: true,
+                  exit: Boolean = t.notifyExit ?: false): JSONObject {
     val o = JSONObject().put("name", t.name.orEmpty()).put("runtime", t.runtime ?: "python")
         .put("form", JSONArray(form.orEmpty().map { it.json() }))
         .put("triggers", JSONArray(triggers.orEmpty().map { it.json() }))
-        .put("fallback", fallback).put("paused", t.paused == true)
+        .put("notify_failure", failure).put("notify_exit", exit).put("paused", t.paused == true)
     t.id?.let { o.put("id", it) }
     t.timeoutS?.let { o.put("timeout_s", it) }
     return o
 }
 
-/** A run's state as an icon (its word for a description): a tick done, a stop sign failed, a spinner going, a square
- * stopped, an arrow skipped; nothing for none. */
+/** A run's state as an icon (its word for a description): a tick done, a stop sign failed, a spinner running, an
+ * hourglass in the warning colour waiting for input, a square stopped, an arrow skipped; nothing for none. */
 @Composable
 private fun RunState(status: String?) {
     val c = LocalBaude.current
@@ -186,7 +187,8 @@ private fun RunState(status: String?) {
     when (status) {
         "done" -> Icon(Adwaita.ObjectSelect, word, tint = c.success, modifier = mod)
         "failed" -> Icon(Adwaita.ProcessStop, word, tint = c.destructive, modifier = mod)
-        "running", "asking" -> Box(mod.semantics { contentDescription = word }, contentAlignment = Alignment.Center) { Spinner() }
+        "running" -> Box(mod.semantics { contentDescription = word }, contentAlignment = Alignment.Center) { Spinner() }
+        "asking" -> Icon(Adwaita.Waiting, word, tint = c.warning, modifier = mod)
         "stopped" -> Icon(Adwaita.MediaPlaybackStop, word, tint = c.dim, modifier = mod)
         "skipped" -> Icon(Adwaita.GoNext, word, tint = c.dim, modifier = mod)
     }
@@ -341,7 +343,7 @@ fun TasksPage(hostId: String, sid: String, here: Boolean, state: TasksState? = n
                         change = { st.editing = t }, delete = { st.deleting = t }, addTrigger = { st.adding = t },
                         removeTrigger = { tr -> save(whole(t, triggers = t.triggers.orEmpty().filter { it.id != tr.id })) },
                         editForm = { st.forming = t }, openRun = { openRun(it) },
-                        hand = { on -> save(whole(t, fallback = on)) })
+                        notify = { failure, on -> save(if (failure) whole(t, failure = on) else whole(t, exit = on)) })
                 }
                 "run" -> st.run?.let { r ->
                     Mesh.tick.value
@@ -408,7 +410,7 @@ fun TasksPage(hostId: String, sid: String, here: Boolean, state: TasksState? = n
 @Composable
 private fun TaskView(t: Msg.Task, runs: List<Msg.TaskRun>, offset: Int, back: () -> Unit, run: () -> Unit, change: () -> Unit,
                      delete: () -> Unit, addTrigger: () -> Unit, removeTrigger: (Msg.TaskTrigger) -> Unit, editForm: () -> Unit,
-                     openRun: (Msg.TaskRun) -> Unit, hand: (Boolean) -> Unit) {
+                     openRun: (Msg.TaskRun) -> Unit, notify: (Boolean, Boolean) -> Unit) {
     val c = LocalBaude.current
     Column(Modifier.fillMaxSize()) {
         PageHeader(Wording.Tasks.title, t.name.orEmpty().ifBlank { Wording.Tasks.task }, back) {
@@ -417,8 +419,9 @@ private fun TaskView(t: Msg.Task, runs: List<Msg.TaskRun>, offset: Int, back: ()
             IconButton(Adwaita.UserTrash, Wording.Common.delete, onClick = delete)
         }
         Scrolled {
-            BoxedList(listOf(t), "") { x ->
-                SwitchRow(Wording.Tasks.fallback, null, x.fallback ?: true) { on -> hand(on) }
+            if (t.runtime != "bot") BoxedList(listOf(true, false), "") { failure ->
+                if (failure) SwitchRow(Wording.Tasks.notifyFailure, null, t.notifyFailure ?: true) { on -> notify(true, on) }
+                else SwitchRow(Wording.Tasks.notifyExit, null, t.notifyExit ?: false) { on -> notify(false, on) }
             }
             GroupHeading(Wording.Tasks.triggers) { IconButton(Adwaita.ListAdd, Wording.Tasks.addTrigger, onClick = addTrigger) }
             BoxedList(t.triggers.orEmpty(), Wording.Tasks.byHand) { tr ->
@@ -482,10 +485,14 @@ private fun RunView(r: Msg.TaskRun, log: List<Msg.TaskLogLine>, bot: String, tas
             }
             if (going(r.status)) IconButton(Adwaita.MediaPlaybackStop, Wording.Common.stop, onClick = stop)
         }
-        Text(listOfNotNull(r.error?.ifBlank { null } ?: Wording.Tasks.status(status = r.status.orEmpty()), kindWord(r.kind),
-            r.seconds?.let { tookText(it.toDouble()) }, r.version)
-            .joinToString(" · "),
-            style = Type.caption, color = c.dim, modifier = Modifier.padding(start = 10.dp, end = 10.dp, bottom = 6.dp))
+        Row(Modifier.padding(start = 10.dp, end = 10.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp)) { // (its state's icon first, as Baude's run page has it)
+            RunState(r.status)
+            Text(listOfNotNull(r.error?.ifBlank { null } ?: Wording.Tasks.status(status = r.status.orEmpty()), kindWord(r.kind),
+                r.seconds?.let { tookText(it.toDouble()) }, r.version)
+                .joinToString(" · "),
+                style = Type.caption, color = c.dim)
+        }
         if (chats.isNotEmpty()) {
             GroupHeading(Wording.Tasks.startedChats)
             BoxedList(chats, "") { s ->

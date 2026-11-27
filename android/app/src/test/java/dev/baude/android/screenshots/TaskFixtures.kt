@@ -52,14 +52,14 @@ def deploy(inputs):
         run("r1", "t1", "Deploy site", "done", "schedule", at(9, 0, 3), 186.0, V_OLD))
 
     val deploy get() = Msg.Task(id = "t1", name = "Deploy site", runtime = "python", script = DEPLOY_SCRIPT, version = V, form = form,
-        triggers = triggers, fallback = true, paused = false, last = runs.first())
+        triggers = triggers, notifyFailure = true, notifyExit = true, paused = false, last = runs.first())
 
     val tasks get() = listOf(
         deploy,
-        Msg.Task(id = "t2", name = "Nightly backup", runtime = "shell", version = "c03b91fe2d48", fallback = true, paused = true,
+        Msg.Task(id = "t2", name = "Nightly backup", runtime = "shell", version = "c03b91fe2d48", notifyFailure = true, paused = true,
             triggers = listOf(Msg.TaskTrigger(id = "s2", kind = "schedule", at = "02:30", days = (0..6).toList())),
             last = run("b9", "t2", "Nightly backup", "failed", "schedule", at(2, 30), 14.0, "c03b91fe2d48")),
-        Msg.Task(id = "t3", name = "Triage issues", runtime = "bot", version = "51e7aa09bd32", fallback = true, paused = false,
+        Msg.Task(id = "t3", name = "Triage issues", runtime = "bot", version = "51e7aa09bd32", notifyFailure = true, paused = false,
             triggers = listOf(Msg.TaskTrigger(id = "s3", kind = "schedule", every = 120)),
             last = run("i5", "t3", "Triage issues", "running", "schedule", now - 40, null, "51e7aa09bd32")))
 
@@ -108,6 +108,31 @@ def deploy(inputs):
         log.addAll(listOf(line("say", "deploying main"), line("err", "upload failed: the key has expired"),
             Msg.TaskLogLine(at = now, kind = "agent", text = "The bucket's key expired yesterday. Renew it, then run the task again.",
                 session = "c1")))
+        bot = "Juniper"
+        page = "run"
+    }
+
+    /** A run of Deploy site waiting for input: its script asked Juniper which bucket, the answer not in yet. */
+    val waiting get() = run("r5", "t1", "Deploy site", "asking", "manual", now - 25 * 60, null, V)
+
+    /** The list, Deploy site's last run waiting for input. */
+    fun waitingList() = list().apply {
+        tasks[0] = Msg.Task.from(deploy.json().put("last", waiting.json()))
+    }
+
+    /** Deploy site's page, its newest run waiting for input. */
+    fun waitingPage() = waitingList().apply {
+        task = tasks[0]
+        runs.addAll(listOf(waiting) + TaskFixtures.runs)
+        page = "task"
+    }
+
+    /** That run's page: what it said, and its ask, not answered yet. */
+    fun waitingRun() = waitingPage().apply {
+        run = Msg.TaskRun.from(waiting.json().put("offset", 0).put("asks", 1))
+        log.addAll(listOf(line("say", "deploying main"), line("out", "building 14 pages… done"),
+            line("ask", "Which bucket does site go to?\n\nAnswer with only a JSON object with these fields:\n" +
+                "- bucket: one of \"staging\", \"production\"")))
         bot = "Juniper"
         page = "run"
     }

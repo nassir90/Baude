@@ -888,6 +888,7 @@ class ServerSessions:
                                      wording.say("host_errors.claude_exited", code=code),
                                      "stopped" if stopping else "failed")  # (a task's run's, stopped or gone before
                 # its turn's end: its Bot told)
+            self.tasks.agent_gone(s)  # (its tasks' asks it took, never answered now: failed, not left waiting)
             s.proc, s.busy, s.acting, s.streamed = None, False, False, False
             s.codex_queue.clear()
             s.asks.clear()

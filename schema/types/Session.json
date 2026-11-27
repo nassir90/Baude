@@ -143,6 +143,11 @@
       "type": ["string", "null"],
       "description": "The chat whose mesh tools started it (start's spawned_by), or the Bot whose task's run started it."
     },
+    "task_asks": {
+      "type": "array",
+      "items": {"type": "string"},
+      "description": "A Bot's: the uuids of the messages its tasks' runs have sent it as asks, each run waiting for input (asking) till the turn that message began ends. Empty for every other."
+    },
     "task_run": {
       "anyOf": [{"$ref": "TaskRunRef.json"}, {"type": "null"}],
       "description": "The task's run that started it (start's task_run), on its Bot's host."

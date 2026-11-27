@@ -41,7 +41,7 @@
       "parts": [
         {
           "name": "task row",
-          "shows": "Before the title, its last run's state icon (a tick done, a stop sign failed, a spinner running or asking, a square stopped, an arrow skipped; nothing if it has never run; its state's word as the tooltip). Title: the task's name. At the end: a switch (on = its triggers fire; tooltip 'Turn off to pause') and a Run button (play icon). No subtitle. Row text is escaped, never markup.",
+          "shows": "Before the title, its last run's state icon (a tick done, a stop sign failed, a spinner running, an hourglass in the warning colour waiting for input (asking: an ask of its Bot not answered yet), a square stopped, an arrow skipped; nothing if it has never run; its state's word as the tooltip). Title: the task's name. At the end: a switch (on = its triggers fire; tooltip 'Turn off to pause') and a Run button (play icon). No subtitle. Row text is escaped, never markup.",
           "copy": [
             "tasks.turn_off",
             "tasks.run",
@@ -66,7 +66,7 @@
     },
     {
       "name": "task page",
-      "shows": "A header row: a back button (tooltip 'Tasks'), the task's name in bold (ellipsized), then flat buttons Run (play), Change (pencil) and Delete (trash). Below it, scrolling, a boxed list of one switch row, 'Hand failures to the Bot', then three groups each with its heading: 'Triggers', 'Inputs', 'Runs'. Each group's rows are a dense list's, as tall as a navigation list's rows: Baude's at least 36 px (1 px above and below, their buttons 24 px), as the Fixes page's; the phone's at least 38 dp, as its Fixes list's. No script and no runtime: the run page's version, and a failed run's log, are all of the script a person sees. Read when opened, every 5 seconds while a run is going, and after each change here.",
+      "shows": "A header row: a back button (tooltip 'Tasks'), the task's name in bold (ellipsized), then flat buttons Run (play), Change (pencil) and Delete (trash). Below it, scrolling, a boxed list of two switch rows, 'Notify on failure' and 'Notify on graceful exit' (none for a task given its Bot as a turn), then three groups each with its heading: 'Triggers', 'Inputs', 'Runs'. Each group's rows are a dense list's, as tall as a navigation list's rows: Baude's at least 36 px (1 px above and below, their buttons 24 px), as the Fixes page's; the phone's at least 38 dp, as its Fixes list's. No script and no runtime: the run page's version, and a failed run's log, are all of the script a person sees. Read when opened, every 5 seconds while a run is going, and after each change here.",
       "copy": [
         "tasks.title",
         "tasks.run",
@@ -74,7 +74,8 @@
         "common.delete",
         "tasks.delete_heading",
         "common.cancel",
-        "tasks.fallback",
+        "tasks.notify_failure",
+        "tasks.notify_exit",
         "tasks.triggers",
         "signal_card.inputs",
         "tasks.runs"
@@ -99,25 +100,37 @@
       ],
       "parts": [
         {
-          "name": "hand failures",
-          "shows": "Above the groups, its own small boxed list of one switch row titled 'Hand failures to the Bot' (no subtitle, title not markup), on while a failed run is handed to the Bot.",
+          "name": "notify switches",
+          "shows": "Above the groups, its own small boxed list of two switch rows (no subtitles, titles not markup). 'Notify on failure' is on while a failed run is sent to the Bot (on for a new task). 'Notify on graceful exit' is on while a run that finishes with exit 0, not stopped, is told to the Bot, for its information, once the Bot's idle: the Bot isn't asked to act, and no more than one such notice per task waits (a newer run's replaces it); a run the Bot itself started with run_task and waited for isn't told (off for a new task). A task kept before there were two has its one switch's value as 'Notify on failure', and 'Notify on graceful exit' off.",
           "copy": [
-            "tasks.fallback"
+            "tasks.notify_failure",
+            "tasks.notify_exit"
           ],
           "actions": [
             {
               "by": "toggle the switch",
-              "does": "saves the task at once on the host with its fallback as set, its script, runtime, inputs and triggers as they are; no dialog, no Save"
+              "does": "saves the task at once on the host with its two switches as set, its script, runtime, inputs and triggers as they are; no dialog, no Save"
             }
           ],
           "decisions": [
             {
               "said": "Hand failures to the bot toggle should be on the main task page not in some pen field.",
-              "rule": "Every app puts the 'Hand failures to the Bot' switch on the task's page, saved the moment it is flipped, and not in the Change Task dialog",
+              "rule": "Every app puts the 'Notify on failure' and 'Notify on graceful exit' switches on the task's page, saved the moment one is flipped, and not in the Change Task dialog",
               "decided": "2026-11-26",
               "source": [
                 {
                   "issue": "BaudeInternal#259"
+                }
+              ]
+            },
+            {
+              "said": "\"Hand failures to the Bot\" -> \"Notify on failure\" + \"Notify on graceful exit\"",
+              "rule": "Every app has two switches on a task's page, 'Notify on failure' (the old 'Hand failures to the Bot', its value kept for a task made before) and 'Notify on graceful exit' (off unless set). A run that finishes with exit 0 and isn't stopped, of a task with the second on, sends its Bot a message in a failure's shape, 'An instance of the '<task>' task finished', the same table, and the last thing the run said (else the end of its output, if it printed any); the Bot isn't asked to act. The Bot's set_task takes both.",
+              "decided": "2026-11-27",
+              "source": [
+                {
+                  "session": "b3845b21-55ac-4aab-a769-fb8517403c51",
+                  "message": "ac39f1b5-2d5e-43fe-800a-2fff32a7fc8c"
                 }
               ]
             }
@@ -192,7 +205,7 @@
     },
     {
       "name": "run page",
-      "shows": "A header row: a back button (tooltip the task's name), the title '<task> · <when>' in bold, and a Wrap toggle (text-wrap icon, tooltip 'Wrap long lines', drawn pressed while on), and a Stop button (stop icon) while it's running or asking. Then one line: its state's word (or, if it failed or was stopped, why), what started it ('By hand', 'Schedule', 'Git push'), how long it took, and its version. Then, if it started any chats (one-shot agents: baude-oneshot, the mesh tools or the script library's agent, run inside it), a group headed 'Started': a boxed row per chat, its title, its state as the sessions list draws it (working grey and pulsing, waiting yellow, else done blue: they go on after the run's over, and the run's state doesn't wait for them) and a chevron. Then its log, scrolling, in order: the script's output in code blocks and its errors in code blocks of their own in the error colour (consecutive lines of each together; their long lines wrapped at the page's width while Wrap is on, else scrolled sideways), each line it said as plain text, each ask of the Bot as a card headed 'Asked <Bot>' (or 'Handed to <Bot>' for a failure handed over) with what was asked, each answer as a card headed '<Bot> answered' with the Bot's answer, what each chat it started said as a turn ended (each stopped or failed turn, then its first that finished) as a card headed '<chat> finished' (or '<chat> stopped', '<chat> failed'), a line if its Bot can't be told yet, and anything else the host says of the run as plain text. Nothing says when it started or that it ended: the title and the line under it do. Read every second while it's going, the lines since added to what's drawn.",
+      "shows": "A header row: a back button (tooltip the task's name), the title '<task> · <when>' in bold, and a Wrap toggle (text-wrap icon, tooltip 'Wrap long lines', drawn pressed while on), and a Stop button (stop icon) while it's running or waiting for input. Then one line: its state's icon (as the task row's: the hourglass while it waits for input) and its state's word ('waiting for input' while it waits) (or, if it failed or was stopped, why), what started it ('By hand', 'Schedule', 'Git push'), how long it took, and its version. Then, if it started any chats (one-shot agents: baude-oneshot, the mesh tools or the script library's agent, run inside it), a group headed 'Started': a boxed row per chat, its title, its state as the sessions list draws it (working grey and pulsing, waiting yellow, else done blue: they go on after the run's over, and the run's state doesn't wait for them) and a chevron. Then its log, scrolling, in order: the script's output in code blocks and its errors in code blocks of their own in the error colour (consecutive lines of each together; their long lines wrapped at the page's width while Wrap is on, else scrolled sideways), each line it said as plain text, each ask of the Bot as a card headed 'Asked <Bot>' (or 'Handed to <Bot>' for a failure handed over) with what was asked, each answer as a card headed '<Bot> answered' with the Bot's answer, what each chat it started said as a turn ended (each stopped or failed turn, then its first that finished) as a card headed '<chat> finished' (or '<chat> stopped', '<chat> failed'), a line if its Bot can't be told yet, and anything else the host says of the run as plain text. Nothing says when it started or that it ended: the title and the line under it do. Read every second while it's going, the lines since added to what's drawn.",
       "copy": [
         "tasks.status",
         "tasks.asked_bot",
@@ -251,7 +264,7 @@
     },
     {
       "name": "task dialog",
-      "shows": "An alert dialog headed 'Change Task', Cancel and Save (suggested). Content: a 'Name' field only. Not the script, not how it runs, not whether failures go to the Bot (a switch on the task's page): those are the Bot's to change or have a place of their own.",
+      "shows": "An alert dialog headed 'Change Task', Cancel and Save (suggested). Content: a 'Name' field only. Not the script, not how it runs, not whether it notifies the Bot (switches on the task's page): those are the Bot's to change or have a place of their own.",
       "copy": [
         "tasks.change_heading",
         "common.name",
@@ -261,7 +274,7 @@
       "actions": [
         {
           "by": "click Save",
-          "does": "saves its name on the host, its script, runtime, inputs, triggers and fallback as they are"
+          "does": "saves its name on the host, its script, runtime, inputs, triggers and notify switches as they are"
         },
         {
           "by": "click Cancel / key Esc",
@@ -357,7 +370,7 @@
     },
     {
       "name": "asking",
-      "shows": "As running, its state 'asking its Bot'; the run's log ends with the ask's card"
+      "shows": "Waiting for input: the hourglass in the warning colour, not the spinner, on the task's row, its run's row and its run page, its state's word 'waiting for input'; the run page's Stop; the run's log ends with the ask's card. It waits up to 7 days for the answer, its timeout not counting the time it waits"
     },
     {
       "name": "failed",
@@ -492,6 +505,16 @@
       "source": [
         {
           "issue": "BaudeInternal#267"
+        }
+      ]
+    },
+    {
+      "said": "Make task timeouts for things like asks much longer; just make it clear when a task is waiting on input (paraphrased)",
+      "rule": "Every app shows a task's run that waits for input (an ask of its Bot: ask, fallback, a form to fill) as its own state, 'waiting for input', with an hourglass in the warning colour where a running run has the spinner: on the task's row in the list, its run's row, and its run page. The host waits up to 7 days for the answer, and the run's timeout doesn't count the time it waits",
+      "decided": "2026-11-27",
+      "source": [
+        {
+          "issue": "BaudeInternal#277"
         }
       ]
     }

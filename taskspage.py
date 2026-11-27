@@ -25,7 +25,7 @@ TYPES = (("text", "tasks.text"), ("number", "tasks.number"), ("bool", "tasks.yes
 KINDS = (("schedule", "tasks.schedule"), ("git_push", "tasks.git_push"))
 PAYLOAD = {"schedule": ("time",), "git_push": ("repo", "branch", "before", "after", "commit", "message", "author")}
 STATUS_ICONS = {"done": "object-select-symbolic", "failed": "dialog-error-symbolic", "stopped": "process-stop-symbolic",
-                "skipped": "go-next-symbolic"}
+                "skipped": "go-next-symbolic", "asking": "baude-waiting-symbolic"}
 GOING = ("running", "asking")
 REPORTS_S = 3600  # (a run's page looks for what the chats it started said till this long after it's over, at most)
 INVALID = object()  # (a number field's value while its text isn't a number)
@@ -88,10 +88,11 @@ def took(seconds):
 
 
 def status_icon(run):
-    """A run's state, as an icon (a spinner while it's going; nothing for none)."""
+    """A run's state, as an icon (a spinner while it's running, an hourglass in the warning colour while it waits
+    for input; nothing for none)."""
     if run is None:
         return Gtk.Box(width_request=16)
-    if run.get("status") in GOING:
+    if run.get("status") == "running":
         w = Spinner(width_request=16, height_request=16, valign=Gtk.Align.CENTER)
     else:
         w = Gtk.Image(icon_name=STATUS_ICONS.get(run.get("status"), "object-select-symbolic"))
@@ -99,6 +100,8 @@ def status_icon(run):
             w.add_css_class("error")
         elif run.get("status") == "done":
             w.add_css_class("success")
+        elif run.get("status") == "asking":
+            w.add_css_class("warning")
     w.set_tooltip_text(wording.say("tasks.status", status=run.get("status") or ""))
     return w
 
@@ -296,8 +299,8 @@ class TasksPage(Gtk.Box):
 
     def kept(self, task, **changed):
         """task as it's sent to be set again (its script left as it is: the Bot's to change), with changed."""
-        return {**{k: task.get(k) for k in ("id", "name", "runtime", "form", "triggers", "fallback", "timeout_s",
-                                            "paused")}, **changed}
+        return {**{k: task.get(k) for k in ("id", "name", "runtime", "form", "triggers", "notify_failure",
+                                            "notify_exit", "timeout_s", "paused")}, **changed}
 
     # ---- the list
     def draw_list(self):
@@ -363,11 +366,14 @@ class TasksPage(Gtk.Box):
         head.append(flat("document-edit-symbolic", wording.say("tasks.change"), lambda: self.change(t)))
         head.append(flat("user-trash-symbolic", wording.say("common.delete"), lambda: self.delete(t)))
         # failures
-        lb = self.listbox(self.task_body)
-        lb.set_margin_top(2)
-        hand = Adw.SwitchRow(title=wording.say("tasks.fallback"), use_markup=False, active=t.get("fallback", True))
-        hand.connect("notify::active", lambda r, _p: self.save(self.kept(t, fallback=r.get_active())))
-        lb.append(hand)
+        if t.get("runtime") != "bot":  # (a Bot's own turn: nothing to notify it of)
+            lb = self.listbox(self.task_body)
+            lb.set_margin_top(2)
+            for key, active in (("notify_failure", t.get("notify_failure", True)),
+                                ("notify_exit", t.get("notify_exit", False))):
+                row = Adw.SwitchRow(title=wording.say(f"tasks.{key}"), use_markup=False, active=active)
+                row.connect("notify::active", lambda r, _p, key=key: self.save(self.kept(t, **{key: r.get_active()})))
+                lb.append(row)
         # triggers
         g = self.group(wording.say("tasks.triggers"),
                        flat("list-add-symbolic", wording.say("tasks.add_trigger"), lambda: self.add_trigger(t)))

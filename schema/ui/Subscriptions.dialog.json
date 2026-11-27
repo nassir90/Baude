@@ -218,7 +218,7 @@
     },
     {
       "name": "Add Claude account dialog",
-      "shows": "On a host with claude: heading \"Add Claude account\"; \"Account name\"; a three-way switcher, Login (picked), Token and Folder; under Token only, a password entry \"Paste a token from claude setup-token or an API key\" and the accent button Add account (usable once something is typed), which adds the account on the host with that token (a setup token, sk-ant-oat…, or an Anthropic API key, sk-ant-api…; anything else is refused with \"Enter a Claude setup token or an Anthropic API key\" under the fields); under Folder only, \"Signed-in Claude folder\"; the accent button Sign in under Login (Use signed-in folder under Folder); Close. Sign in runs claude auth login on the host with a new folder of the account's own, shown as the Claude sign-in card (the button gone, the fields and switcher greyed while it runs): \"Signing in to Claude…\" / dimmed \"Starting the sign-in…\" and Cancel; once the host has the page, \"Open the sign-in page to sign in.\" (a link), a box \"If the page shows a code, paste it here\" with Continue (the accent button, usable once a code is typed), which passes the code to the login on the host, and under it, dimmed, \"Checking the code…\" then what claude says of it (\"Invalid code…\"); Cancel. The dialog closes once it's signed in; else the card says \"Sign-in didn't finish\" / dimmed why, with Try Again (the accent button) and the fields usable again; picking the other tab then lets go of the card and puts the dialog's own button back. Cancel stops it and gives back the fields and button; Close stops it. On a host without claude: \"Account name\", a password entry \"Paste a token from claude setup-token or an API key\", Add account (usable once something is typed), Close.",
+      "shows": "On a host with claude: heading \"Add Claude account\"; \"Account name\"; a three-way switcher, Login (picked), Token and Folder; under Token only, a password entry \"Paste a token from claude setup-token or an API key\" and the accent button Add account (usable once something is typed), which adds the account on the host with that token (a setup token, sk-ant-oat…, or an Anthropic API key, sk-ant-api…; anything else is refused with \"Enter a Claude setup token or an Anthropic API key\" under the fields); under Folder only, \"Signed-in Claude folder\"; the accent button Sign in under Login (Use signed-in folder under Folder); Close. Sign in runs claude auth login on the host with a new folder of the account's own, shown as the Claude sign-in card (the button gone, the fields and switcher greyed while it runs): \"Signing in to Claude…\" / dimmed \"Starting the sign-in…\" and Cancel; once the host has the page, \"Open the sign-in page to sign in.\" (a link), a box \"If the page shows a code, paste it here\" with Continue (the accent button, usable once a code is typed), which passes the code to the login on the host, and under it, dimmed, \"Checking the code…\" then what claude says of it (\"Invalid code…\"); Cancel. The dialog closes once it's signed in; else the card says \"Sign-in didn't finish\" / dimmed why, with Try Again (the accent button) and the fields usable again; picking the other tab then lets go of the card and puts the dialog's own button back. Cancel stops it and gives back the fields and button; Close stops it. On a host without claude: \"Account name\", a password entry \"Paste a token from claude setup-token or an API key\", Add account (usable once something is typed), Close. Tab goes from \"Account name\" to the box picked under the switcher (else the dialog's button), then the switcher, then Close.",
       "copy": [
         "subscriptions.add_claude",
         "subscriptions.name_hint",
@@ -273,7 +273,7 @@
     },
     {
       "name": "Add Codex account dialog",
-      "shows": "Heading \"Add Codex account\"; \"Account name\"; a three-way switcher, Login (picked), Token and Folder; under Token only, a password entry \"Paste an OpenAI API key\" and the accent button Add account (usable once something is typed), which adds the account on the host as a new CODEX_HOME of its own whose auth.json holds the key as codex login --with-api-key writes it (anything not starting sk- is refused with \"Enter an OpenAI API key\"); under Folder only, \"Signed-in CODEX_HOME\"; the accent button Sign in under Login (Use signed-in profile under Folder); Close. Sign in runs codex login on the host with a new CODEX_HOME of the account's own (the browser's sign-in; the device code's on \"Use a device code instead\", or by itself where the browser's can't listen), shown as the Codex sign-in card, the fields and switcher greyed while it runs; the account is added once it's signed in. Close stops it.",
+      "shows": "Heading \"Add Codex account\"; \"Account name\"; a three-way switcher, Login (picked), Token and Folder; under Token only, a password entry \"Paste an OpenAI API key\" and the accent button Add account (usable once something is typed), which adds the account on the host as a new CODEX_HOME of its own whose auth.json holds the key as codex login --with-api-key writes it (anything not starting sk- is refused with \"Enter an OpenAI API key\"); under Folder only, \"Signed-in CODEX_HOME\"; the accent button Sign in under Login (Use signed-in profile under Folder); Close. Sign in runs codex login on the host with a new CODEX_HOME of the account's own (the browser's sign-in; the device code's on \"Use a device code instead\", or by itself where the browser's can't listen), shown as the Codex sign-in card, the fields and switcher greyed while it runs; the account is added once it's signed in. Close stops it. Tab goes from \"Account name\" to the box picked under the switcher (else the dialog's button), then the switcher, then Close.",
       "copy": [
         "subscriptions.add_codex",
         "subscriptions.codex_home_hint",
@@ -521,6 +521,16 @@
       "source": [
         {
           "issue": "BaudeInternal#279"
+        }
+      ]
+    },
+    {
+      "said": "(BaudeInternal#294, paraphrased) Tab in the Add Claude account dialog should move between the fields that matter, e.g. from the name to the token box",
+      "rule": "Every app's Add account dialog (Claude's and Codex's) moves Tab from the account name straight to the box picked under the switcher (the token's or the folder's), else the dialog's own button, never through Login | Token | Folder first; Shift+Tab goes the same way back. On the desktop the switcher's three tabs come after the dialog's button, before Close; the phone's switcher is picked by touch and is not a Tab stop",
+      "decided": "2026-11-27",
+      "source": [
+        {
+          "issue": "BaudeInternal#294"
         }
       ]
     }

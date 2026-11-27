@@ -385,7 +385,7 @@ class Control:
         t.web.run_js(body if page else PAGE_JS + body, ended, page=page)
 
     INPUT = {"click", "drag", "hover", "type", "key", "scroll", "form_input", "navigate", "new_tab", "close_tab",
-             "select_tab", "answer_prompt", "resize"}  # (what changes the page: done in the order it came)
+             "select_tab", "answer_prompt", "resize", "copy", "paste"}  # (what changes the page: done in the order it came)
 
     def run(self, op, msg, answer):
         fn = getattr(self, "op_" + str(op), None)
@@ -689,6 +689,31 @@ class Control:
         self.js(t, focus + "const el = document.activeElement;"
                 f"if (!em.editable(el) && !{anywhere}) throw new Error('nothing to type into is focused: click the "
                 "field, or give its ref'); em.typed = em.editable(el) ? el : null; return true", answer, ready)
+
+    def op_copy(self, msg, answer):
+        """The text selected in the page (in the focused field, its selection there; none from a password's), for a
+        watcher's own clipboard (its ⌘C or Ctrl+C); cut: taken out of the page too, as cutting does."""
+        t = self.tab(msg)
+        self.js(t, "const el = document.activeElement; let text = '';"
+                   "if (el && el.type === 'password') return '';"
+                   "if (el && 'value' in el && typeof el.selectionStart === 'number')"
+                   "  text = el.value.slice(el.selectionStart, el.selectionEnd);"
+                   "else text = String(getSelection());"
+                   f"if (text && {json.dumps(bool(msg.get('cut')))}) document.execCommand('delete');"
+                   "return text", answer, lambda text: answer({**self.describe(t), "text": text or ""}))
+
+    def op_paste(self, msg, answer):
+        """text, from a watcher's own clipboard (its ⌘V or Ctrl+V), pasted where the page has its caret: offered the
+        page as a paste (its own handler can take it), else put in as its editing would type it."""
+        t, text = self.tab(msg), str(msg.get("text") or "")
+        self.js(t, f"const text = {json.dumps(text)}, el = document.activeElement;"
+                   "const data = new DataTransfer(); data.setData('text/plain', text);"
+                   "const ev = new ClipboardEvent('paste', {clipboardData: data, bubbles: true, cancelable: true});"
+                   "if (!(el || document.body).dispatchEvent(ev)) return true;"
+                   "if (!em.editable(el)) return false;"
+                   "if (!document.execCommand('insertText', false, text) && 'value' in el)"
+                   "  em.setValue(el, el.value.slice(0, el.selectionStart) + text + el.value.slice(el.selectionEnd));"
+                   "return true", answer, lambda ok: answer({**self.describe(t), "pasted": bool(ok)}))
 
     def op_key(self, msg, answer):
         t = self.tab(msg)

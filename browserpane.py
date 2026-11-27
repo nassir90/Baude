@@ -35,6 +35,7 @@ SCROLL_MS = 50  # (a wheel's or a trackpad's turns this close together: one scro
 HOVER_MS = 300  # (the pointer still this long over the page: it hovers there)
 SIZE_MS = 250  # (the page shown at a new size: the frames asked for at it this long after)
 DRAG_PX = 5  # (a press moved this far before it's let go: a drag, not a click)
+PRIMARY = "cmd" if sys.platform == "darwin" else "ctrl"  # (what copies, cuts and pastes with C, X and V)
 KEYS = {"Return": "Enter", "KP_Enter": "Enter", "BackSpace": "Backspace", "Delete": "Delete", "Escape": "Escape",
         "Tab": "Tab", "ISO_Left_Tab": "Tab", "Left": "Left", "Right": "Right", "Up": "Up", "Down": "Down",
         "Home": "Home", "End": "End", "Page_Up": "PageUp", "Page_Down": "PageDown", "space": "Space"}
@@ -480,6 +481,44 @@ def remember():
     widgets.save_settings(browser_out=sorted(out | set(RESTORE["left"] or ())))
 
 
+PLACES_KEPT = 50  # (browser windows' places kept: the longest unopened go)
+
+
+def keep_place(win):
+    """A browser window's place kept for its Bot's (or host's) next one (browser_places): on macOS its frame (the
+    display it's on, where, how big), its size, and whether it's maximized."""
+    from macos import window_frame
+    if not win.get_mapped():
+        return
+    w, h = win.get_default_size()
+    place = {"size": [w, h] if w > 0 and h > 0 else None, "maximized": win.is_maximized(),
+             "frame": window_frame(win) if sys.platform == "darwin" else None}
+    places = {k: v for k, v in (widgets.load_settings().get("browser_places") or {}).items() if k != win.sid}
+    places[win.sid] = place
+    widgets.save_settings(browser_places=dict(list(places.items())[-PLACES_KEPT:]))
+
+
+def keep_places():
+    """Each browser window out's place kept (keep_place), as Baude restarts or quits."""
+    for w in list(DISEMBODIED.values()):
+        if not w.done:
+            keep_place(w)
+
+
+def put_place(win):
+    """A browser window opened where its Bot's (or host's) last one was (keep_place), before it's shown."""
+    import theming
+    place = (widgets.load_settings().get("browser_places") or {}).get(win.sid)
+    if not isinstance(place, dict):
+        return
+    size, frame = place.get("size"), place.get("frame")
+    if isinstance(size, list) and len(size) == 2 and all(isinstance(n, int) and n >= 200 for n in size):
+        win.set_default_size(*size)
+    if not (isinstance(frame, list) and len(frame) == 4 and all(isinstance(n, (int, float)) for n in frame)):
+        frame = None
+    theming.put_back(win, frame, place.get("maximized") is True)
+
+
 def baude_window(app, sid=None):
     """The Baude window a Bot's browser window belongs to: the one with its chat open, else the one in front, else
     the first (None: none's left)."""
@@ -571,6 +610,7 @@ class BrowserWindow(Adw.ApplicationWindow):
         self.connect("notify::is-active", lambda *_: self.is_active() and self.pane.watch_again())  # (stopped:
         # started again, come back to)
         self.gone_id = self.get_application().connect("window-removed", lambda _a, w: w is self.main and self.gone())
+        put_place(self)
         if restored:
             self.show_behind()
         else:
@@ -633,6 +673,7 @@ class BrowserWindow(Adw.ApplicationWindow):
         """Gone: its page let go of (for the side panel's to have), the window too unless it's closing itself."""
         if self.done:
             return
+        keep_place(self)
         self.done = True
         if DISEMBODIED.get(self.sid) is self:
             DISEMBODIED.pop(self.sid)
@@ -1606,8 +1647,31 @@ class BrowserPane(Gtk.Box):
         if key is None:
             return False
         self.flush_typing()
+        if mods == [PRIMARY] and key in ("c", "x", "v"):  # (the page's clipboard yours, not its Emission's)
+            return self.clipboard(key)
         combo = "+".join([*self.mods(state), key]) if key in KEYS.values() else "+".join([*mods, key])
         self.ask({"op": "key", "tab": self.tab(), "keys": combo})
+        return True
+
+    def clipboard(self, key):
+        """⌘C, ⌘X or ⌘V (Ctrl on Linux) on a streamed page: what's selected there put on this machine's clipboard
+        (cut: taken out of the page too), or what's on it pasted there. The Bot's Emission has a clipboard of its own,
+        elsewhere or on a display of its own, that the keys alone would use."""
+        if key == "v":
+            def got(clip, res):
+                try:
+                    text = clip.read_text_finish(res)
+                except GLib.Error:
+                    return
+                if text:
+                    self.ask({"op": "paste", "tab": self.tab(), "text": text})
+            self.get_clipboard().read_text_async(None, got)
+            return True
+
+        def copied(r):
+            if isinstance(r, dict) and r.get("text"):
+                self.get_clipboard().set(r["text"])
+        self.ask({"op": "copy", "tab": self.tab(), "cut": key == "x"}, copied)
         return True
 
     def flush_typing(self):

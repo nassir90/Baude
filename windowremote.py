@@ -389,8 +389,10 @@ class WindowRemote:
         if (git := getattr(getattr(self, "panel", None), "git_page", None)) is not None:
             git.show_autofix()  # (Auto-fix turned on or off elsewhere: its agent, the phone)
         listed = self.remote.sessions.get(self.session_id)
-        if listed and listed.get("rotated") != getattr(self, "shown_rotated", None):  # (the Bot rotated: its new
-            self.shown_rotated = listed.get("rotated")                                 # conversation shown)
+        if listed and not getattr(self, "rotating", False) and \
+                (listed.get("rotated") or 0) > (getattr(self, "shown_rotated", None) or 0):  # (the Bot rotated
+            self.shown_rotated = listed.get("rotated")                                 # since: its new conversation
+            # shown, not for a listing older than the one shown)
             info = remote_info({**listed, "server": self.remote})
             GLib.idle_add(lambda: self.session_id == info["id"] and self.open_remote(info) and False)
             return
@@ -809,8 +811,12 @@ class WindowRemote:
         anything's been said) and the Bot carried on afresh on that model, shown as its host lists it then."""
         r, sid = self.remote, self.session_id
         effort = self.local_effort if model_program(model) == "pi" else self.effort
+        self.rotating = True  # (its host's listing of it not shown till its reply: done opens it)
+        self.composer_box.gate("rotating", True)  # (nothing sent till its new conversation is open)
 
         def done(reply):
+            self.rotating = False
+            self.composer_box.gate("rotating", False)
             if reply.get("op") != "rotated":
                 self.note(wording.say("trash.host_refused", host=remote_name(r), op="rotate",
                                       why=baudelib.wire.said(reply)))
@@ -819,9 +825,11 @@ class WindowRemote:
                 if isinstance(listed, dict) and baudelib.wire.is_id(listed.get("id") or ""):
                     r.forget_mirror(listed["id"])
                     r.sessions[listed["id"]] = listed
-            r.network.changed()
-            if self.remote is r and self.session_id == sid and isinstance(reply.get("session"), dict):
+            here = self.remote is r and self.session_id == sid and isinstance(reply.get("session"), dict)
+            if here:
                 self.shown_rotated = reply["session"].get("rotated")  # (opened here, not again by on_network)
+            r.network.changed()
+            if here:
                 self.open_remote(remote_info({**reply["session"], "server": r}))
                 self.note(wording.say("chat_header.model_note_new", name=self.model_said(model)))
         r.request({"op": "rotate", "session": sid, "model": model, **({"effort": effort} if effort else {})}, done)

@@ -246,7 +246,7 @@ class ServerSessions:
             if s.meta.get("ephemeral"):  # (a side question: sees the conversation, writes nothing of its own)
                 extra += ["--no-session-persistence"]
         told = None
-        if s.meta.get("bot") and run["program"] in ("claude", "pi", "codex"):  # (who it is, and its memory, each
+        if s.meta.get("bot") and run["program"] in ("claude", "pi", "codex", "apple"):  # (who it is, and its memory, each
             mem = self.bot_memory(s)                                              # start)
             told = bot_system(s.meta["bot"]["name"], mem["path"], mem["text"])
         if told is not None and run["program"] in ("claude", "pi"):

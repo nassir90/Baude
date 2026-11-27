@@ -472,14 +472,22 @@ private fun pickModel(hostId: String, sid: String, s: Msg.Session, v: String, ch
                       modelSet: (String) -> Unit) {
     val was = s.model?.ifBlank { null } ?: defaultModel(hostId)
     if (program(v) != program(chosen(choices, was)?.value ?: was) && s.bot != null && takes(hostId, "rotate")) {
-        // (a Bot: its conversation rotated, and it goes on afresh on the one picked)
-        Mesh.ask(hostId, Msg.Rotate(session = sid, model = v).json()) { r ->
+        // (a Bot: its conversation rotated, and it goes on afresh on the one picked; once its turn's over, as Baude's)
+        val effort = asked["effort"] ?: s.effort?.ifBlank { null }
+        fun rotate(value: String) = Mesh.ask(hostId, Msg.Rotate(session = sid, model = value, effort = effort).json()) { r ->
             if (r.optString("op") == "rotated") {
-                said(Wording.ChatHeader.modelNoteNew(name = chosen(choices, v)?.name ?: v))
-                modelSet(v)
-            } else said(Wording.Trash.hostRefused(host = Mesh.label(hostId), op = "rotate",
-                why = Msg.Error.from(r).said.orEmpty()))
+                said(Wording.ChatHeader.modelNoteNew(name = chosen(choices, value)?.name ?: value))
+                modelSet(value)
+            } else {
+                asked.remove("model")
+                said(Wording.Trash.hostRefused(host = Mesh.label(hostId), op = "rotate", why = Msg.Error.from(r).said.orEmpty()))
+            }
         }
+        Moves.cancel(hostId, sid)
+        if (s.state.orEmpty() in setOf("working", "waiting")) {
+            asked["model"] = v
+            Moves.later(hostId, sid, v) { value -> rotate(value) }
+        } else rotate(v)
         return
     }
     if (program(v) != program(chosen(choices, was)?.value ?: was)) { // (another program: a new chat with it)

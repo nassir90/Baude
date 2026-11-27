@@ -141,6 +141,14 @@
           "does": "typed characters are sent as text, batched when typed within 60 ms; Enter, Backspace, Delete, Escape and modifier combinations are sent as keys; a lone space is the Space key"
         },
         {
+          "by": "copy, cut, paste, select all, undo, redo (Cmd+C, Cmd+X, Cmd+V, Cmd+A, Cmd+Z, Shift+Cmd+Z; Ctrl on Linux)",
+          "does": "a native page gets the key first and then runs it as its own editing, as an Edit menu would, unless the page's own handler took the key; a streamed page's own copy or cut handler is offered the event first, else its selection is copied (or cut) to this machine's clipboard, and this machine's clipboard is pasted into it, never the clipboard of the Bot's Emission; on Linux Ctrl+C with nothing selected is sent as the key, and Ctrl+Shift+C and Ctrl+Shift+V are the page's keys"
+        },
+        {
+          "by": "Option keys, Option+arrows and Backspace, Ctrl+A/E/K, Cmd+arrows and Cmd+Backspace (macOS, native page that has the keys)",
+          "does": "go to the page as they are, so option characters, dead keys and # @ [ ] on UK and European layouts type; other Cmd keys (Cmd+Q, W, T, L, R, F, number) run Baude's or the window's shortcut first, as Safari's menu shortcuts do"
+        },
+        {
           "by": "scroll (wheel / trackpad)",
           "does": "scrolls the page under the pointer; turns within 50 ms are merged"
         },
@@ -189,6 +197,26 @@
               "issue": "BaudeInternal#302"
             }
           ]
+        },
+        {
+          "said": "Copying from the Emission browser embedded in Baude doesn't work (paraphrased)",
+          "rule": "Every app that shows a web page copies, cuts, pastes, selects all, undoes and redoes in it with the platform's usual keys, and copy and paste use the clipboard of the machine you are at, also when the page is streamed from another host or an Emission of a Bot's own",
+          "decided": "2026-11-27",
+          "source": [
+            {
+              "issue": "BaudeInternal#305"
+            }
+          ]
+        },
+        {
+          "said": "Baude's shortcuts win over the page while a page has the keys (decided)",
+          "rule": "While a page has the keys, a Cmd or Ctrl key that is a window or app shortcut runs that shortcut; everything else, option characters and cursor-movement keys included, goes to the page",
+          "decided": "2026-11-27",
+          "source": [
+            {
+              "issue": "BaudeInternal#305"
+            }
+          ]
         }
       ]
     },
@@ -219,7 +247,7 @@
     },
     {
       "name": "Its own window",
-      "shows": "Moving the browser out puts the same pages and tabs, nothing reloaded, in a window titled '<page title or address> — <Bot name>' (an Emission window, 1180 by 820, with Emission's own bar: back, forward, reload, address, new tab, the Bot's profile name greyed, plus Restart as Native and Read-only at the end, and Emission's tab bar). The side panel page then shows only the dim title text 'Currently disembodied' with the bar reduced to the Move to Its Own Window toggle (now 'Put Back in the Side Panel'); the address, back, forward, reload, new tab, host picker and Read-only (the window has its own lock) are hidden, and so are the tab strip, prompt cards and message line. Closing the window, or toggling back, puts the browser back in the panel. Browsers that were out when Baude last ran come out again at start, shown behind the main window. Such a window is closed with the Baude window it came from. Keys in the window: Ctrl/Cmd+T new tab, Ctrl/Cmd+W close the tab, Ctrl/Cmd+L focus the address, Ctrl/Cmd+R reload.",
+      "shows": "Moving the browser out puts the same pages and tabs, nothing reloaded, in a window titled '<page title or address> — <Bot name>' (an Emission window, 1180 by 820 the first time and after that where that Bot's (or host's) last one was left, with Emission's own bar: back, forward, reload, address, new tab, the Bot's profile name greyed, plus Restart as Native and Read-only at the end, and Emission's tab bar). The side panel page then shows only the dim title text 'Currently disembodied' with the bar reduced to the Move to Its Own Window toggle (now 'Put Back in the Side Panel'); the address, back, forward, reload, new tab, host picker and Read-only (the window has its own lock) are hidden, and so are the tab strip, prompt cards and message line. Closing the window, or toggling back, puts the browser back in the panel. Browsers that were out when Baude last ran come out again at start, shown behind the main window. Such a window is closed with the Baude window it came from. Keys in the window: Ctrl/Cmd+T new tab, Ctrl/Cmd+W close the tab, Ctrl/Cmd+L focus the address, Ctrl/Cmd+R reload.",
       "text": [
         "Currently disembodied"
       ],
@@ -244,6 +272,18 @@
         {
           "by": "key Ctrl+R / Cmd+R (in the window)",
           "does": "reload"
+        }
+      ],
+      "decisions": [
+        {
+          "said": "Emission browser windows out of Baude don't remember where they were (paraphrased)",
+          "rule": "Every app's browser window opened out of the main window opens where its last one for the same Bot (or host) was left: the same display, place and size (on macOS) and maximized if it was; across closing and opening it again and across restarts",
+          "decided": "2026-11-27",
+          "source": [
+            {
+              "issue": "BaudeInternal#306"
+            }
+          ]
         }
       ]
     }

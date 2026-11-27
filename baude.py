@@ -100,6 +100,8 @@ class BaudeApp(Adw.Application):
         self.updater = None  # (update.Updater: started with the first window)
 
     def do_shutdown(self):
+        if "browserpane" in sys.modules:  # (Bots' browser windows out: where each was, for next time)
+            sys.modules["browserpane"].keep_places()
         save_info_cache(force=True)
         if _NETWORK:
             _NETWORK[0].save()  # (the network's sessions as last seen: dead ones are shown from it next time)
@@ -263,6 +265,8 @@ class BaudeApp(Adw.Application):
                 w.proc.kill()
             for p in list(w.background.values()):  # (chats left mid-turn: their turns end here)
                 w.let_go_background(p)
+        if "browserpane" in sys.modules:
+            sys.modules["browserpane"].keep_places()
         save_info_cache(force=True)  # (as quitting does: exec skips do_shutdown)
         if _NETWORK:
             _NETWORK[0].save()

@@ -27,6 +27,12 @@ BOT = {"type": "string", "description": "A Bot's session id (yours if none's giv
 SCHEMAS = {
     "hosts": ("The mesh's hosts (this one first): each one's id, name, whether it's reachable now, and the models it "
               "can run (their values are what start_subagent's model takes).", {}, []),
+    "subscriptions": ("The Claude and Codex subscriptions a host's chats run on (every reachable host's if none's "
+                      "given): each one's id (what start_subagent's account takes; \"\" for its CLI's own sign-in), "
+                      "provider, name, kind, whether it's the one a new chat on that provider's models takes "
+                      "(default), whether it's disabled (a subagent on it is refused), and the models of that host "
+                      "it runs. A model in no subscription's models runs on none (Ollama's, Apple's, an endpoint's).",
+                      {"host": {"type": "string", "description": "A host's id or name (hosts)"}}, []),
     "start_subagent": ("Start a new chat (a subagent) on a host of the mesh, with one of its models, give it a task "
                        "and, unless wait is false, wait for its answer. It runs as a chat there (listed in Baude), in "
                        "cwd on that host (its home if none's given), in Auto mode unless another's asked for (Auto at "
@@ -35,6 +41,11 @@ SCHEMAS = {
                        {"prompt": {"type": "string", "description": "The task, said in full: it doesn't see this chat"},
                         "host": {"type": "string", "description": "A host's id or name (hosts); this one if none"},
                         "model": {"type": "string", "description": "A model's value on that host (hosts)"},
+                        "account": {"type": "string",
+                                    "description": "The subscription it runs on, of those that host has for its "
+                                                   "model's provider (subscriptions: an id or a name; \"\" for the "
+                                                   "CLI's own sign-in), in place of the one it'd take (yours, on "
+                                                   "this host; else that host's default)"},
                         "cwd": {"type": "string", "description": "The folder on that host it works in"},
                         "title": {"type": "string", "description": "Its title in the list"},
                         "mode": {"type": "string", "enum": list(SUBAGENT_MODES),
@@ -167,6 +178,31 @@ class Mesh:
         for t in threads:
             t.join(30)
         return out + found + gone
+
+    def subscriptions(self, a):
+        """Each host's subscriptions (a host's, by its id or name, if a says one; else every reachable host's), with
+        the models of the host each runs: [{host, host_name, subscriptions: [{id, provider, name, kind, default,
+        disabled, models}]}], a host that couldn't be asked with error instead."""
+        places = [h for h in self.hosts() if h["reachable"]] if not a.get("host") else \
+            [{"id": None, "name": a["host"], "where": self.where(a["host"])}]
+        out = [{"host": h["id"], "host_name": h["name"]} for h in places]
+
+        def look(entry, h):
+            where = h.get("where") or (self.local if h.get("here") else {"via": "mesh", "host": h["id"], **self.relay})
+            try:
+                ch, info = self.channel(where)
+                ch.close()
+                entry.update(host=info.get("id"), host_name=info.get("name"),
+                             subscriptions=subscriptions_of(info, self.request(where, {"op": "accounts",
+                                                                                       "what": "list"})))
+            except (OSError, ValueError, KeyError) as e:
+                entry["error"] = str(e)
+        threads = [threading.Thread(target=look, args=(e, h), daemon=True) for e, h in zip(out, places)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(30)
+        return out
 
     def where(self, host):
         """Where a host is (wire.reach's), by its id or name; this one for none."""
@@ -410,6 +446,8 @@ class Mesh:
         for k in ("model", "cwd"):
             if a.get(k):
                 params[k] = a[k]
+        if a.get("account") is not None:
+            params["account"] = a["account"]
         where, wait, timeout_s = self.where(a.get("host")), a.get("wait", True), a.get("timeout_s") or WAIT_S
         if self.me:
             params["spawned_by"] = params["as"] = self.me  # (its task's from this chat: its host says so)
@@ -591,6 +629,32 @@ class Mesh:
         named = self.named(where)
         return {**self.ask(where, a["session"], a["text"], a.get("wait", True), a.get("timeout_s") or WAIT_S,
                            title=s.get("title")), **named}
+
+
+PROVIDERS = ("claude", "codex")  # (accounts.PROVIDERS: the providers a subscription is of)
+CODEX = "codex/"  # (a Codex model's value's start: models.model_program's)
+
+
+def subscriptions_of(info, got):
+    """A host's subscriptions (its hello's info; got: its accounts list's answer), each with the models of the host's
+    it runs: its CLI's own sign-in (id "") for each provider the host runs models of, then its accounts. An error the
+    answer says, ValueError."""
+    if got.get("error"):
+        raise ValueError(got["error"])
+    other = {m.get("value") for p in info.get("providers") or [] for m in p.get("models") or []}
+    runs = {p: [] for p in PROVIDERS}
+    for m in info.get("models") or []:
+        v = m.get("value")
+        if isinstance(v, str) and v not in other and not v.startswith("agent/"):  # (a provider's, another member's)
+            runs["codex" if v.startswith(CODEX) else "claude"].append(v)
+    defaults, off = got.get("defaults") or {}, set(got.get("disabled") or ())
+    cli = [{"id": "", "provider": p, "name": wording.say("subscriptions.cli_default"), "kind": "cli"}
+           for p in PROVIDERS if runs[p]]
+    return [{**{k: a.get(k) for k in ("id", "provider", "name", "kind")},
+             "default": defaults.get(a["provider"], "") == a["id"],
+             "disabled": (a["id"] or ("codex" if a["provider"] == "codex" else "")) in off,
+             "models": runs.get(a["provider"]) or []}
+            for a in cli + [a for a in got.get("accounts") or [] if a.get("provider") in PROVIDERS]]
 
 
 def said_to(session, text, me=None, meta=False, agent=None):

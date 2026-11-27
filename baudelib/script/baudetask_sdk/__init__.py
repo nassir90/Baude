@@ -11,8 +11,8 @@ import time
 from . import generated
 from .client import Conn, Obj, Refused, bot, call, failed, here, where
 
-__all__ = ["emission", "terminal", "kube", "docker", "db", "chats", "subagents", "ops", "hosts", "models", "Host",
-           "Model", "Refused", "Obj"]
+__all__ = ["emission", "terminal", "kube", "docker", "db", "chats", "subagents", "ops", "hosts", "models",
+           "subscriptions", "Host", "Model", "Subscription", "Refused", "Obj"]
 
 _DENIED = "Nobody was there to ask (a task's agent)."
 _ANSI = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b[()][A-Za-z0-9]|\x1b[=>]")
@@ -82,6 +82,46 @@ def models(host=None):
     c = Conn(to).connect()
     c.close()
     return _models(c.info, to)
+
+
+class Subscription(Obj):
+    """A Claude or Codex subscription a host's chats run on: id (what agent's and subagents.start's account take; ""
+    for its CLI's own sign-in), provider (claude or codex), name, kind (folder, token, profile; cli for the CLI's own
+    sign-in), default (the one a new chat on its provider's models takes there), disabled (a chat on it is refused),
+    models (the host's Models it runs) and host (its id)."""
+
+
+def subscriptions(host=None):
+    """The Claude and Codex subscriptions host's chats run on (this one's if none's given), each a Subscription: its
+    CLI's own sign-in for each provider the host runs models of, then its accounts. Pass one as account= to
+    subagents.start or agent; a model in none's models runs on no subscription (Ollama's, Apple's, an endpoint's)."""
+    to = where(host)
+    if to is None:
+        info = here(fresh=True)
+    else:
+        c = Conn(to).connect()
+        c.close()
+        info = c.info
+    hid = info.get("id")
+    got = call("accounts", {"what": "list"}, host)
+    failed(got, "accounts", host)
+    other = {m.get("value") for p in info.get("providers") or [] for m in p.get("models") or []}
+    runs = {"claude": [], "codex": []}
+    for m in _models(info, hid):
+        if isinstance(m.value, str) and m.value not in other and not m.value.startswith("agent/"):
+            runs["codex" if m.value.startswith("codex/") else "claude"].append(m)
+    defaults, off = got.get("defaults") or {}, set(got.get("disabled") or ())
+    cli = [{"id": "", "provider": p, "name": generated.CLI_DEFAULT, "kind": "cli"} for p in runs if runs[p]]
+    return [Subscription(id=a.get("id"), provider=a.get("provider"), name=a.get("name"), kind=a.get("kind"),
+                         default=defaults.get(a["provider"], "") == a.get("id"),
+                         disabled=(a.get("id") or ("codex" if a["provider"] == "codex" else "")) in off,
+                         models=runs[a["provider"]], host=hid)
+            for a in cli + [a for a in got.get("accounts") or [] if a.get("provider") in runs]]
+
+
+def _account(account):
+    """An account= as the host takes it: a Subscription's id, or what's given (an id or a name), None for none."""
+    return account.get("id") if isinstance(account, dict) else account
 
 
 # ---- Kubernetes
@@ -454,24 +494,31 @@ class Subagents(generated.Area):
     """Subagents of the task's Bot: chats started on any host of the mesh with any model it runs, as the Bot's own
     start_subagent starts them (Auto at most; their asks for permission refused)."""
 
-    def start(self, prompt, *, host=None, model=None, cwd=None, title=None, mode="auto", wait=True, timeout_s=3600):
+    def start(self, prompt, *, host=None, model=None, cwd=None, title=None, mode="auto", wait=True, timeout_s=3600,
+              account=None):
         """A subagent started on host (this one if none's given) with model (a Model, or its value), given prompt:
-        an Obj with session, host, text (what it said as its first turn ended; None if not wait) and failed. On this
-        host it's baudetask.agent's: nested under the Bot, kept with the run."""
+        an Obj with session, host, text (what it said as its first turn ended; None if not wait) and failed.
+        account: the subscription it runs on (a Subscription, or an id or name of one of host's, "" for its CLI's own
+        sign-in), in place of the one it'd take. On this host it's baudetask.agent's: nested under the Bot, kept with
+        the run."""
         import baudetask
         host = self._host(host)
         if isinstance(model, dict):
             host, model = host or model.get("host"), model.get("value")
+        if isinstance(account, dict):
+            host = host or account.get("host")
+        account = _account(account)
         to = where(host)
         if to is None:
             got = baudetask.agent(prompt, wait=wait, cwd=cwd, model=model, title=title, mode=mode,
-                                  timeout_s=timeout_s)
+                                  timeout_s=timeout_s, account=account)
             return Obj(got, host=here().get("id"))
         me = bot() or {}
         start = {"op": "start", "prompt": str(prompt), "title": title or " ".join(str(prompt).split())[:60],
                  "mode": mode or "auto", "ask_timeout": 60, "ask_default": "deny", "attach": bool(wait),
                  "answers": False, **({"spawned_by": me["id"], "as": me["id"]} if me.get("id") else {}),
-                 **{k: v for k, v in (("cwd", cwd), ("model", model)) if v}}
+                 **{k: v for k, v in (("cwd", cwd), ("model", model)) if v},
+                 **({"account": account} if account is not None else {})}
         c = Conn(to).connect()
         try:
             sid = c.request(start)["session"]["id"]
@@ -497,4 +544,4 @@ subagents = Subagents()
 ops = generated.Ops()
 AREAS = {"emission": emission, "terminal": terminal, "kube": kube, "docker": docker, "db": db, "chats": chats,
          "subagents": subagents}
-TOP = ("hosts", "models")
+TOP = ("hosts", "models", "subscriptions")

@@ -44,7 +44,8 @@ from _baudetask_vars import Model, vars  # noqa: E402,A004 (beside this file, on
 
 __all__ = ["inputs", "payload", "vars", "Model", "run", "say", "ask", "fallback", "agent", "main", "Refused", "decide",
            "deciders", "choice", "noul", "score", "Decision", "DecisionUnavailable",
-           *(SDK := ("emission", "terminal", "kube", "docker", "db", "chats", "subagents", "ops", "hosts", "models"))]
+           *(SDK := ("emission", "terminal", "kube", "docker", "db", "chats", "subagents", "ops", "hosts", "models",
+                    "subscriptions"))]
 
 run = os.environ.get("BAUDE_TASK_RUN")
 _DENIED = "Nobody was there to ask (a task's agent)."
@@ -175,12 +176,13 @@ def fallback(error):
     return ask(f"This failed:\n\n{error}", error=True)
 
 
-def agent(prompt, wait=True, cwd=None, model=None, title=None, mode=None, timeout_s=3600):
+def agent(prompt, wait=True, cwd=None, model=None, title=None, mode=None, timeout_s=3600, account=None):
     """A chat of its own started on the task's host with prompt (in cwd, the host's home if none; Auto at most, its
     asks for permission refused: at once while it's waited for, after a minute if not), nested under the task's Bot and kept with the run; the Bot's told
     what it says as its first turn ends. {session, text, failed}: with wait, what it said as that turn ended (or
     why it failed); else as soon as it's started (text None). model: a model's value, or a model variable
-    (task.vars: its effort too). Refused: the host didn't start it."""
+    (task.vars: its effort too). account: the subscription it runs on (subscriptions(): a Subscription, or an id or
+    name of one, "" for the CLI's own sign-in), in place of the Bot's. Refused: the host didn't start it."""
     if not run:
         print(f"agent: {prompt}", flush=True)
         return {"session": None, "text": None if not wait else "(a stand-in answer)", "failed": False}
@@ -189,7 +191,9 @@ def agent(prompt, wait=True, cwd=None, model=None, title=None, mode=None, timeou
              "spawned_by": os.environ.get("BAUDE_SPAWNED_BY", ""),
              "task_run": {"run": run, "token": os.environ.get("BAUDE_TASK_TOKEN", "")},
              **{k: v for k, v in (("cwd", cwd), ("model", str(model) if model else None),
-                                  ("effort", getattr(model, "effort", None))) if v}}
+                                  ("effort", getattr(model, "effort", None))) if v},
+             **({"account": account.get("id") if isinstance(account, dict) else account} if account is not None
+                else {})}
     if not start["spawned_by"]:
         start.pop("spawned_by")
     wire = _w()
@@ -323,8 +327,8 @@ def main(fn):
 
 
 def __getattr__(name):
-    """The SDK's (baudetask_sdk: emission, terminal, kube, docker, db, chats, subagents, ops, hosts, models), loaded as
-    it's first used."""
+    """The SDK's (baudetask_sdk: emission, terminal, kube, docker, db, chats, subagents, ops, hosts, models,
+    subscriptions), loaded as it's first used."""
     if name in SDK:
         import baudetask_sdk
         return getattr(baudetask_sdk, name)

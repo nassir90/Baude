@@ -2659,6 +2659,9 @@ TYPES = {"AccessChat": AccessChat, "AccessMember": AccessMember, "AccessRule": A
 Obj._types.update(TYPES)
 
 
+CLI_DEFAULT = "CLI default"  # (a subscription that's its CLI's own sign-in, as every app names it: schema/copy)
+
+
 class Kube(Area):
     """A cluster's objects as Freelens lists them, read through the host's kubeconfig and kubectl: its contexts
     (contexts), whether a context is still there as the head knows it (check: answered removed, or with nothing
@@ -4119,8 +4122,8 @@ class Ops(Area):
         return self._call("signal_names", {"cwd": cwd, "session": session,
                                            "cli_id": cli_id}, host, SignalNamesReply)
 
-    def start(self, *, prompt=None, cwd=None, model=None, effort=None, mode=None, group=None, title=None,
-              attach=None, answers=None, spawned_by=None, task_run=None, system=None, add_dirs=None,
+    def start(self, *, prompt=None, cwd=None, model=None, effort=None, account=None, mode=None, group=None,
+              title=None, attach=None, answers=None, spawned_by=None, task_run=None, system=None, add_dirs=None,
               allowed_tools=None, disallowed_tools=None, fork_from=None, ask_timeout=None, ask_default=None,
               draft=None, ephemeral=None, adopt=None, env=None, start_key=None, app_tools=None, grace=None,
               as_meta=None, as_=None, bot=None, host=None):
@@ -4130,6 +4133,11 @@ class Ops(Area):
             cwd (string): Its folder (default: the forked session's, else home).
             model (string or None): Its model.
             effort (string or None): Its effort.
+            account (string): The subscription its agent runs under, one of the host's accounts for its model's
+                provider (Claude's or Codex's: Account's id or name; "" for the CLI's own sign-in), in place of
+                the one it would take (the chat's that starts it, else the host's default for that provider).
+                Refused for a model that runs on no subscription, or one that isn't an account there; a disabled
+                one's refused as its chats are. Asks subscriptions_read of a member besides spawn.
             mode (string or None): Its permission mode.
             group (string or None): Its group.
             title (string or None): Its title.
@@ -4166,15 +4174,15 @@ class Ops(Area):
             as (string): As input's, for the prompt.
             bot (BotFields): A Bot made of it as it starts (a phone's host takes it; picture left out).
         """
-        return self._call("start", {"prompt": prompt, "cwd": cwd, "model": model, "effort": effort, "mode": mode,
-                                    "group": group, "title": title, "attach": attach, "answers": answers,
-                                    "spawned_by": spawned_by, "task_run": task_run, "system": system,
-                                    "add_dirs": add_dirs, "allowed_tools": allowed_tools,
-                                    "disallowed_tools": disallowed_tools, "fork_from": fork_from,
-                                    "ask_timeout": ask_timeout, "ask_default": ask_default, "draft": draft,
-                                    "ephemeral": ephemeral, "adopt": adopt, "env": env, "start_key": start_key,
-                                    "app_tools": app_tools, "grace": grace, "as_meta": as_meta, "as": as_,
-                                    "bot": bot}, host, Obj)
+        return self._call("start", {"prompt": prompt, "cwd": cwd, "model": model, "effort": effort,
+                                    "account": account, "mode": mode, "group": group, "title": title,
+                                    "attach": attach, "answers": answers, "spawned_by": spawned_by,
+                                    "task_run": task_run, "system": system, "add_dirs": add_dirs,
+                                    "allowed_tools": allowed_tools, "disallowed_tools": disallowed_tools,
+                                    "fork_from": fork_from, "ask_timeout": ask_timeout, "ask_default": ask_default,
+                                    "draft": draft, "ephemeral": ephemeral, "adopt": adopt, "env": env,
+                                    "start_key": start_key, "app_tools": app_tools, "grace": grace,
+                                    "as_meta": as_meta, "as": as_, "bot": bot}, host, Obj)
 
     def stop(self, *, session=None, restart=None, host=None):
         """stop (Stop): A session's agent stopped: the next message resumes it.

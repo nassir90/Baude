@@ -638,10 +638,14 @@ class Info(Obj):
             set_permission_mode, set_model).
         telemetry (TelemetryState): Its telemetry state: the apps on its machine tell it telemetry only while
             it's on, and profile what it says.
+        front (array of TelemetryFront): The chats in front on its machine now, as its apps' telemetry says
+            (each one's last chat_front, till its chat_left or the app's gone): none while its telemetry's off.
+            No head notifies of a chat in front on any machine of the mesh.
         tool_names (ToolNames): How its MCP tools are named: what every head shows for one ("Mesh / Tasks").
     """
     _refs = {"heads": "Head", "update": "Update", "restart": "RestartState", "providers": "Provider",
-             "mesh": "MeshView", "telemetry": "TelemetryState", "tool_names": "ToolNames"}
+             "mesh": "MeshView", "telemetry": "TelemetryState", "front": "TelemetryFront",
+             "tool_names": "ToolNames"}
 
 
 class KubeColumn(Obj):
@@ -1378,8 +1382,9 @@ class TelemetryEvent(Obj):
         app ('host' | 'baude' | 'record' | 'phone'): What saw it: Baude, Record, the phone's app, or the chat's
             host itself (a turn's end, as it ran there: what tokens are added up from).
         kind ('chat_opened' | 'chat_front' | 'chat_left' | 'turn_sent' | 'turn_ended'): What happened: a chat
-            opened in a window or screen; a chat came in front (its window or screen in front, showing it); it
-            stopped being in front; a turn sent in it; a turn of it ended.
+            opened in a window or screen; a chat came in front (its window or screen in front, showing it, with
+            someone at the machine); it stopped being in front (or nobody's at the machine now); a turn sent in
+            it; a turn of it ended.
         host (string): The id of the host the chat is on.
         session (string): The chat's session id.
         seconds (number or None): A turn_ended's: how long the turn took.
@@ -1389,6 +1394,15 @@ class TelemetryEvent(Obj):
         effort (string or None): A turn_ended's: the effort it ran at.
         tokens_in (integer or None): A turn_ended's: the tokens it read (input, cache reads and writes).
         tokens_out (integer or None): A turn_ended's: the tokens it wrote.
+    """
+
+
+class TelemetryFront(Obj):
+    """A chat in front on a host's machine: shown in one of its apps' windows or screens, that in front, with someone
+    at the machine.
+
+        host (string): The id of the host the chat is on.
+        session (string): The chat's session id.
     """
 
 
@@ -2623,27 +2637,27 @@ TYPES = {"AccessChat": AccessChat, "AccessMember": AccessMember, "AccessRule": A
          "Tab": Tab, "Task": Task, "TaskBinding": TaskBinding, "TaskChoice": TaskChoice, "TaskField": TaskField,
          "TaskLogLine": TaskLogLine, "TaskRun": TaskRun, "TaskRunRef": TaskRunRef, "TaskTrigger": TaskTrigger,
          "TaskVariable": TaskVariable, "TelemetryDay": TelemetryDay, "TelemetryEvent": TelemetryEvent,
-         "TelemetryLine": TelemetryLine, "TelemetryModel": TelemetryModel, "TelemetryProc": TelemetryProc,
-         "TelemetryProfile": TelemetryProfile, "TelemetryProfiling": TelemetryProfiling,
-         "TelemetrySample": TelemetrySample, "TelemetryState": TelemetryState, "TelemetryUsage": TelemetryUsage,
-         "TerminalInfo": TerminalInfo, "Theme": Theme, "ThemeFiles": ThemeFiles, "ToolNames": ToolNames,
-         "TurnEnd": TurnEnd, "Update": Update, "UsageLimit": UsageLimit, "UsageReading": UsageReading,
-         "WaitTarget": WaitTarget, "WatchSay": WatchSay, "WatchState": WatchState, "Where": Where,
-         "Accepted": Accepted, "AccessReply": AccessReply, "AccessSetReply": AccessSetReply,
-         "AccountsReply": AccountsReply, "Activated": Activated, "AgentStarted": AgentStarted, "Allowed": Allowed,
-         "Archived": Archived, "Attached": Attached, "AutofixReply": AutofixReply,
-         "BotPictureReply": BotPictureReply, "BotSetReply": BotSetReply, "BrowserOpened": BrowserOpened,
-         "Busy": Busy, "CatalogueReply": CatalogueReply, "ChatSizeReply": ChatSizeReply, "CwdSet": CwdSet,
-         "DatabasesReply": DatabasesReply, "Deactivated": Deactivated, "Decided": Decided,
-         "DecidersReply": DecidersReply, "Deleted": Deleted, "DepsReply": DepsReply, "Dir": Dir,
-         "DockerEnd": DockerEnd, "DockerReply": DockerReply, "DockerText": DockerText, "DraftSaved": DraftSaved,
-         "EditReply": EditReply, "EditsReply": EditsReply, "EmissionFrame": EmissionFrame,
-         "EmissionReply": EmissionReply, "EmissionServing": EmissionServing, "EmissionWatchEnd": EmissionWatchEnd,
-         "EmissionWatching": EmissionWatching, "Error": Error, "FeedbackFiled": FeedbackFiled,
-         "FeedbackTarget": FeedbackTarget, "File": File, "FixesReply": FixesReply, "GitReply": GitReply,
-         "HeldReply": HeldReply, "HelloReply": HelloReply, "InferData": InferData, "InferEnd": InferEnd,
-         "InferHead": InferHead, "Joined": Joined, "KubeContexts": KubeContexts, "KubeEnd": KubeEnd,
-         "KubeReply": KubeReply, "KubeRows": KubeRows, "KubeText": KubeText, "Linking": Linking,
+         "TelemetryFront": TelemetryFront, "TelemetryLine": TelemetryLine, "TelemetryModel": TelemetryModel,
+         "TelemetryProc": TelemetryProc, "TelemetryProfile": TelemetryProfile,
+         "TelemetryProfiling": TelemetryProfiling, "TelemetrySample": TelemetrySample,
+         "TelemetryState": TelemetryState, "TelemetryUsage": TelemetryUsage, "TerminalInfo": TerminalInfo,
+         "Theme": Theme, "ThemeFiles": ThemeFiles, "ToolNames": ToolNames, "TurnEnd": TurnEnd, "Update": Update,
+         "UsageLimit": UsageLimit, "UsageReading": UsageReading, "WaitTarget": WaitTarget, "WatchSay": WatchSay,
+         "WatchState": WatchState, "Where": Where, "Accepted": Accepted, "AccessReply": AccessReply,
+         "AccessSetReply": AccessSetReply, "AccountsReply": AccountsReply, "Activated": Activated,
+         "AgentStarted": AgentStarted, "Allowed": Allowed, "Archived": Archived, "Attached": Attached,
+         "AutofixReply": AutofixReply, "BotPictureReply": BotPictureReply, "BotSetReply": BotSetReply,
+         "BrowserOpened": BrowserOpened, "Busy": Busy, "CatalogueReply": CatalogueReply,
+         "ChatSizeReply": ChatSizeReply, "CwdSet": CwdSet, "DatabasesReply": DatabasesReply,
+         "Deactivated": Deactivated, "Decided": Decided, "DecidersReply": DecidersReply, "Deleted": Deleted,
+         "DepsReply": DepsReply, "Dir": Dir, "DockerEnd": DockerEnd, "DockerReply": DockerReply,
+         "DockerText": DockerText, "DraftSaved": DraftSaved, "EditReply": EditReply, "EditsReply": EditsReply,
+         "EmissionFrame": EmissionFrame, "EmissionReply": EmissionReply, "EmissionServing": EmissionServing,
+         "EmissionWatchEnd": EmissionWatchEnd, "EmissionWatching": EmissionWatching, "Error": Error,
+         "FeedbackFiled": FeedbackFiled, "FeedbackTarget": FeedbackTarget, "File": File, "FixesReply": FixesReply,
+         "GitReply": GitReply, "HeldReply": HeldReply, "HelloReply": HelloReply, "InferData": InferData,
+         "InferEnd": InferEnd, "InferHead": InferHead, "Joined": Joined, "KubeContexts": KubeContexts,
+         "KubeEnd": KubeEnd, "KubeReply": KubeReply, "KubeRows": KubeRows, "KubeText": KubeText, "Linking": Linking,
          "LoginEnd": LoginEnd, "LoginSaid": LoginSaid, "MemoryReply": MemoryReply, "MultiplexReply": MultiplexReply,
          "NotesReply": NotesReply, "Quitting": Quitting, "Relayed": Relayed, "Relaying": Relaying,
          "Renamed": Renamed, "RestartPending": RestartPending, "Rotated": Rotated, "SeenSet": SeenSet,

@@ -362,13 +362,15 @@ class LoginCard(Gtk.Box):
         self.row = Gtk.Box(spacing=6, visible=False)
         self.code = Gtk.Entry(hexpand=True, placeholder_text=wording.say("sign_in.code_hint"))
         self.code.connect("activate", lambda *_: self.paste())
-        self.send = Gtk.Button(label=wording.say("common.send"))
+        self.send = Gtk.Button(label=wording.say("common.continue"), sensitive=False, css_classes=["suggested-action"])
+        self.code.connect("changed", lambda e: self.send.set_sensitive(bool(e.get_text().strip())))
         self.send.connect("clicked", lambda *_: self.paste())
-        self.cancel = Gtk.Button(label=wording.say("common.cancel"))
+        self.cancel = Gtk.Button(label=wording.say("common.cancel"), halign=Gtk.Align.START, visible=False)
         self.cancel.connect("clicked", lambda *_: self.stop())
-        for w in (self.code, self.send, self.cancel):
+        for w in (self.code, self.send):
             self.row.append(w)
         self.append(self.row)
+        self.append(self.cancel)
         self.again = Gtk.Button(label=wording.say("common.try_again"), halign=Gtk.Align.START, visible=False)
         self.again.add_css_class("suggested-action")
         self.again.connect("clicked", lambda *_: self.start())
@@ -401,6 +403,7 @@ class LoginCard(Gtk.Box):
         self.login = login
         state = login.get("state")
         self.row.set_visible(False)
+        self.cancel.set_visible(False)
         self.again.set_visible(False)
         self.resend.set_visible(False)
         if state == "needed":
@@ -490,7 +493,9 @@ class LoginCard(Gtk.Box):
 
     def start(self):
         self.say(wording.say("sign_in.signing_in"), wording.say("sign_in.starting"), dim=True)
-        self.row.set_visible(True)
+        self.row.set_visible(False)  # (the code box once the page is said)
+        self.code.set_text("")
+        self.cancel.set_visible(True)
         self.again.set_visible(False)
         self.again.set_label(wording.say("common.try_again"))
         self.said, self.before = [], self.login
@@ -529,6 +534,7 @@ class LoginCard(Gtk.Box):
                 said = html.escape(wording.say("sign_in.page_there", link="\x00")).replace("\x00", link)
             self.body.set_markup(said)
             self.body.set_visible(True)
+            self.row.set_visible(True)
         elif line and not line.startswith("Opening browser"):
             self.said.append(line)
             if self.checking:  # (what claude says of a pasted code: "Invalid code…", and it asks again)
@@ -555,6 +561,7 @@ class LoginCard(Gtk.Box):
             return False
         self.proc = None
         self.row.set_visible(False)
+        self.cancel.set_visible(False)
         if code == 0:
             return self.signed_in(who)
         if code in (-15, 130) and not problem:

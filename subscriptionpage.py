@@ -583,6 +583,44 @@ def _send(page, dialog, submit, say, msg, inputs=()):
     page.ask(msg, then)
 
 
+class _Source:
+    """An Add account dialog's choice between a new login and an existing signed-in folder on the host: two linked
+    toggles (New login first, picked), the folder's box shown only under Existing folder; the dialog's button says
+    which it does (sign_in, else use)."""
+
+    def __init__(self, form, hint, submit, sign_in, use, save):
+        self.submit, self.sign_in, self.use, self.changed = submit, sign_in, use, None
+        self.new = Gtk.ToggleButton(label=wording.say("subscriptions.new_login"), active=True)
+        self.existing = Gtk.ToggleButton(label=wording.say("subscriptions.existing_folder"), group=self.new)
+        self.tabs = Gtk.Box(css_classes=["linked"], homogeneous=True)
+        self.tabs.append(self.new)
+        self.tabs.append(self.existing)
+        self.folder = Gtk.Entry(placeholder_text=wording.say(hint), visible=False)
+        self.folder.connect("activate", save)
+        self.existing.connect("toggled", lambda *_: self.picked())
+        form.append(self.tabs)
+        form.append(self.folder)
+        self.picked()
+
+    def picked(self):
+        """The tab picked: its box and the dialog's button; a failed sign-in's card let go (changed), the dialog's
+        own button back in place of its Try Again."""
+        if self.changed is not None:
+            self.changed()
+        on = self.existing.get_active()
+        self.folder.set_visible(on)
+        self.submit.set_label(wording.say(self.use if on else self.sign_in))
+        if on:
+            self.folder.grab_focus()
+
+    def path(self):
+        """The folder typed, where Existing folder's picked; else ""."""
+        return self.folder.get_text().strip() if self.existing.get_active() else ""
+
+    def inputs(self):
+        return (self.new, self.existing, self.folder)
+
+
 def add_claude(page):
     """Add account (Claude): signed in with claude auth login run on the host with a folder of the account's own (or
     an existing signed-in folder there); a token from claude setup-token where the host has no claude."""
@@ -591,71 +629,106 @@ def add_claude(page):
     dialog, form, status, submit, say = _form(page, wording.say("subscriptions.add_claude"),
                                               wording.say("sign_in.sign_in"))
     name = Gtk.Entry(placeholder_text=wording.say("subscriptions.name_hint"))
-    folder = Gtk.Entry(placeholder_text=wording.say("subscriptions.claude_folder_hint"))
-    folder.connect("changed", lambda e: submit.set_label(wording.say("subscriptions.use_folder") if e.get_text().strip()
-                                                         else wording.say("sign_in.sign_in")))
-    for w in (name, folder):
-        form.append(w)
-    login = _ClaudeLogin(page, dialog, form, status, submit, say, (name, folder))
+    form.append(name)
 
     def save(*_):
         label = name.get_text().strip()
         if not label:
             return name.grab_focus()
-        if folder.get_text().strip():
+        if source.existing.get_active():
+            if not source.path():
+                return source.folder.grab_focus()
+            login.cancelled()
             return _send(page, dialog, submit, say, {"what": "add", "provider": "claude", "name": label,
-                                                     "folder": folder.get_text().strip()}, (name, folder))
+                                                     "folder": source.path()}, (name, *source.inputs()))
+        say("")
         login.start({"what": "sign_in", "provider": "claude", "name": label})
+    source = _Source(form, "subscriptions.claude_folder_hint", submit, "sign_in.sign_in", "subscriptions.use_folder",
+                     save)
+    login = _ClaudeLogin(page, dialog, submit, (name, *source.inputs()), save)
+    source.changed = login.dismiss
+    for w in (login, status, submit):
+        form.append(w)
     submit.connect("clicked", save)
     name.connect("activate", save)
+    dialog.connect("response", lambda *_: login.stop())
     dialog.present(page)
     return dialog
 
 
-class _ClaudeLogin:
-    """claude auth login run on the host with an account's folder, in a dialog's form: the page to open shown as a
-    link, a box for the code the page may show (sent to it on the same connection), what went wrong if it didn't
-    finish; the dialog closed once it's signed in, and Close stops it."""
+class _ClaudeLogin(Gtk.Box):
+    """claude auth login run on the host with an account's folder, in a dialog's form, as a card the way Codex's is
+    (CodexLogin): a bold title and a line, then what can be done now, one step at a time. Signing in (the dialog's own
+    button gone, its fields greyed): starting; then the page to open as a link, and a box for the code the page may
+    show with Continue, the one button that moves it on (the code sent to it on the same connection, and what claude
+    says of it under it); Cancel. The dialog closed once it's signed in; else why not, and Try Again (again: the
+    dialog's own button's)."""
 
-    def __init__(self, page, dialog, form, status, submit, say, inputs):
-        self.page, self.dialog, self.submit, self.say, self.inputs = page, dialog, submit, say, inputs
-        self.ask, self.lines, self.checking = None, [], False
-        self.link = Gtk.Label(xalign=0, wrap=True, visible=False)
-        self.row = Gtk.Box(spacing=6, visible=False)
+    def __init__(self, page, dialog, submit, inputs, again):
+        super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=6, visible=False)
+        self.add_css_class("perm-card")
+        self.page, self.dialog, self.submit, self.inputs = page, dialog, submit, inputs
+        self.ask, self.checking = None, False
+        self.title = Gtk.Label(xalign=0, wrap=True, selectable=True)
+        self.body = Gtk.Label(xalign=0, wrap=True, selectable=True, visible=False)
         self.code = Gtk.Entry(hexpand=True, placeholder_text=wording.say("sign_in.code_hint"))
-        send = Gtk.Button(label=wording.say("common.send"))
+        self.go = Gtk.Button(label=wording.say("common.continue"), sensitive=False, css_classes=["suggested-action"])
+        self.code.connect("changed", lambda e: self.go.set_sensitive(bool(e.get_text().strip())))
         self.code.connect("activate", lambda *_: self.paste())
-        send.connect("clicked", lambda *_: self.paste())
+        self.go.connect("clicked", lambda *_: self.paste())
+        self.row = Gtk.Box(spacing=6, visible=False)
         self.row.append(self.code)
-        self.row.append(send)
-        form.append(self.link)
-        form.append(self.row)
-        form.append(status)
-        form.append(submit)
-        dialog.connect("response", lambda *_: self.ask is not None and self.ask.stop())
+        self.row.append(self.go)
+        self.note = Gtk.Label(xalign=0, wrap=True, selectable=True, visible=False)
+        self.cancel = Gtk.Button(label=wording.say("common.cancel"))
+        self.cancel.connect("clicked", lambda *_: self.cancelled())
+        self.again = Gtk.Button(label=wording.say("common.try_again"), visible=False, css_classes=["suggested-action"])
+        self.again.connect("clicked", again)
+        buttons = Gtk.Box(spacing=6, halign=Gtk.Align.START)
+        buttons.append(self.again)
+        buttons.append(self.cancel)
+        for w in (self.title, self.body, self.row, self.note, buttons):
+            self.append(w)
+
+    def say(self, title, body="", dim=False, markup=False):
+        self.title.set_markup(f"<b>{html.escape(title)}</b>")
+        text = body if markup else html.escape(body or "")
+        self.body.set_markup(f"<span alpha='60%'>{text}</span>" if dim and text else text)
+        self.body.set_visible(bool(body))
+
+    def tell(self, text):
+        """What claude said of a pasted code (dimmed), or nothing."""
+        self.note.set_markup(f"<span alpha='60%'>{html.escape(text)}</span>" if text else "")
+        self.note.set_visible(bool(text))
 
     def start(self, msg):
-        self.submit.set_sensitive(False)
+        self.stop()
+        self.submit.set_visible(False)
         for w in self.inputs:
             w.set_sensitive(False)
-        self.lines = []
-        self.say(wording.say("sign_in.starting"))
+        self.set_visible(True)
+        self.row.set_visible(False)
+        self.code.set_text("")
+        self.tell("")
+        self.cancel.set_visible(True)
+        self.again.set_visible(False)
+        self.checking = False
+        self.say(wording.say("sign_in.signing_in"), wording.say("sign_in.starting"), dim=True)
         self.ask = Ask(self.page.where, msg, self.answered, self.heard)
 
     def heard(self, line):
+        if self.ask is None:
+            return False
         if m := re.search(r"https://\S+", line):
             url = html.escape(m.group(0).rstrip(".,)"))
             link = f"<a href=\"{url}\">{html.escape(wording.say('sign_in.open_page_there'))}</a>"
-            self.link.set_markup(html.escape(wording.say("sign_in.page_there", link="\x00")).replace("\x00", link))
-            self.link.set_visible(True)
+            self.say(wording.say("sign_in.signing_in"),
+                     html.escape(wording.say("sign_in.page_there", link="\x00")).replace("\x00", link), markup=True)
             self.row.set_visible(True)
-            self.say("")
             self.code.grab_focus()
-        elif not line.startswith("Opening browser"):
-            self.lines.append(line)
-            if self.checking:  # (what claude says of a pasted code: "Invalid code…", and it asks again)
-                self.checking = False
-                self.say(line)
+        elif not line.startswith("Opening browser") and self.checking:
+            self.checking = False  # (what claude says of a pasted code: "Invalid code…", and it asks again)
+            self.tell(line)
         return False
 
     def paste(self):
@@ -663,22 +736,40 @@ class _ClaudeLogin:
         if code and self.ask is not None and self.ask.send({"what": "code", "code": code}):
             self.code.set_text("")
             self.checking = True
-            self.say(wording.say("sign_in.checking_code"))
+            self.tell(wording.say("sign_in.checking_code"))
 
     def answered(self, reply):
         self.ask = None
         if "accounts" in reply:
             self.page.took(reply)
-        if reply.get("error"):
-            self.link.set_visible(False)
-            self.row.set_visible(False)
-            self.say(reply["error"])
-            self.submit.set_sensitive(True)
-            for w in self.inputs:
-                w.set_sensitive(True)
-        else:
+        if not reply.get("error"):
             self.dialog.close()
+            return False
+        self.row.set_visible(False)
+        self.tell("")
+        self.cancel.set_visible(False)
+        self.again.set_visible(True)
+        self.say(wording.say("sign_in.failed"), reply["error"], dim=True)
+        for w in self.inputs:
+            w.set_sensitive(True)
         return False
+
+    def cancelled(self):
+        self.stop()
+        self.set_visible(False)
+        self.submit.set_visible(True)
+        for w in self.inputs:
+            w.set_sensitive(True)
+
+    def dismiss(self):
+        """A finished sign-in's card (failed) let go of, the dialog's own button back."""
+        if self.ask is None and self.get_visible():
+            self.cancelled()
+
+    def stop(self):
+        if self.ask is not None:
+            self.ask.stop()
+            self.ask = None
 
 
 def add_claude_token(page):
@@ -704,24 +795,28 @@ def add_codex(page):
     dialog, form, status, submit, say = _form(page, wording.say("subscriptions.add_codex"),
                                               wording.say("sign_in.sign_in"))
     name = Gtk.Entry(placeholder_text=wording.say("subscriptions.name_hint"))
-    home = Gtk.Entry(placeholder_text=wording.say("subscriptions.codex_home_hint"))
-    home.connect("changed", lambda e: submit.set_label(wording.say("subscriptions.use_profile") if e.get_text().strip()
-                                                       else wording.say("sign_in.sign_in")))
+    form.append(name)
 
     def save(*_):
         label = name.get_text().strip()
         if not label:
             return name.grab_focus()
-        if home.get_text().strip():
+        if source.existing.get_active():
+            if not source.path():
+                return source.folder.grab_focus()
             card.cancelled()
             return _send(page, dialog, submit, say, {"what": "add", "provider": "codex", "name": label,
-                                                     "home": home.get_text().strip()}, (name, home))
+                                                     "home": source.path()}, (name, *source.inputs()))
         say("")
         card.start({"what": "sign_in", "name": label}, label)
-    card = CodexLogin(page, submit, (name, home), save)
-    for w in (name, home, card, status, submit):
+    source = _Source(form, "subscriptions.codex_home_hint", submit, "sign_in.sign_in", "subscriptions.use_profile",
+                     save)
+    card = CodexLogin(page, submit, (name, *source.inputs()), save)
+    source.changed = card.dismiss
+    for w in (card, status, submit):
         form.append(w)
     submit.connect("clicked", save)
+    name.connect("activate", save)
     dialog.connect("response", lambda *_: card.stop())
     dialog.present(page)
     return dialog
@@ -833,22 +928,23 @@ class CodexLogin(Gtk.Box):
         self.add_css_class("perm-card")
         self.page, self.submit, self.inputs = page, submit, inputs
         self.ask, self.msg, self.name, self.opened, self.relay, self.waiting = None, None, "", None, None, {}
-        self.method, self.seq = "browser", 0
+        self.method, self.seq, self.checking = "browser", 0, False
         self.title = Gtk.Label(xalign=0, wrap=True, selectable=True)
         self.body = Gtk.Label(xalign=0, wrap=True, selectable=True, visible=False)
         self.code = Gtk.Label(xalign=0, selectable=True, hexpand=True, css_classes=["device-code"])
-        self.copy = Gtk.Button(label=wording.say("common.copy"), valign=Gtk.Align.CENTER)
+        self.copy = Gtk.Button(label=wording.say("common.copy"), valign=Gtk.Align.CENTER, css_classes=["suggested-action"])
         self.copy.connect("clicked", lambda *_: self.copied())
         self.code_row = Gtk.Box(spacing=12, visible=False)
         self.code_row.append(self.code)
         self.code_row.append(self.copy)
         self.address = Gtk.Entry(hexpand=True, placeholder_text=wording.say("subscriptions.address_hint"))
         self.address.connect("activate", lambda *_: self.paste())
-        send = Gtk.Button(label=wording.say("common.send"))
-        send.connect("clicked", lambda *_: self.paste())
+        self.go = Gtk.Button(label=wording.say("common.continue"), sensitive=False, css_classes=["suggested-action"])
+        self.address.connect("changed", lambda e: self.go.set_sensitive(bool(e.get_text().strip()) and not self.checking))
+        self.go.connect("clicked", lambda *_: self.paste())
         self.paste_row = Gtk.Box(spacing=6, visible=False)
         self.paste_row.append(self.address)
-        self.paste_row.append(send)
+        self.paste_row.append(self.go)
         self.note = Gtk.Label(xalign=0, wrap=True, selectable=True, visible=False)
         self.device = Gtk.Button(label=wording.say("subscriptions.device_instead"), visible=False)
         self.device.connect("clicked", lambda *_: self.start({**self.msg, "method": "device"}, self.name))
@@ -882,6 +978,7 @@ class CodexLogin(Gtk.Box):
         for w in self.inputs:
             w.set_sensitive(False)
         self.set_visible(True)
+        self.checking = False
         self.address.set_text("")
         self.tell("")
         self.show({"state": "signing_in", "method": msg.get("method") or "browser"})
@@ -936,7 +1033,9 @@ class CodexLogin(Gtk.Box):
 
     def paste(self):
         address = self.address.get_text().strip()
-        if address and self.call(address, lambda m: GLib.idle_add(self.pasted, m)):
+        if address and not self.checking and self.call(address, lambda m: GLib.idle_add(self.pasted, m)):
+            self.checking = True
+            self.go.set_sensitive(False)
             self.tell(wording.say("subscriptions.checking_address"))
 
     def call(self, url, answered):
@@ -953,6 +1052,7 @@ class CodexLogin(Gtk.Box):
     def pasted(self, m):
         """The host's answer to a pasted address: nothing to say where codex took it (its end follows), else why not."""
         page = m.get("page") or {}
+        self.checking = False
         if m.get("error"):
             self.tell(m["error"])
         elif page.get("status", 200) >= 400 and (page.get("type") or "").startswith("text/plain"):
@@ -960,6 +1060,7 @@ class CodexLogin(Gtk.Box):
         else:
             self.address.set_text("")
             self.tell("")
+        self.go.set_sensitive(bool(self.address.get_text().strip()))
         return False
 
     def relayed(self, path, answered):
@@ -991,6 +1092,11 @@ class CodexLogin(Gtk.Box):
         self.submit.set_visible(True)
         for w in self.inputs:
             w.set_sensitive(True)
+
+    def dismiss(self):
+        """A finished sign-in's card (failed) let go of, the dialog's own button back."""
+        if self.ask is None and self.get_visible():
+            self.cancelled()
 
     def unrelay(self):
         if self.relay is not None:
@@ -1041,8 +1147,13 @@ def sign_in_again(page, account):
     if account["provider"] == "claude":
         dialog, form, status, submit, say = _form(page, wording.say("subscriptions.sign_in_heading",
                                                                     name=account["name"]), wording.say("sign_in.sign_in"))
-        login = _ClaudeLogin(page, dialog, form, status, submit, say, ())
-        submit.connect("clicked", lambda *_: login.start({"what": "sign_in", "id": account["id"]}))
+        def start(*_):
+            login.start({"what": "sign_in", "id": account["id"]})
+        login = _ClaudeLogin(page, dialog, submit, (), start)
+        for w in (login, status, submit):
+            form.append(w)
+        submit.connect("clicked", start)
+        dialog.connect("response", lambda *_: login.stop())
         dialog.present(page)
         return dialog
     dialog, form, status, submit, say = _form(page, wording.say("subscriptions.sign_in_heading", name=account["name"]),

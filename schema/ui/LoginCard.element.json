@@ -54,25 +54,37 @@
         },
         {
           "name": "code row",
-          "shows": "While signing in (starting, the page's link): a text field filling the width, then \"Send\", \"Cancel\".",
+          "shows": "Once the page's link is shown: a text field filling the width, then \"Continue\" (the accent button, usable once a code is typed). \"Cancel\" (plain) under it while signing in, from starting on.",
           "copy": [
             "sign_in.code_hint",
-            "common.send",
+            "common.continue",
             "common.cancel"
           ],
           "phone": {
-            "does": "The field fills a row of its own, with Send and Cancel in a row under it",
+            "does": "The field fills a row of its own, with Continue and Cancel in a row under it",
             "why": "A phone's width leaves a field beside them too narrow to type a code in",
             "decided": "2026-11-22"
           },
           "actions": [
             {
-              "by": "Enter in the field / click Send",
+              "by": "Enter in the field / click Continue",
               "does": "Passes the pasted code to claude auth login (on another machine: login_code); the line says \"Checking the code…\"."
             },
             {
               "by": "click Cancel",
               "does": "Stops the sign-in (on another machine: lets go of its connection, which stops it there)."
+            }
+          ],
+          "decisions": [
+            {
+              "said": "(BaudeInternal#279, paraphrased) Claude's sign-in shows Send beside Sign In, which is redundant; once sign-in has started, Sign In should give way to the next step (Continue, the accent button, where a code is needed)",
+              "rule": "Every app's chat Sign in card shows the code box only once the page's link is there, its button the accent Continue (usable once a code is typed); Cancel stays a plain button; the card follows Settings → Subscriptions' one-step-at-a-time rule",
+              "decided": "2026-11-27",
+              "source": [
+                {
+                  "issue": "BaudeInternal#279"
+                }
+              ]
             }
           ]
         },

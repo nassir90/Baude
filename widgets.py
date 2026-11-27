@@ -1432,22 +1432,25 @@ def accent_text_rgba():
 
 class Ticker:
     """What moves while something works: a working session's dot pulsing (its opacity eased between 1 and 0.25 and
-    back every 0.9 s) and the spinners of calls still running (Spinner). One timer moves them all, FPS times a
-    second: each frame GTK draws costs 1.5-3 ms of CPU on a Mac (most of it GSK readying the window's surface), and
-    a CSS animation or an Adw.Spinner draws 60 a second, so one working session's dot, or one long-running command,
-    took a sixth of a core. In a window you aren't looking at they hold still."""
+    back every 0.9 s), the spinners of calls still running (Spinner) and a turn's dots (WorkingDots). One timer moves
+    them all, in the same frames: each frame GTK draws costs a Mac 1.5-3 ms of CPU, and far more in a large window
+    (macOS draws all of the window each frame: macos.full_redraws), and a CSS animation or an Adw.Spinner draws 60 a
+    second, so one working session's dot, or one long-running command, took a sixth of a core. So spinners move
+    SPIN_FPS times a second, a pulse alone PULSE_FPS (a dot's opacity needs fewer to look smooth), and nothing moves in
+    a window you aren't looking at, nor while no one's at the machine (user_present)."""
 
-    FPS, IDLE_MS, PERIOD, LOW, STILL = 20, 500, tokens.seconds("motion.pulse"), 0.25, 0.6
+    SPIN_FPS, PULSE_FPS, IDLE_MS, PERIOD, LOW, STILL = 20, 10, 500, tokens.seconds("motion.pulse"), 0.25, 0.6
     # (held, not weakly: a widget Python keeps no wrapper of, Signal's button's icon, lost its own at once; let go of
     # as each is unmapped, which taking it out of the window does, and taken back as it's mapped again)
-    pulsing, spinning, source, interval, start = set(), set(), None, 0, 0.0
+    pulsing, spinning, dotting, source, interval, start = set(), set(), set(), None, 0, 0.0
 
     @classmethod
     def run(cls, ms=None):
-        """The timer: FPS times a second while something it moves is seen, else every IDLE_MS (to notice when it is)."""
-        ms = ms or 1000 // cls.FPS
+        """The timer: while something it moves is seen, as often as that needs; else every IDLE_MS (to notice when
+        it is)."""
+        ms = ms or 1000 // (cls.SPIN_FPS if cls.spinning else cls.PULSE_FPS)
         if cls.source is not None:
-            if cls.interval == ms:
+            if cls.interval <= ms:
                 return
             GLib.source_remove(cls.source)
         else:
@@ -1466,29 +1469,34 @@ class Ticker:
 
     @staticmethod
     def seen(widget):
-        """Mapped, in the window you're looking at."""
+        """Mapped, in the window you're looking at, with you at the machine."""
         root = widget.get_root() if widget.get_mapped() else None
-        return isinstance(root, Gtk.Window) and root.is_active()
+        return isinstance(root, Gtk.Window) and root.is_active() and user_present() is not False
 
     @classmethod
     def tick(cls):
-        for held in (cls.pulsing, cls.spinning):
+        for held in (cls.pulsing, cls.spinning, cls.dotting):
             held.difference_update([w for w in held if not w.get_mapped()])
-        if not cls.pulsing and not cls.spinning:
+        if not cls.pulsing and not cls.spinning and not cls.dotting:
             cls.source = None
             return False
-        phase = ((time.monotonic() - cls.start) / cls.PERIOD) % 2
+        now = time.monotonic()
+        phase = ((now - cls.start) / cls.PERIOD) % 2
         ease = (1 - math.cos(math.pi * (phase if phase < 1 else 2 - phase))) / 2  # (CSS's ease-in-out, near enough)
-        level, seen = round(1 - (1 - cls.LOW) * ease, 2), False
+        level, fps = round(1 - (1 - cls.LOW) * ease, 2), 0
         for w in cls.pulsing:
             here = cls.seen(w)
-            seen = seen or here
+            fps = max(fps, cls.PULSE_FPS if here else 0)
             w.set_opacity(level if here else cls.STILL)
         for w in cls.spinning:
             if cls.seen(w):
-                seen = True
+                fps = cls.SPIN_FPS
                 w.queue_draw()
-        if (ms := 1000 // cls.FPS if seen else cls.IDLE_MS) != cls.interval:  # (the pulse's phase goes on)
+        for w in cls.dotting:
+            if cls.seen(w):
+                fps = max(fps, cls.PULSE_FPS)
+                w.step(now)
+        if (ms := 1000 // fps if fps else cls.IDLE_MS) != cls.interval:  # (the pulse's phase goes on)
             cls.interval, cls.source = ms, GLib.timeout_add(ms, cls.tick)
             return False
         return True
@@ -1542,14 +1550,14 @@ ICON_SLOT = 16  # status icon and disclosure arrow share one square column
 
 class WorkingDots(Gtk.Label):
     """A turn running, at the bottom left (Baude's status bar, Meta's foot): •, ••, •••, and again; otherwise it isn't there, nor the room it takes.
-    All three are laid out, the rest see-through, so what's after it doesn't move with each dot. In a window you aren't
-    looking at it holds still (Ticker)."""
+    All three are laid out, the rest see-through, so what's after it doesn't move with each dot. Moved by Ticker, in
+    its frames; in a window you aren't looking at it holds still."""
 
     STEP_MS = 350
 
     def __init__(self):
         super().__init__(xalign=0, visible=False)
-        self.working, self.shown, self.source = False, 0, None
+        self.working, self.shown, self.began = False, 0, 0.0
         self.connect("map", WorkingDots._run)  # (plain functions: see Spinner)
         self.connect("unmap", WorkingDots._stop)
         self._show(0)
@@ -1561,6 +1569,7 @@ class WorkingDots(Gtk.Label):
         self.set_visible(working)
         self.set_tooltip_text(wording.say("common.working") if working else None)
         self._show(1 if working else 0)
+        self.began = time.monotonic()
         self._stop()
         self._run()
 
@@ -1569,18 +1578,17 @@ class WorkingDots(Gtk.Label):
         self.set_markup("•" * count + f'<span alpha="1">{"•" * (3 - count)}</span>')
 
     def _run(self):
-        if self.working and self.source is None and self.get_mapped():
-            self.source = GLib.timeout_add(self.STEP_MS, self._step)
+        if self.working and self.get_mapped():
+            Ticker.dotting.add(self)
+            Ticker.run()
 
     def _stop(self):
-        if self.source is not None:
-            GLib.source_remove(self.source)
-            self.source = None
+        Ticker.dotting.discard(self)
 
-    def _step(self):
-        if Ticker.seen(self):
-            self._show(self.shown % 3 + 1)
-        return True
+    def step(self, now):
+        """(Ticker's) As many dots as STEP_MS steps since it began say, drawn if that's changed."""
+        if (count := int((now - self.began) * 1000 // self.STEP_MS) % 3 + 1) != self.shown:
+            self._show(count)
 
 
 def _slot(widget):

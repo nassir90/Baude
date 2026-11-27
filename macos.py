@@ -132,9 +132,14 @@ def objc_send(obj, sel, *args, types=(), ret=None):
         rt.objc_getClass.argtypes = rt.sel_registerName.argtypes = [ctypes.c_char_p]
     if isinstance(obj, bytes):
         obj = rt.objc_getClass(obj)
-    f = ctypes.CFUNCTYPE(ret or ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, *types)(
-        ctypes.cast(rt.objc_msgSend, ctypes.c_void_p).value)
+    key = (ret, types)  # (each kind of call's function made once)
+    if (f := _SENDS.get(key)) is None:
+        f = _SENDS[key] = ctypes.CFUNCTYPE(ret or ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, *types)(
+            ctypes.cast(rt.objc_msgSend, ctypes.c_void_p).value)
     return f(obj, rt.sel_registerName(sel), *args)
+
+
+_SENDS = {}
 
 
 DOCK_PX = 512  # (the Dock's tile at its largest, magnified: 256 points, 512 px on a Retina screen. Each tile set (the
@@ -167,12 +172,14 @@ def ns_string(text):
 
 
 def _rect():
+    if (cls := getattr(_rect, "cls", None)) is not None:  # (made once: a class made each time costs, every frame)
+        return cls
     import ctypes
 
     class Rect(ctypes.Structure):  # (NSRect: its origin, then its size, in points)
         _fields_ = [("x", ctypes.c_double), ("y", ctypes.c_double), ("w", ctypes.c_double), ("h", ctypes.c_double)]
-    _rect.cls = getattr(_rect, "cls", None) or Rect
-    return _rect.cls
+    _rect.cls = Rect
+    return Rect
 
 
 def native_window(window):

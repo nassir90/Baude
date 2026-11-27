@@ -75,6 +75,8 @@ class Window(Adw.ApplicationWindow):
         self.reopened = None  # (and what it's told of the pages this browser opened again: from this start alone)
         self.pointer = BotPointer()  # (what its tools do with the mouse: drawn over its pages while hosted, and told
         self.accent = None           # watchers; accent: the glow's colour there, Baude's, as rgb)
+        if hosted:
+            self.pointer.changed = lambda: [t.kick() for t in self.tabs.values()]
         if agent:  # (one a browser before it had for the Bot and never gave)
             self.note = pending_note(profile_id(profile) or "")
             self.reopened = pending_note(profile_id(profile) or "", slot="reopen")

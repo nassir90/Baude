@@ -14,6 +14,8 @@
     "usage_percent": "{$percent}%",
     "checking": "Checking…",
     "usage_unavailable": "Usage unavailable for this sign-in",
+    "after_turn": "Available after a message",
+    "last_update": "Last update {$ago}",
     "no_limits": "API key: no subscription limits",
     "usage_failed": "Could not read usage from Claude Code",
     "codex_usage_failed": "Could not read usage from Codex",

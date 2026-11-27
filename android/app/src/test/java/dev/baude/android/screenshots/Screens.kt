@@ -347,6 +347,28 @@ abstract class Screens(private val theme: String) {
         screen("05i-subscriptions-no-codex")
     }
 
+    // (setup-token accounts: Personal's usage as its chats' turns last said it, with when; Spare's before its first turn)
+    @Test fun subscriptionsTokenUsage() {
+        tokenAccountsFixture(usage = true)
+        show { SettingsScreen({}, {}, page = 1) }
+        laidOut()
+        screen("05t-subscriptions-token-usage")
+    }
+
+    // (the home screen's ⋮ with a setup-token account's usage row: its limits, then when its chats' turns last said them)
+    @Test fun menuUsageToken() {
+        (dev.baude.android.MenuUsageHosts.javaClass.getDeclaredField("hosts").apply { isAccessible = true }
+            .get(dev.baude.android.MenuUsageHosts) as MutableMap<*, *>).clear()
+        dev.baude.android.MenuUsageHosts.readAt.clear()
+        dev.baude.android.MenuUsageHosts.listedAt.clear()
+        tokenAccountsFixture(usage = true)
+        show { dev.baude.android.HomeMenu({}, {}, {}, {}, {}) }
+        laidOut()
+        tap(dev.baude.android.Wording.ChatHeader.menu)
+        laidOut()
+        withMenus("05u-menu-usage-token")
+    }
+
     @Test fun subscriptionsToken() {
         tokenAccountsFixture()
         show { SettingsScreen({}, {}, page = 1) }
@@ -743,13 +765,25 @@ abstract class Screens(private val theme: String) {
         }
     }
 
-    private fun tokenAccountsFixture() {
+    /** usage: a second token account (Spare) too, and each one's usage answered as its host says a setup token's: Personal's
+     * as its chats' turns last said it, 4 minutes ago; Spare's, with no turn yet, nothing. */
+    private fun tokenAccountsFixture(usage: Boolean = false) {
         FixtureConnection.up(activity, Mesh.hosts.first()) { m ->
             if (m.optString("op") != "accounts") null
             else org.json.JSONObject().put("op", "accounts").put("req", m.opt("req")).put("what", m.optString("what"))
                 .put("accounts", org.json.JSONArray(listOf(
-                    org.json.JSONObject().put("id", "t1").put("provider", "claude").put("name", "Personal").put("kind", "token"))))
+                    org.json.JSONObject().put("id", "t1").put("provider", "claude").put("name", "Personal").put("kind", "token")) +
+                    (if (usage) listOf(org.json.JSONObject().put("id", "t2").put("provider", "claude").put("name", "Spare")
+                        .put("kind", "token")) else emptyList())))
                 .put("defaults", org.json.JSONObject().put("claude", "t1").put("codex", "")).put("claude_cli", false)
+                .apply {
+                    val now = System.currentTimeMillis() / 1000
+                    if (usage && m.optString("what") == "usage" && m.optString("id") == "t1") put("usage", org.json.JSONArray(listOf(
+                        org.json.JSONObject().put("name", "Five hour").put("key", "five_hour").put("percent", 42).put("resets", now + 3 * 3600),
+                        org.json.JSONObject().put("name", "Seven day").put("key", "seven_day").put("percent", 17).put("resets", now + 4 * 86400))))
+                        .put("as_of", now - 240)
+                    else if (usage && m.optString("what") == "usage") put("usage", org.json.JSONObject.NULL).put("after_turn", true)
+                }
         }
     }
 

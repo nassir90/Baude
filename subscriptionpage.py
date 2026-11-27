@@ -153,6 +153,7 @@ class Page(Adw.PreferencesPage):
         self.accounts, self.claude_cli, self.missing = [], True, {}
         self.codex_usage = False  # (whether the host reads Codex usage: an older host's reads of Codex's CLI default are Claude's)
         self.lists, self.usage, self.bars, self.reading, self.last = {}, {}, {}, set(), {}
+        self.as_of = {}  # (a subscription's usage as its chats' turns last said it: when, by usage key)
         self.shown, self.timer, self.window_watch = None, None, None
         top = Adw.PreferencesGroup()
         host = Adw.ActionRow(title=wording.say("new_session.host"))
@@ -288,7 +289,7 @@ class Page(Adw.PreferencesPage):
         bars.set_opacity(STALE_OPACITY if stale else 1)
         if stale:
             read = self.last[profile]
-        usage_lines(bars, read)
+        usage_lines(bars, read, as_of=None if stale else self.as_of.get(profile))
 
     def account_menu(self, account):
         actions = Gio.SimpleActionGroup()
@@ -350,21 +351,27 @@ class Page(Adw.PreferencesPage):
 
             def done(reply, profile=profile):
                 self.reading.discard(profile)
-                if reply.get("error"):
-                    self.usage[profile] = reply["error"]
-                elif reply.get("usage"):
-                    self.usage[profile] = _limits(reply["usage"])
-                else:
-                    self.usage[profile] = wording.say("subscriptions.no_limits" if reply.get("api_key") else
-                                                      "subscriptions.usage_unavailable")
+                self.usage[profile], self.as_of[profile] = _read(reply)
                 self.fill_bars(profile)
             self.ask({"what": "usage", "provider": "codex", "id": ""} if profile == CODEX_CLI else
                      {"what": "usage", "id": profile}, done)
 
 
-def usage_lines(box, read, narrow=None):
+def _read(reply):
+    """A usage answer as a card draws it: (its limits, else what to say instead; when its chats' turns last said
+    them, where that's what they are, else None)."""
+    if reply.get("error"):
+        return reply["error"], None
+    if reply.get("usage"):
+        return _limits(reply["usage"]), reply.get("as_of")
+    return wording.say("subscriptions.no_limits" if reply.get("api_key") else "subscriptions.after_turn"
+                       if reply.get("after_turn") else "subscriptions.usage_unavailable"), None
+
+
+def usage_lines(box, read, narrow=None, as_of=None):
     """read (a subscription's limits [(key, name, percent, resets)], or what to say instead) drawn into box: a line for
-    each limit, its name and percentage, its bar under it (a Subscriptions card's, and ☰'s usage row's). narrow (☰'s:
+    each limit, its name and percentage, its bar under it (a Subscriptions card's, and ☰'s usage row's); as_of (where
+    they're as its chats' turns last said them: when), Last update <how long ago> dim under them. narrow (☰'s:
     its width in characters, MenuUsage.fit's): no word asks for more width than the row's, a limit's name cut with …
     where it doesn't fit, what's said instead wrapped within it."""
     while (child := box.get_first_child()) is not None:
@@ -381,6 +388,11 @@ def usage_lines(box, read, narrow=None):
                               css_classes=["dim-label", "numeric"]))
         box.append(line)
         box.append(Gtk.ProgressBar(fraction=max(0.0, min(1.0, percent / 100))))
+    if as_of is not None:
+        from widgets import say_time
+        before, _, after = wording.say("subscriptions.last_update", ago="\0").partition("\0")
+        box.append(say_time(Gtk.Label(xalign=0, wrap=True, css_classes=["dim-label"],
+                                      **({"max_width_chars": narrow} if narrow else {})), as_of, before, after))
 
 
 def open_subscriptions(win):
@@ -555,18 +567,13 @@ class MenuUsage(Gtk.Button):
     def read(self, ticket, target, profile, reply):
         if not self.current(ticket, target) or profile != self.profile:
             return False
-        if reply.get("error"):
-            self.show_read(None, reply["error"])
-        elif reply.get("usage"):
-            self.show_read(_limits(reply["usage"]), None)
-        else:
-            self.show_read(None, wording.say("subscriptions.no_limits" if reply.get("api_key") else
-                                             "subscriptions.usage_unavailable"))
+        read, as_of = _read(reply)
+        self.show_read(read if isinstance(read, list) else None, None if isinstance(read, list) else read, as_of=as_of)
         return False
 
-    def show_read(self, limits, said, stale=False):
+    def show_read(self, limits, said, stale=False, as_of=None):
         self.bars.set_opacity(STALE_OPACITY if stale else 1)
-        usage_lines(self.bars, limits if limits is not None else said, narrow=self.chars)
+        usage_lines(self.bars, limits if limits is not None else said, narrow=self.chars, as_of=as_of)
         self.name.set_visible(bool(self.name.get_label()))
         self.shown(True)
 

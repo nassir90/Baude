@@ -52,7 +52,15 @@
       "items": {
         "$ref": "UsageLimit.json"
       },
-      "description": "usage: the subscription's limits; null where they can't be read for its sign-in (a setup token's, an API key's, a Codex sign-in that isn't a ChatGPT plan's)."
+      "description": "usage: the subscription's limits; for a Claude sign-in that can't be asked (a setup token's), as its chats' turns last said them (as_of); null where none can be said (an API key's, a Codex sign-in that isn't a ChatGPT plan's, a setup token's before its first turn: after_turn)."
+    },
+    "as_of": {
+      "type": "number",
+      "description": "usage: where its limits are as the subscription's chats' turns last said them (its sign-in can't be asked: a setup token's), when they last said them, in seconds since 1970; shown as \"Last update <how long ago>\" under them."
+    },
+    "after_turn": {
+      "type": "boolean",
+      "description": "usage: true where its limits can only be said by its chats' turns (a setup token's) and none has said them yet (usage null)."
     },
     "api_key": {
       "type": "boolean",

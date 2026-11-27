@@ -75,8 +75,9 @@ class HostAccounts(val hostId: String) {
     val missing = mutableStateOf<Map<String, Msg.Dep>>(emptyMap()) // (a provider's program the host lacks, by provider)
     private val reading = HashSet<String>()
 
-    /** A subscription's usage as last read: its limits (name, percent), or what to say instead. */
-    class Usage(val limits: List<Limit>?, val said: String?)
+    /** A subscription's usage as last read: its limits (name, percent), or what to say instead; asOf, where they're as
+     * its chats' turns last said them (a setup token's): when (seconds since 1970). */
+    class Usage(val limits: List<Limit>?, val said: String?, val asOf: Long? = null)
 
     /** One limit: its key (five_hour…), name, percent used, and when it resets (seconds since 1970), if said. */
     class Limit(val key: String, val name: String, val percent: Double, val resets: Double?)
@@ -99,11 +100,13 @@ class HostAccounts(val hostId: String) {
                 else Msg.Accounts(what = "usage", id = id)).json()) { r ->
                 reading.remove(id)
                 val error = took(r)
-                val limits = Msg.AccountsReply.from(r).usage?.takeIf { it.isNotEmpty() }
+                val reply = Msg.AccountsReply.from(r)
+                val limits = reply.usage?.takeIf { it.isNotEmpty() }
                 usage[id] = when {
                     error != null -> Usage(null, error)
-                    limits != null -> Usage(limits(limits), null)
-                    Msg.AccountsReply.from(r).apiKey == true -> Usage(null, Wording.Subscriptions.noLimits)
+                    limits != null -> Usage(limits(limits), null, reply.asOf?.toLong())
+                    reply.apiKey == true -> Usage(null, Wording.Subscriptions.noLimits)
+                    reply.afterTurn == true -> Usage(null, Wording.Subscriptions.afterTurn)
                     else -> Usage(null, Wording.Subscriptions.usageUnavailable)
                 }
             }
@@ -238,8 +241,8 @@ private fun SubscriptionCard(name: String, a: Msg.Account?, usage: HostAccounts.
 }
 
 /** A subscription's usage (a Subscriptions card's, and ⋮'s usage row's): a line for each limit, its name and percentage,
- * its bar under it; else what was said instead. Till it's read, what the host last read (last) greyed (Checking… where
- * it has none). */
+ * its bar under it, and where they're as its chats' turns last said them, Last update <how long ago> dim under them;
+ * else what was said instead. Till it's read, what the host last read (last) greyed (Checking… where it has none). */
 @Composable
 private fun UsageBars(usage: HostAccounts.Usage?, last: List<HostAccounts.Limit>?, modifier: Modifier = Modifier) {
     val c = LocalBaude.current
@@ -260,6 +263,8 @@ private fun UsageBars(usage: HostAccounts.Usage?, last: List<HostAccounts.Limit>
                     .background(c.accentBg))
             }
         }
+        val asOf = if (stale) null else usage?.asOf
+        if (limits != null && asOf != null) Text(Wording.Subscriptions.lastUpdate(ago = ago(asOf)), style = Type.body, color = c.dim)
     }
 }
 

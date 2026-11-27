@@ -19,6 +19,7 @@ import ctypes.util
 import datetime
 import json
 import os
+import re
 import sys
 import threading
 import time
@@ -524,7 +525,10 @@ class Telemetry:
         self.told_at = time.monotonic()
         if isinstance(msg.get("pid"), int) and msg["pid"] > 0 and self.on:
             with self.lock:
+                new = msg["pid"] not in self.pids
                 self.pids[msg["pid"]] = app
+            if new and (st := proc_stats([msg["pid"]]).get(msg["pid"])):
+                self.cpu.setdefault(msg["pid"], (time.time(), st[0]))  # (its CPU share counted from here)
         if app in PROFILED:
             error = msg.get("profile_error") if isinstance(msg.get("profile_error"), str) else None
             if error != self.errors.get(app):
@@ -990,31 +994,48 @@ def tail_since(path, start, block=1 << 16):
 ALIASES = ("opus", "sonnet", "haiku", "fable")  # (claude's own: models.ALIASES)
 
 
+def family_of(model):
+    """The family a model name is of (opus, from opus, opus[1m] or claude-opus-5-5[1m]), or None."""
+    if isinstance(model, str):
+        parts = re.sub(r"\[[^\]]*\]", "", model).split("-")
+        for a in ALIASES:
+            if a in parts:
+                return a
+    return None
+
+
 def model_of(msg, model):
-    """The model a turn ran on, as one name for it: the model id its result says did most of its work (Claude Code's
+    """The model a turn ran on, as one name for it: the model id its result says ran it (Claude Code's
     model_usage_since_last_result or modelUsage: claude-opus-5-5, never the alias opus it was started with), else
-    model as the session has it."""
+    model as the session has it. A turn is the session's model's: the id of its family that wrote most (a subagent's
+    on another model doesn't rename it), the biggest of all only where none is of its family."""
     for key in ("model_usage_since_last_result", "modelUsage"):
         by = msg.get(key)
         if isinstance(by, dict) and by:
-            ran = max(by.items(), key=lambda kv: (kv[1].get("outputTokens") or 0) if isinstance(kv[1], dict) else 0)
-            if isinstance(ran[0], str) and ran[0]:
-                return ran[0]
+            used = [(k, v) for k, v in by.items() if isinstance(k, str) and k]
+            out = lambda kv: (kv[1].get("outputTokens") or 0) if isinstance(kv[1], dict) else 0
+            same = [kv for kv in used if family_of(kv[0]) and family_of(kv[0]) == family_of(model)]
+            if used:
+                return max(same or used, key=out)[0]
     return model
 
 
 def canonical_models(events):
-    """{name: the one name for it} for the models of events: an alias (opus, opus[1m]) kept before turns said the
-    id they ran on, as the latest id of that family the same events have (claude-opus-5-5, claude-opus-5-5[1m])."""
-    latest = {}
+    """A function (model, at) -> the one name for it: an alias (opus, opus[1m]) kept before turns said the id they
+    ran on is the first id of its family the same events have from then on (what the alias meant then), else itself."""
+    ids = {}
     for e in sorted(events, key=lambda e: e.get("at") or 0):
         m = e.get("model")
-        if isinstance(m, str) and m.startswith("claude-"):
-            long = "[1m]" in m
-            for a in ALIASES:
-                if a in m.replace("[1m]", "").split("-"):
-                    latest[(a, long)] = m
-    return {f"{a}[1m]" if long else a: m for (a, long), m in latest.items()}
+        if isinstance(m, str) and m.startswith("claude-") and (f := family_of(m)):
+            ids.setdefault(f, []).append((e.get("at") or 0, m))
+
+    def name(model, at):
+        if not isinstance(model, str) or model.startswith("claude-") or (f := family_of(model)) is None:
+            return model
+        later = [m for t, m in ids.get(f, ()) if t >= (at or 0)]
+        long = [m for m in later if "[1m]" in m]
+        return (long if "[1m]" in model and long else later or [model])[0]
+    return name
 
 
 def usage(events):
@@ -1042,7 +1063,7 @@ def usage(events):
         seen.add(key)
         add(days, datetime.date.fromtimestamp(e["at"]).isoformat(), e)
         if e.get("model"):
-            model = names.get(e["model"], e["model"])  # (one name a model: an alias kept before, as its id)
+            model = names(e["model"], e["at"])  # (one name a model: an alias kept before, as its id)
             add(models, (model, None), e)
             add(combos, (model, e.get("effort")), e)
 

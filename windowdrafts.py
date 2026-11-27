@@ -170,13 +170,16 @@ class WindowDrafts:
     # box by hand, till its host answers a save of that very text. Saved DRAFT_SAVE_MS after typing stops, at once
     # as the box is emptied (a message sent or queued) and as the chat's left; another head's save comes as
     # "_draft" (h_draft). The last write wins: one that comes while this box is dirty or has a save on its way is
-    # held (hd's held), and put in once it's neither, if its host had it after this box's. Only a dirty copy kept
-    # here is ever saved over its host's as the chat's opened. What's attached stays this app's (files on this
+    # held (hd's held), and put in once it's neither, if its host had it after this box's. A save its host didn't
+    # take holds nothing: another's write held then, or come after, goes in (its host has it, and this box's it never
+    # had); else it's saved again DRAFT_RETRY_MS later, twice as long each time, DRAFT_RETRIES times. Only a dirty copy
+    # kept here is ever saved over its host's as the chat's opened. What's attached stays this app's (files on this
     # machine: DRAFTS)
-    DRAFT_SAVE_MS = 400
+    DRAFT_SAVE_MS, DRAFT_RETRY_MS, DRAFT_RETRIES = 400, 1000, 3
     hd = {"sid": None}  # (the open chat's: {sid, rev (the last its host's said), text (the markdown it has), dirty,
-    # flight (saves on their way), held (another's, held)})
-    draft_timer = None
+    # flight (saves on their way), held (another's, held), failed (its last save not taken, nothing typed since),
+    # tries (saves made again since one was last taken)})
+    draft_timer = draft_retry = None
 
     @property
     def draft_head(self):
@@ -206,7 +209,8 @@ class WindowDrafts:
         here is saved to it."""
         self.drop_draft_timer()
         dirty = bool(local and local.get("dirty"))
-        self.hd = {"sid": self.session_id, "rev": 0, "text": None, "flight": 0, "held": None, "dirty": dirty}
+        self.hd = {"sid": self.session_id, "rev": 0, "text": None, "flight": 0, "held": None, "dirty": dirty,
+                   "failed": False, "tries": 0}
         if self.draft_host() is None:
             return
         d = getattr(self.proc, "draft", None) if isinstance(self.proc, baudelib.client.RemoteProc) else None
@@ -257,9 +261,13 @@ class WindowDrafts:
             self.set_box(text, [self.moved_offset(old, text, c) for c in widgets.caret_of(self.input)])
 
     def drop_draft_timer(self):
+        """The save on its way after typing stops, and one to be made again, not made."""
         if self.draft_timer is not None:
             GLib.source_remove(self.draft_timer)
             self.draft_timer = None
+        if self.draft_retry is not None:
+            GLib.source_remove(self.draft_retry)
+            self.draft_retry = None
 
     def draft_typed(self):
         """(the box's text changed by hand: draft_changed, put_ahead) Dirty, and saved to its host DRAFT_SAVE_MS after
@@ -268,6 +276,7 @@ class WindowDrafts:
         if self.reverting is not None or not self.hd_open():
             return
         text = self.box_markdown()
+        self.hd.update(failed=False, tries=0)
         if text == self.hd["text"]:
             self.hd["dirty"] = False
             return self.release_held()
@@ -300,7 +309,7 @@ class WindowDrafts:
         if r is None:
             return
         hd, sid, text = self.hd, self.session_id, self.box_markdown()
-        hd["text"] = text
+        hd["text"], hd["failed"] = text, False
         hd["flight"] += 1
 
         def done(reply):
@@ -313,18 +322,42 @@ class WindowDrafts:
                         ComposerMarkdown.to_markdown(d["text"]) == text:
                     d["dirty"] = False
                 return
-            if not took:  # (not kept there: still dirty, saved again as it's opened or attached)
+            if not took:  # (not kept there: still dirty, saved again as it's opened or attached, and soon)
                 hd["text"] = None
+                if not hd["flight"] and self.draft_timer is None and self.box_markdown() == text:
+                    hd["failed"] = True
+                    if hd["held"] is not None:  # (another's, which its host has: in, in place of this)
+                        return self.release_held()
+                    self.retry_host_draft(text)
                 return
+            hd["tries"] = 0
             if not hd["flight"] and self.draft_timer is None and self.box_markdown() == text:
                 hd["dirty"] = False
                 self.release_held()
         r.request({"op": "draft_save", "session": sid, "text": text, "head": self.draft_head}, done)
 
-    def release_held(self):
-        """Another head's write held while this box was dirty or saving, put in now it's neither."""
+    def retry_host_draft(self, text):
+        """(a save of text its host didn't take) Saved again in a while, unless it's been tried DRAFT_RETRIES times, or
+        the box has changed, another's write come or the chat's been left meanwhile."""
         hd = self.hd
-        if (held := hd.get("held")) is not None and not hd["flight"] and not hd["dirty"] and self.draft_timer is None:
+        if hd["tries"] >= self.DRAFT_RETRIES or self.draft_retry is not None:
+            return
+
+        def again():
+            self.draft_retry = None
+            if self.hd is hd and hd["failed"] and not hd["flight"] and self.draft_timer is None and \
+                    self.box_markdown() == text:
+                self.save_host_draft()
+            return False
+        self.draft_retry = GLib.timeout_add(self.DRAFT_RETRY_MS << hd["tries"], again)
+        hd["tries"] += 1
+
+    def release_held(self):
+        """Another head's write held while this box was dirty or saving, put in now it's neither (or this box's last
+        save wasn't taken)."""
+        hd = self.hd
+        if (held := hd.get("held")) is not None and not hd["flight"] and (not hd["dirty"] or hd.get("failed")) and \
+                self.draft_timer is None:
             hd["held"] = None
             self.host_draft_in(held)
 
@@ -339,11 +372,15 @@ class WindowDrafts:
         if d.get("head") == self.draft_head:  # (this box's own save, back)
             hd["rev"] = d["rev"]
             return
-        if hd["flight"] or hd["dirty"] or self.draft_timer is not None or self.reverting is not None:
+        if hd["flight"] or hd["dirty"] and not hd.get("failed") or self.draft_timer is not None or \
+                self.reverting is not None:
             if hd["held"] is None or d["rev"] > hd["held"]["rev"]:  # (this box's own goes after, unless its host had
                 hd["held"] = d                                      # this after it)
             return
         hd["rev"] = d["rev"]
+        if hd.get("failed"):  # (this box's, which its host never had, gives way)
+            self.drop_draft_timer()
+            hd.update(dirty=False, failed=False, tries=0)
         self.put_host_text(d.get("text") or "")
 
     # ---- a host's chat's queue: kept by its host (hostqueue), the same in every head that opens the chat, on any

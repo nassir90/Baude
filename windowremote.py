@@ -54,6 +54,57 @@ from refpopovers import chat_checkout  # noqa: E402
 MESH_CHAT_TOOLS = ("mcp__mesh__start_subagent", "mcp__mesh__message_chat")  # (drawn as MeshCard)
 
 
+def folder_completion(typed, part, names):
+    """Tab in a folder's path, as GTK's file chooser and a shell complete: the path typed, part (its last part when
+    that isn't a folder, else None) and the folders listed for it (those part begins, or those in it). One: it, with a
+    / to go on into it; several: as much as all of them share; nothing more to put: None."""
+    if part is None:
+        if not typed.endswith("/"):
+            return typed + "/"
+        typed, part = typed, ""
+    elif typed.endswith("/") or not typed.endswith(part):
+        return None
+    if not names:
+        return None
+    if len(names) == 1:
+        return typed[:len(typed) - len(part)] + names[0] + "/"
+    shared = os.path.commonprefix([n.casefold() for n in names])
+    if len(shared) <= len(part):
+        return None
+    return typed[:len(typed) - len(part)] + names[0][:len(shared)]
+
+
+def folder_keys(keyval, held, complete, pick, picked, into, up, home, hidden):
+    """A folder's path field's keys, as file choosers have them: Tab completes it (GTK, shells); Up and Down pick in
+    the list under it and Enter goes into the one picked (GTK's location bar, Finder's Go to Folder); Alt+Up or Cmd+Up
+    goes to the folder above (Nautilus, Dolphin, GTK; Finder), Alt+Down or Cmd+Down into the one picked or the only
+    one; Alt+Home or Cmd+Shift+H home; Ctrl+H, Alt+. or Cmd+Shift+. shows or hides hidden folders. True: taken."""
+    mods = held & (Gdk.ModifierType.SHIFT_MASK | Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.ALT_MASK |
+                   Gdk.ModifierType.META_MASK)
+    shift, ctrl = Gdk.ModifierType.SHIFT_MASK, Gdk.ModifierType.CONTROL_MASK
+    alt, cmd = Gdk.ModifierType.ALT_MASK, Gdk.ModifierType.META_MASK
+    did = None
+    if keyval == Gdk.KEY_Tab and not mods:
+        did = complete
+    elif keyval in (Gdk.KEY_Up, Gdk.KEY_Down) and not mods:
+        did = lambda: pick(-1 if keyval == Gdk.KEY_Up else 1)  # noqa: E731
+    elif keyval in (Gdk.KEY_Return, Gdk.KEY_KP_Enter) and not mods and picked():
+        did = into
+    elif keyval == Gdk.KEY_Up and mods in (alt, cmd):
+        did = up
+    elif keyval == Gdk.KEY_Down and mods in (alt, cmd):
+        did = into
+    elif keyval == Gdk.KEY_Home and mods == alt or keyval in (Gdk.KEY_h, Gdk.KEY_H) and mods == cmd | shift:
+        did = home
+    elif keyval in (Gdk.KEY_h, Gdk.KEY_H) and mods == ctrl or keyval == Gdk.KEY_period and mods == alt or \
+            keyval in (Gdk.KEY_period, Gdk.KEY_greater) and mods == cmd | shift:
+        did = hidden
+    if did is None:
+        return False
+    did()
+    return True
+
+
 class MeshCard(ToolCard):
     """A call of the mesh's tools (baudelib/meshtools.py) that starts a subagent on a host of the mesh, or messages a
     chat there: a line as a subagent's row in the side panel is, [mark] its title over its host and model, ›, the
@@ -472,36 +523,49 @@ class WindowRemote:
         """Open folder… with another host picked: "Open a folder on <host>", a folder there typed or browsed, from the
         one last used there (else its home). Under the path, the folders the host lists (list_dir) as it's typed: those
         in the folder typed, else those of its parent that its last part begins (.. first, for the one above); one
-        clicked is put in the path. Open: a blank chat there, in it (new_session_on)."""
+        clicked is gone into. Open: a blank chat there, in it (new_session_on). Keys as file choosers have them
+        (folder_keys): Tab completes, Up and Down pick in the list, Alt+Up goes up, Ctrl+H shows hidden folders."""
         home = r.info.get("home") or "/"
         entry = Gtk.Entry(text=(load_settings().get("remote_folders") or {}).get(r.key) or home, activates_default=True,
                           width_chars=44)
-        rows = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE)
+        rows = Gtk.ListBox(selection_mode=Gtk.SelectionMode.SINGLE)
         rows.add_css_class("boxed-list")
-        rows.connect("row-activated", lambda _l, row: (entry.set_text(row.path), entry.grab_focus(),
-                                                       entry.set_position(-1)))
         scroll = Gtk.ScrolledWindow(child=rows, hscrollbar_policy=Gtk.PolicyType.NEVER, min_content_height=240,
                                     max_content_height=240)
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
         box.append(entry)
         box.append(scroll)
         asked = [0]
+        state = {"part": None, "names": [], "listed": None, "hidden": False, "then": None}  # (what's listed for the
+        # path as typed: its last part when that isn't a folder, the names; listed: the ask it's for; then: a key's
+        # doing, waiting for it)
 
         def full():  # (the path typed, absolute: ~ the host's home)
             t = entry.get_text().strip() or "~"
             return home.rstrip("/") + t[1:] if t == "~" or t.startswith("~/") else t
 
-        def show(folder, names):
+        def put(path):  # (a folder gone into: its path, with a / to list what's in it)
+            entry.set_text(path.rstrip("/") + "/" if path.rstrip("/") else "/")
+            entry.grab_focus_without_selecting()
+            entry.set_position(-1)
+        rows.connect("row-activated", lambda _l, row: put(row.path))
+
+        def show(folder, names, part=None):
             while (row := rows.get_row_at_index(0)) is not None:
                 rows.remove(row)
+            state.update(part=part, names=names, listed=asked[0])
             above = [("..", os.path.dirname(folder.rstrip("/")) or "/")] if folder.rstrip("/") else []
             for name, path in above + [(n, os.path.join(folder, n)) for n in names]:
                 line = Gtk.Box(spacing=8, margin_start=10, margin_end=10, margin_top=6, margin_bottom=6)
                 line.append(Gtk.Image.new_from_icon_name("go-up-symbolic" if name == ".." else "folder-symbolic"))
                 line.append(Gtk.Label(label=name, xalign=0, ellipsize=Pango.EllipsizeMode.MIDDLE, hexpand=True))
                 row = Gtk.ListBoxRow(child=line)
-                row.path = path
+                row.path, row.up = path, name == ".."
                 rows.append(row)
+            rows.unselect_all()
+            if (then := state["then"]) is not None:
+                state["then"] = None
+                then()
 
         def look(*_):
             asked[0] += 1
@@ -515,14 +579,73 @@ class WindowRemote:
                 if reply.get("op") == "dir" and not reply.get("error"):
                     show(folder, [e["name"] for e in reply.get("entries") or [] if e.get("dir") and
                                   e["name"].casefold().startswith((part or "").casefold()) and
-                                  (not e["name"].startswith(".") or (part or "").startswith("."))])
+                                  (not e["name"].startswith(".") or (part or "").startswith(".") or state["hidden"])],
+                         part)
                 elif part is None:  # (not a folder: its parent's, that its last part begins)
                     parent, part = os.path.split(t.rstrip("/"))
                     r.request({"op": "list_dir", "path": parent or "/"}, lambda rep: got(rep, parent or "/", part))
                 else:
-                    show(folder, [])
+                    show(folder, [], part)
             r.request({"op": "list_dir", "path": t}, lambda rep: got(rep, t, None))
         entry.connect("changed", look)
+
+        def listed(then):  # (a key's doing, once the folders for the path as typed are listed)
+            if state["listed"] == asked[0]:
+                return then()
+            state["then"] = then
+
+        def complete():  # (Tab: the one folder the path begins, else as much as all of them share; none, a bell)
+            t = entry.get_text()
+            done = folder_completion(t, state["part"], state["names"]) if full().startswith("/") else None
+            if done is None:
+                entry.error_bell()
+            else:
+                entry.set_text(done)
+                entry.set_position(-1)
+
+        def pick(step):  # (Up and Down: a folder in the list picked, the path still typed in)
+            row = rows.get_selected_row()
+            if row is not None:
+                row = rows.get_row_at_index(max(row.get_index() + step, 0))
+            elif step < 0:
+                row = rows.get_last_child()
+            else:  # (the first folder, past ..)
+                first = rows.get_row_at_index(0)
+                row = rows.get_row_at_index(1) if first is not None and first.up else first
+                row = row or first
+            if row is None:
+                return
+            rows.select_row(row)
+            ok, box_ = row.compute_bounds(rows)
+            adj = scroll.get_vadjustment()
+            if ok and box_.get_y() < adj.get_value():
+                adj.set_value(box_.get_y())
+            elif ok and box_.get_y() + box_.get_height() > adj.get_value() + adj.get_page_size():
+                adj.set_value(box_.get_y() + box_.get_height() - adj.get_page_size())
+
+        def into():  # (the folder picked in the list, else the only one there)
+            row = rows.get_selected_row()
+            if row is None and len(state["names"]) == 1:
+                row = rows.get_last_child()
+            if row is None:
+                return entry.error_bell()
+            put(row.path)
+
+        def hidden():
+            state["hidden"] = not state["hidden"]
+            look()
+
+        def up():  # (from the folder listed: the one typed, else the one its last part is in)
+            t = full().rstrip("/")
+            if state["part"] is not None:
+                t = os.path.dirname(t)
+            if full().startswith("/") and t.rstrip("/"):
+                put(os.path.dirname(t.rstrip("/")) or "/")
+        keys = Gtk.EventControllerKey(propagation_phase=Gtk.PropagationPhase.CAPTURE)
+        keys.connect("key-pressed", lambda _c, keyval, _code, held: folder_keys(
+            keyval, held, complete=lambda: listed(complete), pick=pick,
+            picked=lambda: rows.get_selected_row() is not None, into=lambda: listed(into), up=up, home=lambda: put(home), hidden=hidden))
+        entry.add_controller(keys)
         look()
         dlg = Adw.AlertDialog(heading=wording.say("sidebar.open_folder_on", host=remote_name(r)), extra_child=box,
                               default_response="open", close_response="cancel")

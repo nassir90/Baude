@@ -832,6 +832,22 @@ abstract class Screens(private val theme: String) {
         tap("Open")
     }
 
+    /** Open folder…'s keys, a keyboard's: a path's last part beginning one folder, Tab: it; Down twice: the second
+     * folder picked; a folder tapped, then Back: out of it again. */
+    @Test fun openFolderKeys() = newChat("95b-open-folder-keys-opened") {
+        tap("Open folder…")
+        typeIn("/home/dev/ga")
+        press(android.view.KeyEvent.KEYCODE_TAB)
+        screen("94d-open-folder-tab")
+        press(android.view.KeyEvent.KEYCODE_DPAD_DOWN)
+        press(android.view.KeyEvent.KEYCODE_DPAD_DOWN)
+        screen("94e-open-folder-picked")
+        tap("docs")
+        press(android.view.KeyEvent.KEYCODE_BACK)
+        screen("94f-open-folder-back")
+        tap("Open")
+    }
+
     /** A new chat's first message sent: it's the host's from then on (no longer a draft), and listed at home. */
     @Test fun newChatFirstMessage() {
         newChat("96-new-chat-written") { tap("New session in ~/garden, on workshop") }
@@ -2166,6 +2182,15 @@ abstract class Screens(private val theme: String) {
         val act = androidx.compose.ui.semantics.SemanticsActions.OnLongClick
         windows().flatMap(::roots).flatMap { all(it.semanticsOwner.rootSemanticsNode) }
             .first { it.config.contains(act) && it.config[act].label == label }.config[act].action!!.invoke()
+        androidx.compose.runtime.snapshots.Snapshot.sendApplyNotifications()
+        settle()
+    }
+
+    /** A key pressed and let go in the window on top (a dialog's, if one's up), as a keyboard would. */
+    private fun press(code: Int) {
+        val top = windows().last()
+        top.dispatchKeyEvent(android.view.KeyEvent(android.view.KeyEvent.ACTION_DOWN, code))
+        top.dispatchKeyEvent(android.view.KeyEvent(android.view.KeyEvent.ACTION_UP, code))
         androidx.compose.runtime.snapshots.Snapshot.sendApplyNotifications()
         settle()
     }

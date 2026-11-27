@@ -5,6 +5,7 @@
     "running_in_background": "running in background",
     "denied": "denied",
     "mcp": "MCP",
+    "answered_task": "Answered {$task}",
     "image_not_decoded": "[image could not be decoded]",
     "cut_chars": "… ({$n} chars)",
     "all_occurrences": "all occurrences",

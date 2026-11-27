@@ -136,7 +136,7 @@ OPS = {  # (the rule each op is checked for, before it's taken (a function: msg'
     "tasks": _tasks,
     "autofix": _autofix,  # (no on: only as it is)
     **dict.fromkeys(("input", "held", "stop", "rename", "archive", "unarchive", "delete", "set_cwd", "always_allow",
-                     "bot", "rotate", "run_task", "task_stop", "waits_on", "seen"), "manage_write"),  # (seen: what
+                     "bot", "rotate", "run_task", "task_stop", "answer_task", "waits_on", "seen"), "manage_write"),  # (seen: what
     # every head shows of it changed, as memory's seen is a write)
 }
 CHATLESS = frozenset(("list_dir", "notes", "edits", "edit_propose", "edit_revise", "edit_withdraw", "edit_decide",

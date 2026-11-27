@@ -18,6 +18,8 @@
     "toolcards.py:_path_label",
     "toolcards.py:humanize",
     "toolcards.py:said_nothing",
+    "toolcards.py:answer_line",
+    "toolcards.py:answer_result",
     "toolcards.py:read_tail",
     "windowview.py:WindowView.tool_card",
     "windowdrafts.py:WindowDrafts.render_assistant",
@@ -88,7 +90,7 @@
         },
         {
           "name": "summary",
-          "shows": "Plain weight, first line only, at most 120 characters, then cut with … to fit. What it is: Claude's description if the input has one; else the first of command, file_path, notebook_path, pattern, url, query, prompt, path, skill that's set. A command (Bash) without a description shows nothing here: a description on this line is always Claude's, never Baude's words. Grep/Glob's pattern is in monospace. A ToolSearch whose query selects tools (\"select:a,b\") shows them by name, comma-separated (\"Mesh / Tasks, Mesh / Task run\"), never the raw query; its input view lists them a line each. Then, dimmed at 55% after \"  · \": \"running in background\", \"interrupted\", and/or \"denied\". AskUserQuestion: its first question (+\" (+N more)\"), and once answered \"<header>: <answer> · <header>: <answer>\". The summary is selectable (to copy) and updates live as the input streams in.",
+          "shows": "Plain weight, first line only, at most 120 characters, then cut with … to fit. What it is: Claude's description if the input has one; else the first of command, file_path, notebook_path, pattern, url, query, prompt, path, skill that's set. A command (Bash) without a description shows nothing here: a description on this line is always Claude's, never Baude's words. Grep/Glob's pattern is in monospace. A ToolSearch whose query selects tools (\"select:a,b\") shows them by name, comma-separated (\"Mesh / Tasks, Mesh / Task run\"), never the raw query; its input view lists them a line each. Then, dimmed at 55% after \"  · \": \"running in background\", \"interrupted\", and/or \"denied\". AskUserQuestion: its first question (+\" (+N more)\"), and once answered \"<header>: <answer> · <header>: <answer>\". Mesh / Answer task (a Bot's answer to its task's ask): its answer's fields, \"<field> = <value>\" joined by \" · \" (text as it is, a number or true/false as written), or its text's first line. The summary is selectable (to copy) and updates live as the input streams in.",
           "copy": [
             "tool_calls.running_in_background",
             "meta.interrupted",
@@ -99,6 +101,26 @@
         {
           "name": "status",
           "shows": "At the end of the line, a 16px spinner (a faint ring with an arc going round, growing and shrinking) while the call runs or runs in the background. Nothing once it's done, failed or interrupted: success says nothing; failure is the red border. Hidden while the call waits for your permission."
+        }
+      ]
+    },
+    {
+      "name": "task answer",
+      "shows": "A Bot's mcp__mesh__answer_task call, once the host's taken it: the name reads \"Answered <task>\" (the task's name, from the call's result) and the summary is the answer as it was taken, e.g. \"Answered Deploy site  env = staging · dry_run = true\". No Output toggle: the card says what came back; Input still opens what it was given. Before it's taken it's drawn as any other call (\"Mesh / Answer task\" and the answer it was given); refused (an answer that doesn't fit the form, or no ask waiting), it's an error card whose Error opens what was wrong.",
+      "copy": [
+        "tool_calls.answered_task"
+      ],
+      "decisions": [
+        {
+          "said": "There should be an answer tool. I see at the moment, models are expected to dump JSON into the text body to parse out for tasks -- this is super ugly!",
+          "rule": "Every app draws a Bot's answer to its task's ask as a compact card, \"Answered <task>\" and its fields as \"field = value\", never as raw JSON.",
+          "decided": "2026-11-27",
+          "source": [
+            {
+              "session": "b3845b21-55ac-4aab-a769-fb8517403c51",
+              "message": "9e88c2db-84ec-4c98-ac7a-c62302de4241"
+            }
+          ]
         }
       ]
     },

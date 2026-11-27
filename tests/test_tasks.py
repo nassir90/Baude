@@ -163,6 +163,27 @@ def heal(head, sid):
     print("healed: failed, handed over, set, run again, done", flush=True)
 
 
+def reminded(head, srv, sid):
+    """An ask whose Bot's turn ends without its answer_task tool: reminded once, then answered with the tool, the run
+    going on (the fake Bot answers with the tool only once it's reminded); an answer to no ask waiting, refused."""
+    tid = head.ask({"op": "tasks", "session": sid, "set": {
+        "name": "Remind", "runtime": "python", "fallback": False, "timeout_s": 30,
+        "script": 'import baudetask as task\n'
+                  'got = task.ask("SKIP THE TOOL, then answer.", form=[{"name": "ok", "type": "bool", '
+                  '"required": True}])\n'
+                  'assert got == {"ok": True}, got\n'}})["saved"]
+    rid = head.ask({"op": "run_task", "session": sid, "id": tid})["run"]["id"]
+    got = ended(head, sid, rid)
+    assert got["run"]["status"] == "done", got
+    answers = [x for x in got["log"] if x["kind"] == "answer"]
+    assert len(answers) == 1 and answers[0].get("values") == {"ok": True}, got["log"]
+    for bad in ({"run": rid, "answer": {"ok": True}}, {"run": "nope", "text": "hi"}):
+        refused = head.ask({"op": "answer_task", "session": sid, **bad})
+        assert refused["op"] == "error", refused
+    head.ask({"op": "tasks", "session": sid, "delete": tid})
+    print("reminded: an ask answered without the tool reminded once, then answered with it", flush=True)
+
+
 def pushes(head, srv, sid, repo):
     """Two pushes while a push's run is going: both deployed, by one run after it (from the head it ran to the
     latest)."""
@@ -418,6 +439,7 @@ def main():
         if rng.random() < 0.3:
             assert head.ask({"op": "tasks", "session": sid, "delete": tid})["op"] == "tasks"
     heal(head, sid)
+    reminded(head, srv, sid)
     pushes(head, srv, sid, repo)
     agents(head, srv, sid)
     # a script's ops, refused without the run's token

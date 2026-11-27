@@ -123,6 +123,17 @@ One run of one of your tasks, and its log.
 | `session` | string |  | A Bot's session id (yours if none's given) |
 | `run` | string | yes |  |
 
+### `answer_task`
+
+Answer one of your tasks' asks: a message that starts "An instance of the '…' task asks:" (or "… failed" from its script), the run's id in its table. With a form, answer is an object of its fields (the ask lists them); with none, text. Its run goes on as soon as you've answered: what you say besides is only commentary. A wrong answer is refused with what's wrong: call it again.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `session` | string |  | A Bot's session id (yours if none's given) |
+| `run` | string | yes | The asking run's id (its table's run) |
+| `answer` | object |  | The form's fields, by name: each a text, number, true or false, or one of a choice's choices |
+| `text` | string |  | The answer to an ask with no form |
+
 ### `list_notebooks`
 
 Record's notebooks on a host: each one's name and how many pages it has.
@@ -273,6 +284,17 @@ Tools allowed whenever a session's agent asks for them, a head attached or not (
 | `session` | string | yes | The session's id. |
 | `tools` | array of string |  | These in place of any there were. |
 | `add` | array of string |  | These added to them. |
+
+#### `answer_task` (AnswerTask)
+
+An ask of one of a Bot's tasks' runs (task_ask) answered: the Bot's answer_task tool's, or anyone's who may manage the Bot. Taken only for an ask of that run that's waiting on that Bot; the run goes on at once. Refused, with what's wrong, if it doesn't fit the ask's form.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `session` | string | yes | The Bot's session id: the one the ask's waiting on. |
+| `run` | string | yes | The asking run's id. |
+| `answer` | object |  | An ask with a form: its fields' values, by name. |
+| `text` | string |  | An ask with no form: the answer. |
 
 #### `archive` (Archive)
 
@@ -967,7 +989,7 @@ One of a Bot's tasks, its script and latest runs.
 
 #### `task_ask` (TaskAsk)
 
-A running script asks its Bot (on the host's own socket, with its run's token): something it can't decide, or (error) a failure handed over. Sent the Bot as a turn of its own once it's idle, answered as that turn ends (refused, as a failure, for a task whose failures aren't handed over).
+A running script asks its Bot (on the host's own socket, with its run's token): something it can't decide, or (error) a failure handed over. Sent the Bot as a turn of its own once it's idle, answered as the Bot calls its answer_task tool (answer_task); a turn that ends without it reminded once, then failed (refused, as a failure, for a task whose failures aren't handed over too).
 
 | Field | Type | Required | What it is |
 |---|---|---|---|
@@ -1878,6 +1900,18 @@ task_ask's answer: the Bot's.
 |---|---|---|---|
 | `text` | string | yes | What it said. |
 | `values` | object/null |  | A form's values, as the Bot filled them. |
+
+#### `task_answered` (TaskAnswered)
+
+answer_task's answer: the ask answered, its run going on.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `session` | string | yes | The Bot's session id. |
+| `run` | string | yes | The run's id. |
+| `task` | string | yes | The run's task, by its name. |
+| `values` | object |  | A form's values, as they were taken (checked against its fields). |
+| `text` | string |  | The answer to an ask with no form. |
 
 #### `task_reported` (TaskReported)
 
@@ -3612,6 +3646,6 @@ Somewhere wire.reach can go: this machine's host process, one listening on anoth
 | `TERMINAL_KEEP_S` | `600` | A terminal (terminal op) no connection is attached to now: its program kept running this long to be attached to again, in seconds. |
 | `TERMINAL_KEPT_BYTES` | `262144` | What a terminal (terminal op) wrote lately, kept to show again on attach: this many bytes at most. |
 | `TTL` | `16` | A tunnel's passed through at most this many hosts (open's ttl). |
-| `VERSION` | `24` | The wire's version, as a host's hello says it. |
+| `VERSION` | `25` | The wire's version, as a host's hello says it. |
 | `ZOOM_MAX` | `1568` | A browser zoom's longest side, in pixels. |
 | `ZOOM_QUALITY` | `90` | A browser zoom's JPEG quality. |

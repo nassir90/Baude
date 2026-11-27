@@ -99,7 +99,7 @@ fun ToolCard(call: Call, ask: Ask?, answer: @Composable (Ask) -> Unit, view: ((C
         Column(Modifier.fillMaxWidth().border(1.dp, if (asking) c.warning else if (bad) c.destructive else c.rule,
             RoundedCornerShape(Gap.cardRadius)).padding(horizontal = Gap.cardH, vertical = Gap.cardV)) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text(toolTitle(call.name), Modifier.weight(1f), style = Type.body.copy(fontWeight = Tokens.Font.bold),
+                Text(call.answer?.let { Wording.ToolCalls.answeredTask(task = it.optString("task")) } ?: toolTitle(call.name), Modifier.weight(1f), style = Type.body.copy(fontWeight = Tokens.Font.bold),
                     color = c.fg, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 if (inputShown || outputShown || call.subagent) Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                     if (inputShown) Toggle(when (call.base) {
@@ -117,7 +117,8 @@ fun ToolCard(call: Call, ask: Ask?, answer: @Composable (Ask) -> Unit, view: ((C
             }
             val detail = header(call, c)
             if (detail.isNotEmpty()) SelectionContainer {
-                Text(detail, style = Type.body, color = c.fg)
+                if (call.answer != null) Text(detail, style = Type.body, color = c.fg, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                else Text(detail, style = Type.body, color = c.fg)
             }
             AnimatedVisibility(inputOpen, enter = expandVertically(slide), exit = shrinkVertically(slide)) {
                 SelectionContainer {
@@ -143,7 +144,8 @@ fun ToolCard(call: Call, ask: Ask?, answer: @Composable (Ask) -> Unit, view: ((C
 /** The line after a card's toggles (ToolCard.refresh_header): what it's for, and what's become of it, dimmed after a
  * dot. */
 private fun header(call: Call, c: BaudeColors): AnnotatedString {
-    val said = summary(call.name, call.input)
+    val said = call.answer?.let { a -> answerLine(JSONObject().put("answer", a.opt("values")).put("text", a.opt("text"))) }
+        ?: summary(call.name, call.input)
     val dim = SpanStyle(color = c.fg.copy(alpha = c.fg.alpha * 0.55f))
     val marks = listOfNotNull(when (call.state) {
         "background" -> Wording.ToolCalls.runningInBackground

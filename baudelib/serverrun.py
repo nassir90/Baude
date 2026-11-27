@@ -1103,6 +1103,14 @@ class ServerRunning:
                 except (ValueError, TypeError, OSError) as e:
                     return reply("error", error=str(e))
                 return reply(kind, **fields)
+            if op == "answer_task":  # (an ask of one of a Bot's tasks' runs, waiting on it: answered, its run going on)
+                if not s.meta.get("bot"):
+                    return reply("error", error=wording.say("host_errors.tasks_bot_only"))
+                try:
+                    kind, fields = self.tasks.answer(s, msg)
+                except ValueError as e:
+                    return reply("error", error=str(e))
+                return reply(kind, **fields)
             if op == "memory":  # (a Bot's memory: read, or, text given, written; refused if the Bot's written it since
                 # base_mtime, with what it wrote)
                 mem = self.bot_memory(s, msg.get("text"), msg.get("seen"),

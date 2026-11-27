@@ -296,24 +296,39 @@ def result(text):
 
 
 def task_answer(n, text):
-    """A task's script asking its Bot (baudelib/tasks.py): a form's fields filled (the last of a choice's choices, 7,
-    true, "filled"), as JSON; a failure handed over whose log says HEAL ME, healed: the task's script set to one that
-    asks the Bot once and ends well (mcp__mesh__set_task), and run again (mcp__mesh__run_task, not waited for); else a
-    line saying it looked."""
+    """A task's script asking its Bot (baudelib/tasks.py), answered with mcp__mesh__answer_task: a form's fields
+    filled (the last of a choice's choices, 7, true, "filled"), or, with no form, a line saying it looked; an ask that
+    says SKIP THE TOOL answered in text only, till it's reminded (answered FAKE_REMINDED_S seconds after). A failure handed over by the host whose log says
+    HEAL ME, healed: the task's script set to one that asks the Bot once and ends well (mcp__mesh__set_task), and run
+    again (mcp__mesh__run_task, not waited for); any other a line saying it looked."""
     healing = re.search(r"^\| task \| ([A-Za-z0-9_-]+) \|$", text, re.M) if "HEAL ME" in text else None
+    run = re.search(r"^\| run \| ([A-Za-z0-9_-]+) \|$", text, re.M) or re.search(r"answered run ([A-Za-z0-9_-]+)", text)
     if healing:
         tid = healing[1]
         mcp_tool("mesh", "set_task", {"id": tid, "script": 'import baudetask as task\n'
                                                            'task.say("healed:", task.ask("Healed. Fine now?"))\n'})
         mcp_tool("mesh", "run_task", {"id": tid})
         answer = "Healed: fixed its script and ran it again."
-    elif "JSON object" in text:
+    elif "answer_task tool" in text and run and ("SKIP THE TOOL" not in text or "You haven't answered" in text):
+        if "You haven't answered" in text:  # (FAKE_REMINDED_S: a while before it answers a reminder, as a scene wants)
+            time.sleep(float(os.environ.get("FAKE_REMINDED_S") or 0))
         values = {}
         for m in re.finditer(r"^- ([A-Za-z_][A-Za-z0-9_]*): (.*)$", text, re.M):
             kind = m[2]
             values[m[1]] = json.loads(re.findall(r'"(?:[^"\\]|\\.)*"', kind)[-1]) if kind.startswith("one of") \
                 else 7 if kind.startswith("a number") else True if kind.startswith("true") else "filled"
-        answer = json.dumps(values)
+        args = {"run": run[1], **({"answer": values} if values else
+                                  {"text": "Looked into it: the script's fine, the input wasn't."})}
+        tid = f"toolu_answer{n}"
+        out({"type": "assistant", "parent_tool_use_id": None, "session_id": SESSION, "message": {
+            "id": f"msg{n}t", "model": "fake", "role": "assistant", "content": [
+                {"type": "tool_use", "id": tid, "name": "mcp__mesh__answer_task", "input": args}]}})
+        said = mcp_tool("mesh", "answer_task", args)
+        out({"type": "user", "parent_tool_use_id": None, "session_id": SESSION, "message": {"role": "user", "content": [
+            {"type": "tool_result", "tool_use_id": tid, "content": said}]}})
+        answer = "Answered it with the tool."
+    elif "answer_task tool" in text:
+        answer = "Here's my answer, in words only."
     elif "task finished" in text:
         answer = "Noted."
     else:
@@ -758,7 +773,7 @@ def main():
             if answer is not None:  # (FAKE_ANSWERS: {words in the message: the answer to it}, as a scene wants it)
                 say(answer, f"answer{turns}")
                 result(answer)
-            elif re.search(r"An instance of the '.*' task (failed|finished|asks:)", text):
+            elif re.search(r"An instance of the '.*' task (failed|finished|asks:)|You haven't answered run", text):
                 task_answer(turns, text)
             elif "AUTOFIX" in text or "needs fixing" in text:
                 autofix(turns, text)

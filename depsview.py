@@ -174,7 +174,7 @@ class Page(Adw.PreferencesPage):
             for dep in listed:
                 group.add(row(dep))
             self.groups.append(group)
-        self.remove(self.deciders)
-        for group in (*self.groups, self.deciders):
-            self.add(group)
+        for group in self.groups:  # (over Deciders, which stays where it is: what's being typed in it keeps its
+            # place, and the page where it's scrolled to)
+            group.insert_before(self.deciders.get_parent(), self.deciders)
         return False

@@ -1502,6 +1502,41 @@ class TaskVariable(Obj):
     """
 
 
+class TelemetryCount(Obj):
+    """How many times one thing in a process was used or ran over a stretch, and how long it took.
+
+        app ('host' | 'baude' | 'record' | 'phone' | 'emission'): The process (a telemetry_read's counted: added
+            up over the stretch, by process, kind and name).
+        kind ('part' | 'menu' | 'screen' | 'op' | 'callback' | 'subprocess'): What it is: a button or row used
+            (part), a menu's item picked (menu), a screen opened (a page, a dialog, a side panel's page:
+            screen), a wire op a host answered (op), a main-loop callback (callback), a program started
+            (subprocess).
+        name (string): Which, by the index every app shares: a part or menu item as Entity.kind/part name
+            (schema/ui's: "Composer.region/send button"; Entity.kind/(what tells it apart) where it isn't one of
+            its entity's parts), a screen as its entity ("Telemetry.dialog"), an op by its name, a callback by
+            its function's (module.Class.method), a program by its file's name.
+        count (integer): Times.
+        seconds (number): Their time added up: a part's or menu item's from its click till the app was free
+            again (its handlers, and what they drew at once); a screen's in front, with someone at the machine;
+            an op's handling; a callback's running; 0 for a program.
+        max (number or None): The longest of them (a screen's: its longest stretch in front).
+    """
+
+
+class TelemetryCounters(Obj):
+    """A process's counts over a stretch (about a minute): what was used and run in it, each once with its count and
+    time. Kept by its machine's host as it's told, read back with telemetry_read.
+
+        at (number): When the stretch ended, in seconds since the epoch.
+        from (number): When it began.
+        app ('host' | 'baude' | 'record' | 'phone' | 'emission'): The process counted.
+        counts (array of TelemetryCount): Each thing used or run in it, the most times first.
+        commit (string or None): The commit the process runs (its first 12 characters).
+        wire (integer or None): The wire's version it speaks.
+    """
+    _refs = {"counts": "TelemetryCount"}
+
+
 class TelemetryCrumb(Obj):
     """Something the user did in an app, a few kept before an error (its breadcrumbs): what was on screen and the part
     used, by their schema/ui names.
@@ -2801,10 +2836,14 @@ class TelemetryReadReply(Obj):
         profiles (array of TelemetryProfile): Its line profiles.
         errors (array of TelemetryError): The errors of the processes on its machine that happened in the
             stretch, the last to happen first.
+        counters (array of TelemetryCounters): Its processes' counts, a row a process a minute.
+        counted (array of TelemetryCount): Its processes' counts added up over the stretch, by process, kind and
+            name, the most times first.
         usage (TelemetryUsage or None): Its turns added up.
     """
     _refs = {"state": "TelemetryState", "events": "TelemetryEvent", "metrics": "TelemetrySample",
-             "profiles": "TelemetryProfile", "errors": "TelemetryError", "usage": "TelemetryUsage"}
+             "profiles": "TelemetryProfile", "errors": "TelemetryError", "counters": "TelemetryCounters",
+             "counted": "TelemetryCount", "usage": "TelemetryUsage"}
 
 
 class TelemetrySetReply(Obj):
@@ -2931,9 +2970,10 @@ TYPES = {"AccessChat": AccessChat, "AccessMember": AccessMember, "AccessRule": A
          "SubagentFile": SubagentFile, "Tab": Tab, "Task": Task, "TaskBinding": TaskBinding,
          "TaskChoice": TaskChoice, "TaskField": TaskField, "TaskLogLine": TaskLogLine, "TaskRun": TaskRun,
          "TaskRunRef": TaskRunRef, "TaskTrigger": TaskTrigger, "TaskVariable": TaskVariable,
-         "TelemetryCrumb": TelemetryCrumb, "TelemetryDay": TelemetryDay, "TelemetryError": TelemetryError,
-         "TelemetryEvent": TelemetryEvent, "TelemetryFront": TelemetryFront, "TelemetryLine": TelemetryLine,
-         "TelemetryModel": TelemetryModel, "TelemetryProc": TelemetryProc, "TelemetryProfile": TelemetryProfile,
+         "TelemetryCount": TelemetryCount, "TelemetryCounters": TelemetryCounters, "TelemetryCrumb": TelemetryCrumb,
+         "TelemetryDay": TelemetryDay, "TelemetryError": TelemetryError, "TelemetryEvent": TelemetryEvent,
+         "TelemetryFront": TelemetryFront, "TelemetryLine": TelemetryLine, "TelemetryModel": TelemetryModel,
+         "TelemetryProc": TelemetryProc, "TelemetryProfile": TelemetryProfile,
          "TelemetryProfiling": TelemetryProfiling, "TelemetrySample": TelemetrySample,
          "TelemetryState": TelemetryState, "TelemetryUsage": TelemetryUsage, "TerminalInfo": TerminalInfo,
          "Theme": Theme, "ThemeFiles": ThemeFiles, "ToolNames": ToolNames, "TurnEnd": TurnEnd, "Update": Update,
@@ -4772,7 +4812,7 @@ class Ops(Area):
         return self._call("tasks", {"session": session, "set": set, "delete": delete}, host, TasksReply)
 
     def telemetry(self, *, app=None, pid=None, events=None, profile=None, profile_error=None, commit=None,
-                  wire=None, errors=None, host=None):
+                  wire=None, errors=None, counters=None, host=None):
         """telemetry (Telemetry): An app's telemetry, told to its own machine's host as it happens (the phone's app to
         its own host), never on to another: what was done in chats, and what it profiled. Kept on that machine only
         (its state folder's telemetry/), while the host's telemetry is on. Its process id is how the host samples
@@ -4789,20 +4829,22 @@ class Ops(Area):
             wire (integer or None): The wire's version the app speaks: kept on each of its rows.
             errors (array of TelemetryError): Its errors since it last told, each once by its fingerprint with
                 how many times it happened (added to what the host keeps of it).
+            counters (TelemetryCounters or None): What it counted since it last told them (about once a minute).
         """
         return self._call("telemetry", {"app": app, "pid": pid, "events": events, "profile": profile,
                                         "profile_error": profile_error, "commit": commit, "wire": wire,
-                                        "errors": errors}, host, Obj)
+                                        "errors": errors, "counters": counters}, host, Obj)
 
     def telemetry_read(self, *, from_=None, to=None, what=None, limit=None, host=None):
         """telemetry_read (TelemetryRead): A host's telemetry over a stretch: its chat events, its samples, its line
-        profiles, and its turns added up, its errors; its telemetry state with it. Any member of the mesh may ask
-        any other: one machine pulls every host's and puts them together by their times.
+        profiles, and its turns added up, its errors, its processes' counts (each minute's, or added up); its
+        telemetry state with it. Any member of the mesh may ask any other: one machine pulls every host's and puts
+        them together by their times.
 
             from (number): From, in seconds since the epoch.
             to (number or None): To (null: now).
-            what (array of 'events' | 'metrics' | 'profiles' | 'usage' | 'errors'): What's wanted (none: only
-                the state).
+            what (array of 'events' | 'metrics' | 'profiles' | 'usage' | 'errors' | 'counters' | 'counted'):
+                What's wanted (none: only the state).
             limit (integer or None): The most events, samples and profiles each (the latest kept; default 5000).
         """
         return self._call("telemetry_read", {"from": from_, "to": to, "what": what,

@@ -55,10 +55,12 @@ object Telemetry {
     private var front: Pair<String, String>? = null
     private val sentAt = HashMap<Pair<String, String>, Long>()
     private var errorsDue = false
+    private var counting = false
     var screen: List<String> = listOf("contacts") // (MainActivity's: the screen shown)
         set(v) {
             field = v
             PhoneErrors.shown(v)
+            if (shown) PhoneCounts.front(PhoneErrors.shownScreen())
             look()
         }
 
@@ -99,13 +101,29 @@ object Telemetry {
     /** In front (MainActivity's onResume). */
     fun resumed() {
         shown = true
+        PhoneCounts.front(PhoneErrors.shownScreen())
+        if (!counting) {
+            counting = true
+            main.postDelayed(::tellCounts, PhoneCounts.FLUSH_MS)
+        }
         look()
     }
 
     /** Gone to the background (onPause). */
     fun paused() {
         shown = false
+        PhoneCounts.front(null)
         look()
+    }
+
+    /** Every PhoneCounts.FLUSH_MS: what this app counted since, told as a row (while telemetry's on). */
+    private fun tellCounts() {
+        main.postDelayed(::tellCounts, PhoneCounts.FLUSH_MS)
+        val row = PhoneCounts.take() ?: return
+        if (!TelemetryStore.on) return
+        val msg = Msg.Telemetry(app = "phone", pid = Process.myPid(), commit = BuildConfig.COMMIT.take(12).ifEmpty { null },
+            wire = WireConstants.VERSION).json().put("counters", row)
+        Mesh.ask("phone", msg) { r -> if (r.optString("op") != "telemetry_kept") PhoneCounts.giveBack(row) }
     }
 
     /** A turn sent in a chat (Mesh.send). */
@@ -259,6 +277,45 @@ private fun modelExpander(m: Msg.TelemetryModel, name: String, slug: String?): @
 }
 
 private const val ERRORS_SHOWN = 20
+private const val COUNTS_SHOWN = 10
+private const val COUNTS_DAYS = 7
+private val USED_KINDS = setOf("part", "menu", "screen")
+private val TIMED_KINDS = setOf("part", "menu", "op", "callback")
+
+/** A count's name as a row says it (telemetryview.count_title): a part's entity and part, else its name. */
+private fun countTitle(c: Msg.TelemetryCount): String {
+    val name = c.name.orEmpty()
+    if (c.kind == "part" || c.kind == "menu") {
+        if ("|copy:" in name) return name.substringBefore("|copy:") + " · " + name.substringAfter("|copy:")
+        if ("/" in name) return name.substringBefore("/") + " · " + name.substringAfter("/")
+    }
+    return name
+}
+
+private fun saidSpan(seconds: Double): String {
+    val s = seconds.toLong()
+    return when {
+        s >= 3600 -> Wording.Time.hoursMinutes(hours = s / 3600, minutes = s % 3600 / 60)
+        s >= 60 -> Wording.Time.minutesSeconds(minutes = s / 60, seconds = s % 60)
+        else -> Wording.Time.seconds(seconds = s)
+    }
+}
+
+/** A count (telemetryview.count_row): its process's logo, its name, how many times (and a screen's time in front;
+ * slow: its time each). */
+@Composable
+private fun CountRow(c: Msg.TelemetryCount, slow: Boolean) {
+    val k = LocalBaude.current
+    val n = c.count?.toLong() ?: 0L
+    val secs = c.seconds?.toDouble() ?: 0.0
+    val values = listOfNotNull(
+        if (slow) Wording.Telemetry.averageMs(ms = String.format(Locale.ROOT, "%.1f", 1000 * secs / maxOf(1L, n)))
+        else if (c.kind == "screen" && secs > 0) saidSpan(secs) else null,
+        Wording.Telemetry.errorTimes(count = n))
+    ActionRow(countTitle(c), null,
+        prefix = { Icon(APP_LOGOS[c.app] ?: Adwaita.AppBaude, null, tint = k.fg, modifier = Modifier.size(16.dp.icon)) },
+        suffix = { Text(values.joinToString("  "), style = Type.body, color = k.dim, maxLines = 1) })
+}
 private const val ERRORS_DAYS = 7
 
 private fun whereSaid(screen: String?, part: String?) = listOfNotNull(screen, part).joinToString(" · ").ifEmpty { "–" }
@@ -341,6 +398,7 @@ fun TelemetryPage() {
     var metrics by remember(hostId) { mutableStateOf<JSONObject?>(null) }
     var profiles by remember(hostId, asked) { mutableStateOf<JSONObject?>(null) }
     var errors by remember(hostId, asked) { mutableStateOf<JSONObject?>(null) }
+    var counted by remember(hostId, asked) { mutableStateOf<JSONObject?>(null) }
     var deps by remember(hostId) { mutableStateOf<Msg.Dep?>(null) }
     fun read(from: Double, what: String, limit: Int?, then: (JSONObject) -> Unit) =
         Mesh.ask(hostId, Msg.TelemetryRead(from = from, what = listOf(what), limit = limit).json(), then)
@@ -350,6 +408,7 @@ fun TelemetryPage() {
         read(now - 3600, "profiles", 500) { profiles = it }
         while (true) { // (its errors read again every 30 seconds, as the desktop's are)
             read(System.currentTimeMillis() / 1000.0 - ERRORS_DAYS * 86400.0, "errors", ERRORS_SHOWN) { errors = it }
+            read(System.currentTimeMillis() / 1000.0 - COUNTS_DAYS * 86400.0, "counted", 2000) { counted = it }
             delay(30_000)
         }
     }
@@ -427,6 +486,21 @@ fun TelemetryPage() {
                 BoxedList(numbered + (null to null), "") { (p, n) ->
                     if (p == null) TotalRow(cpus, rsses) else ProcessRow(p, n)
                 }
+            }
+        }
+        counted?.takeIf { it.optString("op") == Op.TELEMETRY_READ }?.let { r ->
+            val rows = Msg.TelemetryReadReply.from(r).counted.orEmpty()
+            val used = rows.filter { it.kind in USED_KINDS && it.app != "host" && (it.count?.toLong() ?: 0L) > 0 }
+                .sortedWith(compareBy({ -(it.count?.toLong() ?: 0L) }, { -(it.seconds?.toDouble() ?: 0.0) })).take(COUNTS_SHOWN)
+            val slow = rows.filter { it.kind in TIMED_KINDS && (it.count?.toLong() ?: 0L) > 0 }
+                .sortedBy { -(it.seconds?.toDouble() ?: 0.0) / (it.count?.toDouble() ?: 1.0) }.take(COUNTS_SHOWN)
+            if (used.isNotEmpty()) {
+                Heading(Wording.Telemetry.mostUsed)
+                BoxedList(used, "") { CountRow(it, false) }
+            }
+            if (slow.isNotEmpty()) {
+                Heading(Wording.Telemetry.slowest)
+                BoxedList(slow, "") { CountRow(it, true) }
             }
         }
         errors?.takeIf { it.optString("op") == Op.TELEMETRY_READ }?.let { r ->

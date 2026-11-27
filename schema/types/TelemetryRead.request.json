@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
-  "description": "A host's telemetry over a stretch: its chat events, its samples, its line profiles, and its turns added up, its errors; its telemetry state with it. Any member of the mesh may ask any other: one machine pulls every host's and puts them together by their times.",
+  "description": "A host's telemetry over a stretch: its chat events, its samples, its line profiles, and its turns added up, its errors, its processes' counts (each minute's, or added up); its telemetry state with it. Any member of the mesh may ask any other: one machine pulls every host's and puts them together by their times.",
   "properties": {
     "op": {
       "const": "telemetry_read",
@@ -34,7 +34,9 @@
           "metrics",
           "profiles",
           "usage",
-          "errors"
+          "errors",
+          "counters",
+          "counted"
         ]
       },
       "description": "What's wanted (none: only the state)."

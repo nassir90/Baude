@@ -7,63 +7,30 @@ exceptions in main-loop callbacks. install(app) is the one call an app makes, be
 till something's used: a click is looked at as it's made."""
 import collections
 import ctypes
-import glob
-import json
 import os
 import sys
 import time
 
 from gi.repository import Adw, Gio, GLib, GObject, Gtk
 
-from baudelib import errorbook, wire, wording
+from baudelib import counters, errorbook, wire, wording
+from baudelib.uiindex import index
 
 CRUMBS_MAX = 8
 PART_RECENT_S = 5  # (an error this soon after a part was used: that part's)
 SCREEN_KINDS = ("page", "dialog", "panel", "menu", "region")  # (what an entity on screen is: not one of a chat's elements)
 _LEVELS = {GLib.LogLevelFlags.LEVEL_ERROR: "ERROR", GLib.LogLevelFlags.LEVEL_CRITICAL: "CRITICAL",
            GLib.LogLevelFlags.LEVEL_WARNING: "WARNING"}
-_INDEX = {}
-STATE = {"app": None, "crumbs": collections.deque(maxlen=CRUMBS_MAX), "used": None, "screen": None}
+STATE = {"app": None, "crumbs": collections.deque(maxlen=CRUMBS_MAX), "used": None, "screen": None,
+         "shown": {}, "looking": False}  # (shown: each screen in front now, since when)
+FRONT_IDLE_S = 300  # (no input for this long: nobody's at it, and no screen's time counted)
+_GLIB = {}  # (GLib's own idle_add, timeout_add and timeout_add_seconds, before they were counted)
 
 
 def mark(widget, entity):
     """widget is entity's (a schema/ui entry's name, "HeaderBar.region"), where no class of it names it."""
     widget.ui_entity = entity
     return widget
-
-
-def index():
-    """schema/ui read once: {"classes": {module.Class: [entities]}, "copy": {copy key: [(entity, part)]},
-    "text": {literal text: [(entity, part)]}, "kinds": {entity: its kind}}."""
-    if _INDEX:
-        return _INDEX
-    classes, copies, texts, kinds = {}, {}, {}, {}
-
-    def parts(entity, items):
-        for p in items or []:
-            if not isinstance(p, dict) or not isinstance(p.get("name"), str):
-                continue
-            for key in p.get("copy") or []:
-                copies.setdefault(key, []).append((entity, p["name"]))
-            for t in p.get("text") or [] if isinstance(p.get("text"), list) else [p.get("text")]:
-                if isinstance(t, str) and t:
-                    texts.setdefault(t, []).append((entity, p["name"]))
-            parts(entity, p.get("parts"))
-    for path in sorted(glob.glob(os.path.join(wire.SCHEMA_DIR, "ui", "*.json"))):
-        entity = os.path.basename(path)[:-5]
-        try:
-            with open(path, encoding="utf-8") as f:
-                entry = json.load(f)
-        except (OSError, ValueError):
-            continue
-        kinds[entity] = entity.rsplit(".", 1)[-1]
-        for ref in entry.get("code") or []:
-            file, _, name = ref.partition(":")
-            if file.endswith(".py") and name and "." not in name and name[:1].isupper():
-                classes.setdefault(f"{file[:-3].replace('/', '.')}.{name}", []).append(entity)
-        parts(entity, entry.get("parts"))
-    _INDEX.update(classes=classes, copy=copies, text=texts, kinds=kinds)
-    return _INDEX
 
 
 def _class_entities(widget):
@@ -195,6 +162,64 @@ def crumb(action, entity, part, hint=None, at=None):
         STATE["used"] = (now, entity, part)
 
 
+def screens(win=None):
+    """The screens in front: the active window's (screen()), and its side panel's page while it shows one."""
+    if win is None:
+        app = Gio.Application.get_default()
+        win = app.get_active_window() if isinstance(app, Gtk.Application) else None
+    if win is None or not win.is_active():
+        return set()
+    out = {screen(win)} - {None}
+    panel = getattr(win, "panel", None)
+    stack = getattr(panel, "stack", None)
+    if isinstance(stack, (Adw.ViewStack, Gtk.Stack)) and panel.get_mapped() and (page := stack.get_visible_child()):
+        kinds = index()["kinds"]
+        named = next((e for e in chain(page) if kinds.get(e) == "panel"), None)
+        if named is None and isinstance(stack, Adw.ViewStack):
+            name = (stack.get_visible_child_name() or "").replace("_", " ").title().replace(" ", "")
+            named = f"{name}.panel" if f"{name}.panel" in kinds else None
+        if named is not None:
+            out.add(named)
+    return out
+
+
+def look(win=None):
+    """The screens in front looked at again: one come counted as opened, one gone given its time in front (only
+    while someone's at the machine)."""
+    import widgets
+    now = time.time()
+    try:
+        here = screens(win) if widgets.user_present(FRONT_IDLE_S) is not False else set()
+    except Exception:  # noqa: BLE001 (as windows go: looked at again next time)
+        return
+    shown = STATE["shown"]
+    for gone in set(shown) - here:
+        took = now - shown.pop(gone)
+        counters.COUNTERS.add("screen", gone, took, count=0)
+    for came in here - set(shown):
+        shown[came] = now
+        counters.COUNTERS.add("screen", came)
+    if here and STATE["screen"] not in here:
+        crumb("open", None, None)
+
+
+def look_soon():
+    """look once the main loop's free (what a click opened, drawn by then)."""
+    if not STATE["looking"]:
+        STATE["looking"] = True
+        _GLIB["idle_add"](lambda: STATE.update(looking=False) or look() or False)
+
+
+def counts_now():
+    """The screens in front given their time so far (so each minute's row has its own), and what's counted since
+    the last time taken."""
+    now = time.time()
+    for name, since in list(STATE["shown"].items()):
+        counters.COUNTERS.add("screen", name, now - since, count=0)
+        STATE["shown"][name] = now
+    return counters.COUNTERS.take(now)
+
+
 def context():
     """What goes with an error: what's on screen, the part just used, the last actions."""
     used = STATE["used"]
@@ -216,10 +241,48 @@ def _used(action, row=False):
                 widget = widget.get_parent()  # (a menu button's own button: the menu button, as it's named)
             entity, part, hint = part_of(widget)
             crumb(action, entity, part, hint)
+            name = f"{entity}/{part}" if part else f"{entity}/({hint})"
+            began = time.perf_counter()
+
+            def done():  # (the main loop free again: its handlers, and what they did at once, done)
+                counters.COUNTERS.add(action if action == "menu" else "part", name, time.perf_counter() - began)
+                look()
+                return False
+            _GLIB["idle_add"](done, priority=GLib.PRIORITY_HIGH)
         except Exception:  # noqa: BLE001 (a click is never held up by what's kept of it)
             errorbook.caught("callback")
         return True
     return hook
+
+
+def _timed(fn):
+    """fn, its runs counted and timed as a callback's (counters' callable_name)."""
+    name = counters.callable_name(fn)
+
+    def run(*args):
+        began = time.perf_counter()
+        try:
+            return fn(*args)
+        finally:
+            counters.COUNTERS.add("callback", name, time.perf_counter() - began)
+    return run
+
+
+def _count_callbacks():
+    """Every main-loop callback this process adds from here on (GLib.idle_add, timeout_add, timeout_add_seconds)
+    counted and timed."""
+    for fname in ("idle_add", "timeout_add", "timeout_add_seconds"):
+        _GLIB[fname] = before = getattr(GLib, fname)
+
+        def counted(*args, _before=before, _fname=fname, **kw):
+            args = list(args)
+            at = 0 if _fname == "idle_add" else 1
+            if len(args) > at and callable(args[at]):
+                args[at] = _timed(args[at])
+            elif "function" in kw:
+                kw["function"] = _timed(kw["function"])
+            return _before(*args, **kw)
+        setattr(GLib, fname, counted)
 
 
 def _hook(cls, signal, fn, make=None):
@@ -258,6 +321,8 @@ def install(app_name, wake):
     if STATE["app"] is not None:
         return
     STATE["app"] = app_name
+    _count_callbacks()
+    counters.count_programs()
     errorbook.install()
     errorbook.BOOK.claim(app_name, wake, context, in_loop=lambda: GLib.main_depth() > 0)
     try:
@@ -271,6 +336,14 @@ def install(app_name, wake):
     menu.append("·", "app.none")
     Gtk.PopoverMenu.new_from_model(menu)  # (GtkModelButton, a menu's item, made: its type's there from now)
     _hook(GObject.type_from_name("GtkModelButton"), "clicked", _used("menu"))
+    _hook(Adw.Dialog, "closed", lambda *_: look_soon() or True, Adw.Dialog)
+
+
+def watch(win):
+    """win's screens followed: as it comes in front or goes, and as its tabs are switched."""
+    win.connect("notify::is-active", lambda *_: look_soon())
+    if (tabs := getattr(win, "tabs", None)) is not None and hasattr(tabs, "view"):
+        tabs.view.connect("notify::selected-page", lambda *_: look_soon())
 
 
 def alone(app_name):

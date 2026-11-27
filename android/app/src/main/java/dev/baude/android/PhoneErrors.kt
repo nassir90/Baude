@@ -104,6 +104,9 @@ object PhoneErrors {
         }
     }
 
+    /** The schema/ui entity on screen, as last shown. */
+    fun shownScreen(): String? = screen
+
     /** The screen shown changed (Telemetry.screen's): kept as what's on screen, and among the last few. */
     fun shown(now: List<String>) {
         val entity = SCREENS[now.firstOrNull()] ?: return

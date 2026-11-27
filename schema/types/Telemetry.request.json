@@ -72,6 +72,17 @@
         "$ref": "TelemetryError.json"
       },
       "description": "Its errors since it last told, each once by its fingerprint with how many times it happened (added to what the host keeps of it)."
+    },
+    "counters": {
+      "anyOf": [
+        {
+          "$ref": "TelemetryCounters.json"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "What it counted since it last told them (about once a minute)."
     }
   },
   "required": [

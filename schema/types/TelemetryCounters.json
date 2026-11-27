@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "A process's counts over a stretch (about a minute): what was used and run in it, each once with its count and time. Kept by its machine's host as it's told, read back with telemetry_read.",
+  "properties": {
+    "at": {
+      "type": "number",
+      "description": "When the stretch ended, in seconds since the epoch."
+    },
+    "from": {
+      "type": "number",
+      "description": "When it began."
+    },
+    "app": {
+      "enum": [
+        "host",
+        "baude",
+        "record",
+        "phone",
+        "emission"
+      ],
+      "description": "The process counted."
+    },
+    "counts": {
+      "type": "array",
+      "items": {
+        "$ref": "TelemetryCount.json"
+      },
+      "description": "Each thing used or run in it, the most times first."
+    },
+    "commit": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "The commit the process runs (its first 12 characters)."
+    },
+    "wire": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "description": "The wire's version it speaks."
+    }
+  },
+  "required": [
+    "at",
+    "from",
+    "app",
+    "counts"
+  ],
+  "additionalProperties": false
+}

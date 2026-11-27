@@ -23,7 +23,7 @@ import java.util.concurrent.TimeUnit
 object TelemetryStore {
     private const val SAMPLE_S = 5L
     private const val LIMIT = 5000
-    private val KEEP = mapOf("events" to 400L, "metrics" to 30L, "profiles" to 30L, "errors" to 90L)
+    private val KEEP = mapOf("events" to 400L, "metrics" to 30L, "profiles" to 30L, "errors" to 90L, "counters" to 90L)
     private val KINDS = setOf("chat_opened", "chat_front", "chat_left", "turn_sent", "turn_ended")
     private val APPS = setOf("baude", "record", "phone")
     /** A turn's tokens, each kind apart (telemetry.TOKENS), and usage's names for an event's tokens (telemetry._KINDS). */
@@ -90,6 +90,8 @@ object TelemetryStore {
         val told = JSONObject().put("commit", msg.optString("commit").takeIf { !msg.isNull("commit") && it.isNotEmpty() }?.take(12)
             ?: JSONObject.NULL).put("wire", (msg.opt("wire") as? Number)?.toInt() ?: JSONObject.NULL)
         msg.optJSONArray("errors")?.let { keepErrors(it.list(), app, told) }
+        msg.optJSONObject("counters")?.let { c -> counters(c, app)?.let { write("counters", listOf(it.put("commit", told.get("commit"))
+            .put("wire", told.get("wire")))) } }
         val rows = msg.optJSONArray("events").list().take(1000).mapNotNull { e -> event(e, app)?.also { r ->
             r.put("commit", told.get("commit")).put("wire", told.get("wire")) } }
         write("events", rows)
@@ -143,6 +145,29 @@ object TelemetryStore {
         } catch (_: Exception) {
         }
         errs = m
+    }
+
+    /** A told row of counts as it's kept (telemetry.counters_of, the same), or null. */
+    private fun counters(row: JSONObject, app: String): JSONObject? {
+        val at = (row.opt("at") as? Number)?.toDouble() ?: return null
+        val from = (row.opt("from") as? Number)?.toDouble() ?: return null
+        val counts = row.optJSONArray("counts").list().take(2000).filter {
+            it.optString("kind") in setOf("part", "menu", "screen", "op", "callback", "subprocess") && it.optString("name").isNotEmpty()
+                && it.opt("count") is Number && it.opt("seconds") is Number }
+        if (counts.isEmpty()) return null
+        return JSONObject().put("at", at).put("from", from).put("app", app).put("counts", JSONArray(counts))
+    }
+
+    /** Rows of counts added up (telemetry.counted, the same): by process, kind and name, the most times first. */
+    fun counted(rows: List<JSONObject>): List<JSONObject> {
+        val out = LinkedHashMap<Triple<String, String, String>, DoubleArray>()
+        for (r in rows) for (c in r.optJSONArray("counts").list()) {
+            val got = out.getOrPut(Triple(r.optString("app"), c.optString("kind"), c.optString("name"))) { DoubleArray(3) }
+            got[0] += c.optDouble("count"); got[1] += c.optDouble("seconds"); got[2] = maxOf(got[2], c.optDouble("max", 0.0))
+        }
+        return out.entries.sortedWith(compareBy({ -it.value[0] }, { -it.value[1] })).map { (k, v) ->
+            JSONObject().put("app", k.first).put("kind", k.second).put("name", k.third).put("count", v[0].toLong())
+                .put("seconds", v[1]).put("max", if (v[2] > 0) v[2] else JSONObject.NULL) }
     }
 
     /** The errors that happened from start to end, the last to happen first, the latest limit of them. */
@@ -260,6 +285,8 @@ object TelemetryStore {
         for (kind in listOf("events", "metrics", "profiles")) if (kind in what) out.add(kind to JSONArray(rows(kind, start, end, limit)))
         if ("usage" in what) out.add("usage" to usage(rows("events", start, end, 0)))
         if ("errors" in what) out.add("errors" to JSONArray(errorRows(start, end, limit)))
+        if ("counters" in what) out.add("counters" to JSONArray(rows("counters", start, end, limit)))
+        if ("counted" in what) out.add("counted" to JSONArray(counted(rows("counters", start, end, 0)).take(limit)))
         return out.toTypedArray()
     }
 

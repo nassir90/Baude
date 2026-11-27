@@ -13,7 +13,7 @@ import weakref
 
 from gi.repository import Adw, GLib, Gtk, Pango
 
-from baudelib import errorbook, lineprofile, providers, telemetry, wire, wording
+from baudelib import counters, errorbook, lineprofile, providers, telemetry, wire, wording
 import uitrack
 import widgets
 
@@ -29,9 +29,13 @@ LOGO_PX = 16  # (as big as a model's logo)
 PROFILED = ("host", "baude", "record")
 WEEKS = 53  # (the tokens' grid: a year, a column a week)
 LINES_SHOWN = 10
-GROUPS = ("error", "tokens", "models", "machine", "processes", "errors", "profiling", "lines")  # (the page's, in
+GROUPS = ("error", "tokens", "models", "machine", "processes", "used", "slowest", "errors", "profiling", "lines")  # (the page's, in
 # this order)
 ERRORS_SHOWN = 20  # (the latest to happen)
+COUNTS_SHOWN = 10  # (Most Used's and Slowest's rows)
+COUNTS_DAYS = 7
+USED_KINDS = ("part", "menu", "screen")  # (what the user used: Most Used)
+TIMED_KINDS = ("part", "menu", "op", "callback")  # (what's run for them: Slowest, by its time each)
 ERRORS_DAYS = 7
 REFRESH_S = 5  # (the machine's rows asked for again while the page is shown)
 _RECORDER = []
@@ -85,6 +89,7 @@ class Recorder:
         self.sent_at = {}  # (a chat: when its turn was sent here)
         self.profiler, self.profile_timer, self.told_error = lineprofile.Profiler(name), None, None
         self.away_timer = None  # (looking at whether anyone's at the chat in front, while it's on)
+        self.count_timer = None  # (what's counted told every counters.FLUSH_S, while it's on)
         self.errors_due, self.known = False, False  # (this process's errors to be told in a moment; whether its
         # host's telemetry is known: errors before it held, not dropped)
         network.listen(self.heard)
@@ -124,6 +129,7 @@ class Recorder:
                 for win in list(self.windows):
                     self.look(win)
                 self.away_timer = GLib.timeout_add_seconds(AWAY_LOOK_S, self.look_away)
+                self.count_timer = GLib.timeout_add_seconds(counters.FLUSH_S, self.tell_counts)
             else:
                 self.queue.clear()
                 errorbook.BOOK.take()
@@ -132,6 +138,10 @@ class Recorder:
                 if self.away_timer is not None:
                     GLib.source_remove(self.away_timer)
                     self.away_timer = None
+                if self.count_timer is not None:
+                    GLib.source_remove(self.count_timer)
+                    self.count_timer = None
+                uitrack.counts_now()  # (what was counted till now: not kept)
         elif on and pid != self.host_pid:
             self.hello()  # (a host started again: its samples of this process begin again)
             if self.host_pid is not None:  # (and the chat in front told it again: it knows none)
@@ -146,6 +156,7 @@ class Recorder:
 
     def watch(self, win):
         self.windows.add(win)
+        uitrack.watch(win)
         GLib.idle_add(lambda: self.look(win) and False)
         win.connect("notify::is-active", lambda w, _p: self.look(w))
         if (tabs := getattr(win, "tabs", None)) is not None:
@@ -216,6 +227,16 @@ class Recorder:
                    turn=msg.get("uuid") if isinstance(msg.get("uuid"), str) else None,
                    model=model if isinstance(model, str) else None, effort=effort if isinstance(effort, str) else None,
                    **telemetry.tokens_of(msg))
+
+    def tell_counts(self):
+        """Every counters.FLUSH_S: what this process counted since, told as a row."""
+        if not self.on:
+            self.count_timer = None
+            return False
+        uitrack.look()
+        if (row := uitrack.counts_now()) is not None:
+            self.send({"counters": {**row, "app": self.name}}, lambda ok: ok or counters.COUNTERS.give_back(row))
+        return True
 
     def errors_soon(self):
         """(any thread) This process has an error: told in a moment, with any meanwhile."""
@@ -298,10 +319,12 @@ class Recorder:
         last = self.profiler.set([])
         events, self.queue = self.queue, []
         errors = errorbook.BOOK.take()
-        if self.on and (events or last or errors):
+        counted = uitrack.counts_now() if self.on else None
+        if self.on and (events or last or errors or counted):
             try:
                 self.send({"events": events, **({"profile": last} if last else {}),
-                           **({"errors": errors} if errors else {})}, lambda _ok: None, wait=True)
+                           **({"errors": errors} if errors else {}), **({"counters": {**counted, "app": self.name}} if counted else {})},
+                          lambda _ok: None, wait=True)
             except (OSError, ValueError):
                 pass
 
@@ -491,6 +514,50 @@ def where_said(screen, part):
     return " · ".join(x for x in (screen, part) if x) or "–"
 
 
+def most_used(rows):
+    """What the user used most (USED_KINDS, in the apps), the most times first."""
+    return sorted((c for c in rows if c.get("kind") in USED_KINDS and c.get("app") != "host" and c.get("count")),
+                  key=lambda c: (-c["count"], -c["seconds"]))[:COUNTS_SHOWN]
+
+
+def slowest(rows):
+    """What took longest each time it ran (TIMED_KINDS), the longest first."""
+    return sorted((c for c in rows if c.get("kind") in TIMED_KINDS and c.get("count")),
+                  key=lambda c: -c["seconds"] / c["count"])[:COUNTS_SHOWN]
+
+
+def count_title(c):
+    """A count's name as a row says it: a part's entity and part ("Composer.region · send button"), else its name."""
+    name = c.get("name") or ""
+    if c.get("kind") in ("part", "menu") and "/" in name:
+        entity, _, part = name.partition("/")
+        return f"{entity} · {part}"
+    return name
+
+
+def said_span(seconds):
+    s = int(seconds)
+    if s >= 3600:
+        return wording.say("time.hours_minutes", hours=s // 3600, minutes=s % 3600 // 60)
+    if s >= 60:
+        return wording.say("time.minutes_seconds", minutes=s // 60, seconds=s % 60)
+    return wording.say("time.seconds", seconds=s)
+
+
+def count_row(c, slow=False):
+    """A count: its process's logo, its name, how many times (and a screen's time in front; slow: its time each)."""
+    values = [wording.say("telemetry.error_times", count=c["count"])]
+    if slow:
+        values.insert(0, wording.say("telemetry.average_ms", ms=f"{1000 * c['seconds'] / c['count']:.1f}"))
+    elif c.get("kind") == "screen" and c.get("seconds"):
+        values.insert(0, said_span(c["seconds"]))
+    r = fit_row(count_title(c), *values, mono=c.get("kind") in ("op", "callback", "subprocess"))
+    r.set_title_lines(1)
+    r.add_prefix(logo(c.get("app")))
+    r.set_tooltip_text(f"{c.get('kind')}: {c.get('name')}")
+    return r
+
+
 def fit_row(title, *values, **kw):
     return row(title, *values, fit=True, **kw)
 
@@ -577,7 +644,7 @@ class Page(Adw.PreferencesPage):
             self.add(self.made[key])
         self.state, self.taking, self.groups, self.profiling_rows = None, False, {}, None
         self.deps_for, self.missing_shown, self.lines_shown, self.sampled, self.ticks = (), None, None, None, 0
-        self.errors_shown = None
+        self.errors_shown = self.counts_shown = None
         self.grid = TokenGrid()
         self.refresh = GLib.timeout_add_seconds(REFRESH_S, self.tick)
         self.connect("destroy", lambda *_: GLib.source_remove(self.refresh))
@@ -591,9 +658,26 @@ class Page(Adw.PreferencesPage):
             self.ticks += 1
             if self.ticks % (PROFILE_S // REFRESH_S) == 0:
                 self.read_errors()
+                self.read_counts()
                 if self.state.get("line_profiling"):
                     self.read({"from": now - 3600, "what": ["profiles"], "limit": 500}, self.took_profiles)
         return True
+
+    def read_counts(self):
+        self.read({"from": time.time() - COUNTS_DAYS * 86400, "what": ["counted"], "limit": 2000}, self.took_counts)
+
+    def took_counts(self, reply):
+        if self.failed(reply):
+            return False
+        self.took_state(reply)
+        rows = reply.get("counted") or []
+        if "used" in self.groups and self.counts_shown == repr(rows):
+            return False
+        self.counts_shown = repr(rows)
+        used, slow = most_used(rows), slowest(rows)
+        self.group("used", wording.say("telemetry.most_used") if used else None, [count_row(c) for c in used])
+        self.group("slowest", wording.say("telemetry.slowest") if slow else None, [count_row(c, slow=True) for c in slow])
+        return False
 
     def read_errors(self):
         self.read({"from": time.time() - ERRORS_DAYS * 86400, "what": ["errors"], "limit": ERRORS_SHOWN},
@@ -625,6 +709,7 @@ class Page(Adw.PreferencesPage):
         self.read({"from": now - 60, "what": ["metrics"], "limit": 1}, self.took_metrics)
         self.read({"from": now - 3600, "what": ["profiles"], "limit": 500}, self.took_profiles)
         self.read_errors()
+        self.read_counts()
 
     def group(self, key, title, rows=()):
         """The group key shown, titled, with rows (in place of those it had)."""

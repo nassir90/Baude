@@ -317,7 +317,11 @@ def restart_dialog(remote, parent, ask, see=None, held=None):
             title = b.get("name") or b.get("what") or ""
             row = Adw.ActionRow(title=title, title_lines=1, use_markup=False,
                                 tooltip_text="\n".join(dict.fromkeys(filter(None, (title, b.get("what"))))) or None)
-            row.add_prefix(Gtk.Image(icon_name=BLOCKER_ICONS.get(b.get("kind"), "utilities-terminal-symbolic")))
+            icon = Gtk.Image(icon_name="baude-waiting-symbolic" if b.get("waiting") else
+                             BLOCKER_ICONS.get(b.get("kind"), "utilities-terminal-symbolic"))
+            if b.get("waiting"):  # (a task's run waiting for input: as its Tasks page draws it)
+                icon.add_css_class("warning")
+            row.add_prefix(icon)
             if see is not None and (b.get("session") or b.get("terminal")):
                 go = Gtk.Button(label=wording.say("hosts.see_thread"), valign=Gtk.Align.CENTER)
                 go.connect("clicked", lambda _b, b=b: seen(b))

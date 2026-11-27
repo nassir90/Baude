@@ -336,7 +336,7 @@ fun ChatPage(chat: Chat, name: String, attach: Boolean = true, stop: (() -> Unit
                 val uuid = line.uuid
                 androidx.compose.runtime.CompositionLocalProvider(LocalFindLine provides line) {
                 Said(line, uuid?.let { chat.senders[it] }.takeIf { line.kind == "you" },
-                    if (canRevert && line.kind == "you" && uuid != null) RevertOffer(revealed == uuid, { on -> revealed = if (on) uuid else null }) {
+                    waits = uuid != null && session?.taskAsks.orEmpty().contains(uuid), revert = if (canRevert && line.kind == "you" && uuid != null) RevertOffer(revealed == uuid, { on -> revealed = if (on) uuid else null }) {
                         revealed = null
                         if (reverting?.asked == true) return@RevertOffer
                         reverting = Reverting(uuid, reverting?.draft ?: text)
@@ -788,15 +788,16 @@ val SAID_BY = Regex("""\A<baude-sender(?: [a-z_]+="[^"<>]*")*>[^<]*</baude-sende
 /** A line of the chat: from (a message of yours) who it's from instead, if its host's sender store says it's
  * another's: where yours are, grey, as Baude draws it, with "from <who>" small at its top (a link to that chat, if it
  * names one: a task's, to its run on its Bot's Tasks page), and what the store says is shown of it in place of its
- * text if it says (shown: a held answer sent, drawn as the held one was). */
+ * text if it says (shown: a held answer sent, drawn as the held one was). waits: a task's ask whose run waits for its
+ * answer (its Bot's task_asks), said on its from line. */
 @Composable
-fun Said(line: Line, from: Msg.StoredSender? = null, revert: RevertOffer? = null) {
+fun Said(line: Line, from: Msg.StoredSender? = null, waits: Boolean = false, revert: RevertOffer? = null) {
     val c = LocalBaude.current
     when {
         from != null -> Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
             Column(Modifier.padding(start = 48.dp).clip(RoundedCornerShape(Gap.bubbleRadius)).background(c.raised)
                 .padding(horizontal = Gap.bubbleH, vertical = Gap.bubbleV), horizontalAlignment = Alignment.End) {
-                FromLine(from)
+                FromLine(from, waits)
                 SelectionContainer {
                     val shown = from.shown
                     Prose(SAID_BY.replace(shown ?: line.text, "").trim(), under = c.raised.compositeOver(c.inside))
@@ -809,9 +810,10 @@ fun Said(line: Line, from: Msg.StoredSender? = null, revert: RevertOffer? = null
 
 /** A message's from line (SenderTurn's): "from <who>", a link to that chat if it names one (a task's: to its run);
  * a chat a task's run started, then " · <task> run" (a link to the run, on its Bot's Tasks page) and " · finished"
- * (or stopped, failed), as wire.sender_about says it. */
+ * (or stopped, failed), as wire.sender_about says it; a task's ask whose run waits for its answer (waits), then
+ * " · its run is waiting for this answer" (a link to the run), while it waits. */
 @Composable
-fun FromLine(from: Msg.StoredSender) {
+fun FromLine(from: Msg.StoredSender, waits: Boolean = false) {
     val c = LocalBaude.current
     val host = from.host?.ifBlank { null }
     val session = from.session?.ifBlank { null }
@@ -839,6 +841,13 @@ fun FromLine(from: Msg.StoredSender) {
             "failed" -> Wording.TaskNotes.failed
             else -> null
         }?.let { append(" · "); append(it) }
+        if (waits && run != null) {
+            append(" · ")
+            if (host != null && bot != null) withLink(LinkAnnotation.Clickable("waiting", link) {
+                openSender(host, bot, from.task, run)
+            }) { append(Wording.Senders.runWaiting) }
+            else append(Wording.Senders.runWaiting)
+        }
     }
     Text(text, style = Type.caption, color = c.dim, textAlign = TextAlign.End)
 }

@@ -74,17 +74,29 @@ class _Wire:
         got, self.buf = self.buf.split(b"\n", 1)
         return json.loads(got)
 
-    def request(self, msg):
+    def request(self, msg, waits=False):
+        """The host's answer to msg. waits: one that may take days (an ask, answered as its Bot's turn ends), the
+        host told it's still here meanwhile."""
         if self.sock is None and msg.get("op") != "hello":
             self.connect()
         self.req += 1
         self.sock.sendall((json.dumps({**msg, "req": self.req}) + "\n").encode())
-        while True:
-            got = self.line()
-            if got.get("req") == self.req:
-                if got.get("op") == "error":
-                    raise Refused(got.get("error") or got.get("detail") or "refused")
-                return got
+        if waits:
+            self.sock.settimeout(_PING_S)
+        try:
+            while True:
+                try:
+                    got = self.line()
+                except socket.timeout:  # (said something, so the host doesn't take it for gone)
+                    self.sock.sendall(b'{"op": "ping"}\n')
+                    continue
+                if got.get("req") == self.req:
+                    if got.get("op") == "error":
+                        raise Refused(got.get("error") or got.get("detail") or "refused")
+                    return got
+        finally:
+            if waits:
+                self.sock.settimeout(None)
 
 
 _wire = _Wire()
@@ -106,14 +118,15 @@ def say(*parts):
 
 
 def ask(text, form=None, error=False):
-    """The task's Bot asked text, waited for till its turn ends: what it said; with form (fields as a task's form
+    """The task's Bot asked text, waited for till its turn ends (days, if it must: the run waits for input
+    meanwhile, its timeout not counting it): what it said; with form (fields as a task's form
     has them: {name, type: text|number|bool|choice, choices?, default?, required?}), the values it filled, checked
     against the form. Refused: it couldn't answer, or not as asked."""
     if not run:
         print(f"ask: {text}", flush=True)
         return _stand_in(form) if form else "(a stand-in answer)"
     got = _wire.request({"op": "task_ask", "run": run, "token": os.environ.get("BAUDE_TASK_TOKEN", ""), "text": str(text),
-                         **({"form": form} if form else {}), **({"error": True} if error else {})})
+                         **({"form": form} if form else {}), **({"error": True} if error else {})}, waits=True)
     return got.get("values") if form else got.get("text", "")
 
 

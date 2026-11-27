@@ -117,6 +117,22 @@ abstract class TasksMockups(private val theme: String) {
         shoot("run")
     }
 
+    /** A task whose run waits for input: its row, its run's row and the run's page, each with the hourglass. */
+    @Test fun waitingList() {
+        show(TaskFixtures.waitingList())
+        shoot("waiting-list")
+    }
+
+    @Test fun waitingTask() {
+        show(TaskFixtures.waitingPage())
+        shoot("waiting-task")
+    }
+
+    @Test fun waitingRun() {
+        show(TaskFixtures.waitingRun())
+        shoot("waiting-run")
+    }
+
     /** A run that started one-shot agents: Started, each with its state, and what the done one said. */
     @Test fun runStarted() {
         dev.baude.android.Mesh.sessions["h1"] = TaskFixtures.started
@@ -167,7 +183,8 @@ abstract class TasksMockups(private val theme: String) {
                     .padding(top = 24.dp), verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(12.dp)) {
                     dev.baude.android.Said(dev.baude.android.Line("you", "An instance of the 'Deploy site' task asks:\n\n" +
                         table + "| duration | 0.0 s |\n" + tail + "\nWhich bucket does site go to?\n\n" +
-                        "Answer with only a JSON object with these fields:\n- bucket: one of \"staging\", \"production\""), from)
+                        "Answer with only a JSON object with these fields:\n- bucket: one of \"staging\", \"production\""), from,
+                        waits = true)
                     dev.baude.android.Said(dev.baude.android.Line("you", "An instance of the 'Deploy site' task failed\n\n" +
                         table + "| end time | 2026-11-26 23:42:37 |\n| duration | 12.4 s |\n" + tail +
                         "| exit code | 3 |\n\nIt failed: exited with 3. The end of its log:\n\nsay: deploying site\n" +

@@ -656,12 +656,15 @@ fun RestartBlockers(hostId: String, done: () -> Unit, see: (Msg.RestartBlocker) 
                 if (blockers.isEmpty()) Text(Wording.Hosts.restartNothing, style = Type.body, color = c.dim)
                 for (b in blockers) Row(Modifier.padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Icon(when (b.kind) {
+                    Icon(when {
+                        b.waiting == true -> Adwaita.Waiting // (a task's run waiting for input: as its Tasks page draws it)
+                        else -> when (b.kind) {
                         "task" -> Adwaita.MediaPlaybackStart
                         "agent" -> Adwaita.EmblemSystem
                         "terminal" -> Adwaita.InputKeyboard
                         else -> Adwaita.UtilitiesTerminal
-                    }, null, tint = c.fg, modifier = Modifier.size(16.dp.icon))
+                        }
+                    }, null, tint = if (b.waiting == true) c.warning else c.fg, modifier = Modifier.size(16.dp.icon))
                     Text(b.name?.ifBlank { null } ?: b.what.orEmpty(), style = Type.body, color = c.fg, maxLines = 1,
                         overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
                     if (!b.session.isNullOrEmpty() || !b.terminal.isNullOrEmpty())

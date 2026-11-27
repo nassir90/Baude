@@ -421,6 +421,7 @@ class Session:
                 "subagents": max((m for _size, m in (self.agents or {}).values()), default=0),
                 "commands": self.commands(), "cut": self.meta.get("cut"), "bot": self.bot_listing(),
                 "rotated": self.meta.get("rotated") if self.meta.get("bot") else None,
+                "task_asks": self.server.tasks.asks_of(self.id) if self.meta.get("bot") else [],
                 "autofix": autofix.listing(self.meta.get("autofix")),
                 "acting": self.acting and self.busy and not self.asks,
                 "context": context_listing(self.meta.get("context_usage")),

@@ -21,7 +21,10 @@
     "ChatBanner.kt:Away",
     "Mesh.kt:Mesh.reach",
     "windowproc.py:WindowProc.subscription_off",
-    "ChatBanner.kt:subscriptionOff"
+    "ChatBanner.kt:subscriptionOff",
+    "baudewindow.py:BaudeWindow.show_resume",
+    "CutShort.kt:ResumeLine",
+    "baudelib/hostresume.py"
   ],
   "copy": [
     "host_status",
@@ -283,6 +286,38 @@
         {
           "by": "click Continue",
           "does": "Sends the continue message to the chat"
+        }
+      ]
+    },
+    {
+      "name": "resumes after a usage limit line",
+      "shows": "At the end of the transcript (a chat line, not a banner, after the cut-short line if both are there): dim \"Resumes at 3:20 PM\" (\"Resumes Friday at 3:20 PM\" where it isn't today; the viewer's local time and clock format) with a button \"Cancel\". Shown while the chat's host is to resume it (its listing's resume_at): its last turn was stopped by a usage limit and its subscription has Auto Resume on Reset on. Gone once the host sends the continue message, something else is sent, it's cancelled, or the subscription is disabled or the switch turned off.",
+      "copy": [
+        "limit_resume.line",
+        "limit_resume.line_day",
+        "common.cancel",
+        "limit_resume.not_cancelled"
+      ],
+      "actions": [
+        {
+          "by": "click Cancel",
+          "does": "Tells the chat's host not to resume it (resume_cancel); the line goes. If the host refuses, a toast \"Not cancelled: <why>\" and the line stays"
+        },
+        {
+          "by": "(none)",
+          "does": "At the time, the host sends the chat \"Continue where you left off: the usage limit has reset.\" as its user's message, and the turn goes on as any other"
+        }
+      ],
+      "decisions": [
+        {
+          "said": "(BaudeInternal#307, paraphrased) a chat stopped by a usage limit (\"You've hit your 5-hour limit · resets 3:20pm (Europe/Dublin)\") should be able to be resumed automatically",
+          "rule": "Every app's Subscriptions page has Auto Resume on Reset in each subscription's ⋮ (a check item, off until turned on); while it's on, a chat on that subscription whose turn a usage limit stops is sent \"Continue where you left off: the usage limit has reset.\" by its host a minute after the limit resets, over a host restart, unless something is sent to it first, it's cancelled, the switch is turned off, or the subscription is disabled (a disabled subscription is never resumed onto). Every app's chat says when at its end (\"Resumes at 3:20 PM\", with the day where it isn't today) with Cancel beside it.",
+          "decided": "2026-11-27",
+          "source": [
+            {
+              "issue": "BaudeInternal#307"
+            }
+          ]
         }
       ]
     },

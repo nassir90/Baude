@@ -1,7 +1,7 @@
 """Settings → Subscriptions (Baude's and Record's; the phone's SubscriptionsScreen the same): the Claude and Codex
 subscription accounts kept on the host picked beside New session (win.terminal_host, as ☰ → Terminal, Kubernetes and
 Databases are), changed there through its accounts op (hostaccounts): for each provider, a card per subscription (Disabled where it is; ⋮: an account's Rename…, Sign In Again… or Replace
-Token…, Remove…, and every card's Disable or Enable and Auto Disable on Exhaustion; each card with its usage as a bar per limit, read every USAGE_S while the page is shown in the window in front), and Add
+Token…, Remove…, and every card's Disable or Enable, Auto Disable on Exhaustion and Auto Resume on Reset; each card with its usage as a bar per limit, read every USAGE_S while the page is shown in the window in front), and Add
 account (where the host lacks the provider's program, what Settings → Dependencies says of it instead: depsview.row).
 A Claude account is signed in to with claude auth login run on
 the host with the account's own folder: the page to open shown as a link, and a box for the code it shows; or added
@@ -58,6 +58,16 @@ def limit_label(key, name, resets):
             wording.say("subscriptions.weekly_limit", day=day, time=time)
     return wording.say("subscriptions.other_limit_today", name=name, time=time) if today else \
         wording.say("subscriptions.other_limit", name=name, day=day, time=time)
+
+
+def resume_line(at):
+    """When a chat's host resumes it after a usage limit (seconds since 1970), in the viewer's local time and clock:
+    Resumes at 3:20 PM, or Resumes Friday at 3:20 PM where it isn't today."""
+    when = GLib.DateTime.new_from_unix_local(int(at))
+    time = when.format("%H:%M" if clock_24h() else "%-I:%M %p")
+    if when.format("%Y-%m-%d") == GLib.DateTime.new_now_local().format("%Y-%m-%d"):
+        return wording.say("limit_resume.line", time=time)
+    return wording.say("limit_resume.line_day", day=when.format("%A"), time=time)
 
 
 class Ask:
@@ -152,6 +162,7 @@ class Page(Adw.PreferencesPage):
         self.here = wire.is_local(self.where)  # (the host's this machine's: a sign-in's page opened here at once)
         self.accounts, self.claude_cli, self.missing = [], True, {}
         self.disabled, self.auto = set(), set()  # (subscriptions disabled, and auto-disabling as they're exhausted: usage keys)
+        self.resumes = set()  # (those resuming their chats a usage limit stopped as it resets: usage keys)
         self.codex_usage = False  # (whether the host reads Codex usage: an older host's reads of Codex's CLI default are Claude's)
         self.lists, self.usage, self.bars, self.reading, self.last = {}, {}, {}, set(), {}
         self.as_of = {}  # (a subscription's usage as its chats' turns last said it: when, by usage key)
@@ -211,6 +222,7 @@ class Page(Adw.PreferencesPage):
         self.missing = reply.get("missing") or {}
         self.codex_usage = bool(reply.get("codex_usage"))
         self.disabled, self.auto = set(reply.get("disabled") or ()), set(reply.get("auto_disable") or ())
+        self.resumes = set(reply.get("auto_resume") or ())
         if self.drawn() != self.shown:
             self.fill()
         if self.get_mapped():
@@ -234,7 +246,7 @@ class Page(Adw.PreferencesPage):
 
     def drawn(self):
         """What the cards are drawn from: drawn again when it changes."""
-        return self.accounts, self.claude_cli, self.missing, self.codex_usage, self.disabled, self.auto
+        return self.accounts, self.claude_cli, self.missing, self.codex_usage, self.disabled, self.auto, self.resumes
 
     def fill(self, error=None):
         self.shown = None if error else self.drawn()
@@ -264,7 +276,7 @@ class Page(Adw.PreferencesPage):
 
     def card(self, provider, account):
         """A subscription's card: its name, Disabled where it is, and ⋮ (an account's: Rename…, Sign In Again… or
-        Replace Token…; every card's: Disable or Enable, Auto Disable on Exhaustion; an account's: Remove…), then its
+        Replace Token…; every card's: Disable or Enable, Auto Disable on Exhaustion, Auto Resume on Reset; an account's: Remove…), then its
         usage: a bar for each limit with its percentage."""
         key = account["id"] if account else "" if provider == "claude" else CODEX_CLI
         card = Gtk.Box(css_classes=["card"])
@@ -301,7 +313,7 @@ class Page(Adw.PreferencesPage):
 
     def account_menu(self, provider, key, account):
         """A card's ⋮: an account's Rename… and Sign In Again… (Replace Token…); every card's Disable (Enable, where
-        it's disabled) and Auto Disable on Exhaustion, checked where it's on; an account's Remove…."""
+        it's disabled), Auto Disable on Exhaustion and Auto Resume on Reset, each checked where it's on; an account's Remove…."""
         actions = Gio.SimpleActionGroup()
         menu = Gio.Menu()
         off = key in self.disabled
@@ -311,15 +323,18 @@ class Page(Adw.PreferencesPage):
                     [("disable", wording.say("subscriptions.enable" if off else "subscriptions.disable"),
                       lambda page, _a: page.switch("disable", provider, key, not off)),
                      ("auto", wording.say("subscriptions.auto_disable"),
-                      lambda page, _a: page.switch("auto_disable", provider, key, key not in page.auto))],
+                      lambda page, _a: page.switch("auto_disable", provider, key, key not in page.auto)),
+                     ("resume", wording.say("subscriptions.auto_resume"),
+                      lambda page, _a: page.switch("auto_resume", provider, key, key not in page.resumes))],
                     [("remove", wording.say("common.remove_ellipsis"), remove)] if account else []]
         for items in sections:
             if not items:
                 continue
             section = Gio.Menu()
             for name, label, action in items:
-                act = Gio.SimpleAction.new_stateful(name, None, GLib.Variant("b", key in self.auto)) \
-                    if name == "auto" else Gio.SimpleAction(name=name)
+                act = Gio.SimpleAction.new_stateful(name, None, GLib.Variant("b", key in (
+                    self.auto if name == "auto" else self.resumes))) if name in ("auto", "resume") else \
+                    Gio.SimpleAction(name=name)
                 act.connect("activate", lambda *_a, f=action: f(self, account))
                 actions.add_action(act)
                 section.append(label, f"account.{name}")
@@ -330,7 +345,7 @@ class Page(Adw.PreferencesPage):
         return more
 
     def switch(self, what, provider, key, on):
-        """A subscription's (usage key's) switch turned on or off on the host (what: disable, auto_disable); this
+        """A subscription's (usage key's) switch turned on or off on the host (what: disable, auto_disable, auto_resume); this
         machine's: Meta's box as its subscription is now (meta.subscription_off)."""
         def then(reply):
             if reply.get("error"):

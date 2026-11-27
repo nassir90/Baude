@@ -316,6 +316,10 @@ def task_answer(n, text):
     again (mcp__mesh__run_task, not waited for); any other a line saying it looked."""
     healing = re.search(r"^\| task \| ([A-Za-z0-9_-]+) \|$", text, re.M) if "HEAL ME" in text else None
     run = re.search(r"^\| run \| ([A-Za-z0-9_-]+) \|$", text, re.M) or re.search(r"answered run ([A-Za-z0-9_-]+)", text)
+    asked = os.path.join(tempfile.gettempdir(), f"fake-claude-ask-{run[1]}") if run else None
+    if run and "answer_task tool" in text and "You haven't answered" not in text:
+        with open(asked, "w") as f:
+            f.write(text)
     if healing:
         tid = healing[1]
         mcp_tool("mesh", "set_task", {"id": tid, "script": 'import baudetask as task\n'
@@ -325,6 +329,9 @@ def task_answer(n, text):
     elif "answer_task tool" in text and run and ("SKIP THE TOOL" not in text or "You haven't answered" in text):
         if "You haven't answered" in text:  # (FAKE_REMINDED_S: a while before it answers a reminder, as a scene wants)
             time.sleep(float(os.environ.get("FAKE_REMINDED_S") or 0))
+        if "You haven't answered" in text and os.path.exists(asked):  # (a reminder's fields: its ask's)
+            with open(asked) as f:
+                text = f.read()
         values = {}
         for m in re.finditer(r"^- ([A-Za-z_][A-Za-z0-9_]*): (.*)$", text, re.M):
             kind = m[2]

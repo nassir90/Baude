@@ -1111,7 +1111,7 @@ class Tasks:
                 break
             reminded = True  # (its turn ended without the tool: told once more, then it's failed)
             wait["done"].clear()
-            said = wording.say("tasks.answer_reminder", run=rid) + "\n\n" + form_said(form)
+            said = wording.say("tasks.answer_reminder", run=rid)
             wait["said"] = str(uuid.uuid4())  # (a message of its own: its from line says the run waits on it)
         if tool and not wait["answered"] and not wait["failed"]:
             wait["text"], wait["failed"] = wording.say("tasks.answer_refused", wrong=wait["refused"]) \

@@ -1507,18 +1507,20 @@ class TelemetryCount(Obj):
 
         app ('host' | 'baude' | 'record' | 'phone' | 'emission'): The process (a telemetry_read's counted: added
             up over the stretch, by process, kind and name).
-        kind ('part' | 'menu' | 'screen' | 'op' | 'callback' | 'subprocess'): What it is: a button or row used
-            (part), a menu's item picked (menu), a screen opened (a page, a dialog, a side panel's page:
-            screen), a wire op a host answered (op), a main-loop callback (callback), a program started
-            (subprocess).
+        kind ('part' | 'menu' | 'screen' | 'op' | 'callback' | 'function' | 'subprocess'): What it is: a button
+            or row used (part), a menu's item picked (menu), a screen opened (a page, a dialog, a side panel's
+            page: screen), a wire op a host answered (op), a main-loop callback (callback), a function of
+            Baude's own code (function), a program started (subprocess).
         name (string): Which, by the index every app shares: a part or menu item as Entity.kind/part name
             (schema/ui's: "Composer.region/send button"; Entity.kind/(what tells it apart) where it isn't one of
             its entity's parts), a screen as its entity ("Telemetry.dialog"), an op by its name, a callback by
-            its function's (module.Class.method), a program by its file's name.
+            its function's (module.Class.method), a function as module:function
+            ("baudelib.telemetry:Telemetry.flush_counts"), a program by its file's name.
         count (integer): Times.
         seconds (number): Their time added up: a part's or menu item's from its click till the app was free
             again (its handlers, and what they drew at once); a screen's in front, with someone at the machine;
-            an op's handling; a callback's running; 0 for a program.
+            an op's handling; a callback's running; a function's running, added up (its calls' time with theirs
+            in it); 0 for a program.
         max (number or None): The longest of them (a screen's: its longest stretch in front).
     """
 

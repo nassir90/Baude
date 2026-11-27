@@ -13,7 +13,7 @@ import weakref
 
 from gi.repository import Adw, GLib, Gtk, Pango
 
-from baudelib import counters, errorbook, lineprofile, providers, telemetry, wire, wording
+from baudelib import counters, errorbook, funccount, lineprofile, providers, telemetry, uiindex, wire, wording
 import uitrack
 import widgets
 
@@ -123,7 +123,9 @@ class Recorder:
         on, pid = bool(t.get("on")), here.info.get("pid")
         if on != self.on:
             self.on = on
+            funccount.switch(on)
             if on:
+                uitrack.counts_now()  # (what was counted till now: not kept)
                 self.hello()
                 self.errors_soon()
                 for win in list(self.windows):
@@ -529,6 +531,13 @@ def slowest(rows):
 def count_title(c):
     """A count's name as a row says it: a part's entity and part ("Composer.region · send button"), else its name."""
     name = c.get("name") or ""
+    if c.get("kind") in ("part", "menu") and "|copy:" in name:  # (the phone's, where it knows no part: its words' key)
+        entity, _, key = name.partition("|copy:")
+        try:
+            part = uiindex.part_by_copy(entity, key) or wording.say(key)
+        except (KeyError, ValueError, TypeError):
+            part = key
+        return f"{entity} · {part}"
     if c.get("kind") in ("part", "menu") and "/" in name:
         entity, _, part = name.partition("/")
         return f"{entity} · {part}"
@@ -551,8 +560,7 @@ def count_row(c, slow=False):
         values.insert(0, wording.say("telemetry.average_ms", ms=f"{1000 * c['seconds'] / c['count']:.1f}"))
     elif c.get("kind") == "screen" and c.get("seconds"):
         values.insert(0, said_span(c["seconds"]))
-    r = fit_row(count_title(c), *values, mono=c.get("kind") in ("op", "callback", "subprocess"))
-    r.set_title_lines(1)
+    r = fit_row(count_title(c), *values, mono=c.get("kind") in ("op", "callback", "function", "subprocess"))
     r.add_prefix(logo(c.get("app")))
     r.set_tooltip_text(f"{c.get('kind')}: {c.get('name')}")
     return r

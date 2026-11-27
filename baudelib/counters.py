@@ -1,6 +1,7 @@
 """counters — how many times each thing in a process was used or run, and how long it took (the wire's TelemetryCount):
 a button, row or menu item (by its schema/ui entity and part: uitrack's), a screen (opened, and its time in front),
-a wire op (a host's), a main-loop callback (by its function's name), a program started (subprocess). A count is a
+a wire op (a host's), a main-loop callback (by its function's name), a function of Baude's own code (funccount's, by
+module:function), a program started (subprocess). A count is a
 number added to in memory, nothing more; take() gives what's counted since it was last taken as one row (the wire's
 TelemetryCounters) and starts again, about once a minute (FLUSH_S), for the machine's host to keep. No GTK."""
 import os
@@ -8,7 +9,7 @@ import subprocess
 import threading
 import time
 
-from baudelib import wire
+from baudelib import funccount, wire
 
 FLUSH_S = 60  # (a row a minute, a process)
 NAME_MAX = 200
@@ -19,8 +20,9 @@ class Counters:
     def __init__(self):
         self.lock, self.counts, self.since = threading.Lock(), {}, time.time()
 
-    def add(self, kind, name, seconds=None, count=1):
-        """kind's name used (count times), seconds its time (the longest kept too)."""
+    def add(self, kind, name, seconds=None, count=1, longest=None):
+        """kind's name used (count times), seconds its time (the longest kept too, or longest, where seconds is
+        many runs' added up)."""
         key = (kind, name[:NAME_MAX])
         with self.lock:
             c = self.counts.get(key)
@@ -29,18 +31,20 @@ class Counters:
             c[0] += count
             if seconds:
                 c[1] += seconds
-                c[2] = max(c[2], seconds)
+                c[2] = max(c[2], seconds if longest is None else longest)
 
     def take(self, now=None):
         """What's counted since the last take, as a row ({at, from, counts}), or None if nothing was."""
         now = time.time() if now is None else now
+        for name, n, took, longest in funccount.drain():
+            self.add("function", name, took, n, longest)
         with self.lock:
             counts, since, self.counts, self.since = self.counts, self.since, {}, now
         if not counts:
             return None
         return {"at": round(now, 3), "from": round(since, 3), "counts": [
             {"kind": k, "name": n, "count": c, "seconds": round(s, 6), "max": round(m, 6)}
-            for (k, n), (c, s, m) in sorted(counts.items(), key=lambda kv: -kv[1][0])]}
+            for (k, n), (c, s, m) in sorted(counts.items(), key=lambda kv: (kv[0][0] == "function", -kv[1][0]))]}
 
     def give_back(self, row):
         """A row taken but not kept (the host wasn't there): counted again, with what's counted since."""

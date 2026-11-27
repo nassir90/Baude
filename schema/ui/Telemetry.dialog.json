@@ -44,6 +44,7 @@
     "PhoneErrors.kt:PhoneErrors",
     "Telemetry.kt:errorExpander",
     "baudelib/counters.py:Counters",
+    "baudelib/funccount.py:switch",
     "baudelib/uiindex.py:index",
     "uitrack.py:look",
     "uitrack.py:counts_now",
@@ -111,12 +112,24 @@
         },
         {
           "said": "Sreen time is a pretty useless metric, how is that going to help me make the app better (in isolation)",
-          "rule": "Time on screen is never shown on its own as a measure: what every app counts is how many times each thing is used or run (Most Used, Slowest), keyed by schema/ui, a screen's time in front being one field of its count; events each keep their own time",
+          "rule": "No app counts time on screen per place or menu uses; what's kept is a log of events, each with its own time, that can be put together with the host's samples and profiles",
+          "superseded": "2026-11-27",
           "decided": "2026-11-26",
           "source": [
             {
               "session": "b3845b21-55ac-4aab-a769-fb8517403c51",
               "message": "41aef9c4-02f6-4496-ac8a-bb9737df5262"
+            }
+          ]
+        },
+        {
+          "said": "Well, yes, counters are good",
+          "rule": "A screen (a page, dialog, side panel's page or tab; never a region only the focus is in) is counted when it's opened, with its time in front while someone's at the machine, as one field of its count in Most Used: counting how many times it's used is what the time is for, and time on screen is never shown on its own as a measure. Supersedes the decision that no app counts time on screen",
+          "decided": "2026-11-27",
+          "source": [
+            {
+              "session": "221e1c29-56d7-48bf-a2dc-7a2b37ccd685",
+              "message": "4d4c11e9-63d0-4c6d-ba40-6c8dc5ead7c9"
             }
           ]
         },
@@ -345,7 +358,7 @@
       "decisions": [
         {
           "said": "Measure the raw number of invocations and a trivial index of the invocations that doesn't require searching with a model.",
-          "rule": "Every process counts how many times each thing in it is used or run, and how long it took: a button or row (its click till the app is free again), a menu item, a screen or tab (opened, and its time in front while someone's at the machine), a wire op its host answered, a main-loop callback, a program started; each keyed by its schema/ui entity and part (the index is the spec), an op by its name, a callback by its function's; kept as a row a process a minute (nothing while nothing's counted), read by telemetry_read (each minute's, or added up)",
+          "rule": "Every process counts how many times each thing in it is used or run, and how long it took: a button or row (its click till the app is free again), a menu item, a screen or tab (opened, and its time in front while someone's at the machine), a wire op its host answered, a main-loop callback, a function of Baude's own code (its calls and time in all, by module:function, while telemetry is on), a program started; each keyed by its schema/ui entity and part (the index is the spec), an op by its name, a callback by its function's; kept as a row a process a minute (nothing while nothing's counted), read by telemetry_read (each minute's, or added up)",
           "decided": "2026-11-27",
           "source": [
             {

@@ -23,7 +23,7 @@ import sys
 import threading
 import time
 
-from baudelib import counters, deps, errorbook, lineprofile, uiindex, wire
+from baudelib import counters, deps, errorbook, funccount, lineprofile, uiindex, wire
 
 SAMPLE_S = 5  # (how often the machine is sampled while it's on)
 PROFILE_S = 30  # (how often what's profiled is saved)
@@ -163,7 +163,7 @@ def counted(rows, legacy=()):
         got[0] += count
         got[1] += seconds
     return [{"app": a, "kind": k, "name": n, "count": c, "seconds": round(s, 6), "max": round(m, 6) if m else None}
-            for (a, k, n), (c, s, m) in sorted(out.items(), key=lambda kv: (-kv[1][0], -kv[1][1], kv[0][2]))]
+            for (a, k, n), (c, s, m) in sorted(out.items(), key=lambda kv: (kv[0][1] == "function", -kv[1][0], -kv[1][1], kv[0][2]))]
 
 
 def crumb_of(c):
@@ -391,6 +391,7 @@ class Telemetry:
     def start(self):
         """Sampling (and the host's own profiling) started, if it's on."""
         errorbook.install()
+        funccount.switch(self.on)
         self._profile_host()
         self._run()
 
@@ -440,6 +441,7 @@ class Telemetry:
         self.has_lp = deps.present("line_profiler")
         if isinstance(msg.get("on"), bool) and msg["on"] != self.on:
             self.on = msg["on"]
+            funccount.switch(self.on)
             if self.on:
                 self._run()
             else:
@@ -930,7 +932,7 @@ def gather(start, end=None, what=("events", "metrics", "profiles", "usage", "err
                                   for r in rep.get("counters") or []), key=lambda r: r["at"])
     if "counted" in what:
         out["counted"] = sorted(({**r, "from_host": hid} for hid, rep in hosts.items()
-                                 for r in rep.get("counted") or []), key=lambda r: (-r["count"], -r["seconds"]))
+                                 for r in rep.get("counted") or []), key=lambda r: (r["kind"] == "function", -r["count"], -r["seconds"]))
     if "usage" in what:
         out["usage"] = usage(out["events"])
     if "events" not in what:

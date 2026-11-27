@@ -11,7 +11,7 @@ import sys
 import threading
 import time
 
-from gi.repository import Adw, Gio, GLib, GObject, Gtk
+from gi.repository import Adw, Gdk, Gio, GLib, GObject, Gtk
 
 from baudelib import counters, errorbook, wire, wording
 from baudelib.uiindex import index
@@ -19,6 +19,7 @@ from baudelib.uiindex import index
 CRUMBS_MAX = 8
 PART_RECENT_S = 5  # (an error this soon after a part was used: that part's)
 SCREEN_KINDS = ("page", "dialog", "panel", "menu", "region")  # (what an entity on screen is: not one of a chat's elements)
+COUNTED_KINDS = ("page", "dialog", "panel")  # (a screen counted: where the focus is, a region, isn't one)
 _LEVELS = {GLib.LogLevelFlags.LEVEL_ERROR: "ERROR", GLib.LogLevelFlags.LEVEL_CRITICAL: "CRITICAL",
            GLib.LogLevelFlags.LEVEL_WARNING: "WARNING"}
 STATE = {"app": None, "crumbs": [], "used": None, "screen": None, "lock": threading.RLock(),
@@ -122,9 +123,9 @@ def part_of(widget, entities=None):
     return (entities[0] if entities else None), None, hint
 
 
-def screen(win=None):
-    """The schema/ui entity on screen (a page, dialog, panel or region: SCREEN_KINDS): in the active window, its
-    dialog's page if one's open, else where its focus is, else its tab in front."""
+def screen(win=None, of=SCREEN_KINDS):
+    """The schema/ui entity on screen (a page, dialog, panel or region: SCREEN_KINDS; of: these kinds): in the
+    active window, its dialog's page if one's open, else where its focus is, else its tab in front."""
     if win is None:
         app = Gio.Application.get_default()
         win = app.get_active_window() if isinstance(app, Gtk.Application) else None
@@ -146,7 +147,7 @@ def screen(win=None):
         if w is None:
             continue
         for e in chain(w):
-            if kinds.get(e) in SCREEN_KINDS:
+            if kinds.get(e) in of:
                 return e
     return None
 
@@ -178,13 +179,14 @@ def crumb(action, entity, part, hint=None, at=None):
 
 
 def screens(win=None):
-    """The screens in front: the active window's (screen()), and its side panel's page while it shows one."""
+    """The screens in front (COUNTED_KINDS): the active window's (screen()), and its side panel's page while it
+    shows one."""
     if win is None:
         app = Gio.Application.get_default()
         win = app.get_active_window() if isinstance(app, Gtk.Application) else None
     if win is None or not win.is_active():
         return set()
-    out = {screen(win)} - {None}
+    out = {screen(win, COUNTED_KINDS)} - {None}
     panel = getattr(win, "panel", None)
     stack = getattr(panel, "stack", None)
     if isinstance(stack, (Adw.ViewStack, Gtk.Stack)) and panel.get_mapped() and (page := stack.get_visible_child()):
@@ -275,6 +277,22 @@ def _watching():
 
 
 # ---- hooks
+def _after_paint(widget, done):
+    """done once widget's window has painted its next frame (what a click drew); at once when the main loop's free
+    where there's no frame clock, and in 2 s where no frame comes."""
+    clock = widget.get_frame_clock()
+    if clock is None:
+        _GLIB["idle_add"](done, priority=GLib.PRIORITY_DEFAULT_IDLE)
+        return
+
+    def painted(clock):
+        clock.disconnect(handler)
+        done()
+    handler = clock.connect("after-paint", painted)
+    clock.request_phase(Gdk.FrameClockPhase.PAINT)
+    _GLIB["timeout_add"](2000, lambda: done() and False)
+
+
 def _used(action, row=False):
     def hook(widget, *args):
         try:
@@ -287,11 +305,15 @@ def _used(action, row=False):
             name = f"{entity}/{part}" if part else f"{entity}/({hint})"
             began = time.perf_counter()
 
-            def done():  # (the main loop free again: its handlers, and what they did at once, done)
-                counters.COUNTERS.add(action if action == "menu" else "part", name, time.perf_counter() - began)
-                look()
+            ended = []
+
+            def done(*_):  # (the next frame painted: its handlers, and what they drew, done)
+                if not ended:
+                    ended.append(True)
+                    counters.COUNTERS.add(action if action == "menu" else "part", name, time.perf_counter() - began)
+                    look()
                 return False
-            _GLIB["idle_add"](done, priority=GLib.PRIORITY_HIGH)
+            _after_paint(widget, done)
         except Exception:  # noqa: BLE001 (a click is never held up by what's kept of it)
             errorbook.caught("callback")
         return True

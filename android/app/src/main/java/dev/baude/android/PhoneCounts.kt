@@ -22,18 +22,6 @@ object PhoneCounts {
         if (seconds > c[2]) c[2] = seconds
     }
 
-    /** A row tapped on the screen shown: counted with how long its tap took (onClick, run here). */
-    fun tapped(title: String, onClick: () -> Unit) {
-        val began = System.nanoTime()
-        try {
-            onClick()
-        } finally {
-            val key = Wording.keyOf(title)
-            val screen = PhoneErrors.shownScreen() ?: "?"
-            add("part", if (key != null) "$screen|copy:$key" else "$screen/(row)", (System.nanoTime() - began) / 1e9)
-        }
-    }
-
     /** The screen in front now (null: none, the app in the background): one come counted as opened, one gone given
      * its time. */
     @Synchronized

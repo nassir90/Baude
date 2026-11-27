@@ -36,6 +36,7 @@ class BotPointer:
         self.moved = -1e9  # (when its pointer last moved: the glow's held on till GLOW_HOLD_S after)
         self.tab = None  # (the tab it was last in: hosted, drawn over that tab's page only)
         self.log, self.seq = [], 0  # (what was done, numbered: watchers' to play, in the watch's state)
+        self.changed = None  # (told as something's to be moved or drawn anew: a hosted page's frames start then)
 
     def add(self, kind, x, y, tab=None, path=None, count=1, dx=0, dy=0, played=True):
         """What the Bot did: kind hover, click, drag or scroll, at x, y (a drag's path from there); played False:
@@ -82,9 +83,14 @@ class BotPointer:
                     self.pressed = bool(what)
             self.step = None
         self.seen = self.moved = time.monotonic()
+        if self.changed is not None:
+            self.changed()
 
     def set_acting(self, on):
-        self.acting = bool(on)
+        if bool(on) != self.acting:
+            self.acting = bool(on)
+            if self.changed is not None:
+                self.changed()
 
     def busy(self):
         """Whether anything's moving, or about to (the glow's hold after the pointer's last move running out): else

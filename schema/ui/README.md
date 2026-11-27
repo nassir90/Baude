@@ -33,7 +33,7 @@ Plain JSON, two-space indent, no `x-` keys. Fields, in this order, each left out
 - `states`: distinct looks: empty, loading, error, working, asking, signed out, host gone.
 - `removed`: parts taken out on purpose, so no app brings them back: each `{name, apps, why, decided}`, `apps` naming
   every app it's gone from (`baude`, `record`, `phone`).
-- `decisions`: the owner's complaints and corrections an entry or part answers, so no app repeats the mistake: each `{said, rule, decided, source}`, `rule` written to hold for every app, `source` what it can be audited by: `{"issue": "BaudeInternal#N"}` or `{"session": …, "message": <the owner's message's uuid>}`.
+- `decisions`: the owner's complaints and corrections an entry or part answers, so no app repeats the mistake: each `{said, rule, decided, source}`, `rule` written to hold for every app, `source` what it can be audited by: `{"issue": "BaudeInternal#N"}` or `{"session": …, "message": <the owner's message's uuid>}`. A decision a later one replaces stays as it was, with `superseded` (the date), and the later one says which it supersedes.
 - `scenes`: `tests/screenshots.py` scenes that show it.
 
 ## Overrides: where the phone differs on purpose
@@ -56,6 +56,13 @@ An entry or a part may carry:
 - **One word-wrap icon.** Every wrap toggle (code views, Kubernetes logs, on every app) draws `baude-wrap-symbolic` from schema/icons; the owner asked that all of them come from one place, with a clearer icon (2026-11-24). Source: `[{"issue": "BaudeInternal#207"}]`.
 - **A closed window leaves nothing listening.** Anything an entry draws that follows the theme (dark or light, the accent) stops following it when its window closes; the owner found Baude and Record growing in memory the longer they run (2026-11-24). Source: `[{"issue": "BaudeInternal#213"}]`.
 - **What closes is freed.** A closed window, a closed tab (a file's code, a chat, a page of notes, the Feedback tab) and a closed dialog are freed with everything they hold, as are a list's rows when it's filled again (a notebook's pages as another notebook is picked), and changing the accent doesn't keep each logo drawn for it; the owner found Baude and Record growing in memory the longer they run (2026-11-24). Source: `[{"issue": "BaudeInternal#213"}]`.
+- **At rest, an app costs nothing.** Nothing is drawn frame after frame unless something on screen moves: a page
+  hosted in a panel (a Bot's Browser page) is kept in place as the window draws, not by drawing it each frame. What
+  shows something working moves in shared frames, as few as look smooth (a working dot's pulse 10 a second, a spinner
+  20), and holds still in a window you aren't looking at and while no one's at the machine. From the owner's review of
+  the mesh's telemetry (2026-11-27): Baude's window sat at 17–19% CPU with nothing happening, where near 0 was
+  expected. Source: `[{"session": "221e1c29-56d7-48bf-a2dc-7a2b37ccd685", "message": "90c7f3bb-88bc-4a22-9305-4e0bd74d460b"},
+  {"session": "221e1c29-56d7-48bf-a2dc-7a2b37ccd685", "message": "30cf308b-147c-4860-a1c0-9ac81ad796f4"}]`.
 - **A view out in its own window uses that window's title bar.** A view that moves out to a window of its own
   (Kubernetes, Docker, Databases, and any view built like them; viewwindow.Out and ViewWindow on the desktop) puts
   its bar's controls in that window's header bar, beside the window's own controls, with no empty band above the

@@ -146,14 +146,14 @@ fun Popover(open: Boolean, dismiss: () -> Unit, offset: DpOffset = DpOffset.Zero
     }
 }
 
-/** A menu's row: Popups.row high, its things Popups.inset in from the sides and Popups.gap apart; pressed and held:
+/** A menu's row (counted as a menu item, by its label): Popups.row high, its things Popups.inset in from the sides and Popups.gap apart; pressed and held:
  * onLongClick. */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun MenuLine(enabled: Boolean = true, onLongClick: (() -> Unit)? = null, onClick: () -> Unit,
+fun MenuLine(enabled: Boolean = true, onLongClick: (() -> Unit)? = null, label: String? = null, onClick: () -> Unit,
              content: @Composable RowScope.() -> Unit) {
     Row(Modifier.fillMaxWidth().heightIn(min = Popups.row)
-        .combinedClickable(enabled = enabled, onClick = onClick, onLongClick = onLongClick)
+        .combinedClickable(enabled = enabled, onClick = onClick.tapping(label, kind = "menu"), onLongClick = onLongClick)
         .padding(horizontal = Popups.inset), verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(Popups.gap), content = content)
 }
@@ -165,7 +165,7 @@ fun MenuChoice(label: String, on: Boolean, enabled: Boolean = true, textColor: C
                onLongClick: (() -> Unit)? = null, onClick: () -> Unit) {
     val c = LocalBaude.current
     val ticks = LocalTicks.current
-    MenuLine(enabled, onLongClick, onClick) {
+    MenuLine(enabled, onLongClick, label, onClick) {
         if (ticks == Ticks.START) Tick(on, enabled)
         dot?.let { Box(Modifier.size(14.dp).clip(CircleShape).background(it)) }
         Text(label, style = Type.body, color = textColor ?: if (enabled) c.fg else c.dim, maxLines = 1,
@@ -203,7 +203,7 @@ fun MenuChecks(allLabel: String, items: List<Pair<String, String>>, shown: List<
 fun MenuCheck(label: String, on: Boolean, heading: Boolean = false, onLongClick: (() -> Unit)? = null,
               dim: Boolean = false, onClick: () -> Unit) {
     val c = LocalBaude.current
-    MenuLine(true, onLongClick, onClick) {
+    MenuLine(true, onLongClick, label, onClick) {
         val box = Modifier.size(16.dp.icon).clip(RoundedCornerShape(3.dp))
         if (on) Box(box.background(c.accentBg), contentAlignment = Alignment.Center) {
             Icon(Adwaita.ObjectSelect, null, tint = c.accentFg, modifier = Modifier.size(14.dp.icon))
@@ -217,7 +217,7 @@ fun MenuCheck(label: String, on: Boolean, heading: Boolean = false, onLongClick:
 @Composable
 fun MenuRow(label: String, onClick: () -> Unit) {
     val c = LocalBaude.current
-    MenuLine(onClick = onClick) {
+    MenuLine(label = label, onClick = onClick) {
         if (LocalTicks.current == Ticks.START) Tick(false)
         Text(label, style = Type.body, color = c.fg, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
         Icon(Adwaita.GoNext, null, tint = c.fg, modifier = Modifier.size(16.dp.icon))
@@ -228,7 +228,7 @@ fun MenuRow(label: String, onClick: () -> Unit) {
 @Composable
 fun MenuBack(label: String, onClick: () -> Unit) {
     val c = LocalBaude.current
-    MenuLine(onClick = onClick) {
+    MenuLine(label = label, onClick = onClick) {
         Icon(Adwaita.GoPrevious, null, tint = c.fg, modifier = Modifier.size(16.dp.icon))
         Text(label, style = Type.bold, color = c.fg, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
     }

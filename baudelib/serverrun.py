@@ -14,7 +14,7 @@ import time
 import uuid
 
 from baudelib import (
-    access, accounts, agentproxy, autofix, deciders, deps, desktopchats, emissionlink, errorbook, emissiontools, counters, hostaccounts, hostdb, hostdocker, hostfiles, hostfixes, hostkube,
+    access, accounts, agentproxy, autofix, deciders, deps, desktopchats, emissionlink, errorbook, emissiontools, counters, funccount, hostaccounts, hostdb, hostdocker, hostfiles, hostfixes, hostkube,
     hostlogin, hostqueue, hostresume, inbox, mesh, meshtools, models, hostterminal, multiplexlink, notes, selfupdate, telemetry, themes,
     wire, wording, worktree,
 )
@@ -379,6 +379,7 @@ class ServerRunning:
                     break
                 conn.asking(msg)
                 began = time.perf_counter()
+                was = funccount.within("op", str(msg.get("op"))[:64])  # (what its handling runs: this op's, to aim)
                 try:
                     self.handle(conn, msg)
                 except worktree.Gone as e:  # (a chat's folder gone: what to do, said as it is)
@@ -390,6 +391,8 @@ class ServerRunning:
                     conn.send({"op": "error", "req": msg.get("req"), "error": str(e), "plain": True})
                 except Exception as e:  # (one bad request doesn't end the connection)
                     conn.send({"op": "error", "req": msg.get("req"), "error": f"{type(e).__name__}: {e}"})
+                finally:
+                    funccount.within(*(was or ()))
                 if msg.get("op") != "ping":  # (counted with how long its handling took here: what it answers on a
                     # thread of its own, till it's started)
                     self.telemetry.counters.add("op", str(msg.get("op"))[:64], time.perf_counter() - began)

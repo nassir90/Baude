@@ -1,37 +1,56 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
-  "description": "A function line profiling was aimed at, and the count that picked it: what took the user's time most.",
+  "description": "A function line profiling was aimed at, and the count that picked it: where the process's time went (its own time, weighted up by the slow clicks and ops it ran within).",
   "properties": {
     "function": {
       "type": "string",
-      "description": "What's profiled, by its dotted name."
-    },
-    "kind": {
-      "enum": [
-        "handler",
-        "callback",
-        "op"
-      ],
-      "description": "The count that picked it: a button's, row's or menu item's handler (handler), a main-loop callback (callback), a wire op the host answered (op)."
-    },
-    "name": {
-      "type": "string",
-      "description": "The count's name (the handler's or callback's function, the op)."
+      "description": "What's profiled, as its count names it (module:Class.method)."
     },
     "count": {
       "type": "integer",
-      "description": "Its times in the stretch it was picked from (the last day)."
+      "description": "Its runs in the stretch it was picked from (the last day)."
     },
     "seconds": {
       "type": "number",
-      "description": "Its time added up in that stretch: what it was picked by, the most first."
+      "description": "Its own time added up in that stretch (the processor time it took, less its counted callees')."
+    },
+    "within": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "enum": [
+            "part",
+            "menu",
+            "op"
+          ],
+          "description": "A click (part, menu) or a wire op the host answered (op)."
+        },
+        "name": {
+          "type": "string",
+          "description": "Its count's name (\"Composer.region/send button\", an op)."
+        },
+        "seconds": {
+          "type": "number",
+          "description": "The function's own time within it."
+        },
+        "each": {
+          "type": "number",
+          "description": "Its average time, a click's or op's: what weighted the function up."
+        }
+      },
+      "required": [
+        "kind",
+        "name",
+        "seconds",
+        "each"
+      ],
+      "additionalProperties": false,
+      "description": "The click or op it ran within that weighted it most (none: it ran within none)."
     }
   },
   "required": [
     "function",
-    "kind",
-    "name",
     "count",
     "seconds"
   ],

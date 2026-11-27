@@ -1,5 +1,5 @@
 {
-  "description": "The sessions sidebar: the left pane of Baude's main window, 250px wide at least. From top to bottom: New session with its host picker, Open folder, search with the ⋮ menu, the Inbox row, a host banner, the list of sessions in groups, and an Update bar at the foot. Click a session to switch to it, folder and all.",
+  "description": "The sessions sidebar: the left pane of Baude's main window, 250px wide at least. From top to bottom: New session with its host picker, Open folder, the Inbox row, search with the ⋮ menu, a host banner, the list of sessions in groups, and an Update bar at the foot. Click a session to switch to it, folder and all.",
   "apps": [
     "baude"
   ],
@@ -177,6 +177,48 @@
       ]
     },
     {
+      "name": "Inbox row",
+      "shows": "Right under Open folder and over the search field, drawn as New session and Open folder are: an envelope icon and \"Inbox\", then, at the row's end, how many asks are waiting on you (dim) and the yellow dot a chat waiting for you shows; with nothing waiting, neither. Tooltip \"What's waiting on you: tasks' asks and permission requests\". It counts every host's waiting asks the app may see.",
+      "copy": [
+        "inbox.title",
+        "inbox.tip"
+      ],
+      "actions": [
+        {
+          "by": "click",
+          "does": "Opens the Inbox (Inbox.page.json): a tab of the main area, or shown if it's open."
+        }
+      ],
+      "phone": {
+        "does": "The same row on home, under Open folder… and over Search sessions; tapping it opens the Inbox as a screen of its own, Back returns home",
+        "why": "One column at a time on a phone",
+        "decided": "2026-11-27"
+      },
+      "decisions": [
+        {
+          "said": "Wants an Inbox right below Search sessions, where what waits on the person is gathered.",
+          "rule": "Every app puts the Inbox row right below Search sessions, with the count of asks waiting and the waiting dot. Superseded by the next decision.",
+          "decided": "2026-11-27",
+          "source": [
+            {
+              "issue": "BaudeInternal#289"
+            }
+          ]
+        },
+        {
+          "said": "Inbox should be above search bar actually",
+          "rule": "Every app puts the Inbox row right above Search sessions (under Open folder), with the count of asks waiting and the waiting dot. This supersedes the 2026-11-27 decision above to put it below Search sessions.",
+          "decided": "2026-11-27",
+          "source": [
+            {
+              "session": "221e1c29-56d7-48bf-a2dc-7a2b37ccd685",
+              "message": "a5febe74-092c-4df7-abee-d78c80462c03"
+            }
+          ]
+        }
+      ]
+    },
+    {
       "name": "Search field",
       "shows": "A search entry under a small gap, placeholder \"Search sessions\", filling the row left of the ⋮ button.",
       "copy": [
@@ -199,37 +241,6 @@
         {
           "by": "click",
           "does": "Opens the Group by / Groups menu: see GroupByMenu.menu.json. Opening it, or the window coming to the front, looks at the network again for a host started a moment ago."
-        }
-      ]
-    },
-    {
-      "name": "Inbox row",
-      "shows": "Right under the search field, drawn as New session and Open folder are: an envelope icon and \"Inbox\", then, at the row's end, how many asks are waiting on you (dim) and the yellow dot a chat waiting for you shows; with nothing waiting, neither. Tooltip \"What's waiting on you: tasks' asks and permission requests\". It counts every host's waiting asks the app may see.",
-      "copy": [
-        "inbox.title",
-        "inbox.tip"
-      ],
-      "actions": [
-        {
-          "by": "click",
-          "does": "Opens the Inbox (Inbox.page.json): a tab of the main area, or shown if it's open."
-        }
-      ],
-      "phone": {
-        "does": "The same row on home, under Search sessions; tapping it opens the Inbox as a screen of its own, Back returns home",
-        "why": "One column at a time on a phone",
-        "decided": "2026-11-27"
-      },
-      "decisions": [
-        {
-          "said": "Wants an Inbox right below Search sessions, where what waits on the person is gathered.",
-          "rule": "Every app puts the Inbox row right below Search sessions, with the count of asks waiting and the waiting dot.",
-          "decided": "2026-11-27",
-          "source": [
-            {
-              "issue": "BaudeInternal#289"
-            }
-          ]
         }
       ]
     },

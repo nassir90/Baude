@@ -155,7 +155,7 @@ object TelemetryStore {
         val at = (row.opt("at") as? Number)?.toDouble() ?: return null
         val from = (row.opt("from") as? Number)?.toDouble() ?: return null
         val counts = row.optJSONArray("counts").list().take(2000).filter {
-            it.optString("kind") in setOf("part", "menu", "screen", "op", "callback", "subprocess") && it.optString("name").isNotEmpty()
+            it.optString("kind") in setOf("part", "menu", "screen", "op", "callback", "function", "subprocess") && it.optString("name").isNotEmpty()
                 && it.opt("count") is Number && it.opt("seconds") is Number }
         if (counts.isEmpty()) return null
         return JSONObject().put("at", at).put("from", from).put("app", app).put("counts", JSONArray(counts))

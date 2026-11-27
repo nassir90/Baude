@@ -1,4 +1,4 @@
-"""inboxview — Baude's Inbox (schema/ui/Inbox.page.json, InboxAsk.page.json): the row under Search sessions
+"""inboxview — Baude's Inbox (schema/ui/Inbox.page.json, InboxAsk.page.json): the row over Search sessions
 (InboxRow), the Inbox in a tab of the main area (InboxPage: every host's asks of a person, each a card cut a few lines
 down, then the chats waiting on a permission and those at a turn), and an ask in a tab of its own (AskPage). An ask
 (AskView) is drawn as a message is: who it's from and ⋯ (History), its Markdown with its pictures (AskMarkdown), its
@@ -821,7 +821,7 @@ class AskPage(Gtk.Box):
 
 
 class InboxRow(Gtk.Button):
-    """The Inbox row, under Search sessions: as New session and Open folder are drawn, with how many asks wait and the
+    """The Inbox row, over Search sessions: as New session and Open folder are drawn, with how many asks wait and the
     yellow dot a chat waiting for you has (neither, with none)."""
 
     def __init__(self, open_inbox):

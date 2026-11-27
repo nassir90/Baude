@@ -296,7 +296,7 @@
           ]
         },
         {
-          "said": "Making a text change at the bottom of Settings in the telemetry section jumps back to the top of the screen (paraphrased)",
+          "said": "Editing a Telemetry text field near the foot of Settings scrolls the page up to its start (paraphrased)",
           "rule": "Every app keeps Functions (and every text row on a Settings page) where it is while the page refreshes or the host answers: the row isn't taken out and put back, so it keeps its focus, its caret and what's typed, and the page stays where it's scrolled to",
           "decided": "2026-11-27",
           "source": [{"issue": "BaudeInternal#286"}]

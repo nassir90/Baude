@@ -90,6 +90,11 @@ object Inbox {
 
     fun key(host: String, id: String?) = "$host/${id.orEmpty()}"
 
+    /** Everything forgotten (the screenshot rig's, between its scenes). */
+    fun clear() {
+        asks.clear(); forms.clear(); pictures.clear(); fetching.clear(); failed.clear(); versions.clear(); shown = null
+    }
+
     private fun kept(a: Msg.InboxAsk) = a.status == "waiting" || a.status == "stopped"
 
     /** (a link listed its sessions) Its host asked for its asks, once each link; one that says no has none. */
@@ -322,7 +327,7 @@ private fun GroupHead(text: String) {
 }
 
 /** An ask in the Inbox: a card as wide as the screen with the chat's gutters, its head (title, when, the waiting dot;
- * a stopped one's "Not answered — the task stopped"), then the ask as it's opened, its body cut a few lines down. */
+ * a stopped one's title struck through), then the ask as it's opened, its body cut a few lines down. */
 @Composable
 private fun AskCard(host: String, a: Msg.InboxAsk, open: () -> Unit) {
     val c = LocalBaude.current
@@ -334,8 +339,7 @@ private fun AskCard(host: String, a: Msg.InboxAsk, open: () -> Unit) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             FadedLine(askTitle(v), Type.bold.copy(textDecoration = if (stopped) androidx.compose.ui.text.style.TextDecoration.LineThrough else null),
                 if (stopped) c.dim else c.fg, c.card, Modifier.weight(1f).clickable(onClick = open))
-            if (stopped) Text(Wording.Inbox.notAnswered, style = Type.caption, color = c.dim, maxLines = 1)
-            else {
+            if (!stopped) { // (a stopped one's "Not answered" is on its from line: the phone's too narrow for it beside the title)
                 Text(askWhen(a.at?.toDouble()), style = Type.caption, color = c.dim, maxLines = 1)
                 StatusDot("", true)
             }
@@ -463,7 +467,7 @@ private class VersionPictures(val host: String, val id: String, val version: Int
     }
 }
 
-private val CELL_MOST = 120.dp
+private val CELL_MOST = 80.dp
 private val CUT_AT = 160.dp
 
 /** An ask as it's drawn, in the Inbox's list (inList: its body cut a few lines down) and opened: who it's from and ⋮,
@@ -485,10 +489,10 @@ private fun AskView(host: String, a: Msg.InboxAsk, inList: Boolean, under: Color
     val values = Inbox.form(host, a, all.last())
     val pictures = remember(k, at, v) { VersionPictures(host, id, at + 1, v) }
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        FromRow(host, a, inList, all, at)
+        FromRow(host, a, all, at)
         val body = if (stopped) strikeFirstHeading(v.body.orEmpty()) else v.body.orEmpty()
         CompositionLocalProvider(LocalMarkdownPictures provides pictures) {
-            Cut(inList, under) { MarkdownView(body, color = if (stopped) c.dim else c.fg, under = under) }
+            Box(Modifier.alpha(if (stopped) 0.55f else 1f)) { Cut(inList, under) { MarkdownView(body, under = under) } }
         }
         if (gone) Text(Wording.Inbox.gone, style = Type.body, color = c.dim)
         a.proposal?.takeIf { live || it.status == "answering" && !stopped }?.let { Proposal(host, id, it, v) }
@@ -517,10 +521,10 @@ private fun strikeFirstHeading(md: String): String {
 }
 
 /** Who it's from: the asking Bot's picture, "from Task “<task>” on <host>" (dim, small); at its end, a stopped ask's
- * "Not answered — the task stopped" (opened; in the list its head says it) or "Sent to <Bot>", then ⋮: History (each
+ * "Not answered — the task stopped" or "Sent to <Bot>", then ⋮: History (each
  * version and when it came, the one shown ticked) and, on a stopped ask, Remove. */
 @Composable
-private fun FromRow(host: String, a: Msg.InboxAsk, inList: Boolean, all: List<Msg.InboxVersion>, at: Int) {
+private fun FromRow(host: String, a: Msg.InboxAsk, all: List<Msg.InboxVersion>, at: Int) {
     val c = LocalBaude.current
     val contact = Mesh.contact(host, a.session.orEmpty())
     LaunchedEffect(contact?.pictureKey) { contact?.let { Mesh.picture(it) } }
@@ -528,14 +532,14 @@ private fun FromRow(host: String, a: Msg.InboxAsk, inList: Boolean, all: List<Ms
     var menu by remember { mutableStateOf(false) }
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         Avatar(name, contact?.let { Mesh.pictures[it.pictureKey] }, size = 20.dp)
-        Text(Wording.Inbox.fromTask(task = a.taskName.orEmpty(), host = Mesh.label(host)), style = Type.caption, color = c.dim,
-            maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
         val end = when {
-            a.status == "stopped" && !inList -> Wording.Inbox.notAnswered
+            a.status == "stopped" -> Wording.Inbox.notAnswered
             a.sentToName != null -> Wording.Inbox.sentTo(bot = a.sentToName)
             else -> null
         }
-        end?.let { Text(it, style = Type.caption, color = c.dim, maxLines = 1) }
+        // (what's at its end follows it on the line, wrapping under it where the phone's too narrow for both)
+        Text(Wording.Inbox.fromTask(task = a.taskName.orEmpty(), host = Mesh.label(host)) + (end?.let { " · $it" } ?: ""),
+            style = Type.caption, color = c.dim, maxLines = 3, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
         Box {
             IconButton(Adwaita.ViewMore, Wording.Inbox.more, side = 28.dp) { menu = true }
             Popover(menu, { menu = false }, ticks = Ticks.END) {
@@ -668,7 +672,7 @@ private fun AskButton(host: String, id: String, version: Int, v: Msg.InboxVersio
     }
 }
 
-private val PICTURE_BUTTON = 92.dp
+private val PICTURE_BUTTON = 80.dp
 
 /** Route to…: a flat menu button; its menu "Have a model answer" (the ask's host's models, as the model picker lists
  * them) and "Send to a Bot" (that host's Bots, with their pictures). */

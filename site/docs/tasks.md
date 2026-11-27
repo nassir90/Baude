@@ -6,7 +6,9 @@ A Bot's task is a script its host runs (see [docs/tasks-design.md](../../docs/ta
 
 ## How calls are judged
 
-Every call takes `host=`: any host of the mesh, by its name or id (or a `Host` from `hosts()`); this one if none's given. Calls go over the run's own connection to its host, which names the run and its token: the host takes the connection for the run's Bot's and applies the access rules to every call as it does to the Bot's own tools (as the member that started the Bot, if one did), on this host and, through it, on every other one (where the call is from this host). A run can do nothing its Bot couldn't. What's refused raises `baudetask.Refused`, saying which rule refused it.
+Every call takes `host=`: any host of the mesh, by its name or id (or a `Host` from `hosts()`); this one if none's given. Calls go over the run's own connection to its host, which names the run and its token: the host takes the connection for the run's Bot's and applies the access rules to every call as it does to the Bot's own tools (as the member that started the Bot, if one did), on this host and, through it, on every other one (where the call is from this host). A run can do nothing its Bot couldn't through the SDK. What's refused raises `baudetask.Refused`, saying which rule refused it.
+
+Being judged as the run's Bot applies to the SDK's calls; it isn't a sandbox. A script is a process run as the host's user: it can read and write what that user can, and open the host's socket without the run's token, as the owner. So setting or running a task already needs Shell (see [docs/tasks-design.md](../../docs/tasks-design.md)).
 
 Emission and terminal calls drive the Bot's own browser profile and terminals on that host: never Emission's own window, nor another Bot's profile.
 

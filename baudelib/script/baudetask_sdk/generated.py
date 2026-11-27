@@ -1,7 +1,7 @@
 """The task-script SDK's generated half: made by baudelib/tasksdk.py from schema/types and the Bot's own tools'
 definitions (baudelib/emissiontools.py, baudelib/multiplextools.py). Don't change it here: change those, and run
 `python3 -m baudelib.tasksdk` again."""
-from .client import Area, Obj
+from .client import Area, Obj, waited
 
 
 class AccessChat(Obj):
@@ -2834,7 +2834,7 @@ class Kube(Area):
         """
         return self._call("kube", {"what": "exec", "context": context, "server": server, "namespace": namespace,
                                    "name": name, "container": container, "command": command,
-                                   "timeout": timeout}, host, KubeReply)
+                                   "timeout": timeout}, host, KubeReply, waited(timeout))
 
 
 class Docker(Area):
@@ -2941,7 +2941,7 @@ class Docker(Area):
             timeout (number): exec: seconds it may run (60 if none; 600 at most): then it's stopped.
         """
         return self._call("docker", {"what": "exec", "context": context, "page": page, "id": id, "command": command,
-                                     "timeout": timeout}, host, DockerReply)
+                                     "timeout": timeout}, host, DockerReply, waited(timeout))
 
 
 class Databases(Area):
@@ -3289,7 +3289,7 @@ class Terminal(Area):
             timeout (number):
         """
         return self._tool("multiplex", {"op": "wait", "terminal": terminal, "pattern": pattern, "quiet": quiet,
-                                        "timeout": timeout}, host)
+                                        "timeout": timeout}, host, waited(timeout))
 
     def close(self, *, terminal=None, host=None):
         """End a terminal's program (as closing its tab would) and close it. (the close_terminal tool)
@@ -3605,7 +3605,8 @@ class Ops(Area):
             timeout (number): exec: seconds it may run (60 if none; 600 at most): then it's stopped.
         """
         return self._call("docker", {"what": what, "context": context, "page": page, "id": id, "format": format,
-                                     "tail": tail, "command": command, "timeout": timeout}, host, DockerReply)
+                                     "tail": tail, "command": command,
+                                     "timeout": timeout}, host, DockerReply, waited(timeout))
 
     def docker_follow(self, *, what=None, context=None, page=None, id=None, host=None):
         """docker_follow (DockerFollow): A container's or a Compose project's log, followed (logs): one a connection,
@@ -3916,7 +3917,7 @@ class Ops(Area):
                                    "selector": selector, "namespaces": namespaces, "since": since, "fresh": fresh,
                                    "namespace": namespace, "name": name, "kind": kind, "force": force,
                                    "manifest": manifest, "container": container, "previous": previous, "tail": tail,
-                                   "command": command, "timeout": timeout}, host, KubeReply)
+                                   "command": command, "timeout": timeout}, host, KubeReply, waited(timeout))
 
     def kube_follow(self, *, what=None, context=None, server=None, page=None, crd=None, namespace=None, pod=None,
                     container=None, previous=None, host=None):

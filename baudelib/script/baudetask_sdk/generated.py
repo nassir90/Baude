@@ -1506,8 +1506,14 @@ class TelemetryDay(Obj):
     """A day's tokens, from the turns that ended in it.
 
         day (string): The day, YYYY-MM-DD, the host's time.
-        tokens (integer): Tokens read and written.
+        tokens (integer): Every token of them: input, cache writes and reads, output, and input_with_cache.
         turns (integer): Turns that ended.
+        input (integer): Input tokens sent that weren't read from a cache or written to one.
+        cache_write (integer): Input tokens written to a cache.
+        cache_read (integer): Input tokens read from a cache.
+        output (integer): Tokens written.
+        input_with_cache (integer): Input tokens of turns kept before their tokens were told apart, cache reads
+            and writes among them.
     """
 
 
@@ -1530,8 +1536,14 @@ class TelemetryEvent(Obj):
             counted once.
         model (string or None): A turn_ended's: the model it ran on.
         effort (string or None): A turn_ended's: the effort it ran at.
-        tokens_in (integer or None): A turn_ended's: the tokens it read (input, cache reads and writes).
-        tokens_out (integer or None): A turn_ended's: the tokens it wrote.
+        tokens_input (integer or None): A turn_ended's: the input tokens it sent that weren't read from a cache
+            or written to one.
+        tokens_cache_write (integer or None): A turn_ended's: the input tokens it wrote to a cache.
+        tokens_cache_read (integer or None): A turn_ended's: the input tokens it read from a cache (each call of
+            the turn's, counted each time it's read).
+        tokens_out (integer or None): A turn_ended's: the tokens it wrote (thinking among them).
+        tokens_in (integer or None): An older turn_ended's, kept before its tokens were told apart: every input
+            token, cache reads and writes among them. Events told now leave it out.
     """
 
 
@@ -1562,7 +1574,13 @@ class TelemetryModel(Obj):
         model (string): The model.
         effort (string or None): The effort (null: a model's turns at any effort).
         turns (integer): Turns that ended on it.
-        tokens (integer): Their tokens, read and written.
+        tokens (integer): Every token of theirs: input, cache writes and reads, output, and input_with_cache.
+        input (integer): Input tokens sent that weren't read from a cache or written to one.
+        cache_write (integer): Input tokens written to a cache.
+        cache_read (integer): Input tokens read from a cache.
+        output (integer): Tokens written.
+        input_with_cache (integer): Input tokens of turns kept before their tokens were told apart, cache reads
+            and writes among them.
     """
 
 

@@ -36,7 +36,10 @@ WHAT = tuple(wire.DEFS["TelemetryRead"]["properties"]["what"]["items"]["enum"])
 TEXT_MAX = 200
 _EVENT_TEXT = ("host", "session", "turn", "model", "effort")
 _EVENT_NUM = ("seconds",)
-_EVENT_INT = ("tokens_in", "tokens_out")
+TOKENS = ("tokens_input", "tokens_cache_write", "tokens_cache_read", "tokens_out")  # (a turn's, each kind apart)
+_EVENT_INT = (*TOKENS, "tokens_in")
+_KINDS = {"tokens_input": "input", "tokens_cache_write": "cache_write", "tokens_cache_read": "cache_read",
+          "tokens_out": "output", "tokens_in": "input_with_cache"}  # (an event's tokens: usage's names for them)
 
 
 def folder(state_dir):
@@ -45,6 +48,24 @@ def folder(state_dir):
 
 def _num(v):
     return isinstance(v, (int, float)) and not isinstance(v, bool)
+
+
+def tokens_of(msg):
+    """A turn's result's tokens, each kind apart (TOKENS): input not read from a cache, written to it, read from it,
+    and output. Claude Code's model_usage_since_last_result where it has it (every call since its previous result,
+    subagents' and compaction's too, each call on one result only), else its usage (the turn's main loop's calls);
+    the agents Baude runs in its place (Codex, pi, Apple, the phone's) say a turn's in usage's shape."""
+    by_model = msg.get("model_usage_since_last_result")
+    if isinstance(by_model, dict):
+        parts = [m for m in by_model.values() if isinstance(m, dict)]
+        keys = ("inputTokens", "cacheCreationInputTokens", "cacheReadInputTokens", "outputTokens")
+    else:
+        parts = [msg["usage"]] if isinstance(msg.get("usage"), dict) else []
+        keys = ("input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens", "output_tokens")
+    out = {}
+    for name, key in zip(TOKENS, keys):
+        out[name] = sum(max(0, int(p[key])) for p in parts if _num(p.get(key)))
+    return out
 
 
 def event_of(e, app):
@@ -359,15 +380,12 @@ class Telemetry:
         model, effort and tokens, whichever app (or none) sent it. What tokens are added up from (usage)."""
         if not self.on:
             return
-        u = msg.get("usage") if isinstance(msg.get("usage"), dict) else {}
         now = time.time()
         took = now - began if isinstance(began, (int, float)) and began else (
             msg["duration_ms"] / 1000 if _num(msg.get("duration_ms")) else None)
         e = event_of({"at": now, "kind": "turn_ended", "host": self.host_id, "session": session_id,
                       "seconds": took, "turn": msg.get("uuid"), "model": model, "effort": effort,
-                      "tokens_in": sum(int(u.get(k) or 0) for k in ("input_tokens", "cache_read_input_tokens",
-                                                                    "cache_creation_input_tokens")),
-                      "tokens_out": int(u.get("output_tokens") or 0)}, "host")
+                      **tokens_of(msg)}, "host")
         if e is not None:
             self._write("events", [e])
 
@@ -537,9 +555,19 @@ def tail_since(path, start, block=1 << 16):
 
 def usage(events):
     """The hosts' own turn_ended events added up (TelemetryUsage): tokens by day, by model, by model and effort, each
-    turn once (by its host, session and result's id). An app's turn_ended is the same turn seen there: not counted
-    again."""
+    turn once (by its host, session and result's id), each kind of token apart (input, cache writes, cache reads,
+    output; an event kept before they were told apart, its tokens_in as input_with_cache), tokens all of them. An
+    app's turn_ended is the same turn seen there: not counted again."""
     seen, days, models, combos = set(), {}, {}, {}
+
+    def add(table, k, e):
+        t = table.setdefault(k, {"turns": 0, "tokens": 0, **{v: 0 for v in _KINDS.values()}})
+        t["turns"] += 1
+        for field, name in _KINDS.items():
+            n = e.get(field)
+            if isinstance(n, int) and not isinstance(n, bool) and n > 0:
+                t[name] += n
+                t["tokens"] += n
     for e in events:
         if e.get("kind") != "turn_ended" or e.get("app") != "host":
             continue
@@ -547,20 +575,16 @@ def usage(events):
         if key in seen:
             continue
         seen.add(key)
-        tokens = (e.get("tokens_in") or 0) + (e.get("tokens_out") or 0)
-        day = datetime.date.fromtimestamp(e["at"]).isoformat()
-        d = days.setdefault(day, [0, 0])
-        d[0], d[1] = d[0] + tokens, d[1] + 1
+        add(days, datetime.date.fromtimestamp(e["at"]).isoformat(), e)
         if e.get("model"):
-            for table, k in ((models, (e["model"], None)), (combos, (e["model"], e.get("effort")))):
-                m = table.setdefault(k, [0, 0])
-                m[0], m[1] = m[0] + 1, m[1] + tokens
+            add(models, (e["model"], None), e)
+            add(combos, (e["model"], e.get("effort")), e)
 
     def ranked(table):
-        return [{"model": m, "effort": eff, "turns": t, "tokens": tok}
-                for (m, eff), (t, tok) in sorted(table.items(), key=lambda kv: (-kv[1][0], -kv[1][1], str(kv[0])))]
-    return {"days": [{"day": d, "tokens": t, "turns": n} for d, (t, n) in sorted(days.items())],
-            "models": ranked(models), "combos": ranked(combos)}
+        return [{"model": m, "effort": eff, **t}
+                for (m, eff), t in sorted(table.items(), key=lambda kv: (-kv[1]["turns"], -kv[1]["tokens"], str(kv[0])))]
+    return {"days": [{"day": d, **t} for d, t in sorted(days.items())], "models": ranked(models),
+            "combos": ranked(combos)}
 
 
 def chat_size(path):

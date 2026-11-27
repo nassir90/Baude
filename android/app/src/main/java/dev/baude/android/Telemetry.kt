@@ -4,6 +4,7 @@ import android.os.Handler
 import android.os.Looper
 import android.os.Process
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -30,6 +31,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
@@ -104,21 +106,21 @@ object Telemetry {
         if (!TelemetryStore.on) return
         val key = hostOf(chat.hostId) to chat.sid
         val sent = sentAt.remove(key)
-        val u = m.optJSONObject("usage") ?: JSONObject()
+        val t = TelemetryStore.tokensOf(m)
         val listed = Mesh.session(chat.hostId, chat.sid)
         event("turn_ended", key, seconds = sent?.let { (System.currentTimeMillis() - it) / 1000.0 }
             ?: m.optDouble("duration_ms", -1.0).takeIf { it >= 0 }?.let { it / 1000 },
             turn = m.optString("uuid").ifEmpty { null }, model = listed?.model, effort = listed?.effort,
-            tokensIn = u.optLong("input_tokens") + u.optLong("cache_read_input_tokens") + u.optLong("cache_creation_input_tokens"),
-            tokensOut = u.optLong("output_tokens"))
+            tokens = t)
     }
 
     private fun event(kind: String, chat: Pair<String, String>, seconds: Double? = null, turn: String? = null,
-                      model: String? = null, effort: String? = null, tokensIn: Long? = null, tokensOut: Long? = null) {
+                      model: String? = null, effort: String? = null, tokens: LongArray? = null) {
         if (chat.first.isEmpty() || chat.second.isEmpty()) return
         queue.add(Msg.TelemetryEvent(at = System.currentTimeMillis() / 1000.0, kind = kind, host = chat.first,
             session = chat.second, seconds = seconds?.let { Math.round(it * 1000) / 1000.0 }, turn = turn, model = model,
-            effort = effort, tokensIn = tokensIn, tokensOut = tokensOut))
+            effort = effort, tokensInput = tokens?.get(0), tokensCacheWrite = tokens?.get(1), tokensCacheRead = tokens?.get(2),
+            tokensOut = tokens?.get(3)))
         if (queue.size > 1000) queue.subList(0, queue.size - 1000).clear()
         if (!sending) {
             sending = true
@@ -164,13 +166,13 @@ private fun pressureSaid(s: Msg.TelemetrySample): String? =
     s.memoryPressure?.let { Wording.byKey["telemetry.pressure_$it"] ?: it }
         ?: s.memoryStall?.let { Wording.Telemetry.stalled(percent = String.format(Locale.ROOT, "%.1f", it.toDouble())) }
 
-private fun tokens(n: Long) = fmtTokens(n.coerceAtMost(Int.MAX_VALUE.toLong()).toInt())
+private fun tokens(n: Long) = fmtTokens(n)
 
 private fun effortSaid(e: String?) = e?.let { Wording.byKey["mode_effort.effort_$it"] ?: it } ?: "–"
 
 /** Each day's level in the grid, 0 to 4 (telemetryview.levels). */
 private fun levels(days: List<Msg.TelemetryDay>): Map<String, Int> {
-    val most = days.maxOfOrNull { it.tokens?.toLong() ?: 0 } ?: 0
+    val most = days.maxOfOrNull { it.tokens?.toLong() ?: 0L } ?: 0
     return days.associate { d ->
         val t = d.tokens?.toLong() ?: 0
         d.day.orEmpty() to if (t == 0L || most == 0L) 0 else minOf(4, 1 + (4 * t / (most + 1)).toInt())
@@ -195,6 +197,41 @@ private fun TokenGrid(days: List<Msg.TelemetryDay>) {
             val colour = if (l == 0) c.fg.copy(alpha = 0.08f) else c.accentBg.copy(alpha = listOf(0.25f, 0.45f, 0.7f, 1f)[l - 1])
             drawRoundRect(colour, Offset(left + i / 7 * (cell + gap), i % 7 * (cell + gap)), Size(cell, cell),
                 CornerRadius(cell / 5))
+        }
+    }
+}
+
+/** usage's tokens, each kind apart, in the order they're shown (telemetryview.KINDS): input, cache writes, cache
+ * reads, output, and older turns' input with their cache in it. */
+private fun kinds(input: Long?, cacheWrite: Long?, cacheRead: Long?, output: Long?, inputWithCache: Long?) = listOf(
+    Wording.Meta.input to (input ?: 0L), Wording.Telemetry.cacheWrite to (cacheWrite ?: 0L),
+    Wording.Telemetry.cacheRead to (cacheRead ?: 0L), Wording.Meta.output to (output ?: 0L),
+    Wording.Telemetry.inputWithCache to (inputWithCache ?: 0L))
+
+/** A row each kind of token (telemetryview.token_rows), the older turns' only where there are some. */
+private fun tokenRows(k: List<Pair<String, Long>>): List<@Composable () -> Unit> =
+    k.filterIndexed { i, (_, n) -> i < 4 || n > 0 }.map { (name, n) -> valueRow(name, tokens(n)) }
+
+/** A model's row (telemetryview.model_expander): its name, its slug on a long-press, its turns after it; tapped,
+ * opened to its tokens, a row each kind, as Adw.ExpanderRow is. */
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+private fun modelExpander(m: Msg.TelemetryModel, name: String, slug: String?): @Composable () -> Unit = {
+    val c = LocalBaude.current
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    var open by remember(m.model) { mutableStateOf(false) }
+    Column {
+        Box(Modifier.combinedClickable(onClick = { open = !open }, onLongClick = slug?.let { { showSlug(ctx, it) } })) {
+            ActionRow(name, null, suffix = {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(Wording.Telemetry.turns(turns = m.turns?.toLong() ?: 0), style = Type.body, color = c.dim, maxLines = 1)
+                    Icon(Adwaita.PanDown, null, tint = c.dim, modifier = Modifier.size(16.dp.icon).rotate(if (open) 180f else 0f))
+                }
+            })
+        }
+        if (open) for (r in tokenRows(kinds(m.input?.toLong(), m.cacheWrite?.toLong(), m.cacheRead?.toLong(),
+                m.output?.toLong(), m.inputWithCache?.toLong()))) {
+            Box(Modifier.fillMaxWidth().height(1.dp).background(c.rule))
+            r()
         }
     }
 }
@@ -284,16 +321,16 @@ fun TelemetryPage() {
             val models = models(hostId)
             fun named(v: String?) = modelName(v, models).orEmpty()
             Heading(Wording.Telemetry.tokensByDay)
-            BoxedList(listOfNotNull<@Composable () -> Unit>({ TokenGrid(u.days.orEmpty()) },
+            val days = u.days.orEmpty()
+            BoxedList(listOfNotNull<@Composable () -> Unit>({ TokenGrid(days) },
                 u.combos.orEmpty().firstOrNull()?.let { top -> valueRow(Wording.Telemetry.mostUsed,
                     Wording.Telemetry.modelEffort(model = named(top.model), effort = effortSaid(top.effort)),
-                    top.model?.let { modelSlug(it, models) }) }), "") { it() }
+                    top.model?.let { modelSlug(it, models) }) }) + tokenRows(kinds(days.sumOf { it.input?.toLong() ?: 0L },
+                days.sumOf { it.cacheWrite?.toLong() ?: 0L }, days.sumOf { it.cacheRead?.toLong() ?: 0L },
+                days.sumOf { it.output?.toLong() ?: 0L }, days.sumOf { it.inputWithCache?.toLong() ?: 0L })), "") { it() }
             if (u.models.orEmpty().isNotEmpty()) {
                 Heading(Wording.Telemetry.models)
-                BoxedList(u.models.orEmpty(), "") { m ->
-                    valueRow(named(m.model), Wording.Telemetry.turnsTokens(turns = m.turns?.toLong() ?: 0,
-                        tokens = tokens(m.tokens?.toLong() ?: 0)), m.model?.let { modelSlug(it, models) })()
-                }
+                BoxedList(u.models.orEmpty(), "") { m -> modelExpander(m, named(m.model), m.model?.let { modelSlug(it, models) })() }
             }
         }
         if (state?.on == false) BoxedList(listOf(Wording.Telemetry.off), "") { ActionRow(it, null) }

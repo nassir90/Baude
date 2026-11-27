@@ -3958,8 +3958,13 @@ A day's tokens, from the turns that ended in it.
 | Field | Type | Required | What it is |
 |---|---|---|---|
 | `day` | string | yes | The day, YYYY-MM-DD, the host's time. |
-| `tokens` | integer | yes | Tokens read and written. |
+| `tokens` | integer | yes | Every token of them: input, cache writes and reads, output, and input_with_cache. |
 | `turns` | integer | yes | Turns that ended. |
+| `input` | integer | yes | Input tokens sent that weren't read from a cache or written to one. |
+| `cache_write` | integer | yes | Input tokens written to a cache. |
+| `cache_read` | integer | yes | Input tokens read from a cache. |
+| `output` | integer | yes | Tokens written. |
+| `input_with_cache` | integer | yes | Input tokens of turns kept before their tokens were told apart, cache reads and writes among them. |
 
 #### TelemetryEvent
 
@@ -3976,8 +3981,11 @@ Something done in a chat, as an app saw it happen: kept by its machine's host as
 | `turn` | string/null |  | A turn_ended's: the id of the turn's result, so a turn two apps saw end is counted once. |
 | `model` | string/null |  | A turn_ended's: the model it ran on. |
 | `effort` | string/null |  | A turn_ended's: the effort it ran at. |
-| `tokens_in` | integer/null |  | A turn_ended's: the tokens it read (input, cache reads and writes). |
-| `tokens_out` | integer/null |  | A turn_ended's: the tokens it wrote. |
+| `tokens_input` | integer/null |  | A turn_ended's: the input tokens it sent that weren't read from a cache or written to one. |
+| `tokens_cache_write` | integer/null |  | A turn_ended's: the input tokens it wrote to a cache. |
+| `tokens_cache_read` | integer/null |  | A turn_ended's: the input tokens it read from a cache (each call of the turn's, counted each time it's read). |
+| `tokens_out` | integer/null |  | A turn_ended's: the tokens it wrote (thinking among them). |
+| `tokens_in` | integer/null |  | An older turn_ended's, kept before its tokens were told apart: every input token, cache reads and writes among them. Events told now leave it out. |
 
 #### TelemetryFront
 
@@ -4010,7 +4018,12 @@ A model's turns, or a model and effort's.
 | `model` | string | yes | The model. |
 | `effort` | string/null |  | The effort (null: a model's turns at any effort). |
 | `turns` | integer | yes | Turns that ended on it. |
-| `tokens` | integer | yes | Their tokens, read and written. |
+| `tokens` | integer | yes | Every token of theirs: input, cache writes and reads, output, and input_with_cache. |
+| `input` | integer | yes | Input tokens sent that weren't read from a cache or written to one. |
+| `cache_write` | integer | yes | Input tokens written to a cache. |
+| `cache_read` | integer | yes | Input tokens read from a cache. |
+| `output` | integer | yes | Tokens written. |
+| `input_with_cache` | integer | yes | Input tokens of turns kept before their tokens were told apart, cache reads and writes among them. |
 
 #### TelemetryProc
 
@@ -4247,6 +4260,6 @@ Somewhere wire.reach can go: this machine's host process, one listening on anoth
 | `TERMINAL_KEEP_S` | `600` | A terminal (terminal op) no connection is attached to now: its program kept running this long to be attached to again, in seconds. |
 | `TERMINAL_KEPT_BYTES` | `262144` | What a terminal (terminal op) wrote lately, kept to show again on attach: this many bytes at most. |
 | `TTL` | `16` | A tunnel's passed through at most this many hosts (open's ttl). |
-| `VERSION` | `39` | The wire's version, as a host's hello says it. |
+| `VERSION` | `40` | The wire's version, as a host's hello says it. |
 | `ZOOM_MAX` | `1568` | A browser zoom's longest side, in pixels. |
 | `ZOOM_QUALITY` | `90` | A browser zoom's JPEG quality. |

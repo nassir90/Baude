@@ -1091,7 +1091,8 @@ class WindowProc:
 
     # ---- the queue: messages written while the agent's at a turn (QueuedTurn), under the conversation, grey. A turn
     # that ends sends them all, together as one message. A queued message's ↑ sends it with every one before it at
-    # once, to the turn going on, which goes on with it (send_at_turn); its revert puts it back in the box; its ✕
+    # once, to the turn going on, which goes on with it, its subagents moved to the background, not stopped
+    # (send_at_turn); its revert puts it back in the box; its ✕
     # drops it. They're the open chat's: another chat opened, they're kept with its draft
     # (clear_transcript), sent as its turn ends meanwhile (send_left_queues) and drawn again as it's opened (take_draft)
     def queue_message(self):
@@ -1180,7 +1181,9 @@ class WindowProc:
     def send_at_turn(self, turns):
         """Queued messages given the agent at its turn, together as one message, without stopping it: claude, Codex
         and pi take it in between the turn's steps (Apple's model, once its turn's over), and the turn goes on. Drawn
-        as sent, where the chat's got to."""
+        as sent, where the chat's got to. Claude Code's commands and subagents running in the foreground are moved to
+        the background (background_tasks, as its Ctrl+B), where they go on: the step waiting on them ends, so the turn
+        takes the message in now, not once they're done."""
         turns = list(turns)
         self.unqueue(turns)
         text = "\n\n".join(t.text for t in turns if t.text)
@@ -1189,6 +1192,8 @@ class WindowProc:
         self.add(UserTurn(self, self.user_bubble(text, atts), text, said))
         self.stick_bottom, self.restore_scroll = True, None
         self.proc.user(self.user_content(text, atts), said)
+        if model_program(self.model) == "claude":
+            self.request({"subtype": "background_tasks"}, lambda _r: None)
 
     def flush_queue(self):
         """The queue sent up to queue_upto (all of it: "all"), as one message (send_text), once no turn's going."""

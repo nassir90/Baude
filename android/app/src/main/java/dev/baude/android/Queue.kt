@@ -79,7 +79,7 @@ object Queue {
     }
 
     /** The queue sent as one message when a turn ends, including interruption (up to the one ↑ was pressed on, if one was). */
-    fun flush(chat: Chat) {
+    fun flush(chat: Chat, taken: (() -> Unit)? = null) {
         val upto = chat.queueUpto ?: ALL
         chat.stopAsked = false
         chat.queueUpto = null
@@ -94,19 +94,23 @@ object Queue {
         }
         chat.queued.removeAll(turns.toSet())
         if (turns.any { it.tried }) { // (one its host may have taken: each by its own uuid, so it's taken once)
-            for (q in turns) chat.send(q.text, q.files, q.uuid)
+            for (q in turns) chat.send(q.text, q.files, q.uuid, if (q === turns.last()) taken else null)
             return
         }
         val text = turns.map { it.text }.filter { it.isNotBlank() }.joinToString("\n\n")
         val files = turns.flatMap { it.files }
-        chat.send(text, files, turns.singleOrNull()?.uuid)
+        chat.send(text, files, turns.singleOrNull()?.uuid, taken)
     }
 
     /** ↑ on a queued message: it and those before it sent together, now: to the turn going on, which takes it in and
-     * goes on (as Baude's send_at_turn), or as a turn of its own. */
+     * goes on (as Baude's send_at_turn), or as a turn of its own. Claude Code's commands and subagents running in the
+     * foreground are moved to the background once it's given it (background_tasks), where they go on, so the turn
+     * takes it in now. */
     fun sendNow(chat: Chat, q: Queued) {
         chat.queueUpto = q
-        flush(chat)
+        val claude = isWorking(chat) && program(Mesh.session(chat.hostId, chat.sid)?.model) == "claude"
+        flush(chat, if (claude) ({ control(chat.hostId, chat.sid, JSONObject().put("subtype", "background_tasks")) {} })
+            else null)
     }
 
     private val io = java.util.concurrent.Executors.newSingleThreadExecutor()

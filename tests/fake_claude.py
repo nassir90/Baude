@@ -830,6 +830,106 @@ def steps(n):
     result(done)
 
 
+def foreground_agent(n):
+    """"FOREGROUND": an Agent call run in the foreground, as claude 2.1 runs one: the turn waits on it while its
+    subagent works (FAKE_AGENT_STEPS steps, 4, each FAKE_AGENT_STEP_S seconds, 2), and a message sent meanwhile waits
+    too, taken in only once the call's returned. background_tasks moves it to the background: its call returns at
+    once (launched), the subagent goes on there and ends as a task does (task_notification), and the turn takes the
+    message in now and goes on. An interrupt stops the turn and the subagent with it, as a foreground one is stopped."""
+    tid, tool = f"fg{n}", f"toolu_fg{n}"
+    inp = {"description": "Audit each module", "subagent_type": "general-purpose",
+           "prompt": "Read each module under `baudelib/` and list the functions nothing calls."}
+    count = int(os.environ.get("FAKE_AGENT_STEPS") or 4)
+    step_s = float(os.environ.get("FAKE_AGENT_STEP_S") or 2)
+    say("I'll have a subagent audit each module.", f"pre{tid}")
+    out({"type": "assistant", "parent_tool_use_id": None, "session_id": SESSION, "message": {
+        "id": f"m{tid}", "model": "fake", "role": "assistant",
+        "content": [{"type": "tool_use", "id": tool, "name": "Agent", "input": inp}]}})
+    TASKS[tid] = {"tool_use_id": tool, "type": "local_agent", "output_file": "/dev/null",
+                  "summary": f"Audited {count} modules: **3** functions nothing calls.",
+                  "followup": "The audit's done: 3 functions nothing calls.",
+                  "usage": {"total_tokens": 30000, "tool_uses": count, "duration_ms": int(count * step_s * 1000)}}
+    keep_agent(tool, tid, "general-purpose", inp["prompt"])
+    system("task_started", task_id=tid, tool_use_id=tool, description=inp["description"],
+           subagent_type="general-purpose", task_type="local_agent", is_backgrounded=False, prompt=inp["prompt"])
+
+    def step(i):
+        part = f"{tool}_r{i}"
+        out({"type": "assistant", "parent_tool_use_id": tool, "session_id": SESSION, "message": {
+            "id": f"sub{tid}{i}", "model": "fake", "role": "assistant",
+            "content": [{"type": "tool_use", "id": part, "name": "Read", "input": {"file_path": f"baudelib/part{i}.py"}}]}})
+        out({"type": "user", "parent_tool_use_id": tool, "session_id": SESSION, "message": {"role": "user", "content": [
+            {"type": "tool_result", "tool_use_id": part, "content": f"def part{i}():\n    pass\n"}]}})
+        system("task_progress", task_id=tid, tool_use_id=tool, description=f"Reading part {i}",
+               subagent_type="general-purpose", last_tool_name="Read",
+               usage={"total_tokens": 7000 * i, "tool_uses": i, "duration_ms": int(i * step_s * 1000)})
+
+    took, moved, i = [], False, 0
+    while i < count and not moved:
+        i += 1
+        step(i)
+        end = time.time() + step_s
+        while not moved and (left := end - time.time()) > 0:
+            line = next_line(left)
+            if line is None:
+                break
+            if not line:
+                sys.exit(0)
+            record(line)
+            msg = json.loads(line)
+            if msg.get("type") == "user":  # (waits for the call to return: taken in at the turn's next step)
+                keep_queued(msg)
+                content = msg["message"]["content"]
+                took.append(content if isinstance(content, str) else " ".join(
+                    b.get("text", "") for b in content if isinstance(b, dict)))
+            elif msg.get("type") == "control_request":
+                sub = msg["request"].get("subtype")
+                control(msg)
+                if sub == "interrupt":  # (the foreground subagent stopped with the turn)
+                    TASKS.pop(tid, None)
+                    system("task_notification", task_id=tid, tool_use_id=tool, status="killed",
+                           output_file="/dev/null", summary="Stopped by the interrupt")
+                    out({"type": "user", "session_id": SESSION, "message": {"role": "user", "content": [
+                        {"type": "tool_result", "tool_use_id": tool, "is_error": True,
+                         "content": "[Request interrupted by user for tool use]"}]}})
+                    out({"type": "result", "subtype": "error_during_execution", "is_error": True,
+                         "session_id": SESSION, "total_cost_usd": 0.001, "num_turns": 1, "duration_ms": 300,
+                         "usage": {"input_tokens": 10, "output_tokens": 5}})
+                    return
+                if sub == "background_tasks" and msg["request"].get("tool_use_id") in (None, tool):
+                    moved = True
+    if moved:
+        system("task_updated", task_id=tid, patch={"is_backgrounded": True})
+        system("background_tasks_changed", tasks=[{"task_id": tid, "task_type": "local_agent"}])
+        out({"type": "user", "session_id": SESSION, "message": {"role": "user", "content": [
+            {"type": "tool_result", "tool_use_id": tool, "content": [{"type": "text", "text": launched(tid)}]}]}})
+
+        stopped = threading.Event()  # (stop_task's: the timer cancelled)
+
+        def rest():
+            for j in range(i + 1, count + 1):
+                if stopped.wait(step_s):
+                    return
+                step(j)
+            if not stopped.wait(step_s):
+                finish_task(tid)
+        TASKS[tid]["timer"] = threading.Thread(target=rest, daemon=True)
+        TASKS[tid]["timer"].cancel = stopped.set
+        TASKS[tid]["timer"].start()
+    else:
+        t = TASKS.pop(tid)
+        system("task_notification", task_id=tid, tool_use_id=tool, status="completed", output_file="/dev/null",
+               summary=t["summary"], usage=t["usage"])
+        out({"type": "user", "session_id": SESSION, "message": {"role": "user", "content": [
+            {"type": "tool_result", "tool_use_id": tool, "content": [{"type": "text", "text": t["summary"]}]}]}})
+    if took:
+        say(f"Also doing what you sent: {took[-1]}", f"took{tid}")
+    done = ("The audit goes on in the background; I'll pick it up when it ends." if moved else
+            f"The audit's done: {TASKS.get(tid, {}).get('summary') or '3 functions nothing calls.'}")
+    say(done, f"end{tid}")
+    result(done)
+
+
 def main():
     record(f"START cwd={os.getcwd()} argv={json.dumps(sys.argv[1:])}")
     fork_transcript()
@@ -887,6 +987,8 @@ def main():
                 subagent(turns, delay, "OPEN" in text)
             elif "STEPS" in text:
                 steps(turns)
+            elif "FOREGROUND" in text:
+                foreground_agent(turns)
             elif "LINGER" in text or state.get("linger"):
                 linger(turns, "LINGER" in text)
             else:

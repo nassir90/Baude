@@ -244,7 +244,7 @@ object Inbox {
 
 // ------------------------------------------------------------------------------------------------- the home row --
 
-/** Home's Inbox row (Sidebar.region.json's), right under Search sessions, drawn as New session is: the envelope and
+/** Home's Inbox row (Sidebar.region.json's), right over Search sessions, drawn as New session is: the envelope and
  * "Inbox", then how many asks are waiting on every host and the waiting dot; with none, neither. */
 @Composable
 fun InboxRow(onClick: () -> Unit) {

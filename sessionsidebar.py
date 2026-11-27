@@ -36,7 +36,7 @@ from sessionlist import (  # noqa: E402
     short_group_label, started_elsewhere,
 )
 from sidebarmenu import SidebarMenu  # noqa: E402
-from inboxview import InboxRow  # noqa: E402  (the Inbox, under Search sessions)
+from inboxview import InboxRow  # noqa: E402  (the Inbox, over Search sessions)
 from baudelib.desktopchats import group as desktop_group  # noqa: E402  (Claude Desktop's chats' group: Desktop)
 
 
@@ -126,6 +126,10 @@ class SessionSidebar(SidebarMenu, Gtk.Box):
         new_row.append(self.host_dd)
         top.append(new_row)
         top.append(self.folder_btn)
+        # (under it, over the search: the Inbox, drawn as New session is, with how many asks wait for you:
+        # inboxview.InboxRow)
+        self.inbox_row = InboxRow(lambda: self.win.open_inbox())
+        top.append(self.inbox_row)
         find_row = Gtk.Box(spacing=2, margin_top=6)
         self.search = Gtk.SearchEntry(placeholder_text=wording.say("sidebar.search"), hexpand=True)
         self.search.connect("search-changed", lambda *_: self.fill())
@@ -162,9 +166,6 @@ class SessionSidebar(SidebarMenu, Gtk.Box):
         win.connect("notify::is-active", lambda w, _p: w.is_active() and network().look())
         find_row.append(self.view_btn)
         top.append(find_row)
-        # (under it: the Inbox, drawn as New session is, with how many asks wait for you: inboxview.InboxRow)
-        self.inbox_row = InboxRow(lambda: self.win.open_inbox())
-        top.append(self.inbox_row)
         self.append(top)
         # (the host picked isn't there, or is deactivated: said over its chats, as they were last seen: show_host_state)
         self.host_note = chatparts.HostState()  # (its titles: show_host_state's markup)

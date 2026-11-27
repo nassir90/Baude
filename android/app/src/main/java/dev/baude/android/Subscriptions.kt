@@ -240,8 +240,7 @@ private fun SubscriptionCard(name: String, a: Msg.Account?, usage: HostAccounts.
  * its bar under it; else what was said instead. Till it's read, what the host last read (last) greyed (Checking… where
  * it has none). */
 @Composable
-private fun UsageBars(usage: HostAccounts.Usage?, last: List<HostAccounts.Limit>?, modifier: Modifier = Modifier,
-                      narrow: Boolean = false) { // (narrow, ⋮'s: a limit's name on one line, cut with …)
+private fun UsageBars(usage: HostAccounts.Usage?, last: List<HostAccounts.Limit>?, modifier: Modifier = Modifier) {
     val c = LocalBaude.current
     val stale = usage == null && last != null
     Column(modifier.alpha(if (stale) Tokens.Subscriptions.staleOpacity.toFloat() else 1f),
@@ -251,8 +250,7 @@ private fun UsageBars(usage: HostAccounts.Usage?, last: List<HostAccounts.Limit>
         else for (l in limits) {
             val percent = l.percent
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(limitLabel(l), style = Type.body, color = c.fg, modifier = Modifier.weight(1f),
-                    maxLines = if (narrow) 1 else Int.MAX_VALUE, overflow = TextOverflow.Ellipsis)
+                Text(limitLabel(l), style = Type.body, color = c.fg, modifier = Modifier.weight(1f))
                 if (l.name.isNotBlank()) Text(Wording.Subscriptions.usagePercent(percent = "%.4g".format(java.util.Locale.ROOT, percent)
                     .trimEnd('0').trimEnd('.')), style = Type.body, color = c.dim) // (blank: ⋮'s placeholder, its height only)
             }
@@ -282,8 +280,10 @@ fun usageAccount(chat: Pair<String, String>?): Triple<String, String, String?>? 
 /** ⋮'s usage row (subscriptionpage.MenuUsage): the subscription the chat (host, sid) runs under (usageAccount), its
  * name, then its limits as its Subscriptions card has them, read as ⋮ opens (again once USAGE_S has passed, after an
  * answer or an error); the host's last reading greyed till then; till the host's first answer, Checking… over two
- * empty limits. Always menu-usage-width wide to the menu (names cut with …), so ⋮ opens at its final width and keeps
- * it. Nothing where the host has no such subscription, its rule above it (the menu's, between sections) left out with
+ * empty limits. Always as wide to the menu as the longest limit line a host can say needs at the phone's clock and
+ * text size (menuUsageWidth; a longer name cut with …), so ⋮ opens at its final width and keeps it; where the screen's
+ * narrower than that, ⋮ is as wide as it can be and a limit's line wraps.
+ * Nothing where the host has no such subscription, its rule above it (the menu's, between sections) left out with
  * it: decided as ⋮ opens where the host's said so before; found while it's open, an empty line as wide, so ⋮ keeps its
  * width. Tapped, go: Settings → Subscriptions. */
 @Composable
@@ -306,7 +306,7 @@ fun MenuUsage(chat: Pair<String, String>?, go: () -> Unit) {
             }
         }
     }
-    val width = Tokens.Subscriptions.menuUsageWidth.value.toFloat().dp.icon
+    val width = menuUsageWidth()
     val loading = !host.loaded.value && host.error.value == null
     val id = if (loading) null else MenuUsageHosts.profile(host, provider, want)
     var drawn by remember { mutableStateOf(false) } // (shown in this opening of ⋮)
@@ -327,9 +327,30 @@ fun MenuUsage(chat: Pair<String, String>?, go: () -> Unit) {
         if (error != null) Text(error, style = Type.body, color = c.dim)
         else {
             Text(name, style = Type.bold, color = c.fg, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            if (loading) UsageBars(null, List(2) { HostAccounts.Limit("", " ", 0.0, null) }, narrow = true)
-            else UsageBars(host.usage[id], host.last.value[id], narrow = true)
+            if (loading) UsageBars(null, List(2) { HostAccounts.Limit("", " ", 0.0, null) })
+            else UsageBars(host.usage[id], host.last.value[id])
         }
+    }
+}
+
+/** ⋮'s usage row's width: room for the longest limit line a host can say at the phone's clock and text size, Weekly
+ * Limit (Resets <the longest day's name> <the widest time>) and 100%, beside the row's insets; menu-usage-width (in
+ * Baude's px, at the text size) at least. */
+@Composable
+private fun menuUsageWidth(): Dp {
+    val measure = androidx.compose.ui.text.rememberTextMeasurer()
+    val density = androidx.compose.ui.platform.LocalDensity.current
+    val h24 = android.text.format.DateFormat.is24HourFormat(LocalContext.current)
+    val start = menuTextStart()
+    return remember(measure, density, h24, start, Settings.textScale.value) {
+        val clock = java.time.format.DateTimeFormatter.ofPattern(if (h24) "HH:mm" else "h:mm a")
+        val days = java.time.DayOfWeek.values().map { it.getDisplayName(java.time.format.TextStyle.FULL, java.util.Locale.getDefault()) }
+        val times = listOf(0, 10, 12, 20, 22, 23).map { java.time.LocalTime.of(it, 59).format(clock) }
+        fun w(text: String) = measure.measure(text, Type.body).size.width
+        val line = days.maxOf { d -> times.maxOf { t -> w(Wording.Subscriptions.weeklyLimit(day = d, time = t)) } } +
+            w(Wording.Subscriptions.usagePercent(percent = "100"))
+        val need = with(density) { line.toDp() } + 8.dp + start + Popups.inset
+        maxOf(Tokens.Subscriptions.menuUsageWidth.value.toFloat().dp.text, need)
     }
 }
 

@@ -1056,7 +1056,8 @@ class ServerSessions:
         """A chat goes on under another of its host's accounts for its model's provider (profile; "": the CLI's own
         sign-in): its agent started again under it, resuming the chat, now or, mid-turn or with follow-ups waiting,
         once they're answered (switch_account). ValueError for a chat that isn't here, or an account that isn't one for
-        its model; OSError if its record can't be carried to the account (nothing's stopped then). Its model's provider."""
+        its model; OSError if its record can't be carried to the account (nothing's stopped then). The account's kept as
+        the one new chats take once the chat's on it (account_kept)."""
         with self.lock:
             s = self.sessions.get(sid) if isinstance(sid, str) else None
             program = models.model_program(s.meta.get("model")) if s is not None else None
@@ -1066,11 +1067,11 @@ class ServerSessions:
                 raise ValueError(wording.say("subscriptions.gone"))
             if profile == (s.meta.get("profiles") or {}).get(program, ""):  # (its own picked back: none waiting)
                 s.account_to, s.account_after_turn = None, False
+                self.account_kept(program, profile)
                 self.changed()
-                return program
+                return
             s.account_to = profile
         self.switch_account(s)
-        return program
 
     def switch_account(self, s):
         """(lock not held) A chat moved onto the account picked for it (account_to), once nothing's running in it nor
@@ -1106,6 +1107,7 @@ class ServerSessions:
                 s.meta.setdefault("profiles", {})[program] = to
                 s.meta["account_picked"] = True  # (not the default's as it's first written in: default_changed)
                 s.account_to, s.account_after_turn = None, False
+                self.account_kept(program, to)
                 if program == "claude":
                     accounts.use_claude_session(s.id, to)
                     if path:
@@ -1130,6 +1132,16 @@ class ServerSessions:
             except OSError:
                 pass  # (logged: the chat stays on the account it's on)
         threading.Thread(target=run, daemon=True, name="account").start()
+
+    def account_kept(self, program, profile):
+        """(lock held) A chat on program's models now on account profile (picked in its provider picker): kept as the
+        one new chats on them take (accounts.select), and the new chats not written in yet take it (default_changed);
+        an account removed meanwhile, not."""
+        try:
+            accounts.select(program, profile)
+        except ValueError:
+            return
+        self.default_changed(program, profile)
 
     def default_changed(self, provider, profile):
         """A provider's account a new chat takes picked (a chat's provider picker's: accounts.select): the new chats

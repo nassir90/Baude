@@ -175,7 +175,21 @@ abstract class Screens(private val theme: String) {
 
     @Test fun menuUsageLoading() = menuUsageScene("05n-menu-usage-loading", listing = false)
 
-    private fun menuUsageScene(name: String, listing: Boolean) {
+    // (the same at a 24-hour clock, and at text sizes 1.25 and 1.5, each loading and answered)
+    @Test fun menuUsage24h() = menuUsageScene("05o-menu-usage-24h", listing = true, h24 = true)
+
+    @Test fun menuUsageLoading24h() = menuUsageScene("05p-menu-usage-loading-24h", listing = false, h24 = true)
+
+    @Test fun menuUsageText125() = menuUsageScene("05q-menu-usage-text125", listing = true, text = 1.25f)
+
+    @Test fun menuUsageText150() = menuUsageScene("05r-menu-usage-text150", listing = true, text = 1.5f)
+
+    @Test fun menuUsageLoadingText150() = menuUsageScene("05s-menu-usage-loading-text150", listing = false, text = 1.5f)
+
+    private fun menuUsageScene(name: String, listing: Boolean, h24: Boolean = false, text: Float = 1f) {
+        android.provider.Settings.System.putString(activity.contentResolver, android.provider.Settings.System.TIME_12_24,
+            if (h24) "24" else "12")
+        dev.baude.android.Settings.textScale.value = text
         (dev.baude.android.MenuUsageHosts.javaClass.getDeclaredField("hosts").apply { isAccessible = true }
             .get(dev.baude.android.MenuUsageHosts) as MutableMap<*, *>).clear()
         dev.baude.android.MenuUsageHosts.readAt.clear()
@@ -186,7 +200,7 @@ abstract class Screens(private val theme: String) {
         tap(dev.baude.android.Wording.ChatHeader.menu)
         laidOut()
         withMenus(name)
-        java.io.File("build/screenshots/$theme/$name.width").writeText(windows().drop(1).joinToString { "${it.width}" })
+        dev.baude.android.Settings.textScale.value = 1f
     }
 
     @Test fun subscriptionsMenu() {

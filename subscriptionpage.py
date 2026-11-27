@@ -15,14 +15,14 @@ import os
 import re
 import threading
 
-from gi.repository import Adw, Gio, GLib, Gtk
+from gi.repository import Adw, Gio, GLib, Gtk, Pango
 
 from baudelib import deps, icons, tokens, wire, wording
 
 PROVIDERS = (("claude", "report.claude", "claude"), ("codex", "programs.codex", "openai"))
 USAGE_S = 30  # (how often a shown page reads its subscriptions' usage again)
 CODEX_CLI = "codex"  # (Codex's CLI's own sign-in's usage key, as its host says it: accounts.CODEX_CLI)
-MENU_USAGE_W = tokens.px("subscriptions.menu-usage-width")  # (☰'s usage row's: the menu's width from its opening)
+MENU_USAGE_W = tokens.px("subscriptions.menu-usage-width")  # (☰'s usage row's least width: MenuUsage.fit)
 STALE_OPACITY = tokens.number("subscriptions.stale-opacity")  # (a card's usage as the host last read it, till the page's own read answers)
 
 
@@ -360,15 +360,16 @@ class Page(Adw.PreferencesPage):
                      {"what": "usage", "id": profile}, done)
 
 
-def usage_lines(box, read, narrow=False):
+def usage_lines(box, read, narrow=None):
     """read (a subscription's limits [(key, name, percent, resets)], or what to say instead) drawn into box: a line for
-    each limit, its name and percentage, its bar under it (a Subscriptions card's, and ☰'s usage row's). narrow (☰'s):
-    no word asks for width (the menu's other items set it), a limit's name cut with … where it doesn't fit."""
+    each limit, its name and percentage, its bar under it (a Subscriptions card's, and ☰'s usage row's). narrow (☰'s:
+    its width in characters, MenuUsage.fit's): no word asks for more width than the row's, a limit's name cut with …
+    where it doesn't fit, what's said instead wrapped within it."""
     while (child := box.get_first_child()) is not None:
         box.remove(child)
     if not isinstance(read, list):
         box.append(Gtk.Label(label=read or wording.say("subscriptions.checking"), xalign=0, wrap=True,
-                             css_classes=["dim-label"], **({"max_width_chars": 1} if narrow else {})))
+                             css_classes=["dim-label"], **({"max_width_chars": narrow} if narrow else {})))
         return
     for key, name, percent, resets in read:
         line = Gtk.Box(spacing=8)
@@ -409,14 +410,15 @@ class MenuUsage(Gtk.Button):
     """☰'s usage row (Baude's and Record's): the subscription the chat runs under (usage_account), its name, then each
     limit's name, percentage and bar as its Subscriptions card has them, read as ☰ opens (again once USAGE_S has
     passed, after an answer or an error, or at once for another subscription); the host's last reading greyed till then,
-    else a placeholder as high as two limits. It's in ☰ as ☰ opens, MENU_USAGE_W wide whatever it shows (names cut with
-    …), so the menu opens at its final width and keeps it, even as the row goes. An answer that comes after the subscription shown has changed
+    else a placeholder as high as two limits. It's in ☰ as ☰ opens, as wide as the longest limit a host can say needs
+    at the viewer's clock and text size (fit; MENU_USAGE_W at least) whatever it shows (a longer name cut with …), so the
+    menu opens at its final width and keeps it, even as the row goes. An answer that comes after the subscription shown has changed
     (or after a newer ask) is dropped. Where the host has no such subscription its item is out of section (so no rule
     is drawn round nothing), from the next opening on before ☰ shows. A click opens Settings → Subscriptions. Holds its
     window weakly."""
 
     def __init__(self, win, popover, section):
-        super().__init__(css_classes=["flat", "baude-menu-usage"], width_request=MENU_USAGE_W)
+        super().__init__(css_classes=["flat", "baude-menu-usage"], hexpand=True)
         import weakref
         self.win = weakref.ref(win)
         self.popover, self.section = popover, section
@@ -426,6 +428,7 @@ class MenuUsage(Gtk.Button):
         inside.append(self.name)
         inside.append(self.bars)
         self.set_child(inside)
+        self.inside, self.chars = inside, 1
         self.read_at, self.target, self.ticket, self.profile, self.none_for = 0.0, None, 0, None, None
         self.connect("clicked", MenuUsage._clicked, popover)
         popover.connect("show", lambda *_: self.refresh())
@@ -460,23 +463,48 @@ class MenuUsage(Gtk.Button):
         if win is None:
             return
         target = usage_account(win)
-        if target == self.target and time.monotonic() - self.read_at < USAGE_S:
-            return
         if target != self.target:
             self.target, self.profile, self.read_at = target, None, 0.0
             self.placeholder()
         if target != self.none_for:  # (in ☰ as it opens: not added once it's open, widening or moving it)
             self.shown(True)
+            self.fit()
+        if time.monotonic() - self.read_at < USAGE_S:
+            return
         self.ticket += 1
         ticket = self.ticket
         self.read_at = time.monotonic()  # (asked: not again till USAGE_S has passed, whatever it answers)
         Ask(target[0], {"what": "list"}, lambda reply: self.listed(ticket, target, reply))
 
+    def fit(self):
+        """Its width (as it's in ☰, at the viewer's text size), for good: room for the longest limit line a host can
+        say at the viewer's clock, Weekly Limit (Resets <the longest day's name> <the widest time>) and 100%, as
+        usage_lines draws it, beside its padding; MENU_USAGE_W at least."""
+        clock = "%H:%M" if clock_24h() else "%-I:%M %p"
+        days = [GLib.DateTime.new_local(2026, 11, 23 + i, 12, 0, 0).format("%A") for i in range(7)]
+        times = [GLib.DateTime.new_local(2026, 11, 23, h, 59, 0).format(clock) for h in (0, 10, 12, 20, 22, 23)]
+        probe = Gtk.Label()
+        longest = max((wording.say("subscriptions.weekly_limit", day=d, time=t) for d in days for t in times),
+                      key=lambda text: (probe.set_label(text), probe.measure(Gtk.Orientation.HORIZONTAL, -1)[1])[1])
+        line = Gtk.Box(spacing=8)  # (a line as usage_lines draws it, its name on one line)
+        line.append(Gtk.Label(label=longest))
+        line.append(Gtk.Label(label=wording.say("subscriptions.usage_percent", percent="100"),
+                              css_classes=["dim-label", "numeric"]))
+        self.set_size_request(-1, -1)
+        pad = self.measure(Gtk.Orientation.HORIZONTAL, -1)[1] - self.inside.measure(Gtk.Orientation.HORIZONTAL, -1)[1]
+        text = max(MENU_USAGE_W - pad, line.measure(Gtk.Orientation.HORIZONTAL, -1)[1])
+        self.set_size_request(pad + text, -1)
+        probe.set_label("")
+        probe.add_css_class("dim-label")
+        metrics = probe.get_pango_context().get_metrics(None, None)  # (as a label counts its characters)
+        char = max(metrics.get_approximate_char_width(), metrics.get_approximate_digit_width()) / Pango.SCALE
+        self.chars = max(1, int(text / char))  # (what's said in its place wraps within it: usage_lines)
+
     def placeholder(self):
         """Till the first answer: Checking… over two empty limits, as high as two limits are."""
         self.name.set_label(wording.say("subscriptions.checking"))
         self.name.set_visible(True)
-        usage_lines(self.bars, [("", " ", 0, None)] * 2, narrow=True)
+        usage_lines(self.bars, [("", " ", 0, None)] * 2, narrow=self.chars)
         for child in list(_children(self.bars)):
             if isinstance(child, Gtk.Box):
                 for label in _children(child):
@@ -535,7 +563,7 @@ class MenuUsage(Gtk.Button):
 
     def show_read(self, limits, said, stale=False):
         self.bars.set_opacity(STALE_OPACITY if stale else 1)
-        usage_lines(self.bars, limits if limits is not None else said, narrow=True)
+        usage_lines(self.bars, limits if limits is not None else said, narrow=self.chars)
         self.name.set_visible(bool(self.name.get_label()))
         self.shown(True)
 

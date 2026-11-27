@@ -1,8 +1,8 @@
 """hostaccounts — this host's Claude and Codex subscription accounts (accounts), changed for a head anywhere in the
 mesh (Settings → Subscriptions in Baude, Record and the phone, and a chat's Sign in card): listed (list), added
 (add: a Claude token, or an existing signed-in Claude folder or CODEX_HOME), renamed (rename), removed (remove), a
-token account's token replaced (token), a chat moved onto another (use: kept as the one a new chat on its provider's
-models takes, accounts.selected), a subscription's usage read (usage), and a sign-in run here (sign_in): `claude auth login` with a Claude account's own folder, each line it
+token account's token replaced (token), a chat moved onto another (use: once it's on it, kept as the one a new
+chat on its provider's models takes, accounts.selected), a subscription's usage read (usage), and a sign-in run here (sign_in): `claude auth login` with a Claude account's own folder, each line it
 writes carried back as it's written (the page to open among them), a code pasted on the head passed to it (code),
 or Codex's login with its CODEX_HOME (the browser's, the address the head's browser ended on passed to it: callback;
 or the device code's), said as its state (login: the page to open, and the device code's code to enter there, once
@@ -82,9 +82,7 @@ def answer(server, conn, msg, reply):
             accounts.remove(profile, claude_cli(server))
             return done()
         if what == "use":
-            program = server.use_account(msg.get("session"), profile)
-            accounts.select(program, profile)
-            server.default_changed(program, profile)
+            server.use_account(msg.get("session"), profile)
             return done()
         if what == "usage":
             threading.Thread(target=_usage, args=(server, profile, provider or "claude", done), daemon=True,

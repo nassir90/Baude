@@ -98,9 +98,8 @@ def defaults():
 
 
 def selected(provider):
-    """The account a new chat on provider's models takes here: the one a chat's provider picker last picked for it (one
-    kept from when Settings → Subscriptions picked it, as it was), else the CLI's own sign-in (""), as an account
-    removed since leaves it."""
+    """The account a new chat on provider's models takes here: the one select last kept (a chat's provider picker's
+    pick), else the CLI's own sign-in ("")."""
     if not _path().exists():
         return ""
     with database() as db:

@@ -70,8 +70,8 @@
           ]
         },
         {
-          "said": "(BaudeInternal#278, paraphrased) Current Subscription doesn't make sense once there's the provider override (a chat's provider picker): get rid of that field",
-          "rule": "No app's Subscriptions page has a Current Subscription row or any other pick of a default subscription: a chat's provider picker is the one place a subscription is chosen. A new chat on a host takes the subscription a chat's provider picker last picked there for its model's provider (a Current Subscription picked before is kept as that pick), else the CLI's own sign-in, as one removed leaves it",
+          "said": "(BaudeInternal#278, paraphrased) a host-wide default subscription is redundant now that each chat picks its own in its provider picker; take the setting out",
+          "rule": "No app's Subscriptions page has a Current Subscription row or any other pick of a default subscription: a chat's provider picker is the one place a subscription is chosen. A new chat on a host takes the subscription a chat's provider picker last picked there for its model's provider, else the CLI's own sign-in (also once that account is removed)",
           "decided": "2026-11-27",
           "source": [
             {
@@ -490,7 +490,7 @@
         "record",
         "phone"
       ],
-      "why": "The owner (BaudeInternal#278, paraphrased): Current Subscription doesn't make sense once there's the provider override; get rid of that field. A chat's provider picker chooses its subscription, and new chats take its last pick",
+      "why": "The owner (BaudeInternal#278, paraphrased): a host-wide default subscription is redundant now that each chat picks its own in its provider picker. New chats take the picker's last pick",
       "decided": "2026-11-27",
       "source": [
         {

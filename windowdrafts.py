@@ -1254,13 +1254,7 @@ class WindowDrafts:
         name = next((a["name"] for a in self.host_accounts() if a["id"] == profile), None) or \
             wording.say("subscriptions.cli_default")
         if self.remote is None:  # (a Claude Desktop chat's own claude, here: started again under it, resuming it,
-            self.account_to = profile  # once its turn's over; the one a new chat here takes, as a host's use keeps it)
-            import sqlite3
-            from baudelib import accounts
-            try:
-                accounts.select("claude", profile)
-            except (OSError, ValueError, sqlite3.Error):
-                pass
+            self.account_to = profile  # once its turn's over)
             if getattr(self, "busy", False) and self.proc is not None:
                 self.restart_after_turn = True
                 self.note(wording.say("subscriptions.account_note", name=name))
@@ -1285,8 +1279,8 @@ class WindowDrafts:
     def take_account(self):
         """A Claude Desktop chat run here moved onto the account picked for it (account_to), with no claude running
         in it: its transcript carried to that account's projects folder where it isn't the one it's in
-        (accounts.carry_chat), and the account kept as its own. Whether it was (a copy that fails: said, the chat left
-        on the one it's on)."""
+        (accounts.carry_chat), and the account kept as its own and as the one a new chat here takes. Whether it was (a
+        copy that fails: said, the chat left on the one it's on)."""
         profile, self.account_to = getattr(self, "account_to", None), None
         if profile is None or not self.session_id:
             return False
@@ -1295,6 +1289,7 @@ class WindowDrafts:
             accounts.carry_chat("claude", self.session_id, transcripts.session_file(self.session_id),
                                 accounts.claude_session_profile(self.session_id), profile)
             accounts.use_claude_session(self.session_id, profile)
+            accounts.select("claude", profile)  # (as a host's use keeps it: its drafts take it as they're written in)
         except (OSError, ValueError) as e:
             self.note(str(e))
             return False

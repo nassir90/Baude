@@ -97,7 +97,7 @@
           ]
         },
         {
-          "said": "(BaudeInternal#278, paraphrased) Current Subscription doesn't make sense once there's the provider override (a chat's provider picker): get rid of that field",
+          "said": "(BaudeInternal#278, paraphrased) a host-wide default subscription is redundant now that each chat picks its own in its provider picker; take the setting out",
           "rule": "Every app's chat provider picker is the one place a subscription is chosen: a pick is the chat's, and the one new chats on its host for that provider take, till another chat's picker picks another",
           "decided": "2026-11-27",
           "source": [

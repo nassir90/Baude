@@ -9,6 +9,7 @@ import time
 
 import macos  # noqa: E402  (no GTK: before it's loaded)
 from gi.repository import GLib  # noqa: E402
+from baudelib.emissionlink import blocks_tracking  # noqa: E402
 from emissioncore import AGENT, CONSOLE_JS, download_path, failure_page, for_bots, objc_sel, once  # noqa: E402
 from emissionpointer import (  # noqa: E402
     ARROW_EDGE, ARROW_SHADOW, GLOW_REACH, HINT_EDGE, RING_EDGE, arrow_at, chevrons, glow_pixels, hint_at,
@@ -119,7 +120,45 @@ class MacWeb:
         if not cls.loaded:
             ctypes.cdll.LoadLibrary("/System/Library/Frameworks/WebKit.framework/WebKit")
             ctypes.cdll.LoadLibrary("/System/Library/Frameworks/Foundation.framework/Foundation")
+            cls.allow_http()
             cls.loaded = True
+
+    @staticmethod
+    def allow_http():
+        """Plain http opens as in any browser (a dev server on app.localhost, a box on the LAN, any address typed):
+        App Transport Security, which WebKit's network process takes from this process's bundle (Python's, which
+        says nothing of it), is told in memory, before WebKit's first asked, that a web view's loads are anyone's
+        (NSAllowsArbitraryLoadsInWebContent: what's meant for a browser; local networking alone leaves *.localhost
+        out)."""
+        send = macos.objc_send
+        ats = send(b"NSDictionary", b"dictionaryWithObject:forKey:",
+                   send(b"NSNumber", b"numberWithBool:", True, types=(ctypes.c_bool,)),
+                   macos.ns_string("NSAllowsArbitraryLoadsInWebContent"), types=(ctypes.c_void_p, ctypes.c_void_p))
+        if info := send(send(b"NSBundle", b"mainBundle"), b"infoDictionary"):
+            send(info, b"setObject:forKey:", ats, macos.ns_string("NSAppTransportSecurity"),
+                 types=(ctypes.c_void_p, ctypes.c_void_p))
+
+    @classmethod
+    def block_tracking(cls, profile, on):
+        """profile's pages from now on blocking cross-site cookies and storage (on), or not (Emission's setting)."""
+        cls.load_kit()
+        send = macos.objc_send
+        nsuuid = send(send(b"NSUUID", b"alloc"), b"initWithUUIDString:", macos.ns_string(profile),
+                      types=(ctypes.c_void_p,))
+        store = send(b"WKWebsiteDataStore", b"dataStoreForIdentifier:", nsuuid, types=(ctypes.c_void_p,))
+        send(nsuuid, b"release")
+        if store:
+            cls.cross_site(store, not on)
+
+    @staticmethod
+    def cross_site(store, allowed):
+        """store's cookies and storage under another site's page (an app's preview on another host signing in, an
+        embedded sign-in) kept as a browser without tracking prevention keeps them (allowed), or blocked as Safari
+        blocks them."""
+        send = macos.objc_send
+        sel = b"_setResourceLoadStatisticsEnabled:"
+        if send(store, b"respondsToSelector:", objc_sel(sel), types=(ctypes.c_void_p,), ret=ctypes.c_bool):
+            send(store, sel, not allowed, types=(ctypes.c_bool,))
 
     @classmethod
     def make_delegate(cls):
@@ -348,6 +387,7 @@ class MacWeb:
             send(nsuuid, b"release")
             if not store:
                 raise RuntimeError("WebKit gave no store for this profile")
+            self.cross_site(store, not blocks_tracking(profile))
             send(config, b"setWebsiteDataStore:", store, types=(ctypes.c_void_p,))
             send(config, b"setApplicationNameForUserAgent:", macos.ns_string(self.user_agent()),
                  types=(ctypes.c_void_p,))
@@ -694,8 +734,9 @@ class MacWeb:
                 return
             self.overlay = MacOverlay(self.view)
         accent = getattr(self.window, "accent", None) or (0.21, 0.52, 0.89)
-        if not pointer.busy() and self.overlay.drawn is not None and self.overlay.rgb == accent:
-            return  # (nothing's moved, and the accent's as it was drawn in)
+        if not pointer.busy() and self.overlay.drawn is not None and self.overlay.rgb == accent and \
+                self.overlay.drawn[2:] == self.overlay.size():
+            return  # (nothing's moved, the accent's as it was drawn in, and the page's the size it was drawn at)
         look = pointer.look()
         self.overlay.draw(look, accent, mine=look["tab"] in (None, self.tab_id))
 
@@ -1260,12 +1301,17 @@ class MacOverlay:
         send(self.arrow, b"setShadowOffset:", MacPoint(*ARROW_SHADOW), types=(MacPoint,))
         self.drawn = None
 
+    def size(self):
+        """Its width and height now (the page's: it's resized with it)."""
+        box = macos.objc_send(self.view, b"bounds", ret=macos._rect())
+        return box.w, box.h
+
     def draw(self, look, rgb, mine=True):
         """look (BotPointer's) drawn now; mine False: the pointer's in another tab (only the glow drawn here)."""
         send, R = macos.objc_send, macos._rect()
         self.colours(rgb)
         box = send(self.view, b"bounds", ret=R)
-        key = (repr(look), mine, box.w, box.h)
+        key = (repr(look), mine, box.w, box.h)  # (its last two: size()'s)
         if key == self.drawn:
             return
         self.drawn = key

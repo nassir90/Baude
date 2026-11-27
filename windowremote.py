@@ -1287,8 +1287,8 @@ class WindowRemote:
         """A turn's over (its result; or stopped here, stop_stuck: proc, the claude it ran in): the chat not busy, and
         what waited for its end done."""
         proc = self.proc if proc is None else proc
-        if self.queued and self.send_after_result is None and self.queue_upto is None:
-            self.queue_upto = "all"
+        if any(not t.hosted for t in self.queued) and self.send_after_result is None and self.queue_upto is None:
+            self.queue_upto = "all"  # (its host's queue its host sends: hostqueue)
         self.set_busy(False)
         self.login_asked, self.turn_sent = False, None  # (login_prompt's, send_text's: the next turn's own)
         self.keep_chat_model()

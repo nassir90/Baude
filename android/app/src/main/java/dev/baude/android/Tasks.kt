@@ -111,7 +111,7 @@ private fun kindWord(kind: String?) = when (kind) {
 private fun kindIcon(kind: String?) = when (kind) {
     "schedule" -> Adwaita.Alarm
     "git_push" -> Adwaita.MediaPlaylistShuffle
-    else -> Adwaita.MediaPlaybackStart
+    else -> null
 }
 
 /** A trigger's payload's keys (what fills an input). */
@@ -423,7 +423,7 @@ private fun TaskView(t: Msg.Task, runs: List<Msg.TaskRun>, offset: Int, back: ()
             GroupHeading(Wording.Tasks.triggers) { IconButton(Adwaita.ListAdd, Wording.Tasks.addTrigger, onClick = addTrigger) }
             BoxedList(t.triggers.orEmpty(), Wording.Tasks.byHand) { tr ->
                 ActionRow(triggerText(tr), null, compact = true, prefix = {
-                    Icon(kindIcon(tr.kind), kindWord(tr.kind), tint = c.fg, modifier = Modifier.size(16.dp.icon))
+                    kindIcon(tr.kind)?.let { Icon(it, kindWord(tr.kind), tint = c.fg, modifier = Modifier.size(16.dp.icon)) }
                 }, suffix = {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         tr.error?.ifBlank { null }?.let { e ->
@@ -446,7 +446,7 @@ private fun TaskView(t: Msg.Task, runs: List<Msg.TaskRun>, offset: Int, back: ()
                 val title = hostWhen(r.started?.toDouble(), r.offset?.toInt() ?: offset, short = true)
                 ActionRow(title, null, onClick = { openRun(r) }, compact = true, prefix = { RunState(r.status) }, suffix = {
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Icon(kindIcon(r.kind), kindWord(r.kind), tint = c.dim, modifier = Modifier.size(16.dp.icon))
+                        kindIcon(r.kind)?.let { Icon(it, kindWord(r.kind), tint = c.dim, modifier = Modifier.size(16.dp.icon)) }
                         r.version?.let { Text(it, style = Type.mono, color = c.dim) }
                     }
                 })

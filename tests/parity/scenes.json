@@ -62,6 +62,7 @@
     {"name": "chat-signal-links", "what": "A reply's names drawn as Signal links", "lines": 10, "signal": "signal.json", "inventory": ["Reply.element", "SignalLink.menu"]},
     {"name": "chat-signal-popover", "what": "A tap on a name not found: its popover", "signal": "signal.json", "ref": "bench_drop", "inventory": ["SignalLink.menu"]},
     {"name": "chat-signal-menu", "what": "The header's Signal popover open", "signal_menu": true, "inventory": ["SignalMenu.menu", "HeaderBar.region"]},
+    {"name": "chat-bash-running", "what": "A command running at a turn, its Background shown", "lines": 2, "state": "working", "inventory": ["ToolCall.element"]},
     {"name": "chat-queued", "what": "A turn running, a message written meanwhile queued under the chat, its buttons shown", "lines": 3, "state": "working", "queued": "Also check the bench", "inventory": ["QueuedTurn.element", "Composer.region"]},
     {"name": "chat-queued-list", "what": "A queued message ending in a list, its buttons shown beside it", "lines": 3, "state": "working", "queued": "Also:\n\n- check the bench\n- rerun the flaky test", "inventory": ["QueuedTurn.element"]},
     {"name": "chat-host-down", "what": "The chat's host can't be reached: the banner, something written in the box, send off", "down": true, "draft": "Does the bench need it too?", "inventory": ["Banners.region", "Composer.region"]},

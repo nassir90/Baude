@@ -41,7 +41,7 @@ private val processStates = java.util.WeakHashMap<Chat, ProcessesState>()
 
 fun processesState(chat: Chat): ProcessesState = processStates.getOrPut(chat) { ProcessesState() }
 
-private val STARTED = Regex("""Command running in background with ID: (\S+?)\.?\s+Output is being written to: (\S+)""")
+private val STARTED = Regex("""Command (?:running in background|was manually backgrounded by user) with ID: (\S+?)\.?\s+Output is being written to: (\S+)""")
 private val AGENT_ID = Regex("""agentId: (\w+)""")
 
 /** The background tasks a transcript's result and task lines tell of (task_from_result, task_from_note): one the
@@ -183,6 +183,19 @@ private fun stop(chat: Chat, t: JSONObject) {
     val id = t.optString("task_id")
     control(chat.hostId, chat.sid, JSONObject().put("subtype", "stop_task").put("task_id", id)) {}
     chat.lines.add(Line("note", Wording.SidePanel.stopRequested(task = t.optString("description").ifBlank { id })))
+}
+
+/** A card's Background (send_to_background): its command or subagent moved to the background (Claude Code's
+ * background_tasks, by its call), where it goes on; the turn goes on, so what's sent at it reaches the agent. Said in
+ * the chat if it can't be. */
+fun moveToBackground(chat: Chat, call: Call) {
+    call.moving = true
+    controlAnswer(chat.hostId, chat.sid, JSONObject().put("subtype", "background_tasks").put("tool_use_id", call.id)) { r, why ->
+        if (why == null && r?.optBoolean("backgrounded", true) != false) return@controlAnswer
+        call.moving = false
+        chat.lines.add(Line("note", if (why != null) Wording.ToolCalls.notMovedWhy(why = why)
+            else Wording.ToolCalls.notMoved(what = toolTitle(call.name))))
+    }
 }
 
 /** A process's title over its line (its kind, what it's used), as a row and the page's header have them. */

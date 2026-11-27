@@ -63,7 +63,7 @@ object Telemetry {
             look()
         }
 
-    private fun hostOf(id: String) = if (id == "phone") PhoneHost.id else id
+    private fun hostOf(id: String) = Mesh.hostIdOf(id) ?: id // (a connection's: the id of the host it's to)
 
     /** The chat on screen now, and the one in front: told if they've changed. */
     private fun look() {

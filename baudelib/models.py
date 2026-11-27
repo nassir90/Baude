@@ -462,15 +462,17 @@ def pi_exe():
 # Manual only). effort: whether it takes --effort. first: how a new conversation is given its id (claude's --session-id;
 # apple-claude and pi-claude take the id they report from --resume). resumes: whether a later run carries the
 # conversation on (apple-claude remembers nothing). transcript: whether it keeps a Claude Code transcript of it (only
-# claude: the others' are kept for them where they're needed, as the headless server does)
+# claude: the others' are kept for them where they're needed, as the headless server does). steers: whether a message
+# sent at a turn is taken into it as it goes on (apple-claude's model answers in one call: it takes it after)
 PROGRAMS = {
     "codex": {"exe": "codex_exe", "modes": True, "effort": True, "first": None, "resumes": True,
-              "transcript": False},
+              "transcript": False, "steers": True},
     "claude": {"exe": None, "modes": True, "effort": True, "first": "--session-id", "resumes": True,
-               "transcript": True},
+               "transcript": True, "steers": True},
     "apple": {"exe": "apple_exe", "modes": False, "effort": False, "first": "--resume", "resumes": False,
-              "transcript": False},
-    "pi": {"exe": "pi_exe", "modes": False, "effort": True, "first": "--resume", "resumes": True, "transcript": False},
+              "transcript": False, "steers": False},
+    "pi": {"exe": "pi_exe", "modes": False, "effort": True, "first": "--resume", "resumes": True, "transcript": False,
+           "steers": True},
 }
 
 

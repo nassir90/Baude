@@ -244,6 +244,7 @@ class Telemetry:
         self.dir, self.host_id, self.changed, self.log, self.found = folder(state_dir), host_id, changed, log, found
         self.lock, self.wake = threading.Lock(), threading.Event()
         self.pids = {os.getpid(): "host"}  # (the processes sampled: the host's, and each app's that's told it)
+        self.fronts = {}  # (an app's process: the chat in front in it, (host, session), as its last chat_front said)
         self.cpu = {}  # (pid: (when, CPU seconds), the sample before's)
         self.errors = {}  # (an app's profiling error, as it last said)
         self.pruned = None  # (the day files were last pruned)
@@ -293,6 +294,8 @@ class Telemetry:
             else:
                 self.wake.set()
                 self.cpu.clear()
+                with self.lock:
+                    self.fronts.clear()
         app = msg.get("app")
         if app in PROFILED and isinstance(msg.get("functions"), list):
             self.profile[app] = [f.strip() for f in msg["functions"] if isinstance(f, str) and f.strip()]
@@ -326,6 +329,8 @@ class Telemetry:
         events = [e for e in (event_of(x, app) for x in (msg.get("events") or [])[:EVENTS_MAX]) if e]
         if events:
             self._write("events", events)
+            if isinstance(msg.get("pid"), int) and self._front(msg["pid"], events):
+                self.changed()
         if app in PROFILED and (p := profile_of(msg.get("profile"), app)) is not None:
             self._write("profiles", [p])
 
@@ -345,6 +350,22 @@ class Telemetry:
                       "tokens_out": int(u.get("output_tokens") or 0)}, "host")
         if e is not None:
             self._write("events", [e])
+
+    def _front(self, pid, events):
+        """An app's chat in front followed through its events: whether what's in front here changed."""
+        with self.lock:
+            before = self.fronts.get(pid)
+            for e in events:
+                if e["kind"] == "chat_front":
+                    self.fronts[pid] = (e["host"], e["session"])
+                elif e["kind"] == "chat_left" and self.fronts.get(pid) == (e["host"], e["session"]):
+                    self.fronts.pop(pid)
+            return self.fronts.get(pid) != before
+
+    def front(self):
+        """The chats in front on this machine now (Info's front, a TelemetryFront each): what no head notifies of."""
+        with self.lock:
+            return [{"host": h, "session": s} for h, s in sorted(set(self.fronts.values()))]
 
     def _write(self, kind, rows):
         by_day = {}
@@ -400,7 +421,10 @@ class Telemetry:
                 if app != "host":
                     with self.lock:
                         self.pids.pop(pid, None)
+                        gone = self.fronts.pop(pid, None)  # (an app gone without saying: its chat no longer in front)
                     self.cpu.pop(pid, None)
+                    if gone is not None:
+                        self.changed()
                 continue
             cpu_s, rss = stats[pid]
             before = self.cpu.get(pid)

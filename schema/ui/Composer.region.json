@@ -272,7 +272,7 @@
         },
         {
           "by": "click ↑",
-          "does": "Stops the turn, then sends this message and every one queued before it together as one message (tooltip \"Send now: interrupt the chat, then send this and the queued messages before it\")"
+          "does": "Sends this message and every one queued before it together as one message, to the turn going on, which goes on (tooltip \"Send now: send this and the queued messages before it, without stopping the chat\")"
         },
         {
           "by": "click revert (circular arrow)",

@@ -272,7 +272,7 @@
         },
         {
           "by": "click ↑",
-          "does": "Sends this message and every one queued before it together as one message, to the turn going on, which goes on (tooltip \"Send now: send this and the queued messages before it, without stopping the chat\")"
+          "does": "Sends this message and every one queued before it together as one message, to the turn going on, which goes on, its foreground commands and subagents moved to the background in a Claude Code chat so it takes the message in now (tooltip \"Send now: send this and the queued messages before it, without stopping the chat\")"
         },
         {
           "by": "click revert (circular arrow)",

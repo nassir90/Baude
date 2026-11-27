@@ -185,15 +185,25 @@ private fun stop(chat: Chat, t: JSONObject) {
     chat.lines.add(Line("note", Wording.SidePanel.stopRequested(task = t.optString("description").ifBlank { id })))
 }
 
+/** Send now's (Baude's move_foreground): each command and subagent of the turn's own running in the foreground moved to
+ * the background, where it goes on (background_tasks by its call, as moveToBackground, unsaid if it can't be), their
+ * cards' Background hidden meanwhile; the step the turn waits on ends, so it takes in what was sent now. A call waiting
+ * on a permission is left as it is (a subagent's own calls aren't in the chat's calls). */
+fun moveForeground(chat: Chat) {
+    val asked = chat.asks.mapNotNull { it.toolUseId }.toSet()
+    chat.calls.byId.values.filter { it.base in BACKGROUNDABLE && it.state == "running" && !it.moving && it.id !in asked }
+        .forEach { moveToBackground(chat, it, said = false) }
+}
+
 /** A card's Background (send_to_background): its command or subagent moved to the background (Claude Code's
  * background_tasks, by its call), where it goes on; the turn goes on, so what's sent at it reaches the agent. Said in
- * the chat if it can't be. */
-fun moveToBackground(chat: Chat, call: Call) {
+ * the chat if it can't be (said). */
+fun moveToBackground(chat: Chat, call: Call, said: Boolean = true) {
     call.moving = true
     controlAnswer(chat.hostId, chat.sid, JSONObject().put("subtype", "background_tasks").put("tool_use_id", call.id)) { r, why ->
         if (why == null && r?.optBoolean("backgrounded", true) != false) return@controlAnswer
         call.moving = false
-        chat.lines.add(Line("note", if (why != null) Wording.ToolCalls.notMovedWhy(why = why)
+        if (said) chat.lines.add(Line("note", if (why != null) Wording.ToolCalls.notMovedWhy(why = why)
             else Wording.ToolCalls.notMoved(what = toolTitle(call.name))))
     }
 }

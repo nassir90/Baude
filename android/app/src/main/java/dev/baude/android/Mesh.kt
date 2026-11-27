@@ -143,8 +143,8 @@ class Chat(hostId: String, sid: String) {
     var sender: ((String, List<Picked>) -> Unit)? = null // (one that's sent its own way: Meta's)
     val chrome = Chrome() // (what its status bar, banner and stop button keep)
 
-    fun send(text: String, files: List<Picked>, uuid: String? = null) =
-        sender?.invoke(text, files) ?: Mesh.send(this, text, files, uuid = uuid)
+    fun send(text: String, files: List<Picked>, uuid: String? = null, taken: (() -> Unit)? = null) =
+        sender?.invoke(text, files) ?: Mesh.send(this, text, files, uuid = uuid, taken = taken)
 }
 
 /** The mesh as this app has it: your hosts, a connection to each, their Bots, the chat open, notifications as a Bot
@@ -1419,9 +1419,10 @@ object Mesh {
 
     /** What you wrote (and the files you chose) sent to the chat at once, as Baude sends it: a user message for its
      * agent, drawn as yours meanwhile (Outgoing). If its host says no, it's taken out and put back in the box, and why
-     * said. uuid: the one it's sent by, if it was sent before (a queued message its host may not have taken). */
+     * said. uuid: the one it's sent by, if it was sent before (a queued message its host may not have taken). taken:
+     * once its host has given it its agent. */
     fun send(chat: Chat, text: String, files: List<Picked>, keep: Boolean = true, uuid: String? = null,
-             failed: (() -> Unit)? = null) {
+             failed: (() -> Unit)? = null, taken: (() -> Unit)? = null) {
         val c = conns[chat.hostId]?.takeIf { it.state == "up" } ?: run { // (its host went as it was written: queued,
             if (keep && open === chat) Queue.putBackTried(chat, Queued(text, files, uuid ?: java.util.UUID.randomUUID() // to go
                 .toString(), tried = uuid != null))                                                             // once it's back)
@@ -1461,6 +1462,7 @@ object Mesh {
                         if (r.optString("op") != Op.ERROR) {
                             sent.accepted = true
                             if (kept) Queue.taken(chat, id)
+                            taken?.invoke()
                         } else if (went && kept) { // (its link went before its host answered: it may have been taken,
                             chat.sent.remove(sent) // so it goes again by its uuid, taken once)
                             if (open === chat) Queue.putBackTried(chat, Queued(text, files, id))

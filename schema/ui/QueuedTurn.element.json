@@ -13,6 +13,7 @@
     "windowproc.py:WindowProc.queue_message",
     "windowproc.py:WindowProc.queue_send",
     "windowproc.py:WindowProc.send_at_turn",
+    "windowdrafts.py:WindowDrafts.move_foreground",
     "windowproc.py:WindowProc.queue_edit",
     "windowproc.py:WindowProc.queue_drop",
     "windowproc.py:WindowProc.flush_queue",
@@ -98,7 +99,7 @@
         },
         {
           "by": "click ↑",
-          "does": "Sends this message and every queued message before it at once, together as one message (their texts joined by a blank line, their attachments together), to the turn going on, which isn't stopped: claude, Codex and pi take it in between the turn's steps and go on; Apple's on-device model, which answers in one call, takes it once its turn is over. The sent message is drawn as sent where the chat has got to. With a revert waiting to be made, the revert is made first, as sending does, stopping the turn, and the messages go after it. Tooltip \"Send now: send this and the queued messages before it, without stopping the chat\".",
+          "does": "Sends this message and every queued message before it at once, together as one message (their texts joined by a blank line, their attachments together), to the turn going on, which isn't stopped: claude, Codex and pi take it in between the turn's steps and go on; Apple's on-device model, which answers in one call, takes it once its turn is over. In a Claude Code chat, once the host has taken the message (a refused one moves nothing), each of the turn's own commands and subagents running in the foreground is moved to the background (Claude Code's background_tasks, one request naming each call; calls waiting on a permission and the commands a background subagent runs for itself are left alone), where it goes on: the turn's step that waits on it ends, so the turn takes the message in now instead of once they're done, and stops none of them; their cards read running in background. Codex and pi have no way to move a running call: a message sent while one runs is taken in once it ends, and nothing is stopped. The sent message is drawn as sent where the chat has got to. With a revert waiting to be made, the revert is made first, as sending does, stopping the turn, and the messages go after it. Tooltip \"Send now: send this and the queued messages before it, without stopping the chat\".",
           "decisions": [
             {
               "said": "Agents still seem to stop on send queeud message, this is not ideal",
@@ -107,6 +108,16 @@
               "source": [
                 {
                   "issue": "BaudeInternal#292"
+                }
+              ]
+            },
+            {
+              "said": "Getting a queued message into a Claude chat without it killing all the chat's running subagents is very hard, close to impossible, and a massive problem",
+              "rule": "Every app's send-now on a queued message moves the agent's foreground commands and subagents to the background first, where its agent can (Claude Code), so the message reaches the agent at once and every subagent keeps running; an agent that can't move them takes the message in once the running call ends, stopping nothing",
+              "decided": "2026-11-27",
+              "source": [
+                {
+                  "issue": "BaudeInternal#298"
                 }
               ]
             }

@@ -78,6 +78,10 @@ The mesh's hosts, this one first, each a Host with its models; those out of reac
 
 The models host can run (this one's if none's given), each a Model: pass one as a subagent's model.
 
+### `baudetask.subscriptions(host=None)`
+
+The Claude and Codex subscriptions host's chats run on (this one's if none's given), each a Subscription: its CLI's own sign-in for each provider whose program the host has, then its accounts. Pass one as account= to subagents.start or agent; a model in none's models runs on no subscription (Ollama's, Apple's, an endpoint's).
+
 ## `baudetask.emission`
 
 A Bot's browser tools: an MCP server on stdin and stdout (as baudelib.meshtools is), run on the Bot's host. Each call drives the Bot's own Emission profile on a host of the mesh (this one if none's named): through that host's process (wire's emission op), which starts Emission there for the Bot when it isn't running. A Bot only ever reaches its own profile; the sites it's signed in to are the ones its owner signed in to there, or copied in. Each is called by the agent as mcp__emission__<tool>. Each method is one of the Bot's own emission tools, as its emission op takes it, to host: this one if none's given.
@@ -689,7 +693,7 @@ The type of the None singleton.
 
 Besides the generated calls below:
 
-- `subagents.start(prompt, *, host=None, model=None, cwd=None, title=None, mode='auto', wait=True, timeout_s=3600)`: A subagent started on host (this one if none's given) with model (a Model, or its value), given prompt: an Obj with session, host, text (what it said as its first turn ended; None if not wait) and failed. On this host it's baudetask.agent's: nested under the Bot, kept with the run.
+- `subagents.start(prompt, *, host=None, model=None, cwd=None, title=None, mode='auto', wait=True, timeout_s=3600, account=None)`: A subagent started on host (this one if none's given) with model (a Model, or its value), given prompt: an Obj with session, host, text (what it said as its first turn ended; None if not wait) and failed. account: the subscription it runs on (a Subscription, or an id or name of one of host's, "" for its CLI's own sign-in), in place of the one it'd take. On this host it's baudetask.agent's: nested under the Bot, kept with the run.
 - `subagents.list(*, host=None)`: The Bot's subagents on host (the chats it, or its tasks' runs, started there), each a Session.
 
 ## `baudetask.ops`

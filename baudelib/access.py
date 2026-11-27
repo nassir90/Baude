@@ -304,7 +304,8 @@ class Access:
         or drive a Bot: shell to approve a command or allow one always, to start one with commands allowed, or to send
         to one that runs them without asking, or to make, change or run one of a Bot's tasks (a script run here);
         shell and browser_write for a Bot, which has terminals and a browser of its own, to make one, start or fork one, send
-        it a turn, or run or set one of its tasks (which ask it). The first refused, or None."""
+        it a turn, or run or set one of its tasks (which ask it); subscriptions_read to start one on a subscription it
+        picks (account). The first refused, or None."""
         if getattr(conn, "member", None) is None:
             return None
         op, meta = msg.get("op"), getattr(session, "meta", None) or {}
@@ -326,6 +327,8 @@ class Access:
             caps.append("shell")
         if op in ("run_task", "task_bind") or op == "tasks" and "set" in msg:  # (a task: a script run here, a shell's worth; its bindings too)
             caps.append("shell")
+        if op == "start" and msg.get("account") is not None:  # (a subscription picked: one it may see the accounts of)
+            caps.append("subscriptions_read")
         sends = op == "input" and inner.get("type") == "user" or op == "held" and msg.get("send") or \
             op == "run_task" or op == "tasks" and "set" in msg or \
             op == "queue" and bool(msg.get("add") or msg.get("upto"))  # (a queue its host sends)

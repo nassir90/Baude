@@ -22,6 +22,14 @@ Each tool is one or two of the wire's requests, below: the notebook's host does 
 
 The mesh's hosts (this one first): each one's id, name, whether it's reachable now, and the models it can run (their values are what start_subagent's model takes).
 
+### `subscriptions`
+
+The Claude and Codex subscriptions a host's chats run on (every reachable host's if none's given): each one's id (what start_subagent's account takes; "" for its CLI's own sign-in), provider, name, kind, whether it's the one a new chat on that provider's models takes (default), whether it's disabled (a subagent on it is refused), and the models of that host it runs. A model in no subscription's models runs on none (Ollama's, Apple's, an endpoint's).
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `host` | string |  | A host's id or name (hosts) |
+
 ### `start_subagent`
 
 Start a new chat (a subagent) on a host of the mesh, with one of its models, give it a task and, unless wait is false, wait for its answer. It runs as a chat there (listed in Baude), in cwd on that host (its home if none's given), in Auto mode unless another's asked for (Auto at most); it can't ask you for permissions, so what it does ask is refused after a minute. Its id and its host's come back, to message it again (message_chat).
@@ -31,6 +39,7 @@ Start a new chat (a subagent) on a host of the mesh, with one of its models, giv
 | `prompt` | string | yes | The task, said in full: it doesn't see this chat |
 | `host` | string |  | A host's id or name (hosts); this one if none |
 | `model` | string |  | A model's value on that host (hosts) |
+| `account` | string |  | The subscription it runs on, of those that host has for its model's provider (subscriptions: an id or a name; "" for the CLI's own sign-in), in place of the one it'd take (yours, on this host; else that host's default) |
 | `cwd` | string |  | The folder on that host it works in |
 | `title` | string |  | Its title in the list |
 | `mode` | `auto` \| `acceptEdits` \| `default` \| `plan` |  | Its permission mode (default: auto; a model with no modes runs in default) |
@@ -989,6 +998,7 @@ A new session. Its prompt is sent once it's begun.
 | `cwd` | string |  | Its folder (default: the forked session's, else home). |
 | `model` | string/null |  | Its model. |
 | `effort` | string/null |  | Its effort. |
+| `account` | string |  | The subscription its agent runs under, one of the host's accounts for its model's provider (Claude's or Codex's: Account's id or name; "" for the CLI's own sign-in), in place of the one it would take (the chat's that starts it, else the host's default for that provider). Refused for a model that runs on no subscription, or one that isn't an account there; a disabled one's refused as its chats are. Asks subscriptions_read of a member besides spawn. |
 | `mode` | string/null |  | Its permission mode. |
 | `group` | string/null |  | Its group. |
 | `title` | string/null |  | Its title. |
@@ -3948,6 +3958,6 @@ Somewhere wire.reach can go: this machine's host process, one listening on anoth
 | `TERMINAL_KEEP_S` | `600` | A terminal (terminal op) no connection is attached to now: its program kept running this long to be attached to again, in seconds. |
 | `TERMINAL_KEPT_BYTES` | `262144` | What a terminal (terminal op) wrote lately, kept to show again on attach: this many bytes at most. |
 | `TTL` | `16` | A tunnel's passed through at most this many hosts (open's ttl). |
-| `VERSION` | `36` | The wire's version, as a host's hello says it. |
+| `VERSION` | `37` | The wire's version, as a host's hello says it. |
 | `ZOOM_MAX` | `1568` | A browser zoom's longest side, in pixels. |
 | `ZOOM_QUALITY` | `90` | A browser zoom's JPEG quality. |

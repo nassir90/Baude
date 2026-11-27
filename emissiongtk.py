@@ -4,6 +4,7 @@
 import ctypes
 import os
 import shutil
+import time
 
 import gi  # noqa: E402
 
@@ -576,6 +577,7 @@ class Tab:
         self.place = Gtk.Box(hexpand=True, vexpand=True)  # (where its page is drawn: MacWeb lays its view over it)
         self.web = win.Engine(self.place, win.profile_id, opener)
         self.painted, self.ticking = None, None  # (hosted on macOS: frames)
+        self.fading = None  # (a timeout, at the Bot's pointer's idle time's end: frames then, to fade it out)
         if win.Engine is MacWeb:  # (its view kept over its place as soon as that's shown, hidden or moved: hosted, in a
             for signal in ("map", "unmap"):  # side panel that's resized and switched, every frame it's shown)
                 self.place.connect(signal, lambda *_: self.web.follow())
@@ -584,6 +586,7 @@ class Tab:
                 # Bot's pointer moves (kick); none's drawn for it otherwise, so a page left as it is costs nothing)
                 self.place.connect("map", lambda p: self.frames(True))
                 self.place.connect("unmap", lambda p: self.frames(False))
+                self.place.connect("destroy", lambda p: self.unfade())
         self.web.window, self.web.tab_id = win, self.id
         self.web.popup = lambda made_with: win.open(None, made_with).web
         self.web.closed = lambda: win.close_tab(self)
@@ -602,6 +605,8 @@ class Tab:
         if self.ticking is not None:
             self.place.remove_tick_callback(self.ticking)
             self.ticking = None
+        if not on:
+            self.unfade()
         clock = self.place.get_frame_clock() if on else None
         if clock is not None:
             self.painted = (clock, clock.connect("after-paint", lambda *_: self.web.follow()))
@@ -609,8 +614,25 @@ class Tab:
 
     def kick(self):
         """(hosted) Frames drawn while the Bot's pointer or the glow moves, each following it, till they're still."""
-        if self.ticking is None and self.painted is not None and self.win.pointer.busy():
+        if self.painted is None:
+            return
+        if self.ticking is None and self.win.pointer.busy():
             self.ticking = self.place.add_tick_callback(self.tick)
+        pointer = self.win.pointer  # (its idle time ending isn't a move: frames are asked for then, to fade it out)
+        self.unfade()
+        left = pointer.seen + pointer.IDLE_S - time.monotonic()
+        if left > 0:
+            self.fading = GLib.timeout_add(int(left * 1000) + 20, self.faded)
+
+    def unfade(self):
+        if self.fading is not None:
+            GLib.source_remove(self.fading)
+            self.fading = None
+
+    def faded(self):
+        self.fading = None
+        self.kick()
+        return False
 
     def tick(self, *_):
         if self.win.pointer.busy():  # (a frame, followed once it's drawn: frames' after-paint)

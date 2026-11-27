@@ -236,8 +236,7 @@ _CHAT_MODEL = re.compile(rb'"isSidechain":\s*false,\s*"message":\s*\{\s*"model":
 
 def transcript_model(path, chunk=1 << 18):
     """The model a transcript's last reply came from (a subagent's, or a <synthetic> one, aside): read back from its
-    end a chunk at a time (never all of it at once: a Bot's chat ends in screenshots, a few hundred KB each, and read
-    whole, one of hundreds of MB held that much as it opened). None if it has none."""
+    end a chunk at a time (never all of it at once: a Bot's chat ends in screenshots, a few hundred KB each). None if it has none."""
     try:
         with open(path, "rb") as f:
             end = f.seek(0, 2)
@@ -598,8 +597,8 @@ class HistoryIndex:
     time (index_some, from the window's idle time): read whole first, a 177 MB one held the window a second."""
 
     AT_ONCE = 2 << 20  # (up to this much before the newest items is just indexed on opening)
-    DRAWN_AT_ONCE = 8 << 20  # (the newest items drawn on opening are this many bytes of lines at most: a Bot's chat's
-    # last 60, screenshots each, held some 500 MB parsed and decoded at once; the rest are drawn as it's scrolled up)
+    DRAWN_AT_ONCE = 8 << 20  # (the newest items drawn on opening are this many bytes of lines at most;
+    # the rest are drawn as it's scrolled up)
 
     def __init__(self, path):
         self.path = path

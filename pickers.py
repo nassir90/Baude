@@ -642,8 +642,9 @@ def press_opens_dropdowns():
     """As an app starts, once: every dropdown (a Gtk.DropDown, an Adw.ComboRow, a HostPicker) opens its list as the
     mouse button goes down on it, not as it comes up (BaudeInternal#74), as a right-click's menu opens as the button
     goes down on what's clicked. Whatever a press opens, held down and let go over a choice (a menu's item, a list's
-    row, a popover's button): that one's picked, and it closes (BaudeInternal#273). Let go anywhere else (on what was
-    pressed, a plain click; on the list but no choice; outside it): it stays open, to pick from with a click. Each
+    row, a popover's button) a quarter second or more after the press: that one's picked, and it closes
+    (BaudeInternal#273); sooner, it's a click, as a native menu takes it, and picks nothing. Let go on what was
+    pressed, or between its choices: it stays open, to pick from with a click. Let go outside it: it closes. Each
     taken as it's realized (the hooks on GtkWidget's realize and map), so none is missed."""
     if getattr(press_opens_dropdowns, "started", False):
         return
@@ -691,10 +692,9 @@ def _dropdown_pressed(gesture, n_press, _x, _y):
         widget.activate()
 
 
-# (the press under way: what it's on, and where in its window; the popovers it opened, while it's held: _held_event,
-# _held_mapped)
-HELD = {"on": None, "at": None, "pops": []}
-HELD_STILL_PX = 4  # (let go no further than this from where it was pressed: a click, which picks nothing)
+# (the press under way: what it's on and when; the popovers it opened, while it's held: _held_event, _held_mapped)
+HELD = {"on": None, "when": 0, "pops": []}
+HELD_CLICK_MS = 250  # (let go sooner than this after the press: a click, as a native menu takes it, picking nothing)
 
 
 def _held_event(ctl, _event):
@@ -702,25 +702,29 @@ def _held_event(ctl, _event):
     event = ctl.get_current_event()
     kind = event.get_event_type() if event is not None else None
     if kind == Gdk.EventType.BUTTON_PRESS:
-        HELD["pops"] = []
         device = event.get_device()
         touch = device is not None and device.get_source() == Gdk.InputSource.TOUCHSCREEN
         ok, x, y = event.get_position()
         native = ctl.get_widget()
         tx, ty = native.get_surface_transform()
-        HELD["on"] = None if touch or not ok else native.pick(x - tx, y - ty, Gtk.PickFlags.DEFAULT)
-        HELD["at"] = _window_point(event)
+        HELD.update(on=None if touch or not ok else native.pick(x - tx, y - ty, Gtk.PickFlags.DEFAULT),
+                    when=event.get_time(), pops=[])
     elif kind == Gdk.EventType.MOTION_NOTIFY and (pop := _held_pop()) is not None:
-        _dropdown_light(pop, _held_choice(pop, *_held_point(pop, event)))
+        choice = _held_choice(pop, *_held_point(pop, _window_point(event)))
+        _dropdown_light(pop, None if choice is pop else choice)
     elif kind == Gdk.EventType.BUTTON_RELEASE:
-        pop, at, now = _held_pop(), HELD["at"], _window_point(event)
-        HELD["on"], HELD["at"], HELD["pops"] = None, None, []
-        if pop is not None:
+        pop, on, when, now = _held_pop(), HELD["on"], HELD["when"], _window_point(event)
+        HELD.update(on=None, pops=[])
+        if pop is not None and now is not None:
             _dropdown_light(pop, None)
-            still = at is None or now is None or max(abs(now[0] - at[0]), abs(now[1] - at[1])) <= HELD_STILL_PX
-            choice = None if still else _held_choice(pop, *_held_point(pop, event))
-            # (after GTK's own handling of it: what it's let go on hears it first, as it would)
-            GLib.idle_add(lambda: _held_pick(pop, choice) and False)
+            if (pressed := _window_bounds(on)) is not None and pressed.contains_point(Graphene.Point().init(*now)):
+                return False  # (on what was pressed: it stays open)
+            choice = _held_choice(pop, *_held_point(pop, now))
+            if choice is None:
+                pop.popdown()  # (let go outside it)
+            elif choice is not pop and event.get_time() - when >= HELD_CLICK_MS:  # (sooner: a click that slipped)
+                # (after GTK's own handling of it: what it's let go on hears it first, as it would)
+                GLib.idle_add(lambda: _held_pick(pop, choice) and False)
     return False
 
 
@@ -731,6 +735,9 @@ def _held_mapped(widget):
     if isinstance(widget, Gtk.Popover) and on is not None and (parent := widget.get_parent()) is not None \
             and (on is parent or on.is_ancestor(parent)):
         HELD["pops"].append(widget)
+        if not getattr(widget, "unlit_closed", False):  # (closed while held, Escape: nothing left lit in it)
+            widget.unlit_closed = True
+            widget.connect("closed", lambda p: _dropdown_light(p, None))
     return True
 
 
@@ -759,27 +766,38 @@ def _window_point(event):
     return x + nx, y + ny
 
 
-def _held_point(pop, event):
-    """event's point (of the surface it's on: the window's, pop's or another popover's) as a point of pop's."""
-    if (at := _window_point(event)) is None:
+def _held_point(pop, at):
+    """at (a point of its window's surface: _window_point's) as a point of pop's."""
+    if at is None:
         return None, None
     px, py = _surface_origin(pop)
     tx, ty = pop.get_surface_transform()
     return at[0] - px - tx, at[1] - py - ty
 
 
+def _window_bounds(widget):
+    """widget's bounds in its window's surface (through the popovers it's in), or None."""
+    native = widget.get_native() if widget is not None else None
+    ok, b = widget.compute_bounds(native) if native is not None else (False, None)
+    if not ok:
+        return None
+    nx, ny = _surface_origin(native)
+    tx, ty = native.get_surface_transform()
+    return Graphene.Rect().init(b.get_x() + nx + tx, b.get_y() + ny + ty, b.get_width(), b.get_height())
+
+
 def _held_choice(pop, x, y):
-    """The choice at (x, y) of pop: a row of a Gtk.DropDown's or an Adw.ComboRow's list, a menu's item, a button of a
-    popover's own; None if there's none there (or it's greyed)."""
+    """What's at (x, y) of pop: a choice (a row of a Gtk.DropDown's or an Adw.ComboRow's list, a menu's item, a
+    button of a popover's own); pop itself if it's in pop but on no choice (or a greyed one); None if it's outside."""
     if x is None:
         return None
     under = pop.pick(x, y, Gtk.PickFlags.DEFAULT)
     while under is not pop and under is not None:
         if under.__gtype__.name in ("GtkListItemWidget", "GtkModelButton") or \
                 isinstance(under, (Gtk.Button, Gtk.CheckButton)):
-            return under if under.is_sensitive() else None
+            return under if under.is_sensitive() else pop
         under = under.get_parent()
-    return None
+    return under
 
 
 def _held_pick(pop, choice):

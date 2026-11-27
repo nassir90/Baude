@@ -402,13 +402,13 @@ class SessionSidebar(SidebarMenu, Gtk.Box):
         return pop
 
     def popup_on_screen(self, pop):
-        """menu_at's idle: pop shown while its parent's still on screen. The list rebuilt before it (a chat archived,
-        trashed or refreshed) takes the row out of the window, and a popover over a widget with no window has no
-        surface to open from: GTK crashes. Then it's dropped instead."""
+        """menu_at's idle: pop shown while its parent's still on screen. A parent taken out of the window by then (a
+        header's or a group's, gone with what it was in) has no surface to open a popover from: GTK crashes. Then
+        it's dropped instead, as one that didn't open is, so fill doesn't wait for it (menu_held)."""
         parent = pop.get_parent()
         if parent is not None and parent.get_mapped():
             pop.popup()
-        elif parent is not None:
+        if parent is not None and not pop.get_visible():
             pop.unparent()
             self.menu_closed(pop)
         return False

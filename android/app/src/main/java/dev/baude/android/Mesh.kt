@@ -1034,7 +1034,12 @@ object Mesh {
                     main.post {
                         if (r.optString("op") != Op.QUEUE) { // (not taken: this phone's to send, as its turn ends)
                             if (q.hosted == 1) q.hosted = 0
-                        } else if (open === chat) queueIn(chat, r.optJSONObject("queue"))
+                        } else {
+                            val has = r.optJSONObject("queue")?.optJSONArray("turns").list().any { it.optString("id") == id }
+                            if (open === chat) queueIn(chat, r.optJSONObject("queue"))
+                            // (its host's queue has no row for it: sent at once, as no turn was going)
+                            if (q.hosted == 1) { if (has && open !== chat) q.hosted = 2 else chat.queued.remove(q) }
+                        }
                     }
                 }
             }

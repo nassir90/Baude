@@ -44,6 +44,7 @@ class ServerRunning:
             threading.Thread(target=self.answer_wait, args=(s, w), daemon=True, name="wait").start()
         with self.lock:  # (follow-ups a restart cut short: sent now, keep_follow_ups)
             self.send_follow_ups()
+            hostqueue.send_left(self)  # (queues a restart cut short: sent as at a turn's end)
             self.tasks.resume_told()  # (what chats a task's run started had still to tell their Bots: told now)
         self.log(f"serving {len(self.sessions)} sessions on {self.socket_path}, group {self.me['group']!r}"
                  + (f", commit {self.commit[:12]}" if self.commit else ""))

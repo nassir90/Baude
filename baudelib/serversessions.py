@@ -1171,6 +1171,7 @@ class ServerSessions:
                 if s.queued:
                     s.queued = []
                     self.save(s)
+                hostqueue.hold(self, s)  # (what its heads queued: held the same, so they show why and nothing's stuck)
                 if s.proc is not None and not getattr(s.proc, "stopping", False):
                     s.proc.stopping, s.proc.restarting = True, False
                     s.proc.kill()

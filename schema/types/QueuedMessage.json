@@ -26,10 +26,28 @@
       "description": "The message's content as it's sent (a user message's: its text, or its blocks, pictures and documents first)."
     },
     "at": {
-      "type": ["number", "null"],
+      "type": [
+        "number",
+        "null"
+      ],
       "description": "When it was queued, epoch seconds."
+    },
+    "sender": {
+      "anyOf": [
+        {
+          "$ref": "Sender.json"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Who it's from, if not the chat's user (a relayed chat's message): it's sent by itself, not joined with those from another."
     }
   },
-  "required": ["id", "text", "content"],
+  "required": [
+    "id",
+    "text",
+    "content"
+  ],
   "additionalProperties": false
 }

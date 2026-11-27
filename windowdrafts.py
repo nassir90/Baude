@@ -368,7 +368,10 @@ class WindowDrafts:
 
         def done(reply):
             if reply.get("op") == "queue" and self.session_id == sid:
-                return self.host_queue_in(reply.get("queue"))
+                self.host_queue_in(reply.get("queue"))
+                if turn.hosted == "adding":  # (its host's queue has no row for it: sent at once, as no turn was going)
+                    self.unqueue([turn], host=False)
+                return
             if turn.hosted == "adding":  # (not taken: this window's to send, as its turn ends)
                 turn.hosted = False
         p.queue_op({"add": [{"id": turn.qid, "text": turn.text, "content": self.user_content(turn.text, turn.atts)}]},

@@ -7,7 +7,8 @@ attaching.
 Its host leads it: only the host sends it, so a queue every head shows is sent once, whoever's there or not. As a
 turn ends it sends it all as one message (up to the one a send-now named, the rest kept), unless a revert stopped the
 turn: then it's kept till the next turn's end, or a send-now. A message queued as no turn's going goes at once, with
-what's before it. What's sent is told the heads attached live as any message given the agent is (tell_said).
+what's before it. A message keeps who it's from (a relayed chat's): those from another are sent as messages of their
+own. What's sent is told the heads attached live as any message given the agent is (tell_said).
 """
 import json
 import time
@@ -53,7 +54,8 @@ def change(server, conn, s, msg):
     dropped = {i for i in msg.get("drop") or () if isinstance(i, str)}
     turns = [t for t in q["turns"] if t["id"] not in dropped]
     have = {t["id"] for t in turns} | dropped
-    added = [{"id": t["id"], "text": t["text"], "content": t["content"], "at": time.time()}
+    sender = server.sent_by(conn, msg)
+    added = [{"id": t["id"], "text": t["text"], "content": t["content"], "at": time.time(), "sender": sender}
              for t in msg.get("add") or () if isinstance(t, dict) and wire.is_id(t.get("id") or "") and
              t["id"] not in have and isinstance(t.get("text"), str) and isinstance(t.get("content"), (str, list))]
     turns += added
@@ -121,11 +123,37 @@ def send(server, s, upto=None):
     if not going:
         return
     s.queue_left = False
-    said = going[0]["id"] if len(going) == 1 else str(uuid.uuid4())  # (alone: by its own id, taken once)
+    runs = []  # (a message's sender is said in it: those from different ones aren't joined)
+    for t in going:
+        if runs and runs[-1][0].get("sender") == t.get("sender"):
+            runs[-1].append(t)
+        else:
+            runs.append([t])
     put(server, s, rest, None)
-    try:
-        server.take_input(None, s, {"type": "user", "uuid": said,
-                                    "message": {"role": "user", "content": content(going)}})
-    except Exception as e:  # (its agent couldn't be started, or a Desktop chat written elsewhere: kept, to go again)
-        server.log(f"{s.id}: its queue not sent: {type(e).__name__}: {e}")
-        put(server, s, going + kept(s)["turns"], None)
+    for i, run in enumerate(runs):
+        said = run[0]["id"] if len(run) == 1 else str(uuid.uuid4())  # (alone: by its own id, taken once)
+        try:
+            server.take_input(None, s, {"type": "user", "uuid": said,
+                                        "message": {"role": "user", "content": content(run)}}, run[0].get("sender"))
+        except Exception as e:  # (its agent couldn't be started, or a Desktop chat written elsewhere: kept, to go again)
+            server.log(f"{s.id}: its queue not sent: {type(e).__name__}: {e}")
+            put(server, s, [t for r in runs[i:] for t in r] + kept(s)["turns"], None)
+            return
+
+
+def send_left(server):
+    """(lock held) Each chat's queue a restart cut short sent now, as at a turn's end, where no turn's going."""
+    for s in list(server.sessions.values()):
+        if kept(s)["turns"] and not s.busy and not s.deleting:
+            send(server, s, kept(s).get("upto"))
+
+
+def hold(server, s):
+    """(lock held) A chat's queue moved to its held messages (its subscription's disabled), sent by its user once it's
+    back."""
+    turns = kept(s)["turns"]
+    if not turns:
+        return
+    s.meta["held"] = (s.meta.get("held") or []) + [
+        {"id": t["id"], "text": t["text"], "shown": None, "sender": t.get("sender"), "at": t.get("at")} for t in turns]
+    put(server, s, [], None)

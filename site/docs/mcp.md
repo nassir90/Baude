@@ -235,18 +235,19 @@ One of a host's access rules set (capability: the rule's name), or a chat's own 
 
 #### `accounts` (Accounts)
 
-The host's Claude and Codex subscription accounts (hostaccounts): list them; add one (Claude: name and an existing signed-in config folder, or name and token; Codex: name and an existing signed-in home, or name and token); rename one (id, name); replace a token account's token (id, token); remove one (id); use another for a chat (session, id; "" for the CLI's own sign-in: its agent started again under it, resuming the chat, once its turn's over; kept as the one the host's new chats on its provider's models take, defaults); read a subscription's usage (id; "" for the CLI's own sign-in of provider, Claude's where none is said); sign in (sign_in: provider and name for a new account, or id to sign in to one again; Claude's runs claude auth login with the account's own folder, its lines coming as they're written, the page to open among them; Codex's codex login (method: the browser's, by default, or the device code's), its state coming as it goes (login: the page to open, and the device code's code to enter there); then its end; the connection's going stops it); pass a code the sign-in page showed to the sign-in this connection runs (code: no answer of its own); pass the address a browser ended on after a Codex browser sign-in's page to the one this connection runs (callback: url; answered with the page codex's server gave, or error). Each other is answered with accounts.
+The host's Claude and Codex subscription accounts (hostaccounts): list them; add one (Claude: name and an existing signed-in config folder, or name and token; Codex: name and an existing signed-in home, or name and token); rename one (id, name); replace a token account's token (id, token); remove one (id); disable a subscription or enable it again (disable: id, "" with provider for the CLI's own sign-in, and on: its chats' agents stopped, nothing sent to them nor started while it is); turn its auto-disable on or off (auto_disable: id or "" with provider, and on: disabled as one of its limits is used up or extra usage is billed, as its chats' turns or a usage read say, or at once if its last reading says so; enabled again only by hand); use another for a chat (session, id; "" for the CLI's own sign-in: its agent started again under it, resuming the chat, once its turn's over; kept as the one the host's new chats on its provider's models take, defaults); read a subscription's usage (id; "" for the CLI's own sign-in of provider, Claude's where none is said); sign in (sign_in: provider and name for a new account, or id to sign in to one again; Claude's runs claude auth login with the account's own folder, its lines coming as they're written, the page to open among them; Codex's codex login (method: the browser's, by default, or the device code's), its state coming as it goes (login: the page to open, and the device code's code to enter there); then its end; the connection's going stops it); pass a code the sign-in page showed to the sign-in this connection runs (code: no answer of its own); pass the address a browser ended on after a Codex browser sign-in's page to the one this connection runs (callback: url; answered with the page codex's server gave, or error). Each other is answered with accounts.
 
 | Field | Type | Required | What it is |
 |---|---|---|---|
-| `what` | `list` \| `add` \| `rename` \| `token` \| `remove` \| `use` \| `usage` \| `sign_in` \| `code` \| `callback` | yes | What to do. |
-| `provider` | `claude` \| `codex` |  | add, sign_in (a new account): whose. usage with id "": whose CLI's own sign-in (Claude's where left out). |
-| `id` | string |  | rename, token, remove, use, usage, sign_in: the account ("" for the CLI's own sign-in, use and usage only). |
+| `what` | `list` \| `add` \| `rename` \| `token` \| `remove` \| `disable` \| `auto_disable` \| `use` \| `usage` \| `sign_in` \| `code` \| `callback` | yes | What to do. |
+| `provider` | `claude` \| `codex` |  | add, sign_in (a new account): whose. usage, disable and auto_disable with id "": whose CLI's own sign-in (Claude's where left out). |
+| `id` | string |  | rename, token, remove, disable, auto_disable, use, usage, sign_in: the account ("" for the CLI's own sign-in, disable, auto_disable, use and usage only). |
 | `session` | string |  | use: the chat whose account it is, one of the host's sessions whose model is the account's provider's. sign_in (a Claude account's) and token: the chat it's for, whose sign-in (ChatLogin) its host moves as it goes, as a login request's, if the asker may read the chat (Agent Management's read). |
 | `name` | string |  | add, rename, sign_in (a new account): its name. |
 | `token` | string |  | add (Claude, Codex), token: what signs the account in, pasted: Claude's a long-lived token from claude setup-token (sk-ant-oat…) or an Anthropic API key (sk-ant-api…); Codex's an OpenAI API key (sk-…), written to a new CODEX_HOME's auth.json as codex login --with-api-key writes it. Kept on the host only, owner-only; never said back. |
 | `home` | string |  | add (Codex): an existing CODEX_HOME on the host, signed in with ChatGPT and keeping its credentials in a file. |
 | `folder` | string |  | add (Claude): an existing Claude config folder on the host, signed in (claude auth status says so, run with it). |
+| `on` | boolean |  | disable: true to disable it, false to enable it again; auto_disable: whether it's disabled as it's exhausted. |
 | `code` | string |  | code: what the sign-in page showed, pasted. |
 | `method` | `browser` \| `device` |  | sign_in, Codex's: browser (the default: codex login, its page sending the browser back to the host's 127.0.0.1) or device (codex login --device-auth). |
 | `url` | string |  | callback: the address the browser ended on (its path and query are what's passed on). |
@@ -923,11 +924,13 @@ The host process's restart, as a head asks for it: once nothing's running (its p
 
 #### `rotate` (Rotate)
 
-A Bot's conversation archived as a past thread of its own ("<Bot> / <its title>", read-only), and the Bot carried on in a new, empty one with a new agent: its id, name, picture, memory, tasks, browser and rules as they were. Refused while it's at a turn or one of its tasks is asking it.
+A Bot's conversation archived as a past thread of its own ("<Bot> / <its title>", read-only), and the Bot carried on in a new, empty one with a new agent (on another model if one's given): its id, name, picture, memory, tasks, browser and rules as they were. Refused while it's at a turn or one of its tasks is asking it.
 
 | Field | Type | Required | What it is |
 |---|---|---|---|
 | `session` | string | yes | The Bot's session id. |
+| `model` | string/null |  | The model the Bot carries on on, of whatever program (null: its own). Given, a Bot with nothing said yet is moved onto it without a past thread. |
+| `effort` | string/null |  | Its effort on model, if model's program has one (null: the Bot's own). |
 
 #### `run_task` (RunTask)
 
@@ -1316,6 +1319,8 @@ accounts' answer: the accounts and defaults as they are after it, and whether th
 | `claude_cli` | boolean |  | Whether the host has claude: a Claude account there is a folder signed in to with claude auth login; without it, a token from claude setup-token. |
 | `codex_usage` | boolean |  | Whether the host reads a Codex subscription's usage (usage with provider codex, and last_usage's "codex"): a client shows Codex's CLI default card and Codex usage only where it does; an older host's usage read of "" is Claude's. |
 | `missing` | object |  | What the host lacks of a provider's program, by provider (codex: its Codex CLI, as deps says it); a provider that's there isn't in it. Shown in place of Add account. |
+| `disabled` | array of string |  | The subscriptions disabled on the host, by usage key (an account's id, "" for Claude's CLI's own sign-in, "codex" for Codex's): their chats can't send. |
+| `auto_disable` | array of string |  | The subscriptions whose auto-disable is on, by usage key: disabled as they're exhausted. |
 | `last_usage` | object |  | Each Claude and Codex subscription's usage as the host last read it, by id ("" for Claude's CLI's own sign-in, "codex" for Codex's), where that read said its limits: a client shows it greyed till its own usage read answers. |
 | `who` | string/null |  | sign_in, signed in: who as, as claude auth status says (Codex's: the email its sign-in names). |
 
@@ -1956,7 +1961,7 @@ rotate's answer.
 | Field | Type | Required | What it is |
 |---|---|---|---|
 | `session` | Session | yes | The Bot, as it's listed now: in its new conversation. |
-| `thread` | Session | yes | Its past thread, as it's listed now: archived. |
+| `thread` | Session? |  | Its past thread, as it's listed now: archived; null if it was only moved onto another model, nothing said yet. |
 
 #### `seen_set` (SeenSet)
 
@@ -3324,6 +3329,7 @@ A message written while a chat's turn runs, kept by the chat's host in its queue
 | `text` | string | yes | What's written, as heads show it. |
 | `content` | any | yes | The message's content as it's sent (a user message's: its text, or its blocks, pictures and documents first). |
 | `at` | number/null |  | When it was queued, epoch seconds. |
+| `sender` | Sender? |  | Who it's from, if not the chat's user (a relayed chat's message): it's sent by itself, not joined with those from another. |
 
 #### Record
 
@@ -3432,6 +3438,7 @@ A session as a host lists it.
 | `start_key` | string/null |  | Its start's start_key, if it was given one. |
 | `account` | Account? |  | The subscription account its agent runs under on its host, fixed as it's made (the one the host's new chats take for its provider then, accounts' defaults, or as it's first written in), or the one picked for it since (accounts' use), from the moment it's picked; null for the CLI's own sign-in, or an account since removed (account_gone). |
 | `account_gone` | boolean |  | Its subscription account was removed from its host after it was picked for it: its agent can't start till another is picked. |
+| `account_disabled` | boolean |  | The subscription it runs on (its account, or its provider's CLI's own sign-in) is disabled on its host (accounts' disable, or auto_disable as it's exhausted): its agent stopped, nothing sent to it nor started, every app's send button off and its banner saying so, till it's enabled or another's picked. |
 | `held` | array of HeldMessage |  | Messages held for it, oldest first. |
 | `senders` | integer |  | Its sender store's revision (0 for none): what a head's copy is checked against. |
 | `always_allow` | array of string |  | The tools allowed whenever it asks for them, sorted. |
@@ -3762,8 +3769,8 @@ A host's telemetry: on or off, line profiling on or off, and what each process o
 | Field | Type | Required | What it is |
 |---|---|---|---|
 | `on` | boolean | yes | Events kept and the machine sampled. |
-| `line_profiling` | boolean | yes | Line profiling on: each process profiles its functions while telemetry's on too (off unless switched on). |
 | `line_profiler` | boolean | yes | line_profiler is installed for the host's Python. |
+| `line_profiling` | boolean | yes | Line profiling on: each process profiles its functions while telemetry's on too (off unless switched on). |
 | `profiling` | array of TelemetryProfiling | yes | Each process's: the host's, Baude's, Record's. |
 
 #### TelemetryUsage

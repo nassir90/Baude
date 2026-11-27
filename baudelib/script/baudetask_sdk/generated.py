@@ -1005,7 +1005,10 @@ class QueuedMessage(Obj):
         content (any): The message's content as it's sent (a user message's: its text, or its blocks, pictures
             and documents first).
         at (number or None): When it was queued, epoch seconds.
+        sender (Sender or None): Who it's from, if not the chat's user (a relayed chat's message): it's sent by
+            itself, not joined with those from another.
     """
+    _refs = {"sender": "Sender"}
 
 
 class Record(Obj):

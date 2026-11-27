@@ -484,10 +484,11 @@ object PhoneHost {
                         val drop = msg.optJSONArray("drop")?.let { a -> (0 until a.length()).map { a.optString(it) } }.orEmpty().toSet()
                         val turns = q.optJSONArray("turns").list().filter { it.optString("id") !in drop }.toMutableList()
                         val have = turns.map { it.optString("id") }.toSet() + drop
+                        val sender = sentBy(head, null)
                         val added = msg.optJSONArray("add").list().filter { t -> isId(t.optString("id")) && t.optString("id") !in have &&
                             t.has("text") && (t.opt("content") is String || t.opt("content") is JSONArray) }
                             .map { t -> JSONObject().put("id", t.optString("id")).put("text", t.optString("text"))
-                                .put("content", t.get("content")).put("at", now()) }
+                                .put("content", t.get("content")).put("at", now()).put("sender", sender ?: JSONObject.NULL) }
                         turns.addAll(added)
                         if (added.isNotEmpty() && JSONArray(turns).toString().length > WireConstants.QUEUE_CHARS_MAX) {
                             refused = true
@@ -528,6 +529,8 @@ object PhoneHost {
             Op.ALWAYS_ALLOW -> PhoneAccess.firstRefused(head, "shell")
             Op.ATTACH -> if (PhoneAccess.addsTools(msg, s.alwaysAllow + ASK_TOOL)) PhoneAccess.firstRefused(head, "shell") else null
             Op.BOT -> if (msg.optJSONObject("bot") != null) PhoneAccess.firstRefused(head, "shell", "browser_write") else null
+            Op.QUEUE -> if (bot && (msg.optJSONArray("add")?.length() ?: 0) + msg.optString("upto").length > 0)
+                PhoneAccess.firstRefused(head, "shell", "browser_write") else null // (a queue this phone sends: a message sent)
             Op.INPUT -> {
                 val m = Msg.Input.from(msg).msg ?: JSONObject()
                 val request = m.optJSONObject("request")
@@ -772,21 +775,39 @@ object PhoneHost {
         val n = turns.indexOfFirst { it.optString("id") == upto }.let { if (it < 0) turns.size else it + 1 }
         val going = turns.take(n)
         if (going.isEmpty()) return
-        val blocks = JSONArray()
-        val texts = ArrayList<String>()
-        for (t in going) when (val c = t.opt("content")) {
-            is String -> texts.add(c)
-            is JSONArray -> for (b in c.list()) if (b.optString("type") == "text") texts.add(b.optString("text")) else blocks.put(b)
-        }
-        val text = texts.filter { it.isNotEmpty() }.joinToString("\n\n")
-        if (text.isNotEmpty()) blocks.put(JSONObject().put("type", "text").put("text", text))
-        val message = JSONObject().put("role", "user").put("content", if (blocks.length() == 1 && text.isNotEmpty()) text else blocks)
-        val uuid = going.singleOrNull()?.optString("id")?.takeIf(::isId) ?: UUID.randomUUID().toString()
         putQueue(s, turns.drop(n), null)
         work.execute { tellQueue(s, null) }
-        if (repeated(s, uuid)) return
-        tellSaid(s, message, uuid, null)
-        begin(s, listOf(message to uuid))
+        // (who a message is from is said in it: those from different ones go as messages of their own)
+        val runs = ArrayList<MutableList<JSONObject>>()
+        for (t in going) {
+            if (runs.isNotEmpty() && runs.last()[0].optJSONObject("sender")?.toString() == t.optJSONObject("sender")?.toString()) runs.last().add(t)
+            else runs.add(mutableListOf(t))
+        }
+        for (run in runs) {
+            val blocks = JSONArray()
+            val texts = ArrayList<String>()
+            for (t in run) when (val c = t.opt("content")) {
+                is String -> texts.add(c)
+                is JSONArray -> for (b in c.list()) if (b.optString("type") == "text") texts.add(b.optString("text")) else blocks.put(b)
+            }
+            val text = texts.filter { it.isNotEmpty() }.joinToString("\n\n")
+            if (text.isNotEmpty()) blocks.put(JSONObject().put("type", "text").put("text", text))
+            var message = JSONObject().put("role", "user").put("content", if (blocks.length() == 1 && text.isNotEmpty()) text else blocks)
+            val uuid = run.singleOrNull()?.optString("id")?.takeIf(::isId) ?: UUID.randomUUID().toString()
+            if (repeated(s, uuid)) continue
+            val sender = run[0].optJSONObject("sender")
+            if (sender != null) {
+                message = JSONObject(message.toString()).put("content", saidBy(sender, message.opt("content")))
+                stamp(s, uuid, sender)
+            }
+            if (s.busy) { // (the first of them begun a turn: the rest taken into it, or after it)
+                s.queued.put(JSONObject().put("message", message).put("uuid", uuid))
+                save(s)
+            } else {
+                tellSaid(s, message, uuid, null)
+                begin(s, listOf(message to uuid))
+            }
+        }
     }
 
     private fun firstWords(message: JSONObject): String? {

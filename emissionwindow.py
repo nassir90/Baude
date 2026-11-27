@@ -18,8 +18,8 @@ gi.require_version("Adw", "1")
 from gi.repository import Adw, Gio, GLib, Gtk  # noqa: E402
 from baudelib import emissiontools, wording  # noqa: E402  (its words, Baude's browser's: schema/copy)
 from baudelib.emissionlink import (  # noqa
-    DEFAULT, add_profile, call, call_bot, data_home, forget_profile, hand_over, lock_profile, open_pages, pending_note,
-    profile_id, profiles, rename_profile, unlock_profile,
+    DEFAULT, add_profile, blocks_tracking, call, call_bot, data_home, forget_profile, hand_over, lock_profile, open_pages,
+    pending_note, profile_id, profiles, rename_profile, set_blocks_tracking, unlock_profile,
 )
 from emissioncore import AGENT_IDLE_S, HOME_PAGE, POLL_MS, ProfileSocket, STARTED, address, once  # noqa: E402
 from emissionpointer import BotPointer  # noqa: E402
@@ -500,8 +500,22 @@ class Window(Adw.ApplicationWindow):
             group.add_action(act)
             more.append(label, f"who.{name}")
         menu.append_section(None, more)
+        tracking = Gio.SimpleAction.new_stateful("tracking", None, GLib.Variant.new_boolean(
+            blocks_tracking(self.profile_id)))
+        tracking.connect("change-state", lambda act, v: self.block_tracking(act, v.get_boolean()))
+        group.add_action(tracking)
+        privacy = Gio.Menu()
+        privacy.append("Prevent Cross-Site Tracking", "who.tracking")
+        menu.append_section(None, privacy)
         self.insert_action_group("who", group)
         return menu
+
+    def block_tracking(self, act, on):
+        """This profile's pages blocking cross-site cookies and storage (on), as Safari does, or not: from now on."""
+        act.set_state(GLib.Variant.new_boolean(on))
+        set_blocks_tracking(self.profile_id, on)
+        if self.Engine is not None:
+            self.Engine.block_tracking(self.profile_id, on)
 
     def refresh_profiles(self):
         self.who.set_menu_model(self.profile_menu())

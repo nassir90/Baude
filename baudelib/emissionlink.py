@@ -131,6 +131,31 @@ def forget_profile(name):
         _write_profiles([p for p in _read_profiles() if p["name"] != name])
 
 
+def blocks_tracking(pid):
+    """Whether pid's profile blocks cross-site cookies and storage as Safari does (tracking prevention). Off unless
+    it's been turned on: a developer's previews on other hosts sign in, as in a browser that lets them."""
+    try:
+        with open(os.path.join(data_home(), "tracking.json"), encoding="utf-8") as f:
+            return pid in (json.load(f).get("blocked") or [])
+    except (OSError, ValueError, AttributeError, TypeError):
+        return False
+
+
+def set_blocks_tracking(pid, on):
+    with changing():
+        path = os.path.join(data_home(), "tracking.json")
+        try:
+            with open(path, encoding="utf-8") as f:
+                blocked = [str(i) for i in json.load(f).get("blocked") or []]
+        except (OSError, ValueError, AttributeError, TypeError):
+            blocked = []
+        blocked = [i for i in blocked if i != pid] + ([pid] if on else [])
+        tmp = f"{path}.{os.getpid()}.tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump({"blocked": blocked}, f)
+        os.replace(tmp, path)
+
+
 def leftovers():
     path = os.path.join(data_home(), "removed.json")
     try:

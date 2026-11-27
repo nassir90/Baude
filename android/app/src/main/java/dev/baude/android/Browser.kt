@@ -261,6 +261,7 @@ class Browser(private val ctx: Context, val profile: String, val stage: Stage) {
             allowContentAccess = false
             setGeolocationEnabled(false)
         }
+        CookieManager.getInstance().setAcceptThirdPartyCookies(web, true) // (an app's preview on another site signs in)
         web.importantForAutofill = View.IMPORTANT_FOR_AUTOFILL_NO_EXCLUDE_DESCENDANTS
         web.isFocusable = true
         web.isFocusableInTouchMode = true

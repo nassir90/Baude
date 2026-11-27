@@ -203,11 +203,32 @@ abstract class Screens(private val theme: String) {
         dev.baude.android.Settings.textScale.value = 1f
     }
 
+    // (Settings → Subscriptions with Work disabled and Home disabling itself as it's exhausted: Work's card says
+    // Disabled; then Work's ⋮ (Enable) and Home's (Auto Disable on Exhaustion ticked))
+    @Test fun subscriptionsDisabled() {
+        accountsFixture(disabled = true)
+        show { SettingsScreen({}, {}, page = 1) }
+        laidOut()
+        screen("05u-subscriptions-disabled")
+        tap("Change this account", nth = 2)
+        laidOut()
+        withMenus("05v-subscriptions-disabled-menu")
+    }
+
+    @Test fun subscriptionsAutoMenu() {
+        accountsFixture(disabled = true)
+        show { SettingsScreen({}, {}, page = 1) }
+        laidOut()
+        tap("Change this account", nth = 1)
+        laidOut()
+        withMenus("05w-subscriptions-auto-menu")
+    }
+
     @Test fun subscriptionsMenu() {
         accountsFixture()
         show { SettingsScreen({}, {}, page = 1) }
         laidOut()
-        tap("Change this account")
+        tap("Change this account", nth = 1)
         laidOut()
         withMenus("05b-subscriptions-menu")
     }
@@ -332,7 +353,7 @@ abstract class Screens(private val theme: String) {
         accountsFixture()
         show { SettingsScreen({}, {}, page = 1) }
         laidOut()
-        tap("Change this account")
+        tap("Change this account", nth = 1)
         tap("Remove…")
         screen("05e-subscriptions-remove")
     }
@@ -603,8 +624,9 @@ abstract class Screens(private val theme: String) {
             if (m.optString("op") != "telemetry_read") return@up null
             val now = System.currentTimeMillis() / 1000.0
             val rng = java.util.Random(7)
-            val state = org.json.JSONObject().put("on", true).put("line_profiler", profiler).put("profiling", org.json.JSONArray(listOf(
-                org.json.JSONObject().put("app", "host").put("functions", org.json.JSONArray(listOf("baudelib.telemetry.Telemetry.sample"))))))
+            val state = org.json.JSONObject().put("on", true).put("line_profiler", profiler).put("line_profiling", true)
+                .put("profiling", org.json.JSONArray(listOf(org.json.JSONObject().put("app", "host").put("default", true)
+                    .put("functions", org.json.JSONArray(listOf("baudelib.telemetry.Telemetry.sample"))))))
             val out = org.json.JSONObject().put("op", "telemetry_read").put("req", m.opt("req")).put("host", Mesh.hosts.first().id)
                 .put("state", state)
             when (m.optJSONArray("what")?.optString(0)) {
@@ -641,7 +663,10 @@ abstract class Screens(private val theme: String) {
                             .put("code", "stats = proc_stats(sorted(pids))").put("hits", 120).put("seconds", 0.912),
                         org.json.JSONObject().put("file", "baudelib/telemetry.py").put("line", 131).put("function", "_mac_memory")
                             .put("code", "if libc.host_statistics64(host, 4, ctypes.byref(vm), ctypes.byref(count)) == 0:")
-                            .put("hits", 120).put("seconds", 0.402)))))))
+                            .put("hits", 120).put("seconds", 0.402)))),
+                    org.json.JSONObject().put("at", now - 30).put("from", now - 60).put("app", "record").put("lines", org.json.JSONArray(listOf(
+                        org.json.JSONObject().put("file", "recordstore.py").put("line", 498).put("function", "take")
+                            .put("code", "self.merged_page(mine, theirs, was)").put("hits", 41).put("seconds", 0.164)))))))
             }
             out
         }
@@ -724,7 +749,7 @@ abstract class Screens(private val theme: String) {
     }
 
     /** workshop's accounts; reading: each usage read left unanswered, the host's last reading of each in every answer. */
-    private fun accountsFixture(reading: Boolean = false, listing: Boolean = true) {
+    private fun accountsFixture(reading: Boolean = false, listing: Boolean = true, disabled: Boolean = false) {
         FixtureConnection.up(activity, Mesh.hosts.first()) { m ->
             if (m.optString("op") != "accounts" || (reading && m.optString("what") == "usage") ||
                 (!listing && m.optString("what") == "list")) null
@@ -733,6 +758,7 @@ abstract class Screens(private val theme: String) {
                     org.json.JSONObject().put("id", "p1").put("provider", "codex").put("name", "Personal").put("kind", "profile"))))
                 .put("defaults", org.json.JSONObject().put("claude", "w1").put("codex", "")).put("claude_cli", true).put("codex_usage", true)
                 .apply {
+                    if (disabled) put("disabled", org.json.JSONArray(listOf("w1"))).put("auto_disable", org.json.JSONArray(listOf("h2")))
                     fun limits(id: String): org.json.JSONArray {
                         val (five, seven) = mapOf("w1" to (25 to 40), "h2" to (72 to 18), "codex" to (37 to 61),
                             "p1" to (8 to 3))[id] ?: (5 to 12)
@@ -829,6 +855,22 @@ abstract class Screens(private val theme: String) {
         screen("94b-open-folder-typed")
         tap("garden")
         screen("94c-open-folder-browsed")
+        tap("Open")
+    }
+
+    /** Open folder…'s keys, a keyboard's: a path's last part beginning one folder, Tab: it; Down twice: the second
+     * folder picked; a folder tapped, then Back: out of it again. */
+    @Test fun openFolderKeys() = newChat("95b-open-folder-keys-opened") {
+        tap("Open folder…")
+        typeIn("/home/dev/ga")
+        press(android.view.KeyEvent.KEYCODE_TAB)
+        screen("94d-open-folder-tab")
+        press(android.view.KeyEvent.KEYCODE_DPAD_DOWN)
+        press(android.view.KeyEvent.KEYCODE_DPAD_DOWN)
+        screen("94e-open-folder-picked")
+        tap("docs")
+        press(android.view.KeyEvent.KEYCODE_BACK)
+        screen("94f-open-folder-back")
         tap("Open")
     }
 
@@ -1513,6 +1555,21 @@ abstract class Screens(private val theme: String) {
         withMenus("20t-chat-subscriptions-open")
     }
 
+    // (a chat on Work Account, disabled on its host: the banner says so, its send button off)
+    @Test fun chatSubscriptionDisabled() {
+        val chat = Mesh.openChat("h1", "a")
+        fill(chat)
+        val subs = listOf(Msg.Account(id = "w1", provider = "claude", name = "Work Account", kind = "folder"))
+        dev.baude.android.HostSubscriptions.listed["h1"] = subs
+        Mesh.sessions["h1"] = Mesh.sessions["h1"].orEmpty().map {
+            if (it.id == "a") Msg.Session.from(it.json().put("account", subs[0].json()).put("account_disabled", true).put("state", "idle")) else it }
+        chat.busy.value = false
+        chat.thinking.value = false
+        show { ChatShell("h1", "a", back = {}, open = { _, _ -> }, feedback = {}) }
+        laidOut()
+        screen("20v-chat-subscription-disabled")
+    }
+
     // (the same chat on the added account: CLI default still listed, to go back to)
     @Test fun chatSubscriptionsOnAccount() {
         val chat = Mesh.openChat("h1", "a")
@@ -2166,6 +2223,15 @@ abstract class Screens(private val theme: String) {
         val act = androidx.compose.ui.semantics.SemanticsActions.OnLongClick
         windows().flatMap(::roots).flatMap { all(it.semanticsOwner.rootSemanticsNode) }
             .first { it.config.contains(act) && it.config[act].label == label }.config[act].action!!.invoke()
+        androidx.compose.runtime.snapshots.Snapshot.sendApplyNotifications()
+        settle()
+    }
+
+    /** A key pressed and let go in the window on top (a dialog's, if one's up), as a keyboard would. */
+    private fun press(code: Int) {
+        val top = windows().last()
+        top.dispatchKeyEvent(android.view.KeyEvent(android.view.KeyEvent.ACTION_DOWN, code))
+        top.dispatchKeyEvent(android.view.KeyEvent(android.view.KeyEvent.ACTION_UP, code))
         androidx.compose.runtime.snapshots.Snapshot.sendApplyNotifications()
         settle()
     }

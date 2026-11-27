@@ -251,13 +251,13 @@ RESTART_BLOCKERS = [{"kind": "chat", "session": "11111111-0000-4000-8000-0000000
                     {"kind": "terminal", "terminal": "abc123", "name": "zsh", "what": "/bin/zsh -l"}]
 
 
-def _restart_pending(app, paused):
+def _restart_pending(app, paused, blockers=RESTART_BLOCKERS):
     """This Mac's host process (the run's own, in this process) keeping a restart that a chat running a command and a
-    task's run hold up (RESTART_BLOCKERS, as its blockers say them), and paused if paused: as the heads hear it."""
+    task's run hold up (blockers, as its blockers say them), and paused if paused: as the heads hear it."""
     sidebar_sessions(T.TMP)
     win = app.window()
     srv = baude.baudelib.hosts._HERE[0]
-    srv.blockers = lambda: RESTART_BLOCKERS
+    srv.blockers = lambda: blockers
     if paused:
         srv.restart_holds.add("a head")
     srv.restart_when_free("head")
@@ -277,12 +277,21 @@ def _(app):
 @scene("56e-daemon-restart-blockers", "Details on that toast: what the restart waits for, the restart paused meanwhile "
                                       "(every app says so), with Restart (once they're done) and Force Restart (now)")
 def _(app):
-    win = _restart_pending(app, False)
+    return _restart_details(_restart_pending(app, False))
+
+
+def _restart_details(win):
+    """Details on the pending restart's toast pressed: its Waiting For open."""
     toast = next(iter(win.sidebar.restart_toasts.shown.values()))
     toast.emit("button-clicked")
     T.wait_for(lambda: isinstance(win.get_visible_dialog(), baude.Adw.AlertDialog), "Waiting For")
     T.pump(0.5)
     return win
+
+
+@scene("56e2-daemon-restart-one-blocker", "Waiting For with one thing in it: a single row")
+def _(app):
+    return _restart_details(_restart_pending(app, False, RESTART_BLOCKERS[:1]))
 
 
 @scene("55-network-group-menu", "⋮ beside the search: Group by, then which groups are listed: each "
@@ -341,9 +350,10 @@ def _(app):
     return folder_plus_chat(app)
 
 
-def open_folder_step(app, typed=None, into=None):
+def open_folder_step(app, typed=None, into=None, keys=()):
     """A window on lab-mac, Open folder… pressed: "Open a folder on lab-mac" from the folder last used there, its
-    folders listed; typed: a path typed instead; into: a folder in the list clicked."""
+    folders listed; typed: a path typed instead; into: a folder in the list clicked; keys: then these pressed in the
+    path (Gdk keyvals)."""
     win = network_window(app)
     r = NET["lab"][1]
     net = os.path.dirname(NET["folders"][0])
@@ -363,6 +373,10 @@ def open_folder_step(app, typed=None, into=None):
     if into is not None:
         rows.emit("row-activated", listed(into))
         T.wait_for(lambda: listed("src"), "its folders")
+    for keyval in keys:
+        press = next(c for c in entry.observe_controllers() if isinstance(c, Gtk.EventControllerKey))
+        press.emit("key-pressed", keyval, 0, 0)
+        T.pump(0.4)
     T.pump(0.5)
     return win
 
@@ -381,6 +395,24 @@ def _(app):
 @scene("55f5-network-open-folder-browsed", "A folder in the list clicked: it's the path, its folders listed")
 def _(app):
     return open_folder_step(app, typed=os.path.join(os.path.dirname(NET["folders"][0]), "pa"), into="parser")
+
+
+@scene("55f5b-network-open-folder-tab", "Tab with the path's last part beginning one folder: that folder, with a /, "
+                                       "its folders listed")
+def _(app):
+    network_fixture()
+    win = open_folder_step(app, typed=os.path.join(os.path.dirname(NET["folders"][0]), "pa"), keys=(Gdk.KEY_Tab,))
+    T.wait_for(lambda: win.folder_parts[0].get_text().endswith("/parser/") and
+               any((row := win.folder_parts[1].get_row_at_index(i)) is not None and row.path.endswith("/src")
+                   for i in range(5)), "parser's folders")
+    T.pump(0.3)
+    return win
+
+
+@scene("55f5c-network-open-folder-picked", "Down twice in the path: the second folder in the list picked, the path "
+                                           "still being typed")
+def _(app):
+    return open_folder_step(app, into="parser", keys=(Gdk.KEY_Down, Gdk.KEY_Down))
 
 
 @scene("55f6-network-open-folder-opened", "Open: a blank chat on lab-mac, in that folder")
@@ -1571,6 +1603,46 @@ def _(app):
     T.wait_for(lambda: win.session_id == bot, "Juniper open")
     T.wait_for(lambda: len(T.find(win, Gtk.Label, lambda x: x.has_css_class("sender-from") and
                                   x.get_mapped())) >= 2, "the two asks", 20)
+    T.pump(2)
+    return win
+
+
+TASK_REMINDED = '''import baudetask as task
+got = task.ask("Proceed with the deploy? SKIP THE TOOL", form=[{"name": "verdict", "type": "choice",
+                                                              "choices": ["proceed", "override", "fail"]}])
+task.say("verdict", got["verdict"])
+'''
+
+
+@scene("57g-task-reminded", "A Bot's chat (Juniper's) asked by its task's run, its turn ending without the answer_task "
+                            "tool: reminded once, in one sentence, then answered with the tool",
+       size=(1200 + SIDEBAR, H))
+def _(app):
+    win = network_window(app, None)
+    lab_bots(win)
+    server = NET["lab"][0]
+    bot = NET["ids"]["Write the release notes for 2.4"]
+    os.environ["FAKE_ANSWERS"] = "{}"
+    with server.lock:
+        s = server.sessions[bot]
+        st = server.tasks.store(s)
+        task, script = baude.baudelib.tasks.clean({"name": "Deploy site", "runtime": "python", "script": TASK_REMINDED})
+        st.put_script(task, script)
+        st.tasks.append(task)
+        st.save()
+        rid = server.tasks.start(s, task, None, "manual", {})["id"]
+    T.wait_for(lambda: st.runs[rid]["status"] in ("done", "failed"), "the run, reminded and answered", 30)
+
+    def gone(*_):
+        with server.lock:
+            st.tasks = [t for t in st.tasks if t["id"] != task["id"]]
+            st.forget(task["id"])
+            st.save()
+    win.connect("unrealize", gone)
+    win.sidebar.on_activate(win.sidebar.list, session_row(win, bot))
+    T.wait_for(lambda: win.session_id == bot, "Juniper open")
+    T.wait_for(lambda: len(T.find(win, Gtk.Label, lambda x: x.has_css_class("sender-from") and
+                                  x.get_mapped())) >= 2, "the ask and its reminder", 20)
     T.pump(2)
     return win
 

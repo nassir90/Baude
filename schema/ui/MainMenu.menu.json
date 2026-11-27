@@ -133,9 +133,19 @@
               "issue": "BaudeInternal#268"
             }
           ]
+        },
+        {
+          "said": "The caret in Kubernetes's and Databases's rows of the main menu has a highlight that isn't centred on it (paraphrased)",
+          "rule": "A caret-only button (☰'s family rows' host carets) is as wide as its caret and padding: no empty slot beside the caret, so its hover and pressed highlight is centred on it",
+          "decided": "2026-11-27",
+          "source": [
+            {
+              "issue": "BaudeInternal#287"
+            }
+          ]
         }
       ],
-      "shows": "Row \"Kubernetes\". A split, as New session's is: the name, then a caret at the row's end (New session's host dropdown: its hosts as New session lists them, the active one ticked, one out of reach greyed; dimmed with only one host). The name opens it on the host picked beside New session; a host picked from the caret opens it there (the ticked one too), the host picked beside New session left as it is. On the phone the same rows, each shown where any host takes it: its name greyed where the active host doesn't, its caret listing the hosts that do.",
+      "shows": "Row \"Kubernetes\". A split, as New session's is: the name, then a caret at the row's end, centred in its hover highlight (New session's host dropdown: its hosts as New session lists them, the active one ticked, one out of reach greyed; dimmed with only one host). The name opens it on the host picked beside New session; a host picked from the caret opens it there (the ticked one too), the host picked beside New session left as it is. On the phone the same rows, each shown where any host takes it: its name greyed where the active host doesn't, its caret listing the hosts that do.",
       "copy": [
         "window.kubernetes"
       ],
@@ -152,7 +162,7 @@
     },
     {
       "name": "Docker",
-      "shows": "Row \"Docker\". A split, as New session's is: the name, then a caret at the row's end (New session's host dropdown: its hosts as New session lists them, the active one ticked, one out of reach greyed; dimmed with only one host). The name opens it on the host picked beside New session; a host picked from the caret opens it there (the ticked one too), the host picked beside New session left as it is. On the phone the same rows, each shown where any host takes it: its name greyed where the active host doesn't, its caret listing the hosts that do.",
+      "shows": "Row \"Docker\". A split, as New session's is: the name, then a caret at the row's end, centred in its hover highlight (New session's host dropdown: its hosts as New session lists them, the active one ticked, one out of reach greyed; dimmed with only one host). The name opens it on the host picked beside New session; a host picked from the caret opens it there (the ticked one too), the host picked beside New session left as it is. On the phone the same rows, each shown where any host takes it: its name greyed where the active host doesn't, its caret listing the hosts that do.",
       "copy": [
         "window.docker"
       ],
@@ -176,12 +186,22 @@
               "issue": "BaudeInternal#268"
             }
           ]
+        },
+        {
+          "said": "The caret in Kubernetes's and Databases's rows of the main menu has a highlight that isn't centred on it (paraphrased)",
+          "rule": "A caret-only button (☰'s family rows' host carets) is as wide as its caret and padding: no empty slot beside the caret, so its hover and pressed highlight is centred on it",
+          "decided": "2026-11-27",
+          "source": [
+            {
+              "issue": "BaudeInternal#287"
+            }
+          ]
         }
       ]
     },
     {
       "name": "Databases",
-      "shows": "Row \"Databases\". A split, as New session's is: the name, then a caret at the row's end (New session's host dropdown: its hosts as New session lists them, the active one ticked, one out of reach greyed; dimmed with only one host). The name opens it on the host picked beside New session; a host picked from the caret opens it there (the ticked one too), the host picked beside New session left as it is. On the phone the same rows, each shown where any host takes it: its name greyed where the active host doesn't, its caret listing the hosts that do.",
+      "shows": "Row \"Databases\". A split, as New session's is: the name, then a caret at the row's end, centred in its hover highlight (New session's host dropdown: its hosts as New session lists them, the active one ticked, one out of reach greyed; dimmed with only one host). The name opens it on the host picked beside New session; a host picked from the caret opens it there (the ticked one too), the host picked beside New session left as it is. On the phone the same rows, each shown where any host takes it: its name greyed where the active host doesn't, its caret listing the hosts that do.",
       "copy": [
         "window.database_schemas"
       ],
@@ -205,12 +225,22 @@
               "issue": "BaudeInternal#268"
             }
           ]
+        },
+        {
+          "said": "The caret in Kubernetes's and Databases's rows of the main menu has a highlight that isn't centred on it (paraphrased)",
+          "rule": "A caret-only button (☰'s family rows' host carets) is as wide as its caret and padding: no empty slot beside the caret, so its hover and pressed highlight is centred on it",
+          "decided": "2026-11-27",
+          "source": [
+            {
+              "issue": "BaudeInternal#287"
+            }
+          ]
         }
       ]
     },
     {
       "name": "Terminal",
-      "shows": "Row \"Terminal\". A split, as New session's is: the name, then a caret at the row's end (New session's host dropdown: its hosts as New session lists them, the active one ticked, one out of reach greyed; dimmed with only one host). The name opens it on the host picked beside New session; a host picked from the caret opens it there (the ticked one too), the host picked beside New session left as it is. On the phone the same rows, each shown where any host takes it: its name greyed where the active host doesn't, its caret listing the hosts that do.",
+      "shows": "Row \"Terminal\". A split, as New session's is: the name, then a caret at the row's end, centred in its hover highlight (New session's host dropdown: its hosts as New session lists them, the active one ticked, one out of reach greyed; dimmed with only one host). The name opens it on the host picked beside New session; a host picked from the caret opens it there (the ticked one too), the host picked beside New session left as it is. On the phone the same rows, each shown where any host takes it: its name greyed where the active host doesn't, its caret listing the hosts that do.",
       "copy": [
         "multiplex.terminal_menu"
       ],
@@ -234,12 +264,22 @@
               "issue": "BaudeInternal#268"
             }
           ]
+        },
+        {
+          "said": "The caret in Kubernetes's and Databases's rows of the main menu has a highlight that isn't centred on it (paraphrased)",
+          "rule": "A caret-only button (☰'s family rows' host carets) is as wide as its caret and padding: no empty slot beside the caret, so its hover and pressed highlight is centred on it",
+          "decided": "2026-11-27",
+          "source": [
+            {
+              "issue": "BaudeInternal#287"
+            }
+          ]
         }
       ]
     },
     {
       "name": "Browser",
-      "shows": "Row \"Browser\", after Terminal: one of the views and programs on the host picked beside New session. A split, as New session's is: the name, then a caret at the row's end (New session's host dropdown: its hosts as New session lists them, the active one ticked, one out of reach greyed; dimmed with only one host). The name opens it on the host picked beside New session; a host picked from the caret opens it there (the ticked one too), the host picked beside New session left as it is.",
+      "shows": "Row \"Browser\", after Terminal: one of the views and programs on the host picked beside New session. A split, as New session's is: the name, then a caret at the row's end, centred in its hover highlight (New session's host dropdown: its hosts as New session lists them, the active one ticked, one out of reach greyed; dimmed with only one host). The name opens it on the host picked beside New session; a host picked from the caret opens it there (the ticked one too), the host picked beside New session left as it is.",
       "copy": [
         "bot_browser.title"
       ],
@@ -286,6 +326,16 @@
           "source": [
             {
               "issue": "BaudeInternal#269"
+            }
+          ]
+        },
+        {
+          "said": "The caret in Kubernetes's and Databases's rows of the main menu has a highlight that isn't centred on it (paraphrased)",
+          "rule": "A caret-only button (☰'s family rows' host carets) is as wide as its caret and padding: no empty slot beside the caret, so its hover and pressed highlight is centred on it",
+          "decided": "2026-11-27",
+          "source": [
+            {
+              "issue": "BaudeInternal#287"
             }
           ]
         }

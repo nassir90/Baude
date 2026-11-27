@@ -228,6 +228,8 @@ class ServerSessions:
             self.drop_routes(s)
         if s.proc is not None:
             return s.proc
+        if s.subscription_off():  # (its subscription's disabled: nothing started on it)
+            raise accounts.Disabled(self.disabled_said(s))
         if not os.path.isdir(s.meta["cwd"]):  # (gone, and not made again before this: restore_folder's)
             raise worktree.missing(s.meta["cwd"])
         resumed = s.transcript() is not None
@@ -248,9 +250,11 @@ class ServerSessions:
                     extra += [flag, *(value if isinstance(value, list) else [value])]
             if s.meta.get("ephemeral"):  # (a side question: sees the conversation, writes nothing of its own)
                 extra += ["--no-session-persistence"]
-        if s.meta.get("bot") and run["program"] in ("claude", "pi"):  # (who it is, and its memory, each start)
-            mem = self.bot_memory(s)
+        told = None
+        if s.meta.get("bot") and run["program"] in ("claude", "pi", "codex", "apple"):  # (who it is, and its memory, each
+            mem = self.bot_memory(s)                                              # start)
             told = bot_system(s.meta["bot"]["name"], mem["path"], mem["text"])
+        if told is not None and run["program"] in ("claude", "pi"):
             if run["program"] == "claude" and "--append-system-prompt" in extra:  # (one: its own system with it)
                 at = extra.index("--append-system-prompt") + 1
                 extra[at] = extra[at] + "\n\n" + told
@@ -265,31 +269,7 @@ class ServerSessions:
                     extra[at:at] = rules
                 else:
                     extra += ["--allowedTools", *rules]
-        if run["program"] in ("claude", "pi") and not s.meta.get("ephemeral"):  # (its own tools: chattools, every
-            servers = {chattools.NAME: chattools.server(s.id, self.socket_path, sys.executable,  # chat's)
-                                                        agentproxy.HEADLESS)}
-            rules = [f"mcp__{chattools.NAME}__{t}" for t in chattools.SCHEMAS]
-        else:
-            servers, rules = {}, []
-        if s.mesh_tools() and run["program"] in ("claude", "pi"):  # (the mesh's tools: baudelib.meshtools, here)
-            servers |= {meshtools.NAME: {"command": sys.executable, "args": [agentproxy.HEADLESS, "mesh-tools",
-                                                                            "--socket",
-                                                                            os.path.abspath(self.socket_path)],
-                                        "env": {"BAUDE_SESSION": s.id}}}
-            if s.meta.get("bot"):  # (a Bot's browser too: its own Emission profile, on any host)
-                servers[emissiontools.NAME] = {"command": sys.executable,
-                                               "args": [agentproxy.HEADLESS, "emission-tools", "--socket",
-                                                        os.path.abspath(self.socket_path)],
-                                               "env": {"BAUDE_SESSION": s.id}}
-                servers[multiplextools.NAME] = {"command": sys.executable,  # (and its terminals: Multiplex's)
-                                                "args": [agentproxy.HEADLESS, "multiplex-tools", "--socket",
-                                                         os.path.abspath(self.socket_path)],
-                                                "env": {"BAUDE_SESSION": s.id}}
-            rules += [f"mcp__{meshtools.NAME}__{t}" for t in meshtools.SCHEMAS  # (never asked about, a Bot's or Meta's;
-                      if t not in meshtools.ASKED]                          # but those that run code here, as Bash is)
-            if s.meta.get("bot"):
-                rules += [f"mcp__{emissiontools.NAME}__{t}" for t in emissiontools.SCHEMAS]
-                rules += [f"mcp__{multiplextools.NAME}__{t}" for t in multiplextools.SCHEMAS]
+        servers, rules = self.agent_tools(s, run["program"])
         if servers:
             extra += ["--mcp-config", json.dumps({"mcpServers": servers})]
             if run["program"] == "claude":  # (its tools never asked about)
@@ -311,6 +291,7 @@ class ServerSessions:
                 extra[at:at] = rules
             else:
                 extra += ["--allowedTools", *rules]
+        s.bot_note = None  # (what it's told as it starts: a Bot's, in its system prompt)
         made = []  # (the claude its exit is about: claude_exited)
         kind = agentproxy.ProxiedProc if models.proxied(s.meta.get("model")) else claude.ClaudeProc
         if kind is claude.ClaudeProc and run["program"] == "pi":  # (pi here writes its session itself: a run of it
@@ -325,7 +306,7 @@ class ServerSessions:
                 effort=run["effort"], exe=run["exe"], ephemeral=s.meta.get("ephemeral", False),
                 profile=profile,
                 env={**s.env, **(self.env or {})}, catalog=self.codex_models(profile), mode=run["mode"],
-                recover_empty=bool(s.meta.get("cli_id")) and self.codex_empty_thread(s),
+                recover_empty=bool(s.meta.get("cli_id")) and self.codex_empty_thread(s), instructions=told,
                 servers={meshtools.NAME: {"command": sys.executable, "args": [
                     agentproxy.HEADLESS, "mesh-tools", "--socket", os.path.abspath(self.socket_path), "--only",
                     "answer_task"], "env": {"BAUDE_SESSION": s.id},
@@ -341,10 +322,87 @@ class ServerSessions:
                 **({"path": self.socket_path} if kind is agentproxy.ProxiedProc else {}))
         made.append(s.proc)
         s.proc.limits_folder = self.state_dir  # (its usage as its turns say it, kept with this host's state)
+        s.proc.on_disabled = self.subscription_disabled  # (auto-disabled as it's exhausted: its chats stopped)
         s.used, s.streamed, s.acting = time.time(), False, False  # (a new agent, its model's perhaps: how it says
         # what it writes learned again)
         self.changed()  # (running: listed so, and the watch waits for it to go idle)
         return s.proc
+
+    def agent_tools(self, s, program):
+        """(lock held) The MCP servers a session's agent has of this host ({name: its --mcp-config entry}), and the
+        rules allowing their tools without asking (claude's --allowedTools): chattools, every chat's; the mesh's
+        (baudelib.meshtools), a Bot's and Meta's; a Bot's browser and terminals too. None but for claude and pi."""
+        if program in ("claude", "pi") and not s.meta.get("ephemeral"):  # (its own tools: chattools, every chat's)
+            servers = {chattools.NAME: chattools.server(s.id, self.socket_path, sys.executable, agentproxy.HEADLESS)}
+            rules = [f"mcp__{chattools.NAME}__{t}" for t in chattools.SCHEMAS]
+        else:
+            servers, rules = {}, []
+        if s.mesh_tools() and program in ("claude", "pi"):  # (the mesh's tools: baudelib.meshtools, here)
+            for name, cmd in [(meshtools.NAME, "mesh-tools")] + (  # (a Bot's browser too: its own Emission profile,
+                    [(emissiontools.NAME, "emission-tools"), (multiplextools.NAME, "multiplex-tools")]  # on any host;
+                    if s.meta.get("bot") else []):                                                       # its terminals)
+                servers[name] = {"command": sys.executable, "args": [agentproxy.HEADLESS, cmd, "--socket",
+                                                                     os.path.abspath(self.socket_path)],
+                                 "env": {"BAUDE_SESSION": s.id}}
+            rules += [f"mcp__{meshtools.NAME}__{t}" for t in meshtools.SCHEMAS  # (never asked about, a Bot's or Meta's;
+                      if t not in meshtools.ASKED]                          # but those that run code here, as Bash is)
+            if s.meta.get("bot"):
+                rules += [f"mcp__{emissiontools.NAME}__{t}" for t in emissiontools.SCHEMAS]
+                rules += [f"mcp__{multiplextools.NAME}__{t}" for t in multiplextools.SCHEMAS]
+        return servers, rules
+
+    def grow_agent(self, s):
+        """(lock held) A chat just made a Bot: its agent, running, given a Bot's tools as it runs (mcp_set_servers: the
+        whole set of servers, the ones it has with them), its conversation and its cache going on; what a Bot's told
+        at its start (bot_system) put before the next message it's sent (take_input). Its Bot's tools and its folder's
+        files are allowed it as they're asked for (from_claude). Only Claude Code's can: pi-claude's servers are fixed
+        as it starts. Has it nothing more to do (none running, or given them)?"""
+        proc = getattr(s, "proc", None)
+        if proc is None:
+            return True
+        if getattr(proc, "stopping", False) or not isinstance(proc, claude.ClaudeProc) or \
+                models.model_program(s.meta.get("model")) != "claude" or s.meta.get("ephemeral"):
+            return False
+        servers, _rules = self.agent_tools(s, "claude")
+        if s.app_tools is not None:
+            servers |= s.app_tools.config()
+        mem = self.bot_memory(s)
+        s.bot_note = bot_system(s.meta["bot"]["name"], mem["path"], mem["text"])
+        on = f"srv_{next(self.rids)}"
+        s.routes[on] = (None, lambda ok, said=None: (ok and not (said or {}).get("errors") and
+                                                    not (said or {}).get("removed")) or
+                                 self.grow_refused(s, proc, said), None)
+        proc.send({"type": "control_request", "request_id": on,
+                   "request": {"subtype": "mcp_set_servers", "servers": servers}})
+        return True
+
+    def grow_refused(self, s, proc, said):
+        """(lock held) An agent that wouldn't take a Bot's tools as it ran (grow_agent): started again for them."""
+        self.log(f"{s.id}: its agent didn't take a Bot's tools as it ran ({said}): started again for them")
+        if s.proc is proc and s.meta.get("bot"):
+            s.bot_note = None
+            self.renew_agent(s)
+
+    def bot_told(self, s, msg):
+        """(lock held) A user message to a session's agent with what a Bot's told (grow_agent's note) before it, in a
+        reminder every app reads past (transcripts.strip_reminders), if it has one waiting: once."""
+        note, s.bot_note = getattr(s, "bot_note", None), None
+        if not note or msg.get("type") != "user":
+            return msg
+        head = f"<system-reminder>\n{note}\n</system-reminder>\n\n"
+        message = msg.get("message") or {}
+        content = message.get("content")
+        if isinstance(content, str):
+            content = head + content
+        else:
+            blocks = list(content or [])
+            at = next((i for i, b in enumerate(blocks) if isinstance(b, dict) and b.get("type") == "text"), None)
+            if at is None:
+                blocks.insert(0, {"type": "text", "text": head.rstrip()})
+            else:
+                blocks[at] = {**blocks[at], "text": head + (blocks[at].get("text") or "")}
+            content = blocks
+        return {**msg, "message": {**message, "content": content}}
 
     def send_user(self, s, content, sender=None):
         """(lock held) A session's first message (start's prompt), from sender if it isn't its user's (take_input)."""
@@ -358,15 +416,17 @@ class ServerSessions:
         s.meta["said"] = time.time()
         self.save(s)
 
-    def take_input(self, conn, s, msg, sender=None, shown=None, again=False):
+    def take_input(self, conn, s, msg, sender=None, shown=None):
         """(lock held) What a client sends its claude. A user message is given a uuid if it has none, which its
         program keeps; sender: who it's from, if not the session's user (sent_by): said so in it, for its agent
         (wire.said_by), and kept by that uuid (stamp), with what heads show of it if not its text (shown: a held
         answer's). One whose uuid it's taken already (a head sending it again, its connection gone as it first sent
         it) taken once: the last TAKEN kept in its meta. Those attached live but conn are told it as it's given its agent
-        and kept (tell_said). again: one taken already, held for the turn going on (codex_queue)."""
+        and kept (tell_said)."""
         kind = msg.get("type")
-        if kind == "user" and not again:
+        if kind == "user" and s.subscription_off():  # (its subscription's disabled: refused)
+            raise accounts.Disabled(self.disabled_said(s))
+        if kind == "user":
             desktopchats.refuse_or_resync(s)  # (a Desktop chat someone else is writing: Elsewhere, said)
             if wire.is_id(msg.get("uuid") or ""):
                 taken = s.meta.setdefault("taken", [])
@@ -380,12 +440,8 @@ class ServerSessions:
             msg = {**msg, "message": {**message, "content": wire.said_by(sender, message.get("content"))}}
             self.stamp(s, msg["uuid"], sender, shown)
         if kind == "user":
-            is_codex = models.model_program(s.meta.get("model")) == "codex"
-            if is_codex:
+            if models.model_program(s.meta.get("model")) == "codex":
                 codex.user_input((msg.get("message") or {}).get("content", ""))
-            if is_codex and s.busy:
-                s.codex_queue.append((msg, conn))
-                return
             if conn is not None and wire.clean_sender(sender) is None:  # (its user wrote in it from a head: what it
                 self.saw(s)  # last said has been seen; not a follow-up kept over a restart, sent by the host itself)
             s.meta.pop("cut", None)  # (carried on, or something else said: not cut any more)
@@ -395,10 +451,11 @@ class ServerSessions:
                         not s.meta.get("account_picked"):  # (its account: the default as it's first written in, picked since it was made too; one picked for it kept)
                     s.meta["profiles"] = accounts.defaults()
             at_turn = s.busy
-            self.ensure_proc(s).send(msg)
-            if at_turn and s.kept():  # (taken after the turn it's sent in: kept after it too)
+            proc = self.ensure_proc(s)
+            proc.send(self.bot_told(s, msg))
+            if at_turn and s.kept():  # (taken into the turn it's sent at, or after it: kept as it is, took_queued)
                 s.queued.append((msg.get("message") or {}, msg.get("uuid"), conn))
-            elif at_turn:  # (claude's own to take after the turn it's sent in: an account picked waits for it)
+            elif at_turn:  # (claude's own to take into the turn, or after it: an account picked waits for it)
                 s.sent_at_turn = True
             else:
                 self.keep(s, "user", msg.get("message") or {}, msg.get("uuid"))
@@ -427,7 +484,7 @@ class ServerSessions:
         if sub == "get_context_usage" and models.model_program(s.meta.get("model")) == "codex":
             return answer(s.meta.get("context_usage") or {"showWithoutLimit": True})
         if sub == "initialize":
-            if s.proc is None and not os.path.isdir(s.meta["cwd"]):  # (its folder gone: nothing started for this, a
+            if s.proc is None and (not os.path.isdir(s.meta["cwd"]) or s.subscription_off()):  # (its folder gone, or its subscription disabled: nothing started for this, a
                 return answer(self.init({**(s.meta.get("init") or {}),  # message makes it again: restore_folder)
                                          "current_permission_mode": s.meta.get("mode") or "default"}))
             if s.meta.get("init") is not None and (s.proc is None or s.proc.init_rid is None):
@@ -564,7 +621,9 @@ class ServerSessions:
                     proc.respond(msg.get("request_id"), {"behavior": "allow",  # (always allowed, a head said:
                                                          "updatedInput": request.get("input") or {}})  # whoever's here)
                     return
-                if self.edits_memory(s, request):  # (a Bot's memory is its own to keep: pi's and others' too)
+                if self.edits_memory(s, request) or s.meta.get("bot") and \
+                        request.get("tool_name") in self.agent_tools(s, "claude")[1]:  # (a Bot's memory is its own
+                    # to keep: pi's and others' too; and its tools, given it as it ran too: grow_agent)
                     proc.respond(msg.get("request_id"), {"behavior": "allow",
                                                          "updatedInput": request.get("input") or {}})
                     return
@@ -616,6 +675,13 @@ class ServerSessions:
                     self.cut(s)
                     self.cutting.add(s.id)
                 self.changed()
+            started = (msg.get("event") or {}).get("message") or {} if kind == "stream_event" and \
+                (msg.get("event") or {}).get("type") == "message_start" else None
+            if s.queued and not msg.get("parent_tool_use_id") and models.program(s.meta.get("model"))["steers"] and (
+                    started is not None or kind == "assistant" and (msg.get("message") or {}).get("id") != s.writing):
+                self.took_queued(s)  # (the turn's next message, the first after them: what's sent at it, taken)
+            if started is not None and not msg.get("parent_tool_use_id"):
+                s.writing = started.get("id")
             if kind in ("assistant", "user") and not msg.get("parent_tool_use_id"):
                 self.keep(s, kind, msg.get("message") or {})
                 self.ask_context(s, soon=True)  # (a reply, a tool's result: the window filling through a turn)
@@ -632,6 +698,7 @@ class ServerSessions:
                 s.meta.pop("cut", None)
                 self.save(s)
             if kind == "result" and s.renew and proc is s.proc and not s.queued:  # (a Bot changed at its turn)
+                self.move_bot_folder(s)
                 self.restart_agent(s)
             if kind == "result" and (not self.stopped.is_set() or msg.get("subtype") == "success"):
                 self.drop_waits(s)
@@ -674,20 +741,22 @@ class ServerSessions:
                 hostlogin.heard(self, s, msg)  # told after what claude said, so a head's card follows its turn)
             for message, said, by in told:
                 self.tell_said(s, message, said, by)
-            if kind == "result" and s.codex_queue:
-                if self.stopped.is_set() or s.deleting or getattr(proc, "stopping", False):
-                    s.codex_queue.clear()
-                else:
-                    held, by = s.codex_queue.pop(0)
-                    self.take_input(by, s, held, again=True)
             if kind == "result":
                 followed, s.sent_at_turn = bool(told) or s.sent_at_turn, False
                 if s.account_after_turn and proc is s.proc:  # (another account picked at the turn: moved onto it,
                     self.account_after(s, FOLLOW_UP_WAIT if followed else 0)  # follow-ups sent at it answered first)
 
+    def took_queued(self, s):
+        """(lock held) Messages sent at a session's turn (queued), its program taking them in as the turn goes on
+        (PROGRAMS' steers): kept where they're taken, before the turn's next message, and told those attached."""
+        for message, said, by in s.queued:
+            self.keep(s, "user", message, said)
+            self.tell_said(s, message, said, by)
+        s.queued = []
+
     def tell_said(self, s, message, said, conn=None):
         """(lock held) A message given a session's agent, as it's kept (take_input; one taken at a turn, as the turn
-        ends: queued, codex_queue), told those attached live but conn, who sent it ({type: "_said"}), as its claude
+        ends: queued), told those attached live but conn, who sent it ({type: "_said"}), as its claude
         never says it back; with who it's from (sender: with what's shown of it) if its sender store says."""
         told = {"type": "_said", "uuid": said, "message": message}
         if (sender := (self.senders(s) or {}).get(said)) is not None:
@@ -899,7 +968,6 @@ class ServerSessions:
                 # its turn's end: its Bot told)
             self.tasks.agent_gone(s)  # (its tasks' asks it took, never answered now: failed, not left waiting)
             s.proc, s.busy, s.acting, s.streamed = None, False, False, False
-            s.codex_queue.clear()
             s.asks.clear()
             s.rewinds.clear()  # (asked of the program gone: never answered)
             s.forget_commands()
@@ -1095,9 +1163,44 @@ class ServerSessions:
             s.account_to = profile
         self.switch_account(s)
 
+    def disabled_said(self, s):
+        """(lock held) What's said of a message refused as a chat's subscription is disabled: its name."""
+        a = s.account()
+        return wording.say("subscriptions.disabled_chat",
+                           name=a["name"] if a else wording.say("subscriptions.cli_default"))
+
+    def subscription_disabled(self, key):
+        """A subscription (usage key) disabled: every chat here on it turned off, its agent stopped (a turn going
+        on cut short), and listed so (account_disabled). A message sent at that turn and not yet taken in (queued) is held
+        for the chat (held), sent by its user once the subscription is back."""
+        with self.lock:
+            for s in list(self.sessions.values()):
+                if s.subscription() != key:
+                    continue
+                for message, said, _by in s.queued:
+                    content = message.get("content")
+                    text = content if isinstance(content, str) else "".join(
+                        b.get("text", "") for b in content or () if isinstance(b, dict) and b.get("type") == "text")
+                    s.meta["held"] = (s.meta.get("held") or []) + [{"id": said if isinstance(said, str) else str(uuid.uuid4()),
+                                                                     "text": text, "shown": None, "sender": None,
+                                                                     "at": time.time()}]
+                if s.queued:
+                    s.queued = []
+                    self.save(s)
+                if s.proc is not None and not getattr(s.proc, "stopping", False):
+                    s.proc.stopping, s.proc.restarting = True, False
+                    s.proc.kill()
+                    self.log(f"{s.id}: its subscription's disabled: its agent stopped")
+            self.changed()
+
+    def subscription_switched(self):
+        """A subscription's switches changed (enabled again, auto-disable turned on or off): listed so."""
+        with self.lock:
+            self.changed()
+
     def switch_account(self, s):
         """(lock not held) A chat moved onto the account picked for it (account_to), once nothing's running in it nor
-        waiting for it (a turn, follow-ups sent at it: queued, codex_queue; till then account_after_turn, and this again
+        waiting for it (a turn, follow-ups sent at it: queued; till then account_after_turn, and this again
         as the turn's over): its record carried to the account (accounts.carry_chat), the lock not held as it's copied,
         then, if nothing's written it meanwhile, the account kept as its own and its agent started again under it with
         what's sent it next. OSError if the copy fails (the chat left as it was)."""
@@ -1106,7 +1209,7 @@ class ServerSessions:
                 to = s.account_to
                 if to is None or s.deleting or s.deleted:
                     return
-                if s.busy or s.queued or s.codex_queue or tries == CARRY_TRIES - 1:  # (written to all along: taken
+                if s.busy or s.queued or tries == CARRY_TRIES - 1:  # (written to all along: taken
                     s.account_after_turn = True  # after its next turn)
                     return
                 program = models.model_program(s.meta.get("model"))
@@ -1123,7 +1226,7 @@ class ServerSessions:
                 self.log(f"{s.id}: not moved to another account: {e}")
                 raise OSError(str(e)) from e
             with self.lock:
-                if s.account_to != to or s.busy or s.queued or s.codex_queue or \
+                if s.account_to != to or s.busy or s.queued or \
                         accounts.carry_seen(seen) != seen:
                     continue  # (picked again, or written or sent to as it was copied: looked at again)
                 s.meta.setdefault("profiles", {})[program] = to
@@ -1144,7 +1247,7 @@ class ServerSessions:
         """(lock held) A chat's turn over, or its agent gone, with an account picked for it meanwhile: moved onto it on
         a thread of its own (switch_account; the copy can take a while), if nothing waits for it still. wait: s given
         its claude first to begin the turn a follow-up sent at the last one starts (one begun: moved after it)."""
-        if s.account_to is None or s.busy or s.queued or s.codex_queue:
+        if s.account_to is None or s.busy or s.queued:
             return
 
         def run():

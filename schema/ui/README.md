@@ -67,6 +67,13 @@ An entry or a part may carry:
   (BotSettings.dialog.json) and changed with Rename… or Bot Settings…. A new entry that shows a Bot says so. The owner: "Bot's just have a Name. When you promote to a bot you have the option
   of setting the Bot's new name." (2026-11-22). Source: `[{"session": "f24332de-9555-4279-8489-ffa7dbcf54c9", "message":
   "30af64bb-6804-4040-984b-d3fd2a444e53"}]`.
+- **A Bot knows itself by its Name, and gets its tools as it's made.** Every host keeps a Bot's folder (its memory,
+  picture and tasks) under the Bot's name, moved as it's renamed, so what its agent is told of itself and its folder
+  says the name, never its chat's id. A chat made a Bot while its agent runs is given a Bot's tools and told who it
+  is without being started again, where its agent can take tools as it runs (Claude Code's); another (pi's) is started
+  again for them after its turn. The owner asked that Bots refer to themselves by name, not id, and that the research
+  on adding MCP tools to a running chat be used for a chat made a Bot (2026-11-27). Source:
+  `[{"issue": "BaudeInternal#288"}]`.
 - **A picture is set into the page.** Wherever an app shows someone's or a Bot's picture, or their initials on a colour
   (the Git page's authors, a Bot's sidebar or home row, Bot Settings, This phone's Bots, the phone's chat header), it's round, under the inset shade
   `picture-shade` in schema/tokens: a blurred shadow round its rim, one from its top edge and a hairline ring just inside
@@ -124,16 +131,19 @@ An entry or a part may carry:
 - **Telemetry is a timestamped log that stays on the user's machines.** Every app tells its own machine's host only
   (the phone's app its own host), as it happens and each with its own time: each chat opened, in front, left, each turn
   sent and ended (how long, model, effort, tokens), by the chat's host id and session id; a host keeps its own sessions'
-  turn ends too, samples its machine and its processes every 5 seconds, and keeps line profiles of what it's told to
-  profile (line_profiler, optional). All of it only while that host's telemetry is on, switched at run time from
+  turn ends too, samples its machine and its processes every 5 seconds, and, while its line profiling is switched on
+  too, keeps line profiles (line_profiler, optional) of what each process profiles: the developers' pick shipped with
+  the code (lineprofile.DEFAULTS), or what telemetry_set from any member of the mesh names in its place for that host;
+  no app asks the user to name functions. All of it only while that host's telemetry is on, switched at run time from
   Settings → Telemetry or telemetry_set. Any member reads any host's over a stretch (telemetry_read), so one machine
   pulls every host's and puts them together by time (baudelib/telemetry.py's gather); a chat's size is worked out
   from its transcript when asked (chat_size), never kept. No screen time or menu counts. Nothing is sent outside the
   mesh. The owner: "Once a minute is completely bonkers and quite useless", "Sreen time is a pretty useless metric,
   how is that going to help me make the app better (in isolation)", "Store chat activity yes with timestamps", "Yes
-  store system metrics", "Yes build in line_profiler", "Yes add teh wire messags" (2026-11-26). Source:
-  `[{"issue": "BaudeInternal#205"}, {"session": "b3845b21-55ac-4aab-a769-fb8517403c51", "message":
-  "41aef9c4-02f6-4496-ac8a-bb9737df5262"}, {"issue": "BaudeInternal#228"}]`.
+  store system metrics", "Yes build in line_profiler", "Yes add teh wire messags" (2026-11-26); and that which
+  functions are profiled is the developers' call, a default set overridable over the mesh (2026-11-27, paraphrased).
+  Source: `[{"issue": "BaudeInternal#205"}, {"session": "b3845b21-55ac-4aab-a769-fb8517403c51", "message":
+  "41aef9c4-02f6-4496-ac8a-bb9737df5262"}, {"issue": "BaudeInternal#228"}, {"issue": "BaudeInternal#285"}]`.
 - **Every piece of text starts with a capital letter.** Whatever an app puts on screen starts with a capital: notes and
   messages (a chat's SystemNote, an error, a status line) in sentence case ("Interrupted", "Model → Opus", "Committed on
   main", "Claude couldn't save this chat: the disk is full"), buttons, menu items and links in Title Case ("Show in
@@ -247,3 +257,8 @@ An entry or a part may carry:
   the default or disabled and the models it runs; a disabled one is refused as its chats are. The owner asked that the
   Bots' spawn API can override the provider and look at the providers available (2026-11-27). Source: `[{"issue":
   "BaudeInternal#300"}]`.
+- **A text row stays put while it's typed in.** A page that refreshes or takes the host's answer (Settings →
+  Telemetry every few seconds, Dependencies' Deciders as one's added) changes its other rows and groups in place: it
+  never takes out and puts back the text row being typed in or the group holding it, so the row keeps its focus, its
+  caret and what's typed, and the page stays where it's scrolled to. The owner found a text change at the foot of
+  Settings → Telemetry jumping the page back to its top (2026-11-27). Source: `[{"issue": "BaudeInternal#286"}]`.

@@ -325,7 +325,7 @@ class Access:
                 (inner.get("request") or {}).get("subtype") == "set_permission_mode" and \
                 (inner.get("request") or {}).get("mode") not in SAFE_MODES:
             caps.append("shell")
-        if op == "run_task" or op == "tasks" and "set" in msg:  # (a task: a script run here, a shell's worth)
+        if op in ("run_task", "task_bind") or op == "tasks" and "set" in msg:  # (a task: a script run here, a shell's worth; its bindings too)
             caps.append("shell")
         if op == "start" and msg.get("account") is not None:  # (a subscription picked: one it may see the accounts of)
             caps.append("subscriptions_read")

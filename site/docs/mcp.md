@@ -87,7 +87,7 @@ Your tasks (a Bot's; another Bot's, by its session): scripts your host runs, by 
 
 ### `task`
 
-One of your tasks: its script, triggers and form, and its latest runs (when, what started each, how long, how it ended, the version it ran).
+One of your tasks: its script, triggers, form and variables (what each's bound to, and a warning for one bound to what isn't there now), and its latest runs (when, what started each, how long, how it ended, the version it ran).
 
 | Field | Type | Required | What it is |
 |---|---|---|---|
@@ -96,7 +96,7 @@ One of your tasks: its script, triggers and form, and its latest runs (when, wha
 
 ### `set_task`
 
-Make one of your tasks, or change one (by its id; a field left out kept as it was, but triggers and form, given, are given whole). A Python script imports baudetask: baudetask.inputs (its form, filled), baudetask.payload (its trigger's event), say(text) (a line in its log), ask(text, form=None) (asks you: your answer, or the form's values), fallback(error), and @baudetask.main (an exception handed to you). A shell script gets its inputs as $BAUDE_IN_<FIELD>. A trigger's payload fills a field of the same name, or the one fills maps it to. Saving a new script makes a new version.
+Make one of your tasks, or change one (by its id; a field left out kept as it was, but triggers and form, given, are given whole; variables and bindings too). A Python script imports baudetask: baudetask.inputs (its form, filled), baudetask.payload (its trigger's event), baudetask.vars (its variables: vars["Translation Model"] or vars.translation_model, typed, None if unbound, .warning if what it's bound to isn't there now; a model one passed straight to agent(model=)), say(text) (a line in its log), ask(text, form=None) (asks you: your answer, or the form's values), fallback(error), and @baudetask.main (an exception handed to you). A shell script gets its inputs as $BAUDE_IN_<FIELD>. A trigger's payload fills a field of the same name, or the one fills maps it to. Saving a new script makes a new version.
 
 | Field | Type | Required | What it is |
 |---|---|---|---|
@@ -107,6 +107,8 @@ Make one of your tasks, or change one (by its id; a field left out kept as it wa
 | `script` | string |  |  |
 | `form` | array of object |  | Fields: {name, label?, type: text\|number\|bool\|choice, choices?, default?, required?} |
 | `triggers` | array of object |  | {kind: schedule, every (minutes) or at (HH:MM) and days (0 Monday … 6 Sunday)} or {kind: git_push, repo (a folder on the host), branch, poll_s}; each may have fills: {field: payload key}. A git push's payload: repo, branch, before, after, commit, message, author |
+| `variables` | array of object |  | Variables, each bound once for the task (not per run, as the form is): {name, type: model\|decider\|host\|browser_host\|terminal_host\|kube_context\|pod\|container\|database\|text, description?} |
+| `bindings` | object |  | A variable's name: what it's bound to, {value, effort? (a model's), host? (the host serving a model), model? (a decider's), context?, namespace? (a pod's), container? (a database's)}, or just its value as text; given, given whole. A model's value is as hosts lists it; anything else is taken too. One bound to what isn't there is warned of, and the run starts anyway |
 | `notify_failure` | boolean |  | A failed run is sent to you (default true) |
 | `notify_exit` | boolean |  | A run that finishes with exit 0 is told to you, for your information (default false) |
 | `timeout_s` | integer |  |  |
@@ -242,16 +244,16 @@ One of a host's access rules set (capability: the rule's name), or a chat's own 
 
 #### `accounts` (Accounts)
 
-The host's Claude and Codex subscription accounts (hostaccounts): list them; add one (Claude: name and an existing signed-in config folder, or name and token where the host has no claude; Codex: name and an existing signed-in home); rename one (id, name); replace a token account's token (id, token); remove one (id); select a provider's default for new chats (provider, id; "" for the CLI's own sign-in); use another for a chat (session, id; "" for the CLI's own sign-in: its agent started again under it, resuming the chat, once its turn's over); read a subscription's usage (id; "" for the CLI's own sign-in of provider, Claude's where none is said); sign in (sign_in: provider and name for a new account, or id to sign in to one again; Claude's runs claude auth login with the account's own folder, its lines coming as they're written, the page to open among them; Codex's codex login (method: the browser's, by default, or the device code's), its state coming as it goes (login: the page to open, and the device code's code to enter there); then its end; the connection's going stops it); pass a code the sign-in page showed to the sign-in this connection runs (code: no answer of its own); pass the address a browser ended on after a Codex browser sign-in's page to the one this connection runs (callback: url; answered with the page codex's server gave, or error). Each other is answered with accounts.
+The host's Claude and Codex subscription accounts (hostaccounts): list them; add one (Claude: name and an existing signed-in config folder, or name and token; Codex: name and an existing signed-in home, or name and token); rename one (id, name); replace a token account's token (id, token); remove one (id); use another for a chat (session, id; "" for the CLI's own sign-in: its agent started again under it, resuming the chat, once its turn's over; kept as the one the host's new chats on its provider's models take, defaults); read a subscription's usage (id; "" for the CLI's own sign-in of provider, Claude's where none is said); sign in (sign_in: provider and name for a new account, or id to sign in to one again; Claude's runs claude auth login with the account's own folder, its lines coming as they're written, the page to open among them; Codex's codex login (method: the browser's, by default, or the device code's), its state coming as it goes (login: the page to open, and the device code's code to enter there); then its end; the connection's going stops it); pass a code the sign-in page showed to the sign-in this connection runs (code: no answer of its own); pass the address a browser ended on after a Codex browser sign-in's page to the one this connection runs (callback: url; answered with the page codex's server gave, or error). Each other is answered with accounts.
 
 | Field | Type | Required | What it is |
 |---|---|---|---|
-| `what` | `list` \| `add` \| `rename` \| `token` \| `remove` \| `select` \| `use` \| `usage` \| `sign_in` \| `code` \| `callback` | yes | What to do. |
-| `provider` | `claude` \| `codex` |  | add, select, sign_in (a new account): whose. usage with id "": whose CLI's own sign-in (Claude's where left out). |
-| `id` | string |  | rename, token, remove, select, use, usage, sign_in: the account ("" for the CLI's own sign-in, select, use and usage only). |
+| `what` | `list` \| `add` \| `rename` \| `token` \| `remove` \| `use` \| `usage` \| `sign_in` \| `code` \| `callback` | yes | What to do. |
+| `provider` | `claude` \| `codex` |  | add, sign_in (a new account): whose. usage with id "": whose CLI's own sign-in (Claude's where left out). |
+| `id` | string |  | rename, token, remove, use, usage, sign_in: the account ("" for the CLI's own sign-in, use and usage only). |
 | `session` | string |  | use: the chat whose account it is, one of the host's sessions whose model is the account's provider's. sign_in (a Claude account's) and token: the chat it's for, whose sign-in (ChatLogin) its host moves as it goes, as a login request's, if the asker may read the chat (Agent Management's read). |
 | `name` | string |  | add, rename, sign_in (a new account): its name. |
-| `token` | string |  | add (Claude), token: a token from claude setup-token. |
+| `token` | string |  | add (Claude, Codex), token: what signs the account in, pasted: Claude's a long-lived token from claude setup-token (sk-ant-oat…) or an Anthropic API key (sk-ant-api…); Codex's an OpenAI API key (sk-…), written to a new CODEX_HOME's auth.json as codex login --with-api-key writes it. Kept on the host only, owner-only; never said back. |
 | `home` | string |  | add (Codex): an existing CODEX_HOME on the host, signed in with ChatGPT and keeping its credentials in a file. |
 | `folder` | string |  | add (Claude): an existing Claude config folder on the host, signed in (claude auth status says so, run with it). |
 | `code` | string |  | code: what the sign-in page showed, pasted. |
@@ -386,15 +388,16 @@ A tunnel closed, from either end; or (agent) the program's stdin closed.
 
 #### `databases` (Databases)
 
-The running databases, read-only: their servers and databases (servers), one database's schema (schema), a table's first rows (rows). Secret-looking columns are masked here.
+The running databases, read-only: their servers and databases (servers), one database's schema (schema), a table's first rows (rows), a query's rows (query: Postgres's, in a read-only transaction). Secret-looking columns are masked here.
 
 | Field | Type | Required | What it is |
 |---|---|---|---|
-| `what` | `servers` \| `schema` \| `rows` |  | What to read. |
-| `container` | string |  | schema, rows: the server's container. |
-| `database` | string |  | schema, rows: the database. |
+| `what` | `servers` \| `schema` \| `rows` \| `query` |  | What to read. |
+| `container` | string |  | schema, rows, query: the server's container. |
+| `database` | string |  | schema, rows, query: the database. |
 | `schema` | string |  | rows: the table's schema. |
 | `table` | string |  | rows: the table. |
+| `sql` | string |  | query: one statement that reads (SELECT, WITH, VALUES, TABLE), run read-only; its rows come back as rows' do, secret-looking columns masked, QUERY_ROWS_MAX of them at most. |
 
 #### `deactivate` (Deactivate)
 
@@ -451,15 +454,18 @@ This connection detached from a session (an ephemeral one its head's done with d
 
 #### `docker` (Docker)
 
-Docker's containers, images, volumes, networks and Compose projects on the host, read and acted on through its docker CLI: its contexts and the sidebar's categories (contexts), a category's objects (list), an object inspected (inspect), and a container or Compose project started, stopped, restarted or removed (start, stop, restart, remove; an image, a volume or a network removed).
+Docker's containers, images, volumes, networks and Compose projects on the host, read and acted on through its docker CLI: its contexts and the sidebar's categories (contexts), a category's objects (list), an object inspected (inspect), a container's or Compose project's log as it is now (logs), a command run in a running container (exec: no terminal, its output when it ends), and a container or Compose project started, stopped, restarted or removed (start, stop, restart, remove; an image, a volume or a network removed).
 
 | Field | Type | Required | What it is |
 |---|---|---|---|
-| `what` | `contexts` \| `list` \| `inspect` \| `start` \| `stop` \| `restart` \| `remove` |  | What to do. |
+| `what` | `contexts` \| `list` \| `inspect` \| `start` \| `stop` \| `restart` \| `remove` \| `logs` \| `exec` |  | What to do. |
 | `context` | string |  | The context, by its name, as contexts lists it. |
-| `page` | string |  | list, inspect and the actions: the category's page, by its key. |
-| `id` | string |  | inspect and the actions: the object, by its id (a Compose project's, its name). |
+| `page` | string |  | list, inspect, logs, exec and the actions: the category's page, by its key. |
+| `id` | string |  | inspect, logs, exec and the actions: the object, by its id (a Compose project's, its name). |
 | `format` | `json` \| `yaml` |  | inspect: as JSON (the default) or YAML. |
+| `tail` | integer |  | logs: its last this many lines (the Docker view's number if none). |
+| `command` | array of string |  | exec: what's run, its argv (docker exec, with no terminal and nothing on its stdin). |
+| `timeout` | number |  | exec: seconds it may run (60 if none; 600 at most): then it's stopped. |
 
 #### `docker_follow` (DockerFollow)
 
@@ -673,6 +679,9 @@ Who's connecting: the first line, always.
 | `commit` | string |  | The commit its code is (said in the host's log if it's another than the host's). |
 | `here` | boolean |  | true: it's on the host's own machine, connected by its socket (an app there is listed among the host's heads; one elsewhere isn't). |
 | `as` | string |  | A chat on the host it's from (its own tools, on its host's socket): judged by the access rules as the member that started it, if one did. |
+| `task` | object |  | A task's script on its host's socket: its run's id and token, as its environment names them (BAUDE_TASK_RUN, BAUDE_TASK_TOKEN). From then on the connection is the run's Bot's: the access rules judge it as they judge the Bot's own tools (as the member that started the Bot, if one did), its emission and multiplex calls drive the Bot's own browser and terminals, and what it relays through the mesh is from the Bot. Refused (access_denied) if no run going here has that token. |
+| `task.run` | string | yes | The run's id. |
+| `task.token` | string | yes | The run's token. |
 
 #### `in` (In)
 
@@ -721,22 +730,29 @@ An agent's program stopped.
 
 #### `kube` (Kube)
 
-A cluster's objects as Freelens lists them, read through the host's kubeconfig and kubectl: its contexts (contexts), whether a context is still there as the head knows it (check: answered removed, or with nothing else; kubectl isn't run), one connected to (connect), a kind's objects (list), an object's YAML (yaml), what controls an object (owner), a pod deleted (delete), the whole stack's CPU and memory (summary, a read as list is). Secrets' values are never read.
+A cluster's objects as Freelens lists them, read through the host's kubeconfig and kubectl: its contexts (contexts), whether a context is still there as the head knows it (check: answered removed, or with nothing else; kubectl isn't run), one connected to (connect), a kind's objects (list), an object's YAML (yaml), what controls an object (owner), a pod deleted (delete), objects applied from YAML (apply), a pod's log as it is now (logs), a command run in a pod's container (exec: no terminal, its output when it ends), the whole stack's CPU and memory (summary, a read as list is). Secrets' values are never read.
 
 | Field | Type | Required | What it is |
 |---|---|---|---|
-| `what` | `contexts` \| `check` \| `connect` \| `list` \| `yaml` \| `owner` \| `summary` \| `delete` |  | What to do. |
+| `what` | `contexts` \| `check` \| `connect` \| `list` \| `yaml` \| `owner` \| `summary` \| `delete` \| `apply` \| `logs` \| `exec` |  | What to do. |
 | `context` | string |  | The kubeconfig context. |
 | `server` | string |  | The context's server as the head knows it (KubeContext's): a context of that name with another server is another cluster, and the request is answered removed. |
 | `page` | string |  | list, yaml: the kind's page, by its resource. |
 | `crd` | string |  | list, yaml: a custom resource's definition (plural.group) for a kind that isn't listed. |
+| `selector` | string |  | list: only the objects whose labels match this selector (kubectl's -l: app=web,tier!=cache); a Secret's or a Helm release's page lists every one. |
 | `namespaces` | array of string |  | summary: the namespaces it's the totals of (every one when it's left out; none when it's empty). |
 | `since` | number |  | summary: the newest history sample the head has (its at): only later ones are sent (every one when it's left out). |
 | `fresh` | boolean |  | summary: read the cluster now (Refresh), not a read the host kept or the fault it holds while it waits to try a failing cluster again. |
-| `namespace` | string |  | yaml, owner, delete: the object's namespace. |
-| `name` | string |  | yaml, owner, delete: the object's name. |
+| `namespace` | string |  | yaml, owner, delete, logs, exec: the object's namespace; apply: where objects that name none go. |
+| `name` | string |  | yaml, owner, delete, logs, exec: the object's name (logs, exec: the pod's). |
 | `kind` | string |  | owner: the object's kind. |
 | `force` | boolean |  | delete: at once, not waiting for the pod to stop. |
+| `manifest` | string |  | apply: the objects, as YAML or JSON (kubectl apply -f -). |
+| `container` | string |  | logs, exec: the container (the pod's default if none). |
+| `previous` | boolean |  | logs: its previous run's. |
+| `tail` | integer |  | logs: its last this many lines (the Kubernetes view's number if none). |
+| `command` | array of string |  | exec: what's run, its argv (kubectl exec --, with no terminal and nothing on its stdin). |
+| `timeout` | number |  | exec: seconds it may run (60 if none; 600 at most): then it's stopped. |
 
 #### `kube_follow` (KubeFollow)
 
@@ -1045,6 +1061,26 @@ A running script asks its Bot (on the host's own socket, with its run's token): 
 | `form` | array of TaskField |  | Fields the Bot's to fill: its answer's values. |
 | `error` | boolean |  | It's an error handed over. |
 
+#### `task_bind` (TaskBind)
+
+One of a Bot's task's variables bound (binding), or let go of (none): answered as task is, with the variable's warning as it's looked at now.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `session` | string | yes | The session's id. |
+| `id` | string | yes | The task's id. |
+| `name` | string | yes | The variable's name. |
+| `binding` | TaskBinding? |  | What it's bound to; none: unbound. |
+
+#### `task_choices` (TaskChoices)
+
+What a task's variable of a type could be bound to, as the Bot's host has them.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `session` | string | yes | The session's id. |
+| `type` | `model` \| `decider` \| `host` \| `browser_host` \| `terminal_host` \| `kube_context` \| `pod` \| `container` \| `database` \| `text` | yes | The variable's type (TaskVariable's). |
+
 #### `task_output` (TaskOutput)
 
 The last part of a background task's output file, one a session's transcript names. Answered as file.
@@ -1118,13 +1154,15 @@ A host's telemetry over a stretch: its chat events, its samples, its line profil
 
 #### `telemetry_set` (TelemetrySet)
 
-A host's telemetry switched on or off, or what a process on its machine profiles set, at run time: kept by the host, and told to its machine's apps (Info's telemetry).
+A host's telemetry switched on or off, its line profiling switched on or off, or what a process on its machine profiles named (or its defaults again), at run time: kept by the host, and told to its machine's apps (Info's telemetry).
 
 | Field | Type | Required | What it is |
 |---|---|---|---|
 | `on` | boolean/null |  | Telemetry on or off (null: as it is). |
-| `app` | any |  | The process whose profiling is set: the host's, Baude's or Record's (null: none). |
-| `functions` | array/null of string |  | What it profiles: functions and modules by their dotted names; empty: off. |
+| `line_profiling` | boolean/null |  | Line profiling on or off: the host's process, Baude's and Record's each profiling what it's told to while telemetry's on too (null: as it is). |
+| `app` | any |  | The process whose profiled functions are named or put back to its defaults: the host's, Baude's or Record's (null: none). |
+| `functions` | array/null of string |  | What app's process profiles in place of its defaults: functions and modules by their dotted names; empty: nothing (null: as it is). |
+| `default` | boolean/null |  | True: what app's process profiles is its defaults again (Baude's own pick, lineprofile.DEFAULTS), what was named in their place dropped. |
 
 #### `terminal` (Terminal)
 
@@ -1262,10 +1300,13 @@ accounts' answer: the accounts and defaults as they are after it, and whether th
 | `what` | string |  | What was asked. |
 | `error` | string |  | Why it couldn't be done, for the user as it is. |
 | `accounts` | array of Account |  | The host's accounts, by provider then name. |
-| `defaults` | object |  | Each provider's default for new chats. |
-| `defaults.claude` | string |  | Claude's default account's id, "" for the CLI's own sign-in. |
+| `defaults` | object |  | The account each provider's new chats take: the one a chat's provider picker (accounts' use) last picked there, else the CLI's own sign-in. |
+| `defaults.claude` | string |  | Claude's account's id, "" for the CLI's own sign-in. |
 | `defaults.codex` | string |  | Codex's. |
-| `usage` | array/null of UsageLimit |  | usage: the subscription's limits; null where they can't be read for its sign-in (a setup token's, an API key's, a Codex sign-in that isn't a ChatGPT plan's). |
+| `usage` | array/null of UsageLimit |  | usage: the subscription's limits; for a Claude sign-in that can't be asked (a setup token's), as its chats' turns last said them (as_of); null where none can be said (an API key's, a Codex sign-in that isn't a ChatGPT plan's, a setup token's before its first turn: after_turn). |
+| `as_of` | number |  | usage: where its limits are as the subscription's chats' turns last said them (its sign-in can't be asked: a setup token's), when they last said them, in seconds since 1970; shown as "Last update <how long ago>" under them. |
+| `after_turn` | boolean |  | usage: true where its limits can only be said by its chats' turns (a setup token's) and none has said them yet (usage null). |
+| `api_key` | boolean |  | usage: true where the account is signed in with an API key (paid per use), so it has no subscription limits (usage null). |
 | `line` | string |  | sign_in (Claude's): a line the sign-in wrote (the page to open among them). |
 | `login` | ChatLogin |  | sign_in (Codex's): its state as it goes (login alone: signing_in, then with the page, and the device code's code), then on its end, signed_in or failed. |
 | `page` | CallbackPage |  | callback: what the Codex sign-in's server answered the address. |
@@ -1398,7 +1439,7 @@ set_cwd's answer.
 
 #### `databases` (DatabasesReply)
 
-databases' answer: servers {servers, databases}; schema {tables, links, took}; rows {rows}.
+databases' answer: servers {servers, databases}; schema {tables, links, took}; rows and query {rows}.
 
 | Field | Type | Required | What it is |
 |---|---|---|---|
@@ -1409,7 +1450,7 @@ databases' answer: servers {servers, databases}; schema {tables, links, took}; r
 | `tables` | array of DbTable |  | schema: its tables. |
 | `links` | array of DbLink |  | schema: their foreign keys. |
 | `took` | number |  | schema: seconds it took to read, 0 when it was kept from a read before. |
-| `rows` | array of object |  | rows: the first rows, each {column: value}; objects and lists as JSON text. |
+| `rows` | array of object |  | rows: the first rows; query: its rows (QUERY_ROWS_MAX at most); each {column: value}, objects and lists as JSON text. |
 | `missing` | Dep |  | servers: no server was found and Docker isn't on the host: Databases shows this in its place. |
 
 #### `deactivated` (Deactivated)
@@ -1474,7 +1515,7 @@ list_dir's answer: its entries, folders first (.git left out), DIR_LIMIT at most
 
 #### `docker` (DockerReply)
 
-docker's answer: contexts {contexts, sections}; list {columns, rows}; inspect {text, file}; start, stop, restart and remove {said}; fault when Docker can't be reached; missing when there's no docker.
+docker's answer: contexts {contexts, sections}; list {columns, rows}; inspect {text, file}; logs {text}; exec {text, status}; start, stop, restart and remove {said}; fault when Docker can't be reached; missing when there's no docker.
 
 | Field | Type | Required | What it is |
 |---|---|---|---|
@@ -1485,9 +1526,10 @@ docker's answer: contexts {contexts, sections}; list {columns, rows}; inspect {t
 | `sections` | array of DockerSection |  | contexts: the sidebar's categories. |
 | `columns` | array of DockerColumn |  | list: the page's columns. |
 | `rows` | array of DockerRow |  | list: the objects. |
-| `text` | string |  | inspect: what docker inspect says of it. |
+| `text` | string |  | inspect: what docker inspect says of it; logs: its last lines; exec: what the command wrote, its stdout and stderr together. |
 | `file` | string |  | inspect: what it is called, for its highlighting. |
 | `said` | string |  | start, stop, restart, remove: what docker said. |
+| `status` | integer |  | exec: the command's exit status (docker's, if it couldn't run it). |
 | `missing` | Dep |  | docker isn't on the host: the Docker view shows this in its place. |
 
 #### `docker_end` (DockerEnd)
@@ -1740,7 +1782,7 @@ join's answer.
 
 #### `kube` (KubeReply)
 
-kube's answer: contexts {contexts, where}; connect {sections, namespaces, nodes}; list {columns, rows, metrics, page}; yaml {text, file, refs}; owner {kind, name, resource}; summary {summary}; delete {said}; fault when a cluster can't be read; removed when its context has gone from the kubeconfig.
+kube's answer: contexts {contexts, where}; connect {sections, namespaces, nodes}; list {columns, rows, metrics, page}; yaml {text, file, refs}; owner {kind, name, resource}; summary {summary}; delete and apply {said}; logs {text}; exec {text, status}; fault when a cluster can't be read; removed when its context has gone from the kubeconfig.
 
 | Field | Type | Required | What it is |
 |---|---|---|---|
@@ -1757,14 +1799,15 @@ kube's answer: contexts {contexts, where}; connect {sections, namespaces, nodes}
 | `columns` | array of KubeColumn |  | list: the page's columns on this cluster. |
 | `rows` | array of KubeRow |  | list: the objects. |
 | `metrics` | boolean/null |  | list: whether CPU and memory could be read (pods, nodes), or null for another kind. |
-| `text` | string |  | yaml: the YAML (a Secret's keys only, a Helm release's JSON). |
+| `text` | string |  | yaml: the YAML (a Secret's keys only, a Helm release's JSON); logs: the log; exec: what the command wrote, its stdout and stderr together. |
 | `file` | string |  | yaml: what it is called, for its highlighting. |
 | `refs` | array of KubeRef |  | yaml: the names in it that are other objects. |
 | `kind` | string |  | owner: the controlling kind, climbed up from a ReplicaSet or a Job. |
 | `name` | string |  | owner: its name. |
 | `resource` | string |  | owner: its kind's resource. |
 | `summary` | KubeSummary |  | summary: the stack's CPU and memory. |
-| `said` | string |  | delete: what kubectl said. |
+| `said` | string |  | delete, apply: what kubectl said. |
+| `status` | integer |  | exec: the command's exit status (kubectl's, if it couldn't run it). |
 | `missing` | Dep |  | kubectl isn't on the host: the Kubernetes view shows this in its place. |
 
 #### `kube_contexts` (KubeContexts)
@@ -1992,6 +2035,16 @@ answer_task's answer: the ask answered, its run going on.
 | `task` | string | yes | The run's task, by its name. |
 | `values` | object |  | A form's values, as they were taken (checked against its fields). |
 | `text` | string |  | The answer to an ask with no form. |
+
+#### `task_choices` (TaskChoicesReply)
+
+task_choices' answer.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `session` | string | yes | The session's id. |
+| `type` | string |  | The type asked for. |
+| `choices` | array of TaskChoice |  | What it could be bound to, best first. |
 
 #### `task_reported` (TaskReported)
 
@@ -2363,7 +2416,7 @@ A host's rule for each of its capabilities, by name: a capability split into wha
 
 | Field | Type | Required | What it is |
 |---|---|---|---|
-| `shell` | AccessRule | yes | A shell on its machine: its terminals (terminal ops) and Multiplex's, through a Bot's terminal tools (multiplex). |
+| `shell` | AccessRule | yes | A shell on its machine: its terminals (terminal ops) and Multiplex's, through a Bot's terminal tools (multiplex), and a command run in a pod's or a container's (kube's and docker's exec). |
 | `browser_read` | AccessRule | yes | Its Bots' Emission browsers watched: the watch stream (emission_watch) and what the pane says back on it (emission_watch_say). |
 | `browser_write` | AccessRule | yes | Its Bots' Emission browsers driven: their tools' calls (emission), a phone showing one and answering its calls (emission_serve, emission_answer), Emission's own window brought up on its screen (browser_open), or watched and driven from elsewhere (emission_watch and emission, default), and a Bot made or driven (with Shell). Lets a member watch too. |
 | `providers` | AccessRule | yes | Its inference providers' models, run through the mesh (infer). |
@@ -2371,11 +2424,11 @@ A host's rule for each of its capabilities, by name: a capability split into wha
 | `spawn` | AccessRule | yes | New chats and agents started on it (start, agent). |
 | `manage_read` | AccessRule | yes | Its chats as they are, read: listed (and told of their turns' ends), attached to and watched, their transcripts, sizes, subagents, senders, a Bot's picture, memory and tasks read, their Auto-fix as it is, their folders read (read_file, list_dir, git, signal_names, catalogue), forked from; Record's notebooks here listed, and the edits waiting on their pages (notes, edits). A chat's own rule (AccessChat's manage_read) goes before this. |
 | `manage_write` | AccessRule | yes | Its chats as they are, changed: written in, held messages sent or dropped, asks answered, stopped, renamed, archived, deleted, their folders moved, tools allowed always (attach's only where it adds some, its env only where it changes it), made Bots, their Auto-fix turned on or off, a Bot's memory written and tasks set, run and stopped, a chat adopted, moved to another subscription (with Subscriptions' write); Record's notebooks here written, and edits to their pages proposed, revised, withdrawn, decided and adopted (notes' write, edit_*). Lets a member read them too. A chat's own rule (AccessChat's manage_write) goes before this. |
-| `kube_read` | AccessRule | yes | Its machine's Kubernetes clusters read: contexts, lists, YAML, owners (kube) and logs and watches (kube_follow), and the clusters' parts of @. |
-| `kube_write` | AccessRule | yes | Its machine's Kubernetes clusters changed: a pod deleted (kube's delete). Lets a member read them too. |
-| `docker_read` | AccessRule | yes | Its machine's Docker read: contexts, lists, an object inspected (docker) and logs (docker_follow). A shell in a container is a terminal: Shell's. |
+| `kube_read` | AccessRule | yes | Its machine's Kubernetes clusters read: contexts, lists, YAML, owners, a pod's log (kube) and logs and watches (kube_follow), and the clusters' parts of @. |
+| `kube_write` | AccessRule | yes | Its machine's Kubernetes clusters changed: a pod deleted, objects applied (kube's delete, apply). Lets a member read them too. |
+| `docker_read` | AccessRule | yes | Its machine's Docker read: contexts, lists, an object inspected, a log as it is now (docker) and logs (docker_follow). A shell in a container is a terminal: Shell's. |
 | `docker_write` | AccessRule | yes | Its machine's Docker changed: a container or Compose project started, stopped, restarted or removed, an image, volume or network removed (docker's start, stop, restart, remove). Lets a member read it too. |
-| `databases` | AccessRule | yes | Its machine's databases (databases). |
+| `databases` | AccessRule | yes | Its machine's databases, read (databases): their schemas, a table's rows, a query run read-only. |
 | `subscriptions_read` | AccessRule | yes | Its subscription accounts read: listed, and their usage (accounts' list and usage). |
 | `subscriptions_write` | AccessRule | yes | Its subscription accounts changed: added, renamed, a token replaced, removed (signed out), a provider's default picked, a chat moved to one (with the chat's Agent Management write too), signed in to (accounts' sign_in and code, login, login_code). Lets a member read them too. |
 | `access_read` | AccessRule | yes | These rules read (access), and the host's own: its telemetry (telemetry_read) and its Ongoing Feedback listed (fixes' list and shot). |
@@ -2401,7 +2454,7 @@ A Claude or Codex subscription account kept on a host (Settings → Subscription
 | `id` | string | yes | Its id on its host (what a session's kept with). |
 | `provider` | `claude` \| `codex` | yes | Whose subscription it is. |
 | `name` | string | yes | Its name, the user's, unique for its provider on its host. |
-| `kind` | `folder` \| `token` \| `profile` | yes | folder: a Claude account that is a config folder of its own on its host (CLAUDE_CONFIG_DIR), signed in to with claude auth login run there with it (signed in again the same way); token: a Claude account signed in with a token from claude setup-token, where its host has no claude (signed in again by replacing it); profile: a Codex account, a CODEX_HOME of its own (signed in again with a device code). |
+| `kind` | `folder` \| `token` \| `profile` | yes | folder: a Claude account that is a config folder of its own on its host (CLAUDE_CONFIG_DIR), signed in to with claude auth login run there with it (signed in again the same way); token: a Claude account signed in with a token from claude setup-token or an Anthropic API key (signed in again by replacing it); profile: a Codex account, a CODEX_HOME of its own, signed in with ChatGPT or an OpenAI API key (signed in again with codex login). |
 
 #### Ask
 
@@ -2896,6 +2949,7 @@ What a host is, as its hello says (and sessions carries).
 | `phone` | boolean |  | A phone's host. |
 | `ops` | array of string |  | The ops it takes, given by a host that takes only part of the wire (a phone's), with what its sessions take besides (start's ephemeral; control requests: control, set_permission_mode, set_model). |
 | `telemetry` | TelemetryState |  | Its telemetry state: the apps on its machine tell it telemetry only while it's on, and profile what it says. |
+| `front` | array of TelemetryFront |  | The chats in front on its machine now, as its apps' telemetry says (each one's last chat_front, till its chat_left or the app's gone): none while its telemetry's off. No head notifies of a chat in front on any machine of the mesh. |
 | `tool_names` | ToolNames |  | How its MCP tools are named: what every head shows for one ("Mesh / Tasks"). |
 
 #### KubeColumn
@@ -3335,7 +3389,7 @@ A session as a host lists it.
 | `taken_up` | boolean |  | false for a Claude Desktop chat its host only lists: nothing of it runs on the host till it's written in, which takes it up (as adopt does). Missing for every other. |
 | `elsewhere` | boolean |  | Claude Desktop is writing it now (written in the last minute, not by the host's own agent): every app keeps it read-only while it is. |
 | `start_key` | string/null |  | Its start's start_key, if it was given one. |
-| `account` | Account? |  | The subscription account its agent runs under on its host, fixed as it's made (the host's default for its provider then, or as it's first written in), or the one picked for it since (accounts' use), from the moment it's picked; null for the CLI's own sign-in, or an account since removed (account_gone). |
+| `account` | Account? |  | The subscription account its agent runs under on its host, fixed as it's made (the one the host's new chats take for its provider then, accounts' defaults, or as it's first written in), or the one picked for it since (accounts' use), from the moment it's picked; null for the CLI's own sign-in, or an account since removed (account_gone). |
 | `account_gone` | boolean |  | Its subscription account was removed from its host after it was picked for it: its agent can't start till another is picked. |
 | `held` | array of HeldMessage |  | Messages held for it, oldest first. |
 | `senders` | integer |  | Its sender store's revision (0 for none): what a head's copy is checked against. |
@@ -3416,6 +3470,9 @@ One of a Bot's tasks (baudelib.tasks): a script its host runs, by hand or as a t
 | `version` | string/null |  | Its script's version: the first 12 hex of its SHA-256. |
 | `form` | array/null of TaskField |  | Its form's fields. |
 | `triggers` | array/null of TaskTrigger |  | What starts it. |
+| `variables` | array/null of TaskVariable |  | Its variables, each bound once (bindings), its script reading them (baudetask.vars). |
+| `bindings` | object/null |  | A variable's name: what it's bound to (one not here is unbound). |
+| `warnings` | object/null |  | A bound variable's name: why what it's bound to isn't there now (a model not served, a host out of reach, a pod gone), as the host last looked (the host's to say: not set). |
 | `notify_failure` | boolean/null |  | A run that fails is sent to its Bot, with its log. |
 | `fallback` | boolean/null |  | Notify on failure under its old name, for older heads: read when notify_failure isn't given, and sent as notify_failure is. |
 | `notify_exit` | boolean/null |  | A run that finishes, exit 0 and not stopped, is told to its Bot, with the end of its output; the Bot isn't asked to act. |
@@ -3423,6 +3480,31 @@ One of a Bot's tasks (baudelib.tasks): a script its host runs, by hand or as a t
 | `paused` | boolean/null |  | Its triggers don't fire (it can still be run by hand). |
 | `last` | TaskRun? |  | Its latest run. |
 | `next` | number/null |  | When a schedule of its fires next. |
+
+#### TaskBinding
+
+What a task's variable is bound to: value, and what else its type has. Picked from what its host offers (task_choices), or typed in as any text.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `value` | string | yes | What it is: a model's value, a decider's value (what decide's model takes), a host's id or name, a context's, pod's, container's or database's name, or the text. |
+| `label` | string/null |  | What it's shown as (a model's name, a host's), if not its value. |
+| `effort` | string/null |  | A model's: its effort. |
+| `host` | string/null |  | A model's: the member of the mesh that serves it, by name (its provider), if it isn't this host. |
+| `model` | string/null |  | A decider's: the model it serves, as it said. |
+| `context` | string/null |  | A pod's: its Kubernetes context. |
+| `namespace` | string/null |  | A pod's: its namespace. |
+| `container` | string/null |  | A database's: the container it runs in. |
+
+#### TaskChoice
+
+One thing a task's variable could be bound to, as its host offers it (task_choices): its own models, the mesh's hosts, its kubeconfig's contexts, the workloads running in its local clusters, its Docker containers, the databases running on it (what ⌘K lists), its deciders and the mesh's.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `binding` | TaskBinding | yes | What it's bound to, picked. |
+| `detail` | string/null |  | Where it is, beside its name (a pod's context and namespace). |
+| `efforts` | array/null of string |  | A model's: the efforts it takes. |
 
 #### TaskField
 
@@ -3444,12 +3526,13 @@ A line of a run's log.
 | Field | Type | Required | What it is |
 |---|---|---|---|
 | `at` | number | yes | When. |
-| `kind` | `out` \| `err` \| `say` \| `ask` \| `answer` \| `status` \| `agent` | yes | What it is: the script's output or errors, a line it said, an ask of its Bot, the Bot's answer, the run's state changing, or what a chat it started said as its first turn ended (told its Bot too). |
+| `kind` | `out` \| `err` \| `say` \| `ask` \| `answer` \| `status` \| `agent` \| `warning` | yes | What it is: the script's output or errors, a line it said, an ask of its Bot, the Bot's answer, the run's state changing, or what a chat it started said as its first turn ended (told its Bot too), or a bound variable not there as the run started. |
 | `text` | string | yes | What it says. |
 | `values` | object/null |  | An answer's values, from a form. |
 | `error` | boolean/null |  | An ask's: it was an error handed over. An agent's: the chat failed, or was stopped. |
 | `session` | string |  | An agent's: the chat's id. |
 | `over` | `finished` \| `stopped` \| `failed` |  | An agent's: how the chat's turn ended (Sender's over). |
+| `variable` | string |  | A warning's: the variable's name. |
 
 #### TaskRun
 
@@ -3511,6 +3594,16 @@ What starts a task (besides a run by hand): a schedule, or a git push to a branc
 | `fired` | number/null |  | When it last fired. |
 | `error` | string/null |  | Why it couldn't look or fire, last time. |
 
+#### TaskVariable
+
+A variable a task declares: a name its script reads it by (baudetask.vars), and a type, bound once for the task (its bindings), by its Bot or a person, unlike its form's inputs, which each run fills.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `name` | string | yes | Its name, as its row and the script say it ("Translation Model"). |
+| `type` | `model` \| `decider` \| `host` \| `browser_host` \| `terminal_host` \| `kube_context` \| `pod` \| `container` \| `database` \| `text` | yes | What it's bound to: a model (with its effort), a decider (decide's), a host of the mesh (one to browse on, one to run terminals on), a Kubernetes context, a pod, a container, a database, or text. What's offered as it's bound is the host's own of that type; any text can be given all the same. |
+| `description` | string/null |  | What it's for, as its Bot said. |
+
 #### TelemetryDay
 
 A day's tokens, from the turns that ended in it.
@@ -3529,7 +3622,7 @@ Something done in a chat, as an app saw it happen: kept by its machine's host as
 |---|---|---|---|
 | `at` | number | yes | When, in seconds since the epoch (to the millisecond). |
 | `app` | `host` \| `baude` \| `record` \| `phone` |  | What saw it: Baude, Record, the phone's app, or the chat's host itself (a turn's end, as it ran there: what tokens are added up from). |
-| `kind` | `chat_opened` \| `chat_front` \| `chat_left` \| `turn_sent` \| `turn_ended` | yes | What happened: a chat opened in a window or screen; a chat came in front (its window or screen in front, showing it); it stopped being in front; a turn sent in it; a turn of it ended. |
+| `kind` | `chat_opened` \| `chat_front` \| `chat_left` \| `turn_sent` \| `turn_ended` | yes | What happened: a chat opened in a window or screen; a chat came in front (its window or screen in front, showing it, with someone at the machine); it stopped being in front (or nobody's at the machine now); a turn sent in it; a turn of it ended. |
 | `host` | string | yes | The id of the host the chat is on. |
 | `session` | string | yes | The chat's session id. |
 | `seconds` | number/null |  | A turn_ended's: how long the turn took. |
@@ -3538,6 +3631,15 @@ Something done in a chat, as an app saw it happen: kept by its machine's host as
 | `effort` | string/null |  | A turn_ended's: the effort it ran at. |
 | `tokens_in` | integer/null |  | A turn_ended's: the tokens it read (input, cache reads and writes). |
 | `tokens_out` | integer/null |  | A turn_ended's: the tokens it wrote. |
+
+#### TelemetryFront
+
+A chat in front on a host's machine: shown in one of its apps' windows or screens, that in front, with someone at the machine.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `host` | string | yes | The id of the host the chat is on. |
+| `session` | string | yes | The chat's session id. |
 
 #### TelemetryLine
 
@@ -3587,12 +3689,13 @@ What line_profiler timed in a process over a stretch (saved every 30 seconds whi
 
 #### TelemetryProfiling
 
-What a process is told to profile.
+What a process profiles while line profiling's on.
 
 | Field | Type | Required | What it is |
 |---|---|---|---|
 | `app` | `host` \| `baude` \| `record` | yes | The process: the host's, Baude's or Record's. |
-| `functions` | array of string | yes | What's profiled: functions (module.function, module.Class.method) and modules (every function in it); none: off. |
+| `functions` | array of string | yes | What's profiled: functions (module.function, module.Class.method) and modules (every function in it); its defaults unless others are named. |
+| `default` | boolean | yes | They're its defaults (lineprofile.DEFAULTS, Baude's own pick), not named by telemetry_set. |
 | `error` | string/null |  | Why it isn't profiling what it's told to (a name not found; line_profiler not installed). |
 
 #### TelemetrySample
@@ -3613,11 +3716,12 @@ A host's machine and its processes, sampled every few seconds while telemetry is
 
 #### TelemetryState
 
-A host's telemetry: on or off, and what each process on its machine profiles.
+A host's telemetry: on or off, line profiling on or off, and what each process on its machine profiles.
 
 | Field | Type | Required | What it is |
 |---|---|---|---|
 | `on` | boolean | yes | Events kept and the machine sampled. |
+| `line_profiling` | boolean | yes | Line profiling on: each process profiles its functions while telemetry's on too (off unless switched on). |
 | `line_profiler` | boolean | yes | line_profiler is installed for the host's Python. |
 | `profiling` | array of TelemetryProfiling | yes | Each process's: the host's, Baude's, Record's. |
 
@@ -3787,6 +3891,7 @@ Somewhere wire.reach can go: this machine's host process, one listening on anoth
 | `INFER_S` | `600` | A provider has this long to answer infer, in seconds. |
 | `OPEN_S` | `20` | A member of the mesh, reached through it: its tunnel has this long to open, in seconds. |
 | `PING_S` | `5` | A connection's ends each say something at least this often (ping), in seconds. |
+| `QUERY_ROWS_MAX` | `1000` | A database query's rows, at most (databases' query): the rest aren't read. |
 | `SHOT_MAX` | `1024` | A browser screenshot's longest side, in pixels. |
 | `SHOT_QUALITY` | `82` | A browser screenshot's JPEG quality. |
 | `SIGNED_S` | `300` | A tunnel's open: signed this near now, in seconds, either way, or it's closed where it's opened to. |
@@ -3794,6 +3899,6 @@ Somewhere wire.reach can go: this machine's host process, one listening on anoth
 | `TERMINAL_KEEP_S` | `600` | A terminal (terminal op) no connection is attached to now: its program kept running this long to be attached to again, in seconds. |
 | `TERMINAL_KEPT_BYTES` | `262144` | What a terminal (terminal op) wrote lately, kept to show again on attach: this many bytes at most. |
 | `TTL` | `16` | A tunnel's passed through at most this many hosts (open's ttl). |
-| `VERSION` | `35` | The wire's version, as a host's hello says it. |
+| `VERSION` | `36` | The wire's version, as a host's hello says it. |
 | `ZOOM_MAX` | `1568` | A browser zoom's longest side, in pixels. |
 | `ZOOM_QUALITY` | `90` | A browser zoom's JPEG quality. |

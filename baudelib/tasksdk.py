@@ -152,7 +152,10 @@ def _params(props, skip):
 
 
 def _method(name, params, lines, call, args):
-    """A method: its def (its fields keyword arguments, host last), its docstring, and its body (call(op's, {...}))."""
+    """A method: its def (its fields keyword arguments, host last), its docstring, and its body (call(op's, {...})):
+    one that takes a timeout waited for that long on its answer, and then some (client.waited)."""
+    if any(f == "timeout" for f, _p in params):
+        args = [*args, "waited(timeout)"]
     sig = _packed(f"def {name}(", ["self", "*", *[f"{_py(f)}=None" for f, _p in params], "host=None"], "):", 4)
     body = _packed(f"return self.{call}(", [args[0], "{" + ", ".join(args[1]) + "}", *args[2:]], ")", 8)
     if len(body) > 1:  # (the fields' dict on lines of its own)
@@ -228,7 +231,7 @@ def generated():
            "definitions (baudelib/emissiontools.py, baudelib/multiplextools.py). Don't change it here: change those, "
            "and run",
            '`python3 -m baudelib.tasksdk` again."""',
-           "from .client import Area, Obj", "", ""]
+           "from .client import Area, Obj, waited", "", ""]
     entities = sorted(n for n in wire.DEFS if n not in wire.MESSAGES)
     replies = sorted(n for n in wire.MESSAGES if wire.KIND[n] == "reply")
     for name in entities + replies:
@@ -283,8 +286,12 @@ Every call takes `host=`: any host of the mesh, by its name or id (or a `Host` f
 given. Calls go over the run's own connection to its host, which names the run and its token: the host takes the \
 connection for the run's Bot's and applies the access rules to every call as it does to the Bot's own tools (as the \
 member that started the Bot, if one did), on this host and, through it, on every other one (where the call is from \
-this host). A run can do nothing its Bot couldn't. What's refused raises `baudetask.Refused`, saying which rule \
-refused it.
+this host). A run can do nothing its Bot couldn't through the SDK. What's refused raises `baudetask.Refused`, saying \
+which rule refused it.
+
+Being judged as the run's Bot applies to the SDK's calls; it isn't a sandbox. A script is a process run as the host's \
+user: it can read and write what that user can, and open the host's socket without the run's token, as the owner. \
+So setting or running a task already needs Shell (see [docs/tasks-design.md](../../docs/tasks-design.md)).
 
 Emission and terminal calls drive the Bot's own browser profile and terminals on that host: never Emission's own \
 window, nor another Bot's profile.

@@ -5732,11 +5732,11 @@ def test_status_bar_dots_say_its_working(app):
     try:
         pump(0.3)
         assert win.status.get_text().startswith(win.short_cwd()), win.status.get_text()
-        assert dots.shown == 0 and dots.source is None and not dots.get_visible() and not dots.get_tooltip_text()
+        assert dots.shown == 0 and dots not in baude.Ticker.dotting and not dots.get_visible() and not dots.get_tooltip_text()
         idle = where()
         win.set_busy(True)
         pump(0.2)
-        assert dots.get_visible() and dots.shown >= 1 and dots.source is not None and dots.get_tooltip_text()
+        assert dots.get_visible() and dots.shown >= 1 and dots in baude.Ticker.dotting and dots.get_tooltip_text()
         at, room = where(), dots.get_width()
         assert at > idle and dots.get_text() == "•••" and 'alpha="1">' in dots.get_label(), (at, idle, dots.get_label())
         assert "working" not in win.status.get_text() and "idle" not in win.status.get_text()
@@ -5757,18 +5757,18 @@ def test_status_bar_dots_say_its_working(app):
         assert dots.shown == still, "a window you aren't looking at holds still"
         win.set_busy(False)
         pump(0.2)
-        assert dots.shown == 0 and dots.source is None and not dots.get_visible() and not dots.get_tooltip_text(), "no timer"
+        assert dots.shown == 0 and dots not in baude.Ticker.dotting and not dots.get_visible() and not dots.get_tooltip_text(), "no timer"
         assert where() == idle, "the folder back at the start"
         win.set_busy(True)
         pump(0.2)
-        assert dots.source is not None
+        assert dots in baude.Ticker.dotting
         bar = dots.get_parent()
         bar.set_visible(False)
         pump(0.1)
-        assert dots.source is None, "out of the window: no timer"
+        assert dots not in baude.Ticker.dotting, "out of the window: no timer"
         bar.set_visible(True)
         pump(0.1)
-        assert dots.source is not None, "back"
+        assert dots in baude.Ticker.dotting, "back"
     finally:
         baude.Ticker.seen = seen
         win.set_busy(False)

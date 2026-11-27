@@ -18,7 +18,7 @@ from baudelib import (
     wording, worktree,
 )
 from baudelib.serverstate import (
-    APPS, BOT_PICTURE_MAX, Conn, FRAME_KEYS, Session, _mtime, _write_json, _write_text, bot_dir, clean_env,
+    APPS, BOT_PICTURE_MAX, Conn, FRAME_KEYS, Session, _mtime, _write_json, _write_text, bot_dir, bot_folder_name, clean_env,
 )
 
 
@@ -1228,19 +1228,22 @@ class ServerRunning:
 
     def set_bot(self, s, bot):
         """(under the lock) A chat made a Bot (bot: {name, picture: base64 or None to keep it, or "" to drop it}), its
-        name or picture changed, or (bot None) a chat again, its memory and picture kept in case it's made one again."""
-        folder = bot_dir(self.state_dir, s.id)
+        name or picture changed, or (bot None) a chat again, its memory and picture kept in case it's made one again.
+        Its folder named after it (name_bot_folder). A chat made one has its agent given a Bot's tools as it runs
+        (grow_agent), where its program takes them so; another change to what it's told, or one that can't, has its
+        agent started again (renew_agent)."""
+        was = s.meta.get("bot")
         if bot is None:
             s.meta.pop("bot", None)
         else:
             if not isinstance(bot, dict) or not str(bot.get("name") or "").strip():
                 raise ValueError(wording.say("host_errors.bot_needs_name"))
-            os.makedirs(folder, mode=0o700, exist_ok=True)
-            s.meta["bot"] = {"name": " ".join(str(bot["name"]).split())[:80],
-                             "since": (s.meta.get("bot") or {}).get("since") or time.time()}
+            name = " ".join(str(bot["name"]).split())[:80]
+            folder = self.name_bot_folder(s, name)
+            s.meta["bot"] = {"name": name, "since": (was or {}).get("since") or time.time()}
             if not os.path.exists(os.path.join(folder, "memory.md")):  # (and nothing in it accepted yet: all the Bot
-                for name in ("memory.md", "memory.seen.md"):              # writes is shown as its changes)
-                    with open(os.path.join(folder, name), "w") as f:
+                for n in ("memory.md", "memory.seen.md"):                 # writes is shown as its changes)
+                    with open(os.path.join(folder, n), "w") as f:
                         f.write("")
             pic = os.path.join(folder, "picture")
             if bot.get("picture") == "":
@@ -1254,9 +1257,49 @@ class ServerRunning:
                     f.write(data)
                 os.replace(pic + ".new", pic)
         self.save(s)
-        self.renew_agent(s)
+        now = s.meta.get("bot")
+        if (was or {}).get("name") != (now or {}).get("name") and not (was is None and self.grow_agent(s)):
+            self.renew_agent(s)  # (its picture alone: nothing its agent's told)
         self.changed()
         return s.listing()
+
+    def name_bot_folder(self, s, name):
+        """(under the lock) A Bot's folder (bot_dir) named after it (serverstate.bot_folder_name), as it's named:
+        the one it has moved there, or made; a number after the name if another Bot's has it. Left where it is if it
+        can't be moved. Its tasks' store goes on in it where it is now."""
+        old, base = bot_dir(self.state_dir, s.meta), bot_folder_name(name)
+        mine = (s.meta.get("bot_folder") or "").casefold()
+        taken = {(o.meta.get("bot_folder") or "").casefold() for o in self.sessions.values() if o is not s}
+        bots = os.path.join(self.state_dir, "bots")
+        for n in range(1, 100):
+            want = base if n == 1 else f"{base} {n}"
+            if want.casefold() == mine and os.path.isdir(old):
+                return old  # (named so already)
+            if want.casefold() not in taken and not os.path.lexists(os.path.join(bots, want)):
+                break
+        else:
+            want = wire.safe_name(s.id)
+        new = os.path.join(bots, want)
+        try:
+            os.makedirs(bots, mode=0o700, exist_ok=True)
+            if os.path.isdir(old):
+                os.rename(old, new)
+            else:
+                os.makedirs(new, mode=0o700)
+        except OSError as e:
+            self.log(f"{s.id}: its Bot's folder not named {want}: {e}")
+            os.makedirs(old, mode=0o700, exist_ok=True)
+            return old
+        s.meta["bot_folder"] = want
+        self.tasks.moved(s, os.path.join(new, "tasks"))
+        return new
+
+    def settle_bot_folders(self):
+        """(as the host starts) Each Bot's folder named after it, a Bot's kept by its session's id till now too."""
+        for s in list(self.sessions.values()):
+            if s.meta.get("bot") and not s.meta.get("bot_folder"):
+                self.name_bot_folder(s, s.meta["bot"].get("name") or "Bot")
+                self.save(s)
 
     # (what a Bot's conversation was, its thread's; what the Bot is, kept: the rest of its meta)
     THREAD_KEYS = ("path", "cli_id", "title", "prompt", "said", "written", "cut", "context_usage", "codex_started",
@@ -1285,7 +1328,8 @@ class ServerRunning:
         listed = s.listing()
         meta = copy.deepcopy(s.meta)
         for key in ("bot", "autofix", "held", "waits_on", "follow_ups", "routines", "task_run", "spawned_by",
-                    "start_key", "rotated", "last_thread", "composer"):  # (the Bot's draft stays the Bot's)
+                    "start_key", "rotated", "last_thread", "composer", "bot_folder"):  # (the Bot's draft, and its
+            # folder, stay the Bot's)
             meta.pop(key, None)
         title = listed.get("title") or time.strftime("%-d %b %Y", time.localtime(listed.get("created") or time.time()))
         meta.update(id=str(uuid.uuid4()), archived=True, thread_of=s.id, title=f"{bot['name']} / {title}",
@@ -1387,17 +1431,17 @@ class ServerRunning:
         s.proc.close_stdin()
 
     def edits_memory(self, s, request):
-        """Is what a Bot's agent asks to do an edit of a file in its own folder (its memory's)?"""
+        """Is what a Bot's agent asks to do a read or an edit of a file in its own folder (its memory's)?"""
         path = (request.get("input") or {}).get("file_path")
-        if not s.meta.get("bot") or request.get("tool_name") not in ("Edit", "MultiEdit", "Write") or \
+        if not s.meta.get("bot") or request.get("tool_name") not in ("Read", "Edit", "MultiEdit", "Write") or \
                 not isinstance(path, str) or not path:
             return False
-        folder = os.path.realpath(bot_dir(self.state_dir, s.id))
+        folder = os.path.realpath(bot_dir(self.state_dir, s.meta))
         path = os.path.realpath(os.path.join(s.meta.get("cwd") or "/", os.path.expanduser(path)))
         return path.startswith(folder + os.sep)
 
     def bot_picture(self, s):
-        pic = os.path.join(bot_dir(self.state_dir, s.id), "picture")
+        pic = os.path.join(bot_dir(self.state_dir, s.meta), "picture")
         if not os.path.exists(pic):
             return None
         with open(pic, "rb") as f:
@@ -1410,7 +1454,7 @@ class ServerRunning:
         else nothing's written and it's {refused: why, text, seen, mtime, path}, the memory as the Bot left it."""
         if not s.meta.get("bot"):
             raise ValueError(wording.say("host_errors.not_a_bot"))
-        folder = bot_dir(self.state_dir, s.id)
+        folder = bot_dir(self.state_dir, s.meta)
         path, seen_path = os.path.join(folder, "memory.md"), os.path.join(folder, "memory.seen.md")
         if text is not None:
             if "base_mtime" in base and _mtime(path) != base["base_mtime"]:

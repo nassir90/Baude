@@ -11,7 +11,7 @@
   "code": [
     "inboxview.py:InboxPage",
     "inboxview.py:AskCard",
-    "inboxview.py:inbox_row",
+    "inboxview.py:InboxRow",
     "baudelib/inbox.py:Inbox",
     "Inbox.kt:InboxScreen"
   ],

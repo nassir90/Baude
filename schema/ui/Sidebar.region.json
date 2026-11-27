@@ -35,7 +35,7 @@
     "windowremote.py:WindowRemote.ask_host_folder",
     "baudelib/hostfiles.py:list_dir",
     "Home.kt:OpenFolder",
-    "inboxview.py:inbox_row",
+    "inboxview.py:InboxRow",
     "Inbox.kt:InboxRow"
   ],
   "copy": [

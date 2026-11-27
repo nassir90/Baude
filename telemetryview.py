@@ -13,7 +13,7 @@ import weakref
 
 from gi.repository import Adw, GLib, Gtk
 
-from baudelib import errorbook, lineprofile, providers, wire, wording
+from baudelib import errorbook, lineprofile, providers, telemetry, wire, wording
 import uitrack
 import widgets
 
@@ -207,15 +207,12 @@ class Recorder:
         r = getattr(win, "remote", None)
         model = model or ((r.sessions.get(chat[1]) or {}).get("model") if r is not None else None)  # (its default's,
         # as its host lists it)
-        u = msg.get("usage") if isinstance(msg.get("usage"), dict) else {}
         took = time.time() - sent if sent else (msg["duration_ms"] / 1000 if isinstance(
             msg.get("duration_ms"), (int, float)) else None)
         self.event("turn_ended", chat, seconds=round(took, 3) if took is not None else None,
                    turn=msg.get("uuid") if isinstance(msg.get("uuid"), str) else None,
                    model=model if isinstance(model, str) else None, effort=effort if isinstance(effort, str) else None,
-                   tokens_in=sum(int(u.get(k) or 0) for k in ("input_tokens", "cache_read_input_tokens",
-                                                              "cache_creation_input_tokens")),
-                   tokens_out=int(u.get("output_tokens") or 0))
+                   **telemetry.tokens_of(msg))
 
     def errors_soon(self):
         """(any thread) This process has an error: told in a moment, with any meanwhile."""
@@ -350,6 +347,26 @@ def tokens(n):
     return fmt_tokens(int(n))
 
 
+KINDS = {"input": "meta.input", "cache_write": "telemetry.cache_write", "cache_read": "telemetry.cache_read",
+         "output": "meta.output", "input_with_cache": "telemetry.input_with_cache"}  # (usage's tokens, each kind apart,
+# in the order they're shown, and their names)
+
+
+def said_tokens(t):
+    """A day's or a model's tokens, each kind apart ("1.2M In · 30M Cache Reads · 50k Out"): those it has; an older
+    turn's input, cache among it, as that."""
+    return " · ".join(wording.say(f"telemetry.day_{k}", tokens=tokens(t[k]))
+                      for k in ("input_with_cache", "input", "cache_write", "cache_read", "output")
+                      if t.get(k) or k == "output")
+
+
+def token_rows(t):
+    """A row each kind of token, t's count of it after its name: input, cache writes, cache reads, output, and (only
+    where there are some) older turns' input with their cache in it."""
+    return [row(wording.say(name), tokens(t.get(k) or 0)) for k, name in KINDS.items()
+            if k != "input_with_cache" or t.get(k)]
+
+
 def levels(days):
     """Each day's level in the grid, 0 (none) to 4, by its share of the busiest day's tokens."""
     most = max((d["tokens"] for d in days), default=0)
@@ -412,8 +429,8 @@ class TokenGrid(Gtk.DrawingArea):
         day = self.first() + datetime.timedelta(days=col * 7 + row)
         if day > datetime.date.today():
             return False
-        d = self.days.get(day.isoformat()) or {"tokens": 0}
-        tooltip.set_text(wording.say("telemetry.day_tokens", day=day.strftime("%a %-d %b %Y"), tokens=tokens(d["tokens"])))
+        d = self.days.get(day.isoformat()) or {}
+        tooltip.set_text(wording.say("telemetry.day_tokens", day=day.strftime("%a %-d %b %Y"), tokens=said_tokens(d)))
         return True
 
 
@@ -422,10 +439,15 @@ def effort_said(effort):
     return wording.say(key) if effort and wording.has(key) else effort or "–"
 
 
-def model_row(value, models, *values):
-    """A row named for a model, as every app names it (providers.model_name), its slug on hover."""
-    r = row(providers.model_name(value, models) or "–", *values)
+def model_expander(m, models):
+    """A model's row, named as every app names it (providers.model_name), its slug on hover, its turns after it;
+    opened, its tokens, a row each kind (token_rows)."""
+    value = m["model"]
+    r = Adw.ExpanderRow(title=GLib.markup_escape_text(providers.model_name(value, models) or "–"))
     r.set_tooltip_text(providers.model_slug(value, models) if isinstance(value, str) else None)
+    r.add_suffix(Gtk.Label(label=wording.say("telemetry.turns", turns=m["turns"]), css_classes=["dim-label", "numeric"]))
+    for t in token_rows(m):
+        r.add_row(t)
     return r
 
 
@@ -597,11 +619,11 @@ class Page(Adw.PreferencesPage):
                                    effort=effort_said(c.get("effort"))))
             most.set_tooltip_text(providers.model_slug(c["model"], models) if isinstance(c["model"], str) else None)
             box.append(most)
+        for r in token_rows({k: sum(d.get(k) or 0 for d in u["days"]) for k in KINDS}):
+            box.append(r)
         self.group("tokens", wording.say("telemetry.tokens_by_day"), [box])
         self.group("models", wording.say("telemetry.models") if u["models"] else None,
-                   [model_row(m["model"], models,
-                              wording.say("telemetry.turns_tokens", turns=m["turns"], tokens=tokens(m["tokens"])))
-                    for m in u["models"]])
+                   [model_expander(m, models) for m in u["models"]])
         return False
 
     def host_models(self):

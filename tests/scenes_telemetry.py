@@ -45,7 +45,10 @@ def seed(host_id):
                 rows.setdefault(("events", datetime.date.fromtimestamp(at)), []).append({
                     "at": at, "app": "host", "kind": "turn_ended", "host": host_id, "session": f"s{back}",
                     "seconds": rng.randint(8, 400), "turn": f"t{back}-{at}", "model": model, "effort": effort,
-                    "tokens_in": rng.randint(20_000, 900_000), "tokens_out": rng.randint(500, 30_000)})
+                    "tokens_out": rng.randint(500, 30_000),
+                    **({"tokens_in": rng.randint(20_000, 900_000)} if back > 30 else {  # (kept before they were apart)
+                        "tokens_input": rng.randint(200, 20_000), "tokens_cache_write": rng.randint(5_000, 80_000),
+                        "tokens_cache_read": rng.randint(50_000, 4_000_000)})})
     chats = ["c1a7e4f0-0000-4000-8000-000000000001", "5be2d913-0000-4000-8000-000000000002"]
     for i, (kind, chat, more) in enumerate([("chat_opened", 0, {}), ("chat_front", 0, {}), ("turn_sent", 0, {}),
                                             ("turn_ended", 0, {"seconds": 131.4}), ("chat_left", 0, {}),

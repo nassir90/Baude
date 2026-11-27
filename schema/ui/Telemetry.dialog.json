@@ -27,7 +27,12 @@
     "baudelib/server.py:Server.found_procs",
     "baudelib/emissionlink.py:running",
     "Telemetry.kt:ProcessRow",
-    "Telemetry.kt:AppLogo"
+    "Telemetry.kt:AppLogo",
+    "telemetryview.py:model_expander",
+    "telemetryview.py:token_rows",
+    "baudelib/telemetry.py:tokens_of",
+    "baudelib/codex.py:turn_usage",
+    "Telemetry.kt:modelExpander"
   ],
   "copy": [
     "telemetry",
@@ -39,7 +44,8 @@
     "mode_effort",
     "tokens",
     "deps",
-    "side_panel"
+    "side_panel",
+    "meta"
   ],
   "parts": [
     {
@@ -120,13 +126,23 @@
     },
     {
       "name": "Tokens by Day",
-      "shows": "Heading \"Tokens by Day\", then a boxed list: a grid of a year of days like GitHub's contributions (a square a day, a column a week, Sunday at the top, today's the last), each square as dark as its day's share of the busiest day's tokens in the accent colour, a day without turns faint; its tooltip (desktop) the day and its tokens. Under it a row \"Most Used\" with the model and effort with the most turns (\"Opus 4.7 · High effort\").",
+      "shows": "Heading \"Tokens by Day\", then a boxed list: a grid of a year of days like GitHub's contributions (a square a day, a column a week, Sunday at the top, today's the last), each square as dark as its day's share of the busiest day's tokens (every kind added up, cache reads among them, the one figure older turns and newer share) in the accent colour, a day without turns faint; its tooltip (desktop) the day and its tokens each kind apart (\"Thu 26 Nov 2026: 1.2k In · 40k Cache Writes · 3.1M Cache Reads · 12k Out\", an older day's \"600M In With Cache · 1.3M Out\"). Under it a row \"Most Used\" with the model and effort with the most turns (\"Opus 4.7 · High effort\"), then a row each kind of token over the year, its count after it, dim: Input (not read from a cache or written to one), Cache Writes, Cache Reads, Output, and, only where there are some, Input With Cache (Older Turns): the input of turns kept before the kinds were told apart, cache among it, shown as it was kept.",
       "copy": [
         "telemetry.tokens_by_day",
         "telemetry.day_tokens",
         "telemetry.most_used",
         "telemetry.model_effort",
-        "mode_effort.effort_high"
+        "mode_effort.effort_high",
+        "meta.input",
+        "telemetry.cache_write",
+        "telemetry.cache_read",
+        "meta.output",
+        "telemetry.input_with_cache",
+        "telemetry.day_input",
+        "telemetry.day_cache_write",
+        "telemetry.day_cache_read",
+        "telemetry.day_output",
+        "telemetry.day_input_with_cache"
       ],
       "decisions": [
         {
@@ -138,17 +154,33 @@
               "issue": "BaudeInternal#228"
             }
           ]
+        },
+        {
+          "said": "Telemetry's tokens are overstated: cache reads (and cache writes) are counted as input, so a day reads hundreds of millions of tokens in against a million out (paraphrased)",
+          "rule": "Every host keeps each turn's tokens each kind apart (input not read from a cache or written to one, cache writes, cache reads, output), each turn once, from what its agent says of that turn alone (Claude Code's tokens since its previous result, a Codex thread's totals' difference over the turn, pi's and the phone's own turn's), and every app shows them apart; turns kept before then show their input as kept, marked as having cache in it, never added to Input",
+          "decided": "2026-11-27",
+          "source": [
+            {
+              "session": "221e1c29-56d7-48bf-a2dc-7a2b37ccd685",
+              "message": "30cf308b-147c-4860-a1c0-9ac81ad796f4"
+            }
+          ]
         }
       ]
     },
     {
       "name": "Models",
-      "shows": "Heading \"Models\", a row each model that ran a turn in the year, the most turns first: its name (as every app names it; its slug on hover, a long-press on the phone), and \"600 Turns · 280.8M\" after it (\"1 Turn\" for one), dim.",
+      "shows": "Heading \"Models\", a row each model that ran a turn in the year, the most turns first: its name (as every app names it; its slug on hover, a long-press on the phone), and \"600 Turns\" after it (\"1 Turn\" for one), dim, and an arrow; opened (a click, a tap), a row each kind of token of its turns as under Tokens by Day: Input, Cache Writes, Cache Reads, Output, and Input With Cache (Older Turns) where it has some.",
       "copy": [
         "telemetry.models",
-        "telemetry.turns_tokens",
         "tokens.millions",
-        "tokens.thousands"
+        "tokens.thousands",
+        "telemetry.turns",
+        "meta.input",
+        "telemetry.cache_write",
+        "telemetry.cache_read",
+        "meta.output",
+        "telemetry.input_with_cache"
       ],
       "decisions": [
         {
@@ -160,6 +192,23 @@
               "issue": "BaudeInternal#235"
             }
           ]
+        },
+        {
+          "said": "Usage by model is overstated the same way: cache reads counted as input (paraphrased)",
+          "rule": "Every app shows each model's tokens each kind apart, opened from its row, as Tokens by Day shows the year's",
+          "decided": "2026-11-27",
+          "source": [
+            {
+              "session": "221e1c29-56d7-48bf-a2dc-7a2b37ccd685",
+              "message": "30cf308b-147c-4860-a1c0-9ac81ad796f4"
+            }
+          ]
+        }
+      ],
+      "actions": [
+        {
+          "by": "click (a model's row; a tap on the phone)",
+          "does": "Opens or closes its tokens, a row each kind"
         }
       ]
     },
@@ -307,7 +356,11 @@
           "said": "Editing a Telemetry text field near the foot of Settings scrolls the page up to its start (paraphrased)",
           "rule": "Every app keeps every text row on a Settings page where it is while the page refreshes or the host answers: the row isn't taken out and put back, so it keeps its focus, its caret and what's typed, and the page stays where it's scrolled to",
           "decided": "2026-11-27",
-          "source": [{"issue": "BaudeInternal#286"}]
+          "source": [
+            {
+              "issue": "BaudeInternal#286"
+            }
+          ]
         }
       ]
     }
@@ -371,6 +424,7 @@
     "39g-telemetry-foot",
     "39h-telemetry-no-profiler",
     "40d-telemetry",
-    "40e-telemetry-foot"
+    "40e-telemetry-foot",
+    "40d2-telemetry-models"
   ]
 }

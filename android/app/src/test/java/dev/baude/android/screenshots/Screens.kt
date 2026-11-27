@@ -483,6 +483,17 @@ abstract class Screens(private val theme: String) {
         screen("40d-telemetry")
     }
 
+    // (the same page's models, the first opened: its tokens, a row each kind)
+    @Test fun telemetryModels() {
+        telemetryFixture()
+        show { SettingsScreen({}, {}, page = 3) }
+        laidOut()
+        scrollUnder("Opus 4.7", 900f) // (to Models)
+        tap(dev.baude.android.modelName("claude-opus-4-7", emptyList()).orEmpty())
+        laidOut()
+        screen("40d2-telemetry-models")
+    }
+
     // (the same page's foot: its machine and its processes now, line profiling and its top lines)
     @Test fun telemetryFoot() {
         telemetryFixture()
@@ -642,15 +653,25 @@ abstract class Screens(private val theme: String) {
             when (m.optJSONArray("what")?.optString(0)) {
                 "usage" -> {
                     val today = java.time.LocalDate.now()
+                    // (a turn's tokens each kind apart: input, cache writes, cache reads, output, and older turns'
+                    // input with their cache in it; tokens all of them)
+                    fun counts(o: org.json.JSONObject, vararg n: Long) = o.apply {
+                        listOf("input", "cache_write", "cache_read", "output", "input_with_cache").forEachIndexed { i, k -> put(k, n[i]) }
+                        put("tokens", n.sum())
+                    }
                     val days = (0 until 370).filter { rng.nextDouble() < if (it > 120) 0.35 else 0.75 }.reversed().map {
-                        org.json.JSONObject().put("day", today.minusDays(it.toLong()).toString())
-                            .put("tokens", 50_000L + rng.nextInt(4_000_000)).put("turns", 1 + rng.nextInt(9)) }
-                    fun model(name: String, effort: String?, turns: Int, tokens: Long) = org.json.JSONObject().put("model", name)
-                        .put("effort", effort ?: org.json.JSONObject.NULL).put("turns", turns).put("tokens", tokens)
+                        val o = org.json.JSONObject().put("day", today.minusDays(it.toLong()).toString()).put("turns", 1 + rng.nextInt(9))
+                        val out = 500L + rng.nextInt(30_000)
+                        if (it > 30) counts(o, 0, 0, 0, out, 50_000L + rng.nextInt(4_000_000))
+                        else counts(o, 200L + rng.nextInt(20_000), 5_000L + rng.nextInt(80_000), 50_000L + rng.nextInt(4_000_000), out, 0)
+                    }
+                    fun model(name: String, effort: String?, turns: Int, vararg n: Long) = counts(org.json.JSONObject().put("model", name)
+                        .put("effort", effort ?: org.json.JSONObject.NULL).put("turns", turns), *n)
                     out.put("usage", org.json.JSONObject().put("days", org.json.JSONArray(days))
-                        .put("models", org.json.JSONArray(listOf(model("claude-opus-4-7", null, 600, 280_800_000),
-                            model("claude-sonnet-4-6", null, 222, 99_100_000), model("gpt-5.4-codex", null, 70, 33_500_000))))
-                        .put("combos", org.json.JSONArray(listOf(model("claude-opus-4-7", "high", 451, 210_000_000)))))
+                        .put("models", org.json.JSONArray(listOf(model("claude-opus-4-7", null, 600, 734_700, 3_300_000, 140_300_000, 8_600_000, 221_900_000),
+                            model("claude-sonnet-4-6", null, 222, 210_000, 1_100_000, 48_000_000, 3_100_000, 81_000_000),
+                            model("gpt-5.4-codex", null, 70, 120_000, 0, 9_800_000, 1_500_000, 22_000_000))))
+                        .put("combos", org.json.JSONArray(listOf(model("claude-opus-4-7", "high", 451, 550_000, 2_400_000, 100_000_000, 6_400_000, 160_000_000)))))
                 }
                 "events" -> out.put("events", org.json.JSONArray(listOf("chat_opened", "chat_front", "turn_sent", "turn_ended",
                     "chat_left").mapIndexed { i, k -> org.json.JSONObject().put("at", now - 900 + i * 60).put("app", "baude")
@@ -1652,7 +1673,7 @@ abstract class Screens(private val theme: String) {
     }
 
     /** What scrolls around text (a list with it in) scrolled to its end. */
-    private fun scrollUnder(text: String) {
+    private fun scrollUnder(text: String, by: Float = 100_000f) {
         fun roots(v: android.view.View): List<androidx.compose.ui.node.RootForTest> = when (v) {
             is androidx.compose.ui.node.RootForTest -> listOf(v)
             is android.view.ViewGroup -> (0 until v.childCount).flatMap { roots(v.getChildAt(it)) }
@@ -1665,7 +1686,7 @@ abstract class Screens(private val theme: String) {
                 it.config.getOrElse(androidx.compose.ui.semantics.SemanticsProperties.Text) { emptyList() }.any { t -> t.text == text }
             }
         }
-        list.config[androidx.compose.ui.semantics.SemanticsActions.ScrollBy].action!!.invoke(0f, 100_000f)
+        list.config[androidx.compose.ui.semantics.SemanticsActions.ScrollBy].action!!.invoke(0f, by)
         settle()
     }
 

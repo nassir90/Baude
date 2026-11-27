@@ -62,19 +62,40 @@
       ],
       "description": "A turn_ended's: the effort it ran at."
     },
-    "tokens_in": {
+    "tokens_input": {
       "type": [
         "integer",
         "null"
       ],
-      "description": "A turn_ended's: the tokens it read (input, cache reads and writes)."
+      "description": "A turn_ended's: the input tokens it sent that weren't read from a cache or written to one."
+    },
+    "tokens_cache_write": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "description": "A turn_ended's: the input tokens it wrote to a cache."
+    },
+    "tokens_cache_read": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "description": "A turn_ended's: the input tokens it read from a cache (each call of the turn's, counted each time it's read)."
     },
     "tokens_out": {
       "type": [
         "integer",
         "null"
       ],
-      "description": "A turn_ended's: the tokens it wrote."
+      "description": "A turn_ended's: the tokens it wrote (thinking among them)."
+    },
+    "tokens_in": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "description": "An older turn_ended's, kept before its tokens were told apart: every input token, cache reads and writes among them. Events told now leave it out."
     },
     "commit": {
       "type": [

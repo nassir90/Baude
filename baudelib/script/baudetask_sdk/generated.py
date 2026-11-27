@@ -3798,8 +3798,8 @@ class Ops(Area):
             bot (BotRef): The Bot.
             default (boolean): The call is to Emission's own window here on its Default profile instead of a
                 Bot's (☰ → Browser from another host, watched): what a Browser pane does (tabs, navigate,
-                new_tab, close_tab, select_tab, click, hover, drag, type, key, scroll, answer_prompt), nothing
-                else.
+                new_tab, close_tab, select_tab, click, hover, drag, type, key, scroll, answer_prompt, copy,
+                paste), nothing else.
             call (object): The tool's request.
         """
         return self._call("emission", {"bot": bot, "default": default, "call": call}, host, EmissionReply)

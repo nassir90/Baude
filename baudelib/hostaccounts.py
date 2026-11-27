@@ -27,7 +27,7 @@ import urllib.parse
 import uuid
 from http.client import HTTPConnection, HTTPException, InvalidURL
 
-from baudelib import accounts, deps, hostlogin, wording
+from baudelib import accounts, deps, hostlogin, hostresume, wording
 from baudelib.claude import claude_env, claude_exe
 from baudelib.hostlogin import ESCAPES, NO_BROWSER, auth_status, signed_in_as
 
@@ -95,8 +95,9 @@ def answer(server, conn, msg, reply):
             on = bool(msg.get("on"))
             accounts.set_switch(key, **{"disabled" if what == "disable" else "auto_disable": on})
             off = what == "disable" and on
-            if what == "auto_disable" and on and _spent(server, key):  # (exhausted already: disabled now)
-                accounts.set_switch(key, disabled=True)
+            if what == "auto_disable" and on and (limits := _spent(server, key)) is not None:  # (exhausted already:
+                reset = accounts.limits_reset(limits, accounts.key_provider(key))  # disabled now)
+                accounts.exhausted(key, hostresume.after(reset) if reset is not None else None)
                 off = True
             if off:
                 getattr(server, "subscription_disabled", lambda _key: None)(key)
@@ -144,19 +145,22 @@ def _for_chat(server, conn, msg, done):
 
 
 def _spent(server, key):
-    """Whether a subscription (usage key) is exhausted as it was last read, or as its chats' turns last said it."""
+    """The limits ([(key, percent, resets)]) that say a subscription (usage key) is exhausted, as it was last read or as
+    its chats' turns last said it, or None where they don't."""
     from baudelib.serverstate import state_home
     read = accounts.last_usage().get(key)
     seen = accounts.seen_limits(getattr(server, "state_dir", None) or state_home(), key)
     provider = accounts.key_provider(key)
-    return accounts.limits_exhausted(read[1] if read else None, provider) or \
-        accounts.limits_exhausted(seen[0] if seen else None, provider)
+    return next((limits for limits in (read[1] if read else None, seen[0] if seen else None)
+                 if accounts.limits_exhausted(limits, provider)), None)
 
 
 def _exhausted(server, key, limits, provider):
     """A usage read's limits (limits) that say a subscription's used up: disabled if it auto-disables (its chats
     stopped)."""
-    if accounts.limits_exhausted(limits, provider) and accounts.exhausted(key):
+    reset = accounts.limits_reset(limits, provider)
+    if accounts.limits_exhausted(limits, provider) and \
+            accounts.exhausted(key, hostresume.after(reset) if reset is not None else None):
         getattr(server, "subscription_disabled", lambda _key: None)(key)
 
 

@@ -1,7 +1,10 @@
 """hostresume — a chat whose turn a usage limit stopped, carried on by its host once the limit resets. Where the
 subscription it runs on has Auto Resume on Reset on (accounts.auto_resume), the turn's end keeps when (resume_at, in
 the chat's meta: kept over a restart, listed for every head) and the host sends it MESSAGE then, as its user would.
-Anything sent to it first, Cancel (cancel), the switch turned off, or the subscription disabled, and it isn't.
+Anything sent to it first, Cancel (cancel), the switch turned off, or the subscription disabled by hand, and it isn't.
+A subscription that disabled itself as it was exhausted (accounts.auto_off) is enabled again as its limit resets
+(due), its chats' resumes kept meanwhile. Resumes that keep failing back off (BACKOFF, doubling) and stop (MAX_RUNS)
+till a turn succeeds. A task's run's chat isn't resumed: its schedule runs it again.
 
 When a limit's what stopped a turn, and till when, is said by the agent: Claude Code's rate_limit_event refused
 (status rejected, resetsAt) or its synthetic message's error with the same, else the time its message says
@@ -15,6 +18,8 @@ import uuid
 from baudelib import accounts, wording
 
 MARGIN = 60  # (s after the limit resets: its reset is the hour's, a clock a little behind the provider's sends too soon)
+MAX_RUNS = 3  # (resumes in a row, with no turn succeeding between, before a chat's let be)
+BACKOFF = 300  # (s after a resume's sent before the next may be, doubled for each in a row)
 MESSAGE = wording.say("limit_resume.message")
 
 
@@ -79,20 +84,51 @@ def codex_reset(snapshot):
     return max(times) if times else None
 
 
+def after(reset):
+    """When a chat is resumed (and a subscription enabled again) for a limit that resets at reset: a margin after it."""
+    return round(max(reset, time.time()) + MARGIN)
+
+
+def keep(server, s, reset):
+    """(lock held) A chat's resume kept for when its limit resets (reset: seconds since 1970), as its subscription
+    resumes its chats and it isn't a task's run's; later where resumes in a row have failed (BACKOFF), none after
+    MAX_RUNS. When it's to be sent, or None."""
+    key = s.subscription()
+    if reset is None or key is None or s.meta.get("ephemeral") or s.meta.get("task_run") or \
+            not accounts.auto_resume(key) or not allowed(key):
+        return None
+    tried = s.meta.get("resumed") or {}
+    n = tried.get("n", 0)
+    if n >= MAX_RUNS:
+        server.log(f"{s.id}: its resume not kept: {n} in a row didn't get a turn through")
+        return None
+    at = after(reset)
+    if n:
+        at = max(at, round(tried.get("at", 0) + BACKOFF * 2 ** (n - 1)))
+    s.meta["resume_at"] = at
+    server.save(s)
+    server.changed()
+    server.log(f"{s.id}: a usage limit stopped its turn: resumed at {time.ctime(at)}")
+    return at
+
+
 def turn_over(server, s, proc, msg):
-    """(lock held, at a turn's result) A turn a usage limit stopped: its chat's resume kept for when the limit resets,
-    if the subscription it runs on resumes its chats and isn't disabled."""
+    """(lock held, at a turn's result) A turn's end: one that went through clears the resumes in a row; one a usage
+    limit stopped has its chat's resume kept for when the limit resets (keep)."""
     reset, proc.limit_reset = getattr(proc, "limit_reset", None), None
-    if not msg.get("is_error") or s.meta.get("ephemeral"):
+    if not msg.get("is_error"):
+        if s.meta.pop("resumed", None) is not None:
+            server.save(s)
         return
     if reset is None:
         reset = said_reset(msg.get("result"))
     key = s.subscription()
-    if reset is None or key is None or not accounts.auto_resume(key) or accounts.disabled(key):
+    if reset is None or key is None:
         return
-    s.meta["resume_at"] = round(max(reset, time.time()) + MARGIN)
-    server.save(s)
-    server.log(f"{s.id}: a usage limit stopped its turn: resumed at {time.ctime(s.meta['resume_at'])}")
+    off = accounts.auto_off(key)
+    if off is not None and off["until"] is None and accounts.auto_resume(key):
+        accounts.mark_auto_off(key, after(reset))  # (disabled by itself before its limit's reset was known)
+    keep(server, s, reset)
 
 
 def drop(server, s):
@@ -104,24 +140,40 @@ def drop(server, s):
 
 def switched(server):
     """(lock held) The subscriptions' switches changed: the resumes of chats whose subscription no longer resumes
-    them, or is disabled, let go of."""
+    them, or is disabled by hand, let go of."""
     for s in list(server.sessions.values()):
         if s.meta.get("resume_at") is not None and not wanted(s):
             drop(server, s)
 
 
+def allowed(key):
+    """Whether a subscription takes resumes: not disabled, or disabled by itself as it was exhausted (it's enabled
+    again as its limit resets)."""
+    return not accounts.disabled(key) or accounts.auto_off(key) is not None
+
+
 def wanted(s):
-    """Whether a chat's resume is still to go: its subscription resumes its chats and isn't disabled."""
+    """Whether a chat's resume is still to go: its subscription resumes its chats and takes them (allowed)."""
     key = s.subscription()
-    return key is not None and accounts.auto_resume(key) and not accounts.disabled(key)
+    return key is not None and accounts.auto_resume(key) and allowed(key)
 
 
 def due(server):
-    """(lock not held: the watch's) Each chat whose resume's due sent MESSAGE; the seconds till the next, or None."""
+    """(lock not held: the watch's) Each subscription that disabled itself enabled again as its limit's reset, then
+    each chat whose resume's due sent MESSAGE; the seconds till the next of either, or None."""
     now, waits = time.time(), []
     with server.lock:
         if server.stopped.is_set():
             return None
+        for key, off in accounts.auto_off().items():
+            if off["until"] is None or not accounts.auto_resume(key):
+                continue
+            if off["until"] > now:
+                waits.append(off["until"] - now)
+                continue
+            accounts.set_switch(key, disabled=False)
+            server.log("a subscription's usage limit has reset: enabled again")
+            server.subscription_switched()
         for s in list(server.sessions.values()):
             at = s.meta.get("resume_at")
             if not isinstance(at, (int, float)) or isinstance(at, bool):
@@ -142,6 +194,8 @@ def send(server, s):
     try:
         server.take_input(None, s, {"type": "user", "uuid": str(uuid.uuid4()),
                                     "message": {"role": "user", "content": MESSAGE}})
+        s.meta["resumed"] = {"n": (s.meta.get("resumed") or {}).get("n", 0) + 1, "at": time.time()}
+        server.save(s)
         server.log(f"{s.id}: resumed after its usage limit reset")
     except Exception as e:  # (its agent couldn't be started, its folder gone: said, not sent)
         server.log(f"{s.id}: its resume not sent: {type(e).__name__}: {e}")

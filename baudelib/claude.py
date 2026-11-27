@@ -152,7 +152,7 @@ class ClaudeProc:
     dispatch = staticmethod(lambda fn: fn())
     env_of = None  # (a subclass's own environment for claude, in place of claude_env's: Record's, its child_env)
     limits_folder = None  # (where its rate_limit_events are kept: its host's state folder; None, this machine's)
-    on_disabled = None  # (its subscription auto-disabled as a turn said it's exhausted: its host's, on_disabled(key))
+    on_disabled = None  # (its subscription auto-disabled as a turn said it's exhausted: its host's, on_disabled(key, reset))
     limit_reset = None  # (when the usage limit that refused its turn resets, as it said: its host's, hostresume)
 
     def __init__(self, on_msg, on_exit, cwd, model, mode, resume=None, effort=None, extra=(), env=None, exe=None, profile=None):
@@ -216,9 +216,11 @@ class ClaudeProc:
                 from baudelib.serverstate import state_home
                 key = accounts.usage_key("claude", self.profile)
                 try:
+                    reset = self.limit_reset
                     if accounts.note_limits(self.limits_folder or state_home(), key, msg.get("rate_limit_info")) and \
-                            accounts.exhausted(key) and self.on_disabled is not None:
-                        self.on_disabled(key)  # (auto-disabled: its host's chats on it stopped)
+                            accounts.exhausted(key, hostresume.after(reset) if reset is not None else None) and \
+                            self.on_disabled is not None:
+                        self.on_disabled(key, reset)  # (auto-disabled: its host's chats on it stopped)
                 except (OSError, sqlite3.Error):
                     pass
             # (its handler looked up as it's delivered, not as it's read: a chat left mid-turn, or opened again, in between

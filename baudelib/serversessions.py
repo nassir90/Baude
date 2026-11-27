@@ -322,7 +322,7 @@ class ServerSessions:
                 **({"path": self.socket_path} if kind is agentproxy.ProxiedProc else {}))
         made.append(s.proc)
         s.proc.limits_folder = self.state_dir  # (its usage as its turns say it, kept with this host's state)
-        s.proc.on_disabled = self.subscription_disabled  # (auto-disabled as it's exhausted: its chats stopped)
+        s.proc.on_disabled = lambda key, reset=None, s=s: self.subscription_disabled(key, s, reset)  # (auto-disabled as it's exhausted: its chats stopped)
         s.used, s.streamed, s.acting = time.time(), False, False  # (a new agent, its model's perhaps: how it says
         # what it writes learned again)
         s.acting_by.clear()
@@ -1179,9 +1179,11 @@ class ServerSessions:
         return wording.say("subscriptions.disabled_chat",
                            name=a["name"] if a else wording.say("subscriptions.cli_default"))
 
-    def subscription_disabled(self, key):
+    def subscription_disabled(self, key, by=None, reset=None):
         """A subscription (usage key) disabled: every chat here on it turned off, its agent stopped (a turn going
-        on cut short), and listed so (account_disabled). A message sent at that turn and not yet taken in (queued) is held
+        on cut short), and listed so (account_disabled). Where it disabled itself as a usage limit stopped chat by
+        (reset: when the limit resets), that chat's resume kept (hostresume.keep), and the others' kept where they
+        have one. A message sent at that turn and not yet taken in (queued) is held
         for the chat (held), sent by its user once the subscription is back."""
         with self.lock:
             for s in list(self.sessions.values()):
@@ -1202,7 +1204,8 @@ class ServerSessions:
                     s.proc.stopping, s.proc.restarting = True, False
                     s.proc.kill()
                     self.log(f"{s.id}: its subscription's disabled: its agent stopped")
-                hostresume.drop(self, s)  # (not resumed onto it)
+                if not (s is by and hostresume.keep(self, s, reset)) and not hostresume.wanted(s):
+                    hostresume.drop(self, s)  # (not resumed onto it: disabled by hand)
             self.changed()
 
     def subscription_switched(self):

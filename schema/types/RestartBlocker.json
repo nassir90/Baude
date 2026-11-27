@@ -31,6 +31,10 @@
       "type": "string",
       "description": "The chat's title, the task's name, the agent's model, or the terminal's title."
     },
+    "waiting": {
+      "type": "boolean",
+      "description": "A task run's: true while it waits for input (an ask of its Bot, asking); a restart would stop it."
+    },
     "what": {
       "type": "string",
       "description": "What it runs: the chat's oldest command, the agent run's chat's host, or the terminal's program."

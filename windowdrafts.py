@@ -500,30 +500,61 @@ class WindowDrafts:
         words left out of your box."""
         said_text = baudelib.wire.unsaid(text or "").strip()
         drawn = baudelib.wire.unsaid(sender["shown"]).strip() if isinstance(sender.get("shown"), str) else said_text
-        return SenderTurn(self, self.sender_bubble(sender, drawn, atts), said_text, said)
+        return SenderTurn(self, self.sender_bubble(sender, drawn, atts, said), said_text, said)
 
-    def sender_bubble(self, sender, text, atts=()):
+    def sender_bubble(self, sender, text, atts=(), said=None):
         """A message from sender, not you (its host's sender store's): where yours are, grey (not your accent), as a
         queued one is, with who it's from in a small line at its top: a link to that chat (a task's: to its run, on
         its Bot's Tasks page), if it names one; a chat a task's run started, then its run (a link to it) and how its
-        turn ended: "from subagent “Why” · Deploy site run · finished"."""
+        turn ended: "from subagent “Why” · Deploy site run · finished"; a task's ask (uuid said) whose run waits for
+        its answer, then that it does, while it does (sender_waits)."""
         bubble = self.user_bubble(text, atts)
         bubble.add_css_class("sender-bubble")
-        said = wording.say("common.from_who", author=baudelib.wire.sender_name(sender))
-        run, about = baudelib.wire.sender_run(sender), baudelib.wire.sender_about(sender)
-        head = Gtk.Label(label=" · ".join([said, *about]), xalign=1, wrap=True, wrap_mode=Pango.WrapMode.WORD_CHAR,
-                         halign=Gtk.Align.END)
+        head = Gtk.Label(xalign=1, wrap=True, wrap_mode=Pango.WrapMode.WORD_CHAR, halign=Gtk.Align.END)
+        head.sender, head.said, head.waits = sender, said, None
         if sender.get("session"):
-            esc = GLib.markup_escape_text
-            parts = [f'<a href="sender">{esc(said)}</a>']
-            for i, part in enumerate(about):  # (its run: a link to it; how it ended, plain)
-                parts.append(f'<a href="run">{esc(part)}</a>' if i == 0 and sender.get("task_name") and run
-                             else esc(part))
-            head.set_markup(" · ".join(parts))
             head.connect("activate-link", lambda _l, uri: self.open_sender(sender, uri == "run") or True)
         head.add_css_class("sender-from")
+        self.sender_head(head)
+        if said and sender.get("run"):
+            head.chat = self.session_id
+            self.sender_heads = [h for h in getattr(self, "sender_heads", ()) if h.chat == self.session_id] + [head]
         bubble.prepend(head)
         return bubble
+
+    def task_asks(self):
+        """The asks (their uuids) the open chat's been sent whose tasks' runs wait for its answer, as its host lists
+        them (a Bot's task_asks)."""
+        if self.remote is None or not self.session_id:
+            return ()
+        return tuple((self.remote.sessions.get(self.session_id) or {}).get("task_asks") or ())
+
+    def sender_head(self, head):
+        """A from line drawn as its sender says, and, for a task's ask its run waits on, that it does."""
+        sender = head.sender
+        waits = bool(head.said) and head.said in self.task_asks()
+        if waits == head.waits:
+            return
+        head.waits = waits
+        said = wording.say("common.from_who", author=baudelib.wire.sender_name(sender))
+        run, about = baudelib.wire.sender_run(sender), baudelib.wire.sender_about(sender)
+        after = [wording.say("senders.run_waiting")] if waits else []
+        if not sender.get("session"):
+            head.set_label(" · ".join([said, *about, *after]))
+            return
+        esc = GLib.markup_escape_text
+        parts = [f'<a href="sender">{esc(said)}</a>']
+        for i, part in enumerate(about):  # (its run: a link to it; how it ended, plain)
+            parts.append(f'<a href="run">{esc(part)}</a>' if i == 0 and sender.get("task_name") and run
+                         else esc(part))
+        parts += [f'<a href="run">{esc(part)}</a>' for part in after]  # (the run that waits: a link to it)
+        head.set_markup(" · ".join(parts))
+
+    def sender_waits(self):
+        """The open chat's from lines of tasks' asks drawn again as their runs wait for an answer or stop waiting."""
+        self.sender_heads = [h for h in getattr(self, "sender_heads", ()) if h.chat == self.session_id]
+        for head in self.sender_heads:
+            self.sender_head(head)
 
     def open_sender(self, sender, to_run=False):
         """The chat a message is from, opened (a task's, or to_run, a chat a task's run started's run: its Bot's, on

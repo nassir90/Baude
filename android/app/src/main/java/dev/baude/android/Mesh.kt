@@ -138,6 +138,8 @@ class Chat(hostId: String, sid: String) {
     var draftTyping = false // (typed, its save not sent yet)
     var draftHeld: Msg.ChatDraft? = null // (another head's, come while this one's own was waiting: Mesh.draftIn)
     var draftDirty = false  // (written here, not taken by its host yet: Mesh's drafts)
+    var draftFailed = false // (its last save not taken by its host, nothing typed since: holds nothing, Mesh.saveDraft)
+    var draftTries = 0      // (saves made again since one was last taken)
     var draftRestoring = false // (what was kept here going back in the box: not written now)
     var putText = ""        // (the box's text as it was last put there, not written: markdown)
     var sender: ((String, List<Picked>) -> Unit)? = null // (one that's sent its own way: Meta's)
@@ -878,10 +880,14 @@ object Mesh {
     // host answers a save of that very text. Saved DRAFT_SAVE_MS after typing stops, at once as the box is emptied
     // (sent, queued) and as the chat's left; another head's save comes as draft_changed. The last write wins: one
     // that comes while this box is dirty or has a save on its way is held, and put in once it's neither, if its host
-    // had it after this box's. Only a dirty copy kept here is ever saved over its host's as the chat's opened. What's
+    // had it after this box's. A save its host didn't take holds nothing: another's write held then, or come after,
+    // goes in (its host has it, and this box's it never had); else it's saved again DRAFT_RETRY_MS later, twice as
+    // long each time, DRAFT_RETRIES times (WindowDrafts' too). Only a dirty copy kept here is ever saved over its host's as the chat's opened. What's
     // attached stays this phone's (Queue's drafts)
 
     const val DRAFT_SAVE_MS = 400L
+    const val DRAFT_RETRY_MS = 1000L
+    const val DRAFT_RETRIES = 3
 
     /** Does chat's host keep its draft for it (a host's chat, not a new one nor a Claude Desktop chat, this phone let
      * write it, its host's draft taken)? */
@@ -942,6 +948,7 @@ object Mesh {
         if (!keepsDraft(chat)) return
         val key = "${chat.hostId}/${chat.sid}"
         chat.draftText = markdown
+        chat.draftFailed = false
         chat.draftFlight++
         c.request(Msg.DraftSave(session = chat.sid, text = markdown, head = chat.head).json()) { r ->
             main.post {
@@ -954,10 +961,16 @@ object Mesh {
                         Queue.setDraft(key, Draft(kept.text, kept.files, kept.queue, kept.upto, kept.hold, dirty = false))
                     return@post
                 }
-                if (!took) { // (not kept there: still dirty, saved again as it's opened or attached)
+                if (!took) { // (not kept there: still dirty, saved again as it's opened or attached, and soon)
                     chat.draftText = null
+                    if (chat.draftFlight == 0 && !chat.draftTyping && boxMarkdown(chat) == markdown) {
+                        chat.draftFailed = true
+                        if (chat.draftHeld != null) releaseHeld(chat) // (another's, which its host has: in, in place
+                        else retryDraft(chat, markdown)               // of this)
+                    }
                     return@post
                 }
+                chat.draftTries = 0
                 if (chat.draftFlight == 0 && !chat.draftTyping && boxMarkdown(chat) == markdown) {
                     chat.draftDirty = false
                     releaseHeld(chat)
@@ -966,10 +979,22 @@ object Mesh {
         }
     }
 
-    /** Another head's write held while this box was dirty or saving, put in now it's neither. */
+    /** (a save of markdown its host didn't take) Saved again in a while, unless it's been tried DRAFT_RETRIES times,
+     * or the box has changed, another's write come or the chat's been left meanwhile. */
+    private fun retryDraft(chat: Chat, markdown: String) {
+        if (chat.draftTries >= DRAFT_RETRIES) return
+        val wait = DRAFT_RETRY_MS shl chat.draftTries++
+        main.postDelayed({
+            if (open === chat && chat.draftFailed && chat.draftFlight == 0 && !chat.draftTyping &&
+                boxMarkdown(chat) == markdown) saveDraft(chat, markdown)
+        }, wait)
+    }
+
+    /** Another head's write held while this box was dirty or saving, put in now it's neither (or this box's last
+     * save wasn't taken). */
     fun releaseHeld(chat: Chat) {
         val held = chat.draftHeld ?: return
-        if (chat.draftFlight > 0 || chat.draftTyping || chat.draftDirty) return
+        if (chat.draftFlight > 0 || chat.draftTyping || chat.draftDirty && !chat.draftFailed) return
         chat.draftHeld = null
         draftIn(chat, held)
     }
@@ -989,11 +1014,16 @@ object Mesh {
             chat.draftRev = rev
             return
         }
-        if (chat.draftFlight > 0 || chat.draftTyping || chat.draftDirty || chat.reverting != null) {
+        if (chat.draftFlight > 0 || chat.draftTyping || chat.draftDirty && !chat.draftFailed || chat.reverting != null) {
             if ((chat.draftHeld?.rev?.toLong() ?: -1L) < rev) chat.draftHeld = d
             return
         }
         chat.draftRev = rev
+        if (chat.draftFailed) { // (this box's, which its host never had, gives way)
+            chat.draftDirty = false
+            chat.draftFailed = false
+            chat.draftTries = 0
+        }
         chat.draftText = d.text.orEmpty()
         if (boxMarkdown(chat) != chat.draftText) {
             chat.draft.value = null

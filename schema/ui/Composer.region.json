@@ -40,7 +40,7 @@
   "parts": [
     {
       "name": "text box",
-      "shows": "A card with the text in the chat's font (scales with chat zoom), word-wrapped. Empty or one line, it is wrapped close round its buttons: as tall as a button (composer.button, 28 px) with the buttons' inset (composer.inset, 4 px) above and below, the line centred on the buttons, the same height as a side question's box under its question (SideQuestions). Where the line is taller than the buttons (a large chat zoom, Text size or Global Scale) or the buttons taller than 28 px (a large Icons size), the one-line box is the taller of the two plus the inset above and below, and both are centred in it. As the text grows the buttons stay at the bottom, centred on its last line. The box follows a change of zoom or size at once, smaller as well as larger. It grows with the text and scrolls past about nine lines (220 px), its scrollbar shown only then. The right margin keeps text from running under the buttons. No placeholder text. Spell check is not on in Baude's box (it is a Record page feature). The box takes the focus when a window opens; a click anywhere in the card puts the caret in the text. A host's chat's text is its host's draft (schema/types/DraftSave.request.json): the box opens with it and follows other heads' edits to it.",
+      "shows": "A card with the text in the chat's font (scales with chat zoom), word-wrapped. Empty or one line, it is wrapped close round its buttons: as tall as a button (composer.button, 28 px) with the buttons' inset (composer.inset, 4 px) above and below, the line centred on the buttons, the same height as a side question's box under its question (SideQuestions). Where the line is taller than the buttons (a large chat zoom, Text size or Global Scale) or the buttons taller than 28 px (a large Icons size), the one-line box is the taller of the two plus the inset above and below, and both are centred in it. As the text grows the buttons stay at the bottom, centred on its last line. The box follows a change of zoom or size at once, smaller as well as larger. It grows with the text and scrolls past about nine lines (220 px), its scrollbar shown only then. The right margin keeps text from running under the buttons. No placeholder text. Spell check is not on in Baude's box (it is a Record page feature). The box takes the focus when a window opens; a click anywhere in the card puts the caret in the text. A host's chat's text is its host's draft (schema/types/DraftSave.request.json): the box opens with it and follows other heads' edits to it; what was sent from any box never comes back into it.",
       "actions": [
         {
           "by": "key Enter",
@@ -150,6 +150,17 @@
           "source": [
             {
               "issue": "BaudeInternal#304"
+            }
+          ]
+        },
+        {
+          "said": "There seems to be an issue with drafts coming back to me post send. In think this would be fixed if we used some id ber enter-invocation to prevent splashback",
+          "rule": "Text a head has sent never comes back into any box. Every Enter (or Send) that empties a box is a send with an id of its own: its save empties the host's draft and starts the draft's next epoch, and the same send's save made again empties it once. Every save says the epoch its text was written in; the host refuses one from an earlier epoch, and every head drops a draft from an epoch earlier than one it has seen. A head typing on text that another head then sends keeps only what it typed itself, the sent text taken out of its box, and saves that; text a head typed that the host never took is still never replaced by another head's edit. The phone's own sends empty the host's draft as the desktop's do.",
+          "decided": "2026-11-27",
+          "source": [
+            {
+              "session": "221e1c29-56d7-48bf-a2dc-7a2b37ccd685",
+              "message": "fe9f6e47-6574-4d3e-83c0-dc3ae0b3c856"
             }
           ]
         }

@@ -421,6 +421,7 @@ class MacWeb:
         self.views[self.view] = self
         self.attached = self.attached_root = self.blocker = None
         self.holes, self.holes_in_view, self.hole_views = [], [], []  # (where GTK draws over it, cut out: cut_holes)
+        self.holes_frame = None  # (the page's frame as its holes were cut)
         self.hole_tick, self.hole_frames, self.toasts_seen = None, 0, []  # (watch_toasts)
         self.overlay, self.tab_id = None, None  # (overlay: what's drawn over it, hosted: MacOverlay)
 
@@ -746,9 +747,14 @@ class MacWeb:
         """GTK's drawing over the page (holes: (x, y, w, h, corner radius) in the content view) shown through it: those
         cut out of its layer (a mask), and a view over each that takes their clicks and gives them to GTK's, under it
         (as block's), so a toast's button is pressed, not the page under it. [] for none."""
-        if holes == self.holes or self.view is None:
+        if self.view is None:
             return
         send, R = macos.objc_send, macos._rect()
+        f = send(self.view, b"frame", ret=R)
+        frame = (f.x, f.y, f.w, f.h)  # (the page moved or resized under a toast that stayed: cut again, where it is now)
+        if holes == self.holes and frame == self.holes_frame:
+            return
+        self.holes_frame = frame
         for v in self.hole_views:
             send(v, b"removeFromSuperview")
             send(v, b"release")

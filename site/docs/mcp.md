@@ -146,6 +146,28 @@ Answer an ask of one of your tasks' runs whose message says to answer with this 
 | `answer` | object |  | The form's fields, by name: each a text, number, true or false, or one of a choice's choices |
 | `text` | string |  | The answer to an ask with no form |
 
+### `answer_ask`
+
+Answer an ask in a person's Inbox whose message says to answer with this tool (mcp__mesh__answer_ask): press one of its buttons, by its index, with its form's values. It takes effect at once: its task is told, and the ask leaves every Inbox. A wrong answer is refused with what's wrong: call it again.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `ask` | string | yes | The ask's id (its message says it) |
+| `button` | integer | yes | The button's index (its message lists them) |
+| `values` | object |  | The form's fields, by name: each a text, number, true or false, or one of a choice's choices |
+
+### `revise_ask`
+
+Put a new version of an ask your task raised in a person's Inbox (its message says its id): what it says, its buttons, its form. A field left out stays as it was. The person sees it at once.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `ask` | string | yes | The ask's id |
+| `title` | string |  | What it's called in the Inbox's list |
+| `body` | string |  | What it says, in Markdown; ![alt](name) shows one of its pictures |
+| `buttons` | array of object |  | Its buttons, each {label, style?: primary\|secondary\|blue\|teal\|green\|yellow\|orange\|red\|pink\|purple\|slate, picture?: a picture's name} |
+| `form` | array of object |  | Its form's fields, each {name, type: text\|number\|bool\|choice, label?, choices?, default?, required?} |
+
 ### `list_notebooks`
 
 Record's notebooks on a host: each one's name and how many pages it has.
@@ -691,6 +713,109 @@ A line for an agent's program's stdin.
 | Field | Type | Required | What it is |
 |---|---|---|---|
 | `line` | string |  | The line. |
+
+#### `inbox` (Inbox)
+
+The host's asks waiting (and those stopped, till they're removed) of the Bots the head may manage: the Inbox. Changes come as inbox_changed to a head that's subscribed.
+
+#### `inbox_picture` (InboxPictureGet)
+
+One of an ask's pictures, its bytes.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `ask` | string | yes | The ask's id. |
+| `version` | integer | yes | Its version (1 for the first). |
+| `name` | string | yes | The picture's name. |
+
+#### `inbox_press` (InboxPress)
+
+A button of a waiting ask pressed, with its form's values: its task told (inbox_wait), and the ask out of every Inbox. A person's (a head's), or a Bot's (its answer_ask tool: as: its own session id, the ask sent it or its own task's).
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `ask` | string | yes | The ask's id. |
+| `button` | integer | yes | The button's index. |
+| `values` | object/null |  | The form's values, by its fields' names. |
+| `as` | string/null |  | A Bot answering it: its own session id. |
+
+#### `inbox_raise` (InboxRaise)
+
+A running task's script raises an ask of a person (on the host's own socket, with its run's token): kept, and in the Inbox of every head that may manage its Bot till it's answered, withdrawn or its run ends. Answered as a button's pressed (inbox_wait).
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `run` | string | yes | The asking run's id (BAUDE_TASK_RUN): a task's script's. |
+| `token` | string | yes | Its run's token (BAUDE_TASK_TOKEN). |
+| `title` | string/null |  | What it's called in the Inbox's list (its body's first line, if none). |
+| `body` | string | yes | What it says: Markdown, as a message is written. ![alt](name) on a line of its own, or alone in a table's cell, shows one of its pictures there (by its name). |
+| `pictures` | array/null of InboxPictureData |  | Its pictures, each by the name its body and buttons use. |
+| `buttons` | array of InboxButton | yes | What may be pressed: each tells the task, with the form's values. |
+| `form` | array/null of TaskField |  | Fields to fill (as a task's form has them): their values go with the button pressed. |
+
+#### `inbox_remove` (InboxRemove)
+
+A stopped ask taken out of every Inbox (and off the host).
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `ask` | string | yes | The ask's id. |
+
+#### `inbox_revise` (InboxRevise)
+
+A new version of a waiting ask: its task's script's (run, token), or the asking Bot's (its own tools, sent a message from the ask's box). Fields left out are the last version's.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `ask` | string | yes | The ask's id. |
+| `run` | string/null |  | The asking run's id: a script's. |
+| `token` | string/null |  | Its run's token: a script's. |
+| `title` | string/null |  | What it's called in the Inbox's list (its body's first line, if none). |
+| `body` | string/null |  | What it says now (Markdown). |
+| `pictures` | array/null of InboxPictureData |  | Its pictures, each by the name its body and buttons use. |
+| `buttons` | array/null of InboxButton |  | Its buttons now. |
+| `form` | array/null of TaskField |  | Fields to fill (as a task's form has them): their values go with the button pressed. |
+
+#### `inbox_route` (InboxRoute)
+
+A waiting ask handed on: model, a model of the host's asked to answer it (its answer shown for confirming: proposal); bot, a Bot sent it to answer (its answer_ask tool). Neither: a model's answer let go of.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `ask` | string | yes | The ask's id. |
+| `model` | string/null |  | A model's value, as the host lists it. |
+| `effort` | string/null |  | Its effort. |
+| `bot` | string/null |  | A Bot's session id, on this host. |
+
+#### `inbox_say` (InboxSay)
+
+What a person wrote in an ask's box, sent the asking task's Bot as a message (with the ask): it may answer the ask or put a new version of it.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `ask` | string | yes | The ask's id. |
+| `text` | string | yes | What they wrote. |
+
+#### `inbox_wait` (InboxWait)
+
+A task's script's ask's answer (run, token), waited for: till it's answered (or withdrawn, or its run's stopped), or timeout seconds (0: as it is now, a poll).
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `ask` | string | yes | The ask's id. |
+| `run` | string | yes | The asking run's id (BAUDE_TASK_RUN): a task's script's. |
+| `token` | string | yes | Its run's token (BAUDE_TASK_TOKEN). |
+| `timeout` | number/null |  | How long to wait, in seconds (0: not at all; none: till it's answered). |
+
+#### `inbox_withdraw` (InboxWithdraw)
+
+A waiting ask taken back by its task's script (run, token): out of every Inbox.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `ask` | string | yes | The ask's id. |
+| `run` | string | yes | The asking run's id (BAUDE_TASK_RUN): a task's script's. |
+| `token` | string | yes | Its run's token (BAUDE_TASK_TOKEN). |
 
 #### `infer` (Infer)
 
@@ -1768,6 +1893,50 @@ The host's answer to hello.
 |---|---|---|---|
 | `server` | Info |  | What the host is. |
 
+#### `inbox_answered` (InboxAnswered)
+
+inbox_wait's answer: the ask as it is.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `ask` | string | yes | The ask's id. |
+| `status` | `waiting` \| `answered` \| `withdrawn` \| `stopped` | yes | Its status (waiting: not answered within the timeout). |
+| `answer` | InboxAnswer? |  | How it was answered. |
+
+#### `inbox_done` (InboxDone)
+
+inbox_withdraw's, inbox_press's, inbox_route's, inbox_say's and inbox_remove's answer: done.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `ask` | string | yes | The ask's id. |
+
+#### `inbox_picture_data` (InboxPictureReply)
+
+inbox_picture's answer.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `mime` | string | yes | What it is. |
+| `data` | string | yes | Its bytes, base64. |
+
+#### `inbox_raised` (InboxRaised)
+
+inbox_raise's and inbox_revise's answer.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `ask` | string | yes | The ask's id. |
+| `version` | integer | yes | Its version now (1 for the first). |
+
+#### `inbox_reply` (InboxReply)
+
+inbox's answer.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `asks` | array of InboxAsk | yes | The asks, oldest first. |
+
 #### `infer_data` (InferData)
 
 infer's and files's answer: some of its body.
@@ -2293,6 +2462,15 @@ A session's agent stopped.
 | `session` | string | yes | The session's id. |
 | `code` | integer/null |  | Its exit code. |
 | `stopped` | boolean |  | Told to (stop). |
+
+#### `inbox_changed` (InboxChanged)
+
+An ask raised, put anew, answered, withdrawn, stopped, routed or removed: told every subscribed head that may manage its Bot, as a draft's change is. One that's answered, withdrawn or removed (removed: true) leaves every Inbox.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `ask` | InboxAsk | yes | The ask as it is now. |
+| `removed` | boolean/null |  | It's gone from the host (a stopped one removed). |
 
 #### `login_state` (LoginState)
 
@@ -2963,6 +3141,97 @@ A host process as it says it is on a link (mesh._hello_of).
 | `bonjour` | string |  | Its name on the local network, if it said one. |
 | `dial` | boolean |  | false: it can't be linked to, only from (a phone, with no sshd). |
 | `key` | string |  | Its key (Ed25519's public half, in base64): what signs the tunnels it opens. |
+
+#### InboxAnswer
+
+How an ask was answered: the button pressed and the form's values.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `button` | integer | yes | The button's index. |
+| `label` | string | yes | The button's label. |
+| `values` | object | yes | The form's values, checked against its fields. |
+| `by` | string/null |  | A Bot's name, if a Bot answered it (sent to it, or the asking task's); none: a person. |
+| `at` | number | yes | When (seconds since the epoch). |
+
+#### InboxAsk
+
+A task's ask of a person, kept by its host (state folder's inbox/) till it's answered or its task withdraws it: across the host's restarts, stopped (its run gone) then, struck through and its buttons off. Every head that may manage the asking Bot is told it as it changes (inbox_changed).
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `id` | string | yes | The ask's id. |
+| `session` | string | yes | The asking task's Bot's session id. |
+| `bot` | string/null |  | That Bot's name. |
+| `task` | string | yes | The task's id. |
+| `task_name` | string | yes | The task's name. |
+| `run` | string | yes | The asking run's id. |
+| `at` | number | yes | When it was raised (seconds since the epoch). |
+| `status` | `waiting` \| `answered` \| `withdrawn` \| `stopped` | yes | waiting: for an answer; answered (answer: how); withdrawn: its task took it back; stopped: its run ended (or its host restarted) with it unanswered. |
+| `versions` | array of InboxVersion | yes | Every version of it, oldest first: the last is what's answered. |
+| `proposal` | InboxProposal? |  | A model's answer waiting to be confirmed, if one was asked for. |
+| `sent_to` | string/null |  | The Bot it's been sent to answer (its session id), till it does. |
+| `sent_to_name` | string/null |  | That Bot's name. |
+| `answer` | InboxAnswer? |  | How it was answered. |
+
+#### InboxButton
+
+One of an ask's buttons, as its task gives it: pressing it tells the task, with the form's values. Sized to its label, wrapping with the others as a whole.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `label` | string | yes | What it says. |
+| `style` | `primary` \| `secondary` \| `blue` \| `teal` \| `green` \| `yellow` \| `orange` \| `red` \| `pink` \| `purple` \| `slate` |  | How it's drawn: primary (the accent), secondary (plain, the default), or one of the accent palette's colours (schema/tokens accent.*). |
+| `picture` | string/null |  | One of the ask's pictures, by its name, drawn over its label: a picture button. |
+
+#### InboxPicture
+
+One of an ask's version's pictures, as it's listed: its bytes are fetched by its name (inbox_picture).
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `name` | string | yes | Its name, as the body and buttons use it. |
+| `mime` | string | yes | What it is (image/png, image/jpeg, ...). |
+| `size` | integer | yes | How many bytes it is. |
+| `width` | integer/null |  | Its width in pixels, if it could be read. |
+| `height` | integer/null |  | Its height in pixels, if it could be read. |
+
+#### InboxPictureData
+
+A picture given with an ask (inbox_raise, inbox_revise): its bytes.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `name` | string | yes | Its name, as the body and buttons use it (letters, digits, . _ -). |
+| `mime` | string/null |  | What it is (found from its bytes, if none). |
+| `data` | string | yes | Its bytes, base64. |
+
+#### InboxProposal
+
+A model's answer to an ask (Route to → Have a model answer): shown for the person to confirm or change, taking effect only as they press a button.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `model` | string | yes | The model's value. |
+| `name` | string | yes | The model, as it's named. |
+| `status` | `answering` \| `ready` \| `failed` | yes | answering: it's being asked; ready: its answer's here; failed: it couldn't answer (text: why). |
+| `button` | integer/null |  | The button it would press (its index), once it's answered. |
+| `values` | object/null |  | The form's values as it would fill them. |
+| `text` | string/null |  | Why, in a line or two (or why it failed). |
+
+#### InboxVersion
+
+One version of an ask: as its task raised it, or as it (or its Bot) put it anew.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `at` | number | yes | When it came (seconds since the epoch). |
+| `by` | string/null |  | A Bot's name, if a Bot put it; none: the task. |
+| `title` | string/null |  | What it's called in the Inbox's list. |
+| `body` | string | yes | What it says (Markdown). |
+| `pictures` | array of InboxPicture | yes | Its pictures. |
+| `buttons` | array of InboxButton | yes | Its buttons. |
+| `form` | array of TaskField | yes | Its form's fields. |
 
 #### Info
 
@@ -3958,6 +4227,6 @@ Somewhere wire.reach can go: this machine's host process, one listening on anoth
 | `TERMINAL_KEEP_S` | `600` | A terminal (terminal op) no connection is attached to now: its program kept running this long to be attached to again, in seconds. |
 | `TERMINAL_KEPT_BYTES` | `262144` | What a terminal (terminal op) wrote lately, kept to show again on attach: this many bytes at most. |
 | `TTL` | `16` | A tunnel's passed through at most this many hosts (open's ttl). |
-| `VERSION` | `37` | The wire's version, as a host's hello says it. |
+| `VERSION` | `39` | The wire's version, as a host's hello says it. |
 | `ZOOM_MAX` | `1568` | A browser zoom's longest side, in pixels. |
 | `ZOOM_QUALITY` | `90` | A browser zoom's JPEG quality. |

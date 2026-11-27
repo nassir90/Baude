@@ -13,6 +13,10 @@ it can be copied anywhere (the folder: _baudetask_vars.py beside it, its variabl
     plan = task.ask("Resolve this conflict: ...", form=[{"name": "keep", "type": "choice",
                                                          "choices": ["ours", "theirs"]}])  # {"keep": "ours"}
     task.fallback(error)   # a failure sent to its Bot mid-run (if the task notifies on failure): what it said
+    asked = task.inbox("### Deploy 2.5?\n\n![staging](home.png)", ["Approve", {"label": "Deny", "style": "red"}],
+                       pictures=["shots/home.png"], form=[{"name": "note", "type": "text"}])  # asked of a person, in
+    got = asked.wait()     # every Inbox: the button pressed {button, label, values, by}; asked.poll() at once
+    asked.revise(body="...")  # a new version of it;  asked.withdraw(): out of every Inbox
     chat = task.agent("The deploy failed: ...", wait=False)  # a chat of its own started, nested under its Bot,
                            # kept with the run: {session, text, failed}; its Bot's told what it says as its turn ends
 
@@ -42,7 +46,8 @@ import traceback
 
 from _baudetask_vars import Model, vars  # noqa: E402,A004 (beside this file, on the script's path)
 
-__all__ = ["inputs", "payload", "vars", "Model", "run", "say", "ask", "fallback", "agent", "main", "Refused", "decide",
+__all__ = ["inputs", "payload", "vars", "Model", "run", "say", "ask", "fallback", "inbox", "Asked", "Unanswered", "agent",
+           "main", "Refused", "decide",
            "deciders", "choice", "noul", "score", "Decision", "DecisionUnavailable",
            *(SDK := ("emission", "terminal", "kube", "docker", "db", "chats", "subagents", "ops", "hosts", "models",
                     "subscriptions"))]
@@ -174,6 +179,112 @@ def fallback(error):
     if isinstance(error, BaseException):
         error = "".join(traceback.format_exception(type(error), error, error.__traceback__))
     return ask(f"This failed:\n\n{error}", error=True)
+
+
+class Unanswered(Refused):
+    """An ask of a person that won't be answered now: its task withdrew it, or its run was stopped (status)."""
+
+    def __init__(self, status):
+        super().__init__(f"the ask was {status}")
+        self.status = status
+
+
+def _pictures(pictures):
+    """inbox's pictures ({name: a path or bytes}, or paths, each named by its file's name) as the wire has them."""
+    import base64
+    items = pictures.items() if isinstance(pictures, dict) else ((os.path.basename(str(p)), p) for p in pictures)
+    out = []
+    for name, p in items:
+        if not isinstance(p, (bytes, bytearray)):
+            with open(os.path.expanduser(str(p)), "rb") as f:
+                p = f.read()
+        out.append({"name": str(name), "data": base64.b64encode(bytes(p)).decode()})
+    return out
+
+
+def _buttons(buttons):
+    return [{"label": b} if isinstance(b, str) else dict(b) for b in buttons]
+
+
+class Asked:
+    """An ask raised in the Inbox (inbox()): id, its version (1 for the first) and its answer once it's had one
+    ({button: its index, label, values: the form's, by: a Bot's name if a Bot answered it, else None})."""
+
+    def __init__(self, aid, version, stand_in=None):
+        self.id, self.version, self.answer, self.status, self._stand_in = aid, version, None, "waiting", stand_in
+
+    def __repr__(self):
+        return f"Asked({self.id!r}, status={self.status!r})"
+
+    def _waited(self, timeout):
+        if self._stand_in is not None:
+            self.status, self.answer = "answered", self._stand_in
+            return self.answer
+        got = _w().request({"op": "inbox_wait", "run": run, "token": os.environ.get("BAUDE_TASK_TOKEN", ""),
+                            "ask": self.id, "timeout": timeout}, waits=True)
+        self.status, self.answer = got.get("status") or "waiting", got.get("answer")
+        if self.status in ("withdrawn", "stopped"):
+            raise Unanswered(self.status)
+        return self.answer
+
+    def wait(self, timeout=None):
+        """The answer, once a button's pressed (days, if it must: the run waits for input meanwhile, its timeout not
+        counting it); None if timeout (seconds) went by first. Unanswered if it's withdrawn or the run's stopped."""
+        return self._waited(timeout)
+
+    def poll(self):
+        """The answer if it's been answered, else None, at once."""
+        return self._waited(0)
+
+    def revise(self, body=None, buttons=None, form=None, title=None, pictures=None):
+        """A new version of it (what's left out stays as it was): the person sees it at once. Its version now."""
+        if self._stand_in is not None:
+            print(f"inbox revise: {title or body or ''}", flush=True)
+            self.version += 1
+            return self.version
+        msg = {"op": "inbox_revise", "run": run, "token": os.environ.get("BAUDE_TASK_TOKEN", ""), "ask": self.id}
+        for k, v in (("body", body), ("title", title), ("form", form)):
+            if v is not None:
+                msg[k] = v
+        if buttons is not None:
+            msg["buttons"] = _buttons(buttons)
+        if pictures is not None:
+            msg["pictures"] = _pictures(pictures)
+        self.version = _w().request(msg)["version"]
+        return self.version
+
+    def withdraw(self):
+        """Taken back: out of every Inbox, unanswered."""
+        if self._stand_in is None:
+            _w().request({"op": "inbox_withdraw", "run": run, "token": os.environ.get("BAUDE_TASK_TOKEN", ""),
+                          "ask": self.id})
+        self.status = "withdrawn"
+
+
+def inbox(body, buttons, form=None, title=None, pictures=None):
+    """An ask of a person, raised in the Inbox of every app that may manage the task's Bot: body is Markdown, as a
+    message is written (![alt](name) on a line of its own, or alone in a table's cell, shows the picture of that name);
+    buttons, what may be pressed: each a label, or {label, style?: primary|secondary|blue|teal|green|yellow|orange|
+    red|pink|purple|slate, picture?: a picture's name, drawn over its label}; form, fields filled as a button's pressed
+    ({name, type: text|number|bool|choice, label?, choices?, default?, required?}, as a task's form has them);
+    pictures: {name: a path or bytes}, or paths (each named by its file's name). Pressing a button answers it, with the
+    form's values. An Asked: wait() or poll() for the answer, revise() it, withdraw() it. It stays in the Inbox,
+    struck through, if the run ends with it unanswered. Refused: it isn't as an ask takes."""
+    if not run:
+        print(f"inbox: {title or body}", flush=True)
+        first = _buttons(buttons)[0]["label"] if buttons else ""
+        return Asked("stand-in", 1, {"button": 0, "label": first, "values": _stand_in(form) if form else {},
+                                     "by": None})
+    msg = {"op": "inbox_raise", "run": run, "token": os.environ.get("BAUDE_TASK_TOKEN", ""), "body": str(body),
+           "buttons": _buttons(buttons)}
+    if title is not None:
+        msg["title"] = str(title)
+    if form:
+        msg["form"] = form
+    if pictures:
+        msg["pictures"] = _pictures(pictures)
+    got = _w().request(msg)
+    return Asked(got["ask"], got.get("version") or 1)
 
 
 def agent(prompt, wait=True, cwd=None, model=None, title=None, mode=None, timeout_s=3600, account=None):

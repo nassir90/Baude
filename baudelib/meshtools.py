@@ -129,7 +129,31 @@ SCHEMAS = {
                      "answer": {"type": "object", "description": "The form's fields, by name: each a text, number, "
                                                                  "true or false, or one of a choice's choices"},
                      "text": {"type": "string", "description": "The answer to an ask with no form"}}, ["run"]),
+    "answer_ask": ("Answer an ask in a person's Inbox whose message says to answer with this tool "
+                   "(mcp__mesh__answer_ask): press one of its buttons, by its index, with its form's values. It takes "
+                   "effect at once: its task is told, and the ask leaves every Inbox. A wrong answer is refused with "
+                   "what's wrong: call it again.",
+                   {"ask": {"type": "string", "description": "The ask's id (its message says it)"},
+                    "button": {"type": "integer", "description": "The button's index (its message lists them)"},
+                    "values": {"type": "object", "description": "The form's fields, by name: each a text, number, "
+                                                                "true or false, or one of a choice's choices"}},
+                   ["ask", "button"]),
+    "revise_ask": ("Put a new version of an ask your task raised in a person's Inbox (its message says its id): what "
+                   "it says, its buttons, its form. A field left out stays as it was. The person sees it at once.",
+                   {"ask": {"type": "string", "description": "The ask's id"},
+                    "title": {"type": "string", "description": "What it's called in the Inbox's list"},
+                    "body": {"type": "string", "description": "What it says, in Markdown; ![alt](name) shows one of "
+                                                              "its pictures"},
+                    "buttons": {"type": "array", "description": "Its buttons, each {label, style?: primary|secondary|"
+                                                                "blue|teal|green|yellow|orange|red|pink|purple|slate, "
+                                                                "picture?: a picture's name}",
+                                "items": {"type": "object"}},
+                    "form": {"type": "array", "description": "Its form's fields, each {name, type: text|number|bool|"
+                                                             "choice, label?, choices?, default?, required?}",
+                             "items": {"type": "object"}}}, ["ask"]),
 }
+BOT_ANSWERS = ("answer_task", "answer_ask", "revise_ask")  # (a Bot's answers to its tasks and the Inbox: a Codex
+# Bot's only mesh tools)
 ASKED = ("set_task", "run_task")  # (run code on the host: asked about as Bash is, by the chat's permission mode)
 
 
@@ -545,6 +569,16 @@ class Mesh:
                **{k: a[k] for k in ("answer", "text") if k in a}}
         got = self.request(self.local, msg)
         return {k: got[k] for k in ("task", "run", "values", "text") if k in got}
+
+    def answer_ask(self, a):
+        self.request(self.local, {"op": "inbox_press", "ask": a["ask"], "button": a["button"],
+                                  "values": a.get("values") or {}, "as": self.me})
+        return {"ask": a["ask"], "answered": True}
+
+    def revise_ask(self, a):
+        got = self.request(self.local, {"op": "inbox_revise", "ask": a["ask"],
+                                        **{k: a[k] for k in ("title", "body", "buttons", "form") if k in a}})
+        return {"ask": got["ask"], "version": got["version"]}
 
     def chats(self, a):
         out = []

@@ -78,7 +78,7 @@ The models host can run (this one's if none's given), each a Model: pass one as 
 
 ### `baudetask.subscriptions(host=None)`
 
-The Claude and Codex subscriptions host's chats run on (this one's if none's given), each a Subscription: its CLI's own sign-in for each provider the host runs models of, then its accounts. Pass one as account= to subagents.start or agent; a model in none's models runs on no subscription (Ollama's, Apple's, an endpoint's).
+The Claude and Codex subscriptions host's chats run on (this one's if none's given), each a Subscription: its CLI's own sign-in for each provider whose program the host has, then its accounts. Pass one as account= to subagents.start or agent; a model in none's models runs on no subscription (Ollama's, Apple's, an endpoint's).
 
 ## `baudetask.emission`
 

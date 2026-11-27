@@ -93,7 +93,7 @@ class Subscription(Obj):
 
 def subscriptions(host=None):
     """The Claude and Codex subscriptions host's chats run on (this one's if none's given), each a Subscription: its
-    CLI's own sign-in for each provider the host runs models of, then its accounts. Pass one as account= to
+    CLI's own sign-in for each provider whose program the host has, then its accounts. Pass one as account= to
     subagents.start or agent; a model in none's models runs on no subscription (Ollama's, Apple's, an endpoint's)."""
     to = where(host)
     if to is None:
@@ -104,14 +104,17 @@ def subscriptions(host=None):
         info = c.info
     hid = info.get("id")
     got = call("accounts", {"what": "list"}, host)
-    failed(got, "accounts", host)
+    if got.get("error"):
+        raise Refused(f"accounts: {got['error']}", op="accounts", host=host)
     other = {m.get("value") for p in info.get("providers") or [] for m in p.get("models") or []}
     runs = {"claude": [], "codex": []}
     for m in _models(info, hid):
         if isinstance(m.value, str) and m.value not in other and not m.value.startswith("agent/"):
             runs["codex" if m.value.startswith("codex/") else "claude"].append(m)
     defaults, off = got.get("defaults") or {}, set(got.get("disabled") or ())
-    cli = [{"id": "", "provider": p, "name": generated.CLI_DEFAULT, "kind": "cli"} for p in runs if runs[p]]
+    has = {"claude": bool(got.get("claude_cli")) or bool(runs["claude"]),
+           "codex": "codex" not in (got.get("missing") or {})}
+    cli = [{"id": "", "provider": p, "name": generated.CLI_DEFAULT, "kind": "cli"} for p in runs if has[p]]
     return [Subscription(id=a.get("id"), provider=a.get("provider"), name=a.get("name"), kind=a.get("kind"),
                          default=defaults.get(a["provider"], "") == a.get("id"),
                          disabled=(a.get("id") or ("codex" if a["provider"] == "codex" else "")) in off,

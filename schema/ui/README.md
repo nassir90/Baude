@@ -240,3 +240,10 @@ An entry or a part may carry:
   state, its Dependencies row, or the same in a line: "Codex CLI isn't installed: npm install -g @openai/codex"),
   never the run's OS error ("No such file or directory"). The owner found Subscriptions showing that raw error while
   Dependencies already knew codex wasn't installed (2026-11-26). Source: `[{"issue": "BaudeInternal#234"}]`.
+- **A Bot picks the subscription of what it starts.** Every way a Bot (or Meta) starts a chat of its own (the mesh's
+  start_subagent, a task script's agent() and subagents.start) takes the subscription it runs on (account: a Claude or
+  Codex account of that host's, by its id or name, or the CLI's own sign-in) in place of the default, and the same
+  callers can list each host's subscriptions (the mesh's subscriptions, the SDK's subscriptions()) with whether each is
+  the default or disabled and the models it runs; a disabled one is refused as its chats are. The owner asked that the
+  Bots' spawn API can override the provider and look at the providers available (2026-11-27). Source: `[{"issue":
+  "BaudeInternal#300"}]`.

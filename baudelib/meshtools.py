@@ -184,7 +184,7 @@ class Mesh:
         the models of the host each runs: [{host, host_name, subscriptions: [{id, provider, name, kind, default,
         disabled, models}]}], a host that couldn't be asked with error instead."""
         places = [h for h in self.hosts() if h["reachable"]] if not a.get("host") else \
-            [{"id": None, "name": a["host"], "where": self.where(a["host"])}]
+            [{"id": (w := self.where(a["host"])).get("host"), "name": a["host"], "where": w}]
         out = [{"host": h["id"], "host_name": h["name"]} for h in places]
 
         def look(entry, h):
@@ -637,8 +637,8 @@ CODEX = "codex/"  # (a Codex model's value's start: models.model_program's)
 
 def subscriptions_of(info, got):
     """A host's subscriptions (its hello's info; got: its accounts list's answer), each with the models of the host's
-    it runs: its CLI's own sign-in (id "") for each provider the host runs models of, then its accounts. An error the
-    answer says, ValueError."""
+    it runs: its CLI's own sign-in (id "") for each provider whose program the host has, then its accounts. An error
+    the answer says, ValueError."""
     if got.get("error"):
         raise ValueError(got["error"])
     other = {m.get("value") for p in info.get("providers") or [] for m in p.get("models") or []}
@@ -648,8 +648,10 @@ def subscriptions_of(info, got):
         if isinstance(v, str) and v not in other and not v.startswith("agent/"):  # (a provider's, another member's)
             runs["codex" if v.startswith(CODEX) else "claude"].append(v)
     defaults, off = got.get("defaults") or {}, set(got.get("disabled") or ())
+    has = {"claude": bool(got.get("claude_cli")) or bool(runs["claude"]),
+           "codex": "codex" not in (got.get("missing") or {})}
     cli = [{"id": "", "provider": p, "name": wording.say("subscriptions.cli_default"), "kind": "cli"}
-           for p in PROVIDERS if runs[p]]
+           for p in PROVIDERS if has[p]]
     return [{**{k: a.get(k) for k in ("id", "provider", "name", "kind")},
              "default": defaults.get(a["provider"], "") == a["id"],
              "disabled": (a["id"] or ("codex" if a["provider"] == "codex" else "")) in off,

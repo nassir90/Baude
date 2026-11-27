@@ -1231,15 +1231,23 @@ class WindowRemote:
         self.tail.stop()
         self.update_banner()
         reason = self.resume_reason[1] if self.resume_reason and self.resume_reason[0] == self.session_id else None
-        if reason:  # (its claude gone meanwhile, and started again now: drop, on_exit)
-            self.note(wording.say("chat_notes.resumed_from", reason=reason))
-        elif self.resumed_note:
-            self.note(wording.say("chat_notes.resumed"))
+        left = self.take_background(self.session_id)  # (left mid-turn in a window, still at it)
+        if left is None and not self.agent_running():  # (said only where its agent's started again: one still
+            # running, at a turn or between them, is attached to, not resumed)
+            if reason:  # (its claude gone meanwhile: drop, on_exit)
+                self.note(wording.say("chat_notes.resumed_from", reason=reason))
+            elif self.resumed_note:
+                self.note(wording.say("chat_notes.resumed"))
         self.resumed_note, self.resume_reason = False, None
-        if (left := self.take_background(self.session_id)) is not None:  # (left mid-turn in a window, still at it)
+        if left is not None:
             self.attach_proc(left)
             return
         self.restart_proc(resume=True)
+
+    def agent_running(self):
+        """Is a network session's agent running on its host (listed working, waiting or idle, not stopped)?"""
+        listed = (self.remote.sessions.get(self.session_id) or {}) if self.remote is not None else {}
+        return listed.get("state") not in (None, "stopped")
 
     def h_result(self, msg):
         telemetryview.turn_ended(self, msg, self.model, self.local_effort if model_program(self.model) == "pi" else

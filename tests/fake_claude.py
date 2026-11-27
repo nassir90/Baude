@@ -476,6 +476,8 @@ def move_to_background(tool_use_id):
                  f"{t['output_file']}"}]}})
             t["timer"] = threading.Timer(float(os.environ.get("FAKE_MOVED_S") or 1.5), finish_task, (tid,))
             t["timer"].start()
+        if state.get("took"):  # (sent while it ran: taken in now the turn goes on)
+            say(f"Also doing what you sent: {state.pop('took')[-1]}", f"took{moved[0]}")
         say("The suite's running in the background; I'll pick it up when it ends.", f"moved{moved[0]}")
         state.pop("open_turn", None)
         result("moved")
@@ -495,6 +497,7 @@ def interrupted():
             finish_task(tid, "killed", "Stopped by the interrupt")
         if swept:
             system("agents_killed")
+    state.pop("took", None)
     if state.pop("open_turn", None) is not None:
         out({"type": "result", "subtype": "error_during_execution", "is_error": True, "session_id": SESSION,
              "total_cost_usd": 0.001, "num_turns": 1, "duration_ms": 300, "usage": {"input_tokens": 10,
@@ -1002,6 +1005,11 @@ def main():
         msg = json.loads(line)
         if msg.get("type") == "control_request":
             control(msg)
+        elif msg.get("type") == "user" and state.get("open_turn") is not None:  # (a turn still open: the message
+            keep_queued(msg)  # waits for its next step, as claude keeps one it'll take into the turn)
+            content = msg["message"]["content"]
+            state.setdefault("took", []).append(content if isinstance(content, str) else " ".join(
+                b.get("text", "") for b in content if isinstance(b, dict)))
         elif msg.get("type") == "user":
             keep("user", msg["message"], **({"uuid": msg["uuid"]} if msg.get("uuid") else {}))  # (as claude: its uuid)
             turns += 1

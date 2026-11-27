@@ -577,6 +577,11 @@ def desktop_notify(key, title, body="", clicked=None, picture=None, opens=None):
         ["default", wording.say("common.open")], hints, -1)), posted)
 
 
+def notified(key):
+    """Whether key's notification is up (posted by this process, not clicked or taken back since)."""
+    return key in _notified
+
+
 def withdraw_notification(key):
     """key's notification taken back (what it was about seen now), if one's up."""
     if _notified.pop(key, None) is None:

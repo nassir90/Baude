@@ -9,7 +9,8 @@ import time
 import urllib.parse
 from baudelib.transcripts import find_session, history_items, ref_epoch
 from baudelib import providers as providerslib  # noqa: E402  (where the models besides Claude's run: their providers)
-from baudelib.client import chat_name  # noqa: E402
+from baudelib.client import chat_name, seen_past, unseen  # noqa: E402
+from baudelib import wire  # noqa: E402  (what a host takes: seen)
 from baudelib import wording  # noqa: E402  (the words Baude shows: schema/copy, Record's and the Android app's too)
 from lookup import REF_KINDS, Ref
 from lookupkube import pg_servers_cached
@@ -47,6 +48,38 @@ from refpopovers import (  # noqa: E402
     LookupPopover, RefPopover, chat_checkout, in_chat, ref_busy, ref_column_table, ref_kind_label, ref_run_names,
     ref_status_text, ref_status_tip,
 )
+
+
+TURNS = {}  # (a notification of a host's chat's turn's end, by its key, while it's up: {remote, sid, uuid (its
+# result's; None: not known), size (its transcript's as it ended: None till its host says), posted (monotonic)})
+
+
+def turn_size(note):
+    """The size a notification's turn's end was at (its transcript's then), once its host has said it: by its turn's
+    uuid, as turn_ended or a listing says it, or, its uuid not known, the first turn's end told after it was posted."""
+    if note["size"] is not None:
+        return note["size"]
+    r, sid = note["remote"], note["sid"]
+    told, listed = r.ended.get(sid), (r.sessions.get(sid) or {}).get("ended")
+    for end in (told, listed):
+        if isinstance(end, dict) and note["uuid"] is not None and end.get("uuid") == note["uuid"]:
+            note["size"] = end["size"]
+    if note["size"] is None and note["uuid"] is None and told is not None and told["at"] >= note["posted"]:
+        note["size"] = told["size"]
+    return note["size"]
+
+
+def withdraw_seen():
+    """(the network changed: a host listed its sessions) Each notification of a turn's end taken back once its host
+    says that end, or one after it, has been seen: on a head anywhere on the mesh, this one too (wire's Seen)."""
+    for key, note in list(TURNS.items()):
+        if not widgets.notified(key):  # (clicked, or taken back already)
+            TURNS.pop(key, None)
+            continue
+        size = turn_size(note)
+        if size is not None and seen_past(note["remote"].sessions.get(note["sid"]), size):
+            TURNS.pop(key, None)
+            widgets.withdraw_notification(key)
 
 
 class WindowSignal:
@@ -190,12 +223,14 @@ class WindowSignal:
         return any(w.is_active() and w.session_id == session_id and w.tabs.current() is w.tabs.get("chat")
                    for w in (app.windows() if app is not None else [self]))
 
-    def tell_desktop(self, session_id, body, title=None, info=None):
+    def tell_desktop(self, session_id, body, title=None, info=None, turn=None):
         """A turn's end, or a question it asks, in a chat you aren't looking at (looking_at: in another window or
         app, behind the Feedback tab, or left mid-turn behind another chat), as a desktop notification
         (widgets.desktop_notify): a click on it brings this window up with that chat open. info: the chat's, if it's
         known (a network chat's, which find_session doesn't know). The sidebar's dot says it too. Other programs'
-        chats (Claude Desktop, a terminal) are theirs to say: they notify on their own."""
+        chats (Claude Desktop, a terminal) are theirs to say: they notify on their own. turn: a host's chat's turn's
+        end it's of ({uuid, size?}, as its host knows it), taken back as that's seen on any head of the mesh
+        (withdraw_seen), and not posted if it's been seen already."""
         if self.looking_at(session_id):
             return
         here = session_id == self.session_id
@@ -220,17 +255,33 @@ class WindowSignal:
                 else:
                     win.switch_to(lambda: win.resume_session(info))
         key, title = self.chat_key(session_id), title or wording.say("common.untitled")
+        r = (info or {}).get("remote") or (getattr(self, "remote", None) if here else None)
+        TURNS.pop(key, None)  # (one in its place: a question it asks, taken back as it's answered)
+        if turn is not None and r is not None:
+            note = {"remote": r, "sid": session_id, "posted": time.monotonic(),
+                    "uuid": turn.get("uuid") if wire.is_id(turn.get("uuid") or "") else None,
+                    "size": turn.get("size") if isinstance(turn.get("size"), int) else None}
+            if (size := turn_size(note)) is not None and seen_past(r.sessions.get(session_id), size):
+                return  # (seen already, on another head)
+            if withdraw_seen not in network().listeners:  # (once, for the app)
+                network().listen(withdraw_seen)
         opens = None  # (a local chat's: what starts Baude on it, for a click once this process is gone (macOS))
         if session_id and not session_id.startswith("new-") and (info or {}).get("remote") is None:
             cwd = (info or {}).get("cwd") or (self.cwd if here else None)
             opens = [*(["--cwd", cwd] if cwd else []), "--resume", session_id]
         if not (info or {}).get("bot") or not widgets.notification_pictures():  # (osascript's take none)
             widgets.desktop_notify(key, title, body, clicked, opens=opens)
+            if turn is not None and r is not None:
+                TURNS[key] = note
             return
 
         def pictured(tex):
             if (win := me()) is None or win.looking_at(session_id):  # (seen while its picture came)
                 return
+            if turn is not None and r is not None:
+                if (size := turn_size(note)) is not None and seen_past(r.sessions.get(session_id), size):
+                    return  # (seen on another head while its picture came)
+                TURNS[key] = note
             png = tex.save_to_png_bytes().get_data() if tex is not None else None
             widgets.desktop_notify(key, title, body, clicked, picture=png and widgets.notification_picture(
                 png, widgets.notify_logo()), opens=opens)
@@ -238,10 +289,32 @@ class WindowSignal:
 
     def seen_chat(self):
         """The open chat seen (this window's the one you're in, on its chat's tab, or the chat's just opened): its
-        notification gone."""
+        notification gone, and a host's chat's host told (tell_seen)."""
         telemetryview.look(self)
         if self.is_active() and self.tabs.current() is self.tabs.get("chat"):
             widgets.withdraw_notification(self.chat_key(self.session_id))
+            self.tell_seen()
+
+    def tell_seen(self):
+        """The open chat in front of you (looking_at), a host's: its host told its last turn's end is seen here, once
+        what's here of its transcript reaches that end (once each end: seen_told). Its host tells every head, each of
+        which takes back its notification of it and its dot (wire's Seen)."""
+        r, sid = getattr(self, "remote", None), self.session_id
+        if r is None or not sid or r.state != "alive" or not wire.takes(r.info, "seen") or not self.looking_at(sid):
+            return
+        listed = r.sessions.get(sid)
+        if not unseen(listed):
+            return
+        end, upto = listed["ended"], r.mirrored(sid)
+        told = (r.key, sid, end.get("uuid"))
+        if upto < end.get("size", 0) or getattr(self, "seen_told", None) == told:
+            return
+        self.seen_told = told
+
+        def answered(reply):
+            if reply.get("op") != "seen_set" and getattr(self, "seen_told", None) == told:
+                self.seen_told = None  # (tried again as it's next looked at)
+        r.request({"op": "seen", "session": sid, "upto": upto}, answered)
 
     def links_on_focus(self):
         """This window became the active one: its own links are drawn (another window's chat may show none)."""

@@ -434,6 +434,7 @@ class Session:
                           "at": h.get("at")} for h in self.meta.get("held") or []],
                 "senders": self.meta.get("senders") or 0,
                 "always_allow": sorted(self.always_allow),
+                "ended": self.meta.get("ended"), "seen": self.meta.get("seen"),
                 "asks": [{"request_id": rid, "tool": (m.get("request") or {}).get("tool_name"),
                           "input": _shown((m.get("request") or {}).get("input"))} for rid, m in self.asks.items()]}
 

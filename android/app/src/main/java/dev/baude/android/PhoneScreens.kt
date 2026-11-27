@@ -91,7 +91,7 @@ fun PhoneScreen(back: () -> Unit, open: (String) -> Unit) {
                             Spacer(Modifier.width(Gap.avatarGap))
                             Text(name, style = Type.bold, color = c.fg, maxLines = 1, overflow = TextOverflow.Ellipsis,
                                 modifier = Modifier.weight(1f))
-                            StatusDot(s.state.orEmpty(), !s.asks.isNullOrEmpty())
+                            StatusDot(Mesh.dot(s), !s.asks.isNullOrEmpty())
                             IconButton(Adwaita.UserTrash, Wording.Trash.moveDots) { deleting = s }
                         }
                     }

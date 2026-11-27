@@ -377,6 +377,8 @@ class ServerSessions:
             if is_codex and s.busy:
                 s.codex_queue.append((msg, conn))
                 return
+            if wire.clean_sender(sender) is None:  # (its user wrote in it: what it last said has been seen)
+                self.saw(s)
             s.meta.pop("cut", None)  # (carried on, or something else said: not cut any more)
             if s.meta.pop("draft", None) and not s.meta.get("prompt"):  # (written in: a session of its own from now on,
                 s.meta["prompt"] = _said(msg)                           # listed and kept, titled by what was said)
@@ -644,7 +646,12 @@ class ServerSessions:
                 self.ask_context(s)
                 self.changed()
                 self.telemetry.turn(s.id, msg, s.meta.get("model"), s.meta.get("effort"), s.turn_began)
-                ended = {"op": "turn_ended", "session": s.id, "result": msg.get("result"),
+                end = self.turn_end(s, msg.get("uuid"))
+                if end is not None:
+                    msg = {**msg, "uuid": end["uuid"]}  # (those attached live know its end by it too)
+                    self.save(s)
+                ended = {"op": "turn_ended", "session": s.id, "uuid": (end or {}).get("uuid"),
+                         "size": (end or {}).get("size"), "result": msg.get("result"),
                          "is_error": bool(msg.get("is_error")), "cost": msg.get("total_cost_usd"),
                          "turns": msg.get("num_turns"), "duration_ms": msg.get("duration_ms")}
                 for conn in self.conns:  # (as it happens: a turn too short for a sessions listing to see isn't missed;
@@ -971,6 +978,34 @@ class ServerSessions:
         for _conn, theirs, _undo in routes.values():
             if callable(theirs):
                 theirs(False)
+
+    # ---- what's been seen of a session's turns (wire's Seen): its notifications and its dot, on every head
+    def turn_end(self, s, said):
+        """(lock held) A turn's end kept (ended), as every head's notification of it is known: the uuid of the message
+        it ended with (said: its result's, as its agent said it; else one of the host's own) and its transcript's
+        size now. An older end seen past it (a revert made it shorter) seen no more. None for a chat another chat's
+        mesh tools or a task's run started (spawned_by, task_run): what started it tells of it; and for one with no
+        transcript to read it in."""
+        if s.meta.get("spawned_by") or s.meta.get("task_run"):
+            return None
+        try:
+            size = os.path.getsize(s.transcript() or "")
+        except OSError:
+            return None
+        s.meta["ended"] = {"uuid": said if wire.is_id(said or "") else str(uuid.uuid4()), "size": size}
+        if (s.meta.get("seen") or {}).get("size", 0) > size:
+            s.meta.pop("seen", None)
+        return s.meta["ended"]
+
+    def saw(self, s, upto=None):
+        """(lock held) Its last turn's end seen, if it isn't yet: a head shows upto of its transcript, which reaches
+        it, or (upto None) its user wrote in it. Whether that's news (kept: every head's told, changed)."""
+        ended = s.meta.get("ended")
+        if not ended or s.meta.get("seen") == ended or upto is not None and upto < ended["size"]:
+            return False
+        s.meta["seen"] = dict(ended)
+        self.save(s)
+        return True
 
     def rename(self, s, title, done):
         """(lock held) A session's title, as Claude Code keeps it: its claude's to write in its transcript if it's

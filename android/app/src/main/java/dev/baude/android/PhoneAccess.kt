@@ -36,7 +36,7 @@ object PhoneAccess {
         Op.MEMORY -> if (msg.has("text") && !msg.isNull("text") || msg.has("seen") && !msg.isNull("seen")) "manage_write"
             else "manage_read"
         Op.DETACH, Op.TRANSCRIPT, Op.CHAT_SIZE, Op.SUBAGENTS, Op.SENDERS, Op.BOT_PICTURE, Op.READ_FILE, Op.LIST_DIR,
-        Op.CATALOGUE -> "manage_read"
+        Op.CATALOGUE, Op.SEEN -> "manage_read"
         else -> "manage_write" // (input, stop, rename, archive, unarchive, delete, always_allow, bot)
     }
 

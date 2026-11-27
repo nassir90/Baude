@@ -964,6 +964,11 @@ class ServerRunning:
                                                                                msg.get("limit")))
             if op == "subagents":
                 return reply("subagents", session=s.id, **self.read_subagents(s, msg.get("have"), msg.get("limit")))
+            if op == "seen":  # (a head shows it on screen, up to upto: its last turn's end seen once that reaches it)
+                upto = msg.get("upto")
+                if self.saw(s, upto if isinstance(upto, int) and not isinstance(upto, bool) else 0):
+                    self.changed()
+                return reply("seen_set", session=s.id, seen=s.meta.get("seen"))
             if op == "rename":
                 return self.rename(s, msg.get("title"), lambda: reply("renamed", session=s.listing()))
             if op == "bot":  # (made a Bot, renamed or its picture changed; or, bot None, a chat again)

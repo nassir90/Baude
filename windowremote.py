@@ -348,6 +348,8 @@ class WindowRemote:
             self.remote_syncing.pop(key, None)
             for fn in job["then"]:
                 fn()
+            if self.remote is r and self.session_id == sid:
+                self.tell_seen()  # (fetched up to its turn's end, in front of you: seen)
         threading.Thread(target=work, daemon=True).start()
 
     def on_network(self):
@@ -407,6 +409,7 @@ class WindowRemote:
         self.update_session_state()
         if bool(self.cut_state()) != (getattr(self, "cut_row", None) is not None):
             self.show_cut(self.cut_state())
+        self.tell_seen()  # (its turn's end listed, in front of you: seen)
 
     def remote_view(self):
         """A network session with nothing of its server's attached (gone, or not there): watched from its mirror again,
@@ -1109,7 +1112,7 @@ class WindowRemote:
             if (why := self.login_ask(msg)) is not None and not getattr(self, "login_asked", False):
                 self.login_prompt(why)
         self.end_turn()
-        self.tell_desktop(self.session_id, turn_said(msg))
+        self.tell_desktop(self.session_id, turn_said(msg), turn={"uuid": msg.get("uuid")})
         self.update_status(wording.say("status_bar.last_turn", turns=msg.get("num_turns", 0),
                                        seconds=f"{msg.get('duration_ms', 0) / 1000:.1f}", used=fmt_tokens(tok),
                                        written=fmt_tokens(u.get("output_tokens", 0))))

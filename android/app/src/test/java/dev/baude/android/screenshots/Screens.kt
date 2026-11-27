@@ -94,6 +94,21 @@ abstract class Screens(private val theme: String) {
 
     @Test fun home() = render("01-home") { HomeScreen() }
 
+    /** A Bot's turn ended and a chat's too, not seen on any head of the mesh yet (their hosts list ended, not seen):
+     * each row's dot done (blue); then seen on another head: no dot. */
+    @Test fun homeTurnUnseen() = render("01-home-turn-unseen") { turnsEnded(seen = false); HomeScreen() }
+
+    @Test fun homeTurnSeen() = render("01-home-turn-seen") { turnsEnded(seen = true); HomeScreen() }
+
+    private fun turnsEnded(seen: Boolean) {
+        workshopBot()
+        val end = Msg.TurnEnd(uuid = "0e0e0e0e-0000-4000-8000-000000000001", size = 4096)
+        Mesh.sessions["h1"] = Mesh.sessions.getValue("h1").map { s ->
+            if (s.id != "a" && s.id != "c") s
+            else Msg.Session.from(s.json().put("ended", end.json()).apply { if (seen) put("seen", end.json()) })
+        }
+    }
+
     @Test fun homeUpdate() {
         Update.state.value = "ready"
         render("02-home-update") { HomeScreen() }

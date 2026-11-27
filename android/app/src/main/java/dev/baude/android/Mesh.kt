@@ -78,6 +78,7 @@ class Ask(val rid: String, val tool: String, val input: JSONObject, val toolUseI
 class Chat(hostId: String, sid: String) {
     var sid by mutableStateOf(sid)
     var hostId by mutableStateOf(hostId)
+    var inView = true // (its chat page on screen: not another page swiped to; Mesh.tellSeen)
     val lines = mutableStateListOf<Line>()
     val files = mutableStateListOf<Picked>() // (picked to send: kept as the phone's turned)
     val draft = mutableStateOf<String?>(null) // (text for the box: shared from another app, or kept as the app went)
@@ -158,6 +159,9 @@ object Mesh {
     private val listedBy = HashMap<String, MutableSet<String>>() // (a host of yours: the members it's listed)
     private val moved = HashMap<String, String>() // (a member's connection id: the host of yours its machine is now)
     private val askNotes = HashMap<String, MutableSet<String>>() // (a chat, "connection/session": the asks notified)
+    private val toldSeen = HashMap<String, String>() // (a chat, "connection/session": the turn's end its host was told
+    // was seen here, by its uuid)
+    private val listedAt = HashMap<String, Long>() // (a connection: when it last listed its sessions, elapsedRealtime)
     var open: Chat? = null
     var shown = false // (the app in front: no notification for the chat open)
     private var visible = false // (the app on screen: the chat open answers what it asks)
@@ -551,10 +555,13 @@ object Mesh {
                     }
                     if (catchUp.remove(c.id) && before != null) missed(c, before, now)
                     asked(c, before, now)
+                    withdrawSeen(c.id, now)
+                    listedAt[c.id] = android.os.SystemClock.elapsedRealtime()
                     open?.let {
                         if (it.hostId != c.id) return@let
                         senders(it) // (who its messages from others are from, if its host's store is newer)
                         read(it) // (its first read, or what it missed)
+                        tellSeen(it)
                     }
                 }
                 Op.TURN_ENDED -> ended(c, msg)
@@ -760,7 +767,7 @@ object Mesh {
         attach(chat)
         senders(chat)
         read(chat)
-        NotificationManagerCompat.from(app).cancel(sid.hashCode())
+        NotificationManagerCompat.from(app).cancel(turnTag(hostId, sid), TURN_NOTE)
         return chat
     }
 
@@ -885,6 +892,7 @@ object Mesh {
                     chat.loaded.value = true
                     if (open === chat && conns[chat.hostId]?.state == "up" && chat.hostId in live && !isWorking(chat))
                         Queue.resend(chat) // (back, and caught up: what waited for it)
+                    tellSeen(chat)
                 }
             }
         }
@@ -1289,12 +1297,13 @@ object Mesh {
         }
         val contact = contact(c.id, sid) ?: return
         val result = turn.result.orEmpty().trim()
+        val end = turn.size?.let { Msg.TurnEnd(uuid = turn.uuid, size = it) }
         when {
-            turn.isError == true -> notify(contact, Wording.Meta.endedError(error = result.ifEmpty { Wording.Meta.errorUnknown }))
-            result.isNotEmpty() -> notify(contact, result)
+            turn.isError == true -> notify(contact, Wording.Meta.endedError(error = result.ifEmpty { Wording.Meta.errorUnknown }), end)
+            result.isNotEmpty() -> notify(contact, result, end)
             else -> main.postDelayed({ // (no result said: its transcript's end, once its new size is listed)
                 val size = session(c.id, sid)?.size?.toLong() ?: 0
-                last(c, sid, size)
+                last(c, sid, size, end)
             }, 1_200)
         }
     }
@@ -1308,38 +1317,114 @@ object Mesh {
             if ((s.size?.toLong() ?: 0) <= (old.size?.toLong() ?: 0)) continue
             val chat = open
             if (shown && chat != null && chat.hostId == c.id && chat.sid == s.id.orEmpty()) continue
-            last(c, s.id.orEmpty(), s.size?.toLong() ?: 0)
+            if (s.ended != null && !unseen(s)) continue // (its turn's end seen meanwhile, elsewhere on the mesh)
+            last(c, s.id.orEmpty(), s.size?.toLong() ?: 0, s.ended)
         }
     }
 
-    private fun last(c: Connection, sid: String, size: Long) {
+    private fun last(c: Connection, sid: String, size: Long, end: Msg.TurnEnd?) {
         val contact = contact(c.id, sid) ?: return
         c.request(Msg.Transcript(session = sid, offset = (size - 64_000).coerceAtLeast(0)).json()) { r ->
             val data = Msg.TranscriptReply.from(r).data.orEmpty()
             val text = if (data.isEmpty()) "" else String(Base64.getDecoder().decode(data), Charsets.UTF_8)
             val last = parse(text, cutFirst = true).lastOrNull { it.kind == "bot" || it.kind == "error" }?.text ?: return@request
-            main.post { notify(contact, last) }
+            main.post { notify(contact, last, end) }
         }
     }
 
     private val notified = HashMap<String, Pair<String, Long>>() // (a Bot: what it was last notified for, and when)
 
-    private fun notify(contact: Contact, text: String) {
+    /** end: the turn's end it's of (its uuid, and its transcript's size then, what's seen of it is measured against). */
+    private fun notify(contact: Contact, text: String, end: Msg.TurnEnd?) {
         val now = android.os.SystemClock.elapsedRealtime()
         val before = notified[contact.id]
         if (before != null && before.first == text && now - before.second < 120_000) return // (the same turn, told
         notified[contact.id] = text to now                                                  // twice: once)
-        post(contact, text, null)
+        post(contact, text, null, end = end)
+    }
+
+    // ---- what's been seen (wire's Seen): a turn's end seen on any head of the mesh takes back its notification
+    // everywhere, and its dot
+
+    /** Has its last turn's end not been seen yet, anywhere on the mesh (its host's ended and seen)? */
+    fun unseen(s: Msg.Session?): Boolean {
+        if (s == null) return false
+        val end = s.ended?.size?.toLong() ?: return false
+        return (s.seen?.size?.toLong() ?: -1) < end
+    }
+
+    /** Has a turn's end at end (its transcript's size then) been seen, or one after it? */
+    private fun seenPast(s: Msg.Session?, end: Long): Boolean = (s?.seen?.size?.toLong() ?: -1) >= end
+
+    /** A chat's dot, as its host lists it: working or waiting as it says; done (blue) while its last turn's end hasn't
+     * been seen anywhere; else none. */
+    fun dot(s: Msg.Session): String = when {
+        s.state == "working" || s.state == "waiting" -> s.state.orEmpty()
+        unseen(s) -> "done"
+        else -> s.state.orEmpty()
+    }
+
+    /** The tag of a chat's turn's notification (with TURN_NOTE): what it's taken back by, here or by its host's word. */
+    fun turnTag(hostId: String, sid: String) = "chat:$hostId/$sid"
+
+    /** (a host listed its sessions) Each notification of a turn's end it's posted for a chat of it (up now, whether
+     * this process posted it or one before it, Android having ended the app since) taken back once that turn's end,
+     * or one after it, has been seen: on a head anywhere on the mesh, this one too. */
+    private fun withdrawSeen(hostId: String, now: List<Msg.Session>) {
+        val nm = app.getSystemService(NotificationManager::class.java) ?: return
+        val prefix = turnTag(hostId, "")
+        for (n in try { nm.activeNotifications } catch (_: Exception) { return }) {
+            val tag = n.tag ?: continue
+            if (n.id != TURN_NOTE || !tag.startsWith(prefix)) continue
+            val end = n.notification.extras.getLong(TURN_END, -1)
+            val s = now.firstOrNull { it.id == tag.removePrefix(prefix) }
+            if (end >= 0 && seenPast(s, end)) nm.cancel(tag, TURN_NOTE)
+        }
+    }
+
+    /** The hosts (connection ids) whose chats have a notification of a turn's end up, as SeenJob looks. */
+    fun turnNotes(): Set<String> {
+        val nm = app.getSystemService(NotificationManager::class.java) ?: return emptySet()
+        return (try { nm.activeNotifications } catch (_: Exception) { return emptySet() })
+            .filter { it.id == TURN_NOTE && it.tag?.startsWith("chat:") == true }
+            .map { it.tag.removePrefix("chat:").substringBeforeLast('/') }.toSet()
+    }
+
+    /** When a host (a connection's id) last listed its sessions (elapsedRealtime; 0: not since the app started). */
+    fun listedAt(hostId: String): Long = listedAt[hostId] ?: 0
+
+    /** Each link that's down made again (SeenJob, Android's network back): what's been seen is heard as each lists. */
+    fun wake() {
+        conns.values.forEach { it.resume(fresh = false) }
+    }
+
+    /** The open chat on screen (the app in front, its chat page shown): its host told its last turn's end is seen
+     * here, once what's read of it reaches that end (once a turn: toldSeen). */
+    fun tellSeen(chat: Chat? = open) {
+        chat ?: return
+        if (!shown || open !== chat || !chat.inView) return
+        val s = session(chat.hostId, chat.sid)
+        val end = s?.ended ?: return
+        if (!unseen(s) || chat.offset < (end.size?.toLong() ?: Long.MAX_VALUE)) return
+        val key = "${chat.hostId}/${chat.sid}"
+        if (toldSeen[key] == end.uuid) return
+        val c = conns[chat.hostId]?.takeIf { it.state == "up" } ?: return
+        toldSeen[key] = end.uuid.orEmpty()
+        c.request(Msg.Seen(session = chat.sid, upto = chat.offset).json()) { r ->
+            if (r.optString("op") != Op.SEEN_SET) main.post { if (toldSeen[key] == end.uuid) toldSeen.remove(key) }
+        }
     }
 
     /** A notification for a Bot that opens its chat: what it said (one a Bot, each in place of the last), or one of
      * its asks (tag: its own, taken back once it's answered). On the lock screen, only which Bot wrote or is asking:
      * what it said shows once the phone's unlocked. */
-    private fun post(contact: Contact, text: String, tag: String?, asked: Boolean = false) {
+    private fun post(contact: Contact, text: String, tag: String?, asked: Boolean = false, end: Msg.TurnEnd? = null) {
         Settings.load(app)
         if (!Settings.notify.value) return // (Settings → Notifications off)
+        if (end != null && seenPast(session(contact.hostId, contact.id), end.size?.toLong() ?: 0)) return // (seen
+        // already, elsewhere)
         if (!asked && contact.session.bot?.picture != null && contact.pictureKey !in pictures) // (its picture first)
-            return picture(contact) { post(contact, text, tag, asked = true) }
+            return picture(contact) { post(contact, text, tag, asked = true, end = end) }
         if (Build.VERSION.SDK_INT >= 33 &&
             app.checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED
         ) return
@@ -1355,6 +1440,10 @@ object Mesh {
             .setLargeIcon(pictures[contact.pictureKey]?.let { notificationPicture(app, it.asAndroidBitmap()) })
             .setContentIntent(pending)
             .setAutoCancel(true)
+            .addExtras(android.os.Bundle().apply { // (the turn's end it's of: what's seen is measured against, withdrawSeen)
+                end?.size?.let { putLong(TURN_END, it.toLong()) }
+                end?.uuid?.let { putString(TURN_UUID, it) }
+            })
             .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
             .setPublicVersion(NotificationCompat.Builder(app, MESSAGES)
                 .setSmallIcon(R.drawable.ic_baude)
@@ -1364,13 +1453,19 @@ object Mesh {
             .build()
         try {
             if (tag != null) NotificationManagerCompat.from(app).notify(tag, ASK_NOTE, n)
-            else NotificationManagerCompat.from(app).notify(contact.id.hashCode(), n)
+            else {
+                NotificationManagerCompat.from(app).notify(turnTag(contact.hostId, contact.id), TURN_NOTE, n)
+                SeenJob.schedule(app) // (taken back by what its host says, the app ended by Android or not)
+            }
         } catch (_: SecurityException) {
         }
     }
 
     const val MESSAGES = "messages"
     private const val ASK_NOTE = 2 // (an ask's notification: its tag says which)
+    const val TURN_NOTE = 3 // (a Bot's turn's notification: its tag says whose, turnTag)
+    private const val TURN_END = "dev.baude.android.TURN_END" // (its extras': the turn's end, TurnEnd's size and uuid)
+    private const val TURN_UUID = "dev.baude.android.TURN_UUID"
     const val LINKED = "linked"
     private const val TAIL = 400_000L // (a chat's transcript read from its last this much, the first time)
     val IMAGE_TYPES = setOf("image/png", "image/jpeg", "image/gif", "image/webp")

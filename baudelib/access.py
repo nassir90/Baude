@@ -130,7 +130,7 @@ OPS = {  # (the rule each op is checked for, before it's taken (a function: msg'
     "list_dir": "manage_read",  # (any folder's entries: as much as a chat's, which could list them)
     # (a chat's, or a chat's folder's: checked as it's found)
     **dict.fromkeys(("detach", "transcript", "chat_size", "subagents", "senders", "bot_picture", "task", "task_run",
-                     "task_output", "read_file", "git", "signal_names", "catalogue"), "manage_read"),
+                     "task_output", "read_file", "git", "signal_names", "catalogue", "seen"), "manage_read"),
     "attach": _attach,
     "memory": _memory,
     "tasks": _tasks,

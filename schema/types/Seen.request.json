@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "A session seen: a head shows it on screen (its window the one in front, its chat shown; the phone's app in front, on its chat), up to upto. Its last turn's end is seen once upto reaches it, and every head is told so in its listing (seen): each takes back its notification of it, and its dot.",
+  "properties": {
+    "op": {
+      "const": "seen",
+      "description": "What it is."
+    },
+    "req": {
+      "type": ["integer", "null"],
+      "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "session": {
+      "type": "string",
+      "description": "The session's id."
+    },
+    "upto": {
+      "type": "integer",
+      "description": "How much of its transcript the head shows (its size, as the head has read it)."
+    }
+  },
+  "required": ["op", "session", "upto"],
+  "additionalProperties": false
+}

@@ -26,9 +26,11 @@ import pickers  # noqa: E402
 from baudelib import wording  # noqa: E402  (its words, Baude's: schema/copy)
 import livefeed  # noqa: E402  (a chat followed as it's written, as Baude's: beside this file)
 import metalook  # noqa: E402
+from baudelib import wire  # noqa: E402  (what a host takes: seen)
+from baudelib.client import unseen  # noqa: E402
 from recordstore import (  # noqa: E402
-    HOME, LINK_RE, MARKUP_MODES, base_name, citation_link, page_target, parse_records, passage_in, plain_words,
-    short_page, without_to_learn,
+    HOME, LINK_RE, MARKUP_MODES, base_name, citation_link, network, page_target, parse_records, passage_in,
+    plain_words, short_page, without_to_learn,
 )
 from recordui import ReaderNames, UNEXPLAINED, ZoomPlace, bot_started, search_spaces  # noqa: E402
 
@@ -731,6 +733,31 @@ class Reader(Gtk.Box):
             self._add(it)
         if grew or len(self.items) != n or keep < n:
             self.mark_nouns_soon()
+        self.tell_seen()
+
+    def tell_seen(self):
+        """The chat read in front of you (its window the one you're in, its tab shown), a host's: its host told its
+        last turn's end is seen here, once what's read of it reaches that end (once each end), as Baude's chat tells
+        it. Every head takes back its notification of it, and its dot (wire's Seen)."""
+        win = self.win
+        if not self.path or not win.is_active() or win.tabs.current() is not self:
+            return
+        sid = os.path.basename(self.path).removesuffix(".jsonl")
+        if not wire.is_id(sid):
+            return
+        for r in network().remotes():
+            listed = r.sessions.get(sid)
+            if listed is None or r.state != "alive" or not wire.takes(r.info, "seen") or \
+                    os.path.realpath(r.mirror(sid)) != self.path:
+                continue
+            end = listed.get("ended") or {}
+            told = (r.key, sid, end.get("uuid"))
+            if not unseen(listed) or self.tail.offset < end.get("size", 0) or getattr(self, "seen_told", None) == told:
+                return
+            self.seen_told = told
+            r.request({"op": "seen", "session": sid, "upto": self.tail.offset},
+                      lambda reply: reply.get("op") == "seen_set" or setattr(self, "seen_told", None))
+            return
 
     def _add(self, it):
         row = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)

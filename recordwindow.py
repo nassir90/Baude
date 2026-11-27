@@ -874,6 +874,8 @@ class Window(RecordHosts, Adw.ApplicationWindow, feedback.FeedbackHost, viewers.
             win.list_notes(win.store.host)
         if not win.is_active():
             win.store.flush()  # (gone to another window: what's typed is on the disk)
+        elif isinstance(reader := win.tabs.current(), Reader):
+            reader.tell_seen()  # (come back to, a host's chat read in it: seen)
 
     def github_folders(self):
         """What GitHub's lists are read for (lookupgit.GitHub.look), as Baude's: the repository the chat read's folder
@@ -1278,6 +1280,7 @@ class Window(RecordHosts, Adw.ApplicationWindow, feedback.FeedbackHost, viewers.
         self.zoom_tab(child)  # (it may have been left at another size: at this one in its first frame)
         if isinstance(child, Reader):
             child.activate()
+            child.tell_seen()  # (a host's chat, in front of you: seen)
             if child.chat:
                 self.store.reading = child.chat
                 self.reading_changed()

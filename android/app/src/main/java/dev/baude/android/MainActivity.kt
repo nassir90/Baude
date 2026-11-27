@@ -169,6 +169,7 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         Mesh.shown = true
+        Mesh.tellSeen() // (the chat open, in front again: seen, if what's read of it reaches its turn's end)
         Telemetry.resumed()
     }
 

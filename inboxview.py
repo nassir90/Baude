@@ -2,8 +2,8 @@
 (InboxRow), the Inbox in a tab of the main area (InboxPage: every host's asks of a person, each a card cut a few lines
 down, then the chats waiting on a permission and those at a turn), and an ask in a tab of its own (AskPage). An ask
 (AskView) is drawn as a message is: who it's from and ⋯ (History), its Markdown with its pictures (AskMarkdown), its
-form as setting rows, the task's buttons wrapping as whole buttons (Adw.WrapBox) and Route to…, a model's answer to
-confirm, and, opened, a box that writes to the asking task's Bot. What's shown is what each host says
+form as setting rows, the task's buttons wrapping as whole buttons (Adw.WrapBox; its picture buttons large, a few to a
+row: PictureGrid, AskView.picture_button) and Route to…, a model's answer to confirm, and, opened, a box that writes to the asking task's Bot. What's shown is what each host says
 (baudelib.client.Remote.inbox, as inbox_changed tells it); what's done is asked of the ask's host (baudelib/inbox.py).
 """
 import base64
@@ -30,7 +30,9 @@ from widgets import Spinner, discard, ensure_icons, toast  # noqa: E402
 
 CUT = 160  # (px of an ask's body shown in the Inbox's list before Show more)
 FADE = 48  # (px the cut fades over)
-PICTURE_BUTTON = 180  # (a picture button's picture, at most, each way)
+PICTURE_BUTTON = 240  # (a picture button, at least, wide: as many to a row as fit, PICTURE_ROW at most)
+PICTURE_ROW = 3
+PICTURE_TALL = 1.25  # (a picture button's picture, at most, this many times as tall as it's wide)
 COLOURS = ("blue", "teal", "green", "yellow", "orange", "red", "pink", "purple", "slate")
 _IMAGE = re.compile(r"^\s*!\[([^\]]*)\]\(([^)\s]+)\)\s*$")
 _PICTURES = {}  # ((host key, ask id, version, name): its bytes, as fetched) — the last PICTURES_KEPT
@@ -52,8 +54,10 @@ def css():
     rules.append(f"""
 .ask-card {{ padding: 14px 16px 16px 16px; }}
 .ask-picture {{ border-radius: 12px; }}
-button.picture-button {{ padding: 8px; }}
-button.picture-button picture {{ border-radius: 8px; }}
+.picture-frame {{ border-radius: 12px; border: 1px solid alpha(currentColor, 0.12); }}
+.picture-frame picture:hover {{ filter: brightness(0.94); }}
+.picture-view {{ margin: 8px; padding: 6px; border-radius: 99px; background-color: alpha(black, 0.55); color: white; }}
+button.picture-press {{ padding: 8px 12px; font-weight: bold; }}
 .ask-fade {{ background-image: linear-gradient(alpha(@card_bg_color, 0), @card_bg_color); min-height: {FADE}px; }}
 .ask-gone {{ opacity: 0.55; }}
 .ask-proposal {{ padding: 8px 12px; border-radius: 10px; background-color: alpha(@accent_bg_color, 0.1); }}
@@ -169,6 +173,74 @@ class SizedPicture(Gtk.Picture):
     def do_measure(self, orientation, for_size):
         n = self.size[0 if orientation == Gtk.Orientation.HORIZONTAL else 1]
         return n, n, -1, -1
+
+
+class PicturePart(WidePicture):
+    """A picture button's picture: as wide as its button, its height as its shape has it (PICTURE_TALL times its width
+    at most, shown whole in that); click to see it large."""
+
+    def __init__(self, width, height, alt):
+        super().__init__(width, height, alt)
+        self.set_content_fit(Gtk.ContentFit.CONTAIN)
+
+    def do_measure(self, orientation, for_size):
+        w, h = self.shape
+        if orientation == Gtk.Orientation.HORIZONTAL:
+            return 0, w, -1, -1
+        n = round((for_size if for_size > 0 else w) * min(h / w, PICTURE_TALL))
+        return n, n, -1, -1
+
+
+class PictureGrid(Gtk.Widget):
+    """An ask's picture buttons, as many to a row as fit at least `least` wide each (`most` at most), each as wide as
+    the row shares out, a row as tall as its tallest: a picture button wraps as a whole."""
+
+    def __init__(self, least, most, gap):
+        super().__init__(hexpand=True)
+        self.least, self.most, self.gap, self.kids = least, most, gap, []
+
+    def append(self, child):
+        child.set_parent(self)
+        self.kids.append(child)
+
+    def do_dispose(self):
+        for k in self.kids:
+            k.unparent()
+        self.kids = []
+
+    def do_get_request_mode(self):
+        return Gtk.SizeRequestMode.HEIGHT_FOR_WIDTH
+
+    def cells(self, width):
+        """(columns, each one's width) at this width."""
+        n = max(1, min(self.most, (width + self.gap) // (self.least + self.gap)))
+        return n, max(1, (width - self.gap * (n - 1)) // n)
+
+    def rows(self, width):
+        n, w = self.cells(width)
+        out = []
+        for i in range(0, len(self.kids), n):
+            row = self.kids[i:i + n]
+            out.append((row, max(k.measure(Gtk.Orientation.VERTICAL, w)[1] for k in row)))
+        return n, w, out
+
+    def do_measure(self, orientation, for_size):
+        if orientation == Gtk.Orientation.HORIZONTAL:
+            least = max([k.measure(orientation, -1)[0] for k in self.kids] or [0])
+            return least, self.least * self.most + self.gap * (self.most - 1), -1, -1
+        _n, _w, rows = self.rows(for_size if for_size > 0 else self.least * self.most)
+        h = sum(r[1] for r in rows) + self.gap * max(0, len(rows) - 1)
+        return h, h, -1, -1
+
+    def do_size_allocate(self, width, height, baseline):
+        _n, w, rows = self.rows(width)
+        y = 0
+        for row, h in rows:
+            for c, k in enumerate(row):
+                box = Gdk.Rectangle()
+                box.x, box.y, box.width, box.height = c * (w + self.gap), y, w, h
+                k.size_allocate(box, -1)
+            y += h + self.gap
 
 
 def sized(meta, edge, alt):
@@ -379,8 +451,11 @@ class AskView(Gtk.Box):
         self.append(self.form_box)
         self.proposal = Gtk.Box(spacing=10, visible=False, css_classes=["ask-proposal"])
         self.append(self.proposal)
+        self.pictures_row = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, visible=False)
+        self.append(self.pictures_row)
         self.buttons_row = Gtk.Box(spacing=12)
         self.append(self.buttons_row)
+        self.image_group = True  # (the large view steps through this ask's pictures: Lightbox.open)
         actions = Gio.SimpleActionGroup()
         pick = Gio.SimpleAction.new_stateful("version", GLib.VariantType.new("s"), GLib.Variant.new_string(""))
         pick.connect("change-state", lambda a, v: self.show_version(int(v.get_string())))
@@ -422,7 +497,7 @@ class AskView(Gtk.Box):
             self.draw_form(kept)
             self.draw_buttons()
         self.draw_proposal()
-        for w in (self.form_box, self.buttons_row):
+        for w in (self.form_box, self.buttons_row, self.route, *self.button_widgets):  # (its pictures still open)
             w.set_sensitive(self.live())
 
     def menu(self):
@@ -496,23 +571,31 @@ class AskView(Gtk.Box):
         self.form_box.set_visible(True)
 
     def draw_buttons(self):
-        while (c := self.buttons_row.get_first_child()) is not None:
-            self.buttons_row.remove(c)
-            discard(c)
+        for row in (self.pictures_row, self.buttons_row):
+            while (c := row.get_first_child()) is not None:
+                row.remove(c)
+                discard(c)
         v = self.ask["versions"][self.shown_n - 1]
+        grid = PictureGrid(PICTURE_BUTTON, PICTURE_ROW, 12)
         wrap = Adw.WrapBox(child_spacing=8, line_spacing=8, hexpand=True)
-        self.button_widgets = []
+        self.button_widgets = [None] * len(v["buttons"])
         for i, b in enumerate(v["buttons"]):
-            btn = self.picture_button(b, self.shown_n) if b.get("picture") else \
-                Gtk.Button(label=b["label"], valign=Gtk.Align.START)
+            if b.get("picture"):
+                unit, btn = self.picture_button(b, self.shown_n)
+                grid.append(unit)
+            else:
+                btn = Gtk.Button(label=b["label"], valign=Gtk.Align.START)
+                wrap.append(btn)
             style = b.get("style") or "secondary"
             if style == "primary":
                 btn.add_css_class("suggested-action")
             elif style in COLOURS:
                 btn.add_css_class(f"ask-{style}")
             btn.connect("clicked", lambda _b, i=i: self.press(i))
-            wrap.append(btn)
-            self.button_widgets.append(btn)
+            self.button_widgets[i] = btn
+        if grid.kids:
+            self.pictures_row.append(grid)
+        self.pictures_row.set_visible(bool(grid.kids))
         self.buttons_row.append(wrap)
         route = Gtk.MenuButton(label=wording.say("inbox.route_to"), css_classes=["flat"], valign=Gtk.Align.START,
                                tooltip_text=wording.say("inbox.route_tip"), always_show_arrow=True)
@@ -523,16 +606,30 @@ class AskView(Gtk.Box):
         self.buttons_row.append(route)
 
     def picture_button(self, b, n):
-        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        """A picture button: its picture, which a click opens large, over a button with its label, which presses it.
+        (the whole, and that button)"""
         meta = next((p for p in self.ask["versions"][n - 1]["pictures"] if p["name"] == b["picture"]), {})
-        pic = sized(meta, PICTURE_BUTTON, b["label"])
-        box.append(pic)
-        box.append(Gtk.Label(label=b["label"], wrap=True, max_width_chars=24, justify=Gtk.Justification.CENTER))
-        picture(self.ask, n, b["picture"], lambda data: data is not None and pic.set_paintable(
-            Gdk.Texture.new_from_bytes(GLib.Bytes.new(data))))
-        btn = Gtk.Button(child=box, valign=Gtk.Align.START)
-        btn.add_css_class("picture-button")
-        return btn
+        pic = PicturePart(meta.get("width") or 4, meta.get("height") or 3, b["label"])
+        frame = Gtk.Overlay(child=pic, overflow=Gtk.Overflow.HIDDEN, css_classes=["picture-frame"])
+        frame.add_overlay(Gtk.Image(icon_name="system-search-symbolic", halign=Gtk.Align.END, valign=Gtk.Align.START,
+                                    can_target=False, css_classes=["picture-view"]))
+
+        def got(data):
+            if data is None:
+                return
+            try:
+                pic.set_paintable(Gdk.Texture.new_from_bytes(GLib.Bytes.new(data)))
+            except GLib.Error:
+                return
+            imageviews.make_image_interactive(pic, data, name=b["label"])
+        picture(self.ask, n, b["picture"], got)
+        label = Gtk.Label(label=b["label"], wrap=True, justify=Gtk.Justification.CENTER,
+                          wrap_mode=Pango.WrapMode.WORD_CHAR)
+        btn = Gtk.Button(child=label, css_classes=["picture-press"])
+        unit = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, valign=Gtk.Align.START)
+        unit.append(frame)
+        unit.append(btn)
+        return unit, btn
 
     def draw_proposal(self):
         box = self.proposal

@@ -57,11 +57,28 @@
     },
     {
       "name": "Buttons",
-      "shows": "The task's buttons, each sized to its label, wrapping as whole buttons when a row is full (Adw.WrapBox; the phone's FlowRow): style primary (the accent), secondary (plain), or a colour of the accent palette (blue, teal, green, yellow, orange, red, pink, purple, slate: schema/tokens accent.*); a picture button shows its picture over its label. Route to… at the row's end.",
+      "shows": "The task's buttons, each sized to its label, wrapping as whole buttons when a row is full (Adw.WrapBox; the phone's FlowRow): style primary (the accent), secondary (plain), or a colour of the accent palette (blue, teal, green, yellow, orange, red, pink, purple, slate: schema/tokens accent.*). Picture buttons come first, large enough to judge their pictures in place: as many to a row as fit (at least 240 px wide each, three to a row at most on the desktop; at least 150 dp, two at most on the phone), each wrapping as a whole. A picture button is its picture, framed, with a magnifier in its corner, over a button with its label in the button's style. Route to… at the row's end.",
       "actions": [
         {
-          "by": "click a button",
+          "by": "click a button (a picture button's label)",
           "does": "Answers the ask: its task is told which button, with the form's values, and the ask leaves every Inbox. There's no separate Submit."
+        },
+        {
+          "by": "click a picture button's picture, or a picture in the body",
+          "does": "Opens it in the large view chat pictures open in (ImageViewer), which steps (← / →, a swipe on the phone) through this ask's pictures only: its body's in order, then its picture buttons'. It presses nothing, and still opens when the buttons are off."
+        }
+      ],
+      "decisions": [
+        {
+          "said": "okay major issue with clicker buttons, I want to be able to click the image to see it but click the text below to actually toggle it. the buttons in my inbox right now are too small to properly review. image view should be the same as chat image view with the same panning between.",
+          "rule": "Every app splits a picture button: its picture opens the large view and its label, below it, presses it. Picture buttons are big enough to judge their pictures in place, a few to a row. The large view is the one chat pictures use, stepping through the ask's own pictures (body first, then picture buttons).",
+          "decided": "2026-11-27",
+          "source": [
+            {
+              "session": "221e1c29-56d7-48bf-a2dc-7a2b37ccd685",
+              "message": "a22aba1a-cde9-4d19-a6a1-b8bd4d3fd734"
+            }
+          ]
         }
       ]
     },

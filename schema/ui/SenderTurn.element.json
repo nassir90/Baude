@@ -93,7 +93,7 @@
     },
     {
       "name": "from line",
-      "shows": "At the top of the bubble, right-aligned, wrapping: \"from <who>\" at 0.85em and 60% opacity. <who> is: \"<name>, a Bot\" (or \"a Bot, a Bot\" without a name); \"“<chat title>”\" (or \"a chat\"); \"subagent “<name>”\" (or \"a subagent\"); a host's name (or \"a host\"); another kind by its name (or \"another\"). For anything but a host, \" on <host>\" follows when the sender's host is known, e.g. \"from Ada, a Bot on lab-mac\". When the sender names a chat (a Bot, a chat, a subagent: its session), the line is a link (underlined, link colour): it opens that chat on its host. A task's run's (a host sender naming a run: what a run sends a chat it starts, and its asks of its Bot) opens the run's Bot's chat on its Tasks page, at that run. A chat a task's run started, telling its Bot what it said (a subagent sender naming the run's Bot, task and run, and how its turn ended), adds \" · <task> run\" (a link: the run, on the Bot's Tasks page, its task's page under it, so Back goes to that task) and \" · finished\" (or \"stopped\", \"failed\"), each joined by \" · \", e.g. \"from subagent “Why the deploy failed” on lab-mac · Deploy site run · finished\"; its name is a link to its chat. A task's own line in a chat its run started (\"from Task “Deploy site”\") and on its asks of its Bot is a link to the run.",
+      "shows": "At the top of the bubble, right-aligned, wrapping: \"from <who>\" at 0.85em and 60% opacity. <who> is: \"<name>, a Bot\" (or \"a Bot, a Bot\" without a name); \"“<chat title>”\" (or \"a chat\"); \"subagent “<name>”\" (or \"a subagent\"); a host's name (or \"a host\"); another kind by its name (or \"another\"). For anything but a host, \" on <host>\" follows when the sender's host is known, e.g. \"from Ada, a Bot on lab-mac\". When the sender names a chat (a Bot, a chat, a subagent: its session), the line is a link (underlined, link colour): it opens that chat on its host. A task's run's (a host sender naming a run: what a run sends a chat it starts, and its asks of its Bot) opens the run's Bot's chat on its Tasks page, at that run. A chat a task's run started, telling its Bot what it said (a subagent sender naming the run's Bot, task and run, and how its turn ended), adds \" · <task> run\" (a link: the run, on the Bot's Tasks page, its task's page under it, so Back goes to that task) and \" · finished\" (or \"stopped\", \"failed\"), each joined by \" · \", e.g. \"from subagent “Why the deploy failed” on lab-mac · Deploy site run · finished\"; its name is a link to its chat. A task's own line in a chat its run started (\"from Task “Deploy site”\") and on its asks of its Bot is a link to the run. A task's ask its run still waits on (its Bot's task_asks has the message) then says \" · its run is waiting for this answer\", a link to that run, till the run stops waiting.",
       "copy": [
         "common.from_who",
         "senders.bot",
@@ -108,7 +108,8 @@
         "senders.task_run",
         "task_notes.finished",
         "task_notes.stopped",
-        "task_notes.failed"
+        "task_notes.failed",
+        "senders.run_waiting"
       ],
       "actions": [
         {
@@ -118,6 +119,18 @@
         {
           "by": "click",
           "does": "on \"<task> run\": opens the run's Bot's chat on its Tasks page at that run, its task's page under it"
+        }
+      ],
+      "decisions": [
+        {
+          "said": "Make task timeouts for things like asks much longer; just make it clear when a task is waiting on input (paraphrased)",
+          "rule": "Every app's Bot chat says on a task's ask, while its run waits for the answer, that its run is waiting for this answer (a link to the run), and drops it once the run stops waiting",
+          "decided": "2026-11-27",
+          "source": [
+            {
+              "issue": "BaudeInternal#277"
+            }
+          ]
         }
       ]
     },

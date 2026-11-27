@@ -1,5 +1,5 @@
 {
-  "description": "Telemetry: what each app keeps of what's done in chats, what each host samples of its machine and its processes, line profiles, and Settings → Telemetry, which shows them for the host picked.",
+  "description": "Telemetry: what each app keeps of what's done in chats, what each host samples of its machine and its processes, line profiles, the errors every process on a host's machine had, and Settings → Telemetry, which shows them for the host picked.",
   "messages": {
     "title": "Telemetry",
     "collect": "Collect Telemetry",
@@ -36,6 +36,19 @@
     "hits_seconds": "{$hits} Hits · {$seconds}s",
     "off": "Telemetry is off",
     "no_profiling": "Line profiling isn't on this phone",
-    "not_found": "{$name} isn't a module or function here"
+    "not_found": "{$name} isn't a module or function here",
+    "errors": "Errors",
+    "no_errors": "No Errors",
+    "error_times": ".input {$count :number} .match $count one {{Once}} * {{{$count} Times}}",
+    "error_where": "Raised In",
+    "error_op": "Answering",
+    "error_code": "Exit Code",
+    "error_screen": "On Screen",
+    "action_click": "Clicked",
+    "action_menu": "Picked From a Menu",
+    "action_open": "Opened",
+    "error_version": "Code Version",
+    "version_of": "{$commit} · Wire {$wire}",
+    "error_first": "First Happened"
   }
 }

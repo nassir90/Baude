@@ -271,3 +271,37 @@ def install(app_name, wake):
     menu.append("·", "app.none")
     Gtk.PopoverMenu.new_from_model(menu)  # (GtkModelButton, a menu's item, made: its type's there from now)
     _hook(GObject.type_from_name("GtkModelButton"), "clicked", _used("menu"))
+
+
+def alone(app_name):
+    """install for a process that tells its host nothing else (Emission's): its errors told to this machine's host
+    in a moment as each comes, on a thread of their own (the host there, or not: kept for the next)."""
+    import threading
+    due = [False]
+
+    def tell():
+        due[0] = False
+        errors = errorbook.BOOK.take()
+        if not errors:
+            return
+        try:
+            from baudelib import selfupdate
+            if "commit" not in STATE:
+                STATE["commit"] = selfupdate.git(selfupdate.HERE, "rev-parse", "HEAD", timeout=5)
+            ch, _ = wire.reach({"via": "local"}, timeout=5)
+            try:
+                ch.sock.settimeout(5)
+                ch.send({"op": "telemetry", "req": 1, "app": app_name, "pid": os.getpid(), "errors": errors,
+                         "commit": (STATE["commit"] or "")[:12] or None, "wire": wire.VERSION})
+                if next((m for m in ch if m.get("req") == 1), {}).get("op") != "telemetry_kept":
+                    errorbook.BOOK.give_back(errors)
+            finally:
+                ch.close()
+        except (OSError, ValueError):
+            errorbook.BOOK.give_back(errors)
+
+    def wake():
+        if not due[0]:
+            due[0] = True
+            GLib.timeout_add(1000, lambda: threading.Thread(target=tell, daemon=True, name="errors").start() and False)
+    install(app_name, wake)

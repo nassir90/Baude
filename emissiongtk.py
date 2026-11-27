@@ -10,7 +10,7 @@ import gi  # noqa: E402
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Adw, GLib, Gtk  # noqa: E402
-from baudelib import wording  # noqa: E402  (its words, Baude's browser's: schema/copy)
+from baudelib import errorbook, wording  # noqa: E402  (its words, Baude's browser's: schema/copy)
 from baudelib.emissionlink import blocks_tracking, data_home, note_leftover  # noqa
 from emissioncore import CONSOLE_JS, address, download_path, failure_page, for_bots, once  # noqa: E402
 from emissionmac import MacWeb  # noqa: E402
@@ -355,6 +355,8 @@ class GtkWeb:
         if error.matches(W.NetworkError.quark(), W.NetworkError.CANCELLED) or error.matches(
                 W.PolicyError.quark(), W.PolicyError.FRAME_LOAD_INTERRUPTED_BY_POLICY_CHANGE):
             return False  # (a load stopped, or handed to a download: no failure)
+        errorbook.note("page_load", f"{error.domain}", error.message, key=f"{error.domain}:{error.code}",
+                       code=error.code)
         view.load_alternate_html(failure_page(url, error.message), url, None)
         return True
 

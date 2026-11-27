@@ -80,6 +80,7 @@ class Book:
             ctx = self.context() if self.context is not None else {}
         except Exception:  # noqa: BLE001 (what was on screen couldn't be told: kept without it)
             ctx = {}
+        err = {**err, "app": err.get("app") or self.app or "host"}
         with self.lock:
             got = self.pending.get(err["fingerprint"])
             if got is not None:

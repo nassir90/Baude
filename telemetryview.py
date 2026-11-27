@@ -11,7 +11,7 @@ import os
 import time
 import weakref
 
-from gi.repository import Adw, GLib, Gtk
+from gi.repository import Adw, GLib, Gtk, Pango
 
 from baudelib import errorbook, lineprofile, providers, telemetry, wire, wording
 import uitrack
@@ -29,7 +29,10 @@ LOGO_PX = 16  # (as big as a model's logo)
 PROFILED = ("host", "baude", "record")
 WEEKS = 53  # (the tokens' grid: a year, a column a week)
 LINES_SHOWN = 10
-GROUPS = ("error", "tokens", "models", "machine", "processes", "profiling", "lines")  # (the page's, in this order)
+GROUPS = ("error", "tokens", "models", "machine", "processes", "errors", "profiling", "lines")  # (the page's, in
+# this order)
+ERRORS_SHOWN = 20  # (the latest to happen)
+ERRORS_DAYS = 7
 REFRESH_S = 5  # (the machine's rows asked for again while the page is shown)
 _RECORDER = []
 
@@ -483,14 +486,63 @@ def proc_rows(procs):
     return rows
 
 
-def row(title, *values, sensitive=True, mono=False, bold=False, visible=True):
+def where_said(screen, part):
+    """A schema/ui entity and its part, as an error's screen and part say them."""
+    return " · ".join(x for x in (screen, part) if x) or "–"
+
+
+def fit_row(title, *values, **kw):
+    return row(title, *values, fit=True, **kw)
+
+
+def error_row(e):
+    """An error: its process's logo, its type and message, how many times and how long ago it last happened; opened,
+    where it was raised, what was on screen, the user's last actions before it, and the code it ran."""
+    import widgets
+    r = Adw.ExpanderRow(title=GLib.markup_escape_text(f"{e['type']}: {e['message']}" if e.get("message") and
+                                                      e["message"] != e["type"] else e["type"]))
+    r.set_title_lines(1)
+    r.add_prefix(logo(e.get("app")))
+    r.add_suffix(Gtk.Label(label=widgets.time_ago(e.get("last") or 0), css_classes=["dim-label", "numeric"]))
+    r.add_suffix(Gtk.Label(label=wording.say("telemetry.error_times", count=e.get("count") or 1),
+                           css_classes=["dim-label", "numeric"]))
+    r.set_tooltip_text(e.get("message") or None)
+    if e.get("file"):
+        r.add_row(fit_row(wording.say("telemetry.error_where"),
+                      f"{e['file']}:{e.get('line')}" + (f" {e['function']}" if e.get("function") else ""), mono=True))
+    if e.get("wire_op"):
+        r.add_row(fit_row(wording.say("telemetry.error_op"), str(e["wire_op"]) + (
+            f" · {e['code']}" if e.get("code") is not None else "")))
+    elif e.get("code") is not None:
+        r.add_row(fit_row(wording.say("telemetry.error_code"), str(e["code"])))
+    if e.get("screen") or e.get("part"):
+        r.add_row(fit_row(wording.say("telemetry.error_screen"), where_said(e.get("screen"), e.get("part"))))
+    for c in reversed(e.get("crumbs") or []):
+        key = f"telemetry.action_{c.get('action')}"
+        r.add_row(fit_row(wording.say(key) if wording.has(key) else str(c.get("action")),
+                      where_said(c.get("screen"), c.get("part") or c.get("widget")), widgets.time_ago(c["at"])))
+    if e.get("commit") or e.get("wire") is not None:
+        r.add_row(fit_row(wording.say("telemetry.error_version"), wording.say(
+            "telemetry.version_of", commit=e.get("commit") or "–", wire=str(e.get("wire") or "–")), mono=True))
+    if (first := e.get("first")) and e.get("count", 1) > 1:
+        r.add_row(fit_row(wording.say("telemetry.error_first"), widgets.time_ago(first)))
+    return r
+
+
+def row(title, *values, sensitive=True, mono=False, bold=False, visible=True, fit=False):
+    """A row: its title, its values after it (dim); fit: each value cut short with … where the row hasn't room."""
     esc = GLib.markup_escape_text(title)
     r = Adw.ActionRow(title=f"<b>{esc}</b>" if bold else esc, sensitive=sensitive, visible=visible)
     if mono:
         r.add_css_class("monospace")
     for v in values:
         if v:
-            r.add_suffix(Gtk.Label(label=v, css_classes=["numeric"] if bold else ["dim-label", "numeric"]))
+            label = Gtk.Label(label=v, css_classes=["numeric"] if bold else ["dim-label", "numeric"])
+            if fit:
+                label.set_ellipsize(Pango.EllipsizeMode.MIDDLE)
+                label.set_max_width_chars(60)
+                label.set_tooltip_text(v)
+            r.add_suffix(label)
     return r
 
 
@@ -525,6 +577,7 @@ class Page(Adw.PreferencesPage):
             self.add(self.made[key])
         self.state, self.taking, self.groups, self.profiling_rows = None, False, {}, None
         self.deps_for, self.missing_shown, self.lines_shown, self.sampled, self.ticks = (), None, None, None, 0
+        self.errors_shown = None
         self.grid = TokenGrid()
         self.refresh = GLib.timeout_add_seconds(REFRESH_S, self.tick)
         self.connect("destroy", lambda *_: GLib.source_remove(self.refresh))
@@ -536,9 +589,27 @@ class Page(Adw.PreferencesPage):
             self.read({"from": max(self.sampled or 0, now - 3 * REFRESH_S), "what": ["metrics"], "limit": 1},
                       self.took_metrics)
             self.ticks += 1
-            if self.ticks % (PROFILE_S // REFRESH_S) == 0 and self.state.get("line_profiling"):
-                self.read({"from": now - 3600, "what": ["profiles"], "limit": 500}, self.took_profiles)
+            if self.ticks % (PROFILE_S // REFRESH_S) == 0:
+                self.read_errors()
+                if self.state.get("line_profiling"):
+                    self.read({"from": now - 3600, "what": ["profiles"], "limit": 500}, self.took_profiles)
         return True
+
+    def read_errors(self):
+        self.read({"from": time.time() - ERRORS_DAYS * 86400, "what": ["errors"], "limit": ERRORS_SHOWN},
+                  self.took_errors)
+
+    def took_errors(self, reply):
+        if self.failed(reply):
+            return False
+        self.took_state(reply)
+        errors = reply.get("errors") or []
+        if "errors" in self.groups and self.errors_shown == repr(errors):
+            return False
+        self.errors_shown = repr(errors)
+        self.group("errors", wording.say("telemetry.errors"),
+                   [error_row(e) for e in errors] or [row(wording.say("telemetry.no_errors"), sensitive=False)])
+        return False
 
     def read(self, msg, done):
         import depsview
@@ -553,6 +624,7 @@ class Page(Adw.PreferencesPage):
         self.read({"from": now - (WEEKS * 7 + 7) * 86400, "what": ["usage"]}, self.took_usage)
         self.read({"from": now - 60, "what": ["metrics"], "limit": 1}, self.took_metrics)
         self.read({"from": now - 3600, "what": ["profiles"], "limit": 500}, self.took_profiles)
+        self.read_errors()
 
     def group(self, key, title, rows=()):
         """The group key shown, titled, with rows (in place of those it had)."""

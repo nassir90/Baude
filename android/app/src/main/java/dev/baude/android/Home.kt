@@ -476,7 +476,7 @@ private fun OpenFolder(h: String, done: () -> Unit, picked: (String) -> Unit) {
     var listed by remember { mutableStateOf<Listed?>(null) }
     var hidden by remember { mutableStateOf(false) }
     var pick by remember { mutableStateOf(-1) } // (the row picked with Up and Down; -1: none)
-    var then by remember { mutableStateOf<(() -> Unit)?>(null) } // (a key's doing, waiting for the folders listed)
+    var then by remember { mutableStateOf<String?>(null) } // (a key waiting for the folders listed: "complete" or "into"; done with the listing that lands)
     val back = remember { mutableStateListOf<String>() } // (the paths gone out of, for Back)
     fun full(t: String) = t.trim().ifBlank { "~" }.let { if (it == "~" || it.startsWith("~/")) home.trimEnd('/') + it.drop(1) else it }
     fun up(p: String) = p.trimEnd('/').substringBeforeLast('/').ifEmpty { "/" }
@@ -501,10 +501,8 @@ private fun OpenFolder(h: String, done: () -> Unit, picked: (String) -> Unit) {
             }
         }
     }
-    LaunchedEffect(listed) { if (listed?.typed == typed) then?.let { then = null; it() } }
     fun set(text: String) { field = androidx.compose.ui.text.input.TextFieldValue(text, androidx.compose.ui.text.TextRange(text.length)) }
     fun put(path: String) { back.add(field.text); set(path.trimEnd('/') + "/") } // (a folder gone into: a / lists it)
-    fun whenListed(doing: () -> Unit) { if (listed?.typed == typed) doing() else then = doing }
     val (folder, part, names) = listed?.let { Triple(it.folder, it.part, it.names) } ?: Triple("", null, emptyList())
     val rows = (if (folder.trimEnd('/').isNotEmpty()) listOf(".." to up(folder)) else emptyList()) +
         names.map { it to folder.trimEnd('/') + "/" + it }
@@ -513,10 +511,17 @@ private fun OpenFolder(h: String, done: () -> Unit, picked: (String) -> Unit) {
         if (row != null) put(row.second)
     }
     fun open() = picked(if (typed.startsWith("/")) java.io.File(typed).normalize().path.ifEmpty { "/" } else typed)
+    fun complete() { if (typed.startsWith("/")) folderCompletion(field.text, part, names)?.let { set(it) } }
+    fun whenListed(key: String) {
+        if (listed?.typed != typed) then = key else if (key == "complete") complete() else into()
+    }
+    LaunchedEffect(listed) { // (this composition's, so the listing that landed)
+        if (listed?.typed == typed) then?.let { then = null; if (it == "complete") complete() else into() }
+    }
     val list = androidx.compose.foundation.lazy.rememberLazyListState()
     LaunchedEffect(pick) { if (pick >= 0) list.animateScrollToItem(pick) }
     val keys = FolderKeys(
-        complete = { whenListed { if (typed.startsWith("/")) folderCompletion(field.text, part, names)?.let { set(it) } } },
+        complete = { whenListed("complete") },
         pick = { step -> pick = when {
             rows.isEmpty() -> -1
             pick >= 0 -> (pick + step).coerceIn(0, rows.lastIndex)
@@ -524,7 +529,7 @@ private fun OpenFolder(h: String, done: () -> Unit, picked: (String) -> Unit) {
             else -> if (rows[0].first == ".." && rows.size > 1) 1 else 0
         } },
         picked = { pick >= 0 },
-        into = { whenListed { into() } },
+        into = { whenListed("into") },
         up = {
             val at = if (part != null) up(typed) else typed
             if (typed.startsWith("/") && at.trimEnd('/').isNotEmpty()) put(up(at))

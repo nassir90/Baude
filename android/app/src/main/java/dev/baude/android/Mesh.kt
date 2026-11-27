@@ -104,6 +104,8 @@ class Chat(hostId: String, sid: String) {
     val agents = mutableStateListOf<Subagent>()    // (the subagents it started, newest first: the Subagents page)
     val btw = mutableStateListOf<SideQuestion>()   // (its side questions, newest first, while it's open)
     val uses = HashMap<String, JSONObject>()       // (an Artifact or Agent call's id: the call, till its result's read)
+    var rotated: Double? = null              // (when its Bot last rotated, as listed as it was first read: one since, and
+    var rotatedKnown = false                 // it's read anew, whether the phone was connected then or not)
     var offset = -1L
     val raw = java.io.ByteArrayOutputStream() // (its transcript as read, from rawFrom (a line's start) to offset: kept,
     var rawFrom = -1L                         // LinkCache, to show at once next time)
@@ -553,6 +555,21 @@ object Mesh {
                     asked(c, before, now)
                     open?.let {
                         if (it.hostId != c.id) return@let
+                        val listed = now.firstOrNull { s -> s.id == it.sid }
+                        val rotated = listed?.rotated?.toDouble()
+                        if (listed == null) Unit // (not listed now: nothing to go by)
+                        else if (!it.rotatedKnown) {
+                            it.rotated = rotated
+                            it.rotatedKnown = true
+                        } else if (rotated != it.rotated) { // (a Bot rotated, since it was first read: its new
+                            it.rotated = rotated            // conversation, read from nothing)
+                            restart(it)
+                            it.sent.clear()
+                            it.asks.clear()
+                            it.sendersRev = -1
+                            it.senders.clear()
+                            it.again = it.reading
+                        }
                         senders(it) // (who its messages from others are from, if its host's store is newer)
                         read(it) // (its first read, or what it missed)
                     }
@@ -727,6 +744,10 @@ object Mesh {
         }
         close()
         val chat = Chat(hostId, sid)
+        session(hostId, sid)?.let { // (when its Bot last rotated, as it's listed now: what's read is of that)
+            chat.rotated = it.rotated?.toDouble()
+            chat.rotatedKnown = true
+        }
         Queue.takeDraft(hostId, sid, machine(hostId))?.let { d ->
             chat.draft.value = d.text.ifBlank { null }
             chat.files.addAll(d.files)

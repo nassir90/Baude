@@ -420,6 +420,7 @@ class Session:
                 "written": self.meta.get("written"),
                 "subagents": max((m for _size, m in (self.agents or {}).values()), default=0),
                 "commands": self.commands(), "cut": self.meta.get("cut"), "bot": self.bot_listing(),
+                "rotated": self.meta.get("rotated") if self.meta.get("bot") else None,
                 "autofix": autofix.listing(self.meta.get("autofix")),
                 "acting": self.acting and self.busy and not self.asks,
                 "context": context_listing(self.meta.get("context_usage")),

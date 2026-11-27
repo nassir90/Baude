@@ -1127,6 +1127,42 @@ abstract class Screens(private val theme: String) {
         screen("09c-home-session-menu")
     }
 
+    // (a Bot's long-press menu: Rotate after Bot Settings…; then, rotated, its new chat empty, and a search finding its past
+    // thread under Archived)
+    @Test fun homeBotMenu() {
+        workshopBot()
+        show { HomeScreen() }
+        tap("Juniper", long = true)
+        layOut()
+        screen("09d-home-bot-menu")
+    }
+
+    @Test fun homeBotThreadSearch() {
+        rotatedBot()
+        show { HomeScreen() }
+        typeIn("Juniper")
+        screen("09e-home-bot-thread-search")
+    }
+
+    @Test fun chatBotRotated() {
+        val bot = rotatedBot()
+        Mesh.openChat("h1", bot.id.orEmpty())
+        render("10f-chat-bot-rotated") { ChatShell("h1", bot.id.orEmpty(), back = {}, open = { _, _ -> }, feedback = {}, first = "chat") }
+    }
+
+    /** workshop's Juniper rotated: a new, empty chat, its past one archived as "Juniper / <its title>". */
+    private fun rotatedBot(): Msg.Session {
+        val bot = workshopBot()
+        val now = System.currentTimeMillis() / 1000.0
+        val thread = Msg.Session(id = "a0", title = "Juniper / ${bot.title}", cwd = bot.cwd, updated = now - 120, said = now - 120,
+            created = bot.created, state = "stopped", model = bot.model, effort = bot.effort, mode = bot.mode, archived = true)
+        val fresh = bot.json().put("rotated", now).put("said", now).put("prompts", 0).put("size", 0)
+        fresh.remove("title")
+        val rotated = Msg.Session.from(fresh)
+        Mesh.sessions["h1"] = listOf(rotated) + Mesh.sessions.getValue("h1").drop(1) + thread
+        return rotated
+    }
+
     // (a chat open on workshop, which is up: each of its pages, as its bottom bar switches to them)
     @Test fun chat() = chatAt("10-chat", "chat")
     /** The chat with the phone's text at a size whose line is taller than the box's buttons. */

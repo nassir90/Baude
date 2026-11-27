@@ -16,8 +16,8 @@
       "description": "What's wrong."
     },
     "code": {
-      "enum": ["unsupported_operation", "invalid_data_type", "access_denied"],
-      "description": "One of the schema's own refusals."
+      "enum": ["unsupported_operation", "invalid_data_type", "access_denied", "stale_draft"],
+      "description": "One of the schema's own refusals; stale_draft: a draft_save written before the draft's last send (its epoch less than its host's), not kept."
     },
     "detail": {
       "type": "string",
@@ -39,9 +39,13 @@
       "$ref": "Dep.json",
       "description": "What a chat's program needs that the host hasn't (claude, codex): error says what to install."
     },
+    "draft": {
+      "$ref": "ChatDraft.json",
+      "description": "stale_draft's: the draft as its host keeps it."
+    },
     "session": {
       "type": "string",
-      "description": "memory's refusal: the session."
+      "description": "memory's refusal, and stale_draft's: the session."
     },
     "text": {
       "type": "string",

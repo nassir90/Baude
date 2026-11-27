@@ -197,7 +197,9 @@ OPEN_S = CONSTANTS["OPEN_S"]      # (a member of the mesh, reached through it: t
 UNSUPPORTED = "unsupported_operation"  # (the schema's own refusals: their codes, and what each says)
 INVALID = "invalid_data_type"
 DENIED = "access_denied"  # (one a host's access rules refuse: baudelib.access)
-SAID = {UNSUPPORTED: "unsupported operation", INVALID: "invalid data type", DENIED: "access denied"}
+STALE = "stale_draft"  # (a draft written before its last send: not kept, so what was sent doesn't come back)
+SAID = {UNSUPPORTED: "unsupported operation", INVALID: "invalid data type", DENIED: "access denied",
+        STALE: "written before the last send"}
 
 
 def takes(info, op):

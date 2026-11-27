@@ -1104,7 +1104,8 @@ class RemoteProc(claude.ClaudeProc):
                 self.login = msg.get("login")  # as {type: "_login"}, as a note of its host's is "_note")
                 self.dispatch(lambda m=msg: self.on_msg(self, {"type": "_login", "login": m.get("login")}))
             elif op == "draft_changed" and msg.get("session") == self.session:  # (its draft, another head's write,
-                self.dispatch(lambda m=msg: self.on_msg(self, {"type": "_draft", "draft": m.get("draft")}))  # as "_draft")
+                self.draft = msg.get("draft")  # as "_draft")
+                self.dispatch(lambda m=msg: self.on_msg(self, {"type": "_draft", "draft": m.get("draft")}))
             elif op == "queue_changed" and msg.get("session") == self.session:  # (its queue, another head's change
                 self.queue = msg.get("queue")  # or its host's sending it, as "_queue")
                 self.dispatch(lambda m=msg: self.on_msg(self, {"type": "_queue", "queue": m.get("queue")}))

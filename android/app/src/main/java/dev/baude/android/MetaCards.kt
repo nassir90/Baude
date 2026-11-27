@@ -138,7 +138,7 @@ fun markedName(name: String, how: String?, live: Boolean): AnnotatedString {
 @Composable
 fun BatchButton(icon: ImageVector, label: String, onClick: () -> Unit) {
     val c = LocalBaude.current
-    Box(Modifier.size(24.dp).clip(RoundedCornerShape(6.dp)).clickable(onClick = onClick).semantics { contentDescription = label },
+    Box(Modifier.size(24.dp).clip(RoundedCornerShape(6.dp)).clickable(onClick = onClick.tapping(label)).semantics { contentDescription = label },
         contentAlignment = Alignment.Center) {
         Icon(icon, label, tint = c.fg, modifier = Modifier.size(16.dp.icon))
     }

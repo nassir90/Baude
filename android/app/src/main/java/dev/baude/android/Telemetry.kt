@@ -35,6 +35,7 @@ import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.delay
@@ -344,7 +345,7 @@ private fun errorExpander(e: Msg.TelemetryError): @Composable () -> Unit = {
             else e.code?.let { rows.add(valueRow(Wording.Telemetry.errorCode, it.toString())) }
             if (e.screen != null || e.part != null) rows.add(valueRow(Wording.Telemetry.errorScreen, whereSaid(e.screen, e.part)))
             for (k in e.crumbs.orEmpty().reversed()) rows.add(valueRow(Wording.byKey["telemetry.action_${k.action}"] ?: k.action.orEmpty(),
-                whereSaid(k.screen, k.part ?: k.widget) + " · " + ago(k.at?.toLong() ?: 0L)))
+                whereSaid(k.screen, k.part ?: k.widget), ago = ago(k.at?.toLong() ?: 0L)))
             if (e.commit != null || e.wire != null) rows.add(valueRow(Wording.Telemetry.errorVersion,
                 Wording.Telemetry.versionOf(commit = e.commit ?: "–", wire = e.wire?.toString() ?: "–")))
             if ((e.count?.toLong() ?: 1L) > 1) e.first?.let { rows.add(valueRow(Wording.Telemetry.errorFirst, ago(it.toLong()))) }
@@ -356,11 +357,17 @@ private fun errorExpander(e: Msg.TelemetryError): @Composable () -> Unit = {
     }
 }
 
-private fun valueRow(title: String, value: String?, slug: String? = null): @Composable () -> Unit = {
+private fun valueRow(title: String, value: String?, slug: String? = null, ago: String? = null): @Composable () -> Unit = {
     val c = LocalBaude.current
     val ctx = androidx.compose.ui.platform.LocalContext.current
     Box(if (slug == null) Modifier else Modifier.pointerInput(slug) { detectTapGestures(onLongPress = { showSlug(ctx, slug) }) }) {
-        ActionRow(title, null, suffix = { value?.let { Text(it, style = Type.body, color = c.dim, maxLines = 1) } })
+        ActionRow(title, null, suffix = {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                value?.let { Text(it, style = Type.body, color = c.dim, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.widthIn(max = 170.dp)) }
+                ago?.let { Text(it, style = Type.body, color = c.dim, maxLines = 1) }
+            }
+        })
     }
 }
 

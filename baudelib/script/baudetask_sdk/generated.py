@@ -1581,8 +1581,8 @@ class TelemetryError(Obj):
             error answered on the wire, an agent that exited by itself with a code other than 0, a draft its
             host didn't save, a message not sent, a page Emission couldn't load, or the phone's app crashing.
         fingerprint (string): What it's kept by: its kind, its type and the frame of Baude's own code it was
-            raised in (file:line), or for one without a stack what tells it apart (the op and code, a log's
-            domain and its message with numbers taken out).
+            raised in (its file and function), or for one without a stack what tells it apart (the op and code,
+            a log's domain and its message with numbers taken out).
         type (string): The exception's class, the log's domain and level, the op, the agent's program.
         message (string): What it said, its first line (the last time).
         file (string or None): The file it was raised in, under the checkout, relative to it.

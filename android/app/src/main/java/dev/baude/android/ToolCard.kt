@@ -71,7 +71,7 @@ fun Spinner() {
 fun Toggle(label: String, on: Boolean, onClick: () -> Unit) {
     val c = LocalBaude.current
     Box(Modifier.clip(RoundedCornerShape(4.dp)).background(c.fg.copy(alpha = if (on) 0.30f else 0.10f))
-        .clickable(role = Role.Button, onClick = onClick).padding(horizontal = 7.dp, vertical = 1.dp)) {
+        .clickable(role = Role.Button, onClick = onClick.tapping(label)).padding(horizontal = 7.dp, vertical = 1.dp)) {
         Text(label, style = Type.body.copy(fontSize = Tokens.Font.body * 0.85f, lineHeight = Tokens.Font.bodyLine * 0.85f,
             fontWeight = Tokens.Font.bold), color = c.fg)
     }

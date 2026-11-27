@@ -145,7 +145,7 @@
         },
         {
           "said": "Draft sync doesn't refresh while the pointer rests on the box; hovering mustn't stop updates from the draft's owner (paraphrased)",
-          "rule": "Nothing about the pointer, the focus or the window being in front keeps another head's edit out of a box: it goes in unless this head has typing its host hasn't taken yet, or a save on its way, and the caret and selection move with the text. A save the host doesn't take (refused, or its connection gone) holds nothing: another head's edit, held then or come after, goes in, since the host has it and never had this head's; otherwise the save is made again after 1 s, then 2 s, then 4 s.",
+          "rule": "Nothing about the pointer, the focus or the window being in front keeps another head's edit out of a box: it goes in unless this head has typing its host hasn't taken yet, or a save on its way, and the caret and selection move with the text. Text this head typed that the host never took is never replaced by another head's edit: a draft over 200000 characters (which the host refuses) stays this head's own and is not saved again, and an edit held meanwhile stays held; a save lost to a dropped connection leaves the box dirty and is made again after 1 s, then 2 s, then 4 s (and as the chat is attached again), an edit held from before the typing staying held.",
           "decided": "2026-11-27",
           "source": [
             {

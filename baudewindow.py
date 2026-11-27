@@ -612,6 +612,7 @@ class BaudeWindow(WindowView, WindowProc, WindowDrafts, WindowSignal, WindowRemo
         self.connect("close-request", lambda *_: (self.proc and self.proc.kill(),
                                                   [self.let_go_background(p) for p in list(self.background.values())],
                                                   [sq.close() for sq in self.panel.side_questions()],
+                                                  self.drop_draft_retry(),
                                                   self.panel.memory.stop(),  # (what's written in a Bot's memory saved)
                                                   self.panel.browser.stop(),  # (its watch let go of)
                                                   self.drop_signal(), GLib.idle_add(self.let_go)) and False)

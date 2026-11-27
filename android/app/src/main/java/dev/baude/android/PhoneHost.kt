@@ -63,7 +63,7 @@ object PhoneHost {
         "subagents", "rename", "archive", "unarchive", "delete", "always_allow", "bot", "bot_picture", "memory",
         "read_file", "catalogue", "list_dir", "senders", "telemetry", "telemetry_read", "telemetry_set", "chat_size",
         "access", "access_set", "seen", "draft_save", "queue", "ephemeral", "control",
-        "set_permission_mode", "set_model")
+        "set_permission_mode", "set_model", "inbox")
     private val CONTROLS = setOf("control", "set_permission_mode", "set_model", "ephemeral") // (OPS' that aren't ops: the
     // control requests its agents take (control: any a claude takes, answered as a host answers them between turns), and
     // start's ephemeral)
@@ -258,6 +258,7 @@ object PhoneHost {
         WireCheck.refusal(JSONObject(msg.toString()), TAKES)?.let { return head.send(it) }
         when (op) {
             Op.HELLO -> return reply(Op.HELLO, "server" to info())
+            Op.INBOX -> return reply(Op.INBOX_REPLY, "asks" to org.json.JSONArray()) // (this phone runs no tasks: none)
             Op.SUBSCRIBE -> {
                 head.subscribed = true
                 head.archived = Msg.Subscribe.from(msg).archived == true

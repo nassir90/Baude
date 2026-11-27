@@ -648,7 +648,7 @@ private fun TaskDialog(t: Msg.Task, done: (JSONObject?) -> Unit) {
 }
 
 /** A field's default as the run form fills it (a number as the host has it). */
-private fun defaultText(f: Msg.TaskField): String = when (val d = f.default) {
+internal fun defaultText(f: Msg.TaskField): String = when (val d = f.default) {
     null, JSONObject.NULL -> ""
     else -> d.toString()
 }
@@ -657,7 +657,7 @@ private val NUMBER = Regex("[+-]?(?:[0-9]+\\.?[0-9]*|\\.[0-9]+)(?:[eE][+-]?[0-9]
 
 /** Text as the number it is (a Long when whole and small, else a Double): null for text that isn't a finite number in
  * plain digits (not NaN, Infinity, 1e999, 1_000 or 1f), and for empty text. */
-private fun numberOf(text: String): Number? {
+internal fun numberOf(text: String): Number? {
     val s = text.trim()
     if (!NUMBER.matches(s)) return null
     val d = s.toDoubleOrNull()?.takeIf { it.isFinite() } ?: return null
@@ -710,7 +710,7 @@ private fun RunForm(t: Msg.Task, done: (JSONObject?) -> Unit) {
 /** A row to type in (Adw.EntryRow): its title small over what's typed, a pencil after; number: a number's keyboard, and
  * the title and text in the error colour while it isn't one. */
 @Composable
-private fun EntryRow(title: String, value: String, number: Boolean, bad: Boolean, enter: () -> Unit, set: (String) -> Unit) {
+internal fun EntryRow(title: String, value: String, number: Boolean, bad: Boolean, enter: () -> Unit, set: (String) -> Unit) {
     val c = LocalBaude.current
     Row(Modifier.fillMaxWidth().heightIn(min = 50.dp).padding(horizontal = 12.dp, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {

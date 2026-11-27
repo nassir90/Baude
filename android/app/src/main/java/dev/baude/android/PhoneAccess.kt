@@ -15,9 +15,9 @@ import java.io.File
  * was split is both of its sides' (Access Rules': write's). Of the capabilities, the phone host has new agents (start:
  * spawn) and its agents as they are (manage, each op's side: side); a member a rule refuses is answered access_denied. */
 object PhoneAccess {
-    val CAPABILITIES = listOf("shell", "browser", "providers", "model_files", "spawn", "manage", "kube", "databases",
+    val CAPABILITIES = listOf("shell", "browser", "providers", "model_files", "spawn", "manage", "kube", "docker", "databases",
         "subscriptions", "access")
-    val SPLIT = listOf("browser", "manage", "kube", "subscriptions", "access")
+    val SPLIT = listOf("browser", "manage", "kube", "docker", "subscriptions", "access")
     val RULES = CAPABILITIES.flatMap { rulesOf(it) }
     val WHO = listOf("everybody", "nobody", "chosen")
     private val rules = HashMap<String, JSONObject>()
@@ -149,7 +149,7 @@ object PhoneAccess {
             else Wording.Access.side(capability = said, side = if (name.endsWith("_read")) Wording.Access.read else Wording.Access.write)
     }
     private val COPY = mapOf("shell" to "kube.shell", "providers" to "deps.providers", "kube" to "window.kubernetes", "docker" to "window.docker",
-        "subscriptions" to "subscriptions.title")
+        "databases" to "window.database_schemas", "subscriptions" to "subscriptions.title")
 
     /** Rule name set and kept, its other side kept with it: false if it isn't one. */
     @Synchronized fun set(name: String, rule: JSONObject?): Boolean {

@@ -10,8 +10,12 @@
   ],
   "code": [
     "accessview.py:Page",
-    "accessview.py:AccessRow",
     "baudelib/access.py:Access",
+    "Access.kt:PillFlow",
+    "Access.kt:ToField",
+    "accessview.py:Pills",
+    "accessview.py:RuleField",
+    "accessview.py:RuleRow",
     "baudelib/serverrun.py:ServerRunning.access_op",
     "baudelib/serverrun.py:ServerRunning.handle",
     "Access.kt:AccessPage",
@@ -43,7 +47,7 @@
     },
     {
       "name": "Capability rows",
-      "shows": "One boxed list, a row for each capability in this order: Shell, Emission Browser, Providers, Model Files, Agent Spawn, Agent Management, Kubernetes, Databases, Subscriptions, Access Rules. A capability with one rule (Shell, Providers, Model Files, Agent Spawn, Databases) is its name and one button after it naming who may. A capability split into read and write (Emission Browser, Agent Management, Kubernetes, Subscriptions, Access Rules) is its name over two compact lines in the same row, \"Read\" and \"Write\" (dim, a little in from the name), each with its rule's button at the row's end, so every button sits in one column at any width. A button names who may: Everybody, Nobody, the members' names (one or two), or \"<n> members\". It opens the checklist the sessions' Groups and Kubernetes' Namespaces have: a check \"Everybody\" over a check for each member the host can name (those it reaches, has lately, or a rule names). Every member checked is Everybody, none is Nobody, some is those members. With no other member, \"No other members\" dim under Everybody. A host without all of a capability's rules (older code) has that row hidden. A row the asking app may not change (editable false: a member Access Rules' Write refuses) has its buttons greyed.",
+      "shows": "One boxed list, a row for each capability in this order: Shell, Emission Browser, Providers, Model Files, Agent Spawn, Agent Management, Kubernetes, Docker, Databases, Subscriptions, Access Rules. A row is the capability's name, then its rule's field filling the rest of the row (desktop: the names in one column, Read and Write in the next, every field lined up in the third; phone: the name over its fields). A capability split into read and write (Emission Browser, Agent Management, Kubernetes, Docker, Subscriptions, Access Rules) has a line for each, \"Read\" and \"Write\" (dim), each with its field. A field is like an email's To: who the rule lets in as pills, each a member's picture (its initials) and name with ×; Everybody is one accent pill with the people icon; no pills is Nobody, said dim where typing goes. Past its room it shows the pills that fit (desktop: one line; phone: two lines, wrapped) and an \"<n> more\" pill, which opens the field out to every pill, wrapped. Typing in it (on the phone, once tapped) lists under it who may be added, Everybody first, then the members the host can name (those it reaches, has lately, or a rule names), each with its picture, but those it has, matched as typed (names starting with it first). With no other member, \"No other members\" in the list. A host without all of a capability's rules (older code) has that row hidden. A field the asking app may not change (editable false: a member Access Rules' Write refuses) is greyed with no ×.",
       "copy": [
         "access.browser",
         "access.model_files",
@@ -58,14 +62,31 @@
         "access.everybody",
         "access.nobody",
         "access.no_members",
-        "access.n_members",
         "access.read",
-        "access.write"
+        "access.write",
+        "access.n_more",
+        "common.remove"
       ],
       "actions": [
         {
-          "by": "check or uncheck in the button's list",
-          "does": "Sends access_set at once (capability: the rule's name, e.g. kube_write; rule: everybody, nobody, or chosen with the members checked) and shows the capability's rules as the host answers; checking Everybody checks every member, unchecking it unchecks every one. Write lets a member read too, and the host keeps the two together: whoever Write is given to is added to Read, and whoever Read loses is taken out of Write, so both buttons always say who may. A refusal says \"Couldn't change access: <why>\" in a toast and the row goes back to what the host has."
+          "by": "Enter (or Tab), the phone keyboard's Done, or a click on a row in the list",
+          "does": "Adds the lit (first) one and sends access_set at once (capability: the rule's name, e.g. kube_write; rule: everybody, nobody, or chosen with the members). Everybody takes the place of every member pill; a member added to Everybody takes its place (that member alone). Naming every member one by one is those members, not Everybody."
+        },
+        {
+          "by": "click ×, or Backspace with nothing typed (the last pill)",
+          "does": "Takes that pill out and sends the rule at once; the last pill out is Nobody."
+        },
+        {
+          "by": "key Up / Down, Esc",
+          "does": "Moves the lit row in the list / closes the list"
+        },
+        {
+          "by": "click \"<n> more\"",
+          "does": "Opens the field out to every pill; it closes back when the focus leaves it"
+        },
+        {
+          "by": "any change",
+          "does": "The field shows the change at once and then what the host answers. Write lets a member read too, and the host keeps the two together: whoever Write is given to is added to Read, and whoever Read loses is taken out of Write. A refusal says \"Couldn't change access: <why>\" in a toast and the field goes back to what the host has."
         }
       ],
       "decisions": [
@@ -147,6 +168,30 @@
               "issue": "BaudeInternal#246"
             }
           ]
+        },
+        {
+          "said": "For now none of these look that nice. id say we just stick with something like email \"to \" lists where you get a nice drop-down, auto complete combined with pills-likes for added hosts and an \"N more\" suffix.",
+          "rule": "Every app shows each access rule as an email-To-style field: the members it lets in as pills with ×, a drop-down with autocomplete over the mesh's members (picture and name) as you type, and the first pills that fit then an \"<n> more\" pill that opens the field out. Everybody is a pill offered first in the drop-down that replaces the others; an empty field is Nobody, said as its placeholder. No member groups and no \"Everybody except\" for now. The fields fill the row, so the page has no empty middle.",
+          "decided": "2026-11-27",
+          "source": [
+            {
+              "session": "221e1c29-56d7-48bf-a2dc-7a2b37ccd685",
+              "message": "a0907a25-207a-43de-b530-25de510ac3ea"
+            },
+            {
+              "issue": "BaudeInternal#310"
+            }
+          ]
+        },
+        {
+          "said": "The Access screen looks nasty: a massive, vacuous empty middle; there must be a better way to show these toggles (paraphrased)",
+          "rule": "An access row's control fills the row beside its name; nothing sits alone at the row's far end with empty space before it",
+          "decided": "2026-11-27",
+          "source": [
+            {
+              "issue": "BaudeInternal#310"
+            }
+          ]
         }
       ]
     },
@@ -197,11 +242,15 @@
     "default: every rule Everybody, Read and Write alike (Subscriptions too), but Access Rules' Write, Nobody (a mesh with no rules works as before; only this machine's heads, and those over ssh, change the rules till members are chosen; every member may read them)",
     "error: the host's error in one dim row",
     "read-only: every button greyed (editable false)",
-    "no members: \"No other members\" under Everybody in the list"
+    "no members: \"No other members\" in the field's list"
   ],
   "scenes": [
     "40g-access",
+    "40g-access-foot",
+    "40g-access-many",
+    "40g-access-more",
     "40g-access-open",
+    "40g-access-typing",
     "40l-meta-access-split"
   ]
 }

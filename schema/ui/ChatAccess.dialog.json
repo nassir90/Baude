@@ -21,21 +21,21 @@
   "parts": [
     {
       "name": "Agent Management row",
-      "shows": "The capability's row as Settings → Access has it: \"Agent Management\" over two lines, Read and Write, each with its button naming who may (Same as Host while the chat has no rule of its own for that side). A button opens a check \"Same as Host\" above the Settings checklist (Everybody over a check per member). While Same as Host is checked, the list shows the host's rule for that side.",
+      "shows": "The capability's row as Settings → Access has it, its name over two lines, Read and Write, each with its email-To-style field. While the chat has no rule of its own for a side, that field holds one accent pill \"Same as Host\" (the server icon). The field's list offers Same as Host first, then Everybody, then the members.",
       "copy": [
         "access.manage",
         "access.same_as_host",
         "access.everybody",
         "access.nobody",
-        "access.n_members",
         "access.no_members",
         "access.read",
-        "access.write"
+        "access.write",
+        "access.n_more"
       ],
       "actions": [
         {
-          "by": "check or uncheck",
-          "does": "Sends access_set {session, capability: manage_read or manage_write, rule} at once: a member or Everybody checked or unchecked gives the chat its own rule for that side (Same as Host goes off); unchecking Same as Host keeps the host's rule as the chat's own; checking it sends rule null, the host's rule again. The host keeps the sides together as Settings' are: a member given Write is added to the chat's Read, one taken out of Read is taken out of its Write."
+          "by": "add or take out a pill (as Settings' fields)",
+          "does": "Sends access_set {session, capability: manage_read or manage_write, rule} at once: Same as Host added sends rule null, the host's rule again, in place of every pill; Everybody or a member added gives the chat its own rule for that side in place of Same as Host; taking out the last pill (Same as Host too) is Nobody. The host keeps the sides together as Settings' are."
         }
       ],
       "decisions": [
@@ -66,6 +66,20 @@
           "source": [
             {
               "issue": "BaudeInternal#246"
+            }
+          ]
+        },
+        {
+          "said": "For now none of these look that nice. id say we just stick with something like email \"to \" lists where you get a nice drop-down, auto complete combined with pills-likes for added hosts and an \"N more\" suffix.",
+          "rule": "A chat's own access rules use the same To-style fields as Settings → Access; Same as Host is a pill, offered first in the list, in place of the others",
+          "decided": "2026-11-27",
+          "source": [
+            {
+              "session": "221e1c29-56d7-48bf-a2dc-7a2b37ccd685",
+              "message": "a0907a25-207a-43de-b530-25de510ac3ea"
+            },
+            {
+              "issue": "BaudeInternal#310"
             }
           ]
         }

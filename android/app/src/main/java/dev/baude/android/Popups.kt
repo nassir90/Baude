@@ -81,16 +81,17 @@ enum class Ticks { NONE, END, START }
 private val LocalTicks = staticCompositionLocalOf { Ticks.NONE }
 
 /** A popup's own window at the page's density, placed by Placer; most: the room it has on the screen (as wide as the
- * screen less its margins, as tall as the more of the room under its anchor and over it). */
+ * screen less its margins, as tall as the more of the room under its anchor and over it). focusable false: the focus
+ * (and the keyboard) left where it is, as a list picked from as you type wants. */
 @Composable
-fun PopupAt(offset: DpOffset, dismiss: () -> Unit, content: @Composable (most: DpSize) -> Unit) {
+fun PopupAt(offset: DpOffset, dismiss: () -> Unit, focusable: Boolean = true, content: @Composable (most: DpSize) -> Unit) {
     val density = LocalDensity.current
     val view = LocalView.current
     val margin = with(density) { Popups.margin.roundToPx() }
     val off = with(density) { IntOffset(offset.x.roundToPx(), offset.y.roundToPx()) }
     val room = remember { mutableIntStateOf(Int.MAX_VALUE) }
     val placer = remember(off, margin, view) { Placer(off, offset != DpOffset.Zero, margin, view, room) }
-    Popup(popupPositionProvider = placer, onDismissRequest = dismiss, properties = PopupProperties(focusable = true)) {
+    Popup(popupPositionProvider = placer, onDismissRequest = dismiss, properties = PopupProperties(focusable = focusable)) {
         val frame = android.graphics.Rect().also { view.getWindowVisibleDisplayFrame(it) }
         val most = with(density) { DpSize((frame.width() - 2 * margin).toDp(), minOf(frame.height() - 2 * margin, room.intValue).toDp()) }
         Paged(density) { content(most) }

@@ -526,7 +526,7 @@ abstract class Screens(private val theme: String) {
         telemetryFixture()
         show {
             androidx.compose.foundation.layout.Box(androidx.compose.ui.Modifier.fillMaxSize()
-                .wrapContentHeight(androidx.compose.ui.Alignment.Bottom, unbounded = true).requiredHeight(1700.dp)) {
+                .wrapContentHeight(androidx.compose.ui.Alignment.Bottom, unbounded = true).requiredHeight(1380.dp)) {
                 dev.baude.android.TelemetryPage()
             }
         }
@@ -565,7 +565,7 @@ abstract class Screens(private val theme: String) {
         screen("40h-chat-access")
     }
 
-    // (a capability's members opened: a check each, Everybody over them)
+    // (a capability's field tapped, nothing typed: who may be added listed under it, Everybody first)
     @Test fun accessOpen() {
         accessFixture()
         show { SettingsScreen({}, {}, page = 4) }
@@ -573,6 +573,50 @@ abstract class Screens(private val theme: String) {
         tap(dev.baude.android.PhoneAccess.named("model_files"))
         layOut()
         screen("40g-access-open")
+    }
+
+    // (the page with 25 members: each field's pills on two lines at most, "<n> more" for the rest)
+    @Test fun accessMany() {
+        accessFixture(many = true)
+        show { SettingsScreen({}, {}, page = 4) }
+        laidOut()
+        screen("40g-access-many")
+    }
+
+    // (the page's foot with 25 members: Kubernetes, Docker, Databases, Subscriptions, Access Rules)
+    @Test fun accessFoot() {
+        accessFixture(many = true)
+        show {
+            androidx.compose.foundation.layout.Box(androidx.compose.ui.Modifier.fillMaxSize()
+                .wrapContentHeight(androidx.compose.ui.Alignment.Bottom, unbounded = true).requiredHeight(1380.dp)) {
+                dev.baude.android.AccessPage()
+            }
+        }
+        laidOut()
+        screen("40g-access-foot")
+    }
+
+    // (25 members, Shell's field typed into: the members matching listed under it)
+    @Test fun accessTyping() {
+        accessFixture(many = true)
+        show { SettingsScreen({}, {}, page = 4) }
+        laidOut()
+        tap(dev.baude.android.PhoneAccess.named("shell"))
+        layOut()
+        typeIn("c")
+        laidOut()
+        layOut()
+        screen("40g-access-typing")
+    }
+
+    // (25 members, a field's "<n> more" tapped: every pill, wrapped)
+    @Test fun accessMore() {
+        accessFixture(many = true)
+        show { SettingsScreen({}, {}, page = 4) }
+        laidOut()
+        tapEnding(" more")
+        laidOut()
+        screen("40g-access-more")
     }
 
     // (a chat's own Read (pixel-9), its Write the host's, the host's Write widened to everybody: Write opened, as
@@ -644,20 +688,34 @@ abstract class Screens(private val theme: String) {
 
     /** A host answering access and access_set as one with members studio and pixel-9 would. */
     private fun accessFixture(host: Host = Mesh.hosts.first(), name: String = "workshop", spawn: String = "everybody",
-                              write: String = "nobody") {
+                              write: String = "nobody", many: Boolean = false) {
         val studio = "5b168c62-bc6e-4150-8d6f-de1c2fade4f3"
         val pixel = "9c0e7a11-4f2d-4b8e-a3c5-2d7e9f1b6a40"
         fun rule(who: String, vararg m: String) = org.json.JSONObject().put("who", who)
             .apply { if (who == "chosen") put("members", org.json.JSONArray(m.toList())) }
+        val more = if (!many) emptyList() else listOf("nas", "laptop", "anna-mbp", "ben-thinkpad", "ci-runner-1", "ci-runner-2",
+            "ci-runner-3", "ci-runner-4", "build-mac", "cara-desktop", "dev-vm", "dina-phone", "eli-mbp", "gpu-box", "hall-tv",
+            "ivan-laptop", "kiosk", "lab-pi", "media-server", "nora-ipad", "office-mini", "test-phone", "zoe-air")
+        val ids = more.associateWith { java.util.UUID.nameUUIDFromBytes(it.toByteArray()).toString() }
+        fun ms(vararg n: String) = n.map { ids.getValue(it) }.toTypedArray()
         val rules = org.json.JSONObject().put("shell", rule("nobody")).put("browser_read", rule("chosen", studio))
             .put("browser_write", rule("nobody")).put("providers", rule("everybody"))
             .put("model_files", rule("chosen", studio, pixel)).put("spawn", rule(spawn))
             .put("manage_read", rule(if (write == "everybody") "everybody" else "chosen", studio)).put("manage_write", rule(write)).put("kube_read", rule("everybody"))
             .put("kube_write", rule("nobody")).put("databases", rule("everybody")).put("subscriptions_read", rule("everybody"))
             .put("subscriptions_write", rule("everybody")).put("access_read", rule("everybody")).put("access_write", rule("nobody"))
+        rules.put("docker_read", rule("everybody")).put("docker_write", rule("nobody"))
+        if (many) rules.put("shell", rule("chosen", studio, *ms("laptop", "build-mac")))
+            .put("browser_write", rule("chosen", studio, pixel, *ms("nas", "laptop", "hall-tv", "media-server")))
+            .put("manage_read", rule("chosen", studio, pixel, *ms("nas", "laptop", "hall-tv", "media-server", "anna-mbp",
+                "ben-thinkpad", "cara-desktop", "dina-phone", "eli-mbp", "ivan-laptop", "nora-ipad", "zoe-air")))
+            .put("manage_write", rule("chosen", studio, pixel, *ms("nas", "laptop")))
+            .put("kube_write", rule("chosen", *ms("ci-runner-1", "dev-vm")))
+            .put("databases", rule("chosen", *ms("anna-mbp", "ben-thinkpad", "cara-desktop", "dina-phone", "eli-mbp")))
         val state = org.json.JSONObject().put("host", name).put("rules", rules).put("editable", true)
             .put("members", org.json.JSONArray(listOf(org.json.JSONObject().put("id", pixel).put("name", "pixel-9"),
-                org.json.JSONObject().put("id", studio).put("name", "studio"))))
+                org.json.JSONObject().put("id", studio).put("name", "studio")) +
+                more.map { org.json.JSONObject().put("id", ids.getValue(it)).put("name", it) }))
         FixtureConnection.up(activity, host) { m ->
             if (m.optString("op") != "access") return@up null
             org.json.JSONObject().put("op", "access").put("req", m.opt("req")).put("state", state)
@@ -2572,6 +2630,24 @@ Work's weekly limit ran out at 09:12. Three chats are running on it; they stop a
         repeat(20) { if (hits().size <= nth) settle() } // (a menu that's opening: once it's up)
         hits()[nth].config[act].action!!.invoke()
         androidx.compose.runtime.snapshots.Snapshot.sendApplyNotifications() // (what it changed: composed again)
+        settle()
+    }
+
+    /** The first thing on screen whose words end with ending tapped (a count's in them: "<n> more"). */
+    private fun tapEnding(ending: String) {
+        val act = androidx.compose.ui.semantics.SemanticsActions.OnClick
+        fun roots(v: android.view.View): List<androidx.compose.ui.node.RootForTest> = when (v) {
+            is androidx.compose.ui.node.RootForTest -> listOf(v)
+            is android.view.ViewGroup -> (0 until v.childCount).flatMap { roots(v.getChildAt(it)) }
+            else -> emptyList()
+        }
+        fun all(n: androidx.compose.ui.semantics.SemanticsNode): List<androidx.compose.ui.semantics.SemanticsNode> =
+            listOf(n) + n.children.flatMap { all(it) }
+        windows().flatMap(::roots).flatMap { all(it.semanticsOwner.rootSemanticsNode) }.first { n ->
+            n.config.contains(act) && n.config.getOrElse(androidx.compose.ui.semantics.SemanticsProperties.Text) { emptyList() }
+                .any { it.text.endsWith(ending) }
+        }.config[act].action!!.invoke()
+        androidx.compose.runtime.snapshots.Snapshot.sendApplyNotifications()
         settle()
     }
 

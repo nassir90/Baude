@@ -95,6 +95,7 @@ class Server(ServerRunning, ServerSessions):
                 self.sessions[meta["id"]] = Session(self, meta)
             except (OSError, ValueError, KeyError, TypeError):
                 continue
+        self.settle_rotations()  # (a Bot's rotation the host stopped in the middle of: finished, or undone)
         self.desktop = desktopchats.DesktopChats(self)  # (this machine's Claude Desktop chats, listed to heads too)
         self.conns = set()
         self.dirty = False  # (subscribers have yet to hear of a change: _watch)

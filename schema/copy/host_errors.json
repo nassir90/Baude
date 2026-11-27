@@ -23,6 +23,7 @@
     "bot_needs_name": "a Bot has a name",
     "picture_too_big": "the picture is too big (2 MB at most)",
     "not_a_bot": "not a Bot",
+    "background_running": "it's running something in the background: stop it, or wait for its end, first",
     "task_asking": "one of its tasks is asking it something: wait for the answer first",
     "nothing_to_rotate": "nothing's been said in its chat yet",
     "memory_changed": "the Bot changed its memory since it was read",

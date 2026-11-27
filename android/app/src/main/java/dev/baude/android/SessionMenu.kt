@@ -114,7 +114,8 @@ fun SessionMenu(item: Item, open: Boolean, at: DpOffset, dismiss: () -> Unit) {
             return@Popover
         }
         if (!gone) MenuChoice(Wording.Common.renameEllipsis, false) { dismiss(); renaming = true }
-        val canRotate = !gone && s.bot != null && takes(h, "rotate") // (a Codex Bot's too)
+        val canRotate = !gone && !active && s.bot != null && takes(h, "rotate") // (a Codex Bot's too; not at a turn,
+        // as Archive isn't)
         fun rotate() {
             dismiss()
             Mesh.ask(h, Msg.Rotate(session = sid).json()) { r ->

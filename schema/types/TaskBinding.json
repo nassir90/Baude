@@ -1,0 +1,64 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "What a task's variable is bound to: value, and what else its type has. Picked from what its host offers (task_choices), or typed in as any text.",
+  "properties": {
+    "value": {
+      "type": "string",
+      "description": "What it is: a model's value, a decision model's URL, a host's id or name, a context's, pod's, container's or database's name, or the text."
+    },
+    "label": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "What it's shown as (a model's name, a host's), if not its value."
+    },
+    "effort": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "A model's: its effort."
+    },
+    "host": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "A model's: the member of the mesh that serves it, by name (its provider), if it isn't this host."
+    },
+    "model": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "A decision model's: the model its endpoint is asked for."
+    },
+    "context": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "A pod's: its Kubernetes context."
+    },
+    "namespace": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "A pod's: its namespace."
+    },
+    "container": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "A database's: the container it runs in."
+    }
+  },
+  "required": [
+    "value"
+  ],
+  "additionalProperties": false
+}

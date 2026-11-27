@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
@@ -114,6 +115,36 @@ private fun kindIcon(kind: String?) = when (kind) {
     else -> null
 }
 
+/** A variable's type, as its bind dialog's field hints it. */
+private fun variableWord(type: String?) = when (type) {
+    "model" -> Wording.Common.model
+    "decider" -> Wording.Tasks.decider
+    "host" -> Wording.NewSession.host
+    "browser_host" -> Wording.Tasks.browserHost
+    "terminal_host" -> Wording.Tasks.terminalHost
+    "kube_context" -> Wording.Tasks.kubeContext
+    "pod" -> Wording.Tasks.pod
+    "container" -> Wording.Kube.container
+    "database" -> Wording.Databases.database
+    else -> Wording.Tasks.text
+}
+
+/** What a variable's bound to, as its row says it: its label (a model's name, a host's) or value, a model's effort after it. */
+fun boundText(b: Msg.TaskBinding?): String = if (b == null) Wording.Tasks.notBound else
+    (b.label?.ifBlank { null } ?: b.value.orEmpty()) + (b.effort?.ifBlank { null }?.let { " · $it" } ?: "")
+
+/** A task's warnings, one line each: '<variable>: <why>'. */
+private fun warningsText(t: Msg.Task) = t.warnings.orEmpty().entries.joinToString("\n") { (k, w) ->
+    Wording.Tasks.variableWarning(name = k, warning = w) }
+
+/** The warning icon (in the warning colour), its tip the warning. */
+@Composable
+private fun WarningMark(tip: String) {
+    Box(Modifier.size(Gap.barButton).tip(tip), contentAlignment = Alignment.Center) {
+        Icon(Adwaita.DialogWarning, null, tint = LocalBaude.current.warning, modifier = Modifier.size(16.dp.icon))
+    }
+}
+
 /** A trigger's payload's keys (what fills an input). */
 private fun payloadKeys(kind: String) = if (kind == "git_push") listOf("repo", "branch", "before", "after", "commit", "message", "author")
     else listOf("time")
@@ -162,6 +193,9 @@ class TasksState(val live: Boolean = true) {
     var forming by mutableStateOf<Msg.Task?>(null)
     /** The task whose Delete waits to be confirmed. */
     var deleting by mutableStateOf<Msg.Task?>(null)
+    /** The variable being bound (its task, and it), and what its host offers to bind it to. */
+    var binding by mutableStateOf<Pair<Msg.Task, Msg.TaskVariable>?>(null)
+    val choices = mutableStateListOf<Msg.TaskChoice>()
 }
 
 /** A task as it's sent to be saved: the whole of it but its script (left as it is: the Bot's to change). */
@@ -262,6 +296,10 @@ fun TasksPage(hostId: String, sid: String, here: Boolean, state: TasksState? = n
                     }
                 }
                 Op.TASK_STARTED -> {}
+                Op.TASK_CHOICES -> {
+                    st.choices.clear()
+                    st.choices.addAll(Msg.TaskChoicesReply.from(r).choices.orEmpty())
+                }
                 else -> {
                     st.error = Wording.Tasks.couldnt(doing = doing)
                     st.reason = Msg.Error.from(r).said?.ifBlank { null }
@@ -295,6 +333,11 @@ fun TasksPage(hostId: String, sid: String, here: Boolean, state: TasksState? = n
             if (st.page == "task") readTask()
         }
     fun runOrAsk(t: Msg.Task) = if (t.form.orEmpty().isNotEmpty()) st.running = t else runIt(t)
+    fun bindAsk(t: Msg.Task, v: Msg.TaskVariable) {
+        if (st.live) st.choices.clear()
+        st.binding = t to v
+        if (v.type != "text") ask(Msg.TaskChoices(session = sid, type = v.type ?: "text").json(), "load")
+    }
     LaunchedEffect(hostId, sid, TaskLinks.pending) { // (opened from a pending restart's See Thread, or a chat's line
         // from the task's run that started it: at that run)
         val p = TaskLinks.pending ?: return@LaunchedEffect
@@ -342,7 +385,7 @@ fun TasksPage(hostId: String, sid: String, here: Boolean, state: TasksState? = n
                     TaskView(t, st.runs.toList(), offset, back = { st.page = "list"; load() }, run = { runOrAsk(t) },
                         change = { st.editing = t }, delete = { st.deleting = t }, addTrigger = { st.adding = t },
                         removeTrigger = { tr -> save(whole(t, triggers = t.triggers.orEmpty().filter { it.id != tr.id })) },
-                        editForm = { st.forming = t }, openRun = { openRun(it) },
+                        editForm = { st.forming = t }, openRun = { openRun(it) }, bind = { v -> bindAsk(t, v) },
                         notify = { failure, on -> save(if (failure) whole(t, failure = on) else whole(t, exit = on)) })
                 }
                 "run" -> st.run?.let { r ->
@@ -358,6 +401,7 @@ fun TasksPage(hostId: String, sid: String, here: Boolean, state: TasksState? = n
                         ActionRow(t.name.orEmpty().ifBlank { Wording.Tasks.task }, null, onClick = { openTask(t) },
                             prefix = t.last?.let { { RunState(it.status) } }, suffix = {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
+                                    if (!t.warnings.isNullOrEmpty()) WarningMark(warningsText(t))
                                     Switch(t.paused != true, { on -> save(whole(t).put("paused", !on)) },
                                         colors = SwitchDefaults.colors(checkedTrackColor = c.accentBg, checkedThumbColor = c.accentFg),
                                         modifier = Modifier.padding(end = 4.dp).semantics { contentDescription = Wording.Tasks.turnOff })
@@ -388,6 +432,14 @@ fun TasksPage(hostId: String, sid: String, here: Boolean, state: TasksState? = n
     st.forming?.let { t ->
         FormDialog(t) { made -> st.forming = null; if (made != null) save(whole(t, form = made)) }
     }
+    st.binding?.let { (t, v) ->
+        BindDialog(v, t.bindings?.get(v.name.orEmpty()), st.choices.toList()) { done, binding ->
+            st.binding = null
+            if (done) ask(Msg.TaskBind(session = sid, id = t.id.orEmpty(), name = v.name.orEmpty(), binding = binding).json(), "save") {
+                load()
+            }
+        }
+    }
     st.deleting?.let { t ->
         AlertDialog(
             onDismissRequest = { st.deleting = null },
@@ -410,7 +462,7 @@ fun TasksPage(hostId: String, sid: String, here: Boolean, state: TasksState? = n
 @Composable
 private fun TaskView(t: Msg.Task, runs: List<Msg.TaskRun>, offset: Int, back: () -> Unit, run: () -> Unit, change: () -> Unit,
                      delete: () -> Unit, addTrigger: () -> Unit, removeTrigger: (Msg.TaskTrigger) -> Unit, editForm: () -> Unit,
-                     openRun: (Msg.TaskRun) -> Unit, notify: (Boolean, Boolean) -> Unit) {
+                     openRun: (Msg.TaskRun) -> Unit, notify: (Boolean, Boolean) -> Unit, bind: (Msg.TaskVariable) -> Unit) {
     val c = LocalBaude.current
     Column(Modifier.fillMaxSize()) {
         PageHeader(Wording.Tasks.title, t.name.orEmpty().ifBlank { Wording.Tasks.task }, back) {
@@ -443,6 +495,19 @@ private fun TaskView(t: Msg.Task, runs: List<Msg.TaskRun>, offset: Int, back: ()
                 ActionRow(f.label?.ifBlank { null } ?: f.name.orEmpty(), null, compact = true, suffix = {
                     Text(typeWord(f.type), style = Type.body, color = c.dim)
                 })
+            }
+            if (!t.variables.isNullOrEmpty()) {
+                GroupHeading(Wording.Tasks.variables)
+                BoxedList(t.variables.orEmpty(), "") { v ->
+                    val b = t.bindings?.get(v.name.orEmpty())
+                    ActionRow(v.name.orEmpty(), null, onClick = { bind(v) }, compact = true, suffix = {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            t.warnings?.get(v.name.orEmpty())?.takeIf { b != null }?.let { WarningMark(it) }
+                            Text(boundText(b), style = Type.body, color = c.dim, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.widthIn(max = 180.dp))
+                        }
+                    })
+                }
             }
             GroupHeading(Wording.Tasks.runs)
             BoxedList(runs, Wording.Tasks.noRuns) { r ->
@@ -529,6 +594,10 @@ private fun RunView(r: Msg.TaskRun, log: List<Msg.TaskLogLine>, bot: String, tas
                         }, style = Type.bold, color = c.fg)
                         val values = l.values?.takeIf { it.length() > 0 }
                         Text(l.text.orEmpty().ifBlank { values?.toString(1).orEmpty() }, style = Type.body, color = c.fg)
+                    }
+                    "warning" -> Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Icon(Adwaita.DialogWarning, null, tint = c.warning, modifier = Modifier.size(16.dp.icon))
+                        Text(l.text.orEmpty(), style = Type.body, color = c.fg)
                     }
                     else -> Text(l.text.orEmpty(), style = Type.body, color = c.fg)
                 }
@@ -795,4 +864,65 @@ private fun NumberField(value: String, hint: String = "", set: (String) -> Unit)
         BasicTextField(value, set, singleLine = true, textStyle = Type.body.copy(color = c.fg), cursorBrush = SolidColor(c.accentBg),
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.fillMaxWidth())
     }
+}
+
+/** Bind <variable>: what's typed, over what its host has of its type (each word typed found in its name or where it is),
+ * one tapped to pick it, or whatever's typed; a model's effort beside it. Clear unbinds it. done(false, _): cancelled. */
+@Composable
+private fun BindDialog(v: Msg.TaskVariable, bound: Msg.TaskBinding?, choices: List<Msg.TaskChoice>,
+                       done: (Boolean, Msg.TaskBinding?) -> Unit) {
+    val c = LocalBaude.current
+    fun shown(b: Msg.TaskBinding?) = b?.label?.ifBlank { null } ?: b?.value.orEmpty()
+    var text by remember { mutableStateOf(shown(bound)) }
+    var picked by remember { mutableStateOf(bound) }
+    var effort by remember { mutableStateOf(bound?.effort.orEmpty()) }
+    val pickedShown = picked != null && text == shown(picked)
+    val words = if (pickedShown) emptyList() else text.lowercase().split(' ').filter { it.isNotBlank() }
+    val hits = choices.filter { ch ->
+        val hay = listOfNotNull(ch.binding?.label, ch.binding?.value, ch.detail).joinToString(" ").lowercase()
+        words.all { it in hay }
+    }.take(100)
+    val efforts = (choices.firstOrNull { it.binding?.value == picked?.value }?.efforts.orEmpty() +
+        listOfNotNull(effort.ifBlank { null })).distinct()
+    fun made(): Msg.TaskBinding? {
+        val base = if (pickedShown) picked else text.trim().ifBlank { null }?.let { Msg.TaskBinding(value = it) }
+        return if (base == null || v.type != "model") base else Msg.TaskBinding(value = base.value, label = base.label,
+            host = base.host, effort = effort.ifBlank { null })
+    }
+    AlertDialog(
+        onDismissRequest = { done(false, null) },
+        title = { Text(Wording.Tasks.bindHeading(name = v.name.orEmpty())) },
+        text = {
+            Column(Modifier.heightIn(max = 520.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Field(text, { text = it; if (picked != null && it != shown(picked)) picked = null }, variableWord(v.type))
+                if (hits.isNotEmpty()) Column(Modifier.heightIn(max = 260.dp).verticalScroll(rememberScrollState())) {
+                    BoxedList(hits, "", inset = 0.dp) { ch ->
+                        ActionRow(shown(ch.binding), null, compact = true, onClick = {
+                            picked = ch.binding
+                            text = shown(ch.binding)
+                        }, suffix = {
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                ch.detail?.ifBlank { null }?.let { Text(it, style = Type.body, color = c.dim, maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis, modifier = Modifier.widthIn(max = 140.dp)) }
+                                if (picked?.value == ch.binding?.value) Icon(Adwaita.ObjectSelect, null, tint = c.fg, modifier = Modifier.size(16.dp.icon))
+                            }
+                        })
+                    }
+                }
+                if (v.type == "model") Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(Wording.MetaSettings.effort, style = Type.body, color = c.fg, modifier = Modifier.weight(1f))
+                    Picker(effort.ifBlank { Wording.MetaSettings.effortDefault }, Wording.MetaSettings.effort,
+                        listOf(Wording.MetaSettings.effortDefault to "") + efforts.map { it to it }, effort) { effort = it }
+                }
+            }
+        },
+        confirmButton = { Button(Wording.Common.save, suggested = true) { done(true, made()) } },
+        dismissButton = {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(Wording.Common.cancel) { done(false, null) }
+                if (bound != null) Button(Wording.Common.clear) { done(true, null) }
+            }
+        },
+        containerColor = c.dialog,
+    )
 }

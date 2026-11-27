@@ -112,6 +112,27 @@ abstract class TasksMockups(private val theme: String) {
         shoot("task-whole")
     }
 
+    /** Typed task variables: the list's warning, the task's Variables, Bind with the host's models, and the run's warning. */
+    @Test fun variablesList() {
+        show(TaskFixtures.variablesList())
+        shoot("variables-list")
+    }
+
+    @Test fun variables() {
+        show(TaskFixtures.variablesPage())
+        shoot("variables")
+    }
+
+    @Test fun bind() {
+        show(TaskFixtures.bind())
+        shoot("bind")
+    }
+
+    @Test fun variablesRun() {
+        show(TaskFixtures.variablesRun())
+        shoot("variables-run")
+    }
+
     @Test fun run() {
         show(TaskFixtures.failedRun())
         shoot("run")

@@ -1017,6 +1017,16 @@ class ServerRunning:
                 return reply("waits_on", session=s.id)
             if op == "bot_picture":
                 return reply("bot_picture", session=s.id, picture=self.bot_picture(s))
+            if op in ("task_bind", "task_choices"):  # (a task's variables: on a thread of its own, as what's here of
+                def variables(s=s):                     # their type is looked at: kubectl, docker, the mesh)
+                    try:
+                        kind, fields = self.tasks.bind(s, msg) if op == "task_bind" else \
+                            self.tasks.choices(s, msg.get("type"), lambda cap: self.access.allowed(conn, cap))
+                    except (ValueError, TypeError, OSError) as e:
+                        return reply("error", error=str(e))
+                    return reply(kind, **fields)
+                threading.Thread(target=variables, daemon=True, name=op).start()
+                return None
             if op in ("tasks", "task", "run_task", "task_run", "task_stop"):  # (a Bot's tasks: baudelib.tasks)
                 try:
                     kind, fields = self.tasks.op(s, msg, by={"id": conn.member, "verified": conn.verified}

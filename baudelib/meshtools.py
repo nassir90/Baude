@@ -62,12 +62,15 @@ SCHEMAS = {
               "fires (a schedule; a git push to a branch of a repo on the host), each one's triggers, form, last run "
               "and version. Their scripts call you mid-run (import baudetask: ask, fallback) when they can't decide "
               "or fail: see task for one's script.", {"session": BOT}, []),
-    "task": ("One of your tasks: its script, triggers and form, and its latest runs (when, what started each, how "
-             "long, how it ended, the version it ran).", {"session": BOT, "id": {"type": "string"}}, ["id"]),
+    "task": ("One of your tasks: its script, triggers, form and variables (what each's bound to, and a warning for "
+             "one bound to what isn't there now), and its latest runs (when, what started each, how long, how it "
+             "ended, the version it ran).", {"session": BOT, "id": {"type": "string"}}, ["id"]),
     "set_task": ("Make one of your tasks, or change one (by its id; a field left out kept as it was, but triggers and "
-                 "form, given, are given whole). A Python script imports baudetask: baudetask.inputs (its form, "
-                 "filled), baudetask.payload (its trigger's event), say(text) (a line in its log), ask(text, "
-                 "form=None) (asks you: your answer, or the form's values), fallback(error), and @baudetask.main (an "
+                 "form, given, are given whole; variables and bindings too). A Python script imports baudetask: "
+                 "baudetask.inputs (its form, filled), baudetask.payload (its trigger's event), baudetask.vars (its "
+                 "variables: vars[\"Translation Model\"] or vars.translation_model, typed, None if unbound, .warning "
+                 "if what it's bound to isn't there now; a model one passed straight to agent(model=)), say(text) "
+                 "(a line in its log), ask(text, form=None) (asks you: your answer, or the form's values), fallback(error), and @baudetask.main (an "
                  "exception handed to you). A shell script gets its inputs as $BAUDE_IN_<FIELD>. A trigger's payload "
                  "fills a field of the same name, or the one fills maps it to. Saving a new script makes a new "
                  "version.",
@@ -84,6 +87,18 @@ SCHEMAS = {
                                                                "fills: {field: payload key}. A git push's payload: repo, "
                                                                "branch, before, after, commit, message, author",
                                "items": {"type": "object"}},
+                  "variables": {"type": "array", "description": "Variables, each bound once for the task (not per run, "
+                                                               "as the form is): {name, type: model|decider|host|"
+                                                               "browser_host|terminal_host|kube_context|pod|container|"
+                                                               "database|text, description?}",
+                                "items": {"type": "object"}},
+                  "bindings": {"type": "object", "description": "A variable's name: what it's bound to, {value, "
+                                                                "effort? (a model's), host? (the host serving a model), "
+                                                                "model? (a decider's), context?, namespace? (a pod's), "
+                                                                "container? (a database's)}, or just its value as text; "
+                                                                "given, given whole. A model's value is as hosts lists "
+                                                                "it; anything else is taken too. One bound to what "
+                                                                "isn't there is warned of, and the run starts anyway"},
                   "notify_failure": {"type": "boolean", "description": "A failed run is sent to you (default true)"},
                   "notify_exit": {"type": "boolean", "description": "A run that finishes with exit 0 is told to you, for your information (default false)"},
                   "timeout_s": {"type": "integer"}, "paused": {"type": "boolean"},
@@ -451,12 +466,12 @@ class Mesh:
         if a.get("delete"):
             self.request(self.local, {"op": "tasks", "session": sid, "delete": a.get("id") or ""})
             return {"deleted": a.get("id")}
-        task = {k: a[k] for k in ("id", "name", "runtime", "script", "form", "triggers", "notify_failure", "notify_exit",
-                                  "timeout_s", "paused") if k in a}
+        task = {k: a[k] for k in ("id", "name", "runtime", "script", "form", "triggers", "variables", "bindings",
+                                  "notify_failure", "notify_exit", "timeout_s", "paused") if k in a}
         if a.get("id"):  # (fields left out: as they were)
             old = self.request(self.local, {"op": "task", "session": sid, "id": a["id"]})["task"]
-            task = {**{k: old.get(k) for k in ("name", "runtime", "form", "triggers", "notify_failure", "notify_exit",
-                                               "timeout_s", "paused")}, **task}
+            task = {**{k: old.get(k) for k in ("name", "runtime", "form", "triggers", "variables", "bindings",
+                                               "notify_failure", "notify_exit", "timeout_s", "paused")}, **task}
         got = self.request(self.local, {"op": "tasks", "session": sid, "set": task})
         return next(t for t in got["tasks"] if t["id"] == got.get("saved"))
 

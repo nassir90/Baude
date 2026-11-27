@@ -1572,3 +1572,116 @@ def _(app):
                                   x.get_mapped())) >= 2, "the two asks", 20)
     T.pump(2)
     return win
+
+
+TASK_VARS = '''import baudetask as task
+model = task.vars.translation_model
+task.say("translating with", model.label, model.effort)
+worker = task.vars["Worker Agent Model"]
+if worker is None or worker.warning:  # (its own fallback: the translation model)
+    task.say("worker model:", worker.warning if worker is not None else "not bound", "- using", model.label)
+    worker = model
+said = task.agent("Translate the release notes into French.", model=worker, title="Translate the notes")
+task.say("done:", said["text"])
+'''
+
+
+def task_variables(win):
+    """Juniper's task Translate notes, its variables: Translation Model bound to Sonnet 5.5 (low), Worker Agent Model
+    to a model this host doesn't serve (warned of), Terminal Host to lab-mac, Browser Host not bound, Glossary to text;
+    run once, its script reading them and passing a model variable to agent(). (the Bot, the task, the run's id)."""
+    server = NET["lab"][0]
+    bot = NET["ids"]["Write the release notes for 2.4"]
+    os.environ["FAKE_ANSWERS"] = json.dumps({"Translate the release notes": "Traduit: notes de version 2.4."})
+    with server.lock:
+        s = server.sessions[bot]
+        st = server.tasks.store(s)
+        task, script = baude.baudelib.tasks.clean({
+            "name": "Translate notes", "runtime": "python", "script": TASK_VARS, "variables": [
+                {"name": "Translation Model", "type": "model"}, {"name": "Worker Agent Model", "type": "model"},
+                {"name": "Terminal Host", "type": "terminal_host"}, {"name": "Browser Host", "type": "browser_host"},
+                {"name": "Glossary", "type": "text"}],
+            "bindings": {"Translation Model": {"value": "sonnet", "label": "Sonnet 5.5", "effort": "low"},
+                         "Worker Agent Model": {"value": "ollama/gpt-oss:20b", "label": "GPT OSS", "effort": "low",
+                                                "host": "mac-mini"},
+                         "Terminal Host": {"value": "lab-mac", "label": "lab-mac"}, "Glossary": "docs/glossary.md"}})
+        st.put_script(task, script)
+        st.tasks.append(task)
+        st.save()
+        rid = server.tasks.start(s, task, None, "manual", {})["id"]
+    T.wait_for(lambda: st.runs[rid]["status"] == "done", "the run", 30)
+
+    def gone(*_):
+        with server.lock:
+            for c in st.runs[rid].get("chats") or ():
+                server.sessions[c].meta["archived"] = True
+                server.save(server.sessions[c])
+            server.changed()
+            st.tasks = [t for t in st.tasks if t["id"] != task["id"]]
+            st.forget(task["id"])
+            st.save()
+    win.connect("unrealize", gone)
+    return bot, task, rid
+
+
+def tasks_open(win, bot):
+    win.sidebar.on_activate(win.sidebar.list, session_row(win, bot))
+    T.wait_for(lambda: win.session_id == bot and win.panel.tasks.sid == bot, "Juniper open")
+    win.show_panel(True, "tasks")
+    tasks = win.panel.tasks
+    T.wait_for(lambda: any(t.get("warnings") for t in tasks.tasks), "the task, its warning")
+    return tasks
+
+
+@scene("57f-task-variables-list", "A Bot's tasks, one with a variable bound to a model its host doesn't serve: a warning "
+                                  "on its row, its tooltip the variable and why", size=(1200 + SIDEBAR, H))
+def _(app):
+    win = network_window(app, None)
+    lab_bots(win)
+    bot, _task, _rid = task_variables(win)
+    tasks_open(win, bot)
+    T.pump(1)
+    return win
+
+
+@scene("57g-task-variables", "A task's page, its Variables: each one's name and what it's bound to (a model and its "
+                             "effort, a host, text), one not bound, one warned of (its model not served here)",
+       size=(1200 + SIDEBAR, H))
+def _(app):
+    win = network_window(app, None)
+    lab_bots(win)
+    bot, task, _rid = task_variables(win)
+    tasks = tasks_open(win, bot)
+    tasks.open_task(task["id"])
+    T.wait_for(lambda: tasks.runs and (tasks.task or {}).get("warnings"), "the task's page")
+    T.pump(1)
+    return win
+
+
+@scene("57h-task-bind", "Bind Translation Model: what's typed over the host's models (as ⌘K lists them), the effort "
+                        "beside it", size=(1200 + SIDEBAR, H))
+def _(app):
+    win = network_window(app, None)
+    lab_bots(win)
+    bot, task, _rid = task_variables(win)
+    tasks = tasks_open(win, bot)
+    tasks.open_task(task["id"])
+    T.wait_for(lambda: tasks.runs, "the task's page")
+    dlg = tasks.bind(tasks.task, tasks.task["variables"][0])
+    T.wait_for(lambda: T.find(dlg, T.Adw.ActionRow, lambda r: hasattr(r, "choice")), "its choices")
+    T.pump(1)
+    return win
+
+
+@scene("57i-task-variables-run", "The run of that task: the warning noted first in its log, then the script's own "
+                                 "fallback to the translation model, and the agent it started with it",
+       size=(1200 + SIDEBAR, H))
+def _(app):
+    win = network_window(app, None)
+    lab_bots(win)
+    bot, _task, rid = task_variables(win)
+    tasks = tasks_open(win, bot)
+    tasks.open_run({"id": rid, "name": "Translate notes", "status": "done"})
+    T.wait_for(lambda: tasks.log, "the run's log")
+    T.pump(2)
+    return win

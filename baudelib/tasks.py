@@ -23,7 +23,7 @@ import threading
 import time
 import uuid
 
-from baudelib import wire, wording
+from baudelib import taskvars, wire, wording
 
 RUNTIMES = tuple(wire.DEFS["Task"]["properties"]["runtime"]["enum"])
 KINDS = tuple(wire.DEFS["TaskTrigger"]["properties"]["kind"]["enum"])
@@ -206,11 +206,15 @@ def clean(task, old=None):
     olds = {t["id"]: t for t in (old or {}).get("triggers") or []}
     triggers = [clean_trigger(t, olds.get(t.get("id")) if isinstance(t, dict) else None, {f["name"] for f in form})
                 for t in (task.get("triggers") or [])[:TRIGGERS_MAX]]
+    variables = taskvars.clean_variables(task["variables"]) if task.get("variables") is not None else \
+        list((old or {}).get("variables") or [])
+    bindings = taskvars.clean_bindings(task["bindings"] if task.get("bindings") is not None else
+                                       (old or {}).get("bindings"), variables)
     name = " ".join(str(task.get("name") or "").split())[:80] or (
         (script or "").strip().splitlines()[0][:40] if script else (old or {}).get("name")) or "Task"
     out = {"id": (old or {}).get("id") or _id(task.get("id")), "name": name, "runtime": runtime,
            "version": version_of(script) if script is not None else old["version"], "form": form,
-           "triggers": triggers,
+           "triggers": triggers, "variables": variables, "bindings": bindings,
            "notify_failure": bool(task["notify_failure"] if "notify_failure" in task else
                                   task["fallback"] if "fallback" in task else
                                   (old or {}).get("notify_failure", True)),  # (fallback: an older head's)
@@ -494,6 +498,9 @@ class Tasks:
         self.turns = {}  # (a Bot's session id: held while one ask of it waits on its turn: one at a time)
         self.notices = {}  # (a Bot's session id: {task id: its finished run's notice, till sent: deliver})
         self.tellers = set()  # (the chats a run started whose reports are being given their Bots: _tell)
+        self.lists = taskvars.Lists(server)  # (what's here of each type a variable's of: its choices, its warnings)
+        self.warned = {}  # ((a Bot's tasks' folder, a task's id): {a variable's name: its warning}, as last looked at)
+        self.checked = None  # (when every task's bound variables were last looked at: monotonic; None, never)
 
     # ---- kept
     def store(self, s):
@@ -521,7 +528,10 @@ class Tasks:
         """A task as the wire has it: its latest run, its next schedule (and its script)."""
         last = st.latest(task["id"], 1)
         nexts = [t["next"] for t in task["triggers"] if t["kind"] == "schedule" and t.get("next")]
+        warned = self.warned.get((st.folder, task["id"])) or {}
+        warned = {k: w for k, w in warned.items() if k in (task.get("bindings") or {})}
         return {**task, "fallback": task.get("notify_failure"),  # (what an older head's switch reads)
+                **({"warnings": warned} if warned else {}),
                 "last": last[0] if last else None, "next": None if task.get("paused") or not nexts
                 else min(nexts), **({"script": st.script(task)} if script else {})}
 
@@ -587,6 +597,75 @@ class Tasks:
             return "task_run", {"session": s.id, "run": dict(st.runs[run["id"]]), "log": st.read_log(run["id"]),
                                 "bot": (s.meta.get("bot") or {}).get("name")}
 
+    # ---- its variables
+    def bind(self, s, msg):
+        """task_bind for the Bot s: one of a task's variables bound (or not), and looked at at once for its warning
+        (not under the server's lock: kubectl, docker). (the answer's op, its fields), or ValueError."""
+        with self.server.lock:
+            if not s.meta.get("bot"):
+                raise ValueError(wording.say("host_errors.tasks_bot_only"))
+            st = self.store(s)
+            with self.lock:
+                task = st.find(msg.get("id"))
+                if task is None:
+                    raise ValueError(wording.say("host_errors.no_task"))
+                if not any(v["name"] == msg.get("name") for v in task.get("variables") or []):
+                    raise ValueError(wording.say("tasks.no_variable"))
+                bindings = dict(task.get("bindings") or {})
+                b = taskvars.clean_binding(msg.get("binding"))
+                if b is None:
+                    bindings.pop(msg["name"], None)
+                else:
+                    bindings[msg["name"]] = b
+                task["bindings"] = bindings
+                st.save()
+                task = dict(task)
+            self.server.changed()
+        self.look_at(st, task)
+        with self.server.lock, self.lock:
+            task = st.find(task["id"]) or task
+            return "task", {"session": s.id, "task": self.shown(st, task), "runs": st.latest(task["id"]),
+                            "clock": clock()}
+
+    def choices(self, s, kind, allowed):
+        """task_choices for the Bot s: what a variable of kind could be bound to here (allowed(capability): whether
+        the one asking may read what it's of: a cluster's, Docker's, a database's). (op, fields), or ValueError."""
+        if kind not in taskvars.TYPES:
+            raise ValueError(wording.say("tasks.no_variable"))
+        if not s.meta.get("bot"):
+            raise ValueError(wording.say("host_errors.tasks_bot_only"))
+        need = taskvars.NEEDS.get(kind)
+        got = taskvars.choices(self.lists, kind) if need is None or allowed(need) else []
+        return "task_choices", {"session": s.id, "type": kind, "choices": got}
+
+    def look_at(self, st, task):
+        """task's bound variables looked at now (not under the server's lock): their warnings, kept (warned) and
+        given back; heads told if they changed."""
+        said = taskvars.warnings(self.server, self.lists, task)
+        with self.lock:
+            changed = self.warned.get((st.folder, task["id"]), {}) != said
+            self.warned[(st.folder, task["id"])] = said
+        if changed:
+            with self.server.lock:
+                self.server.changed()
+        return said
+
+    def check_all(self):
+        """Every Bot's tasks' bound variables looked at, for their warnings (on a thread of its own: due's, every
+        CHECK_S)."""
+        with self.server.lock:
+            stores = [self.store(s) for s in list(self.server.sessions.values())
+                      if s.meta.get("bot") and not s.meta.get("archived") and not s.deleting]
+            with self.lock:
+                tasks = [(st, dict(t)) for st in stores for t in st.tasks if t.get("bindings")]
+        for st, task in tasks:
+            if self.server.stopped.is_set():
+                return
+            try:
+                self.look_at(st, task)
+            except Exception as e:  # noqa: BLE001 (said, and looked at again next time)
+                self.server.log(f"task {task['name']!r}: its variables not looked at: {e}")
+
     # ---- run
     def start(self, s, task, trigger, kind, payload, given=None, by=None, waited=False):
         """(server's lock held) A run of task begun (or, one of it running already, kept as skipped): its record.
@@ -639,12 +718,13 @@ class Tasks:
     def _run(self, sid, st, task, run, token):
         error, code = None, None
         try:
+            said = self.warn(st, task, run)
             if task["runtime"] == "bot":
                 self._cwd(sid, st)
                 text, failed = self.ask(run["id"], st.script(task), task["name"])
                 error = wording.say("tasks.bot_failed") if failed else None
             else:
-                code, error = self._script(sid, st, task, run, token, self._cwd(sid, st))
+                code, error = self._script(sid, st, task, run, token, self._cwd(sid, st), said)
         except Exception as e:  # noqa: BLE001 (said in its run, and on the page)
             error = f"{type(e).__name__}: {e}"
         with self.lock:
@@ -674,6 +754,20 @@ class Tasks:
                 st.log(run["id"], "status", f"{type(e).__name__}: {e}")
         elif told:
             self.notify(sid, task, run["id"])
+
+    def warn(self, st, task, run):
+        """A run's task's bound variables looked at as it starts: each that isn't there now a warning in its log (the
+        run goes on all the same: its script's to decide). {name: warning}."""
+        if not task.get("bindings"):
+            return {}
+        try:
+            said = self.look_at(st, task)
+        except Exception as e:  # noqa: BLE001 (not looked at: said, and run as it is)
+            st.log(run["id"], "status", f"{type(e).__name__}: {e}")
+            return {}
+        for name, w in said.items():
+            st.log(run["id"], "warning", wording.say("tasks.variable_warning", name=name, warning=w), variable=name)
+        return said
 
     def finished_text(self, st, task, rid):
         """What a run that finished says to its Bot: the head and table, that nothing's asked, then its last say(), else
@@ -738,7 +832,7 @@ class Tasks:
             st.put_run(run)
             return run
 
-    def _script(self, sid, st, task, run, token, cwd):
+    def _script(self, sid, st, task, run, token, cwd, said=None):
         """A python or shell task's script run (its Bot's, sid: the chats it starts nested under it, BAUDE_SPAWNED_BY):
         (its exit code, why it failed or None). Stopped or out of time (its timeout_s, the time it waited for input
         not counted): its process group told to stop, and killed after GRACE_S whether or not its script's gone."""
@@ -749,6 +843,7 @@ class Tasks:
                "BAUDE_TASK_TOKEN": token, "BAUDE_TASK_INPUTS": json.dumps(run["inputs"]),
                "BAUDE_TASK_PAYLOAD": json.dumps(run["payload"] or {}), "BAUDE_TASK_NAME": task["name"],
                "BAUDE_WIRE_VERSION": str(wire.VERSION),
+               "BAUDE_TASK_VARS": json.dumps(taskvars.for_script(task, said or {})),
                "PYTHONPATH": os.pathsep.join(p for p in (SCRIPT_DIR, os.environ.get("PYTHONPATH")) if p)}
         for k, v in run["inputs"].items():
             env[f"BAUDE_IN_{k.upper()}"] = v if isinstance(v, str) else json.dumps(v)
@@ -1168,6 +1263,9 @@ class Tasks:
         one). When the next one's due (seconds from now), or None if there's none."""
         srv, now, soonest, looks = self.server, time.time(), None, []
         self.deliver()
+        if self.checked is None or time.monotonic() - self.checked >= taskvars.CHECK_S:
+            self.checked = time.monotonic()
+            threading.Thread(target=self.check_all, daemon=True, name="task-variables").start()
         with srv.lock:
             if srv.stopped.is_set():
                 return None

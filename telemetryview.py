@@ -737,7 +737,7 @@ class Page(Adw.PreferencesPage):
         self.deps_for, self.missing_shown, self.lines_shown, self.sampled, self.ticks = (), None, None, None, 0
         self.errors_shown = self.counts_shown = None
         self.error_rows = {}  # (the Errors group's rows, by app and fingerprint)
-        self.procs, self.proc_history, self.proc_sort = [], {}, "cpu"  # (history: pid -> [(at, cpu, rss)])
+        self.procs, self.proc_history, self.proc_sort, self.procs_at = [], {}, "cpu", None  # (history: pid -> [(at, cpu, rss)])
         self.grid = TokenGrid()
         self.refresh = GLib.timeout_add_seconds(REFRESH_S, self.tick)
         self.connect("destroy", lambda *_: GLib.source_remove(self.refresh))
@@ -941,6 +941,9 @@ class Page(Adw.PreferencesPage):
         with_procs = [x for x in samples if "procs" in x]  # (they're taken less often than the machine)
         if not with_procs:
             return False
+        if with_procs[-1]["at"] == self.procs_at:  # (the read's inclusive bound sends it again: the table stays as it is)
+            return False
+        self.procs_at = with_procs[-1]["at"]
         for x in with_procs:
             for p in x.get("procs") or []:
                 hist = self.proc_history.setdefault(p.get("pid"), [])

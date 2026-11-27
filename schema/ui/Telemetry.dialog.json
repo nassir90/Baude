@@ -387,7 +387,7 @@
           ]
         },
         {
-          "said": "Processes CPU / memory can probably be more tabular; then, answering the mockups in the Inbox: the table with each process's last ten minutes on desktop, the plain table on the phone (paraphrased)",
+          "said": "Wants the Processes CPU and memory shown more as a table, and chose from the mockups: desktop with each process's recent history beside its values, the phone as a plain table (paraphrased)",
           "rule": "Every app shows Processes as one table, busiest first by CPU with CPU and Memory sortable by their headings, numbers right-aligned and a bold Total under a rule; Baude and Record draw each process's CPU and memory over the last 10 minutes beside its value now, on one scale per column; the phone shows Process, PID, CPU and Memory without lines over time",
           "decided": "2026-11-27",
           "source": [

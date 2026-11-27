@@ -18,8 +18,11 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.size
 import androidx.compose.material3.Icon
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
@@ -39,8 +42,12 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.delay
 import org.json.JSONObject
@@ -307,7 +314,7 @@ private fun CountRow(c: Msg.TelemetryCount, slow: Boolean) {
     ActionRow(countTitle(c), null, titleLines = 3,
         prefix = { Icon(APP_LOGOS[c.app] ?: Adwaita.AppBaude, null, tint = k.fg, modifier = Modifier.size(16.dp.icon)) },
         suffix = { Text(values.joinToString("  "), style = Type.body, color = k.dim, maxLines = 2, textAlign = TextAlign.End,
-            modifier = Modifier.widthIn(max = 120.dp)) })
+            modifier = Modifier.widthIn(max = 72.dp)) })
 }
 private const val ERRORS_DAYS = 7
 
@@ -374,39 +381,55 @@ private fun ProcTable(numbered: List<Pair<Msg.TelemetryProc, String>>, sort: Str
     val sorted = numbered.sortedBy { (p, _) -> -((if (sort == "cpu") p.cpu?.toDouble() else p.rss?.toDouble()) ?: -1.0) }
     val cpus = numbered.mapNotNull { it.first.cpu?.toDouble() }
     val rsses = numbered.mapNotNull { it.first.rss?.toLong() }
-    @Composable fun RowScope.Cell(text: String, w: Int, bold: Boolean = false, dim: Boolean = false) =
+    val measurer = rememberTextMeasurer()
+    val density = LocalDensity.current
+    fun widest(style: TextStyle, texts: List<String>): Dp =
+        with(density) { (texts.maxOfOrNull { measurer.measure(it, style, softWrap = false, maxLines = 1).size.width } ?: 0).toDp() }
+    val icon = 12.dp.icon
+    val pids = numbered.map { (p, _) -> p.pid?.toString() ?: "–" }
+    val cpuTexts = numbered.map { cpu(it.first.cpu?.toDouble()) } + cpu(if (cpus.isEmpty()) null else cpus.sum())
+    val rssTexts = numbered.map { saidSize(it.first.rss?.toLong()) } + saidSize(if (rsses.isEmpty()) null else rsses.sum())
+    val pidW = maxOf(widest(Type.body, pids), widest(Type.folder, listOf(Wording.Telemetry.pid)))
+    val cpuW = maxOf(widest(Type.bold, cpuTexts), widest(Type.folder, listOf(Wording.Telemetry.cpu)) + icon)
+    val rssW = maxOf(widest(Type.bold, rssTexts), widest(Type.folder, listOf(Wording.BotMemory.title)) + icon)
+    @Composable fun RowScope.Cell(text: String, w: Dp, bold: Boolean = false, dim: Boolean = false) =
         Text(text, style = if (bold) Type.bold else Type.body, color = if (dim) c.dim else c.fg, textAlign = TextAlign.End,
-            maxLines = 1, modifier = Modifier.width(w.dp))
-    @Composable fun RowScope.Head(text: String, w: Int, key: String?) =
-        Row(Modifier.width(w.dp).then(if (key != null) Modifier.clickable { resort(key) } else Modifier),
+            maxLines = 1, softWrap = false, modifier = Modifier.width(w))
+    @Composable fun RowScope.Head(text: String, w: Dp, key: String?) =
+        Row(Modifier.width(w).then(if (key != null) Modifier.clickable { resort(key) } else Modifier),
             horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.CenterVertically) {
-            Text(text, style = Type.folder, color = c.dim, maxLines = 1)
+            Text(text, style = Type.folder, color = c.dim, maxLines = 1, softWrap = false)
             if (key == sort) Icon(Adwaita.PanDown, null, tint = c.dim, modifier = Modifier.size(12.dp.icon))
         }
-    val line = Modifier.fillMaxWidth().heightIn(min = 36.dp)
     val gap = Arrangement.spacedBy(8.dp)
     BoxedList(listOf(Unit), "") {
-        Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
-            Row(Modifier.fillMaxWidth().padding(bottom = 4.dp), horizontalArrangement = gap, verticalAlignment = Alignment.CenterVertically) {
-                Text(Wording.Telemetry.process, style = Type.folder, color = c.dim, maxLines = 1, modifier = Modifier.weight(1f))
-                Head(Wording.Telemetry.pid, 34, null)
-                Head(Wording.Telemetry.cpu, 56, "cpu")
-                Head(Wording.BotMemory.title, 64, "rss")
-            }
-            for ((p, name) in sorted) Row(line, horizontalArrangement = gap, verticalAlignment = Alignment.CenterVertically) {
-                Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Icon(APP_LOGOS[p.app] ?: Adwaita.AppBaude, null, tint = c.fg, modifier = Modifier.size(16.dp.icon))
-                    Text(name, style = Type.body, color = c.fg, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        BoxWithConstraints {
+            val nameW = maxOf(maxWidth - 24.dp - pidW - cpuW - rssW - 24.dp, 72.dp)
+            val tableW = nameW + pidW + cpuW + rssW + 24.dp
+            val line = Modifier.width(tableW).heightIn(min = 36.dp)
+            Column(Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp, vertical = 8.dp)) {
+                Row(line.padding(bottom = 4.dp), horizontalArrangement = gap, verticalAlignment = Alignment.CenterVertically) {
+                    Text(Wording.Telemetry.process, style = Type.folder, color = c.dim, maxLines = 1, softWrap = false, modifier = Modifier.width(nameW))
+                    Head(Wording.Telemetry.pid, pidW, null)
+                    Head(Wording.Telemetry.cpu, cpuW, "cpu")
+                    Head(Wording.BotMemory.title, rssW, "rss")
                 }
-                Cell(p.pid?.toString() ?: "–", 34, dim = true)
-                Cell(cpu(p.cpu?.toDouble()), 56)
-                Cell(saidSize(p.rss?.toLong()), 64)
-            }
-            Box(Modifier.fillMaxWidth().padding(vertical = 4.dp).height(1.dp).background(c.rule))
-            Row(line, horizontalArrangement = gap, verticalAlignment = Alignment.CenterVertically) {
-                Text(Wording.Telemetry.total, style = Type.bold, color = c.fg, maxLines = 1, modifier = Modifier.weight(1f))
-                Cell(cpu(if (cpus.isEmpty()) null else cpus.sum()), 56, bold = true)
-                Cell(saidSize(if (rsses.isEmpty()) null else rsses.sum()), 64, bold = true)
+                for ((p, name) in sorted) Row(line, horizontalArrangement = gap, verticalAlignment = Alignment.CenterVertically) {
+                    Row(Modifier.width(nameW), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Icon(APP_LOGOS[p.app] ?: Adwaita.AppBaude, null, tint = c.fg, modifier = Modifier.size(16.dp.icon))
+                        Text(name, style = Type.body, color = c.fg, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
+                    }
+                    Cell(p.pid?.toString() ?: "–", pidW, dim = true)
+                    Cell(cpu(p.cpu?.toDouble()), cpuW)
+                    Cell(saidSize(p.rss?.toLong()), rssW)
+                }
+                Box(Modifier.width(tableW).padding(vertical = 4.dp).height(1.dp).background(c.rule))
+                Row(line, horizontalArrangement = gap, verticalAlignment = Alignment.CenterVertically) {
+                    Text(Wording.Telemetry.total, style = Type.bold, color = c.fg, maxLines = 1, softWrap = false, modifier = Modifier.width(nameW))
+                    Spacer(Modifier.width(pidW))
+                    Cell(cpu(if (cpus.isEmpty()) null else cpus.sum()), cpuW, bold = true)
+                    Cell(saidSize(if (rsses.isEmpty()) null else rsses.sum()), rssW, bold = true)
+                }
             }
         }
     }

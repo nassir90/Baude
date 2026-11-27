@@ -2,7 +2,7 @@
 mesh (Settings → Subscriptions in Baude, Record and the phone, and a chat's Sign in card): listed (list), added
 (add: a Claude token or API key, a Codex API key, or an existing signed-in Claude folder or CODEX_HOME), renamed (rename), removed (remove), a
 token account's token replaced (token), a chat moved onto another (use: once it's on it, kept as the one a new
-chat on its provider's models takes, accounts.selected), a subscription's usage read (usage; a Claude sign-in that can't be asked, a setup token's, as its chats' turns last
+chat on its provider's models takes, accounts.selected), a subscription's usage read (usage; a setup token's, which can't be asked, as its chats' turns last
 said it, with when: as_of), and a sign-in run here (sign_in): `claude auth login` with a Claude account's own folder, each line it
 writes carried back as it's written (the page to open among them), a code pasted on the head passed to it (code),
 or Codex's login with its CODEX_HOME (the browser's, the address the head's browser ended on passed to it: callback;
@@ -131,7 +131,8 @@ def _usage(server, profile, provider, done):
     except (OSError, subprocess.SubprocessError):
         return done(error=wording.say("subscriptions.codex_usage_failed" if provider == "codex" else
                                       "subscriptions.usage_failed"))
-    if limits is None and provider == "claude":  # (its sign-in can't be asked: as its chats' turns last said it)
+    if limits is None and provider == "claude" and (accounts.account(profile) or {}).get("kind") == "token":
+        # (a setup token's usage can't be asked: as its chats' turns last said it)
         from baudelib.serverstate import state_home
         seen = accounts.seen_limits(getattr(server, "state_dir", None) or state_home(), accounts.usage_key(provider, profile))
         if seen is None:

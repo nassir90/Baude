@@ -95,6 +95,7 @@ class Server(ServerRunning, ServerSessions):
                 self.sessions[meta["id"]] = Session(self, meta)
             except (OSError, ValueError, KeyError, TypeError):
                 continue
+        self.settle_rotations()  # (a Bot's rotation the host stopped in the middle of: finished, or undone)
         self.desktop = desktopchats.DesktopChats(self)  # (this machine's Claude Desktop chats, listed to heads too)
         self.conns = set()
         self.dirty = False  # (subscribers have yet to hear of a change: _watch)
@@ -366,7 +367,8 @@ class Server(ServerRunning, ServerSessions):
         with self.lock:
             path = s.transcript() if not s.kept() else os.path.join(self.state_dir, "transcripts", f"{s.id}.jsonl")
             program = models.program(s.meta.get("model"))["name"]
-            names = {s.meta.get("cli_id") or s.id, s.id}
+            names = {s.meta.get("cli_id") or s.id, s.id} - \
+                {o.meta.get("cli_id") for o in self.sessions.values() if o is not s}  # (a Bot's past thread's: its own)
         paths = [path, path[:-len(".jsonl")] if path and path.endswith(".jsonl") else None,
                  bot_dir(self.state_dir, s.id),  # (a Bot's, or a chat's that was one: its memory and its picture)
                  self.senders_path(s.id)]  # (who its messages were from, with them)

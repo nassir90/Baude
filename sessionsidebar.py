@@ -183,7 +183,7 @@ class SessionSidebar(SidebarMenu, Gtk.Box):
         actions = Gio.SimpleActionGroup()
         for name, fn in (("rename", self.ask_rename), ("archive", self.archive), ("unarchive", self.unarchive),
                          ("trash", self.ask_trash), ("hide", self.hide_remote), ("stop", self.stop_remote),
-                         ("make_bot", self.ask_bot), ("unbot", self.unbot),
+                         ("make_bot", self.ask_bot), ("unbot", self.unbot), ("rotate", self.rotate),
                          ("access", self.ask_access)):
             act = Gio.SimpleAction.new(name, GLib.VariantType.new("s"))
             act.connect("activate", lambda _a, v, fn=fn: fn(self.find_info(v.get_string())))

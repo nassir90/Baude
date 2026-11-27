@@ -76,6 +76,7 @@ class HostAccounts(val hostId: String) {
     val missing = mutableStateOf<Map<String, Msg.Dep>>(emptyMap()) // (a provider's program the host lacks, by provider)
     val disabled = mutableStateOf<Set<String>>(emptySet()) // (subscriptions disabled on the host, by usage key)
     val auto = mutableStateOf<Set<String>>(emptySet()) // (those disabled as they're exhausted, by usage key)
+    val resumes = mutableStateOf<Set<String>>(emptySet()) // (those resuming their chats a usage limit stopped, by usage key)
     private val reading = HashSet<String>()
 
     /** A subscription's usage as last read: its limits (name, percent), or what to say instead; asOf, where they're as
@@ -132,6 +133,7 @@ class HostAccounts(val hostId: String) {
         missing.value = g.missing.orEmpty()
         disabled.value = g.disabled.orEmpty().toSet()
         auto.value = g.autoDisable.orEmpty().toSet()
+        resumes.value = g.autoResume.orEmpty().toSet()
         g.lastUsage?.let { l -> last.value = l.mapValues { limits(it.value.usage.orEmpty()) } }
         loaded.value = true
         error.value = null
@@ -156,7 +158,7 @@ class HostAccounts(val hostId: String) {
 /** Settings → Subscriptions (subscriptionpage.Page), Settings' second page: the Claude and Codex accounts kept on the
  * host picked beside New session, changed there: its name; for each provider, its heading, then a card for each subscription (CLI default first, where the host has the
  * provider's program), each with Disabled where it is and ⋮ (an account's Rename…, Sign In Again… or Replace Token…, Remove…; every
- * card's Disable or Enable, Auto Disable on Exhaustion), and each card's usage as a
+ * card's Disable or Enable, Auto Disable on Exhaustion, Auto Resume on Reset), and each card's usage as a
  * bar for each limit with its percentage, read as the page is shown and every USAGE_S while it is and the app is in front; then Add account
  * (where the host lacks the provider's program, its Dependencies row instead: DepRow). */
 @Composable
@@ -204,11 +206,13 @@ fun SubscriptionsPage() {
                 val cli = if (provider == "claude") "" else HostAccounts.CODEX_CLI
                 if (host.cliCard(provider))
                     SubscriptionCard(Wording.Subscriptions.cliDefault, null, host.usage[cli], host.last.value[cli], true,
-                        cli in host.disabled.value, cli in host.auto.value) { kind -> host.switchPicked(kind, provider, cli) }
+                        cli in host.disabled.value, cli in host.auto.value, cli in host.resumes.value) { kind ->
+                        host.switchPicked(kind, provider, cli) }
                 for (a in mine) SubscriptionCard(a.name.orEmpty(), a, host.usage[a.id.orEmpty()], host.last.value[a.id.orEmpty()],
                     provider == "claude" || host.codexUsage.value, a.id.orEmpty() in host.disabled.value,
-                    a.id.orEmpty() in host.auto.value) { kind ->
-                    if (kind == "disable" || kind == "auto") host.switchPicked(kind, provider, a.id.orEmpty()) else dialog = kind to a }
+                    a.id.orEmpty() in host.auto.value, a.id.orEmpty() in host.resumes.value) { kind ->
+                    if (kind in listOf("disable", "auto", "resume")) host.switchPicked(kind, provider, a.id.orEmpty())
+                    else dialog = kind to a }
                 val lacks = host.missing.value[provider] // (its program isn't on the host: what Dependencies says, no account to add)
                 BoxedList(listOf(Unit), "") {
                     if (lacks != null) DepRow(lacks, depTitle(lacks, title))
@@ -234,17 +238,20 @@ fun SubscriptionsPage() {
     }
 }
 
-/** ⋮'s Disable (Enable) or Auto Disable on Exhaustion picked (kind: "disable", "auto") on a subscription's card (key). */
-private fun HostAccounts.switchPicked(kind: String, provider: String, key: String) =
-    if (kind == "disable") switch("disable", provider, key, key !in disabled.value)
-    else switch("auto_disable", provider, key, key !in auto.value)
+/** ⋮'s Disable (Enable), Auto Disable on Exhaustion or Auto Resume on Reset picked (kind: "disable", "auto", "resume")
+ * on a subscription's card (key). */
+private fun HostAccounts.switchPicked(kind: String, provider: String, key: String) = when (kind) {
+    "disable" -> switch("disable", provider, key, key !in disabled.value)
+    "resume" -> switch("auto_resume", provider, key, key !in resumes.value)
+    else -> switch("auto_disable", provider, key, key !in auto.value)
+}
 
 /** A subscription's card: its name, Disabled where it is, and ⋮ with what can be done to it (pick: an account's
- * "rename", "again" or "remove"; every card's "disable", "auto"); its usage: a bar for each limit with its name and percentage over it, else what was
+ * "rename", "again" or "remove"; every card's "disable", "auto", "resume"); its usage: a bar for each limit with its name and percentage over it, else what was
  * said instead. Till it's first read here, what the host last read (last) greyed (Checking… where it has none). */
 @Composable
 private fun SubscriptionCard(name: String, a: Msg.Account?, usage: HostAccounts.Usage?, last: List<HostAccounts.Limit>?,
-                             shown: Boolean, off: Boolean, auto: Boolean, pick: (String) -> Unit) {
+                             shown: Boolean, off: Boolean, auto: Boolean, resume: Boolean, pick: (String) -> Unit) {
     val c = LocalBaude.current
     val shape = RoundedCornerShape(12.dp)
     Column(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 4.dp).clip(shape).background(c.card)
@@ -254,7 +261,7 @@ private fun SubscriptionCard(name: String, a: Msg.Account?, usage: HostAccounts.
             Text(name, style = Type.body, color = c.fg, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
             if (off) Text(Wording.Subscriptions.disabled, style = Type.body, color = c.dim, maxLines = 1,
                 modifier = Modifier.padding(horizontal = 8.dp))
-            AccountMenu(a, off, auto, pick)
+            AccountMenu(a, off, auto, resume, pick)
         }
         if (shown) UsageBars(usage, last, Modifier.padding(end = 6.dp))
     }
@@ -428,10 +435,11 @@ private fun limitLabel(l: HostAccounts.Limit): String {
 }
 
 /** A subscription's ⋮ with what can be done to it (pick): an account's (a) "rename" and "again"; every one's
- * "disable" (Enable, where it's disabled: off) and "auto" (Auto Disable on Exhaustion, ticked where it's on); an
+ * "disable" (Enable, where it's disabled: off), "auto" (Auto Disable on Exhaustion) and "resume" (Auto Resume on
+ * Reset), each ticked where it's on; an
  * account's "remove". */
 @Composable
-private fun AccountMenu(a: Msg.Account?, off: Boolean, auto: Boolean, pick: (String) -> Unit) {
+private fun AccountMenu(a: Msg.Account?, off: Boolean, auto: Boolean, resume: Boolean, pick: (String) -> Unit) {
     var open by remember { mutableStateOf(false) }
     Box {
         IconButton(Adwaita.ViewMore, Wording.Subscriptions.moreTip) { open = true }
@@ -446,6 +454,7 @@ private fun AccountMenu(a: Msg.Account?, off: Boolean, auto: Boolean, pick: (Str
             }
             MenuChoice(if (off) Wording.Subscriptions.enable else Wording.Subscriptions.disable, false) { open = false; pick("disable") }
             MenuChoice(Wording.Subscriptions.autoDisable, auto) { open = false; pick("auto") }
+            MenuChoice(Wording.Subscriptions.autoResume, resume) { open = false; pick("resume") }
             if (a != null) {
                 MenuDivider()
                 MenuChoice(Wording.Common.removeEllipsis, false) { open = false; pick("remove") }

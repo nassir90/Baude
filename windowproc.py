@@ -549,7 +549,8 @@ class WindowProc:
             return True
         child = self.transcript.get_first_child()
         while child is not None:
-            if not child.has_css_class("sysnote") and child is not getattr(self, "cut_row", None):
+            if not child.has_css_class("sysnote") and child is not getattr(self, "cut_row", None) and \
+                    child is not getattr(self, "resume_row", None):
                 return True
             child = child.get_next_sibling()
         return False
@@ -844,6 +845,7 @@ class WindowProc:
         if carried is not None:
             self.set_box(*carried)
         self.cut_row = self.cut_pending = None  # (the next chat's own: cut_state)
+        self.resume_row = self.resume_shown = None  # (and resume_state)
         self.cut_continuing = False
         self.set_slack(None)  # (the next chat's no room left under it)
         self.toggle_held = None

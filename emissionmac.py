@@ -557,9 +557,11 @@ class MacWeb:
     def take_event(cls, event):
         """A wheel's turn or a trackpad's gesture over a page (in Emission's window, or hosted in Baude's; not
         read-only), given to its view as it comes, momentum and all: GTK keeps these for its own surface, so the page
-        would never see them. True if it's taken (macos.route_events)."""
+        would never see them; a key, to a page that has the keys (take_key). True if it's taken (macos.route_events)."""
         send = macos.objc_send
         kind = send(event, b"type", ret=ctypes.c_ulong)
+        if kind in cls.KEY_EVENTS:
+            return cls.take_key(event, kind)
         sel = cls.GESTURES.get(kind)
         if sel is None:
             return False
@@ -614,6 +616,73 @@ class MacWeb:
         if began:
             cls.gesture_to = "gtk"
         return False
+
+    KEY_NAMES = {chars: name for name, (_code, chars) in MAC_KEYS.items() if len(chars) == 1}  # (a key's name, by what it types)
+    EDITING = {b"selectAll:", b"copy:", b"cut:", b"paste:", b"undo:", b"redo:"}  # (what ⌘A, C, X, V, Z and ⇧⌘Z run)
+    MOVING = {"Left", "Right", "Up", "Down", "Home", "End", "PageUp", "PageDown", "Backspace", "Delete"}  # (with ⌘, the page's)
+    KEY_EVENTS = (10, 11, 12)  # (an NSEvent's type: a key's press, its release, a modifier's change)
+    HOLD_JS = ("window.__emission_held = null; addEventListener('keydown', e => setTimeout(() => {"
+               " window.__emission_held = e.defaultPrevented; }), {capture: true, once: true}); return true")
+    HELD_JS = ("for (let i = 0; i < 20 && window.__emission_held === null; i++)"
+               " await new Promise(r => setTimeout(r, 5)); return window.__emission_held === true")
+
+    @classmethod
+    def page_with_keys(cls, ns):
+        """The page whose view its window's keys go to (clicked into, or given them), unless it's read-only or out of
+        sight; None if GTK's widgets have them."""
+        web = cls.views.get(macos.objc_send(ns, b"firstResponder")) if ns else None
+        if web is None or web.attached_root in (None, "parked") or getattr(web.window, "blocked", False):
+            return None
+        return web
+
+    @classmethod
+    def take_key(cls, event, kind):
+        """A key over a window whose page has the keys, given to the page as it comes off AppKit's queue (GTK would
+        keep it for its own widgets: Baude's hold off every key a page has, guard_keys). ⌘C, ⌘X, ⌘V, ⌘A, ⌘Z and ⇧⌘Z
+        go to the page as a key first, then run as its editing unless the page took the key itself (as an Edit menu's
+        would: GTK's menu bar has none). ⌥ and ⌃ keys (option characters, dead keys, ⌥←, ⌃A…) and ⌘ with a movement
+        or deletion key go to the page as they are. Other keys with ⌘ are left to GTK, Baude's and the window's
+        shortcuts first, as Safari's menu's come before its page. True if it's taken."""
+        send = macos.objc_send
+        ns = send(event, b"window")
+        if (web := cls.page_with_keys(ns)) is None:
+            return False
+        flags = send(event, b"modifierFlags", ret=ctypes.c_ulong)
+        mods = tuple(sorted(m for m, bit in MAC_MODS.items() if flags & bit))
+        if kind != 12 and set(mods) - {"shift"}:
+            chars = cls._text(send(event, b"charactersIgnoringModifiers")).lower()
+            name = cls.KEY_NAMES.get(chars, chars)
+            command = MAC_COMMANDS.get((name, mods)) if "cmd" in mods else None
+            if command in cls.EDITING:
+                if kind == 10:
+                    web.edit_after_key(event, command)
+                return True
+            if "cmd" in mods and (name not in cls.MOVING or {"alt", "ctrl"} & set(mods)):
+                return False  # (Baude's or the window's own shortcut: GTK's, which come first)
+            if "ctrl" in mods and name == "Tab":
+                return False
+        send(ns, b"sendEvent:", event, types=(ctypes.c_void_p,))
+        return True
+
+    def edit_after_key(self, event, command):
+        """event (a key press with ⌘) given the page as AppKit gives a key equivalent, then command (copy:, paste:…)
+        run in it, unless the page's own handler for the key prevented its default."""
+        send = macos.objc_send
+
+        def edit(held, _error=None):
+            if not self.view or held == "true":
+                return
+            if command in (b"undo:", b"redo:"):  # (WebKit's editing undone in the window's undo manager, as Edit's
+                undo = send(self.view, b"undoManager")  # Undo does: the view has no undo: of its own)
+                can, do = (b"canUndo", b"undo") if command == b"undo:" else (b"canRedo", b"redo")
+                if undo and send(undo, can, ret=ctypes.c_bool):
+                    send(undo, do)
+            elif send(self.view, b"respondsToSelector:", objc_sel(command), types=(ctypes.c_void_p,),
+                      ret=ctypes.c_bool):
+                send(self.view, command, None, types=(ctypes.c_void_p,))
+        self.run_js(self.HOLD_JS, lambda *_: None)
+        send(self.view, b"performKeyEquivalent:", event, types=(ctypes.c_void_p,), ret=ctypes.c_bool)
+        self.run_js(self.HELD_JS, edit)
 
     @classmethod
     def parking(cls):
@@ -1118,12 +1187,15 @@ class MacWeb:
             send(ns, b"makeFirstResponder:", before, types=(ctypes.c_void_p,))
 
     @staticmethod
-    def page_has_keys(window, when, keyval):
-        """Whether a key GTK hears (at when: its event's time, ms; keyval its key) isn't its own: a page has the keys
-        (clicked into), it's a Bot's key a page handed back, or text a Bot's key made, come with no key of its own
-        (VoidSymbol, at 0) while the Bot types. Your own keys come with theirs, and at their own times."""
-        if when in MacWeb.bot_times or not MacWeb.gtk_has_keys(window):
+    def page_has_keys(window, when, keyval, state=0):
+        """Whether a key GTK hears (at when: its event's time, ms; keyval its key; state its modifiers) isn't its
+        own: it's a Bot's key a page handed back, or text a Bot's key made, come with no key of its own (VoidSymbol,
+        at 0) while the Bot types; or a page has the keys (clicked into) and it's no ⌘ or Ctrl key, which are the
+        window's shortcuts'. Your own keys come with theirs, and at their own times."""
+        if when in MacWeb.bot_times:
             return True
+        if not MacWeb.gtk_has_keys(window):
+            return not state & (1 << 28 | 1 << 2)  # (GDK's META_MASK and CONTROL_MASK)
         return keyval == 0xffffff and not when and time.monotonic() < MacWeb.bot_text_until
 
     def keyed(self):

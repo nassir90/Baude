@@ -14,7 +14,7 @@ import uuid
 
 from baudelib import (
     access, accounts, agentproxy, autofix, deciders, deps, desktopchats, emissionlink, emissiontools, hostaccounts, hostdb, hostdocker, hostfiles, hostfixes, hostkube,
-    hostlogin, hostqueue, inbox, mesh, meshtools, models, hostterminal, multiplexlink, notes, selfupdate, telemetry, themes,
+    hostlogin, hostqueue, hostresume, inbox, mesh, meshtools, models, hostterminal, multiplexlink, notes, selfupdate, telemetry, themes,
     wire, wording, worktree,
 )
 from baudelib.serverstate import (
@@ -1100,6 +1100,9 @@ class ServerRunning:
                 self.save(s)
                 self.changed()
                 return reply("held", session=s.id)
+            if op == "resume_cancel":  # (its resume after a usage limit, let go of: hostresume)
+                hostresume.drop(self, s)
+                return reply("resume_cancelled", session=s.id)
             if op == "waits_on":  # (its agent waits on another chat's answer, or no longer: kept, for a restart)
                 on = msg.get("on") if isinstance(msg.get("on"), dict) else {}
                 if not wire.is_id(on.get("session") or "") or on.get("host") is not None and not wire.is_id(on["host"]):

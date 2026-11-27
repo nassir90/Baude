@@ -6,6 +6,7 @@ import re
 import sqlite3
 import subprocess
 import threading
+import time
 from collections import deque
 
 from baudelib import accounts, wording
@@ -327,6 +328,8 @@ class CodexProc(AppServer):
         self.thread = self.turn = None
         self.last_text = ""
         self.starting = self.interrupting = False
+        self.limits = self.limit_reset = None  # (its last rate-limit snapshot; when a limit that stopped its turn resets)
+        self.limits_at = self.turn_at = 0.0  # (when that snapshot was read; when its turn began)
         super().__init__(exe, cwd, env, lambda code: self.dispatch(on_exit, code),
                          lambda line: self.emit("_stderr", text=line), profile)
         params = {"cwd": cwd, **permission_params(self.mode, read_only=self.read_only)}
@@ -412,6 +415,7 @@ class CodexProc(AppServer):
         elif method == "turn/started":
             with self.lock:
                 self.turn = params["turn"]["id"]
+                self.turn_at = time.time()
                 self.starting = False
                 if self.interrupting:
                     self.interrupt()
@@ -424,14 +428,22 @@ class CodexProc(AppServer):
             turn = params["turn"]
             status = turn.get("status")
             error = (turn.get("error") or {}).get("message") or (status if status != "completed" else None)
+            if error and status != "interrupted":
+                self.limit_reset = self.stopped_by_limit(turn)
             self.finish(error, turn.get("durationMs"), interrupted=status == "interrupted")
         elif method == "account/rateLimits/updated":  # (its subscription's limits, as a turn's answer said them)
             snapshot = params.get("rateLimits")
+            if isinstance(snapshot, dict) and snapshot.get("limitId") in (None, "codex"):
+                self.limits, self.limits_at = snapshot, time.time()  # (its default bucket's latest: when a limit that
+                # stops a turn resets)
             key = accounts.usage_key("codex", self.profile)
             try:
-                if isinstance(snapshot, dict) and accounts.codex_exhausted(snapshot) and \
-                        accounts.exhausted(key) and self.on_disabled is not None:
-                    self.on_disabled(key)
+                if isinstance(snapshot, dict) and accounts.codex_exhausted(snapshot):
+                    from baudelib import hostresume
+                    reset = hostresume.codex_reset(snapshot)
+                    if accounts.exhausted(key, hostresume.after(reset) if reset is not None else None) and \
+                            self.on_disabled is not None:
+                        self.on_disabled(key, reset)
             except (OSError, sqlite3.Error):
                 pass
         elif method == "thread/tokenUsage/updated":
@@ -449,6 +461,22 @@ class CodexProc(AppServer):
         elif method == "serverRequest/resolved":
             with self.lock:
                 self.asks.pop(params.get("requestId"), None)
+
+    def stopped_by_limit(self, turn):
+        """When the usage limit that stopped a failed turn resets (seconds since 1970), or None where a limit didn't
+        stop it: its error says so, or the snapshot of its rate limits read since the turn began (not an earlier
+        turn's) says one's reached; where none was read since, they're asked for."""
+        from baudelib import hostresume, models
+        said = "usageLimitExceeded" in json.dumps((turn.get("error") or {}).get("codexErrorInfo"))
+        fresh = self.limits if self.limits_at >= self.turn_at else None
+        if fresh is None and said and (exe := models.codex_exe()):
+            try:
+                fresh = rate_limits(exe, timeout=10, profile=self.profile)
+            except RuntimeError:
+                fresh = None
+        if not said and not (isinstance(fresh, dict) and fresh.get("rateLimitReachedType")):
+            return None
+        return hostresume.codex_reset(fresh)
 
     def result(self, error=None, duration=None, interrupted=False):
         # (a turn stopped ends as Claude Code's does: error_during_execution, Baude's chat says it stopped, not failed)

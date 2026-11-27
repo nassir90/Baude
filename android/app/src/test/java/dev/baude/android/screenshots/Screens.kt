@@ -216,6 +216,16 @@ abstract class Screens(private val theme: String) {
         withMenus("05v-subscriptions-disabled-menu")
     }
 
+    // (Home's ⋮ with Auto Resume on Reset ticked)
+    @Test fun subscriptionsResumeMenu() {
+        accountsFixture(resume = true)
+        show { SettingsScreen({}, {}, page = 1) }
+        laidOut()
+        tap("Change this account", nth = 1)
+        laidOut()
+        withMenus("05x-subscriptions-resume-menu")
+    }
+
     @Test fun subscriptionsAutoMenu() {
         accountsFixture(disabled = true)
         show { SettingsScreen({}, {}, page = 1) }
@@ -750,7 +760,8 @@ abstract class Screens(private val theme: String) {
     }
 
     /** workshop's accounts; reading: each usage read left unanswered, the host's last reading of each in every answer. */
-    private fun accountsFixture(reading: Boolean = false, listing: Boolean = true, disabled: Boolean = false) {
+    private fun accountsFixture(reading: Boolean = false, listing: Boolean = true, disabled: Boolean = false,
+                                resume: Boolean = false) {
         FixtureConnection.up(activity, Mesh.hosts.first()) { m ->
             if (m.optString("op") != "accounts" || (reading && m.optString("what") == "usage") ||
                 (!listing && m.optString("what") == "list")) null
@@ -760,6 +771,7 @@ abstract class Screens(private val theme: String) {
                 .put("defaults", org.json.JSONObject().put("claude", "w1").put("codex", "")).put("claude_cli", true).put("codex_usage", true)
                 .apply {
                     if (disabled) put("disabled", org.json.JSONArray(listOf("w1"))).put("auto_disable", org.json.JSONArray(listOf("h2")))
+                    if (resume) put("auto_resume", org.json.JSONArray(listOf("h2")))
                     fun limits(id: String): org.json.JSONArray {
                         val (five, seven) = mapOf("w1" to (25 to 40), "h2" to (72 to 18), "codex" to (37 to 61),
                             "p1" to (8 to 3))[id] ?: (5 to 12)
@@ -1747,6 +1759,21 @@ Work's weekly limit ran out at 09:12. Three chats are running on it; they stop a
         show { ChatShell("h1", "a", back = {}, open = { _, _ -> }, feedback = {}) }
         laidOut()
         screen("20v-chat-subscription-disabled")
+    }
+
+    // (a chat whose turn the five-hour limit stopped, on a subscription that resumes it: when, and Cancel, at its end)
+    @Test fun chatLimitResume() {
+        val chat = Mesh.openChat("h1", "a")
+        chat.lines.addAll(listOf(Line("you", "Refactor the parser into a tokenizer and a parser"),
+            Line("bot", "You've hit your 5-hour limit · resets 4:08pm (Europe/Dublin)")))
+        val at = java.time.LocalDate.now().atTime(16, 9).atZone(java.time.ZoneId.systemDefault()).toEpochSecond()
+        Mesh.sessions["h1"] = Mesh.sessions["h1"].orEmpty().map {
+            if (it.id == "a") Msg.Session.from(it.json().put("resume_at", at).put("state", "idle")) else it }
+        chat.busy.value = false
+        chat.thinking.value = false
+        show { ChatShell("h1", "a", back = {}, open = { _, _ -> }, feedback = {}) }
+        laidOut()
+        screen("20w-chat-limit-resume")
     }
 
     // (the same chat on the added account: CLI default still listed, to go back to)

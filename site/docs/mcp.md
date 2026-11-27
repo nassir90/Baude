@@ -266,19 +266,19 @@ One of a host's access rules set (capability: the rule's name), or a chat's own 
 
 #### `accounts` (Accounts)
 
-The host's Claude and Codex subscription accounts (hostaccounts): list them; add one (Claude: name and an existing signed-in config folder, or name and token; Codex: name and an existing signed-in home, or name and token); rename one (id, name); replace a token account's token (id, token); remove one (id); disable a subscription or enable it again (disable: id, "" with provider for the CLI's own sign-in, and on: its chats' agents stopped, nothing sent to them nor started while it is); turn its auto-disable on or off (auto_disable: id or "" with provider, and on: disabled as one of its limits is used up or extra usage is billed, as its chats' turns or a usage read say, or at once if its last reading says so; enabled again only by hand); use another for a chat (session, id; "" for the CLI's own sign-in: its agent started again under it, resuming the chat, once its turn's over; kept as the one the host's new chats on its provider's models take, defaults); read a subscription's usage (id; "" for the CLI's own sign-in of provider, Claude's where none is said); sign in (sign_in: provider and name for a new account, or id to sign in to one again; Claude's runs claude auth login with the account's own folder, its lines coming as they're written, the page to open among them; Codex's codex login (method: the browser's, by default, or the device code's), its state coming as it goes (login: the page to open, and the device code's code to enter there); then its end; the connection's going stops it); pass a code the sign-in page showed to the sign-in this connection runs (code: no answer of its own); pass the address a browser ended on after a Codex browser sign-in's page to the one this connection runs (callback: url; answered with the page codex's server gave, or error). Each other is answered with accounts.
+The host's Claude and Codex subscription accounts (hostaccounts): list them; add one (Claude: name and an existing signed-in config folder, or name and token; Codex: name and an existing signed-in home, or name and token); rename one (id, name); replace a token account's token (id, token); remove one (id); disable a subscription or enable it again (disable: id, "" with provider for the CLI's own sign-in, and on: its chats' agents stopped, nothing sent to them nor started while it is); turn its auto-disable on or off (auto_disable: id or "" with provider, and on: disabled as one of its limits is used up or extra usage is billed, as its chats' turns or a usage read say, or at once if its last reading says so; enabled again only by hand); turn its auto-resume on or off (auto_resume: id or "" with provider, and on: a chat of its a usage limit stopped is sent a message to carry on a minute after the limit resets, unless it's disabled then); use another for a chat (session, id; "" for the CLI's own sign-in: its agent started again under it, resuming the chat, once its turn's over; kept as the one the host's new chats on its provider's models take, defaults); read a subscription's usage (id; "" for the CLI's own sign-in of provider, Claude's where none is said); sign in (sign_in: provider and name for a new account, or id to sign in to one again; Claude's runs claude auth login with the account's own folder, its lines coming as they're written, the page to open among them; Codex's codex login (method: the browser's, by default, or the device code's), its state coming as it goes (login: the page to open, and the device code's code to enter there); then its end; the connection's going stops it); pass a code the sign-in page showed to the sign-in this connection runs (code: no answer of its own); pass the address a browser ended on after a Codex browser sign-in's page to the one this connection runs (callback: url; answered with the page codex's server gave, or error). Each other is answered with accounts.
 
 | Field | Type | Required | What it is |
 |---|---|---|---|
-| `what` | `list` \| `add` \| `rename` \| `token` \| `remove` \| `disable` \| `auto_disable` \| `use` \| `usage` \| `sign_in` \| `code` \| `callback` | yes | What to do. |
-| `provider` | `claude` \| `codex` |  | add, sign_in (a new account): whose. usage, disable and auto_disable with id "": whose CLI's own sign-in (Claude's where left out). |
-| `id` | string |  | rename, token, remove, disable, auto_disable, use, usage, sign_in: the account ("" for the CLI's own sign-in, disable, auto_disable, use and usage only). |
+| `what` | `list` \| `add` \| `rename` \| `token` \| `remove` \| `disable` \| `auto_disable` \| `auto_resume` \| `use` \| `usage` \| `sign_in` \| `code` \| `callback` | yes | What to do. |
+| `provider` | `claude` \| `codex` |  | add, sign_in (a new account): whose. usage, disable, auto_disable and auto_resume with id "": whose CLI's own sign-in (Claude's where left out). |
+| `id` | string |  | rename, token, remove, disable, auto_disable, auto_resume, use, usage, sign_in: the account ("" for the CLI's own sign-in, disable, auto_disable, auto_resume, use and usage only). |
 | `session` | string |  | use: the chat whose account it is, one of the host's sessions whose model is the account's provider's. sign_in (a Claude account's) and token: the chat it's for, whose sign-in (ChatLogin) its host moves as it goes, as a login request's, if the asker may read the chat (Agent Management's read). |
 | `name` | string |  | add, rename, sign_in (a new account): its name. |
 | `token` | string |  | add (Claude, Codex), token: what signs the account in, pasted: Claude's a long-lived token from claude setup-token (sk-ant-oat…) or an Anthropic API key (sk-ant-api…); Codex's an OpenAI API key (sk-…), written to a new CODEX_HOME's auth.json as codex login --with-api-key writes it. Kept on the host only, owner-only; never said back. |
 | `home` | string |  | add (Codex): an existing CODEX_HOME on the host, signed in with ChatGPT and keeping its credentials in a file. |
 | `folder` | string |  | add (Claude): an existing Claude config folder on the host, signed in (claude auth status says so, run with it). |
-| `on` | boolean |  | disable: true to disable it, false to enable it again; auto_disable: whether it's disabled as it's exhausted. |
+| `on` | boolean |  | disable: true to disable it, false to enable it again; auto_disable: whether it's disabled as it's exhausted. auto_resume: whether its chats a usage limit stopped are resumed as it resets. |
 | `code` | string |  | code: what the sign-in page showed, pasted. |
 | `method` | `browser` \| `device` |  | sign_in, Codex's: browser (the default: codex login, its page sending the browser back to the host's 127.0.0.1) or device (codex login --device-auth). |
 | `url` | string |  | callback: the address the browser ended on (its path and query are what's passed on). |
@@ -580,7 +580,7 @@ A Bot's browser tool's request (baudelib.emissiontools) to the Emission that has
 | Field | Type | Required | What it is |
 |---|---|---|---|
 | `bot` | BotRef |  | The Bot. |
-| `default` | boolean |  | The call is to Emission's own window here on its Default profile instead of a Bot's (☰ → Browser from another host, watched): what a Browser pane does (tabs, navigate, new_tab, close_tab, select_tab, click, hover, drag, type, key, scroll, answer_prompt), nothing else. |
+| `default` | boolean |  | The call is to Emission's own window here on its Default profile instead of a Bot's (☰ → Browser from another host, watched): what a Browser pane does (tabs, navigate, new_tab, close_tab, select_tab, click, hover, drag, type, key, scroll, answer_prompt, copy, paste), nothing else. |
 | `call` | object |  | The tool's request. |
 
 #### `emission_answer` (EmissionAnswer)
@@ -1056,6 +1056,14 @@ The host process's restart, as a head asks for it: once nothing's running (its p
 |---|---|---|---|
 | `do` | `free` \| `now` \| `pause` | yes | free: restart once no chat's running a command and no task's running (and this head's pause let go of); now: restart at once, what's running stopped and turns cut short; pause: no restart while this head holds it (till it says free, or its connection goes). |
 
+#### `resume_cancel` (ResumeCancel)
+
+A session's resume after a usage limit (its listing's resume_at) let go of: nothing's sent to it as the limit resets.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `session` | string | yes | The session's id. |
+
 #### `rotate` (Rotate)
 
 A Bot's conversation archived as a past thread of its own ("<Bot> / <its title>", read-only), and the Bot carried on in a new, empty one with a new agent (on another model if one's given): its id, name, picture, memory, tasks, browser and rules as they were. Refused while it's at a turn or one of its tasks is asking it.
@@ -1456,6 +1464,7 @@ accounts' answer: the accounts and defaults as they are after it, and whether th
 | `missing` | object |  | What the host lacks of a provider's program, by provider (codex: its Codex CLI, as deps says it); a provider that's there isn't in it. Shown in place of Add account. |
 | `disabled` | array of string |  | The subscriptions disabled on the host, by usage key (an account's id, "" for Claude's CLI's own sign-in, "codex" for Codex's): their chats can't send. |
 | `auto_disable` | array of string |  | The subscriptions whose auto-disable is on, by usage key: disabled as they're exhausted. |
+| `auto_resume` | array of string |  | The subscriptions whose Auto Resume on Reset is on, by usage key: a chat of theirs a usage limit stopped is sent a message to carry on once the limit resets. |
 | `last_usage` | object |  | Each Claude and Codex subscription's usage as the host last read it, by id ("" for Claude's CLI's own sign-in, "codex" for Codex's), where that read said its limits: a client shows it greyed till its own usage read answers. |
 | `who` | string/null |  | sign_in, signed in: who as, as claude auth status says (Codex's: the email its sign-in names). |
 
@@ -2132,6 +2141,14 @@ restart's answer: the restart it keeps, as info's restart says it (it goes once 
 | Field | Type | Required | What it is |
 |---|---|---|---|
 | `restart` | RestartState? |  | Its restart, or null: none pending. |
+
+#### `resume_cancelled` (ResumeCancelled)
+
+resume_cancel's answer.
+
+| Field | Type | Required | What it is |
+|---|---|---|---|
+| `session` | string | yes | The session's id. |
 
 #### `rotated` (Rotated)
 
@@ -3718,6 +3735,7 @@ A session as a host lists it.
 | `account` | Account? |  | The subscription account its agent runs under on its host, fixed as it's made (the one the host's new chats take for its provider then, accounts' defaults, or as it's first written in), or the one picked for it since (accounts' use), from the moment it's picked; null for the CLI's own sign-in, or an account since removed (account_gone). |
 | `account_gone` | boolean |  | Its subscription account was removed from its host after it was picked for it: its agent can't start till another is picked. |
 | `account_disabled` | boolean |  | The subscription it runs on (its account, or its provider's CLI's own sign-in) is disabled on its host (accounts' disable, or auto_disable as it's exhausted): its agent stopped, nothing sent to it nor started, every app's send button off and its banner saying so, till it's enabled or another's picked. |
+| `resume_at` | number/null |  | When its host sends it a message to carry on (seconds since 1970): its last turn was stopped by a usage limit and the subscription it runs on has Auto Resume on Reset on (accounts' auto_resume), so it's resumed a minute after the limit resets. Null once anything's sent to it, it's cancelled (resume_cancel), or the subscription's disabled or no longer resumes its chats. |
 | `held` | array of HeldMessage |  | Messages held for it, oldest first. |
 | `senders` | integer |  | Its sender store's revision (0 for none): what a head's copy is checked against. |
 | `always_allow` | array of string |  | The tools allowed whenever it asks for them, sorted. |
@@ -4227,6 +4245,6 @@ Somewhere wire.reach can go: this machine's host process, one listening on anoth
 | `TERMINAL_KEEP_S` | `600` | A terminal (terminal op) no connection is attached to now: its program kept running this long to be attached to again, in seconds. |
 | `TERMINAL_KEPT_BYTES` | `262144` | What a terminal (terminal op) wrote lately, kept to show again on attach: this many bytes at most. |
 | `TTL` | `16` | A tunnel's passed through at most this many hosts (open's ttl). |
-| `VERSION` | `39` | The wire's version, as a host's hello says it. |
+| `VERSION` | `40` | The wire's version, as a host's hello says it. |
 | `ZOOM_MAX` | `1568` | A browser zoom's longest side, in pixels. |
 | `ZOOM_QUALITY` | `90` | A browser zoom's JPEG quality. |

@@ -103,8 +103,8 @@ class Window(Adw.ApplicationWindow):
         chrome.tab_bar.set_view(self.view)
         if hosted:  # (in Baude's window: its tabs' keys are Baude's own tabs')
             self.view.set_shortcuts(Adw.TabViewShortcuts.NONE)
-        if self.Engine is MacWeb and not (agent and not hosted):  # (a wheel's and a trackpad's gestures its pages')
-            macos.route_events(MacWeb.take_event)
+        if self.Engine is MacWeb and not (agent and not hosted):  # (a wheel's and a trackpad's gestures its pages',
+            macos.route_events(MacWeb.take_event)                  # and the keys of a page that has them)
         self.view.connect("notify::selected-page", lambda *_: self.selected())
         self.view.connect("close-page", self.closing)
         self.banner = Adw.Banner(button_label=wording.say("common.show"))

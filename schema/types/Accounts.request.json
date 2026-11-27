@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
-  "description": "The host's Claude and Codex subscription accounts (hostaccounts): list them; add one (Claude: name and an existing signed-in config folder, or name and token; Codex: name and an existing signed-in home, or name and token); rename one (id, name); replace a token account's token (id, token); remove one (id); disable a subscription or enable it again (disable: id, \"\" with provider for the CLI's own sign-in, and on: its chats' agents stopped, nothing sent to them nor started while it is); turn its auto-disable on or off (auto_disable: id or \"\" with provider, and on: disabled as one of its limits is used up or extra usage is billed, as its chats' turns or a usage read say, or at once if its last reading says so; enabled again only by hand); use another for a chat (session, id; \"\" for the CLI's own sign-in: its agent started again under it, resuming the chat, once its turn's over; kept as the one the host's new chats on its provider's models take, defaults); read a subscription's usage (id; \"\" for the CLI's own sign-in of provider, Claude's where none is said); sign in (sign_in: provider and name for a new account, or id to sign in to one again; Claude's runs claude auth login with the account's own folder, its lines coming as they're written, the page to open among them; Codex's codex login (method: the browser's, by default, or the device code's), its state coming as it goes (login: the page to open, and the device code's code to enter there); then its end; the connection's going stops it); pass a code the sign-in page showed to the sign-in this connection runs (code: no answer of its own); pass the address a browser ended on after a Codex browser sign-in's page to the one this connection runs (callback: url; answered with the page codex's server gave, or error). Each other is answered with accounts.",
+  "description": "The host's Claude and Codex subscription accounts (hostaccounts): list them; add one (Claude: name and an existing signed-in config folder, or name and token; Codex: name and an existing signed-in home, or name and token); rename one (id, name); replace a token account's token (id, token); remove one (id); disable a subscription or enable it again (disable: id, \"\" with provider for the CLI's own sign-in, and on: its chats' agents stopped, nothing sent to them nor started while it is); turn its auto-disable on or off (auto_disable: id or \"\" with provider, and on: disabled as one of its limits is used up or extra usage is billed, as its chats' turns or a usage read say, or at once if its last reading says so; enabled again only by hand); turn its auto-resume on or off (auto_resume: id or \"\" with provider, and on: a chat of its a usage limit stopped is sent a message to carry on a minute after the limit resets, unless it's disabled then); use another for a chat (session, id; \"\" for the CLI's own sign-in: its agent started again under it, resuming the chat, once its turn's over; kept as the one the host's new chats on its provider's models take, defaults); read a subscription's usage (id; \"\" for the CLI's own sign-in of provider, Claude's where none is said); sign in (sign_in: provider and name for a new account, or id to sign in to one again; Claude's runs claude auth login with the account's own folder, its lines coming as they're written, the page to open among them; Codex's codex login (method: the browser's, by default, or the device code's), its state coming as it goes (login: the page to open, and the device code's code to enter there); then its end; the connection's going stops it); pass a code the sign-in page showed to the sign-in this connection runs (code: no answer of its own); pass the address a browser ended on after a Codex browser sign-in's page to the one this connection runs (callback: url; answered with the page codex's server gave, or error). Each other is answered with accounts.",
   "properties": {
     "op": {
       "const": "accounts",
@@ -23,6 +23,7 @@
         "remove",
         "disable",
         "auto_disable",
+        "auto_resume",
         "use",
         "usage",
         "sign_in",
@@ -36,11 +37,11 @@
         "claude",
         "codex"
       ],
-      "description": "add, sign_in (a new account): whose. usage, disable and auto_disable with id \"\": whose CLI's own sign-in (Claude's where left out)."
+      "description": "add, sign_in (a new account): whose. usage, disable, auto_disable and auto_resume with id \"\": whose CLI's own sign-in (Claude's where left out)."
     },
     "id": {
       "type": "string",
-      "description": "rename, token, remove, disable, auto_disable, use, usage, sign_in: the account (\"\" for the CLI's own sign-in, disable, auto_disable, use and usage only)."
+      "description": "rename, token, remove, disable, auto_disable, auto_resume, use, usage, sign_in: the account (\"\" for the CLI's own sign-in, disable, auto_disable, auto_resume, use and usage only)."
     },
     "session": {
       "type": "string",
@@ -64,7 +65,7 @@
     },
     "on": {
       "type": "boolean",
-      "description": "disable: true to disable it, false to enable it again; auto_disable: whether it's disabled as it's exhausted."
+      "description": "disable: true to disable it, false to enable it again; auto_disable: whether it's disabled as it's exhausted. auto_resume: whether its chats a usage limit stopped are resumed as it resets."
     },
     "code": {
       "type": "string",

@@ -138,7 +138,8 @@ class Chat(hostId: String, sid: String) {
     var draftTyping = false // (typed, its save not sent yet)
     var draftHeld: Msg.ChatDraft? = null // (another head's, come while this one's own was waiting: Mesh.draftIn)
     var draftDirty = false  // (written here, not taken by its host yet: Mesh's drafts)
-    var draftFailed = false // (its last save not taken by its host, nothing typed since: holds nothing, Mesh.saveDraft)
+    var draftFailed = false // (its last save not given to its host, nothing typed since: saved again, Mesh.saveDraft)
+    var draftRetrying = false // (a save to be made again is waiting: Mesh.retryDraft)
     var draftTries = 0      // (saves made again since one was last taken)
     var draftRestoring = false // (what was kept here going back in the box: not written now)
     var putText = ""        // (the box's text as it was last put there, not written: markdown)
@@ -882,10 +883,11 @@ object Mesh {
     // host answers a save of that very text. Saved DRAFT_SAVE_MS after typing stops, at once as the box is emptied
     // (sent, queued) and as the chat's left; another head's save comes as draft_changed. The last write wins: one
     // that comes while this box is dirty or has a save on its way is held, and put in once it's neither, if its host
-    // had it after this box's. A save its host didn't take holds nothing: another's write held then, or come after,
-    // goes in (its host has it, and this box's it never had); else it's saved again DRAFT_RETRY_MS later, twice as
-    // long each time, DRAFT_RETRIES times (WindowDrafts' too). Only a dirty copy kept here is ever saved over its host's as the chat's opened. What's
-    // attached stays this phone's (Queue's drafts)
+    // had it after this box's. Typing its host never took is never replaced by another's write: a save it refused as
+    // too long (DRAFT_CHARS_MAX) stays this box's, not saved again, another's write held as before; one it couldn't
+    // be given is saved again DRAFT_RETRY_MS later, twice as long each time, DRAFT_RETRIES times (WindowDrafts' too),
+    // another's write held meanwhile, and as the chat's attached again. Only a dirty copy kept here is ever saved
+    // over its host's as the chat's opened. What's attached stays this phone's (Queue's drafts)
 
     const val DRAFT_SAVE_MS = 400L
     const val DRAFT_RETRY_MS = 1000L
@@ -963,12 +965,12 @@ object Mesh {
                         Queue.setDraft(key, Draft(kept.text, kept.files, kept.queue, kept.upto, kept.hold, dirty = false))
                     return@post
                 }
-                if (!took) { // (not kept there: still dirty, saved again as it's opened or attached, and soon)
-                    chat.draftText = null
-                    if (chat.draftFlight == 0 && !chat.draftTyping && boxMarkdown(chat) == markdown) {
+                if (!took) { // (not kept there: still dirty, this box's, and held against others'. Too long: stays so, as
+                    chat.draftText = null // its host will never take it. Else saved again soon, and as it's opened or attached)
+                    if (chat.draftFlight == 0 && !chat.draftTyping && boxMarkdown(chat) == markdown &&
+                        r.optString("code") != WireCheck.INVALID) {
                         chat.draftFailed = true
-                        if (chat.draftHeld != null) releaseHeld(chat) // (another's, which its host has: in, in place
-                        else retryDraft(chat, markdown)               // of this)
+                        retryDraft(chat, markdown)
                     }
                     return@post
                 }
@@ -984,19 +986,20 @@ object Mesh {
     /** (a save of markdown its host didn't take) Saved again in a while, unless it's been tried DRAFT_RETRIES times,
      * or the box has changed, another's write come or the chat's been left meanwhile. */
     private fun retryDraft(chat: Chat, markdown: String) {
-        if (chat.draftTries >= DRAFT_RETRIES) return
+        if (chat.draftTries >= DRAFT_RETRIES || chat.draftRetrying) return
         val wait = DRAFT_RETRY_MS shl chat.draftTries++
+        chat.draftRetrying = true
         main.postDelayed({
+            chat.draftRetrying = false
             if (open === chat && chat.draftFailed && chat.draftFlight == 0 && !chat.draftTyping &&
                 boxMarkdown(chat) == markdown) saveDraft(chat, markdown)
         }, wait)
     }
 
-    /** Another head's write held while this box was dirty or saving, put in now it's neither (or this box's last
-     * save wasn't taken). */
+    /** Another head's write held while this box was dirty or saving, put in now it's neither. */
     fun releaseHeld(chat: Chat) {
         val held = chat.draftHeld ?: return
-        if (chat.draftFlight > 0 || chat.draftTyping || chat.draftDirty && !chat.draftFailed) return
+        if (chat.draftFlight > 0 || chat.draftTyping || chat.draftDirty) return
         chat.draftHeld = null
         draftIn(chat, held)
     }
@@ -1016,16 +1019,11 @@ object Mesh {
             chat.draftRev = rev
             return
         }
-        if (chat.draftFlight > 0 || chat.draftTyping || chat.draftDirty && !chat.draftFailed || chat.reverting != null) {
+        if (chat.draftFlight > 0 || chat.draftTyping || chat.draftDirty || chat.reverting != null) {
             if ((chat.draftHeld?.rev?.toLong() ?: -1L) < rev) chat.draftHeld = d
             return
         }
         chat.draftRev = rev
-        if (chat.draftFailed) { // (this box's, which its host never had, gives way)
-            chat.draftDirty = false
-            chat.draftFailed = false
-            chat.draftTries = 0
-        }
         chat.draftText = d.text.orEmpty()
         if (boxMarkdown(chat) != chat.draftText) {
             chat.draft.value = null
@@ -1568,6 +1566,19 @@ object Mesh {
                         .let { if (send) Wording.HeldSend.notSent(why = it) else Wording.HeldSend.notDeleted(why = it) },
                         Toast.LENGTH_SHORT).show()
                 else read(chat)
+            }
+        }
+    }
+
+    /** A chat's resume after a usage limit (its resume_at) cancelled on its host, as Baude's cancel_resume: the line
+     * gone as its listing says so; why not, if it isn't. */
+    fun resumeCancel(chat: Chat) {
+        val c = conns[chat.hostId] ?: return
+        c.request(Msg.ResumeCancel(session = chat.sid).json()) { r ->
+            main.post {
+                if (r.optString("op") == Op.ERROR)
+                    Toast.makeText(app, Wording.LimitResume.notCancelled(why = Msg.Error.from(r).said.orEmpty()
+                        .ifBlank { Wording.BotBrowser.hostSaidNo }), Toast.LENGTH_SHORT).show()
             }
         }
     }

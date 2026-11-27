@@ -125,9 +125,36 @@ fun ChatPage(chat: Chat, name: String, attach: Boolean = true, stop: (() -> Unit
     }
     LaunchedEffect(chat, chat.draft.value) { // (shared from another app: after what's written)
         val shared = chat.draft.value ?: return@LaunchedEffect
-        text = if (text.isBlank()) shared else text.trimEnd() + "\n" + shared
+        val now = if (text.isBlank()) shared else text.trimEnd() + "\n" + shared
+        if (chat.draftRestoring) chat.putText = toMarkdown(now) // (what was kept here, put back: not written now)
+        chat.draftRestoring = false
+        text = now
         chat.draft.value = null
     }
+    LaunchedEffect(chat, text) { // (its host's draft: dirty as it's written, saved a moment after typing stops, at
+        chat.typed = text          // once as the box empties)
+        val markdown = toMarkdown(text)
+        if (chat.sender != null || chat.reverting != null) return@LaunchedEffect
+        if (markdown == chat.draftText) { // (written back to what its host has)
+            chat.draftTyping = false
+            if (chat.draftFlight == 0) {
+                chat.draftDirty = false
+                Mesh.releaseHeld(chat)
+            }
+            return@LaunchedEffect
+        }
+        if (markdown == chat.putText) return@LaunchedEffect // (as it was put there, not written)
+        chat.draftDirty = true
+        if (!Mesh.keepsDraft(chat)) {
+            chat.draftTyping = false
+            return@LaunchedEffect
+        }
+        chat.draftTyping = true
+        if (markdown.isNotBlank()) kotlinx.coroutines.delay(Mesh.DRAFT_SAVE_MS)
+        chat.draftTyping = false
+        Mesh.saveDraft(chat, markdown)
+    }
+    androidx.compose.runtime.DisposableEffect(chat) { onDispose { Mesh.flushDraft(chat) } } // (left: saved now)
     val list = remember(chat) { androidx.compose.foundation.lazy.LazyListState() }
     var revealed by remember(chat) { mutableStateOf<String?>(null) } // (the message whose revert button's shown)
     val placeKey = if (chat.sender == null) "${chat.hostId}/${chat.sid}" else null // (a host's chat's place is kept)
@@ -154,6 +181,17 @@ fun ChatPage(chat: Chat, name: String, attach: Boolean = true, stop: (() -> Unit
     if (field.text != text) { // (put in from outside: its bullets made as typed ones are)
         field = makeBullets(androidx.compose.ui.text.input.TextFieldValue(text, androidx.compose.ui.text.TextRange(text.length)))
         if (field.text != text) text = field.text
+    }
+    LaunchedEffect(chat, chat.boxText.value) { // (its host's draft, in place of what's written: the caret and
+        val put = chat.boxText.value ?: return@LaunchedEffect // selection carried over the change)
+        val was = field
+        val at = { o: Int -> Mesh.movedOffset(was.text, put, o) }
+        field = makeBullets(androidx.compose.ui.text.input.TextFieldValue(put,
+            androidx.compose.ui.text.TextRange(at(was.selection.start), at(was.selection.end)), null))
+        text = field.text
+        chat.typed = field.text
+        chat.putText = toMarkdown(field.text)
+        chat.boxText.value = null
     }
     val host = chat.sender == null // (Baude's own commands, the / and @ lists: a host's chat's)
     val marks = remember(chat) { Marks() }

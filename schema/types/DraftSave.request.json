@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "A chat's draft written (a change to the chat: Agent Management's write), kept by its host as the newest whatever was there (the last write wins), and told every other head attached to it (draft_changed). Sent a moment after typing stops, as the chat's left, and at once as the box is emptied by sending.",
+  "properties": {
+    "op": {
+      "const": "draft_save",
+      "description": "What it is."
+    },
+    "req": {
+      "type": ["integer", "null"],
+      "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "session": {
+      "type": "string",
+      "description": "The session's id."
+    },
+    "text": {
+      "type": "string",
+      "description": "What's written in its box now (empty: nothing, as once it's sent)."
+    },
+    "head": {
+      "type": ["string", "null"],
+      "description": "The box writing it, an id of the head's own pick (one each window or chat page): carried in the draft as it's told, so the box knows its own save."
+    }
+  },
+  "required": ["op", "session", "text"],
+  "additionalProperties": false
+}

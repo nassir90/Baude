@@ -341,9 +341,10 @@ def _(app):
     return folder_plus_chat(app)
 
 
-def open_folder_step(app, typed=None, into=None):
+def open_folder_step(app, typed=None, into=None, keys=()):
     """A window on lab-mac, Open folder… pressed: "Open a folder on lab-mac" from the folder last used there, its
-    folders listed; typed: a path typed instead; into: a folder in the list clicked."""
+    folders listed; typed: a path typed instead; into: a folder in the list clicked; keys: then these pressed in the
+    path (Gdk keyvals)."""
     win = network_window(app)
     r = NET["lab"][1]
     net = os.path.dirname(NET["folders"][0])
@@ -363,6 +364,10 @@ def open_folder_step(app, typed=None, into=None):
     if into is not None:
         rows.emit("row-activated", listed(into))
         T.wait_for(lambda: listed("src"), "its folders")
+    for keyval in keys:
+        press = next(c for c in entry.observe_controllers() if isinstance(c, Gtk.EventControllerKey))
+        press.emit("key-pressed", keyval, 0, 0)
+        T.pump(0.4)
     T.pump(0.5)
     return win
 
@@ -381,6 +386,24 @@ def _(app):
 @scene("55f5-network-open-folder-browsed", "A folder in the list clicked: it's the path, its folders listed")
 def _(app):
     return open_folder_step(app, typed=os.path.join(os.path.dirname(NET["folders"][0]), "pa"), into="parser")
+
+
+@scene("55f5b-network-open-folder-tab", "Tab with the path's last part beginning one folder: that folder, with a /, "
+                                       "its folders listed")
+def _(app):
+    network_fixture()
+    win = open_folder_step(app, typed=os.path.join(os.path.dirname(NET["folders"][0]), "pa"), keys=(Gdk.KEY_Tab,))
+    T.wait_for(lambda: win.folder_parts[0].get_text().endswith("/parser/") and
+               any((row := win.folder_parts[1].get_row_at_index(i)) is not None and row.path.endswith("/src")
+                   for i in range(5)), "parser's folders")
+    T.pump(0.3)
+    return win
+
+
+@scene("55f5c-network-open-folder-picked", "Down twice in the path: the second folder in the list picked, the path "
+                                           "still being typed")
+def _(app):
+    return open_folder_step(app, into="parser", keys=(Gdk.KEY_Down, Gdk.KEY_Down))
 
 
 @scene("55f6-network-open-folder-opened", "Open: a blank chat on lab-mac, in that folder")

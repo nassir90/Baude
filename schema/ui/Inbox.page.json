@@ -5,7 +5,7 @@
     "phone"
   ],
   "opens": [
-    "the Inbox row under Search sessions",
+    "the Inbox row over Search sessions",
     "back / forward in the tab history"
   ],
   "code": [

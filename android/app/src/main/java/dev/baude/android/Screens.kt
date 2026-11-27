@@ -145,6 +145,8 @@ fun ChatPage(chat: Chat, name: String, attach: Boolean = true, stop: (() -> Unit
         }
         if (markdown == chat.putText) return@LaunchedEffect // (as it was put there, not written)
         chat.draftDirty = true
+        chat.draftFailed = false
+        chat.draftTries = 0
         if (!Mesh.keepsDraft(chat)) {
             chat.draftTyping = false
             return@LaunchedEffect

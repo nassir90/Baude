@@ -11,6 +11,8 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.fillMaxSize
@@ -35,6 +37,7 @@ import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -360,25 +363,53 @@ private fun valueRow(title: String, value: String?, slug: String? = null, ago: S
     }
 }
 
-/** A process's row (telemetryview.proc_rows): its app's logo, its name (numbered where its app has several), its CPU
- * and memory after them. */
+/** Processes as a table (telemetryview.proc_table, without its lines over time: no room on a phone): Process, PID, CPU
+ * and Memory, a line each of numbered (each with its name, numbered where its app has several), busiest first by sort
+ * ("cpu" or "rss"; CPU's and Memory's headings sort by theirs), its app's logo before its name; under a rule, a bold
+ * Total, the processes' CPU and memory added up (one that gave none left out). */
 @Composable
-private fun ProcessRow(p: Msg.TelemetryProc, n: Int?) {
+private fun ProcTable(numbered: List<Pair<Msg.TelemetryProc, String>>, sort: String, resort: (String) -> Unit) {
     val c = LocalBaude.current
-    val name = APP_NAMES[p.app]?.invoke() ?: p.app.orEmpty()
-    ActionRow(if (n == null) name else Wording.Telemetry.processN(name = name, n = n), null,
-        prefix = { Icon(APP_LOGOS[p.app] ?: Adwaita.AppBaude, null, tint = c.fg, modifier = Modifier.size(16.dp.icon)) },
-        suffix = { Text(Wording.Telemetry.cpuRss(cpu = p.cpu?.let { String.format(Locale.ROOT, "%.1f", it.toDouble()) } ?: "–",
-            rss = saidSize(p.rss?.toLong())), style = Type.body, color = c.dim, maxLines = 1) })
-}
-
-/** The Total row ending the processes (telemetryview.proc_rows): bold, its CPU and memory the processes' added up. */
-@Composable
-private fun TotalRow(cpus: List<Double>, rsses: List<Long>) {
-    val c = LocalBaude.current
-    ActionRow(Wording.Telemetry.total, null, bold = true,
-        suffix = { Text(Wording.Telemetry.cpuRss(cpu = if (cpus.isEmpty()) "–" else String.format(Locale.ROOT, "%.1f", cpus.sum()),
-            rss = saidSize(if (rsses.isEmpty()) null else rsses.sum())), style = Type.body, color = c.fg, maxLines = 1) })
+    fun cpu(x: Double?) = Wording.Telemetry.cpuPercent(cpu = x?.let { String.format(Locale.ROOT, "%.1f", it) } ?: "–")
+    val sorted = numbered.sortedBy { (p, _) -> -((if (sort == "cpu") p.cpu?.toDouble() else p.rss?.toDouble()) ?: -1.0) }
+    val cpus = numbered.mapNotNull { it.first.cpu?.toDouble() }
+    val rsses = numbered.mapNotNull { it.first.rss?.toLong() }
+    @Composable fun RowScope.Cell(text: String, w: Int, bold: Boolean = false, dim: Boolean = false) =
+        Text(text, style = if (bold) Type.bold else Type.body, color = if (dim) c.dim else c.fg, textAlign = TextAlign.End,
+            maxLines = 1, modifier = Modifier.width(w.dp))
+    @Composable fun RowScope.Head(text: String, w: Int, key: String?) =
+        Row(Modifier.width(w.dp).then(if (key != null) Modifier.clickable { resort(key) } else Modifier),
+            horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.CenterVertically) {
+            Text(text, style = Type.folder, color = c.dim, maxLines = 1)
+            if (key == sort) Icon(Adwaita.PanDown, null, tint = c.dim, modifier = Modifier.size(12.dp.icon))
+        }
+    val line = Modifier.fillMaxWidth().heightIn(min = 36.dp)
+    val gap = Arrangement.spacedBy(8.dp)
+    BoxedList(listOf(Unit), "") {
+        Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
+            Row(Modifier.fillMaxWidth().padding(bottom = 4.dp), horizontalArrangement = gap, verticalAlignment = Alignment.CenterVertically) {
+                Text(Wording.Telemetry.process, style = Type.folder, color = c.dim, maxLines = 1, modifier = Modifier.weight(1f))
+                Head(Wording.Telemetry.pid, 34, null)
+                Head(Wording.Telemetry.cpu, 56, "cpu")
+                Head(Wording.BotMemory.title, 64, "rss")
+            }
+            for ((p, name) in sorted) Row(line, horizontalArrangement = gap, verticalAlignment = Alignment.CenterVertically) {
+                Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Icon(APP_LOGOS[p.app] ?: Adwaita.AppBaude, null, tint = c.fg, modifier = Modifier.size(16.dp.icon))
+                    Text(name, style = Type.body, color = c.fg, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+                Cell(p.pid?.toString() ?: "–", 34, dim = true)
+                Cell(cpu(p.cpu?.toDouble()), 56)
+                Cell(saidSize(p.rss?.toLong()), 64)
+            }
+            Box(Modifier.fillMaxWidth().padding(vertical = 4.dp).height(1.dp).background(c.rule))
+            Row(line, horizontalArrangement = gap, verticalAlignment = Alignment.CenterVertically) {
+                Text(Wording.Telemetry.total, style = Type.bold, color = c.fg, maxLines = 1, modifier = Modifier.weight(1f))
+                Cell(cpu(if (cpus.isEmpty()) null else cpus.sum()), 56, bold = true)
+                Cell(saidSize(if (rsses.isEmpty()) null else rsses.sum()), 64, bold = true)
+            }
+        }
+    }
 }
 
 /** Settings → Telemetry (telemetryview.Page), Settings' fourth page: the host picked beside New session (this phone's
@@ -393,6 +424,7 @@ fun TelemetryPage() {
     var usage by remember(hostId, asked) { mutableStateOf<JSONObject?>(null) }
     var metrics by remember(hostId) { mutableStateOf<JSONObject?>(null) }
     var procsAt by remember(hostId) { mutableStateOf<Msg.TelemetrySample?>(null) }
+    var procSort by remember { mutableStateOf("cpu") }
     var profiles by remember(hostId, asked) { mutableStateOf<JSONObject?>(null) }
     var errors by remember(hostId, asked) { mutableStateOf<JSONObject?>(null) }
     var counted by remember(hostId, asked) { mutableStateOf<JSONObject?>(null) }
@@ -481,13 +513,10 @@ fun TelemetryPage() {
                 Heading(Wording.SidePanel.processes)
                 val numbered = procs.mapIndexed { i, p ->
                     val same = procs.filter { it.app == p.app }
-                    p to if (same.size > 1) procs.subList(0, i).count { it.app == p.app } + 1 else null
+                    val name = APP_NAMES[p.app]?.invoke() ?: p.app.orEmpty()
+                    p to if (same.size > 1) Wording.Telemetry.processN(name = name, n = procs.subList(0, i).count { it.app == p.app } + 1) else name
                 }
-                val cpus = procs.mapNotNull { it.cpu?.toDouble() }
-                val rsses = procs.mapNotNull { it.rss?.toLong() }
-                BoxedList(numbered + (null to null), "") { (p, n) ->
-                    if (p == null) TotalRow(cpus, rsses) else ProcessRow(p, n)
-                }
+                ProcTable(numbered, procSort) { procSort = it }
             }
         }
         counted?.takeIf { it.optString("op") == Op.TELEMETRY_READ }?.let { r ->

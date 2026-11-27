@@ -457,6 +457,9 @@ list.navigation-sidebar.kube-side > row.kube-side-head-row { margin-top: 9px; }
 .kube-fill.kube-over { background: @warning_color; border-top-left-radius: 0; border-bottom-left-radius: 0; }
 .kube-tick { background: alpha(currentColor, 0.75); border-radius: 1px; }
 .kube-spark { color: @success_color; }
+.proc-spark { color: @success_color; }
+.proc-head { font-size: 0.85em; font-weight: bold; }
+.proc-sort { padding: 2px 4px; min-height: 0; margin-left: -4px; }
 .kube-home-head { font-size: 0.85em; font-weight: bold; opacity: 0.6; padding: 2px 4px; min-height: 0; }
 .schema-canvas { font-size: 0.92em; }
 .schema-rows { background: @baude_inside; }  /* (opaque: nothing of the diagram shows through) */

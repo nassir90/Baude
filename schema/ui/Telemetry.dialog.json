@@ -334,7 +334,7 @@
     },
     {
       "name": "Processes",
-      "shows": "Heading \"Processes\": a row each process the host's latest sample with its processes has (they're taken every 30 seconds) (its procs, as typed: app and pid), in this order, those of one app by pid: Host Process, Baude, Record, Emission, Multiplex (the phone's app, as Baude, on a phone's host). Each row: its app's logo at its start, monochrome in the row's text colour as the model logos are and as big as one (16 px; schema/icons/baude's baude-app-<app>-symbolic: the logo's shape with what's drawn on it cut out, no tile, no accent; the host process Baude's, the phone's app Baude's), the app's name, and its CPU and memory after it, dim (\"6.2% · 613 MB\"). After the last, a Total row in bold (no logo): the processes' CPU and memory added up in the same form, a process that gave none left out of its sum; it stays at the bottom. Hidden while telemetry is off, or the sample has none.",
+      "shows": "Heading \"Processes\": one table in a card, of the processes the host's latest sample with its processes has (they're taken every 30 seconds) (its procs, as typed: app and pid), busiest first by CPU; a click on the CPU or Memory heading sorts by that one instead (the heading sorted by has a down arrow after it), a process that gave none last. Each process keeps its name however it's sorted: the app's name, numbered where the app has several, in the order Host Process, Baude, Record, Emission, Multiplex and by pid within an app (\"Emission (2)\"; the phone's app, as Baude, on a phone's host). Each line: its app's logo at its start, monochrome in the text colour as the model logos are and as big as one (16 px; schema/icons/baude's baude-app-<app>-symbolic: the logo's shape with what's drawn on it cut out, no tile, no accent; the host process Baude's, the phone's app Baude's), and its name. Desktop (Baude and Record): columns Process, \"CPU, Last 10 Minutes\" and \"Memory, Last 10 Minutes\"; under each of the last two, the process's line over the last 10 minutes (the samples the page reads, kept as it reads more; one scale for every process's line in a column, so the busiest stands out; a gap where its samples are 5 minutes apart; drawn in the Kubernetes history's colour), then its value now, right-aligned (\"6.2%\", \"613 MB\"). Phone: columns Process, PID (dim), CPU and Memory, the numbers right-aligned, with no lines over time (no room). Under a rule, a bold Total (no logo): the processes' CPU and memory added up, a process that gave none left out of its sum; it stays at the bottom whatever the sort. Hidden while telemetry is off, or the sample has none.",
       "copy": [
         "side_panel.processes",
         "telemetry.host_process",
@@ -342,7 +342,14 @@
         "mesh_versions.record",
         "mesh_versions.emission",
         "deps.multiplex",
-        "telemetry.cpu_rss",
+        "telemetry.process_n",
+        "telemetry.process",
+        "telemetry.pid",
+        "telemetry.cpu",
+        "bot_memory.title",
+        "telemetry.cpu_history",
+        "telemetry.memory_history",
+        "telemetry.cpu_percent",
         "telemetry.total",
         "telemetry.size_gb",
         "images.size_mb"
@@ -376,6 +383,16 @@
             {
               "session": "b3845b21-55ac-4aab-a769-fb8517403c51",
               "message": "ae00d4f1-22a6-4e1f-afe6-1ef28e5f464a"
+            }
+          ]
+        },
+        {
+          "said": "Processes CPU / memory can probably be more tabular; then, answering the mockups in the Inbox: the table with each process's last ten minutes on desktop, the plain table on the phone (paraphrased)",
+          "rule": "Every app shows Processes as one table, busiest first by CPU with CPU and Memory sortable by their headings, numbers right-aligned and a bold Total under a rule; Baude and Record draw each process's CPU and memory over the last 10 minutes beside its value now, on one scale per column; the phone shows Process, PID, CPU and Memory without lines over time",
+          "decided": "2026-11-27",
+          "source": [
+            {
+              "issue": "BaudeInternal#311"
             }
           ]
         }

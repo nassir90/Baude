@@ -330,6 +330,23 @@ paned.main-split.inside-before > separator { margin-left: -6px; margin-right: 6p
 .composer-box:disabled { opacity: 0.55; }
 .ref-pop contents { padding: 4px; }  /* (a list to pick from as you type: PickList) */
 .ref-pop listview { background: none; }
+/* an access rule's field, as an email's To (accessview.RuleField): an entry's fill, its pills rounded, each a picture
+   (or Everybody's icon), a name and × */
+.access-field { background-color: alpha(currentColor, 0.1); border-radius: 6px; padding: 3px 4px; min-height: 28px; }
+.access-field:focus-within { outline: 2px solid alpha(@accent_color, 0.5); outline-offset: -2px; }
+.access-field:disabled { opacity: 0.55; }
+.access-field text { padding: 0 4px; min-height: 24px; }
+.access-field text placeholder { color: alpha(currentColor, 0.55); }
+.access-pill { border-radius: 99px; background-color: alpha(currentColor, 0.1); padding: 1px 1px 1px 3px; min-height: 22px; }
+.access-pill.fixed { padding-right: 10px; }
+.access-pill.access-all { background-color: alpha(@accent_bg_color, 0.22); color: @accent_color; padding-left: 7px; }
+.access-pill button { min-width: 20px; min-height: 20px; padding: 0; }
+.access-pill button image { -gtk-icon-size: 10px; }
+button.access-more { border-radius: 99px; min-height: 22px; padding: 1px 10px; background-color: alpha(currentColor, 0.06);
+  box-shadow: inset 0 0 0 1px alpha(currentColor, 0.15); }
+.access-pop contents { padding: 4px; }
+.access-pop list { background: none; }
+.access-pop list > row { border-radius: 6px; }
 .lightbox { color: white; }  /* (what's behind it dimmed: Lightbox.do_snapshot) */
 .lightbox .dim-label { color: alpha(white, 0.7); }
 .lightbox-arrow { min-width: 44px; min-height: 44px; }

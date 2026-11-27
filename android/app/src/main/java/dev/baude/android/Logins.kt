@@ -343,15 +343,15 @@ fun LoginCard(login: Login) {
             var token by remember(login) { mutableStateOf("") }
             SecretField(token, { token = it }, Wording.Subscriptions.tokenHint) { login.saveToken(token) }
             Button(Wording.Common.save, suggested = true) { login.saveToken(token) }
-        } else if (stage == "starting" || stage == "page") {
+        } else if (stage == "page") {
             var code by remember(login) { mutableStateOf("") }
             // (the field a row of its own, the buttons under it: beside them, a phone's width leaves it too narrow)
             NameField(code, { code = it }, Wording.SignIn.codeHint, { login.paste(code); code = "" }, focus = false)
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                Button(Wording.Common.send) { login.paste(code); code = "" }
+                Button(Wording.Common.`continue`, suggested = true, enabled = code.isNotBlank()) { login.paste(code); code = "" }
                 Button(Wording.Common.cancel) { login.cancel() }
             }
-        }
+        } else if (stage == "starting") Button(Wording.Common.cancel) { login.cancel() }
         when {
             account != null && stage != "signed" -> Unit
             stage == "ask" -> Button(Wording.SignIn.signIn, suggested = true) { login.start() }

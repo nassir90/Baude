@@ -223,6 +223,9 @@ abstract class Screens(private val theme: String) {
         login.failed.value = "Login failed: Invalid code"
         laidOut()
         screen("05d-subscriptions-sign-in-failed")
+        tap("Existing folder") // (the dialog's own button back in place of Try Again)
+        laidOut()
+        screen("05d-subscriptions-sign-in-failed-then-folder")
     }
 
     // (Add account (Codex) on workshop: the sign-in's card at each step as the host says it: the browser's, waiting
@@ -275,14 +278,17 @@ abstract class Screens(private val theme: String) {
     @Test fun chatLoginCard() {
         accountsFixture()
         val login = dev.baude.android.Login(Mesh.hosts.first().id, "s1", null, null, emptyList()).apply {
-            stage.value = "page"
-            url.value = "https://claude.ai/oauth/authorize?code=true&client_id=fixture"
+            stage.value = "starting"
         }
-        render("05r-chat-login-card") {
+        render("05r-chat-login-card-starting") {
             androidx.compose.foundation.layout.Box(androidx.compose.ui.Modifier.padding(16.dp)) {
                 dev.baude.android.LoginCard(login)
             }
         }
+        login.stage.value = "page"
+        login.url.value = "https://claude.ai/oauth/authorize?code=true&client_id=fixture"
+        laidOut()
+        activity.window.decorView.captureRoboImage("build/screenshots/$theme/05r-chat-login-card.png")
     }
 
     @Test fun subscriptionsRemove() {

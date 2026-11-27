@@ -589,7 +589,7 @@ class _Source:
     which it does (sign_in, else use)."""
 
     def __init__(self, form, hint, submit, sign_in, use, save):
-        self.submit, self.sign_in, self.use = submit, sign_in, use
+        self.submit, self.sign_in, self.use, self.changed = submit, sign_in, use, None
         self.new = Gtk.ToggleButton(label=wording.say("subscriptions.new_login"), active=True)
         self.existing = Gtk.ToggleButton(label=wording.say("subscriptions.existing_folder"), group=self.new)
         self.tabs = Gtk.Box(css_classes=["linked"], homogeneous=True)
@@ -603,6 +603,10 @@ class _Source:
         self.picked()
 
     def picked(self):
+        """The tab picked: its box and the dialog's button; a failed sign-in's card let go (changed), the dialog's
+        own button back in place of its Try Again."""
+        if self.changed is not None:
+            self.changed()
         on = self.existing.get_active()
         self.folder.set_visible(on)
         self.submit.set_label(wording.say(self.use if on else self.sign_in))
@@ -642,6 +646,7 @@ def add_claude(page):
     source = _Source(form, "subscriptions.claude_folder_hint", submit, "sign_in.sign_in", "subscriptions.use_folder",
                      save)
     login = _ClaudeLogin(page, dialog, submit, (name, *source.inputs()), save)
+    source.changed = login.dismiss
     for w in (login, status, submit):
         form.append(w)
     submit.connect("clicked", save)
@@ -756,6 +761,11 @@ class _ClaudeLogin(Gtk.Box):
         for w in self.inputs:
             w.set_sensitive(True)
 
+    def dismiss(self):
+        """A finished sign-in's card (failed) let go of, the dialog's own button back."""
+        if self.ask is None and self.get_visible():
+            self.cancelled()
+
     def stop(self):
         if self.ask is not None:
             self.ask.stop()
@@ -802,6 +812,7 @@ def add_codex(page):
     source = _Source(form, "subscriptions.codex_home_hint", submit, "sign_in.sign_in", "subscriptions.use_profile",
                      save)
     card = CodexLogin(page, submit, (name, *source.inputs()), save)
+    source.changed = card.dismiss
     for w in (card, status, submit):
         form.append(w)
     submit.connect("clicked", save)
@@ -917,7 +928,7 @@ class CodexLogin(Gtk.Box):
         self.add_css_class("perm-card")
         self.page, self.submit, self.inputs = page, submit, inputs
         self.ask, self.msg, self.name, self.opened, self.relay, self.waiting = None, None, "", None, None, {}
-        self.method, self.seq = "browser", 0
+        self.method, self.seq, self.checking = "browser", 0, False
         self.title = Gtk.Label(xalign=0, wrap=True, selectable=True)
         self.body = Gtk.Label(xalign=0, wrap=True, selectable=True, visible=False)
         self.code = Gtk.Label(xalign=0, selectable=True, hexpand=True, css_classes=["device-code"])
@@ -929,7 +940,7 @@ class CodexLogin(Gtk.Box):
         self.address = Gtk.Entry(hexpand=True, placeholder_text=wording.say("subscriptions.address_hint"))
         self.address.connect("activate", lambda *_: self.paste())
         self.go = Gtk.Button(label=wording.say("common.continue"), sensitive=False, css_classes=["suggested-action"])
-        self.address.connect("changed", lambda e: self.go.set_sensitive(bool(e.get_text().strip())))
+        self.address.connect("changed", lambda e: self.go.set_sensitive(bool(e.get_text().strip()) and not self.checking))
         self.go.connect("clicked", lambda *_: self.paste())
         self.paste_row = Gtk.Box(spacing=6, visible=False)
         self.paste_row.append(self.address)
@@ -967,6 +978,7 @@ class CodexLogin(Gtk.Box):
         for w in self.inputs:
             w.set_sensitive(False)
         self.set_visible(True)
+        self.checking = False
         self.address.set_text("")
         self.tell("")
         self.show({"state": "signing_in", "method": msg.get("method") or "browser"})
@@ -1021,7 +1033,9 @@ class CodexLogin(Gtk.Box):
 
     def paste(self):
         address = self.address.get_text().strip()
-        if address and self.call(address, lambda m: GLib.idle_add(self.pasted, m)):
+        if address and not self.checking and self.call(address, lambda m: GLib.idle_add(self.pasted, m)):
+            self.checking = True
+            self.go.set_sensitive(False)
             self.tell(wording.say("subscriptions.checking_address"))
 
     def call(self, url, answered):
@@ -1038,6 +1052,7 @@ class CodexLogin(Gtk.Box):
     def pasted(self, m):
         """The host's answer to a pasted address: nothing to say where codex took it (its end follows), else why not."""
         page = m.get("page") or {}
+        self.checking = False
         if m.get("error"):
             self.tell(m["error"])
         elif page.get("status", 200) >= 400 and (page.get("type") or "").startswith("text/plain"):
@@ -1045,6 +1060,7 @@ class CodexLogin(Gtk.Box):
         else:
             self.address.set_text("")
             self.tell("")
+        self.go.set_sensitive(bool(self.address.get_text().strip()))
         return False
 
     def relayed(self, path, answered):
@@ -1076,6 +1092,11 @@ class CodexLogin(Gtk.Box):
         self.submit.set_visible(True)
         for w in self.inputs:
             w.set_sensitive(True)
+
+    def dismiss(self):
+        """A finished sign-in's card (failed) let go of, the dialog's own button back."""
+        if self.ask is None and self.get_visible():
+            self.cancelled()
 
     def unrelay(self):
         if self.relay is not None:

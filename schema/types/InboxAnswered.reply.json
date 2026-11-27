@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "inbox_wait's answer: the ask as it is.",
+  "properties": {
+    "op": {
+      "const": "inbox_answered",
+      "description": "What it is."
+    },
+    "req": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "ask": {
+      "type": "string",
+      "description": "The ask's id."
+    },
+    "status": {
+      "enum": [
+        "waiting",
+        "answered",
+        "withdrawn",
+        "stopped"
+      ],
+      "description": "Its status (waiting: not answered within the timeout)."
+    },
+    "answer": {
+      "anyOf": [
+        {
+          "$ref": "InboxAnswer.json"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "How it was answered."
+    }
+  },
+  "required": [
+    "op",
+    "ask",
+    "status"
+  ],
+  "additionalProperties": false
+}

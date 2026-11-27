@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "The host's asks waiting (and those stopped, till they're removed) of the Bots the head may manage: the Inbox. Changes come as inbox_changed to a head that's subscribed.",
+  "properties": {
+    "op": {
+      "const": "inbox",
+      "description": "What it is."
+    },
+    "req": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "description": "The request's number, the client's pick: its answers carry it back."
+    }
+  },
+  "required": [
+    "op"
+  ],
+  "additionalProperties": false
+}

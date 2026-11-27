@@ -1,5 +1,5 @@
 {
-  "description": "The sessions sidebar: the left pane of Baude's main window, 250px wide at least. From top to bottom: New session with its host picker, Open folder, search with the ⋮ menu, a host banner, the list of sessions in groups, and an Update bar at the foot. Click a session to switch to it, folder and all.",
+  "description": "The sessions sidebar: the left pane of Baude's main window, 250px wide at least. From top to bottom: New session with its host picker, Open folder, search with the ⋮ menu, the Inbox row, a host banner, the list of sessions in groups, and an Update bar at the foot. Click a session to switch to it, folder and all.",
   "apps": [
     "baude"
   ],
@@ -34,7 +34,9 @@
     "sidebarmenu.py:SidebarMenu.open_folder",
     "windowremote.py:WindowRemote.ask_host_folder",
     "baudelib/hostfiles.py:list_dir",
-    "Home.kt:OpenFolder"
+    "Home.kt:OpenFolder",
+    "inboxview.py:inbox_row",
+    "Inbox.kt:InboxRow"
   ],
   "copy": [
     "sidebar",
@@ -46,7 +48,8 @@
     "chats",
     "meta",
     "asks",
-    "update_bar"
+    "update_bar",
+    "inbox"
   ],
   "phone": {
     "does": "The session list is the phone's home screen; opening a session replaces it, back returns to it",
@@ -56,7 +59,18 @@
   "parts": [
     {
       "name": "New session button",
-      "decisions": [{"said": "Clicking New Session should put the caret in the message box, ready to type", "rule": "Every app puts the focus in the new chat's message box when New session opens it", "decided": "2026-11-23", "source": [{"issue": "BaudeInternal#202"}]}],
+      "decisions": [
+        {
+          "said": "Clicking New Session should put the caret in the message box, ready to type",
+          "rule": "Every app puts the focus in the new chat's message box when New session opens it",
+          "decided": "2026-11-23",
+          "source": [
+            {
+              "issue": "BaudeInternal#202"
+            }
+          ]
+        }
+      ],
       "shows": "A flat button with a new-document icon and the words \"New session\", filling the row, left of the host picker. Tooltip \"Ctrl+N\".",
       "copy": [
         "sidebar.new_session"
@@ -78,7 +92,18 @@
     {
       "name": "New session's group rule",
       "shows": "Not drawn; decides which group a new chat joins. If exactly one group is ticked in ⋮ → Groups, that one. Else, if the chats listed all belong to one group, that one. Else, if no groups are ticked-out (all listed), none. Else the open chat's group if it's ticked, else none. After starting, that group is ticked in ⋮ too if it wasn't, so the new chat is listed.",
-      "decisions": [{"said": "With only one group visible, a new session should go into that group (paraphrased)", "rule": "In every app a new chat joins the group the sidebar shows: the one group ticked, else the one group the listed chats are in on that host, so it stays listed", "decided": "2026-11-19", "source": [{"issue": "BaudeInternal#171"}]}]
+      "decisions": [
+        {
+          "said": "With only one group visible, a new session should go into that group (paraphrased)",
+          "rule": "In every app a new chat joins the group the sidebar shows: the one group ticked, else the one group the listed chats are in on that host, so it stays listed",
+          "decided": "2026-11-19",
+          "source": [
+            {
+              "issue": "BaudeInternal#171"
+            }
+          ]
+        }
+      ]
     },
     {
       "name": "Host picker (beside New session)",
@@ -103,7 +128,19 @@
           "does": "Touch's right-click: the same host menu, its list not opened."
         }
       ],
-      "decisions": [{"said": "On mobile, in the host dropdown, your phone should be `local` as it is on desktop... Not sure why it is different on mobile.", "rule": "Every app names the machine it runs on \"local\" in the host picker, first in the list (the phone's own host too); the mesh knows it by its name", "decided": "2026-11-22", "source": [{"session": "f24332de-9555-4279-8489-ffa7dbcf54c9", "message": "30af64bb-6804-4040-984b-d3fd2a444e53"}]}]
+      "decisions": [
+        {
+          "said": "On mobile, in the host dropdown, your phone should be `local` as it is on desktop... Not sure why it is different on mobile.",
+          "rule": "Every app names the machine it runs on \"local\" in the host picker, first in the list (the phone's own host too); the mesh knows it by its name",
+          "decided": "2026-11-22",
+          "source": [
+            {
+              "session": "f24332de-9555-4279-8489-ffa7dbcf54c9",
+              "message": "30af64bb-6804-4040-984b-d3fd2a444e53"
+            }
+          ]
+        }
+      ]
     },
     {
       "name": "Open folder button",
@@ -126,7 +163,18 @@
         "why": "The phone's chats are all on hosts; it has no folder chooser of its own",
         "decided": "2026-11-22"
       },
-      "decisions": [{"said": "Look up other file managers' keybindings for Open Folder, desktop and mobile: things like Tab taking the only match don't work well (paraphrased)", "rule": "Every app's \"Open a folder on <host>\" step takes the keys file choosers and shells share: Tab completes (GTK's location bar, bash), Up/Down and Enter pick and go into a folder (GTK's location bar, Finder's Go to Folder), Alt+Up / Cmd+Up goes up (Nautilus, Dolphin, GTK; Finder), Alt+Down / Cmd+Down goes in, Alt+Home / Cmd+Shift+H goes home, Ctrl+H / Alt+. / Cmd+Shift+. shows hidden folders (Nautilus, GTK; Dolphin; Finder); on the phone Back steps back out of folders before closing (Android's folder picker)", "decided": "2026-11-27", "source": [{"issue": "BaudeInternal#295"}]}]
+      "decisions": [
+        {
+          "said": "Look up other file managers' keybindings for Open Folder, desktop and mobile: things like Tab taking the only match don't work well (paraphrased)",
+          "rule": "Every app's \"Open a folder on <host>\" step takes the keys file choosers and shells share: Tab completes (GTK's location bar, bash), Up/Down and Enter pick and go into a folder (GTK's location bar, Finder's Go to Folder), Alt+Up / Cmd+Up goes up (Nautilus, Dolphin, GTK; Finder), Alt+Down / Cmd+Down goes in, Alt+Home / Cmd+Shift+H goes home, Ctrl+H / Alt+. / Cmd+Shift+. shows hidden folders (Nautilus, GTK; Dolphin; Finder); on the phone Back steps back out of folders before closing (Android's folder picker)",
+          "decided": "2026-11-27",
+          "source": [
+            {
+              "issue": "BaudeInternal#295"
+            }
+          ]
+        }
+      ]
     },
     {
       "name": "Search field",
@@ -151,6 +199,37 @@
         {
           "by": "click",
           "does": "Opens the Group by / Groups menu: see GroupByMenu.menu.json. Opening it, or the window coming to the front, looks at the network again for a host started a moment ago."
+        }
+      ]
+    },
+    {
+      "name": "Inbox row",
+      "shows": "Right under the search field, drawn as New session and Open folder are: an envelope icon and \"Inbox\", then, at the row's end, how many asks are waiting on you (dim) and the yellow dot a chat waiting for you shows; with nothing waiting, neither. Tooltip \"What's waiting on you: tasks' asks and permission requests\". It counts every host's waiting asks the app may see.",
+      "copy": [
+        "inbox.title",
+        "inbox.tip"
+      ],
+      "actions": [
+        {
+          "by": "click",
+          "does": "Opens the Inbox (Inbox.page.json): a tab of the main area, or shown if it's open."
+        }
+      ],
+      "phone": {
+        "does": "The same row on home, under Search sessions; tapping it opens the Inbox as a screen of its own, Back returns home",
+        "why": "One column at a time on a phone",
+        "decided": "2026-11-27"
+      },
+      "decisions": [
+        {
+          "said": "Wants an Inbox right below Search sessions, where what waits on the person is gathered.",
+          "rule": "Every app puts the Inbox row right below Search sessions, with the count of asks waiting and the waiting dot.",
+          "decided": "2026-11-27",
+          "source": [
+            {
+              "issue": "BaudeInternal#289"
+            }
+          ]
         }
       ]
     },
@@ -293,8 +372,27 @@
               "name": "Fork nesting",
               "shows": "A fork sits under the session it came from, indented 18px per level, joined by a thin tree line: down from the foot of the parent's row (for a Bot, 1px under its picture, 5px in from its left edge) to its last child, then a corner across to that child. A fork named \"<parent's title> (…)\" shows only the \"…\" part, in a distinct fork style. A Claude Desktop side session or fork sits under the chat Claude Desktop says it came from, in that chat's group whatever its own folder. A chat a Bot started is under that agent. A chat an agent on another host started (its spawned_by a chat of another host, none of its own host's: an archived or gone-host chat counts, one whose agent is deleted doesn't), and any chat that one started in turn on its host, is listed only under that agent, never among its own host's chats: under it whichever host's chats are listed, if the agent is listed (not deleted here, or missed by a search), and nowhere otherwise. An archived agent's chats are under it in Archived, whatever host they're on. The phone's home list and This phone's agents follow the same rule. Forks are found within a folder, by date too.",
               "decisions": [
-                {"said": "On phone, the rule where subagents started on another machine by a Bot are not visible... Is not followed.... Please make sure that rule is followed.", "rule": "Every app lists a chat a Bot on another host started (and any chat that one started in turn) only under that Bot, never among its own host's chats, and nowhere when the Bot isn't listed", "decided": "2026-11-22", "source": [{"session": "f24332de-9555-4279-8489-ffa7dbcf54c9", "message": "30af64bb-6804-4040-984b-d3fd2a444e53"}]},
-                {"said": "On the phone, the bars from a Bot to its subagent chats don't start near its icon; do as the desktop does (paraphrased)", "rule": "Every app starts the tree line from a Bot to the chats under it just under the Bot's picture (1px under it, 5px in from its left edge)", "decided": "2026-11-22", "source": [{"issue": "BaudeInternal#180"}]}
+                {
+                  "said": "On phone, the rule where subagents started on another machine by a Bot are not visible... Is not followed.... Please make sure that rule is followed.",
+                  "rule": "Every app lists a chat a Bot on another host started (and any chat that one started in turn) only under that Bot, never among its own host's chats, and nowhere when the Bot isn't listed",
+                  "decided": "2026-11-22",
+                  "source": [
+                    {
+                      "session": "f24332de-9555-4279-8489-ffa7dbcf54c9",
+                      "message": "30af64bb-6804-4040-984b-d3fd2a444e53"
+                    }
+                  ]
+                },
+                {
+                  "said": "On the phone, the bars from a Bot to its subagent chats don't start near its icon; do as the desktop does (paraphrased)",
+                  "rule": "Every app starts the tree line from a Bot to the chats under it just under the Bot's picture (1px under it, 5px in from its left edge)",
+                  "decided": "2026-11-22",
+                  "source": [
+                    {
+                      "issue": "BaudeInternal#180"
+                    }
+                  ]
+                }
               ]
             },
             {
@@ -307,9 +405,38 @@
             }
           ],
           "decisions": [
-            {"said": "Switching chats while the Ongoing Feedback tab is shown left it on the Feedback tab instead of opening the chat", "rule": "In every app, clicking a chat in the list while another main tab (Feedback, a file's code) is shown switches to the chat's tab and opens that chat.", "decided": "2026-11-14", "source": [{"issue": "BaudeInternal#95"}]},
-            {"said": "Increase row height of:\n\n* Trainscripts on the home page", "rule": "Every app draws its chat list's rows tall enough to tap where it's touched: on a touch screen a chat row is at least 48dp (the least touch target) with its title and dot centred, and a Bot row twice a chat's", "decided": "2026-11-22", "source": [{"session": "f24332de-9555-4279-8489-ffa7dbcf54c9", "message": "30af64bb-6804-4040-984b-d3fd2a444e53"}]},
-            {"said": "<dead> is shown when a connection ides. This is not needed, you should just use a cloud icon with a slash going through it (no connection) to indicate this on mobile and dsesktop.", "rule": "Every app marks a chat whose host is gone with the crossed-out cloud (schema/icons/baude/baude-no-connection-symbolic.svg, tooltip \"No connection\") and never with a \"dead\" word", "decided": "2026-11-22", "source": [{"session": "f24332de-9555-4279-8489-ffa7dbcf54c9", "message": "30af64bb-6804-4040-984b-d3fd2a444e53"}]}
+            {
+              "said": "Switching chats while the Ongoing Feedback tab is shown left it on the Feedback tab instead of opening the chat",
+              "rule": "In every app, clicking a chat in the list while another main tab (Feedback, a file's code) is shown switches to the chat's tab and opens that chat.",
+              "decided": "2026-11-14",
+              "source": [
+                {
+                  "issue": "BaudeInternal#95"
+                }
+              ]
+            },
+            {
+              "said": "Increase row height of:\n\n* Trainscripts on the home page",
+              "rule": "Every app draws its chat list's rows tall enough to tap where it's touched: on a touch screen a chat row is at least 48dp (the least touch target) with its title and dot centred, and a Bot row twice a chat's",
+              "decided": "2026-11-22",
+              "source": [
+                {
+                  "session": "f24332de-9555-4279-8489-ffa7dbcf54c9",
+                  "message": "30af64bb-6804-4040-984b-d3fd2a444e53"
+                }
+              ]
+            },
+            {
+              "said": "<dead> is shown when a connection ides. This is not needed, you should just use a cloud icon with a slash going through it (no connection) to indicate this on mobile and dsesktop.",
+              "rule": "Every app marks a chat whose host is gone with the crossed-out cloud (schema/icons/baude/baude-no-connection-symbolic.svg, tooltip \"No connection\") and never with a \"dead\" word",
+              "decided": "2026-11-22",
+              "source": [
+                {
+                  "session": "f24332de-9555-4279-8489-ffa7dbcf54c9",
+                  "message": "30af64bb-6804-4040-984b-d3fd2a444e53"
+                }
+              ]
+            }
           ]
         },
         {
@@ -347,9 +474,96 @@
     {
       "name": "Daemon restart toast",
       "shows": "Not in the sidebar: a toast over the window in front (a snackbar over the phone's home screen), one per host keeping a daemon restart, This Mac's first, each named \"<host>: …\" when there's more than one: \"Restarting the daemon once N things are done\", kept up as that changes, or \"Daemon restart paused\" while any app shows what it waits for or a See Thread from it is being looked at; Details, and the toast's close button. Each pending restart is toasted once, in the window in front, for 10 s; after See Thread it's toasted again till dismissed.",
-      "copy": ["hosts.restart_waiting", "hosts.restart_paused", "hosts.restart_details", "hosts.restart_on", "hosts.restart_blockers", "hosts.restart_nothing", "hosts.see_thread", "shared_settings.restart", "hosts.force_restart", "hosts.restart_failed"],
-      "actions": [{"by": "click Details", "does": "Opens \"Waiting For\": a row for each chat running a command (a terminal icon, the chat's title), each task running (a play icon, the task's name; one waiting for input, the hourglass in the warning colour, its tooltip saying so), each agent run for a chat on another host (a gear icon, the model) and each terminal someone's attached to (a keyboard icon, its title), each row with a See Thread button, or \"Nothing running\"; the restart is paused while it's open. The rows are one rounded list ending at its last row, a rule only between rows. On desktop each row is one line: a title too long is cut with … and shown in full in its tooltip. Restart (suggested) lets go of the pause, and the daemon restarts once nothing is running; Force Restart (destructive) restarts it now, what's running stopped, turns cut short and their queued follow-ups sent again once it's back. Closing it lets go of the pause (only while the restart is still pending). See Thread closes it and shows that chat, run page or terminal, the restart still paused, and the toast back reading \"Daemon restart paused\"; dismissing that toast, or the window closing, lets go of it. On the phone the pause is sent again as its connection comes back while it's open, and let go of as it leaves the screen without See Thread."}, {"by": "dismiss (or 10 s go by)", "does": "The toast goes and the restart goes on, as after Restart; a See Thread's pause it was showing is let go of"}],
-      "decisions": [{"said": "When the daemon is waiting to restart, the owner wants to see which chats, tasks or services are holding it up; while that view is open the restart is paused, with Restart and Force Restart buttons (paraphrased)", "rule": "Every app shows a host's pending daemon restart (a toast with Details: Sidebar's \"Daemon restart toast\"); Details lists what the restart waits for (each chat running a command, each task running) and the restart is paused while that view is open. Restart (or closing it) restarts once nothing is running; Force Restart restarts now. The host keeps the pending restart and its blockers and says them on the wire (info's restart), so every app shows the same", "decided": "2026-11-26", "source": [{"issue": "BaudeInternal#253"}]}, {"said": "can I click it to go to the thread? There should be a \"See Thread\" button", "rule": "Every app's \"Waiting For\" gives each row a See Thread button: a chat (or the chat elsewhere an agent run is for) opens that chat, a running task opens its run page, an attached terminal opens that terminal. The restart stays paused while the person looks: its toast is back reading \"Daemon restart paused\", and its Details brings back Restart and Force Restart", "decided": "2026-11-26", "source": [{"session": "b3845b21-55ac-4aab-a769-fb8517403c51", "message": "9a0fed72-7780-4e0b-be64-d9b520977385"}, {"session": "b3845b21-55ac-4aab-a769-fb8517403c51", "message": "eb02ba15-d365-430f-aee2-df3f20aa63ed"}]}, {"said": "The restart also waits for agent runs this host does for other hosts' chats and for host terminals someone is attached to, not for Multiplex, Emission or Auto-fix, which survive a daemon restart; closing Waiting For resumes the restart (paraphrased)", "rule": "Every host waits for, and every app lists, chats running a command, task runs, agent runs for chats on other hosts (Apple and pi models) and attached host terminals; closing \"Waiting For\" without a button lets go of the pause, so the restart goes on", "decided": "2026-11-26", "source": [{"issue": "BaudeInternal#253"}]}, {"said": "The \"waiting for\" menu has no reason being that thin on desktop", "rule": "Every desktop app's \"Waiting For\" is as wide as its other list dialogs (about 560 px, a little over the Access dialog's 420 and under Settings' 820), so a chat's title and its See Thread button sit on one line; a title too long for the row is cut with … and the full title is in its tooltip. The buttons below keep their layout", "decided": "2026-11-26", "source": [{"session": "b3845b21-55ac-4aab-a769-fb8517403c51", "message": "30322e8d-6444-4abb-ae88-14ee1a087e1d"}]}, {"said": "The pending daemon restart's line shouldn't sit in the bar where Update is: the toast it was before was fine, it only needed a button to open what the restart waits for. Not sure \"Waiting For\" updates as things finish, or stays stuck with the first ones (paraphrased)", "rule": "Every app says a host's pending daemon restart as a toast (the phone's snackbar), never in the Update bar, which keeps only Update. The toast says what the restart waits for, kept up as that changes, with Details, which opens \"Waiting For\" (the restart paused while it's open). It's shown once per pending restart, in the window in front, and goes as toasts do (10 s, or dismissed): the restart goes on, as after Restart. After See Thread the toast is back, \"Daemon restart paused\", till it's dismissed (that pause let go of) or Details is clicked. \"Waiting For\" and the toast are drawn again as the host says what the restart waits for (the host looks every 500 ms and pushes its info when that changes), so a chat's command or a task's run ending takes its row away and the count down", "decided": "2026-11-26", "source": [{"issue": "BaudeInternal#260"}]}, {"said": "In \"Waiting For\", with only one row, a horizontal rule still shows at the bottom of that single pill, an eyesore (paraphrased)", "rule": "Every app's \"Waiting For\" draws its rows as one rounded list that ends at its last row: a rule only between rows, never under the last (or only) one, and no empty band below it. \"Nothing running\" is shown only when there are no rows", "decided": "2026-11-27", "source": [{"issue": "BaudeInternal#293"}]}]
+      "copy": [
+        "hosts.restart_waiting",
+        "hosts.restart_paused",
+        "hosts.restart_details",
+        "hosts.restart_on",
+        "hosts.restart_blockers",
+        "hosts.restart_nothing",
+        "hosts.see_thread",
+        "shared_settings.restart",
+        "hosts.force_restart",
+        "hosts.restart_failed"
+      ],
+      "actions": [
+        {
+          "by": "click Details",
+          "does": "Opens \"Waiting For\": a row for each chat running a command (a terminal icon, the chat's title), each task running (a play icon, the task's name; one waiting for input, the hourglass in the warning colour, its tooltip saying so), each agent run for a chat on another host (a gear icon, the model) and each terminal someone's attached to (a keyboard icon, its title), each row with a See Thread button, or \"Nothing running\"; the restart is paused while it's open. The rows are one rounded list ending at its last row, a rule only between rows. On desktop each row is one line: a title too long is cut with … and shown in full in its tooltip. Restart (suggested) lets go of the pause, and the daemon restarts once nothing is running; Force Restart (destructive) restarts it now, what's running stopped, turns cut short and their queued follow-ups sent again once it's back. Closing it lets go of the pause (only while the restart is still pending). See Thread closes it and shows that chat, run page or terminal, the restart still paused, and the toast back reading \"Daemon restart paused\"; dismissing that toast, or the window closing, lets go of it. On the phone the pause is sent again as its connection comes back while it's open, and let go of as it leaves the screen without See Thread."
+        },
+        {
+          "by": "dismiss (or 10 s go by)",
+          "does": "The toast goes and the restart goes on, as after Restart; a See Thread's pause it was showing is let go of"
+        }
+      ],
+      "decisions": [
+        {
+          "said": "When the daemon is waiting to restart, the owner wants to see which chats, tasks or services are holding it up; while that view is open the restart is paused, with Restart and Force Restart buttons (paraphrased)",
+          "rule": "Every app shows a host's pending daemon restart (a toast with Details: Sidebar's \"Daemon restart toast\"); Details lists what the restart waits for (each chat running a command, each task running) and the restart is paused while that view is open. Restart (or closing it) restarts once nothing is running; Force Restart restarts now. The host keeps the pending restart and its blockers and says them on the wire (info's restart), so every app shows the same",
+          "decided": "2026-11-26",
+          "source": [
+            {
+              "issue": "BaudeInternal#253"
+            }
+          ]
+        },
+        {
+          "said": "can I click it to go to the thread? There should be a \"See Thread\" button",
+          "rule": "Every app's \"Waiting For\" gives each row a See Thread button: a chat (or the chat elsewhere an agent run is for) opens that chat, a running task opens its run page, an attached terminal opens that terminal. The restart stays paused while the person looks: its toast is back reading \"Daemon restart paused\", and its Details brings back Restart and Force Restart",
+          "decided": "2026-11-26",
+          "source": [
+            {
+              "session": "b3845b21-55ac-4aab-a769-fb8517403c51",
+              "message": "9a0fed72-7780-4e0b-be64-d9b520977385"
+            },
+            {
+              "session": "b3845b21-55ac-4aab-a769-fb8517403c51",
+              "message": "eb02ba15-d365-430f-aee2-df3f20aa63ed"
+            }
+          ]
+        },
+        {
+          "said": "The restart also waits for agent runs this host does for other hosts' chats and for host terminals someone is attached to, not for Multiplex, Emission or Auto-fix, which survive a daemon restart; closing Waiting For resumes the restart (paraphrased)",
+          "rule": "Every host waits for, and every app lists, chats running a command, task runs, agent runs for chats on other hosts (Apple and pi models) and attached host terminals; closing \"Waiting For\" without a button lets go of the pause, so the restart goes on",
+          "decided": "2026-11-26",
+          "source": [
+            {
+              "issue": "BaudeInternal#253"
+            }
+          ]
+        },
+        {
+          "said": "The \"waiting for\" menu has no reason being that thin on desktop",
+          "rule": "Every desktop app's \"Waiting For\" is as wide as its other list dialogs (about 560 px, a little over the Access dialog's 420 and under Settings' 820), so a chat's title and its See Thread button sit on one line; a title too long for the row is cut with … and the full title is in its tooltip. The buttons below keep their layout",
+          "decided": "2026-11-26",
+          "source": [
+            {
+              "session": "b3845b21-55ac-4aab-a769-fb8517403c51",
+              "message": "30322e8d-6444-4abb-ae88-14ee1a087e1d"
+            }
+          ]
+        },
+        {
+          "said": "The pending daemon restart's line shouldn't sit in the bar where Update is: the toast it was before was fine, it only needed a button to open what the restart waits for. Not sure \"Waiting For\" updates as things finish, or stays stuck with the first ones (paraphrased)",
+          "rule": "Every app says a host's pending daemon restart as a toast (the phone's snackbar), never in the Update bar, which keeps only Update. The toast says what the restart waits for, kept up as that changes, with Details, which opens \"Waiting For\" (the restart paused while it's open). It's shown once per pending restart, in the window in front, and goes as toasts do (10 s, or dismissed): the restart goes on, as after Restart. After See Thread the toast is back, \"Daemon restart paused\", till it's dismissed (that pause let go of) or Details is clicked. \"Waiting For\" and the toast are drawn again as the host says what the restart waits for (the host looks every 500 ms and pushes its info when that changes), so a chat's command or a task's run ending takes its row away and the count down",
+          "decided": "2026-11-26",
+          "source": [
+            {
+              "issue": "BaudeInternal#260"
+            }
+          ]
+        },
+        {
+          "said": "In \"Waiting For\", with only one row, a horizontal rule still shows at the bottom of that single pill, an eyesore (paraphrased)",
+          "rule": "Every app's \"Waiting For\" draws its rows as one rounded list that ends at its last row: a rule only between rows, never under the last (or only) one, and no empty band below it. \"Nothing running\" is shown only when there are no rows",
+          "decided": "2026-11-27",
+          "source": [
+            {
+              "issue": "BaudeInternal#293"
+            }
+          ]
+        }
+      ]
     },
     {
       "name": "Update bar",
@@ -373,7 +587,28 @@
           "does": "Looks at the checkout again (never a version found earlier), fetches the new version in if it isn't yet, checks it imports, and restarts onto it now (asking first if that would stop something running). A spinner shows on the button meanwhile; clicked while a look is under way, it carries on after it. With Auto restart on update off, this is the only way it restarts."
         }
       ],
-      "decisions": [{"said": "Asked for the Update Available button to be white and not bold.", "rule": "Every app's Update button is in the text's own colour (white on a dark bar), not bold, not the accent.", "decided": "2026-11-12", "source": [{"issue": "BaudeInternal#48"}]}, {"said": "Even with Auto restart on update off, the Update button should always show when a newer version is there, at the foot of the sessions list or of the window (paraphrased)", "rule": "Every app looks for a newer version whether or not Auto restart on update is on, and shows Update at the foot of its sessions or notebooks list whenever one is there; with the setting off it never restarts by itself, only when Update is clicked", "decided": "2026-11-26", "source": [{"issue": "BaudeInternal#254"}]}]
+      "decisions": [
+        {
+          "said": "Asked for the Update Available button to be white and not bold.",
+          "rule": "Every app's Update button is in the text's own colour (white on a dark bar), not bold, not the accent.",
+          "decided": "2026-11-12",
+          "source": [
+            {
+              "issue": "BaudeInternal#48"
+            }
+          ]
+        },
+        {
+          "said": "Even with Auto restart on update off, the Update button should always show when a newer version is there, at the foot of the sessions list or of the window (paraphrased)",
+          "rule": "Every app looks for a newer version whether or not Auto restart on update is on, and shows Update at the foot of its sessions or notebooks list whenever one is there; with the setting off it never restarts by itself, only when Update is clicked",
+          "decided": "2026-11-26",
+          "source": [
+            {
+              "issue": "BaudeInternal#254"
+            }
+          ]
+        }
+      ]
     },
     {
       "name": "Sidebar toggle",
@@ -397,7 +632,23 @@
     {
       "name": "Status dot",
       "shows": "A small round dot at the right of each row (also in Bot rows), same size as the icon size set in Settings → Size. Working: grey (the text colour at 55% strength) and pulsing, tooltip \"Working\". Waiting: yellow (#e5a50a), tooltip \"Waiting for your answer\" (a question or permission prompt needs an answer). Done: blue (#3584e4), tooltip \"Finished — waiting for input\" (the turn finished, waiting for your next message). Inactive: not drawn at all. The open session's dot follows the live chat. For other sessions on this machine: working while another program is mid-turn in the file, waiting if it asks, done for a minute after its last write, else inactive; mid-turn but silent 10 minutes counts as inactive. For a session on a host: as that host last said (working, waiting); between turns, done (blue) while its last turn's end hasn't been seen on any head of the mesh (its host's listing: ended, not seen), else inactive; inactive while the host is gone. The open session on a host is the same: done till its turn's end is seen, here or on any other head.",
-      "decisions": [{"said": "If I see a bot message anywhere on the mesh, the notification should disappear / Specificlly, the notiifaction shoulddisappear from my phone", "rule": "A chat's done dot means its last turn's end hasn't been seen anywhere on the mesh: every app clears it once any head shows that turn's end on screen (a window in front on that chat, or the phone's app in front on it), as the notification goes.", "decided": "2026-11-27", "source": [{"session": "b3845b21-55ac-4aab-a769-fb8517403c51", "message": "7d20c8ad-943d-490b-a80f-304ab1fc36c3"}, {"session": "b3845b21-55ac-4aab-a769-fb8517403c51", "message": "c1507637-f5b7-4cf3-a509-6c3f24d93a7d"}]}],
+      "decisions": [
+        {
+          "said": "If I see a bot message anywhere on the mesh, the notification should disappear / Specificlly, the notiifaction shoulddisappear from my phone",
+          "rule": "A chat's done dot means its last turn's end hasn't been seen anywhere on the mesh: every app clears it once any head shows that turn's end on screen (a window in front on that chat, or the phone's app in front on it), as the notification goes.",
+          "decided": "2026-11-27",
+          "source": [
+            {
+              "session": "b3845b21-55ac-4aab-a769-fb8517403c51",
+              "message": "7d20c8ad-943d-490b-a80f-304ab1fc36c3"
+            },
+            {
+              "session": "b3845b21-55ac-4aab-a769-fb8517403c51",
+              "message": "c1507637-f5b7-4cf3-a509-6c3f24d93a7d"
+            }
+          ]
+        }
+      ],
       "copy": [
         "common.working",
         "asks.waiting"
@@ -452,7 +703,21 @@
     }
   ],
   "removed": [
-    {"name": "Daemon restart line at the foot of the list, over Update", "apps": ["baude", "record", "phone"], "why": "The owner: the pending restart shouldn't sit in the bar where Update is; the toast was fine, it only needed a button to open \"Waiting For\" (paraphrased)", "decided": "2026-11-26", "source": [{"issue": "BaudeInternal#260"}]},
+    {
+      "name": "Daemon restart line at the foot of the list, over Update",
+      "apps": [
+        "baude",
+        "record",
+        "phone"
+      ],
+      "why": "The owner: the pending restart shouldn't sit in the bar where Update is; the toast was fine, it only needed a button to open \"Waiting For\" (paraphrased)",
+      "decided": "2026-11-26",
+      "source": [
+        {
+          "issue": "BaudeInternal#260"
+        }
+      ]
+    },
     {
       "name": "New session form (a dialog of host, folder, group, prompt, model, effort and mode: the desktop's from a folder's + on another host, or on this machine while a new chat here wouldn't be listed; the phone's from a folder's + and Open folder…)",
       "apps": [

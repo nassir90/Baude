@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "A waiting ask handed on: model, a model of the host's asked to answer it (its answer shown for confirming: proposal); bot, a Bot sent it to answer (its answer_ask tool). Neither: a model's answer let go of.",
+  "properties": {
+    "op": {
+      "const": "inbox_route",
+      "description": "What it is."
+    },
+    "req": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "ask": {
+      "type": "string",
+      "description": "The ask's id."
+    },
+    "model": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "A model's value, as the host lists it."
+    },
+    "effort": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Its effort."
+    },
+    "bot": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "A Bot's session id, on this host."
+    }
+  },
+  "required": [
+    "op",
+    "ask"
+  ],
+  "additionalProperties": false
+}

@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "A model's answer to an ask (Route to → Have a model answer): shown for the person to confirm or change, taking effect only as they press a button.",
+  "properties": {
+    "model": {
+      "type": "string",
+      "description": "The model's value."
+    },
+    "name": {
+      "type": "string",
+      "description": "The model, as it's named."
+    },
+    "status": {
+      "enum": [
+        "answering",
+        "ready",
+        "failed"
+      ],
+      "description": "answering: it's being asked; ready: its answer's here; failed: it couldn't answer (text: why)."
+    },
+    "button": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "description": "The button it would press (its index), once it's answered."
+    },
+    "values": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "description": "The form's values as it would fill them."
+    },
+    "text": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Why, in a line or two (or why it failed)."
+    }
+  },
+  "required": [
+    "model",
+    "name",
+    "status"
+  ],
+  "additionalProperties": false
+}

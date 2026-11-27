@@ -1,0 +1,236 @@
+{
+  "description": "The Inbox: what's waiting on the person, from every host the app sees. First the asks tasks have raised, newest first, each a card expanded in place but cut a few lines down, its form and buttons always shown; then Pending requests (chats waiting on a permission) and Running (chats at a turn). Full width.",
+  "apps": [
+    "baude",
+    "phone"
+  ],
+  "opens": [
+    "the Inbox row under Search sessions",
+    "back / forward in the tab history"
+  ],
+  "code": [
+    "inboxview.py:InboxPage",
+    "inboxview.py:AskCard",
+    "inboxview.py:inbox_row",
+    "baudelib/inbox.py:Inbox",
+    "Inbox.kt:InboxScreen"
+  ],
+  "copy": [
+    "inbox",
+    "asks",
+    "signal",
+    "git"
+  ],
+  "phone": {
+    "does": "A screen of its own opened from home's Inbox row, titled Inbox with a back arrow; the same content in one column",
+    "why": "One column at a time on a phone",
+    "decided": "2026-11-27"
+  },
+  "parts": [
+    {
+      "name": "Ask cards",
+      "shows": "One card per ask (no heading over them), newest first, as wide as the tab with the chat's side gutters.",
+      "parts": [
+        {
+          "name": "Head",
+          "shows": "The ask's title (bold, one line, fading out where it's cut), then at its end the time it was raised (dim: HH:MM today, else the weekday and time, else the date) and the yellow waiting dot.",
+          "actions": [
+            {
+              "by": "click the title",
+              "does": "Opens the ask in a tab of its own (InboxAsk.page.json)."
+            }
+          ]
+        },
+        {
+          "name": "Body",
+          "shows": "The ask as InboxAsk.page.json draws it (from line and ⋯, its Markdown, pictures), cut a few lines down (160 px) with a fade into the card's colour and \"Show more\" under it when it's taller; \"Show more\" shows it whole and becomes \"Show less\". A short ask isn't cut and has no \"Show more\".",
+          "copy": [
+            "git.show_more",
+            "inbox.show_less"
+          ]
+        },
+        {
+          "name": "Form and buttons",
+          "shows": "Never cut: the ask's form (setting rows) and its buttons with Route to…, as the ask opened has them, working the same way."
+        }
+      ]
+    },
+    {
+      "name": "Stopped ask",
+      "shows": "An ask whose task went away (its run ended, or its host restarted) unanswered: its card greyed, its title and heading struck through, \"Not answered — the task stopped\" (dim) in place of the time and dot, its form and buttons off. ⋯ → Remove takes it out of every Inbox.",
+      "copy": [
+        "inbox.not_answered",
+        "common.remove"
+      ]
+    },
+    {
+      "name": "Pending requests",
+      "shows": "A group heading, then one row per chat waiting on a permission, drawn as the sidebar's rows (the Bot's picture or the chat's title, the yellow dot) with a tag saying what it asks (\"Allow Bash?\"). Left out when there are none.",
+      "copy": [
+        "inbox.pending_requests",
+        "asks.allow_tool"
+      ],
+      "actions": [
+        {
+          "by": "click a row",
+          "does": "Opens that chat, as the sidebar does."
+        }
+      ]
+    },
+    {
+      "name": "Running",
+      "shows": "A group heading, then one row per chat at a turn, drawn as the sidebar's rows with the grey pulsing dot. Left out when there are none.",
+      "copy": [
+        "signal.running"
+      ],
+      "actions": [
+        {
+          "by": "click a row",
+          "does": "Opens that chat."
+        }
+      ]
+    }
+  ],
+  "states": [
+    {
+      "name": "empty",
+      "shows": "\"Nothing is waiting on you\", dim, centred.",
+      "copy": [
+        "inbox.nothing"
+      ]
+    },
+    {
+      "name": "an ask answered on another device",
+      "shows": "Its card leaves the list at once: the host tells every head (inbox_changed)."
+    }
+  ],
+  "removed": [
+    {
+      "name": "Asks heading",
+      "apps": [
+        "baude",
+        "phone"
+      ],
+      "why": "The owner: no \"Asks\" header on the list.",
+      "decided": "2026-11-27",
+      "source": [
+        {
+          "issue": "BaudeInternal#289"
+        },
+        {
+          "issue": "BaudeInternal#289",
+          "comment": "7224670481"
+        }
+      ]
+    },
+    {
+      "name": "Collapse all / Expand all",
+      "apps": [
+        "baude",
+        "phone"
+      ],
+      "why": "Went with the Asks heading row; the owner chose each ask expanded and cut with Show more (example-6b).",
+      "decided": "2026-11-27",
+      "source": [
+        {
+          "issue": "BaudeInternal#289"
+        },
+        {
+          "issue": "BaudeInternal#289",
+          "comment": "7224670481"
+        }
+      ]
+    }
+  ],
+  "decisions": [
+    {
+      "said": "The Inbox gathers all running sessions, all pending requests and every ask a task has of the person.",
+      "rule": "Every app's Inbox lists the asks, then Pending requests, then Running.",
+      "decided": "2026-11-27",
+      "source": [
+        {
+          "issue": "BaudeInternal#289"
+        },
+        {
+          "issue": "BaudeInternal#289",
+          "comment": "7221349386"
+        }
+      ]
+    },
+    {
+      "said": "A preview of the list with each ask expanded in place may be useful.",
+      "rule": "Every app shows each ask in the list in place, not as a collapsed row.",
+      "decided": "2026-11-27",
+      "source": [
+        {
+          "issue": "BaudeInternal#289"
+        },
+        {
+          "issue": "BaudeInternal#289",
+          "comment": "7223792437"
+        }
+      ]
+    },
+    {
+      "said": "The list preview is B: each ask expanded, cut with Show more (example-6b).",
+      "rule": "Every app cuts a long ask a few lines down with a fade and Show more; its form and buttons are never cut.",
+      "decided": "2026-11-27",
+      "source": [
+        {
+          "issue": "BaudeInternal#289"
+        },
+        {
+          "issue": "BaudeInternal#289",
+          "comment": "7224670481"
+        }
+      ]
+    },
+    {
+      "said": "No \"Asks\" header on the list.",
+      "rule": "No app puts a heading over the asks.",
+      "decided": "2026-11-27",
+      "source": [
+        {
+          "issue": "BaudeInternal#289"
+        },
+        {
+          "issue": "BaudeInternal#289",
+          "comment": "7224670481"
+        }
+      ]
+    },
+    {
+      "said": "Asks persist across a restart, shown as cancelled / unanswered when their task went away; a cancelled ask is shown struck through with \"Not answered — the task stopped\", in the list and opened (example-7b, example-7e).",
+      "rule": "Every app keeps an ask whose task went away, struck through and greyed with \"Not answered — the task stopped\", its buttons off.",
+      "decided": "2026-11-27",
+      "source": [
+        {
+          "issue": "BaudeInternal#289"
+        },
+        {
+          "issue": "BaudeInternal#289",
+          "comment": "7224233722"
+        },
+        {
+          "issue": "BaudeInternal#289",
+          "comment": "7224670481"
+        }
+      ]
+    },
+    {
+      "said": "Asks are answered once: one answered anywhere leaves every Inbox.",
+      "rule": "Every app drops an ask from its Inbox as its host says it's answered or withdrawn, whichever device answered it.",
+      "decided": "2026-11-27",
+      "source": [
+        {
+          "issue": "BaudeInternal#289"
+        }
+      ]
+    }
+  ],
+  "scenes": [
+    "inbox-list",
+    "inbox-row",
+    "inbox-stopped"
+  ]
+}

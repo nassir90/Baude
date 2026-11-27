@@ -361,7 +361,8 @@ class ServerSessions:
         mem = self.bot_memory(s)
         s.bot_note = bot_system(s.meta["bot"]["name"], mem["path"], mem["text"])
         on = f"srv_{next(self.rids)}"
-        s.routes[on] = (None, lambda ok, said=None: (ok and not (said or {}).get("errors")) or
+        s.routes[on] = (None, lambda ok, said=None: (ok and not (said or {}).get("errors") and
+                                                    not (said or {}).get("removed")) or
                                  self.grow_refused(s, proc, said), None)
         proc.send({"type": "control_request", "request_id": on,
                    "request": {"subtype": "mcp_set_servers", "servers": servers}})
@@ -684,6 +685,7 @@ class ServerSessions:
                 s.meta.pop("cut", None)
                 self.save(s)
             if kind == "result" and s.renew and proc is s.proc and not s.queued:  # (a Bot changed at its turn)
+                self.move_bot_folder(s)
                 self.restart_agent(s)
             if kind == "result" and (not self.stopped.is_set() or msg.get("subtype") == "success"):
                 self.drop_waits(s)

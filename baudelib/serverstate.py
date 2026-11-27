@@ -250,6 +250,7 @@ class Session:
         self.env = {}             # (the environment a head on this machine gave it: its claude's, never written)
         self.always_allow = set()  # (tools a head always allows: allowed here, with or without a head; memory only)
         self.renew = False        # (a Bot changed at a turn: its agent started again once the turn's over, set_bot)
+        self.bot_rename = False   # (a Bot renamed at a turn: its folder moved once the turn's over, set_bot)
         self.bot_note = None      # (what a Bot's told, for the next message its running agent's sent: grow_agent)
         self.account_to = None    # (an account picked for it, not yet taken: switch_account; "": the CLI's own sign-in)
         self.context_asked = 0.0  # (when its agent was last asked its context's usage: ask_context)

@@ -1239,7 +1239,14 @@ class ServerRunning:
             if not isinstance(bot, dict) or not str(bot.get("name") or "").strip():
                 raise ValueError(wording.say("host_errors.bot_needs_name"))
             name = " ".join(str(bot["name"]).split())[:80]
-            folder = self.name_bot_folder(s, name)
+            data = base64.b64decode(bot["picture"]) if bot.get("picture") else None
+            if data is not None and len(data) > BOT_PICTURE_MAX:
+                raise ValueError(wording.say("host_errors.picture_too_big"))
+            if was and name != was.get("name") and getattr(s, "proc", None) is not None and s.busy:
+                s.bot_rename = True  # (its agent goes on writing its memory where it began the turn: moved as it ends)
+                folder = bot_dir(self.state_dir, s.meta)
+            else:
+                folder = self.name_bot_folder(s, name)
             s.meta["bot"] = {"name": name, "since": (was or {}).get("since") or time.time()}
             if not os.path.exists(os.path.join(folder, "memory.md")):  # (and nothing in it accepted yet: all the Bot
                 for n in ("memory.md", "memory.seen.md"):                 # writes is shown as its changes)
@@ -1249,17 +1256,16 @@ class ServerRunning:
             if bot.get("picture") == "":
                 if os.path.exists(pic):
                     os.remove(pic)
-            elif bot.get("picture"):
-                data = base64.b64decode(bot["picture"])
-                if len(data) > BOT_PICTURE_MAX:
-                    raise ValueError(wording.say("host_errors.picture_too_big"))
+            elif data is not None:
                 with open(pic + ".new", "wb") as f:
                     f.write(data)
                 os.replace(pic + ".new", pic)
         self.save(s)
         now = s.meta.get("bot")
-        if (was or {}).get("name") != (now or {}).get("name") and not (was is None and self.grow_agent(s)):
-            self.renew_agent(s)  # (its picture alone: nothing its agent's told)
+        if (was or {}).get("name") != (now or {}).get("name"):
+            s.bot_note = None  # (what it was to be told, with the name and folder it had)
+            if not (was is None and self.grow_agent(s)):
+                self.renew_agent(s)  # (its picture alone: nothing its agent's told)
         self.changed()
         return s.listing()
 
@@ -1280,26 +1286,59 @@ class ServerRunning:
         else:
             want = wire.safe_name(s.id)
         new = os.path.join(bots, want)
+        before = {k: s.meta.get(k) for k in ("bot_folder", "bot_moving")}
         try:
             os.makedirs(bots, mode=0o700, exist_ok=True)
             if os.path.isdir(old):
+                s.meta["bot_folder"], s.meta["bot_moving"] = want, os.path.basename(old)
+                self.save(s)  # (the name it's to have kept first: a crash between this and the move is mended as the host starts)
                 os.rename(old, new)
             else:
                 os.makedirs(new, mode=0o700)
         except OSError as e:
             self.log(f"{s.id}: its Bot's folder not named {want}: {e}")
-            os.makedirs(old, mode=0o700, exist_ok=True)
+            for k, v in before.items():
+                s.meta.pop(k, None) if v is None else s.meta.__setitem__(k, v)
+            try:
+                self.save(s)
+                os.makedirs(old, mode=0o700, exist_ok=True)
+            except OSError:
+                pass
             return old
         s.meta["bot_folder"] = want
+        s.meta.pop("bot_moving", None)
         self.tasks.moved(s, os.path.join(new, "tasks"))
         return new
 
-    def settle_bot_folders(self):
-        """(as the host starts) Each Bot's folder named after it, a Bot's kept by its session's id till now too."""
-        for s in list(self.sessions.values()):
-            if s.meta.get("bot") and not s.meta.get("bot_folder"):
-                self.name_bot_folder(s, s.meta["bot"].get("name") or "Bot")
+    def move_bot_folder(self, s):
+        """(under the lock) A Bot's folder moved to its name's, now its agent's turn is over (set_bot)."""
+        if s.bot_rename and s.meta.get("bot"):
+            s.bot_rename = False
+            self.name_bot_folder(s, s.meta["bot"]["name"])
+            try:
                 self.save(s)
+            except OSError as e:
+                self.log(f"{s.id}: {e}")
+
+    def settle_bot_folders(self):
+        """(as the host starts) Each Bot's folder named after it, a Bot's kept by its session's id till now too; one a
+        crash left between saving its folder's name and moving it, moved. Never stops the host."""
+        bots = os.path.join(self.state_dir, "bots")
+        for s in list(self.sessions.values()):
+            if not s.meta.get("bot"):
+                continue
+            try:
+                if s.meta.get("bot_moving"):
+                    new, old = (os.path.join(bots, s.meta.get(k) or "") for k in ("bot_folder", "bot_moving"))
+                    if os.path.isdir(old) and not os.path.lexists(new):
+                        os.rename(old, new)
+                    s.meta.pop("bot_moving", None)
+                    self.save(s)
+                if not s.meta.get("bot_folder"):
+                    self.name_bot_folder(s, s.meta["bot"].get("name") or "Bot")
+                    self.save(s)
+            except OSError as e:
+                self.log(f"{s.id}: its Bot's folder not settled: {e}")
 
     # (what a Bot's conversation was, its thread's; what the Bot is, kept: the rest of its meta)
     THREAD_KEYS = ("path", "cli_id", "title", "prompt", "said", "written", "cut", "context_usage", "codex_started",
@@ -1328,7 +1367,7 @@ class ServerRunning:
         listed = s.listing()
         meta = copy.deepcopy(s.meta)
         for key in ("bot", "autofix", "held", "waits_on", "follow_ups", "routines", "task_run", "spawned_by",
-                    "start_key", "rotated", "last_thread", "composer", "bot_folder"):  # (the Bot's draft, and its
+                    "start_key", "rotated", "last_thread", "composer", "bot_folder", "bot_moving"):  # (the Bot's draft, and its
             # folder, stay the Bot's)
             meta.pop(key, None)
         title = listed.get("title") or time.strftime("%-d %b %Y", time.localtime(listed.get("created") or time.time()))

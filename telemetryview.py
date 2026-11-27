@@ -698,8 +698,12 @@ class Page(Adw.PreferencesPage):
             return False
         self.counts_shown = repr(rows)
         used, slow = most_used(rows), slowest(rows)
-        self.group("used", wording.say("telemetry.most_used") if used else None, [count_row(c) for c in used])
-        self.group("slowest", wording.say("telemetry.slowest") if slow else None, [count_row(c, slow=True) for c in slow])
+        for key, title, these, is_slow in (("used", "telemetry.most_used", used, False),
+                                           ("slowest", "telemetry.slowest", slow, True)):
+            if these:
+                self.group(key, wording.say(title), [count_row(c, slow=is_slow) for c in these])
+            else:
+                self.drop(key)
         return False
 
     def read_errors(self):

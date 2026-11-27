@@ -46,7 +46,7 @@
         "integer",
         "null"
       ],
-      "description": "The most events, samples and profiles each (the latest kept; default 5000)."
+      "description": "The most events, samples, profiles, counts and errors each (default 5000): what's cut is said in the answer's truncated."
     }
   },
   "required": [

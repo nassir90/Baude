@@ -43,6 +43,41 @@
         "null"
       ],
       "description": "The longest of them (a screen's: its longest stretch in front)."
+    },
+    "own": {
+      "type": "number",
+      "description": "A function's own time added up: the processor time its runs took on their thread, less what the functions of Baude's own it called took (what it ran itself, not what it waited for: what line profiling is aimed by)."
+    },
+    "within": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "enum": [
+              "part",
+              "menu",
+              "op"
+            ],
+            "description": "A click (part, menu) or a wire op the host answered (op)."
+          },
+          "name": {
+            "type": "string",
+            "description": "Its count's name."
+          },
+          "seconds": {
+            "type": "number",
+            "description": "The function's own time within it, added up."
+          }
+        },
+        "required": [
+          "kind",
+          "name",
+          "seconds"
+        ],
+        "additionalProperties": false
+      },
+      "description": "A function's: the clicks and ops it ran within (from the click till it was painted; the op's handling), its own time in each, the most first (at most 3)."
     }
   },
   "required": [

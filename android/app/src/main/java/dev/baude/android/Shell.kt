@@ -215,7 +215,7 @@ fun ChatShell(hostId: String, sid: String, back: () -> Unit, open: (String, Stri
     Box(Modifier.fillMaxSize()) {
     Column(Modifier.fillMaxSize().background(c.frame)) {
         Bar(name, start = { IconButton(Adwaita.GoPrevious, Wording.Browser.back, onClick = back) },
-            lead = if (bot != null) ({ Avatar(name, contact?.let { Mesh.pictures[it.pictureKey] }) }) else null,
+            lead = if (bot != null) ({ Avatar(name, contact?.let { Mesh.pictures[it.pictureKey] }, size = Tokens.Gap.avatar) }) else null,
             end = {
                 if (wide) when (if (split) "chat" else shown) {
                     "chat" -> chatControls(true)

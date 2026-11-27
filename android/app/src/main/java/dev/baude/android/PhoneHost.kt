@@ -976,7 +976,8 @@ object PhoneHost {
             if (s.deleted) emptyList() else heads.filter { it.subscribed && (it.archived || !s.meta.optBoolean("archived")) &&
                 PhoneAccess.allowed(it, "manage_read", s.meta) } // (told only those it's listed to)
         }
-        if (!s.meta.optBoolean("ephemeral")) TelemetryStore.turn(s.id, ms / 1000.0, s.meta.optString("model").ifEmpty { null },
+        if (!s.meta.optBoolean("ephemeral")) TelemetryStore.turn(s.id, ms / 1000.0,
+            (s.meta.optJSONObject("infer")?.optString("model")?.ifEmpty { null }) ?: s.meta.optString("model").ifEmpty { null }, // (the id it ran on)
             s.meta.optString("effort").ifEmpty { null }, tokens)
         val kept = synchronized(lock) { if (s.deleted) null else turnEnd(s) }
         val end = Msg.TurnEnded(session = s.id, uuid = kept?.uuid, size = kept?.size, result = result, isError = error,

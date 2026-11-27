@@ -1,7 +1,8 @@
 """lineprofile — line_profiler (schema/deps/line_profiler.json, optional) switched on and off at run time for the
 functions and modules named, in whichever process this runs in: the host process (baudelib.telemetry's), Baude's and
-Record's (telemetryview's). What each profiles is Baude's developers' pick (DEFAULTS), unless telemetry_set from any
-member of the mesh names others for it on a host. While nothing's named nothing of line_profiler is loaded or running,
+Record's (telemetryview's). What each profiles is what its counts show took the user's time (baudelib.aim; Baude's
+developers' pick, DEFAULTS, till there are counts), unless telemetry_set from any member of the mesh names others for
+it on a host. While nothing's named nothing of line_profiler is loaded or running,
 so off costs nothing.
 What it timed is taken every so often (snapshot) as the wire's TelemetryProfile, the time since the last one's.
 No GTK."""
@@ -17,8 +18,9 @@ import time
 from baudelib import deps, wording
 
 LINES_MAX = 200  # (a snapshot's lines, the most time first)
-DEFAULTS = {  # (what each process profiles while line profiling's on: the developers' pick, shipped with the code)
-    "host": ["baudelib.serverrun.ServerRunning.handle", "baudelib.telemetry.Telemetry.sample"],
+DEFAULTS = {  # (what each process profiles while line profiling's on before it's counted anything to pick from
+    # (baudelib.aim): the developers' pick, shipped with the code)
+    "host": ["baudelib.serverrun.ServerRunning.handle"],
     "baude": ["windowview.WindowView.load_history", "markdownview.markdown_parse"],
     "record": ["recordstore.Store.take", "markdownview.markdown_parse"],
 }
@@ -28,12 +30,16 @@ CHECKOUT = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 def resolve(name):
     """What a dotted name is: a module (every function in it profiled) or a function or method (module.function,
     module.Class.method; module:Class.method too). The longest part of it that's a module is the module (imported, if
-    it isn't yet). ValueError if it isn't one of them."""
+    it isn't yet; the script the process runs as itself). ValueError if it isn't one of them."""
     name = name.strip().replace(":", ".")
     parts = [p for p in name.split(".") if p]
     for cut in range(len(parts), 0, -1):
         mod_name = ".".join(parts[:cut])
         mod = sys.modules.get(mod_name)
+        main = sys.modules.get("__main__")
+        if mod is None and os.path.realpath(getattr(main, "__file__", None) or "") == os.path.join(
+                CHECKOUT, *mod_name.split(".")) + ".py":
+            mod = main  # (the script this process runs: not imported again)
         if mod is None:
             try:
                 mod = importlib.import_module(mod_name)

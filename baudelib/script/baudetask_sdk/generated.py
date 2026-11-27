@@ -1522,6 +1522,11 @@ class TelemetryCount(Obj):
             an op's handling; a callback's running; a function's running, added up (its calls' time with theirs
             in it); 0 for a program.
         max (number or None): The longest of them (a screen's: its longest stretch in front).
+        own (number): A function's own time added up: the processor time its runs took on their thread, less
+            what the functions of Baude's own it called took (what it ran itself, not what it waited for: what
+            line profiling is aimed by).
+        within (array of object): A function's: the clicks and ops it ran within (from the click till it was
+            painted; the op's handling), its own time in each, the most first (at most 3).
     """
 
 
@@ -1535,6 +1540,8 @@ class TelemetryCounters(Obj):
         counts (array of TelemetryCount): Each thing used or run in it, the most times first.
         commit (string or None): The commit the process runs (its first 12 characters).
         wire (integer or None): The wire's version it speaks.
+        span (number or None): A rolled-up row's: the seconds it stands for (3600: a row an hour, after a week),
+            its counts added up (null: a row a minute, as told).
     """
     _refs = {"counts": "TelemetryCount"}
 
@@ -1679,6 +1686,18 @@ class TelemetryModel(Obj):
     """
 
 
+class TelemetryPick(Obj):
+    """A function line profiling was aimed at, and the count that picked it: where the process's time went (its own
+    time, weighted up by the slow clicks and ops it ran within).
+
+        function (string): What's profiled, as its count names it (module:Class.method).
+        count (integer): Its runs in the stretch it was picked from (the last day).
+        seconds (number): Its own time added up in that stretch (the processor time it took, less its counted
+            callees').
+        within (object): The click or op it ran within that weighted it most (none: it ran within none).
+    """
+
+
 class TelemetryProc(Obj):
     """A process's use of its machine, in one sample.
 
@@ -1701,8 +1720,10 @@ class TelemetryProfile(Obj):
         lines (array of TelemetryLine): Its lines that ran, the most time first (at most 200).
         commit (string or None): The commit the process profiled runs (its first 12 characters), as it started.
         wire (integer or None): The wire's version the process profiled speaks.
+        picked (array of TelemetryPick): What its counts picked it to profile over the stretch, each with the
+            count that picked it (none: named by telemetry_set, or the developers' pick).
     """
-    _refs = {"lines": "TelemetryLine"}
+    _refs = {"lines": "TelemetryLine", "picked": "TelemetryPick"}
 
 
 class TelemetryProfiling(Obj):
@@ -1710,16 +1731,22 @@ class TelemetryProfiling(Obj):
 
         app ('host' | 'baude' | 'record'): The process: the host's, Baude's or Record's.
         functions (array of string): What's profiled: functions (module.function, module.Class.method) and
-            modules (every function in it); its defaults unless others are named.
-        default (boolean): They're its defaults (lineprofile.DEFAULTS, Baude's own pick), not named by
-            telemetry_set.
+            modules (every function in it): what telemetry_set named for it, else what its counts picked
+            (picked), else Baude's developers' pick (lineprofile.DEFAULTS) till there are counts.
+        default (boolean): Nothing's named for it by telemetry_set: what it profiles is picked by its counts (or
+            the developers' pick, before there are any).
         error (string or None): Why it isn't profiling what it's told to (a name not found; line_profiler not
             installed).
+        picked (array of TelemetryPick): What its counts picked for it now, each with the count that picked it
+            (none while something's named, or nothing's counted yet).
     """
+    _refs = {"picked": "TelemetryPick"}
 
 
 class TelemetrySample(Obj):
-    """A host's machine and its processes, sampled every few seconds while telemetry is on.
+    """A host's machine sampled while telemetry is on: every 5 seconds with someone at it (every 30 with nobody), its
+    processes with it every 30 seconds (every 2 minutes with nobody); older ones rolled up, a row a minute after a
+    day and a row an hour after a week.
 
         at (number): When, in seconds since the epoch.
         load (array or None of number): The machine's load average over 1, 5 and 15 minutes (null where it has
@@ -1738,9 +1765,11 @@ class TelemetrySample(Obj):
             on memory (Linux's pressure stall information, some avg10); null where it has none.
         procs (array of TelemetryProc): The host process, each app on its machine that told it telemetry (Baude,
             Record, the phone's app), and each Emission and Multiplex running there (the host finds those
-            itself).
+            itself). Left out of a sample its processes weren't taken in.
         commit (string or None): The commit the host runs (its first 12 characters), as it started.
         wire (integer or None): The wire's version the host speaks.
+        span (number or None): A rolled-up row's: the seconds it stands for (60, 3600), from at on, its numbers
+            their mean, its pressure the worst (null: one sample).
     """
     _refs = {"procs": "TelemetryProc"}
 
@@ -2842,6 +2871,8 @@ class TelemetryReadReply(Obj):
         counted (array of TelemetryCount): Its processes' counts added up over the stretch, by process, kind and
             name, the most times first.
         usage (TelemetryUsage or None): Its turns added up.
+        truncated (array of 'events' | 'metrics' | 'profiles' | 'counters' | 'errors' | 'counted'): Each list
+            cut short by limit (the latest kept): a read is never cut short without saying so.
     """
     _refs = {"state": "TelemetryState", "events": "TelemetryEvent", "metrics": "TelemetrySample",
              "profiles": "TelemetryProfile", "errors": "TelemetryError", "counters": "TelemetryCounters",
@@ -2975,7 +3006,7 @@ TYPES = {"AccessChat": AccessChat, "AccessMember": AccessMember, "AccessRule": A
          "TelemetryCount": TelemetryCount, "TelemetryCounters": TelemetryCounters, "TelemetryCrumb": TelemetryCrumb,
          "TelemetryDay": TelemetryDay, "TelemetryError": TelemetryError, "TelemetryEvent": TelemetryEvent,
          "TelemetryFront": TelemetryFront, "TelemetryLine": TelemetryLine, "TelemetryModel": TelemetryModel,
-         "TelemetryProc": TelemetryProc, "TelemetryProfile": TelemetryProfile,
+         "TelemetryPick": TelemetryPick, "TelemetryProc": TelemetryProc, "TelemetryProfile": TelemetryProfile,
          "TelemetryProfiling": TelemetryProfiling, "TelemetrySample": TelemetrySample,
          "TelemetryState": TelemetryState, "TelemetryUsage": TelemetryUsage, "TerminalInfo": TerminalInfo,
          "Theme": Theme, "ThemeFiles": ThemeFiles, "ToolNames": ToolNames, "TurnEnd": TurnEnd, "Update": Update,
@@ -4847,7 +4878,8 @@ class Ops(Area):
             to (number or None): To (null: now).
             what (array of 'events' | 'metrics' | 'profiles' | 'usage' | 'errors' | 'counters' | 'counted'):
                 What's wanted (none: only the state).
-            limit (integer or None): The most events, samples and profiles each (the latest kept; default 5000).
+            limit (integer or None): The most events, samples, profiles, counts and errors each (default 5000):
+                what's cut is said in the answer's truncated.
         """
         return self._call("telemetry_read", {"from": from_, "to": to, "what": what,
                                              "limit": limit}, host, TelemetryReadReply)

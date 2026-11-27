@@ -4,7 +4,8 @@ its own process and of each app's on it: Baude's, Record's, Emission's, Multiple
 its own, and those its apps send), and the errors of every process on its machine (errorbook's: its own, and those its
 apps tell it), each row with the commit and wire version of the code that made it, while it's on; all read back over a stretch by telemetry_read, from any member of the
 mesh, and switched by telemetry_set (Settings → Telemetry, any head). Line profiling is switched on and off there too;
-what each process profiles is lineprofile.DEFAULTS unless telemetry_set names others for it (python3 -m
+what each process profiles is picked from what its counts show took the user's time (baudelib.aim, again every
+aim.ROTATE_S) unless telemetry_set names others for it (python3 -m
 baudelib.telemetry profile, from any member of the mesh). Kept in the host's state folder only,
 telemetry/<events|metrics|profiles>/YYYY-MM-DD.jsonl (the day of each line's time, this machine's),
 telemetry/errors.json (each error once, by its process and fingerprint), and
@@ -18,16 +19,21 @@ import ctypes.util
 import datetime
 import json
 import os
-import subprocess
+import re
 import sys
 import threading
 import time
 
-from baudelib import counters, deps, errorbook, funccount, lineprofile, uiindex, wire
+from baudelib import aim, counters, deps, errorbook, funccount, lineprofile, uiindex, wire
 
-SAMPLE_S = 5  # (how often the machine is sampled while it's on)
+SAMPLE_S = 5  # (how often the machine is sampled while it's on, someone at it)
+PROCS_S = 30  # (how often its processes are, with it)
+AWAY_SAMPLE_S, AWAY_PROCS_S = 30, 120  # (the same with nobody at the machine)
+AWAY_IDLE_S = 300  # (no input for this long: nobody's at it)
+MINUTE_AFTER_DAYS, HOUR_AFTER_DAYS = 1, 7  # (samples older than this rolled up to a row a minute, then a row an hour;
+# counts, already a row a minute, to a row an hour)
 PROFILE_S = 30  # (how often what's profiled is saved)
-KEEP_DAYS = {"events": 400, "metrics": 7, "profiles": 30, "errors": 90, "counters": 90}  # (events back a year: the tokens' grid;
+KEEP_DAYS = {"events": 400, "metrics": 90, "profiles": 30, "errors": 90, "counters": 90}  # (events back a year: the tokens' grid;
 # an error since it last happened)
 ERRORS_FLUSH_S = 1  # (errors written this long after one comes, those meanwhile with it)
 ERRORS_KEPT = 1000  # (errors kept: the latest by when they last happened)
@@ -116,7 +122,10 @@ def profile_of(p, app, ver=None):
              for x in p["lines"][:lineprofile.LINES_MAX] if isinstance(x, dict) and isinstance(x.get("file"), str)
              and isinstance(x.get("line"), int) and isinstance(x.get("function"), str)
              and isinstance(x.get("hits"), int) and _num(x.get("seconds"))]
-    return {"at": float(p["at"]), "from": float(p["from"]), "app": app, "lines": lines, **(ver or {})} if lines else None
+    picked = [aim.pick_of(x) for x in (p.get("picked") or [])[:aim.CANDIDATES]]
+    picked = [x for x in picked if x is not None]
+    return {"at": float(p["at"]), "from": float(p["from"]), "app": app, "lines": lines, "picked": picked,
+            **(ver or {})} if lines else None
 
 
 def _text(v, n=TEXT_MAX):
@@ -140,29 +149,47 @@ def counters_of(row, app, ver=None):
             part = uiindex.part_by_copy(entity, key)
             name = f"{entity}/{part}" if part else f"{entity}/({key})"
         counts.append({"kind": c["kind"], "name": name, "count": c["count"], "seconds": round(float(c["seconds"]), 6),
-                       "max": round(float(c["max"]), 6) if _num(c.get("max")) else None})
+                       "max": round(float(c["max"]), 6) if _num(c.get("max")) else None, **own_of(c)})
     if not counts:
         return None
     return {"at": round(float(row["at"]), 3), "from": round(float(row["from"]), 3), "app": app, "counts": counts,
             **(ver or {})}
 
 
+def own_of(c):
+    """A told function count's own time and what it ran within, as kept ({own, within}), or nothing."""
+    if c.get("kind") != "function" or not _num(c.get("own")):
+        return {}
+    within = [{"kind": w["kind"], "name": str(w["name"])[:counters.NAME_MAX], "seconds": round(float(w["seconds"]), 6)}
+              for w in (c.get("within") if isinstance(c.get("within"), list) else [])[:funccount.WITHIN_MAX]
+              if isinstance(w, dict) and w.get("kind") in ("part", "menu", "op") and isinstance(w.get("name"), str)
+              and _num(w.get("seconds"))]
+    return {"own": round(max(float(c["own"]), 0.0), 6), "within": within}
+
+
 def counted(rows, legacy=()):
     """Rows of counts added up (TelemetryCount each, with its process): by process, kind and name, the most times
     first. legacy: what Baude kept before counts (screen time per place, menu uses), added in as screens and menu
     items named by their copy keys."""
-    out = {}
+    out, own = {}, {}
     for r in rows:
         for c in r.get("counts") or []:
-            got = out.setdefault((r.get("app"), c["kind"], c["name"]), [0, 0.0, 0.0])
+            key = (r.get("app"), c["kind"], c["name"])
+            got = out.setdefault(key, [0, 0.0, 0.0])
             got[0] += c["count"]
             got[1] += c["seconds"]
             got[2] = max(got[2], c.get("max") or 0)
+            if "own" in c:
+                mine = own.setdefault(key, [0.0, {}])
+                mine[0] += c["own"]
+                for w in c.get("within") or []:
+                    mine[1][(w["kind"], w["name"])] = mine[1].get((w["kind"], w["name"]), 0.0) + w["seconds"]
     for app, kind, name, count, seconds in legacy:
         got = out.setdefault((app, kind, name), [0, 0.0, 0.0])
         got[0] += count
         got[1] += seconds
-    return [{"app": a, "kind": k, "name": n, "count": c, "seconds": round(s, 6), "max": round(m, 6) if m else None}
+    return [{"app": a, "kind": k, "name": n, "count": c, "seconds": round(s, 6), "max": round(m, 6) if m else None,
+             **counters.own_of(own.get((a, k, n)))}
             for (a, k, n), (c, s, m) in sorted(out.items(), key=lambda kv: (kv[0][1] == "function", -kv[1][0], -kv[1][1], kv[0][2]))]
 
 
@@ -201,56 +228,70 @@ _CLK = os.sysconf("SC_CLK_TCK") if hasattr(os, "sysconf") and sys.platform != "d
 _PAGE = os.sysconf("SC_PAGE_SIZE") if hasattr(os, "sysconf") else 4096
 
 
-def _ps_time(text):
-    """macOS ps's cputime ([dd-][hh:]mm:ss.ss) in seconds."""
-    days, _, rest = text.rpartition("-")
-    total = 0.0
-    for part in rest.split(":"):
-        total = total * 60 + float(part)
-    return total + (int(days) * 86400 if days else 0)
+class _TaskInfo(ctypes.Structure):
+    """macOS's struct proc_taskinfo (sys/proc_info.h), as proc_pidinfo's PROC_PIDTASKINFO fills it."""
+    _fields_ = [(n, ctypes.c_uint64) for n in ("virtual_size", "resident_size", "total_user", "total_system",
+                                               "threads_user", "threads_system")] + \
+        [(n, ctypes.c_int32) for n in ("policy", "faults", "pageins", "cow_faults", "messages_sent",
+                                       "messages_received", "syscalls_mach", "syscalls_unix", "csw", "threadnum",
+                                       "numrunning", "priority")]
+
+
+class _Timebase(ctypes.Structure):
+    _fields_ = [("numer", ctypes.c_uint32), ("denom", ctypes.c_uint32)]
+
+
+def _mac_args(pid):
+    """A macOS process's command line (sysctl's KERN_PROCARGS2: argc, the executable's path, then argv), or None."""
+    libc = _mac()[0]
+    mib, size = (ctypes.c_int * 3)(1, 49, pid), ctypes.c_size_t(0)  # (CTL_KERN, KERN_PROCARGS2)
+    if libc.sysctl(mib, 3, None, ctypes.byref(size), None, ctypes.c_size_t(0)) != 0 or not size.value:
+        return None
+    buf = ctypes.create_string_buffer(size.value)
+    if libc.sysctl(mib, 3, buf, ctypes.byref(size), None, ctypes.c_size_t(0)) != 0:
+        return None
+    raw = buf.raw[:size.value]
+    argc = int.from_bytes(raw[:4], sys.byteorder)
+    _path, _, rest = raw[4:].partition(b"\0")
+    return b" ".join(rest.lstrip(b"\0").split(b"\0")[:argc]).decode("utf-8", "replace")
 
 
 def commands(pids):
-    """{pid: its command line} of those still running."""
+    """{pid: its command line} of those still running (no program started: macOS's sysctl, Linux's /proc)."""
     out = {}
-    if not pids:
-        return out
-    if sys.platform == "darwin":
-        for pid in pids:
-            try:
-                text = subprocess.run(["ps", "-o", "command=", "-p", str(pid)], capture_output=True, text=True,
-                                      timeout=5).stdout.strip()
-            except (OSError, subprocess.TimeoutExpired):
-                continue
-            if text:
-                out[pid] = text
-        return out
     for pid in pids:
         try:
+            if sys.platform == "darwin":
+                if (text := _mac_args(pid)) is not None:
+                    out[pid] = text
+                continue
             with open(f"/proc/{pid}/cmdline", "rb") as f:
                 out[pid] = f.read().replace(b"\0", b" ").decode("utf-8", "replace")
-        except OSError:
+        except (OSError, AttributeError, TypeError, ValueError, ctypes.ArgumentError):
             continue
     return out
 
 
 def proc_stats(pids):
-    """{pid: (CPU seconds so far, resident bytes)} of those still running."""
+    """{pid: (CPU seconds so far, resident bytes)} of those still running (no program started: macOS's libproc,
+    proc_pidinfo, Linux's /proc)."""
     out = {}
     if not pids:
         return out
     if sys.platform == "darwin":
         try:
-            text = subprocess.run(["ps", "-o", "pid=,time=,rss=", "-p", ",".join(str(p) for p in pids)],
-                                  capture_output=True, text=True, timeout=5).stdout
-        except (OSError, subprocess.TimeoutExpired):
-            return out
-        for line in text.splitlines():
-            f = line.split()
-            try:
-                out[int(f[0])] = (_ps_time(f[1]), int(f[2]) * 1024)
-            except (IndexError, ValueError):
-                continue
+            libc = _mac()[0]
+            if not _TIMEBASE:
+                tb = _Timebase()
+                libc.mach_timebase_info(ctypes.byref(tb))
+                _TIMEBASE.append(tb.numer / tb.denom / 1e9)  # (proc_taskinfo's times are mach ticks)
+            info = _TaskInfo()
+            for pid in pids:
+                if libc.proc_pidinfo(pid, 4, ctypes.c_uint64(0), ctypes.byref(info), ctypes.sizeof(info)) == \
+                        ctypes.sizeof(info):  # (PROC_PIDTASKINFO)
+                    out[pid] = ((info.total_user + info.total_system) * _TIMEBASE[0], info.resident_size)
+        except (OSError, AttributeError, TypeError, ValueError, ctypes.ArgumentError):
+            pass
         return out
     for pid in pids:
         try:
@@ -262,6 +303,9 @@ def proc_stats(pids):
         except (OSError, IndexError, ValueError):
             continue
     return out
+
+
+_TIMEBASE = []
 
 
 _PRESSURES = {1: "normal", 2: "warning", 4: "critical"}  # (macOS's kern.memorystatus_vm_pressure_level, dispatch's)
@@ -382,6 +426,8 @@ class Telemetry:
         self.named = {a: [f for f in named[a] if isinstance(f, str)] for a in PROFILED
                       if isinstance(named.get(a), list)}  # (what's named in place of a process's defaults)
         self.thread = None
+        self.picked, self.profiled_picks = {}, []  # (what each process's counts picked: aim's; the host's own now)
+        self.told_at = time.monotonic()  # (an app here last told something: away's, where input can't be read)
         self.errors_lock, self.errs, self.errors_due = threading.Lock(), None, None  # (errors.json's, as read;
         # its write waited for)
         self.counters = counters.Counters()  # (its wire ops'; this process's own, COUNTERS, too where it has the book)
@@ -395,15 +441,31 @@ class Telemetry:
         self._run()
 
     def functions(self, app):
-        """What app's process profiles while line profiling's on: what telemetry_set named for it, else the defaults."""
-        return list(self.named[app] if app in self.named else lineprofile.DEFAULTS[app])
+        """What app's process profiles while line profiling's on: what telemetry_set named for it, else what its
+        counts picked (aim's), else the developers' pick."""
+        if app in self.named:
+            return list(self.named[app])
+        return [p["function"] for p in self.picked.get(app) or []] or aim.defaults(app)
+
+    def aim(self, now=None):
+        """What each process profiles picked again from the last day's counts (while line profiling's on): its
+        apps told (Info's telemetry) if it's changed."""
+        now = time.time() if now is None else now
+        rows = counted(self.rows("counters", now - aim.SINCE_S, now, 0))
+        picked = {a: aim.picks(a, rows, now) for a in PROFILED}
+        if picked != self.picked:
+            self.picked = picked
+            self._profile_host()
+            self.changed()
 
     def _profile_host(self):
         """The host's own profiler following the state: its functions while telemetry and line profiling are on (and
         the functions counted, to aim it, in the same time)."""
+        picked = self.profiled_picks
+        self.profiled_picks = [] if "host" in self.named else list(self.picked.get("host") or [])
         funccount.switch(self.on and self.profiling)
         if (last := self.profiler.set(self.functions("host") if self.on and self.profiling else [])) is not None:
-            self._write("profiles", [last])
+            self._write("profiles", [{**last, "picked": picked}])
 
     def _run(self):
         with self.lock:
@@ -433,6 +495,7 @@ class Telemetry:
     def state(self):
         """As the wire's TelemetryState has it."""
         profiling = [{"app": a, "functions": self.functions(a), "default": a not in self.named,
+                      "picked": [] if a in self.named else list(self.picked.get(a) or []),
                       "error": self.profiler.error if a == "host" else self.errors.get(a)} for a in PROFILED]
         return {"on": self.on, "line_profiler": self.has_lp, "line_profiling": self.profiling, "profiling": profiling}
 
@@ -451,6 +514,8 @@ class Telemetry:
                     self.fronts.clear()
         if isinstance(msg.get("line_profiling"), bool):
             self.profiling = msg["line_profiling"]
+            if self.profiling:
+                self.aim()
         app = msg.get("app")
         if app in PROFILED and msg.get("default") is True:
             self.named.pop(app, None)
@@ -474,9 +539,13 @@ class Telemetry:
         app = msg.get("app")
         if app not in APPS:
             return
+        self.told_at = time.monotonic()
         if isinstance(msg.get("pid"), int) and msg["pid"] > 0 and self.on:
             with self.lock:
+                new = msg["pid"] not in self.pids
                 self.pids[msg["pid"]] = app
+            if new and (st := proc_stats([msg["pid"]]).get(msg["pid"])):
+                self.cpu.setdefault(msg["pid"], (time.time(), st[0]))  # (its CPU share counted from here)
         if app in PROFILED:
             error = msg.get("profile_error") if isinstance(msg.get("profile_error"), str) else None
             if error != self.errors.get(app):
@@ -508,7 +577,7 @@ class Telemetry:
         took = now - began if isinstance(began, (int, float)) and began else (
             msg["duration_ms"] / 1000 if _num(msg.get("duration_ms")) else None)
         e = event_of({"at": now, "kind": "turn_ended", "host": self.host_id, "session": session_id,
-                      "seconds": took, "turn": msg.get("uuid"), "model": model, "effort": effort,
+                      "seconds": took, "turn": msg.get("uuid"), "model": model_of(msg, model), "effort": effort,
                       **tokens_of(msg)}, "host", self.ver)
         if e is not None:
             self._write("events", [e])
@@ -634,7 +703,23 @@ class Telemetry:
                 self._prune(today)
 
     def _prune(self, today):
-        """(lock held) Day files older than they're kept, gone."""
+        """(lock held) Day files older than they're kept, gone; old samples and counts rolled up."""
+        for kind in ("metrics", "counters"):
+            try:
+                names = sorted(os.listdir(os.path.join(self.dir, kind)))
+            except OSError:
+                continue
+            for name in names:
+                try:
+                    age = (today - datetime.date.fromisoformat(name.removesuffix(".jsonl"))).days
+                except ValueError:
+                    continue
+                span = 3600 if age > HOUR_AFTER_DAYS else 60 if age > MINUTE_AFTER_DAYS and kind == "metrics" else 0
+                if span:
+                    try:
+                        roll_file(os.path.join(self.dir, kind, name), kind, span)
+                    except (OSError, ValueError) as e:
+                        self.log(f"telemetry: {name} not rolled up: {e}")
         for kind, days in KEEP_DAYS.items():
             try:
                 names = os.listdir(os.path.join(self.dir, kind))
@@ -652,8 +737,15 @@ class Telemetry:
                         pass
 
     # ---- sampling
-    def sample(self, now=None):
-        """One sample of the machine and its processes (a TelemetrySample)."""
+    def sample(self, now=None, procs=True):
+        """One sample of the machine and (procs) its processes (a TelemetrySample)."""
+        if not procs:
+            now = time.time() if now is None else now
+            try:
+                load = [round(x, 2) for x in os.getloadavg()]
+            except OSError:
+                load = None
+            return {"at": round(now, 3), "load": load, **memory()}
         try:
             found = {pid: app for pid, app in self.found().items() if app in PROCS}
         except Exception as e:  # noqa: BLE001 (what couldn't be found: sampled without it)
@@ -689,18 +781,47 @@ class Telemetry:
             load = None
         return {"at": round(now, 3), "load": load, **memory(), "procs": procs}
 
+    def away(self):
+        """Nobody's at this machine: no input for AWAY_IDLE_S (macOS's), or (where that can't be told) no app here
+        has told anything for as long and no chat's in front."""
+        if sys.platform == "darwin":
+            try:
+                if not _IDLE:
+                    cg = ctypes.cdll.LoadLibrary("/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics")
+                    cg.CGEventSourceSecondsSinceLastEventType.restype = ctypes.c_double
+                    cg.CGEventSourceSecondsSinceLastEventType.argtypes = [ctypes.c_int32, ctypes.c_uint32]
+                    _IDLE.append(cg.CGEventSourceSecondsSinceLastEventType)
+                return _IDLE[0](0, 0xFFFFFFFF) > AWAY_IDLE_S  # (the session's, any input)
+            except (OSError, AttributeError):
+                pass
+        with self.lock:
+            return not self.fronts and time.monotonic() - self.told_at > AWAY_IDLE_S
+
     def _sampling(self):
         profiled = counted_at = time.monotonic()
-        while not self.wake.wait(SAMPLE_S):
+        procs_at = 0.0
+        aimed = int(time.time() // aim.ROTATE_S)
+        with self.lock:  # (each process's CPU so far: its first sample's share is from here)
+            pids = dict(self.pids)
+        now = time.time()
+        for pid, (cpu_s, _rss) in proc_stats(sorted(pids)).items():
+            self.cpu.setdefault(pid, (now, cpu_s))
+        while not self.wake.wait(AWAY_SAMPLE_S if (away := self.away()) else SAMPLE_S):
             try:
                 if time.monotonic() - counted_at >= counters.FLUSH_S:
                     counted_at = time.monotonic()
                     self.flush_counts()
-                self._write("metrics", [self.sample()])
+                if self.profiling and int(time.time() // aim.ROTATE_S) != aimed:
+                    aimed = int(time.time() // aim.ROTATE_S)
+                    self.aim()
+                with_procs = time.monotonic() - procs_at >= (AWAY_PROCS_S if away else PROCS_S)
+                if with_procs:
+                    procs_at = time.monotonic()
+                self._write("metrics", [self.sample(procs=with_procs)])
                 if time.monotonic() - profiled >= PROFILE_S:
                     profiled = time.monotonic()
                     if (p := self.profiler.snapshot()) is not None:
-                        self._write("profiles", [p])
+                        self._write("profiles", [{**p, "picked": list(self.profiled_picks)}])
             except Exception as e:  # noqa: BLE001 (a sample gone wrong: said, and the next one taken)
                 self.log(f"telemetry: {type(e).__name__}: {e}")
 
@@ -739,18 +860,27 @@ class Telemetry:
         limit = max(1, min(int(msg["limit"]), 100_000)) if isinstance(msg.get("limit"), int) else LIMIT
         what = [w for w in msg.get("what") or [] if w in WHAT]
         self.has_lp = deps.present("line_profiler")
-        out = {"host": host_id, "state": self.state()}
-        for kind in ("events", "metrics", "profiles"):
+        out, cut = {"host": host_id, "state": self.state()}, []
+        for kind in ("events", "metrics", "profiles", "counters"):
             if kind in what:
-                out[kind] = self.rows(kind, start, end, limit)
+                rows = self.rows(kind, start, end, 0)
+                if len(rows) > limit:  # (the latest kept, and said: never cut short silently)
+                    cut.append(kind)
+                out[kind] = rows[-limit:]
         if "usage" in what:
             out["usage"] = usage(self.rows("events", start, end, 0))
         if "errors" in what:
-            out["errors"] = self.error_rows(start, end, limit)
-        if "counters" in what:
-            out["counters"] = self.rows("counters", start, end, limit)
+            out["errors"] = self.error_rows(start, end, 0)
+            if len(out["errors"]) > limit:
+                cut.append("errors")
+                out["errors"] = out["errors"][:limit]
         if "counted" in what:
-            out["counted"] = counted(self.rows("counters", start, end, 0), self.legacy(start, end))[:limit]
+            out["counted"] = counted(self.rows("counters", start, end, 0), self.legacy(start, end))
+            if len(out["counted"]) > limit:
+                cut.append("counted")
+                out["counted"] = out["counted"][:limit]
+        if cut:
+            out["truncated"] = cut
         return out
 
     def legacy(self, start, end):
@@ -782,6 +912,82 @@ class Telemetry:
         return out
 
 
+_IDLE = []
+_LEVEL = {"normal": 0, "warning": 1, "critical": 2}
+
+
+def _mean(xs):
+    xs = [x for x in xs if _num(x)]
+    return sum(xs) / len(xs) if xs else None
+
+
+def roll_samples(rows, span):
+    """Samples rolled up, a row each span seconds (and each version of the code in it): the machine's numbers their
+    mean, its pressure the worst, each process's CPU and memory their mean; span on each."""
+    groups = {}
+    for r in rows:
+        groups.setdefault((int(r["at"] // span), r.get("commit"), r.get("wire")), []).append(r)
+    out = []
+    for (bucket, commit, wire_v), these in sorted(groups.items(), key=lambda kv: kv[0][0]):
+        loads = [r["load"] for r in these if isinstance(r.get("load"), list) and len(r["load"]) == 3]
+        row = {"at": bucket * span, "span": span, "commit": commit, "wire": wire_v,
+               "load": [round(sum(x) / len(loads), 2) for x in zip(*loads)] if loads else None}
+        for k in ("memory_total", "memory_used", "swap_total", "swap_used"):
+            m = _mean(r.get(k) for r in these)
+            row[k] = int(m) if m is not None else None
+        stall = _mean(r.get("memory_stall") for r in these)
+        row["memory_stall"] = round(stall, 2) if stall is not None else None
+        levels = [r["memory_pressure"] for r in these if r.get("memory_pressure") in _LEVEL]
+        row["memory_pressure"] = max(levels, key=_LEVEL.get) if levels else None
+        procs = {}
+        for r in these:
+            for p in r.get("procs") or []:
+                procs.setdefault((p.get("app"), p.get("pid")), []).append(p)
+        if procs:
+            row["procs"] = [{"app": a, "pid": pid,
+                             "cpu": round(c, 1) if (c := _mean(p.get("cpu") for p in ps)) is not None else None,
+                             "rss": int(m) if (m := _mean(p.get("rss") for p in ps)) is not None else None}
+                            for (a, pid), ps in procs.items()]
+        out.append(row)
+    return out
+
+
+def roll_counts(rows, span):
+    """Rows of counts rolled up, a row each span seconds a process (and each version of its code): each thing's
+    count and time added up (a function's own time and what it ran within too), the longest kept; span on each."""
+    groups = {}
+    for r in rows:
+        groups.setdefault((int(r["at"] // span), r.get("app"), r.get("commit"), r.get("wire")), []).append(r)
+    out = []
+    for (bucket, app, commit, wire_v), these in sorted(groups.items(), key=lambda kv: kv[0][0]):
+        summed = counted([{**r, "app": app} for r in these])
+        out.append({"at": max(r["at"] for r in these), "from": min(r["from"] for r in these), "span": span,
+                    "app": app, "commit": commit, "wire": wire_v,
+                    "counts": [{k: c[k] for k in ("kind", "name", "count", "seconds", "max", "own", "within") if k in c}
+                               for c in summed]})
+    return out
+
+
+def roll_file(path, kind, span):
+    """A day file of samples or counts rolled up to a row each span seconds, unless it is already."""
+    with open(path, encoding="utf-8") as f:
+        rows = []
+        for line in f:
+            try:
+                r = json.loads(line)
+            except ValueError:
+                continue
+            if isinstance(r, dict) and _num(r.get("at")):
+                rows.append(r)
+    if not rows or all((r.get("span") or 0) >= span for r in rows):
+        return
+    rolled = (roll_samples if kind == "metrics" else roll_counts)(rows, span)
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        f.write("".join(json.dumps(r, separators=(",", ":")) + "\n" for r in rolled))
+    os.replace(tmp, path)
+
+
 def tail_since(path, start, block=1 << 16):
     """A file of rows in time order, its lines from the first at start or later (and a few before), read from its
     end back only as far as that."""
@@ -803,12 +1009,60 @@ def tail_since(path, start, block=1 << 16):
     return lines[1:] if at else lines
 
 
+ALIASES = ("opus", "sonnet", "haiku", "fable")  # (claude's own: models.ALIASES)
+
+
+def family_of(model):
+    """The family a model name is of (opus, from opus, opus[1m] or claude-opus-5-5[1m]), or None."""
+    if isinstance(model, str):
+        parts = re.sub(r"\[[^\]]*\]", "", model).split("-")
+        for a in ALIASES:
+            if a in parts:
+                return a
+    return None
+
+
+def model_of(msg, model):
+    """The model a turn ran on, as one name for it: the model id its result says ran it (Claude Code's
+    model_usage_since_last_result or modelUsage: claude-opus-5-5, never the alias opus it was started with), else
+    model as the session has it. A turn is the session's model's: the id of its family that wrote most (a subagent's
+    on another model doesn't rename it), the biggest of all only where none is of its family."""
+    for key in ("model_usage_since_last_result", "modelUsage"):
+        by = msg.get(key)
+        if isinstance(by, dict) and by:
+            used = [(k, v) for k, v in by.items() if isinstance(k, str) and k]
+            out = lambda kv: (kv[1].get("outputTokens") or 0) if isinstance(kv[1], dict) else 0
+            same = [kv for kv in used if family_of(kv[0]) and family_of(kv[0]) == family_of(model)]
+            if used:
+                return max(same or used, key=out)[0]
+    return model
+
+
+def canonical_models(events):
+    """A function (model, at) -> the one name for it: an alias (opus, opus[1m]) kept before turns said the id they
+    ran on is the first id of its family the same events have from then on (what the alias meant then), else itself."""
+    ids = {}
+    for e in sorted(events, key=lambda e: e.get("at") or 0):
+        m = e.get("model")
+        if isinstance(m, str) and m.startswith("claude-") and (f := family_of(m)):
+            ids.setdefault(f, []).append((e.get("at") or 0, m))
+
+    def name(model, at):
+        if not isinstance(model, str) or model.startswith("claude-") or (f := family_of(model)) is None:
+            return model
+        later = [m for t, m in ids.get(f, ()) if t >= (at or 0)]
+        long = [m for m in later if "[1m]" in m]
+        return (long if "[1m]" in model and long else later or [model])[0]
+    return name
+
+
 def usage(events):
     """The hosts' own turn_ended events added up (TelemetryUsage): tokens by day, by model, by model and effort, each
     turn once (by its host, session and result's id), each kind of token apart (input, cache writes, cache reads,
     output; an event kept before they were told apart, its tokens_in as input_with_cache), tokens all of them. An
     app's turn_ended is the same turn seen there: not counted again."""
     seen, days, models, combos = set(), {}, {}, {}
+    names = canonical_models(events)
 
     def add(table, k, e):
         t = table.setdefault(k, {"turns": 0, "tokens": 0, **{v: 0 for v in _KINDS.values()}})
@@ -827,8 +1081,9 @@ def usage(events):
         seen.add(key)
         add(days, datetime.date.fromtimestamp(e["at"]).isoformat(), e)
         if e.get("model"):
-            add(models, (e["model"], None), e)
-            add(combos, (e["model"], e.get("effort")), e)
+            model = names(e["model"], e["at"])  # (one name a model: an alias kept before, as its id)
+            add(models, (model, None), e)
+            add(combos, (model, e.get("effort")), e)
 
     def ranked(table):
         return [{"model": m, "effort": eff, **t}

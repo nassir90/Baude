@@ -263,6 +263,7 @@ class Server(ServerRunning, ServerSessions):
                 "notes": self.notes_seen,  # (Record's notebooks here, as written last: notes.stamp)
                 "edits": self.edits_seen,  # (the edits proposed to their pages, as written last: notes.edits_stamp)
                 "telemetry": self.telemetry.state(),  # (on or off, and what each process here profiles: its apps follow it)
+                "front": self.telemetry.front(),  # (the chats in front on this machine: no head anywhere notifies of them)
                 "tool_names": toolnames.table(self.me.get("mcp_servers") or ())}  # (how its MCP tools are named)
 
     def made_of(self, commit):

@@ -14,9 +14,12 @@ import weakref
 from gi.repository import Adw, GLib, Gtk
 
 from baudelib import lineprofile, providers, wording
+import widgets
 
 PROFILE_S = 30  # (how often what's profiled here is told)
 QUEUE_MAX = 1000  # (events kept for a host that isn't there yet)
+FRONT_IDLE_S = 300  # (no input for this long, or the screen locked, or the display asleep: nobody's at the chat in front)
+AWAY_LOOK_S = 5  # (how often whether anyone's still at the chat in front is looked at)
 APP_NAMES = {"host": "telemetry.host_process", "baude": "mesh_versions.baude", "record": "mesh_versions.record",
              "emission": "mesh_versions.emission", "multiplex": "deps.multiplex", "phone": "mesh_versions.baude"}
 APP_LOGOS = {"host": "baude", "baude": "baude", "record": "record", "emission": "emission", "multiplex": "multiplex",
@@ -76,6 +79,7 @@ class Recorder:
         self.front = None  # (the chat in front, in which window: (win ref, chat))
         self.sent_at = {}  # (a chat: when its turn was sent here)
         self.profiler, self.profile_timer, self.told_error = lineprofile.Profiler(name), None, None
+        self.away_timer = None  # (looking at whether anyone's at the chat in front, while it's on)
         network.listen(self.heard)
         app.connect("shutdown", lambda *_: self.quit())
         self.heard()
@@ -110,12 +114,20 @@ class Recorder:
                 self.hello()
                 for win in list(self.windows):
                     self.look(win)
+                self.away_timer = GLib.timeout_add_seconds(AWAY_LOOK_S, self.look_away)
             else:
                 self.queue.clear()
                 self.opened.clear()
                 self.front, self.sent_at = None, {}
+                if self.away_timer is not None:
+                    GLib.source_remove(self.away_timer)
+                    self.away_timer = None
         elif on and pid != self.host_pid:
             self.hello()  # (a host started again: its samples of this process begin again)
+            if self.host_pid is not None:  # (and the chat in front told it again: it knows none)
+                self.front = None
+                for win in list(self.windows):
+                    self.look(win)
         self.host_pid = pid
         functions = next((p.get("functions") or [] for p in t.get("profiling") or [] if p.get("app") == self.name), [])
         if functions != self.profiler.functions:
@@ -133,10 +145,14 @@ class Recorder:
 
     # ---- chats
     def look(self, win, gone=False):
-        """win looked at again: a chat opened in it since, and the chat in front, if it's changed, told."""
+        """win looked at again: a chat opened in it since, and the chat in front, if it's changed, told. In front
+        means with someone at the machine (widgets.user_present, within FRONT_IDLE_S): what its host tells every head
+        of the mesh, which notifies of no chat in front anywhere (Info's front)."""
         if not self.on:
             return
         open_, front = (set(), None) if gone else chats_in(win)
+        if front is not None and widgets.user_present(FRONT_IDLE_S) is False:
+            front = None
         before = self.opened.get(win, set())
         for chat in open_ - before:
             self.event("chat_opened", chat)
@@ -151,6 +167,17 @@ class Recorder:
         elif was is not None and was[0]() in (win, None):
             self.event("chat_left", was[1])
             self.front = None
+
+    def look_away(self):
+        """Every AWAY_LOOK_S while it's on: the window in front looked at again, for whether anyone's still at it."""
+        if not self.on:
+            self.away_timer = None
+            return False
+        held = self.front[0]() if self.front is not None else None
+        for win in list(self.windows):
+            if win is held or win.is_active():
+                self.look(win)
+        return True
 
     def turn_sent(self, win):
         if not self.on:

@@ -250,6 +250,8 @@ class Session:
         self.env = {}             # (the environment a head on this machine gave it: its claude's, never written)
         self.always_allow = set()  # (tools a head always allows: allowed here, with or without a head; memory only)
         self.renew = False        # (a Bot changed at a turn: its agent started again once the turn's over, set_bot)
+        self.bot_rename = False   # (a Bot renamed at a turn: its folder moved once the turn's over, set_bot)
+        self.bot_note = None      # (what a Bot's told, for the next message its running agent's sent: grow_agent)
         self.account_to = None    # (an account picked for it, not yet taken: switch_account; "": the CLI's own sign-in)
         self.context_asked = 0.0  # (when its agent was last asked its context's usage: ask_context)
         self.context_soon = False  # (asked again a moment from now, through a turn)
@@ -383,7 +385,7 @@ class Session:
         bot = self.meta.get("bot")
         if not bot:
             return None
-        pic = os.path.join(bot_dir(self.server.state_dir, self.id), "picture")
+        pic = os.path.join(bot_dir(self.server.state_dir, self.meta), "picture")
         return {"name": bot.get("name") or "Bot", "since": bot.get("since"),
                 "picture": os.path.getmtime(pic) if os.path.exists(pic) else None}
 
@@ -493,10 +495,18 @@ BOT_MEMORY_TOLD = 32 << 10  # (bytes of a Bot's memory put in what its agent's t
 # Linux; the rest it reads in the file)
 
 
-def bot_dir(state_dir, sid):
-    """A Bot's own folder on its host: its memory (memory.md), what the user's accepted of it (memory.seen.md: what the
-    Bot's changes are shown against, on the Memory page) and its picture."""
-    return os.path.join(state_dir, "bots", wire.safe_name(sid))
+def bot_dir(state_dir, meta):
+    """A Bot's own folder on its host (meta: its session's): its memory (memory.md), what the user's accepted of it
+    (memory.seen.md: what the Bot's changes are shown against, on the Memory page), its picture and its tasks. Named
+    after the Bot (bot_folder, kept as it's named: Server.name_bot_folder), else by its session's id."""
+    return os.path.join(state_dir, "bots", meta.get("bot_folder") or wire.safe_name(meta["id"]))
+
+
+def bot_folder_name(name):
+    """A Bot's name as its folder's: what can't be in a file's name, or in a permission rule's path (brackets and
+    glob characters), taken out; at most 64 characters."""
+    name = re.sub(r"[\x00-\x1f/\\:*?\"<>|()\[\]{}]", "-", " ".join(str(name).split())).strip(" .")[:64].strip(" .")
+    return name or "Bot"
 
 
 def bot_system(name, memory_path, memory):

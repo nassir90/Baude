@@ -67,6 +67,13 @@ An entry or a part may carry:
   (BotSettings.dialog.json) and changed with Rename… or Bot Settings…. A new entry that shows a Bot says so. The owner: "Bot's just have a Name. When you promote to a bot you have the option
   of setting the Bot's new name." (2026-11-22). Source: `[{"session": "f24332de-9555-4279-8489-ffa7dbcf54c9", "message":
   "30af64bb-6804-4040-984b-d3fd2a444e53"}]`.
+- **A Bot knows itself by its Name, and gets its tools as it's made.** Every host keeps a Bot's folder (its memory,
+  picture and tasks) under the Bot's name, moved as it's renamed, so what its agent is told of itself and its folder
+  says the name, never its chat's id. A chat made a Bot while its agent runs is given a Bot's tools and told who it
+  is without being started again, where its agent can take tools as it runs (Claude Code's); another (pi's) is started
+  again for them after its turn. The owner asked that Bots refer to themselves by name, not id, and that the research
+  on adding MCP tools to a running chat be used for a chat made a Bot (2026-11-27). Source:
+  `[{"issue": "BaudeInternal#288"}]`.
 - **A picture is set into the page.** Wherever an app shows someone's or a Bot's picture, or their initials on a colour
   (the Git page's authors, a Bot's sidebar or home row, Bot Settings, This phone's Bots, the phone's chat header), it's round, under the inset shade
   `picture-shade` in schema/tokens: a blurred shadow round its rim, one from its top edge and a hairline ring just inside

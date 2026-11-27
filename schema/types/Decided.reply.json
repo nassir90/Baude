@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "description": "decide's answer: each question's, by name; or, unavailable, why the decider couldn't be asked (not running, not answering, not there, its host out of reach), the script's to deal with: nothing else is asked instead.",
+  "properties": {
+    "op": {
+      "const": "decided",
+      "description": "What it is."
+    },
+    "req": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "decider": {
+      "type": "string",
+      "description": "The decider asked, by its name."
+    },
+    "host": {
+      "type": "string",
+      "description": "Its host's name."
+    },
+    "model": {
+      "type": "string",
+      "description": "The model that answered."
+    },
+    "answers": {
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "Decision.json"
+      },
+      "description": "Each question's answer, by name."
+    },
+    "latency_ms": {
+      "type": "number",
+      "description": "How long it took its server."
+    },
+    "unavailable": {
+      "type": "string",
+      "description": "Why it couldn't be asked."
+    }
+  },
+  "required": [
+    "op"
+  ],
+  "additionalProperties": false
+}

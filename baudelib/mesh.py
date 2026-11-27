@@ -279,6 +279,8 @@ def _record(r):
     info["providers"] = [published(p, p.get("http") is True) for p in raw[:32]
                          if isinstance(p, dict) and is_provider_id(p.get("id"))] \
         if isinstance(raw, list) else []
+    from baudelib.deciders import from_record
+    info["deciders"] = from_record(r["info"].get("deciders"))
     info.update(versions_of(r["info"]))
     links = r.get("links") if isinstance(r.get("links"), list) else []
     return {"id": r["id"], "seq": r["seq"], "info": info, "links": sorted({x for x in links[:256] if wire.is_id(x)})}
@@ -657,6 +659,7 @@ class Mesh:
         self.routes, self.hops = {}, {}  # member id -> the linked member it's reached through; how many links away
         self.seq = time.time_ns()  # (higher than any this host sent before it started, clocks allowing)
         self.local = local_providers()
+        self.deciders = []  # (this host's deciders, as the mesh is told of them: refresh)
         self.proxy = None
         self.outs = []
         self.found, self.refused = {}, set()  # (member id -> Found; those that refused a link straight, this run)
@@ -701,6 +704,8 @@ class Mesh:
     def start(self):
         for o in self.outs:
             o.start()
+        threading.Thread(target=lambda: self.deciders_changed(self.server.deciders.listing()), daemon=True,
+                         name="deciders").start()  # (this host's deciders looked at, for its record)
         with self.lock:
             self.reroute()  # (those linked to straight before: linked to again)
         threading.Thread(target=self._providers, daemon=True, name="mesh-providers").start()
@@ -758,7 +763,8 @@ class Mesh:
     def mine(self):
         """(lock held) This host's record."""
         return {"id": self.id, "seq": self.seq,
-                "info": {**self.hello(), "providers": [published(p) for p in self.local], **self.server.versions()},
+                "info": {**self.hello(), "providers": [published(p) for p in self.local], "deciders": self.deciders,
+                         **self.server.versions()},
                 "links": sorted(self.links)}
 
     def publish(self):
@@ -788,15 +794,43 @@ class Mesh:
                 self.refresh()
 
     def refresh(self):
-        """This machine's providers looked at now: the mesh told if they've changed, and heads here."""
+        """This machine's providers, and this host's deciders, looked at now: the mesh told if they've changed, and
+        heads here."""
         found = local_providers()
+        decs = self.server.deciders.published(self.server.deciders.listing(fresh=True))
         with self.lock:
-            if [published(p) for p in found] != [published(p) for p in self.local]:
-                self.local = found
+            if [published(p) for p in found] != [published(p) for p in self.local] or decs != self.deciders:
+                self.local, self.deciders = found, decs
                 self.publish()
             else:
                 self.local = found
         self.changed()
+
+    def deciders_changed(self, listed):
+        """This host's deciders as they are now (deciders.Deciders.listing's): the mesh told if that's news."""
+        decs = self.server.deciders.published(listed)
+        with self.lock:
+            if decs != self.deciders:
+                self.deciders = decs
+                self.publish()
+
+    def member_deciders(self):
+        """The deciders of the members reached, as their records say them: [(member id, its name, [decider])]."""
+        with self.lock:
+            out = []
+            for k in sorted(self.hops, key=lambda k: self.name_of(k).lower()):
+                rec = (self.records.get(k) or {}).get("rec")
+                if rec is not None and rec["info"].get("deciders"):
+                    out.append((k, rec["info"]["name"], list(rec["info"]["deciders"])))
+            return out
+
+    def member_named(self, name):
+        """A member reached, by its id or its name (any case): its id, or None."""
+        with self.lock:
+            if name in self.hops:
+                return name
+            low = name.lower()
+            return next((k for k in self.hops if self.name_of(k).lower() == low), None)
 
     # ---- links
     def link(self, where):

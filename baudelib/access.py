@@ -100,6 +100,10 @@ def _watch(msg):
     return "browser_write" if msg.get("default") else "browser_read"  # (Emission's own window: driven, not a Bot's)
 
 
+def _deciders(msg):
+    return "access_write" if msg.get("what") in ("add", "remove", "test") else "providers"  # (the host's own setup)
+
+
 def _tasks(msg):
     return "manage_write" if "set" in msg or "delete" in msg else "manage_read"
 
@@ -110,6 +114,8 @@ OPS = {  # (the rule each op is checked for, before it's taken (a function: msg'
     "emission_watch_say": "browser_read",
     **dict.fromkeys(("emission", "emission_serve", "emission_answer", "browser_open"), "browser_write"),
     "infer": "providers",
+    "decide": "providers",  # (a decision model's: as a provider's model)
+    "deciders": _deciders,
     "files": "model_files",
     **dict.fromkeys(("start", "agent"), "spawn"),  # (a chat forked: its manage_read too; adopted: its manage_write)
     "kube": _kube,

@@ -3966,11 +3966,16 @@ How many times one thing in a process was used or ran over a stretch, and how lo
 | Field | Type | Required | What it is |
 |---|---|---|---|
 | `app` | `host` \| `baude` \| `record` \| `phone` \| `emission` |  | The process (a telemetry_read's counted: added up over the stretch, by process, kind and name). |
-| `kind` | `part` \| `menu` \| `screen` \| `op` \| `callback` \| `handler` \| `subprocess` | yes | What it is: a button or row used (part), a menu's item picked (menu), a screen opened (a page, a dialog, a side panel's page: screen), a wire op a host answered (op), a main-loop callback (callback), a function connected to a button, row or menu item, run as it was used (handler: by its name, with its click's time), a program started (subprocess). |
-| `name` | string | yes | Which, by the index every app shares: a part or menu item as Entity.kind/part name (schema/ui's: "Composer.region/send button"; Entity.kind/(what tells it apart) where it isn't one of its entity's parts), a screen as its entity ("Telemetry.dialog"), an op by its name, a callback by its function's (module.Class.method), a program by its file's name. |
+| `kind` | `part` \| `menu` \| `screen` \| `op` \| `callback` \| `function` \| `subprocess` | yes | What it is: a button or row used (part), a menu's item picked (menu), a screen opened (a page, a dialog, a side panel's page: screen), a wire op a host answered (op), a main-loop callback (callback), a function of Baude's own code (function), a program started (subprocess). |
+| `name` | string | yes | Which, by the index every app shares: a part or menu item as Entity.kind/part name (schema/ui's: "Composer.region/send button"; Entity.kind/(what tells it apart) where it isn't one of its entity's parts), a screen as its entity ("Telemetry.dialog"), an op by its name, a callback by its function's (module.Class.method), a function as module:function ("baudelib.telemetry:Telemetry.flush_counts"), a program by its file's name. |
 | `count` | integer | yes | Times. |
-| `seconds` | number | yes | Their time added up: a part's or menu item's from its click till the app was free again (its handlers, and what they drew at once); a screen's in front, with someone at the machine; an op's handling; a callback's running; 0 for a program. |
+| `seconds` | number | yes | Their time added up: a part's or menu item's from its click till the app was free again (its handlers, and what they drew at once); a screen's in front, with someone at the machine; an op's handling; a callback's running; a function's running, added up (its calls' time with theirs in it); 0 for a program. |
 | `max` | number/null |  | The longest of them (a screen's: its longest stretch in front). |
+| `own` | number |  | A function's own time added up: the processor time its runs took on their thread, less what the functions of Baude's own it called took (what it ran itself, not what it waited for: what line profiling is aimed by). |
+| `within` | array of object |  | A function's: the clicks and ops it ran within (from the click till it was painted; the op's handling), its own time in each, the most first (at most 3). |
+| `within[].kind` | `part` \| `menu` \| `op` | yes | A click (part, menu) or a wire op the host answered (op). |
+| `within[].name` | string | yes | Its count's name. |
+| `within[].seconds` | number | yes | The function's own time within it, added up. |
 
 #### TelemetryCounters
 
@@ -4103,15 +4108,18 @@ A model's turns, or a model and effort's.
 
 #### TelemetryPick
 
-A function line profiling was aimed at, and the count that picked it: what took the user's time most.
+A function line profiling was aimed at, and the count that picked it: where the process's time went (its own time, weighted up by the slow clicks and ops it ran within).
 
 | Field | Type | Required | What it is |
 |---|---|---|---|
-| `function` | string | yes | What's profiled, by its dotted name. |
-| `kind` | `handler` \| `callback` \| `op` | yes | The count that picked it: a button's, row's or menu item's handler (handler), a main-loop callback (callback), a wire op the host answered (op). |
-| `name` | string | yes | The count's name (the handler's or callback's function, the op). |
-| `count` | integer | yes | Its times in the stretch it was picked from (the last day). |
-| `seconds` | number | yes | Its time added up in that stretch: what it was picked by, the most first. |
+| `function` | string | yes | What's profiled, as its count names it (module:Class.method). |
+| `count` | integer | yes | Its runs in the stretch it was picked from (the last day). |
+| `seconds` | number | yes | Its own time added up in that stretch (the processor time it took, less its counted callees'). |
+| `within` | object |  | The click or op it ran within that weighted it most (none: it ran within none). |
+| `within.kind` | `part` \| `menu` \| `op` | yes | A click (part, menu) or a wire op the host answered (op). |
+| `within.name` | string | yes | Its count's name ("Composer.region/send button", an op). |
+| `within.seconds` | number | yes | The function's own time within it. |
+| `within.each` | number | yes | Its average time, a click's or op's: what weighted the function up. |
 
 #### TelemetryProc
 
@@ -4355,6 +4363,6 @@ Somewhere wire.reach can go: this machine's host process, one listening on anoth
 | `TERMINAL_KEEP_S` | `600` | A terminal (terminal op) no connection is attached to now: its program kept running this long to be attached to again, in seconds. |
 | `TERMINAL_KEPT_BYTES` | `262144` | What a terminal (terminal op) wrote lately, kept to show again on attach: this many bytes at most. |
 | `TTL` | `16` | A tunnel's passed through at most this many hosts (open's ttl). |
-| `VERSION` | `43` | The wire's version, as a host's hello says it. |
+| `VERSION` | `47` | The wire's version, as a host's hello says it. |
 | `ZOOM_MAX` | `1568` | A browser zoom's longest side, in pixels. |
 | `ZOOM_QUALITY` | `90` | A browser zoom's JPEG quality. |

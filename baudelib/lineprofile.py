@@ -30,12 +30,16 @@ CHECKOUT = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 def resolve(name):
     """What a dotted name is: a module (every function in it profiled) or a function or method (module.function,
     module.Class.method; module:Class.method too). The longest part of it that's a module is the module (imported, if
-    it isn't yet). ValueError if it isn't one of them."""
+    it isn't yet; the script the process runs as itself). ValueError if it isn't one of them."""
     name = name.strip().replace(":", ".")
     parts = [p for p in name.split(".") if p]
     for cut in range(len(parts), 0, -1):
         mod_name = ".".join(parts[:cut])
         mod = sys.modules.get(mod_name)
+        main = sys.modules.get("__main__")
+        if mod is None and os.path.realpath(getattr(main, "__file__", None) or "") == os.path.join(
+                CHECKOUT, *mod_name.split(".")) + ".py":
+            mod = main  # (the script this process runs: not imported again)
         if mod is None:
             try:
                 mod = importlib.import_module(mod_name)

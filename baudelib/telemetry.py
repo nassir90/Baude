@@ -24,7 +24,7 @@ import sys
 import threading
 import time
 
-from baudelib import aim, counters, deps, errorbook, lineprofile, uiindex, wire
+from baudelib import aim, counters, deps, errorbook, funccount, lineprofile, uiindex, wire
 
 SAMPLE_S = 5  # (how often the machine is sampled while it's on, someone at it)
 PROCS_S = 30  # (how often its processes are, with it)
@@ -122,11 +122,8 @@ def profile_of(p, app, ver=None):
              for x in p["lines"][:lineprofile.LINES_MAX] if isinstance(x, dict) and isinstance(x.get("file"), str)
              and isinstance(x.get("line"), int) and isinstance(x.get("function"), str)
              and isinstance(x.get("hits"), int) and _num(x.get("seconds"))]
-    picked = [{"function": str(x["function"])[:TEXT_MAX], "kind": x["kind"], "name": str(x["name"])[:TEXT_MAX],
-               "count": x["count"], "seconds": float(x["seconds"])}
-              for x in (p.get("picked") or [])[:aim.CANDIDATES] if isinstance(x, dict) and isinstance(x.get("function"), str)
-              and x.get("kind") in ("handler", "callback", "op") and isinstance(x.get("name"), str)
-              and isinstance(x.get("count"), int) and _num(x.get("seconds"))]
+    picked = [aim.pick_of(x) for x in (p.get("picked") or [])[:aim.CANDIDATES]]
+    picked = [x for x in picked if x is not None]
     return {"at": float(p["at"]), "from": float(p["from"]), "app": app, "lines": lines, "picked": picked,
             **(ver or {})} if lines else None
 
@@ -152,30 +149,48 @@ def counters_of(row, app, ver=None):
             part = uiindex.part_by_copy(entity, key)
             name = f"{entity}/{part}" if part else f"{entity}/({key})"
         counts.append({"kind": c["kind"], "name": name, "count": c["count"], "seconds": round(float(c["seconds"]), 6),
-                       "max": round(float(c["max"]), 6) if _num(c.get("max")) else None})
+                       "max": round(float(c["max"]), 6) if _num(c.get("max")) else None, **own_of(c)})
     if not counts:
         return None
     return {"at": round(float(row["at"]), 3), "from": round(float(row["from"]), 3), "app": app, "counts": counts,
             **(ver or {})}
 
 
+def own_of(c):
+    """A told function count's own time and what it ran within, as kept ({own, within}), or nothing."""
+    if c.get("kind") != "function" or not _num(c.get("own")):
+        return {}
+    within = [{"kind": w["kind"], "name": str(w["name"])[:counters.NAME_MAX], "seconds": round(float(w["seconds"]), 6)}
+              for w in (c.get("within") if isinstance(c.get("within"), list) else [])[:funccount.WITHIN_MAX]
+              if isinstance(w, dict) and w.get("kind") in ("part", "menu", "op") and isinstance(w.get("name"), str)
+              and _num(w.get("seconds"))]
+    return {"own": round(max(float(c["own"]), 0.0), 6), "within": within}
+
+
 def counted(rows, legacy=()):
     """Rows of counts added up (TelemetryCount each, with its process): by process, kind and name, the most times
     first. legacy: what Baude kept before counts (screen time per place, menu uses), added in as screens and menu
     items named by their copy keys."""
-    out = {}
+    out, own = {}, {}
     for r in rows:
         for c in r.get("counts") or []:
-            got = out.setdefault((r.get("app"), c["kind"], c["name"]), [0, 0.0, 0.0])
+            key = (r.get("app"), c["kind"], c["name"])
+            got = out.setdefault(key, [0, 0.0, 0.0])
             got[0] += c["count"]
             got[1] += c["seconds"]
             got[2] = max(got[2], c.get("max") or 0)
+            if "own" in c:
+                mine = own.setdefault(key, [0.0, {}])
+                mine[0] += c["own"]
+                for w in c.get("within") or []:
+                    mine[1][(w["kind"], w["name"])] = mine[1].get((w["kind"], w["name"]), 0.0) + w["seconds"]
     for app, kind, name, count, seconds in legacy:
         got = out.setdefault((app, kind, name), [0, 0.0, 0.0])
         got[0] += count
         got[1] += seconds
-    return [{"app": a, "kind": k, "name": n, "count": c, "seconds": round(s, 6), "max": round(m, 6) if m else None}
-            for (a, k, n), (c, s, m) in sorted(out.items(), key=lambda kv: (-kv[1][0], -kv[1][1], kv[0][2]))]
+    return [{"app": a, "kind": k, "name": n, "count": c, "seconds": round(s, 6), "max": round(m, 6) if m else None,
+             **counters.own_of(own.get((a, k, n)))}
+            for (a, k, n), (c, s, m) in sorted(out.items(), key=lambda kv: (kv[0][1] == "function", -kv[1][0], -kv[1][1], kv[0][2]))]
 
 
 def crumb_of(c):
@@ -411,8 +426,8 @@ class Telemetry:
         self.named = {a: [f for f in named[a] if isinstance(f, str)] for a in PROFILED
                       if isinstance(named.get(a), list)}  # (what's named in place of a process's defaults)
         self.thread = None
-        self.picked, self.profiled_picks = {}, []
-        self.told_at = time.monotonic()  # (an app here last told something: away's, where input can't be read)  # (what each process's counts picked: aim's; the host's own now)
+        self.picked, self.profiled_picks = {}, []  # (what each process's counts picked: aim's; the host's own now)
+        self.told_at = time.monotonic()  # (an app here last told something: away's, where input can't be read)
         self.errors_lock, self.errs, self.errors_due = threading.Lock(), None, None  # (errors.json's, as read;
         # its write waited for)
         self.counters = counters.Counters()  # (its wire ops'; this process's own, COUNTERS, too where it has the book)
@@ -444,9 +459,11 @@ class Telemetry:
             self.changed()
 
     def _profile_host(self):
-        """The host's own profiler following the state: its functions while telemetry and line profiling are on."""
+        """The host's own profiler following the state: its functions while telemetry and line profiling are on (and
+        the functions counted, to aim it, in the same time)."""
         picked = self.profiled_picks
         self.profiled_picks = [] if "host" in self.named else list(self.picked.get("host") or [])
+        funccount.switch(self.on and self.profiling)
         if (last := self.profiler.set(self.functions("host") if self.on and self.profiling else [])) is not None:
             self._write("profiles", [{**last, "picked": picked}])
 
@@ -937,7 +954,7 @@ def roll_samples(rows, span):
 
 def roll_counts(rows, span):
     """Rows of counts rolled up, a row each span seconds a process (and each version of its code): each thing's
-    count and time added up, the longest kept; span on each."""
+    count and time added up (a function's own time and what it ran within too), the longest kept; span on each."""
     groups = {}
     for r in rows:
         groups.setdefault((int(r["at"] // span), r.get("app"), r.get("commit"), r.get("wire")), []).append(r)
@@ -946,7 +963,8 @@ def roll_counts(rows, span):
         summed = counted([{**r, "app": app} for r in these])
         out.append({"at": max(r["at"] for r in these), "from": min(r["from"] for r in these), "span": span,
                     "app": app, "commit": commit, "wire": wire_v,
-                    "counts": [{k: c[k] for k in ("kind", "name", "count", "seconds", "max")} for c in summed]})
+                    "counts": [{k: c[k] for k in ("kind", "name", "count", "seconds", "max", "own", "within") if k in c}
+                               for c in summed]})
     return out
 
 
@@ -1169,7 +1187,7 @@ def gather(start, end=None, what=("events", "metrics", "profiles", "usage", "err
                                   for r in rep.get("counters") or []), key=lambda r: r["at"])
     if "counted" in what:
         out["counted"] = sorted(({**r, "from_host": hid} for hid, rep in hosts.items()
-                                 for r in rep.get("counted") or []), key=lambda r: (-r["count"], -r["seconds"]))
+                                 for r in rep.get("counted") or []), key=lambda r: (r["kind"] == "function", -r["count"], -r["seconds"]))
     if "usage" in what:
         out["usage"] = usage(out["events"])
     if "events" not in what:

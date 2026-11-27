@@ -36,6 +36,7 @@ import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.delay
@@ -273,7 +274,8 @@ private val TIMED_KINDS = setOf("part", "menu", "op", "callback")
 private fun countTitle(c: Msg.TelemetryCount): String {
     val name = c.name.orEmpty()
     if (c.kind == "part" || c.kind == "menu") {
-        if ("|copy:" in name) return name.substringBefore("|copy:") + " · " + name.substringAfter("|copy:")
+        if ("|copy:" in name) name.substringAfter("|copy:").let { key ->
+            return name.substringBefore("|copy:") + " · " + (Wording.byKey[key] ?: key) }
         if ("/" in name) return name.substringBefore("/") + " · " + name.substringAfter("/")
     }
     return name
@@ -299,9 +301,10 @@ private fun CountRow(c: Msg.TelemetryCount, slow: Boolean) {
         if (slow) Wording.Telemetry.averageMs(ms = String.format(Locale.ROOT, "%.1f", 1000 * secs / maxOf(1L, n)))
         else if (c.kind == "screen" && secs > 0) saidSpan(secs) else null,
         Wording.Telemetry.errorTimes(count = n))
-    ActionRow(countTitle(c), null,
+    ActionRow(countTitle(c), null, titleLines = 3,
         prefix = { Icon(APP_LOGOS[c.app] ?: Adwaita.AppBaude, null, tint = k.fg, modifier = Modifier.size(16.dp.icon)) },
-        suffix = { Text(values.joinToString("  "), style = Type.body, color = k.dim, maxLines = 1) })
+        suffix = { Text(values.joinToString("  "), style = Type.body, color = k.dim, maxLines = 2, textAlign = TextAlign.End,
+            modifier = Modifier.widthIn(max = 120.dp)) })
 }
 private const val ERRORS_DAYS = 7
 

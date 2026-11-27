@@ -1507,20 +1507,26 @@ class TelemetryCount(Obj):
 
         app ('host' | 'baude' | 'record' | 'phone' | 'emission'): The process (a telemetry_read's counted: added
             up over the stretch, by process, kind and name).
-        kind ('part' | 'menu' | 'screen' | 'op' | 'callback' | 'handler' | 'subprocess'): What it is: a button
+        kind ('part' | 'menu' | 'screen' | 'op' | 'callback' | 'function' | 'subprocess'): What it is: a button
             or row used (part), a menu's item picked (menu), a screen opened (a page, a dialog, a side panel's
-            page: screen), a wire op a host answered (op), a main-loop callback (callback), a function connected
-            to a button, row or menu item, run as it was used (handler: by its name, with its click's time), a
-            program started (subprocess).
+            page: screen), a wire op a host answered (op), a main-loop callback (callback), a function of
+            Baude's own code (function), a program started (subprocess).
         name (string): Which, by the index every app shares: a part or menu item as Entity.kind/part name
             (schema/ui's: "Composer.region/send button"; Entity.kind/(what tells it apart) where it isn't one of
             its entity's parts), a screen as its entity ("Telemetry.dialog"), an op by its name, a callback by
-            its function's (module.Class.method), a program by its file's name.
+            its function's (module.Class.method), a function as module:function
+            ("baudelib.telemetry:Telemetry.flush_counts"), a program by its file's name.
         count (integer): Times.
         seconds (number): Their time added up: a part's or menu item's from its click till the app was free
             again (its handlers, and what they drew at once); a screen's in front, with someone at the machine;
-            an op's handling; a callback's running; 0 for a program.
+            an op's handling; a callback's running; a function's running, added up (its calls' time with theirs
+            in it); 0 for a program.
         max (number or None): The longest of them (a screen's: its longest stretch in front).
+        own (number): A function's own time added up: the processor time its runs took on their thread, less
+            what the functions of Baude's own it called took (what it ran itself, not what it waited for: what
+            line profiling is aimed by).
+        within (array of object): A function's: the clicks and ops it ran within (from the click till it was
+            painted; the op's handling), its own time in each, the most first (at most 3).
     """
 
 
@@ -1681,14 +1687,14 @@ class TelemetryModel(Obj):
 
 
 class TelemetryPick(Obj):
-    """A function line profiling was aimed at, and the count that picked it: what took the user's time most.
+    """A function line profiling was aimed at, and the count that picked it: where the process's time went (its own
+    time, weighted up by the slow clicks and ops it ran within).
 
-        function (string): What's profiled, by its dotted name.
-        kind ('handler' | 'callback' | 'op'): The count that picked it: a button's, row's or menu item's handler
-            (handler), a main-loop callback (callback), a wire op the host answered (op).
-        name (string): The count's name (the handler's or callback's function, the op).
-        count (integer): Its times in the stretch it was picked from (the last day).
-        seconds (number): Its time added up in that stretch: what it was picked by, the most first.
+        function (string): What's profiled, as its count names it (module:Class.method).
+        count (integer): Its runs in the stretch it was picked from (the last day).
+        seconds (number): Its own time added up in that stretch (the processor time it took, less its counted
+            callees').
+        within (object): The click or op it ran within that weighted it most (none: it ran within none).
     """
 
 

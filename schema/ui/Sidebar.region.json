@@ -1,5 +1,5 @@
 {
-  "description": "The sessions sidebar: the left pane of Baude's main window, 250px wide at least. From top to bottom: New session with its host picker, Open folder, search with the ⋮ menu, the Inbox row, a host banner, the list of sessions in groups, and an Update bar at the foot. Click a session to switch to it, folder and all.",
+  "description": "The sessions sidebar: the left pane of Baude's main window, 250px wide at least. From top to bottom: New session with its host picker, Open folder, the Inbox row, search with the ⋮ menu, a host banner, the list of sessions in groups, and an Update bar at the foot. Click a session to switch to it, folder and all.",
   "apps": [
     "baude"
   ],
@@ -177,6 +177,48 @@
       ]
     },
     {
+      "name": "Inbox row",
+      "shows": "Right under Open folder and over the search field, drawn as New session and Open folder are: an envelope icon and \"Inbox\", then, at the row's end, how many asks are waiting on you (dim) and the yellow dot a chat waiting for you shows; with nothing waiting, neither. Tooltip \"What's waiting on you: tasks' asks and permission requests\". It counts every host's waiting asks the app may see.",
+      "copy": [
+        "inbox.title",
+        "inbox.tip"
+      ],
+      "actions": [
+        {
+          "by": "click",
+          "does": "Opens the Inbox (Inbox.page.json): a tab of the main area, or shown if it's open."
+        }
+      ],
+      "phone": {
+        "does": "The same row on home, under Open folder… and over Search sessions; tapping it opens the Inbox as a screen of its own, Back returns home",
+        "why": "One column at a time on a phone",
+        "decided": "2026-11-27"
+      },
+      "decisions": [
+        {
+          "said": "Wants an Inbox right below Search sessions, where what waits on the person is gathered.",
+          "rule": "Every app puts the Inbox row right below Search sessions, with the count of asks waiting and the waiting dot. Superseded by the next decision.",
+          "decided": "2026-11-27",
+          "source": [
+            {
+              "issue": "BaudeInternal#289"
+            }
+          ]
+        },
+        {
+          "said": "Inbox should be above search bar actually",
+          "rule": "Every app puts the Inbox row right above Search sessions (under Open folder), with the count of asks waiting and the waiting dot. This supersedes the 2026-11-27 decision above to put it below Search sessions.",
+          "decided": "2026-11-27",
+          "source": [
+            {
+              "session": "221e1c29-56d7-48bf-a2dc-7a2b37ccd685",
+              "message": "a5febe74-092c-4df7-abee-d78c80462c03"
+            }
+          ]
+        }
+      ]
+    },
+    {
       "name": "Search field",
       "shows": "A search entry under a small gap, placeholder \"Search sessions\", filling the row left of the ⋮ button.",
       "copy": [
@@ -199,37 +241,6 @@
         {
           "by": "click",
           "does": "Opens the Group by / Groups menu: see GroupByMenu.menu.json. Opening it, or the window coming to the front, looks at the network again for a host started a moment ago."
-        }
-      ]
-    },
-    {
-      "name": "Inbox row",
-      "shows": "Right under the search field, drawn as New session and Open folder are: an envelope icon and \"Inbox\", then, at the row's end, how many asks are waiting on you (dim) and the yellow dot a chat waiting for you shows; with nothing waiting, neither. Tooltip \"What's waiting on you: tasks' asks and permission requests\". It counts every host's waiting asks the app may see.",
-      "copy": [
-        "inbox.title",
-        "inbox.tip"
-      ],
-      "actions": [
-        {
-          "by": "click",
-          "does": "Opens the Inbox (Inbox.page.json): a tab of the main area, or shown if it's open."
-        }
-      ],
-      "phone": {
-        "does": "The same row on home, under Search sessions; tapping it opens the Inbox as a screen of its own, Back returns home",
-        "why": "One column at a time on a phone",
-        "decided": "2026-11-27"
-      },
-      "decisions": [
-        {
-          "said": "Wants an Inbox right below Search sessions, where what waits on the person is gathered.",
-          "rule": "Every app puts the Inbox row right below Search sessions, with the count of asks waiting and the waiting dot.",
-          "decided": "2026-11-27",
-          "source": [
-            {
-              "issue": "BaudeInternal#289"
-            }
-          ]
         }
       ]
     },
@@ -441,7 +452,7 @@
         },
         {
           "name": "Bot row",
-          "shows": "For a session on a host that is a Bot (top level only, its host reachable; a Bot whose host is gone is a session row showing its name, dimmed, with the crossed-out cloud): twice a chat's height: a round avatar with the Bot's picture (its initials until it has one), set into the page: see README's A picture is set into the page, the Bot's name in bold on one line, a \"held\" tag if any, the status dot. The tree line to the chats under it starts under its picture (see Fork nesting). A Bot has only its Name: the row never shows its chat's title or any second line. Bots are listed first in the list with no header, the last used first, each with what is under it (its forks and threads, whatever host). By date, Bots are among the chats by time. Tooltip: name; folder; \"On <host> (<address>)\"; held; \"Group <name>\"; worktree (never the chat's title).",
+          "shows": "For a session on a host that is a Bot (top level only, its host reachable; a Bot whose host is gone is a session row showing its name, dimmed, with the crossed-out cloud): twice a chat's height: a round avatar with the Bot's picture (its initials until it has one), 32px against the name's 12px text (8px from the name), set into the page: see README's A picture is set into the page, the Bot's name in bold on one line, a \"held\" tag if any, the status dot. The tree line to the chats under it starts under its picture (see Fork nesting). A Bot has only its Name: the row never shows its chat's title or any second line. Bots are listed first in the list with no header, the last used first, each with what is under it (its forks and threads, whatever host). By date, Bots are among the chats by time. Tooltip: name; folder; \"On <host> (<address>)\"; held; \"Group <name>\"; worktree (never the chat's title).",
           "copy": [
             "sidebar.bot",
             "sidebar.held",
@@ -455,6 +466,30 @@
             {
               "by": "right-click",
               "does": "The session menu, with Bot Settings…: see SessionRowMenu.menu.json."
+            }
+          ],
+          "decisions": [
+            {
+              "said": "Those images illustrate that apk bot images are too small, compared ratios.",
+              "rule": "Every app sizes a Bot's picture to the desktop's ratio against the text beside it: in its list row 32px to the name's 12px (2.67 times the text size), 8px from the name; the Inbox's from-line and Send to Bot list 20px, and Bot Settings 64px. On the phone these are given in the desktop's px through Dp.icon, as icons are, so they grow with its text and its icon size. The chat header's picture and its gap to the title are not: they keep the desktop's 32px and 8px as plain dp.",
+              "decided": "2026-11-27",
+              "source": [
+                {
+                  "session": "221e1c29-56d7-48bf-a2dc-7a2b37ccd685",
+                  "message": "407b47f4-de13-41a9-8b64-b1909abd1007"
+                }
+              ]
+            },
+            {
+              "said": "uhh too bar size was fine... it's mostly main page size that hae to change",
+              "rule": "The phone's chat header keeps its Bot picture and the gap to its title at the desktop's 32px and 8px as plain dp, the size it had before the Bot pictures were sized to their text. Only the home list's Bot rows (and the Bots page, Inbox and Bot Settings) follow the larger, text-matched size.",
+              "decided": "2026-11-27",
+              "source": [
+                {
+                  "session": "221e1c29-56d7-48bf-a2dc-7a2b37ccd685",
+                  "message": "a9e7d2bf-5677-453f-807b-a312d6aab8cd"
+                }
+              ]
             }
           ]
         },

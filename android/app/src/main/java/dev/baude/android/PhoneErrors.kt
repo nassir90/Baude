@@ -126,7 +126,7 @@ object PhoneErrors {
     /** A row or button tapped (a shared component's: ActionRow, Button, IconButton, ...): named as the desktop names it,
      * by the schema/ui entity and part whose copy says what it shows (texts: its label, its tip; the entity of the
      * screen shown when it has more than one), else the screen and, where its text is a copy key, that key. */
-    fun tapped(vararg texts: String?) {
+    fun tapped(vararg texts: String?): String {
         val keys = texts.mapNotNull { t -> t?.let { Wording.keyOf(it) } }
         val hits = keys.firstNotNullOfOrNull { UiParts.byKey[it] }
         val hit = hits?.firstOrNull { it.first == screen } ?: hits?.firstOrNull()
@@ -138,6 +138,11 @@ object PhoneErrors {
             while (crumbs.size > CRUMBS_MAX) crumbs.removeFirst()
             used = Triple(now, entity, hit?.second)
         }
+        return when {
+            hit != null -> "${hit.first}/${hit.second}"
+            keys.isNotEmpty() -> "${entity ?: "?"}|copy:${keys.first()}"
+            else -> "${entity ?: "?"}/(row)"
+        }
     }
 
     /** The crash written as the app last went, if it did: taken (and the file gone). */
@@ -148,8 +153,14 @@ object PhoneErrors {
     }
 }
 
-/** onClick, a tap on what shows one of texts first noted (PhoneErrors.tapped). */
-fun (() -> Unit).tapping(vararg texts: String?): () -> Unit = {
-    try { PhoneErrors.tapped(*texts) } catch (_: Throwable) { }
-    this()
+/** onClick, a tap on what shows one of texts first noted (PhoneErrors.tapped), then counted (kind: a menu's item
+ * "menu") with how long onClick took. */
+fun (() -> Unit).tapping(vararg texts: String?, kind: String = "part"): () -> Unit = {
+    val name = try { PhoneErrors.tapped(*texts) } catch (_: Throwable) { null }
+    val began = System.nanoTime()
+    try {
+        this()
+    } finally {
+        if (name != null) PhoneCounts.add(kind, name, (System.nanoTime() - began) / 1e9)
+    }
 }

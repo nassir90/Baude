@@ -11,14 +11,15 @@ import sys
 import threading
 import time
 
-from gi.repository import Adw, Gio, GLib, GObject, Gtk
+from gi.repository import Adw, Gdk, Gio, GLib, GObject, Gtk
 
-from baudelib import counters, errorbook, wire, wording
+from baudelib import counters, errorbook, funccount, wire, wording
 from baudelib.uiindex import index
 
 CRUMBS_MAX = 8
 PART_RECENT_S = 5  # (an error this soon after a part was used: that part's)
 SCREEN_KINDS = ("page", "dialog", "panel", "menu", "region")  # (what an entity on screen is: not one of a chat's elements)
+COUNTED_KINDS = ("page", "dialog", "panel")  # (a screen counted: where the focus is, a region, isn't one)
 _LEVELS = {GLib.LogLevelFlags.LEVEL_ERROR: "ERROR", GLib.LogLevelFlags.LEVEL_CRITICAL: "CRITICAL",
            GLib.LogLevelFlags.LEVEL_WARNING: "WARNING"}
 STATE = {"app": None, "crumbs": [], "used": None, "screen": None, "lock": threading.RLock(),
@@ -26,9 +27,6 @@ STATE = {"app": None, "crumbs": [], "used": None, "screen": None, "lock": thread
 # (screen and crumbs are kept by the main thread as they change; context() only reads them, from any thread, and
 # never calls GTK: inside GLib's log writer one more GLib message aborts the process)
 FRONT_IDLE_S = 300  # (no input for this long: nobody's at it, and no screen's time counted)
-HANDLED = ("clicked", "activated", "row-activated", "activate", "toggled")  # (the signals a use runs: their
-# handlers kept, to be counted as each is used)
-_ACTIONS = {}  # (an action's name: the functions connected to its activate)
 _GLIB = {}  # (GLib's own idle_add, timeout_add and timeout_add_seconds, before they were counted)
 
 
@@ -125,9 +123,9 @@ def part_of(widget, entities=None):
     return (entities[0] if entities else None), None, hint
 
 
-def screen(win=None):
-    """The schema/ui entity on screen (a page, dialog, panel or region: SCREEN_KINDS): in the active window, its
-    dialog's page if one's open, else where its focus is, else its tab in front."""
+def screen(win=None, of=SCREEN_KINDS):
+    """The schema/ui entity on screen (a page, dialog, panel or region: SCREEN_KINDS; of: these kinds): in the
+    active window, its dialog's page if one's open, else where its focus is, else its tab in front."""
     if win is None:
         app = Gio.Application.get_default()
         win = app.get_active_window() if isinstance(app, Gtk.Application) else None
@@ -149,7 +147,7 @@ def screen(win=None):
         if w is None:
             continue
         for e in chain(w):
-            if kinds.get(e) in SCREEN_KINDS:
+            if kinds.get(e) in of:
                 return e
     return None
 
@@ -181,13 +179,14 @@ def crumb(action, entity, part, hint=None, at=None):
 
 
 def screens(win=None):
-    """The screens in front: the active window's (screen()), and its side panel's page while it shows one."""
+    """The screens in front (COUNTED_KINDS): the active window's (screen()), and its side panel's page while it
+    shows one."""
     if win is None:
         app = Gio.Application.get_default()
         win = app.get_active_window() if isinstance(app, Gtk.Application) else None
     if win is None or not win.is_active():
         return set()
-    out = {screen(win)} - {None}
+    out = {screen(win, COUNTED_KINDS)} - {None}
     panel = getattr(win, "panel", None)
     stack = getattr(panel, "stack", None)
     if isinstance(stack, (Adw.ViewStack, Gtk.Stack)) and panel.get_mapped() and (page := stack.get_visible_child()):
@@ -278,6 +277,22 @@ def _watching():
 
 
 # ---- hooks
+def _after_paint(widget, done):
+    """done once widget's window has painted its next frame (what a click drew); at once when the main loop's free
+    where there's no frame clock, and in 2 s where no frame comes."""
+    clock = widget.get_frame_clock()
+    if clock is None:
+        _GLIB["idle_add"](done, priority=GLib.PRIORITY_DEFAULT_IDLE)
+        return
+
+    def painted(clock):
+        clock.disconnect(handler)
+        done()
+    handler = clock.connect("after-paint", painted)
+    clock.request_phase(Gdk.FrameClockPhase.PAINT)
+    _GLIB["timeout_add"](2000, lambda: done() and False)
+
+
 def _used(action, row=False):
     def hook(widget, *args):
         try:
@@ -288,78 +303,24 @@ def _used(action, row=False):
             entity, part, hint = part_of(widget)
             crumb(action, entity, part, hint)
             name = f"{entity}/{part}" if part else f"{entity}/({hint})"
-            ran, unnamed = handlers(widget, args[0] if row else None)
-            calls = _calls_of(unnamed) if unnamed else None
             began = time.perf_counter()
+            kind = action if action == "menu" else "part"
+            funccount.within(kind, name)  # (what runs till it's painted: this click's, to aim line profiling)
 
-            def done():  # (the main loop free again: its handlers, and what they did at once, done)
-                took = time.perf_counter() - began
-                if calls is not None:  # (a lambda's: what it called, by name, in its place)
-                    sys.setprofile(None)
-                    ran.extend(n for n in calls if n not in ran)
-                counters.COUNTERS.add(action if action == "menu" else "part", name, took)
-                for h in ran:
-                    counters.COUNTERS.add("handler", h, took)
-                look()
+            ended = []
+
+            def done(*_):  # (the next frame painted: its handlers, and what they drew, done)
+                if not ended:
+                    ended.append(True)
+                    funccount.within()
+                    counters.COUNTERS.add(kind, name, time.perf_counter() - began)
+                    look()
                 return False
-            _GLIB["idle_add"](done, priority=GLib.PRIORITY_HIGH)
+            _after_paint(widget, done)
         except Exception:  # noqa: BLE001 (a click is never held up by what's kept of it)
             errorbook.caught("callback")
         return True
     return hook
-
-
-def handlers(widget, box=None):
-    """The functions a use of widget runs (connected to it as HANDLED: a row's, its list's; a menu item's, its
-    action's): (the names of those reached by their names, the code of those that aren't: a lambda's, a nested
-    function's)."""
-    found = list(getattr(widget, "ui_handlers", ()))
-    if box is not None:
-        found += getattr(box, "ui_handlers", ())
-    if GObject.type_name(widget.__gtype__) == "GtkModelButton":
-        action = (widget.props.action_name or "").partition(".")[2]
-        found += _ACTIONS.get(action, ())
-    named = list(dict.fromkeys(n for n, _ in found if "<" not in n))
-    unnamed = {getattr(getattr(f, "__func__", f), "__code__", None) for n, f in found if "<" in n} - {None}
-    return named, unnamed
-
-
-def _calls_of(codes):
-    """The functions the code in codes calls (a lambda handler's: the first of Baude's own it calls, each), by their
-    names, gathered from now till sys.setprofile(None)."""
-    called, depth = [], [0]
-
-    def watch(frame, event, _arg):
-        if event == "call":
-            if frame.f_code in codes:
-                depth[0] += 1
-            elif depth[0] and frame.f_back is not None and frame.f_back.f_code in codes:
-                mod = frame.f_globals.get("__name__", "?")
-                name = f"{mod}.{frame.f_code.co_qualname}"
-                if "<" not in name and errorbook.ours(frame.f_code.co_filename) and name not in called:
-                    called.append(name)
-        elif event == "return" and frame.f_code in codes:
-            depth[0] -= 1
-    sys.setprofile(watch)
-    return called
-
-
-def _keep_handlers():
-    """Each function connected to a signal a use runs (HANDLED) kept on what it's connected to, by its name."""
-    before = GObject.Object.connect
-
-    def connect(self, signal, fn, *args, **kw):
-        if signal in HANDLED and callable(fn):
-            try:
-                name = counters.callable_name(fn)
-                if isinstance(self, Gio.SimpleAction):
-                    _ACTIONS.setdefault(self.get_name(), []).append((name, fn))
-                else:
-                    self.ui_handlers = (*getattr(self, "ui_handlers", ()), (name, fn))
-            except Exception:  # noqa: BLE001 (connected all the same)
-                pass
-        return before(self, signal, fn, *args, **kw)
-    GObject.Object.connect = connect
 
 
 def _timed(fn):
@@ -422,23 +383,14 @@ def _writer(level, fields, _n, user_data):
     return GLib.log_writer_default(level, fields, user_data)
 
 
-def prepare():
-    """Counting from here on: every main-loop callback, the functions connected to what's used, every program
-    started. Before an app's windows are made; once a process."""
-    if _GLIB:
-        return
-    _count_callbacks()
-    _keep_handlers()
-    counters.count_programs()
-
-
 def install(app_name, wake):
     """This process's errors kept as app_name's (told by wake, from any thread), with what's on screen and the
     user's last actions; what's used looked at as it's used. Once a process."""
     if STATE["app"] is not None:
         return
     STATE["app"] = app_name
-    prepare()
+    _count_callbacks()
+    counters.count_programs()
     errorbook.install()
     errorbook.BOOK.claim(app_name, wake, context, in_loop=lambda: GLib.main_depth() > 0)
     try:

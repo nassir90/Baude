@@ -1,6 +1,6 @@
 """The Inbox's scenes (schema/ui/Inbox.page.json, InboxAsk.page.json): lab-mac's Bots' tasks' asks of a person, put on
 its host's Inbox as a task's script raises them (baudelib/inbox.py: the pictures kept, every head told), drawn in the
-row under Search sessions, the Inbox's tab, and an ask's tab: opened, Route to… open, a model's answer to confirm,
+row over Search sessions, the Inbox's tab, and an ask's tab: opened, Route to… open, a model's answer to confirm,
 History, and one whose task went away. Fixture pictures only (tests/inbox_fixture.py)."""
 import base64
 import os
@@ -168,7 +168,7 @@ def tall(win, page, col):
     win.tall = (page, col)
 
 
-@scene("inbox-row", "The Inbox row under Search sessions: how many asks wait, and the waiting dot", size=SIZE)
+@scene("inbox-row", "The Inbox row over Search sessions: how many asks wait, and the waiting dot", size=SIZE)
 def _(app):
     win = base(app)
     T.pump(0.5)

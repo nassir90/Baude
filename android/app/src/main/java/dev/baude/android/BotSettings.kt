@@ -65,7 +65,7 @@ fun BotSettings(item: Item, done: () -> Unit) {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 if (making) Text(Wording.BotSettings.body, style = Type.body, color = c.fg)
                 Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-                    Avatar(name.ifBlank { Wording.Sidebar.bot }, shown, size = 64.dp)
+                    Avatar(name.ifBlank { Wording.Sidebar.bot }, shown, size = 64.dp.icon)
                 }
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.CenterHorizontally)) {
                     Button(Wording.BotSettings.choosePicture) {

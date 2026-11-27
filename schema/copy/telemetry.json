@@ -52,6 +52,7 @@
     "error_first": "First Happened",
     "slowest": "Slowest",
     "average_ms": "{$ms} ms Each",
-    "picked_by": "Picked by {$name}: {$seconds}s in the Last Day"
+    "picked_by": "Picked by Its Own Time: {$seconds}s in the Last Day",
+    "picked_within": "Mostly in {$name}: {$ms} ms Each"
   }
 }

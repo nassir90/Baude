@@ -970,6 +970,14 @@ class Network:
         with self.lock:
             return [r for r in self.servers.values() if r.info.get("id") or r.by_hand]
 
+    def in_front(self, host_id, session_id):
+        """Is a chat (its host's id, its session's) in front of someone on any machine of the mesh, as each host there
+        says of its own machine's apps (Info's front)?"""
+        with self.lock:
+            return any(r.state == "alive" and any(
+                isinstance(f, dict) and f.get("host") == host_id and f.get("session") == session_id
+                for f in r.info.get("front") or []) for r in self.servers.values())
+
     def find(self, session_id):
         with self.lock:
             return next((r for r in self.servers.values() if session_id in r.sessions), None)

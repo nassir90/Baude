@@ -144,6 +144,9 @@ class FamilyRow(Gtk.Box):
         caret = Gtk.SignalListItemFactory()  # (its button: the caret alone; its list New session's rows)
         caret.connect("setup", lambda _f, item: item.set_child(Gtk.Box()))
         self.hosts.set_factory(caret)
+        from widgets import walk
+        if (shown := next((w for w in walk(self.hosts) if isinstance(w, Gtk.Stack)), None)) is not None:
+            shown.set_visible(False)  # (its empty slot and the space after it gone: the caret centred in its highlight)
         self.hosts.set_dimmed(set())
         self.hosts.pick_again()  # (the host ticked, picked: opened there too, the menu closed)
         self.hosts.update_property([Gtk.AccessibleProperty.LABEL], [label])

@@ -314,8 +314,11 @@ object PhoneHost {
             work.execute {
                 try {
                     if (op == Op.TELEMETRY_READ) reply(op, *TelemetryStore.read(msg))
-                    else TelemetryStore.set(msg)?.let { reply(Op.ERROR, "error" to it) }
-                        ?: reply(op, "state" to TelemetryStore.state())
+                    else {
+                        TelemetryStore.set(msg)?.let { reply(Op.ERROR, "error" to it) }
+                            ?: reply(op, "state" to TelemetryStore.state())
+                        changed() // (switched off: no chat in front here any more)
+                    }
                 } catch (e: Exception) {
                     reply(Op.ERROR, "error" to (e.message ?: e.toString()))
                 }
@@ -994,7 +997,7 @@ object PhoneHost {
         .put("host", name).put("home", if (::root.isInitialized) File(root, "agents").path else "")
         .put("pid", android.os.Process.myPid()).put("groups", JSONArray().put(name)).put("init", JSONObject.NULL)
         .put("commit", JSONObject.NULL).put("update", JSONObject.NULL).put("providers", JSONArray())
-        .put("phone", true)
+        .put("phone", true).put("front", TelemetryStore.fronts())
         .put("mesh", JSONObject().put("members", JSONArray()).put("links", JSONArray()).put("proxy", JSONObject.NULL)
             .put("inactive", JSONArray()).put("found", JSONArray()).put("gone", JSONArray()))
 

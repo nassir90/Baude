@@ -1,7 +1,7 @@
 """The task-script SDK's generated half: made by baudelib/tasksdk.py from schema/types and the Bot's own tools'
 definitions (baudelib/emissiontools.py, baudelib/multiplextools.py). Don't change it here: change those, and run
 `python3 -m baudelib.tasksdk` again."""
-from .client import Area, Obj
+from .client import Area, Obj, waited
 
 
 class AccessChat(Obj):
@@ -638,10 +638,14 @@ class Info(Obj):
             set_permission_mode, set_model).
         telemetry (TelemetryState): Its telemetry state: the apps on its machine tell it telemetry only while
             it's on, and profile what it says.
+        front (array of TelemetryFront): The chats in front on its machine now, as its apps' telemetry says
+            (each one's last chat_front, till its chat_left or the app's gone): none while its telemetry's off.
+            No head notifies of a chat in front on any machine of the mesh.
         tool_names (ToolNames): How its MCP tools are named: what every head shows for one ("Mesh / Tasks").
     """
     _refs = {"heads": "Head", "update": "Update", "restart": "RestartState", "providers": "Provider",
-             "mesh": "MeshView", "telemetry": "TelemetryState", "tool_names": "ToolNames"}
+             "mesh": "MeshView", "telemetry": "TelemetryState", "front": "TelemetryFront",
+             "tool_names": "ToolNames"}
 
 
 class KubeColumn(Obj):
@@ -1115,6 +1119,10 @@ class Session(Obj):
             the CLI's own sign-in, or an account since removed (account_gone).
         account_gone (boolean): Its subscription account was removed from its host after it was picked for it:
             its agent can't start till another is picked.
+        account_disabled (boolean): The subscription it runs on (its account, or its provider's CLI's own sign-
+            in) is disabled on its host (accounts' disable, or auto_disable as it's exhausted): its agent
+            stopped, nothing sent to it nor started, every app's send button off and its banner saying so, till
+            it's enabled or another's picked.
         held (array of HeldMessage): Messages held for it, oldest first.
         senders (integer): Its sender store's revision (0 for none): what a head's copy is checked against.
         always_allow (array of string): The tools allowed whenever it asks for them, sorted.
@@ -1379,8 +1387,9 @@ class TelemetryEvent(Obj):
         app ('host' | 'baude' | 'record' | 'phone'): What saw it: Baude, Record, the phone's app, or the chat's
             host itself (a turn's end, as it ran there: what tokens are added up from).
         kind ('chat_opened' | 'chat_front' | 'chat_left' | 'turn_sent' | 'turn_ended'): What happened: a chat
-            opened in a window or screen; a chat came in front (its window or screen in front, showing it); it
-            stopped being in front; a turn sent in it; a turn of it ended.
+            opened in a window or screen; a chat came in front (its window or screen in front, showing it, with
+            someone at the machine); it stopped being in front (or nobody's at the machine now); a turn sent in
+            it; a turn of it ended.
         host (string): The id of the host the chat is on.
         session (string): The chat's session id.
         seconds (number or None): A turn_ended's: how long the turn took.
@@ -1390,6 +1399,15 @@ class TelemetryEvent(Obj):
         effort (string or None): A turn_ended's: the effort it ran at.
         tokens_in (integer or None): A turn_ended's: the tokens it read (input, cache reads and writes).
         tokens_out (integer or None): A turn_ended's: the tokens it wrote.
+    """
+
+
+class TelemetryFront(Obj):
+    """A chat in front on a host's machine: shown in one of its apps' windows or screens, that in front, with someone
+    at the machine.
+
+        host (string): The id of the host the chat is on.
+        session (string): The chat's session id.
     """
 
 
@@ -1703,6 +1721,10 @@ class AccountsReply(Obj):
             does; an older host's usage read of "" is Claude's.
         missing (object): What the host lacks of a provider's program, by provider (codex: its Codex CLI, as
             deps says it); a provider that's there isn't in it. Shown in place of Add account.
+        disabled (array of string): The subscriptions disabled on the host, by usage key (an account's id, ""
+            for Claude's CLI's own sign-in, "codex" for Codex's): their chats can't send.
+        auto_disable (array of string): The subscriptions whose auto-disable is on, by usage key: disabled as
+            they're exhausted.
         last_usage (object): Each Claude and Codex subscription's usage as the host last read it, by id ("" for
             Claude's CLI's own sign-in, "codex" for Codex's), where that read said its limits: a client shows it
             greyed till its own usage read answers.
@@ -2349,7 +2371,8 @@ class Rotated(Obj):
     """rotate's answer.
 
         session (Session): The Bot, as it's listed now: in its new conversation.
-        thread (Session): Its past thread, as it's listed now: archived.
+        thread (Session or None): Its past thread, as it's listed now: archived; null if it was only moved onto
+            another model, nothing said yet.
     """
     _refs = {"session": "Session", "thread": "Session"}
 
@@ -2624,27 +2647,27 @@ TYPES = {"AccessChat": AccessChat, "AccessMember": AccessMember, "AccessRule": A
          "Tab": Tab, "Task": Task, "TaskBinding": TaskBinding, "TaskChoice": TaskChoice, "TaskField": TaskField,
          "TaskLogLine": TaskLogLine, "TaskRun": TaskRun, "TaskRunRef": TaskRunRef, "TaskTrigger": TaskTrigger,
          "TaskVariable": TaskVariable, "TelemetryDay": TelemetryDay, "TelemetryEvent": TelemetryEvent,
-         "TelemetryLine": TelemetryLine, "TelemetryModel": TelemetryModel, "TelemetryProc": TelemetryProc,
-         "TelemetryProfile": TelemetryProfile, "TelemetryProfiling": TelemetryProfiling,
-         "TelemetrySample": TelemetrySample, "TelemetryState": TelemetryState, "TelemetryUsage": TelemetryUsage,
-         "TerminalInfo": TerminalInfo, "Theme": Theme, "ThemeFiles": ThemeFiles, "ToolNames": ToolNames,
-         "TurnEnd": TurnEnd, "Update": Update, "UsageLimit": UsageLimit, "UsageReading": UsageReading,
-         "WaitTarget": WaitTarget, "WatchSay": WatchSay, "WatchState": WatchState, "Where": Where,
-         "Accepted": Accepted, "AccessReply": AccessReply, "AccessSetReply": AccessSetReply,
-         "AccountsReply": AccountsReply, "Activated": Activated, "AgentStarted": AgentStarted, "Allowed": Allowed,
-         "Archived": Archived, "Attached": Attached, "AutofixReply": AutofixReply,
-         "BotPictureReply": BotPictureReply, "BotSetReply": BotSetReply, "BrowserOpened": BrowserOpened,
-         "Busy": Busy, "CatalogueReply": CatalogueReply, "ChatSizeReply": ChatSizeReply, "CwdSet": CwdSet,
-         "DatabasesReply": DatabasesReply, "Deactivated": Deactivated, "Decided": Decided,
-         "DecidersReply": DecidersReply, "Deleted": Deleted, "DepsReply": DepsReply, "Dir": Dir,
-         "DockerEnd": DockerEnd, "DockerReply": DockerReply, "DockerText": DockerText, "DraftSaved": DraftSaved,
-         "EditReply": EditReply, "EditsReply": EditsReply, "EmissionFrame": EmissionFrame,
-         "EmissionReply": EmissionReply, "EmissionServing": EmissionServing, "EmissionWatchEnd": EmissionWatchEnd,
-         "EmissionWatching": EmissionWatching, "Error": Error, "FeedbackFiled": FeedbackFiled,
-         "FeedbackTarget": FeedbackTarget, "File": File, "FixesReply": FixesReply, "GitReply": GitReply,
-         "HeldReply": HeldReply, "HelloReply": HelloReply, "InferData": InferData, "InferEnd": InferEnd,
-         "InferHead": InferHead, "Joined": Joined, "KubeContexts": KubeContexts, "KubeEnd": KubeEnd,
-         "KubeReply": KubeReply, "KubeRows": KubeRows, "KubeText": KubeText, "Linking": Linking,
+         "TelemetryFront": TelemetryFront, "TelemetryLine": TelemetryLine, "TelemetryModel": TelemetryModel,
+         "TelemetryProc": TelemetryProc, "TelemetryProfile": TelemetryProfile,
+         "TelemetryProfiling": TelemetryProfiling, "TelemetrySample": TelemetrySample,
+         "TelemetryState": TelemetryState, "TelemetryUsage": TelemetryUsage, "TerminalInfo": TerminalInfo,
+         "Theme": Theme, "ThemeFiles": ThemeFiles, "ToolNames": ToolNames, "TurnEnd": TurnEnd, "Update": Update,
+         "UsageLimit": UsageLimit, "UsageReading": UsageReading, "WaitTarget": WaitTarget, "WatchSay": WatchSay,
+         "WatchState": WatchState, "Where": Where, "Accepted": Accepted, "AccessReply": AccessReply,
+         "AccessSetReply": AccessSetReply, "AccountsReply": AccountsReply, "Activated": Activated,
+         "AgentStarted": AgentStarted, "Allowed": Allowed, "Archived": Archived, "Attached": Attached,
+         "AutofixReply": AutofixReply, "BotPictureReply": BotPictureReply, "BotSetReply": BotSetReply,
+         "BrowserOpened": BrowserOpened, "Busy": Busy, "CatalogueReply": CatalogueReply,
+         "ChatSizeReply": ChatSizeReply, "CwdSet": CwdSet, "DatabasesReply": DatabasesReply,
+         "Deactivated": Deactivated, "Decided": Decided, "DecidersReply": DecidersReply, "Deleted": Deleted,
+         "DepsReply": DepsReply, "Dir": Dir, "DockerEnd": DockerEnd, "DockerReply": DockerReply,
+         "DockerText": DockerText, "DraftSaved": DraftSaved, "EditReply": EditReply, "EditsReply": EditsReply,
+         "EmissionFrame": EmissionFrame, "EmissionReply": EmissionReply, "EmissionServing": EmissionServing,
+         "EmissionWatchEnd": EmissionWatchEnd, "EmissionWatching": EmissionWatching, "Error": Error,
+         "FeedbackFiled": FeedbackFiled, "FeedbackTarget": FeedbackTarget, "File": File, "FixesReply": FixesReply,
+         "GitReply": GitReply, "HeldReply": HeldReply, "HelloReply": HelloReply, "InferData": InferData,
+         "InferEnd": InferEnd, "InferHead": InferHead, "Joined": Joined, "KubeContexts": KubeContexts,
+         "KubeEnd": KubeEnd, "KubeReply": KubeReply, "KubeRows": KubeRows, "KubeText": KubeText, "Linking": Linking,
          "LoginEnd": LoginEnd, "LoginSaid": LoginSaid, "MemoryReply": MemoryReply, "MultiplexReply": MultiplexReply,
          "NotesReply": NotesReply, "Quitting": Quitting, "Relayed": Relayed, "Relaying": Relaying,
          "Renamed": Renamed, "RestartPending": RestartPending, "Rotated": Rotated, "SeenSet": SeenSet,
@@ -2821,7 +2844,7 @@ class Kube(Area):
         """
         return self._call("kube", {"what": "exec", "context": context, "server": server, "namespace": namespace,
                                    "name": name, "container": container, "command": command,
-                                   "timeout": timeout}, host, KubeReply)
+                                   "timeout": timeout}, host, KubeReply, waited(timeout))
 
 
 class Docker(Area):
@@ -2928,7 +2951,7 @@ class Docker(Area):
             timeout (number): exec: seconds it may run (60 if none; 600 at most): then it's stopped.
         """
         return self._call("docker", {"what": "exec", "context": context, "page": page, "id": id, "command": command,
-                                     "timeout": timeout}, host, DockerReply)
+                                     "timeout": timeout}, host, DockerReply, waited(timeout))
 
 
 class Databases(Area):
@@ -3276,7 +3299,7 @@ class Terminal(Area):
             timeout (number):
         """
         return self._tool("multiplex", {"op": "wait", "terminal": terminal, "pattern": pattern, "quiet": quiet,
-                                        "timeout": timeout}, host)
+                                        "timeout": timeout}, host, waited(timeout))
 
     def close(self, *, terminal=None, host=None):
         """End a terminal's program (as closing its tab would) and close it. (the close_terminal tool)
@@ -3313,28 +3336,32 @@ class Ops(Area):
                                          "rule": rule}, host, AccessSetReply)
 
     def accounts(self, *, what=None, provider=None, id=None, session=None, name=None, token=None, home=None,
-                 folder=None, code=None, method=None, url=None, cb=None, host=None):
+                 folder=None, on=None, code=None, method=None, url=None, cb=None, host=None):
         """accounts (Accounts): The host's Claude and Codex subscription accounts (hostaccounts): list them; add one
         (Claude: name and an existing signed-in config folder, or name and token; Codex: name and an existing
         signed-in home, or name and token); rename one (id, name); replace a token account's token (id, token);
-        remove one (id); use another for a chat (session, id; "" for the CLI's own sign-in: its agent started again
-        under it, resuming the chat, once its turn's over; kept as the one the host's new chats on its provider's
-        models take, defaults); read a subscription's usage (id; "" for the CLI's own sign-in of provider, Claude's
-        where none is said); sign in (sign_in: provider and name for a new account, or id to sign in to one again;
-        Claude's runs claude auth login with the account's own folder, its lines coming as they're written, the page
-        to open among them; Codex's codex login (method: the browser's, by default, or the device code's), its state
-        coming as it goes (login: the page to open, and the device code's code to enter there); then its end; the
-        connection's going stops it); pass a code the sign-in page showed to the sign-in this connection runs (code:
-        no answer of its own); pass the address a browser ended on after a Codex browser sign-in's page to the one
-        this connection runs (callback: url; answered with the page codex's server gave, or error). Each other is
-        answered with accounts.
+        remove one (id); disable a subscription or enable it again (disable: id, "" with provider for the CLI's own
+        sign-in, and on: its chats' agents stopped, nothing sent to them nor started while it is); turn its auto-
+        disable on or off (auto_disable: id or "" with provider, and on: disabled as one of its limits is used up or
+        extra usage is billed, as its chats' turns or a usage read say, or at once if its last reading says so;
+        enabled again only by hand); use another for a chat (session, id; "" for the CLI's own sign-in: its agent
+        started again under it, resuming the chat, once its turn's over; kept as the one the host's new chats on its
+        provider's models take, defaults); read a subscription's usage (id; "" for the CLI's own sign-in of
+        provider, Claude's where none is said); sign in (sign_in: provider and name for a new account, or id to sign
+        in to one again; Claude's runs claude auth login with the account's own folder, its lines coming as they're
+        written, the page to open among them; Codex's codex login (method: the browser's, by default, or the device
+        code's), its state coming as it goes (login: the page to open, and the device code's code to enter there);
+        then its end; the connection's going stops it); pass a code the sign-in page showed to the sign-in this
+        connection runs (code: no answer of its own); pass the address a browser ended on after a Codex browser
+        sign-in's page to the one this connection runs (callback: url; answered with the page codex's server gave,
+        or error). Each other is answered with accounts.
 
-            what ('list' | 'add' | 'rename' | 'token' | 'remove' | 'use' | 'usage' | 'sign_in' | 'code' |
-                'callback'): What to do.
-            provider ('claude' | 'codex'): add, sign_in (a new account): whose. usage with id "": whose CLI's
-                own sign-in (Claude's where left out).
-            id (string): rename, token, remove, use, usage, sign_in: the account ("" for the CLI's own sign-in,
-                use and usage only).
+            what ('list' | 'add' | 'rename' | 'token' | 'remove' | 'disable' | 'auto_disable' | 'use' | 'usage'
+                | 'sign_in' | 'code' | 'callback'): What to do.
+            provider ('claude' | 'codex'): add, sign_in (a new account): whose. usage, disable and auto_disable
+                with id "": whose CLI's own sign-in (Claude's where left out).
+            id (string): rename, token, remove, disable, auto_disable, use, usage, sign_in: the account ("" for
+                the CLI's own sign-in, disable, auto_disable, use and usage only).
             session (string): use: the chat whose account it is, one of the host's sessions whose model is the
                 account's provider's. sign_in (a Claude account's) and token: the chat it's for, whose sign-in
                 (ChatLogin) its host moves as it goes, as a login request's, if the asker may read the chat
@@ -3348,6 +3375,8 @@ class Ops(Area):
                 its credentials in a file.
             folder (string): add (Claude): an existing Claude config folder on the host, signed in (claude auth
                 status says so, run with it).
+            on (boolean): disable: true to disable it, false to enable it again; auto_disable: whether it's
+                disabled as it's exhausted.
             code (string): code: what the sign-in page showed, pasted.
             method ('browser' | 'device'): sign_in, Codex's: browser (the default: codex login, its page sending
                 the browser back to the host's 127.0.0.1) or device (codex login --device-auth).
@@ -3356,8 +3385,8 @@ class Ops(Area):
                 have several callbacks waiting).
         """
         return self._call("accounts", {"what": what, "provider": provider, "id": id, "session": session,
-                                       "name": name, "token": token, "home": home, "folder": folder, "code": code,
-                                       "method": method, "url": url, "cb": cb}, host, AccountsReply)
+                                       "name": name, "token": token, "home": home, "folder": folder, "on": on,
+                                       "code": code, "method": method, "url": url, "cb": cb}, host, AccountsReply)
 
     def activate(self, *, id=None, where=None, host=None):
         """activate (Activate): A member taken up again.
@@ -3592,7 +3621,8 @@ class Ops(Area):
             timeout (number): exec: seconds it may run (60 if none; 600 at most): then it's stopped.
         """
         return self._call("docker", {"what": what, "context": context, "page": page, "id": id, "format": format,
-                                     "tail": tail, "command": command, "timeout": timeout}, host, DockerReply)
+                                     "tail": tail, "command": command,
+                                     "timeout": timeout}, host, DockerReply, waited(timeout))
 
     def docker_follow(self, *, what=None, context=None, page=None, id=None, host=None):
         """docker_follow (DockerFollow): A container's or a Compose project's log, followed (logs): one a connection,
@@ -3903,7 +3933,7 @@ class Ops(Area):
                                    "selector": selector, "namespaces": namespaces, "since": since, "fresh": fresh,
                                    "namespace": namespace, "name": name, "kind": kind, "force": force,
                                    "manifest": manifest, "container": container, "previous": previous, "tail": tail,
-                                   "command": command, "timeout": timeout}, host, KubeReply)
+                                   "command": command, "timeout": timeout}, host, KubeReply, waited(timeout))
 
     def kube_follow(self, *, what=None, context=None, server=None, page=None, crd=None, namespace=None, pod=None,
                     container=None, previous=None, host=None):
@@ -4064,14 +4094,18 @@ class Ops(Area):
         """
         return self._call("restart", {"do": do}, host, Obj)
 
-    def rotate(self, *, session=None, host=None):
+    def rotate(self, *, session=None, model=None, effort=None, host=None):
         """rotate (Rotate): A Bot's conversation archived as a past thread of its own ("<Bot> / <its title>", read-
-        only), and the Bot carried on in a new, empty one with a new agent: its id, name, picture, memory, tasks,
-        browser and rules as they were. Refused while it's at a turn or one of its tasks is asking it.
+        only), and the Bot carried on in a new, empty one with a new agent (on another model if one's given): its
+        id, name, picture, memory, tasks, browser and rules as they were. Refused while it's at a turn or one of its
+        tasks is asking it.
 
             session (string): The Bot's session id.
+            model (string or None): The model the Bot carries on on, of whatever program (null: its own). Given,
+                a Bot with nothing said yet is moved onto it without a past thread.
+            effort (string or None): Its effort on model, if model's program has one (null: the Bot's own).
         """
-        return self._call("rotate", {"session": session}, host, Obj)
+        return self._call("rotate", {"session": session, "model": model, "effort": effort}, host, Obj)
 
     def run_task(self, *, session=None, id=None, inputs=None, waited=None, host=None):
         """run_task (RunTask): One of a Bot's tasks run now, by hand.

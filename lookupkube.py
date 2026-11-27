@@ -781,21 +781,22 @@ def pg_docker_servers():
 
 
 def pg_query(server, database, sql):
-    """psql's answer (-At) to sql, run read-only in the server's container (docker exec, or kubectl exec for a pod's)
-    as its own user."""
-    psql = ["psql", "-X", "-q", "-U", server["user"], "-d", database, "-At", "-v", "ON_ERROR_STOP=1", "-f", "-"]
+    """psql's answer (-At) to sql, one statement, run in the server's container (docker exec, or kubectl exec for a
+    pod's) as its own user: in a read-only transaction, rolled back. Each -c goes to the server as it is (no psql
+    meta-commands, variables or script), so sql is the one statement there is if it has no ; in it."""
+    psql = ["psql", "-X", "-q", "-U", server["user"], "-d", database, "-At", "-v", "ON_ERROR_STOP=1",
+            "-c", "begin transaction read only", "-c", sql, "-c", "rollback"]
     if server.get("exec"):
         cmd = server["exec"] + ["env", "PGOPTIONS=-c default_transaction_read_only=on"] + psql
         try:
-            p = subprocess.run(cmd, input=sql, capture_output=True, text=True, timeout=30)
+            p = subprocess.run(cmd, input="", capture_output=True, text=True, timeout=30)
         except (OSError, subprocess.TimeoutExpired) as e:
             raise RuntimeError(wording.say("kube.kubectl_error", error=e)) from e
         if p.returncode:
             lines = (p.stderr or p.stdout).strip().splitlines()
             raise RuntimeError(lines[-1] if lines else wording.say("kube.kubectl_exited", code=p.returncode))
         return p.stdout
-    return _docker("exec", "-i", "-e", "PGOPTIONS=-c default_transaction_read_only=on", server["container"],
-                   *psql, stdin=sql)
+    return _docker("exec", "-e", "PGOPTIONS=-c default_transaction_read_only=on", server["container"], *psql)
 
 
 def pg_databases(server):

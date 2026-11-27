@@ -885,7 +885,9 @@ private fun BindDialog(v: Msg.TaskVariable, bound: Msg.TaskBinding?, choices: Li
     val efforts = (choices.firstOrNull { it.binding?.value == picked?.value }?.efforts.orEmpty() +
         listOfNotNull(effort.ifBlank { null })).distinct()
     fun made(): Msg.TaskBinding? {
-        val base = if (pickedShown) picked else text.trim().ifBlank { null }?.let { Msg.TaskBinding(value = it) }
+        val typed = text.trim()
+        val same = choices.firstOrNull { ch -> ch.binding?.label.equals(typed, true) || ch.binding?.value.equals(typed, true) }?.binding
+        val base = if (pickedShown) picked else same ?: typed.ifBlank { null }?.let { Msg.TaskBinding(value = it) }
         return if (base == null || v.type != "model") base else Msg.TaskBinding(value = base.value, label = base.label,
             host = base.host, effort = effort.ifBlank { null })
     }

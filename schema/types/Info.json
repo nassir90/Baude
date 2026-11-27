@@ -128,6 +128,13 @@
       "$ref": "TelemetryState.json",
       "description": "Its telemetry state: the apps on its machine tell it telemetry only while it's on, and profile what it says."
     },
+    "front": {
+      "type": "array",
+      "items": {
+        "$ref": "TelemetryFront.json"
+      },
+      "description": "The chats in front on its machine now, as its apps' telemetry says (each one's last chat_front, till its chat_left or the app's gone): none while its telemetry's off. No head notifies of a chat in front on any machine of the mesh."
+    },
     "tool_names": {
       "$ref": "ToolNames.json",
       "description": "How its MCP tools are named: what every head shows for one (\"Mesh / Tasks\")."

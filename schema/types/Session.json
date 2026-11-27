@@ -183,6 +183,10 @@
       "type": "boolean",
       "description": "Its subscription account was removed from its host after it was picked for it: its agent can't start till another is picked."
     },
+    "account_disabled": {
+      "type": "boolean",
+      "description": "The subscription it runs on (its account, or its provider's CLI's own sign-in) is disabled on its host (accounts' disable, or auto_disable as it's exhausted): its agent stopped, nothing sent to it nor started, every app's send button off and its banner saying so, till it's enabled or another's picked."
+    },
     "held": {
       "type": "array",
       "items": {

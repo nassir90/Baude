@@ -235,6 +235,7 @@ class Session:
         self.busy = False         # at a turn
         self.turn_began = None    # (when its turn going on began: autofix.turn_over's)
         self.acting = False       # at its browser's tools: an Emission call begun, nothing else since (turn_acting)
+        self.acting_by = {}       # (whose Emission call's begun: None its own, else a subagent's, by its Agent call's id)
         self.streamed = False     # (its agent's said what it writes as it writes it: stream_event)
         self.writing = None       # (the id of the message its agent last began to stream: took_queued's)
         self.waiting_init = []    # (conn, its request id): initialize asked before claude answered its own
@@ -481,13 +482,13 @@ def context_kept(usage):
 
 
 def turn_acting(msg, was, streamed=False):
-    """Whether a turn's at its browser's tools (Emission's: what its browser glows for) once msg (its agent's own, not
-    a subagent's) has come, was being whether it was before: a call of Emission's begun (its block started, as it's
-    streamed; or come whole, as some agents send their calls though they stream their text), and it is; another tool's
-    call, or text, begun, and it isn't (at other tools, or writing to you). streamed: its agent streams what it writes,
-    so text come whole is what was streamed already (late: after a call's begun, say), not looked at. Thinking, and
-    the rest, leave it as it was: between two of Emission's calls it's still at them. Its result, or its agent gone,
-    ends it (from_claude, claude_exited)."""
+    """Whether one of a turn's agents (its own, or a subagent: note_acting's) is at its browser's tools (Emission's:
+    what its browser glows for) once msg has come, was being whether it was before: a call of Emission's begun (its
+    block started, as it's streamed; or come whole, as some agents send their calls though they stream their text), and
+    it is; another tool's call, or text, begun, and it isn't (at other tools, or writing to you). streamed: its agent
+    streams what it writes, so text come whole is what was streamed already (late: after a call's begun, say), not
+    looked at. Thinking, and the rest, leave it as it was: between two of Emission's calls it's still at them. Its
+    result, or its agent gone, ends it (from_claude, claude_exited)."""
     if msg.get("type") == "stream_event":
         event = msg.get("event") or {}
         if event.get("type") != "content_block_start":
@@ -502,6 +503,17 @@ def turn_acting(msg, was, streamed=False):
     if msg.get("type") != "stream_event" and streamed:
         return was
     return False if any(b.get("type") == "text" for b in blocks) else was
+
+
+def note_acting(by, msg, streamed=False):
+    """Whether any of a turn's agents (its own, and its subagents: msg's parent_tool_use_id) is at Emission's tools,
+    once msg has come; by (whose call's begun, by that id) is kept for it."""
+    who = msg.get("parent_tool_use_id") or None
+    if turn_acting(msg, by.get(who, False), streamed):
+        by[who] = True
+    else:
+        by.pop(who, None)
+    return bool(by)
 
 
 EMISSION_TOOL = f"mcp__{emissiontools.NAME}__"  # (Emission's tools' names, as its agent calls them)

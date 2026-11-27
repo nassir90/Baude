@@ -3368,7 +3368,7 @@ A session as a host lists it.
 | `bot` | BotListing? |  | A Bot's; null for a chat. |
 | `rotated` | number/null |  | A Bot's: when it was last rotated (its conversation archived as a past thread, a new one begun), epoch seconds; null if it never has. A head's copy of its transcript is let go of as it changes. |
 | `autofix` | AutofixPull? |  | Its Auto-fix: the pull request its host follows for it; null while it's off. |
-| `acting` | boolean |  | Whether its turn is at its tools: from a tool call's start till text starts after it, the turn ends or its agent goes; only while it's working, not asking. |
+| `acting` | boolean |  | Whether its turn is at its browser's tools (Emission's), its own or a subagent's: from the start of a call of Emission's till another tool's call or text starts after it (in each agent's own messages; on while any agent is at one), the turn ends or its agent goes; only while it's working, not asking. |
 | `context` | ContextUsage? |  | How much of its context window its agent last said it's used, kept while its agent's stopped; null till it's said. |
 | `on_phone` | boolean |  | A Bot's browser is on a phone now. |
 | `fork_from` | string/null |  | The session it was forked from. |

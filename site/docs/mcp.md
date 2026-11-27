@@ -1108,13 +1108,15 @@ A host's telemetry over a stretch: its chat events, its samples, its line profil
 
 #### `telemetry_set` (TelemetrySet)
 
-A host's telemetry switched on or off, or what a process on its machine profiles set, at run time: kept by the host, and told to its machine's apps (Info's telemetry).
+A host's telemetry switched on or off, its line profiling switched on or off, or what a process on its machine profiles named (or its defaults again), at run time: kept by the host, and told to its machine's apps (Info's telemetry).
 
 | Field | Type | Required | What it is |
 |---|---|---|---|
 | `on` | boolean/null |  | Telemetry on or off (null: as it is). |
-| `app` | any |  | The process whose profiling is set: the host's, Baude's or Record's (null: none). |
-| `functions` | array/null of string |  | What it profiles: functions and modules by their dotted names; empty: off. |
+| `line_profiling` | boolean/null |  | Line profiling on or off: the host's process, Baude's and Record's each profiling what it's told to while telemetry's on too (null: as it is). |
+| `app` | any |  | The process whose profiled functions are named or put back to its defaults: the host's, Baude's or Record's (null: none). |
+| `functions` | array/null of string |  | What app's process profiles in place of its defaults: functions and modules by their dotted names; empty: nothing (null: as it is). |
+| `default` | boolean/null |  | True: what app's process profiles is its defaults again (Baude's own pick, lineprofile.DEFAULTS), what was named in their place dropped. |
 
 #### `terminal` (Terminal)
 
@@ -3577,12 +3579,13 @@ What line_profiler timed in a process over a stretch (saved every 30 seconds whi
 
 #### TelemetryProfiling
 
-What a process is told to profile.
+What a process profiles while line profiling's on.
 
 | Field | Type | Required | What it is |
 |---|---|---|---|
 | `app` | `host` \| `baude` \| `record` | yes | The process: the host's, Baude's or Record's. |
-| `functions` | array of string | yes | What's profiled: functions (module.function, module.Class.method) and modules (every function in it); none: off. |
+| `functions` | array of string | yes | What's profiled: functions (module.function, module.Class.method) and modules (every function in it); its defaults unless others are named. |
+| `default` | boolean | yes | They're its defaults (lineprofile.DEFAULTS, Baude's own pick), not named by telemetry_set. |
 | `error` | string/null |  | Why it isn't profiling what it's told to (a name not found; line_profiler not installed). |
 
 #### TelemetrySample
@@ -3603,7 +3606,7 @@ A host's machine and its processes, sampled every few seconds while telemetry is
 
 #### TelemetryState
 
-A host's telemetry: on or off, and what each process on its machine profiles.
+A host's telemetry: on or off, line profiling on or off, and what each process on its machine profiles.
 
 | Field | Type | Required | What it is |
 |---|---|---|---|
@@ -3699,6 +3702,7 @@ One of a subscription's limits, as Claude Code's get_usage says it, or Codex's A
 
 A subscription's usage as its host last read it: its limits and when.
 
+| `line_profiling` | boolean | yes | Line profiling on: each process profiles its functions while telemetry's on too (off unless switched on). |
 | Field | Type | Required | What it is |
 |---|---|---|---|
 | `usage` | array of UsageLimit | yes | The limits as that read said them. |

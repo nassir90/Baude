@@ -124,16 +124,19 @@ An entry or a part may carry:
 - **Telemetry is a timestamped log that stays on the user's machines.** Every app tells its own machine's host only
   (the phone's app its own host), as it happens and each with its own time: each chat opened, in front, left, each turn
   sent and ended (how long, model, effort, tokens), by the chat's host id and session id; a host keeps its own sessions'
-  turn ends too, samples its machine and its processes every 5 seconds, and keeps line profiles of what it's told to
-  profile (line_profiler, optional). All of it only while that host's telemetry is on, switched at run time from
+  turn ends too, samples its machine and its processes every 5 seconds, and, while its line profiling is switched on
+  too, keeps line profiles (line_profiler, optional) of what each process profiles: the developers' pick shipped with
+  the code (lineprofile.DEFAULTS), or what telemetry_set from any member of the mesh names in its place for that host;
+  no app asks the user to name functions. All of it only while that host's telemetry is on, switched at run time from
   Settings → Telemetry or telemetry_set. Any member reads any host's over a stretch (telemetry_read), so one machine
   pulls every host's and puts them together by time (baudelib/telemetry.py's gather); a chat's size is worked out
   from its transcript when asked (chat_size), never kept. No screen time or menu counts. Nothing is sent outside the
   mesh. The owner: "Once a minute is completely bonkers and quite useless", "Sreen time is a pretty useless metric,
   how is that going to help me make the app better (in isolation)", "Store chat activity yes with timestamps", "Yes
-  store system metrics", "Yes build in line_profiler", "Yes add teh wire messags" (2026-11-26). Source:
-  `[{"issue": "BaudeInternal#205"}, {"session": "b3845b21-55ac-4aab-a769-fb8517403c51", "message":
-  "41aef9c4-02f6-4496-ac8a-bb9737df5262"}, {"issue": "BaudeInternal#228"}]`.
+  store system metrics", "Yes build in line_profiler", "Yes add teh wire messags" (2026-11-26); and that which
+  functions are profiled is the developers' call, a default set overridable over the mesh (2026-11-27, paraphrased).
+  Source: `[{"issue": "BaudeInternal#205"}, {"session": "b3845b21-55ac-4aab-a769-fb8517403c51", "message":
+  "41aef9c4-02f6-4496-ac8a-bb9737df5262"}, {"issue": "BaudeInternal#228"}, {"issue": "BaudeInternal#285"}]`.
 - **Every piece of text starts with a capital letter.** Whatever an app puts on screen starts with a capital: notes and
   messages (a chat's SystemNote, an error, a status line) in sentence case ("Interrupted", "Model → Opus", "Committed on
   main", "Claude couldn't save this chat: the disk is full"), buttons, menu items and links in Title Case ("Show in

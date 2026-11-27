@@ -1,10 +1,13 @@
 """telemetry — a host's: what the apps on its machine saw done in chats (the telemetry op's events, each kept as it's
 told, at its own time), samples of its machine every SAMPLE_S (load, memory, swap, memory pressure, and the CPU and memory of
 its own process and of each app's on it: Baude's, Record's, Emission's, Multiplex's), and line profiles (lineprofile:
-its own, and those its apps send), while it's on; all read back over a stretch by telemetry_read, from any member of the mesh, and switched by telemetry_set (Settings →
-Telemetry, any head). Kept in the host's state folder only, telemetry/<events|metrics|profiles>/YYYY-MM-DD.jsonl (the
-day of each line's time, this machine's), and telemetry/state.json (on, and what each process profiles). Nothing here
-sends it anywhere else.
+its own, and those its apps send), while it's on; all read back over a stretch by telemetry_read, from any member of the
+mesh, and switched by telemetry_set (Settings → Telemetry, any head). Line profiling is switched on and off there too;
+what each process profiles is lineprofile.DEFAULTS unless telemetry_set names others for it (python3 -m
+baudelib.telemetry profile, from any member of the mesh). Kept in the host's state folder only,
+telemetry/<events|metrics|profiles>/YYYY-MM-DD.jsonl (the day of each line's time, this machine's), and
+telemetry/state.json (on, line profiling on, and what's named in place of a process's defaults). Nothing here sends it
+anywhere else.
 
 Chat sizes aren't kept: chat_size works one out from a chat's transcript as it is when it's asked. gather() pulls every
 host's into one, by their times. No GTK, no dependency but line_profiler's (lineprofile's, optional)."""
@@ -255,14 +258,25 @@ class Telemetry:
         except (OSError, ValueError):
             kept = {}
         self.on = kept.get("on") is not False  # (on unless switched off)
-        self.profile = {a: [f for f in (kept.get("profile") or {}).get(a) or [] if isinstance(f, str)] for a in PROFILED}
+        self.profiling = kept.get("line_profiling") is True  # (off unless switched on: it slows what it times)
+        named = kept.get("named") if isinstance(kept.get("named"), dict) else {}
+        self.named = {a: [f for f in named[a] if isinstance(f, str)] for a in PROFILED
+                      if isinstance(named.get(a), list)}  # (what's named in place of a process's defaults)
         self.thread = None
 
     def start(self):
         """Sampling (and the host's own profiling) started, if it's on."""
-        if self.profile["host"]:
-            self.profiler.set(self.profile["host"])
+        self._profile_host()
         self._run()
+
+    def functions(self, app):
+        """What app's process profiles while line profiling's on: what telemetry_set named for it, else the defaults."""
+        return list(self.named[app] if app in self.named else lineprofile.DEFAULTS[app])
+
+    def _profile_host(self):
+        """The host's own profiler following the state: its functions while telemetry and line profiling are on."""
+        if (last := self.profiler.set(self.functions("host") if self.on and self.profiling else [])) is not None:
+            self._write("profiles", [last])
 
     def _run(self):
         with self.lock:
@@ -279,12 +293,13 @@ class Telemetry:
     # ---- its state
     def state(self):
         """As the wire's TelemetryState has it."""
-        profiling = [self.profiler.profiling()] + [
-            {"app": a, "functions": list(self.profile[a]), "error": self.errors.get(a)} for a in PROFILED if a != "host"]
-        return {"on": self.on, "line_profiler": self.has_lp, "profiling": profiling}
+        profiling = [{"app": a, "functions": self.functions(a), "default": a not in self.named,
+                      "error": self.profiler.error if a == "host" else self.errors.get(a)} for a in PROFILED]
+        return {"on": self.on, "line_profiler": self.has_lp, "line_profiling": self.profiling, "profiling": profiling}
 
     def set(self, msg):
-        """telemetry_set's: on or off, and what a process profiles; kept, and the state returned."""
+        """telemetry_set's: on or off, line profiling on or off, and what a process profiles (named, or its
+        defaults again); kept, and the state returned."""
         self.has_lp = deps.present("line_profiler")
         if isinstance(msg.get("on"), bool) and msg["on"] != self.on:
             self.on = msg["on"]
@@ -293,16 +308,21 @@ class Telemetry:
             else:
                 self.wake.set()
                 self.cpu.clear()
+        if isinstance(msg.get("line_profiling"), bool):
+            self.profiling = msg["line_profiling"]
         app = msg.get("app")
-        if app in PROFILED and isinstance(msg.get("functions"), list):
-            self.profile[app] = [f.strip() for f in msg["functions"] if isinstance(f, str) and f.strip()]
+        if app in PROFILED and msg.get("default") is True:
+            self.named.pop(app, None)
             self.errors.pop(app, None)
-            if app == "host" and (last := self.profiler.set(self.profile["host"])) is not None:
-                self._write("profiles", [last])
+        elif app in PROFILED and isinstance(msg.get("functions"), list):
+            self.named[app] = list(dict.fromkeys(f.strip() for f in msg["functions"]
+                                                 if isinstance(f, str) and f.strip()))
+            self.errors.pop(app, None)
+        self._profile_host()
         os.makedirs(self.dir, mode=0o700, exist_ok=True)
         tmp = os.path.join(self.dir, "state.json.tmp")
         with open(tmp, "w", encoding="utf-8") as f:
-            json.dump({"on": self.on, "profile": self.profile}, f)
+            json.dump({"on": self.on, "line_profiling": self.profiling, "named": self.named}, f)
         os.replace(tmp, os.path.join(self.dir, "state.json"))
         self.changed()
         return self.state()
@@ -557,20 +577,18 @@ def chat_size(path):
     return {"bytes": size, "messages": messages, "images": images}
 
 
-def gather(start, end=None, what=("events", "metrics", "profiles", "usage"), timeout=20):
-    """Every host's telemetry in the mesh (this machine's host's members, and it), pulled by telemetry_read from here
-    and put together: {"hosts": {id: reply or {"error"}}, "events": [...], "metrics": [...], "profiles": [...],
-    "usage": ...}, each row with its host's id, the earliest first; usage added up over every host's events, each turn
-    once. Every host's asked at once, and what hasn't answered within timeout (all told) is an error."""
+def ask_every(ask, timeout=20, host=None):
+    """ask sent to every host in the mesh (this machine's host's members, and it; host: that one's id only), all at
+    once: {id: its answer, or {"error"}}, what hasn't answered within timeout (all told) an error."""
     deadline = time.monotonic() + timeout
     ch, info = wire.reach({"via": "local"}, timeout=timeout)
     ch.close()
     wheres = [({"via": "local"}, info.get("id"))] + [
         ({"via": "mesh", "host": m["id"]}, m["id"]) for m in (info.get("mesh") or {}).get("members") or []
         if isinstance(m, dict) and wire.is_id(m.get("id")) and m["id"] != info.get("id")]
-    replies, ask = {}, {"op": "telemetry_read", "from": start, "to": end, "what": [w for w in what if w != "usage"]
-                        + (["events"] if "usage" in what and "events" not in what else []), "req": 1}
-
+    if host is not None:
+        wheres = [w for w in wheres if w[1] == host] or [({"via": "mesh", "host": host}, host)]
+    replies, ask = {}, {**ask, "req": 1}
     lock, done = threading.Lock(), [False]
 
     def one(where, hid):
@@ -585,7 +603,7 @@ def gather(start, end=None, what=("events", "metrics", "profiles", "usage"), tim
         except (OSError, ValueError) as e:
             got = {"error": str(e)}
         with lock:
-            if not done[0]:  # (an answer after gather's returned: dropped)
+            if not done[0]:  # (an answer after ask_every's returned: dropped)
                 replies[hid] = got
     threads = [threading.Thread(target=one, args=w, daemon=True) for w in wheres]
     for t in threads:
@@ -594,7 +612,15 @@ def gather(start, end=None, what=("events", "metrics", "profiles", "usage"), tim
         t.join(max(0, deadline - time.monotonic()))
     with lock:
         done[0] = True
-        hosts = {hid: replies.get(hid) or {"error": "no answer"} for _, hid in wheres}
+        return {hid: replies.get(hid) or {"error": "no answer"} for _, hid in wheres}
+
+
+def gather(start, end=None, what=("events", "metrics", "profiles", "usage"), timeout=20):
+    """Every host's telemetry in the mesh (ask_every's), pulled by telemetry_read from here and put together:
+    {"hosts": {id: reply or {"error"}}, "events": [...], "metrics": [...], "profiles": [...], "usage": ...}, each row
+    with its host's id, the earliest first; usage added up over every host's events, each turn once."""
+    hosts = ask_every({"op": "telemetry_read", "from": start, "to": end, "what": [w for w in what if w != "usage"]
+                       + (["events"] if "usage" in what and "events" not in what else [])}, timeout)
     out = {"hosts": hosts}
     for kind in ("events", "metrics", "profiles"):
         out[kind] = sorted(({**r, "from_host": hid} for hid, rep in hosts.items() for r in rep.get(kind) or []),
@@ -606,6 +632,31 @@ def gather(start, end=None, what=("events", "metrics", "profiles", "usage"), tim
     return out
 
 
-if __name__ == "__main__":  # (python3 -m baudelib.telemetry [hours]: every host's last hours, as JSON)
-    hours = float(sys.argv[1]) if len(sys.argv) > 1 else 1
-    json.dump(gather(time.time() - hours * 3600), sys.stdout, indent=1)
+def main(argv):
+    """python3 -m baudelib.telemetry [hours]: every host's last hours, as JSON. python3 -m baudelib.telemetry profile
+    [--host ID] [--on | --off] [APP [NAME ...] | APP --default]: line profiling switched, or what APP's process
+    profiles named (NAME: a function or module's dotted name; none: nothing) or its defaults again, on every host in
+    the mesh (or ID's only); each host's telemetry state after it, as JSON."""
+    import argparse
+    if argv[:1] != ["profile"]:
+        hours = float(argv[0]) if argv else 1
+        return json.dump(gather(time.time() - hours * 3600), sys.stdout, indent=1)
+    p = argparse.ArgumentParser(prog="python3 -m baudelib.telemetry profile")
+    p.add_argument("--host")
+    p.add_argument("--on", dest="line_profiling", action="store_const", const=True)
+    p.add_argument("--off", dest="line_profiling", action="store_const", const=False)
+    p.add_argument("--default", action="store_true")
+    p.add_argument("app", nargs="?", choices=PROFILED)
+    p.add_argument("names", nargs="*")
+    a = p.parse_args(argv[1:])
+    if a.default and (a.app is None or a.names):
+        p.error("--default takes an app and no names")
+    ask = {"op": "telemetry_set", "line_profiling": a.line_profiling, "app": a.app,
+           **({"default": True} if a.default else {"functions": a.names} if a.app else {})}
+    answers = ask_every(ask, host=a.host)
+    json.dump({hid: r.get("state") or {"error": r.get("error") or r.get("said") or "no answer"}
+               for hid, r in answers.items()}, sys.stdout, indent=1)
+
+
+if __name__ == "__main__":
+    main(sys.argv[1:])

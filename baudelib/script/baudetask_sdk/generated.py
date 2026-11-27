@@ -1439,11 +1439,13 @@ class TelemetryProfile(Obj):
 
 
 class TelemetryProfiling(Obj):
-    """What a process is told to profile.
+    """What a process profiles while line profiling's on.
 
         app ('host' | 'baude' | 'record'): The process: the host's, Baude's or Record's.
         functions (array of string): What's profiled: functions (module.function, module.Class.method) and
-            modules (every function in it); none: off.
+            modules (every function in it); its defaults unless others are named.
+        default (boolean): They're its defaults (lineprofile.DEFAULTS, Baude's own pick), not named by
+            telemetry_set.
         error (string or None): Why it isn't profiling what it's told to (a name not found; line_profiler not
             installed).
     """
@@ -1475,10 +1477,12 @@ class TelemetrySample(Obj):
 
 
 class TelemetryState(Obj):
-    """A host's telemetry: on or off, and what each process on its machine profiles.
+    """A host's telemetry: on or off, line profiling on or off, and what each process on its machine profiles.
 
         on (boolean): Events kept and the machine sampled.
         line_profiler (boolean): line_profiler is installed for the host's Python.
+        line_profiling (boolean): Line profiling on: each process profiles its functions while telemetry's on
+            too (off unless switched on).
         profiling (array of TelemetryProfiling): Each process's: the host's, Baude's, Record's.
     """
     _refs = {"profiling": "TelemetryProfiling"}
@@ -4320,16 +4324,23 @@ class Ops(Area):
         return self._call("telemetry_read", {"from": from_, "to": to, "what": what,
                                              "limit": limit}, host, TelemetryReadReply)
 
-    def telemetry_set(self, *, on=None, app=None, functions=None, host=None):
-        """telemetry_set (TelemetrySet): A host's telemetry switched on or off, or what a process on its machine
-        profiles set, at run time: kept by the host, and told to its machine's apps (Info's telemetry).
+    def telemetry_set(self, *, on=None, line_profiling=None, app=None, functions=None, default=None, host=None):
+        """telemetry_set (TelemetrySet): A host's telemetry switched on or off, its line profiling switched on or off,
+        or what a process on its machine profiles named (or its defaults again), at run time: kept by the host, and
+        told to its machine's apps (Info's telemetry).
 
             on (boolean or None): Telemetry on or off (null: as it is).
-            app (any): The process whose profiling is set: the host's, Baude's or Record's (null: none).
-            functions (array or None of string): What it profiles: functions and modules by their dotted names;
-                empty: off.
+            line_profiling (boolean or None): Line profiling on or off: the host's process, Baude's and Record's
+                each profiling what it's told to while telemetry's on too (null: as it is).
+            app (any): The process whose profiled functions are named or put back to its defaults: the host's,
+                Baude's or Record's (null: none).
+            functions (array or None of string): What app's process profiles in place of its defaults: functions
+                and modules by their dotted names; empty: nothing (null: as it is).
+            default (boolean or None): True: what app's process profiles is its defaults again (Baude's own
+                pick, lineprofile.DEFAULTS), what was named in their place dropped.
         """
-        return self._call("telemetry_set", {"on": on, "app": app, "functions": functions}, host, TelemetrySetReply)
+        return self._call("telemetry_set", {"on": on, "line_profiling": line_profiling, "app": app,
+                                            "functions": functions, "default": default}, host, TelemetrySetReply)
 
     def terminal(self, *, argv=None, cwd=None, title=None, columns=None, rows=None, attach=None, host=None):
         """terminal (Terminal): A terminal on this host (Multiplex's, baudelib.hostterminal): a program run in a pty

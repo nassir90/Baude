@@ -51,13 +51,14 @@ object TelemetryStore {
     }
 
     /** The wire's TelemetryState: on or off; nothing profiled here. */
-    fun state(): JSONObject = JSONObject().put("on", on).put("line_profiler", false).put("profiling", JSONArray())
+    fun state(): JSONObject = JSONObject().put("on", on).put("line_profiler", false).put("line_profiling", false)
+        .put("profiling", JSONArray())
 
     /** telemetry_set's: on or off (profiling isn't on this phone: an error, if it's asked for). */
     @Synchronized
     fun set(msg: JSONObject): String? {
         val m = Msg.TelemetrySet.from(msg)
-        if (m.app != null && !m.functions.isNullOrEmpty()) return Wording.Telemetry.noProfiling
+        if (m.lineProfiling == true || m.app != null && !m.functions.isNullOrEmpty()) return Wording.Telemetry.noProfiling
         m.on?.let { now ->
             if (now != on) {
                 on = now

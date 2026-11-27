@@ -64,6 +64,15 @@ def seed(host_id):
     rows.setdefault(("profiles", datetime.date.today()), []).append({
         "at": now - 30, "from": now - 60, "app": "host",
         "lines": [{"file": f, "line": n, "function": fn, "code": c, "hits": h, "seconds": s} for f, n, fn, c, h, s in lines]})
+    for app, these in (("baude", [("markdownview.py", 652, "markdown_parse", "blocks = markdown_blocks(md[start:])", 64,
+                                   0.733),
+                                  ("windowview.py", 761, "load_history", "items = self.history.load(self.HISTORY_CHUNK)",
+                                   3, 0.288)]),
+                       ("record", [("recordstore.py", 498, "take", "self.merged_page(mine, theirs, was)", 41, 0.164)])):
+        rows[("profiles", datetime.date.today())].append({
+            "at": now - 30, "from": now - 60, "app": app,
+            "lines": [{"file": f, "line": n, "function": fn, "code": c, "hits": h, "seconds": s}
+                      for f, n, fn, c, h, s in these]})
     for (kind, day), these in rows.items():
         os.makedirs(os.path.join(folder, kind), exist_ok=True)
         with open(os.path.join(folder, kind, f"{day.isoformat()}.jsonl"), "a") as f:
@@ -77,7 +86,7 @@ def settings(app, profile=True, scrolled=False):
     host_id = ask({"op": "telemetry_read", "from": 0})["host"]
     seed(host_id)
     if profile:
-        ask({"op": "telemetry_set", "on": True, "app": "host", "functions": ["baudelib.telemetry.Telemetry.sample"]})
+        ask({"op": "telemetry_set", "on": True, "line_profiling": True})
     time.sleep(6)  # (a sample of the machine taken)
     dialog = win.open_settings()
     import telemetryview

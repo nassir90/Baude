@@ -54,11 +54,27 @@ object Telemetry {
     private var opened: Pair<String, String>? = null
     private var front: Pair<String, String>? = null
     private val sentAt = HashMap<Pair<String, String>, Long>()
+    private var errorsDue = false
     var screen: List<String> = listOf("contacts") // (MainActivity's: the screen shown)
         set(v) {
             field = v
+            PhoneErrors.shown(v)
             look()
         }
+
+    /** (any thread) This app has an error (PhoneErrors' wake): told in a moment, with any meanwhile. */
+    fun errorsSoon() {
+        main.post {
+            if (!errorsDue) {
+                errorsDue = true
+                main.postDelayed({
+                    errorsDue = false
+                    if (!TelemetryStore.on) PhoneErrors.take()
+                    else if (!sending) { sending = true; tell() }
+                }, 1000)
+            }
+        }
+    }
 
     private fun hostOf(id: String) = Mesh.hostIdOf(id) ?: id // (a connection's: the id of the host it's to)
 
@@ -131,13 +147,19 @@ object Telemetry {
     private fun tell() {
         val events = ArrayList(queue)
         queue.clear()
-        if (events.isEmpty()) {
+        val errors = PhoneErrors.take()
+        if (events.isEmpty() && errors.isEmpty()) {
             sending = false
             return
         }
-        val msg = Msg.Telemetry(app = "phone", pid = Process.myPid(), events = events).json()
+        val msg = Msg.Telemetry(app = "phone", pid = Process.myPid(), events = events,
+            commit = BuildConfig.COMMIT.take(12).ifEmpty { null }, wire = WireConstants.VERSION).json()
+        if (errors.isNotEmpty()) msg.put("errors", org.json.JSONArray(errors))
         Mesh.ask("phone", msg) { r ->
-            if (r.optString("op") != "telemetry_kept") queue.addAll(0, events) // (kept: told next time)
+            if (r.optString("op") != "telemetry_kept") { // (kept: told next time)
+                queue.addAll(0, events)
+                PhoneErrors.giveBack(errors)
+            }
             sending = false
             if (r.optString("op") == "telemetry_kept" && queue.isNotEmpty()) {
                 sending = true
@@ -236,6 +258,47 @@ private fun modelExpander(m: Msg.TelemetryModel, name: String, slug: String?): @
     }
 }
 
+private const val ERRORS_SHOWN = 20
+private const val ERRORS_DAYS = 7
+
+private fun whereSaid(screen: String?, part: String?) = listOfNotNull(screen, part).joinToString(" · ").ifEmpty { "–" }
+
+/** An error (telemetryview.error_row): its process's logo, its type and message, how long ago it last happened and how
+ * many times; tapped, opened to where it was raised, what was on screen, the user's last actions before it and the
+ * code it ran, as Adw.ExpanderRow is. */
+private fun errorExpander(e: Msg.TelemetryError): @Composable () -> Unit = {
+    val c = LocalBaude.current
+    var open by remember(e.fingerprint, e.app) { mutableStateOf(false) }
+    val title = if (!e.message.isNullOrEmpty() && e.message != e.type) "${e.type}: ${e.message}" else e.type.orEmpty()
+    Column {
+        ActionRow(title, null, onClick = { open = !open },
+            prefix = { Icon(APP_LOGOS[e.app] ?: Adwaita.AppBaude, null, tint = c.fg, modifier = Modifier.size(16.dp.icon)) },
+            suffix = {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(ago(e.last?.toLong() ?: 0L), style = Type.body, color = c.dim, maxLines = 1)
+                    Text(Wording.Telemetry.errorTimes(count = e.count?.toLong() ?: 1L), style = Type.body, color = c.dim, maxLines = 1)
+                    Icon(Adwaita.PanDown, null, tint = c.dim, modifier = Modifier.size(16.dp.icon).rotate(if (open) 180f else 0f))
+                }
+            })
+        if (open) {
+            val rows = ArrayList<@Composable () -> Unit>()
+            e.file?.let { rows.add(valueRow(Wording.Telemetry.errorWhere, "$it:${e.line}" + (e.function?.let { f -> " $f" } ?: ""))) }
+            if (e.wireOp != null) rows.add(valueRow(Wording.Telemetry.errorOp, e.wireOp + (e.code?.let { " · $it" } ?: "")))
+            else e.code?.let { rows.add(valueRow(Wording.Telemetry.errorCode, it.toString())) }
+            if (e.screen != null || e.part != null) rows.add(valueRow(Wording.Telemetry.errorScreen, whereSaid(e.screen, e.part)))
+            for (k in e.crumbs.orEmpty().reversed()) rows.add(valueRow(Wording.byKey["telemetry.action_${k.action}"] ?: k.action.orEmpty(),
+                whereSaid(k.screen, k.part ?: k.widget) + " · " + ago(k.at?.toLong() ?: 0L)))
+            if (e.commit != null || e.wire != null) rows.add(valueRow(Wording.Telemetry.errorVersion,
+                Wording.Telemetry.versionOf(commit = e.commit ?: "–", wire = e.wire?.toString() ?: "–")))
+            if ((e.count?.toLong() ?: 1L) > 1) e.first?.let { rows.add(valueRow(Wording.Telemetry.errorFirst, ago(it.toLong()))) }
+            for (r in rows) {
+                Box(Modifier.fillMaxWidth().height(1.dp).background(c.rule))
+                r()
+            }
+        }
+    }
+}
+
 private fun valueRow(title: String, value: String?, slug: String? = null): @Composable () -> Unit = {
     val c = LocalBaude.current
     val ctx = androidx.compose.ui.platform.LocalContext.current
@@ -277,6 +340,7 @@ fun TelemetryPage() {
     var usage by remember(hostId, asked) { mutableStateOf<JSONObject?>(null) }
     var metrics by remember(hostId) { mutableStateOf<JSONObject?>(null) }
     var profiles by remember(hostId, asked) { mutableStateOf<JSONObject?>(null) }
+    var errors by remember(hostId, asked) { mutableStateOf<JSONObject?>(null) }
     var deps by remember(hostId) { mutableStateOf<Msg.Dep?>(null) }
     fun read(from: Double, what: String, limit: Int?, then: (JSONObject) -> Unit) =
         Mesh.ask(hostId, Msg.TelemetryRead(from = from, what = listOf(what), limit = limit).json(), then)
@@ -284,6 +348,10 @@ fun TelemetryPage() {
         val now = System.currentTimeMillis() / 1000.0
         read(now - (WEEKS * 7 + 7) * 86400.0, "usage", null) { usage = it }
         read(now - 3600, "profiles", 500) { profiles = it }
+        while (true) { // (its errors read again every 30 seconds, as the desktop's are)
+            read(System.currentTimeMillis() / 1000.0 - ERRORS_DAYS * 86400.0, "errors", ERRORS_SHOWN) { errors = it }
+            delay(30_000)
+        }
     }
     LaunchedEffect(hostId) {
         while (true) {
@@ -360,6 +428,12 @@ fun TelemetryPage() {
                     if (p == null) TotalRow(cpus, rsses) else ProcessRow(p, n)
                 }
             }
+        }
+        errors?.takeIf { it.optString("op") == Op.TELEMETRY_READ }?.let { r ->
+            val list = Msg.TelemetryReadReply.from(r).errors.orEmpty()
+            Heading(Wording.Telemetry.errors)
+            if (list.isEmpty()) BoxedList(listOf(Wording.Telemetry.noErrors), "") { ActionRow(it, null) }
+            else BoxedList(list, "") { e -> errorExpander(e)() }
         }
         if (hostId != "phone" && state != null) Profiling(state, profiles, deps, { asked++ }) { set(it) }
     }

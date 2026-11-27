@@ -499,7 +499,12 @@ object Mesh {
     }?.id
 
     /** A request to a host, its reply on the main thread (an error one if it isn't connected). */
-    fun ask(hostId: String, msg: JSONObject, then: (JSONObject) -> Unit) {
+    fun ask(hostId: String, msg: JSONObject, answered: (JSONObject) -> Unit) {
+        val then = PhoneErrors.FAILS[msg.optString("op")]?.let { kind -> { r: JSONObject ->
+            if (r.optString("op") == Op.ERROR) PhoneErrors.note(kind, msg.optString("op"), r.optString("error"),
+                r.optString("code").ifEmpty { null }, msg.optString("op"), r.opt("code")?.takeIf { it != JSONObject.NULL })
+            answered(r)
+        } } ?: answered
         val c = conns[hostId]
         if (c == null) {
             then(Msg.Error(error = "the server isn't there").json())

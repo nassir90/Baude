@@ -92,6 +92,8 @@ object PhoneHost {
             id = prefs.getString("id", null) ?: UUID.randomUUID().toString().also { prefs.edit().putString("id", it).apply() }
             name = prefs.getString("name", null)?.ifBlank { null } ?: deviceName()
             root = File(ctx.filesDir, "phone")
+            PhoneErrors.install(ctx.filesDir)
+            PhoneErrors.wake = { Telemetry.errorsSoon() }
             TelemetryStore.start(root, id)
             PhoneAccess.start(root)
             for (d in listOf("sessions", "transcripts", "agents", "pictures", "trash", "senders")) File(root, d).mkdirs()

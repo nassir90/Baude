@@ -23,7 +23,7 @@ import java.util.concurrent.TimeUnit
 object TelemetryStore {
     private const val SAMPLE_S = 5L
     private const val LIMIT = 5000
-    private val KEEP = mapOf("events" to 400L, "metrics" to 30L, "profiles" to 30L)
+    private val KEEP = mapOf("events" to 400L, "metrics" to 30L, "profiles" to 30L, "errors" to 90L)
     private val KINDS = setOf("chat_opened", "chat_front", "chat_left", "turn_sent", "turn_ended")
     private val APPS = setOf("baude", "record", "phone")
     /** A turn's tokens, each kind apart (telemetry.TOKENS), and usage's names for an event's tokens (telemetry._KINDS). */
@@ -42,14 +42,21 @@ object TelemetryStore {
     // chat_front said, till its chat_left: Info's front)
 
     private fun dir() = File(root!!, "telemetry")
+    /** The version of this app's code, on each row it makes (telemetry.version's): its commit and wire version. */
+    private val ver = JSONObject().put("commit", BuildConfig.COMMIT.take(12).ifEmpty { null } ?: JSONObject.NULL)
+        .put("wire", WireConstants.VERSION)
+    private var errs: LinkedHashMap<String, JSONObject>? = null // (errors.json's, as read: by process and fingerprint)
+    private val LATEST = listOf("message", "file", "line", "function", "stack", "commit", "wire", "screen", "part",
+        "wire_op", "code", "crumbs") // (an error's, as it was the last time)
 
-    /** As PhoneHost starts: its state read, and sampling started if it's on. */
+    /** As PhoneHost starts: its state read, sampling started if it's on, and a crash as the app last went kept. */
     @Synchronized
     fun start(phoneRoot: File, id: String) {
         root = phoneRoot
         hostId = id
         on = try { JSONObject(File(dir(), "state.json").readText()).optBoolean("on", true) } catch (_: Exception) { true }
         if (on) run()
+        PhoneErrors.crashed()?.let { if (on) keepErrors(listOf(it), "phone", null) }
     }
 
     private fun run() {
@@ -80,7 +87,11 @@ object TelemetryStore {
     fun keep(msg: JSONObject) {
         if (!on) return
         val app = msg.optString("app").takeIf { it in APPS } ?: return
-        val rows = msg.optJSONArray("events").list().take(1000).mapNotNull { e -> event(e, app) }
+        val told = JSONObject().put("commit", msg.optString("commit").takeIf { !msg.isNull("commit") && it.isNotEmpty() }?.take(12)
+            ?: JSONObject.NULL).put("wire", (msg.opt("wire") as? Number)?.toInt() ?: JSONObject.NULL)
+        msg.optJSONArray("errors")?.let { keepErrors(it.list(), app, told) }
+        val rows = msg.optJSONArray("events").list().take(1000).mapNotNull { e -> event(e, app)?.also { r ->
+            r.put("commit", told.get("commit")).put("wire", told.get("wire")) } }
         write("events", rows)
         if (follow(rows)) PhoneHost.changed() // (every head told: none notifies of the chat in front)
     }
@@ -96,6 +107,49 @@ object TelemetryStore {
         }
         return front != before
     }
+
+    /** Errors told (telemetry.Telemetry.keep_errors, the same): each added to what's kept of it, by its process and
+     * fingerprint, written at once (they're few). told: the telling's version, for one that doesn't say its own. */
+    @Synchronized
+    fun keepErrors(errors: List<JSONObject>, app: String, told: JSONObject?) {
+        val kept = errors()
+        for (e in errors.take(500)) {
+            val fp = e.optString("fingerprint").takeIf { it.isNotEmpty() } ?: continue
+            if (e.optString("type").isEmpty() || e.optInt("count", 0) < 1 || e.opt("first") !is Number || e.opt("last") !is Number) continue
+            val r = JSONObject(e.toString()).put("app", app)
+            if (told != null && (r.isNull("commit") || !r.has("commit")) && (r.isNull("wire") || !r.has("wire")))
+                r.put("commit", told.opt("commit")).put("wire", told.opt("wire"))
+            if (!r.has("first_commit") || r.isNull("first_commit")) r.put("first_commit", r.opt("commit") ?: JSONObject.NULL)
+            val key = "$app:$fp"
+            val got = kept[key]
+            if (got == null) { kept[key] = r; continue }
+            if (r.getDouble("last") >= got.getDouble("last")) for (k in LATEST) got.put(k, r.opt(k) ?: JSONObject.NULL)
+            got.put("count", got.getInt("count") + r.getInt("count")).put("first", minOf(got.getDouble("first"), r.getDouble("first")))
+                .put("last", maxOf(got.getDouble("last"), r.getDouble("last")))
+        }
+        val old = System.currentTimeMillis() / 1000.0 - KEEP.getValue("errors") * 86400
+        kept.entries.removeAll { it.value.optDouble("last", 0.0) < old }
+        if (root == null) return
+        dir().mkdirs()
+        val tmp = File(dir(), "errors.json.tmp")
+        tmp.writeText(JSONObject().put("errors", JSONArray(kept.values.toList())).toString())
+        tmp.renameTo(File(dir(), "errors.json"))
+    }
+
+    private fun errors(): LinkedHashMap<String, JSONObject> = errs ?: LinkedHashMap<String, JSONObject>().also { m ->
+        try {
+            JSONObject(File(dir(), "errors.json").readText()).optJSONArray("errors").list()
+                .forEach { m["${it.optString("app")}:${it.optString("fingerprint")}"] = it }
+        } catch (_: Exception) {
+        }
+        errs = m
+    }
+
+    /** The errors that happened from start to end, the last to happen first, the latest limit of them. */
+    @Synchronized
+    fun errorRows(start: Double, end: Double, limit: Int): List<JSONObject> = errors().values
+        .filter { it.optDouble("last") >= start && it.optDouble("first") <= end }.sortedByDescending { it.optDouble("last") }
+        .take(limit)
 
     /** The chats in front on this phone now (Info's front, a TelemetryFront each): what no head notifies of. */
     fun fronts(): JSONArray = JSONArray(listOfNotNull(front).map { (h, s) -> JSONObject().put("host", h).put("session", s) })
@@ -127,6 +181,7 @@ object TelemetryStore {
     @Synchronized
     private fun write(kind: String, rows: List<JSONObject>) {
         if (rows.isEmpty() || root == null) return
+        for (r in rows) if (!r.has("wire")) r.put("commit", ver.get("commit")).put("wire", ver.get("wire")) // (the host's own)
         val where = File(dir(), kind).apply { mkdirs() }
         for ((d, these) in rows.groupBy { day(it.getDouble("at")) })
             File(where, "$d.jsonl").appendText(these.joinToString("") { "$it\n" })
@@ -204,6 +259,7 @@ object TelemetryStore {
         val out = arrayListOf<Pair<String, Any?>>("host" to hostId, "state" to state())
         for (kind in listOf("events", "metrics", "profiles")) if (kind in what) out.add(kind to JSONArray(rows(kind, start, end, limit)))
         if ("usage" in what) out.add("usage" to usage(rows("events", start, end, 0)))
+        if ("errors" in what) out.add("errors" to JSONArray(errorRows(start, end, limit)))
         return out.toTypedArray()
     }
 

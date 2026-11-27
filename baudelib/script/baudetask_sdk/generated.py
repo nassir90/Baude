@@ -1502,6 +1502,21 @@ class TaskVariable(Obj):
     """
 
 
+class TelemetryCrumb(Obj):
+    """Something the user did in an app, a few kept before an error (its breadcrumbs): what was on screen and the part
+    used, by their schema/ui names.
+
+        at (number): When, in seconds since the epoch.
+        action ('click' | 'menu' | 'open'): What was done: a button or row clicked (or activated from the
+            keyboard), a menu's item picked, or a screen opened (a tab, a page, a dialog, a side panel's page).
+        screen (string or None): The schema/ui entity it was on ("Telemetry.dialog"), null where it has none.
+        part (string or None): The entity's part used, by its name there ("Collect Telemetry"), null where it
+            isn't one of its parts.
+        widget (string or None): What was used where it isn't a part schema/ui names: its copy key, else its
+            icon's name, else its kind of widget.
+    """
+
+
 class TelemetryDay(Obj):
     """A day's tokens, from the turns that ended in it.
 
@@ -1515,6 +1530,47 @@ class TelemetryDay(Obj):
         input_with_cache (integer): Input tokens of turns kept before their tokens were told apart, cache reads
             and writes among them.
     """
+
+
+class TelemetryError(Obj):
+    """An error a process on a host's machine had, kept by that host by its fingerprint (its kind and type and where it
+    was raised): how many times, when first and last, the code it was on, what was on screen and the user's last
+    actions before it.
+
+        app ('host' | 'baude' | 'record' | 'phone' | 'emission'): The process it was in: the host's, Baude's,
+            Record's, the phone's app, or Emission's.
+        kind ('exception' | 'thread' | 'callback' | 'log' | 'wire' | 'agent_exit' | 'draft_save' | 'send' |
+            'page_load' | 'crash'): What it was: an exception nothing caught (on the main thread; on another
+            thread; in a main-loop callback, which carries on), a critical or warning GLib or GTK logged, an
+            error answered on the wire, an agent that exited by itself with a code other than 0, a draft its
+            host didn't save, a message not sent, a page Emission couldn't load, or the phone's app crashing.
+        fingerprint (string): What it's kept by: its kind, its type and the frame of Baude's own code it was
+            raised in (file:line), or for one without a stack what tells it apart (the op and code, a log's
+            domain and its message with numbers taken out).
+        type (string): The exception's class, the log's domain and level, the op, the agent's program.
+        message (string): What it said, its first line (the last time).
+        file (string or None): The file it was raised in, under the checkout, relative to it.
+        line (integer or None): Its line there.
+        function (string or None): The function.
+        stack (array of string): Its frames (file:line function), the innermost last, at most 20 (the last
+            time).
+        count (integer): Times it happened.
+        first (number): When it first happened, in seconds since the epoch.
+        last (number): When it last happened.
+        commit (string or None): The commit the process ran the last time (its first 12 characters).
+        wire (integer or None): The wire's version it spoke the last time.
+        first_commit (string or None): The commit it ran the first time.
+        screen (string or None): The schema/ui entity on screen as it happened ("Telemetry.dialog"), the last
+            time; null in a process with no screen.
+        part (string or None): The entity's part the user had just used, by its name there, if one was used just
+            before.
+        wire_op (string or None): The wire op it happened answering (a wire error's, an exception in a host's
+            op).
+        code (string or integer or None): A wire error's code (Error's), an agent's exit code.
+        crumbs (array of TelemetryCrumb): The user's last actions before it (at most 8), the earliest first, the
+            last time.
+    """
+    _refs = {"crumbs": "TelemetryCrumb"}
 
 
 class TelemetryEvent(Obj):
@@ -1544,6 +1600,8 @@ class TelemetryEvent(Obj):
         tokens_out (integer or None): A turn_ended's: the tokens it wrote (thinking among them).
         tokens_in (integer or None): An older turn_ended's, kept before its tokens were told apart: every input
             token, cache reads and writes among them. Events told now leave it out.
+        commit (string or None): The commit the app that saw it runs (its first 12 characters), as it started.
+        wire (integer or None): The wire's version the app that saw it speaks.
     """
 
 
@@ -1604,6 +1662,8 @@ class TelemetryProfile(Obj):
         from (number): When it began.
         app ('host' | 'baude' | 'record'): The process profiled: the host's, Baude's or Record's.
         lines (array of TelemetryLine): Its lines that ran, the most time first (at most 200).
+        commit (string or None): The commit the process profiled runs (its first 12 characters), as it started.
+        wire (integer or None): The wire's version the process profiled speaks.
     """
     _refs = {"lines": "TelemetryLine"}
 
@@ -1642,6 +1702,8 @@ class TelemetrySample(Obj):
         procs (array of TelemetryProc): The host process, each app on its machine that told it telemetry (Baude,
             Record, the phone's app), and each Emission and Multiplex running there (the host finds those
             itself).
+        commit (string or None): The commit the host runs (its first 12 characters), as it started.
+        wire (integer or None): The wire's version the host speaks.
     """
     _refs = {"procs": "TelemetryProc"}
 
@@ -2730,17 +2792,19 @@ class TelemetryKept(Obj):
 
 
 class TelemetryReadReply(Obj):
-    """telemetry_read's answer, each list the earliest first.
+    """telemetry_read's answer, each list the earliest first (errors the latest first).
 
         host (string): The host's id.
         state (TelemetryState): Its telemetry state.
         events (array of TelemetryEvent): Its chat events.
         metrics (array of TelemetrySample): Its samples.
         profiles (array of TelemetryProfile): Its line profiles.
+        errors (array of TelemetryError): The errors of the processes on its machine that happened in the
+            stretch, the last to happen first.
         usage (TelemetryUsage or None): Its turns added up.
     """
     _refs = {"state": "TelemetryState", "events": "TelemetryEvent", "metrics": "TelemetrySample",
-             "profiles": "TelemetryProfile", "usage": "TelemetryUsage"}
+             "profiles": "TelemetryProfile", "errors": "TelemetryError", "usage": "TelemetryUsage"}
 
 
 class TelemetrySetReply(Obj):
@@ -2867,38 +2931,39 @@ TYPES = {"AccessChat": AccessChat, "AccessMember": AccessMember, "AccessRule": A
          "SubagentFile": SubagentFile, "Tab": Tab, "Task": Task, "TaskBinding": TaskBinding,
          "TaskChoice": TaskChoice, "TaskField": TaskField, "TaskLogLine": TaskLogLine, "TaskRun": TaskRun,
          "TaskRunRef": TaskRunRef, "TaskTrigger": TaskTrigger, "TaskVariable": TaskVariable,
-         "TelemetryDay": TelemetryDay, "TelemetryEvent": TelemetryEvent, "TelemetryFront": TelemetryFront,
-         "TelemetryLine": TelemetryLine, "TelemetryModel": TelemetryModel, "TelemetryProc": TelemetryProc,
-         "TelemetryProfile": TelemetryProfile, "TelemetryProfiling": TelemetryProfiling,
-         "TelemetrySample": TelemetrySample, "TelemetryState": TelemetryState, "TelemetryUsage": TelemetryUsage,
-         "TerminalInfo": TerminalInfo, "Theme": Theme, "ThemeFiles": ThemeFiles, "ToolNames": ToolNames,
-         "TurnEnd": TurnEnd, "Update": Update, "UsageLimit": UsageLimit, "UsageReading": UsageReading,
-         "WaitTarget": WaitTarget, "WatchSay": WatchSay, "WatchState": WatchState, "Where": Where,
-         "Accepted": Accepted, "AccessReply": AccessReply, "AccessSetReply": AccessSetReply,
-         "AccountsReply": AccountsReply, "Activated": Activated, "AgentStarted": AgentStarted, "Allowed": Allowed,
-         "Archived": Archived, "Attached": Attached, "AutofixReply": AutofixReply,
-         "BotPictureReply": BotPictureReply, "BotSetReply": BotSetReply, "BrowserOpened": BrowserOpened,
-         "Busy": Busy, "CatalogueReply": CatalogueReply, "ChatSizeReply": ChatSizeReply, "CwdSet": CwdSet,
-         "DatabasesReply": DatabasesReply, "Deactivated": Deactivated, "Decided": Decided,
-         "DecidersReply": DecidersReply, "Deleted": Deleted, "DepsReply": DepsReply, "Dir": Dir,
-         "DockerEnd": DockerEnd, "DockerReply": DockerReply, "DockerText": DockerText, "DraftSaved": DraftSaved,
-         "EditReply": EditReply, "EditsReply": EditsReply, "EmissionFrame": EmissionFrame,
-         "EmissionReply": EmissionReply, "EmissionServing": EmissionServing, "EmissionWatchEnd": EmissionWatchEnd,
-         "EmissionWatching": EmissionWatching, "Error": Error, "FeedbackFiled": FeedbackFiled,
-         "FeedbackTarget": FeedbackTarget, "File": File, "FixesReply": FixesReply, "GitReply": GitReply,
-         "HeldReply": HeldReply, "HelloReply": HelloReply, "InboxAnswered": InboxAnswered, "InboxDone": InboxDone,
-         "InboxPictureReply": InboxPictureReply, "InboxRaised": InboxRaised, "InboxReply": InboxReply,
-         "InferData": InferData, "InferEnd": InferEnd, "InferHead": InferHead, "Joined": Joined,
-         "KubeContexts": KubeContexts, "KubeEnd": KubeEnd, "KubeReply": KubeReply, "KubeRows": KubeRows,
-         "KubeText": KubeText, "Linking": Linking, "LoginEnd": LoginEnd, "LoginSaid": LoginSaid,
-         "MemoryReply": MemoryReply, "MultiplexReply": MultiplexReply, "NotesReply": NotesReply,
-         "QueueReply": QueueReply, "Quitting": Quitting, "Relayed": Relayed, "Relaying": Relaying,
-         "Renamed": Renamed, "RestartPending": RestartPending, "ResumeCancelled": ResumeCancelled,
-         "Rotated": Rotated, "SeenSet": SeenSet, "SendersReply": SendersReply, "SignalNamesReply": SignalNamesReply,
-         "Started": Started, "Stopped": Stopped, "SubagentsReply": SubagentsReply, "TaskAnswer": TaskAnswer,
-         "TaskAnswered": TaskAnswered, "TaskChoicesReply": TaskChoicesReply, "TaskReply": TaskReply,
-         "TaskReported": TaskReported, "TaskRunReply": TaskRunReply, "TaskStarted": TaskStarted,
-         "TasksReply": TasksReply, "TelemetryKept": TelemetryKept, "TelemetryReadReply": TelemetryReadReply,
+         "TelemetryCrumb": TelemetryCrumb, "TelemetryDay": TelemetryDay, "TelemetryError": TelemetryError,
+         "TelemetryEvent": TelemetryEvent, "TelemetryFront": TelemetryFront, "TelemetryLine": TelemetryLine,
+         "TelemetryModel": TelemetryModel, "TelemetryProc": TelemetryProc, "TelemetryProfile": TelemetryProfile,
+         "TelemetryProfiling": TelemetryProfiling, "TelemetrySample": TelemetrySample,
+         "TelemetryState": TelemetryState, "TelemetryUsage": TelemetryUsage, "TerminalInfo": TerminalInfo,
+         "Theme": Theme, "ThemeFiles": ThemeFiles, "ToolNames": ToolNames, "TurnEnd": TurnEnd, "Update": Update,
+         "UsageLimit": UsageLimit, "UsageReading": UsageReading, "WaitTarget": WaitTarget, "WatchSay": WatchSay,
+         "WatchState": WatchState, "Where": Where, "Accepted": Accepted, "AccessReply": AccessReply,
+         "AccessSetReply": AccessSetReply, "AccountsReply": AccountsReply, "Activated": Activated,
+         "AgentStarted": AgentStarted, "Allowed": Allowed, "Archived": Archived, "Attached": Attached,
+         "AutofixReply": AutofixReply, "BotPictureReply": BotPictureReply, "BotSetReply": BotSetReply,
+         "BrowserOpened": BrowserOpened, "Busy": Busy, "CatalogueReply": CatalogueReply,
+         "ChatSizeReply": ChatSizeReply, "CwdSet": CwdSet, "DatabasesReply": DatabasesReply,
+         "Deactivated": Deactivated, "Decided": Decided, "DecidersReply": DecidersReply, "Deleted": Deleted,
+         "DepsReply": DepsReply, "Dir": Dir, "DockerEnd": DockerEnd, "DockerReply": DockerReply,
+         "DockerText": DockerText, "DraftSaved": DraftSaved, "EditReply": EditReply, "EditsReply": EditsReply,
+         "EmissionFrame": EmissionFrame, "EmissionReply": EmissionReply, "EmissionServing": EmissionServing,
+         "EmissionWatchEnd": EmissionWatchEnd, "EmissionWatching": EmissionWatching, "Error": Error,
+         "FeedbackFiled": FeedbackFiled, "FeedbackTarget": FeedbackTarget, "File": File, "FixesReply": FixesReply,
+         "GitReply": GitReply, "HeldReply": HeldReply, "HelloReply": HelloReply, "InboxAnswered": InboxAnswered,
+         "InboxDone": InboxDone, "InboxPictureReply": InboxPictureReply, "InboxRaised": InboxRaised,
+         "InboxReply": InboxReply, "InferData": InferData, "InferEnd": InferEnd, "InferHead": InferHead,
+         "Joined": Joined, "KubeContexts": KubeContexts, "KubeEnd": KubeEnd, "KubeReply": KubeReply,
+         "KubeRows": KubeRows, "KubeText": KubeText, "Linking": Linking, "LoginEnd": LoginEnd,
+         "LoginSaid": LoginSaid, "MemoryReply": MemoryReply, "MultiplexReply": MultiplexReply,
+         "NotesReply": NotesReply, "QueueReply": QueueReply, "Quitting": Quitting, "Relayed": Relayed,
+         "Relaying": Relaying, "Renamed": Renamed, "RestartPending": RestartPending,
+         "ResumeCancelled": ResumeCancelled, "Rotated": Rotated, "SeenSet": SeenSet, "SendersReply": SendersReply,
+         "SignalNamesReply": SignalNamesReply, "Started": Started, "Stopped": Stopped,
+         "SubagentsReply": SubagentsReply, "TaskAnswer": TaskAnswer, "TaskAnswered": TaskAnswered,
+         "TaskChoicesReply": TaskChoicesReply, "TaskReply": TaskReply, "TaskReported": TaskReported,
+         "TaskRunReply": TaskRunReply, "TaskStarted": TaskStarted, "TasksReply": TasksReply,
+         "TelemetryKept": TelemetryKept, "TelemetryReadReply": TelemetryReadReply,
          "TelemetrySetReply": TelemetrySetReply, "TerminalEnd": TerminalEnd, "TerminalOpened": TerminalOpened,
          "TerminalOut": TerminalOut, "TerminalsReply": TerminalsReply, "ThemeRemoved": ThemeRemoved,
          "ThemeSaved": ThemeSaved, "ThemesReply": ThemesReply, "TranscriptReply": TranscriptReply,
@@ -4706,29 +4771,38 @@ class Ops(Area):
         """
         return self._call("tasks", {"session": session, "set": set, "delete": delete}, host, TasksReply)
 
-    def telemetry(self, *, app=None, pid=None, events=None, profile=None, profile_error=None, host=None):
+    def telemetry(self, *, app=None, pid=None, events=None, profile=None, profile_error=None, commit=None,
+                  wire=None, errors=None, host=None):
         """telemetry (Telemetry): An app's telemetry, told to its own machine's host as it happens (the phone's app to
         its own host), never on to another: what was done in chats, and what it profiled. Kept on that machine only
         (its state folder's telemetry/), while the host's telemetry is on. Its process id is how the host samples
         it.
 
-            app ('baude' | 'record' | 'phone'): The app it's of: Baude, Record, or the phone's app.
+            app ('baude' | 'record' | 'phone' | 'emission'): The app it's of: Baude, Record, the phone's app, or
+                Emission (its errors only).
             pid (integer): The app's process id.
             events (array of TelemetryEvent): What happened since it last told (each at its own time).
             profile (TelemetryProfile or None): What it profiled since it last told, if it's profiling.
             profile_error (string or None): Why it isn't profiling what it's told to, if it isn't.
+            commit (string or None): The commit the app runs (its first 12 characters), as it started: kept on
+                each of its rows.
+            wire (integer or None): The wire's version the app speaks: kept on each of its rows.
+            errors (array of TelemetryError): Its errors since it last told, each once by its fingerprint with
+                how many times it happened (added to what the host keeps of it).
         """
         return self._call("telemetry", {"app": app, "pid": pid, "events": events, "profile": profile,
-                                        "profile_error": profile_error}, host, Obj)
+                                        "profile_error": profile_error, "commit": commit, "wire": wire,
+                                        "errors": errors}, host, Obj)
 
     def telemetry_read(self, *, from_=None, to=None, what=None, limit=None, host=None):
         """telemetry_read (TelemetryRead): A host's telemetry over a stretch: its chat events, its samples, its line
-        profiles, and its turns added up; its telemetry state with it. Any member of the mesh may ask any other: one
-        machine pulls every host's and puts them together by their times.
+        profiles, and its turns added up, its errors; its telemetry state with it. Any member of the mesh may ask
+        any other: one machine pulls every host's and puts them together by their times.
 
             from (number): From, in seconds since the epoch.
             to (number or None): To (null: now).
-            what (array of 'events' | 'metrics' | 'profiles' | 'usage'): What's wanted (none: only the state).
+            what (array of 'events' | 'metrics' | 'profiles' | 'usage' | 'errors'): What's wanted (none: only
+                the state).
             limit (integer or None): The most events, samples and profiles each (the latest kept; default 5000).
         """
         return self._call("telemetry_read", {"from": from_, "to": to, "what": what,

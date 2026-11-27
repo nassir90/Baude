@@ -25,6 +25,8 @@ import json
 import os
 import socket
 import sys
+import threading
+import time
 import traceback
 
 __all__ = ["inputs", "payload", "run", "say", "ask", "fallback", "agent", "main", "Refused"]
@@ -54,10 +56,10 @@ class Refused(Exception):
 
 
 class _Wire:
-    """One connection to the host's socket, a request at a time."""
+    """One connection to the host's socket, a request at a time (each thread has its own: _w)."""
 
     def __init__(self):
-        self.sock, self.buf, self.req = None, b"", 0
+        self.sock, self.buf, self.req, self.sent = None, b"", 0, time.monotonic()
 
     def connect(self):
         self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
@@ -65,41 +67,58 @@ class _Wire:
         version = int(os.environ.get("BAUDE_WIRE_VERSION") or 0)
         self.request({"op": "hello", "client": "task", **({"version": version} if version else {})})
 
-    def line(self):
+    def send(self, msg):
+        self.sock.sendall((json.dumps(msg) + "\n").encode())
+        self.sent = time.monotonic()
+
+    def line(self, waits=False):
+        """The next message from the host. waits: a wait that may take days, the host told it's still here every
+        _PING_S however much it says meanwhile (it takes the connection for gone after 16 s of silence)."""
         while b"\n" not in self.buf:
-            part = self.sock.recv(1 << 16)
+            if waits:
+                due = self.sent + _PING_S - time.monotonic()
+                if due <= 0:
+                    self.send({"op": "ping"})
+                    due = _PING_S
+                self.sock.settimeout(due)
+            try:
+                part = self.sock.recv(1 << 16)
+            except socket.timeout:
+                continue
+            finally:
+                if waits:
+                    self.sock.settimeout(None)
             if not part:
                 raise ConnectionError("the host closed the connection")
             self.buf += part
         got, self.buf = self.buf.split(b"\n", 1)
+        if waits and time.monotonic() - self.sent >= _PING_S:  # (a host saying a lot: pinged all the same)
+            self.send({"op": "ping"})
         return json.loads(got)
 
     def request(self, msg, waits=False):
-        """The host's answer to msg. waits: one that may take days (an ask, answered as its Bot's turn ends), the
-        host told it's still here meanwhile."""
+        """The host's answer to msg. waits: one that may take days (an ask, answered as its Bot's turn ends)."""
         if self.sock is None and msg.get("op") != "hello":
             self.connect()
         self.req += 1
-        self.sock.sendall((json.dumps({**msg, "req": self.req}) + "\n").encode())
-        if waits:
-            self.sock.settimeout(_PING_S)
-        try:
-            while True:
-                try:
-                    got = self.line()
-                except socket.timeout:  # (said something, so the host doesn't take it for gone)
-                    self.sock.sendall(b'{"op": "ping"}\n')
-                    continue
-                if got.get("req") == self.req:
-                    if got.get("op") == "error":
-                        raise Refused(got.get("error") or got.get("detail") or "refused")
-                    return got
-        finally:
-            if waits:
-                self.sock.settimeout(None)
+        self.send({**msg, "req": self.req})
+        while True:
+            got = self.line(waits)
+            if got.get("req") == self.req:
+                if got.get("op") == "error":
+                    raise Refused(got.get("error") or got.get("detail") or "refused")
+                return got
 
 
-_wire = _Wire()
+_wires = threading.local()
+
+
+def _w():
+    """This thread's connection to the host (asks from threads of one script go on at once, each on its own)."""
+    w = getattr(_wires, "w", None)
+    if w is None:
+        w = _wires.w = _Wire()
+    return w
 
 
 def _stand_in(form):
@@ -114,7 +133,7 @@ def say(*parts):
     if not run:
         print(text, flush=True)
         return
-    _wire.request({"op": "task_report", "run": run, "token": os.environ.get("BAUDE_TASK_TOKEN", ""), "say": text})
+    _w().request({"op": "task_report", "run": run, "token": os.environ.get("BAUDE_TASK_TOKEN", ""), "say": text})
 
 
 def ask(text, form=None, error=False):
@@ -125,7 +144,7 @@ def ask(text, form=None, error=False):
     if not run:
         print(f"ask: {text}", flush=True)
         return _stand_in(form) if form else "(a stand-in answer)"
-    got = _wire.request({"op": "task_ask", "run": run, "token": os.environ.get("BAUDE_TASK_TOKEN", ""), "text": str(text),
+    got = _w().request({"op": "task_ask", "run": run, "token": os.environ.get("BAUDE_TASK_TOKEN", ""), "text": str(text),
                          **({"form": form} if form else {}), **({"error": True} if error else {})}, waits=True)
     return got.get("values") if form else got.get("text", "")
 
@@ -152,28 +171,22 @@ def agent(prompt, wait=True, cwd=None, model=None, title=None, mode=None, timeou
              **{k: v for k, v in (("cwd", cwd), ("model", model)) if v}}
     if not start["spawned_by"]:
         start.pop("spawned_by")
-    sid = _wire.request(start)["session"]["id"]
+    wire = _w()
+    sid = wire.request(start)["session"]["id"]
     if not wait:
         return {"session": sid, "text": None, "failed": False}
-    import time
     end, said = time.monotonic() + timeout_s, {"session": sid, "text": None, "failed": True}
     try:
-        _wire.sock.settimeout(_PING_S)
         while time.monotonic() < end:
-            try:
-                got = _wire.line()
-            except socket.timeout:  # (said something, so the host doesn't take it for gone)
-                _wire.sock.sendall(b'{"op": "ping"}\n')
-                continue
+            got = wire.line(waits=True)
             if got.get("session") != sid:
                 continue
             msg = got.get("msg") or {}
             if got.get("op") == "claude" and msg.get("type") == "control_request" and \
                     (msg.get("request") or {}).get("subtype") == "can_use_tool":  # (no one's here to ask: refused)
-                _wire.sock.sendall((json.dumps({"op": "input", "session": sid, "msg": {
+                wire.send({"op": "input", "session": sid, "msg": {
                     "type": "control_response", "response": {"subtype": "success", "request_id": msg.get("request_id"),
                                                              "response": {"behavior": "deny", "message": _DENIED}}}})
-                                    + "\n").encode())
                 continue
             if got.get("op") == "exited":
                 said["text"] = "its agent ended before its turn did"
@@ -185,8 +198,7 @@ def agent(prompt, wait=True, cwd=None, model=None, title=None, mode=None, timeou
         said["text"] = f"{type(e).__name__}: {e}"
     finally:
         try:
-            _wire.sock.settimeout(None)
-            _wire.sock.sendall((json.dumps({"op": "detach", "session": sid}) + "\n").encode())
+            wire.send({"op": "detach", "session": sid})
         except OSError:
             pass
     return said

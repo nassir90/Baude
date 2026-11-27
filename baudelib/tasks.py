@@ -605,6 +605,12 @@ class Tasks:
                "command": command(task, st.script_path(task))}
         with self.lock:
             if self.going(s.id, task["id"]):
+                last = (st.latest(task["id"], 1) or [None])[0]
+                if last and last["status"] == "skipped" and last.get("kind") == kind and \
+                        last.get("trigger") == run["trigger"]:  # (fired again while the same run goes, as one
+                    n = (last.get("skips") or 1) + 1                 # waiting for input may for days: one record)
+                    return self._update(st, last["id"], skips=n, ended=now,
+                                        error=wording.say("tasks.still_running_n", n=n))
                 run.update(status="skipped", ended=now, seconds=0, error=wording.say("tasks.still_running"))
                 st.put_run(run)
                 return run
@@ -767,7 +773,7 @@ class Tasks:
             try:
                 code = p.wait(timeout=0.25)
             except subprocess.TimeoutExpired:
-                if time.monotonic() - begun - self.waited(held) > task["timeout_s"]:
+                if time.monotonic() - begun - self.input_s(held) > task["timeout_s"]:
                     timed_out = True
                     break
         if timed_out or held.get("stop"):  # (its script gone already or not: its group's what's killed)
@@ -893,7 +899,7 @@ class Tasks:
         for till that turn ends; the ask and its answer in the run's log. held: an ended run's (its failure handed
         on), else the run's as it's going. One ask of a Bot at a time, each sent as it's idle: the turn it ends
         is that ask's, not one going on as it was sent (a user's, a stopped run's). A run going waits for input
-        till it's answered (ASK_S at most): asking, its clock stopped (waited)."""
+        till it's answered (ASK_S at most): asking, its clock stopped (input_s)."""
         live = held is None
         with self.lock:
             held = self.running.get(rid) if live else held
@@ -918,23 +924,23 @@ class Tasks:
 
     def _waiting(self, st, rid, held, on):
         """A run going waiting for input (on: an ask of its Bot begun; asks of one run may overlap), or not any more
-        (its last ask over): asking, its clock stopped meanwhile (waited), or running again. Heads told."""
+        (its last ask over): asking, its clock stopped meanwhile (input_s), or running again. Heads told."""
         with self.lock:
             n = held["asking"] = held.get("asking", 0) + (1 if on else -1)
             now = time.monotonic()
             if on and n == 1:
                 held["asked_at"] = now
             elif not on and n == 0:
-                held["waited"] = held.get("waited", 0.0) + now - held.pop("asked_at", now)
+                held["input_s"] = held.get("input_s", 0.0) + now - held.pop("asked_at", now)
             if st is not None and rid in self.running and (n == 1 if on else n == 0) and \
                     (st.runs.get(rid) or {}).get("status") in ("running", "asking"):  # (not one that's over)
                 self._update(st, rid, status="asking" if on else "running")
         self.server.changed()
 
-    def waited(self, held):
+    def input_s(self, held):
         """How long a run's waited for input, all told (its asks of its Bot): what its timeout_s doesn't count."""
         with self.lock:
-            return held.get("waited", 0.0) + (time.monotonic() - held["asked_at"] if held.get("asking") else 0.0)
+            return held.get("input_s", 0.0) + (time.monotonic() - held["asked_at"] if held.get("asking") else 0.0)
 
     def asks_of(self, sid):
         """The messages (their uuids) the Bot sid's been sent by its tasks' runs going, each run waiting for input
@@ -997,6 +1003,14 @@ class Tasks:
         with self.lock:
             turn = self.turns.get(sid)
             return bool(self.waiting.get(sid)) or turn is not None and turn.locked()
+
+    def agent_gone(self, s):
+        """(server's lock held) s's agent ended with its tasks' asks sent it unanswered: each failed at once (its turn
+        will never end), not left for the next turn's end to answer."""
+        with self.lock:
+            for w in self.waiting.pop(s.id, []):
+                w["text"], w["failed"] = wording.say("tasks.agent_gone"), True
+                w["done"].set()
 
     def turn_over(self, s, msg):
         """(server's lock held) s's turn ended (its result, msg): the ask it was sent for, answered with what it

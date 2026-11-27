@@ -104,6 +104,13 @@
       ],
       "description": "Why it failed or was skipped."
     },
+    "skips": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "description": "A skipped run's: how many firings it stands for (its trigger fired again while the same run went on: one record, not one each)."
+    },
     "asks": {
       "type": [
         "integer",

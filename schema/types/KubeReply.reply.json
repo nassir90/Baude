@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
-  "description": "kube's answer: contexts {contexts, where}; connect {sections, namespaces, nodes}; list {columns, rows, metrics, page}; yaml {text, file, refs}; owner {kind, name, resource}; summary {summary}; delete {said}; fault when a cluster can't be read; removed when its context has gone from the kubeconfig.",
+  "description": "kube's answer: contexts {contexts, where}; connect {sections, namespaces, nodes}; list {columns, rows, metrics, page}; yaml {text, file, refs}; owner {kind, name, resource}; summary {summary}; delete and apply {said}; logs {text}; exec {text, status}; fault when a cluster can't be read; removed when its context has gone from the kubeconfig.",
   "properties": {
     "op": {
       "const": "kube",
@@ -86,7 +86,7 @@
     },
     "text": {
       "type": "string",
-      "description": "yaml: the YAML (a Secret's keys only, a Helm release's JSON)."
+      "description": "yaml: the YAML (a Secret's keys only, a Helm release's JSON); logs: the log; exec: what the command wrote, its stdout and stderr together."
     },
     "file": {
       "type": "string",
@@ -117,7 +117,11 @@
     },
     "said": {
       "type": "string",
-      "description": "delete: what kubectl said."
+      "description": "delete, apply: what kubectl said."
+    },
+    "status": {
+      "type": "integer",
+      "description": "exec: the command's exit status (kubectl's, if it couldn't run it)."
     },
     "missing": {
       "$ref": "Dep.json",

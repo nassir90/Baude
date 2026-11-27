@@ -1096,8 +1096,9 @@ def kube_page_crd(context, page, max_age=60):
     return crd
 
 
-def kube_list(context, page):
-    """A page's objects in a context (worker thread): [object]; a Secret is {metadata, type, keys} only."""
+def kube_list(context, page, selector=None):
+    """A page's objects in a context (worker thread): [object]; a Secret is {metadata, type, keys} only. selector: only
+    those whose labels match it (kubectl's -l), but a Secret's or a Helm release's."""
     if page["source"] == "helm":
         return json.loads(kube_run("helm", ["list", "--all-namespaces", "--output", "json",  # (helm 4: every status)
                                             "--kube-context", context]) or "[]")
@@ -1111,7 +1112,8 @@ def kube_list(context, page):
                 out.append({"metadata": {"namespace": ns, "name": name, "creationTimestamp": created},
                             "type": kind, "keys": [k for k in keys.split(",") if k]})
         return out
-    args = [page["resource"], "-o", "json"] + (["--all-namespaces"] if page["namespaced"] else [])
+    args = [page["resource"], "-o", "json"] + (["--all-namespaces"] if page["namespaced"] else []) + \
+        (["-l", selector] if selector else [])
     return json.loads(kube_get(context, *args) or "{}").get("items") or []
 
 

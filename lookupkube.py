@@ -1039,16 +1039,17 @@ def kube_fault(tool):
     return KUBE_FAULTS.get(name, f"error: unknown BAUDE_KUBE_FAULT {name!r}") if name and tool == "kubectl" else None
 
 
-def kube_run(tool, args, timeout=30):
-    """A kubectl or helm command's output; KubeError with what it wrote if it fails (removed, if its context has gone
-    from the kubeconfig). One that read a kubeconfig half written (a tool rewriting it) is run once more."""
+def kube_run(tool, args, timeout=30, input=None):
+    """A kubectl or helm command's output (input: its stdin, else none); KubeError with what it wrote if it fails
+    (removed, if its context has gone from the kubeconfig). One that read a kubeconfig half written (a tool rewriting
+    it) is run once more."""
     if (fault := kube_fault(tool)) is not None and "config" not in args[:1]:
         raise KubeError(fault.splitlines()[-1], fault)
     context = next((args[i + 1] for i in range(len(args) - 1) if args[i] in ("--context", "--kube-context")), None)
     for again in (True, False):
         try:
             p = subprocess.run([kube_tool(tool), *args], capture_output=True, text=True, timeout=timeout,
-                               stdin=subprocess.DEVNULL)
+                               **({"input": input} if input is not None else {"stdin": subprocess.DEVNULL}))
         except (OSError, subprocess.TimeoutExpired) as e:
             raise KubeError(f"{tool}: {e}") from e
         said = (p.stderr or p.stdout).strip() if p.returncode else ""

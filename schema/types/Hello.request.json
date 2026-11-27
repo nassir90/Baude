@@ -30,6 +30,22 @@
     "as": {
       "type": "string",
       "description": "A chat on the host it's from (its own tools, on its host's socket): judged by the access rules as the member that started it, if one did."
+    },
+    "task": {
+      "type": "object",
+      "description": "A task's script on its host's socket: its run's id and token, as its environment names them (BAUDE_TASK_RUN, BAUDE_TASK_TOKEN). From then on the connection is the run's Bot's: the access rules judge it as they judge the Bot's own tools (as the member that started the Bot, if one did), its emission and multiplex calls drive the Bot's own browser and terminals, and what it relays through the mesh is from the Bot. Refused (access_denied) if no run going here has that token.",
+      "properties": {
+        "run": {
+          "type": "string",
+          "description": "The run's id."
+        },
+        "token": {
+          "type": "string",
+          "description": "The run's token."
+        }
+      },
+      "required": ["run", "token"],
+      "additionalProperties": false
     }
   },
   "required": ["op"],

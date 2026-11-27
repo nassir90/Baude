@@ -413,6 +413,50 @@ def _inspect(args, page, oid, fmt):
     return {"text": json.dumps(got, indent=2, ensure_ascii=False) + "\n", "file": "inspect.json"}
 
 
+def _log(args, page, oid, tail=None):
+    """A container's or a Compose project's log as it is now: its last tail lines (LOG_TAIL's), not followed."""
+    if page not in ("running", "containers", "compose"):
+        raise ValueError("docker's logs are a container's or a Compose project's")
+    tail = tail if isinstance(tail, int) and not isinstance(tail, bool) and tail > 0 else LOG_TAIL
+    try:
+        p = subprocess.run([_docker(), *args, *(["compose", "-p", oid, "logs", "--no-color"] if page == "compose"
+                                                 else ["logs"]), f"--tail={tail}", *([] if page == "compose" else [oid])],
+                           stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+                           timeout=TIMEOUT_S)
+    except (OSError, subprocess.TimeoutExpired) as e:
+        raise RuntimeError(f"docker: {e}") from e
+    if p.returncode:
+        raise RuntimeError(p.stdout.strip() or wording.say("docker.exited", code=p.returncode))
+    return p.stdout
+
+
+EXEC_S, EXEC_MOST_S = 60, 600  # (an exec's command: stopped after this long, by default and at most)
+EXEC_BYTES = 4 * 1024 * 1024  # (what it wrote, kept: its last this many bytes)
+
+
+def run_command(argv, timeout=None):
+    """{text, status} for argv run with nothing on its stdin (exec's: no terminal), its stdout and stderr together,
+    stopped after timeout seconds (EXEC_S; EXEC_MOST_S at most)."""
+    timeout = min(float(timeout), EXEC_MOST_S) if isinstance(timeout, (int, float)) and timeout > 0 else EXEC_S
+    try:
+        p = subprocess.run(argv, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                           timeout=timeout)
+    except subprocess.TimeoutExpired as e:
+        out = (e.output or b"")[-EXEC_BYTES:].decode("utf-8", "replace")
+        return {"text": out + wording.say("docker.exec_timed_out", seconds=round(timeout)), "status": -9}
+    except OSError as e:
+        return {"text": str(e), "status": 127}
+    return {"text": p.stdout[-EXEC_BYTES:].decode("utf-8", "replace"), "status": p.returncode}
+
+
+def _exec(args, page, oid, command, timeout):
+    if page not in ("running", "containers"):
+        raise ValueError("docker's exec is a container's")
+    if not isinstance(command, list) or not command or not all(isinstance(c, str) for c in command):
+        raise ValueError("docker's exec needs a command: its argv")
+    return run_command([_docker(), *args, "exec", oid, *command], timeout)
+
+
 # ---------------------------------------------------------------- acting
 def _act(args, page, what, oid):
     """A start, stop, restart or remove of the object: what docker said (a Compose project's remove: down)."""
@@ -465,11 +509,15 @@ def answer(server, msg):
             return {"what": what, "error": f"docker's {what} needs an id"}
         if what == "inspect":
             return {"what": what, **_inspect(args, page, oid, msg.get("format") or "json")}
+        if what == "logs":
+            return {"what": what, "text": _log(args, page, oid, msg.get("tail"))}
+        if what == "exec":
+            return {"what": what, **_exec(args, page, oid, msg.get("command"), msg.get("timeout"))}
         if what in ACTIONS:
             return {"what": what, "said": _act(args, page, what, oid)}
     except (RuntimeError, ValueError, KeyError, OSError) as e:
         return {"what": what, "error": str(e)}
-    return {"what": what, "error": "docker takes contexts, list, inspect, start, stop, restart or remove"}
+    return {"what": what, "error": "docker takes contexts, list, inspect, logs, exec, start, stop, restart or remove"}
 
 
 # ---------------------------------------------------------------- following

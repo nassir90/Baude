@@ -36,6 +36,8 @@
     "null": "NULL",
     "reading_rows": "reading…",
     "first_rows": "first {$n} rows (read-only; secret-looking columns hidden)",
-    "viewer_tip": "Databases: the running ones' tables, as a diagram"
+    "viewer_tip": "Databases: the running ones' tables, as a diagram",
+    "query_postgres": "Queries are run on Postgres servers only",
+    "query_empty": "There's no query to run"
   }
 }

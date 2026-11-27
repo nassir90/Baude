@@ -4,7 +4,8 @@ default and colima, a made-up machine each, answered the way docker answers with
 Compose project, shop (its api, db and a worker restarting), and a redis on its own; default's daemon isn't running.
 Every call is logged ($FAKE_DOCKER_LOG). With $FAKE_DOCKER_STATE (a file), start, stop, restart and remove are
 remembered. `logs` prints a few lines, and with -f waits to be stopped, printing a line every $FAKE_DOCKER_FOLLOW
-seconds if that's set (never for more than two minutes). `exec -it` is a shell (this machine's sh) in the container."""
+seconds if that's set (never for more than two minutes). `exec -it` is a shell (this machine's sh) in the container;
+`exec ID COMMAND` runs COMMAND here."""
 import json
 import os
 import sys
@@ -161,6 +162,8 @@ def main(argv):
         for name in ("app.py", "requirements.txt", "compose.yaml"):
             open(os.path.join(app, name), "a").close()
         os.chdir(app)
+        if "-it" not in argv and len(argv) > 2:  # (exec ID COMMAND...: run here, as if in the container)
+            os.execvp(argv[2], argv[2:])
         os.execvp("sh", ["sh", "-i"])
     else:
         sys.stderr.write(f"docker: '{cmd}' is not a docker command.\n")

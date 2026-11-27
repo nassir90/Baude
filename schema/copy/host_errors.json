@@ -46,6 +46,8 @@
     "another_phone": "another phone shows this Bot's browser now",
     "no_such_bot": "that's no Bot of this host's",
     "not_task_output": "not a background task's output in that session",
-    "active_elsewhere": "This session is currently active elsewhere: send it again once it's done"
+    "active_elsewhere": "This session is currently active elsewhere: send it again once it's done",
+    "no_task_token": "no task's run going here has that token: its calls aren't taken",
+    "task_default_browser": "a task drives its Bot's own browser, never Emission's own window"
   }
 }

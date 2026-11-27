@@ -618,6 +618,28 @@
           "issue": "BaudeInternal#277"
         }
       ]
+    },
+    {
+      "said": "Anything accessible to a Bot, or Meta, should be accessible via an SDK. For example, scripts should be able to manage Emission tabs, Multiplex virtual terminals, Manipulate kube objects, manipulate Docker objects, manipulate and view databases in addition to their existing ability to ask models and spawn agents.",
+      "rule": "baudetask's SDK (emission, terminal, kube, docker, db, chats, subagents, ops, hosts, models) is generated from schema/types and the Bot's tools' definitions (baudelib/tasksdk.py); every call takes host= and is judged as the run's Bot (hello's task), never more",
+      "decided": "2026-11-27",
+      "source": [
+        {
+          "session": "b3845b21-55ac-4aab-a769-fb8517403c51",
+          "message": "f01a3226-f8f1-4b43-b6bc-823e69a01394"
+        }
+      ]
+    },
+    {
+      "said": "scripts should be able to enumerate objects and dynamically select them! Just like a Bot can spawn a subagent on any host with any compatible model!",
+      "rule": "The SDK's lists answer typed objects that carry their host and context, so a script filters them and passes one back (kube.logs(pod), docker.restart(container), subagents.start(model=...))",
+      "decided": "2026-11-27",
+      "source": [
+        {
+          "session": "b3845b21-55ac-4aab-a769-fb8517403c51",
+          "message": "f01a3226-f8f1-4b43-b6bc-823e69a01394"
+        }
+      ]
     }
   ],
   "removed": [

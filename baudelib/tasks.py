@@ -861,7 +861,7 @@ class Tasks:
         path = st.script_path(task)
         argv = [*runner(task), path]
         env = {**os.environ, "BAUDE_SOCKET": os.path.abspath(self.server.socket_path), "BAUDE_TASK_RUN": run["id"],
-               "BAUDE_SPAWNED_BY": sid,
+               "BAUDE_SPAWNED_BY": sid, "BAUDE_TASK_BOT": json.dumps(self.bot_of({"run": run["id"], "token": token})),
                "BAUDE_TASK_TOKEN": token, "BAUDE_TASK_INPUTS": json.dumps(run["inputs"]),
                "BAUDE_TASK_PAYLOAD": json.dumps(run["payload"] or {}), "BAUDE_TASK_NAME": task["name"],
                "BAUDE_WIRE_VERSION": str(wire.VERSION),
@@ -974,6 +974,18 @@ class Tasks:
             if held is None or not secrets.compare_digest(str(msg.get("token") or ""), held["token"]):
                 return None
             return held, self.stores.get(held["sid"])
+
+    def bot_of(self, given):
+        """The Bot ({id, name}) whose run given ({run, token}: a task's script's hello) names, if it's going here and
+        its token's right; else None."""
+        got = self.held(given) if isinstance(given, dict) else None
+        if got is None:
+            return None
+        sid = got[0]["sid"]
+        with self.server.lock:
+            s = self.server.sessions.get(sid)
+            bot = (s.meta.get("bot") or {}) if s is not None else {}
+        return {"id": sid, "name": bot.get("name") or "Bot"}
 
     def report(self, msg):
         got = self.held(msg)

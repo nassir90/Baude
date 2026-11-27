@@ -11,10 +11,11 @@ kubectl does, and so does --server naming another server than its cluster's (not
 
 `logs` prints a few lines of a pod's container (its previous run's with --previous); with -f it then waits to be
 stopped, printing a line every $FAKE_KUBECTL_FOLLOW seconds if that's set (and never for more than two minutes).
-`exec -it` is a shell (this machine's sh) in the pod. `delete pod` says what kubectl says; with $FAKE_KUBECTL_STATE (a file) it's remembered: the pod is Terminating
+`exec -it` is a shell (this machine's sh) in the pod; `exec POD -- COMMAND` runs COMMAND here. `delete pod` says what kubectl says; with $FAKE_KUBECTL_STATE (a file) it's remembered: the pod is Terminating
 afterwards, or gone if it was forced."""
 import json
 import os
+import re
 import sys
 import time
 
@@ -62,7 +63,8 @@ def pod(name, ns, minutes, phase="Running", containers=None, init=(), deleting=F
     if reason:
         status["reason"] = reason
     meta = {"name": name, "namespace": ns, "creationTimestamp": ts(minutes), "resourceVersion": "1",
-            "ownerReferences": [{"kind": owner[0], "name": owner[1]}] if owner else []}
+            "ownerReferences": [{"kind": owner[0], "name": owner[1]}] if owner else [],
+            **({"labels": {"app": owner[1].rsplit("-", 1)[0]}} if owner else {})}  # (web-7d9f's: app=web)
     if deleting:  # (each change a new resourceVersion, as the API server's: the watch tells changes by it; compared
         meta["deletionTimestamp"], meta["resourceVersion"] = ts(0), "2"  # whole, two processes' clocks differed)
     return {"metadata": meta, "spec": spec, "status": status}
@@ -516,6 +518,8 @@ def main():
         os.makedirs(home, exist_ok=True)
         os.chdir(home)
         os.execve("/bin/sh", ["sh"], {"PATH": "/usr/bin:/bin", "PS1": f"root@{pod}:/app# ", "TERM": "xterm-256color"})
+    if rest[:1] == ["exec"] and "--" in rest and not {"psql", "arangosh"} & set(rest):  # (exec POD -- COMMAND: run
+        os.execvp(rest[rest.index("--") + 1], rest[rest.index("--") + 1:])            # here, as if in the pod)
     if rest[:1] == ["exec"] and "arangosh" in " ".join(rest):  # (arangosh in an ArangoDB pod)
         script, program = rest[-3], rest[-1]
         if '"$ARANGO_ROOT_PASSWORD"' not in script or "@@" not in program and "@" in program.replace("@@", ""):
@@ -567,8 +571,13 @@ def main():
         logs(rest)
     if rest[:1] == ["delete"]:
         delete(rest)
+    if rest[:1] == ["apply"] and rest[1:3] == ["-f", "-"]:  # (said as kubectl says it; nothing's kept)
+        text = sys.stdin.read()
+        kinds = re.findall(r"^kind:\s*(\S+)", text, re.M)
+        names = re.findall(r"^\s+name:\s*(\S+)", text, re.M)
+        out("".join(f"{k.lower()}/{n} configured\n" for k, n in zip(kinds, names)) or "")
     if rest[:1] != ["get"]:
-        sys.stderr.write(f"fake kubectl: only get, api-resources, logs and delete here, not {rest[:1]}\n")
+        sys.stderr.write(f"fake kubectl: only get, api-resources, logs, apply and delete here, not {rest[:1]}\n")
         sys.exit(2)
     rest = rest[1:]
     if rest[:1] == ["--raw"]:
@@ -600,6 +609,16 @@ def main():
     if resource in PROD_RESOURCES and context != "prod":  # (no KEDA here)
         fail(f'error: the server doesn\'t have a resource type "{resource.split(".")[0]}"')
     items = current(resource, context)
+    if "-l" in rest:  # (a selector: key=value and key!=value, each of them)
+        def matches(o, selector=rest[rest.index("-l") + 1]):
+            labels = (o.get("metadata") or {}).get("labels") or {}
+            for part in selector.split(","):
+                k, eq, v = re.split(r"(!=|==|=)", part, maxsplit=1) if "=" in part else (part, None, None)
+                if eq is None and k not in labels or eq == "!=" and labels.get(k) == v or \
+                        eq in ("=", "==") and labels.get(k) != v:
+                    return False
+            return True
+        items = [o for o in items if matches(o)]
     if "--watch" in rest:
         watch(resource, context)
     if resource == "pods" and os.environ.get("FAKE_KUBECTL_PG"):  # (a cluster with Postgres in a pod)

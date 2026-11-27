@@ -1093,6 +1093,16 @@ class RemoteProc(claude.ClaudeProc):
         if self.writes:  # (one only read here: nothing of this head's goes to its claude)
             self.ch.send({"op": "input", "session": self.session, "msg": obj})
 
+    def send_taken(self, obj, done):
+        """obj sent, and done told its host's answer (op accepted, or error, why), as held's."""
+        if not self.writes:
+            return self.dispatch(lambda: done({"op": "error", "error": wording.say("host_status.host_absent")}))
+        req = next(self.req_ids)
+        self.answering[req] = done
+        if not self.ch.send({"op": "input", "session": self.session, "msg": obj, "req": req}):
+            self.answering.pop(req, None)
+            self.dispatch(lambda: done({"op": "error", "error": wording.say("host_status.host_absent")}))
+
     def held(self, held_id, send, done):
         """A message its host holds for it (held) sent (send) or dropped, on this connection, so what its claude says
         of it comes here as it's said: done(answer) with the host's answer (op held, or error, why), on the main

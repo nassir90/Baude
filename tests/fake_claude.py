@@ -483,7 +483,7 @@ def move_to_background(tool_use_id):
         result("moved")
     if moved:
         threading.Timer(0.05, go).start()
-    return {} if tool_use_id is None else {"backgrounded": bool(moved)}
+    return {} if tool_use_id is None else {"backgrounded": bool(moved) or tool_use_id in state.get("fg_calls", ())}
 
 
 def interrupted():
@@ -893,13 +893,25 @@ def foreground_agent(n):
     subagent works (FAKE_AGENT_STEPS steps, 4, each FAKE_AGENT_STEP_S seconds, 2), and a message sent meanwhile waits
     too, taken in only once the call's returned. background_tasks moves it to the background: its call returns at
     once (launched), the subagent goes on there and ends as a task does (task_notification), and the turn takes the
-    message in now and goes on. An interrupt stops the turn and the subagent with it, as a foreground one is stopped."""
+    message in now and goes on. A background subagent runs its own Bash (pytest) meanwhile, which only a
+    background_tasks naming no call would move (as claude does, whoever's it is). An interrupt stops the turn and the subagent with it, as a foreground one is stopped."""
     tid, tool = f"fg{n}", f"toolu_fg{n}"
     inp = {"description": "Audit each module", "subagent_type": "general-purpose",
            "prompt": "Read each module under `baudelib/` and list the functions nothing calls."}
     count = int(os.environ.get("FAKE_AGENT_STEPS") or 4)
     step_s = float(os.environ.get("FAKE_AGENT_STEP_S") or 2)
     say("I'll have a subagent audit each module.", f"pre{tid}")
+    side, side_bash = f"toolu_bg{n}", f"toolu_bgsh{n}"
+    out({"type": "assistant", "parent_tool_use_id": None, "session_id": SESSION, "message": {
+        "id": f"mbg{n}", "model": "fake", "role": "assistant", "content": [{"type": "tool_use", "id": side, "name": "Agent",
+        "input": {"description": "Run the tests", "subagent_type": "general-purpose", "run_in_background": True,
+                  "prompt": "Run the test suite and report what fails."}}]}})
+    out({"type": "user", "session_id": SESSION, "message": {"role": "user", "content": [
+        {"type": "tool_result", "tool_use_id": side, "content": [{"type": "text", "text": launched(f"bg{n}")}]}]}})
+    out({"type": "assistant", "parent_tool_use_id": side, "session_id": SESSION, "message": {
+        "id": f"mbgsh{n}", "model": "fake", "role": "assistant", "content": [{"type": "tool_use", "id": side_bash,
+        "name": "Bash", "input": {"command": "pytest tests/ -q", "description": "Run the tests"}}]}})
+    state["fg_calls"] = {tool}
     out({"type": "assistant", "parent_tool_use_id": None, "session_id": SESSION, "message": {
         "id": f"m{tid}", "model": "fake", "role": "assistant",
         "content": [{"type": "tool_use", "id": tool, "name": "Agent", "input": inp}]}})
@@ -956,6 +968,12 @@ def foreground_agent(n):
                     return
                 if sub == "background_tasks" and msg["request"].get("tool_use_id") in (None, tool):
                     moved = True
+                    if msg["request"].get("tool_use_id") is None:  # (moves the background subagent's Bash too)
+                        out({"type": "user", "parent_tool_use_id": side, "session_id": SESSION, "message": {
+                            "role": "user", "content": [{"type": "tool_result", "tool_use_id": side_bash, "content":
+                            "Command was manually backgrounded by user with ID: bgsh. Output is being written to: "
+                            "/dev/null"}]}})
+    state.pop("fg_calls", None)
     if moved:
         system("task_updated", task_id=tid, patch={"is_backgrounded": True})
         system("background_tasks_changed", tasks=[{"task_id": tid, "task_type": "local_agent"}])

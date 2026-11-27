@@ -1654,29 +1654,30 @@ class WindowDrafts:
         return model_program(self.model) == "claude"
 
     def move_foreground(self):
-        """Send now's: every command and subagent Claude Code runs in the foreground moved to the background, where
-        it goes on (background_tasks naming no call, as its Ctrl+B), each card taking its result as a task's, as its
-        Background does (send_to_background); the step the turn waits on ends, so it takes in what was sent now."""
+        """Send now's: each command and subagent of the turn's own running in the foreground moved to the background,
+        where it goes on (background_tasks by its call, as send_to_background does, unsaid if it can't be), each card
+        taking its result as a task's; the step the turn waits on ends, so the turn takes in what was sent now. A
+        subagent's own commands and a call waiting on a permission are left as they are."""
         if not self.offers_background() or not self.proc or not self.busy:
             return
-        cards = [c for c in self.tool_cards.values() if getattr(c, "to_background", None) is not None and
-                 c.state == "running" and c.asking is None and not c.moving]
-        for card in cards:
-            card.moved(True)
-        self.request({"subtype": "background_tasks"}, lambda _r: None, lambda _why: [c.moved(False) for c in cards])
+        for card in [c for c in self.tool_cards.values() if getattr(c, "to_background", None) is not None and
+                     c.state == "running" and c.asking is None and not c.moving and c.tool_id not in self.tool_parent]:
+            self.send_to_background(card, said=False)
 
-    def send_to_background(self, card):
+    def send_to_background(self, card, said=True):
         """A card's Background: its command or subagent moved to the background (Claude Code's background_tasks, by
         its call), where it goes on, its result saying so (task_from_result) and its end told as a task's; the turn
-        goes on, so what's sent at it reaches the agent. Said in the chat if it can't be."""
+        goes on, so what's sent at it reaches the agent. Said in the chat if it can't be (said)."""
         def done(r):
             if not (r or {}).get("backgrounded", True):  # (it ended, or its task wasn't one yet: nothing to move)
                 card.moved(False)
-                self.note(wording.say("tool_calls.not_moved", what=tool_label(card.name)))
+                if said:
+                    self.note(wording.say("tool_calls.not_moved", what=tool_label(card.name)))
 
         def refused(why):
             card.moved(False)
-            self.note(wording.say("tool_calls.not_moved_why", why=why))
+            if said:
+                self.note(wording.say("tool_calls.not_moved_why", why=why))
         if not self.proc or not self.busy:
             return
         card.moved(True)

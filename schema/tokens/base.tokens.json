@@ -560,7 +560,8 @@
     "badge-gap": {"$description": "The gap cut round the logo.", "$value": {"value": 4, "unit": "px"}}
   },
   "subscriptions": {
-    "stale-opacity": {"$type": "number", "$description": "A Claude card's usage as the host last read it, till the page's own read answers (subscriptionpage.STALE_OPACITY).", "$value": 0.5}
+    "stale-opacity": {"$type": "number", "$description": "A Claude card's usage as the host last read it, till the page's own read answers (subscriptionpage.STALE_OPACITY).", "$value": 0.5},
+    "menu-usage-width": {"$type": "dimension", "$description": "The main menu's usage row's width, kept from the menu's opening whatever it shows (MenuUsage): room for a limit's name and when it resets; longer cut with ….", "$value": {"value": 300, "unit": "px"}}
   },
   "lightbox": {
     "fly": {"$type": "duration", "$description": "A picture opened into the large view, and closed back (Lightbox.FLY_MS).", "$value": {"value": 240, "unit": "ms"}},

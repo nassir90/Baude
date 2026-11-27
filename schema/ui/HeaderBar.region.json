@@ -72,7 +72,7 @@
         },
         {
           "by": "click an account",
-          "does": "The chat goes on under that account (accounts' use on its host): its agent started again under it, resuming the chat, at once or, mid-turn, once the turn and any follow-ups sent during it are answered, with a quiet note \"Subscription → <name>\". It keeps that account from then on, even a new chat not yet written in."
+          "does": "The chat goes on under that account (accounts' use on its host): its agent started again under it, resuming the chat, at once or, mid-turn, once the turn and any follow-ups sent during it are answered, with a quiet note \"Subscription → <name>\". It keeps that account from then on, even a new chat not yet written in, and new chats on its host for its model's provider (and those not yet written in, nor picked for) take it from then on."
         }
       ],
       "decisions": [
@@ -93,6 +93,16 @@
           "source": [
             {
               "issue": "BaudeInternal#263"
+            }
+          ]
+        },
+        {
+          "said": "(BaudeInternal#278, paraphrased) Current Subscription doesn't make sense once there's the provider override (a chat's provider picker): get rid of that field",
+          "rule": "Every app's chat provider picker is the one place a subscription is chosen: a pick is the chat's, and the one new chats on its host for that provider take, till another chat's picker picks another",
+          "decided": "2026-11-27",
+          "source": [
+            {
+              "issue": "BaudeInternal#278"
             }
           ]
         }

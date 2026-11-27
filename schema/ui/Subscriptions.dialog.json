@@ -43,7 +43,7 @@
     },
     {
       "name": "provider group",
-      "shows": "For Claude, then Codex: a heading (the provider's logo and name), a Current Subscription row, then a card for each subscription stacked, then a boxed list with Add account.",
+      "shows": "For Claude, then Codex: a heading (the provider's logo and name), then a card for each subscription stacked, then a boxed list with Add account.",
       "decisions": [
         {
           "said": "Baude needs to be able to support running claude with different subscriptions, e.g. a team sub for work and an ultra sub for home that they absolutely need to keep separate (paraphrased)",
@@ -68,46 +68,19 @@
               "issue": "BaudeInternal#226"
             }
           ]
+        },
+        {
+          "said": "(BaudeInternal#278, paraphrased) Current Subscription doesn't make sense once there's the provider override (a chat's provider picker): get rid of that field",
+          "rule": "No app's Subscriptions page has a Current Subscription row or any other pick of a default subscription: a chat's provider picker is the one place a subscription is chosen. A new chat on a host takes the subscription a chat's provider picker last picked there for its model's provider (a Current Subscription picked before is kept as that pick), else the CLI's own sign-in, as one removed leaves it",
+          "decided": "2026-11-27",
+          "source": [
+            {
+              "issue": "BaudeInternal#278"
+            }
+          ]
         }
       ],
       "parts": [
-        {
-          "name": "Current Subscription row",
-          "shows": "Under the heading, its own boxed row like Settings' Code Font: \"Current Subscription\" at the left and, at the right, the name of the subscription a new chat on this host takes (\"CLI default\" for the CLI's own sign-in) with a down arrow.",
-          "copy": [
-            "subscriptions.current",
-            "subscriptions.cli_default"
-          ],
-          "actions": [
-            {
-              "by": "click",
-              "does": "Menu: \"CLI default\" then each account by name, the one picked marked; picking one is select: the host's default for that provider; new chats not written in yet take it too. The row shows the host's answer: a refused pick leaves it on the real default"
-            }
-          ],
-          "decisions": [
-            {
-              "said": "The subscriptions page is structured wrong: the account picker and the usage are lumped together. Each subscription should be its own card, stacked, with its usage as bars with percentages below its name, read again automatically every 30 seconds; over the cards a pill whose dropdown picks the subscription used; and rename and remove under the dots on each card (paraphrased)",
-              "rule": "Every app's Subscriptions page shows, for each provider, a heading with a pill (the subscription a new chat on the host takes; its dropdown picks another), then one card per subscription stacked under it; each account's card has ⋮ (Rename…, Sign In Again… or Replace Token…, Remove…); each Claude card shows its own usage as a bar per limit with its name and percentage, read as the page is shown and every 30 seconds while it is, with no button to read it",
-              "decided": "2026-11-25",
-              "source": [
-                {
-                  "issue": "BaudeInternal#226"
-                }
-              ]
-            },
-            {
-              "said": "226 dropdown is its own pill called \"Current Subscription\", similar to the Code Font row in settings but in isolation.",
-              "rule": "Every app's Subscriptions page puts each provider's dropdown in its own row named Current Subscription (label at the left, the picked subscription with a dropdown at the right, like Settings' Code Font row), above that provider's cards, not in the heading",
-              "decided": "2026-11-26",
-              "source": [
-                {
-                  "session": "b3845b21-55ac-4aab-a769-fb8517403c51",
-                  "message": "261792c7-ec64-4d01-aac0-475fd2183c0c"
-                }
-              ]
-            }
-          ]
-        },
         {
           "name": "subscription card",
           "shows": "One card per subscription, stacked: the provider's CLI default first (Claude's where the host has claude, Codex's where it has codex and says it reads Codex's usage: the accounts answer's codex_usage; an older host's Codex cards have no usage), then each account. Its name, and ⋮ on an account's card (CLI default has none). A Claude card then has its usage: for each limit, its name with its percentage at the end (\"Five Hour Limit (Resets 3:16 PM)\" … \"25%\"; \"Weekly Limit (Resets Friday 3:16 PM)\", or \"Weekly Limit (Resets 3:16 PM)\" where it resets today; the times in the viewer's local time and clock format) and a bar under them filled that far; till the page's own read answers, the host's last reading of it the same way but greyed (half opacity), and \"Checking…\" only where the host has none; \"Usage unavailable for this sign-in\" for a token account (a setup token can't read them) or the error if reading failed. A Codex card has its usage the same way, its limits as Codex's App Server says them (its five-hour and weekly windows named as Claude's); \"Usage unavailable for this sign-in\" where Codex says its sign-in isn't a ChatGPT plan's (an API key's, or none: its two authentication-required errors); \"Sign in to this Codex profile again\" for an account whose folder has no sign-in; \"Could not read usage from Codex\" for any other failure, a hang included, which leaves the host's last reading as it was.",
@@ -477,6 +450,23 @@
       "source": [
         {
           "issue": "BaudeInternal#226"
+        }
+      ]
+    }
+  ],
+  "removed": [
+    {
+      "name": "Current Subscription row in Settings → Subscriptions",
+      "apps": [
+        "baude",
+        "record",
+        "phone"
+      ],
+      "why": "The owner (BaudeInternal#278, paraphrased): Current Subscription doesn't make sense once there's the provider override; get rid of that field. A chat's provider picker chooses its subscription, and new chats take its last pick",
+      "decided": "2026-11-27",
+      "source": [
+        {
+          "issue": "BaudeInternal#278"
         }
       ]
     }

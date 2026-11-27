@@ -1038,7 +1038,13 @@ class WindowDrafts:
         name = next((a["name"] for a in self.host_accounts() if a["id"] == profile), None) or \
             wording.say("subscriptions.cli_default")
         if self.remote is None:  # (a Claude Desktop chat's own claude, here: started again under it, resuming it,
-            self.account_to = profile  # once its turn's over)
+            self.account_to = profile  # once its turn's over; the one a new chat here takes, as a host's use keeps it)
+            import sqlite3
+            from baudelib import accounts
+            try:
+                accounts.select("claude", profile)
+            except (OSError, ValueError, sqlite3.Error):
+                pass
             if getattr(self, "busy", False) and self.proc is not None:
                 self.restart_after_turn = True
                 self.note(wording.say("subscriptions.account_note", name=name))

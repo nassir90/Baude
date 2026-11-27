@@ -1050,7 +1050,7 @@ class ServerSessions:
         """A chat goes on under another of its host's accounts for its model's provider (profile; "": the CLI's own
         sign-in): its agent started again under it, resuming the chat, now or, mid-turn or with follow-ups waiting,
         once they're answered (switch_account). ValueError for a chat that isn't here, or an account that isn't one for
-        its model; OSError if its record can't be carried to the account (nothing's stopped then)."""
+        its model; OSError if its record can't be carried to the account (nothing's stopped then). Its model's provider."""
         with self.lock:
             s = self.sessions.get(sid) if isinstance(sid, str) else None
             program = models.model_program(s.meta.get("model")) if s is not None else None
@@ -1061,9 +1061,10 @@ class ServerSessions:
             if profile == (s.meta.get("profiles") or {}).get(program, ""):  # (its own picked back: none waiting)
                 s.account_to, s.account_after_turn = None, False
                 self.changed()
-                return
+                return program
             s.account_to = profile
         self.switch_account(s)
+        return program
 
     def switch_account(self, s):
         """(lock not held) A chat moved onto the account picked for it (account_to), once nothing's running in it nor
@@ -1125,8 +1126,9 @@ class ServerSessions:
         threading.Thread(target=run, daemon=True, name="account").start()
 
     def default_changed(self, provider, profile):
-        """A provider's default account picked: the new chats not written in yet, with no agent running, take it, as
-        each would as it's first written in (take_input)."""
+        """A provider's account a new chat takes picked (a chat's provider picker's: accounts.select): the new chats
+        not written in yet, with no agent running and none picked for them, take it, as each would as it's first
+        written in (take_input)."""
         with self.lock:
             for s in self.sessions.values():
                 if s.meta.get("draft") and s.proc is None and not s.meta.get("fork_from") and \

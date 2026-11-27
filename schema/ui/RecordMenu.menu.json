@@ -267,7 +267,7 @@
     },
     {
       "name": "Usage",
-      "shows": "A section of its own, after the views over the window: the current Claude subscription on the host picked beside New session (the one a new chat there takes; \"CLI default\" for the CLI's own sign-in) by name, then each of its limits as its Subscriptions card shows them: Five Hour Limit (Resets <time>) and Weekly Limit (Resets <day> <time>), its percentage at the right and its bar under it. Its words start where the menu's items' do. Read from the host as the menu opens (again once 30 seconds have passed, after an answer or an error); an answer that comes after another host is picked is dropped, the row cleared as the host changes; till that answers, the host's last reading greyed, or \"Checking…\". An error, or \"Usage unavailable for this sign-in\", in its place. Not shown where the host has no Claude subscription, and its section with it (no rule round nothing).",
+      "shows": "A section of its own, after the views over the window: as Baude's with no chat (Record has no host chat of its own), the subscription a new chat on the default model (Claude's) takes on the host picked beside New session (the one a chat's provider picker last picked there; \"CLI default\" for the CLI's own sign-in) by name, then each of its limits as its Subscriptions card shows them: Five Hour Limit (Resets <time>) and Weekly Limit (Resets <day> <time>), its percentage at the right and its bar under it. Its words start where the menu's items' do. Read from the host as the menu opens (again once 30 seconds have passed, after an answer or an error); an answer that comes after the subscription shown changes (another chat, host or pick) is dropped, the row cleared as it changes; till that answers, the host's last reading greyed, or, before the host's first answer, \"Checking…\" over two empty limits (as high as two limits). The row is in the menu as it opens and is always menu-usage-width (subscriptions token) wide, whatever it shows: the subscription's name and each limit's name are cut with … where they don't fit, so the menu opens at its final width and never widens. An error, or \"Usage unavailable for this sign-in\", in its place. Not shown where the host has no such subscription, and its section with it (no rule round nothing): decided before the menu shows where the host has said so before; found while it's open, the row goes but the menu keeps its width (only its height changes).",
       "copy": [
         "subscriptions.cli_default",
         "subscriptions.five_hour_limit",
@@ -291,6 +291,16 @@
           "source": [
             {
               "issue": "BaudeInternal#270"
+            }
+          ]
+        },
+        {
+          "said": "(BaudeInternal#278, paraphrased) Current Subscription doesn't make sense once there's the provider override (a chat's provider picker): get rid of that field",
+          "rule": "Every app's main menu usage row shows the usage of the subscription the chat actually runs under (its provider picker's pick, its model's provider's, on its host); with no chat on a Claude or Codex model (Record's menu, the phone's home), the one a new chat on the default model takes on the host picked beside New session",
+          "decided": "2026-11-27",
+          "source": [
+            {
+              "issue": "BaudeInternal#278"
             }
           ]
         }

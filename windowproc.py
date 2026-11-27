@@ -362,6 +362,22 @@ class WindowProc:
                 return None
         return None
 
+    def usage_account(self):
+        """Whose usage ☰'s usage row shows (subscriptionpage.MenuUsage): (where, provider, account id, "" for the CLI's
+        own sign-in) of the chat's on a Claude or Codex model: its host's, its model's provider's, the account its agent
+        runs under (None for a chat its host doesn't list yet: the one a new chat there takes); else None, as with no
+        chat."""
+        program = model_program(self.model or "default")
+        if program not in ("claude", "codex"):
+            return None
+        if self.remote is not None:
+            listed = self.remote.sessions.get(self.session_id) if self.session_id else None
+            profile = ((listed.get("account") or {}).get("id") or "") if isinstance(listed, dict) else None
+            return self.remote.where, program, profile
+        if program == "claude" and self.session_id:
+            return {"via": "local"}, program, (self.chat_account_info() or {}).get("id") or ""
+        return None
+
     def cost_said(self):
         """What the chat's spent, as the status bar says it: claude's figure ($0.0125); on a model run on your own
         machines (providers.runs_free), which a turn adds nothing to, $0.00 (local) while it's spent nothing, so it

@@ -142,8 +142,8 @@ abstract class Screens(private val theme: String) {
     }
 
     // (Settings → Subscriptions on workshop, the host picked, which has claude: Claude's Work and Home, folders signed
-    // in to with claude auth login, Work the default, each card's usage read as the page is shown; Codex's Personal;
-    // then the Current Subscription row's menu, an account's ⋮, Add account (the sign-in, its page's link and the code box) and Remove…)
+    // in to with claude auth login, each card's usage read as the page is shown; Codex's Personal;
+    // then an account's ⋮, Add account (the sign-in, its page's link and the code box) and Remove…)
     @Test fun subscriptions() {
         accountsFixture()
         show { SettingsScreen({}, {}, page = 1) }
@@ -169,13 +169,24 @@ abstract class Screens(private val theme: String) {
         screen("05j-subscriptions-last-read")
     }
 
-    @Test fun subscriptionsPill() {
-        accountsFixture()
-        show { SettingsScreen({}, {}, page = 1) }
+    // (the home screen's ⋮ with its usage row: Work's, the account a new chat on workshop takes; then, the host not
+    // answering yet, its placeholder; each the menu's width written beside its picture)
+    @Test fun menuUsage() = menuUsageScene("05m-menu-usage", listing = true)
+
+    @Test fun menuUsageLoading() = menuUsageScene("05n-menu-usage-loading", listing = false)
+
+    private fun menuUsageScene(name: String, listing: Boolean) {
+        (dev.baude.android.MenuUsageHosts.javaClass.getDeclaredField("hosts").apply { isAccessible = true }
+            .get(dev.baude.android.MenuUsageHosts) as MutableMap<*, *>).clear()
+        dev.baude.android.MenuUsageHosts.readAt.clear()
+        dev.baude.android.MenuUsageHosts.listedAt.clear()
+        accountsFixture(listing = listing)
+        show { dev.baude.android.HomeMenu({}, {}, {}, {}, {}) }
         laidOut()
-        tap("Current Subscription")
+        tap(dev.baude.android.Wording.ChatHeader.menu)
         laidOut()
-        withMenus("05f-subscriptions-pill")
+        withMenus(name)
+        java.io.File("build/screenshots/$theme/$name.width").writeText(windows().drop(1).joinToString { "${it.width}" })
     }
 
     @Test fun subscriptionsMenu() {
@@ -627,9 +638,10 @@ abstract class Screens(private val theme: String) {
     }
 
     /** workshop's accounts; reading: each usage read left unanswered, the host's last reading of each in every answer. */
-    private fun accountsFixture(reading: Boolean = false) {
+    private fun accountsFixture(reading: Boolean = false, listing: Boolean = true) {
         FixtureConnection.up(activity, Mesh.hosts.first()) { m ->
-            if (m.optString("op") != "accounts" || (reading && m.optString("what") == "usage")) null
+            if (m.optString("op") != "accounts" || (reading && m.optString("what") == "usage") ||
+                (!listing && m.optString("what") == "list")) null
             else org.json.JSONObject().put("op", "accounts").put("req", m.opt("req")).put("what", m.optString("what"))
                 .put("accounts", org.json.JSONArray(listOf(HOME_ACCOUNT, WORK,
                     org.json.JSONObject().put("id", "p1").put("provider", "codex").put("name", "Personal").put("kind", "profile"))))

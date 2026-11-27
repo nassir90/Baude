@@ -1653,6 +1653,18 @@ class WindowDrafts:
         Claude Code does (background_tasks); Codex, pi and Apple's model have no way to."""
         return model_program(self.model) == "claude"
 
+    def move_foreground(self):
+        """Send now's: every command and subagent Claude Code runs in the foreground moved to the background, where
+        it goes on (background_tasks naming no call, as its Ctrl+B), each card taking its result as a task's, as its
+        Background does (send_to_background); the step the turn waits on ends, so it takes in what was sent now."""
+        if not self.offers_background() or not self.proc or not self.busy:
+            return
+        cards = [c for c in self.tool_cards.values() if getattr(c, "to_background", None) is not None and
+                 c.state == "running" and c.asking is None and not c.moving]
+        for card in cards:
+            card.moved(True)
+        self.request({"subtype": "background_tasks"}, lambda _r: None, lambda _why: [c.moved(False) for c in cards])
+
     def send_to_background(self, card):
         """A card's Background: its command or subagent moved to the background (Claude Code's background_tasks, by
         its call), where it goes on, its result saying so (task_from_result) and its end told as a task's; the turn

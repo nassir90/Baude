@@ -1206,8 +1206,7 @@ class WindowProc:
         self.add(UserTurn(self, self.user_bubble(text, atts), text, said))
         self.stick_bottom, self.restore_scroll = True, None
         self.proc.user(self.user_content(text, atts), said)
-        if model_program(self.model) == "claude":
-            self.request({"subtype": "background_tasks"}, lambda _r: None)
+        self.move_foreground()
 
     def flush_queue(self):
         """The queue sent up to queue_upto (all of it: "all"), as one message (send_text), once no turn's going."""

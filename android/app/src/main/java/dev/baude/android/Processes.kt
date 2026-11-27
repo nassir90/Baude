@@ -185,6 +185,17 @@ private fun stop(chat: Chat, t: JSONObject) {
     chat.lines.add(Line("note", Wording.SidePanel.stopRequested(task = t.optString("description").ifBlank { id })))
 }
 
+/** Send now's (Baude's move_foreground): every command and subagent Claude Code runs in the foreground moved to the
+ * background, where it goes on (background_tasks naming no call, as its Ctrl+B), their cards' Background hidden
+ * meanwhile; the step the turn waits on ends, so it takes in what was sent now. */
+fun moveForeground(chat: Chat) {
+    val calls = chat.calls.byId.values.filter { it.base in BACKGROUNDABLE && it.state == "running" && !it.moving }
+    calls.forEach { it.moving = true }
+    control(chat.hostId, chat.sid, JSONObject().put("subtype", "background_tasks")) { why ->
+        if (why != null) calls.forEach { it.moving = false }
+    }
+}
+
 /** A card's Background (send_to_background): its command or subagent moved to the background (Claude Code's
  * background_tasks, by its call), where it goes on; the turn goes on, so what's sent at it reaches the agent. Said in
  * the chat if it can't be. */

@@ -109,8 +109,7 @@ object Queue {
     fun sendNow(chat: Chat, q: Queued) {
         chat.queueUpto = q
         val claude = isWorking(chat) && program(Mesh.session(chat.hostId, chat.sid)?.model) == "claude"
-        flush(chat, if (claude) ({ control(chat.hostId, chat.sid, JSONObject().put("subtype", "background_tasks")) {} })
-            else null)
+        flush(chat, if (claude) ({ moveForeground(chat) }) else null)
     }
 
     private val io = java.util.concurrent.Executors.newSingleThreadExecutor()

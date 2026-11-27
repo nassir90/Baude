@@ -3933,10 +3933,7 @@ Somewhere wire.reach can go: this machine's host process, one listening on anoth
 | `OPEN_S` | `20` | A member of the mesh, reached through it: its tunnel has this long to open, in seconds. |
 | `PING_S` | `5` | A connection's ends each say something at least this often (ping), in seconds. |
 | `QUERY_ROWS_MAX` | `1000` | A database query's rows, at most (databases' query): the rest aren't read. |
-<<<<<<< ours
 | `QUEUE_CHARS_MAX` | `8000000` | A chat's queue, as its host keeps it, at most, in characters of JSON (its messages' pictures and documents too): a message that would take it past this is refused, and stays the head's own. |
-=======
->>>>>>> theirs
 | `SHOT_MAX` | `1024` | A browser screenshot's longest side, in pixels. |
 | `SHOT_QUALITY` | `82` | A browser screenshot's JPEG quality. |
 | `SIGNED_S` | `300` | A tunnel's open: signed this near now, in seconds, either way, or it's closed where it's opened to. |
@@ -3944,10 +3941,6 @@ Somewhere wire.reach can go: this machine's host process, one listening on anoth
 | `TERMINAL_KEEP_S` | `600` | A terminal (terminal op) no connection is attached to now: its program kept running this long to be attached to again, in seconds. |
 | `TERMINAL_KEPT_BYTES` | `262144` | What a terminal (terminal op) wrote lately, kept to show again on attach: this many bytes at most. |
 | `TTL` | `16` | A tunnel's passed through at most this many hosts (open's ttl). |
-<<<<<<< ours
-| `VERSION` | `35` | The wire's version, as a host's hello says it. |
-=======
-| `VERSION` | `34` | The wire's version, as a host's hello says it. |
->>>>>>> theirs
+| `VERSION` | `36` | The wire's version, as a host's hello says it. |
 | `ZOOM_MAX` | `1568` | A browser zoom's longest side, in pixels. |
 | `ZOOM_QUALITY` | `90` | A browser zoom's JPEG quality. |

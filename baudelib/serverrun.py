@@ -1309,8 +1309,8 @@ class ServerRunning:
                 s.meta["seen"] = dict(ended)
             if models.model_program(s.meta.get("model")) != "codex":  # (claude, pi: a conversation of a new id;
                 s.meta["cli_id"] = str(uuid.uuid4())                  # Codex names its own thread as it starts)
-            s.meta.update(said=time.time(), rotated=time.time(), senders=(s.meta.get("senders") or 0) + 1,
-                          last_thread=thread.id)
+            s.meta.update(said=listed.get("said"), rotated=time.time(), senders=(s.meta.get("senders") or 0) + 1,
+                          last_thread=thread.id)  # (its place in the list kept: what's next said in it moves it up)
             self.save(s)  # (3: the Bot afresh: from here the thread's its own)
         except Exception:
             s.meta = was

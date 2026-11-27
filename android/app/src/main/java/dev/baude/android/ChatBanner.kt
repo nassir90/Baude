@@ -25,7 +25,7 @@ import kotlinx.coroutines.delay
 
 /** What's in the way of a chat from outside it, said in a strip under its header while it is (Adw.Banner): its host
  * stopping or gone (Mesh.reach: while it's only away, a cloud and Reconnecting…, Away, instead), its host not having the chat any more, Claude Desktop writing the chat (Baude's
- * live_elsewhere), claude retrying the model's API. Nothing, and no
+ * live_elsewhere), the subscription it runs on disabled on its host, claude retrying the model's API. Nothing, and no
  * room, when nothing is. */
 @Composable
 fun ChatBanner(chat: Chat, open: (String, String) -> Unit) {
@@ -58,6 +58,8 @@ fun ChatBanner(chat: Chat, open: (String, String) -> Unit) {
             AnnotatedString(Wording.ChatBanner.missing(name = name))
         }
         Mesh.session(at, chat.sid)?.elsewhere == true -> AnnotatedString(Wording.ChatBanner.activeElsewhere)
+        subscriptionOff(chat) -> AnnotatedString(Wording.Subscriptions.disabledChat(
+            name = Mesh.session(at, chat.sid)?.account?.name ?: Wording.Subscriptions.cliDefault))
         retry != null -> {
             val status = retry.opt("error_status")?.takeIf { !retry.isNull("error_status") && it.toString().isNotBlank() }
             val what = if (status != null) Wording.ChatBanner.apiStatus(status = status) else Wording.ChatBanner.apiSilent
@@ -93,3 +95,7 @@ fun Away(modifier: Modifier = Modifier) {
         Text(Wording.Hosts.reconnecting, style = Type.caption, color = c.dim, maxLines = 1)
     }
 }
+
+/** Whether the subscription a chat runs on is disabled on its host (its listing's account_disabled): its send button
+ * off, its banner saying so. */
+fun subscriptionOff(chat: Chat): Boolean = Mesh.session(chat.hostId, chat.sid)?.accountDisabled == true

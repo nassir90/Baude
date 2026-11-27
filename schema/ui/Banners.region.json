@@ -19,7 +19,9 @@
     "meshui.py:HostApart",
     "chatparts.py:ShutBar",
     "ChatBanner.kt:Away",
-    "Mesh.kt:Mesh.reach"
+    "Mesh.kt:Mesh.reach",
+    "windowproc.py:WindowProc.subscription_off",
+    "ChatBanner.kt:subscriptionOff"
   ],
   "copy": [
     "host_status",
@@ -32,7 +34,7 @@
   "parts": [
     {
       "name": "chat banner",
-      "shows": "A full-width strip (an Adw banner) revealed with a slide under the header and above the chat, one title line (markup) and an optional button at its right. It is hidden when nothing applies. When several things apply, the one shown is the first of: host gone, chat missing, active elsewhere, connection dropped, API retrying, daemon/app older. The composer's send button is switched off while the host is gone, the chat is missing, or the connection dropped.",
+      "shows": "A full-width strip (an Adw banner) revealed with a slide under the header and above the chat, one title line (markup) and an optional button at its right. It is hidden when nothing applies. When several things apply, the one shown is the first of: host gone, chat missing, active elsewhere, connection dropped, subscription disabled, API retrying, daemon/app older. The composer's send button is switched off while the host is gone, the chat is missing, the connection dropped, or the chat's subscription is disabled.",
       "parts": [
         {
           "name": "host gone",
@@ -135,6 +137,27 @@
           "shows": "\"Connection to <daemon or host> dropped...\" with the three dots stepping (every 0.35 s); the send button is off. Cleared when attached again (retried about every 10 s); the host leaving the network shows \"host gone\" instead. A turn that was running goes on on the host, and a message sent after a claude that exited notes \"— resumed from <reason> —\".",
           "text": [
             "Connection to {host} dropped"
+          ]
+        },
+        {
+          "name": "subscription disabled",
+          "shows": "The subscription the chat runs on (its account, or its provider's CLI default) is disabled on its host (Settings → Subscriptions, or Auto Disable on Exhaustion): \"Subscription <name> is disabled\" (CLI default's name for the CLI's own sign-in). No button. The send button is off till it's enabled or another subscription is picked in the chat's provider picker; a held message's ↑ says it can't be sent while it is.",
+          "copy": [
+            "subscriptions.disabled_chat",
+            "subscriptions.cli_default",
+            "held_send.while_disabled"
+          ],
+          "decisions": [
+            {
+              "said": "(BaudeInternal#280, paraphrased) a provider should be able to be disabled without removing it: its chats turned off and the send button blocked for chats on it, since some providers don't stop when usage runs out and bill extra instead",
+              "rule": "Every app's Subscriptions page lets any subscription (an account, or a provider's CLI default) be disabled and enabled again from its ⋮, without removing it; while it's disabled its card says Disabled, its host stops the agent of every chat on it (a turn going on cut short) and refuses anything sent to them or anything that would start them, and every app's chat on it has its send button off with a banner \"Subscription <name> is disabled\" (Meta's box, where Meta runs on it, the same line over it), till it's enabled or the chat's moved to another subscription",
+              "decided": "2026-11-27",
+              "source": [
+                {
+                  "issue": "BaudeInternal#280"
+                }
+              ]
+            }
           ]
         },
         {

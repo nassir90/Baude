@@ -18,9 +18,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material3.Icon
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.text.BasicTextField
-import androidx.compose.foundation.text.KeyboardActions
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -36,8 +33,6 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.graphics.SolidColor
-import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.delay
@@ -63,7 +58,7 @@ object Telemetry {
             look()
         }
 
-    private fun hostOf(id: String) = if (id == "phone") PhoneHost.id else id
+    private fun hostOf(id: String) = Mesh.hostIdOf(id) ?: id // (a connection's: the id of the host it's to)
 
     /** The chat on screen now, and the one in front: told if they've changed. */
     private fun look() {
@@ -246,7 +241,6 @@ fun TelemetryPage() {
     var metrics by remember(hostId) { mutableStateOf<JSONObject?>(null) }
     var profiles by remember(hostId, asked) { mutableStateOf<JSONObject?>(null) }
     var deps by remember(hostId) { mutableStateOf<Msg.Dep?>(null) }
-    var app by remember(hostId) { mutableStateOf("host") }
     fun read(from: Double, what: String, limit: Int?, then: (JSONObject) -> Unit) =
         Mesh.ask(hostId, Msg.TelemetryRead(from = from, what = listOf(what), limit = limit).json(), then)
     LaunchedEffect(hostId, asked) {
@@ -265,7 +259,7 @@ fun TelemetryPage() {
     val error = replies.firstOrNull { it.optString("op") == Op.ERROR }
     val state = replies.firstOrNull { it.optString("op") == Op.TELEMETRY_READ }?.let { Msg.TelemetryReadReply.from(it).state }
     fun set(msg: Msg.TelemetrySet) = Mesh.ask(hostId, msg.json()) { asked++ }
-    val profiling = state?.on == true && state.profiling.orEmpty().any { it.functions.orEmpty().isNotEmpty() }
+    val profiling = state?.on == true && state.lineProfiling == true
     LaunchedEffect(hostId, asked, profiling) { // (its top lines read again as often as they're taken, while it profiles)
         while (profiling) {
             delay(30_000)
@@ -330,15 +324,16 @@ fun TelemetryPage() {
                 }
             }
         }
-        if (hostId != "phone" && state != null) Profiling(state, profiles, deps, app, { app = it }, { asked++ }) { set(it) }
+        if (hostId != "phone" && state != null) Profiling(state, profiles, deps, { asked++ }) { set(it) }
     }
 }
 
-/** Line profiling of a computer's processes (telemetryview.Page.show_profiling): on or off, which process, what it
- * profiles, its top lines in the last hour; line_profiler missing there, what installs it. */
+/** Line profiling of a computer's processes (telemetryview.Page.show_profiling): on or off (what each profiles is
+ * Baude's own pick, or what telemetry_set named for it), each process's error, every process's top lines in the last
+ * hour, each with its app's logo; line_profiler missing there, what installs it. */
 @Composable
-private fun Profiling(state: Msg.TelemetryState, profiles: JSONObject?, dep: Msg.Dep?, app: String, pick: (String) -> Unit,
-                      again: () -> Unit, set: (Msg.TelemetrySet) -> Unit) {
+private fun Profiling(state: Msg.TelemetryState, profiles: JSONObject?, dep: Msg.Dep?, again: () -> Unit,
+                      set: (Msg.TelemetrySet) -> Unit) {
     val c = LocalBaude.current
     if (state.lineProfiler != true) {
         if (dep != null && dep.present != true) Box(Modifier.fillMaxWidth().height(280.dp)) { // (as every feature without
@@ -346,40 +341,29 @@ private fun Profiling(state: Msg.TelemetryState, profiles: JSONObject?, dep: Msg
         }
         return
     }
-    val mine = state.profiling.orEmpty().firstOrNull { it.app == app }
-    val functions = mine?.functions.orEmpty()
-    var text by remember(app, functions) { mutableStateOf(functions.joinToString(", ")) }
-    fun named() = text.split(",").map { it.trim() }.filter { it.isNotEmpty() }
-    BoxedList(listOfNotNull<@Composable () -> Unit>(
-        { SwitchRow(Wording.Telemetry.lineProfiling, null, state.on == true && functions.isNotEmpty(),
-            enabled = state.on == true && (functions.isNotEmpty() || named().isNotEmpty())) {
-            set(Msg.TelemetrySet(app = app, functions = if (it) named() else emptyList())) } },
-        { Choice(Wording.Telemetry.process, PROFILED, app, { APP_NAMES.getValue(it)() }) { pick(it) } },
-        {
-            Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp)) {
-                Text(Wording.Telemetry.functions, style = Type.caption, color = c.dim)
-                BasicTextField(text, { text = it }, singleLine = true, textStyle = Type.body.copy(color = c.fg),
-                    cursorBrush = SolidColor(c.accentBg), keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-                    keyboardActions = KeyboardActions(onDone = { set(Msg.TelemetrySet(app = app, functions = named())) }),
-                    modifier = Modifier.fillMaxWidth())
-            }
-        },
-        mine?.error?.let { e -> { ActionRow(e, null) } },
-    ), "") { it() }
-    val lines = HashMap<Pair<String, Long>, Triple<Msg.TelemetryLine, Long, Double>>()
-    profiles?.let { Msg.TelemetryReadReply.from(it).profiles }.orEmpty().filter { it.app == app }.forEach { p ->
+    fun logo(app: String?): @Composable () -> Unit =
+        { Icon(APP_LOGOS[app] ?: Adwaita.AppBaude, null, tint = c.fg, modifier = Modifier.size(16.dp.icon)) }
+    BoxedList(listOf<@Composable () -> Unit>(
+        { SwitchRow(Wording.Telemetry.lineProfiling, null, state.on == true && state.lineProfiling == true,
+            enabled = state.on == true) { set(Msg.TelemetrySet(lineProfiling = it)) } },
+    ) + state.profiling.orEmpty().filter { it.app in PROFILED && !it.error.isNullOrEmpty() }.map { p ->
+        { ActionRow(p.error.orEmpty(), null, prefix = logo(p.app)) } }, "") { it() }
+    val lines = HashMap<Triple<String, String, Long>, Triple<Msg.TelemetryLine, Long, Double>>()
+    profiles?.let { Msg.TelemetryReadReply.from(it).profiles }.orEmpty().filter { it.app in PROFILED }.forEach { p ->
         for (x in p.lines.orEmpty()) {
-            val k = x.file.orEmpty() to (x.line?.toLong() ?: 0)
+            val k = Triple(p.app.orEmpty(), x.file.orEmpty(), x.line?.toLong() ?: 0)
             val got = lines[k]
             lines[k] = Triple(x, (got?.second ?: 0) + (x.hits?.toLong() ?: 0), (got?.third ?: 0.0) + (x.seconds?.toDouble() ?: 0.0))
         }
     }
-    val top = lines.values.sortedByDescending { it.third }.take(10)
+    val top = lines.entries.sortedByDescending { it.value.third }.take(10)
     if (top.isEmpty()) return
     Heading(Wording.Telemetry.topLines)
-    BoxedList(top, "") { (x, hits, seconds) ->
+    BoxedList(top, "") { (k, v) ->
+        val (x, _, seconds) = v
         Row(Modifier.fillMaxWidth().heightIn(min = 50.dp).padding(horizontal = 12.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            logo(k.first)()
             Text("${x.file.orEmpty().substringAfterLast('/')}:${x.line}  ${x.code ?: x.function.orEmpty()}", style = Type.mono,
                 color = c.fg, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
             Text(Wording.Time.seconds(seconds = String.format(Locale.ROOT, "%.3f", seconds)), style = Type.body,

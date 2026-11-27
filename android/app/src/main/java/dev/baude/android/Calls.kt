@@ -26,6 +26,8 @@ class Call(val id: String, val name: String, input: JSONObject = JSONObject()) {
     var outputOpen by mutableStateOf(false)
     /** An answer_task call's, once it's taken (toolcards.answer_result): {task, run, values or text}. */
     var answer by mutableStateOf<JSONObject?>(null)
+    /** Asked to move to the background (moveToBackground): its Background hidden meanwhile. */
+    var moving by mutableStateOf(false)
     private var report: String? = null
     private var taskId: String? = null
     private var taskType: String? = null
@@ -90,7 +92,10 @@ class ChatCalls {
     val autoOpened = HashMap<String, String>() // (a group: what it was last opened by itself for)
 }
 
-private val BACKGROUND_COMMAND = Regex("""Command running in background with ID: (\S+?)\.?\s+Output is being written to: (\S+)""")
+private val BACKGROUND_COMMAND = Regex("""Command (?:running in background|was manually backgrounded by user) with ID: (\S+?)\.?\s+Output is being written to: (\S+)""")
+
+/** What Claude Code moves to the background as it runs (toolcards.BACKGROUNDABLE). */
+val BACKGROUNDABLE = setOf("Bash", "PowerShell", "Agent", "Task")
 private val AGENT_ID = Regex("""agentId: (\w+)""")
 
 private fun cut(text: String) = if (text.length < 200_000) text

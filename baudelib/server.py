@@ -144,6 +144,7 @@ class Server(ServerRunning, ServerSessions):
         # profiles: baudelib/telemetry.py)
         self.access = access.Access(self)  # (who in the mesh may use what of its: baudelib/access.py)
         self.tasks = tasks.Tasks(self)  # (its Bots' tasks: baudelib/tasks.py)
+        self.settle_bot_folders()  # (each Bot's folder by its name)
 
     def bind(self):
         """The socket listened on: made (again, if it's gone: its folder taken away, say), in a folder of its user's
@@ -263,6 +264,7 @@ class Server(ServerRunning, ServerSessions):
                 "notes": self.notes_seen,  # (Record's notebooks here, as written last: notes.stamp)
                 "edits": self.edits_seen,  # (the edits proposed to their pages, as written last: notes.edits_stamp)
                 "telemetry": self.telemetry.state(),  # (on or off, and what each process here profiles: its apps follow it)
+                "front": self.telemetry.front(),  # (the chats in front on this machine: no head anywhere notifies of them)
                 "tool_names": toolnames.table(self.me.get("mcp_servers") or ())}  # (how its MCP tools are named)
 
     def made_of(self, commit):
@@ -371,7 +373,7 @@ class Server(ServerRunning, ServerSessions):
             names = {s.meta.get("cli_id") or s.id, s.id} - \
                 {o.meta.get("cli_id") for o in self.sessions.values() if o is not s}  # (a Bot's past thread's: its own)
         paths = [path, path[:-len(".jsonl")] if path and path.endswith(".jsonl") else None,
-                 bot_dir(self.state_dir, s.id),  # (a Bot's, or a chat's that was one: its memory and its picture)
+                 bot_dir(self.state_dir, s.meta),  # (a Bot's, or a chat's that was one: its memory and its picture)
                  self.senders_path(s.id)]  # (who its messages were from, with them)
         pi = os.path.expanduser("~/.local/share/baude/pi/sessions")  # (pi-claude's own: its session's, its id in its
         if program == "pi" and os.path.isdir(pi):                    # name, as pi has it: <when>_<id>.jsonl)

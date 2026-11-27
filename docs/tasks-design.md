@@ -17,6 +17,9 @@ A task belongs to one Bot and is kept on that Bot's host, in the Bot's folder (`
 | `version` | the first 12 hex of the script's SHA-256; every run records the version it ran |
 | `form` | its inputs, each `{name, label?, type: text, number, bool or choice, choices?, default?, required?}` |
 | `triggers` | below |
+| `variables` | typed variables, each `{name, type, description?}`, bound once for the task (below) |
+| `bindings` | `{name: {value, label?, effort?, host?, model?, context?, namespace?, container?}}`: what each variable's bound to |
+| `warnings` | (the host's to say) `{name: why}` for each bound variable that isn't there now |
 | `notify_failure` | true: a failed run (non-zero exit, timeout) is sent to the Bot with its log |
 | `notify_exit` | true: a run that exits 0 is told to the Bot, for its information, with the end of its output (default false) |
 | `timeout_s` | the most a run may take (default an hour), not counting time it waits for input; it's stopped after |
@@ -26,7 +29,39 @@ A script runs with the Bot's folder as its working directory (its worktree made 
 gone, as for a message), in a process group of its own, and gets its run in its environment:
 `BAUDE_SOCKET`, `BAUDE_TASK_RUN`, `BAUDE_TASK_TOKEN`, `BAUDE_TASK_INPUTS` (the inputs as filled, JSON),
 `BAUDE_TASK_PAYLOAD` (the trigger's event, JSON) and `BAUDE_IN_<FIELD>` for each input, for shell scripts.
-`baudelib/script/` is on its `PYTHONPATH`, so a Python script does `import baudetask`.
+`baudelib/script/` is on its `PYTHONPATH`, so a Python script does `import baudetask`. `BAUDE_TASK_VARS` has its
+variables, `{name: {type, binding, warning?}}`.
+
+## Variables
+
+A task declares variables, each a name ("Translation Model"), a type and an optional description: `model` (a model's
+value, its effort, the host serving it), `decider` (a decider, as decide's `model` names it), `host`,
+`browser_host`, `terminal_host` (a host of the mesh), `kube_context`, `pod`, `container`, `database`, `text`. Unlike the
+form's inputs, which each run fills, a variable is bound once for the task: by its Bot (`set_task`'s `bindings`) or by
+a person on the task's page (`task_bind`, needing manage write on the Bot's chat, as its other changes do).
+
+Binding offers what the task's host has of that type (`task_choices`), from the lists ⌘K lists: its models (as its
+hello lists them, and other hosts' run here), the mesh's hosts, its kubeconfig's contexts, the workloads in its local
+clusters, its Docker containers, the databases running on it, and the deciders it knows (its own and the mesh's members') for a decider. Any text is
+taken instead, for a flaky entity. Clusters' choices need Kubernetes read, Docker's Docker read and databases'
+Databases, as the catalogue's do.
+
+The host looks at every bound variable every minute, at once as one's bound, and as a run starts: a model it can't run
+(not served, no account), a decider that didn't answer when last looked at, a host not in the mesh or out of reach, a context gone,
+a pod or container not running, a database gone. Each is a warning on the variable's row and its task's row, and the
+first lines of the run's log (kind `warning`). The run starts all the same: nothing is put in its place, and the script
+decides what to do with `baudetask.vars`:
+
+```python
+import baudetask as task
+model = task.vars.translation_model          # or task.vars["Translation Model"]: a Model (a str: its value), or None
+if model is None or model.warning:
+    model = task.vars.worker_agent_model
+task.agent("Translate this: ...", model=model)  # its value and its effort
+```
+
+Each variable is a `str` of its value with its type's fields as attributes (`.effort`, `.host`, `.context`,
+`.namespace`, `.container`, `.model`), `.label` and `.warning`.
 
 ## Triggers
 
@@ -54,7 +89,7 @@ push since (its payload's `before` the head last run, `after` the head now).
 `running` → (`asking` while it waits for input: an ask of its Bot, shown as "Waiting for input") → `done` | `failed` | `stopped` | `skipped`.
 
 Each run is kept as `runs/<id>.json` with a log `runs/<id>.log` (JSON lines `{at, kind, text, values?}`, kinds `out`,
-`err`, `say`, `ask`, `answer`, `status`). The latest 100 runs of each task are kept. A run records: task, version,
+`err`, `say`, `ask`, `answer`, `status`, `agent`, `warning`). The latest 100 runs of each task are kept. A run records: task, version,
 trigger (`{id, kind}`, `manual` for by hand), payload, inputs, started (and the host's UTC offset then, so its
 time reads as it did there), ended, seconds, exit code, error, asks, `handed` (its failure given to the Bot), and its
 script's `pid` and `pgid`.
@@ -131,11 +166,13 @@ events (`task_run`) on Settings → Telemetry's timeline.
 | `run_task {session, id, inputs?}` | `task_started {session, run}` | run it now, by hand |
 | `task_run {session, run}` | `task_run {session, run, log}` | one run and its log |
 | `task_stop {session, run}` | `task_run` | a run stopped |
+| `task_bind {session, id, name, binding?}` | `task` | one variable bound (no binding: unbound), its warning looked at now |
+| `task_choices {session, type}` | `task_choices {session, type, choices}` | what a variable of that type could be bound to here |
 | `task_report {run, token, say?}` | `task_reported` | a script's line in its run's log |
 | `task_ask {run, token, text, form?, error?}` | `task_answer {text, values?}` | a script asks its Bot (above) |
 | `answer_task {session, run, answer?, text?}` | `task_answered {session, run, task, values?, text?}` | the Bot (or someone who can manage it) answers the ask of its run that's waiting on it |
 
-Entities: `Task`, `TaskField`, `TaskTrigger`, `TaskRun`, `TaskLogLine`. `task_report` and `task_ask` are a running
+Entities: `Task`, `TaskField`, `TaskTrigger`, `TaskVariable`, `TaskBinding`, `TaskChoice`, `TaskRun`, `TaskLogLine`. `task_report` and `task_ask` are a running
 script's: taken only on the host's own socket, with the run's token.
 
 ## Access

@@ -1,11 +1,13 @@
 """baudetask: a Bot's task's script, talking to the host that runs it, over the wire (docs/tasks-design.md). The host
 puts this folder on the script's PYTHONPATH and its run in its environment; nothing here but Python's own library, so
-it can be copied anywhere.
+it can be copied anywhere (the folder: _baudetask_vars.py beside it, its variables).
 
     import baudetask as task
 
     task.inputs            # the run's form, filled: by hand, from its trigger's payload, or by default
     task.payload           # what its trigger saw (a git push's {repo, branch, before, after, commit, message, author})
+    task.vars              # the task's variables, each bound once ("Translation Model": task.vars.translation_model),
+                           # typed (a model, a host, a pod...), its warning if it isn't there now; None if not bound
     task.say("deploying", task.inputs["branch"])           # a line in the run's log
     answer = task.ask("Which of these is the release?")    # its Bot asked: what it said
     plan = task.ask("Resolve this conflict: ...", form=[{"name": "keep", "type": "choice",
@@ -38,8 +40,10 @@ import threading
 import time
 import traceback
 
-__all__ = ["inputs", "payload", "run", "say", "ask", "fallback", "agent", "main", "Refused", "decide", "deciders", "choice",
-           "noul", "score", "Decision", "DecisionUnavailable"]
+from _baudetask_vars import Model, vars  # noqa: E402,A004 (beside this file, on the script's path)
+
+__all__ = ["inputs", "payload", "vars", "Model", "run", "say", "ask", "fallback", "agent", "main", "Refused", "decide",
+           "deciders", "choice", "noul", "score", "Decision", "DecisionUnavailable"]
 
 run = os.environ.get("BAUDE_TASK_RUN")
 _DENIED = "Nobody was there to ask (a task's agent)."
@@ -170,7 +174,8 @@ def agent(prompt, wait=True, cwd=None, model=None, title=None, mode=None, timeou
     """A chat of its own started on the task's host with prompt (in cwd, the host's home if none; Auto at most, its
     asks for permission refused: at once while it's waited for, after a minute if not), nested under the task's Bot and kept with the run; the Bot's told
     what it says as its first turn ends. {session, text, failed}: with wait, what it said as that turn ended (or
-    why it failed); else as soon as it's started (text None). Refused: the host didn't start it."""
+    why it failed); else as soon as it's started (text None). model: a model's value, or a model variable
+    (task.vars: its effort too). Refused: the host didn't start it."""
     if not run:
         print(f"agent: {prompt}", flush=True)
         return {"session": None, "text": None if not wait else "(a stand-in answer)", "failed": False}
@@ -178,7 +183,8 @@ def agent(prompt, wait=True, cwd=None, model=None, title=None, mode=None, timeou
              "mode": mode or "auto", "ask_timeout": 60, "ask_default": "deny", "attach": bool(wait), "answers": False,
              "spawned_by": os.environ.get("BAUDE_SPAWNED_BY", ""),
              "task_run": {"run": run, "token": os.environ.get("BAUDE_TASK_TOKEN", "")},
-             **{k: v for k, v in (("cwd", cwd), ("model", model)) if v}}
+             **{k: v for k, v in (("cwd", cwd), ("model", str(model) if model else None),
+                                  ("effort", getattr(model, "effort", None))) if v}}
     if not start["spawned_by"]:
         start.pop("spawned_by")
     wire = _w()

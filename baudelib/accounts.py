@@ -136,9 +136,30 @@ def exhausted(key):
     return True
 
 
-def limits_exhausted(limits):
-    """Whether a subscription's limits ([(key, percent, resets)]) say one of them is used up."""
-    return any(isinstance(p, (int, float)) and p >= 100 and "overage" not in str(k) for k, p, *_ in limits or ())
+WHOLE_WINDOWS = ("five_hour", "seven_day")  # (Claude's limits that are the whole subscription's: the others are a model's or an app's)
+
+
+def limits_exhausted(limits, provider="claude"):
+    """Whether a subscription's limits ([(key, percent, resets)]) say one that stops it is used up: Claude's whole
+    subscription's (WHOLE_WINDOWS), not a model's; any of Codex's own windows."""
+    return any(isinstance(p, (int, float)) and p >= 100 and "overage" not in str(k) and
+               (provider != "claude" or k in WHOLE_WINDOWS) for k, p, *_ in limits or ())
+
+
+def codex_exhausted(snapshot):
+    """Whether a Codex rate-limit snapshot (its App Server's) says the subscription's used up: its default bucket (not
+    another limit's, as a model's own) at 100%, or its rateLimitReachedType, or its spend control, said."""
+    if not isinstance(snapshot, dict) or snapshot.get("limitId") not in (None, "codex"):
+        return False
+    credits = snapshot.get("credits")
+    return bool(snapshot.get("rateLimitReachedType")) or snapshot.get("spendControlReached") is True or \
+        isinstance(credits, dict) and credits.get("spendControlReached") is True or \
+        limits_exhausted(codex_limits(snapshot), "codex")
+
+
+def key_provider(key):
+    """The provider a usage key's subscription is of."""
+    return "codex" if key == CODEX_CLI else (account(key) or {}).get("provider", "claude")
 
 
 def listing():
@@ -538,11 +559,14 @@ def note_limits(folder, key, info):
     """A claude chat's rate_limit_event (its rate_limit_info: the limits its last request's answer said, utilization a
     fraction and resetsAt in seconds since 1970) kept for usage key key in folder (the host's state folder), each
     window's (five_hour, seven_day…) latest with when it was seen, for seen_limits. Overage isn't kept. Whether it
-    says the subscription's exhausted: a limit refused or used up, or extra usage billed (overage)."""
+    says the subscription's exhausted: the request refused as a whole (status rejected, but not at a model's own limit), or
+    extra usage billed (overage). A window's own status or utilization doesn't say it."""
     import json
     if not isinstance(info, dict):
         return False
-    spent = info.get("status") == "rejected" or info.get("isUsingOverage") is True
+    kind = info.get("rateLimitType")
+    spent = info.get("status") == "rejected" and not (isinstance(kind, str) and kind.startswith("seven_day_")) or \
+        info.get("isUsingOverage") is True or info.get("overageInUse") is True
     found = {}
     windows = info.get("unifiedWindows")
     for name, window in [*(windows.items() if isinstance(windows, dict) else ()),
@@ -550,9 +574,7 @@ def note_limits(folder, key, info):
         if not isinstance(name, str) or "overage" in name or not isinstance(window, dict):
             continue
         used, resets = window.get("utilization"), window.get("resetsAt")
-        spent = spent or window.get("status") == "rejected"
         if isinstance(used, (int, float)) and not isinstance(used, bool):
-            spent = spent or used >= 1
             found.setdefault(name, {"percent": round(float(used) * 100, 1),
                                     **({"resets": _reset_time(resets)} if _reset_time(resets) is not None else {})})
     if not found:

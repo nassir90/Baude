@@ -141,13 +141,15 @@ def _spent(server, key):
     from baudelib.serverstate import state_home
     read = accounts.last_usage().get(key)
     seen = accounts.seen_limits(getattr(server, "state_dir", None) or state_home(), key)
-    return accounts.limits_exhausted(read[1] if read else None) or accounts.limits_exhausted(seen[0] if seen else None)
+    provider = accounts.key_provider(key)
+    return accounts.limits_exhausted(read[1] if read else None, provider) or \
+        accounts.limits_exhausted(seen[0] if seen else None, provider)
 
 
-def _exhausted(server, key, limits):
+def _exhausted(server, key, limits, provider):
     """A usage read's limits (limits) that say a subscription's used up: disabled if it auto-disables (its chats
     stopped)."""
-    if accounts.limits_exhausted(limits) and accounts.exhausted(key):
+    if accounts.limits_exhausted(limits, provider) and accounts.exhausted(key):
         getattr(server, "subscription_disabled", lambda _key: None)(key)
 
 
@@ -172,7 +174,7 @@ def _usage(server, profile, provider, done):
         return done(usage=_limits(seen[0]), as_of=round(seen[1]))
     if limits is None:
         return done(usage=None)
-    _exhausted(server, accounts.usage_key(provider, profile), limits)
+    _exhausted(server, accounts.usage_key(provider, profile), limits, provider)
     done(usage=_limits(limits))
 
 

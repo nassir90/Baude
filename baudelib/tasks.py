@@ -830,7 +830,7 @@ class Tasks:
                     with self.lock:
                         self.notices.pop(sid, None)
                     continue
-                if s.busy or s.codex_queue or self.asking(sid):
+                if s.busy or self.asking(sid):
                     continue
                 with self.lock:
                     n = pending.pop(next(iter(pending)))
@@ -1131,7 +1131,7 @@ class Tasks:
                 s = srv.sessions.get(sid)
                 if s is None or s.deleting or s.meta.get("archived"):
                     return wording.say("host_errors.no_task"), True
-                if not s.busy and not s.codex_queue:
+                if not s.busy:
                     with self.lock:
                         self.waiting.setdefault(sid, []).append(wait)
                     try:
@@ -1304,7 +1304,7 @@ class Tasks:
                     with srv.lock:
                         c, b = srv.sessions.get(cid), srv.sessions.get(came.get("bot"))
                         if c is not None and b is not None and not c.deleting and not b.deleting and \
-                                not b.busy and not b.codex_queue and not b.meta.get("archived"):
+                                not b.busy and not b.meta.get("archived"):
                             sender = {"kind": "subagent", "name": c.listing().get("title") or "",
                                       "host": srv.me["id"], "host_name": srv.me["name"], "session": cid,
                                       "bot": b.id, "task": came.get("task") or "", "task_name": came.get("name") or "",

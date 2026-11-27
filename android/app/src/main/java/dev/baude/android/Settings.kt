@@ -192,6 +192,9 @@ fun chatColumn(w: Dp): Dp {
  * grow by the same ratio and keep their size against the words beside them. */
 val Dp.icon: Dp get() = this * (Tokens.Font.body.value / BAUDE_TEXT_PX) * Settings.iconScale.value
 
+/** A width given in Baude's px for room for text: as the phone's text is to Baude's 12 px, at Settings' text size. */
+val Dp.text: Dp get() = this * (Tokens.Font.body.value / BAUDE_TEXT_PX) * Settings.textScale.value
+
 private const val BAUDE_TEXT_PX = 12f
 
 /** ⋮ → Settings…, as Baude's Settings: its pages, General, Subscriptions (SubscriptionsPage), Dependencies (DepsPage),

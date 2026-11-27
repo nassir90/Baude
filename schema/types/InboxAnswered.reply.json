@@ -37,6 +37,13 @@
         }
       ],
       "description": "How it was answered."
+    },
+    "version": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "description": "How many versions it has (the last is what's answered)."
     }
   },
   "required": [

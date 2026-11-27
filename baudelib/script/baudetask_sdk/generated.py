@@ -634,20 +634,23 @@ class InboxAnswer(Obj):
 
 
 class InboxAsk(Obj):
-    """A task's ask of a person, kept by its host (state folder's inbox/) till it's answered or its task withdraws it:
-    across the host's restarts, stopped (its run gone) then, struck through and its buttons off. Every head that may
-    manage the asking Bot is told it as it changes (inbox_changed).
+    """A task's or a chat's ask of a person, kept by its host (state folder's inbox/) till it's answered or withdrawn:
+    across the host's restarts; a task's stopped then (its run gone), a chat's once its chat's archived or deleted,
+    struck through and its buttons off. Every head that may manage the asking Bot or chat is told it as it changes
+    (inbox_changed).
 
         id (string): The ask's id.
-        session (string): The asking task's Bot's session id.
-        bot (string or None): That Bot's name.
-        task (string): The task's id.
-        task_name (string): The task's name.
-        run (string): The asking run's id.
+        session (string): The asking chat's session id: a task's Bot's, or the chat whose model raised it.
+        bot (string or None): That chat's Bot's name, if it's a Bot.
+        chat (string or None): A chat's own ask (task null): the chat's name as it raised it (its Bot's, else
+            its title).
+        task (string or None): The task's id; null for a chat's own ask (its model's, with its chat's tools).
+        task_name (string or None): The task's name; null for a chat's own.
+        run (string or None): The asking run's id; null for a chat's own.
         at (number): When it was raised (seconds since the epoch).
         status ('waiting' | 'answered' | 'withdrawn' | 'stopped'): waiting: for an answer; answered (answer:
-            how); withdrawn: its task took it back; stopped: its run ended (or its host restarted) with it
-            unanswered.
+            how); withdrawn: its task or chat took it back; stopped: its run ended (or its host restarted), or
+            its chat was archived or deleted, with it unanswered.
         versions (array of InboxVersion): Every version of it, oldest first: the last is what's answered.
         proposal (InboxProposal or None): A model's answer waiting to be confirmed, if one was asked for.
         sent_to (string or None): The Bot it's been sent to answer (its session id), till it does.
@@ -2479,6 +2482,7 @@ class InboxAnswered(Obj):
         status ('waiting' | 'answered' | 'withdrawn' | 'stopped'): Its status (waiting: not answered within the
             timeout).
         answer (InboxAnswer or None): How it was answered.
+        version (integer or None): How many versions it has (the last is what's answered).
     """
     _refs = {"answer": "InboxAnswer"}
 
@@ -2503,7 +2507,10 @@ class InboxRaised(Obj):
 
         ask (string): The ask's id.
         version (integer): Its version now (1 for the first).
+        answered (InboxAnswer or None): A revised chat's ask's answer to the version before, if its chat hadn't
+            been told it yet.
     """
+    _refs = {"answered": "InboxAnswer"}
 
 
 class InboxReply(Obj):
@@ -4269,12 +4276,16 @@ class Ops(Area):
         return self._call("inbox_press", {"ask": ask, "button": button, "values": values, "as": as_,
                                           "version": version}, host, Obj)
 
-    def inbox_raise(self, *, run=None, token=None, title=None, body=None, pictures=None, buttons=None, form=None,
-                    host=None):
+    def inbox_raise(self, *, session=None, run=None, token=None, title=None, body=None, pictures=None, buttons=None,
+                    form=None, host=None):
         """inbox_raise (InboxRaise): A running task's script raises an ask of a person (on the host's own socket, with
-        its run's token): kept, and in the Inbox of every head that may manage its Bot till it's answered, withdrawn
-        or its run ends. Answered as a button's pressed (inbox_wait).
+        its run's token), or a chat's model does with its own tools (session, on its host's own socket): kept, and
+        in the Inbox of every head that may manage its Bot (or chat) till it's answered, withdrawn or its run ends
+        (its chat's archived or deleted). Answered as a button's pressed: inbox_wait, and for a chat, a message from
+        the Inbox as its next turn.
 
+            session (string): A chat's own ask: the asking chat's session id, from its own tools (their
+                connection's hello as), in place of run and token.
             run (string): The asking run's id (BAUDE_TASK_RUN): a task's script's.
             token (string): Its run's token (BAUDE_TASK_TOKEN).
             title (string or None): What it's called in the Inbox's list (its body's first line, if none).
@@ -4286,8 +4297,9 @@ class Ops(Area):
             form (array or None of TaskField): Fields to fill (as a task's form has them): their values go with
                 the button pressed.
         """
-        return self._call("inbox_raise", {"run": run, "token": token, "title": title, "body": body,
-                                          "pictures": pictures, "buttons": buttons, "form": form}, host, Obj)
+        return self._call("inbox_raise", {"session": session, "run": run, "token": token, "title": title,
+                                          "body": body, "pictures": pictures, "buttons": buttons,
+                                          "form": form}, host, Obj)
 
     def inbox_remove(self, *, ask=None, host=None):
         """inbox_remove (InboxRemove): A stopped ask taken out of every Inbox (and off the host).
@@ -4298,9 +4310,10 @@ class Ops(Area):
 
     def inbox_revise(self, *, ask=None, run=None, token=None, title=None, body=None, pictures=None, buttons=None,
                      form=None, host=None):
-        """inbox_revise (InboxRevise): A new version of a waiting ask: its task's script's (run, token), or the asking
-        Bot's (its own tools, sent a message from the ask's box). A script's on an ask that's been pressed opens it
-        again, waiting. Fields left out are the last version's.
+        """inbox_revise (InboxRevise): A new version of a waiting ask: its task's script's (run, token), the asking
+        chat's or Bot's (its own tools; a Bot's after a message from the ask's box), or one that may manage it. A
+        script's, or the asking chat's own, on an ask that's been pressed opens it again, waiting. Fields left out
+        are the last version's.
 
             ask (string): The ask's id.
             run (string or None): The asking run's id: a script's.
@@ -4337,27 +4350,33 @@ class Ops(Area):
         """
         return self._call("inbox_say", {"ask": ask, "text": text}, host, Obj)
 
-    def inbox_wait(self, *, ask=None, run=None, token=None, timeout=None, host=None):
-        """inbox_wait (InboxWait): A task's script's ask's answer (run, token), waited for: till it's answered (or
-        withdrawn, or its run's stopped), or timeout seconds (0: as it is now, a poll).
+    def inbox_wait(self, *, ask=None, session=None, run=None, token=None, timeout=None, host=None):
+        """inbox_wait (InboxWait): An ask's answer, waited for: a task's script's (run, token), till it's answered (or
+        withdrawn, or its run's stopped), or timeout seconds (0: as it is now, a poll); a chat's own tools'
+        (session), as long, 600 seconds at most. An answer a chat's model gets so isn't sent it as a message as
+        well.
 
             ask (string): The ask's id.
+            session (string): A chat's own ask: the asking chat's session id, from its own tools (their
+                connection's hello as), in place of run and token.
             run (string): The asking run's id (BAUDE_TASK_RUN): a task's script's.
             token (string): Its run's token (BAUDE_TASK_TOKEN).
             timeout (number or None): How long to wait, in seconds (0: not at all; none: till it's answered).
         """
-        return self._call("inbox_wait", {"ask": ask, "run": run, "token": token,
+        return self._call("inbox_wait", {"ask": ask, "session": session, "run": run, "token": token,
                                          "timeout": timeout}, host, Obj, waited(timeout))
 
-    def inbox_withdraw(self, *, ask=None, run=None, token=None, host=None):
-        """inbox_withdraw (InboxWithdraw): A waiting ask taken back by its task's script (run, token): out of every
-        Inbox.
+    def inbox_withdraw(self, *, ask=None, session=None, run=None, token=None, host=None):
+        """inbox_withdraw (InboxWithdraw): A waiting ask taken back by its task's script (run, token), or by its chat's
+        own tools (session): out of every Inbox.
 
             ask (string): The ask's id.
+            session (string): A chat's own ask: the asking chat's session id, from its own tools (their
+                connection's hello as), in place of run and token.
             run (string): The asking run's id (BAUDE_TASK_RUN): a task's script's.
             token (string): Its run's token (BAUDE_TASK_TOKEN).
         """
-        return self._call("inbox_withdraw", {"ask": ask, "run": run, "token": token}, host, Obj)
+        return self._call("inbox_withdraw", {"ask": ask, "session": session, "run": run, "token": token}, host, Obj)
 
     def infer(self, *, provider=None, method=None, path=None, headers=None, body=None, host=None):
         """infer (Infer): An HTTP request to one of this machine's model providers (an OpenAI-compatible server's: path

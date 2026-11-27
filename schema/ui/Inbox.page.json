@@ -1,5 +1,5 @@
 {
-  "description": "The Inbox: what's waiting on the person, from every host the app sees. First the asks tasks have raised, newest first, each a card expanded in place but cut a few lines down, its form and buttons always shown; then Pending requests (chats waiting on a permission) and Running (chats at a turn). Full width.",
+  "description": "The Inbox: what's waiting on the person, from every host the app sees. First the asks tasks and chats' models have raised, newest first, each a card expanded in place but cut a few lines down, its form and buttons always shown; then Pending requests (chats waiting on a permission) and Running (chats at a turn). Full width.",
   "apps": [
     "baude",
     "phone"
@@ -13,7 +13,8 @@
     "inboxview.py:AskCard",
     "inboxview.py:InboxRow",
     "baudelib/inbox.py:Inbox",
-    "Inbox.kt:InboxScreen"
+    "Inbox.kt:InboxScreen",
+    "baudelib/chattools.py"
   ],
   "copy": [
     "inbox",
@@ -57,9 +58,10 @@
     },
     {
       "name": "Stopped ask",
-      "shows": "An ask whose task went away (its run ended, or its host restarted) unanswered: its card greyed, its title and heading struck through, \"Not answered — the task stopped\" (dim) in place of the time and dot, its form and buttons off. ⋯ → Remove takes it out of every Inbox.",
+      "shows": "An ask whose task went away (its run ended, or its host restarted) unanswered, or a chat's own ask whose chat was archived or deleted: its card greyed, its title and heading struck through, \"Not answered — the task stopped\" (a chat's: \"Not answered — the chat was archived or deleted\") (dim) in place of the time and dot, its form and buttons off. ⋯ → Remove takes it out of every Inbox.",
       "copy": [
         "inbox.not_answered",
+        "inbox.chat_stopped",
         "common.remove"
       ]
     },
@@ -226,11 +228,23 @@
           "issue": "BaudeInternal#289"
         }
       ]
+    },
+    {
+      "said": "A model should be able to ask the user stuff in a formatted task like manners without a task to begin with i.e. direct access to the human ask machinery and the artefact builder",
+      "rule": "Every app's Inbox lists the asks chats' models raise themselves (no task) with the tasks' asks, newest first, each from its chat.",
+      "decided": "2026-11-27",
+      "source": [
+        {
+          "session": "221e1c29-56d7-48bf-a2dc-7a2b37ccd685",
+          "message": "75fb87b9-c080-453a-b592-ecb49dea4fb6"
+        }
+      ]
     }
   ],
   "scenes": [
     "inbox-list",
     "inbox-row",
-    "inbox-stopped"
+    "inbox-stopped",
+    "inbox-chat-list"
   ]
 }

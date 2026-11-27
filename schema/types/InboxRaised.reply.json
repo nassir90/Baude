@@ -21,6 +21,17 @@
     "version": {
       "type": "integer",
       "description": "Its version now (1 for the first)."
+    },
+    "answered": {
+      "anyOf": [
+        {
+          "$ref": "InboxAnswer.json"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "A revised chat's ask's answer to the version before, if its chat hadn't been told it yet."
     }
   },
   "required": [

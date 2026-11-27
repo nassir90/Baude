@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
-  "description": "A waiting ask taken back by its task's script (run, token): out of every Inbox.",
+  "description": "A waiting ask taken back by its task's script (run, token), or by its chat's own tools (session): out of every Inbox.",
   "properties": {
     "op": {
       "const": "inbox_withdraw",
@@ -18,6 +18,10 @@
       "type": "string",
       "description": "The ask's id."
     },
+    "session": {
+      "type": "string",
+      "description": "A chat's own ask: the asking chat's session id, from its own tools (their connection's hello as), in place of run and token."
+    },
     "run": {
       "type": "string",
       "description": "The asking run's id (BAUDE_TASK_RUN): a task's script's."
@@ -29,9 +33,7 @@
   },
   "required": [
     "op",
-    "ask",
-    "run",
-    "token"
+    "ask"
   ],
   "additionalProperties": false
 }

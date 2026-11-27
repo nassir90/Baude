@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
-  "description": "A new version of a waiting ask: its task's script's (run, token), or the asking Bot's (its own tools, sent a message from the ask's box). A script's on an ask that's been pressed opens it again, waiting. Fields left out are the last version's.",
+  "description": "A new version of a waiting ask: its task's script's (run, token), the asking chat's or Bot's (its own tools; a Bot's after a message from the ask's box), or one that may manage it. A script's, or the asking chat's own, on an ask that's been pressed opens it again, waiting. Fields left out are the last version's.",
   "properties": {
     "op": {
       "const": "inbox_revise",

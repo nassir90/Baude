@@ -107,6 +107,27 @@ def bot_info(ask):
     return remote_info({**listed, "server": r}) if listed else None
 
 
+def asker(ask):
+    """Who an ask's from, as its from line and tab name it: a task's, its task's name; a chat's own, the chat's (its
+    Bot's name, or its title as its host lists it now, else as it was when it asked)."""
+    if ask.get("run"):
+        return ask.get("task_name") or ""
+    listed = ask["server"].sessions.get(ask["session"]) if ask.get("server") is not None else None
+    return (chat_name(listed) if listed else None) or ask.get("chat") or ask.get("bot") or ""
+
+
+def from_line(ask):
+    """An ask's from line: "from Task “<task>” on <host>", or a chat's own "from <chat> on <host>"."""
+    if ask.get("run"):
+        return wording.say("inbox.from_task", task=ask.get("task_name") or "", host=ask["server"].label)
+    return wording.say("inbox.from_chat", chat=asker(ask), host=ask["server"].label)
+
+
+def writes_to(ask):
+    """Does an ask's box write to whoever asked: its task's Bot always, a chat while it's there (not stopped)?"""
+    return bool(ask.get("run")) or ask.get("status") != "stopped"
+
+
 def avatar(info, name, size=20):
     a = Adw.Avatar(size=size, text=name or "Bot", show_initials=True, valign=Gtk.Align.CENTER)
     if info is not None:
@@ -481,11 +502,11 @@ class AskView(Gtk.Box):
         info = bot_info(ask)
         key = (len(ask["versions"]), self.shown_n, ask.get("status"))
         child = self.face.get_first_child()
-        if child is None:
+        if child is None and (ask.get("run") or ask.get("bot")):  # (a Bot's picture; a chat that isn't one, none)
             self.face.append(avatar(info, ask.get("bot")))
-        self.from_line.set_label(wording.say("inbox.from_task", task=ask.get("task_name") or "",
-                                             host=ask["server"].label))
-        state = wording.say("inbox.not_answered") if self.gone() else \
+        self.face.set_visible(self.face.get_first_child() is not None)
+        self.from_line.set_label(from_line(ask))
+        state = wording.say("inbox.not_answered" if ask.get("run") else "inbox.chat_stopped") if self.gone() else \
             wording.say("inbox.sent_to", bot=ask["sent_to_name"]) if ask.get("sent_to_name") else ""
         self.state.set_label(state)
         self.state.set_visible(bool(state))
@@ -751,7 +772,7 @@ class AskCard(Gtk.Box):
     def update(self, ask):
         self.ask = ask
         gone = ask.get("status") == "stopped"
-        title = title_of(latest(ask)) or ask.get("task_name") or ""
+        title = title_of(latest(ask)) or asker(ask)
         if gone:
             self.title_label.set_markup(f"<s>{GLib.markup_escape_text(title)}</s>")
         else:
@@ -878,7 +899,7 @@ class AskPage(Gtk.Box):
         col.append(self.view)
         self.scroll = Gtk.ScrolledWindow(child=col, vexpand=True, hscrollbar_policy=Gtk.PolicyType.NEVER)
         self.append(self.scroll)
-        bot = ask.get("bot") or "Bot"
+        bot = asker(ask) if not ask.get("run") else ask.get("bot") or "Bot"  # (the asking chat, or task's Bot)
         self.writing = composerview.Composer(send_tip=wording.say("inbox.send_to", bot=bot))
         self.writing.set_margin_start(20)
         self.writing.set_margin_end(20)
@@ -888,6 +909,7 @@ class AskPage(Gtk.Box):
         keys.connect("key-pressed", self._key)
         self.writing.input.add_controller(keys)
         self.append(self.writing)
+        self.writing.set_visible(writes_to(ask))
 
     def _key(self, _c, keyval, _code, state):
         if keyval in (Gdk.KEY_Return, Gdk.KEY_KP_Enter) and composerview.sends(state):
@@ -913,6 +935,7 @@ class AskPage(Gtk.Box):
             self.view.draw()
             return
         self.banner.set_revealed(False)
+        self.writing.set_visible(writes_to(ask))
         if ask != self.view.ask:
             self.view.update(ask)
 
@@ -952,8 +975,10 @@ def ask_text(ask, view=None):
     v = latest(ask)
     values = view.values() if view is not None else {}
     lines = [f"Ask {ask['id']} on {ask['server'].label}: {title_of(v)}",
-             f"From Task “{ask.get('task_name')}” (task {ask.get('task')}, run {ask.get('run')}), Bot "
-             f"{ask.get('bot') or ''} (chat {ask.get('session')}); status {ask.get('status')}; version "
+             (f"From Task “{ask.get('task_name')}” (task {ask.get('task')}, run {ask.get('run')}), Bot "
+              f"{ask.get('bot') or ''} (chat {ask.get('session')})" if ask.get("run") else
+              f"From the chat “{asker(ask)}” itself, no task (chat {ask.get('session')})") +
+             f"; status {ask.get('status')}; version "
              f"{len(ask['versions'])} of {len(ask['versions'])}", "", "<body>", v["body"].strip(), "</body>", "",
              "Buttons (by index): " + "; ".join(f"{i}: {b['label']}" for i, b in enumerate(v["buttons"]))]
     if v["form"]:
@@ -969,7 +994,10 @@ def ask_text(ask, view=None):
 
 
 def run_log(ask, limit=60):
-    """The asking run's record and the end of its log, as its host gives them (off the main loop)."""
+    """The asking run's record and the end of its log, as its host gives them (off the main loop); none for a chat's
+    own ask."""
+    if not ask.get("run"):
+        return "(no run: the chat itself asks this)"
     got = ask["server"].call({"op": "task_run", "session": ask["session"], "run": ask["run"]}, timeout=15)
     if got.get("op") == "error":
         return f"(its run's log couldn't be read: {got.get('error')})"

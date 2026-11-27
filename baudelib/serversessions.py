@@ -363,6 +363,8 @@ class ServerSessions:
         out = {}
         for name, entry in servers.items():
             out[name] = {**entry, "default_tools_approval_mode": "approve"}
+            if name == chattools.NAME:
+                out[name]["tool_timeout_sec"] = chattools.WAIT_MAX_S + 60  # (an ask's answer waited for)
             if name == meshtools.NAME:
                 out[name]["tool_timeout_sec"] = meshtools.WAIT_MAX_S + 60
                 if models.codex_mode(mode) != "bypassPermissions":

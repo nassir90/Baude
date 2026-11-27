@@ -840,6 +840,15 @@ class WindowDrafts:
                 self.sync_providers()
             return
         self.outgrown = False  # (another model's window: as its usage says)
+        if self.remote is not None and model_program(value) != model_program(was) and self.bot_name() and \
+                baudelib.wire.takes(self.remote.info, "rotate"):
+            if getattr(self, "busy", False) and self.proc is not None:  # (rotated once the turn's over)
+                self.move_after_turn = (self.proc, value)
+                self.sync_providers()
+                return
+            self.sync_providers()  # (its own model till the host's moved it)
+            self.remote_rotate_to(value)  # (a Bot: its conversation rotated, and it goes on afresh on the one picked)
+            return
         if self.remote is not None and model_program(value) != model_program(was):
             self.sync_providers()  # (this one goes on with its own model: the one picked is the new session's)
             self.remote_new_conversation(value)  # (a network session: a new one, on its server)

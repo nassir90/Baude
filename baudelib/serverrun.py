@@ -1069,12 +1069,13 @@ class ServerRunning:
                 return reply(kind, **fields)
             if op == "bot":  # (made a Bot, renamed or its picture changed; or, bot None, a chat again)
                 return reply("bot_set", session=self.set_bot(s, msg.get("bot")))
-            if op == "rotate":  # (a Bot's conversation archived as a past thread of its own; the Bot goes on afresh)
-                try:
-                    thread = self.rotate(s)
+            if op == "rotate":  # (a Bot's conversation archived as a past thread of its own; the Bot goes on afresh,
+                try:              # on model if it's given)
+                    thread = self.rotate(s) if msg.get("model") is None else \
+                        self.rotate_to(s, msg["model"], msg.get("effort"))
                 except (OSError, ValueError) as e:
                     return reply("error", error=str(e), plain=True)
-                return reply("rotated", session=s.listing(), thread=thread.listing())
+                return reply("rotated", session=s.listing(), thread=thread.listing() if thread is not None else None)
             if op == "held":  # (a message held for it: dropped, or sent as its user's input would be, and dropped then,
                 # at once: kept if it can't be)
                 held = s.meta.get("held") or []
@@ -1271,14 +1272,7 @@ class ServerRunning:
         one left half done is undone or finished as the host next starts (settle_rotations), or at once if a step
         fails here. The thread: the new session, as it's kept."""
         bot = s.meta.get("bot")
-        if not bot:
-            raise ValueError(wording.say("host_errors.not_a_bot"))
-        if s.busy or s.asks or s.queued or s.codex_queue:
-            raise ValueError(wording.say("host_errors.at_a_turn"))
-        if s.commands() or s.background_agents:
-            raise ValueError(wording.say("host_errors.background_running"))
-        if self.tasks.asking(s.id):
-            raise ValueError(wording.say("host_errors.task_asking"))
+        self.can_rotate(s)
         if s.transcript() is None:
             raise ValueError(wording.say("host_errors.nothing_to_rotate"))
         self.rescan(s)  # (its title as its transcript has it now)
@@ -1336,6 +1330,52 @@ class ServerRunning:
         s.reverting.clear()
         self.rescan(s)
         self.log(f"rotated {s.id}: its conversation archived as {thread.id}")
+        self.changed()
+        return thread
+
+    def can_rotate(self, s):
+        """(under the lock) Refused (ValueError) if a session can't be rotated now: it isn't a Bot, or it's at a turn,
+        asking, running commands or agents in the background, or a task's ask waits on it."""
+        if not s.meta.get("bot"):
+            raise ValueError(wording.say("host_errors.not_a_bot"))
+        if s.busy or s.asks or s.queued or s.codex_queue:
+            raise ValueError(wording.say("host_errors.at_a_turn"))
+        if s.commands() or s.background_agents:
+            raise ValueError(wording.say("host_errors.background_running"))
+        if self.tasks.asking(s.id):
+            raise ValueError(wording.say("host_errors.task_asking"))
+
+    def rotate_to(self, s, model, effort=None):
+        """(under the lock) A Bot moved onto any model, of whatever program: its conversation rotated (rotate) if
+        anything's been said in it, and the Bot carried on afresh on model, at effort if its program has one, its
+        memory telling it who it is. Refused (ValueError) as rotate is, or for a model this host can't run. The
+        thread: its past one, None if there was nothing to rotate."""
+        if not isinstance(model, str) or not model.strip():
+            raise ValueError("model is a model's name")
+        if not self.can_run(model):
+            raise ValueError(wording.say("host_errors.cant_run", host=self.me["name"], model=model))
+        self.can_rotate(s)
+        thread = self.rotate(s) if s.transcript() is not None else None
+        was = models.model_program(s.meta.get("model"))
+        run = models.launch(model, s.meta.get("mode"), effort if isinstance(effort, str) and effort else
+                            s.meta.get("effort"))
+        if run["program"] == "codex":
+            run["effort"] = models.codex_effort(self.codex_models(s.meta.get("profiles", {}).get("codex", "")),
+                                                model, run["effort"])
+        s.meta.update(model=model, mode=run["mode"], effort=run["effort"])
+        if run["program"] != was:  # (a conversation of the new program's: Codex names its own thread as it starts)
+            for key in ("cli_id", "path", "codex_started", "context_usage", "init"):
+                s.meta.pop(key, None)
+            if run["program"] != "codex":
+                s.meta["cli_id"] = str(uuid.uuid4())
+        self.save(s)
+        if s.proc is not None:  # (its agent between turns, the old model's: let go of, as rotate does)
+            old, s.proc = s.proc, None
+            old.stopping = True
+            s.forget_commands()
+            old.kill()
+            self.drop_routes(s)
+        self.log(f"moved {s.id} onto {model}")
         self.changed()
         return thread
 

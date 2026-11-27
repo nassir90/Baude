@@ -804,6 +804,28 @@ class WindowRemote:
                    **({"env": claudelib.claude_env()} if r.mine else {})},
                   lambda reply: self.remote_started(r, reply, carry_from=was))
 
+    def remote_rotate_to(self, model):
+        """Another kind of model picked in a Bot: its conversation rotated on its host (archived as a past thread, if
+        anything's been said) and the Bot carried on afresh on that model, shown as its host lists it then."""
+        r, sid = self.remote, self.session_id
+        effort = self.local_effort if model_program(model) == "pi" else self.effort
+
+        def done(reply):
+            if reply.get("op") != "rotated":
+                self.note(wording.say("trash.host_refused", host=remote_name(r), op="rotate",
+                                      why=baudelib.wire.said(reply)))
+                return
+            for listed in (reply.get("session"), reply.get("thread")):
+                if isinstance(listed, dict) and baudelib.wire.is_id(listed.get("id") or ""):
+                    r.forget_mirror(listed["id"])
+                    r.sessions[listed["id"]] = listed
+            r.network.changed()
+            if self.remote is r and self.session_id == sid and isinstance(reply.get("session"), dict):
+                self.shown_rotated = reply["session"].get("rotated")  # (opened here, not again by on_network)
+                self.open_remote(remote_info({**reply["session"], "server": r}))
+                self.note(wording.say("chat_header.model_note_new", name=self.model_said(model)))
+        r.request({"op": "rotate", "session": sid, "model": model, **({"effort": effort} if effort else {})}, done)
+
     def remote_started(self, r, reply, carry_from=None):
         """A server started a session asked for here: its group listed, and it opened (another host's isn't listed till
         that host's picked beside New session: Meta's button:host). carry_from: the chat whose box it opens with, if

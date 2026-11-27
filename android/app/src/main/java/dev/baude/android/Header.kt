@@ -471,6 +471,17 @@ private fun pickModel(hostId: String, sid: String, s: Msg.Session, v: String, ch
                       asked: MutableMap<String, String>, said: (String) -> Unit, open: (String, String) -> Unit,
                       modelSet: (String) -> Unit) {
     val was = s.model?.ifBlank { null } ?: defaultModel(hostId)
+    if (program(v) != program(chosen(choices, was)?.value ?: was) && s.bot != null && takes(hostId, "rotate")) {
+        // (a Bot: its conversation rotated, and it goes on afresh on the one picked)
+        Mesh.ask(hostId, Msg.Rotate(session = sid, model = v).json()) { r ->
+            if (r.optString("op") == "rotated") {
+                said(Wording.ChatHeader.modelNoteNew(name = chosen(choices, v)?.name ?: v))
+                modelSet(v)
+            } else said(Wording.Trash.hostRefused(host = Mesh.label(hostId), op = "rotate",
+                why = Msg.Error.from(r).said.orEmpty()))
+        }
+        return
+    }
     if (program(v) != program(chosen(choices, was)?.value ?: was)) { // (another program: a new chat with it)
         val msg = Msg.Start(prompt = "", cwd = s.cwd.orEmpty().ifBlank { "~" }, model = v,
             mode = if (program(v) == "codex") "default" else "auto", draft = true, group = s.group).json()

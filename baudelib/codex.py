@@ -307,7 +307,7 @@ class CodexProc(AppServer):
 
     def __init__(self, on_msg, on_exit, cwd, model, resume=None, effort=None, env=None, exe=None, ephemeral=False,
                  catalog=(), mode="default", meta_system=None, meta_servers=None, dispatch=None,
-                 recover_empty=False, profile=None, servers=None):
+                 recover_empty=False, profile=None, servers=None, instructions=None):
         self.on_msg = on_msg
         self.dispatch = dispatch or (lambda fn, *args: fn(*args))
         self.req_ids = itertools.count(1)
@@ -336,6 +336,8 @@ class CodexProc(AppServer):
             params["ephemeral"] = True
         if servers:  # (MCP servers of the host's: a Bot's answer_task tool)
             params["config"] = {"mcp_servers": servers}
+        if instructions:  # (after Codex's own, each start: a Bot's who it is, its memory)
+            params["developerInstructions"] = instructions
 
         def opened(result):
             self.thread = result["thread"]["id"]

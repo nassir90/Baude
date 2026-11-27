@@ -245,9 +245,11 @@ class ServerSessions:
                     extra += [flag, *(value if isinstance(value, list) else [value])]
             if s.meta.get("ephemeral"):  # (a side question: sees the conversation, writes nothing of its own)
                 extra += ["--no-session-persistence"]
-        if s.meta.get("bot") and run["program"] in ("claude", "pi"):  # (who it is, and its memory, each start)
-            mem = self.bot_memory(s)
+        told = None
+        if s.meta.get("bot") and run["program"] in ("claude", "pi", "codex"):  # (who it is, and its memory, each
+            mem = self.bot_memory(s)                                              # start)
             told = bot_system(s.meta["bot"]["name"], mem["path"], mem["text"])
+        if told is not None and run["program"] in ("claude", "pi"):
             if run["program"] == "claude" and "--append-system-prompt" in extra:  # (one: its own system with it)
                 at = extra.index("--append-system-prompt") + 1
                 extra[at] = extra[at] + "\n\n" + told
@@ -322,7 +324,7 @@ class ServerSessions:
                 effort=run["effort"], exe=run["exe"], ephemeral=s.meta.get("ephemeral", False),
                 profile=profile,
                 env={**s.env, **(self.env or {})}, catalog=self.codex_models(profile), mode=run["mode"],
-                recover_empty=bool(s.meta.get("cli_id")) and self.codex_empty_thread(s),
+                recover_empty=bool(s.meta.get("cli_id")) and self.codex_empty_thread(s), instructions=told,
                 servers={meshtools.NAME: {"command": sys.executable, "args": [
                     agentproxy.HEADLESS, "mesh-tools", "--socket", os.path.abspath(self.socket_path), "--only",
                     "answer_task"], "env": {"BAUDE_SESSION": s.id},

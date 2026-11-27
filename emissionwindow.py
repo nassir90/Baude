@@ -500,19 +500,18 @@ class Window(Adw.ApplicationWindow):
             group.add_action(act)
             more.append(label, f"who.{name}")
         menu.append_section(None, more)
-        tracking = Gio.SimpleAction.new_stateful("tracking", None, GLib.Variant.new_boolean(
-            blocks_tracking(self.profile_id)))
-        tracking.connect("change-state", lambda act, v: self.block_tracking(act, v.get_boolean()))
+        blocked = blocks_tracking(self.profile_id)
+        tracking = Gio.SimpleAction.new("tracking", None)
+        tracking.connect("activate", lambda *_a: self.block_tracking(not blocked))
         group.add_action(tracking)
         privacy = Gio.Menu()
-        privacy.append("Prevent Cross-Site Tracking", "who.tracking")
+        privacy.append("Prevent Cross-Site Tracking" + ("  ✓" if blocked else ""), "who.tracking")
         menu.append_section(None, privacy)
         self.insert_action_group("who", group)
         return menu
 
-    def block_tracking(self, act, on):
+    def block_tracking(self, on):
         """This profile's pages blocking cross-site cookies and storage (on), as Safari does, or not: from now on."""
-        act.set_state(GLib.Variant.new_boolean(on))
         set_blocks_tracking(self.profile_id, on)
         if self.Engine is not None:
             self.Engine.block_tracking(self.profile_id, on)

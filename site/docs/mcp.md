@@ -503,12 +503,14 @@ A container's or a Compose project's log, followed (logs): one a connection, the
 
 #### `draft_save` (DraftSave)
 
-A chat's draft written (a change to the chat: Agent Management's write), kept by its host as the newest whatever was there (the last write wins), and told every other head attached to it (draft_changed). Sent a moment after typing stops, as the chat's left, and at once as the box is emptied by sending.
+A chat's draft written (a change to the chat: Agent Management's write), kept by its host as the newest whatever was there (the last write wins), and told every other head attached to it (draft_changed). Sent a moment after typing stops, as the chat's left, and at once as the box is emptied by sending (sent). One written before the draft's last send is refused (stale_draft), its draft as kept now with it.
 
 | Field | Type | Required | What it is |
 |---|---|---|---|
 | `session` | string | yes | The session's id. |
 | `text` | string | yes | What's written in its box now (empty: nothing, as once it's sent). |
+| `epoch` | integer | yes | The draft's epoch its text was written in (ChatDraft's epoch, as this head last had it): one less than its host's now (a send's emptied it since), and it's refused (stale_draft), so what was sent isn't written back. |
+| `sent` | string/null |  | A send's id, of the head's own pick (one each Enter): the box emptied by sending what was in it. The draft emptied, and its epoch one more. |
 | `head` | string/null |  | The box writing it, an id of the head's own pick (one each window or chat page): carried in the draft as it's told, so the box knows its own save. |
 
 #### `edit_adopt` (EditAdopt)
@@ -742,12 +744,13 @@ A button of a waiting ask pressed, with its form's values: its task told (inbox_
 
 #### `inbox_raise` (InboxRaise)
 
-A running task's script raises an ask of a person (on the host's own socket, with its run's token): kept, and in the Inbox of every head that may manage its Bot till it's answered, withdrawn or its run ends. Answered as a button's pressed (inbox_wait).
+A running task's script raises an ask of a person (on the host's own socket, with its run's token), or a chat's model does with its own tools (session, on its host's own socket): kept, and in the Inbox of every head that may manage its Bot (or chat) till it's answered, withdrawn or its run ends (its chat's archived or deleted). Answered as a button's pressed: inbox_wait, and for a chat, a message from the Inbox as its next turn.
 
 | Field | Type | Required | What it is |
 |---|---|---|---|
-| `run` | string | yes | The asking run's id (BAUDE_TASK_RUN): a task's script's. |
-| `token` | string | yes | Its run's token (BAUDE_TASK_TOKEN). |
+| `session` | string |  | A chat's own ask: the asking chat's session id, from its own tools (their connection's hello as), in place of run and token. |
+| `run` | string |  | The asking run's id (BAUDE_TASK_RUN): a task's script's. |
+| `token` | string |  | Its run's token (BAUDE_TASK_TOKEN). |
 | `title` | string/null |  | What it's called in the Inbox's list (its body's first line, if none). |
 | `body` | string | yes | What it says: Markdown, as a message is written. ![alt](name) on a line of its own, or alone in a table's cell, shows one of its pictures there (by its name). |
 | `pictures` | array/null of InboxPictureData |  | Its pictures, each by the name its body and buttons use. |
@@ -764,7 +767,7 @@ A stopped ask taken out of every Inbox (and off the host).
 
 #### `inbox_revise` (InboxRevise)
 
-A new version of a waiting ask: its task's script's (run, token), or the asking Bot's (its own tools, sent a message from the ask's box). A script's on an ask that's been pressed opens it again, waiting. Fields left out are the last version's.
+A new version of a waiting ask: its task's script's (run, token), the asking chat's or Bot's (its own tools; a Bot's after a message from the ask's box), or one that may manage it. A script's, or the asking chat's own, on an ask that's been pressed opens it again, waiting. Fields left out are the last version's.
 
 | Field | Type | Required | What it is |
 |---|---|---|---|
@@ -799,24 +802,26 @@ What a person wrote in an ask's box, sent the asking task's Bot as a message (wi
 
 #### `inbox_wait` (InboxWait)
 
-A task's script's ask's answer (run, token), waited for: till it's answered (or withdrawn, or its run's stopped), or timeout seconds (0: as it is now, a poll).
+An ask's answer, waited for: a task's script's (run, token), till it's answered (or withdrawn, or its run's stopped), or timeout seconds (0: as it is now, a poll); a chat's own tools' (session), as long, 600 seconds at most. An answer a chat's model gets so isn't sent it as a message as well.
 
 | Field | Type | Required | What it is |
 |---|---|---|---|
 | `ask` | string | yes | The ask's id. |
-| `run` | string | yes | The asking run's id (BAUDE_TASK_RUN): a task's script's. |
-| `token` | string | yes | Its run's token (BAUDE_TASK_TOKEN). |
+| `session` | string |  | A chat's own ask: the asking chat's session id, from its own tools (their connection's hello as), in place of run and token. |
+| `run` | string |  | The asking run's id (BAUDE_TASK_RUN): a task's script's. |
+| `token` | string |  | Its run's token (BAUDE_TASK_TOKEN). |
 | `timeout` | number/null |  | How long to wait, in seconds (0: not at all; none: till it's answered). |
 
 #### `inbox_withdraw` (InboxWithdraw)
 
-A waiting ask taken back by its task's script (run, token): out of every Inbox.
+A waiting ask taken back by its task's script (run, token), or by its chat's own tools (session): out of every Inbox.
 
 | Field | Type | Required | What it is |
 |---|---|---|---|
 | `ask` | string | yes | The ask's id. |
-| `run` | string | yes | The asking run's id (BAUDE_TASK_RUN): a task's script's. |
-| `token` | string | yes | Its run's token (BAUDE_TASK_TOKEN). |
+| `session` | string |  | A chat's own ask: the asking chat's session id, from its own tools (their connection's hello as), in place of run and token. |
+| `run` | string |  | The asking run's id (BAUDE_TASK_RUN): a task's script's. |
+| `token` | string |  | Its run's token (BAUDE_TASK_TOKEN). |
 
 #### `infer` (Infer)
 
@@ -1781,13 +1786,14 @@ Anything wrong, with the request's req. A request whose op the host doesn't take
 | Field | Type | Required | What it is |
 |---|---|---|---|
 | `error` | string | yes | What's wrong. |
-| `code` | `unsupported_operation` \| `invalid_data_type` \| `access_denied` |  | One of the schema's own refusals. |
+| `code` | `unsupported_operation` \| `invalid_data_type` \| `access_denied` \| `stale_draft` |  | One of the schema's own refusals; stale_draft: a draft_save written before the draft's last send (its epoch less than its host's), not kept. |
 | `detail` | string |  | A refusal's: what was wrong (the op, or the field and why), for a person to read; code, not this, says which refusal it is. |
 | `denied` | `shell` \| `browser_read` \| `browser_write` \| `providers` \| `model_files` \| `spawn` \| `manage_read` \| `manage_write` \| `kube_read` \| `kube_write` \| `docker_read` \| `docker_write` \| `databases` \| `subscriptions_read` \| `subscriptions_write` \| `access_read` \| `access_write` |  | access_denied's: the rule refused (AccessRules'): a capability, or one side of one split into read and write. |
 | `plain` | boolean |  | Said for the user as it is. |
 | `gone` | GoneFolder |  | A session's folder gone and not made again. |
 | `missing` | Dep |  | What a chat's program needs that the host hasn't (claude, codex): error says what to install. |
-| `session` | string |  | memory's refusal: the session. |
+| `draft` | ChatDraft |  | stale_draft's: the draft as its host keeps it. |
+| `session` | string |  | memory's refusal, and stale_draft's: the session. |
 | `text` | string |  | memory's refusal: the memory as the Bot left it. |
 | `seen` | string/null |  | memory's refusal: what the user's accepted of it. |
 | `mtime` | number/null |  | memory's refusal: its mtime (ns; a phone's, seconds). |
@@ -1916,6 +1922,7 @@ inbox_wait's answer: the ask as it is.
 | `ask` | string | yes | The ask's id. |
 | `status` | `waiting` \| `answered` \| `withdrawn` \| `stopped` | yes | Its status (waiting: not answered within the timeout). |
 | `answer` | InboxAnswer? |  | How it was answered. |
+| `version` | integer/null |  | How many versions it has (the last is what's answered). |
 
 #### `inbox_done` (InboxDone)
 
@@ -2783,6 +2790,8 @@ A chat's draft, as its host keeps it: the text written in its box and not sent, 
 | `text` | string | yes | What's written (empty once it's sent). |
 | `rev` | integer | yes | Its revision: one more with every save, never less (a head drops one it's seen a later revision than). |
 | `head` | string/null |  | The box that wrote it (draft_save's head): what that box knows as its own save, coming back. |
+| `epoch` | integer |  | How many times it's been emptied by a send (none: 0): one more with every send, never less. A save written before the last send (its epoch less) is refused, and a head drops a draft of an epoch less than one it's seen, so what was sent never comes back. |
+| `sent` | string/null |  | The send that last emptied it (draft_save's sent): the same send's save, made again, empties it once. |
 | `at` | number/null |  | When it was written, epoch seconds. |
 
 #### ChatLogin
@@ -3182,18 +3191,19 @@ How an ask was answered: the button pressed and the form's values.
 
 #### InboxAsk
 
-A task's ask of a person, kept by its host (state folder's inbox/) till it's answered or its task withdraws it: across the host's restarts, stopped (its run gone) then, struck through and its buttons off. Every head that may manage the asking Bot is told it as it changes (inbox_changed).
+A task's or a chat's ask of a person, kept by its host (state folder's inbox/) till it's answered or withdrawn: across the host's restarts; a task's stopped then (its run gone), a chat's once its chat's archived or deleted, struck through and its buttons off. Every head that may manage the asking Bot or chat is told it as it changes (inbox_changed).
 
 | Field | Type | Required | What it is |
 |---|---|---|---|
 | `id` | string | yes | The ask's id. |
-| `session` | string | yes | The asking task's Bot's session id. |
-| `bot` | string/null |  | That Bot's name. |
-| `task` | string | yes | The task's id. |
-| `task_name` | string | yes | The task's name. |
-| `run` | string | yes | The asking run's id. |
+| `session` | string | yes | The asking chat's session id: a task's Bot's, or the chat whose model raised it. |
+| `bot` | string/null |  | That chat's Bot's name, if it's a Bot. |
+| `chat` | string/null |  | A chat's own ask (task null): the chat's name as it raised it (its Bot's, else its title). |
+| `task` | string/null |  | The task's id; null for a chat's own ask (its model's, with its chat's tools). |
+| `task_name` | string/null |  | The task's name; null for a chat's own. |
+| `run` | string/null |  | The asking run's id; null for a chat's own. |
 | `at` | number | yes | When it was raised (seconds since the epoch). |
-| `status` | `waiting` \| `answered` \| `withdrawn` \| `stopped` | yes | waiting: for an answer; answered (answer: how); withdrawn: its task took it back; stopped: its run ended (or its host restarted) with it unanswered. |
+| `status` | `waiting` \| `answered` \| `withdrawn` \| `stopped` | yes | waiting: for an answer; answered (answer: how); withdrawn: its task or chat took it back; stopped: its run ended (or its host restarted), or its chat was archived or deleted, with it unanswered. |
 | `versions` | array of InboxVersion | yes | Every version of it, oldest first: the last is what's answered. |
 | `proposal` | InboxProposal? |  | A model's answer waiting to be confirmed, if one was asked for. |
 | `sent_to` | string/null |  | The Bot it's been sent to answer (its session id), till it does. |
@@ -4363,6 +4373,6 @@ Somewhere wire.reach can go: this machine's host process, one listening on anoth
 | `TERMINAL_KEEP_S` | `600` | A terminal (terminal op) no connection is attached to now: its program kept running this long to be attached to again, in seconds. |
 | `TERMINAL_KEPT_BYTES` | `262144` | What a terminal (terminal op) wrote lately, kept to show again on attach: this many bytes at most. |
 | `TTL` | `16` | A tunnel's passed through at most this many hosts (open's ttl). |
-| `VERSION` | `47` | The wire's version, as a host's hello says it. |
+| `VERSION` | `49` | The wire's version, as a host's hello says it. |
 | `ZOOM_MAX` | `1568` | A browser zoom's longest side, in pixels. |
 | `ZOOM_QUALITY` | `90` | A browser zoom's JPEG quality. |

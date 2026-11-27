@@ -6,6 +6,7 @@ called by the agent as mcp__mesh__<tool>."""
 import base64
 import json
 import os
+import socket
 import sys
 import threading
 import time
@@ -161,6 +162,9 @@ def _channel(where, timeout=10, as_=None, meta=False, agent=None):
     return ch, info or {}
 
 
+CALL = threading.local()  # (the tool call a thread's running: .cancel, the event its cancel sets)
+
+
 class Mesh:
     """The mesh as this host's process has it (this chat's: me, its session id, or meta: a head's Meta's, in no chat;
     socket: that host process's, if it isn't this user's usual one; agent: an agent outside the apps', by its name:
@@ -268,6 +272,17 @@ class Mesh:
 
     def request(self, where, msg, timeout=30):
         ch, _info = self.channel(where)
+        cancel, done = getattr(CALL, "cancel", None), threading.Event()
+        if cancel is not None:  # (the model's call cancelled: this connection closed, its host told)
+            def watch():
+                while not done.is_set():
+                    if cancel.wait(0.2):
+                        try:
+                            ch.sock.shutdown(socket.SHUT_RDWR)
+                        except OSError:
+                            pass
+                        return
+            threading.Thread(target=watch, daemon=True).start()
         try:
             ch.sock.settimeout(timeout)
             ch.send({**msg, "req": 1})
@@ -278,6 +293,7 @@ class Mesh:
                     return r
             raise OSError("the host went before it answered")
         finally:
+            done.set()
             ch.close()
 
     def sessions(self, where):
@@ -773,7 +789,10 @@ def serve_tools(name, schemas, call, rfile=None, wfile=None, started=None):
             wfile.write(json.dumps(msg) + "\n")
             wfile.flush()
 
-    def run(mid, tool, args):
+    cancels = {}  # (the calls going, by their request id: the event a cancel of one sets)
+
+    def run(mid, tool, args, cancel):
+        CALL.cancel = cancel
         try:
             if tool not in schemas:
                 raise ValueError(f"no tool {tool}")
@@ -781,13 +800,20 @@ def serve_tools(name, schemas, call, rfile=None, wfile=None, started=None):
             result = {"content": [{"type": "text", "text": json.dumps(got, indent=1, ensure_ascii=False)}]}
         except Exception as e:  # (said to the model, which may try again)
             result = {"content": [{"type": "text", "text": f"{type(e).__name__}: {e}"}], "isError": True}
-        send({"jsonrpc": "2.0", "id": mid, "result": result})
+        finally:
+            cancels.pop(mid, None)
+        if not cancel.is_set():  # (one cancelled isn't answered)
+            send({"jsonrpc": "2.0", "id": mid, "result": result})
     for line in rfile:
         try:
             msg = json.loads(line)
         except ValueError:
             continue
         method, mid = msg.get("method"), msg.get("id")
+        if method == "notifications/cancelled":
+            if (c := cancels.get((msg.get("params") or {}).get("requestId"))) is not None:
+                c.set()
+            continue
         if mid is None:
             continue
         if method == "initialize":
@@ -801,7 +827,9 @@ def serve_tools(name, schemas, call, rfile=None, wfile=None, started=None):
             send({"jsonrpc": "2.0", "id": mid, "result": {"tools": listed(schemas, name)}})
         elif method == "tools/call":
             p = msg.get("params") or {}
-            threading.Thread(target=run, args=(mid, p.get("name"), p.get("arguments") or {}), daemon=True).start()
+            cancels[mid] = threading.Event()
+            threading.Thread(target=run, args=(mid, p.get("name"), p.get("arguments") or {}, cancels[mid]),
+                             daemon=True).start()
         else:
             send({"jsonrpc": "2.0", "id": mid, "error": {"code": -32601, "message": "unknown method"}})
 

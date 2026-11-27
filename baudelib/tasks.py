@@ -1367,6 +1367,7 @@ class Tasks:
         one). When the next one's due (seconds from now), or None if there's none."""
         srv, now, soonest, looks = self.server, time.time(), None, []
         self.deliver()
+        srv.inbox.deliver()  # (and each chat its asks' answers)
         if self.checked is None or time.monotonic() - self.checked >= taskvars.CHECK_S:
             self.checked = time.monotonic()
             threading.Thread(target=self.check_all, daemon=True, name="task-variables").start()

@@ -1199,6 +1199,27 @@ abstract class Screens(private val theme: String) {
         screen("inbox-8-stopped-ask")
     }
 
+    @Test @Config(qualifiers = "+h1500dp") fun inboxChatAsk() {
+        inboxFixture(chat = true)
+        show { dev.baude.android.AskScreen("h1", "chat", {}) }
+        laidOut()
+        screen("inbox-13-chat-ask")
+    }
+
+    @Test @Config(qualifiers = "+h3300dp") fun inboxChatList() {
+        inboxFixture(chat = true)
+        show { dev.baude.android.InboxScreen({}, { _, _ -> }, { _, _ -> }) }
+        laidOut()
+        screen("inbox-14-chat-list")
+    }
+
+    @Test @Config(qualifiers = "+h1500dp") fun inboxChatStopped() {
+        inboxFixture(chat = true, stopped = true)
+        show { dev.baude.android.AskScreen("h1", "chat", {}) }
+        laidOut()
+        screen("inbox-15-chat-stopped")
+    }
+
     @Test fun inboxEmpty() = render("inbox-9-empty") {
         Mesh.sessions["h1"] = Mesh.sessions.getValue("h1").map { Msg.Session.from(it.json().put("state", "idle")) }
         dev.baude.android.InboxScreen({}, { _, _ -> }, { _, _ -> })
@@ -1221,13 +1242,14 @@ abstract class Screens(private val theme: String) {
      * pick, a morning digest and a limit's six coloured buttons and its form); stopped: the deploy one's task gone;
      * proposal: Opus's answer to the limit one, ready. Their pictures are scratch-BI-289's fixtures where build/inbox-fix
      * has them (copied there by hand: never kept), else a flat colour of their size. */
-    private fun inboxFixture(stopped: Boolean = false, proposal: Boolean = false) {
+    private fun inboxFixture(stopped: Boolean = false, proposal: Boolean = false, chat: Boolean = false) {
         val now = System.currentTimeMillis() / 1000.0
         val dir = java.io.File("build/inbox-fix")
         val sizes = mapOf("tea-after.png" to (1920 to 1200), "dash-after.png" to (1920 to 1200), "week.png" to (2200 to 600),
             "logo-a.png" to (720 to 720), "logo-b.png" to (720 to 720), "logo-c.png" to (720 to 720),
             "meter-work.png" to (600 to 80), "meter-home.png" to (600 to 80), "meter-team.png" to (600 to 80),
-            "use-work.png" to (600 to 168), "use-home.png" to (600 to 168), "use-team.png" to (600 to 168))
+            "use-work.png" to (600 to 168), "use-home.png" to (600 to 168), "use-team.png" to (600 to 168),
+            "timings.png" to (2400 to 660))
         fun bytes(name: String): ByteArray {
             java.io.File(dir, name).takeIf { it.exists() }?.let { return it.readBytes() }
             val (w, h) = sizes.getValue(name)
@@ -1249,7 +1271,10 @@ abstract class Screens(private val theme: String) {
             if (it.id == "d") Msg.Session.from(it.json().put("asks", org.json.JSONArray().put(org.json.JSONObject()
                 .put("request_id", "r1").put("tool", "Bash").put("input", org.json.JSONObject())))) else it
         }
-        Mesh.sessions["h1"] = listOf(bot("j", "Juniper", "idle", 30.0), bot("f", "Fern", "working", 90.0)) + rest
+        Mesh.sessions["h1"] = listOf(bot("j", "Juniper", "idle", 30.0), bot("f", "Fern", "working", 90.0)) + rest +
+            (if (chat) listOf(Msg.Session(id = "t", title = "Speed up the tokenizer's hot loop", cwd = "/home/dev/parser",
+                updated = now - 20, said = now - 20, created = now - 9_000, state = "idle", model = "opus", effort = "high",
+                mode = "default")) else emptyList())
         Mesh.pictures["h1/j/null"] = Pictures.portrait(0xFFFFFFFF.toInt(), 0xFFC68B59.toInt(), 0xFF8DE6B1.toInt(), 0xFF5A3A22.toInt())
         fun pic(name: String) = Msg.InboxPicture(name = name, mime = "image/png", size = 1000,
             width = sizes.getValue(name).first, height = sizes.getValue(name).second)
@@ -1327,8 +1352,28 @@ Work's weekly limit ran out at 09:12. Three chats are running on it; they stop a
             proposal = if (proposal) Msg.InboxProposal(model = "opus", name = "Opus 5.5", status = "ready", button = 1,
                 values = org.json.JSONObject().put("cap", 0).put("notify", true),
                 text = "Home has 59% left this week and resets Monday; nothing needs Work's overage today.") else null)
+        // (a chat's own ask: its model's, raised with its chat's tools, no task)
+        val tokenizer = Msg.InboxAsk(id = "chat", session = "t", chat = "Speed up the tokenizer's hot loop", at = now - 20,
+            status = if (stopped) "stopped" else "waiting", versions = listOf(Msg.InboxVersion(at = now - 20,
+                title = "Tokenizer: keep the merge rewrite?", body = """### The hot loop is 2.4× faster
+
+I rewrote byte-pair merging to work on one flat array instead of a list of strings, and split on whitespace with a lookup table. Every test passes; this is 1 GB of the docs corpus, before and after:
+
+![seconds per stage](timings.png)
+
+| Stage | Before | After |
+|---|---|---|
+| split on whitespace | 3.6 s | **1.1 s** |
+| merge byte pairs | 6.8 s | **2.4 s** |
+| map to ids | 1.7 s | **0.6 s** |
+""", pictures = listOf(pic("timings.png")),
+                buttons = listOf(button("Keep it and open a pull request", "green"), button("Try a SIMD split too", "blue"),
+                    button("Revert", "red")),
+                form = listOf(field("branch", "text", "Branch", "tokenizer-flat-merge"),
+                    field("bench", "bool", "Run the full benchmark first", true)))))
         dev.baude.android.Inbox.clear()
-        dev.baude.android.Inbox.asks["h1"] = listOf(deploy, review, logo, digest, Msg.InboxAsk.from(limit.json().apply { remove("proposal") }))
+        dev.baude.android.Inbox.asks["h1"] = listOf(deploy, review, logo, digest, Msg.InboxAsk.from(limit.json().apply { remove("proposal") })) +
+            (if (chat) listOf(tokenizer) else emptyList())
         if (proposal) dev.baude.android.Inbox.changed("h1", Msg.InboxChanged(ask = limit))
     }
 

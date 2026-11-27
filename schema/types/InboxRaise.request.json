@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
-  "description": "A running task's script raises an ask of a person (on the host's own socket, with its run's token): kept, and in the Inbox of every head that may manage its Bot till it's answered, withdrawn or its run ends. Answered as a button's pressed (inbox_wait).",
+  "description": "A running task's script raises an ask of a person (on the host's own socket, with its run's token), or a chat's model does with its own tools (session, on its host's own socket): kept, and in the Inbox of every head that may manage its Bot (or chat) till it's answered, withdrawn or its run ends (its chat's archived or deleted). Answered as a button's pressed: inbox_wait, and for a chat, a message from the Inbox as its next turn.",
   "properties": {
     "op": {
       "const": "inbox_raise",
@@ -13,6 +13,10 @@
         "null"
       ],
       "description": "The request's number, the client's pick: its answers carry it back."
+    },
+    "session": {
+      "type": "string",
+      "description": "A chat's own ask: the asking chat's session id, from its own tools (their connection's hello as), in place of run and token."
     },
     "run": {
       "type": "string",
@@ -63,8 +67,6 @@
   },
   "required": [
     "op",
-    "run",
-    "token",
     "body",
     "buttons"
   ],

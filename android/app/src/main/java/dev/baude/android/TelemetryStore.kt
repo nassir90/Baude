@@ -26,6 +26,10 @@ object TelemetryStore {
     private val KEEP = mapOf("events" to 400L, "metrics" to 30L, "profiles" to 30L)
     private val KINDS = setOf("chat_opened", "chat_front", "chat_left", "turn_sent", "turn_ended")
     private val APPS = setOf("baude", "record", "phone")
+    /** A turn's tokens, each kind apart (telemetry.TOKENS), and usage's names for an event's tokens (telemetry._KINDS). */
+    val TOKENS = arrayOf("tokens_input", "tokens_cache_write", "tokens_cache_read", "tokens_out")
+    private val NAMES = mapOf("tokens_input" to "input", "tokens_cache_write" to "cache_write",
+        "tokens_cache_read" to "cache_read", "tokens_out" to "output", "tokens_in" to "input_with_cache")
     private val work = Executors.newSingleThreadScheduledExecutor { r -> Thread(r, "telemetry").apply { isDaemon = true } }
     private var sampling: ScheduledFuture<*>? = null
     private var root: File? = null
@@ -105,16 +109,16 @@ object TelemetryStore {
             .put("host", host.take(200)).put("session", session.take(200))
         for (k in listOf("turn", "model", "effort")) e.optString(k).takeIf { !e.isNull(k) && it.isNotEmpty() }?.let { out.put(k, it.take(200)) }
         (e.opt("seconds") as? Number)?.toDouble()?.takeIf { it >= 0 }?.let { out.put("seconds", Math.round(it * 1000) / 1000.0) }
-        for (k in listOf("tokens_in", "tokens_out")) (e.opt(k) as? Number)?.toLong()?.takeIf { it >= 0 }?.let { out.put(k, it) }
+        for (k in listOf(*TOKENS, "tokens_in")) (e.opt(k) as? Number)?.toLong()?.takeIf { it >= 0 }?.let { out.put(k, it) }
         return out
     }
 
     /** A turn of one of this phone's sessions ended: the host's own turn_ended (what tokens are added up from). */
-    fun turn(session: String, seconds: Double, model: String?, effort: String?, tokensIn: Long, tokensOut: Long) {
+    fun turn(session: String, seconds: Double, model: String?, effort: String?, tokens: LongArray) {
         if (!on) return
         event(JSONObject().put("at", System.currentTimeMillis() / 1000.0).put("kind", "turn_ended").put("host", hostId)
             .put("session", session).put("seconds", seconds).put("model", model ?: JSONObject.NULL)
-            .put("effort", effort ?: JSONObject.NULL).put("tokens_in", tokensIn).put("tokens_out", tokensOut), "phone")
+            .put("effort", effort ?: JSONObject.NULL).apply { TOKENS.forEachIndexed { i, k -> put(k, tokens[i]) } }, "phone")
             ?.let { write("events", listOf(it.put("app", "host"))) }
     }
 
@@ -203,29 +207,48 @@ object TelemetryStore {
         return out.toTypedArray()
     }
 
+    /** A turn's result's tokens, each kind apart, as TOKENS (telemetry.tokens_of, the same). */
+    fun tokensOf(m: JSONObject): LongArray {
+        val byModel = m.optJSONObject("model_usage_since_last_result")
+        val (parts, keys) = if (byModel != null)
+            byModel.keys().asSequence().mapNotNull { byModel.optJSONObject(it) }.toList() to
+                listOf("inputTokens", "cacheCreationInputTokens", "cacheReadInputTokens", "outputTokens")
+        else listOfNotNull(m.optJSONObject("usage")) to
+            listOf("input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens", "output_tokens")
+        return LongArray(4) { i -> parts.sumOf { (it.opt(keys[i]) as? Number)?.toLong()?.coerceAtLeast(0) ?: 0 } }
+    }
+
     /** The hosts' own turn_ended events added up (telemetry.usage, the same). */
     fun usage(events: List<JSONObject>): JSONObject {
         val seen = HashSet<String>()
-        val days = sortedMapOf<String, LongArray>()
-        val models = HashMap<Pair<String, String?>, LongArray>()
-        val combos = HashMap<Pair<String, String?>, LongArray>()
+        val days = sortedMapOf<String, HashMap<String, Long>>()
+        val models = HashMap<Pair<String, String?>, HashMap<String, Long>>()
+        val combos = HashMap<Pair<String, String?>, HashMap<String, Long>>()
+        fun add(t: HashMap<String, Long>, e: JSONObject) {
+            t["turns"] = (t["turns"] ?: 0) + 1
+            for ((field, name) in NAMES) {
+                val n = (e.opt(field) as? Number)?.toLong()?.takeIf { it > 0 } ?: continue
+                t[name] = (t[name] ?: 0) + n
+                t["tokens"] = (t["tokens"] ?: 0) + n
+            }
+        }
         for (e in events) {
             if (e.optString("kind") != "turn_ended" || e.optString("app") != "host") continue
             val key = "${e.optString("host")}/${e.optString("session")}/${e.optString("turn").ifEmpty { Math.round(e.getDouble("at")).toString() }}"
             if (!seen.add(key)) continue
-            val tokens = e.optLong("tokens_in") + e.optLong("tokens_out")
-            days.getOrPut(day(e.getDouble("at")).toString()) { LongArray(2) }.let { it[0] += tokens; it[1] += 1 }
+            add(days.getOrPut(day(e.getDouble("at")).toString()) { HashMap() }, e)
             val model = e.optString("model").takeIf { !e.isNull("model") && it.isNotEmpty() } ?: continue
             val effort = e.optString("effort").takeIf { !e.isNull("effort") && it.isNotEmpty() }
-            models.getOrPut(model to null) { LongArray(2) }.let { it[0] += 1; it[1] += tokens }
-            combos.getOrPut(model to effort) { LongArray(2) }.let { it[0] += 1; it[1] += tokens }
+            add(models.getOrPut(model to null) { HashMap() }, e)
+            add(combos.getOrPut(model to effort) { HashMap() }, e)
         }
-        fun ranked(t: Map<Pair<String, String?>, LongArray>) = JSONArray(t.entries.sortedWith(compareBy(
-            { -it.value[0] }, { -it.value[1] }, { it.key.toString() })).map {
-            JSONObject().put("model", it.key.first).put("effort", it.key.second ?: JSONObject.NULL)
-                .put("turns", it.value[0]).put("tokens", it.value[1]) })
-        return JSONObject().put("days", JSONArray(days.map { (d, v) ->
-            JSONObject().put("day", d).put("tokens", v[0]).put("turns", v[1]) }))
+        fun counts(o: JSONObject, t: Map<String, Long>) = o.apply {
+            for (k in listOf("turns", "tokens", *NAMES.values.toTypedArray())) put(k, t[k] ?: 0L)
+        }
+        fun ranked(t: Map<Pair<String, String?>, HashMap<String, Long>>) = JSONArray(t.entries.sortedWith(compareBy(
+            { -(it.value["turns"] ?: 0) }, { -(it.value["tokens"] ?: 0) }, { it.key.toString() })).map {
+            counts(JSONObject().put("model", it.key.first).put("effort", it.key.second ?: JSONObject.NULL), it.value) })
+        return JSONObject().put("days", JSONArray(days.map { (d, v) -> counts(JSONObject().put("day", d), v) }))
             .put("models", ranked(models)).put("combos", ranked(combos))
     }
 

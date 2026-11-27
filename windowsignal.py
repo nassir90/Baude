@@ -289,25 +289,60 @@ class WindowSignal:
 
     def seen_chat(self):
         """The open chat seen (this window's the one you're in, on its chat's tab, or the chat's just opened): its
-        notification gone, and a host's chat's host told (tell_seen)."""
+        notification gone, and a host's chat's host told, if you're there to see it (acted, tell_seen)."""
         telemetryview.look(self)
         if self.is_active() and self.tabs.current() is self.tabs.get("chat"):
             widgets.withdraw_notification(self.chat_key(self.session_id))
-            self.tell_seen()
+            self.acted()
+
+    def acted(self):
+        """Something done in this window by hand (focus come to it, a tab switched to, a key, a scroll): where the
+        system can't say whether anyone's at the machine (widgets.user_present), what lets the chat's end on screen
+        count as seen (tell_seen)."""
+        self.acted_at = time.monotonic()
+        self.tell_seen()
+
+    def chat_at_end(self):
+        """Whether the chat's scrolled all the way down: its end on screen."""
+        adj = self.scroller.get_vadjustment()
+        return adj.get_value() + adj.get_page_size() >= adj.get_upper() - 1
+
+    def shown_upto(self, r, sid):
+        """How much of a host's chat's transcript this window has drawn: as far as it's read it (Tail), or, its agent
+        attached live, all that's fetched of it (what it says is drawn as it comes)."""
+        tail = getattr(self, "tail", None)
+        if self.resume_pending and tail is not None and tail.path == r.mirror(sid):
+            return tail.offset
+        return r.mirrored(sid)
 
     def tell_seen(self):
-        """The open chat in front of you (looking_at), a host's: its host told its last turn's end is seen here, once
-        what's here of its transcript reaches that end (once each end: seen_told). Its host tells every head, each of
-        which takes back its notification of it and its dot (wire's Seen)."""
+        """The open chat seen by you, a host's: its host told its last turn's end is seen here, once (each end:
+        seen_told). Seen means its window's the one you're in, on its chat's tab, scrolled to its end, that end drawn,
+        and you there: input in the last minute, the screen not locked, the display awake (widgets.user_present);
+        where that can't be told, something done by hand in this window since the end came (acted). Idle at it,
+        looked at again every IDLE_LOOK_S till you're back. Its host tells every head, each of which takes back its
+        notification of it and its dot (wire's Seen)."""
         r, sid = getattr(self, "remote", None), self.session_id
-        if r is None or not sid or r.state != "alive" or not wire.takes(r.info, "seen") or not self.looking_at(sid):
+        if r is None or not sid or r.state != "alive" or not wire.takes(r.info, "seen") or not self.is_active() \
+                or self.tabs.current() is not self.tabs.get("chat"):
             return
         listed = r.sessions.get(sid)
         if not unseen(listed):
             return
-        end, upto = listed["ended"], r.mirrored(sid)
+        end = listed["ended"]
         told = (r.key, sid, end.get("uuid"))
-        if upto < end.get("size", 0) or getattr(self, "seen_told", None) == told:
+        if getattr(self, "seen_told", None) == told:
+            return
+        if getattr(self, "end_heard", (None,))[0] != told:  # (when this window first knew of that end)
+            self.end_heard = (told, time.monotonic())
+        upto = self.shown_upto(r, sid)
+        if upto < end.get("size", 0) or not self.chat_at_end():
+            return
+        present = widgets.user_present()
+        if present is False:
+            self.look_again()
+            return
+        if present is None and getattr(self, "acted_at", 0.0) < self.end_heard[1]:
             return
         self.seen_told = told
 
@@ -315,6 +350,29 @@ class WindowSignal:
             if reply.get("op") != "seen_set" and getattr(self, "seen_told", None) == told:
                 self.seen_told = None  # (tried again as it's next looked at)
         r.request({"op": "seen", "session": sid, "upto": upto}, answered)
+
+    def scrolled_chat(self):
+        """The chat scrolled: by hand (acted), or as it follows what's new (its end may be on screen now)."""
+        follow = getattr(self, "follow", None)
+        if follow is not None and not follow.auto and follow.glide is None:
+            self.acted()
+        else:
+            self.tell_seen()
+
+    IDLE_LOOK_S = 5
+
+    def look_again(self):
+        """The chat's end on screen with nobody at the machine: tell_seen again in IDLE_LOOK_S, while the window's the
+        one you're in (one wait at a time)."""
+        if getattr(self, "idle_look", None) is not None:
+            return
+
+        def again():
+            self.idle_look = None
+            if not getattr(self, "let_go_done", False) and self.is_active():
+                self.tell_seen()
+            return False
+        self.idle_look = GLib.timeout_add_seconds(self.IDLE_LOOK_S, again)
 
     def links_on_focus(self):
         """This window became the active one: its own links are drawn (another window's chat may show none)."""

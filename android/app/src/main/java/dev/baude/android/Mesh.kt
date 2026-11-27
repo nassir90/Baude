@@ -79,6 +79,7 @@ class Chat(hostId: String, sid: String) {
     var sid by mutableStateOf(sid)
     var hostId by mutableStateOf(hostId)
     var inView = true // (its chat page on screen: not another page swiped to; Mesh.tellSeen)
+    var atEnd = false // (its list scrolled to its end, its last line drawn: ChatPage; Mesh.tellSeen)
     val lines = mutableStateListOf<Line>()
     val files = mutableStateListOf<Picked>() // (picked to send: kept as the phone's turned)
     val draft = mutableStateOf<String?>(null) // (text for the box: shared from another app, or kept as the app went)
@@ -529,6 +530,14 @@ object Mesh {
     private fun heard(c: Connection, msg: JSONObject) {
         main.post {
             if (conns[c.id] !== c) return@post
+            if (!started) { // (a link SeenJob made, the app not started: only what's been seen heard)
+                if (msg.optString("op") == Op.SESSIONS) Msg.Sessions.from(msg).sessions.orEmpty().let { now ->
+                    sessions[c.id] = now
+                    withdrawSeen(c.id, now)
+                    listedAt[c.id] = android.os.SystemClock.elapsedRealtime()
+                }
+                return@post
+            }
             for (l in listeners.toList()) l(c.id, msg)
             when (msg.optString("op")) {
                 Op.SESSIONS -> {
@@ -1382,27 +1391,57 @@ object Mesh {
         }
     }
 
-    /** The hosts (connection ids) whose chats have a notification of a turn's end up, as SeenJob looks. */
+    /** The hosts of yours whose chats have a notification of a turn's end up that their word can take back, as SeenJob
+     * looks: one with its turn's end in it (TURN_END), on a host that's still yours. (A member's, reached only through a
+     * host's mesh, waits for the app's own start; so does every one while there's no key to reach a host with.) */
     fun turnNotes(): Set<String> {
         val nm = app.getSystemService(NotificationManager::class.java) ?: return emptySet()
+        if (key.value == null) return emptySet()
+        val yours = HostStore.load(app).map { it.id }.toSet() - HostStore.deactivated(app).toSet()
         return (try { nm.activeNotifications } catch (_: Exception) { return emptySet() })
-            .filter { it.id == TURN_NOTE && it.tag?.startsWith("chat:") == true }
-            .map { it.tag.removePrefix("chat:").substringBeforeLast('/') }.toSet()
+            .filter { it.id == TURN_NOTE && it.tag?.startsWith("chat:") == true && it.notification.extras.containsKey(TURN_END) }
+            .map { it.tag.removePrefix("chat:").substringBeforeLast('/') }.filter { it in yours }.toSet()
+    }
+
+    /** (SeenJob) The hosts given reached, for what's been seen there: the app running, those of its links that are
+     * down made again; not started (Android ended it), only links to those hosts made, nothing else of the app
+     * started (not this phone's own host, nor the mesh's members). The links made here, to close once it's done. */
+    fun reachForSeen(ctx: Context, ids: Set<String>): Set<String> {
+        if (started) {
+            ids.forEach { conns[it]?.resume(fresh = false) }
+            return emptySet()
+        }
+        app = ctx.applicationContext
+        if (key.value == null) readKey()
+        channel()
+        if (key.value == null) return emptySet()
+        val made = HashSet<String>()
+        for (h in HostStore.load(app)) {
+            if (h.id !in ids || conns[h.id]?.state == "up") continue
+            conns.remove(h.id)?.stop()
+            start(Connection(app, Place.Direct(h), ::identify, { null }, ::heard) { main.post { tick.value++ } })
+            made.add(h.id)
+        }
+        return made
+    }
+
+    /** (SeenJob, done) The links it made let go of, unless the app's started since (they're its own then). */
+    fun dropForSeen(ids: Set<String>) {
+        if (started) return
+        for (id in ids) {
+            conns.remove(id)?.stop()
+            states.remove(id)
+        }
     }
 
     /** When a host (a connection's id) last listed its sessions (elapsedRealtime; 0: not since the app started). */
     fun listedAt(hostId: String): Long = listedAt[hostId] ?: 0
 
-    /** Each link that's down made again (SeenJob, Android's network back): what's been seen is heard as each lists. */
-    fun wake() {
-        conns.values.forEach { it.resume(fresh = false) }
-    }
-
-    /** The open chat on screen (the app in front, its chat page shown): its host told its last turn's end is seen
-     * here, once what's read of it reaches that end (once a turn: toldSeen). */
+    /** The open chat seen (the app in front, its chat page shown, scrolled to its end): its host told its last turn's
+     * end is seen here, once what's read of it reaches that end (once a turn: toldSeen). */
     fun tellSeen(chat: Chat? = open) {
         chat ?: return
-        if (!shown || open !== chat || !chat.inView) return
+        if (!shown || open !== chat || !chat.inView || !chat.atEnd) return
         val s = session(chat.hostId, chat.sid)
         val end = s?.ended ?: return
         if (!unseen(s) || chat.offset < (end.size?.toLong() ?: Long.MAX_VALUE)) return

@@ -130,13 +130,14 @@ OPS = {  # (the rule each op is checked for, before it's taken (a function: msg'
     "list_dir": "manage_read",  # (any folder's entries: as much as a chat's, which could list them)
     # (a chat's, or a chat's folder's: checked as it's found)
     **dict.fromkeys(("detach", "transcript", "chat_size", "subagents", "senders", "bot_picture", "task", "task_run",
-                     "task_output", "read_file", "git", "signal_names", "catalogue", "seen"), "manage_read"),
+                     "task_output", "read_file", "git", "signal_names", "catalogue"), "manage_read"),
     "attach": _attach,
     "memory": _memory,
     "tasks": _tasks,
     "autofix": _autofix,  # (no on: only as it is)
     **dict.fromkeys(("input", "held", "stop", "rename", "archive", "unarchive", "delete", "set_cwd", "always_allow",
-                     "bot", "run_task", "task_stop", "waits_on"), "manage_write"),
+                     "bot", "run_task", "task_stop", "waits_on", "seen"), "manage_write"),  # (seen: what every head
+    # shows of it changed, as memory's seen is a write)
 }
 CHATLESS = frozenset(("list_dir", "notes", "edits", "edit_propose", "edit_revise", "edit_withdraw", "edit_decide",
                       "edit_adopt"))  # (Agent Management's, but no chat's: checked as they come)

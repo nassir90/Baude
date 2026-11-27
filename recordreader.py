@@ -572,6 +572,10 @@ class Reader(Gtk.Box):
         self.append(self.stack)
         self.follow = livefeed.FollowEnd(self.scroll)  # (the newest in view, once it's read to, as in Baude's chat)
         self.follow.attach()
+        self.scroll.get_vadjustment().connect("value-changed", lambda *_: self._scrolled())
+        keys = Gtk.EventControllerKey(propagation_phase=Gtk.PropagationPhase.CAPTURE)  # (a key in it: you're here)
+        keys.connect("key-pressed", lambda *_: (self.acted(), False)[1])
+        self.add_controller(keys)
         self.tail = livefeed.Tail(lambda lines: self.as_mine(lambda: self._read(lines)), self._rewritten)
         self.space = None  # (the names its replies are linked with: show)
         self.chat, self.names, self.base_dir = None, None, None  # (its chat, and its names: show)
@@ -735,10 +739,23 @@ class Reader(Gtk.Box):
             self.mark_nouns_soon()
         self.tell_seen()
 
+    def acted(self):
+        """Something done by hand in the chat read (its tab switched to, its window come to the front, a key, a
+        scroll): where the system can't say whether anyone's at the machine, what lets its end count as seen."""
+        self.acted_at = GLib.get_monotonic_time() / 1e6
+        self.tell_seen()
+
+    def _scrolled(self):
+        if not self.follow.auto and self.follow.glide is None:
+            self.acted()
+        else:
+            self.tell_seen()
+
     def tell_seen(self):
-        """The chat read in front of you (its window the one you're in, its tab shown), a host's: its host told its
-        last turn's end is seen here, once what's read of it reaches that end (once each end), as Baude's chat tells
-        it. Every head takes back its notification of it, and its dot (wire's Seen)."""
+        """The chat read seen by you, a host's: its host told its last turn's end is seen here, once each end, as
+        Baude's chat tells it (WindowSignal.tell_seen): its window the one you're in, its tab shown, scrolled to its
+        end, that end read, and you there (widgets.user_present; where that can't be told, something done by hand
+        here since the end came: acted). Every head takes back its notification of it, and its dot (wire's Seen)."""
         win = self.win
         if not self.path or not win.is_active() or win.tabs.current() is not self:
             return
@@ -752,7 +769,21 @@ class Reader(Gtk.Box):
                 continue
             end = listed.get("ended") or {}
             told = (r.key, sid, end.get("uuid"))
-            if not unseen(listed) or self.tail.offset < end.get("size", 0) or getattr(self, "seen_told", None) == told:
+            if not unseen(listed) or getattr(self, "seen_told", None) == told:
+                return
+            now = GLib.get_monotonic_time() / 1e6
+            if getattr(self, "end_heard", (None,))[0] != told:
+                self.end_heard = (told, now)
+            adj = self.scroll.get_vadjustment()
+            if self.tail.offset < end.get("size", 0) or adj.get_value() + adj.get_page_size() < adj.get_upper() - 1:
+                return
+            present = widgets.user_present()
+            if present is False:
+                if getattr(self, "idle_look", None) is None:  # (looked at again till you're back)
+                    self.idle_look = GLib.timeout_add_seconds(5, lambda: (setattr(self, "idle_look", None),
+                                                                          self.tell_seen(), False)[2])
+                return
+            if present is None and getattr(self, "acted_at", 0.0) < self.end_heard[1]:
                 return
             self.seen_told = told
             r.request({"op": "seen", "session": sid, "upto": self.tail.offset},

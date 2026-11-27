@@ -11,11 +11,11 @@ import android.os.Looper
 import android.os.SystemClock
 
 /** A Bot's notification of a turn's end, left up while nothing of the app hears its host (Android ended the app, or
- * closed its links while it was put away): its hosts reached again as the app's start reaches them (Mesh.start; or,
- * the app running, the links that are down made again: Mesh.wake), and each notification whose turn's end has been
- * seen on a head of the mesh since taken back as its host lists its sessions (Mesh.withdrawSeen). Scheduled as each is
- * posted, and again, LATER_MS on, while any is up. Android runs it as it sees fit: put off while the phone dozes, till
- * its next window for jobs. */
+ * closed its links while it was put away): the hosts with one up reached again, and only those (Mesh.reachForSeen),
+ * and each notification whose turn's end has been seen on a head of the mesh since taken back as its host lists its
+ * sessions (Mesh.withdrawSeen); the links it made let go of after. Scheduled as each is posted, and again, LATER_MS on,
+ * while one it can clear is up. Android runs it as it sees fit: put off while the phone dozes, till its next window
+ * for jobs. */
 class SeenJob : JobService() {
     override fun onStartJob(params: JobParameters): Boolean {
         run(this) { jobFinished(params, false) }
@@ -41,18 +41,24 @@ class SeenJob : JobService() {
             }
         }
 
-        /** What the job does: the hosts with a notification up reached, each waited for (LISTEN_MS at most) to list
-         * its sessions since, which takes back those seen; done() then, the job scheduled again if any are still up. */
+        /** What the job does: the hosts with a notification up their word can clear (Mesh.turnNotes) reached, and
+         * only those (Mesh.reachForSeen); each waited for (LISTEN_MS at most) to list its sessions since, which takes
+         * back those seen; the links it made let go of; done() then, the job scheduled again only while one it can
+         * clear is still up. */
         fun run(ctx: Context, done: () -> Unit) {
-            Mesh.start(ctx)
-            Mesh.wake()
+            Mesh.app = ctx.applicationContext
+            if (Mesh.key.value == null) Mesh.readKey() // (what a host's reached with: none, nothing it can clear)
+            val wanted = Mesh.turnNotes()
+            if (wanted.isEmpty()) return done()
+            val made = Mesh.reachForSeen(ctx, wanted)
             val began = SystemClock.elapsedRealtime()
             fun look() {
                 val up = Mesh.turnNotes()
-                if (up.isNotEmpty() && up.any { Mesh.listedAt(it) < began } && SystemClock.elapsedRealtime() - began < LISTEN_MS) {
+                if (up.any { Mesh.listedAt(it) < began } && SystemClock.elapsedRealtime() - began < LISTEN_MS) {
                     main.postDelayed(::look, 500)
                     return
                 }
+                Mesh.dropForSeen(made)
                 if (Mesh.turnNotes().isNotEmpty()) schedule(ctx, LATER_MS)
                 done()
             }

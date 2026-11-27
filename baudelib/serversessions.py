@@ -377,8 +377,8 @@ class ServerSessions:
             if is_codex and s.busy:
                 s.codex_queue.append((msg, conn))
                 return
-            if wire.clean_sender(sender) is None:  # (its user wrote in it: what it last said has been seen)
-                self.saw(s)
+            if conn is not None and wire.clean_sender(sender) is None:  # (its user wrote in it from a head: what it
+                self.saw(s)  # last said has been seen; not a follow-up kept over a restart, sent by the host itself)
             s.meta.pop("cut", None)  # (carried on, or something else said: not cut any more)
             if s.meta.pop("draft", None) and not s.meta.get("prompt"):  # (written in: a session of its own from now on,
                 s.meta["prompt"] = _said(msg)                           # listed and kept, titled by what was said)

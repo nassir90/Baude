@@ -111,6 +111,7 @@ class WindowDrafts:
         ahead = "\n\n".join(t for t in texts if t)
         draft = widgets.typed_text(self.input).strip()
         self.set_box("\n\n".join(p for p in (ahead, draft) if p), [len(ahead)] * 2, list(atts) + self.attachments)
+        self.draft_typed()  # (put there by hand: dirty, saved to its host)
 
     @staticmethod
     def join_drafts(first, then):
@@ -137,15 +138,16 @@ class WindowDrafts:
         """The box's draft kept as key's, its queue with it (queue: queue_state's), with one another window left there
         (join_drafts), and the box emptied for the next chat's. An empty box and no queue keep nothing and drop
         nothing: a draft this window took is gone already (take_draft), and one there is another window's. A host's
-        chat's text is saved to its host first (flush_host_draft); saved: whether it was."""
+        chat's typing not yet saved goes to its host first (flush_host_draft); dirty: its host hadn't taken it yet."""
         text, atts = widgets.typed_text(self.input), list(self.attachments)
-        saved = self.flush_host_draft()
+        dirty = self.flush_host_draft()
         self.hd = {"sid": None}  # (its host's draft no longer this box's)
         if text.strip() or atts or queue:
-            draft = {"text": text, "caret": widgets.caret_of(self.input), "attachments": atts, "saved": saved,
+            draft = {"text": text, "caret": widgets.caret_of(self.input), "attachments": atts, "dirty": dirty,
                      **({"queue": queue} if queue else {})}
             if (other := self.DRAFTS.pop(key, None)) is not None:
                 draft = self.join_drafts(other, draft)
+                draft["dirty"] = dirty or bool(other.get("dirty"))
             self.DRAFTS[key] = draft
             while len(self.DRAFTS) > self.MAX_DRAFTS:  # (the longest left go)
                 del self.DRAFTS[next(iter(self.DRAFTS))]
@@ -162,13 +164,16 @@ class WindowDrafts:
         self.open_host_draft(draft)
 
     # ---- a host's chat's draft: its text kept by its host (draft_save), the same in every head that opens the chat,
-    # on any machine. Saved DRAFT_SAVE_MS after typing stops, at once as the box is emptied (a message sent or
-    # queued) and as the chat's left; another head's save comes as "_draft" (h_draft). The last write wins: one that
-    # comes while this box has a save of its own waiting or on its way is held (hd's held) and put in only if its
-    # host had it after this box's. What's attached stays this app's (files on this machine: DRAFTS)
+    # on any machine. What's written here and its host hasn't taken yet is dirty: typed, pasted or put back in the
+    # box by hand, till its host answers a save of that very text. Saved DRAFT_SAVE_MS after typing stops, at once
+    # as the box is emptied (a message sent or queued) and as the chat's left; another head's save comes as
+    # "_draft" (h_draft). The last write wins: one that comes while this box is dirty or has a save on its way is
+    # held (hd's held), and put in once it's neither, if its host had it after this box's. Only a dirty copy kept
+    # here is ever saved over its host's as the chat's opened. What's attached stays this app's (files on this
+    # machine: DRAFTS)
     DRAFT_SAVE_MS = 400
-    hd = {"sid": None}  # (the open chat's: {sid, rev (the last its host's said), text (the markdown it has), flight
-    # (saves on their way), held (another's, held)})
+    hd = {"sid": None}  # (the open chat's: {sid, rev (the last its host's said), text (the markdown it has), dirty,
+    # flight (saves on their way), held (another's, held)})
     draft_timer = None
 
     @property
@@ -189,40 +194,62 @@ class WindowDrafts:
     def box_markdown(self):
         return ComposerMarkdown.to_markdown(widgets.typed_text(self.input))
 
+    def hd_open(self):
+        """Is hd the open chat's?"""
+        return self.hd.get("sid") is not None and self.hd["sid"] == self.session_id
+
     def open_host_draft(self, local):
-        """(the chat just opened, its local draft local, or None) Its host's draft in the box, unless this app's is
-        newer: typed here while its host couldn't be told (saved false), or kept from before its host kept any:
-        that's saved to it instead."""
+        """(the chat just opened, its local draft local, or None) Its host's draft in the box, unless what's kept here
+        is dirty (typed while its host couldn't take it): that's saved to it instead. Its host with none, what's
+        here is saved to it."""
         self.drop_draft_timer()
-        self.hd = {"sid": self.session_id, "rev": 0, "text": None, "flight": 0, "held": None}
+        dirty = bool(local and local.get("dirty"))
+        self.hd = {"sid": self.session_id, "rev": 0, "text": None, "flight": 0, "held": None, "dirty": dirty}
         if self.draft_host() is None:
             return
         d = getattr(self.proc, "draft", None) if isinstance(self.proc, baudelib.client.RemoteProc) else None
         if not isinstance(d, dict):
             if self.box_markdown().strip():
+                self.hd["dirty"] = True
                 self.save_host_draft()
             return
         self.hd.update(rev=d.get("rev") or 0, text=d.get("text") or "")
-        if local is not None and local.get("saved") is not True and self.box_markdown() != self.hd["text"]:
+        if dirty and self.box_markdown() != self.hd["text"]:
             return self.save_host_draft()
+        self.hd["dirty"] = False
         self.put_host_text(self.hd["text"])
 
     def reattached_draft(self):
-        """(the open chat attached again: its host back, say) What's typed since its host was last told saved to it;
-        else what it has, if it's had a write since."""
-        if self.hd.get("sid") is None or self.hd["sid"] != self.session_id or \
-                not isinstance(self.proc, baudelib.client.RemoteProc) or self.draft_host() is None:
+        """(the open chat attached again: its host back, say) What's been typed since its host last took it saved to
+        it; else what it has, if it's had a write since."""
+        if not self.hd_open() or not isinstance(self.proc, baudelib.client.RemoteProc) or self.draft_host() is None:
             return
-        if self.box_markdown() != (self.hd["text"] if self.hd["text"] is not None else ""):
+        if self.hd["dirty"]:
             return self.save_host_draft()
         self.host_draft_in(self.proc.draft)
 
+    @staticmethod
+    def moved_offset(old, new, at):
+        """Where offset at in old is in new, the change between them the part neither's start nor end shares."""
+        start, most = 0, min(len(old), len(new))
+        while start < most and old[start] == new[start]:
+            start += 1
+        end = 0
+        while end < most - start and old[-1 - end] == new[-1 - end]:
+            end += 1
+        if at <= start:
+            return at
+        if at >= len(old) - end:
+            return at + len(new) - len(old)
+        return len(new) - end
+
     def put_host_text(self, text):
-        """text in the box (what's attached as it is), the caret where it was, unless that's what's there."""
+        """text in the box (what's attached as it is), the caret and selection carried over the change, unless that's
+        what's there."""
         self.hd["text"] = text
         if self.box_markdown() != text:
-            caret = widgets.caret_of(self.input)
-            self.set_box(text, [min(c, len(text)) for c in caret])
+            old = widgets.typed_text(self.input)
+            self.set_box(text, [self.moved_offset(old, text, c) for c in widgets.caret_of(self.input)])
 
     def drop_draft_timer(self):
         if self.draft_timer is not None:
@@ -230,19 +257,20 @@ class WindowDrafts:
             self.draft_timer = None
 
     def draft_typed(self):
-        """(the box's text changed by hand: draft_changed) Its host's copy saved DRAFT_SAVE_MS after typing stops,
-        at once as it's emptied."""
+        """(the box's text changed by hand: draft_changed, put_ahead) Dirty, and saved to its host DRAFT_SAVE_MS after
+        typing stops, at once as it's emptied; written back to what its host has, clean."""
         self.drop_draft_timer()
-        if self.reverting is not None or self.hd.get("sid") is None or self.hd["sid"] != self.session_id or \
-                self.draft_host() is None:
+        if self.reverting is not None or not self.hd_open():
             return
         text = self.box_markdown()
         if text == self.hd["text"]:
+            self.hd["dirty"] = False
+            return self.release_held()
+        self.hd["dirty"] = True
+        if self.draft_host() is None:
             return
-        if not text.strip():
-            self.save_host_draft()
-        else:
-            self.draft_timer = GLib.timeout_add(self.DRAFT_SAVE_MS, self.draft_due)
+        self.draft_timer = GLib.timeout_add(0 if not text.strip() else self.DRAFT_SAVE_MS, self.draft_due)  # (emptied:
+        # on the main loop's next turn, so text put in its place at once, as set_text does, goes instead)
 
     def draft_due(self):
         self.draft_timer = None
@@ -250,19 +278,18 @@ class WindowDrafts:
         return False
 
     def flush_host_draft(self):
-        """(the chat being left, or the app restarting) What's typed saved to its host now, if it hasn't been; True
-        if its host has it (or the chat's draft isn't a host's)."""
+        """(the chat being left, or the app restarting) Dirty typing saved to its host now; whether it's still dirty
+        (its host's answer not come yet, or it can't be told: saved again as it's opened)."""
         self.drop_draft_timer()
-        if self.hd.get("sid") is None or self.hd["sid"] != self.session_id or self.reverting is not None:
-            return True
-        if self.draft_host() is None:
-            return self.box_markdown() == self.hd.get("text")
-        if self.box_markdown() != self.hd["text"]:
+        if not self.hd_open() or self.reverting is not None:
+            return False
+        if self.hd["dirty"] and self.draft_host() is not None:
             self.save_host_draft()
-        return True
+        return bool(self.hd["dirty"])
 
     def save_host_draft(self):
-        """The box's text saved to the open chat's host (draft_save)."""
+        """The box's text saved to the open chat's host (draft_save): clean once its host's taken that very text and
+        nothing's been typed since."""
         self.drop_draft_timer()
         r = self.draft_host()
         if r is None:
@@ -273,17 +300,28 @@ class WindowDrafts:
 
         def done(reply):
             hd["flight"] -= 1
-            if reply.get("op") != "draft_saved":  # (not kept there: this app's, saved again as it's opened)
-                if (d := self.DRAFTS.get(sid)) is not None:
-                    d["saved"] = False
-                elif self.hd is hd:
-                    hd["text"] = None
+            took = reply.get("op") == "draft_saved"
+            if took:
+                hd["rev"] = max(hd["rev"], reply["draft"]["rev"])
+            if self.hd is not hd:  # (left: what was kept of it clean, if this was what it had)
+                if took and (d := self.DRAFTS.get(sid)) is not None and \
+                        ComposerMarkdown.to_markdown(d["text"]) == text:
+                    d["dirty"] = False
                 return
-            hd["rev"] = max(hd["rev"], reply["draft"]["rev"])
-            if self.hd is hd and (held := hd["held"]) is not None and not hd["flight"] and self.draft_timer is None:
-                hd["held"] = None
-                self.host_draft_in(held)
+            if not took:  # (not kept there: still dirty, saved again as it's opened or attached)
+                hd["text"] = None
+                return
+            if not hd["flight"] and self.draft_timer is None and self.box_markdown() == text:
+                hd["dirty"] = False
+                self.release_held()
         r.request({"op": "draft_save", "session": sid, "text": text, "head": self.draft_head}, done)
+
+    def release_held(self):
+        """Another head's write held while this box was dirty or saving, put in now it's neither."""
+        hd = self.hd
+        if (held := hd.get("held")) is not None and not hd["flight"] and not hd["dirty"] and self.draft_timer is None:
+            hd["held"] = None
+            self.host_draft_in(held)
 
     def h_draft(self, msg):
         """Another head's write of the open chat's draft, as its host tells it (draft_changed)."""
@@ -291,16 +329,14 @@ class WindowDrafts:
 
     def host_draft_in(self, d):
         hd = self.hd
-        if not isinstance(d, dict) or hd.get("sid") is None or hd["sid"] != self.session_id or \
-                (d.get("rev") or 0) <= hd["rev"]:
+        if not isinstance(d, dict) or not self.hd_open() or (d.get("rev") or 0) <= hd["rev"]:
             return  # (one seen already, or older than one that has been)
         if d.get("head") == self.draft_head:  # (this box's own save, back)
             hd["rev"] = d["rev"]
             return
-        if hd["flight"] or self.draft_timer is not None or self.reverting is not None or \
-                hd["text"] is not None and self.box_markdown() != hd["text"]:  # (this box's typing, not saved yet: it
-            if hd["held"] is None or d["rev"] > hd["held"]["rev"]:  # goes after, unless its host has this after it)
-                hd["held"] = d
+        if hd["flight"] or hd["dirty"] or self.draft_timer is not None or self.reverting is not None:
+            if hd["held"] is None or d["rev"] > hd["held"]["rev"]:  # (this box's own goes after, unless its host had
+                hd["held"] = d                                      # this after it)
             return
         hd["rev"] = d["rev"]
         self.put_host_text(d.get("text") or "")

@@ -1038,7 +1038,7 @@ class ServerRunning:
         if not isinstance(text, str) or len(text) > wire.CONSTANTS["DRAFT_CHARS_MAX"]:
             return "error", {"error": wire.SAID[wire.INVALID], "code": wire.INVALID}
         draft = {"text": text, "rev": int((s.meta.get("composer") or {}).get("rev") or 0) + 1,
-                 "head": msg["head"] if isinstance(msg.get("head"), str) else None, "at": time.time()}
+                 "head": msg["head"][:64] if isinstance(msg.get("head"), str) else None, "at": time.time()}
         s.meta["composer"] = draft
         self.save(s)
         for v in list(s.viewers):

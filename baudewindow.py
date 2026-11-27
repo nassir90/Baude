@@ -702,7 +702,7 @@ class BaudeWindow(WindowView, WindowProc, WindowDrafts, WindowSignal, WindowRemo
         aside, the Feedback tab's reply. The other chats' drafts are every window's: BaudeApp.restart's."""
         adj = self.scroller.get_vadjustment()
         fixes_page = self.tabs.get(("fixes",))
-        self.flush_host_draft()  # (a host's chat's: its host has what's typed, for the window that opens it next)
+        dirty = self.flush_host_draft()  # (a host's chat's typing: to its host, and kept dirty till it's taken)
         return {
             "cwd": self.run_cwd, "session_id": self.session_id, "viewing": self.resume_pending,
             "cut": bool(self.busy and self.remote is None and self.proc is not None),  # (Baude's claude: cut here)
@@ -710,7 +710,7 @@ class BaudeWindow(WindowView, WindowProc, WindowDrafts, WindowSignal, WindowRemo
             "at_bottom": self.stick_bottom,
             "from_bottom": adj.get_upper() - adj.get_page_size() - adj.get_value(),
             "chunk": None if self.stick_bottom else self.view_chunk(),  # (open_at)
-            "draft": widgets.typed_text(self.input), "caret": widgets.caret_of(self.input),
+            "draft": widgets.typed_text(self.input), "caret": widgets.caret_of(self.input), "draft_dirty": dirty,
             "btw_draft": widgets.typed_text(self.panel.btw_ask.input),  # (a side question typed, not yet asked)
             "attachments": [a.state() for a in self.attachments],
             "queue": self.queue_saved(q) if (q := self.queue_state()) else None,  # (the open chat's: put_queue)
@@ -728,8 +728,9 @@ class BaudeWindow(WindowView, WindowProc, WindowDrafts, WindowSignal, WindowRemo
             self.cut_pending = time.time()
         for sid, place in (state.get("places") or {}).items():
             self.PLACES.setdefault(sid, place)
-        hosts = isinstance(getattr(self.proc, "draft", None), dict) and self.draft_host() is not None  # (its text
-        # its host's, put in as it opened: what this window had, saved there before the restart)
+        hosts = self.remote is not None and self.hd_open() and bool(self.draft_key())  # (a host's chat: its text
+        # its host's, put in as it opened, what this window had taken there before the restart; typing its host
+        # hadn't taken yet put back over it below, and saved)
         if (widgets.typed_text(self.input) or self.attachments) and not hosts:  # (one its chat took as it opened,
             self.keep_draft(self.draft_key())                   # another window's: kept for it, this window's own
             # put back below)
@@ -738,7 +739,7 @@ class BaudeWindow(WindowView, WindowProc, WindowDrafts, WindowSignal, WindowRemo
         theming.put_back(self, state.get("frame"), state.get("maximized"))  # (where it was, on macOS)
         if state.get("panel"):
             self.show_panel(True)
-        if state.get("draft") and not hosts:
+        if state.get("draft") and (not hosts or state.get("draft_dirty")):
             self.input.get_buffer().set_text(state["draft"])
         if state.get("draft"):
             widgets.put_caret(self.input, state.get("caret"))

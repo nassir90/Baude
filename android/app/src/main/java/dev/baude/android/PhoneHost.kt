@@ -455,7 +455,7 @@ object PhoneHost {
                 var kept: JSONObject? = null
                 live(s) {
                     val draft = JSONObject().put("text", text).put("rev", (s.meta.optJSONObject("composer")?.optLong("rev") ?: 0L) + 1)
-                        .put("head", d.head ?: JSONObject.NULL).put("at", now())
+                        .put("head", d.head?.take(64) ?: JSONObject.NULL).put("at", now())
                     s.meta.put("composer", draft)
                     save(s)
                     kept = draft
